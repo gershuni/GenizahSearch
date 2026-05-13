@@ -9,12 +9,29 @@ routes onto it via init_api_routes(bare_app). The NiceGUI global app is not
 mutated -- calling init_api_routes() multiple times in a test session is safe
 because each call targets the bare-app passed in. Routes registered onto a
 test-scoped FastAPI instance are GC'd at fixture teardown.
+
+Updated 2026-05-13 (Phase 88 D-02/D-04): payload now read from per-session
+``web.export_state`` (formerly state.* singleton). Tests monkeypatch
+``web.safe_storage.app`` to a SimpleNamespace stub (Refinement 6) and use
+``export_state.set_search_export(...)`` / ``set_parallels_export(...)`` to
+populate the per-session payload -- no state.X = ... fixture setup, no
+in-process backend shim.
 """
 
 import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+
+def _make_stub(initial_storage: dict):
+    """Instance-isolated stub mirroring app.storage.user surface.
+
+    Per Phase 88 review (Codex LOW, Refinement 6): each invocation returns
+    a fresh SimpleNamespace tree -- no class-level state shared across tests.
+    """
+    return SimpleNamespace(storage=SimpleNamespace(user=initial_storage))
 
 
 @pytest.fixture(scope='module')
@@ -53,25 +70,18 @@ def mock_meta_mgr():
 
 @pytest.fixture
 def populated_search_state(mock_meta_mgr, monkeypatch):
-    """Populate web.api.state.last_results + the per-session export payload.
+    """Populate per-session search export payload via export_state helper.
 
-    Updated 2026-05-12: handlers now read from web.export_state per-session
-    payload (formerly state.* singleton). Tests inject a stub backend dict
-    via the ``_TEST_BACKEND`` hook.
+    Phase 88 D-02/D-04: monkeypatches web.safe_storage.app with a
+    SimpleNamespace stub (Refinement 6), then calls
+    ``export_state.set_search_export(...)`` to round-trip the payload
+    through ``safe_user_set``. No state.X = ... fixture setup.
     """
     from web.api import state
-    import web.export_state as export_state
-    saved = {
-        'last_results': state.last_results,
-        'current_search_query': getattr(state, 'current_search_query', ''),
-        'current_search_mode': getattr(state, 'current_search_mode', 'text'),
-        'current_search_gap': getattr(state, 'current_search_gap', None),
-        'last_filters_applied': getattr(state, 'last_filters_applied', None),
-        'last_search_warnings': getattr(state, 'last_search_warnings', []),
-        'last_selected_uids': getattr(state, 'last_selected_uids', None),
-        'meta_mgr': state.meta_mgr,
-    }
+    from web import export_state
+    saved_meta = state.meta_mgr
     state.meta_mgr = mock_meta_mgr
+
     results = [{
         'uid': 'uid_001',
         'display': {
@@ -85,51 +95,38 @@ def populated_search_state(mock_meta_mgr, monkeypatch):
         'full_text': 'lorem ipsum',
         'sort_score': 0.5,
     }]
-    state.last_results = results
-    state.last_selected_uids = None
-    state.current_search_query = 'foo'
-    state.current_search_mode = 'text'
-    state.current_search_gap = None
-    state.last_filters_applied = None
-    state.last_search_warnings = []
-    fake_backend = {
-        'export_search_payload': {
-            'results': results,
-            'query': 'foo',
-            'mode': 'text',
-            'gap': None,
-            'filters': None,
-            'warnings': [],
-            'selected_uids': None,
-        }
-    }
-    monkeypatch.setattr(export_state, '_TEST_BACKEND', fake_backend)
+
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+    export_state.set_search_export(
+        results=results,
+        query='foo',
+        mode='text',
+        gap=None,
+        filters=None,
+        warnings=[],
+        selected_uids=None,
+    )
     yield state
-    for k, v in saved.items():
-        setattr(state, k, v)
+    state.meta_mgr = saved_meta
 
 
 @pytest.fixture
-def empty_search_state():
+def empty_search_state(monkeypatch):
+    """Empty per-session storage -- export handler must return 400."""
+    monkeypatch.setattr('web.safe_storage.app', _make_stub({}))
     from web.api import state
-    saved = state.last_results
-    state.last_results = []
     yield state
-    state.last_results = saved
 
 
 @pytest.fixture
 def populated_parallels_state(mock_meta_mgr, monkeypatch):
-    """Populate state.* AND the per-session parallels export payload."""
+    """Populate per-session parallels export payload via export_state helper."""
     from web.api import state
-    import web.export_state as export_state
-    saved = {
-        'parallels_results': state.parallels_results,
-        'parallels_filtered': state.parallels_filtered,
-        'parallels_search_meta': getattr(state, 'parallels_search_meta', None),
-        'meta_mgr': state.meta_mgr,
-    }
+    from web import export_state
+    saved_meta = state.meta_mgr
     state.meta_mgr = mock_meta_mgr
+
     parallels_results = [{
         'uid': 'uid_a',
         'raw_header': 'header_9911111111111111_IE1_P3',
@@ -138,9 +135,7 @@ def populated_parallels_state(mock_meta_mgr, monkeypatch):
         'text': 'manuscript text',
         'chunk_hits': [(0, 'first chunk', 30, 'manuscript snippet')],
     }]
-    state.parallels_results = parallels_results
-    state.parallels_filtered = []
-    state.parallels_search_meta = {
+    meta = {
         'source_text': 'hello world',
         'chunk_size': 5,
         'mode': 'exact',
@@ -149,29 +144,24 @@ def populated_parallels_state(mock_meta_mgr, monkeypatch):
         'boundary_options': None,
         'warnings': [],
     }
-    fake_backend = {
-        'export_parallels_payload': {
-            'results': parallels_results,
-            'filtered': [],
-            'meta': state.parallels_search_meta,
-        }
-    }
-    monkeypatch.setattr(export_state, '_TEST_BACKEND', fake_backend)
+
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+    export_state.set_parallels_export(
+        results=parallels_results,
+        filtered=[],
+        meta=meta,
+    )
     yield state
-    for k, v in saved.items():
-        setattr(state, k, v)
+    state.meta_mgr = saved_meta
 
 
 @pytest.fixture
-def empty_parallels_state():
+def empty_parallels_state(monkeypatch):
+    """Empty per-session storage -- parallels export handler must return 400."""
+    monkeypatch.setattr('web.safe_storage.app', _make_stub({}))
     from web.api import state
-    saved_main = state.parallels_results
-    saved_filt = state.parallels_filtered
-    state.parallels_results = []
-    state.parallels_filtered = []
     yield state
-    state.parallels_results = saved_main
-    state.parallels_filtered = saved_filt
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +169,7 @@ def empty_parallels_state():
 # ---------------------------------------------------------------------------
 
 def test_export_json_handler_empty(client, empty_search_state):
-    """EXPORT-01: empty state.last_results -> 400 + body 'No results to export'."""
+    """EXPORT-01: empty per-session storage -> 400 + body 'No results to export'."""
     r = client.get('/api/export/json')
     assert r.status_code == 400
     assert b'No results to export' in r.content

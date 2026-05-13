@@ -3,22 +3,38 @@
 Bug 2026-05-12: User A's search query name appeared as the suggested
 xlsx filename in User B's export dialog. They were on totally different
 devices and networks; both shared the production process. Root cause:
-`state.last_results` / `state.current_search_query` / `state.last_selected_uids`
+``state.last_results`` / ``state.current_search_query`` / ``state.last_selected_uids``
 on AppState (singleton) were the source of truth for the export handlers,
-so the last writer won — User B's request to /api/export/excel read
+so the last writer won -- User B's request to /api/export/excel read
 whatever User A's search had just written to those fields.
 
-Fix: handlers now read from `web.export_state` which targets
-``app.storage.user`` (per-session). This test simulates two sessions
-with distinct backends and asserts their filenames + result counts are
-independent.
+Fix: handlers now read from ``web.export_state`` which routes through
+``web.safe_storage`` to ``app.storage.user`` (per-session). This test
+simulates two sessions with distinct storage dicts and asserts their
+filenames + result counts are independent.
 
-The simulation uses the `_TEST_BACKEND` hook on `web.export_state` to
-swap backends between requests in a single test process.
+IMPORTANT (per Phase 88 D-03): this is SEQUENTIAL simulation, not true
+concurrent coverage. We monkeypatch ``web.safe_storage.app`` to a stub
+whose ``storage.user`` is a plain dict, swap the dict between requests
+to model two sessions sharing one Python process, and verify
+isolation. Real concurrency (two NiceGUI processes or fully-instantiated
+``app.storage.user`` per request via the NiceGUI test harness) is
+deferred to Phase 92 SWEEP-05 production smoke-test (two browser sessions,
+manual checklist).
 """
+from types import SimpleNamespace
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from unittest.mock import MagicMock
+
+
+def _make_stub(initial_storage: dict):
+    """Instance-isolated stub mirroring app.storage.user surface.
+
+    Per Phase 88 review (Codex LOW, Refinement 6): each invocation returns
+    a fresh SimpleNamespace tree -- no class-level state shared across tests.
+    """
+    return SimpleNamespace(storage=SimpleNamespace(user=initial_storage))
 
 
 def _make_mock_meta_mgr():
@@ -65,24 +81,22 @@ def test_two_sessions_get_independent_filenames(monkeypatch):
     NOT carry User A's 'alpha' in its filename or User A's results.
     """
     from web.api import init_api_routes, state
-    import web.export_state as export_state
 
     bare = FastAPI()
     init_api_routes(app_override=bare)
     client = TestClient(bare)
 
-    # Set the singleton meta_mgr (shared across users — read-only).
     saved_meta = state.meta_mgr
     state.meta_mgr = _make_mock_meta_mgr()
 
     try:
         # --- User A's session: searches 'alpha-query' with 3 results ---
-        user_a_backend = {
+        user_a_storage = {
             'export_search_payload': _build_payload(
                 _user_results('alpha', 3), 'alpha-query'
             )
         }
-        monkeypatch.setattr(export_state, '_TEST_BACKEND', user_a_backend)
+        monkeypatch.setattr('web.safe_storage.app', _make_stub(user_a_storage))
         r_a = client.get('/api/export/excel')
         assert r_a.status_code == 200
         cd_a = r_a.headers.get('content-disposition', '')
@@ -90,13 +104,13 @@ def test_two_sessions_get_independent_filenames(monkeypatch):
             f"User A's filename should contain 'alpha-query', got {cd_a!r}"
         )
 
-        # --- User B's session: different backend, different query ---
-        user_b_backend = {
+        # --- User B's session: different storage dict, different query ---
+        user_b_storage = {
             'export_search_payload': _build_payload(
                 _user_results('beta', 5), 'beta-query'
             )
         }
-        monkeypatch.setattr(export_state, '_TEST_BACKEND', user_b_backend)
+        monkeypatch.setattr('web.safe_storage.app', _make_stub(user_b_storage))
         r_b = client.get('/api/export/excel')
         assert r_b.status_code == 200
         cd_b = r_b.headers.get('content-disposition', '')
@@ -110,7 +124,7 @@ def test_two_sessions_get_independent_filenames(monkeypatch):
         )
 
         # --- Back to User A: must not see User B's data ---
-        monkeypatch.setattr(export_state, '_TEST_BACKEND', user_a_backend)
+        monkeypatch.setattr('web.safe_storage.app', _make_stub(user_a_storage))
         r_a2 = client.get('/api/export/excel')
         assert r_a2.status_code == 200
         cd_a2 = r_a2.headers.get('content-disposition', '')
@@ -130,7 +144,6 @@ def test_empty_session_does_not_inherit_other_session_results(monkeypatch):
     fall back to any global cache.
     """
     from web.api import init_api_routes, state
-    import web.export_state as export_state
 
     bare = FastAPI()
     init_api_routes(app_override=bare)
@@ -138,33 +151,22 @@ def test_empty_session_does_not_inherit_other_session_results(monkeypatch):
 
     saved_meta = state.meta_mgr
     state.meta_mgr = _make_mock_meta_mgr()
-    # Set singleton state.* to a populated value to confirm the handler
-    # IGNORES it now (it should only consult the per-session payload).
-    saved_results = state.last_results
-    saved_query = state.current_search_query
-    state.last_results = _user_results('singleton-leak', 7)
-    state.current_search_query = 'leaky-singleton-query'
 
     try:
-        # New session: empty per-session backend.
-        empty_backend = {}
-        monkeypatch.setattr(export_state, '_TEST_BACKEND', empty_backend)
+        # New session: empty per-session storage.
+        monkeypatch.setattr('web.safe_storage.app', _make_stub({}))
         r = client.get('/api/export/excel')
         assert r.status_code == 400, (
-            f"Empty session must return 400 even when state.last_results "
-            f"is populated (singleton-leak regression guard); got {r.status_code} {r.content!r}"
+            f"Empty session must return 400; got {r.status_code} {r.content!r}"
         )
         assert b'No results to export' in r.content
     finally:
-        state.last_results = saved_results
-        state.current_search_query = saved_query
         state.meta_mgr = saved_meta
 
 
 def test_parallels_cross_user_isolation(monkeypatch):
     """Same isolation guarantee for the parallels export endpoint."""
     from web.api import init_api_routes, state
-    import web.export_state as export_state
 
     bare = FastAPI()
     init_api_routes(app_override=bare)
@@ -175,7 +177,7 @@ def test_parallels_cross_user_isolation(monkeypatch):
 
     try:
         # User A: parallels search with source text 'one'
-        user_a_backend = {
+        user_a_storage = {
             'export_parallels_payload': {
                 'results': [{
                     'uid': 'uid_a',
@@ -194,7 +196,7 @@ def test_parallels_cross_user_isolation(monkeypatch):
                 },
             }
         }
-        monkeypatch.setattr(export_state, '_TEST_BACKEND', user_a_backend)
+        monkeypatch.setattr('web.safe_storage.app', _make_stub(user_a_storage))
         r_a = client.get('/api/export/parallels/json')
         assert r_a.status_code == 200
         body_a = r_a.json()
@@ -202,7 +204,7 @@ def test_parallels_cross_user_isolation(monkeypatch):
                'one' in body_a.get('meta', {}).get('source_text', '')
 
         # User B: parallels search with source text 'two'
-        user_b_backend = {
+        user_b_storage = {
             'export_parallels_payload': {
                 'results': [{
                     'uid': 'uid_b',
@@ -221,7 +223,7 @@ def test_parallels_cross_user_isolation(monkeypatch):
                 },
             }
         }
-        monkeypatch.setattr(export_state, '_TEST_BACKEND', user_b_backend)
+        monkeypatch.setattr('web.safe_storage.app', _make_stub(user_b_storage))
         r_b = client.get('/api/export/parallels/json')
         assert r_b.status_code == 200
         body_b = r_b.json()
@@ -230,6 +232,93 @@ def test_parallels_cross_user_isolation(monkeypatch):
                 body_b.get('meta', {}).get('source_text', '')
         assert 'one' not in b_src, (
             f"CROSS-USER PARALLELS LEAK: User B saw 'one' in source_text: {b_src!r}"
+        )
+    finally:
+        state.meta_mgr = saved_meta
+
+
+def test_parallels_source_text_cannot_leak_via_deleted_fallback(monkeypatch):
+    """Phase 88 D-15 (strengthened per Codex review, Refinement 2) -- prove the
+    legacy source_text fallback is dead via a POSITIVE export path.
+
+    Setup:
+      - User B's storage has a VALID parallels payload (results + filtered +
+        meta with NO source_text key). The export handler will reach the
+        positive-export code path that USED to consult the legacy fallback.
+      - User B's storage also has the legacy key
+        ``app.storage.user['parallels_source_text']`` set to a bait string
+        (simulates the worst case where a leftover legacy write polluted
+        storage, OR where a future regression re-introduced the fallback).
+
+    Before Phase 88 D-14: /api/export/parallels/json would have read
+    ``meta.get('source_text') or safe_user_get('parallels_source_text', '')``,
+    so the bait would have surfaced in User B's exported JSON envelope.
+
+    After Phase 88 D-14: the fallback is gone; source_text comes exclusively
+    from User B's own ``meta['source_text']``, which is empty. The exported
+    envelope must NOT contain the bait even when results EXIST so the handler
+    reaches the code branch that USED to read it.
+
+    Why this is stronger than the previous empty-storage 400 test
+    (Refinement 2, Codex MEDIUM): A reintroduced fallback could pass the
+    400-path test if it sits BEHIND a ``if not parallels_results and not
+    filtered_results: return 400`` early return -- the bait would never be
+    touched in the 400 path. This POSITIVE-path test ensures results EXIST so
+    the fallback (if reintroduced) WOULD be consulted.
+    """
+    from web.api import init_api_routes, state
+
+    bare = FastAPI()
+    init_api_routes(app_override=bare)
+    client = TestClient(bare)
+
+    saved_meta = state.meta_mgr
+    state.meta_mgr = _make_mock_meta_mgr()
+    try:
+        # User B's session: valid parallels payload with results, meta has
+        # no source_text. ALSO has the legacy bait key set -- simulating
+        # the worst case where a leftover legacy write polluted storage.
+        # The fallback (if reintroduced) would surface this bait.
+        valid_results = [{
+            'uid': 'uid_b',
+            'raw_header': 'header_9933333333333333_IE3_P7',
+            'score': 80,
+            'source_ctx': 'third',
+            'text': 'manuscript text B',
+            'chunk_hits': [(0, 'third', 30, 'snippet')],
+        }]
+        user_b_storage = {
+            'export_parallels_payload': {
+                'results': valid_results,
+                'filtered': [],
+                'meta': {  # NO 'source_text' key -- was previously sourced from legacy fallback
+                    'chunk_size': 3, 'mode': 'exact', 'max_freq': None,
+                    'filters': None, 'boundary_options': None, 'warnings': [],
+                },
+            },
+            # Legacy key -- must NOT be read by the export handler post-D-14.
+            'parallels_source_text': 'alpha-leak-bait',
+        }
+        monkeypatch.setattr('web.safe_storage.app', _make_stub(user_b_storage))
+        r = client.get('/api/export/parallels/json')
+        # Handler reaches positive-export path (results exist).
+        assert r.status_code == 200, (
+            f"Expected 200 with valid results, got {r.status_code}: {r.text[:200]}"
+        )
+        body_bytes = r.content
+        assert b'alpha-leak-bait' not in body_bytes, (
+            "LEAK: legacy source_text fallback is still being read. "
+            "Phase 88 D-14 deleted it; if this fires, the fallback was reintroduced. "
+            "source_text should come exclusively from meta['source_text']."
+        )
+        # Also assert source_text in the response envelope is empty (no bait,
+        # no other surface). Envelope shape from web/api.py export_parallels_json
+        # +shared/search_serializer.serialize_parallels_payload: top-level
+        # 'source_text' key.
+        body = r.json()
+        assert body.get('source_text', '') == '', (
+            f"source_text must be empty when meta has no source_text key and "
+            f"the legacy fallback is deleted; got {body.get('source_text')!r}."
         )
     finally:
         state.meta_mgr = saved_meta
