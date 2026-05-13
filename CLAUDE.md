@@ -9,7 +9,7 @@ GenizahSearch is a collaborative research platform for the Cairo Genizah, featur
 - **Desktop Application** (PyQt6) - Windows executable
 - **Supabase Backend** - Cloud database for user data
 
-## Architecture (January 2026)
+## Architecture
 
 ```
 Web App (NiceGUI) ──────────────┐
@@ -28,7 +28,7 @@ Web App (NiceGUI) ──────────────┐
 Desktop App (PyQt6) ────────────┘
 ```
 
-**Note:** The FastAPI backend was removed in January 2026. All read-only reference data is now served from local SQLite sidecars (pgp.db, fjms_enrichment.db, nli_crossref.db). Supabase is retained only for community features (auth, corrections, lists, comments).
+The FastAPI backend was removed in January 2026. All read-only reference data is now served from local SQLite sidecars. Supabase is retained only for community features (auth, corrections, lists, comments).
 
 ## Key Files
 
@@ -41,6 +41,7 @@ Desktop App (PyQt6) ────────────┘
 - `web/pages/` - Page components (search.py, browse.py, lists.py, etc.)
 - `web/components/` - Reusable UI components
 - `web/supabase_client.py` - Supabase integration
+- `web/safe_storage.py` - Chokepoint for per-user state (post-Phase 87)
 
 ### Puzzle (Fragment Puzzle / Join Documents)
 - `shared/puzzle_model.py` - PuzzleDocument/PuzzleFragment dataclasses
@@ -53,11 +54,10 @@ Desktop App (PyQt6) ────────────┘
 
 ### Browser Extension (GenizahSearch Image Helper)
 - `extension/manifest.json` - Chrome MV3 manifest with NLI host permissions
-- `extension/manifest.firefox.json` - Firefox MV3 manifest (gecko settings, background.scripts)
+- `extension/manifest.firefox.json` - Firefox MV3 manifest
 - `extension/background.js` - Service worker fetching NLI images as binary
 - `extension/content_script.js` - Page↔background bridge + extension detection
-- `extension/icons/` - Extension icons (16/48/128px)
-- `extension/build.py` - Builds Chrome and Firefox ZIP packages into extension/dist/
+- `extension/build.py` - Builds Chrome and Firefox ZIP packages
 
 ### Desktop
 - `supabase_corrections_client.py` - Desktop Supabase client
@@ -87,7 +87,7 @@ python genizah_app.py
 ## Data Files
 
 ### libraries.csv
-Master metadata file for all ~217,000 manuscript records.
+Master metadata file for ~255,000 manuscript records.
 
 **Structure:**
 ```csv
@@ -102,19 +102,10 @@ system_number,oxford_part_id,call_numbers,library_code,,,,titles_non_placeholder
 | library_code | 3 | Library abbreviation (CUL, JTS, etc.) |
 | titles_non_placeholder | 7 | Hebrew title |
 
-**Library Codes:**
-- `CUL` - Cambridge University Library (~128K records)
-- `JTS` - Jewish Theological Seminary (~30K)
-- `RNL` - National Library of Russia (~17K)
-- `Oxford` - Bodleian Libraries (~13K)
-- `Manchester` - University of Manchester (~12K)
-- `BL` - British Library (~8K)
-- `AIU` - Alliance Israélite Universelle
-- `Mosseri`, `Gaster`, `Halper` - Private collections
-- And others (see `genizah_core.LIBRARY_CODES`)
+**Library Codes:** CUL (~128K), JTS (~30K), RNL (~17K), Oxford (~13K), Manchester (~12K), BL (~8K), AIU, Mosseri, Gaster, Halper, NLI, and others (see `genizah_core.LIBRARY_CODES`).
 
 ### joins.db (SQLite sidecar)
-Stores saved puzzle/join documents. Created automatically in `joins_data/` on first save.
+Stores saved puzzle/join documents in `joins_data/`.
 - `join_documents` - Document records (id, title, notes, fragments_json, thumbnail_b64)
 - `join_document_fragments` - Fragment index for reverse lookups (doc_id, fl_id, sys_id)
 
@@ -125,6 +116,7 @@ See `docs/DOCUMENTATION_INDEX.md` for full documentation structure:
 - `docs/plans/` - Implementation plans
 - `docs/specs/` - Technical specifications
 - `docs/archive/` - Historical documents
+- `CHANGELOG.md` - Full release history
 
 ## Code Style
 
@@ -140,17 +132,21 @@ See `docs/DOCUMENTATION_INDEX.md` for full documentation structure:
 SUPABASE_URL=https://xxxxx.supabase.co
 SUPABASE_ANON_KEY=eyJ...
 POSTHOG_API_KEY=phc_xxxxx (optional - enables PostHog analytics)
-WEB_PUZZLE_ENABLED=true (default: true; set to false to disable web puzzle page)
+WEB_PUZZLE_ENABLED=true (default: true)
 PUZZLE_UPLOAD_SECRET=xxx (optional - HMAC secret for puzzle upload tokens; auto-generated if unset)
-SEARCH_API_MODE=open (one of: open | localhost-only | disabled; default: open; flippable per request without restart; applies to /api/search, /api/browse, /api/parallels)
-SEARCH_API_RATE_LIMIT=30 (per-IP requests per minute; default: 30; SHARED ceiling across /api/search, /api/browse, /api/parallels but each endpoint has its own independent bucket — see Phase 80 D-05)
-POSTHOG_IP_SALT=xxx (optional - HMAC salt for hashing client IPs in server-side PostHog events; auto-generated if unset, but production should set explicitly so hashes survive restarts)
-SEARCH_API_POSTHOG_SAMPLE_N=1 (optional - capture every Nth API request to PostHog; default: 1 = every request; applies to /api/search, /api/browse, /api/parallels)
-SEARCH_API_BROWSE_TIMEOUT=1.0 (per-source enrichment timeout for /api/browse PGP/FJMS/NLI fetches in seconds; default: 1.0)
-SEARCH_API_BROWSE_CORE_TIMEOUT=2.0 (core BrowsePage fetch timeout for /api/browse in seconds; default: 2.0; previously no core timeout existed — added per Phase 79 R-01 to prevent executor pinning on a hung Tantivy reader)
-SEARCH_API_BROWSE_TEXT_CAP=4000 (default char cap for transcription text in /api/browse; per-request override via ?text_cap=N bounded by [100, 10000]; default: 4000)
-GENIZAH_API_BASE=https://genizahsearch.com (skill-side only; cairo-genizah-research skill consumer base URL; overrides --base-url CLI flag per skill D-09 env-wins; consumed by skills/cairo-genizah-research/scripts/_config.py)
-GENIZAH_SKILL_REQ_PER_MIN=24 (skill-side only; cairo-genizah-research skill self-throttle ceiling per endpoint bucket, default 24 req/min leaving 6 rpm headroom under server's 30 rpm SEARCH_API_RATE_LIMIT; SKILL-06)
+POSTHOG_IP_SALT=xxx (optional - HMAC salt for hashing client IPs; auto-generated if unset, production should set explicitly so hashes survive restarts)
+
+# Search API (Phase 77-83 public HTTP/JSON API over the corpus)
+SEARCH_API_MODE=open                  # open | localhost-only | disabled (flippable per request, no restart)
+SEARCH_API_RATE_LIMIT=30              # per-IP requests/minute; shared ceiling but each endpoint has its own bucket
+SEARCH_API_POSTHOG_SAMPLE_N=1         # capture every Nth API request to PostHog
+SEARCH_API_BROWSE_TIMEOUT=1.0         # per-source enrichment timeout (PGP/FJMS/NLI), seconds
+SEARCH_API_BROWSE_CORE_TIMEOUT=2.0    # core BrowsePage fetch timeout, seconds
+SEARCH_API_BROWSE_TEXT_CAP=4000       # default char cap for transcription text; ?text_cap=N override bounded [100, 10000]
+
+# Skill-side (cairo-genizah-research skill consumer)
+GENIZAH_API_BASE=https://genizahsearch.com    # overrides --base-url CLI flag (env wins)
+GENIZAH_SKILL_REQ_PER_MIN=24                  # skill self-throttle, leaves 6 rpm headroom under server's 30 rpm
 ```
 
 ## Testing
@@ -178,13 +174,6 @@ pytest tests/
 3. **After finding new bugs:** Add to appropriate section with `❌ Open` status
 4. **At session end:** Update the "Last Updated" timestamp and summary counts
 
-```markdown
-# Format for marking issues complete:
-| Issue | ❌ Open | Notes |
-↓
-| Issue | ✅ Fixed (2026-02-03) | Notes |
-```
-
 ### When to Update Docs
 
 | If you change... | Update these docs |
@@ -194,7 +183,7 @@ pytest tests/
 | Web app pages/components | `docs/CODE_INDEX.md` |
 | Environment variables | `CLAUDE.md`, `docs/guides/DEVELOPER_GUIDE.md` |
 | Major features | `CHANGELOG.md`, `README.md` |
-| **App version** | Run `python scripts/bump_version.py X.Y.Z` (see below) |
+| **App version** | Run `python scripts/bump_version.py X.Y.Z` |
 
 ### Version Bumping (REQUIRED for releases)
 
@@ -204,37 +193,23 @@ python scripts/bump_version.py 6.3.0          # apply changes
 python scripts/bump_version.py 6.3.0 --dry-run # preview only
 ```
 
-**Files updated automatically:**
-| File | What changes |
-|------|-------------|
-| `version.py` | `APP_VERSION` (source of truth, imported by both apps) |
-| `version_info.txt` | Windows EXE metadata (`filevers`, `prodvers`, `FileVersion`, `ProductVersion`) |
-| `CompileScriptGenizah.iss` | Inno Setup `#define MyAppVersion` + `OutputBaseFilename` |
-| `README.md` | Header line |
+**Files updated automatically:** `version.py` (source of truth), `version_info.txt` (Windows EXE metadata), `CompileScriptGenizah.iss` (Inno Setup), `README.md` (header line).
 
 **Manual steps after running the script:**
 1. `CHANGELOG.md` — add `## [X.Y.Z]` section with release notes
-2. `CLAUDE.md` "Recently Changed" — add entry for the new version
+2. `CLAUDE.md` "Recently Changed" — add one-line entry
 3. `README.md` "What's New" section — update feature description
 
 ### Before Finishing a Session
 
-Run the documentation health check:
 ```bash
 python scripts/check_docs.py
 ```
 
-If it reports issues, fix them before committing.
-
-### Key Docs to Keep Updated
-
-1. **`CLAUDE.md`** - This file! Update if architecture changes
-2. **`docs/guides/DEPLOYMENT_TECHNICAL.md`** - Server/deployment info
-3. **`docs/guides/SUPABASE_GUIDE.md`** - Database schema and queries
+Fix any reported issues before committing.
 
 ### Outdated Terms to Avoid
 
-These terms indicate outdated documentation:
 - `FastAPI` / `backend server` - Removed in Jan 2026
 - `genizah-backend` service - No longer exists
 - `DATABASE_URL` - Replaced by `SUPABASE_URL`
@@ -242,44 +217,26 @@ These terms indicate outdated documentation:
 
 ## Recently Changed
 
-- May 2026: v7.12 Path B Phase 87 (Foundations -- Session UUID and Safe Storage Chokepoint) -- internal milestone, not a release. First phase of v7.12 Multitenant Architecture (Path B) refactor. Adds `_session_uuid` lazy-mint helpers to `web/safe_storage.py` (`get_session_uuid()` + `ensure_session_uuid()`) — establishing `web/safe_storage.py` as **the** safe_storage chokepoint for per-user state — with strict `^[0-9a-f]{32}$` regex validation per 87-REVIEWS.md M5, CSPRNG-backed via `uuid.uuid4().hex`, 100-session uniqueness verified via mock-based concurrency test (T-87-01 mitigation), and a private `_is_valid_uuid()` validator that rejects uppercase hex / non-string / malformed-length / non-hex chars (T-87-02 mitigation). Wires `ensure_session_uuid()` into the page bootstrap at three locations in `web/main.py`: `create_layout()` L349 (covers 17 of 19 `@ui.page` handlers), `reset_hints_route` L1288, `auth_callback_route` L1450 (B1 fix per 87-REVIEWS.md + Codex round-2 Fix 1 closing the 3-route residual). `/privacy-extension` intentionally skipped — AST-confirmed zero `app.storage.user` accesses on that route (pure static info page). Migrates **131 raw `app.storage.user.*` access sites across 14 files** to the `safe_storage` chokepoint helpers (Plans 03-06): leaf cluster 16 sites (text_editor 3, translation_report 1, home 2, settings 7, search_results 3), main+alias cluster 18 sites (main.py 14 inline + 2 local-helper deletions + 18 caller routings, api.py 3 `nicegui_app` alias, supabase_client.py 1 `_app` alias in sign_out), browse cluster 17 sites (browse 4, browse_state 10, catalog_browse 3), search cluster 80 sites (parallels 35, search 14, search_state 31 — single largest migration). Creates `.planning/phase87_storage_allowlist.yaml` with H1 `expected_count` schema (4 entries / 13 patterns / 14 expected_count nodes) covering bootstrap sites that intentionally stay raw: `web/auth_state.py` (Phase 91 atomic auth-state writes), `web/main.py` OAuth callback 3-key atomic block at L1458/1460/1463 (Phase 91), `web/supabase_client.py:111` captured-handle in `get_user_client` (Phase 90 deletes the function), `web/export_state.py:48` `_TEST_BACKEND` production fallthrough (Phase 88 deletes the shim). Adds AST-based pytest lint scanner `tests/test_no_raw_storage_access.py` with 6 tests (allowlist schema, B2 chain-order correctness, alias resolution for `app`/`nicegui_app`/`_app`, parent-tracking to avoid double-reporting nested Call/Subscript/Attribute, H1 count enforcement with Fix 3 loud-fail when nicegui import is removed, big-gate production scan) — now the permanent CI guard against raw storage access regression. All 6 existing `tests/test_safe_storage.py` tests pass byte-unchanged (FOUND-05 invariant SHA-256 `e165bf0e...` preserved across all 8 plans). Codex round 4 MEDIUM-2 deferred-callback site at `parallels.py:3520` migrated with explicit documenting comment about intentional silent-loss-on-prune tradeoff (vs. crashing the asyncio event loop). `tests/test_browse_state.py` and `tests/test_search_state.py` monkeypatches updated per 87-REVIEWS.md B3 to patch the new `web.safe_storage.app` chokepoint surface (7 + 7 patches swapped). M2 independent-read semantics preserved in `restore_browse_snapshot` and `restore_search_snapshot`. M3 Class B defensive wrappers preserved at `persist_browse_snapshot` inner try (dict construction + reading_desk_entries comprehension), `persist_search_snapshot` outer + inner try (RefinementStep.to_dict iteration), and 3 other sites covering non-storage transformations; Class A wrappers (storage-prune-only) collapsed. Cumulative metrics: 8 plans / 14 source files modified / 4 docs files updated / 2 test files updated for B3 / 22 tests in Phase 87 test surface (6 safe_storage byte-unchanged + 11 session_uuid green at Plan 02 close + 6 lint scanner green at Plan 07 close — note 11 session_uuid count = 5 base + 4 M5 validation + 1 route-coverage + 1 bootstrap wiring). Full pytest suite **1879 passed / 20 skipped** at Plan 07 close; ruff clean throughout; `check_docs.py` green. Zero user-visible behavior change. No release artifact — Phases 88-92 depend on this foundation (`_session_uuid` as stable cache key; zero-raw-storage invariant). Hand-off chain: Phase 88 deletes the `_TEST_BACKEND` allowlist entry (state separation by deletion); Phase 90 deletes `web/supabase_client.py:111` allowlist entry (auth caching rewrite without `set_session()`); Phase 91 deletes the `web/auth_state.py` + `web/main.py` OAuth allowlist entries (atomic auth-state writes through `safe_storage`). Web-only milestone — desktop is genuinely single-user and unaffected. (web)
-- May 2026: v7.11.0 release -- CUDL Coverage & Synthetic Inventories. 3-phase milestone (Phases 84, 85, 86) closing the gap between CUDL's ~141K classmark catalogue and GenizahSearch's libraries.csv. Originating user case: `T-S NS 329.96` (sys_id `990065549106000000`) — present in CUDL with 2 image canvases, missing from libraries.csv because its FJMS inventory has no NLI Alma record. **Phase 84** (CUDL Shelfmark Normalization): new `shared/fist_cudl_bridge.py` + `shared/shelfmark_bridge.py` bridge modules with FIST↔CUDL normalizers (Mosseri label `Moss. III,27O` ↔ `mosseriiii27o`, Cambridge Or. numeric collapse, leading-zero collision audit, slash/comma/dot bug fixes); 6 bridge wiring call sites across `genizah_core.py`, `web/services.py`, `web/pages/browse_enrichment.py:208`, image-source resolution, CUDL link builder, orphan-scanner unification — recovers thousands of CUDL classmarks already represented in libraries.csv under different forms. 3-layer regression guard: `cudl_must_resolve` fixture, `cudl_baseline_resolved` snapshot, unit tests. **Phase 85** (Synthetic Infrastructure): helper module `shared/synthetic_sys_id.py` (`is_synthetic_sys_id`, `encode_inventory_sys_id`, `decode_inventory_id`), FJMS sidecar UNION-ALL export pattern, browse hide-NLI gates (KTIV link, NLI source toggle, NLI bibliography chips, NLI image source all hidden when synthetic), `is_synthetic` field on /api/search + /api/browse + /api/parallels response items + PostHog event property, corrections-write reject at `CorrectionsClient.create_correction` + `SupabaseCorrectionsClient.create_correction`. Initial Phase 85 POPULATION (5,035 bibliography-only rows) reverted by `3c75a9bc` during 2026-05-09 UAT — infrastructure stays active, produces zero rows until Phase 86 re-attempts with image-bearing criteria. **Phase 86** (CUDL Coverage Audit + Synthetic Re-attempt): **108 image-bearing synthetic manuscripts** including the originating case T-S NS 329.96 — distribution 101 CUL + 7 Mosseri, all with CUDL canvas images via the bridge. Surgical DB injection (`scripts/phase86_inject_synthetic_to_main_db.py`): 3,264 catalog rows + 103 FTS5 docs across 11 base tables in `fjms_enrichment.db`, leaving 7 supplemental tables untouched (translations, measurements, blank_images, extra_info, computed_measurements, import_meta, fjms_translations); `catalog_sizes` skipped per Codex review for schema drift. Backup via `.backup()` API + full gzip CRC retained. AUDIT-02 5-tier coverage report: phase84_hit 96.23%, phase86_existing_alma_candidate 2.39%, phase86_synthetic 0.08%, phase86_residue 1.13%, multi_inventory_ambiguous 0.18%. 6 residue pattern families analyzed and REJECTED (need human-in-loop, not new auto-rules). NLI attribution regression guard via 461-row golden fixture confirms v7.9.4 Oxford→NLI flip not regressed. Browse pagination fixes for synthetic sys_ids (web + desktop): `_get_metadata_only_browse_page` accepts `p_num`/`absolute_index`/`next_prev` and produces moving target page; `browse_render_page` derives `total` from largest of folio_images/images_ext/images_nli when `metadata_only` and `total_pages==0`; bypasses Tantivy for synthetic via `is_synthetic_sys_id` short-circuit; tolerates NiceGUI slot-lifecycle race. Plus 2 unrelated search UX fixes: duplicate top-toolbar "Exclude manuscripts" button removed; Text Position dropdown resets on New Search + shows active-state chip when not default. **Deploy posture codified**: scp DBs FIRST, then push code — established by the 2026-05-11 incident (deployed code without DB sync → catalog/PGP/bib data loss → reverted to `6ce42522`). Web auto-deployed 2026-05-12 via `deploy.sh` after scp + atomic systemd swap (old DB preserved on server as `fjms_enrichment.db.pre-phase86-20260512` for rollback). Desktop installer rebuilt bundling updated `libraries.csv` (108 synthetic rows) + `fjms_enrichment.db` (3,264 synthetic rows). Pre-flight: 1836 passed / 20 skipped. **Phase 87 follow-up logged**: enable corrections/joins/comments on the 108 image-bearing synthetic rows (page_number semantics now well-defined as CUDL canvas index) — currently still disabled by Phase 85 guards. (both apps)
-- May 2026: v7.10.0 release -- Search API Public Release. The v7.10 milestone (Phases 77, 78, 79, 80, 81A, 81B, 82, 83 — 8 phase entries spanning serializer foundation through public release) ships a public HTTP/JSON research-automation API over the existing Genizah corpus. Three endpoints: `POST /api/search` (keyword/Responsa/title/shelfmark search with per-IP rate limiting, mode gating, and uniform error envelope), `GET /api/browse` (stateless manuscript drill-down returning PGP transcription, FJMS/NLI enrichment, and image URLs from a search locator), `POST /api/parallels` (composition-parallels detection using sliding-window chunk matching). Security hardening includes XFF spoofing protection via trusted-proxy allowlist, fail-closed filter validation, Responsa expansion cap (MAX_EXPANDED_TERMS=500), and HMAC-hashed PostHog telemetry with persistent POSTHOG_IP_SALT. OpenAPI spec auto-generated from Pydantic models with explicit `openapi_extra` route metadata at `/api/openapi.json`; interactive Swagger UI at `/api/docs` (Phase 83 sub-mount, scoped to the 3 search-helper endpoints — legacy `/api/*` proxies excluded). Reference Claude skill `cairo-genizah-research` (Phase 81B, `skills/cairo-genizah-research/`) demonstrates search → browse → rank workflow with file-locked token-bucket throttling and browse-honesty annotations. `docs/SEARCH_API.md` is the public contract with stability commitment: additive changes any time; breaking changes only on major-version releases announced in CHANGELOG. Web-only release; NO desktop installer rebuilt/distributed; NO GitHub Release object (desktop polls releases/latest at gui_threads.py:459); NO `v7.10.0` git tag (consistent with prior web-only release pattern). Phase 83 also reframed `docs/SEARCH_API.md` from internal-only to public-facing (Stability + Quick Start + Attribution + Changelog sections), added README.md "## API" section + What's New entry, fixed OpenAPI sub-mount populated requestBody/parameters/responses (Codex HIGH fix from `83-REVIEWS.md`), and produced `83-SECURITY.md` audit verifying all Phase 78–81B mitigations remain load-bearing — 7-item Post-Deploy Verification checklist re-run against production. Pre-flight: 15/15 Phase 83 Wave 0 tests GREEN (8 docs + 4 OpenAPI scope + 3 release artifact); full pytest suite GREEN; check_docs green. (web)
-- May 2026: v7.9.4 release -- NLI Library Code Fix. Tiny data-only patch correcting library attribution for 461 manuscripts in `libraries.csv`. User reported (sys_id 990025143260205171) that NLI manuscripts were rendering as Oxford in browse — external links, source toggles, and folio navigation all routed through Oxford-flavored code paths because browse keys off `library_code` column. Investigation: 461 rows had `library_code=Oxford` but call_numbers contained ONLY NLI shelfmarks (`The National Library of Israel Ms. Heb. ...` or `JER NLI Heb`) with no Oxford signal anywhere. Bad data has been present since libraries.csv was first introduced (commit 68dc0e99) — not a recent regression, just user-noticed now. Fix via new `scripts/fix_nli_oxford_mislabel.py` flipping the 461 unambiguous rows Oxford → NLI; preserves CRLF line endings (initial run wrote LF and produced full-file diff, restored from backup, fixed with line-ending detection). Apparent edge cases — 11 rows under Allony/Harkavy/HAS that also have NLI shelfmarks — left untouched as intentional cross-listings of private collections deposited at NLI. Pre-flight: 1384 passed / 10 skipped, check_docs green. Both apps deploy: desktop bundles libraries.csv in installer; web pulls it via deploy.sh.
-- April 2026: v7.9.3 release -- Visual Similarity Dialog Fixes. Small web-only patch fixing three usability bugs in `web/components/visual_similarity_dialog.py`, all from the same user email. (1) Firefox could not reach the post-20-results `Show more` button because the right-pane Quasar `ui.scroll_area` did not scroll reliably in Firefox (Chrome was unaffected); swapped for a plain `<div style="overflow-y:auto; height:100%">`. (2) Ctrl/Cmd-click and middle-click on a suggestion opened in the same tab because shelfmarks and the `open_in_new` icon were `ui.button`s navigating via `ui.navigate.to()` — browser-native modifier-click never fired. Shelfmarks converted to `ui.link('/browse?sys_id=...')` with `click.stop_propagation` so row expansion still works; `open_in_new` icon wrapped in `ui.link(target=..., new_tab=True)`. (3) Manual text selection on the suggestion list excluded the shelfmark column (the most important field) because Quasar `q-btn` applies `user-select: none`; `ui.link` uses a plain anchor with `user-select: text`, so copy-paste now includes shelfmarks. Remaining action buttons (Add to Puzzle, Add to List, Add as Join) moved to `click.stop` handlers to avoid triggering the row expander. Codex implemented the fix; pre-flight: 1156 passed / 8 skipped, check_docs green, OPEN_ISSUES + CODE_INDEX updated. Web-only deploy; desktop stays at 7.9.2.
-- April 2026: v7.9.2 release -- PGP Data Refresh. Data-only refresh release. Bundled Princeton Geniza Project metadata (pgp.db sidecar) was last imported 2026-02-05 and had gone 2.5 months stale. Re-imported from princetongenizalab/pgp-metadata (daily upstream exports; v1.1 schema with new person/place relationship columns gracefully ignored by row.get() pattern in importer). Deltas vs prior: documents 35,839 → 35,986 (+147), document_sources 9,364 → 9,523 (+159 = +93 Digital Editions + +50 translations), document_footnotes 22,757 → 22,968 (+211), document_fragments 36,155 → 36,500 (+345). Pipeline: pgp_transcriptions_export.py regenerates transcriptions_linked.csv (9,507 linked / 346 unmatched, 96.5% match rate unchanged); import_pgp_full.py --execute upserts to Supabase; export_pgp_sidecar.py rebuilds pgp.db (148.6 MB, down from 170 MB via compaction, row-count validation passes on all 4 tables). Web server received new pgp.db and restarted 2026-04-22 13:52 UTC. Desktop installer bundles it. Also ships two small post-7.9.1 fixes riding along: Oxford/NLI source-toggle buttons on /browse restored (commit 33e165d3), desktop Cambridge nav page_idx undefined fix (ruff F821, commit cf3473fb). Desktop WhatsNewBar + WhatsNewDialog texts finally refreshed (were still showing v7.7.0 Volume-Aware Browse content). OPEN_ISSUES reclassified WhatsNewDialog RTL ✅ Fixed → 🟡 Partially Fixed: block-level alignment works, but inline parenthesized Latin runs like (PGP) in Hebrew strings still need manual LRM (\u200E) marks; proper fix would auto-inject LRM in tr() or use <bdi>/LRI+PDI isolates. pytest 1156 passed / 8 skipped.
-- April 2026: v7.9.1 release -- Catalog Attribution & Reading Desk Polish. Data-quality release. FJMS Instatution migration (267K catalog + 48K free_desc rows rewritten via local CODE_Institution join — ~30K manuscripts with empty `Catalog Information` dialogs now render GRU – Cambridge, Schocken-Zulay, Fleischer Piyut Project, Yad Harav Herzog, Uri Ehrlich, etc.). JTS browse source-switch fixed (L81) — MARC 942$z last-wins bug + `Ms.` prefix tolerance + `get_jts_urls_for_sys_id` JOIN + NLI circuit breaker (nav lag ~25s→~5s). CUL CUDL/NLI alignment via new `classify_cambridge_alignment` helper consolidating 5 duplicate decision sites; handles bifolios (T-S NS 158.112), binding canvases, same-count-different-order CUDL manifests (Or.2245); desktop past-CUDL auto-fallback. Reading Desk polish (desktop): `_browse_rd_enrich_entry` helper populates images for fragments added from list/top-shelfmark/green-bar that were never browsed this session (volume-aware via current_browse_volume_ie; threads sys_id-keyed with wait/terminate on exit + window close); Add to View respects typed input in top bar; green toolbar size policy pinned to Fixed; pre-populate; What's New RTL alignment. Security: ilike injection sanitization at 4 supabase_corrections_client sites (CR-02); Supabase config unified via shared provider (CR-01). Web log hygiene: 3 ui.timer→asyncio (L91); NiceGUI audit threshold constant + startup WARNING (IN-02); banner auto-dismiss flag only persists on successful .delete(). /_nicegui/ marked noindex. /_internal/memstat diagnostic endpoint. Phase 65 cleanup (WR-01/02, IN-01). New fjms_enrichment.db uploaded (1.6 GB, 2026-04-21). pytest 1156 passed / 8 skipped.
-- April 2026: v7.9.0 release -- bundles v7.8 Structural Foundation + v7.9 Decomposition internal milestones into a shippable release. User-visible changes: back-navigation state-loss bugfix (browser Back from /browse to /search now restores the saved snapshot; regression from 2026-03-27 commit 829cd7cf, fix 8f9c5ef3), CUL paired-leaf folio-label fix (parse_folio_label handles paired-leaf bifolio ImageName patterns like T-S NS 158.112). Everything else internal refactor — page-scoped state reducing app.storage.user sprawl, search/browse/desktop decomposition, CI + deps pinning + auth migration (see CHANGELOG for full detail). Deployed as leak-investigation baseline — pre-refactor app.storage.user sprawl may have contributed to observed 8.7GB RssAnon after 5 days uptime.
-- April 2026: v7.9 Decomposition (internal milestone, not a release) -- 10 phases, 23 plans. Desktop split: ResultDialog, filter/scholarly dialogs, image viewers (ManuscriptViewerWidget, FullscreenImageWindow), puzzle canvas, VS cache, widgets extracted into new desktop/ package — genizah_app.py slimmer (still ~22.5K lines per external review). Web split: search.py → search_state.py + search_results.py; browse.py → browse_state.py + browse_enrichment.py. Page-scoped state refactor reducing app.storage.user sprawl and detached asyncio.ensure_future in search + browse. CODE_INDEX.md regenerated via new scripts/gen_code_index_section.py AST generator; check_docs green. Back-navigation state loss regression fixed during Phase 75 verification (origin commit 829cd7cf 2026-03-27, fix 8f9c5ef3). Zero user-visible behavior change except the back-nav bugfix. APP_VERSION still 7.7.2; will ship as next release bump.
-- April 2026: v7.8 Structural Foundation (internal milestone, not a release) -- 4 phases, 9 plans, 64 commits, 173 files changed (+6,269/-828 lines). 12/12 requirements satisfied. CI safety net (GitHub Actions, Ubuntu + Windows matrix, ruff + check_docs + pytest). Dependency pinning: requirements.txt (14 direct) + requirements-lock.txt (115 transitive). Supabase auth migration: gotrue → supabase_auth, PKCE-only OAuth. 205+ silent except handlers audited across 76 first-party files. NiceGUI monkey-patches isolated with version guards in web/framework_patches.py. Repo hygiene (.gitignore 50 → 126, untracked root 67 → 1). Docs refresh: CODE_INDEX, OPEN_ISSUES, DEVELOPER_GUIDE. Zero user-visible behavior change. APP_VERSION still 7.7.2.
-- April 2026: v7.7.2 PageSpeed Quick Wins (A11y + Perf) -- Lighthouse homepage: accessibility 85 → 96, performance 90 → 98. Fixed `<html lang="undefined">` by passing full Quasar lang pack + JS guard + NiceGUI template patch at startup. Aria-labels on 10 icon-only buttons (help, dismiss, theme, citation copy/close, hero search). WCAG AA color contrast: light-theme --text-muted 2.34:1 → 4.63:1, global link color 3.06:1 → 5.44:1, dark-theme overrides for muted + Quasar primary/secondary/accent. Starlette middleware injects font-display: swap into NiceGUI's fonts.css (prevents ~1200ms invisible text). Conditional IIIF preconnect only on /search, /browse, /puzzle. Homepage "What is the Cairo Genizah?" heading promoted h3 → h2. Remaining: 13 parchment-theme color-contrast warnings deferred (web)
-- April 2026: v7.7.1 SEO Round 2 -- bilingual meta tags (English brand + Hebrew search phrase "חיפוש בגניזה הקהירית" + Hebrew brand "אתר הגניזה של דיקטה"), English-leading per-page titles on indexable routes, homepage h1 contains target Hebrew phrases for crawlers, Organization + BreadcrumbList JSON-LD (SearchAction kept as legacy markup — Google deprecated Sitelinks Search Box Nov 2024), PostHog deferred via requestIdleCallback + dns-prefetch for analytics CDNs, client-side browse title unified with server format, Pesach banner hidden (pattern preserved for future seasonal themes), honest disclosure that performance was not measured — follow-up deferred for real Search Console + PSI data (web)
-- April 2026: v7.7.0 Volume-Aware Browse -- 3,193 multi-IE manuscripts get volume selector for switching between microfilm scans (IEs), volume-correct text+images per IE, auto-default to Manchester/Cambridge/JTS images when available, ie_id in community data (corrections/comments tagged per volume), desktop external image filtering by volume, volume page count fix, threading.Lock for browse_map, browse_map IE repair function (both apps)
-- March 2026: v7.6.0 Visual Similarity Suggestions -- FJMS SVM image analysis (~15.5M pairs) visual similarity browse dialog with ranked partners, thumbnails, domain/library metadata, Browse/Puzzle/Join actions, "Search in visual suggestions" with union/intersection modes, desktop on-demand server fetch with local cache, VS text snippet preloading, exclusion dialog "Active exclusions" section with per-source remove and "Clear all", New Search properly clears exclusions (both apps)
-- March 2026: v7.5.0 Exclude Known Manuscripts -- hide already-reviewed manuscripts from search results using saved lists, imported shelfmark files (TXT/CSV), or pasted shelfmarks, multi-source tracking with per-source clear, resolution report table, collapsible excluded section, export respects exclusions (WYSIWYG), session persistence, shared exclusion_service.py with 15 tests, web tabbed picker dialog (Paste/List/File), desktop ExcludeDialog with QTabWidget + setRowHidden filtering, 38 Hebrew translations (both apps)
-- March 2026: v7.4.0 Search Within Results -- progressive refinement restricting follow-up queries to manuscripts from current result set, breadcrumb chip chain with per-chip removal, cross-mode support (text/Responsa/Title/Shelfmark), "Only results with all terms" page-level filter (uid intersection), chain-aware snippet highlighting, manuscript-count labels, dark mode + RTL support, thread-safe SQLite services (per-thread connections), csv_bank race condition fix (both apps)
-- March 2026: v7.3.1 SEO Foundation & Shareable Browse URLs -- per-page metadata (title, description, canonical, OG/Twitter per route), manuscript-specific browse metadata (shelfmark from csv_bank), sitemap index with ~255K manuscript URLs in 40K chunks, indexability policy (noindex,follow on search/parallels/lists/settings/corrections/admin/profile), robots.txt aligned, homepage WebSite JSON-LD, preconnect hints (NLI IIIF, Cambridge CUDL), shareable browse URLs (history.replaceState syncs URL bar on navigation with share button to copy link) (web)
-- March 2026: v7.3.0 Manuscript Measurements, Bibliography Cleanup & Desktop Stability -- Measurements dialog (web + desktop browse) showing physical dimensions, margins, line counts, text density, material for 231K manuscripts from FJMS computed measurements (5 new tables, 1.5M rows imported), bibliography dedup (828K→427K, 48.4% reduction), 55K new Hebrew translations via Dicta Translation, desktop browse crash fix (navigation debounce + QThread lifecycle), persistent NLI FL-ID cache, concurrent fetches 4→8 (both apps)
-- March 2026: v7.2.4 JTS Image Upgrade + Shelfmark Search Fixes -- Princeton DPUL as primary JTS image source (36K items), desktop Printed badge, blue mat auto-detection, enhanced shelfmark lookup (full library name stripping, ENA-MS normalization), FJMS bibliography enrichment (8 new fields), catalog dedup, search perf (removed duplicate enrichment), shared JS extraction (~1050 lines), browse/puzzle/PostHog bug fixes (both apps)
-- March 2026: PostHog-driven UX & Auth fixes -- parallels rageclick prevention (immediate button disable, clickable shelfmarks, filter loading spinners, expansion chevrons, export button state), OAuth implicit flow fix (PKCE code_verifier issue), login PostHog tracking (login_failed enrichment, OAuth callback events, POSTHOG_SCRIPT on callback page, run.io_bound for non-blocking login), login dialog for anonymous write actions (discoveries vote/create/share, puzzle publish), _posthog_identify XSS fix (json.dumps), dev-mode auto port finding (both apps)
-- March 2026: Princeton DPUL as primary JTS image source -- full DPUL catalog import (36,283 items, v1 had 453), JTS manuscripts auto-default to DPUL images in web browse, external link points to DPUL catalog page instead of manifest URL (both apps)
-- March 2026: v7.2.3 Chrome Extension Live + Puzzle Enabled -- Chrome Web Store install link in puzzle banner (bilingual), WEB_PUZZLE_ENABLED defaults to True, json.dumps() escaping for banner texts
-- March 2026: v7.2.2 Desktop Browse Tab Polish -- emoji icon buttons matching ResultDialog, reorganized ext_info_row (Puzzle/Parallels/List + Info/Bib/Catalog/External links + compact translations toggle), dynamic external library link buttons (Cambridge/Oxford/Manchester/Princeton), cross-shelfmark page navigation (Prev/Next wrap at boundaries), extended info and image toggle state preserved across navigation, fullscreen image viewer (FullscreenImageWindow with zoom/rotate/adjustments/arrow-key page nav, works from both browse and modal ResultDialog), enrichment race condition fix (stale Part context leak), centralized _start_browse_enrichment() with generation counter (desktop)
-- March 2026: v7.2.0 Image Adjustment Controls -- brightness/contrast/gamma sliders + invert toggle on all image viewers (web browse standard/fullscreen/reading desk, web search advanced, desktop ManuscriptViewerWidget), desktop export bakes in adjustments (copy/save), icon-based compact toolbar, per-viewer SVG gamma filters for reading desk isolation, LUT-based desktop pixel processing with 80ms debounce, browse page async slot context fix, desktop image race condition fixes (both apps)
-- March 2026: v7.1.0 FIST Gap Fill & Expanded Catalog -- 38,673 new manuscript records from FIST.db (libraries.csv 216K→255K), 7 new library codes (Solomon, Reinach, Vatican, CentralArch, JCMainz, Corwin, Mehlman), metadata-only search (Title/Shelfmark returns records without transcription text), metadata-only browse (shows NLI images + FJMS enrichment instead of error), Yevr→EVR and Halper→Genizah shelfmark normalization, Mosseri CUDL image fallback, server stability fixes (both apps)
-- March 2026: v7.0.1 Web Puzzle Browser Extension -- GenizahSearch Image Helper Chrome/Firefox extension for NLI image acquisition, unified _loadImageWithFallbacks() fallback chain (server cache → extension → localhost helper → direct NLI), HMAC upload tokens, server derivative cache with processing version, extension install banner, privacy policy page, nginx /api/ proxy fix, Firefox AMO submission
-- March 2026: v7.0.0 Fragment Puzzle & Community Publishing -- visual canvas for arranging fragments (background removal, zoom/rotate/crop, folio nav, layer ordering), save/load join documents to joins.db, composite PNG export with metadata banner, recto/verso support, community publishing (publish/unpublish/fork/browse), Discoveries Center integration, All/My Puzzles tabs, fragment selector combobox+browse, clickable shelfmark badges, admin soft-delete, auto-unpublish on delete, 90+ Hebrew translations, bilingual help sections, Windows index rebuild fix (both apps)
-- March 2026: v6.5.3 Image viewer copy & save -- right-click context menu on manuscript images with Copy Image and Save Image As (desktop)
-- March 2026: v6.5.2 UI polish -- desktop ResultDialog icon+text compact buttons, web language toggle moved to header
-- March 2026: v6.5.1 Bug fixes + session restore -- desktop composition ResultDialog nav for filtered/appendix results, web parallels parent_slot timer crash, session persistence for browse tabs/composition summary/active tab
-- March 2026: v6.5.0 Search UX & Filtered Search -- focused search by manuscript properties (domain/author/work/date/material), ~580K Dicta translations (Hebrew↔English) for catalog data, translation toggle, browse-to-search navigation, citation reminder popup (both apps)
-- March 2026: v6.2.0 Power-User UX -- composition search UX (timer, ETA, cancel with partial results, printed badge/filter), session persistence, search history dropdowns, desktop notifications, sleep prevention, copy menu, Hebrew library names (both apps)
-- March 2026: v6.1.0/v6.1.1 Catalog Browse & Navigation -- faceted catalog browsing by domain/author/work, free-text filter, FIST v5.0.0 enrichment, 100x faster domain queries, async desktop catalog
-- February 2026: v6.0.0 Local Data Architecture -- PGP data migrated to pgp.db sidecar (147MB), FJMS catalog descriptions expanded, offline browsing, desktop crash fixes, paginated search, performance optimizations (both apps)
-- February 2026: v5.9.0 Multi-Source Image & Metadata Integration -- NLI crossref sidecar (815K), Cambridge/Manchester/JTS IIIF, folio navigation, bibliography, catalog refs (both apps)
-- February 2026: v5.8.0 FJMS Integration -- domain classifications, scientific joins, catalog enrichment via SQLite sidecar (both apps)
-- February 2026: v5.7.2 Cleanup, Normalization & Sections -- AI code removed, Unicode search normalization, full green test suite, structural HTML section parser
-- February 2026: v5.7.0 Responsa Search -- syntax parsing, grammatical expansion, Judeo-Arabic, tabular query builder (both apps)
-- February 2026: v5.6.0 Desktop Parity -- PGP integration, Virtual Reading Desk, 35K documents imported
-- January 2026: Migrated from FastAPI to Supabase
-- January 2026: Documentation reorganized into `docs/` subdirectories
+For full release history see `CHANGELOG.md`. Most recent:
+
+- **May 2026: v7.12 Path B Phase 88 (State Separation by Deletion)** — internal milestone, not a release. Second phase of v7.12 Multitenant Architecture (Path B) refactor. Deletes the 10 per-user export-state singleton mirror fields from `web/state.py:AppState` (`last_results`, `current_search_query`, `current_search_mode`, `current_search_gap`, `last_filters_applied`, `last_search_warnings`, `last_selected_uids`, `parallels_results`, `parallels_filtered`, `parallels_search_meta`). Plan 88-01 migrated 13 writer sites across `web/pages/search.py`, `web/pages/search_results.py`, `web/pages/parallels.py` from `state.X = value` to local-variable threading through the existing `web.export_state.set_*` / `update_*` / `clear_*` calls (Codex round-5 catch: reorder of original plan ordering required because `set_search_export(...)` calls passed `state.current_search_gap` etc. as kwargs two lines below their assignments). Plan 88-02 rewrote `web/export_state.py` to route through Phase 87 `web.safe_storage` chokepoint helpers, deleted the production-code test-backend shim + selector helper (per D-09 + Phase 87 chokepoint discipline), hardened `update_*` functions with `isinstance(payload, dict)` guard (D-11) + copy-on-update (D-12), hardened getters `get_search_export()` / `get_parallels_export()` with isinstance guard (Refinement 4 — cross-AI review), folded `parallels_source_text` into the `set_parallels_export(meta={'source_text': ...})` payload (D-13), deleted the reader-side fallback at `web/api.py:1928-1931, 1962-1964, 2063-2066` (D-14), rewrote 4 affected test files (`test_export_cross_user_isolation`, `test_export_state_selection`, `test_api_export_json`, `test_api_legacy_unchanged`) to `monkeypatch.setattr('web.safe_storage.app', ...)` pattern with `SimpleNamespace`-based instance-isolated stubs (D-01, D-02, Refinement 6) — deleting the legacy proxy wrapper, dropping all `state.X =` fixture setup, adding a strengthened source_text cross-user leak regression test exercising a POSITIVE export path (D-15, Refinement 2), and deleted the `web/export_state.py` entry from `.planning/phase87_storage_allowlist.yaml` (allowlist count: 4 → 3 entries). Plan 88-03 deleted the 10 fields from `AppState.init()`, installed two permanent CI regression guards: runtime attr-absence test `tests/test_no_appstate_export_fields.py` (11 tests = 10 parametrized + 1 survivor sanity per D-06) and static AST scanner `tests/test_no_deleted_state_references.py` (D-07 — walks `web/` + `tests/` for `state.<deleted_field>` / `setattr(state, ...)` / `getattr(state, ...)` AND aliased imports per Refinement 5 (`from web.state import state as s`, `import web.state as web_state`), 4 tests = 3 seed-traps + 1 production scan), refreshed stale docstring/comment mentions per D-16 at `web/api.py:1846-1851` and `web/search_api.py:1198-1204`. Codex round-5 review reshaped plan ordering (locals-first instead of fields-first per D-04 + D-05) to eliminate the data-loss window where deletion-first ordering would feed stale defaults into `set_search_export(...)` kwargs. Cross-AI plan review (Gemini + Codex, 2026-05-13) refined plans pre-execution with 7 targeted improvements (scoped greps to `web/`+`tests/`, strengthened D-15 positive-path test, audit of `set_parallels_export(..., meta=None)` paths, getter isinstance guards, alias-import scanner coverage, SimpleNamespace stubs, Windows-tooling fallback notes). Full pytest suite green at each plan boundary (D-05). All 6 STATE-XX requirements satisfied. Zero user-visible behavior change. Web-only milestone — desktop unaffected. Hand-off chain: Phase 89 deletes `UserListsManager._cache_entry` singleton (LISTS-01..04); Phase 90 deletes `_client_cache` / `_session_locks` / `_CLIENT_CACHE_TTL` and the auth `_app.storage.user` allowlist entry (AUTHC-01..05); Phase 91 deletes the `web/auth_state.py` + `web/main.py` OAuth allowlist entries (AUTHW-01..06); Phase 92 final sweep + acceptance (SWEEP-01..06). (web)
+- **May 2026: v7.12 Phase 87** (internal milestone) — Foundations for Path B multitenant refactor. `web/safe_storage.py` is now THE chokepoint for per-user state via `_session_uuid` lazy-mint helpers. Migrated 131 raw `app.storage.user.*` access sites across 14 files. AST-based pytest lint scanner (`tests/test_no_raw_storage_access.py`) is the permanent CI guard. Allowlist YAML covers bootstrap sites Phases 88-92 will delete. Zero user-visible change. (web)
+- **May 2026: v7.11.0** — CUDL Coverage & Synthetic Inventories. Phases 84-86. FIST↔CUDL shelfmark bridge recovers thousands of CUDL classmarks. 108 image-bearing synthetic manuscripts injected (incl. T-S NS 329.96). **Deploy posture codified: scp DBs FIRST, then push code** (after 2026-05-11 incident). (both apps)
+- **May 2026: v7.10.0** — Search API Public Release. Phases 77-83. Public HTTP/JSON endpoints `POST /api/search`, `GET /api/browse`, `POST /api/parallels`. OpenAPI at `/api/openapi.json`, Swagger at `/api/docs`. Reference skill `cairo-genizah-research`. `docs/SEARCH_API.md` is the public contract. (web)
+- **May 2026: v7.9.4** — NLI Library Code Fix. Data-only: 461 manuscripts flipped Oxford → NLI in libraries.csv. (both apps)
+- **April 2026: v7.9.3** — Visual Similarity Dialog Fixes. Firefox scroll, modifier-click open-in-new-tab, copy-paste includes shelfmarks. (web)
+- **April 2026: v7.9.2** — PGP Data Refresh. pgp.db re-imported from upstream. (both apps)
+- **April 2026: v7.9.1** — Catalog Attribution & Reading Desk Polish. FJMS Institution migration, JTS source-switch fix, CUL CUDL/NLI alignment helper, ilike injection sanitization. (both apps)
+- **April 2026: v7.9.0** — Bundles v7.8 Structural Foundation + v7.9 Decomposition. Back-nav state-loss bugfix, CUL paired-leaf folio-label fix. Mostly internal refactor. (both apps)
+- **April 2026: v7.7.2** — PageSpeed (a11y 85→96, perf 90→98). (web)
+- **April 2026: v7.7.1** — SEO Round 2 (bilingual meta, JSON-LD, deferred PostHog). (web)
+- **April 2026: v7.7.0** — Volume-Aware Browse. 3,193 multi-IE manuscripts get volume selector. (both apps)
+
+## v7.12 Path B Milestone (active)
+
+6 phases (87-92) refactoring web for multitenant safety. `deploy.sh` BLOCKED until ships.
+- Phase 87 ✅ done (Foundations — session UUID + safe_storage chokepoint)
+- Phase 88 ✅ done (State separation by deletion — 10 AppState mirror fields gone; D-06 runtime + D-07 static AST regression guards installed; allowlist 4→3)
+- Phase 90: auth caching rewrite (deletes `web/supabase_client.py:111` allowlist)
+- Phase 91: atomic auth-state writes (deletes `web/auth_state.py` + OAuth allowlist)
+- Phases 89, 92: TBD
