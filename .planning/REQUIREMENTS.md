@@ -1,68 +1,93 @@
-# Requirements: v7.11 CUDL Coverage & Synthetic Inventories
+# Requirements — Milestone v7.12: Multitenant Architecture (Path B)
 
-> **Milestone:** v7.11
-> **Goal:** Close the gap between CUDL's ~141K classmark catalogue and GenizahSearch's libraries.csv so users searching for any CUDL-catalogued shelfmark land on a usable record — through better cross-system normalization for shelfmarks that already exist in our data, and synthetic libraries.csv rows for the small residue of FJMS-only inventories that have no NLI Alma record.
-> **Status:** Active
+**Goal:** Refactor GenizahSearch's web layer off the desktop-inherited single-user mental model so per-user state, auth, and caches cannot leak across concurrent sessions sharing one Python process.
 
-## Background
+**Hard constraint (Codex finding):** No mid-flight `auth.set_session()` calls — verified at `gotrue_client.py:713` that `set_session()` is networked (calls `get_user(access_token)` when JWT valid, `_refresh_access_token(refresh_token)` when expired), not local-only.
 
-A user-reported case (`T-S NS 329.96`, missing in app, present in CUDL) triggered a deep scan against the CUDL classmark universe. Findings:
+---
 
-- **6,052 CUDL classmarks** were initially flagged as missing from libraries.csv.
-- After fixing four normalization bugs (slash, comma, dot-after-letter, leading-zero), the residue dropped sharply.
-- A Mosseri-aware normalizer recovers **3,828 of 3,883 (98.6%)** Mosseri classmarks already present in libraries.csv under `library_code=Mosseri` but in `Moss. III,27O` form (CUDL writes `mosseriiii27o`).
-- A Cambridge Or. normalizer recovers **584 of 1,421 (41%)** Or. classmarks already present, with deeper work to push the rest.
-- The NLI gap file (`Inventory ID no exact match to Alma.xlsx`, 42K rows) confirms ~93 T-S sub-series classmarks are **FJMS-only** — they have FJMS catalogue / bibliography / images but no NLI Alma record at all (NLI's own data confirms this). They cannot be aliased into a neighbour; they need independent rows.
+## Foundations — Phase 87
 
-So the milestone splits into a normalization pass (no schema change, recovers thousands of rows) and a synthetic-row mechanism (Option-2 numeric sys_id format, recovers ~150–250 truly-orphan FJMS inventories).
+Land the primitives the rest of the milestone depends on. **This phase must complete before any subsequent phase can start.**
 
-## v7.11 Requirements
+- [ ] **FOUND-01**: `_session_uuid` minted on first request to any page, stored in `app.storage.user['_session_uuid']`, stable across token refresh
+- [ ] **FOUND-02**: `web/safe_storage.py` adopted and finalized as the single chokepoint adapter for all per-user state (carried forward from hold-commit `aab16e6d`, audited for completeness)
+- [ ] **FOUND-03**: Explicit allowlist of permitted raw `app.storage.user` access sites with per-entry justification (e.g. bootstrap code that pre-dates session existence)
+- [ ] **FOUND-04**: CI/lint guard (grep-based check or ruff custom rule) rejects new raw `app.storage.user.get/pop/[key] = ...` outside the allowlist
+- [ ] **FOUND-05**: All 6 existing `safe_storage` tests (`tests/test_safe_storage.py`) pass without modification
 
-### Normalization
+## State Separation — Phase 88
 
-CUDL classmark form ↔ libraries.csv shelfmark form mapping fixes. Lands in the bridge layer (`shared/nli_crossref_service.py` and any browse-side resolution) without changing libraries.csv content or schema.
+Delete singleton mirrors; `web/export_state.py` becomes the only path for per-user export state. **Migration is by deletion — no dual-writing through both AppState and export_state.**
 
-- [ ] **NORM-01** — User can navigate from a CUDL Mosseri page (e.g. `mosseriiii27o`) to the matching libraries.csv row (`library_code=Mosseri`, `Moss. III,27O`). The Roman-numeral-collapsed form `mosseri{vol}{frag}` resolves to its `Moss. {VOL},{FRAG}` equivalent in both directions (browse external link → CUDL, and CUDL → app via shelfmark search).
-- [ ] **NORM-02** — User can navigate from Cambridge Or. CUDL classmarks to libraries.csv rows. Both the `Or. 1080 J 15` ↔ `or1080j15` (letter-suffix) and `Or. 1080.1.1` ↔ `or1080.11` (numeric-collapse) patterns resolve correctly.
-- [ ] **NORM-03** — Slash, comma, dot-after-letter, and leading-zero normalization fixes (`T-S F 8/002` ↔ `tsf8.2`, `Add. 863, 2` ↔ `add863.2`, `T-S Ar. 48.211` ↔ `tsar48.211`, `T-S NS 329/0014` ↔ `tsns329.14`) apply uniformly to all CUL/Cambridge collections.
-- [ ] **NORM-04** — No regression on the 140K already-matching CUL rows or other library_code attributions; existing `shelfmark search` and browse-by-sys_id flows still resolve as before.
+- [ ] **STATE-01**: 10 per-user fields deleted from `web/state.py:AppState` (`last_results`, `current_search_query`, `current_search_mode`, `current_search_gap`, `last_filters_applied`, `last_search_warnings`, `last_selected_uids`, `parallels_results`, `parallels_filtered`, `parallels_search_meta`)
+- [ ] **STATE-02**: All writer sites (`search.py`, `search_results.py`, `parallels.py`) migrated to write exclusively through `web/export_state.py`
+- [ ] **STATE-03**: All reader sites (`api.py` export handlers, others discovered during migration) migrated to read exclusively through `web/export_state.py`
+- [ ] **STATE-04**: `_TEST_BACKEND` shim removed from `web/export_state.py`; replaced with proper fixture or adapter injection
+- [ ] **STATE-05**: `tests/test_export_cross_user_isolation.py` rewritten to assert against per-session storage directly, without the shim
+- [ ] **STATE-06**: `tests/test_export_state_selection.py`, `tests/test_api_export_json.py`, `tests/test_api_legacy_unchanged.py` updated to drop `state.*` setup and use only `export_state` helpers
 
-### Synthetic Inventories
+## Lists Cache — Phase 89
 
-New libraries.csv rows representing FJMS-only inventories that have no NLI Alma record. Keyed by Option-2 synthetic sys_id (18-digit, `99` + InventoryId-padded-10 + `000000`).
+Drop the singleton + 10s TTL plumbing. Per-request instantiation is the simpler safe pattern.
 
-- [x] **SYNTH-01** — A `is_synthetic_sys_id(s)` helper plus encode/decode functions for the 18-digit format exist in shared code; all sites that branch on Alma vs FJMS metadata consult the helper rather than parsing the string ad-hoc.
-- [x] **SYNTH-02** — User can search by an FJMS-only shelfmark (e.g. `T-S NS 329.96`) and get a result row backed by a synthetic libraries.csv entry with FJMS-derived title and matching `call_numbers`.
-- [x] **SYNTH-03** — The Tantivy index includes synthetic rows so all standard search modes (text/title/shelfmark/Responsa) return them; transcription text is empty when FJMS has no full text, but the row is still discoverable.
-- [x] **SYNTH-04** — User can open the browse page for a synthetic sys_id and see CUDL image panel (when a manifest exists), FJMS catalogue/bibliography/measurements, and clear UI signalling that no NLI metadata is available, without errors or empty fallbacks elsewhere on the page.
-- [x] **SYNTH-05** — FJMS enrichment lookups (`fjms_service.py`) resolve synthetic sys_ids via their underlying InventoryId, so catalogue/bib/measurement/free-desc dialogs populate correctly. The fallback path is shared by both web and desktop apps.
-- [x] **SYNTH-06** — Lists, exclusions, parallels, comments, corrections, and external-link buttons all tolerate synthetic sys_ids: round-trip add/remove/serialize works, and no path silently drops or crashes on the new ID format.
+- [ ] **LISTS-01**: `UserListsManager` instance singleton on `AppState._user_lists_mgr` removed
+- [ ] **LISTS-02**: `UserListsManager` instantiated per-request in page handlers that need it
+- [ ] **LISTS-03**: `_cache_entry` tuple and 10s TTL plumbing removed (originated in `22b45f68`, evolved in `8ac93eff`); user-id-key plumbing removed alongside
+- [ ] **LISTS-04**: `tests/test_user_lists_cache_isolation.py` rewritten against the per-request model
 
-### Coverage Audit
+## Auth Caching — Phase 90
 
-Final pass that confirms the milestone closed the gap and produces a durable artifact for future re-runs.
+Replace the process-wide cache with request-scoped auth that respects Codex's `set_session()` finding.
 
-- [ ] **AUDIT-01** — `scripts/scan_cudl_orphans.py` is re-run after Phases 84–85 land and produces a residual orphan list of fewer than 200 CUDL classmarks (target: most remaining are genuinely missing from both NLI Alma and FJMS, not normalization noise).
-- [ ] **AUDIT-02** — `reports/cudl_coverage.md` documents the post-milestone state: matched-by-normalization count, synthetic-row count, residual unmatched count, with per-collection breakdown (T-S, Mosseri, Or, Add., etc.) and the methodology used.
-- [ ] **AUDIT-03** — A regression check confirms the v7.9.4 NLI Oxford mislabel fix and existing library_code attributions are unchanged, and the 461 NLI-flipped rows still resolve correctly post-milestone.
+- [ ] **AUTHC-01**: `_client_cache`, `_session_locks`, `_locks_guard`, `_CLIENT_CACHE_TTL` deleted from `web/supabase_client.py`
+- [ ] **AUTHC-02**: Request-scoped auth strategy implemented that does NOT call `auth.set_session()` solely to set request headers (per Codex finding: `gotrue_client.py:713` proves `set_session()` makes a network call)
+- [ ] **AUTHC-03**: Refresh-only locking keyed by `_session_uuid` from Phase 87; no cached authenticated `supabase.Client` objects
+- [ ] **AUTHC-04**: Auth-resurrection guard added in `cca23db3` removed (obsolete once `get_user_client()` cache is gone)
+- [ ] **AUTHC-05**: Code comment near the auth path documents WHY `set_session()` is avoided (Codex finding cited) so future contributors don't reintroduce it
 
-## Future Requirements (Deferred)
+## Auth State Writes — Phase 91
 
-- Reverse-direction audit: NLI Alma records present in libraries.csv but absent from CUDL/FJMS (different data sources, different scope).
-- Periodic NLI gap-file refresh — Chico/Tzippora at NLI publish updates; for now the gap file is a one-shot snapshot.
-- Synthetic rows for collections not currently in scope (e.g. AIU/Halper FJMS-only inventories that don't have CUDL manifests).
-- Mosseri shelfmark format unification — keep legacy `Moss. III,27O` form; reform out of scope.
-- Tantivy-index incremental rebuild for synthetic-row updates without a full rebuild — likely a future infra phase.
+Make the multi-step writes across the auth boundary atomic and safe-storage-aware.
+
+- [ ] **AUTHW-01**: `web/auth_state.py:set_auth`, `clear_auth`, `do_login` migrated to safe_storage helpers
+- [ ] **AUTHW-02**: OAuth callback in `web/main.py:1456+` migrated to safe_storage helpers
+- [ ] **AUTHW-03**: `sign_out`/server-side revocation happens BEFORE popping `auth_session`; local auth keys popped in a `finally` block so cleanup is atomic even when revocation fails
+- [ ] **AUTHW-04**: `sign_out` uses the user's authenticated client (not the anonymous singleton) so the token is actually revoked server-side
+- [ ] **AUTHW-05**: Tests for OAuth callback prune-mid-flight resilience (`AssertionError` on pruned session must not 500 the callback)
+- [ ] **AUTHW-06**: `persist_value` safe-wrap from `cca23db3` retained in `web/components/filter_panel.py`
+
+## Final Sweep + Acceptance — Phase 92
+
+Prove the invariants hold end-to-end and document the architecture so it survives the next contributor.
+
+- [ ] **SWEEP-01**: `web/` audited for any remaining raw `app.storage.user.get/pop` and `app.storage.user[key] = ...` accesses
+- [ ] **SWEEP-02**: `parallels.py:3520` and `text_editor.py` auto-save (the two deferred-callback sites Codex round 4 flagged) confirmed migrated to safe_storage
+- [ ] **SWEEP-03**: Phase 87 allowlist re-audited; every entry has explicit justification; new entries require code-review approval
+- [ ] **SWEEP-04**: 4 Codex review transcripts (`_tmp/codex_*_response.txt`) re-read against final state; each previously-flagged issue confirmed addressed or explicitly waived with rationale
+- [ ] **SWEEP-05**: Production smoke-test plan executed: cross-user concurrent `/search` + `/browse` + `/lists` + xlsx export in two browser sessions; no leakage observed
+- [ ] **SWEEP-06**: `docs/guides/MULTITENANT.md` written documenting the architecture (safe_storage chokepoint, `_session_uuid`, request-scoped auth, per-request lists, deletion-not-migration discipline) for future contributors
+
+---
+
+## Future Requirements (deferred)
+
+- Per-session rate limiting keyed by `_session_uuid` (currently per-IP; could be tightened post-v7.12 if abuse appears)
+- Server-side cache for read-mostly per-user data with TTL (`_session_uuid` makes this safe to add later if perf needs it)
+- Desktop equivalent of multitenancy work — NOT NEEDED (desktop is genuinely single-user; this milestone is web-only)
 
 ## Out of Scope
 
-- Editing NLI Alma records to add the missing classmarks — NLI's responsibility, not ours.
-- Adding fabricated NLI-style metadata (Hebrew titles_non_placeholder, etc.) to synthetic rows — they get FJMS-only metadata until/unless NLI publishes catalogue records.
-- Migrating libraries.csv to SQLite (still deferred per project-level constraints).
-- Server-side IIIF image cache (SEED-001 — separate seed, separate trigger conditions).
-- Changing how the app keys browse/search by sys_id — Option-2 synthetic IDs satisfy the existing `starts with 99 + all digits` contract.
-- Changing the `library_code` taxonomy — synthetic rows reuse the existing `CUL` code (or `Mosseri` for Mosseri synthetics) rather than introducing a new code.
+- **Desktop app changes** — Path B is web-only. Desktop is single-user by design and unaffected.
+- **Migrating Supabase client choice** — keep supabase-py; the issue is how WE use it, not which library.
+- **Async session storage** — NiceGUI `app.storage.user` is synchronous; switching to an async store is a separate, larger refactor.
+- **Multi-process safety** — single Uvicorn process today; cross-process locking only matters if/when we horizontally scale. Out of scope for v7.12.
+- **Rewriting `web/safe_storage.py`** — the module landed in `aab16e6d` and is adequate. Phase 87 is about ADOPTING it as the chokepoint, not rewriting it.
 
 ## Traceability
 
-Filled by the roadmap. See `ROADMAP.md` for phase-to-requirement mapping.
+(Filled by roadmapper after roadmap creation.)
+
+---
+
+*Last updated: 2026-05-13 — initial draft for v7.12 milestone*
