@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nicegui import ui, app, run
 from web.framework_patches import apply_all_patches
 from web.crawler_visibility import should_block_archive_request, should_mark_noindex
-from web.safe_storage import ensure_session_uuid
+from web.safe_storage import ensure_session_uuid, safe_user_get, safe_user_set, safe_user_pop
 apply_all_patches()
 
 
@@ -324,10 +324,7 @@ COMMON_STYLES = '<link rel="stylesheet" href="/static/common.css">'
 
 def _resolve_ui_language() -> str:
     """Return the persisted UI language so layout and bootstrap agree on first render."""
-    try:
-        saved_lang = app.storage.user.get('ui_language')
-    except Exception:
-        saved_lang = None  # Language pref load failed; will use default
+    saved_lang = safe_user_get('ui_language')
 
     if saved_lang in ('he', 'en'):
         return saved_lang
@@ -351,7 +348,7 @@ def create_layout():
     resolved_lang = _resolve_ui_language()
     set_language(resolved_lang)
 
-    current_page = _safe_user_storage_get('current_page', '/')
+    current_page = safe_user_get('current_page', '/')
     rtl_mode = resolved_lang == 'he'
 
     # Page loading progress bar element (CSS in COMMON_STYLES)
@@ -495,10 +492,7 @@ def create_layout():
             def toggle_lang():
                 current = get_language()
                 new_lang = 'en' if current == 'he' else 'he'
-                try:
-                    app.storage.user['ui_language'] = new_lang
-                except Exception:
-                    pass  # Browser storage operation failed; preference not persisted
+                safe_user_set('ui_language', new_lang)
                 set_language(new_lang)
                 ui.navigate.reload()
 
@@ -527,7 +521,7 @@ def create_layout():
     # Sidebar (Drawer)
     # Use stored state, default to True (open) on desktop
     # On mobile (< 768px), we will close it after page load via JavaScript
-    drawer_open = _safe_user_storage_get('drawer_open', True)
+    drawer_open = safe_user_get('drawer_open', True)
 
     # Set drawer side based on RTL mode - Quasar will handle page padding correctly
     drawer_side = 'right' if rtl_mode else 'left'
@@ -559,7 +553,7 @@ def create_layout():
     content_col.props('id=main-content')
 
     # === "What's New" Banner (dismissible, compact single-line) ===
-    if _safe_user_storage_get('whats_new_dismissed') != WHATS_NEW_VERSION:
+    if safe_user_get('whats_new_dismissed') != WHATS_NEW_VERSION:
         banner_dir = 'rtl' if rtl_mode else 'ltr'
         with content_col:
             with ui.element('div').classes('w-full mx-auto max-w-5xl px-4 py-2 flex items-center gap-3 mt-2').style(
@@ -570,7 +564,7 @@ def create_layout():
                 ui.label(tr('New: Public Search API — programmatic access to search, browse, and parallels for researchers and AI tools. See the API section in the README.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
                     # Explicit user dismiss (X button): persist the flag unconditionally.
-                    app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
+                    safe_user_set('whats_new_dismissed', WHATS_NEW_VERSION)
                     try:
                         whats_new_banner.delete()
                     except Exception:
@@ -589,10 +583,7 @@ def create_layout():
                         whats_new_banner.delete()
                     except Exception:
                         return
-                    try:
-                        app.storage.user['whats_new_dismissed'] = WHATS_NEW_VERSION
-                    except Exception:
-                        pass
+                    safe_user_set('whats_new_dismissed', WHATS_NEW_VERSION)
                 try:
                     asyncio.get_event_loop().call_later(10.0, _auto_dismiss_whats_new)
                 except RuntimeError:
@@ -601,7 +592,7 @@ def create_layout():
     def toggle_drawer():
         """Toggle drawer and save state."""
         main_drawer.toggle()
-        app.storage.user['drawer_open'] = not app.storage.user.get('drawer_open', True)
+        safe_user_set('drawer_open', not safe_user_get('drawer_open', True))
 
     def nav_to(path):
         """Navigate to path. Drawer auto-hides on mobile via breakpoint=768."""
@@ -658,18 +649,11 @@ def create_layout():
             # Footer Section
             with ui.column().classes('sidebar-footer gap-4'):
                 # Translation Toggle (show/hide machine translations)
-                show_translations = False
-                try:
-                    show_translations = app.storage.user.get('show_translations', False)
-                except Exception:
-                    pass  # Translation lookup failed; continue without translation
+                show_translations = safe_user_get('show_translations', False)
 
                 def toggle_translations():
-                    try:
-                        current = app.storage.user.get('show_translations', False)
-                        app.storage.user['show_translations'] = not current
-                    except Exception:
-                        pass  # Translation lookup failed; continue without translation
+                    current = safe_user_get('show_translations', False)
+                    safe_user_set('show_translations', not current)
                     ui.navigate.reload()
 
                 trans_icon = 'g_translate' if show_translations else 'translate'
@@ -694,7 +678,7 @@ def create_layout():
                 # Theme Switcher
                 with ui.row().classes('theme-switcher w-full'):
                     def set_theme(theme_name):
-                        app.storage.user['theme'] = theme_name
+                        safe_user_set('theme', theme_name)
                         ui.run_javascript(f'''
                             document.documentElement.setAttribute("data-theme", "{theme_name}");
                             document.body.setAttribute("data-theme", "{theme_name}");
@@ -702,7 +686,7 @@ def create_layout():
                             document.querySelector(".theme-btn-{theme_name}").classList.add("active");
                         ''')
 
-                    current_theme = _safe_user_storage_get('theme', 'light')
+                    current_theme = safe_user_get('theme', 'light')
 
                     with ui.button(icon='light_mode', on_click=lambda: set_theme('light')).props(f'flat round size=sm aria-label="{tr("Light theme")}"').classes(f'theme-btn theme-btn-light {"active" if current_theme == "light" else ""}'): pass
                     with ui.button(icon='history_edu', on_click=lambda: set_theme('parchment')).props(f'flat round size=sm aria-label="{tr("Parchment theme")}"').classes(f'theme-btn theme-btn-parchment {"active" if current_theme == "parchment" else ""}'): pass
@@ -822,10 +806,7 @@ def _show_citation_reminder(lang: str):
 
 def apply_theme_immediately():
     """Add script to apply theme before page renders to prevent flash."""
-    try:
-        current_theme = app.storage.user.get('theme', 'light')
-    except Exception:
-        current_theme = 'light'  # Theme read failed; default to light
+    current_theme = safe_user_get('theme', 'light')
     current_lang = _resolve_ui_language()
     bg_color = "#0f172a" if current_theme == "dark" else "#fffbf5" if current_theme == "parchment" else "#f8fafc"
 
@@ -952,28 +933,10 @@ def apply_theme_immediately():
         }})();
     </script>'''
 
-def _safe_user_storage_get(key: str, default=None):
-    """Safely read from app.storage.user, returning default if session not ready."""
-    try:
-        return app.storage.user.get(key, default)
-    except (AssertionError, KeyError, Exception):
-        return default
-
-
-def set_current_page(page_path: str):
-    """Safely set the current page in user storage."""
-    try:
-        app.storage.user['current_page'] = page_path
-    except (AssertionError, KeyError, Exception):
-        pass  # Storage not ready yet, ignore
-
 @ui.page('/', title='Dicta Genizah Search | חיפוש בגניזה הקהירית — אתר הגניזה של דיקטה')
 def dashboard_page():
-    set_current_page('/')
-    try:
-        current_theme = app.storage.user.get('theme', 'light')
-    except (AssertionError, KeyError, Exception):
-        current_theme = 'light'
+    safe_user_set('current_page', '/')
+    current_theme = safe_user_get('theme', 'light')
     ui.add_head_html(page_meta('/'))
     # Structured data: WebSite schema for homepage
     ui.add_head_html('''
@@ -1032,7 +995,7 @@ def search_page_route(
     from_browse: int = None,
     vs_src: str = None, vs_mode: str = None, vs_browse: int = None,
 ):
-    set_current_page('/search')
+    safe_user_set('current_page', '/search')
     ui.add_head_html(page_meta(
         '/search',
         title='Full-Text Search | חיפוש טקסט מלא — Dicta Genizah Search',
@@ -1059,7 +1022,7 @@ def search_page_route(
 
 @ui.page('/parallels', title='Textual Parallels | Dicta Genizah Search')
 def parallels_page_route(text: str = None):
-    set_current_page('/parallels')
+    safe_user_set('current_page', '/parallels')
     ui.add_head_html(page_meta(
         '/parallels',
         title='Textual Parallels | Dicta Genizah Search',
@@ -1078,7 +1041,7 @@ def parallels_page_route(text: str = None):
 
 @ui.page('/browse', title='Manuscript Browser | עיון בכתבי יד — Dicta Genizah Search')
 def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = None, page: int = None, shelfmark: str = None, volume_ie: str = None):
-    set_current_page('/browse')
+    safe_user_set('current_page', '/browse')
     # Dynamic metadata for manuscript pages when sys_id is provided
     if sys_id:
         # Resolve the real shelfmark from csv_bank when the URL only has sys_id
@@ -1153,7 +1116,7 @@ def catalog_browse_page_route(
     domain: str = None, author: str = None, work: str = None, page: int = None,
     text_all: str = None, text_any: str = None, text_not: str = None,
 ):
-    set_current_page('/catalog-browse')
+    safe_user_set('current_page', '/catalog-browse')
     _catalog_parts = [p for p in [domain, author, work] if p]
     if _catalog_parts:
         _catalog_label = ' / '.join(_catalog_parts)
@@ -1194,7 +1157,7 @@ def catalog_browse_page_route(
 
 @ui.page('/lists', title='My Lists | הרשימות שלי — Dicta Genizah Search')
 def lists_page_route():
-    set_current_page('/lists')
+    safe_user_set('current_page', '/lists')
     ui.add_head_html(page_meta('/lists', noindex=True))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)
@@ -1208,7 +1171,7 @@ def lists_page_route():
 
 @ui.page('/puzzle', title='Fragment Puzzle | Dicta Genizah Search')
 def puzzle_page_route(add: str = None, doc: str = None):
-    set_current_page('/puzzle')
+    safe_user_set('current_page', '/puzzle')
     ui.add_head_html(page_meta(
         '/puzzle',
         title='Fragment Puzzle | Dicta Genizah Search',
@@ -1287,12 +1250,12 @@ def reset_hints_route():
     """Hidden utility route to reset all feature discovery hints."""
     ensure_session_uuid()  # Fix 1 in 87-REVIEWS.md iter 3 (Codex B1-residual): mint UUID before storage pops
     for key in ('whats_new_dismissed', 'hint_responsa_seen', 'hint_tabular_seen'):
-        app.storage.user.pop(key, None)
+        safe_user_pop(key, None)
     ui.navigate.to('/')
 
 @ui.page('/settings', title='Settings | הגדרות — Dicta Genizah Search')
 def settings_page_route():
-    set_current_page('/settings')
+    safe_user_set('current_page', '/settings')
     ui.add_head_html(page_meta('/settings', noindex=True))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)
@@ -1306,7 +1269,7 @@ def settings_page_route():
 
 @ui.page('/help', title='Help | Dicta Genizah Search')
 def help_page_route():
-    set_current_page('/help')
+    safe_user_set('current_page', '/help')
     ui.add_head_html(page_meta(
         '/help',
         title='Help | Dicta Genizah Search',
@@ -1324,7 +1287,7 @@ def help_page_route():
 
 @ui.page('/corrections', title='Corrections | תיקונים — Dicta Genizah Search')
 async def corrections_page_route():
-    set_current_page('/corrections')
+    safe_user_set('current_page', '/corrections')
     ui.add_head_html(page_meta('/corrections', noindex=True))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)
@@ -1338,7 +1301,7 @@ async def corrections_page_route():
 
 @ui.page('/discoveries', title='Discoveries Center | Dicta Genizah Search')
 def discoveries_page_route():
-    set_current_page('/discoveries')
+    safe_user_set('current_page', '/discoveries')
     ui.add_head_html(page_meta(
         '/discoveries',
         title='Discoveries Center | Dicta Genizah Search',
@@ -1356,7 +1319,7 @@ def discoveries_page_route():
 
 @ui.page('/admin', title='Admin — Dicta Genizah Search')
 async def admin_page_route():
-    set_current_page('/admin')
+    safe_user_set('current_page', '/admin')
     ui.add_head_html(page_meta('/admin', noindex=True))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)
@@ -1370,7 +1333,7 @@ async def admin_page_route():
 
 @ui.page('/profile', title='Profile | פרופיל — Dicta Genizah Search')
 async def profile_page_route():
-    set_current_page('/profile')
+    safe_user_set('current_page', '/profile')
     ui.add_head_html(page_meta('/profile', noindex=True))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)
@@ -1384,7 +1347,7 @@ async def profile_page_route():
 
 @ui.page('/accessibility', title='Accessibility | Dicta Genizah Search')
 def accessibility_page_route():
-    set_current_page('/accessibility')
+    safe_user_set('current_page', '/accessibility')
     ui.add_head_html(page_meta(
         '/accessibility',
         title='Accessibility | Dicta Genizah Search',
@@ -1403,7 +1366,7 @@ def accessibility_page_route():
 
 @ui.page('/about', title='About the Cairo Genizah | על גניזת קהיר — Dicta Genizah Search')
 def about_page_route():
-    set_current_page('/about')
+    safe_user_set('current_page', '/about')
     ui.add_head_html(page_meta(
         '/about',
         title='About the Cairo Genizah | על גניזת קהיר — Dicta Genizah Search',
@@ -1423,7 +1386,7 @@ def about_page_route():
 
 @ui.page('/download', title='Download Desktop App | Dicta Genizah Search')
 def download_page_route():
-    set_current_page('/download')
+    safe_user_set('current_page', '/download')
     ui.add_head_html(page_meta(
         '/download',
         title='Download Desktop App | Dicta Genizah Search',
