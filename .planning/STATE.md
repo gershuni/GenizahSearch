@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
-stopped_at: Completed 87-07-LINT-FINALIZATION-PLAN.md
-last_updated: "2026-05-13T06:01:30.720Z"
-last_activity: 2026-05-13 -- Plan 87-07 complete (lint acceptance gate closed; all 6 lint scanner tests GREEN; allowlist verified at 4 entries / 13 patterns / 14 expected_count nodes; 131 sites migrated across 14 files in Plans 03-06; full suite 1879/1879)
+stopped_at: Completed 87-08-ACCEPTANCE-AND-DOCS-PLAN.md (Task 1 — docs updates committed; Task 2 human smoke-check pending user approval)
+last_updated: "2026-05-13T09:20:00.000Z"
+last_activity: 2026-05-13 -- Phase 87 complete (Task 1 of Plan 08): 131 raw-access sites migrated to safe_storage chokepoint across 14 files; _session_uuid helpers landed in web/safe_storage.py with strict ^[0-9a-f]{32}$ regex + 100-session uniqueness guard; bootstrap wiring per B1 at create_layout + /reset-hints + /auth/callback (/privacy-extension AST-exempt); lint scanner 6/6 GREEN as permanent CI guard; allowlist 4 entries / 13 patterns / 14 nodes citing downstream phases 88/90/91; Codex round 4 MEDIUM-2 deferred-callback site at parallels.py:3520 closed; B3 monkeypatch fixes applied to test_browse_state + test_search_state; FOUND-05 invariant SHA-256 e165bf0e... preserved byte-unchanged; full suite 1879/1879
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 8
-  completed_plans: 7
-  percent: 88
+  completed_plans: 8
+  percent: 13
 ---
 
 # Project State
@@ -25,18 +25,18 @@ See: .planning/PROJECT.md (updated 2026-05-13)
 
 ## Current Position
 
-Phase: 87 (Foundations -- Session UUID and Safe Storage Chokepoint) — EXECUTING
-Plan: 8 of 8 (next: 87-08-ACCEPTANCE-AND-DOCS)
-Status: Executing Phase 87
-Last activity: 2026-05-13 -- Plan 87-07 complete (lint acceptance gate closed; all 6 lint scanner tests GREEN; allowlist verified at 4 entries / 13 patterns / 14 expected_count nodes; 131 sites migrated across 14 files in Plans 03-06; full suite 1879/1879)
+Phase: 88 of 92 (State Separation by Deletion) — NEXT
+Plan: 0 of TBD (next: `/gsd-discuss-phase 88`)
+Status: Phase 87 complete; ready for /gsd-discuss-phase 88
+Last activity: 2026-05-13 -- Phase 87 complete. 131 raw-access sites migrated to safe_storage chokepoint across 14 files; _session_uuid helper landed; bootstrap wiring per B1 at create_layout + /reset-hints + /auth/callback (/privacy-extension AST-exempt); lint scanner GREEN (6/6 tests). Plan 08 Task 1 (docs) committed; Task 2 human smoke-check pending user approval.
 
-Progress: [█████████░] 88%
+Progress: [█░░░░░░░░░] 13%
 
 ## Phase Queue (v7.12)
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
-| 87 | Foundations -- Session UUID and Safe Storage Chokepoint | FOUND-01..05 | Pending |
+| 87 | Foundations -- Session UUID and Safe Storage Chokepoint | FOUND-01..05 | Complete |
 | 88 | State Separation by Deletion | STATE-01..06 | Pending |
 | 89 | Lists Cache Per-Request | LISTS-01..04 | Pending |
 | 90 | Auth Caching Rewrite -- No set_session | AUTHC-01..05 | Pending |
@@ -74,6 +74,9 @@ Progress: [█████████░] 88%
 - Phase 87-05 complete: 3 browse-cluster files (web/pages/browse.py 4 sites, web/pages/browse_state.py 10 sites, web/pages/catalog_browse.py 3 sites) migrated — 17 raw access sites eliminated. M2 independent-read semantics preserved in restore_browse_snapshot; M3 Class B inner wrappers preserved in persist_browse_snapshot (Fix 4) and browse.py:1122. B3 monkeypatch fix applied to tests/test_browse_state.py (7 patches swapped to web.safe_storage.app). 28/28 relevant tests GREEN. FOUND-02 advanced.
 - Phase 87-06 complete: 3 search-cluster files (web/pages/parallels.py 35 sites, web/pages/search.py 14 sites, web/pages/search_state.py 31 sites) migrated — 80 raw access sites eliminated. Single largest migration in Phase 87. Codex round 4 MEDIUM-2 deferred-restore callback at parallels.py:3520 migrated with explicit documenting comment. M2 independent-read semantics preserved; M3 Class B wrappers preserved in persist_search_snapshot (both outer and inner per Fix 4). B3 dual-patch fix applied to tests/test_search_state.py. 31/31 Phase 87 + search-state tests GREEN. FOUND-02 advanced.
 - Phase 87-07 complete: lint acceptance gate closed. All 6 lint scanner tests pass GREEN against production code (test_allowlist_well_formed, test_lint_rejects_synthetic_violation, test_lint_handles_aliased_imports, test_lint_does_not_double_report_nested_nodes, test_allowlist_counts_exact, test_no_raw_storage_access_outside_allowlist). Allowlist preserved verbatim from Plan 01: 4 entries (auth_state, main, supabase_client, export_state) / 13 patterns / 14 expected_count nodes — exactly matching the AST-counted reality after Plans 03-06 migrated 131 sites across 14 files. Zero code changes needed in Plan 07 (outcome A: Wave 2 already brought codebase to target state). Full suite 1879/1879 pass, ruff clean, check_docs healthy. All 5 ROADMAP Phase 87 Success Criteria satisfied via automated test commands. FOUND-04 satisfied; lint scanner is now the permanent CI guard.
+- Phase 87-08 Task 1 complete (Task 2 pending user smoke-check): docs updates committed across CLAUDE.md "Recently Changed" (new Phase 87 entry citing 131 sites / 14 files / 8 plans / 22 tests / lint scanner / allowlist 4 entries / Codex round 4 MEDIUM-2 closure / B3 monkeypatch fixes), docs/OPEN_ISSUES.md (Last Updated 2026-05-13 with Phase 87 framing; narrow-scope `/browse 500 AssertionError` hotfix from line 82 now subsumed by broader chokepoint), .planning/STATE.md frontmatter (completed_phases 0→1, completed_plans 7→8, percent 88→13 reflecting full v7.12 milestone scope of 6 phases) + Phase 87 row marked Complete + Current Position advanced to Phase 88, .planning/ROADMAP.md Phase 87 row marked Complete with 8/8 plans + plan list populated with 8 [x] entries. check_docs green; full pytest suite green at Plan 07 close. Task 2 (human smoke-check confirming real-NiceGUI session storage behavior per B1) returned as checkpoint to orchestrator — NOT yet user-approved.
+- Plan 07 lint scanner (tests/test_no_raw_storage_access.py) is the permanent CI guard against raw app.storage.user regression — all new code must use safe_storage helpers or add an allowlist entry with justification AND expected_count (H1 schema from 87-REVIEWS.md)
+- Bootstrap wiring (B1): ensure_session_uuid() is called from web/main.py:create_layout() (covers 17 of 19 routes), web/main.py:reset_hints_route, and web/main.py:auth_callback_route. /privacy-extension is AST-confirmed exempt (zero app.storage.user access). This is the canonical mint surface — DO NOT add per-page mint calls; downstream code can rely on _session_uuid being present in storage at every storage-touching page entry.
 
 ### Carryover from hold commits (master-main at cca23db3)
 
@@ -90,7 +93,7 @@ Progress: [█████████░] 88%
 
 ## Session Continuity
 
-Last session: 2026-05-13T05:58:49.312Z
-Stopped at: Completed 87-07-LINT-FINALIZATION-PLAN.md
+Last session: 2026-05-13T09:20:00.000Z
+Stopped at: Completed 87-08-ACCEPTANCE-AND-DOCS-PLAN.md Task 1 (docs); Task 2 human smoke-check returned as checkpoint and awaiting user approval
 Resume file: None
-Next step: `/gsd-execute-phase 87` continues with `87-08-ACCEPTANCE-AND-DOCS-PLAN.md` (final phase closeout: CHANGELOG entry, OPEN_ISSUES updates, milestone tracking). Technical work for Phase 87 is complete; Plan 08 is documentation-only.
+Next step: `/gsd-discuss-phase 88` (State Separation by Deletion) — once user approves the Phase 87 Task 2 smoke-check signal. Phase 88 will delete the 10 per-user fields on `AppState` singleton, remove the `_TEST_BACKEND` shim from `web/export_state.py`, and use `_session_uuid` (landed in Phase 87) as the stable cache key for the post-shim state model.
