@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from nicegui import ui, app, run
 from web.framework_patches import apply_all_patches
 from web.crawler_visibility import should_block_archive_request, should_mark_noindex
+from web.safe_storage import ensure_session_uuid
 apply_all_patches()
 
 
@@ -341,6 +342,11 @@ def _resolve_ui_language() -> str:
 
 def create_layout():
     """Create the main application layout with modern Header and Sidebar."""
+    # Phase 87 FOUND-01 (B1 in 87-REVIEWS.md): mint _session_uuid on first
+    # page render of every session. ensure_session_uuid() is idempotent and
+    # returns False harmlessly on prune-race. Downstream code (Phases 88+)
+    # can rely on _session_uuid being present in storage after this point.
+    ensure_session_uuid()
 
     resolved_lang = _resolve_ui_language()
     set_language(resolved_lang)
