@@ -4,6 +4,75 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.11.1] - Desktop Catch-up Release - 2026-05-13
+
+A small release that brings the desktop installer up to par with what
+shipped to web. The web app has been running v7.11.0 (CUDL Coverage)
+plus six post-release hotfixes since 2026-05-12; this release packages
+all of that into a desktop installer.
+
+The 5 commits past `242664d3` on master-main (cross-user lists cache,
+safe-storage wrapper, auth resurrection guard, persist_value, more
+safety reads) are intentionally NOT in this release — they are partial
+fixes superseded by the v7.12 Multitenant Architecture (Path B)
+milestone now in flight.
+
+### New on Desktop (from v7.11.0, never previously distributed to desktop users)
+
+- **108 CUDL-only manuscripts** — Cambridge CUDL classmarks that have no
+  NLI Alma record at all (including the originating user-reported case
+  `T-S NS 329.96`, plus ~100 Mosseri and CUL entries) now appear in
+  search results, the catalog browser, and the metadata viewer. Images
+  load from CUDL canvases; catalog, source, and bibliography panels
+  populate from FJMS data. No transcription text — these are
+  image+metadata-only records.
+- **Cambridge shelfmark normalization bridge** — alternative shelfmark
+  forms (`Moss. III,27O` ↔ `mosseriiii27o`, Cambridge `Or.` numeric
+  variants, leading-zero collisions, slash/comma/dot handling) now
+  resolve to the same record. Shelfmark search recovers thousands of
+  CUDL classmarks that previously appeared "missing" because of form
+  differences.
+- **"View on CUDL" link fixed** — works for previously-orphan Mosseri
+  and CUL shelfmarks that used to fall through to a slug-fallback that
+  404'd.
+- **Browse pagination for synthetic manuscripts** — Next/Prev navigation
+  on CUDL-only manuscripts (which have image pages but no transcription)
+  now works correctly.
+
+### Bug Fixes
+
+- **Desktop comments save** — 4 of 5 comment-type dropdown values
+  (`Question`, `Scholarly Note`, `Suggestion`, `Issue`) silently failed
+  to save with a `comments_scope_check` database error; only `General`
+  worked. Fixed by deriving `scope` from `page_number` presence
+  (matching the web client's behavior). (desktop)
+- **`/help` 500 error** — chained `set_visibility` calls on `ui.card()`
+  were breaking the `with` statement because `set_visibility` returns
+  `None`. (web)
+- **Cross-user export filename leak** — User A's saved search query
+  name appeared as the suggested `.xlsx` filename in User B's export
+  dialog. Search/parallels export endpoints were reading from a
+  process-wide singleton; routed all 5 `/api/export/*` handlers through
+  per-session app storage. (web)
+- **`/browse` 500 on pruned-session race** — stopping a search and then
+  opening a result on `/browse` raised an `AssertionError` when the
+  session_id had been evicted from NiceGUI's `_users` cache by the 10s
+  prune scheduler. Snapshot read/write helpers now degrade to defaults
+  instead of raising. (web)
+- **Browse Phase B enrichment silently failing on production** —
+  expanded manuscript panel was missing PGP description, FJMS catalog
+  records, bibliography, and measurements. A JS dispatch during the
+  detached `load_page` task was bubbling up a slot-lifecycle exception
+  that the enrichment gate was treating as an error. Wrapped the
+  dispatcher and extended the slot-race exception filter. (web)
+- **Lists "Sync Now" UX clarification** — renamed misleadingly-named
+  button to "Move to account" (it only migrated browser-localStorage
+  anonymous lists into the cloud account, NOT cloud→view), added a new
+  "Refresh from Cloud" button on the lists header for logged-in users,
+  reworded surrounding copy as a one-way browser→account move. (web)
+
+---
+
 ## [7.11.0] - CUDL Coverage & Synthetic Inventories - 2026-05-12
 
 A 3-phase milestone (Phases 84, 85, 86) closing the gap between CUDL's ~141K

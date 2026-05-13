@@ -221,7 +221,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("Updated PGP data, catalog sources for 30,000 manuscripts, and Cambridge image alignment."))
+        self.lbl_msg.setText(tr("Additional Cambridge CUDL manuscripts are now available with images and information."))
         self.show()
 
     def on_learn_more(self):
@@ -255,9 +255,9 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr('Updated Princeton Geniza Project (PGP) data — hundreds of new documents, transcriptions, and scholarly footnotes.'),
-            tr('Catalog dialog — about 30,000 manuscripts that previously showed empty dialogs now display proper sources (GRU Cambridge, Schocken-Zulay, Fleischer Piyut Project, and more).'),
-            tr('Bug fixes for navigation and image display on Cambridge and JTS manuscripts.'),
+            tr('108 manuscripts from the Cambridge CUDL catalog that did not previously appear in the app — because they have no record in the National Library of Israel catalog — are now available for viewing. You can see images, catalog, and bibliographic information (including T-S NS 329.96 and about 100 others).'),
+            tr('Automatic recognition of alternative shelfmark forms for manuscripts from the Mosseri collection and other collections. Shelfmark search now finds thousands of manuscripts that previously could not be found due to differences in writing convention.'),
+            tr('Bug fix in submitting user comments on manuscripts.'),
         ]
         align = 'right' if is_heb else 'left'
         dir_attr = "rtl" if is_heb else "ltr"
