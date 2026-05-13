@@ -16,6 +16,7 @@ from typing import Any, Optional, List, Set
 from datetime import datetime
 
 from nicegui import app
+from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop
 from web.translations import tr, get_language
 from web.services import BrowsePage
 
@@ -340,38 +341,40 @@ def restore_search_snapshot(state: 'SearchUIState') -> None:
     corruption but does NOT prevent Tab B overwriting Tab A's snapshot.
     True per-tab isolation is deferred (Codex W3).
     """
-    from web.safe_storage import safe_user_get
     stored_version = safe_user_get('search_snapshot_schema_version', 0)
     if stored_version == 0:
         # Pre-Phase-74 snapshots have no version stamp. Adopt the legacy payload
         # once by stamping to current; otherwise returning users would have
         # their search_results / exclusions / refinement chain silently wiped
         # on the first post-upgrade load (Codex review 74-CODEX-REVIEW2.md #1).
-        try:
-            app.storage.user['search_snapshot_schema_version'] = _SEARCH_SNAPSHOT_VERSION
-        except Exception:
-            pass
+        # Class A try/except collapsed — safe_user_set absorbs AssertionError.
+        safe_user_set('search_snapshot_schema_version', _SEARCH_SNAPSHOT_VERSION)
     elif stored_version != _SEARCH_SNAPSHOT_VERSION:
         clear_search_snapshot()
         return
 
+    # Class B OUTER try-except PRESERVED — wraps restore_search_active_snapshot
+    # call (tab-snapshot read can return arbitrary types/decode errors) and
+    # RefinementStep.from_dict iteration (parsing failures, schema drift).
+    # M2: each safe_user_get read is INDEPENDENT — a missing search_results
+    # does not short-circuit the domain_exclusions read.
     try:
         # Restorable scalar/list fields (match RESEARCH §1.1 bucket).
         if restore_search_active_snapshot(state):
             return
-        state.results = app.storage.user.get('search_results', []) or []
-        state.printed_filter = app.storage.user.get('search_printed_filter', 'all')
-        _de = app.storage.user.get('domain_exclusions')
+        state.results = safe_user_get('search_results', []) or []
+        state.printed_filter = safe_user_get('search_printed_filter', 'all')
+        _de = safe_user_get('domain_exclusions')
         state.domain_exclusions = set(_de) if _de else set()
         # refinement_chain (list[dict] -> list[RefinementStep])
         from shared.refinement import RefinementStep
-        raw_chain = app.storage.user.get('search_refinement_chain', []) or []
+        raw_chain = safe_user_get('search_refinement_chain', []) or []
         try:
             state.refinement_chain = [RefinementStep.from_dict(d) for d in raw_chain]
         except Exception:
             state.refinement_chain = []
         # exclusion sources (list[dict])
-        state.exclusion_sources = app.storage.user.get('search_exclusion_sources', []) or []
+        state.exclusion_sources = safe_user_get('search_exclusion_sources', []) or []
         # NOTE: search_mode, search_query, search_preset, search_max_changes,
         # search_gap are read as needed by search.py's bootstrap block
         # (they feed resolve_search_bootstrap). They are not stored on
@@ -387,25 +390,29 @@ def persist_search_snapshot(state: 'SearchUIState') -> None:
     runtime_only and cross_page_preference fields are NOT written.
     Gated by session_persistence_enabled, mirroring filter_panel.persist_value.
     """
-    from web.safe_storage import safe_user_get
     if not safe_user_get('session_persistence_enabled', True):
         return
+    # Class B OUTER try-except PRESERVED per Fix 4 in 87-REVIEWS.md (M3):
+    # covers list/dict construction (_compact_result_rows, list(state.domain_exclusions),
+    # list(state.exclusion_sources)) and persist_search_active_snapshot subcall.
     try:
-        app.storage.user['search_snapshot_schema_version'] = _SEARCH_SNAPSHOT_VERSION
+        safe_user_set('search_snapshot_schema_version', _SEARCH_SNAPSHOT_VERSION)
         persist_search_active_snapshot(state)
-        app.storage.user['search_results'] = _compact_result_rows(
+        safe_user_set('search_results', _compact_result_rows(
             (state.results or [])[:_SEARCH_ACTIVE_USER_FALLBACK_LIMIT]
-        )
-        app.storage.user['search_printed_filter'] = state.printed_filter
-        app.storage.user['domain_exclusions'] = list(state.domain_exclusions or [])
+        ))
+        safe_user_set('search_printed_filter', state.printed_filter)
+        safe_user_set('domain_exclusions', list(state.domain_exclusions or []))
         # refinement_chain (list[RefinementStep] -> list[dict])
+        # Class B INNER try-except PRESERVED — covers to_dict() iteration which
+        # can raise on schema-drift / non-RefinementStep objects in the chain.
         try:
-            app.storage.user['search_refinement_chain'] = [
+            safe_user_set('search_refinement_chain', [
                 s.to_dict() for s in (state.refinement_chain or [])
-            ]
+            ])
         except Exception:
-            app.storage.user['search_refinement_chain'] = []
-        app.storage.user['search_exclusion_sources'] = list(state.exclusion_sources or [])
+            safe_user_set('search_refinement_chain', [])
+        safe_user_set('search_exclusion_sources', list(state.exclusion_sources or []))
     except Exception:
         pass  # Browser storage operation failed; snapshot not persisted (D-08)
 
@@ -437,17 +444,12 @@ def clear_search_snapshot() -> None:
         'search_exclusion_sources': [],
     }
     for key, value in defaults.items():
-        try:
-            app.storage.user[key] = value
-        except Exception:
-            pass
+        # Class A try/except collapsed — safe_user_set absorbs AssertionError.
+        safe_user_set(key, value)
     # Remaining snapshot keys: drop them.
     for key in ('search_refinement_chain',
                 'search_all_terms_filter', 'search_snapshot_schema_version'):
-        try:
-            app.storage.user.pop(key, None)
-        except Exception:
-            pass
+        safe_user_pop(key, None)
     clear_search_active_snapshot()
     # Filter keys (match search.py:806-832 reset block).
     # Defaults match LIVE field types verified in web/pages/search_state.py:60, :82
@@ -455,24 +457,18 @@ def clear_search_snapshot() -> None:
     #   filter_include_mode is bool (default True) - NOT string 'any'
     #   filter_measurement_material is list (default []) - NOT None
     for key in _SEARCH_FILTER_KEYS:
-        try:
-            if key == 'search_filter_include_mode':
-                app.storage.user[key] = True  # bool, matches filter_panel.py:248
-            elif key in ('search_filter_date_from', 'search_filter_date_to'):
-                app.storage.user[key] = None
-            else:
-                app.storage.user[key] = []
-        except Exception:
-            pass
+        if key == 'search_filter_include_mode':
+            safe_user_set(key, True)  # bool, matches filter_panel.py:248
+        elif key in ('search_filter_date_from', 'search_filter_date_to'):
+            safe_user_set(key, None)
+        else:
+            safe_user_set(key, [])
     # Measurement keys: mins/maxes default to None (numeric), material to [].
     for key in _SEARCH_FILTER_MEASUREMENT_KEYS:
-        try:
-            if key == 'search_filter_measurement_material':
-                app.storage.user[key] = []  # list, matches filter_panel.py:271
-            else:
-                app.storage.user[key] = None  # numeric min/max
-        except Exception:
-            pass
+        if key == 'search_filter_measurement_material':
+            safe_user_set(key, [])  # list, matches filter_panel.py:271
+        else:
+            safe_user_set(key, None)  # numeric min/max
 
 
 def clear_search_filters() -> None:
@@ -485,23 +481,17 @@ def clear_search_filters() -> None:
     (Codex review 74-CODEX-REVIEW2.md #3).
     """
     for key in _SEARCH_FILTER_KEYS:
-        try:
-            if key == 'search_filter_include_mode':
-                app.storage.user[key] = True
-            elif key in ('search_filter_date_from', 'search_filter_date_to'):
-                app.storage.user[key] = None
-            else:
-                app.storage.user[key] = []
-        except Exception:
-            pass
+        if key == 'search_filter_include_mode':
+            safe_user_set(key, True)
+        elif key in ('search_filter_date_from', 'search_filter_date_to'):
+            safe_user_set(key, None)
+        else:
+            safe_user_set(key, [])
     for key in _SEARCH_FILTER_MEASUREMENT_KEYS:
-        try:
-            if key == 'search_filter_measurement_material':
-                app.storage.user[key] = []
-            else:
-                app.storage.user[key] = None
-        except Exception:
-            pass
+        if key == 'search_filter_measurement_material':
+            safe_user_set(key, [])
+        else:
+            safe_user_set(key, None)
 
 
 # ---------------------------------------------------------------------------
@@ -510,14 +500,14 @@ def clear_search_filters() -> None:
 
 def get_search_history() -> list:
     """Get search history from storage."""
-    return app.storage.user.get('search_history', [])
+    return safe_user_get('search_history', [])
 
 
 def add_to_search_history(query: str, result_count: int, mode: str, params: dict, state_snapshot: dict):
     """Add or update a search history entry. Deduplicates by query+mode."""
-    if not app.storage.user.get('session_persistence_enabled', True):
+    if not safe_user_get('session_persistence_enabled', True):
         return
-    limit = app.storage.user.get('search_history_limit', 20)
+    limit = safe_user_get('search_history_limit', 20)
     history = get_search_history()
 
     # Dedup: check for existing entry with same query + mode
@@ -547,7 +537,7 @@ def add_to_search_history(query: str, result_count: int, mode: str, params: dict
 
     # Enforce limit
     history = history[:limit]
-    app.storage.user['search_history'] = history
+    safe_user_set('search_history', history)
 
 
 def delete_search_history_entry(index: int):
@@ -555,12 +545,12 @@ def delete_search_history_entry(index: int):
     history = get_search_history()
     if 0 <= index < len(history):
         history.pop(index)
-        app.storage.user['search_history'] = history
+        safe_user_set('search_history', history)
 
 
 def clear_search_history():
     """Clear all search history."""
-    app.storage.user['search_history'] = []
+    safe_user_set('search_history', [])
 
 
 # ---------------------------------------------------------------------------
