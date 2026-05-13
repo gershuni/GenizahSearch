@@ -213,3 +213,57 @@ def test_every_ui_page_handler_mints_uuid():
         + chr(10) + chr(10)
         + "Fix: add `ensure_session_uuid()` to the function OR call create_layout()."
     )
+
+
+def test_create_layout_mints_session_uuid():
+    """B1 (87-REVIEWS.md): web/main.py:create_layout() must call ensure_session_uuid().
+
+    This test verifies the BOOTSTRAP WIRING — that the function created in Plan 02
+    Task 1 is actually IMPORTED and CALLED from the page bootstrap path. The test
+    cannot exercise create_layout() directly (it requires a NiceGUI runtime), but
+    it CAN verify that web.main imports ensure_session_uuid AND that calling it
+    has the expected storage side effect.
+
+    Failure modes this test catches:
+    - Someone deletes the `ensure_session_uuid()` call from create_layout()
+    - Someone removes the `from web.safe_storage import ensure_session_uuid` import
+    - The implementation of ensure_session_uuid() regresses such that the mint
+      no longer happens (also covered by test_ensure_session_uuid_idempotent,
+      but doubled here as a defense-in-depth check)
+
+    Note: this test does NOT import web.main (which would pull in NiceGUI's full
+    page-router machinery). Instead it reads web/main.py's source and asserts the
+    wiring at the textual level, then exercises ensure_session_uuid() directly.
+    """
+    import re
+    import pathlib
+
+    # Part A: textual verification that web/main.py imports and calls ensure_session_uuid
+    main_src = pathlib.Path(__file__).resolve().parent.parent.joinpath('web', 'main.py').read_text(encoding='utf-8')
+    assert re.search(r'from web\.safe_storage import.*ensure_session_uuid', main_src), (
+        "web/main.py must import ensure_session_uuid from web.safe_storage (B1 wiring)"
+    )
+    # Locate create_layout body and confirm ensure_session_uuid() is called inside it
+    layout_match = re.search(r'^def create_layout\(\):.*?(?=^def )', main_src, re.MULTILINE | re.DOTALL)
+    assert layout_match, "web/main.py must define create_layout()"
+    layout_body = layout_match.group(0)
+    assert 'ensure_session_uuid()' in layout_body, (
+        "web/main.py:create_layout() must call ensure_session_uuid() — B1 bootstrap wiring missing"
+    )
+
+    # Part B: functional verification that calling ensure_session_uuid mints the UUID
+    storage = {}
+    with patch('web.safe_storage.app') as mock_app:
+        mock_app.storage.user = storage
+        from web.safe_storage import ensure_session_uuid
+        result = ensure_session_uuid()
+        assert result is True, "ensure_session_uuid() should return True on fresh storage"
+        minted = storage.get('_session_uuid')
+        assert minted, "_session_uuid was not stored after ensure_session_uuid() returned True"
+        assert isinstance(minted, str)
+        assert len(minted) == 32
+        # Verify regex shape per M5
+        import re as _re
+        assert _re.fullmatch(r'^[0-9a-f]{32}$', minted), (
+            f"Minted UUID {minted!r} does not match ^[0-9a-f]{{32}}$"
+        )
