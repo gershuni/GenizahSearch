@@ -11,9 +11,13 @@ def test_persist_and_restore_round_trip():
     """runtime_only fields are pristine; restorable fields survive."""
     storage = _make_storage()
     tab_storage = {}
-    with patch('web.pages.search_state.app') as mock_app:
+    # Phase 87 (B3 fix): user-storage reads/writes now route through
+    # web.safe_storage; tab storage remains direct in search_state.py.
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app:
         mock_app.storage.user = storage
         mock_app.storage.tab = tab_storage
+        mock_safe_app.storage.user = storage
 
         from web.pages.search_state import (
             SearchUIState,
@@ -58,9 +62,11 @@ def test_clear_snapshot_wipes_all_keys():
         'search_snapshot_schema_version': 1,
     }
     tab_storage = {'search_active_snapshot': {'version': 1, 'results': [{'id': 'tab'}]}}
-    with patch('web.pages.search_state.app') as mock_app:
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app:
         mock_app.storage.user = storage
         mock_app.storage.tab = tab_storage
+        mock_safe_app.storage.user = storage
         from web.pages.search_state import clear_search_snapshot
         clear_search_snapshot()
         # Snapshot fields are reset to safe defaults:
@@ -84,9 +90,11 @@ def test_missing_stamp_adopts_legacy_payload():
         'domain_exclusions': ['foo'],
         # No 'search_snapshot_schema_version' key -> pre-74 snapshot.
     }
-    with patch('web.pages.search_state.app') as mock_app:
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app:
         mock_app.storage.user = storage
         mock_app.storage.tab = {}
+        mock_safe_app.storage.user = storage
         from web.pages.search_state import SearchUIState, restore_search_snapshot
 
         state = SearchUIState()
@@ -121,9 +129,11 @@ def test_clear_search_filters_preserves_live_search_state():
         'search_filter_width_min': 5.0,
         'search_filter_measurement_material': ['Parchment'],
     }
-    with patch('web.pages.search_state.app') as mock_app:
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app:
         mock_app.storage.user = storage
         mock_app.storage.tab = {}
+        mock_safe_app.storage.user = storage
         from web.pages.search_state import clear_search_filters
 
         clear_search_filters()
@@ -185,9 +195,11 @@ def test_restore_prefers_tab_snapshot_over_legacy_user_results():
             'search_exclusion_sources': [],
         }
     }
-    with patch('web.pages.search_state.app') as mock_app:
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app:
         mock_app.storage.user = storage
         mock_app.storage.tab = tab_storage
+        mock_safe_app.storage.user = storage
         from web.pages.search_state import SearchUIState, restore_search_snapshot
 
         state = SearchUIState()
@@ -206,9 +218,11 @@ def test_restore_falls_back_to_compact_user_snapshot_when_tab_missing():
         'domain_exclusions': ['bar'],
         'search_snapshot_schema_version': 1,
     }
-    with patch('web.pages.search_state.app') as mock_app:
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app:
         mock_app.storage.user = storage
         mock_app.storage.tab = {}
+        mock_safe_app.storage.user = storage
         from web.pages.search_state import SearchUIState, restore_search_snapshot
 
         state = SearchUIState()
@@ -222,9 +236,11 @@ def test_restore_falls_back_to_compact_user_snapshot_when_tab_missing():
 def test_search_history_compacts_embedded_results():
     """History entries must not persist heavyweight results."""
     storage = {'session_persistence_enabled': True, 'search_history_limit': 20}
-    with patch('web.pages.search_state.app') as mock_app:
+    with patch('web.pages.search_state.app') as mock_app, \
+         patch('web.safe_storage.app') as mock_safe_app:
         mock_app.storage.user = storage
         mock_app.storage.tab = {}
+        mock_safe_app.storage.user = storage
         from web.pages.search_state import add_to_search_history
 
         add_to_search_history(

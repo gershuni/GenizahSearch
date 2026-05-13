@@ -98,7 +98,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # 2026-05-12: pruned-session AssertionError fix — route through safe_user_get
     # so a fresh page handler racing with prune_user_storage degrades to defaults
     # instead of returning 500. Codex flagged these 5 raw reads as still-vulnerable.
-    from web.safe_storage import safe_user_get as _safe_get
+    from web.safe_storage import safe_user_get as _safe_get, safe_user_set as _safe_set
     raw_saved_mode = _safe_get('search_mode', 'exact')
     raw_saved_query = _safe_get('search_query', '')
     saved_preset = _safe_get('search_preset', 30)
@@ -419,7 +419,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                         # Save query on change
                         def save_query():
-                            app.storage.user['search_query'] = query_input.value or ''
+                            _safe_set('search_query', query_input.value or '')
                         query_input.on('blur', save_query)
 
                     # Phase 55: Refine mode badge (D-02) + cancel (D-02a)
@@ -529,7 +529,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     def set_level(level_value):
                         """Set variant level."""
                         current_preset['value'] = level_value
-                        app.storage.user['search_preset'] = level_value
+                        _safe_set('search_preset', level_value)
                         if state.var_mgr:
                             state.var_mgr.set_variant_level(level_value)
 
@@ -542,7 +542,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         ui.tooltip(tr('Gap description'))
 
                         def save_gap():
-                            app.storage.user['search_gap'] = int(gap_input.value or 0)
+                            _safe_set('search_gap', int(gap_input.value or 0))
                         gap_input.on('blur', save_gap)
 
                     # Search/Stop Button Container - buttons swap in same position
@@ -654,7 +654,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 ui.tooltip(tr('Constrain matches to text boundaries (for join detection)'))
 
                                 def save_text_position():
-                                    app.storage.user['search_text_position'] = text_position_select.value
+                                    _safe_set('search_text_position', text_position_select.value)
                                     try:
                                         _update_chip_bar()
                                     except NameError:
@@ -678,7 +678,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 def on_slider_change():
                     val = int(variant_slider.value)
                     current_preset['value'] = val
-                    app.storage.user['search_preset'] = val
+                    _safe_set('search_preset', val)
                     if state.var_mgr:
                         state.var_mgr.set_variant_level(val)
                 variant_slider.on('update:model-value', on_slider_change)
@@ -686,7 +686,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Save max changes on change (handle both slider and non-slider modes)
             if max_changes_select:
                 def save_max_changes():
-                    app.storage.user['search_max_changes'] = int(max_changes_select.value)
+                    _safe_set('search_max_changes', int(max_changes_select.value))
                 max_changes_select.on('update:model-value', save_max_changes)
 
             # Mode change handler (must be after variant_slider_row is defined)
@@ -715,7 +715,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                 # Save mode to storage (don't persist pgp_tags)
                 if not is_tags:
-                    app.storage.user['search_mode'] = mode
+                    _safe_set('search_mode', mode)
 
             mode_select.on('update:model-value', on_mode_change)
 
@@ -1083,7 +1083,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     }
                     def _clear_text_position():
                         text_position_select.value = 'anywhere'
-                        app.storage.user['search_text_position'] = 'anywhere'
+                        _safe_set('search_text_position', 'anywhere')
                         _update_chip_bar()
                     ui.chip(
                         f"{tr('Text Position')}: {_pos_label_map.get(_pos, _pos)}",
@@ -2052,13 +2052,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # search_query/search_mode are bootstrap-input keys NOT owned by the helper;
         # keep their UX-driven writes here to wipe the query bar on New Search.
         clear_search_snapshot()
-        app.storage.user['search_query'] = ''
-        app.storage.user['search_mode'] = 'exact'
+        _safe_set('search_query', '')
+        _safe_set('search_mode', 'exact')
         # Bootstrap-input precedent (Phase 74): text_position is NOT a
         # SearchUIState field and is excluded from _SEARCH_SNAPSHOT_KEYS,
         # so reset it directly here — same shape as search_query/search_mode.
         text_position_select.value = 'anywhere'
-        app.storage.user['search_text_position'] = 'anywhere'
+        _safe_set('search_text_position', 'anywhere')
         # Phase 77 gap-closure (Plan 06, Gap #1): mirror the page-scoped
         # search_state clear into the global state singleton that the FastAPI
         # export handlers (web/api.py:1816-1955) read from. Plan 01 populated
@@ -4358,10 +4358,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # blur-only write at search.py:~401 misses Enter-to-search flows, and the
         # is_back_navigation guard in resolve_search_bootstrap silently fails.
         # This mirrors the query that history.replaceState just stamped into the URL.
-        try:
-            app.storage.user['search_query'] = clean_query
-        except Exception:
-            pass  # Browser storage operation failed; back-nav guard will no-op
+        _safe_set('search_query', clean_query)
 
         # Search history -- D-15: Refined searches don't enter history
         if not search_state.refinement_chain:
@@ -4415,11 +4412,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 fjms.get_measurement_summaries_batch(sys_ids),  # Phase 54: measurement cache
             )
 
-        _show_trans_for_enrich = False
-        try:
-            _show_trans_for_enrich = app.storage.user.get('show_translations', False)
-        except Exception:
-            pass  # Translation lookup failed; continue without translation
+        _show_trans_for_enrich = _safe_get('show_translations', False)
 
         def collect_translations(sys_ids, show_trans=False):
             try:
@@ -4627,7 +4620,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _tag_trans = {}
             if tag_results and get_language() == 'he':
                 try:
-                    _tag_show = app.storage.user.get('show_translations', False)
+                    _tag_show = _safe_get('show_translations', False)
                     if _tag_show:
                         _tag_sids = [r.get('sys_id') for r in tag_results if r.get('sys_id')]
                         if _tag_sids:
