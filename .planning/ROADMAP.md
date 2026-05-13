@@ -273,7 +273,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
   5. `tests/test_export_state_selection.py`, `tests/test_api_export_json.py`, and `tests/test_api_legacy_unchanged.py` all pass after dropping any `state.*` setup — they use only `export_state` helpers.
 **Plans**: 3 plans (88-01 through 88-03)
 - [x] 88-01-writer-migration-PLAN.md -- Migrate 13 writer sites to local variables (state.X = → local_X = ; thread through export_state setters)
-- [ ] 88-02-export-state-rewrite-PLAN.md -- Rewrite export_state.py via safe_storage chokepoint; delete _TEST_BACKEND + reader-side parallels_source_text fallback; rewrite 4 test files; remove allowlist entry
+- [x] 88-02-export-state-rewrite-PLAN.md -- Rewrite export_state.py via safe_storage chokepoint; delete _TEST_BACKEND + reader-side parallels_source_text fallback; rewrite 4 test files; remove allowlist entry
 - [ ] 88-03-appstate-deletion-and-enforcement-PLAN.md -- Delete 10 AppState fields; install runtime + static AST regression guards (D-06 + D-07); refresh stale docs (D-16)
 
 ### Phase 89: Lists Cache Per-Request
@@ -331,7 +331,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 | 85. Synthetic FJMS Inventory Rows | v7.11 | 5/5 | Complete | 2026-05-12 |
 | 86. CUDL Coverage Audit + Synthetic Re-attempt | v7.11 | 4/5 | Complete | 2026-05-12 |
 | 87. Foundations -- Session UUID and Safe Storage Chokepoint | v7.12 | 8/8 | Complete    | 2026-05-13 |
-| 88. State Separation by Deletion | v7.12 | 1/3 | In Progress|  |
+| 88. State Separation by Deletion | v7.12 | 2/3 | In Progress|  |
 | 89. Lists Cache Per-Request | v7.12 | 0/TBD | Not started | - |
 | 90. Auth Caching Rewrite -- No set_session | v7.12 | 0/TBD | Not started | - |
 | 91. Atomic Auth State Writes | v7.12 | 0/TBD | Not started | - |
