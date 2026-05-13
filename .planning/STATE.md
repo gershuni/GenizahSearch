@@ -1,84 +1,110 @@
 ---
 gsd_state_version: 1.0
-milestone: v7.11
-milestone_name: CUDL Coverage & Synthetic Inventories
-status: executing
-last_updated: "2026-05-11T14:12:49.171Z"
-last_activity: 2026-05-11 -- Phase 86 execution started
+milestone: v7.12
+milestone_name: Multitenant Architecture (Path B)
+status: defining_requirements
+last_updated: "2026-05-13T00:00:00.000Z"
+last_activity: 2026-05-13 -- Milestone v7.12 started
 progress:
-  total_phases: 87
-  completed_phases: 83
-  total_plans: 279
-  completed_plans: 273
-  percent: 98
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-05)
+See: .planning/PROJECT.md (updated 2026-05-13)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 86 — cudl-coverage-audit-and-synthetic-reattempt
+**Current focus:** v7.12 Multitenant Architecture (Path B) — refactor web layer off desktop-inherited single-user model
 
 ## Current Position
 
-Phase: 86 (cudl-coverage-audit-and-synthetic-reattempt) — EXECUTING
-Plan: 1 of 5
-Status: Executing Phase 86
-Last activity: 2026-05-11 -- Phase 86 execution started
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-05-13 -- Milestone v7.12 started
 
-Progress: [###.......] 33% (1/3 phases, 85 in plan-stage)
+## Milestone Goal (v7.12)
 
-**Phase queue (v7.11):**
+Refactor GenizahSearch's web layer off the desktop-inherited single-user mental model so per-user state, auth, and caches cannot leak across concurrent sessions sharing one Python process.
 
-1. ✅ **Phase 84** — CUDL Shelfmark Normalization (NORM-01..04). Bridge-layer normalizers shipped: shared/shelfmark_bridge.py, alias index, leading-zero audit, NORM-04 regression guard.
-2. ⏭ **Phase 85** — Synthetic FJMS Inventory Rows (SYNTH-01..06). Option-2 18-digit numeric sys_id format. Touches search index, browse, lists, exclusions, parallels, FJMS enrichment fallback.
-3. ⏭ **Phase 86** — CUDL Coverage Audit (AUDIT-01..03). Final scan, report, regression check.
+**Hard constraint (Codex finding):** no mid-flight `auth.set_session()` calls — verified at `gotrue_client.py:713` that it is networked, not local-only.
+
+## Phase Sketch (continued numbering from 86)
+
+1. **Phase 87** — Foundations: session UUID + safe_storage chokepoint adoption
+2. **Phase 88** — State separation by deletion (export_state.py becomes sole source of truth)
+3. **Phase 89** — Lists cache redesign (per-request UserListsManager)
+4. **Phase 90** — Auth caching rewrite (refresh-only locking keyed by _session_uuid)
+5. **Phase 91** — Atomic auth state writes (server revocation before token pop)
+6. **Phase 92** — Final sweep + acceptance (zero raw app.storage.user outside whitelist)
+
+Roadmapper produces canonical phase list in `.planning/ROADMAP.md`.
 
 ## Investigation Summary (pre-milestone)
 
-**User-reported case:** `T-S NS 329.96` missing from app despite existing in CUDL. Investigation produced `scripts/scan_cudl_orphans.py` and surfaced 6,052 CUDL-vs-libraries.csv classmark gaps.
+**Origin:** v7.11.1 shipped 2026-05-12 closing 4 user-reported bugs. Cross-user xlsx export filename leak was the headline bug, fixed by routing export payload through per-session storage (commit `242664d3`).
 
-**Key findings driving this milestone:**
+**4 rounds of Codex review** of the post-release commits surfaced that the cross-user export was one instance of a class of multitenant bugs spanning:
+- `web/state.py:AppState` singleton with per-user fields (`last_results`, `current_search_query`, `parallels_*`)
+- `web/user_lists.py:UserListsManager` instance singleton via `AppState._user_lists_mgr`
+- `web/supabase_client.py` process-wide `_client_cache + _session_locks` keyed first by `id(storage)` (object-id reuse after GC), then by `access_token` (rotates on refresh)
+- 30+ raw `app.storage.user.get(...)` bootstrap sites that can 500 on prune-mid-flight `AssertionError`
+- `web/auth_state.py:clear_auth/do_login` + OAuth callback with non-atomic multi-step writes across auth boundary
+- `web/components/filter_panel.py:persist_value` raw read+write (now safe-wrapped in commit cca23db3)
 
-- 4 normalization bugs in the libraries.csv ↔ CUDL bridge accounted for ~13K false orphans (slash, comma, letter-adjacent dot, leading zeros).
-- Mosseri-aware normalization recovers 3,828 of 3,883 (98.6%) — rows already exist under `library_code=Mosseri` in `Moss. III,27O` form.
-- Cambridge Or. normalization recovers 584 of 1,421 so far; deeper letter-suffix pattern work in scope.
-- NLI gap file (`Inventory ID no exact match to Alma.xlsx`) confirms ~93 T-S sub-series classmarks are FJMS-only — no Alma record at all. Need synthetic rows.
-- 0 cases of "missing alias on existing libraries.csv row" — the original "merge 329.96 into 329.97" hypothesis is wrong; NLI doesn't have a single Alma covering both.
+The 5 hold commits (`22b45f68 → cca23db3`) on `master-main` past production are partial fixes superseded by intentional v7.12 work.
 
-**Reports produced:**
+**Carryover from hold commits:**
+- KEEP: `web/safe_storage.py` module + helpers (aab16e6d); `safe_user_get` migrations in search/parallels/filter_panel (8ac93eff); `persist_value` safe-wrap + more bootstrap-read migrations (cca23db3)
+- DISCARD: `UserListsManager._cache_entry` tuple (22b45f68 — superseded by per-request); access_token-keyed client cache (8ac93eff — superseded by refresh-only UUID-keyed locking); auth-resurrection guard (cca23db3 — obsolete once `get_user_client` cache is gone)
 
-- `reports/cudl_orphans_all.csv` — 6,052 rows
-- `reports/cudl_orphans_with_neighbor.csv` — 104 rows (heuristic candidates, mostly disconfirmed by gap file)
+**Codex review transcripts** (audit trail input):
+- `_tmp/codex_post_711_review_prompt.md` + `.._response.txt`
+- `_tmp/codex_critical_high_review_prompt.md` + `.._response.txt`
+- `_tmp/codex_3rdpass_review_prompt.md` + `.._response.txt`
+- `_tmp/codex_4thpass_review_prompt.md` + `.._response.txt`
 
-**External data references:**
+## Test Coverage to Preserve / Rewrite
 
-- `FIST_DB_BACKUP/gap_files/Inventory ID no exact match to Alma.xlsx` (NLI Chico/Tzippora, Feb 2026)
-- `FIST_DB_BACKUP/gap_files/Alma records - no Inventory ID.xlsx` (12,647 Alma rows lacking FIST link, mostly BL/RNL/JTS — out of scope)
-- `nli_data/nli_crossref.db` `cambridge_manifests` table (141,368 CUDL classmarks)
+| File | Purpose | Path B fate |
+|---|---|---|
+| `tests/test_export_cross_user_isolation.py` | 3 tests for user-reported xlsx leak | RE-WRITE to assert against per-session storage directly, no `_TEST_BACKEND` shim |
+| `tests/test_user_lists_cache_isolation.py` | 3 tests for UserListsManager cross-user | RE-WRITE to match per-request model |
+| `tests/test_safe_storage.py` | 6 tests for the helpers | KEEP as-is |
+| `tests/test_browse_state.py` | 7 tests including pruned-session AssertionError | KEEP |
 
 ## Accumulated Context
 
 ### Architectural Constraints (carry-over from prior milestones)
 
 - **Dual app maintenance:** All shared logic lives in `genizah_core.py` and `shared/*`. UI is app-specific (web/, desktop/).
-- **sys_id contract:** Browse module identifies sys_id by "starts with 99, all digits" (web/pages/browse.py:584-585). Synthetic IDs MUST satisfy this.
-- **Tantivy index:** Local, includes a row per libraries.csv entry. Synthetic rows require index rebuild path.
-- **fjms_enrichment.db keys on AlmaId:** All catalogue/bib/measurement tables key by AlmaId, not InventoryId. Phase 85 needs an InventoryId-fallback resolver.
+- **Desktop is single-user by design:** v7.12 scope is web-only. Desktop app is unaffected by Path B.
+- **NiceGUI session storage:** `app.storage.user` is per-browser-session, pruned periodically. Reads must tolerate prune-mid-flight via safe_storage helpers.
+- **Server posture (2026-05-12):** detached HEAD at `v7.11.1` tag (commit `242664d3`). Do NOT run `deploy.sh` until Path B is ready — it will pull `master-main` and move prod to `cca23db3` (recall-grade per Codex).
 
 ### Key References
 
-- `shared/nli_crossref_service.py` — current bridge layer for CUDL classmark resolution
-- `web/pages/browse.py` — sys_id detection logic (line 584-585)
-- `scripts/scan_cudl_orphans.py` — investigation script (will be re-run for AUDIT-01)
-- `docs/FJMS_API_REFERENCE.md` — FJMS WCF API docs (used during investigation)
-- `genizah_core.py` `LIBRARY_CODES` — library_code taxonomy (synthetic rows use existing codes)
+- `web/state.py:26` — `AppState` singleton with 9 per-user fields to evict
+- `web/user_lists.py` — `UserListsManager` + `_cache_entry`
+- `web/supabase_client.py:34` — `_client_cache` / `_session_locks` to delete
+- `web/auth_state.py` — `set_auth/clear_auth/do_login`
+- `web/main.py:1456+` — OAuth callback site
+- `web/safe_storage.py` — chokepoint adapter (lives at HEAD, was introduced in aab16e6d)
+- `web/export_state.py` — emerging sole source of truth for export selection
+- `web/components/filter_panel.py:persist_value` — example of correct safe-wrap
+- `gotrue_client.py:713` (installed Supabase auth) — proves `set_session()` is networked
+- `.planning/HANDOFF_v7.11.1_path_b.md` — full handoff context
 
 ## Next Step
 
-`/gsd-discuss-phase 85` (Synthetic FJMS Inventory Rows) or `/gsd-plan-phase 85` to start the next phase.
+Roadmapper runs next to produce `.planning/ROADMAP.md` (6 phases, Phase 87 onward) and `.planning/REQUIREMENTS.md` (requirements grouped by phase).
 
-Optional: with `nli_crossref.db` available locally, run `pytest tests/test_shelfmark_bridge.py::TestScanDiffBaselineStillResolves -v` to confirm the human-verification item (Mosseri 98% end-to-end resolution rate).
+After roadmap approval:
+
+`/clear` then `/gsd-discuss-phase 87` (Foundations: session UUID + safe_storage chokepoint).

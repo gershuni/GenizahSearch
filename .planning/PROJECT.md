@@ -8,7 +8,20 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current State (after v7.10 Search API shipped)
+## Current State (after v7.11.1 shipped)
+
+**Shipped:** v7.11.1 Web Hotfix (2026-05-12)
+- 4 user-reported bugs closed: cross-user xlsx export filename leak (the originating report), /help 500 (chained `set_visibility()` returning None), /browse 500 on pruned NiceGUI session AssertionError, lists "Sync Now" UX confusion (renamed + added "Refresh from Cloud")
+- Deployed at commit `242664d3`; git tag `v7.11.1`; web-only (no GitHub Release per desktop-poll prompt avoidance)
+- Server systemd override bumped `SEARCH_API_BROWSE_CORE_TIMEOUT` 2.0 → 5.0s to mitigate cold-Tantivy-reader race; applies on next restart
+- 4 rounds of Codex code review of post-release hotfixes (`22b45f68 → cca23db3`) surfaced deeper architectural problem behind the export leak — singleton-thinking in web layer spanning `AppState`, `UserListsManager`, `get_user_client()` cache, raw `app.storage.user` reads at 30+ bootstrap sites. The 5 hold commits on `master-main` past `242664d3` are partial fixes, deferred to v7.12 Path B (this milestone) for proper architectural treatment.
+
+**Shipped:** v7.11.0 CUDL Coverage & Synthetic Inventories (2026-05-12)
+- 3-phase milestone (Phases 84/85/86) closing the gap between CUDL's ~141K classmark catalogue and GenizahSearch's libraries.csv
+- Phase 84 (NORM-01..04): FIST↔CUDL bridge modules with normalizers (Mosseri labels, Cambridge Or. numeric collapse, slash/comma/dot bug fixes, leading-zero collision audit); 6 bridge wiring call sites; 3-layer regression guard
+- Phase 85 (SYNTH-01..06): Synthetic libraries.csv infrastructure with `is_synthetic_sys_id` helper, Option-2 18-digit numeric sys_id format, FJMS sidecar UNION-ALL pattern, browse hide-NLI gates, `is_synthetic` field on API responses, corrections-write reject
+- Phase 86 (AUDIT-01..03): 108 image-bearing synthetic manuscripts injected (101 CUL + 7 Mosseri, all with CUDL canvas images via bridge); 3,264 catalog rows + 103 FTS5 docs surgically added to fjms_enrichment.db. T-S NS 329.96 (originating case) resolved. 5-tier coverage report: phase84_hit 96.23%, residue 1.13%.
+- Deploy posture codified after 2026-05-11 incident: scp DBs FIRST, then push code. Web auto-deployed via deploy.sh atomic systemd swap.
 
 **Shipped:** v7.10 Search API (2026-05-05)
 - Public HTTP/JSON research-automation API: `POST /api/search`, `GET /api/browse`, `POST /api/parallels`
@@ -180,19 +193,37 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - Security hardening: XFF spoofing protection, fail-closed filter validation, MAX_EXPANDED_TERMS=500 cascade cap, HMAC-hashed PostHog telemetry with persistent IP salt -- v7.10
 - docs/SEARCH_API.md public-facing reference (Stability + Quick Start + Attribution + Changelog) -- v7.10
 
+- FIST↔CUDL bridge with shelfmark normalizers (Mosseri label form, Cambridge Or. numeric collapse, CUL slash/comma/dot/leading-zero fixes) recovering thousands of CUDL classmarks masked by format mismatch -- v7.11
+- 6 bridge wiring call sites across genizah_core.py, web/services.py, web/pages/browse_enrichment.py, image-source resolution, CUDL link builder, orphan scanner -- v7.11
+- 3-layer regression guard: cudl_must_resolve fixture, cudl_baseline_resolved snapshot, unit tests for bridge normalizers -- v7.11
+- Synthetic libraries.csv infrastructure: is_synthetic_sys_id helper, Option-2 18-digit numeric sys_id format (99 + InventoryId-padded-10 + 000000) preserving sys_id "starts with 99" contract -- v7.11
+- Browse + search + lists + exclusions + parallels + comments tolerate synthetic sys_ids; FJMS enrichment lookups fall back to InventoryId resolution; corrections-write reject at service layer -- v7.11
+- is_synthetic field on /api/search + /api/browse + /api/parallels response items + PostHog event property -- v7.11
+- 108 image-bearing synthetic manuscripts injected (101 CUL + 7 Mosseri with CUDL canvas images via bridge); T-S NS 329.96 originating case resolved -- v7.11
+- CUDL coverage 5-tier audit report: phase84_hit 96.23%, phase86_existing_alma_candidate 2.39%, phase86_synthetic 0.08%, phase86_residue 1.13%, multi_inventory_ambiguous 0.18% -- v7.11
+- Browse pagination fixes for synthetic sys_ids (web + desktop): metadata_only mode derives total from largest of folio_images/images_ext/images_nli; bypasses Tantivy via is_synthetic_sys_id short-circuit -- v7.11
+- NLI library code data fix: 461 manuscripts flipped Oxford → NLI (call_numbers contained only NLI shelfmarks) -- v7.9.4
+
+- Cross-user xlsx export filename leak fixed (route export payload through per-session storage, not AppState singleton) -- v7.11.1
+- /help 500 fixed (chained set_visibility() returning None) -- v7.11.1
+- /browse 500 fixed (AssertionError on pruned NiceGUI session state during browse render) -- v7.11.1
+- Lists "Sync Now" UX clarified (renamed + added explicit "Refresh from Cloud" button) -- v7.11.1
+
 ### Active
 
-**Milestone v7.11: CUDL Coverage & Synthetic Inventories**
+**Milestone v7.12: Multitenant Architecture (Path B)**
 
-Goal: Close the gap between CUDL's ~141K classmark catalogue and GenizahSearch's libraries.csv so users searching for any CUDL-catalogued shelfmark land on a usable record. Two complementary tracks: bridge-layer normalization that recovers thousands of already-existing rows masked by shelfmark-format mismatches, and synthetic libraries.csv rows for the residue of FJMS-only inventories that have no NLI Alma record (e.g. T-S NS 329.96).
+Goal: Refactor GenizahSearch's web layer off the desktop-inherited single-user mental model so per-user state, auth, and caches cannot leak across concurrent sessions sharing one Python process. The cross-user xlsx export leak fixed in v7.11.1 was one instance of a class of bugs surfaced across 4 rounds of Codex review. This milestone replaces that pattern with intentional multitenant primitives. **Constraint:** no mid-flight `auth.set_session()` calls — Codex verified at `gotrue_client.py:713` that it is networked (calls `get_user(access_token)` when JWT valid, `_refresh_access_token(refresh_token)` when expired), not local-only.
 
 Target features:
-- Mosseri shelfmark normalizer (Moss. III,27O ↔ mosseriiii27o) recovering ~3,800 already-existing rows currently masked by format mismatch
-- Cambridge Or. shelfmark normalizer (Or. 1080 J 15 ↔ or1080j15, Or. 1080.1.1 ↔ or1080.11)
-- CUL shelfmark normalization fixes for slash / comma / dot-after-letter / leading-zero patterns (T-S F 8/002 ↔ tsf8.2, Add. 863, 2 ↔ add863.2, T-S Ar. 48.211 ↔ tsar48.211, T-S NS 329/0014 ↔ tsns329.14)
-- Synthetic libraries.csv rows for ~150-250 FJMS-only inventories using Option-2 18-digit numeric sys_id format (99 + InventoryId-padded-10 + 000000) preserving the existing "starts with 99 + all digits" sys_id contract
-- Browse + search + lists + exclusions + parallels + comments tolerate synthetic sys_ids; FJMS enrichment lookups fall back to InventoryId resolution when sys_id is synthetic
-- CUDL coverage audit report (reports/cudl_coverage.md) with per-collection breakdown of matched / synthetic / unmatched buckets, target residue under 200 truly-orphan classmarks
+- Stable per-session UUID (`_session_uuid`) minted on first request, stored in `app.storage.user`, used as cache key wherever caching survives Path B (tokens rotate; UUIDs don't)
+- `web/safe_storage.py` adopted/finalized as the single chokepoint adapter for all per-user state; zero raw `app.storage.user.get/pop/[key] = ...` outside an explicit whitelist
+- State separation by deletion: `web/export_state.py` becomes the sole source of truth for last_results / current_search_query / parallels_*; singleton mirrors on `AppState` deleted (not dual-written); `_TEST_BACKEND` shim replaced with proper fixture/adapter injection
+- Lists cache redesign: `UserListsManager` instantiated per-request; singleton on `AppState._user_lists_mgr` and 10s cache plumbing removed entirely (not load-bearing during multitenant safety work)
+- Auth caching rewrite: process-wide `_client_cache / _session_locks / _locks_guard / _CLIENT_CACHE_TTL` deleted; replaced with request-scoped auth strategy that does NOT call `set_session()` to set headers; refresh-only locking keyed by `_session_uuid`, with no cached authenticated client objects
+- Atomic auth state writes: `web/auth_state.py:set_auth/clear_auth/do_login` and OAuth callback migrated to safe_storage helpers; `sign_out`/server revocation happens before popping `auth_session`; local auth keys popped in `finally`; `sign_out` uses user's authenticated client (not anonymous singleton) so token is actually server-side revoked
+- Final sweep + acceptance: web/ audited for any remaining raw `app.storage.user` accesses (including deferred callbacks like parallels.py:3520 and text_editor.py auto-save); whitelist from Phase 87 empty or every entry has explicit justification
+- Test coverage rewritten without `_TEST_BACKEND` shim: test_export_cross_user_isolation.py, test_user_lists_cache_isolation.py (re-written to per-request model), test_safe_storage.py (kept), test_browse_state.py (kept)
 
 ### Out of Scope
 
@@ -274,6 +305,13 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Inline justification comments for silent handlers (not converting to logging) | Preserves intentional suppression behavior; grep-visible; zero behavioral change | Good |
 | Root-anchored .gitignore patterns with explicit exemption block | Prevents accidentally hiding subdirectory files; intentional assets documented at the source of truth | Good |
 | PKCE-only OAuth callback (implicit flow removed) | Removes unused dead code path; aligns with Supabase default; confirmed via production testing | Good |
+| v7.12 Path B: foundations first (session UUID + safe_storage chokepoint) | Subsequent phases need stable cache key + zero-raw-storage invariant before auth/lists can be rewritten safely | — Pending |
+| v7.12 Path B: state separation by deletion, not migration | Dual-write through singleton mirrors invites regression; `web/export_state.py` becomes the only path | — Pending |
+| v7.12 Path B: lists cache goes per-request (drop the 10s TTL) | Cache was a perf optimization not load-bearing for normal use; not worth preserving during multitenant safety refactor | — Pending |
+| v7.12 Path B: NO `auth.set_session()` per request | Codex verified gotrue_client.py:713 — `set_session()` is networked (calls `get_user` or `_refresh_access_token`); request-scoped auth must avoid it | — Pending |
+| v7.12 Path B: refresh-only locking keyed by `_session_uuid` | Token-keyed locks rotate when tokens rotate; UUID-keyed locks are stable across refresh; no cached authenticated client objects | — Pending |
+| v7.12 Path B: `sign_out` calls user's authenticated client (not anonymous singleton) | Anonymous singleton can't revoke the user's token server-side; revocation must happen with the user's credentials before popping auth_session | — Pending |
+| v7.12 Path B: `_TEST_BACKEND` shim removed | Tests should use real session storage with proper fixtures or adapter injection, not a parallel-universe storage backend | — Pending |
 
 ## Evolution
 
@@ -293,4 +331,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-27 — v7.10 Search API milestone started*
+*Last updated: 2026-05-13 — v7.12 Multitenant Architecture (Path B) milestone started*
