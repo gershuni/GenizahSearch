@@ -719,32 +719,32 @@ def test_ensure_session_uuid_idempotent():
 
 **Bias toward verification:** All A1-A7 should be retested at plan-Wave-0 entry to catch any drift between research date (2026-05-13) and plan-execution date.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Lint mechanism — pytest vs ruff plugin (FOUND-04)**
    - What we know: Project uses ruff 0.15.10 for syntax/import lint; pytest 9.0.2 for tests. Both run in CI.
    - What's unclear: Ruff 0.15.10's plugin API status (A1).
-   - Recommendation: Default to pytest AST scan (R-03). If discuss-phase explicitly prefers ruff plugin, plan a spike to verify ruff plugin viability before committing.
+   - RESOLVED — Recommendation: Default to pytest AST scan (R-03). If discuss-phase explicitly prefers ruff plugin, plan a spike to verify ruff plugin viability before committing.
 
 2. **Allowlist scope — file-level vs line-level (FOUND-03)**
    - What we know: Some files (e.g., `web/auth_state.py`) have multiple raw-access sites that legitimately need allowlisting.
    - What's unclear: Should allowlist be file-level (allow ANY raw access in that file) or pattern/line-level (allow ONLY specific known sites)?
-   - Recommendation: Pattern-level (R-04). File-level is too coarse — a future contributor could add NEW raw access in an allowlisted file with no friction. Pattern-level catches drift.
+   - RESOLVED — Recommendation: Pattern-level (R-04). File-level is too coarse — a future contributor could add NEW raw access in an allowlisted file with no friction. Pattern-level catches drift.
 
 3. **Phase 90 dependency — `set_session()` constraint encoding**
    - What we know: REQUIREMENTS.md "Hard constraint (Codex finding): No mid-flight `auth.set_session()` calls". This is Phase 90 territory.
    - What's unclear: Should Phase 87's `_session_uuid` helper API anticipate Phase 90's use? E.g., expose it as a context-manager that locks?
-   - Recommendation: NO. Keep Phase 87 minimal — just `get_session_uuid()` and `ensure_session_uuid()`. Phase 90 builds locks on top.
+   - RESOLVED — Recommendation: NO. Keep Phase 87 minimal — just `get_session_uuid()` and `ensure_session_uuid()`. Phase 90 builds locks on top.
 
 4. **Should the `_session_uuid` be exposed to client-side JavaScript?**
    - What we know: HANDOFF item 6 says "Use this as the stable cache key wherever caching survives Path B" — purely server-side.
    - What's unclear: Will any client-side feature ever need it (e.g., for client-side rate limiting display)?
-   - Recommendation: NO for Phase 87. If a future phase needs it client-side, add an explicit handler (and HMAC it to prevent leakage).
+   - RESOLVED — Recommendation: NO for Phase 87. If a future phase needs it client-side, add an explicit handler (and HMAC it to prevent leakage).
 
 5. **Auth_state.py allowlist or migration?**
    - What we know: `GlobalAuthState.get_user()` (line 42) and `.get_profile()` (line 50) wrap their own try/except inline.
    - What's unclear: Should Phase 87 migrate these now, or wait for Phase 91 (AUTHW-01 explicitly migrates auth_state.py)?
-   - Recommendation: ALLOWLIST in Phase 87 with justification "Phase 91 AUTHW-01 will migrate". Avoid duplicating Phase 91's work.
+   - RESOLVED — Recommendation: ALLOWLIST in Phase 87 with justification "Phase 91 AUTHW-01 will migrate". Avoid duplicating Phase 91's work.
 
 ## Environment Availability
 

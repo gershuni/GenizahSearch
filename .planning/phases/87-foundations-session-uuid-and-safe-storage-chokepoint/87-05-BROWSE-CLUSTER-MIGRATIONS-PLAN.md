@@ -8,6 +8,7 @@ files_modified:
   - web/pages/browse.py
   - web/pages/browse_state.py
   - web/pages/catalog_browse.py
+  - tests/test_browse_state.py
 autonomous: true
 requirements:
   - FOUND-02
@@ -21,37 +22,52 @@ tags:
 must_haves:
   truths:
     - "web/pages/browse.py raw accesses reduced from 4 to 0 (lines 1122, 1214, 2080, 2115)"
-    - "web/pages/browse_state.py raw accesses reduced from 11 to 0 (lines 127, 137, 147, 153, 174, 180, 184, 197, 203, 224 — plus the inline guard wrappers removed)"
+    - "web/pages/browse_state.py raw accesses reduced from 11 to 0 — but only after defensive wrapper audit per M3"
     - "web/pages/catalog_browse.py raw accesses reduced from 3 to 0 (lines 339, 954, 962)"
-    - "tests/test_browse_state.py passes (existing 7+ tests preserved)"
+    - "tests/test_browse_state.py monkeypatch targets updated to include web.safe_storage.app (B3 fix); all 7 existing tests still pass"
+    - "restore_browse_snapshot preserves independent read semantics for browse_position and reading_desk_state per M2 — one being absent must NOT short-circuit the other"
     - "Plan 02 + Plan 03 invariants preserved"
   artifacts:
     - path: "web/pages/browse.py"
       provides: "Migrated 4 sites: reading_desk_state read (1122), browse_export_data write (1214), 2 show_translations reads (2080, 2115)"
       contains: "from web.safe_storage import"
     - path: "web/pages/browse_state.py"
-      provides: "Migrated 11 sites in restore_browse_snapshot + persist_browse_snapshot + clear_browse_snapshot; inline try/except guards removed"
+      provides: "Migrated 11 sites in restore_browse_snapshot + persist_browse_snapshot + clear_browse_snapshot; defensive wrappers preserved per M3; independent read semantics preserved per M2"
       contains: "safe_user_get, safe_user_set, safe_user_pop"
     - path: "web/pages/catalog_browse.py"
       provides: "Migrated 3 sites: show_translations read (339), incoming_filters writes (954, 962)"
       contains: "safe_user_get"
+    - path: "tests/test_browse_state.py"
+      provides: "Monkeypatch updated to also patch web.safe_storage.app — required because browse_state.py reads/writes now go through safe_storage helpers (B3 fix)"
+      contains: "patch('web.safe_storage.app')"
   key_links:
     - from: "web/pages/browse_state.py restore_browse_snapshot"
       to: "safe_user_get for schema_version + browse_position + reading_desk_state + session_persistence_enabled"
-      via: "single-call replacement of inline try/except guards"
+      via: "independent calls; one absent value does NOT short-circuit the other (M2)"
       pattern: "safe_user_get\\('browse_position'\\)"
     - from: "web/pages/browse.py reading desk restore"
       to: "safe_user_get('reading_desk_state')"
       via: "drop-in replacement at line 1122"
       pattern: "safe_user_get\\('reading_desk_state'\\)"
+    - from: "tests/test_browse_state.py"
+      to: "web.safe_storage.app"
+      via: "B3 monkeypatch target update"
+      pattern: "patch\\('web\\.safe_storage\\.app'\\)"
 ---
 
 <objective>
-Migrate the three browse-related files (`browse.py`, `browse_state.py`, `catalog_browse.py`) from raw `app.storage.user.*` access to `web.safe_storage` helpers. Total: 18 raw access sites migrated; `browse_state.py`'s inline try/except guards (which predate the safe_storage module) are replaced with single-line helper calls.
+Migrate the three browse-related files (`browse.py`, `browse_state.py`, `catalog_browse.py`) from raw `app.storage.user.*` access to `web.safe_storage` helpers. Total: 18 raw access sites migrated. ALSO update `tests/test_browse_state.py` to keep the existing 7 test cases working after the production code moves storage access through `web.safe_storage` (B3 fix).
+
+**REVISION (B3, M1, M2, M3, M4 from 87-REVIEWS.md):**
+- **B3 (BLOCKER):** `tests/test_browse_state.py` currently patches `web.pages.browse_state.app` (the module-level `from nicegui import app` import in browse_state.py). After this plan, browse_state.py's reads go through `safe_user_get` which itself reads from `web.safe_storage.app`. The existing monkeypatch would become a no-op and the tests would fail despite production code being correct. Fix: update the test file to ALSO patch `web.safe_storage.app` (or to patch ONLY `web.safe_storage.app` since browse_state.py no longer touches `app.storage.user` directly).
+- **M2 (MEDIUM — snapshot semantics):** Plan 05 reads `browse_position` and `reading_desk_state` INDEPENDENTLY in `restore_browse_snapshot`. A missing `browse_position` MUST NOT short-circuit the `reading_desk_state` read. Before/after code example included in Task 2.
+- **M3 (MEDIUM — defensive wrappers):** Some try/except blocks in browse_state.py catch JSON parsing or value-shape errors in addition to storage prune. Those wrappers are PRESERVED; only AssertionError-only wrappers are collapsed.
+- **M1:** All acceptance criteria use `pytest tests/test_no_raw_storage_access.py` invocations, not grep.
+- **M4:** Windows-safe Python one-liners throughout.
 
 Purpose: The browse cluster is the page where the original v7.11.0 `/browse 500` bug surfaced (`AssertionError` on pruned session storage during reading-desk restore). The safe_storage module was created specifically to fix this class of bug; this plan completes the migration that `cca23db3` started.
 
-Output: 3 files migrated; 18 sites converted; inline try/except guards collapsed to helper calls; existing `tests/test_browse_state.py` (7 tests per HANDOFF) passes.
+Output: 3 production files migrated; 18 sites converted; existing `tests/test_browse_state.py` (7 tests) passes with updated monkeypatch.
 </objective>
 
 <execution_context>
@@ -61,6 +77,7 @@ Output: 3 files migrated; 18 sites converted; inline try/except guards collapsed
 
 <context>
 @.planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-PATTERNS.md
+@.planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-REVIEWS.md
 @web/safe_storage.py
 @web/pages/browse.py
 @web/pages/browse_state.py
@@ -80,13 +97,13 @@ Output: 3 files migrated; 18 sites converted; inline try/except guards collapsed
 'incoming_filters'                # dict — cross-page filter handoff (catalog_browse.py:954,962)
 ```
 
-<!-- Migration pattern for inline try/except (used heavily in browse_state.py): -->
+<!-- Migration pattern for AssertionError-only try/except (Class A collapse): -->
 
 Before:
 ```python
 try:
     value = app.storage.user.get(key, default)
-except (AssertionError, Exception) as e:
+except AssertionError as e:
     logger.debug(f"...: {e}")
     return default_result
 ```
@@ -94,8 +111,61 @@ except (AssertionError, Exception) as e:
 After:
 ```python
 value = safe_user_get(key, default)
-# (the outer "return default_result" path is collapsed; safe_user_get already returns default on failure)
+# (the outer "return default_result" path may need to remain as a check-on-value, NOT as except handler)
 ```
+
+<!-- Migration pattern for parsing-error try/except (Class B preserve): -->
+
+Before:
+```python
+try:
+    raw = app.storage.user.get(key)
+    parsed = json.loads(raw) if raw else {}
+except (AssertionError, json.JSONDecodeError) as e:
+    parsed = {}
+```
+
+After:
+```python
+try:
+    raw = safe_user_get(key)
+    parsed = json.loads(raw) if raw else {}
+except json.JSONDecodeError as e:
+    # AssertionError now absorbed by safe_user_get; only JSON failure remains
+    parsed = {}
+```
+
+<!-- B3 monkeypatch fix template for tests/test_browse_state.py: -->
+
+When browse_state.py uses safe_user_get/set/pop, the storage access happens
+inside web.safe_storage. Tests must patch BOTH module-level `app` imports
+(browse_state.py's own `app` for any remaining non-storage references, and
+web.safe_storage.app for the storage calls). After Plan 05 migration,
+browse_state.py has zero raw `app.storage.user` accesses — so patching
+web.safe_storage.app is SUFFICIENT (the browse_state.app patch becomes
+unnecessary but harmless).
+
+```python
+# Old (Plan-05-incompatible):
+with patch('web.pages.browse_state.app') as mock_app:
+    mock_app.storage.user = storage
+    # ... call browse_state functions
+
+# New (Plan 05 / B3 compatible):
+with patch('web.safe_storage.app') as mock_safe_app:
+    mock_safe_app.storage.user = storage
+    # ... call browse_state functions
+```
+
+Note: tests that DON'T call browse_state functions (e.g., direct calls to
+safe_storage helpers) should already use `web.safe_storage.app`. Tests in
+tests/test_browse_state.py call browse_state functions which now route
+through safe_storage — patch web.safe_storage.app.
+
+Alternative (option B in the review): introduce a shared conftest fixture
+that patches web.safe_storage.app. Chosen approach for this plan: direct
+patch replacement in the 7 existing tests because the test file is small
+and self-contained.
 </interfaces>
 </context>
 
@@ -106,12 +176,12 @@ value = safe_user_get(key, default)
   <read_first>
     - web/pages/browse.py — read at minimum:
       - Top of file (find existing imports; check for any existing `from web.safe_storage import`)
-      - Lines 1115-1135 (verify line 1122 reads `reading_desk_state` inside a "Restore reading desk state from app.storage.user after language switch" function)
+      - Lines 1115-1135 (verify line 1122 reads `reading_desk_state`; apply M3 audit)
       - Lines 1205-1225 (verify line 1214 writes `browse_export_data`)
       - Lines 2075-2090 (verify line 2080 reads `show_translations`)
       - Lines 2110-2125 (verify line 2115 reads `show_translations` — different code path)
-    - .planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-PATTERNS.md (read "web/pages/browse.py" section if present, otherwise refer to general migration pattern)
-    - web/safe_storage.py (so you know the helper signatures)
+    - .planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-PATTERNS.md (read "web/pages/browse.py" section if present)
+    - web/safe_storage.py (helper signatures reference)
   </read_first>
   <files>web/pages/browse.py</files>
   <action>
@@ -119,148 +189,149 @@ value = safe_user_get(key, default)
 
 **Step 1: Add safe_storage import.**
 
-Find the existing imports section near the top of the file. Add or extend:
+Check for existing import (Windows-safe):
+```
+python -c "import re; print(re.search(r'from web\\.safe_storage import', open('web/pages/browse.py').read()))"
+```
+
+Add or extend:
 ```python
 from web.safe_storage import safe_user_get, safe_user_set
 ```
 
-(If a partial import already exists, e.g., `from web.safe_storage import safe_user_get`, extend it to include `safe_user_set`.)
+**Step 2: Migrate 4 sites in DESCENDING line-number order (per L1 ordering principle).**
 
-**Step 2: Migrate 4 sites.**
+Order: 2115, 2080, 1214, 1122.
 
-| Line | Current | Replace With |
-|------|---------|--------------|
-| 1122 | `saved = app.storage.user.get('reading_desk_state')` | `saved = safe_user_get('reading_desk_state')` |
-| 1214 | `app.storage.user['browse_export_data'] = export_data` | `safe_user_set('browse_export_data', export_data)` |
-| 2080 | `_browse_show_trans = app.storage.user.get('show_translations', False)` | `_browse_show_trans = safe_user_get('show_translations', False)` |
-| 2115 | `_show_trans_browse = app.storage.user.get('show_translations', False)` | `_show_trans_browse = safe_user_get('show_translations', False)` |
+| Order | Line | Before | After |
+|-------|------|--------|-------|
+| 1 | 2115 | `_show_trans_browse = app.storage.user.get('show_translations', False)` | `_show_trans_browse = safe_user_get('show_translations', False)` |
+| 2 | 2080 | `_browse_show_trans = app.storage.user.get('show_translations', False)` | `_browse_show_trans = safe_user_get('show_translations', False)` |
+| 3 | 1214 | `app.storage.user['browse_export_data'] = export_data` | `safe_user_set('browse_export_data', export_data)` |
+| 4 | 1122 | `saved = app.storage.user.get('reading_desk_state')` | `saved = safe_user_get('reading_desk_state')` |
 
-NOTE: At line 1122, the surrounding code may have an outer try/except guarding `app.storage.user.get('reading_desk_state')` against AssertionError. Read 5 lines of context before/after to confirm. If the try/except wraps ONLY the storage read, simplify by removing it. If it wraps additional code (e.g., JSON parsing of the returned value), keep the outer wrapper but replace the inner storage call with `safe_user_get`.
+**Apply M3 audit at line 1122:** Read 10 lines around line 1122. The current code may have a try/except wrapper that catches AssertionError. Likely BUT NOT GUARANTEED to also catch JSON-shape errors when iterating over `saved.entries`. Classify:
 
-**Step 3: Verify.**
+- Class A (collapse): if the except clause is `except AssertionError:` or `except Exception:` with body that just returns default. Replace and collapse.
+- Class B (preserve): if there is additional parsing after the get (e.g., `saved = json.loads(...)` or `saved.get('entries', [])`) inside the same try. Keep the outer try but replace ONLY the storage call.
 
-```bash
-grep -c "app\.storage\.user" web/pages/browse.py     # expect 0
-grep -c "safe_user_get\|safe_user_set" web/pages/browse.py  # expect at least 4 (1 import + 3 reads + 1 write = 5)
-python -c "import ast; ast.parse(open('web/pages/browse.py').read())"
+When in doubt, preserve the wrapper.
+
+**Step 3: Verify (Windows-safe).**
+
+```
+python -c "import ast; ast.parse(open('web/pages/browse.py').read()); print('parses OK')"
 ruff check web/pages/browse.py
+python -c "import sys, pathlib; sys.path.insert(0, '.'); from tests.test_no_raw_storage_access import _scan_file; v = _scan_file(pathlib.Path('web/pages/browse.py'), pathlib.Path('web/pages/browse.py').read_text(encoding='utf-8')); assert len(v) == 0, v; print('OK')"
 ```
   </action>
   <verify>
-    <automated>grep -c "app\.storage\.user" web/pages/browse.py</automated>
+    <automated>python -c "import sys, pathlib; sys.path.insert(0, '.'); from tests.test_no_raw_storage_access import _scan_file; v = _scan_file(pathlib.Path('web/pages/browse.py'), pathlib.Path('web/pages/browse.py').read_text(encoding='utf-8')); assert len(v) == 0, v; print('OK')"</automated>
   </verify>
   <acceptance_criteria>
-    - `grep -c "app\.storage\.user" web/pages/browse.py` returns 0
-    - `grep -c "from web.safe_storage import" web/pages/browse.py` returns 1
-    - `grep -c "safe_user_get\|safe_user_set" web/pages/browse.py` returns at least 4
-    - `grep -c "'reading_desk_state'" web/pages/browse.py` returns at least 1 (key preserved)
-    - `grep -c "'browse_export_data'" web/pages/browse.py` returns at least 1 (key preserved)
-    - `grep -c "'show_translations'" web/pages/browse.py` returns at least 2 (both reads preserved)
     - File parses: `python -c "import ast; ast.parse(open('web/pages/browse.py').read())"` exits 0
     - `ruff check web/pages/browse.py` exits 0
-    - `pytest tests/test_safe_storage.py tests/test_session_uuid.py -x` exits 0 (Plan 02 preserved)
+    - AST scanner reports 0 violations for browse.py (verified by `<verify>`)
+    - safe_storage import present: verified via Python regex
+    - Keys preserved (no accidental rename): `python -c "import re; src = open('web/pages/browse.py').read(); [print(k, 'count:', len(re.findall(rf\"'{k}'\", src))) for k in ['reading_desk_state', 'browse_export_data', 'show_translations']]"` — each ≥1
+    - `pytest tests/test_safe_storage.py tests/test_session_uuid.py -x` exits 0
   </acceptance_criteria>
-  <done>browse.py: 4 → 0 raw accesses; ruff happy; tests preserved.</done>
+  <done>browse.py: 4 sites migrated; 0 AST violations; M3 wrappers handled per audit.</done>
 </task>
 
 <task type="auto">
-  <name>Task 2: Migrate web/pages/browse_state.py (11 sites + collapse inline try/except guards)</name>
+  <name>Task 2: Migrate web/pages/browse_state.py (11 sites) — PRESERVE M2 independent-read semantics + M3 defensive wrappers</name>
   <read_first>
-    - web/pages/browse_state.py FULL FILE (this is a small focused file — read it entirely; understand the 3 main functions: `restore_browse_snapshot`, `persist_browse_snapshot`, and the `_BROWSE_SNAPSHOT_VERSION` constant; per research and PATTERNS.md lines 126-130, 147-156, 174-203, 224 are the migration targets)
-    - tests/test_browse_state.py (FULL FILE — this is the regression-test contract; 7+ tests per HANDOFF including pruned-session AssertionError handling; understand what the tests assert so your migration preserves the contract)
-    - .planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-PATTERNS.md (read "web/pages/browse_state.py" section — has explicit before/after for the inline-guard pattern collapse)
+    - web/pages/browse_state.py FULL FILE (this is a small focused file — read it entirely; understand the 3 main functions: `restore_browse_snapshot`, `persist_browse_snapshot`, `clear_browse_snapshot`)
+    - tests/test_browse_state.py (FULL FILE — this is the regression-test contract; 7 tests; understand what each test asserts so your migration preserves the contract)
+    - .planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-PATTERNS.md ("web/pages/browse_state.py" section)
+    - .planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-REVIEWS.md (M2 independent-read semantics; M3 defensive wrappers)
   </read_first>
   <files>web/pages/browse_state.py</files>
   <action>
-**File: `web/pages/browse_state.py`** — 11 raw access sites, all wrapped in inline `try: ... except (AssertionError, Exception): ...` guards that PREDATE the safe_storage module. This task replaces those inline guards with single-line helper calls.
+**File: `web/pages/browse_state.py`** — 11 raw access sites. The original implementation uses inline `try: ... except (AssertionError, Exception): ...` guards that PREDATE the safe_storage module. This task replaces those guards but PRESERVES anything catching non-storage errors (M3) AND preserves independent-read semantics for `browse_position` vs `reading_desk_state` (M2).
 
 **Step 1: Add safe_storage import.**
 
-At the top of the file (after existing imports — check first with grep):
 ```python
 from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop
 ```
 
-**Step 2: Read the file end-to-end and understand the structure.**
+**Step 2: Read the file end-to-end and build a site-to-pattern map.**
 
-The file has three main functions per research:
-- `restore_browse_snapshot(state)` — lines ~120-160 (reads from storage; returns the restored state or None)
-- `persist_browse_snapshot(state, page)` — lines ~170-210 (writes to storage)
-- `clear_browse_snapshot(state)` or similar cleanup at line ~224 (pops keys)
-
-Map every raw access to its containing function before editing. Per research the line numbers are:
-- 127: read `'browse_snapshot_schema_version'` (in restore)
-- 137: write `'browse_snapshot_schema_version'` (somewhere — maybe a migration upgrade path)
-- 147: read `'browse_position'` (in restore)
-- 153: read `'reading_desk_state'` (in restore)
-- 174: read `'session_persistence_enabled'` (in persist — gates whether to write)
-- 180: write `'browse_snapshot_schema_version'` (in persist)
-- 184: write `'browse_position'` (in persist)
-- 197: write `'reading_desk_state'` (in persist, conditional on having reading-desk data)
-- 203: pop `'reading_desk_state'` (in persist, when no reading-desk data)
-- 224: pop arbitrary `key` (in clear or similar)
-
-**Step 3: Replace each site.**
-
-Approach: for EACH line listed, read the surrounding 5-10 lines of context and apply the pattern below.
-
-| Site | Pattern to Apply |
-|------|------------------|
-| Read sites (127, 147, 153, 174) | Replace `try: x = app.storage.user.get(KEY, DEFAULT); except (AssertionError, Exception) as e: logger.debug(...); return ...` with `x = safe_user_get(KEY, DEFAULT)` and remove the surrounding try/except. If the outer return-on-failure is needed, retain it but key it off the value (e.g., `if x is None: return None`). |
-| Write sites (137, 180, 184, 197) | Replace `try: app.storage.user[KEY] = VALUE; except Exception as e: logger.error(...)` with `safe_user_set(KEY, VALUE)`. Drop the outer try/except. |
-| Pop sites (203, 224) | Replace `try: app.storage.user.pop(KEY, None); except Exception: pass` with `safe_user_pop(KEY, None)`. Drop the outer try/except. |
-
-CONCRETE EXAMPLE for `restore_browse_snapshot` (lines 126-156 per research):
-
-BEFORE:
-```python
-    try:
-        stored_version = app.storage.user.get('browse_snapshot_schema_version', 0)
-    except (AssertionError, Exception) as e:
-        logger.debug(f"[BrowseSnapshot] user storage unavailable on restore: {e}")
-        return (None, None)
-
-    if stored_version != _BROWSE_SNAPSHOT_VERSION:
-        # Migration upgrade path
-        try:
-            app.storage.user['browse_snapshot_schema_version'] = _BROWSE_SNAPSHOT_VERSION
-        except (AssertionError, Exception):
-            pass
-        return (None, None)
-
-    try:
-        pos = app.storage.user.get('browse_position')
-    except (AssertionError, Exception):
-        return (None, None)
-
-    try:
-        desk = app.storage.user.get('reading_desk_state')
-    except (AssertionError, Exception):
-        desk = None
+Run:
+```
+python -c "import re; src = open('web/pages/browse_state.py').read(); [print(i, line.strip()) for i, line in enumerate(src.splitlines(), start=1) if 'app.storage.user' in line]"
 ```
 
-AFTER:
+This gives you the 11 lines. Cross-reference with the line numbers in the research (127, 137, 147, 153, 174, 180, 184, 197, 203, 224) — line numbers may have drifted; trust the grep output.
+
+**Step 3: M2 — Preserve independent-read semantics in `restore_browse_snapshot`.**
+
+This is the MEDIUM finding from the cross-AI review. The original code reads `browse_position` and `reading_desk_state` as TWO SEPARATE reads, and the function returns a 2-tuple `(pos, desk)` where each can independently be None.
+
+**The CORRECT migration (preserves M2 semantics):**
+
 ```python
+def restore_browse_snapshot(state):
+    """Restore browse position and reading desk from storage. Returns (pos, desk)."""
     stored_version = safe_user_get('browse_snapshot_schema_version', 0)
 
-    if stored_version != _BROWSE_SNAPSHOT_VERSION:
-        safe_user_set('browse_snapshot_schema_version', _BROWSE_SNAPSHOT_VERSION)
+    if stored_version != _BROWSE_SNAPSHOT_VERSION and stored_version != 0:
+        # Stale version — wipe both
+        safe_user_pop('browse_position', None)
+        safe_user_pop('reading_desk_state', None)
+        safe_user_pop('browse_snapshot_schema_version', None)
         return (None, None)
 
+    # M2: read browse_position and reading_desk_state INDEPENDENTLY.
+    # Either can be present without the other. A missing browse_position must
+    # NOT cause reading_desk_state to be returned as None — the test
+    # `test_clear_snapshot_keep_position_preserves_position` exercises the
+    # inverse case (position present, desk absent).
     pos = safe_user_get('browse_position')
-    if pos is None:
-        return (None, None)
-
     desk = safe_user_get('reading_desk_state')
+
+    # Version stamp adoption: if stored_version == 0 (no stamp present) and we
+    # have either pos or desk, adopt the current schema version (per the test
+    # `test_missing_stamp_adopts_legacy_payload`).
+    if stored_version == 0 and (pos is not None or desk is not None):
+        safe_user_set('browse_snapshot_schema_version', _BROWSE_SNAPSHOT_VERSION)
+
+    return (pos, desk)
 ```
 
-NOTE 1: The original returned `(None, None)` on AssertionError for the `pos` read. With `safe_user_get`, the helper returns `None` (the default) on AssertionError. So the explicit `if pos is None: return (None, None)` preserves the original semantics IF the caller distinguishes "key absent" from "storage unavailable" — and the existing code DID NOT distinguish (both branches returned `(None, None)`). So the migration is semantically equivalent.
+**INCORRECT pattern (collapsed and broken — DO NOT do this):**
 
-NOTE 2: For the `desk` read, the original set `desk = None` on AssertionError; `safe_user_get(key)` returns `None` by default if key is missing OR storage is unavailable. Equivalent.
+```python
+def restore_browse_snapshot(state):
+    pos = safe_user_get('browse_position')
+    if pos is None:
+        return (None, None)  # ← BUG: this short-circuits the desk read!
+    desk = safe_user_get('reading_desk_state')
+    return (pos, desk)
+```
 
-CONCRETE EXAMPLE for `persist_browse_snapshot` (lines 174-203 per research):
+The bug above would cause `test_clear_snapshot_keep_position_preserves_position` to fail because it asserts that when position is present (and desk was just cleared), `pos != None` and `desk == None` — but the buggy code would short-circuit and return `(None, None)` if position were absent in a different test scenario. **Read both independently; let each return its own value.**
 
-BEFORE:
+Read the CURRENT body of `restore_browse_snapshot` carefully. The original code at lines 127, 147, 153 likely already reads each key independently (just wrapped in separate try/except blocks). The migration substitutes the storage calls but preserves the independent-read structure.
+
+**Step 4: M3 — Audit each try/except wrapper.**
+
+For each of the 11 sites, classify the surrounding try/except:
+
+- **Class A (collapse):** `except AssertionError:` or `except (AssertionError, Exception) as e: logger.debug(...); return default`. The wrapper only absorbs storage prune. Collapse to `safe_user_get(key, default)`.
+- **Class B (preserve):** Any except clause catching json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError, or any combination not exclusively storage-related. Keep the wrapper but replace the inner storage call with the helper.
+
+For `browse_state.py` specifically, the predominant pattern per research is Class A — the wrappers exist solely to absorb the prune AssertionError. Most will collapse cleanly.
+
+**Step 5: Migrate each site.**
+
+Approach: edit the file ONE FUNCTION AT A TIME, applying the M2/M3 rules.
+
+CONCRETE EXAMPLE for `persist_browse_snapshot`:
+
+BEFORE (per research, lines 174-203):
 ```python
         if not app.storage.user.get('session_persistence_enabled', True):
             return
@@ -276,6 +347,8 @@ BEFORE:
             logger.error(f"[BrowseSnapshot] Error persisting state: {e}")
 ```
 
+Analyze: the outer try/except is Class A (absorbs prune-race during multi-key write). Collapse:
+
 AFTER:
 ```python
         if not safe_user_get('session_persistence_enabled', True):
@@ -289,50 +362,140 @@ AFTER:
             safe_user_pop('reading_desk_state', None)
 ```
 
-NOTE: Drop the outer try/except — each helper absorbs its own exception. The previous `logger.error` was a single combined error log; the helpers log individually at warning level for unexpected exceptions, which is equivalent observability.
+**Step 6: Run the test file BEFORE updating it (intentional — Task 3 updates the monkeypatches).**
 
-**Step 4: Verify the tests still pass.**
-
-The file `tests/test_browse_state.py` exists with 7 tests including pruned-session AssertionError handling. The migration MUST NOT break these tests. Run:
-```bash
-pytest tests/test_browse_state.py -x -v
+```
+python -m pytest tests/test_browse_state.py -x -v
 ```
 
-Expected: all 7+ tests pass.
+Expected: **some or all tests FAIL**. This is the B3 evidence — the existing tests patch `web.pages.browse_state.app`, which after migration is no longer the storage access point. Task 3 fixes the tests.
 
-If a test fails, the migration changed semantics. Common pitfall: the original code had a path that wrote `app.storage.user.pop(key, None)` WITHOUT a default — `safe_user_pop(key, None)` preserves the default-None semantics. Verify by reading the test that fails to understand the assertion.
+**Step 7: Verify (Windows-safe).**
 
-**Step 5: Final verification.**
-
-```bash
-grep -c "app\.storage\.user" web/pages/browse_state.py     # expect 0
-grep -c "safe_user_get\|safe_user_set\|safe_user_pop" web/pages/browse_state.py  # expect at least 11 (1 import + 10 calls)
-python -c "import ast; ast.parse(open('web/pages/browse_state.py').read())"
+```
+python -c "import ast; ast.parse(open('web/pages/browse_state.py').read()); print('parses OK')"
 ruff check web/pages/browse_state.py
-pytest tests/test_browse_state.py -x
+python -c "import sys, pathlib; sys.path.insert(0, '.'); from tests.test_no_raw_storage_access import _scan_file; v = _scan_file(pathlib.Path('web/pages/browse_state.py'), pathlib.Path('web/pages/browse_state.py').read_text(encoding='utf-8')); assert len(v) == 0, v; print('OK')"
 ```
   </action>
   <verify>
-    <automated>pytest tests/test_browse_state.py -x</automated>
+    <automated>python -c "import sys, pathlib; sys.path.insert(0, '.'); from tests.test_no_raw_storage_access import _scan_file; v = _scan_file(pathlib.Path('web/pages/browse_state.py'), pathlib.Path('web/pages/browse_state.py').read_text(encoding='utf-8')); assert len(v) == 0, v; print('OK')"</automated>
   </verify>
   <acceptance_criteria>
-    - `grep -c "app\.storage\.user" web/pages/browse_state.py` returns 0
-    - `grep -c "from web.safe_storage import" web/pages/browse_state.py` returns 1
-    - `grep -c "safe_user_get\|safe_user_set\|safe_user_pop" web/pages/browse_state.py` returns at least 11
-    - `grep -c "'browse_snapshot_schema_version'" web/pages/browse_state.py` returns at least 2 (read + write preserved)
-    - `grep -c "'browse_position'" web/pages/browse_state.py` returns at least 2 (read + write preserved)
-    - `grep -c "'reading_desk_state'" web/pages/browse_state.py` returns at least 3 (read + write + pop preserved)
-    - `grep -c "'session_persistence_enabled'" web/pages/browse_state.py` returns at least 1 (read preserved)
     - File parses: `python -c "import ast; ast.parse(open('web/pages/browse_state.py').read())"` exits 0
     - `ruff check web/pages/browse_state.py` exits 0
-    - `pytest tests/test_browse_state.py -x` exits 0 (7+ tests pass)
-    - `pytest tests/test_safe_storage.py tests/test_session_uuid.py -x` exits 0 (Plan 02 preserved)
+    - AST scanner reports 0 violations for browse_state.py (verified by `<verify>`)
+    - safe_storage import present
+    - **M2 preserved:** `restore_browse_snapshot` reads `browse_position` and `reading_desk_state` via SEPARATE `safe_user_get` calls (not nested or short-circuited). Manual verification by reading the function body: `python -c "import re; src = open('web/pages/browse_state.py').read(); m = re.search(r'def restore_browse_snapshot.*?(?=\\ndef )', src, re.DOTALL); body = m.group(0); assert \"safe_user_get('browse_position')\" in body and \"safe_user_get('reading_desk_state')\" in body; print('OK')"` prints `OK`
+    - Schema keys preserved: `python -c "import re; src = open('web/pages/browse_state.py').read(); keys = ['browse_snapshot_schema_version', 'browse_position', 'reading_desk_state', 'session_persistence_enabled']; missing = [k for k in keys if f\"'{k}'\" not in src]; assert not missing, missing; print('OK')"` prints `OK`
+    - **M3 audit recorded:** SUMMARY notes which try/except blocks were collapsed (Class A) vs preserved (Class B), counted per function
   </acceptance_criteria>
-  <done>browse_state.py: 11 → 0 raw accesses; inline try/except guards collapsed; test_browse_state.py still green.</done>
+  <done>browse_state.py: 0 AST violations; M2 independent-read semantics preserved; M3 defensive wrappers audited and handled.</done>
 </task>
 
 <task type="auto">
-  <name>Task 3: Migrate web/pages/catalog_browse.py (3 sites at lines 339, 954, 962)</name>
+  <name>Task 3: Update tests/test_browse_state.py monkeypatches to web.safe_storage.app (B3 BLOCKER fix)</name>
+  <read_first>
+    - tests/test_browse_state.py (FULL FILE — read all 7 tests; identify every `patch('web.pages.browse_state.app')` site)
+    - web/pages/browse_state.py (AFTER Task 2 — verify it no longer has any `app.storage.user` text and now uses `safe_user_get/set/pop`)
+    - tests/test_search_state.py lines 159-170 (REFERENCE — `test_stale_version_discards_snapshot` already patches BOTH `web.pages.search_state.app` AND `web.safe_storage.app`. Same pattern applies here.)
+    - .planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-REVIEWS.md (B3 description)
+  </read_first>
+  <files>tests/test_browse_state.py</files>
+  <action>
+**B3 BLOCKER FIX:** Update `tests/test_browse_state.py` so its monkeypatches work against the migrated production code.
+
+After Task 2, `web/pages/browse_state.py` reads from / writes to `app.storage.user` ONLY via `web.safe_storage.safe_user_*` helpers. The helpers in `web/safe_storage.py` use `app.storage.user.get(key)` etc., where `app` is the module-level import in `web.safe_storage`. So tests must patch `web.safe_storage.app`.
+
+The current test file patches `web.pages.browse_state.app` — after Task 2, browse_state.py still has `from nicegui import app` (likely) but doesn't access `.storage.user` through it directly. Patching `browse_state.app` has no effect on storage reads anymore.
+
+**Step 1: Survey existing patches.**
+
+Windows-safe:
+```
+python -c "import re; src = open('tests/test_browse_state.py').read(); [print(i, line.strip()) for i, line in enumerate(src.splitlines(), start=1) if 'patch(' in line]"
+```
+
+Expected: 7 occurrences of `patch('web.pages.browse_state.app')`.
+
+**Step 2: Replace each patch target.**
+
+For EACH `patch('web.pages.browse_state.app')` occurrence, replace it with `patch('web.safe_storage.app')`. The variable name `mock_app` and the inner `mock_app.storage.user = storage` line do NOT change — only the patch target string changes.
+
+CONCRETE EXAMPLE:
+
+BEFORE:
+```python
+def test_missing_stamp_adopts_legacy_payload():
+    storage = {
+        'browse_position': {...},
+        'reading_desk_state': {...},
+    }
+    with patch('web.pages.browse_state.app') as mock_app:
+        mock_app.storage.user = storage
+        from web.pages.browse_state import BrowseState, restore_browse_snapshot
+        pos, desk = restore_browse_snapshot(BrowseState())
+        ...
+```
+
+AFTER:
+```python
+def test_missing_stamp_adopts_legacy_payload():
+    storage = {
+        'browse_position': {...},
+        'reading_desk_state': {...},
+    }
+    with patch('web.safe_storage.app') as mock_app:
+        mock_app.storage.user = storage
+        from web.pages.browse_state import BrowseState, restore_browse_snapshot
+        pos, desk = restore_browse_snapshot(BrowseState())
+        ...
+```
+
+Apply this substitution to all 7 occurrences.
+
+**Step 3 (defensive — handle dual-patch test if any).**
+
+Some tests may patch BOTH `browse_state.app` AND `safe_storage.app` (as `test_search_state.py:test_stale_version_discards_snapshot` already does). If so, keep both patches or simplify to just `safe_storage.app`. Either works; pick the simpler form.
+
+**Step 4: Run the test file.**
+
+```
+python -m pytest tests/test_browse_state.py -x -v
+```
+
+Expected: **all 7 tests pass**.
+
+Common failure modes:
+- If tests still fail with AssertionError about storage not being available: confirm browse_state.py's migration removed ALL `app.storage.user` references.
+- If a test fails on a specific assertion about returned values: check whether M2 semantics were preserved in Task 2 (the test you'd expect to break first is `test_clear_snapshot_keep_position_preserves_position`).
+- If a test fails on `mock_app.storage.tab` not being set: browse_state.py might also use `app.storage.tab` (verify; if so, this plan needs a small extension to also wrap tab storage, OR keep `web.pages.browse_state.app` patched in tests that use tab storage).
+
+**Step 5: Verify test count and patch target consistency.**
+
+```
+python -c "import re; src = open('tests/test_browse_state.py').read(); print('test functions:', len(re.findall(r'^def test_', src, re.MULTILINE))); print('patch(safe_storage.app):', len(re.findall(r\"patch\\('web\\.safe_storage\\.app'\\)\", src))); print('patch(browse_state.app):', len(re.findall(r\"patch\\('web\\.pages\\.browse_state\\.app'\\)\", src)))"
+```
+
+Expected: 7 test functions, 7 patches to web.safe_storage.app, 0 patches to web.pages.browse_state.app.
+
+(If any test patches both — for tab storage reasons — the count of `web.pages.browse_state.app` patches might be >0. Document in SUMMARY.)
+  </action>
+  <verify>
+    <automated>python -m pytest tests/test_browse_state.py -x</automated>
+  </verify>
+  <acceptance_criteria>
+    - `python -m pytest tests/test_browse_state.py -x` exits 0 (all 7 tests pass)
+    - The test file has 7 `def test_*` functions: verified via Python regex
+    - All `patch('web.pages.browse_state.app')` occurrences are EITHER replaced with `patch('web.safe_storage.app')` OR retained alongside an additional `patch('web.safe_storage.app')` patch (for tests using tab storage). Verified by ensuring at least 7 `patch('web.safe_storage.app')` occurrences exist OR the test passes (functional gate)
+    - `pytest tests/test_safe_storage.py tests/test_session_uuid.py -x` exits 0 (Plan 02 invariants preserved)
+    - `pytest tests/test_no_raw_storage_access.py::test_allowlist_well_formed tests/test_no_raw_storage_access.py::test_lint_rejects_synthetic_violation tests/test_no_raw_storage_access.py::test_lint_handles_aliased_imports tests/test_no_raw_storage_access.py::test_lint_does_not_double_report_nested_nodes -x` exits 0 (Plan 01 standalone tests still pass)
+  </acceptance_criteria>
+  <done>test_browse_state.py: 7 tests pass after monkeypatch update; B3 BLOCKER closed.</done>
+</task>
+
+<task type="auto">
+  <name>Task 4: Migrate web/pages/catalog_browse.py (3 sites at lines 339, 954, 962)</name>
   <read_first>
     - web/pages/catalog_browse.py — read lines 335-345 (verify line 339 reads `'show_translations'`), lines 945-970 (verify lines 954, 962 write `'incoming_filters'` — likely 2 different conditional branches)
     - .planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-PATTERNS.md (if "web/pages/catalog_browse.py" section exists, follow it; otherwise use the generic settings.py pattern)
@@ -347,43 +510,40 @@ pytest tests/test_browse_state.py -x
 from web.safe_storage import safe_user_get, safe_user_set
 ```
 
-**Step 2: Migrate 3 sites.**
+**Step 2: Migrate 3 sites in DESCENDING line-number order.**
 
-| Line | Current | Replace With |
-|------|---------|--------------|
-| 339 | `_show_cat_trans = app.storage.user.get('show_translations', False)` | `_show_cat_trans = safe_user_get('show_translations', False)` |
-| 954 | `app.storage.user['incoming_filters'] = incoming` | `safe_user_set('incoming_filters', incoming)` |
-| 962 | `app.storage.user['incoming_filters'] = incoming` | `safe_user_set('incoming_filters', incoming)` |
+| Order | Line | Before | After |
+|-------|------|--------|-------|
+| 1 | 962 | `app.storage.user['incoming_filters'] = incoming` | `safe_user_set('incoming_filters', incoming)` |
+| 2 | 954 | `app.storage.user['incoming_filters'] = incoming` | `safe_user_set('incoming_filters', incoming)` |
+| 3 | 339 | `_show_cat_trans = app.storage.user.get('show_translations', False)` | `_show_cat_trans = safe_user_get('show_translations', False)` |
 
-NOTE 1: Lines 954 and 962 write the same key from different branches. Don't try to dedupe them — preserve the branching structure. Just substitute the single line in each branch.
+NOTE 1: Lines 954 and 962 write the same key from different branches. Don't dedupe — preserve the branching structure.
 
 NOTE 2: Per Codex round 4 MEDIUM-2, the `incoming_filters` writes are cross-page handoff state — when a user clicks a catalog row, filters are written here so the destination page can read them. The `safe_user_set` wrapper is the correct migration target; behavior is equivalent.
 
-**Step 3: Verify.**
+**M3 audit:** Reading 5 lines around each site to check for wrappers; collapse Class A, preserve Class B.
 
-```bash
-grep -c "app\.storage\.user" web/pages/catalog_browse.py     # expect 0
-grep -c "safe_user_get\|safe_user_set" web/pages/catalog_browse.py  # expect at least 3 (1 import + 3 sites = 4)
-grep -c "'show_translations'" web/pages/catalog_browse.py    # expect at least 1
-grep -c "'incoming_filters'" web/pages/catalog_browse.py     # expect at least 2 (both writes preserved)
-python -c "import ast; ast.parse(open('web/pages/catalog_browse.py').read())"
+**Step 3: Verify (Windows-safe).**
+
+```
+python -c "import ast; ast.parse(open('web/pages/catalog_browse.py').read()); print('parses OK')"
 ruff check web/pages/catalog_browse.py
+python -c "import sys, pathlib; sys.path.insert(0, '.'); from tests.test_no_raw_storage_access import _scan_file; v = _scan_file(pathlib.Path('web/pages/catalog_browse.py'), pathlib.Path('web/pages/catalog_browse.py').read_text(encoding='utf-8')); assert len(v) == 0, v; print('OK')"
 ```
   </action>
   <verify>
-    <automated>grep -c "app\.storage\.user" web/pages/catalog_browse.py</automated>
+    <automated>python -c "import sys, pathlib; sys.path.insert(0, '.'); from tests.test_no_raw_storage_access import _scan_file; v = _scan_file(pathlib.Path('web/pages/catalog_browse.py'), pathlib.Path('web/pages/catalog_browse.py').read_text(encoding='utf-8')); assert len(v) == 0, v; print('OK')"</automated>
   </verify>
   <acceptance_criteria>
-    - `grep -c "app\.storage\.user" web/pages/catalog_browse.py` returns 0
-    - `grep -c "from web.safe_storage import" web/pages/catalog_browse.py` returns 1
-    - `grep -c "safe_user_get\|safe_user_set" web/pages/catalog_browse.py` returns at least 3
-    - `grep -c "'show_translations'" web/pages/catalog_browse.py` returns at least 1
-    - `grep -c "'incoming_filters'" web/pages/catalog_browse.py` returns at least 2
-    - File parses: `python -c "import ast; ast.parse(open('web/pages/catalog_browse.py').read())"` exits 0
+    - File parses
     - `ruff check web/pages/catalog_browse.py` exits 0
+    - AST scanner reports 0 violations (verified by `<verify>`)
+    - safe_storage import present
+    - Keys preserved: `'show_translations'` ≥1, `'incoming_filters'` ≥2
     - `pytest tests/test_safe_storage.py tests/test_session_uuid.py tests/test_browse_state.py -x` exits 0
   </acceptance_criteria>
-  <done>catalog_browse.py: 3 → 0 raw accesses; ruff happy.</done>
+  <done>catalog_browse.py: 3 sites migrated; 0 AST violations.</done>
 </task>
 
 </tasks>
@@ -393,72 +553,84 @@ ruff check web/pages/catalog_browse.py
 
 | Boundary | Description |
 |----------|-------------|
-| Page navigation → app.storage.user (browse_state, catalog_browse incoming_filters) | Cross-page handoff state; safe_user_set absorbs prune-race |
+| Page navigation -> app.storage.user (browse_state, catalog_browse incoming_filters) | Cross-page handoff state; safe_user_set absorbs prune-race |
 | Reading-desk restore on language switch (browse.py:1122) | Deferred callback path — exactly the v7.11.0 /browse 500 bug site; safe_user_get is the production fix |
 
 ## STRIDE Threat Register
 
 | Threat ID | Category | Component | Disposition | Mitigation Plan |
 |-----------|----------|-----------|-------------|-----------------|
-| — | Denial of Service | /browse 500 on pruned session (the original v7.11.0 bug) | mitigate | All 18 raw sites in this plan now route through safe_storage helpers, which absorb AssertionError. The /browse 500 class of bug is closed at these specific sites. |
+| -- | Denial of Service | /browse 500 on pruned session (the original v7.11.0 bug) | mitigate | All 18 raw sites in this plan now route through safe_storage helpers, which absorb AssertionError. The /browse 500 class of bug is closed at these specific sites. |
 | T-87-04 | Tampering | Lint scanner pattern matching — N/A (no allowlist entries for these 3 files) | accept | All 3 files fully migrated; lint scanner finds zero violations |
-| — | Tampering | browse_state schema_version migration path | accept | Schema-version write inside the migration upgrade branch is wrapped by safe_user_set; if the write fails (storage pruned), the next request will retry and converge. No data corruption possible. |
-| — | Information disclosure | Cross-page incoming_filters carrying user-specific data | accept | Filters are per-session; storage is per-session; no cross-user leak introduced |
+| -- | Tampering | browse_state schema_version migration path | accept | Schema-version write inside the migration upgrade branch is wrapped by safe_user_set; if the write fails (storage pruned), the next request will retry and converge. No data corruption possible. |
+| -- | Information disclosure | Cross-page incoming_filters carrying user-specific data | accept | Filters are per-session; storage is per-session; no cross-user leak introduced |
+| -- | Test integrity (B3) | Monkeypatch target drift after migration | mitigate | Task 3 explicitly updates test_browse_state.py to patch the new storage access point. Without this, tests would pass-trivially or fail noisily — both are bad signals. |
+| -- | Data semantics (M2) | Snapshot restore short-circuit bug | mitigate | Task 2 includes explicit before/after code showing the M2-correct pattern; acceptance criteria verify both keys are read independently |
 
-This plan does not directly mitigate T-87-01/02/03 (those are Plan 02's concern). The primary value is closing the prune-race DoS class at 18 specific code paths.
+This plan does not directly mitigate T-87-01/02/03 (Plan 02's concern). Primary value: closing the prune-race DoS class at 18 specific code paths AND preserving test fidelity.
 </threat_model>
 
 <verification>
-After all 3 tasks:
+After all 4 tasks (Windows-safe):
 
-```bash
-# Verify zero raw access in all 3 files
-for f in web/pages/browse.py web/pages/browse_state.py web/pages/catalog_browse.py; do
-  count=$(grep -c "app\.storage\.user" "$f")
-  echo "$f: $count raw access (expect 0)"
-done
+```
+# Verify zero violations in all 3 production files
+python -c "
+import sys, pathlib
+sys.path.insert(0, '.')
+from tests.test_no_raw_storage_access import _scan_file
+for f in ['web/pages/browse.py', 'web/pages/browse_state.py', 'web/pages/catalog_browse.py']:
+    v = _scan_file(pathlib.Path(f), pathlib.Path(f).read_text(encoding='utf-8'))
+    print(f, 'violations:', len(v))
+    assert len(v) == 0, v
+print('OK')
+"
 
 # Verify all 3 files import safe_storage
-for f in web/pages/browse.py web/pages/browse_state.py web/pages/catalog_browse.py; do
-  count=$(grep -c "from web.safe_storage import" "$f")
-  echo "$f: $count safe_storage imports (expect 1)"
-done
+python -c "
+import re
+for f in ['web/pages/browse.py', 'web/pages/browse_state.py', 'web/pages/catalog_browse.py']:
+    has = bool(re.search(r'from web\\.safe_storage import', open(f).read()))
+    print(f, has)
+    assert has, f
+"
 
 # Verify files parse and pass ruff
 python -c "
 import ast
 for f in ['web/pages/browse.py', 'web/pages/browse_state.py', 'web/pages/catalog_browse.py']:
     ast.parse(open(f).read(), filename=f)
-print('All 3 files parse OK')
+print('All 3 production files parse OK')
 "
 ruff check web/pages/browse.py web/pages/browse_state.py web/pages/catalog_browse.py
 
-# Critical: tests/test_browse_state.py must pass (browse_state migration changes function bodies)
-pytest tests/test_browse_state.py -x -v
+# Critical (B3): tests/test_browse_state.py must pass after monkeypatch update
+python -m pytest tests/test_browse_state.py -x -v
 
-# Plan 02 + Plan 03 + Plan 04 invariants preserved
-pytest tests/test_safe_storage.py tests/test_session_uuid.py -x
-
-# Lint scanner: verify no violations in these 3 files
-pytest tests/test_no_raw_storage_access.py::test_no_raw_storage_access_outside_allowlist 2>&1 | grep -E "browse\.py|browse_state\.py|catalog_browse\.py" || echo "No violations in browse cluster"
+# Plan 01 + 02 invariants preserved
+python -m pytest tests/test_safe_storage.py tests/test_session_uuid.py -x
+python -m pytest tests/test_no_raw_storage_access.py::test_allowlist_well_formed tests/test_no_raw_storage_access.py::test_lint_rejects_synthetic_violation tests/test_no_raw_storage_access.py::test_lint_handles_aliased_imports tests/test_no_raw_storage_access.py::test_lint_does_not_double_report_nested_nodes -x
 ```
 </verification>
 
 <success_criteria>
-1. `web/pages/browse.py`: 0 raw access (was 4)
-2. `web/pages/browse_state.py`: 0 raw access (was 11)
-3. `web/pages/catalog_browse.py`: 0 raw access (was 3)
-4. All 3 files import `safe_user_get` (and set/pop where needed) from `web.safe_storage`
-5. `pytest tests/test_browse_state.py -x` passes (7+ tests)
+1. `web/pages/browse.py`: 0 AST violations (was 4)
+2. `web/pages/browse_state.py`: 0 AST violations (was 11); M2 independent-read semantics preserved
+3. `web/pages/catalog_browse.py`: 0 AST violations (was 3)
+4. **B3:** `tests/test_browse_state.py` monkeypatches updated; all 7 tests pass against migrated production code
+5. All 3 production files import safe_user_get (and set/pop where needed)
 6. `pytest tests/test_safe_storage.py tests/test_session_uuid.py -x` passes (Plan 02 invariant)
-7. `ruff check` clean on all 3 files
-8. Lint scanner reports zero violations in any of the 3 files
+7. `ruff check` clean on all 3 production files
+8. M3 audit recorded: per-file note of which try/except blocks were collapsed vs preserved
 </success_criteria>
 
 <output>
 After completion, create `.planning/phases/87-foundations-session-uuid-and-safe-storage-chokepoint/87-05-SUMMARY.md` summarizing:
-- 3 files migrated: browse.py (4 sites), browse_state.py (11 sites + inline-guard collapse), catalog_browse.py (3 sites) = 18 total
-- test_browse_state.py still green (7+ tests)
-- Inline try/except guards removed from browse_state.py functions (count of removed guards)
+- 3 production files migrated: browse.py (4 sites), browse_state.py (11 sites), catalog_browse.py (3 sites) = 18 total
+- 1 test file updated: tests/test_browse_state.py — 7 monkeypatch sites swapped from `web.pages.browse_state.app` to `web.safe_storage.app` (B3 fix)
+- test_browse_state.py: 7/7 tests pass after update
+- **M2 verification:** restore_browse_snapshot reads browse_position and reading_desk_state independently — confirmed by reading function body and by the persisting test_clear_snapshot_keep_position_preserves_position
+- **M3 audit per file:** list defensive wrappers preserved (with brief why-it-catches-non-storage rationale)
+- **B3 verification:** new monkeypatch target works; production code's path through safe_storage is exercised by tests
 - Phase 87 progress: 34 (plans 03-04) + 18 (this plan) = 52 sites migrated cumulatively
 </output>
