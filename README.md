@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.11.0
+# Genizah Search Pro 7.11.1
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,31 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.11.0?
+## What's New in Version 7.11.1?
+
+### v7.11.1: Desktop Catch-up Release
+
+This release brings the desktop installer up to par with what shipped
+to web in v7.11.0 (CUDL Coverage) plus six post-release hotfixes.
+Most user-visible benefit for desktop users:
+
+- **108 CUDL-only manuscripts now visible on desktop** — Cambridge
+  manuscripts that have no NLI Alma record (including T-S NS 329.96
+  and ~100 Mosseri/CUL entries) now appear in search results and the
+  catalog browser. Images and metadata only; no transcription text.
+- **Cambridge shelfmark search recovery** — alternative shelfmark forms
+  (Moss. III,27O ↔ mosseriiii27o, Or. numeric variants, leading zeros)
+  now resolve to the same record. Thousands of "missing" Cambridge
+  shelfmarks recovered.
+- **"View on CUDL" link** — fixed for previously-orphan classmarks.
+- **Browse pagination for image-only manuscripts** — Next/Prev now
+  works for CUDL manuscripts that have images but no transcription.
+- **Desktop comments save** — fixed a bug where Question, Scholarly
+  Note, Suggestion, and Issue silently failed to save (only General
+  worked).
+- **Web fixes also bundled** — /help 500, cross-user export filename
+  leak, /browse 500 race after stopped search, browse expanded panel
+  silently missing enrichment, lists "Sync Now" UX clarification.
 
 ### v7.11.0: CUDL Coverage & Synthetic Inventories
 
@@ -196,7 +220,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.11.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.11.1_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
