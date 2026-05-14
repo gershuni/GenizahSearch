@@ -1,7 +1,7 @@
 # GenizahSearch Supabase Guide
 
 > Guide for working with Supabase in the GenizahSearch project
-> Last updated: 2026-03-13
+> Last updated: 2026-05-14
 
 ---
 
@@ -33,6 +33,46 @@ SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ---
 
 ## Database Schema
+
+### Data API Grants for New Tables
+
+Supabase is changing the default Data API exposure model for tables in the `public` schema:
+
+- 2026-05-30: new Supabase projects no longer auto-expose new `public` tables to the Data API by default.
+- 2026-10-30: the behavior is enforced for existing projects.
+- Existing tables keep their current grants, but newly created tables need explicit grants before `supabase-js`, PostgREST, or GraphQL can access them.
+
+For every new `public` table that should be reachable through the Supabase client, include grants in the same migration as the table, RLS, and policies:
+
+```sql
+-- Grant access per role. Keep anon read-only unless the table is intentionally public-write.
+GRANT SELECT
+ON TABLE public.your_table
+TO anon;
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON TABLE public.your_table
+TO authenticated;
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON TABLE public.your_table
+TO service_role;
+
+-- SERIAL/BIGSERIAL inserts also need sequence privileges.
+GRANT USAGE, SELECT
+ON SEQUENCE public.your_table_id_seq
+TO authenticated, service_role;
+
+-- RLS and policies are still required. Grants only make the table visible to the role.
+ALTER TABLE public.your_table ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read their own rows"
+ON public.your_table
+FOR SELECT TO authenticated
+USING (auth.uid() = user_id);
+```
+
+For public-read system tables, grant only the operations the app needs. For private/user-owned tables, grant role-level access broadly enough for the Data API to reach the table, then constrain rows with RLS policies.
 
 ### Tables
 
@@ -653,10 +693,12 @@ Make sure `.env` file exists and contains valid credentials.
 
 ### "Permission denied"
 
-RLS is blocking the operation. Check:
-1. User is authenticated
-2. User owns the resource
-3. User has required role
+Either table grants or RLS may be blocking the operation. Check:
+1. The table has explicit `GRANT` statements for the current role (`anon`, `authenticated`, or `service_role`)
+2. User is authenticated
+3. User owns the resource
+4. User has required role
+5. RLS policy matches the operation
 
 ### "Connection failed"
 
@@ -677,7 +719,7 @@ You're trying to reference a non-existent record. Check that:
 
 1. **Always use helper functions** when available (in `supabase_client.py`)
 2. **Handle errors** - all functions return `{'error': ...}` on failure
-3. **Check RLS** when adding new tables
+3. **Add explicit Data API grants and check RLS** when adding new `public` tables
 4. **Use transactions** for multi-step operations
 5. **Index frequently queried columns**
 

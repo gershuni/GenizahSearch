@@ -83,6 +83,7 @@ python genizah_app.py
 3. **sys_id** - Internal unique identifier for manuscripts
 4. **fl_id** - Fragment/leaf identifier (e.g., "T-S 12.123.1r" for recto)
 5. **library_code** - Abbreviated library identifier (e.g., "CUL", "JTS", "Oxford")
+6. **Supabase Data API grants** - Every migration/provisioning script that creates a `public` table intended for `supabase-js`/PostgREST/GraphQL access must include explicit `GRANT` statements for the needed roles, in addition to RLS and policies. This is required for new projects from 2026-05-30 and existing projects from 2026-10-30.
 
 ## Data Files
 
