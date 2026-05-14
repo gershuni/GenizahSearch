@@ -12,6 +12,8 @@ import requests.adapters
 import re
 import os
 import threading
+import time as _module_time
+from collections import OrderedDict
 from genizah_core import Config
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from urllib.parse import urlparse
@@ -30,6 +32,10 @@ IMAGE_CACHE_TTL = int(os.environ.get('IMAGE_CACHE_TTL', '600'))  # 10 minutes de
 NLI_MAX_CONCURRENT_FETCHES = max(1, int(os.environ.get('NLI_MAX_CONCURRENT_FETCHES', '8')))
 NLI_SEMAPHORE_TIMEOUT = int(os.environ.get('NLI_SEMAPHORE_TIMEOUT', '20'))
 NLI_PERSISTENT_CACHE_FILE = os.path.join(Config.INDEX_DIR, 'nli_fl_ids_cache.json')
+IMAGE_CACHE_MAX_BYTES = max(0, int(os.environ.get('IMAGE_CACHE_MAX_BYTES', str(256 * 1024 * 1024))))
+IMAGE_CACHE_MAX_ENTRIES = max(0, int(os.environ.get('IMAGE_CACHE_MAX_ENTRIES', '512')))
+NLI_MEMORY_CACHE_MAX_ENTRIES = max(0, int(os.environ.get('NLI_MEMORY_CACHE_MAX_ENTRIES', '50000')))
+PUZZLE_RATE_LIMIT_BUCKET_TTL = max(60, int(os.environ.get('PUZZLE_RATE_LIMIT_BUCKET_TTL', '3600')))
 
 # Concurrency cap for NLI IIIF fetches (prevents burst-flooding the upstream)
 _nli_semaphore = threading.Semaphore(NLI_MAX_CONCURRENT_FETCHES)
@@ -44,6 +50,132 @@ _nli_adapter = requests.adapters.HTTPAdapter(
     pool_maxsize=max(8, NLI_MAX_CONCURRENT_FETCHES * 2),
 )
 _nli_session.mount('https://iiif.nli.org.il', _nli_adapter)
+
+
+def _estimate_cache_value_bytes(value) -> int:
+    """Approximate the heap footprint of cache values dominated by image bytes."""
+    if value is None:
+        return 0
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return len(value)
+    if isinstance(value, str):
+        return len(value.encode('utf-8', errors='ignore'))
+    if isinstance(value, dict):
+        return sum(
+            _estimate_cache_value_bytes(k) + _estimate_cache_value_bytes(v)
+            for k, v in value.items()
+        )
+    if isinstance(value, (tuple, list, set)):
+        return sum(_estimate_cache_value_bytes(v) for v in value)
+    return 64
+
+
+class _TTLMemoryCache:
+    """Small thread-safe LRU+TTL cache for response bytes.
+
+    The previous route-local dict caches stored full image responses forever
+    when every request used a new key. This cache evicts on age, entry count,
+    and approximate byte budget so crawls or gallery browsing cannot ratchet
+    process RSS upward indefinitely.
+    """
+
+    def __init__(self, name: str, *, ttl_seconds: int, max_entries: int, max_bytes: int):
+        self.name = name
+        self.ttl_seconds = max(1, int(ttl_seconds))
+        self.max_entries = max(0, int(max_entries))
+        self.max_bytes = max(0, int(max_bytes))
+        self._items: OrderedDict[object, tuple[object, int, float]] = OrderedDict()
+        self._total_bytes = 0
+        self._lock = threading.Lock()
+
+    def get(self, key):
+        now = _module_time.time()
+        with self._lock:
+            item = self._items.get(key)
+            if item is None:
+                return None
+            value, size, cached_at = item
+            if now - cached_at >= self.ttl_seconds:
+                self._remove_locked(key)
+                return None
+            self._items.move_to_end(key)
+            return value
+
+    def set(self, key, value) -> None:
+        if self.max_entries == 0 or self.max_bytes == 0:
+            return
+        now = _module_time.time()
+        size = _estimate_cache_value_bytes(value)
+        if size > self.max_bytes:
+            return
+        with self._lock:
+            self._remove_locked(key)
+            self._items[key] = (value, size, now)
+            self._total_bytes += size
+            self._evict_locked(now)
+
+    def _remove_locked(self, key) -> None:
+        item = self._items.pop(key, None)
+        if item is not None:
+            self._total_bytes -= item[1]
+
+    def _evict_locked(self, now: float) -> None:
+        expired = [
+            key for key, (_, _, cached_at) in self._items.items()
+            if now - cached_at >= self.ttl_seconds
+        ]
+        for key in expired:
+            self._remove_locked(key)
+        while self.max_entries and len(self._items) > self.max_entries:
+            _key, (_value, size, _cached_at) = self._items.popitem(last=False)
+            self._total_bytes -= size
+        while self.max_bytes and self._total_bytes > self.max_bytes and self._items:
+            _key, (_value, size, _cached_at) = self._items.popitem(last=False)
+            self._total_bytes -= size
+
+    def stats(self) -> dict:
+        now = _module_time.time()
+        with self._lock:
+            self._evict_locked(now)
+            return {
+                'entries': len(self._items),
+                'bytes_estimate': max(0, self._total_bytes),
+                'max_entries': self.max_entries,
+                'max_bytes': self.max_bytes,
+                'ttl_seconds': self.ttl_seconds,
+            }
+
+
+_RUNTIME_CACHE_STAT_PROVIDERS = {}
+
+
+def _register_runtime_cache_stats(name: str, provider) -> None:
+    _RUNTIME_CACHE_STAT_PROVIDERS[name] = provider
+
+
+def get_runtime_cache_stats() -> dict:
+    """Return lightweight diagnostics for route-local runtime caches."""
+    stats = {}
+    for name, provider in list(_RUNTIME_CACHE_STAT_PROVIDERS.items()):
+        try:
+            stats[name] = provider()
+        except Exception:
+            stats[name] = {'error': True}
+    return stats
+
+
+def _make_image_cache(name: str) -> _TTLMemoryCache:
+    shard_count = 5
+    max_bytes = IMAGE_CACHE_MAX_BYTES // shard_count if IMAGE_CACHE_MAX_BYTES else 0
+    max_entries = IMAGE_CACHE_MAX_ENTRIES // shard_count if IMAGE_CACHE_MAX_ENTRIES else 0
+    cache = _TTLMemoryCache(
+        name,
+        ttl_seconds=IMAGE_CACHE_TTL,
+        max_entries=max(1, max_entries) if IMAGE_CACHE_MAX_ENTRIES else 0,
+        max_bytes=max(1, max_bytes) if IMAGE_CACHE_MAX_BYTES else 0,
+    )
+    _register_runtime_cache_stats(name, cache.stats)
+    return cache
 
 # Allowed domains for image proxy (prevents SSRF attacks)
 ALLOWED_IMAGE_DOMAINS = [
@@ -336,7 +468,42 @@ def init_api_routes(app_override=None):
     # Sentinel for negative cache entries (distinguishes "cached empty" from "not cached")
     _NLI_FAIL_SENTINEL = object()
     _nli_cache, _nli_cache_time = _load_nli_persistent_cache()
+    _nli_cache = OrderedDict(_nli_cache)
+    _nli_cache_time = OrderedDict(_nli_cache_time)
     _nli_cache_lock = threading.Lock()
+
+    def _prune_nli_memory_cache_locked(now: float) -> None:
+        """Drop expired/oldest FL-ID cache entries from the in-process cache."""
+        stale_keys = []
+        for key, cached_at in list(_nli_cache_time.items()):
+            cached_val = _nli_cache.get(key)
+            ttl = NLI_FAIL_CACHE_TTL if cached_val is _NLI_FAIL_SENTINEL else NLI_CACHE_TTL
+            if now - cached_at >= ttl:
+                stale_keys.append(key)
+        for key in stale_keys:
+            _nli_cache.pop(key, None)
+            _nli_cache_time.pop(key, None)
+        while NLI_MEMORY_CACHE_MAX_ENTRIES and len(_nli_cache) > NLI_MEMORY_CACHE_MAX_ENTRIES:
+            key, _value = _nli_cache.popitem(last=False)
+            _nli_cache_time.pop(key, None)
+
+    def _nli_memory_cache_stats() -> dict:
+        import time as _time
+        now = _time.time()
+        with _nli_cache_lock:
+            _prune_nli_memory_cache_locked(now)
+            negative_count = sum(1 for value in _nli_cache.values() if value is _NLI_FAIL_SENTINEL)
+            positive_count = len(_nli_cache) - negative_count
+            return {
+                'entries': len(_nli_cache),
+                'positive_entries': positive_count,
+                'negative_entries': negative_count,
+                'max_entries': NLI_MEMORY_CACHE_MAX_ENTRIES,
+                'ttl_seconds': NLI_CACHE_TTL,
+                'negative_ttl_seconds': NLI_FAIL_CACHE_TTL,
+            }
+
+    _register_runtime_cache_stats('nli_fl_ids', _nli_memory_cache_stats)
 
     def _persist_positive_cache_snapshot() -> None:
         with _nli_cache_lock:
@@ -364,6 +531,7 @@ def init_api_routes(app_override=None):
 
         # Check cache first (both positive and negative entries)
         with _nli_cache_lock:
+            _prune_nli_memory_cache_locked(_time.time())
             cached_present = cache_key in _nli_cache
             cached_val = _nli_cache.get(cache_key)
             cache_age = _time.time() - _nli_cache_time.get(cache_key, 0)
@@ -395,6 +563,7 @@ def init_api_routes(app_override=None):
         # Re-check cache after acquiring semaphore (another thread may have resolved it
         # or stored a negative entry while we were waiting)
         with _nli_cache_lock:
+            _prune_nli_memory_cache_locked(_time.time())
             cached_present = cache_key in _nli_cache
             cached_val = _nli_cache.get(cache_key)
             cache_age = _time.time() - _nli_cache_time.get(cache_key, 0)
@@ -430,6 +599,7 @@ def init_api_routes(app_override=None):
                     with _nli_cache_lock:
                         _nli_cache[cache_key] = fl_ids
                         _nli_cache_time[cache_key] = _time.time()
+                        _prune_nli_memory_cache_locked(_time.time())
                     _persist_positive_cache_snapshot()
                     logger.info(f"Resolved {len(fl_ids)} FL IDs for {cache_key} from network IIIF manifest")
                     return fl_ids
@@ -453,6 +623,7 @@ def init_api_routes(app_override=None):
                         with _nli_cache_lock:
                             _nli_cache[cache_key] = unique_fl_ids
                             _nli_cache_time[cache_key] = _time.time()
+                            _prune_nli_memory_cache_locked(_time.time())
                         _persist_positive_cache_snapshot()
                         logger.info(f"Cached {len(unique_fl_ids)} FL IDs from MARC for {system_id}")
                         return unique_fl_ids
@@ -463,6 +634,7 @@ def init_api_routes(app_override=None):
         with _nli_cache_lock:
             _nli_cache[cache_key] = _NLI_FAIL_SENTINEL
             _nli_cache_time[cache_key] = _time.time()
+            _prune_nli_memory_cache_locked(_time.time())
         return []
 
     @target_app.get('/api/fl_ids/{sys_id}')
@@ -523,10 +695,8 @@ def init_api_routes(app_override=None):
 
         return Response(content="Image not found", status_code=404)
 
-    # Image cache: (sys_id, page, width, suffix) -> (content, content_type, fl_id, timestamp)
-    # Legacy 3-tuple shape (content, content_type, timestamp) is still readable
-    # for backward compatibility with any warm caches from before 260419-cfx.
-    _image_cache = {}
+    # Image cache: (sys_id, page, width, suffix) -> (content, content_type, fl_id)
+    _image_cache = _make_image_cache('image_nli')
 
     def _fetch_nli_image_bytes(sys_id: str, page: int, width: int = 2000, suffix: int = 1):
         """Internal helper: fetch NLI image bytes for (sys_id, page, width, suffix).
@@ -541,20 +711,13 @@ def init_api_routes(app_override=None):
         column holds Friedberg photo numbers, not NLI FL ids (see
         .planning/research/PITFALLS.md Pitfall 6).
         """
-        import time as _time
         width = max(100, min(width, 2000))
         cache_key = (sys_id, page, width, suffix)
 
-        if cache_key in _image_cache:
-            entry = _image_cache[cache_key]
-            # Support both new 4-tuple (with fl_id) and legacy 3-tuple shapes.
-            if len(entry) == 4:
-                content, content_type, fl_id, cached_at = entry
-            else:
-                content, content_type, cached_at = entry
-                fl_id = None
-            if _time.time() - cached_at < IMAGE_CACHE_TTL:
-                return (content, content_type, fl_id)
+        entry = _image_cache.get(cache_key)
+        if entry is not None:
+            content, content_type, fl_id = entry
+            return (content, content_type, fl_id)
 
         fl_ids = fetch_fl_ids_from_nli(sys_id, suffix=suffix)
         if not fl_ids:
@@ -580,14 +743,14 @@ def init_api_routes(app_override=None):
         if 0 <= page < len(fl_ids):
             got = _try_fl(fl_ids[page])
             if got is not None:
-                _image_cache[cache_key] = (got[0], got[1], fl_ids[page], _time.time())
+                _image_cache.set(cache_key, (got[0], got[1], fl_ids[page]))
                 return (got[0], got[1], fl_ids[page])
 
         # Fallback: try each FL id until one works.
         for fl_id in fl_ids:
             got = _try_fl(fl_id)
             if got is not None:
-                _image_cache[cache_key] = (got[0], got[1], fl_id, _time.time())
+                _image_cache.set(cache_key, (got[0], got[1], fl_id))
                 return (got[0], got[1], fl_id)
 
         return None
@@ -617,19 +780,19 @@ def init_api_routes(app_override=None):
             headers={"Cache-Control": "public, max-age=600"},
         )
 
-    # Oxford image cache: (sys_id, page) -> (content, content_type, timestamp)
-    _oxford_image_cache = {}
+    # Oxford image cache: (sys_id, page, width) -> (content, content_type)
+    _oxford_image_cache = _make_image_cache('image_oxford')
 
     # Cambridge image cache (260419-cfx shape):
     #   key   = (_CAMBRIDGE_CACHE_VERSION, sys_id, page)
-    #   value = (content, content_type, extra_headers_dict, timestamp)
+    #   value = (content, content_type, extra_headers_dict)
     # Bumping _CAMBRIDGE_CACHE_VERSION invalidates all server-side entries.
     # _CAMBRIDGE_ETAG_VERSION is the matching ETag suffix exposed to clients;
     # bump BOTH in lockstep when the resolver contract changes so browsers
     # and CDNs revalidate via ETag too.
     _CAMBRIDGE_CACHE_VERSION = 2
     _CAMBRIDGE_ETAG_VERSION = "v2"
-    _cambridge_image_cache = {}
+    _cambridge_image_cache = _make_image_cache('image_cambridge')
     # sys_ids for which we have already logged a "degraded: legacy positional"
     # WARNING (once per process lifetime, per sys_id — not per request).
     _cambridge_degraded_warned = set()
@@ -653,7 +816,6 @@ def init_api_routes(app_override=None):
         All responses carry X-Image-Resolver-Version and ETag headers so
         downstream caches (browser + CDN) can revalidate after a deploy.
         """
-        import time as _time
         # Imported locally to avoid adding a hot-path import at module load.
         from shared.nli_crossref_service import resolve_cambridge_canvas_for_page
 
@@ -669,13 +831,13 @@ def init_api_routes(app_override=None):
                 "X-Image-Resolver-Version": str(_CAMBRIDGE_CACHE_VERSION),
             }
 
-        if cache_key in _cambridge_image_cache:
-            content, content_type, headers_extra, cached_at = _cambridge_image_cache[cache_key]
-            if _time.time() - cached_at < IMAGE_CACHE_TTL:
-                resp_headers = _base_headers()
-                if headers_extra:
-                    resp_headers.update(headers_extra)
-                return Response(content=content, media_type=content_type, headers=resp_headers)
+        cached_entry = _cambridge_image_cache.get(cache_key)
+        if cached_entry is not None:
+            content, content_type, headers_extra = cached_entry
+            resp_headers = _base_headers()
+            if headers_extra:
+                resp_headers.update(headers_extra)
+            return Response(content=content, media_type=content_type, headers=resp_headers)
 
         # Look up Cambridge images from nli_cache
         if not state.meta_mgr or not hasattr(state.meta_mgr, 'nli_cache'):
@@ -755,7 +917,7 @@ def init_api_routes(app_override=None):
             extra_headers = {"X-Image-Fallback-Source": "nli"}
             if matched_folio_side:
                 extra_headers["X-Folio-Matched"] = matched_folio_side
-            _cambridge_image_cache[cache_key] = (content, ct, extra_headers, _time.time())
+            _cambridge_image_cache.set(cache_key, (content, ct, extra_headers))
             resp_headers = _base_headers()
             resp_headers.update(extra_headers)
             return Response(content=content, media_type=ct, headers=resp_headers)
@@ -778,9 +940,7 @@ def init_api_routes(app_override=None):
                 extra_headers = {}
                 if matched_folio_side:
                     extra_headers["X-Folio-Matched"] = matched_folio_side
-                _cambridge_image_cache[cache_key] = (
-                    resp.content, content_type, extra_headers, _time.time(),
-                )
+                _cambridge_image_cache.set(cache_key, (resp.content, content_type, extra_headers))
                 resp_headers = _base_headers()
                 resp_headers.update(extra_headers)
                 return Response(
@@ -796,8 +956,8 @@ def init_api_routes(app_override=None):
         except Exception as e:
             return Response(content=f"Error fetching Cambridge image: {e}", status_code=500)
 
-    # Manchester image cache: (sys_id, page) -> (content, content_type, timestamp)
-    _manchester_image_cache = {}
+    # Manchester image cache: (sys_id, page, width) -> (content, content_type)
+    _manchester_image_cache = _make_image_cache('image_manchester')
 
     @target_app.get('/api/manchester_image/{sys_id}')
     def manchester_image(sys_id: str, page: int = 0, width: int = 2000):
@@ -805,16 +965,15 @@ def init_api_routes(app_override=None):
         Fetch Manchester IIIF image by System ID.
         Uses images_ext from nli_cache populated by enrich_metadata via LUNA IIIF manifest.
         """
-        import time as _time
         width = max(100, min(int(width or 2000), 2000))
         cache_key = (sys_id, page, width)
 
         # Check cache
-        if cache_key in _manchester_image_cache:
-            content, content_type, cached_at = _manchester_image_cache[cache_key]
-            if _time.time() - cached_at < IMAGE_CACHE_TTL:
-                return Response(content=content, media_type=content_type,
-                              headers={"Cache-Control": "public, max-age=600"})
+        cached_entry = _manchester_image_cache.get(cache_key)
+        if cached_entry is not None:
+            content, content_type = cached_entry
+            return Response(content=content, media_type=content_type,
+                          headers={"Cache-Control": "public, max-age=600"})
 
         # Look up Manchester images from nli_cache
         if not state.meta_mgr or not hasattr(state.meta_mgr, 'nli_cache'):
@@ -846,7 +1005,7 @@ def init_api_routes(app_override=None):
             resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
-                _manchester_image_cache[cache_key] = (resp.content, content_type, _time.time())
+                _manchester_image_cache.set(cache_key, (resp.content, content_type))
                 return Response(content=resp.content, media_type=content_type,
                               headers={"Cache-Control": "public, max-age=600"})
             else:
@@ -854,8 +1013,8 @@ def init_api_routes(app_override=None):
         except Exception as e:
             return Response(content=f"Error fetching Manchester image: {e}", status_code=500)
 
-    # JTS image cache: (sys_id, page) -> (content, content_type, timestamp)
-    _jts_image_cache = {}
+    # JTS image cache: (sys_id, page, width) -> (content, content_type)
+    _jts_image_cache = _make_image_cache('image_jts')
 
     @target_app.get('/api/jts_image/{sys_id}')
     def jts_image(sys_id: str, page: int = 0, width: int = 2000):
@@ -863,16 +1022,15 @@ def init_api_routes(app_override=None):
         Fetch JTS/Princeton IIIF image by System ID.
         Uses images_ext from nli_cache populated by enrich_metadata via Figgy IIIF manifest.
         """
-        import time as _time
         width = max(100, min(int(width or 2000), 2000))
         cache_key = (sys_id, page, width)
 
         # Check cache
-        if cache_key in _jts_image_cache:
-            content, content_type, cached_at = _jts_image_cache[cache_key]
-            if _time.time() - cached_at < IMAGE_CACHE_TTL:
-                return Response(content=content, media_type=content_type,
-                              headers={"Cache-Control": "public, max-age=600"})
+        cached_entry = _jts_image_cache.get(cache_key)
+        if cached_entry is not None:
+            content, content_type = cached_entry
+            return Response(content=content, media_type=content_type,
+                          headers={"Cache-Control": "public, max-age=600"})
 
         # Look up JTS images from nli_cache
         if not state.meta_mgr or not hasattr(state.meta_mgr, 'nli_cache'):
@@ -904,7 +1062,7 @@ def init_api_routes(app_override=None):
             resp = requests.get(img_url, headers=headers, timeout=30, verify=True)
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
-                _jts_image_cache[cache_key] = (resp.content, content_type, _time.time())
+                _jts_image_cache.set(cache_key, (resp.content, content_type))
                 return Response(content=resp.content, media_type=content_type,
                               headers={"Cache-Control": "public, max-age=600"})
             else:
@@ -926,19 +1084,18 @@ def init_api_routes(app_override=None):
         Fetch Oxford image by System ID using CodicologicalManager.
         Automatically finds the correct folio image based on shelfmark.
         """
-        import time as _time
         width = max(100, min(int(width or 2000), 2000))
         cache_key = (sys_id, page, width)
 
         # Check image cache first
-        if cache_key in _oxford_image_cache:
-            content, content_type, cached_at = _oxford_image_cache[cache_key]
-            if _time.time() - cached_at < IMAGE_CACHE_TTL:
-                return Response(
-                    content=content,
-                    media_type=content_type,
-                    headers={"Cache-Control": "public, max-age=600"}
-                )
+        cached_entry = _oxford_image_cache.get(cache_key)
+        if cached_entry is not None:
+            content, content_type = cached_entry
+            return Response(
+                content=content,
+                media_type=content_type,
+                headers={"Cache-Control": "public, max-age=600"}
+            )
 
         if not state.meta_mgr or not state.meta_mgr.codico_mgr:
             return Response(content="Oxford manager not initialized", status_code=503)
@@ -1024,7 +1181,7 @@ def init_api_routes(app_override=None):
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 content_type = resp.headers.get('Content-Type', 'image/jpeg')
                 # Cache the image
-                _oxford_image_cache[cache_key] = (resp.content, content_type, _time.time())
+                _oxford_image_cache.set(cache_key, (resp.content, content_type))
                 return Response(
                     content=resp.content,
                     media_type=content_type,
@@ -1233,11 +1390,32 @@ def init_api_routes(app_override=None):
     # In-memory rate limiter for puzzle upload endpoints
     _puzzle_rate_limits = {}  # IP -> (count, window_start_epoch)
 
+    def _puzzle_rate_limit_stats() -> dict:
+        now = _module_time.time()
+        stale = [
+            ip for ip, (_count, window_start) in _puzzle_rate_limits.items()
+            if now - window_start > PUZZLE_RATE_LIMIT_BUCKET_TTL
+        ]
+        for ip in stale:
+            _puzzle_rate_limits.pop(ip, None)
+        return {
+            'entries': len(_puzzle_rate_limits),
+            'bucket_ttl_seconds': PUZZLE_RATE_LIMIT_BUCKET_TTL,
+        }
+
+    _register_runtime_cache_stats('puzzle_rate_limits', _puzzle_rate_limit_stats)
+
     def _check_puzzle_rate_limit(request: Request, max_per_min: int = 60):
         """Check per-IP rate limit. Returns Response if exceeded, else None."""
         import time as _time
         client_ip = request.client.host if request.client else 'unknown'
         now = _time.time()
+        stale = [
+            ip for ip, (_count, window_start) in _puzzle_rate_limits.items()
+            if now - window_start > PUZZLE_RATE_LIMIT_BUCKET_TTL
+        ]
+        for ip in stale:
+            _puzzle_rate_limits.pop(ip, None)
         entry = _puzzle_rate_limits.get(client_ip)
         if entry:
             count, window_start = entry

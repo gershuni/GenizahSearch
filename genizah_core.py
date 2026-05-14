@@ -13,7 +13,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 import csv
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from logging.handlers import RotatingFileHandler
 import platform
@@ -3678,8 +3678,11 @@ class MetadataManager:
         self.nli_cache[system_id] = meta
         return meta
 
-    # Separate manifest cache keyed by (sys_id, suffix) — does NOT touch nli_cache
-    _iiif_manifest_cache = {}
+    # Separate manifest cache keyed by (sys_id, suffix) — does NOT touch nli_cache.
+    # Bounded LRU: crawl traffic can otherwise leave one manifest dict per
+    # requested manuscript in process memory for the lifetime of the service.
+    _iiif_manifest_cache = OrderedDict()
+    _IIIF_MANIFEST_CACHE_MAX = max(0, int(os.environ.get('IIIF_MANIFEST_CACHE_MAX_ENTRIES', '5000')))
     # 260421 follow-up (L81 lag): per-sys_id negative cache + global
     # circuit breaker for NLI. The negative cache prevents re-trying the
     # SAME failed sys_id within TTL; the circuit breaker trips after 3
@@ -3687,9 +3690,10 @@ class MetadataManager:
     # CIRCUIT_WINDOW seconds, so navigating through a batch of JTS
     # manuscripts doesn't re-burn the timeout on each one when NLI's
     # host is down.
-    _iiif_manifest_fail_cache: dict = {}  # {(sys_id, suffix): timestamp}
-    _marc_fail_cache: dict = {}  # {sys_id: timestamp}
+    _iiif_manifest_fail_cache: dict = OrderedDict()  # {(sys_id, suffix): timestamp}
+    _marc_fail_cache: dict = OrderedDict()  # {sys_id: timestamp}
     _NLI_FAIL_TTL = 60  # seconds
+    _NLI_FAIL_CACHE_MAX = max(0, int(os.environ.get('NLI_FAIL_CACHE_MAX_ENTRIES', '20000')))
     _nli_consecutive_failures = 0
     _nli_circuit_open_until = 0.0
     _NLI_CIRCUIT_THRESHOLD = 3
@@ -3715,6 +3719,58 @@ class MetadataManager:
         cls._nli_consecutive_failures = 0
         cls._nli_circuit_open_until = 0.0
 
+    @staticmethod
+    def _bounded_cache_get(cache: dict, key):
+        if key not in cache:
+            return None
+        if isinstance(cache, OrderedDict):
+            cache.move_to_end(key)
+        return cache[key]
+
+    @staticmethod
+    def _bounded_cache_set(cache: dict, key, value, max_entries: int) -> None:
+        if max_entries == 0:
+            return
+        cache[key] = value
+        if isinstance(cache, OrderedDict):
+            cache.move_to_end(key)
+        while max_entries and len(cache) > max_entries:
+            if isinstance(cache, OrderedDict):
+                cache.popitem(last=False)
+            else:
+                cache.pop(next(iter(cache)), None)
+
+    def _timestamp_cache_recent(self, cache: dict, key, ttl: float, now: float):
+        ts = cache.get(key)
+        if ts is None:
+            return None
+        if now - ts < ttl:
+            if isinstance(cache, OrderedDict):
+                cache.move_to_end(key)
+            return ts
+        cache.pop(key, None)
+        return None
+
+    def _timestamp_cache_set(self, cache: dict, key, now: float) -> None:
+        self._bounded_cache_set(cache, key, now, self._NLI_FAIL_CACHE_MAX)
+        stale = [
+            cache_key for cache_key, ts in list(cache.items())
+            if now - ts >= self._NLI_FAIL_TTL
+        ]
+        for cache_key in stale:
+            cache.pop(cache_key, None)
+
+    def get_runtime_cache_stats(self) -> dict:
+        """Return lightweight cache sizes for the memstat diagnostic endpoint."""
+        return {
+            'nli_cache_entries': len(self.nli_cache),
+            'iiif_manifest_cache_entries': len(self._iiif_manifest_cache),
+            'iiif_manifest_cache_max_entries': self._IIIF_MANIFEST_CACHE_MAX,
+            'iiif_manifest_fail_cache_entries': len(self._iiif_manifest_fail_cache),
+            'marc_fail_cache_entries': len(self._marc_fail_cache),
+            'nli_fail_cache_max_entries': self._NLI_FAIL_CACHE_MAX,
+        }
+
     def fetch_iiif_manifest(self, system_id, suffix=1):
         """Fetch and parse IIIF manifest for physical description, attribution, and image labels.
 
@@ -3732,8 +3788,9 @@ class MetadataManager:
 
         # Check manifest-only cache first
         cache_key = (system_id, suffix)
-        if cache_key in self._iiif_manifest_cache:
-            return self._iiif_manifest_cache[cache_key]
+        cached_manifest = self._bounded_cache_get(self._iiif_manifest_cache, cache_key)
+        if cached_manifest is not None:
+            return cached_manifest
 
         # Circuit breaker: if NLI has been failing consistently, skip
         # entirely without burning another timeout on this sys_id.
@@ -3742,8 +3799,11 @@ class MetadataManager:
 
         # Negative cache: if this sys_id recently timed out, return empty
         # without re-trying. TTL lets the cache age out so recovery works.
-        fail_ts = self._iiif_manifest_fail_cache.get(cache_key)
-        if fail_ts is not None and time.time() - fail_ts < self._NLI_FAIL_TTL:
+        now = time.time()
+        fail_ts = self._timestamp_cache_recent(
+            self._iiif_manifest_fail_cache, cache_key, self._NLI_FAIL_TTL, now
+        )
+        if fail_ts is not None:
             return {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
 
         url = f"{Config.NLI_IIIF_BASE}/DOCID/PNX_MANUSCRIPTS{system_id}-{suffix}/manifest"
@@ -3782,13 +3842,18 @@ class MetadataManager:
                                 fl_digits = fl_match.group(1)
                                 result['canvas_map'][fl_digits] = label
 
-            self._iiif_manifest_cache[cache_key] = result
+            self._bounded_cache_set(
+                self._iiif_manifest_cache,
+                cache_key,
+                result,
+                self._IIIF_MANIFEST_CACHE_MAX,
+            )
             self._iiif_manifest_fail_cache.pop(cache_key, None)
             self._nli_record_success()
             return result
         except Exception as e:
             LOGGER.warning(f"IIIF fetch failed for {system_id} (suffix={suffix}): {e}")
-            self._iiif_manifest_fail_cache[cache_key] = time.time()
+            self._timestamp_cache_set(self._iiif_manifest_fail_cache, cache_key, time.time())
             self._nli_record_failure()
             return result
 
@@ -3827,8 +3892,10 @@ class MetadataManager:
         # consecutive failures so a dead NLI host doesn't gate navigation.
         if self._nli_circuit_is_open():
             return result
-        fail_ts = self._marc_fail_cache.get(system_id)
-        if fail_ts is not None and time.time() - fail_ts < self._NLI_FAIL_TTL:
+        fail_ts = self._timestamp_cache_recent(
+            self._marc_fail_cache, system_id, self._NLI_FAIL_TTL, time.time()
+        )
+        if fail_ts is not None:
             return result
 
         try:
@@ -3936,7 +4003,7 @@ class MetadataManager:
             return result
         except Exception as e:
             LOGGER.warning(f"MARC fetch failed for {system_id}: {e}")
-            self._marc_fail_cache[system_id] = time.time()
+            self._timestamp_cache_set(self._marc_fail_cache, system_id, time.time())
             self._nli_record_failure()
             return result
 

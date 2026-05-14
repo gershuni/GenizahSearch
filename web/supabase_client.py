@@ -70,6 +70,23 @@ def reset_client():
     _client = None
 
 
+def _prune_session_client_cache(now: float | None = None) -> None:
+    """Remove expired per-session Supabase clients and their locks.
+
+    Access tokens rotate frequently. Without pruning, every token seen by the
+    process leaves behind a cached client and lock until restart.
+    """
+    now = time.time() if now is None else now
+    with _locks_guard:
+        expired_keys = [
+            key for key, (_client_obj, expiry) in list(_client_cache.items())
+            if expiry <= now
+        ]
+        for key in expired_keys:
+            _client_cache.pop(key, None)
+            _session_locks.pop(key, None)
+
+
 def _is_jwt_expired(error) -> bool:
     """Check if a Supabase error is a JWT expiry."""
     msg = str(error)
@@ -109,6 +126,7 @@ def get_user_client() -> Client:
     try:
         from nicegui import app as _app
         storage = _app.storage.user
+        _prune_session_client_cache()
 
         # Read tokens FIRST so the cache key is bound to the actual session,
         # not to a memory-address proxy. No tokens → anonymous singleton client.
@@ -164,7 +182,12 @@ def get_user_client() -> Client:
                     new_key = resp.session.access_token
                 else:
                     new_key = access_token_inner
+                if new_key != cache_key:
+                    _client_cache.pop(cache_key, None)
+                    with _locks_guard:
+                        _session_locks.pop(cache_key, None)
                 _client_cache[new_key] = (user_client, now + _CLIENT_CACHE_TTL)
+                _prune_session_client_cache(now)
                 return user_client
             except Exception as e:
                 logger.error(f"[get_user_client] set_session failed: {e}")
@@ -265,6 +288,7 @@ def sign_out() -> Dict:
             if access_token:
                 _client_cache.pop(access_token, None)
                 _session_locks.pop(access_token, None)
+            _prune_session_client_cache()
         except Exception:
             pass  # Cache operation failed; continue without cached data
         client = get_client()

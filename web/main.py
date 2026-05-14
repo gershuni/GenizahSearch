@@ -156,6 +156,18 @@ def _memstat_endpoint(x_memstat_secret: str = Header(default='')):
         stats.update(summarize_nicegui_storage(app.storage, _NiceGUIClient.instances.values()))
     except Exception:
         stats['nicegui_storage_summary_error'] = True
+    try:
+        from web.api import get_runtime_cache_stats as _get_runtime_cache_stats
+        stats['runtime_caches'] = _get_runtime_cache_stats()
+    except Exception:
+        stats['runtime_caches_error'] = True
+    try:
+        from web.state import state as _runtime_state
+        meta_mgr = getattr(_runtime_state, 'meta_mgr', None)
+        if meta_mgr and hasattr(meta_mgr, 'get_runtime_cache_stats'):
+            stats['metadata_runtime_caches'] = meta_mgr.get_runtime_cache_stats()
+    except Exception:
+        stats['metadata_runtime_caches_error'] = True
     return JSONResponse(stats)
 
 
