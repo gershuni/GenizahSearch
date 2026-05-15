@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
-stopped_at: Phase 999.3 context gathered
-last_updated: "2026-05-15T10:23:16.357Z"
-last_activity: 2026-05-15 -- Phase 999.2 planning complete
+stopped_at: Phase 90 complete -- ready for Phase 91
+last_updated: "2026-05-15T10:30:00.000Z"
+last_activity: 2026-05-15 -- Phase 90 complete (Auth Caching Rewrite -- No set_session)
 progress:
   total_phases: 10
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 17
-  completed_plans: 14
-  percent: 82
+  completed_plans: 15
+  percent: 88
 ---
 
 # Project State
@@ -21,17 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-13)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 90 — Auth Caching Rewrite -- No set_session
+**Current focus:** Phase 90 complete (2/2 plans, 5/5 SCs, 5/5 AUTHC reqs verified) — ready for Phase 91
 
 ## Current Position
 
-Phase: 90 (Auth Caching Rewrite -- No set_session) — EXECUTING
-Plan: 1 of 2
-Next: Phase 90 (Auth Caching Rewrite — No set_session)
-Status: Ready to execute
-Last activity: 2026-05-15 -- Phase 999.2 planning complete
+Phase: 90 (Auth Caching Rewrite -- No set_session) — COMPLETE (2/2 plans shipped, all 5 ROADMAP SCs + 5 AUTHC reqs verified)
+Next: Phase 91 (Atomic Auth State Writes)
+Status: Ready to discuss
+Last activity: 2026-05-15 -- Phase 90 complete (Auth Caching Rewrite -- No set_session)
 
-Progress: [█████░░░░░] 50%
+Progress: [██████░░░░] 67%
 
 ## Phase Queue (v7.12)
 
@@ -40,7 +39,7 @@ Progress: [█████░░░░░] 50%
 | 87 | Foundations -- Session UUID and Safe Storage Chokepoint | FOUND-01..05 | Complete |
 | 88 | State Separation by Deletion | STATE-01..06 | Complete |
 | 89 | Lists Cache Per-Request | LISTS-01..04 | Complete |
-| 90 | Auth Caching Rewrite -- No set_session | AUTHC-01..05 | Pending |
+| 90 | Auth Caching Rewrite -- No set_session | AUTHC-01..05 | Complete |
 | 91 | Atomic Auth State Writes | AUTHW-01..06 | Pending |
 | 92 | Final Sweep and Acceptance | SWEEP-01..06 | Pending |
 
@@ -78,6 +77,8 @@ Progress: [█████░░░░░] 50%
 - Phase 87-08 Task 1 complete (Task 2 pending user smoke-check): docs updates committed across CLAUDE.md "Recently Changed" (new Phase 87 entry citing 131 sites / 14 files / 8 plans / 22 tests / lint scanner / allowlist 4 entries / Codex round 4 MEDIUM-2 closure / B3 monkeypatch fixes), docs/OPEN_ISSUES.md (Last Updated 2026-05-13 with Phase 87 framing; narrow-scope `/browse 500 AssertionError` hotfix from line 82 now subsumed by broader chokepoint), .planning/STATE.md frontmatter (completed_phases 0→1, completed_plans 7→8, percent 88→13 reflecting full v7.12 milestone scope of 6 phases) + Phase 87 row marked Complete + Current Position advanced to Phase 88, .planning/ROADMAP.md Phase 87 row marked Complete with 8/8 plans + plan list populated with 8 [x] entries. check_docs green; full pytest suite green at Plan 07 close. Task 2 (human smoke-check confirming real-NiceGUI session storage behavior per B1) returned as checkpoint to orchestrator — NOT yet user-approved.
 - Plan 07 lint scanner (tests/test_no_raw_storage_access.py) is the permanent CI guard against raw app.storage.user regression — all new code must use safe_storage helpers or add an allowlist entry with justification AND expected_count (H1 schema from 87-REVIEWS.md)
 - Bootstrap wiring (B1): ensure_session_uuid() is called from web/main.py:create_layout() (covers 17 of 19 routes), web/main.py:reset_hints_route, and web/main.py:auth_callback_route. /privacy-extension is AST-confirmed exempt (zero app.storage.user access). This is the canonical mint surface — DO NOT add per-page mint calls; downstream code can rely on _session_uuid being present in storage at every storage-touching page entry.
+- Phase 90 complete (2026-05-15): Auth caching rewrite shipped in 2 plans/2 waves. Plan 90-01 rewrote `web/supabase_client.py` to request-scoped auth — `get_user_client()` builds an authenticated Client per call via local header mutation (`_apply_user_auth_to_client` writes 4 headers: postgrest.auth, functions.set_auth, storage `Authorization`+`apikey`); proactive refresh (`_refresh_user_session`) gated by `_refresh_locks` keyed by `_session_uuid` (NOT access tokens); 4 reactive JWT-expired retry blocks at lines ~516/756/935/1101 call `_refresh_user_session()` instead of `reset_client()`; 5 auth-mutating helpers (sign_in/sign_up/set_session_from_url/exchange_code_for_session/get_oauth_url) all use throwaway clients to sidestep the supabase event-listener leak vector at `supabase/_sync/client.py:338-346` (D-10 invariant); `sign_out` calls `throwaway.auth.admin.sign_out(jwt, "global")` for real server-side revocation (Codex round-3 P1 — high-level `sign_out` on throwaway is a no-op per `gotrue_client.py:789-793`); `clear_auth` reordered to revoke-before-pop with finally-block local cleanup (D-11b); `profile.py:149-150` migrated to new `change_password` REST helper (D-02 direct httpx with explicit apikey header); standalone dead-code `refresh_session()` at lines 325-339 DELETED. Phase 87 allowlist entry for `supabase_client.py` self-eliminated by the `safe_user_get('auth_session')` migration — count 3→2. Plan 90-02 atomically deleted 6 dead-code names (`_client_cache`, `_session_locks`, `_locks_guard`, `_CLIENT_CACHE_TTL`, `_clear_stale_auth`, `_prune_session_client_cache`) and installed 3 permanent CI guards in a SINGLE commit (Phase 89 D-09 discipline): `tests/test_no_set_session_outside_oauth.py` (D-15 static AST scanner — Class A `set_session`/`exchange_code_for_session` outside allowed helpers + Class B `get_client().auth.<mutating>(...)` resurrection ban, 13 seed-trap snippets, 16 tests), `tests/test_no_client_cache_globals.py` (D-16 runtime attr-absence parametrized over 6 names, 6 tests), `tests/test_refresh_lock_per_session.py` (D-17 deterministic behavioral — Test A same-uuid serialization, Test B distinct-uuid parallelism via `_ThreadRoutedApp` + `_ConcurrencyRecorder.max_concurrent == 2` proving real parallelism not trivial pass, Test C stale-snapshot short-circuit, 3 tests). Codex review history: 4 rounds (1 storage/auth/reactive/leak, 2 sign_out/headers/alias/count, 3 throwaway.auth.sign_out is no-op, 4 plan-checker D-10 helper set 3→5 + dead-code deletion). Full pytest green at each plan boundary (1948→1949 passed, 0 failures). Verification 5/5 PASS — both SC #1 (no cache globals) and SC #2 (set_session only at `web/supabase_client.py:609` inside `set_session_from_url`) confirmed via word-boundary grep. Plan 90-02 Task 5 (L1 perf sanity check) deferred per `feedback_no_background_webserver.md` — does not affect SC closure.
+- Phase 90 deviation: Plan 90-01 pulled AUTHW-03 + AUTHW-04 forward from Phase 91 per Codex round-2 P1 because `sign_out` needed actual revocation immediately. Phase 91 scope adjusted — AUTHW-01 (auth_state.py allowlist migration), AUTHW-02 (OAuth callback atomicity at main.py:1458-1463), AUTHW-05 (test_auth_callback_resilience.py), AUTHW-06 (filter_panel persist_value retention) remain; AUTHW-03/AUTHW-04 mark "subsumed by Phase 90".
 
 ### Carryover from hold commits (master-main at cca23db3)
 
@@ -94,7 +95,7 @@ Progress: [█████░░░░░] 50%
 
 ## Session Continuity
 
-Last session: 2026-05-15T08:48:03.590Z
-Stopped at: Phase 999.3 context gathered
-Resume file: .planning/phases/999.3-adding-pgp-to-downloaded-data/999.3-CONTEXT.md
-Next step: `/gsd-discuss-phase 88` (State Separation by Deletion) — once user approves the Phase 87 Task 2 smoke-check signal. Phase 88 will delete the 10 per-user fields on `AppState` singleton, remove the `_TEST_BACKEND` shim from `web/export_state.py`, and use `_session_uuid` (landed in Phase 87) as the stable cache key for the post-shim state model.
+Last session: 2026-05-15T10:30:00.000Z
+Stopped at: Phase 90 complete — Auth Caching Rewrite shipped (2/2 plans, 5/5 SCs verified)
+Resume file: .planning/phases/90-auth-caching-rewrite-no-set-session/90-VERIFICATION.md
+Next step: `/gsd-discuss-phase 91` (Atomic Auth State Writes). Phase 91 scope reduced after Plan 90-01 pulled AUTHW-03 + AUTHW-04 forward (sign_out server-side revocation already shipped). Remaining: AUTHW-01 (auth_state.py raw-storage migration through safe_storage helpers — closes Phase 87 allowlist entry #1), AUTHW-02 (OAuth callback main.py:1458-1463 atomicity — closes Phase 87 allowlist entry #2), AUTHW-05 (tests/test_auth_callback_resilience.py for mid-flight prune), AUTHW-06 (filter_panel persist_value retention check).

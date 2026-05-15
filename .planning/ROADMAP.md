@@ -300,8 +300,8 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
   4. Static grep returns zero matches for `auth_resurrection` or the resurrection guard function name introduced in commit `cca23db3` — the guard is removed because the cache that made it necessary no longer exists.
   5. A code comment in the auth path documents the Codex finding (citing `gotrue_client.py:713`) explaining why `set_session()` is not called mid-flight, visible to future contributors without requiring them to find the Codex transcripts.
 **Plans**: 2 plans (90-01 through 90-02)
-- [ ] 90-01-PLAN.md -- Behavior rewrite (get_user_client/sign_in/sign_out/set_session_from_url/exchange_code_for_session/4 retry blocks/clear_auth reorder/profile.py change_password) + Codex round-1/2/3 fixes + AUTHC-05 docstring + allowlist 3->2 (AUTHC-02, AUTHC-03, AUTHC-04, AUTHC-05)
-- [ ] 90-02-PLAN.md -- Delete 4 globals + 2 helpers + atomic-commit install of 3 permanent CI guards: static AST scanner with 10 seed traps (D-15), runtime attr-absence over 6 names (D-16), behavioral refresh-lock test Tests A/B/C (D-17) (AUTHC-01, AUTHC-03, AUTHC-04)
+- [x] 90-01-PLAN.md -- Behavior rewrite (get_user_client/sign_in/sign_out/set_session_from_url/exchange_code_for_session/4 retry blocks/clear_auth reorder/profile.py change_password) + Codex round-1/2/3 fixes + AUTHC-05 docstring + allowlist 3->2 (AUTHC-02, AUTHC-03, AUTHC-04, AUTHC-05)
+- [x] 90-02-PLAN.md -- Delete 4 globals + 2 helpers + atomic-commit install of 3 permanent CI guards: static AST scanner with 13 seed traps (D-15), runtime attr-absence over 6 names (D-16), behavioral refresh-lock test Tests A/B/C (D-17) (AUTHC-01, AUTHC-03, AUTHC-04)
 
 ### Phase 91: Atomic Auth State Writes
 **Goal**: Migrate auth state writes through safe_storage helpers; `sign_out` revokes server-side on the user's authenticated client before popping `auth_session`.
@@ -337,7 +337,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 | 87. Foundations -- Session UUID and Safe Storage Chokepoint | v7.12 | 8/8 | Complete    | 2026-05-13 |
 | 88. State Separation by Deletion | v7.12 | 3/3 | Complete    | 2026-05-14 |
 | 89. Lists Cache Per-Request | v7.12 | 2/2 | Complete   | 2026-05-15 |
-| 90. Auth Caching Rewrite -- No set_session | v7.12 | 0/2 | Planned | - |
+| 90. Auth Caching Rewrite -- No set_session | v7.12 | 2/2 | Complete   | 2026-05-15 |
 | 91. Atomic Auth State Writes | v7.12 | 0/TBD | Not started | - |
 | 92. Final Sweep and Acceptance | v7.12 | 0/TBD | Not started | - |
 
