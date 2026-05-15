@@ -343,14 +343,14 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 
 ## Backlog
 
-### Phase 999.1: Search results by folio (BACKLOG)
+### Phase 999.1: Search results by folio (BACKLOG — PLANNED)
 
-**Goal:** [Captured for future planning]
-**Requirements:** TBD
-**Plans:** 0 plans
+**Goal:** Web search-result parity with desktop — surface the page/image number (`display['img']`, same field desktop's `COL_IMG` renders at `genizah_app.py:16111`) on each search-result card so users see which folio a hit came from without opening Quick View. Strict parity scope; folio labels (`1r`/`2v`), grouping, sorting, and parallels-list extension are all explicitly deferred.
+**Requirements:** FOLIO-01
+**Plans:** 1 plan
 
 Plans:
-- [ ] TBD (promote with /gsd-review-backlog when ready)
+- [ ] 999.1-01-PLAN.md — Render display.img inline after shelfmark on result card title line; human smoke-check (FOLIO-01)
 
 ### Phase 999.2: Filtering by PGP (BACKLOG)
 
@@ -381,4 +381,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-15 -- Phase 90 (Auth Caching Rewrite -- No set_session) planned: 2 plans across 2 waves. 90-01 (wave 1): behavior rewrite (get_user_client/sign_in/sign_out/set_session_from_url/exchange_code_for_session/4 retry blocks/profile.py change_password helper/clear_auth revoke-before-pop reorder) per Codex round-1/2/3 fixes + AUTHC-05 docstring + Phase 87 allowlist self-elimination (3->2) (closes AUTHC-02, AUTHC-03, AUTHC-04, AUTHC-05). 90-02 (wave 2, depends_on 90-01): atomic deletion of 4 globals + 2 helpers + install of 3 permanent CI guards (static AST scanner D-15 with 10 seed traps, runtime attr-absence D-16, behavioral refresh-lock test D-17 Tests A/B/C) (closes AUTHC-01, finalizes AUTHC-03, closes AUTHC-04). All 5 AUTHC-XX requirements covered.*
+*Last updated: 2026-05-15 -- Phase 999.1 (Search results by folio, backlog) planned: 1 plan, wave 1, autonomous=false (single human-verify checkpoint). 999.1-01 (wave 1): single-task UI render addition in `web/pages/search_results.py:468` surfacing `display['img']` as `· {num}` after the shelfmark — strict desktop-parity scope per locked decisions D-01..D-05 in 999.1-CONTEXT.md. Mints requirement FOLIO-01. Earlier note: Phase 90 (Auth Caching Rewrite -- No set_session) planned: 2 plans across 2 waves. 90-01 (wave 1): behavior rewrite (get_user_client/sign_in/sign_out/set_session_from_url/exchange_code_for_session/4 retry blocks/profile.py change_password helper/clear_auth revoke-before-pop reorder) per Codex round-1/2/3 fixes + AUTHC-05 docstring + Phase 87 allowlist self-elimination (3->2) (closes AUTHC-02, AUTHC-03, AUTHC-04, AUTHC-05). 90-02 (wave 2, depends_on 90-01): atomic deletion of 4 globals + 2 helpers + install of 3 permanent CI guards (static AST scanner D-15 with 10 seed traps, runtime attr-absence D-16, behavioral refresh-lock test D-17 Tests A/B/C) (closes AUTHC-01, finalizes AUTHC-03, closes AUTHC-04). All 5 AUTHC-XX requirements covered.*
