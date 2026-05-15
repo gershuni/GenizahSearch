@@ -8,10 +8,11 @@
 
 Delete the process-wide auth client cache (`_client_cache`, `_session_locks`, `_locks_guard`, `_CLIENT_CACHE_TTL`) and the auth-resurrection guard (`_clear_stale_auth` + the "cleared while waiting for lock" re-read at lines 161-171) from `web/supabase_client.py`. Rewrite `get_user_client()` to build a fresh request-scoped client each call, authenticated by **local header mutation** across all three Supabase sub-clients (PostgREST + functions + storage) — **never** via the networked `auth.set_session(...)`. Refactor the OAuth bootstrap helpers (`sign_in`, `set_session_from_url`, `exchange_code_for_session`) to operate on **throwaway clients**, not the module singleton `get_client()`, so the singleton remains anonymous-only. Add a dedicated `change_password(new_password)` REST helper to replace `profile.py:149-150`'s `get_user_client().auth.update_user(...)` (GoTrue's `update_user` requires a local session, which we can't establish without `set_session`). Add proactive refresh: `get_user_client()` decodes the access-token `exp` claim, refreshes via `_refresh_user_session()` if expired/near-expiry, under a `_session_uuid`-keyed lock with post-lock re-read + stale-token-snapshot comparison to prevent concurrent-refresh token burn. Migrate the captured-handle `_app.storage.user` access at line 128 to `safe_user_get('auth_session')`, self-eliminating the Phase 87 allowlist entry. Install 3 permanent CI guards (static AST scanner with per-helper allowlist + aliased-form seed traps, runtime attr-absence on deleted globals, deterministic refresh-lock behavioral tests with Barrier/Event).
 
+**Scope expansion (Codex round-2 P1 catch — AUTHW-03 + AUTHW-04 pulled forward from Phase 91):** Today's `web/auth_state.py:clear_auth` (lines 120-134) pops `auth_session` BEFORE calling `supabase_sign_out()`. By the time `sign_out` runs, the access token is gone from storage, so today's eviction-by-access-token is already a no-op — but `client.auth.sign_out()` still fires on the module singleton, which is currently authenticated by the event-listener leak Codex F3 catches (`supabase/_sync/client.py:338-346`). That accidental authentication is what revokes a token server-side today (often the wrong user's token, but at least *some* token). The moment Phase 90 D-10 makes the singleton provably anonymous, `client.auth.sign_out()` revokes nothing, and **the user's refresh token stays valid forever on Supabase's servers**. This is a security regression worse than today's broken behavior. AUTHW-03 (revoke before pop) + AUTHW-04 (use user's authenticated client) MUST land in the same phase as the throwaway-bootstrap refactor — i.e., Phase 90.
+
 **Out of scope (carved off for other phases):**
-- `web/auth_state.py:set_auth/clear_auth/do_login` migration to `safe_storage` helpers — Phase 91 (AUTHW-01).
+- `web/auth_state.py:set_auth/do_login` migration to `safe_storage` helpers — Phase 91 (AUTHW-01). Phase 90 modifies `clear_auth` for the revoke-before-pop reorder, but the raw `app.storage.user.pop(cls.USER_KEY, None)` etc. allowlist entries stay; Phase 91 owns the per-key `safe_user_pop` migration.
 - OAuth callback in `web/main.py:1419+` migration to safe_storage helpers — Phase 91 (AUTHW-02).
-- `sign_out` ordering: server-side revocation BEFORE popping `auth_session`; use the user's authenticated client (not the anonymous singleton) — Phase 91 (AUTHW-03, AUTHW-04).
 - Cross-user concurrent smoke test, `docs/guides/MULTITENANT.md` — Phase 92.
 - The `reset_client()` function in `web/supabase_client.py:67-70` — kept; legacy retry helper unrelated to auth caching.
 - The `_is_jwt_expired()` helper — kept; still useful as a residual reactive-retry signal in the 4 read paths after the proactive primary strategy lands.
@@ -36,7 +37,50 @@ Delete the process-wide auth client cache (`_client_cache`, `_session_locks`, `_
       client.storage.session.headers["Authorization"] = bearer
   ```
   Verified local-only (no network call) by reading source: `postgrest/base_client.py:54`, `supabase_functions/_sync/functions_client.py:111`, `httpx.Headers.__setitem__`.
-- **D-02 (Codex F1 catch — `client.auth.update_user(...)` path):** `web/pages/profile.py:149-150` calls `get_user_client().auth.update_user({'password': ...})`. GoTrue's `update_user` requires a **local** auth session (`get_session()` at `gotrue_client.py:690`), which we explicitly avoid creating. Header mutation alone cannot satisfy this contract. **Add a dedicated `change_password(new_password: str) -> Dict` helper** in `web/supabase_client.py` that issues a direct `httpx.put` to `{SUPABASE_URL}/auth/v1/user` with the bearer header, bypassing the GoTrue client entirely. Migrate `web/pages/profile.py:149-150` to call this helper instead. This is a small but real change in scope that Plan 90-01 must include.
+- **D-02 (Codex F1 catch — `client.auth.update_user(...)` path):** `web/pages/profile.py:149-150` calls `get_user_client().auth.update_user({'password': ...})`. GoTrue's `update_user` requires a **local** auth session (`get_session()` at `gotrue_client.py:690`), which we explicitly avoid creating. Header mutation alone cannot satisfy this contract. **Add a dedicated `change_password(new_password: str) -> Dict` helper** in `web/supabase_client.py` that issues a direct `httpx.put` to `{SUPABASE_URL}/auth/v1/user`, bypassing the GoTrue client entirely. Migrate `web/pages/profile.py:149-150` to call this helper instead. Plan 90-01 must include this.
+
+  **Required request shape (Codex round-2 P2 catch — earlier draft only said "with the bearer header" which is incomplete; GoTrue's base client at `supabase_auth/_sync/gotrue_base_api.py:54-58` merges instance headers with per-call headers, so all four headers below must be present explicitly because we're bypassing the GoTrue client and therefore the instance-header merge):**
+
+  ```python
+  def change_password(new_password: str) -> Dict:
+      """Change current user's password without GoTrue's local-session requirement.
+
+      Direct PUT to /auth/v1/user with explicit headers — Codex P2: the GoTrue
+      base client (gotrue_base_api.py:54-58) merges instance headers (apikey +
+      Content-Type) with per-call headers (Authorization). When we bypass GoTrue
+      entirely we lose that merge, so we must supply all four explicitly.
+      """
+      import httpx
+      from web.safe_storage import safe_user_get
+      auth_session = safe_user_get('auth_session') or {}
+      access_token = auth_session.get('access_token')
+      if not access_token:
+          return {'error': 'Not logged in'}
+      url = f"{SUPABASE_URL}/auth/v1/user"
+      headers = {
+          'apikey': SUPABASE_ANON_KEY,                # project-scope API key
+          'Authorization': f'Bearer {access_token}',  # user-scope JWT
+          'Content-Type': 'application/json',         # request body type
+          'Accept': 'application/json',               # explicit response type
+      }
+      try:
+          resp = httpx.put(
+              url, headers=headers,
+              json={'password': new_password},        # JSON body
+              timeout=30.0,
+          )
+          if resp.status_code == 200:
+              return {'success': True, 'user': resp.json()}
+          # Surface server error message when available
+          try:
+              return {'error': resp.json().get('msg') or resp.text}
+          except Exception:
+              return {'error': resp.text}
+      except Exception as e:
+          return {'error': str(e)}
+  ```
+
+  Per Codex round 2: the previous one-line "bearer header" instruction would have produced a request without `apikey`, which Supabase rejects at the gateway — making `change_password` always return an error in production. The header tetrad above matches what GoTrue's own client sends when `update_user` runs normally.
 - **D-03 (Codex F1 catch — authenticated storage path):** `shared/puzzle_publish_service.py:81 publish_join` and line 152 `unpublish_join` use `client.storage.from_(STORAGE_BUCKET).upload/remove`. The puzzle-publish flow at `web/pages/puzzle.py:2665, 2742` hands the authenticated client into the service. D-01's storage header mutation makes this path keep working without code change at the service layer — but the assertion that "storage is anonymous-only in our code" (Claude's original proposal) is **false** and was a near-miss bug. Plan 90-01 must include a smoke check confirming that an authenticated storage upload works with the new header-mutation path.
 
 ### Refresh Strategy — Proactive Under Lock, with Reactive Fallback (Area 2, Codex F2)
@@ -98,7 +142,70 @@ Delete the process-wide auth client cache (`_client_cache`, `_session_locks`, `_
 
 - **D-09 (Codex F3 catch — singleton authentication leak):** Verified at `supabase/_sync/client.py:338-346`: when supabase Client receives `SIGNED_IN`/`TOKEN_REFRESHED`/`SIGNED_OUT` events, `_listen_to_auth_events` mutates `self.options.headers["Authorization"]` AND `self.auth._headers["Authorization"]`. Today's `sign_in()` (line 254), `set_session_from_url()` (line 388), and `exchange_code_for_session()` (line 414) all call auth-mutating methods on `get_client()` (the module singleton) — which means the singleton becomes authenticated with the most recently signed-in user's token. **Subsequent callers of `get_client()` receive a singleton with someone else's auth header.** This is a real cross-user leak path that survives `_client_cache` deletion. **Phase 90 MUST refactor the OAuth bootstrap helpers to use throwaway clients.**
 - **D-10:** Rewrite `sign_in`, `set_session_from_url`, `exchange_code_for_session` to create local `throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)` instances, call `throwaway.auth.<method>(...)`, extract the returned `user` + `session` dicts, return them — the throwaway client is discarded. `get_client()` is **never** the recipient of `auth.sign_in_*` or `auth.set_session` or `auth.exchange_code_for_session` calls. This makes the singleton **provably anonymous-only**.
-- **D-11:** `sign_out()` is more delicate. The current impl calls `get_client().auth.sign_out()` to revoke at Supabase. Phase 90 must NOT change `sign_out`'s server-side semantics — Phase 91 (AUTHW-03, AUTHW-04) explicitly owns the "use the user's authenticated client, revoke first, pop second" refactor. **Phase 90 scope for `sign_out`:** only delete the `_client_cache.pop / _session_locks.pop / _prune_session_client_cache` eviction block at lines 281-293 (the cache it referenced is gone). The `client.auth.sign_out()` call on the singleton stays; Phase 91 will move it to a user-client. Document this seam explicitly in code comments at the `sign_out` definition so Phase 91 can find it.
+- **D-11 (Codex round-2 P1 catch — AUTHW-03 + AUTHW-04 pulled forward):** `sign_out()` cannot stay on the singleton once D-10 makes the singleton anonymous-only. Today's accidental token revocation depends on the singleton being authenticated by the event-listener leak; remove that leak (D-10) and `client.auth.sign_out()` on the singleton revokes nothing. **Phase 90 MUST rewrite `sign_out()` to use a user-authenticated throwaway client.** New `sign_out` signature accepts an optional `access_token` parameter so the caller (`web/auth_state.py:clear_auth`) can pass the token BEFORE popping `auth_session` from storage:
+
+  ```python
+  def sign_out(access_token: Optional[str] = None) -> Dict:
+      """Revoke the user's session server-side via a throwaway authenticated client.
+
+      Phase 90 D-11 (Codex round-2 P1): we cannot rely on get_client() being
+      authenticated — D-10 makes it provably anonymous-only — so we build a
+      throwaway, apply the user's token via local headers (no set_session),
+      and call sign_out() on the throwaway. Token is passed as a parameter
+      so clear_auth can revoke BEFORE popping auth_session from storage.
+      """
+      if access_token is None:
+          # Fall back to reading from storage (covers callers other than
+          # clear_auth, though there are none in production today).
+          from web.safe_storage import safe_user_get
+          auth_session = safe_user_get('auth_session') or {}
+          access_token = auth_session.get('access_token')
+      if not access_token:
+          return {'success': True, 'note': 'no active session to revoke'}
+      try:
+          throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+          _apply_user_auth_to_client(throwaway, access_token)
+          throwaway.auth.sign_out()
+          return {'success': True}
+      except Exception as e:
+          return {'error': f'Logout error: {str(e)}'}
+  ```
+
+- **D-11b (clear_auth reorder — Codex round-2 P1):** Modify `web/auth_state.py:120-134:GlobalAuthState.clear_auth` to read the access token, call `supabase_sign_out(access_token)`, **then** pop the local keys. Final shape:
+
+  ```python
+  @classmethod
+  def clear_auth(cls):
+      """Clear authentication (logout). Revoke server-side BEFORE local cleanup
+      so the token is actually invalidated on Supabase's side (Phase 90 D-11).
+
+      Local key cleanup happens in a finally block so it runs even when
+      server revocation fails — half-state (revoked server-side but local
+      keys still present) is worse than no revocation at all.
+      """
+      from web.safe_storage import safe_user_get
+      auth_session = safe_user_get('auth_session') or {}
+      access_token = auth_session.get('access_token')
+      try:
+          # AUTHW-04: server-side revocation FIRST, with the user's own token
+          supabase_sign_out(access_token)
+      except Exception:
+          pass  # Server revocation failed; local cleanup still runs below
+      finally:
+          # AUTHW-03: local keys popped unconditionally (no half-state)
+          app.storage.user.pop(cls.USER_KEY, None)
+          app.storage.user.pop(cls.PROFILE_KEY, None)
+          app.storage.user.pop('auth_session', None)
+      # PostHog reset stays as-is (line 126-129)
+      try:
+          ui.run_javascript('if(window.posthog)posthog.reset()')
+      except Exception:
+          pass
+  ```
+
+  **Allowlist impact:** the three raw pops at `web/auth_state.py:122-124` stay (they're inside the Phase 87 `web/auth_state.py` allowlist block — Phase 91 AUTHW-01 will migrate them to `safe_user_pop`). Phase 90 only changes the ORDERING and adds the `safe_user_get` read above (which is NOT raw access — it goes through the chokepoint). The `expected_count` values in the allowlist YAML stay correct.
+
+  **The `desktop` desktop app does NOT have this code path** (PyQt6 client uses `supabase_corrections_client.py`); this change is web-only and bypasses desktop entirely.
 
 ### Caller-Side: Signature Stable, No Migration Churn (Pre-decided)
 
@@ -106,44 +213,73 @@ Delete the process-wide auth client cache (`_client_cache`, `_session_locks`, `_
 
 ### Plan Decomposition (Area 3, Codex revised)
 
-- **D-13 (Codex plan-boundary catch):** The 2-plan split stands, but **Plan 90-01 scope grew** to include all 3 of Codex's blocking findings. The deletion can't go first because the cache fields are still referenced (sign_out eviction block, get_user_client cache lookup) before the rewrite lands. Phase 90 ships as **2 plans**:
-  - **Plan 90-01 — Behavior rewrite + Codex-mandated fixes + tests + comments.**
+- **D-13 (Codex plan-boundary catch, expanded in round 2):** The 2-plan split stands, but **Plan 90-01 scope grew further** to include AUTHW-03 + AUTHW-04 (the `sign_out` user-client + revoke-before-pop refactor) per Codex round-2 P1. The deletion can't go first because the cache fields are still referenced (`get_user_client` cache lookup) before the rewrite lands. Phase 90 ships as **2 plans**:
+  - **Plan 90-01 — Behavior rewrite + Codex round-1 fixes (F1/F2/F3) + Codex round-2 fixes (P1 sign_out, P2 change_password headers) + tests + comments.**
     - Add `_apply_user_auth_to_client(client, access_token)` helper (D-01).
     - Add `_access_token_near_expiry(access_token, skew_sec=REFRESH_SKEW_SEC)` helper — base64-decode JWT payload, parse `exp` claim, compare to `time.time() + skew_sec`. No signature check (we trust supabase tokens locally; if a malformed JWT lands here, treat as expired and let the refresh attempt fail loudly).
     - Add `_refresh_locks: Dict[str, threading.Lock] = {}` and `_refresh_locks_guard = threading.Lock()` module globals (the **new** locks, keyed by `_session_uuid`; NOT to be confused with the old `_session_locks` keyed by `access_token` which dies in Plan 90-02).
     - Add `_refresh_user_session(stale_refresh_token=None) -> bool` per D-06.
     - Rewrite `get_user_client()` per D-05: read tokens via `safe_user_get('auth_session')` (replaces the captured-handle `_app.storage.user` at line 128), proactive expiry check → call `_refresh_user_session(stale_refresh_token=current_refresh_token)` if needed → re-read tokens → build fresh client → `_apply_user_auth_to_client(client, access_token)` → return.
-    - Add `change_password(new_password: str) -> Dict` REST helper per D-02; migrate `web/pages/profile.py:149-150` to call it.
+    - Add `change_password(new_password: str) -> Dict` REST helper per D-02 (full 4-header request shape — `apikey` + `Authorization` + `Content-Type` + `Accept` + JSON body); migrate `web/pages/profile.py:149-150` to call it.
     - Refactor `sign_in()`, `set_session_from_url()`, `exchange_code_for_session()` per D-10 to use throwaway clients.
+    - **Rewrite `sign_out()` per D-11** — accept optional `access_token` parameter, build throwaway, `_apply_user_auth_to_client(throwaway, token)`, call `throwaway.auth.sign_out()`. Deletes the old cache-eviction block inline as part of the rewrite (lines 281-293 are gone).
+    - **Reorder `web/auth_state.py:120-134:GlobalAuthState.clear_auth` per D-11b** — `safe_user_get('auth_session')` to read access_token → call `supabase_sign_out(access_token)` in `try:` → local pops in `finally:` block (atomic local cleanup even if server revocation fails).
     - Update the 4 reactive retry blocks at `web/supabase_client.py:516, 756, 935, 1101` to call `_refresh_user_session()` instead of `reset_client()` (which only resets the anonymous singleton and has no effect on auth). `reset_client()` itself stays (legacy; used elsewhere indirectly), only its uses inside the JWT-expired retry blocks change.
     - Add the AUTHC-05 docstring/comment at the top of `get_user_client()` citing `gotrue_client.py:713`, explaining why `set_session()` is intentionally avoided mid-flight.
-    - Delete the Phase 87 allowlist entry for `web/supabase_client.py` from `.planning/phase87_storage_allowlist.yaml` (it goes from 4 → 3 entries; matches Phase 88's self-elimination pattern for `web/export_state.py`).
-    - **`_client_cache`, `_session_locks`, `_locks_guard`, `_CLIENT_CACHE_TTL`, `_clear_stale_auth`, `_prune_session_client_cache`** are kept as dead code in this plan — their only references after the rewrite are inside `sign_out()` (the eviction block at lines 281-293), which Plan 90-02 deletes together with the globals.
-    - Plan boundary: full pytest green. The Phase 87 lint scanner still passes (allowlist entry removed, raw access migrated). No user-visible behavior change.
+    - Delete the Phase 87 allowlist entry for `web/supabase_client.py` from `.planning/phase87_storage_allowlist.yaml` (allowlist drops from **3 → 2** file entries — the current state has 3 entries: `web/auth_state.py`, `web/main.py`, `web/supabase_client.py`; matches Phase 88's `web/export_state.py` self-elimination pattern). Phase 91 will subsequently take 2 → 0 by migrating the `auth_state.py` pops and the `main.py` OAuth callback writes.
+    - **`_client_cache`, `_session_locks`, `_locks_guard`, `_CLIENT_CACHE_TTL`, `_clear_stale_auth`, `_prune_session_client_cache`** are kept as dead code in this plan — they have **no remaining references** after the `sign_out` rewrite removes the eviction block. Plan 90-02 deletes the dead globals + helpers.
+    - Plan boundary: full pytest green. The Phase 87 lint scanner still passes (allowlist entry removed, raw access migrated). **User-visible behavior change in this plan: logout now ACTUALLY revokes the token server-side** (D-11 + D-11b) — a security correctness improvement over today's accidental-revocation-via-event-listener-leak. No other user-visible behavior change.
   - **Plan 90-02 — Deletion + static enforcement.**
     - Delete the 4 module globals `_session_locks`, `_locks_guard`, `_client_cache`, `_CLIENT_CACHE_TTL`.
     - Delete the helper functions `_clear_stale_auth(storage)` (lines 96-107) and `_prune_session_client_cache(now)` (lines 73-87).
-    - Delete the eviction block in `sign_out()` at lines 281-293 (the `try: from web.safe_storage import safe_user_get; auth_session = ...; access_token = auth_session.get('access_token'); if access_token: _client_cache.pop(...); _session_locks.pop(...); _prune_session_client_cache(); except Exception: pass` block).
-    - Install 3 test files per D-14, D-15, D-16.
+    - The `sign_out` eviction block at lines 281-293 is already gone (Plan 90-01 rewrote `sign_out` and removed it as part of the rewrite, not as a separate later deletion).
+    - Install 3 test files per D-15, D-16, D-17.
     - Plan boundary: full pytest green. No user-visible behavior change.
 - **D-14:** Plan 90-01 MUST keep all tests green at its boundary. The current `tests/test_version_selector_pending.py` mocks `set_session` (per memory: "mocks `set_session` at the client level"); audit its assertions in Plan 90-01 and retarget mocks to whichever auth helper survives the refactor — most likely it can pass unchanged because version selector doesn't go through `get_user_client()`'s rewritten path, but **the planner must confirm** during the migration.
 
 ### Regression Guards — Static AST + Runtime Attr-Absence + Behavioral (Area 4, Codex-refined)
 
-- **D-15 — Static AST scanner (`tests/test_no_set_session_outside_oauth.py`):** Mirrors Phase 89 D-10 structure (scan `web/` + `tests/`, AST walker, seed traps as parsed snippets).
-  - Disallowed Call nodes: any Call whose attribute chain matches `.auth.set_session(...)` OR `.auth.exchange_code_for_session(...)`, regardless of receiver name (catches `client.auth.set_session(...)`, `c.auth.set_session(...)`, and `<any>.auth.<method>(...)`).
-  - **Per-helper allowlist (Codex catch — narrower than original Claude proposal):**
-    - `.auth.set_session(...)` allowed only inside the FunctionDef body of `set_session_from_url` in `web/supabase_client.py`.
-    - `.auth.exchange_code_for_session(...)` allowed only inside the FunctionDef body of `exchange_code_for_session` in `web/supabase_client.py`.
+- **D-15 — Static AST scanner (`tests/test_no_set_session_outside_oauth.py`):** Mirrors Phase 89 D-10 structure (scan `web/` + `tests/`, AST walker, seed traps as parsed snippets). **Codex round-2 P3 catch: the original "chain matching" approach (`.auth.set_session(...)` chain) silently misses aliased forms like `auth = client.auth; auth.set_session(...)` — the Call node's attribute chain is `auth.set_session`, not `.auth.set_session`. Switched to attribute-name matching, which catches all aliases trivially without requiring alias tracking.**
+
+  **Two enforcement classes:**
+
+  **Class A — Auth-mutating method name bans (regardless of receiver chain):**
+  - Disallowed Call nodes: ANY Call whose **terminal attribute name** is `set_session` OR `exchange_code_for_session`, regardless of the receiver expression. The walker matches `node.func.attr in {"set_session", "exchange_code_for_session"}` — no alias tracking, no chain reconstruction, just the leaf method name. Catches:
+    - `client.auth.set_session(...)` — direct
+    - `c.auth.set_session(...)` — short-alias receiver
+    - `auth = client.auth; auth.set_session(...)` — aliased intermediate (only `set_session` matters; the LHS is irrelevant)
+    - `get_client().auth.set_session(...)` — singleton resurrection
+    - `self.client.auth.set_session(...)` — attribute path
+    - `client.auth.exchange_code_for_session({...})` — direct OAuth variant
+    - `c.auth.exchange_code_for_session({...})` — aliased OAuth variant
+  - **Per-helper allowlist:** the walker permits matches only when the enclosing FunctionDef name (anywhere in the lexical chain of `ast.walk` parents) matches the expected pair:
+    - `set_session` allowed only inside `set_session_from_url` in `web/supabase_client.py`
+    - `exchange_code_for_session` allowed only inside `exchange_code_for_session` in `web/supabase_client.py`
     - The original "one shared allowlist for both APIs" was too loose; per-method enforcement makes accidental mixing of bootstrap roles impossible.
-  - **Seed-trap snippets (Codex catch — aliased forms):** include at least 6 known-bad strings AS PARSED CODE SNIPPETS via `ast.parse(...)`:
-    1. `client.auth.set_session(a, r)` — direct
-    2. `c.auth.set_session(a, r)` — alias receiver
-    3. `auth = client.auth; auth.set_session(a, r)` — aliased intermediate
-    4. `get_client().auth.set_session(a, r)` — singleton resurrection
-    5. `client.auth.exchange_code_for_session({...})` — direct OAuth variant
-    6. `auth = client.auth; auth.exchange_code_for_session({...})` — aliased OAuth
-  - The scanner asserts each parsed snippet, when run through the walker, IS flagged as a violation. Defends against false-negatives.
+  - **Theoretical false-positive risk:** a user-written method also named `set_session` on an unrelated class would be flagged. Mitigation: the scanner's narrow scope (`web/` only) and the codebase's lack of any other `set_session` consumer (verified by grep) make this acceptable. Worst-case future addition can claim an allowlist exception.
+
+  **Class B — Singleton-resurrection ban (D-10 invariant enforcement, Codex round-2 P3):** The invariant from D-10 — "`get_client()` is never used for auth-mutating calls" — needs its own scanner clause. The walker additionally flags any Call whose receiver chain begins with a Call to a function named `get_client` AND whose path traverses `.auth` AND whose terminal attribute is in the auth-mutating method set. Mathematically:
+  - Pattern: `get_client().auth.<X>(...)` where `<X>` ∈ {`set_session`, `sign_in_with_password`, `sign_in_with_oauth`, `sign_in_with_otp`, `sign_up`, `exchange_code_for_session`, `refresh_session`, `update_user`, `sign_out`}
+  - Banned EVERYWHERE in `web/` and `tests/`. No allowlist — there is no legitimate reason to perform auth mutation on the singleton.
+  - This catches the cross-user leak vector Codex F3 surfaced: even if someone deletes `_client_cache` correctly, doing `get_client().auth.sign_in_with_password(...)` re-authenticates the singleton via the event listener.
+
+  **Seed-trap snippets — 10 minimum (Codex round-2 P3 widened from 6):** include AS PARSED CODE SNIPPETS via `ast.parse(...)`. Walker MUST flag each:
+
+  Class A traps (auth-mutating method anywhere outside the 2 helpers):
+  1. `client.auth.set_session(a, r)` — direct
+  2. `c.auth.set_session(a, r)` — short-alias receiver
+  3. `auth = client.auth\nauth.set_session(a, r)` — aliased intermediate
+  4. `client.auth.exchange_code_for_session({})` — direct OAuth variant
+  5. `auth = c.auth\nauth.exchange_code_for_session({})` — aliased OAuth variant
+
+  Class B traps (`get_client()` resurrection vectors):
+  6. `get_client().auth.set_session(a, r)` — singleton set_session
+  7. `get_client().auth.sign_in_with_password({})` — singleton sign-in
+  8. `get_client().auth.exchange_code_for_session({})` — singleton OAuth
+  9. `get_client().auth.refresh_session(r)` — singleton refresh
+  10. `get_client().auth.update_user({})` — singleton user-mutation
+
+  The scanner asserts each parsed snippet IS flagged. Defends against false-negatives where future "improvements" to the walker silently weaken coverage.
 - **D-16 — Runtime attr-absence test (`tests/test_no_client_cache_globals.py`):** Parametrized over the **6 deleted module-level names**:
   ```python
   DELETED_GLOBALS = [
@@ -188,7 +324,7 @@ Delete the process-wide auth client cache (`_client_cache`, `_session_locks`, `_
 
 ### Phase 87 + Phase 88 + Phase 89 Foundations (load-bearing for Phase 90)
 - `web/safe_storage.py` — Phase 87 chokepoint. Phase 90's storage access (token read at the new line replacing `_app.storage.user` at line 128, token write in `_refresh_user_session`) MUST go through `safe_user_get`/`safe_user_set`. `get_session_uuid()` is the stable cache-key primitive for the new `_refresh_locks` dict.
-- `.planning/phase87_storage_allowlist.yaml` — Plan 90-01 deletes the `web/supabase_client.py` entry (currently lines 95-114, the captured-handle pattern with `expected_count=1`). After Phase 90, the allowlist drops to 3 entries (was 4 at v7.12 start, became 3 after Phase 88's `web/export_state.py` self-elimination, and now drops again to 2 with `web/supabase_client.py` self-eliminating).
+- `.planning/phase87_storage_allowlist.yaml` — Plan 90-01 deletes the `web/supabase_client.py` entry (currently lines 95-114, the captured-handle pattern with `expected_count=1`). **Allowlist count: currently 3 file entries (`web/auth_state.py`, `web/main.py`, `web/supabase_client.py`); Phase 90 takes it 3 → 2** (verified by `grep -c "^  - file:" .planning/phase87_storage_allowlist.yaml`). v7.12 started with 4 entries; Phase 88 took 4 → 3 by self-eliminating `web/export_state.py`. Phase 90 takes 3 → 2 by self-eliminating `web/supabase_client.py`. Phase 91 takes 2 → 0 by migrating `web/auth_state.py` (AUTHW-01) and the `web/main.py` OAuth callback (AUTHW-02).
 - `tests/test_no_raw_storage_access.py` — Phase 87 permanent CI lint scanner. Phase 90 makes one allowlist deletion (no additions).
 - `.planning/phases/88-state-separation-by-deletion/88-CONTEXT.md` D-04, D-05, D-07 — plan-boundary green discipline, ordering rationale, and static AST guard shape. Phase 90 mirrors D-07's seed-trap-as-parsed-code-snippet pattern.
 - `.planning/phases/89-lists-cache-per-request/89-CONTEXT.md` D-08, D-09, D-10, D-11 — 2-plan split, same-commit-as-deletion test-update discipline, static AST scanner shape, runtime attr-absence parametrized test shape. Phase 90 D-15/D-16 are direct mirrors.
@@ -202,18 +338,20 @@ Plan 90-01:
   - Add `_refresh_locks` (line ~36 area), `_refresh_locks_guard`, `_apply_user_auth_to_client`, `_access_token_near_expiry`, `_refresh_user_session`, `change_password` helpers.
   - Rewrite `get_user_client()` body (lines 110-203) per D-05.
   - Refactor `sign_in()` (line 246), `set_session_from_url()` (line 376), `exchange_code_for_session()` (line 403) to use throwaway clients per D-10.
+  - **Rewrite `sign_out()` (lines 278-298) per D-11** — accept optional `access_token` parameter, build throwaway, `_apply_user_auth_to_client(throwaway, token)`, call `throwaway.auth.sign_out()` on the throwaway. As part of the rewrite, the old cache-eviction block (lines 281-293 in the current file) is deleted inline — no longer a separate 90-02 step.
   - Update 4 reactive retry blocks: lines 516, 756, 935, 1101 (`reset_client()` → `_refresh_user_session()`).
   - Migrate `_app.storage.user` at line 128 to `safe_user_get('auth_session')` (self-eliminates Phase 87 allowlist entry).
   - Add AUTHC-05 docstring/comment at `get_user_client`.
+- `web/auth_state.py:120-134:GlobalAuthState.clear_auth` — reorder per D-11b: read `auth_session.access_token` via `safe_user_get`, call `supabase_sign_out(access_token)` in `try:` BEFORE the local pops, move local pops into `finally:` for atomicity. The three raw `app.storage.user.pop(...)` calls stay (Phase 87 allowlisted; Phase 91 AUTHW-01 will migrate them to `safe_user_pop`). `expected_count` in the allowlist YAML stays correct because no new raw accesses are added.
 - `web/pages/profile.py:149-150` — replace `client = get_user_client(); response = client.auth.update_user({'password': ...})` with `result = change_password(new_password_input.value)`. Adjust the success/error branch accordingly.
-- `.planning/phase87_storage_allowlist.yaml` — delete the `web/supabase_client.py` block (lines 95-114).
+- `.planning/phase87_storage_allowlist.yaml` — delete the `web/supabase_client.py` block (lines 95-114). Allowlist drops 3 → 2 entries.
 
 Plan 90-02:
 - `web/supabase_client.py` — deletions:
   - Lines 31-35: 4 module globals (`_session_locks`, `_locks_guard`, `_client_cache`, `_CLIENT_CACHE_TTL`).
   - Lines 73-87: `_prune_session_client_cache(now)`.
   - Lines 96-107: `_clear_stale_auth(storage)`.
-  - Lines 281-293: the `_client_cache.pop / _session_locks.pop / _prune_session_client_cache()` eviction block inside `sign_out()`. The `client.auth.sign_out()` call on `get_client()` STAYS (Phase 91 owns its refactor).
+  - **NOTE:** The `sign_out` cache-eviction block at lines 281-293 is already gone — Plan 90-01 removed it as part of the `sign_out` rewrite (D-11). Plan 90-02 only deletes the dead module globals + 2 dead helpers above.
 
 ### Test files created by Phase 90 (Plan 90-02)
 - `tests/test_no_set_session_outside_oauth.py` — static AST scanner per D-15.
@@ -224,13 +362,18 @@ Plan 90-02:
 - `tests/test_supabase_corrections_client.py` — does not touch `get_user_client` directly per grep. Should pass unchanged.
 - `tests/test_version_selector_pending.py` — mocks `set_session` at the client level. Plan 90-01 must audit and either retarget the mocks or confirm the test still passes (the function under test does not go through `get_user_client`'s rewritten path).
 
-### External red-team review (Codex round — Phase 88/89 pattern)
-- `_tmp/codex_phase90_discuss_review_prompt.md` — Claude's proposed decisions sent to Codex.
-- `_tmp/codex_phase90_discuss_review_response.txt` — Codex's verdicts. Three blocking findings:
+### External red-team review (Codex rounds 1 + 2 — Phase 88/89 pattern, doubled here)
+- `_tmp/codex_phase90_discuss_review_prompt.md` — Claude's round-1 proposed decisions sent to Codex.
+- `_tmp/codex_phase90_discuss_review_response.txt` — Codex round-1 verdicts. Three blocking findings:
   1. **F1: Token application incomplete** — postgrest.auth + functions.set_auth alone breaks `profile.py:149` password change (GoTrue `update_user` needs local session) and `puzzle.py` authenticated storage upload (storage IS used authenticated, not anonymous-only).
   2. **F2: Reactive refresh insufficient** — only 4 of ~30 callers retry on JWT-expired; reactive-only would silently break ~26 write paths. Need proactive refresh in `get_user_client()`.
   3. **F3: Singleton anonymous claim is false** — `supabase/_sync/client.py:338-346` event listener mutates `get_client()`'s headers on `SIGNED_IN`/`TOKEN_REFRESHED`. Today's `sign_in`/`set_session_from_url`/`exchange_code_for_session` on the singleton produce a real cross-user leak path that survives `_client_cache` deletion. Bootstrap helpers must use throwaway clients.
   Plus refined refresh-race verdict (post-lock expiry-check + stale-snapshot comparison; do NOT prune locks on sign_out) and per-helper static-allowlist scope.
+- **Codex round 2** (user-supplied review of the round-1-synthesized CONTEXT.md):
+  - **P1 (BLOCKING): `sign_out` regression after D-10.** Making the singleton anonymous-only (D-10) breaks the accidental token revocation that today's `client.auth.sign_out()` on the singleton produces via the event-listener leak. After Phase 90 lands as originally drafted, the user's refresh token would NEVER be revoked server-side on logout. **Fix:** pull AUTHW-03 + AUTHW-04 forward from Phase 91 into Phase 90; rewrite `sign_out` to use a user-authenticated throwaway, reorder `clear_auth` to revoke-before-pop with finally-block local cleanup. Encoded as D-11 + D-11b.
+  - **P1 (BLOCKING): `change_password` headers incomplete.** Original "with the bearer header" instruction was missing `apikey`; Supabase's gateway requires both. GoTrue's `gotrue_base_api.py:54-58` merges instance headers (which include `apikey`) with per-call headers — bypassing GoTrue means we lose that merge. **Fix:** D-02 expanded to spell out all four headers explicitly (`apikey`, `Authorization: Bearer ...`, `Content-Type: application/json`, `Accept: application/json`) plus JSON body shape.
+  - **P2 (MEDIUM): D-15 chain-matching misses aliased forms.** Seed-trap #3 (`auth = client.auth; auth.set_session(...)`) requires alias tracking to catch under chain-matching. **Fix:** D-15 switched to terminal-attribute-name matching (`node.func.attr in {...}`) — catches all aliases trivially. Also added Class B (singleton-resurrection ban: `get_client().auth.<mutating>(...)` with broader method set including `sign_in_*`, `refresh_session`, `update_user`, `sign_out`). Seed traps expanded from 6 to 10 with the Class B traps.
+  - **P3 (LOW): Allowlist count inconsistency.** Document said both "4 → 3" and "3 → 2" in different places. Actual count today: 3 file entries. Phase 90 takes 3 → 2. Fixed in canonical_refs and D-13 plan list.
 
 ### Upstream source-read references (verified facts, NOT in the project tree)
 - `supabase_auth/_sync/gotrue_client.py:713` — `set_session()` networked behavior (Codex finding; verified by source-read). Cited in AUTHC-05 docstring.
@@ -252,7 +395,7 @@ Plan 90-02:
 - `tests/test_browse_state.py` (Phase 87 B3 fix), `tests/test_search_state.py` (Phase 87 B3 fix) — monkeypatch `web.safe_storage.app` pattern for isolated test storage. Phase 90 D-17 reuses this for the behavioral lock test (no real NiceGUI context in worker threads).
 
 ### Established Patterns
-- **Deletion-not-migration discipline** (Phase 87, 88, 89): Plan 90-01 leaves the 4 module globals + 2 helper functions + 1 eviction block as dead code temporarily; Plan 90-02 deletes them in one commit alongside the regression-guard installation. Plan-boundary green discipline (Phase 88 D-05).
+- **Deletion-not-migration discipline** (Phase 87, 88, 89): Plan 90-01 leaves the 4 module globals + 2 helper functions as dead code temporarily (the eviction block is deleted inline as part of the `sign_out` rewrite in 90-01 per Codex round-2 P1, not deferred to 90-02); Plan 90-02 deletes the dead globals + helpers in one commit alongside the regression-guard installation. Plan-boundary green discipline (Phase 88 D-05).
 - **Codex red-team after Claude proposes** (Phase 88/89 specifics, repeated here): user is non-technical for these decisions; Claude proposes, Codex red-teams, user picks the synthesis. Worked again — Codex caught 3 blocking findings (storage/auth path completeness, reactive-refresh coverage gap, singleton authentication leak via supabase event listener) that the original Claude analysis missed. Same pattern locked in for Phases 91-92.
 - **Static AST guard as durable CI lint** (Phase 87 + 88 + 89): AST walker over `web/` + `tests/` with seed-trap parsed snippets is the orthodox shape for "this name/call is gone forever" enforcement. Phase 90 extends the pattern from `Attribute` access (Phase 88/89) to `Call` invocation (Phase 90 D-15 catches `.auth.set_session(...)` method calls).
 - **Throwaway clients for one-shot auth-mutating calls** (Phase 90 NEW pattern): bootstrap helpers (`sign_in`, `set_session_from_url`, `exchange_code_for_session`) and the refresh helper (`_refresh_user_session`) create local `create_client(URL, ANON_KEY)` instances and discard them post-call. The module singleton `get_client()` is **provably anonymous-only** after Phase 90. This pattern generalizes the v7.12 principle of "no cached authenticated clients" beyond the explicit `_client_cache` deletion.
@@ -262,7 +405,7 @@ Plan 90-02:
 - **4 reactive JWT-expired retry blocks** at `web/supabase_client.py:516, 756, 935, 1101` — Plan 90-01 updates these to call `_refresh_user_session()` instead of `reset_client()`. Pattern is a 2-3 line per-site change.
 - **`web/pages/profile.py:149-150`** — Plan 90-01 migrates the one call site of `client.auth.update_user(...)` to the new `change_password(...)` REST helper. This is the only caller of `client.auth.<method>(...)` returned from `get_user_client()` per Codex grep.
 - **`shared/puzzle_publish_service.py:81, 152`** — keeps working without code change; D-01's storage header mutation in `_apply_user_auth_to_client` covers authenticated storage upload/remove.
-- **Phase 91 seam at `sign_out()`** — Plan 90-02 deletes the cache-eviction block (lines 281-293) but leaves the `client.auth.sign_out()` call on `get_client()` for Phase 91 to refactor into a user-authenticated revocation. Document the seam with an inline comment so Phase 91 can locate it.
+- **`sign_out()` + `clear_auth()` rewrite — pulled forward from Phase 91** (Codex round-2 P1). Plan 90-01 rewrites both: `sign_out(access_token)` uses a user-authenticated throwaway client to actually revoke server-side (D-11); `clear_auth` reorders to revoke-before-pop with finally-block local cleanup (D-11b). After Phase 90, the only Phase 91 work remaining on this code path is migrating the three `app.storage.user.pop(...)` calls in `clear_auth` to `safe_user_pop` (AUTHW-01) — a strictly local-state-migration concern with no security-correctness implications.
 - **`web/auth_state.py:do_login` at line 176** — writes `auth_session` to `app.storage.user` raw (Phase 87 allowlisted, Phase 91 will migrate). Phase 90's `_refresh_user_session` writes through `safe_user_set('auth_session', ...)` already; both writers will converge in Phase 91.
 
 ### Why Codex's F3 Catch Matters (High-Value Insight)
@@ -284,15 +427,20 @@ This is the Phase-89-equivalent high-value Codex catch (per-ACCESS vs. per-reque
   3. **F3 (singleton authentication leak via event listener):** Real cross-user leak path surviving `_client_cache` deletion, via `supabase/_sync/client.py:334-346`'s mutation of singleton `Authorization` headers on `SIGNED_IN`/`TOKEN_REFRESHED`. Forces throwaway-client refactor of OAuth bootstrap helpers (D-09, D-10).
 - **Refresh-race refinement (Codex catch):** "Post-lock token-equality check alone burns the newly-rotated token if the snapshot was taken after another thread already refreshed." Forces the stale-token-snapshot parameter on `_refresh_user_session` (D-06) and the post-lock expiry-check + stale-comparison combined gate.
 - **Static scanner allowlist scope refinement (Codex catch):** Original Claude proposal had one shared allowlist for both `.auth.set_session` and `.auth.exchange_code_for_session`. Codex tightened to per-helper enforcement: `set_session` only inside `set_session_from_url`; `exchange_code_for_session` only inside `exchange_code_for_session`. Prevents accidental mixing of OAuth bootstrap roles.
-- **Seed-trap expansion (Codex catch):** Original Claude proposal had 4 seed traps; Codex added "aliased auth" forms (`auth = client.auth; auth.set_session(...)`) and "singleton resurrection" (`get_client().auth.set_session(...)`). Final D-15 has 6 seed traps minimum.
+- **Seed-trap expansion (Codex catches across both rounds):** Round 1 added "aliased auth" forms (`auth = client.auth; auth.set_session(...)`) and "singleton resurrection" (`get_client().auth.set_session(...)`). Round 2 caught that chain-matching can't see through aliases — switched D-15 to attribute-name matching plus added a Class B clause for `get_client().auth.<mutating>(...)` with a broader method set including `sign_in_*`, `refresh_session`, `update_user`, `sign_out`. Final D-15 has **10** seed traps minimum (5 Class A + 5 Class B).
+- **Codex round-2 catches (4 additional findings on the round-1 synthesis):**
+  1. **P1 (BLOCKING) — `sign_out` regression after D-10:** D-10's anonymous-singleton-only invariant breaks today's accidental token revocation. Without pulling AUTHW-03 + AUTHW-04 into Phase 90, refresh tokens are NEVER revoked server-side on logout. Encoded as D-11 + D-11b (`sign_out(access_token=...)` rewrite + `clear_auth` revoke-before-pop reorder).
+  2. **P1 (BLOCKING) — `change_password` request headers:** Original "with the bearer header" guidance missed `apikey` (Supabase's gateway rejects without it). GoTrue's base client at `gotrue_base_api.py:54-58` merges instance + per-call headers; bypassing GoTrue loses that merge. D-02 expanded to all 4 headers + JSON body shape.
+  3. **P2 (MEDIUM) — Static scanner alias gap:** Chain-matching `.auth.set_session(...)` can't catch aliased `auth = client.auth; auth.set_session(...)` without explicit alias tracking. Switched to attribute-name matching (catches all aliases trivially). Added Class B singleton-resurrection ban.
+  4. **P3 (LOW) — Allowlist count inconsistency:** "4 → 3" vs "3 → 2" in different places. Actual: 3 file entries today, Phase 90 takes 3 → 2.
 
 </specifics>
 
 <deferred>
 ## Deferred Ideas
 
-- **`sign_out` refactor to use user-authenticated client + revocation-before-pop ordering:** Codex F3's logic suggests `sign_out` should ALSO use a throwaway-style authenticated client (not the singleton) to actually revoke the user's token server-side. Phase 91 AUTHW-03/AUTHW-04 explicitly own this; Phase 90 only deletes the dead cache-eviction block and leaves a documenting seam comment. Do not bundle into Phase 90.
-- **`web/auth_state.py:set_auth/clear_auth/do_login` migration:** Phase 91 AUTHW-01. Phase 90's `_refresh_user_session` does write `safe_user_set('auth_session', ...)` — that's the only Phase-91-adjacent write Phase 90 introduces, and it goes through the chokepoint already. Phase 91 will further atomize the multi-key write block (`auth_user` + `auth_profile` + `auth_session` as a single safe operation).
+- ~~**`sign_out` refactor to use user-authenticated client + revocation-before-pop ordering:**~~ **No longer deferred — pulled forward into Phase 90 per Codex round-2 P1 (D-11 + D-11b).** Without this, Phase 90 would ship a security regression (refresh tokens never revoked server-side on logout).
+- **`web/auth_state.py:set_auth/do_login` migration to `safe_user_*`:** Phase 91 AUTHW-01. Phase 90 now modifies `clear_auth` for the revoke-before-pop reorder (D-11b) but does NOT migrate the three raw `app.storage.user.pop(...)` calls — Phase 91 owns the `safe_user_pop` swap. Phase 90's `_refresh_user_session` already writes via `safe_user_set('auth_session', ...)` through the chokepoint. Phase 91 will further atomize the multi-key write block (`auth_user` + `auth_profile` + `auth_session` as a single safe operation).
 - **`reset_client()` deletion:** Function at lines 67-70 is unrelated to auth caching — it resets the anonymous singleton, which is now provably anonymous post-Phase-90. Its callers in the 4 retry blocks are replaced by `_refresh_user_session()`; if no other callers exist, the function could be deleted in a future cleanup. Not in Phase 90 scope — out of REQUIREMENTS.md mapping.
 - **Background proactive refresh worker:** Pre-refresh at e.g. `exp - 5min` via a per-session background job. Considered, rejected: NiceGUI doesn't have a clean per-session worker primitive, and the in-flight proactive check at `get_user_client()` covers the same ground at zero infra cost. Revisit only if production traces show measurable refresh-storms.
 - **JWT signature verification on the access token:** D-05 base64-decodes the JWT payload for `exp` without verifying the signature. We trust supabase's tokens locally; a forged JWT with a future `exp` would just delay our refresh (server would then 401, reactive retry takes over). Not worth the libsodium/cryptography dependency for a defensive read-only check.
@@ -305,4 +453,4 @@ This is the Phase-89-equivalent high-value Codex catch (per-ACCESS vs. per-reque
 
 *Phase: 90-auth-caching-rewrite-no-set-session*
 *Context gathered: 2026-05-15*
-*Workflow note: This CONTEXT.md captures recommendations refined by 1 round of Codex external review (see `_tmp/codex_phase90_discuss_review_response.txt`). Three blocking findings (storage/auth path completeness, reactive-refresh coverage gap, singleton authentication leak via supabase event listener) plus the refresh-race subtlety (post-lock stale-snapshot comparison) all incorporated Codex catches that the original Claude-only analysis missed. Pattern matches Phases 88 and 89; user direction: "I'm non-technical for these decisions; ask Codex".*
+*Workflow note: This CONTEXT.md captures recommendations refined by **two rounds** of Codex external review. Round 1 (`_tmp/codex_phase90_discuss_review_response.txt`): three blocking findings (F1 storage/auth path completeness, F2 reactive-refresh coverage gap, F3 singleton authentication leak via supabase event listener) plus the refresh-race subtlety (post-lock stale-snapshot comparison). Round 2 (user-supplied review of the round-1 synthesis): four findings — P1 sign_out regression after D-10 (forcing AUTHW-03 + AUTHW-04 pull-forward into Phase 90 via D-11 + D-11b), P1 change_password headers incomplete (D-02 expanded to all 4 headers + JSON body), P2 D-15 chain-matching alias gap (D-15 switched to attribute-name matching + Class B singleton-resurrection ban + 10 seed traps), P3 allowlist count inconsistency (fixed to 3 → 2). Pattern matches Phases 88 and 89; user direction: "I'm non-technical for these decisions; ask Codex".*

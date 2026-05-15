@@ -155,13 +155,34 @@ The user explicitly delegated all technical decisions to Codex per the Phase 88/
 ## Deferred Ideas
 
 Captured in CONTEXT.md `<deferred>` block. Briefly:
-- `sign_out` refactor to user-authenticated client + revocation-before-pop (Phase 91).
-- `web/auth_state.py:set_auth/clear_auth/do_login` migration (Phase 91).
+- ~~`sign_out` refactor to user-authenticated client + revocation-before-pop~~ — **pulled forward into Phase 90** per Codex round-2 P1.
+- `web/auth_state.py:set_auth/do_login` migration (Phase 91 AUTHW-01). Phase 90 reorders `clear_auth` but does NOT migrate its pops to `safe_user_pop` (Phase 91 owns).
 - `reset_client()` deletion (out of scope; legacy helper).
 - Background proactive refresh worker (no NiceGUI primitive).
 - JWT signature verification (defensive read-only check; not worth dependency).
 - `_refresh_locks` pruning (unbounded growth accepted, matches Phase 89).
 - Async-refresh via `asyncio.Lock` (out of scope per REQUIREMENTS.md "Async session storage").
+
+---
+
+## Codex Round 2 (user-supplied review of round-1 synthesis)
+
+After the initial Codex round-1 synthesis was committed at `a9fecfaf`, the user ran a second Codex review pass and surfaced 4 additional findings. All were applied to CONTEXT.md without re-discussing with the user (same delegation pattern):
+
+| # | Severity | Finding | Resolution |
+|---|----------|---------|------------|
+| P1 | BLOCKING | `sign_out` regression after D-10 — anonymous singleton breaks today's accidental token revocation | Pulled AUTHW-03 + AUTHW-04 forward from Phase 91 into Phase 90; encoded as D-11 (sign_out throwaway rewrite) + D-11b (clear_auth revoke-before-pop reorder with finally-block) |
+| P1 | BLOCKING | `change_password` request headers incomplete — missing `apikey` which Supabase gateway requires | D-02 expanded to spell out all 4 headers (`apikey`, `Authorization: Bearer ...`, `Content-Type: application/json`, `Accept: application/json`) + JSON body shape, with reference to `gotrue_base_api.py:54-58` header-merge behavior |
+| P2 | MEDIUM | D-15 chain-matching can't see aliases (`auth = client.auth; auth.set_session(...)`) | D-15 switched to terminal-attribute-name matching (`node.func.attr in {...}`); added Class B singleton-resurrection ban (`get_client().auth.<mutating>(...)`) with broader method set (`sign_in_*`, `refresh_session`, `update_user`, `sign_out`); 6 → 10 seed traps |
+| P3 | LOW | Allowlist count inconsistency ("4 → 3" vs "3 → 2" in different paragraphs) | Verified by `grep -c "^  - file:" .planning/phase87_storage_allowlist.yaml` = 3; Phase 90 takes 3 → 2; both paragraphs fixed |
+
+**Result:** Plan 90-01 scope expanded again. Final 90-01 contents:
+- All Codex round-1 fixes (D-01 token application, D-04/D-05/D-06 proactive refresh, D-09/D-10 throwaway bootstrap)
+- All Codex round-2 fixes (D-02 expanded headers, D-11/D-11b sign_out + clear_auth, D-15 widened scanner)
+- Tests + comments + allowlist deletion (3 → 2)
+- All-pytest-green plan boundary
+
+**Behavior change in 90-01 (newly user-visible after round 2):** Logout now actually revokes the user's refresh token server-side via the user-authenticated throwaway. Today's behavior depends on the event-listener-leak accidentally revoking some token; tomorrow's behavior is correct revocation of the right token.
 
 ---
 
