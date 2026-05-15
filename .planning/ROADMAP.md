@@ -352,14 +352,14 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 Plans:
 - [ ] 999.1-01-PLAN.md — Render display.img inline after shelfmark on result card title line; human smoke-check (FOLIO-01)
 
-### Phase 999.2: Filtering by PGP (BACKLOG)
+### Phase 999.2: Filtering by PGP (BACKLOG — PLANNED)
 
-**Goal:** [Captured for future planning]
-**Requirements:** TBD
-**Plans:** 0 plans
+**Goal:** Add a 3-state post-search PGP filter toggle (`All` / `Has PGP` / `No PGP`) to the web `/search` results toolbar, modeled directly on the existing `printed_filter` pattern at `web/pages/search.py:1402-1434`. Plus an active-filter chip in the results header (co-located with `exclusion_chips_row`) and session persistence via `web/safe_storage.py`. Web only — parallels and desktop explicitly out of scope (D-12). The filter operates on the in-memory result list using `search_state.transcription_sys_ids` (the same set that drives the green PGP badge in `search_results.py:397-400`); no search-pipeline changes.
+**Requirements:** PGP-FILTER-01, PGP-FILTER-02, PGP-FILTER-03, PGP-FILTER-04, PGP-FILTER-05
+**Plans:** 1 plan
 
 Plans:
-- [ ] TBD (promote with /gsd-review-backlog when ready)
+- [ ] 999.2-01-PLAN.md — pgp_filter field on SearchUIState + bootstrap read + cycle handler + label/color updater + button after printed_filter_btn + cascade integration (printed → PGP → measurement) + active-filter chip with click-to-clear + post-enrichment visibility flip + New Search reset + human smoke-check (PGP-FILTER-01..05)
 
 ### Phase 999.3: Adding PGP to downloaded data (BACKLOG)
 
@@ -381,4 +381,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-15 -- Phase 999.1 (Search results by folio, backlog) planned: 1 plan, wave 1, autonomous=false (single human-verify checkpoint). 999.1-01 (wave 1): single-task UI render addition in `web/pages/search_results.py:468` surfacing `display['img']` as `· {num}` after the shelfmark — strict desktop-parity scope per locked decisions D-01..D-05 in 999.1-CONTEXT.md. Mints requirement FOLIO-01. Earlier note: Phase 90 (Auth Caching Rewrite -- No set_session) planned: 2 plans across 2 waves. 90-01 (wave 1): behavior rewrite (get_user_client/sign_in/sign_out/set_session_from_url/exchange_code_for_session/4 retry blocks/profile.py change_password helper/clear_auth revoke-before-pop reorder) per Codex round-1/2/3 fixes + AUTHC-05 docstring + Phase 87 allowlist self-elimination (3->2) (closes AUTHC-02, AUTHC-03, AUTHC-04, AUTHC-05). 90-02 (wave 2, depends_on 90-01): atomic deletion of 4 globals + 2 helpers + install of 3 permanent CI guards (static AST scanner D-15 with 10 seed traps, runtime attr-absence D-16, behavioral refresh-lock test D-17 Tests A/B/C) (closes AUTHC-01, finalizes AUTHC-03, closes AUTHC-04). All 5 AUTHC-XX requirements covered.*
+*Last updated: 2026-05-15 -- Phase 999.2 (Filtering by PGP, backlog) planned: 1 plan, wave 1, autonomous=false (one human-verify checkpoint at end). 999.2-01 (wave 1): 7 tasks adding a 3-state PGP filter toggle to web `/search` results toolbar mirroring the existing `printed_filter` pattern end-to-end — bootstrap read at :148, cycle handler + label/color updater + button construction after `printed_filter_btn` at :1430-1434, `_apply_pgp_filter` predicate wired into both `_apply_printed_filter_and_render` and `_apply_domain_exclusions` cascades per D-11, active-filter chip co-located with `exclusion_chips_row` at :1448-1449 per D-08 with click-to-clear, post-enrichment visibility flip in `_apply_enrichment_to_ui` at :4436-4444, New Search reset at :2042-2050. Mints requirements PGP-FILTER-01..05. Persistence goes through `safe_storage` chokepoint (Phase 87 lint preserved). Parallels page and desktop app explicitly OUT OF SCOPE per D-12. Earlier note: Phase 999.1 (Search results by folio, backlog) planned: 1 plan, wave 1, autonomous=false (single human-verify checkpoint). 999.1-01 (wave 1): single-task UI render addition in `web/pages/search_results.py:468` surfacing `display['img']` as `· {num}` after the shelfmark — strict desktop-parity scope per locked decisions D-01..D-05 in 999.1-CONTEXT.md. Mints requirement FOLIO-01. Earlier note: Phase 90 (Auth Caching Rewrite -- No set_session) planned: 2 plans across 2 waves. 90-01 (wave 1): behavior rewrite (get_user_client/sign_in/sign_out/set_session_from_url/exchange_code_for_session/4 retry blocks/profile.py change_password helper/clear_auth revoke-before-pop reorder) per Codex round-1/2/3 fixes + AUTHC-05 docstring + Phase 87 allowlist self-elimination (3->2) (closes AUTHC-02, AUTHC-03, AUTHC-04, AUTHC-05). 90-02 (wave 2, depends_on 90-01): atomic deletion of 4 globals + 2 helpers + install of 3 permanent CI guards (static AST scanner D-15 with 10 seed traps, runtime attr-absence D-16, behavioral refresh-lock test D-17 Tests A/B/C) (closes AUTHC-01, finalizes AUTHC-03, closes AUTHC-04). All 5 AUTHC-XX requirements covered.*
