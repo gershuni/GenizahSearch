@@ -285,7 +285,9 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
   2. Static grep of `web/user_lists.py` returns zero matches for `_cache_entry` and the 10s TTL constant — the time-based cache plumbing does not exist in the codebase.
   3. A user logged in as User A opens the lists page; User B (different session, different user account) opens the lists page within what would have been the 10s TTL window; User B sees their own lists, not User A's.
   4. `tests/test_user_lists_cache_isolation.py` passes and is written against the per-request model (no references to cache TTL, user_id keys, or singleton behavior).
-**Plans**: TBD
+**Plans**: 2 plans (89-01 through 89-02)
+- [ ] 89-01-PLAN.md -- Per-access factory + stateless fetch + delegation audit + test rewrite (LISTS-02, LISTS-03, LISTS-04)
+- [ ] 89-02-PLAN.md -- Singleton deletion + Phase 88 survivor-test fix (D-09) + static AST guard + runtime attr-absence test (LISTS-01, LISTS-03)
 
 ### Phase 90: Auth Caching Rewrite -- No set_session
 **Goal**: Replace the process-wide auth client cache with request-scoped auth that does NOT call `auth.set_session()` to set headers; refresh locking keyed by `_session_uuid` with no cached client objects.
@@ -332,11 +334,11 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 | 86. CUDL Coverage Audit + Synthetic Re-attempt | v7.11 | 4/5 | Complete | 2026-05-12 |
 | 87. Foundations -- Session UUID and Safe Storage Chokepoint | v7.12 | 8/8 | Complete    | 2026-05-13 |
 | 88. State Separation by Deletion | v7.12 | 3/3 | Complete    | 2026-05-14 |
-| 89. Lists Cache Per-Request | v7.12 | 0/TBD | Not started | - |
+| 89. Lists Cache Per-Request | v7.12 | 0/2 | Planned | - |
 | 90. Auth Caching Rewrite -- No set_session | v7.12 | 0/TBD | Not started | - |
 | 91. Atomic Auth State Writes | v7.12 | 0/TBD | Not started | - |
 | 92. Final Sweep and Acceptance | v7.12 | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-13 -- Phase 87 (Foundations -- Session UUID and Safe Storage Chokepoint) complete: 8/8 plans, 131 raw-access sites migrated to safe_storage chokepoint, _session_uuid helpers landed, lint scanner now permanent CI guard. Phase 88 (State Separation by Deletion) up next.*
+*Last updated: 2026-05-14 -- Phase 89 (Lists Cache Per-Request) planned: 2 plans across 2 waves. 89-01: per-access factory + stateless fetch + delegation audit + test rewrite (LISTS-02, LISTS-03, LISTS-04). 89-02: singleton deletion + Phase 88 survivor-test fix (D-09 atomic commit) + static AST guard + runtime attr-absence test (LISTS-01, LISTS-03). All 4 LISTS-XX requirements covered.*
