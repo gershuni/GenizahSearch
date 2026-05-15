@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid as _uuid
-from typing import Any
+from typing import Any, Optional
 
 from nicegui import app
 
@@ -145,6 +145,40 @@ def get_session_uuid() -> str:
     except Exception as e:
         logger.warning("get_session_uuid unexpected failure: %s", e, exc_info=False)
         return _uuid.uuid4().hex
+
+
+def get_persisted_session_uuid() -> Optional[str]:
+    """Return the persisted `_session_uuid` from storage, or None.
+
+    Strict variant of :func:`get_session_uuid` that refuses to mint or
+    return an ephemeral UUID under prune race. Use this when a None
+    return is meaningful -- e.g., refresh-lock keying in
+    `_refresh_user_session` MUST NOT key by an ephemeral UUID because
+    a second concurrent attempt would mint a DIFFERENT ephemeral UUID
+    and bypass the per-uuid lock, re-introducing the concurrent
+    refresh-token burn that Phase 90 D-06 set out to prevent.
+
+    On prune / storage AssertionError: returns None.
+    On poisoned/malformed stored value: returns None (caller must
+    re-mint via :func:`get_session_uuid` if minting is appropriate).
+    On valid stored value: returns the 32-char lowercase hex string.
+
+    Note: ``get_session_uuid()`` remains the right choice for "mint if
+    absent" call sites (e.g., bootstrap, JS bridge). Use this helper
+    only when the caller has a meaningful "skip operation" branch for
+    the absent case.
+    """
+    try:
+        uid = app.storage.user.get(_SESSION_UUID_KEY)
+        if _is_valid_uuid(uid):
+            return uid
+        return None
+    except AssertionError as e:
+        logger.debug("get_persisted_session_uuid: session storage unavailable: %s", e)
+        return None
+    except Exception as e:
+        logger.warning("get_persisted_session_uuid unexpected failure: %s", e, exc_info=False)
+        return None
 
 
 def ensure_session_uuid() -> bool:

@@ -34,6 +34,24 @@ _locks_guard = threading.Lock()
 _client_cache: Dict[str, Tuple[Client, float]] = {}
 _CLIENT_CACHE_TTL = 50  # seconds (Supabase access tokens last 60s)
 
+# Phase 90 (Plan 90-01): NEW refresh-only locks keyed by _session_uuid.
+# Distinct from the prior cache's refresh-lock map (keyed by access_token)
+# declared just above as dead code awaiting Plan 90-02 deletion.
+# _refresh_locks does NOT cache any Client objects -- it serializes refresh
+# ROTATIONS only, so the one-time-use refresh token never races concurrent
+# consumption. Per CONTEXT D-07: lock-dict growth is bounded by distinct
+# session uuids ever seen; we deliberately do NOT prune on sign_out (a
+# held lock + pop = a second lock for the same uuid = defeated
+# serialization). Process restart prunes naturally. Same trade-off as
+# Phase 89 lists factory.
+# R3-H1 fix (a): comment intentionally avoids the literal identifier of
+# the prior cache's refresh-lock map so Plan 90-02's deletion-verification
+# AST scans (which look for that identifier by Name node in this file)
+# don't trip on documentation substrings.
+_refresh_locks: Dict[str, threading.Lock] = {}
+_refresh_locks_guard = threading.Lock()
+REFRESH_SKEW_SEC = 60  # refresh within last minute of token validity
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -107,99 +125,248 @@ def _clear_stale_auth(storage):
     logger.warning("[get_user_client] Cleared stale auth — user must re-login")
 
 
+def _apply_user_auth_to_client(client: Client, access_token: str) -> None:
+    """Authenticate a supabase Client by LOCAL header mutation across all
+    three sub-clients (PostgREST + functions + storage).
+
+    Phase 90 (Plan 90-01, D-01): we deliberately avoid the GoTrue
+    session-setting helper at `gotrue_client.py:713` because it is
+    networked (it calls `get_user` or `_refresh_access_token`). Local
+    header mutation is sufficient for every authenticated read/write/
+    upload path in the codebase:
+      - PostgREST  -> `client.postgrest.auth(token)` (postgrest/base_client.py:37-54, local-only).
+      - Functions  -> `client.functions.set_auth(token)` (supabase_functions/_sync/functions_client.py:111, local-only).
+      - Storage    -> direct header mutation; no supabase-py helper exists,
+                     but `client.storage.session.headers` is a writable
+                     httpx Headers dict. Authenticated uploads
+                     (shared/puzzle_publish_service.py:81, 152) use this.
+
+    Codex round-1 F1 catch (storage path completeness): Claude's original
+    proposal of "PostgREST + functions covers everything" was false -- the
+    puzzle publish flow uploads to authenticated storage.
+    """
+    bearer = f"Bearer {access_token}"
+    client.postgrest.auth(access_token)
+    client.functions.set_auth(access_token)
+    client.storage.session.headers["Authorization"] = bearer
+
+
+def _access_token_near_expiry(access_token: str, skew_sec: int = REFRESH_SKEW_SEC) -> bool:
+    """Return True if the JWT's `exp` claim is within `skew_sec` of now.
+
+    Decodes the JWT payload via base64 -- NO signature verification (we
+    trust supabase's tokens locally; a forged JWT with a future `exp`
+    would just delay refresh until the server returns 401, at which point
+    the reactive defense-in-depth retry path takes over). Returns True
+    on any decode/parse failure so refresh fires loudly rather than
+    silently skipping.
+    """
+    import base64
+    import json
+    try:
+        parts = access_token.split('.')
+        if len(parts) != 3:
+            return True  # malformed -> treat as expired
+        payload_b64 = parts[1]
+        # JWT base64url uses no padding; restore for stdlib decoder.
+        padding = '=' * (-len(payload_b64) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64 + padding)
+        payload = json.loads(payload_bytes)
+        exp = payload.get('exp')
+        if not isinstance(exp, (int, float)):
+            return True
+        return (exp - time.time()) < skew_sec
+    except Exception:
+        return True  # any failure -> refresh defensively
+
+
+def _refresh_user_session(stale_refresh_token: Optional[str] = None) -> bool:
+    """Refresh tokens. Lock by persisted _session_uuid (Phase 87 primitive).
+
+    Codex 2026-05-15 (D-06): post-lock re-read MUST include both an
+    expiry check AND a stale-snapshot comparison to prevent a second
+    thread from burning the just-rotated refresh token.
+
+    Codex review round 1 M1: keys by ``get_persisted_session_uuid()``
+    (returns None under prune), NOT ``get_session_uuid()`` (mints
+    ephemeral). Ephemeral UUIDs would defeat the per-session
+    serialization invariant. When persistence is unavailable, refresh
+    is skipped and the caller falls back to the anonymous singleton --
+    safer than racing.
+
+    Codex review round 1 H3: on known terminal refresh failures
+    (invalid/consumed/expired refresh token), local auth keys are
+    popped so the UI stops believing the user is logged in. Once
+    Plan 90-02 removes the previous stale-auth cleanup hook nothing
+    else cleans up `auth_session` from storage; without this branch
+    the UI would keep retrying refresh forever against a server that
+    will always return 400.
+    """
+    from web.safe_storage import (
+        safe_user_get, safe_user_set, safe_user_pop, get_persisted_session_uuid,
+    )
+    from supabase_auth.errors import AuthApiError
+    auth_session = safe_user_get('auth_session') or {}
+    if not auth_session.get('refresh_token'):
+        return False
+    session_uuid = get_persisted_session_uuid()
+    if session_uuid is None:
+        # No persisted UUID (prune race or first-request before
+        # ensure_session_uuid). Skip refresh -- caller will fall back
+        # to the anonymous singleton. Better than minting an
+        # ephemeral UUID that would defeat per-session serialization
+        # (Codex review round 1 M1).
+        logger.debug("_refresh_user_session: no persisted _session_uuid; skipping refresh")
+        return False
+    with _refresh_locks_guard:
+        lock = _refresh_locks.setdefault(session_uuid, threading.Lock())
+    with lock:
+        # Re-read inside lock -- another thread may have rotated.
+        auth_session = safe_user_get('auth_session') or {}
+        access_token = auth_session.get('access_token')
+        refresh_token = auth_session.get('refresh_token')
+        if not refresh_token:
+            return False
+        # Check 1: access token no longer expired -> another thread refreshed.
+        if access_token and not _access_token_near_expiry(access_token):
+            return True
+        # Check 2: refresh token rotated since caller's snapshot -> done.
+        if stale_refresh_token is not None and refresh_token != stale_refresh_token:
+            return True
+        # We are the rotator.
+        try:
+            throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+            resp = throwaway.auth.refresh_session(refresh_token)
+            if resp and resp.session:
+                safe_user_set('auth_session', {
+                    'access_token': resp.session.access_token,
+                    'refresh_token': resp.session.refresh_token,
+                })
+                return True
+            return False
+        except AuthApiError as e:
+            # Codex review round 1 H3: known terminal refresh failures
+            # mean the refresh token is invalid/consumed/expired on
+            # the server side. Match on message substrings (covers
+            # older GoTrue versions without a `code` attribute), the
+            # `code` attribute itself, AND HTTP 400 (Supabase's
+            # canonical response for consumed/missing refresh tokens
+            # at /auth/v1/token?grant_type=refresh_token).
+            msg = str(e).lower()
+            code = (getattr(e, 'code', '') or '').lower() if getattr(e, 'code', None) is not None else ''
+            status = getattr(e, 'status', 0)
+            terminal = (
+                'refresh_token_not_found' in msg or
+                'refresh token not found' in msg or
+                'invalid refresh token' in msg or
+                code in {'refresh_token_not_found', 'invalid_refresh_token'} or
+                status == 400
+            )
+            if terminal:
+                logger.warning(
+                    "_refresh_user_session: terminal refresh failure (%s, code=%r, status=%r) - clearing local auth keys",
+                    e, code, status,
+                )
+                safe_user_pop('auth_session', None)
+                safe_user_pop('auth_user', None)
+                safe_user_pop('auth_profile', None)
+            else:
+                logger.warning("_refresh_user_session: refresh failed (non-terminal): %s", e)
+            return False
+        except Exception as e:
+            # Transient errors (network, 5xx) - do NOT clear auth
+            # keys. The next proactive-refresh attempt will retry.
+            logger.warning(f"_refresh_user_session: refresh failed: {e}")
+            return False
+
+
 def get_user_client() -> Client:
-    """Get a per-user Supabase client authenticated with the current user's session tokens.
+    """Return a freshly-built, fully-authenticated supabase Client for the
+    current user. Stable signature -- all 30+ call sites use this verbatim.
 
-    Uses a per-session lock + short-lived cache to prevent the race condition where
-    concurrent requests all try to consume the same one-time-use refresh token.
-    The first request refreshes and caches; subsequent requests reuse the cached client.
+    Phase 90 (D-05, D-12) request-scoped strategy:
+      1. Read tokens via safe_user_get('auth_session') -- routes through the
+         Phase 87 chokepoint (replaces the old captured-handle pattern
+         `storage = _app.storage.user` at the previous line 128 which is
+         unsafe per Codex round-4 CRITICAL-1: FilePersistentDict can be
+         GC'd mid-flight when prune_user_storage fires).
+      2. No tokens -> return the anonymous module singleton get_client()
+         (existing fallback semantics preserved).
+      3. Proactively check `_access_token_near_expiry(access_token)`; if
+         True, call `_refresh_user_session(stale_refresh_token=...)` which
+         rotates under a `_session_uuid`-keyed lock with stale-snapshot
+         short-circuit. Re-read tokens post-refresh.
+      4. Build a fresh request-scoped client via `create_client(...)`.
+      5. Apply user auth by LOCAL header mutation via
+         `_apply_user_auth_to_client(client, access_token)` -- sets all
+         three sub-clients (PostgREST, functions, storage) without any
+         network call.
+      6. Return the fresh client. NO caching -- Phase 90 D-12 invariant.
 
-    Falls back to the singleton client if no user session tokens are available.
+    AUTHC-05: Why we do NOT invoke the GoTrue session-setting helper
+    on the client here -- verified at
+    `supabase_auth/_sync/gotrue_client.py:713`: that helper is NETWORKED
+    (it calls `get_user(access_token)` when JWT is valid, or
+    `_refresh_access_token(refresh_token)` when expired). Calling it on
+    every authenticated request would add a round-trip per call, and
+    burning the one-time-use refresh token concurrently across requests
+    would log users out. Local header mutation (D-01) is sufficient for
+    every PostgREST/functions/storage path in this codebase; GoTrue's
+    `auth.update_user(...)` is the one exception, handled by the dedicated
+    `change_password(...)` REST helper (D-02).
 
-    2026-05-12 Codex review CRITICAL fix: the cache + lock dicts are keyed by
-    ``access_token`` (a stable per-session identifier) instead of the previous
-    ``id(app.storage.user)``. CPython can reuse object ids after a session
-    storage dict is GC'd by ``prune_user_storage``, which let a fresh session
-    that happened to land on the same memory address inherit a cached
-    authenticated client belonging to a different user.
+    Singleton-anonymous-only invariant (D-09, D-10): all five bootstrap
+    helpers (sign_in / sign_up / set_session_from_url /
+    exchange_code_for_session / get_oauth_url) use throwaway clients --
+    they never touch the singleton's auth state. This prevents the
+    supabase event-listener leak at
+    `supabase/_sync/client.py:338-346` from authenticating get_client()
+    with the most-recently-signed-in user's token (Codex round-1 F3 +
+    plan-checker round catch).
     """
     try:
-        from nicegui import app as _app
-        storage = _app.storage.user
-        _prune_session_client_cache()
-
-        # Read tokens FIRST so the cache key is bound to the actual session,
-        # not to a memory-address proxy. No tokens → anonymous singleton client.
-        auth_session = storage.get('auth_session') or {}
+        from web.safe_storage import safe_user_get
+        auth_session = safe_user_get('auth_session') or {}
         access_token = auth_session.get('access_token')
         refresh_token = auth_session.get('refresh_token')
 
         if not access_token or not refresh_token:
-            logger.info("[get_user_client] No auth_session tokens in user storage — user should re-login")
+            logger.info("[get_user_client] No auth_session tokens — returning anonymous singleton")
             return get_client()
 
-        cache_key = access_token  # Unique per-session, rotates on refresh.
-
-        # Fast path: return cached client if still valid.
-        now = time.time()
-        cached = _client_cache.get(cache_key)
-        if cached and cached[1] > now:
-            return cached[0]
-
-        # Get or create a lock for this session.
-        with _locks_guard:
-            if cache_key not in _session_locks:
-                _session_locks[cache_key] = threading.Lock()
-            lock = _session_locks[cache_key]
-
-        with lock:
-            # Re-check cache after acquiring lock (another thread may have refreshed).
-            cached = _client_cache.get(cache_key)
-            if cached and cached[1] > now:
-                return cached[0]
-
-            # Re-read tokens after lock acquisition. If a concurrent logout /
-            # _clear_stale_auth fired while we waited for the lock,
-            # auth_session is now gone — do NOT resurrect cleared auth by
-            # falling back to pre-lock tokens (Codex 3rd-pass CRITICAL).
-            auth_session = storage.get('auth_session') or {}
-            access_token_inner = auth_session.get('access_token')
-            refresh_token_inner = auth_session.get('refresh_token')
-            if not access_token_inner or not refresh_token_inner:
-                logger.info("[get_user_client] auth_session cleared while waiting for lock — returning anonymous")
-                _client_cache.pop(cache_key, None)
+        # Proactive refresh: if access_token is near expiry, rotate
+        # BEFORE building the client. Stale-snapshot comparison inside
+        # _refresh_user_session prevents concurrent burn (D-06).
+        #
+        # R3-M1 fix: honor _refresh_user_session's return value. False
+        # means either no persisted UUID (prune race) OR a terminal
+        # refresh failure cleared auth_session. Either way, fall back
+        # to the anonymous singleton -- do NOT build an authenticated
+        # client with a stale token.
+        if _access_token_near_expiry(access_token):
+            refreshed = _refresh_user_session(stale_refresh_token=refresh_token)
+            if not refreshed:
+                logger.info(
+                    "[get_user_client] Refresh failed/skipped (no persisted "
+                    "UUID or terminal refresh error cleared auth_session) -- "
+                    "returning anonymous singleton"
+                )
+                return get_client()
+            # Re-read after refresh attempt -- _refresh_user_session may
+            # have rotated tokens AND/OR popped auth_session entirely on
+            # terminal failure (Codex review round 1 H3 cleanup branch).
+            # Reading post-refresh observes whichever side effect won.
+            auth_session = safe_user_get('auth_session') or {}
+            access_token = auth_session.get('access_token')
+            if not access_token:
+                logger.info("[get_user_client] Refresh attempt left no access_token — returning anonymous")
                 return get_client()
 
-            try:
-                user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-                resp = user_client.auth.set_session(access_token_inner, refresh_token_inner)
-                # Update stored tokens — set_session may have refreshed them.
-                if resp and resp.session:
-                    storage['auth_session'] = {
-                        'access_token': resp.session.access_token,
-                        'refresh_token': resp.session.refresh_token,
-                    }
-                    new_key = resp.session.access_token
-                else:
-                    new_key = access_token_inner
-                if new_key != cache_key:
-                    _client_cache.pop(cache_key, None)
-                    with _locks_guard:
-                        _session_locks.pop(cache_key, None)
-                _client_cache[new_key] = (user_client, now + _CLIENT_CACHE_TTL)
-                _prune_session_client_cache(now)
-                return user_client
-            except Exception as e:
-                logger.error(f"[get_user_client] set_session failed: {e}")
-                _client_cache.pop(cache_key, None)
-                # Clear auth only for terminal token errors (consumed/expired/invalid);
-                # transient network or Supabase outages should NOT log the user out.
-                err_msg = str(e).lower()
-                if 'refresh token' in err_msg or 'invalid' in err_msg or 'expired' in err_msg:
-                    _clear_stale_auth(storage)
-                return get_client()
+        user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        _apply_user_auth_to_client(user_client, access_token)
+        return user_client
     except Exception as e:
-        logger.error(f"[get_user_client] Error creating per-user client: {e}")
+        logger.error(f"[get_user_client] Error building per-user client: {e}")
         return get_client()
 
 
@@ -208,8 +375,14 @@ def get_user_client() -> Client:
 # ============================================================================
 
 def sign_up(email: str, password: str, metadata: Dict = None) -> Dict:
-    """
-    Register a new user.
+    """Register a new user via a throwaway client (D-10 invariant).
+
+    Phase 90 (D-09, D-10, plan-checker round catch): does NOT touch the
+    module singleton get_client(). Supabase fires SIGNED_IN under auto-
+    confirm mode, which causes the event listener at
+    supabase/_sync/client.py:338-346 to mutate the singleton's
+    Authorization header -- identical F3 leak vector as sign_in. The
+    plan-checker round caught this; D-10 expanded to 5 helpers.
 
     Args:
         email: User's email
@@ -220,15 +393,13 @@ def sign_up(email: str, password: str, metadata: Dict = None) -> Dict:
         Dict with 'user' and 'session' on success, or 'error' on failure
     """
     try:
-        client = get_client()
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
         options = {'data': metadata} if metadata else {}
-
-        response = client.auth.sign_up({
+        response = throwaway.auth.sign_up({
             'email': email,
             'password': password,
             'options': options if options else None
         })
-
         if response and response.user:
             return {
                 'success': True,
@@ -236,7 +407,6 @@ def sign_up(email: str, password: str, metadata: Dict = None) -> Dict:
                 'session': _session_to_dict(response.session) if response.session else None
             }
         return {'error': 'Registration failed - no user returned'}
-
     except AuthApiError as e:
         return {'error': str(e)}
     except Exception as e:
@@ -244,19 +414,22 @@ def sign_up(email: str, password: str, metadata: Dict = None) -> Dict:
 
 
 def sign_in(email: str, password: str) -> Dict:
-    """
-    Sign in an existing user.
+    """Sign in an existing user via a throwaway client (D-10 invariant).
 
-    Returns:
-        Dict with 'user' and 'session' on success, or 'error' on failure
+    Phase 90 (D-09, D-10): does NOT touch the module singleton
+    get_client(). The supabase event listener at
+    supabase/_sync/client.py:338-346 mutates the singleton's
+    Authorization header on SIGNED_IN -- using the singleton here would
+    leave it authenticated as this user for subsequent unrelated
+    callers, a cross-user leak path that survives even after Plan 90-02
+    deletes the prior singleton client cache (Codex round-1 F3).
     """
     try:
-        client = get_client()
-        response = client.auth.sign_in_with_password({
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        response = throwaway.auth.sign_in_with_password({
             'email': email,
             'password': password
         })
-
         if response.user:
             return {
                 'success': True,
@@ -264,7 +437,6 @@ def sign_in(email: str, password: str) -> Dict:
                 'session': _session_to_dict(response.session)
             }
         return {'error': 'Login failed'}
-
     except AuthApiError as e:
         return {
             'error': str(e),
@@ -275,27 +447,91 @@ def sign_in(email: str, password: str) -> Dict:
         return {'error': f'Login error: {str(e)}'}
 
 
-def sign_out() -> Dict:
-    """Sign out the current user."""
+def sign_out(access_token: Optional[str] = None) -> Dict:
+    """Revoke the user's session server-side via admin-scoped global logout.
+
+    Phase 90 D-11 (Codex round-3 P1 + Codex review round 1 M2): we
+    cannot rely on get_client() being authenticated -- D-10 makes it
+    provably anonymous-only. We build a throwaway client and invoke
+    the admin namespace's scoped logout directly, supplying the
+    user's JWT and the "global" scope. This bypasses GoTrue's
+    high-level sign_out() entirely (see body comment for the
+    gotrue_client.py:789-793 rationale referenced in Codex transcript).
+    Token is passed as a parameter so clear_auth can revoke BEFORE
+    popping auth_session from storage (D-11b atomic local cleanup).
+    """
+    if access_token is None:
+        # Fall back to reading from storage (covers callers other than
+        # clear_auth, though there are none in production today).
+        from web.safe_storage import safe_user_get
+        auth_session = safe_user_get('auth_session') or {}
+        access_token = auth_session.get('access_token')
+    if not access_token:
+        return {'success': True, 'note': 'no active session to revoke'}
     try:
-        # 2026-05-12 Codex 3rd-pass LOW fix: _client_cache and _session_locks
-        # are now keyed by access_token (str), not id(storage) (int). Evict by
-        # the current session's access_token so the cleanup actually fires.
-        try:
-            from web.safe_storage import safe_user_get
-            auth_session = (safe_user_get('auth_session') or {})
-            access_token = auth_session.get('access_token')
-            if access_token:
-                _client_cache.pop(access_token, None)
-                _session_locks.pop(access_token, None)
-            _prune_session_client_cache()
-        except Exception:
-            pass  # Cache operation failed; continue without cached data
-        client = get_client()
-        client.auth.sign_out()
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        # CODEX ROUND-3 P1: do NOT call the high-level auth-namespace logout
+        # on the throwaway. GoTrue's high-level sign_out() reads
+        # self.get_session() first (gotrue_client.py:789-793) and only
+        # invokes admin.sign_out when a LOCAL session exists. Since
+        # v7.12 AUTHC-02 forbids the GoTrue session-setting helper, the
+        # throwaway never has a local session -- so the high-level path
+        # degenerates to a no-op on the network side. The admin namespace
+        # (gotrue_admin_api.py:69-79) exposes the raw
+        # POST /auth/v1/logout?scope=global call which carries the
+        # JWT directly -- that IS the actual revocation we need.
+        throwaway.auth.admin.sign_out(access_token, "global")
         return {'success': True}
     except Exception as e:
         return {'error': f'Logout error: {str(e)}'}
+
+
+def change_password(new_password: str) -> Dict:
+    """Change current user's password without GoTrue's local-session requirement.
+
+    Direct PUT to /auth/v1/user with explicit headers -- Codex round-2 P2:
+    the GoTrue base client (gotrue_base_api.py:54-58) merges instance
+    headers (apikey + Content-Type) with per-call headers (Authorization).
+    When we bypass GoTrue entirely we lose that merge, so we must supply
+    all four explicitly. The 4-header tetrad below matches what GoTrue's
+    own client sends when update_user runs normally -- without `apikey`,
+    Supabase's gateway rejects the request and change_password would
+    always return an error in production.
+
+    Replaces the old `client.auth.update_user({'password': ...})` call at
+    profile.py:149-150 -- GoTrue's update_user requires a LOCAL session
+    (gotrue_client.py:690 via get_session()), which we explicitly avoid
+    creating to honor AUTHC-02. Header mutation alone cannot satisfy
+    update_user's contract; bypass GoTrue entirely.
+    """
+    import httpx
+    from web.safe_storage import safe_user_get
+    auth_session = safe_user_get('auth_session') or {}
+    access_token = auth_session.get('access_token')
+    if not access_token:
+        return {'error': 'Not logged in'}
+    url = f"{SUPABASE_URL}/auth/v1/user"
+    headers = {
+        'apikey': SUPABASE_ANON_KEY,                # project-scope API key
+        'Authorization': f'Bearer {access_token}',  # user-scope JWT
+        'Content-Type': 'application/json',         # request body type
+        'Accept': 'application/json',               # explicit response type
+    }
+    try:
+        resp = httpx.put(
+            url, headers=headers,
+            json={'password': new_password},        # JSON body
+            timeout=30.0,
+        )
+        if resp.status_code == 200:
+            return {'success': True, 'user': resp.json()}
+        # Surface server error message when available
+        try:
+            return {'error': resp.json().get('msg') or resp.text}
+        except Exception:
+            return {'error': resp.text}
+    except Exception as e:
+        return {'error': str(e)}
 
 
 def get_current_user() -> Optional[Dict]:
@@ -322,27 +558,28 @@ def get_session() -> Optional[Dict]:
         return None  # Operation failed; use fallback value
 
 
-def refresh_session() -> Dict:
-    """Refresh the current session."""
-    try:
-        client = get_client()
-        response = client.auth.refresh_session()
-        if response.session:
-            return {
-                'success': True,
-                'session': _session_to_dict(response.session)
-            }
-        return {'error': 'Session refresh failed'}
-    except Exception as e:
-        return {'error': f'Refresh error: {str(e)}'}
-
-
 def get_oauth_url(provider: str = 'google', redirect_to: str = None) -> Dict:
-    """
-    Get OAuth URL for social login using Supabase's built-in OAuth method.
+    """Get OAuth URL for social login via a throwaway client (D-10 invariant)
+    AND persist the PKCE code verifier per NiceGUI session (Codex review
+    round 1 H1).
 
-    Uses the Supabase client's sign_in_with_oauth which handles state parameter
-    generation and PKCE flow automatically.
+    Phase 90 (D-09, D-10, plan-checker round catch): does NOT touch the
+    module singleton get_client(). While sign_in_with_oauth in practice
+    returns a URL without firing SIGNED_IN, the D-15 Class B scanner
+    installed in Plan 90-02 categorically bans sign_in_with_oauth on
+    the singleton -- refactoring to a throwaway here aligns
+    implementation with the scanner's declared invariant.
+
+    Codex review round 1 H1: PKCE code verifier persistence.
+    sign_in_with_oauth generates the verifier and stashes it in the
+    throwaway's in-memory storage at `{storage_key}-code-verifier`
+    (gotrue_client.py:_get_url_for_provider, "PKCE storage stash").
+    The throwaway is GC'd when this function returns -- without
+    explicit persistence the verifier is LOST and the subsequent
+    exchange_code_for_session() call cannot recover it. We extract
+    it from the throwaway's storage and re-persist via safe_user_set
+    so exchange_code_for_session can read it back and pass it
+    explicitly as the `code_verifier` parameter.
 
     Args:
         provider: OAuth provider ('google', 'github', etc.)
@@ -352,30 +589,63 @@ def get_oauth_url(provider: str = 'google', redirect_to: str = None) -> Dict:
         Dict with 'url' on success, or 'error' on failure
     """
     try:
-        client = get_client()
-
-        # Use Supabase's built-in OAuth method which handles state/PKCE
-        options = {}
+        from web.safe_storage import safe_user_set
+        # Codex round 2 P1 fix: dict-options form raises AttributeError
+        # at runtime (create_client expects Optional[SyncClientOptions],
+        # not dict -- see supabase/_sync/client.py:108). The default
+        # flow_type in SyncClientOptions is already 'pkce' (verified
+        # via `python -c "from supabase.lib.client_options import
+        # SyncClientOptions; print(SyncClientOptions().flow_type)"` ->
+        # 'pkce'), so the bare 2-arg form is equivalent AND simpler.
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        options_dict = {}
         if redirect_to:
-            options['redirect_to'] = redirect_to
-
-        response = client.auth.sign_in_with_oauth({
+            options_dict['redirect_to'] = redirect_to
+        response = throwaway.auth.sign_in_with_oauth({
             'provider': provider,
-            'options': options
+            'options': options_dict,
         })
-
         if response and response.url:
+            # Codex review round 1 H1: extract the PKCE verifier from
+            # the throwaway's storage and persist it per-session.
+            # GoTrue stores it at `{storage_key}-code-verifier`; the
+            # default storage_key is supabase_auth.constants.STORAGE_KEY
+            # ("supabase.auth.token"). Read via the private storage
+            # accessor on the auth client -- this is the stable
+            # contract verified at gotrue_client.py:1063-1078 (set)
+            # and gotrue_client.py:exchange_code_for_session (get).
+            try:
+                storage = throwaway.auth._storage
+                storage_key = throwaway.auth._storage_key
+                verifier = storage.get_item(f"{storage_key}-code-verifier")
+                if verifier:
+                    safe_user_set('oauth_code_verifier', verifier)
+                else:
+                    logger.warning(
+                        "get_oauth_url: PKCE verifier missing from throwaway storage "
+                        "(key=%s-code-verifier) -- OAuth callback will fail with "
+                        "'Code verifier and code challenge do not match'",
+                        storage_key,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "get_oauth_url: PKCE verifier extraction failed: %s "
+                    "-- OAuth callback may fail", e,
+                )
             return {'success': True, 'url': response.url}
-
         return {'error': 'Failed to generate OAuth URL'}
-
     except Exception as e:
         return {'error': f'OAuth error: {str(e)}'}
 
 
 def set_session_from_url(access_token: str, refresh_token: str) -> Dict:
-    """
-    Set session from OAuth callback tokens.
+    """Set session from OAuth callback tokens via throwaway client (D-10).
+
+    Phase 90 D-09/D-10: legitimate bootstrap use of set_session -- this is
+    the ONLY place `set_session` is allowed by the D-15 static AST
+    scanner (Class A allowlist: enclosing function name must match
+    `set_session_from_url`). Throwaway prevents the singleton-leak path
+    Codex F3 surfaced.
 
     Args:
         access_token: The access token from URL
@@ -385,9 +655,8 @@ def set_session_from_url(access_token: str, refresh_token: str) -> Dict:
         Dict with 'user' and 'session' on success, or 'error' on failure
     """
     try:
-        client = get_client()
-        response = client.auth.set_session(access_token, refresh_token)
-
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        response = throwaway.auth.set_session(access_token, refresh_token)
         if response and response.user:
             return {
                 'success': True,
@@ -395,14 +664,28 @@ def set_session_from_url(access_token: str, refresh_token: str) -> Dict:
                 'session': _session_to_dict(response.session)
             }
         return {'error': 'Failed to set session'}
-
     except Exception as e:
         return {'error': f'Session error: {str(e)}'}
 
 
 def exchange_code_for_session(code: str) -> Dict:
-    """
-    Exchange OAuth code for session (PKCE flow fallback).
+    """Exchange OAuth code for session via throwaway client (D-10) with
+    explicit PKCE code verifier round-trip (Codex review round 1 H1).
+
+    Phase 90 D-09/D-10: PKCE bootstrap -- this is the ONLY function
+    allowed to call `auth.exchange_code_for_session` per the D-15
+    static AST scanner (Class A allowlist: enclosing function name
+    must match `exchange_code_for_session`).
+
+    Codex review round 1 H1: the code_verifier is read from
+    `safe_user_get('oauth_code_verifier')` (set by get_oauth_url
+    Step 1.6 above) and passed explicitly as the `code_verifier`
+    parameter to GoTrue's exchange_code_for_session. The verifier
+    cannot be retrieved from the throwaway's own in-memory storage
+    because that storage is fresh on every throwaway construction --
+    the verifier set by the EARLIER throwaway in get_oauth_url is
+    gone. We pop after read so the verifier isn't reusable across
+    OAuth attempts (defense in depth -- verifier should be one-shot).
 
     Args:
         code: The authorization code from URL query parameter
@@ -411,9 +694,29 @@ def exchange_code_for_session(code: str) -> Dict:
         Dict with 'user' and 'session' on success, or 'error' on failure
     """
     try:
-        client = get_client()
-        response = client.auth.exchange_code_for_session({'auth_code': code})
-
+        from web.safe_storage import safe_user_pop
+        # Pop the PKCE verifier persisted by get_oauth_url (Step 1.6).
+        # Pop (not get) so one verifier serves one OAuth round-trip.
+        code_verifier = safe_user_pop('oauth_code_verifier', None)
+        if not code_verifier:
+            # No verifier in storage -- either the user came directly to
+            # the callback without going through get_oauth_url, or the
+            # NiceGUI session was pruned between the URL request and the
+            # callback. The exchange will fail; surface a clearer error
+            # than GoTrue's "Code verifier and code challenge do not match".
+            logger.warning(
+                "exchange_code_for_session: no PKCE code_verifier in storage -- "
+                "OAuth round-trip lost the verifier (session prune or direct callback)"
+            )
+            return {'error': 'OAuth verifier missing -- please retry login'}
+        # Codex round 2 P1 fix: dict-options form raises AttributeError
+        # at runtime; default flow_type in SyncClientOptions is already
+        # 'pkce'. Bare 2-arg form is equivalent and simpler.
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        response = throwaway.auth.exchange_code_for_session({
+            'auth_code': code,
+            'code_verifier': code_verifier,  # H1: explicit verifier round-trip
+        })
         if response and response.user:
             return {
                 'success': True,
@@ -421,7 +724,6 @@ def exchange_code_for_session(code: str) -> Dict:
                 'session': _session_to_dict(response.session)
             }
         return {'error': 'Failed to exchange code for session'}
-
     except Exception as e:
         return {'error': f'Code exchange error: {str(e)}'}
 
@@ -514,8 +816,8 @@ def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
                 logger.error(f"Error getting lists (fallback): {e2}")
                 return []
         if _is_jwt_expired(e):
-            logger.warning("JWT expired in get_user_lists, resetting client and retrying")
-            reset_client()
+            logger.warning("JWT expired in get_user_lists, refreshing session and retrying")
+            _refresh_user_session()
             try:
                 return get_user_lists(user_id=user_id, include_deleted=include_deleted)
             except Exception as e2:
@@ -754,8 +1056,8 @@ def get_projects(user_id: str) -> List[Dict]:
         return response.data or []
     except Exception as e:
         if _is_jwt_expired(e):
-            logger.warning("JWT expired in get_projects, resetting client and retrying")
-            reset_client()
+            logger.warning("JWT expired in get_projects, refreshing session and retrying")
+            _refresh_user_session()
             try:
                 client = get_client()
                 return client.table('projects').select('*').eq('user_id', user_id).order('created_at').execute().data or []
@@ -933,8 +1235,8 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
         return _enrich_with_profiles(client, comments)
     except Exception as e:
         if _is_jwt_expired(e):
-            logger.warning("JWT expired in get_comments, resetting client and retrying")
-            reset_client()
+            logger.warning("JWT expired in get_comments, refreshing session and retrying")
+            _refresh_user_session()
             try:
                 client = get_client()
                 query = client.table('comments').select('*')
@@ -1099,8 +1401,8 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
         return rows
     except Exception as e:
         if _is_jwt_expired(e):
-            logger.warning("JWT expired in get_fragment_joins, resetting client and retrying")
-            reset_client()
+            logger.warning("JWT expired in get_fragment_joins, refreshing session and retrying")
+            _refresh_user_session()
             try:
                 return get_fragment_joins(user_id=user_id, fragment_sys_id=fragment_sys_id, status=status)
             except Exception as e2:
