@@ -286,7 +286,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
   3. A user logged in as User A opens the lists page; User B (different session, different user account) opens the lists page within what would have been the 10s TTL window; User B sees their own lists, not User A's.
   4. `tests/test_user_lists_cache_isolation.py` passes and is written against the per-request model (no references to cache TTL, user_id keys, or singleton behavior).
 **Plans**: 2 plans (89-01 through 89-02)
-- [ ] 89-01-PLAN.md -- Per-access factory + stateless fetch + delegation audit + test rewrite (LISTS-02, LISTS-03, LISTS-04)
+- [x] 89-01-PLAN.md -- Per-access factory + stateless fetch + delegation audit + test rewrite (LISTS-02, LISTS-03, LISTS-04)
 - [ ] 89-02-PLAN.md -- Singleton deletion + Phase 88 survivor-test fix (D-09) + static AST guard + runtime attr-absence test (LISTS-01, LISTS-03)
 
 ### Phase 90: Auth Caching Rewrite -- No set_session
@@ -334,7 +334,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 | 86. CUDL Coverage Audit + Synthetic Re-attempt | v7.11 | 4/5 | Complete | 2026-05-12 |
 | 87. Foundations -- Session UUID and Safe Storage Chokepoint | v7.12 | 8/8 | Complete    | 2026-05-13 |
 | 88. State Separation by Deletion | v7.12 | 3/3 | Complete    | 2026-05-14 |
-| 89. Lists Cache Per-Request | v7.12 | 0/2 | Planned | - |
+| 89. Lists Cache Per-Request | v7.12 | 1/2 | In Progress|  |
 | 90. Auth Caching Rewrite -- No set_session | v7.12 | 0/TBD | Not started | - |
 | 91. Atomic Auth State Writes | v7.12 | 0/TBD | Not started | - |
 | 92. Final Sweep and Acceptance | v7.12 | 0/TBD | Not started | - |

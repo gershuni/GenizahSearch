@@ -64,7 +64,7 @@ def test_appstate_still_has_non_deleted_fields():
     instance = AppState()
     survivors = [
         'meta_mgr', 'var_mgr', 'searcher', 'lab_engine', 'indexer',
-        '_local_lists_mgr', '_user_lists_mgr',
+        '_local_lists_mgr',
     ]
     for attr in survivors:
         assert hasattr(instance, attr), (
