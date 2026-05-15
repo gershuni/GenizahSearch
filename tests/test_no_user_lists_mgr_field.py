@@ -23,8 +23,6 @@ deletion (5-file commit boundary per R10).
 See .planning/phases/89-lists-cache-per-request/89-CONTEXT.md D-11 and
 89-REVIEWS.md R9.
 """
-import pytest
-
 from web.state import AppState
 from web.user_lists import UserListsManager
 
