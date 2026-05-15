@@ -4,6 +4,47 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.11.2] - Composition Search Bug Fixes - 2026-05-15
+
+Desktop-only patch addressing two user-reported bugs in composition
+search (find Genizah manuscripts that match a long source text).
+Reported by a power user after the v7.11.1 desktop release. No new
+features; pure correctness fixes.
+
+### Bug Fixes
+
+- **`Min chunks ≥ N` filter inflated when source repeats a phrase** — if
+  the source text contained the same phrase multiple times (e.g.
+  "ברוך אתה יי" recurring through benedictions and prayers, or two
+  versions of the same text pasted together), the system counted each
+  repetition as a separate chunk match. A manuscript that actually
+  matched the phrase only once could pass `Min chunks = 2`. Internal
+  Tantivy segment duplication on the same manuscript inflated the count
+  too. The chunk counter is now derived post-hoc from unique chunk
+  *contents*, not raw Tantivy hits, so the filter does what users
+  expect. Affects both the standard composition search and the Lab
+  composition search; the Lab path's full-mode filter was also latently
+  broken (always rejected everything when min ≥ 1 — the item dict never
+  surfaced the counter it was filtering on). (desktop; shared code
+  also benefits web)
+- **Expanded result view didn't scroll to the highlighted match** —
+  opening a composition result by double-click loaded the source and
+  manuscript text panes from the top, with the highlight somewhere far
+  below. For 70-page source texts (common with prayer-book collections
+  or Responsa volumes) the view was effectively unusable. Both panes
+  now scroll to the first match automatically, and the manuscript pane
+  re-anchors when navigating between pages. (desktop)
+
+### Internal
+
+- **v7.12 Path B foundations bundled** — internal multitenant-state
+  refactor (Phases 87, 88, 89: session UUID + safe_storage chokepoint,
+  AppState export-field deletion, per-request UserListsManager). Zero
+  user-visible change. Web deploy still gated behind the rest of the
+  Path B milestone (Phases 90-92); this desktop release is independent.
+
+---
+
 ## [7.11.1] - Desktop Catch-up Release - 2026-05-13
 
 A small release that brings the desktop installer up to par with what

@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.11.1
+# Genizah Search Pro 7.11.2
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,29 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.11.1?
+## What's New in Version 7.11.2?
+
+### v7.11.2: Composition Search Bug Fixes
+
+Desktop-only patch addressing two user-reported bugs in composition
+search (find Genizah manuscripts matching a long source text like a
+prayer collection, responsum, or letter).
+
+- **`Min chunks` filter no longer inflated by repeating phrases** — if
+  the source text contained the same words multiple times (e.g.
+  "ברוך אתה יי" recurring through benedictions and prayers), the
+  system counted each repetition as a separate chunk match. A
+  manuscript with the phrase only once could wrongly pass
+  `Min chunks = 2`. The filter now counts unique chunk *contents*, so
+  it matches user expectations.
+- **Expanded result view scrolls to the highlight** — opening a
+  composition result by double-click now anchors both the source text
+  pane and the manuscript text pane to the first match. No more manual
+  scrolling through a 70-page source to find the highlighted segment.
+  Page navigation in the manuscript pane also re-anchors.
+
+Internal: bundles v7.12 Path B refactor foundations (Phases 87-89) with
+zero user-visible change.
 
 ### v7.11.1: Desktop Catch-up Release
 
@@ -220,7 +242,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.11.1_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.11.2_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
