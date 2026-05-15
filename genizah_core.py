@@ -9695,8 +9695,20 @@ class ListsManager:
         self.save()
         return True
 
-    def create_project(self, name):
-        """Create a new project. Returns the project ID."""
+    def create_project(self, name, color=None):
+        """Create a new project. Returns the project ID.
+
+        Args:
+            name: Project name.
+            color: Optional hex color (e.g. '#4CAF50'). When None, auto-assigned
+                from the palette via _get_next_project_color().
+
+        Phase 89 (D-06): the optional ``color`` parameter was added for parity
+        with web/user_lists.py:UserListsManager.create_project, which passes
+        ``self.local_mgr.create_project(name, color)`` and previously raised
+        TypeError when local_mgr was a stock ListsManager. Desktop callers
+        (genizah_app.py:12237, 12996) pass ``name`` only and are unaffected.
+        """
         import time
         import uuid
 
@@ -9704,7 +9716,7 @@ class ListsManager:
         self.data.setdefault('projects', {})[project_id] = {
             'name': name,
             'created': time.time(),
-            'color': self._get_next_project_color()
+            'color': color or self._get_next_project_color(),
         }
         self.data.setdefault('projects_order', []).append(project_id)
         self.save()

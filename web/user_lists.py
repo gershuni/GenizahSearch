@@ -14,8 +14,7 @@ Usage:
     lists = lists_mgr.get_all_lists()
 """
 
-import time
-from typing import Optional, Dict, List, Tuple, Any
+from typing import Optional, Dict, List
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -64,17 +63,16 @@ class UserListsManager:
         Args:
             local_mgr: Optional local ListsManager for fallback
             meta_mgr: Metadata manager for enriching items
+
+        Phase 89 (2026-05-14): The 10s TTL cache was removed. Each .data /
+        ._get_cached_data() call hits Supabase fresh. The factory-property
+        at web/state.py:AppState.lists_mgr returns a new instance per access,
+        so per-instance memoization would still be unsafe under UI callback
+        capture (web/components/add_to_list_dialog.py, project_tree.py); see
+        Phase 89 CONTEXT.md D-03/D-04.
         """
         self.local_mgr = local_mgr
         self.meta_mgr = meta_mgr
-        # 2026-05-12 cross-user fix (Codex review CRITICAL):
-        # Cache state is held in a single tuple ``(user_id, timestamp, data)``
-        # assigned atomically in one statement. The earlier multi-field
-        # version was racy: a thread writing User B's data could partially
-        # mutate (_cache=B, _cache_user_id still 'A') before completing,
-        # letting a concurrent User-A reader return User B's data.
-        self._cache_entry: Optional[Tuple[Optional[str], float, Dict[str, Any]]] = None
-        self._cache_ttl = 10  # Cache for 10 seconds
 
     @property
     def is_authenticated(self) -> bool:
@@ -119,69 +117,70 @@ class UserListsManager:
         }
 
     def _get_cached_data(self) -> Dict:
-        """Get data from cache or fetch from Supabase.
+        """Fetch lists+projects data fresh from Supabase on every call (Phase 89).
 
-        2026-05-12 cross-user fix: `UserListsManager` is a singleton on
-        `AppState` (web/state.py), so multi-tenant requests share the
-        same instance. The cache entry is held in a single immutable
-        tuple ``(user_id, timestamp, data)`` so a concurrent reader
-        cannot observe a half-mutated state (Codex review CRITICAL — the
-        first fix used three separate fields, which is non-atomic
-        across the GIL for multi-statement writes).
+        Previously this method memoized the result in a (user_id, timestamp, data)
+        tuple for 10 seconds. Phase 89 removed that cache because (a) the
+        factory-property at AppState.lists_mgr returns a new instance per
+        access, so per-instance state cannot be trusted to survive between
+        accesses, and (b) UI dialog callbacks capture managers into closures
+        that outlive the request that constructed them — per-instance cache
+        in those captured managers would serve stale data indefinitely. See
+        Phase 89 CONTEXT.md D-03/D-04 for the full analysis.
+
+        Defensive: if is_logged_in() returns True but get_user_id() returns
+        None (edge case during token rotation / partial auth state), return
+        default data rather than calling Supabase with user_id=None which
+        would behave like an unfiltered query. See REVIEWS.md R2.
         """
-        now = time.time()
-        current_user_id = self.user_id
-        entry = self._cache_entry  # Snapshot the reference atomically.
-        if (
-            entry is not None
-            and entry[0] == current_user_id
-            and (now - entry[1]) < self._cache_ttl
-        ):
-            return entry[2]
+        if not self.is_authenticated:
+            return self._get_default_data()
 
-        # Fetch fresh data
-        if self.is_authenticated:
-            user_id = current_user_id
-            lists = get_user_lists(user_id)
-            projects = get_projects(user_id)
+        user_id = self.user_id
+        if not user_id:
+            # R2 defensive guard: never call get_user_lists(None) / get_projects(None).
+            return self._get_default_data()
 
-            data = self._get_default_data()
-            data['lists'] = {}
-            data['projects'] = {}
+        lists = get_user_lists(user_id)
+        projects = get_projects(user_id)
 
-            for lst in lists:
-                list_id = str(lst['id'])
-                data['lists'][list_id] = {
-                    'name': lst.get('name', ''),
-                    'name_en': lst.get('name_en', ''),
-                    'color': lst.get('color', '#FFD700'),
-                    'is_default': lst.get('is_default', False),
-                    'is_system': lst.get('is_system', False),
-                    'project_id': lst.get('project_id'),
-                    'created': lst.get('created_at')
-                }
+        data = self._get_default_data()
+        data['lists'] = {}
+        data['projects'] = {}
 
-            for proj in projects:
-                proj_id = str(proj['id'])
-                data['projects'][proj_id] = {
-                    'name': proj.get('name', ''),
-                    'color': proj.get('color', '#4CAF50'),
-                    'created': proj.get('created_at')
-                }
+        for lst in lists:
+            list_id = str(lst['id'])
+            data['lists'][list_id] = {
+                'name': lst.get('name', ''),
+                'name_en': lst.get('name_en', ''),
+                'color': lst.get('color', '#FFD700'),
+                'is_default': lst.get('is_default', False),
+                'is_system': lst.get('is_system', False),
+                'project_id': lst.get('project_id'),
+                'created': lst.get('created_at'),
+            }
 
-            data['lists_order'] = list(data['lists'].keys())
-            data['projects_order'] = list(data['projects'].keys())
+        for proj in projects:
+            proj_id = str(proj['id'])
+            data['projects'][proj_id] = {
+                'name': proj.get('name', ''),
+                'color': proj.get('color', '#4CAF50'),
+                'created': proj.get('created_at'),
+            }
 
-            # ATOMIC write: assign the whole (user_id, time, data) tuple in
-            # one statement so concurrent readers never see a partial state.
-            self._cache_entry = (current_user_id, now, data)
-            return data
-
-        return self._get_default_data()
+        data['lists_order'] = list(data['lists'].keys())
+        data['projects_order'] = list(data['projects'].keys())
+        return data
 
     def invalidate_cache(self):
-        """Invalidate the cache to force refresh."""
-        self._cache_entry = None  # 2026-05-12 atomic snapshot reset
+        """Compatibility no-op — Phase 89 removed the cache.
+
+        Internal mutation paths (create_list, update_list, add_item, etc.)
+        still call this; the call is harmless. Public callers: none. The
+        method is preserved (not deleted) to keep ~10 internal call sites
+        byte-unchanged at the Phase 89 boundary. See CONTEXT.md D-05.
+        """
+        pass
 
     # === List Operations ===
 
