@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
-status: executing
-stopped_at: Phase 89 complete; ready for Phase 90 discuss
-last_updated: "2026-05-15T04:10:00.000Z"
-last_activity: 2026-05-15 -- Phase 89 execution complete (2 plans shipped)
+status: completed
+stopped_at: Phase 90 context gathered
+last_updated: "2026-05-15T05:14:38.651Z"
+last_activity: 2026-05-15 -- Phase 89 execution complete
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 13
   completed_plans: 13
-  percent: 50
+  percent: 100
 ---
 
 # Project State
@@ -93,7 +93,7 @@ Progress: [█████░░░░░] 50%
 
 ## Session Continuity
 
-Last session: 2026-05-14T04:09:39.235Z
-Stopped at: Phase 89 context gathered
-Resume file: .planning/phases/89-lists-cache-per-request/89-CONTEXT.md
+Last session: 2026-05-15T05:14:38.646Z
+Stopped at: Phase 90 context gathered
+Resume file: .planning/phases/90-auth-caching-rewrite-no-set-session/90-CONTEXT.md
 Next step: `/gsd-discuss-phase 88` (State Separation by Deletion) — once user approves the Phase 87 Task 2 smoke-check signal. Phase 88 will delete the 10 per-user fields on `AppState` singleton, remove the `_TEST_BACKEND` shim from `web/export_state.py`, and use `_session_uuid` (landed in Phase 87) as the stable cache key for the post-shim state model.
