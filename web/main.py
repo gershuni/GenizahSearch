@@ -27,6 +27,7 @@ from nicegui import ui, app, run
 from web.framework_patches import apply_all_patches
 from web.crawler_visibility import should_block_archive_request, should_mark_noindex
 from web.safe_storage import ensure_session_uuid, safe_user_get, safe_user_set, safe_user_pop
+from web.auth_state import GlobalAuthState
 apply_all_patches()
 
 
@@ -1415,6 +1416,75 @@ def download_page_route():
         create_download_page()
 
 
+async def _oauth_complete_login(user, profile, session, status_label, show_error_fn):
+    """OAuth complete-login helper (factored out of auth_callback_route in
+    Phase 91 AUTHW-02 / D-06 + pattern-mapper finding 1).
+
+    Multi-write rollback discipline: every safe_user_set is checked. On
+    partial-write failure, roll back any successful writes (DEFENSIVELY
+    across all 3 auth keys at the caller level per Revision MUST-2 — Codex
+    HIGH catch in 91-REVIEWS.md) and surface a user-visible error via
+    show_error_fn so the user doesn't reload into a half-logged-in state.
+    The OAuth code has already been consumed by exchange_code_for_session
+    so there is no auto-retry path -- the user must restart the OAuth flow
+    from the login button.
+
+    NEW-M1 wording note: this helper performs DEFENSIVE 3-key cleanup
+    (auth_session + auth_user + auth_profile). set_auth itself performs
+    SYMMETRIC 2-key rollback (USER_KEY + PROFILE_KEY). The two layers
+    overlap on user/profile so that set_auth's own SYMMETRIC rollback
+    failing during a prune race is covered by the outer DEFENSIVE cleanup.
+
+    Args:
+        user: Supabase user dict (must contain 'id', 'email').
+        profile: Profile dict from get_profile(user['id']); may be None.
+        session: Session dict with 'access_token' + 'refresh_token'; may be None.
+        status_label: NiceGUI label widget bound to the "Completing login..."
+            text. Mutated to "Login successful! Redirecting..." on happy path.
+        show_error_fn: Callable taking a message string. In production this
+            is the auth_callback_route's `show_error` closure (audited per
+            Revision MUST-4 -- encapsulates spinner hide, status_label hide,
+            error_label show, home_btn show, AND posthog_capture('login_failed', ...)
+            emission). All UI-recovery state lives inside show_error_fn, so
+            this helper is intentionally UI-agnostic beyond status_label.
+    """
+    # D-06: session token write FIRST (no user-visible side-effect yet).
+    if session:
+        if not safe_user_set('auth_session', {
+            'access_token': session.get('access_token'),
+            'refresh_token': session.get('refresh_token'),
+        }):
+            posthog_capture('login_failed', {
+                'reason': 'session_storage_unavailable',
+                'method': 'google_oauth',
+            })
+            show_error_fn('Session storage unavailable. Please try again.')
+            return
+    # User + profile next (use set_auth's built-in SYMMETRIC 2-key rollback;
+    # Revision MUST-2 ensures auth_user AND auth_profile are popped on
+    # any partial-write failure inside set_auth).
+    if not GlobalAuthState.set_auth(user, profile):
+        # DEFENSIVE 3-key cleanup at the CALLER level (Revision MUST-2):
+        # set_auth's own SYMMETRIC 2-key rollback should have handled
+        # user/profile, but we also pop all 3 keys defensively in case
+        # set_auth's internal rollback also failed (prune race during
+        # rollback). Best-effort -- safe_user_pop returns the default
+        # on any failure including no-such-key.
+        safe_user_pop('auth_session', None)
+        safe_user_pop('auth_user', None)
+        safe_user_pop('auth_profile', None)
+        posthog_capture('login_failed', {
+            'reason': 'auth_state_storage_unavailable',
+            'method': 'google_oauth',
+        })
+        show_error_fn('Session storage unavailable. Please try again.')
+        return
+    posthog_capture('login_success', {'method': 'google_oauth'})
+    status_label.text = 'Login successful! Redirecting...'
+    await asyncio.sleep(0.5)
+    ui.navigate.to('/')
+
+
 @ui.page('/auth/callback')
 async def auth_callback_route(code: str = None, error: str = None, error_description: str = None):
     """
@@ -1424,7 +1494,9 @@ async def auth_callback_route(code: str = None, error: str = None, error_descrip
     """
     ensure_session_uuid()  # Fix 1 in 87-REVIEWS.md iter 3 (Codex B1-residual): mint UUID before OAuth atomic writes / telemetry
     from web.supabase_client import get_profile, exchange_code_for_session
-    from web.auth_state import GlobalAuthState
+    # Phase 91 NEW-H1: GlobalAuthState now imported at module top so the
+    # factored _oauth_complete_login helper can resolve it; the previous
+    # local-scope import here is removed (ruff F401 — would be unused).
 
     ui.add_head_html(COMMON_STYLES)
     ui.add_head_html(apply_theme_immediately())
@@ -1437,20 +1509,13 @@ async def auth_callback_route(code: str = None, error: str = None, error_descrip
         home_btn = ui.button('Return to Home', on_click=lambda: ui.navigate.to('/')).classes('mt-2 hidden')
 
     async def complete_login(user, profile, session=None):
-        """Store user in session and redirect."""
-        app.storage.user[GlobalAuthState.USER_KEY] = user
-        if profile:
-            app.storage.user[GlobalAuthState.PROFILE_KEY] = profile
-        # Store session tokens for per-user Supabase client
-        if session:
-            app.storage.user['auth_session'] = {
-                'access_token': session.get('access_token'),
-                'refresh_token': session.get('refresh_token'),
-            }
-        posthog_capture('login_success', {'method': 'google_oauth'})
-        status_label.text = 'Login successful! Redirecting...'
-        await asyncio.sleep(0.5)
-        ui.navigate.to('/')
+        """Inner thin-shim around the module-level _oauth_complete_login helper.
+
+        Phase 91 AUTHW-02 + pattern-mapper finding 1: extraction makes the
+        multi-write atomicity logic unit-testable (AUTHW-05 T-A/T-B/T-E)
+        without spinning up the full NiceGUI page-render harness.
+        """
+        await _oauth_complete_login(user, profile, session, status_label, show_error)
 
     def show_error(message):
         """Display error and show home button."""
