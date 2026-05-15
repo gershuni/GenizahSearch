@@ -24,6 +24,20 @@ from web.supabase_client import (
     get_oauth_url
 )
 
+# Phase 91 AUTHW-01: chokepoint helpers replace raw app.storage.user access.
+# Note (Rule-1 deviation from NEW-H2): the plan claimed `app` could be
+# dropped from this import line after migrating all app.storage.user sites.
+# That claim is incorrect — `create_login_dialog()` below still uses
+# `app.storage.browser.*` (lines ~382, 383, 408, 409, 411, 412) for the
+# "Remember me" feature, which is a separate NiceGUI storage backend
+# (browser localStorage, not server-side per-user storage) and is OUTSIDE
+# the Phase 87 lint scanner's scope (the scanner only flags
+# `app.storage.user`). Dropping `app` would NameError at first login dialog
+# render. ruff F401 will NOT fire because `app` is genuinely referenced.
+# We therefore keep `from nicegui import app, ui` unchanged — recorded as
+# a deviation in 91-01-SUMMARY.md.
+from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop
+
 
 class GlobalAuthState:
     """
@@ -37,19 +51,23 @@ class GlobalAuthState:
 
     @classmethod
     def get_user(cls) -> Optional[Dict]:
-        """Get the current user info."""
-        try:
-            return app.storage.user.get(cls.USER_KEY)
-        except Exception:
-            return None
+        """Get the current user info.
+
+        Phase 91 AUTHW-01 (D-01): safe_user_get already handles AssertionError
+        (prune race, debug-logged) and other Exception (warning-logged) per
+        web/safe_storage.py contract -- the manual try/except wrapper here
+        would suppress the warning-level logging that safe_user_get provides
+        for unexpected failures.
+        """
+        return safe_user_get(cls.USER_KEY)
 
     @classmethod
     def get_profile(cls) -> Optional[Dict]:
-        """Get the current user's profile."""
-        try:
-            return app.storage.user.get(cls.PROFILE_KEY)
-        except Exception:
-            return None
+        """Get the current user's profile.
+
+        Phase 91 AUTHW-01 (D-01): see get_user docstring.
+        """
+        return safe_user_get(cls.PROFILE_KEY)
 
     @classmethod
     def is_logged_in(cls) -> bool:
@@ -90,13 +108,53 @@ class GlobalAuthState:
         return cls.is_logged_in()
 
     @classmethod
-    def set_auth(cls, user: Dict, profile: Dict = None):
-        """Set authentication after successful login."""
-        app.storage.user[cls.USER_KEY] = user
-        if profile:
-            app.storage.user[cls.PROFILE_KEY] = profile
+    def set_auth(cls, user: Dict, profile: Dict = None) -> bool:
+        """Set authentication after successful login. Returns False if any
+        write fails (prune race) -- caller MUST handle by surfacing an error
+        and rolling back any pre-existing partial state.
+
+        Phase 91 D-04 (REVISED per Revision MUST-2 / Codex HIGH catch in
+        91-REVIEWS.md): multi-write atomicity is best-effort under NiceGUI
+        storage semantics (no compare-and-swap). On partial-write failure we
+        roll back ALL successful writes SYMMETRICALLY across set_auth's OWN
+        keys -- USER_KEY + PROFILE_KEY (2 keys; auth_session is the outer
+        caller's responsibility, not set_auth's) so callers never observe a
+        half-state AND so stale auth_profile from a prior session cannot
+        survive (GlobalAuthState.get_role()/is_admin()/is_editor() read profile
+        independently of user -- leaving stale auth_profile would be a
+        security/correctness leak per Codex's HIGH).
+
+        NEW-M1 (round-2 cross-AI review) wording note: "SYMMETRIC rollback"
+        here means USER_KEY + PROFILE_KEY only (2 keys). Do NOT add an
+        auth_session pop inside set_auth -- that key is owned by the outer
+        caller (do_login / _oauth_complete_login), which performs its own
+        DEFENSIVE 3-key cleanup if set_auth returns False.
+
+        Semantic shift for profile=None:
+            Previously: `if profile:` skipped the profile branch entirely,
+                        leaving any stale auth_profile from a prior session.
+            Now:        `profile is None` triggers a best-effort pop of the
+                        PROFILE_KEY so a new login with no profile cannot
+                        inherit a stale role.
+        """
+        if not safe_user_set(cls.USER_KEY, user):
+            return False
+        if profile is not None:
+            if not safe_user_set(cls.PROFILE_KEY, profile):
+                # SYMMETRIC 2-key rollback: pop BOTH the user write AND any
+                # stale profile to ensure no half-state and no role leak.
+                # auth_session is NOT touched here -- outer caller owns it.
+                safe_user_pop(cls.USER_KEY, None)
+                safe_user_pop(cls.PROFILE_KEY, None)
+                return False
+        else:
+            # profile is None: clear any stale auth_profile from a prior
+            # session (best-effort -- safe_user_pop returns the default on
+            # any failure including no-such-key, so this is idempotent).
+            safe_user_pop(cls.PROFILE_KEY, None)
         # Identify user in PostHog for session tracking
         cls._posthog_identify(user, profile)
+        return True
 
     @classmethod
     def _posthog_identify(cls, user: Dict, profile: Dict = None):
@@ -113,8 +171,21 @@ class GlobalAuthState:
 
     @classmethod
     def update_profile_cache(cls, profile: Dict):
-        """Update the cached profile."""
-        app.storage.user[cls.PROFILE_KEY] = profile
+        """Update the cached profile.
+
+        Phase 91 D-04 (best-effort note): this is an update-on-existing-state
+        path, not a login boundary. A failed write leaves the prior profile
+        in storage unchanged -- correct half-state for a profile-only update.
+        No return value (void) and no rollback.
+
+        Note: Revision MAY-8 (Codex defensive suggestion to also check
+        profile['id'] == auth_user['id'] before writing) is DEFERRED to
+        Phase 92's final-sweep audit per 91-REVIEWS.md item 8. update_profile_cache
+        is called only after a successful Supabase profile fetch by the
+        current user; the cross-user case is theoretical and best handled
+        as a cross-cutting defensive hardening pass.
+        """
+        safe_user_set(cls.PROFILE_KEY, profile)
 
     @classmethod
     def clear_auth(cls):
@@ -124,8 +195,10 @@ class GlobalAuthState:
         Local key cleanup happens in a finally block so it runs even when
         server revocation fails -- half-state (revoked server-side but local
         keys still present) is worse than no revocation at all.
+
+        Phase 91 AUTHW-01 (D-01): 3 raw pops -> safe_user_pop. The deferred
+        safe_user_get import is now redundant -- module-top import covers it.
         """
-        from web.safe_storage import safe_user_get
         auth_session = safe_user_get('auth_session') or {}
         access_token = auth_session.get('access_token')
         try:
@@ -134,10 +207,10 @@ class GlobalAuthState:
         except Exception:
             pass  # Server revocation failed; local cleanup still runs below
         finally:
-            # AUTHW-03: local keys popped unconditionally (no half-state)
-            app.storage.user.pop(cls.USER_KEY, None)
-            app.storage.user.pop(cls.PROFILE_KEY, None)
-            app.storage.user.pop('auth_session', None)
+            # AUTHW-03 + AUTHW-01: local keys popped unconditionally (no half-state)
+            safe_user_pop(cls.USER_KEY, None)
+            safe_user_pop(cls.PROFILE_KEY, None)
+            safe_user_pop('auth_session', None)
         # PostHog reset stays as-is
         try:
             ui.run_javascript('if(window.posthog)posthog.reset()')
@@ -163,47 +236,76 @@ class GlobalAuthState:
 
 
 async def do_login(email: str, password: str) -> Dict:
-    """
-    Perform login and update global auth state.
+    """Perform login and update global auth state.
+
+    Phase 91 D-05 (REVISED per Revision MUST-2): session-first ordering.
+    The smallest-blast-radius write (the auth_session key) goes first;
+    on failure we return an explicit error so the caller doesn't reload
+    into a half-logged-in state. If the set_auth call later fails, we
+    DEFENSIVELY pop ALL 3 auth keys (set_auth's own SYMMETRIC 2-key
+    rollback should have handled user/profile, but the outer 3-key
+    cleanup covers the case where set_auth's internal rollback also
+    failed -- Codex HIGH catch in 91-REVIEWS.md round 1).
+
+    NEW-M1 wording note: this is the DEFENSIVE 3-key cleanup at the
+    CALLER level. set_auth itself does SYMMETRIC 2-key rollback
+    (USER_KEY + PROFILE_KEY only). Together they form layered defense.
+
+    NEW-L2 (round-2 cross-AI review polish): both storage-failure
+    posthog events emit `'method': 'password'` for parity with
+    `_oauth_complete_login`'s `'method': 'google_oauth'` -- consistent
+    dashboard slicing for partial-write failures by login method.
 
     Returns:
-        Success dict with user info or error dict
+        Success dict with user info or error dict.
     """
     from nicegui import run
+    from web.analytics import posthog_capture
     result = await run.io_bound(supabase_sign_in, email, password)
 
     if "error" in result:
-        from web.analytics import posthog_capture
         posthog_capture('login_failed', {
             'reason': str(result.get('error', ''))[:100],
             'error_code': str(result.get('error_code', ''))[:50],
             'status_code': result.get('status_code', ''),
+            'method': 'password',
         })
         return result
 
-    # Store session tokens for per-user Supabase client
     session = result.get('session', {})
-    if session:
-        app.storage.user['auth_session'] = {
-            'access_token': session.get('access_token'),
-            'refresh_token': session.get('refresh_token'),
-        }
-
     user = result.get('user')
     if not user:
-        from web.analytics import posthog_capture
-        posthog_capture('login_failed', {'reason': 'No user returned'})
+        posthog_capture('login_failed', {'reason': 'No user returned', 'method': 'password'})
         return {"error": "No user returned"}
 
-    # Get user profile
     profile = get_profile(user['id'])
 
-    # Update global state
-    GlobalAuthState.set_auth(user, profile)
-
-    from web.analytics import posthog_capture
-    posthog_capture('login_success', {})
-
+    # D-05 (REVISED): session-first; defensive 3-key cleanup on later failure.
+    if session:
+        if not safe_user_set('auth_session', {
+            'access_token': session.get('access_token'),
+            'refresh_token': session.get('refresh_token'),
+        }):
+            posthog_capture('login_failed', {
+                'reason': 'session_storage_unavailable',
+                'method': 'password',
+            })
+            return {"error": "Session storage unavailable. Please try again."}
+    if not GlobalAuthState.set_auth(user, profile):
+        # set_auth should have rolled back its own user/profile writes
+        # SYMMETRICALLY (2 keys) per Revision MUST-2. We DEFENSIVELY pop
+        # all 3 keys in case set_auth's internal rollback also failed
+        # (prune race during rollback). Best-effort -- safe_user_pop
+        # returns the default on any failure including no-such-key.
+        safe_user_pop('auth_session', None)
+        safe_user_pop('auth_user', None)
+        safe_user_pop('auth_profile', None)
+        posthog_capture('login_failed', {
+            'reason': 'auth_state_storage_unavailable',
+            'method': 'password',
+        })
+        return {"error": "Session storage unavailable. Please try again."}
+    posthog_capture('login_success', {'method': 'password'})
     return {"success": True, "user": user, "profile": profile}
 
 
