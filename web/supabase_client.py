@@ -34,6 +34,24 @@ _locks_guard = threading.Lock()
 _client_cache: Dict[str, Tuple[Client, float]] = {}
 _CLIENT_CACHE_TTL = 50  # seconds (Supabase access tokens last 60s)
 
+# Phase 90 (Plan 90-01): NEW refresh-only locks keyed by _session_uuid.
+# Distinct from the prior cache's refresh-lock map (keyed by access_token)
+# declared just above as dead code awaiting Plan 90-02 deletion.
+# _refresh_locks does NOT cache any Client objects -- it serializes refresh
+# ROTATIONS only, so the one-time-use refresh token never races concurrent
+# consumption. Per CONTEXT D-07: lock-dict growth is bounded by distinct
+# session uuids ever seen; we deliberately do NOT prune on sign_out (a
+# held lock + pop = a second lock for the same uuid = defeated
+# serialization). Process restart prunes naturally. Same trade-off as
+# Phase 89 lists factory.
+# R3-H1 fix (a): comment intentionally avoids the literal identifier of
+# the prior cache's refresh-lock map so Plan 90-02's deletion-verification
+# AST scans (which look for that identifier by Name node in this file)
+# don't trip on documentation substrings.
+_refresh_locks: Dict[str, threading.Lock] = {}
+_refresh_locks_guard = threading.Lock()
+REFRESH_SKEW_SEC = 60  # refresh within last minute of token validity
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
@@ -105,6 +123,161 @@ def _clear_stale_auth(storage):
     storage.pop('auth_user', None)
     storage.pop('auth_profile', None)
     logger.warning("[get_user_client] Cleared stale auth — user must re-login")
+
+
+def _apply_user_auth_to_client(client: Client, access_token: str) -> None:
+    """Authenticate a supabase Client by LOCAL header mutation across all
+    three sub-clients (PostgREST + functions + storage).
+
+    Phase 90 (Plan 90-01, D-01): we deliberately avoid the GoTrue
+    session-setting helper at `gotrue_client.py:713` because it is
+    networked (it calls `get_user` or `_refresh_access_token`). Local
+    header mutation is sufficient for every authenticated read/write/
+    upload path in the codebase:
+      - PostgREST  -> `client.postgrest.auth(token)` (postgrest/base_client.py:37-54, local-only).
+      - Functions  -> `client.functions.set_auth(token)` (supabase_functions/_sync/functions_client.py:111, local-only).
+      - Storage    -> direct header mutation; no supabase-py helper exists,
+                     but `client.storage.session.headers` is a writable
+                     httpx Headers dict. Authenticated uploads
+                     (shared/puzzle_publish_service.py:81, 152) use this.
+
+    Codex round-1 F1 catch (storage path completeness): Claude's original
+    proposal of "PostgREST + functions covers everything" was false -- the
+    puzzle publish flow uploads to authenticated storage.
+    """
+    bearer = f"Bearer {access_token}"
+    client.postgrest.auth(access_token)
+    client.functions.set_auth(access_token)
+    client.storage.session.headers["Authorization"] = bearer
+
+
+def _access_token_near_expiry(access_token: str, skew_sec: int = REFRESH_SKEW_SEC) -> bool:
+    """Return True if the JWT's `exp` claim is within `skew_sec` of now.
+
+    Decodes the JWT payload via base64 -- NO signature verification (we
+    trust supabase's tokens locally; a forged JWT with a future `exp`
+    would just delay refresh until the server returns 401, at which point
+    the reactive defense-in-depth retry path takes over). Returns True
+    on any decode/parse failure so refresh fires loudly rather than
+    silently skipping.
+    """
+    import base64
+    import json
+    try:
+        parts = access_token.split('.')
+        if len(parts) != 3:
+            return True  # malformed -> treat as expired
+        payload_b64 = parts[1]
+        # JWT base64url uses no padding; restore for stdlib decoder.
+        padding = '=' * (-len(payload_b64) % 4)
+        payload_bytes = base64.urlsafe_b64decode(payload_b64 + padding)
+        payload = json.loads(payload_bytes)
+        exp = payload.get('exp')
+        if not isinstance(exp, (int, float)):
+            return True
+        return (exp - time.time()) < skew_sec
+    except Exception:
+        return True  # any failure -> refresh defensively
+
+
+def _refresh_user_session(stale_refresh_token: Optional[str] = None) -> bool:
+    """Refresh tokens. Lock by persisted _session_uuid (Phase 87 primitive).
+
+    Codex 2026-05-15 (D-06): post-lock re-read MUST include both an
+    expiry check AND a stale-snapshot comparison to prevent a second
+    thread from burning the just-rotated refresh token.
+
+    Codex review round 1 M1: keys by ``get_persisted_session_uuid()``
+    (returns None under prune), NOT ``get_session_uuid()`` (mints
+    ephemeral). Ephemeral UUIDs would defeat the per-session
+    serialization invariant. When persistence is unavailable, refresh
+    is skipped and the caller falls back to the anonymous singleton --
+    safer than racing.
+
+    Codex review round 1 H3: on known terminal refresh failures
+    (invalid/consumed/expired refresh token), local auth keys are
+    popped so the UI stops believing the user is logged in. Once
+    Plan 90-02 removes the previous stale-auth cleanup hook nothing
+    else cleans up `auth_session` from storage; without this branch
+    the UI would keep retrying refresh forever against a server that
+    will always return 400.
+    """
+    from web.safe_storage import (
+        safe_user_get, safe_user_set, safe_user_pop, get_persisted_session_uuid,
+    )
+    from supabase_auth.errors import AuthApiError
+    auth_session = safe_user_get('auth_session') or {}
+    if not auth_session.get('refresh_token'):
+        return False
+    session_uuid = get_persisted_session_uuid()
+    if session_uuid is None:
+        # No persisted UUID (prune race or first-request before
+        # ensure_session_uuid). Skip refresh -- caller will fall back
+        # to the anonymous singleton. Better than minting an
+        # ephemeral UUID that would defeat per-session serialization
+        # (Codex review round 1 M1).
+        logger.debug("_refresh_user_session: no persisted _session_uuid; skipping refresh")
+        return False
+    with _refresh_locks_guard:
+        lock = _refresh_locks.setdefault(session_uuid, threading.Lock())
+    with lock:
+        # Re-read inside lock -- another thread may have rotated.
+        auth_session = safe_user_get('auth_session') or {}
+        access_token = auth_session.get('access_token')
+        refresh_token = auth_session.get('refresh_token')
+        if not refresh_token:
+            return False
+        # Check 1: access token no longer expired -> another thread refreshed.
+        if access_token and not _access_token_near_expiry(access_token):
+            return True
+        # Check 2: refresh token rotated since caller's snapshot -> done.
+        if stale_refresh_token is not None and refresh_token != stale_refresh_token:
+            return True
+        # We are the rotator.
+        try:
+            throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+            resp = throwaway.auth.refresh_session(refresh_token)
+            if resp and resp.session:
+                safe_user_set('auth_session', {
+                    'access_token': resp.session.access_token,
+                    'refresh_token': resp.session.refresh_token,
+                })
+                return True
+            return False
+        except AuthApiError as e:
+            # Codex review round 1 H3: known terminal refresh failures
+            # mean the refresh token is invalid/consumed/expired on
+            # the server side. Match on message substrings (covers
+            # older GoTrue versions without a `code` attribute), the
+            # `code` attribute itself, AND HTTP 400 (Supabase's
+            # canonical response for consumed/missing refresh tokens
+            # at /auth/v1/token?grant_type=refresh_token).
+            msg = str(e).lower()
+            code = (getattr(e, 'code', '') or '').lower() if getattr(e, 'code', None) is not None else ''
+            status = getattr(e, 'status', 0)
+            terminal = (
+                'refresh_token_not_found' in msg or
+                'refresh token not found' in msg or
+                'invalid refresh token' in msg or
+                code in {'refresh_token_not_found', 'invalid_refresh_token'} or
+                status == 400
+            )
+            if terminal:
+                logger.warning(
+                    "_refresh_user_session: terminal refresh failure (%s, code=%r, status=%r) - clearing local auth keys",
+                    e, code, status,
+                )
+                safe_user_pop('auth_session', None)
+                safe_user_pop('auth_user', None)
+                safe_user_pop('auth_profile', None)
+            else:
+                logger.warning("_refresh_user_session: refresh failed (non-terminal): %s", e)
+            return False
+        except Exception as e:
+            # Transient errors (network, 5xx) - do NOT clear auth
+            # keys. The next proactive-refresh attempt will retry.
+            logger.warning(f"_refresh_user_session: refresh failed: {e}")
+            return False
 
 
 def get_user_client() -> Client:
@@ -296,6 +469,54 @@ def sign_out() -> Dict:
         return {'success': True}
     except Exception as e:
         return {'error': f'Logout error: {str(e)}'}
+
+
+def change_password(new_password: str) -> Dict:
+    """Change current user's password without GoTrue's local-session requirement.
+
+    Direct PUT to /auth/v1/user with explicit headers -- Codex round-2 P2:
+    the GoTrue base client (gotrue_base_api.py:54-58) merges instance
+    headers (apikey + Content-Type) with per-call headers (Authorization).
+    When we bypass GoTrue entirely we lose that merge, so we must supply
+    all four explicitly. The 4-header tetrad below matches what GoTrue's
+    own client sends when update_user runs normally -- without `apikey`,
+    Supabase's gateway rejects the request and change_password would
+    always return an error in production.
+
+    Replaces the old `client.auth.update_user({'password': ...})` call at
+    profile.py:149-150 -- GoTrue's update_user requires a LOCAL session
+    (gotrue_client.py:690 via get_session()), which we explicitly avoid
+    creating to honor AUTHC-02. Header mutation alone cannot satisfy
+    update_user's contract; bypass GoTrue entirely.
+    """
+    import httpx
+    from web.safe_storage import safe_user_get
+    auth_session = safe_user_get('auth_session') or {}
+    access_token = auth_session.get('access_token')
+    if not access_token:
+        return {'error': 'Not logged in'}
+    url = f"{SUPABASE_URL}/auth/v1/user"
+    headers = {
+        'apikey': SUPABASE_ANON_KEY,                # project-scope API key
+        'Authorization': f'Bearer {access_token}',  # user-scope JWT
+        'Content-Type': 'application/json',         # request body type
+        'Accept': 'application/json',               # explicit response type
+    }
+    try:
+        resp = httpx.put(
+            url, headers=headers,
+            json={'password': new_password},        # JSON body
+            timeout=30.0,
+        )
+        if resp.status_code == 200:
+            return {'success': True, 'user': resp.json()}
+        # Surface server error message when available
+        try:
+            return {'error': resp.json().get('msg') or resp.text}
+        except Exception:
+            return {'error': resp.text}
+    except Exception as e:
+        return {'error': str(e)}
 
 
 def get_current_user() -> Optional[Dict]:
