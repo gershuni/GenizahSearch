@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
-status: executing
-stopped_at: "Phase 91 complete -- AUTHW-01..06 closed; allowlist 2 -> 0; permanent CI guards installed for AUTHW-05 (T-A/T-B/T-C/T-D/T-E/T-F + companion = 7 tests) + AUTHW-06 (3 AST STRICT + 1 behavioral + 2 seed-trap = 6 tests). Cross-AI review revisions applied: round 1 MUST-1 (asyncio.run not pytest-asyncio), MUST-2 (SYMMETRIC 2-key set_auth + DEFENSIVE 3-key caller cleanup + profile-is-None-clears-stale), MUST-3 (T-D/T-E/T-F partial-rollback tests), MUST-4 (show_error audit documented), MUST-5 (T-Beh behavioral test), SHOULD-6 (STRICT AST args check); round 2 NEW-H1 (module-top GlobalAuthState import), NEW-H2 (drop nicegui.app -- NOT applied per Plan 91-01 Rule-1 deviation, app.storage.browser still in create_login_dialog), NEW-H3 (no pytest top-level import), NEW-H4/H5 (T-D + T-E pre-seed stale prior-session data), NEW-M1 (SYMMETRIC 2-key vs DEFENSIVE 3-key wording), NEW-M2 (PowerShell rg + Python verification), NEW-M3 (plan-split: 91-02 strict single-test-file + new 91-03 closeout docs), NEW-L1 (single-event posthog consolidation deferred), NEW-L2 (method:password tags)."
-last_updated: "2026-05-15T18:10:00.000Z"
-last_activity: "2026-05-15 -- Phase 91 complete (2 plans-with-requirements + 1 closeout-docs plan; AUTHW-01..06 closed; allowlist now empty; round-1 + round-2 cross-AI review revisions integrated)"
+status: planning
+stopped_at: Completed Phase 91 closeout (Plan 91-03 docs-only commit; 5/6 v7.12 phases complete, 18/24 plans complete)
+last_updated: "2026-05-15T15:25:57.863Z"
+last_activity: 2026-05-15
 progress:
   total_phases: 10
   completed_phases: 5
-  total_plans: 24
+  total_plans: 23
   completed_plans: 18
-  percent: 75
+  percent: 78
 ---
 
 # Project State
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md (updated 2026-05-13)
 
 ## Current Position
 
-Phase: 91 (Atomic Auth State Writes) -- COMPLETE (2 plans-with-AUTHW-XX shipped + 1 closeout-docs plan; AUTHW-01, -02, -05, -06 closed; -03, -04 inherited from Phase 90; round-1 + round-2 cross-AI review revisions applied). Next: Phase 92 (Final Sweep and Acceptance) -- ready to plan.
-Plan: 3 of 3 complete
+Phase: 92
+Plan: Not started
 Next: Phase 92 (Final Sweep and Acceptance)
 Status: Ready to plan Phase 92
-Last activity: 2026-05-15 -- Phase 91 complete
+Last activity: 2026-05-15
 
 Progress: [████████░░] 75%
 
@@ -50,7 +50,7 @@ Progress: [████████░░] 75%
 
 **Velocity:**
 
-- Total plans completed: 11
+- Total plans completed: 14
 - Average duration: --
 - Total execution time: --
 
