@@ -28,18 +28,32 @@ class AppState:
 
     @property
     def lists_mgr(self):
-        """
-        Get the appropriate lists manager based on auth state.
+        """Per-access factory: return a fresh UserListsManager wrapping the
+        local mgr + meta mgr, or None if bootstrap has not yet wired
+        ``_local_lists_mgr`` (load-bearing — call sites at web/api.py:2114,
+        web/components/comment_dialog.py:93, web/pages/lists.py:218 use
+        ``if not state.lists_mgr:`` to detect the pre-bootstrap window).
 
-        Returns UserListsManager when available (for logged-in users),
-        falls back to local ListsManager for anonymous users.
-        """
-        # Try to use the auth-aware manager
-        if self._user_lists_mgr is not None:
-            return self._user_lists_mgr
+        Phase 89 (D-01, D-02): every access constructs a new UserListsManager.
+        Safe because UserListsManager is stateless post-Phase 89 (no _cache_entry,
+        no _cache_ttl — see web/user_lists.py docstring). The per-ACCESS
+        lifecycle satisfies LISTS-02 in effect: no state crosses request
+        boundaries because no state exists.
 
-        # Fall back to local manager
-        return self._local_lists_mgr
+        The ``_user_lists_mgr`` field on AppState is dead-code temporary for
+        Plan 89-01; Plan 89-02 deletes both the field, ``init_user_lists_mgr()``,
+        and the caller at web/main.py:1508 in a single commit alongside the
+        Phase 88 survivor-test update at tests/test_no_appstate_export_fields.py:67
+        (D-09 plan-boundary discipline).
+        """
+        if self._local_lists_mgr is None:
+            return None  # Pre-bootstrap None-guard contract — DO NOT remove.
+        # Local import: UserListsManager imports from web.user_lists at module
+        # load time would create a cycle (user_lists imports from web.auth_state
+        # which imports from web.supabase_client which depends on nicegui app
+        # state). Lazy import preserves the existing import-time graph.
+        from web.user_lists import UserListsManager
+        return UserListsManager(self._local_lists_mgr, self.meta_mgr)
 
     @lists_mgr.setter
     def lists_mgr(self, value):
