@@ -328,7 +328,9 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
   3. Two concurrent browser sessions execute the full research workflow (search → browse → lists → xlsx export) simultaneously; inspection of each session's exported xlsx and list contents shows no cross-session data; the test is documented in `SWEEP-05` smoke-test plan with pass/fail checkboxes.
   4. Each issue previously flagged in the 4 Codex review transcripts (`_tmp/codex_*_response.txt`) is either marked "addressed" with a pointer to the commit/phase that fixed it, or "waived" with an explicit written rationale -- no issue is left silently unaddressed.
   5. `docs/guides/MULTITENANT.md` exists and documents: the `safe_storage` chokepoint pattern, the `_session_uuid` stable cache key, the request-scoped auth strategy with the `set_session()` prohibition, the per-request lists instantiation, and the deletion-not-migration discipline -- sufficient for a future contributor to understand and extend the architecture without reading the Codex transcripts.
-**Plans**: TBD
+**Plans**: 2 plans (92-01 + 92-02)
+- [ ] 92-01-PLAN.md -- SWEEP-01..05: AST scan + 5-surface audit + thematic transcript audit + smoke scaffold (closes SWEEP-01, SWEEP-02, SWEEP-03, SWEEP-04, SWEEP-05)
+- [ ] 92-02-PLAN.md -- SWEEP-06: docs/guides/MULTITENANT.md + closeout docs (depends_on 92-01; gated on human smoke PASS commit per D-02; closes SWEEP-06)
 
 ## Progress
 
@@ -342,7 +344,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 | 89. Lists Cache Per-Request | v7.12 | 2/2 | Complete   | 2026-05-15 |
 | 90. Auth Caching Rewrite -- No set_session | v7.12 | 2/2 | Complete   | 2026-05-15 |
 | 91. Atomic Auth State Writes | v7.12 | 3/3 | Complete    | 2026-05-15 |
-| 92. Final Sweep and Acceptance | v7.12 | 0/TBD | Not started | - |
+| 92. Final Sweep and Acceptance | v7.12 | 0/2 | Not started | - |
 
 ## Backlog
 
