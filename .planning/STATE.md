@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
-stopped_at: Phase 90 complete — Auth Caching Rewrite shipped (2/2 plans, 5/5 SCs verified)
-last_updated: "2026-05-15T11:47:54.567Z"
+stopped_at: Phase 91 context gathered (Codex round-1 pivot to keep 3 keys)
+last_updated: "2026-05-15T11:51:43.206Z"
 last_activity: 2026-05-15 -- Phase 999.3 planning complete
 progress:
   total_phases: 10
@@ -95,7 +95,7 @@ Progress: [██████░░░░] 67%
 
 ## Session Continuity
 
-Last session: 2026-05-15T10:30:00.000Z
-Stopped at: Phase 90 complete — Auth Caching Rewrite shipped (2/2 plans, 5/5 SCs verified)
-Resume file: .planning/phases/90-auth-caching-rewrite-no-set-session/90-VERIFICATION.md
+Last session: 2026-05-15T11:51:43.200Z
+Stopped at: Phase 91 context gathered (Codex round-1 pivot to keep 3 keys)
+Resume file: .planning/phases/91-atomic-auth-state-writes/91-CONTEXT.md
 Next step: `/gsd-discuss-phase 91` (Atomic Auth State Writes). Phase 91 scope reduced after Plan 90-01 pulled AUTHW-03 + AUTHW-04 forward (sign_out server-side revocation already shipped). Remaining: AUTHW-01 (auth_state.py raw-storage migration through safe_storage helpers — closes Phase 87 allowlist entry #1), AUTHW-02 (OAuth callback main.py:1458-1463 atomicity — closes Phase 87 allowlist entry #2), AUTHW-05 (tests/test_auth_callback_resilience.py for mid-flight prune), AUTHW-06 (filter_panel persist_value retention check).
