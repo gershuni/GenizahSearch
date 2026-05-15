@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
-stopped_at: Phase 89 context gathered
-last_updated: "2026-05-15T03:31:56.573Z"
-last_activity: 2026-05-15 -- Phase 89 execution started
+stopped_at: Phase 89 complete; ready for Phase 90 discuss
+last_updated: "2026-05-15T04:10:00.000Z"
+last_activity: 2026-05-15 -- Phase 89 execution complete (2 plans shipped)
 progress:
   total_phases: 6
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 13
-  completed_plans: 11
-  percent: 85
+  completed_plans: 13
+  percent: 50
 ---
 
 # Project State
@@ -21,24 +21,24 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-13)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 89 — Lists Cache Per-Request
+**Current focus:** Phase 89 complete — ready to discuss Phase 90 (Auth Caching Rewrite)
 
 ## Current Position
 
-Phase: 89 (Lists Cache Per-Request) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 89
-Last activity: 2026-05-15 -- Phase 89 execution started
+Phase: 89 (Lists Cache Per-Request) — COMPLETE (2/2 plans shipped, all 4 ROADMAP SCs verified)
+Next: Phase 90 (Auth Caching Rewrite — No set_session)
+Status: Phase 89 complete; full pytest green (1912 passed, 20 skipped); permanent CI guards (static AST + runtime attr-absence) installed
+Last activity: 2026-05-15 -- Phase 89 execution complete
 
-Progress: [█░░░░░░░░░] 13%
+Progress: [█████░░░░░] 50%
 
 ## Phase Queue (v7.12)
 
 | Phase | Name | Requirements | Status |
 |-------|------|--------------|--------|
 | 87 | Foundations -- Session UUID and Safe Storage Chokepoint | FOUND-01..05 | Complete |
-| 88 | State Separation by Deletion | STATE-01..06 | Pending |
-| 89 | Lists Cache Per-Request | LISTS-01..04 | Pending |
+| 88 | State Separation by Deletion | STATE-01..06 | Complete |
+| 89 | Lists Cache Per-Request | LISTS-01..04 | Complete |
 | 90 | Auth Caching Rewrite -- No set_session | AUTHC-01..05 | Pending |
 | 91 | Atomic Auth State Writes | AUTHW-01..06 | Pending |
 | 92 | Final Sweep and Acceptance | SWEEP-01..06 | Pending |
