@@ -4,8 +4,8 @@ milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
 stopped_at: Phase 91 context gathered (Codex round-1 pivot to keep 3 keys)
-last_updated: "2026-05-15T14:34:33.597Z"
-last_activity: 2026-05-15 -- Phase 91 planning complete
+last_updated: "2026-05-15T14:38:01.583Z"
+last_activity: 2026-05-15 -- Phase 91 execution started
 progress:
   total_phases: 10
   completed_phases: 4
@@ -21,14 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-13)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 90 complete (2/2 plans, 5/5 SCs, 5/5 AUTHC reqs verified) — ready for Phase 91
+**Current focus:** Phase 91 — Atomic Auth State Writes
 
 ## Current Position
 
-Phase: 90 (Auth Caching Rewrite -- No set_session) — COMPLETE (2/2 plans shipped, all 5 ROADMAP SCs + 5 AUTHC reqs verified)
+Phase: 91 (Atomic Auth State Writes) — EXECUTING
+Plan: 1 of 3
 Next: Phase 91 (Atomic Auth State Writes)
-Status: Ready to execute
-Last activity: 2026-05-15 -- Phase 91 planning complete
+Status: Executing Phase 91
+Last activity: 2026-05-15 -- Phase 91 execution started
 
 Progress: [██████░░░░] 67%
 
