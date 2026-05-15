@@ -375,8 +375,14 @@ def get_user_client() -> Client:
 # ============================================================================
 
 def sign_up(email: str, password: str, metadata: Dict = None) -> Dict:
-    """
-    Register a new user.
+    """Register a new user via a throwaway client (D-10 invariant).
+
+    Phase 90 (D-09, D-10, plan-checker round catch): does NOT touch the
+    module singleton get_client(). Supabase fires SIGNED_IN under auto-
+    confirm mode, which causes the event listener at
+    supabase/_sync/client.py:338-346 to mutate the singleton's
+    Authorization header -- identical F3 leak vector as sign_in. The
+    plan-checker round caught this; D-10 expanded to 5 helpers.
 
     Args:
         email: User's email
@@ -387,15 +393,13 @@ def sign_up(email: str, password: str, metadata: Dict = None) -> Dict:
         Dict with 'user' and 'session' on success, or 'error' on failure
     """
     try:
-        client = get_client()
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
         options = {'data': metadata} if metadata else {}
-
-        response = client.auth.sign_up({
+        response = throwaway.auth.sign_up({
             'email': email,
             'password': password,
             'options': options if options else None
         })
-
         if response and response.user:
             return {
                 'success': True,
@@ -403,7 +407,6 @@ def sign_up(email: str, password: str, metadata: Dict = None) -> Dict:
                 'session': _session_to_dict(response.session) if response.session else None
             }
         return {'error': 'Registration failed - no user returned'}
-
     except AuthApiError as e:
         return {'error': str(e)}
     except Exception as e:
@@ -411,19 +414,22 @@ def sign_up(email: str, password: str, metadata: Dict = None) -> Dict:
 
 
 def sign_in(email: str, password: str) -> Dict:
-    """
-    Sign in an existing user.
+    """Sign in an existing user via a throwaway client (D-10 invariant).
 
-    Returns:
-        Dict with 'user' and 'session' on success, or 'error' on failure
+    Phase 90 (D-09, D-10): does NOT touch the module singleton
+    get_client(). The supabase event listener at
+    supabase/_sync/client.py:338-346 mutates the singleton's
+    Authorization header on SIGNED_IN -- using the singleton here would
+    leave it authenticated as this user for subsequent unrelated
+    callers, a cross-user leak path that survives even after Plan 90-02
+    deletes the prior singleton client cache (Codex round-1 F3).
     """
     try:
-        client = get_client()
-        response = client.auth.sign_in_with_password({
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        response = throwaway.auth.sign_in_with_password({
             'email': email,
             'password': password
         })
-
         if response.user:
             return {
                 'success': True,
@@ -431,7 +437,6 @@ def sign_in(email: str, password: str) -> Dict:
                 'session': _session_to_dict(response.session)
             }
         return {'error': 'Login failed'}
-
     except AuthApiError as e:
         return {
             'error': str(e),
@@ -442,24 +447,40 @@ def sign_in(email: str, password: str) -> Dict:
         return {'error': f'Login error: {str(e)}'}
 
 
-def sign_out() -> Dict:
-    """Sign out the current user."""
+def sign_out(access_token: Optional[str] = None) -> Dict:
+    """Revoke the user's session server-side via admin-scoped global logout.
+
+    Phase 90 D-11 (Codex round-3 P1 + Codex review round 1 M2): we
+    cannot rely on get_client() being authenticated -- D-10 makes it
+    provably anonymous-only. We build a throwaway client and invoke
+    the admin namespace's scoped logout directly, supplying the
+    user's JWT and the "global" scope. This bypasses GoTrue's
+    high-level sign_out() entirely (see body comment for the
+    gotrue_client.py:789-793 rationale referenced in Codex transcript).
+    Token is passed as a parameter so clear_auth can revoke BEFORE
+    popping auth_session from storage (D-11b atomic local cleanup).
+    """
+    if access_token is None:
+        # Fall back to reading from storage (covers callers other than
+        # clear_auth, though there are none in production today).
+        from web.safe_storage import safe_user_get
+        auth_session = safe_user_get('auth_session') or {}
+        access_token = auth_session.get('access_token')
+    if not access_token:
+        return {'success': True, 'note': 'no active session to revoke'}
     try:
-        # 2026-05-12 Codex 3rd-pass LOW fix: _client_cache and _session_locks
-        # are now keyed by access_token (str), not id(storage) (int). Evict by
-        # the current session's access_token so the cleanup actually fires.
-        try:
-            from web.safe_storage import safe_user_get
-            auth_session = (safe_user_get('auth_session') or {})
-            access_token = auth_session.get('access_token')
-            if access_token:
-                _client_cache.pop(access_token, None)
-                _session_locks.pop(access_token, None)
-            _prune_session_client_cache()
-        except Exception:
-            pass  # Cache operation failed; continue without cached data
-        client = get_client()
-        client.auth.sign_out()
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        # CODEX ROUND-3 P1: do NOT call the high-level auth-namespace logout
+        # on the throwaway. GoTrue's high-level sign_out() reads
+        # self.get_session() first (gotrue_client.py:789-793) and only
+        # invokes admin.sign_out when a LOCAL session exists. Since
+        # v7.12 AUTHC-02 forbids the GoTrue session-setting helper, the
+        # throwaway never has a local session -- so the high-level path
+        # degenerates to a no-op on the network side. The admin namespace
+        # (gotrue_admin_api.py:69-79) exposes the raw
+        # POST /auth/v1/logout?scope=global call which carries the
+        # JWT directly -- that IS the actual revocation we need.
+        throwaway.auth.admin.sign_out(access_token, "global")
         return {'success': True}
     except Exception as e:
         return {'error': f'Logout error: {str(e)}'}
@@ -537,27 +558,28 @@ def get_session() -> Optional[Dict]:
         return None  # Operation failed; use fallback value
 
 
-def refresh_session() -> Dict:
-    """Refresh the current session."""
-    try:
-        client = get_client()
-        response = client.auth.refresh_session()
-        if response.session:
-            return {
-                'success': True,
-                'session': _session_to_dict(response.session)
-            }
-        return {'error': 'Session refresh failed'}
-    except Exception as e:
-        return {'error': f'Refresh error: {str(e)}'}
-
-
 def get_oauth_url(provider: str = 'google', redirect_to: str = None) -> Dict:
-    """
-    Get OAuth URL for social login using Supabase's built-in OAuth method.
+    """Get OAuth URL for social login via a throwaway client (D-10 invariant)
+    AND persist the PKCE code verifier per NiceGUI session (Codex review
+    round 1 H1).
 
-    Uses the Supabase client's sign_in_with_oauth which handles state parameter
-    generation and PKCE flow automatically.
+    Phase 90 (D-09, D-10, plan-checker round catch): does NOT touch the
+    module singleton get_client(). While sign_in_with_oauth in practice
+    returns a URL without firing SIGNED_IN, the D-15 Class B scanner
+    installed in Plan 90-02 categorically bans sign_in_with_oauth on
+    the singleton -- refactoring to a throwaway here aligns
+    implementation with the scanner's declared invariant.
+
+    Codex review round 1 H1: PKCE code verifier persistence.
+    sign_in_with_oauth generates the verifier and stashes it in the
+    throwaway's in-memory storage at `{storage_key}-code-verifier`
+    (gotrue_client.py:_get_url_for_provider, "PKCE storage stash").
+    The throwaway is GC'd when this function returns -- without
+    explicit persistence the verifier is LOST and the subsequent
+    exchange_code_for_session() call cannot recover it. We extract
+    it from the throwaway's storage and re-persist via safe_user_set
+    so exchange_code_for_session can read it back and pass it
+    explicitly as the `code_verifier` parameter.
 
     Args:
         provider: OAuth provider ('google', 'github', etc.)
@@ -567,30 +589,63 @@ def get_oauth_url(provider: str = 'google', redirect_to: str = None) -> Dict:
         Dict with 'url' on success, or 'error' on failure
     """
     try:
-        client = get_client()
-
-        # Use Supabase's built-in OAuth method which handles state/PKCE
-        options = {}
+        from web.safe_storage import safe_user_set
+        # Codex round 2 P1 fix: dict-options form raises AttributeError
+        # at runtime (create_client expects Optional[SyncClientOptions],
+        # not dict -- see supabase/_sync/client.py:108). The default
+        # flow_type in SyncClientOptions is already 'pkce' (verified
+        # via `python -c "from supabase.lib.client_options import
+        # SyncClientOptions; print(SyncClientOptions().flow_type)"` ->
+        # 'pkce'), so the bare 2-arg form is equivalent AND simpler.
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        options_dict = {}
         if redirect_to:
-            options['redirect_to'] = redirect_to
-
-        response = client.auth.sign_in_with_oauth({
+            options_dict['redirect_to'] = redirect_to
+        response = throwaway.auth.sign_in_with_oauth({
             'provider': provider,
-            'options': options
+            'options': options_dict,
         })
-
         if response and response.url:
+            # Codex review round 1 H1: extract the PKCE verifier from
+            # the throwaway's storage and persist it per-session.
+            # GoTrue stores it at `{storage_key}-code-verifier`; the
+            # default storage_key is supabase_auth.constants.STORAGE_KEY
+            # ("supabase.auth.token"). Read via the private storage
+            # accessor on the auth client -- this is the stable
+            # contract verified at gotrue_client.py:1063-1078 (set)
+            # and gotrue_client.py:exchange_code_for_session (get).
+            try:
+                storage = throwaway.auth._storage
+                storage_key = throwaway.auth._storage_key
+                verifier = storage.get_item(f"{storage_key}-code-verifier")
+                if verifier:
+                    safe_user_set('oauth_code_verifier', verifier)
+                else:
+                    logger.warning(
+                        "get_oauth_url: PKCE verifier missing from throwaway storage "
+                        "(key=%s-code-verifier) -- OAuth callback will fail with "
+                        "'Code verifier and code challenge do not match'",
+                        storage_key,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "get_oauth_url: PKCE verifier extraction failed: %s "
+                    "-- OAuth callback may fail", e,
+                )
             return {'success': True, 'url': response.url}
-
         return {'error': 'Failed to generate OAuth URL'}
-
     except Exception as e:
         return {'error': f'OAuth error: {str(e)}'}
 
 
 def set_session_from_url(access_token: str, refresh_token: str) -> Dict:
-    """
-    Set session from OAuth callback tokens.
+    """Set session from OAuth callback tokens via throwaway client (D-10).
+
+    Phase 90 D-09/D-10: legitimate bootstrap use of set_session -- this is
+    the ONLY place `set_session` is allowed by the D-15 static AST
+    scanner (Class A allowlist: enclosing function name must match
+    `set_session_from_url`). Throwaway prevents the singleton-leak path
+    Codex F3 surfaced.
 
     Args:
         access_token: The access token from URL
@@ -600,9 +655,8 @@ def set_session_from_url(access_token: str, refresh_token: str) -> Dict:
         Dict with 'user' and 'session' on success, or 'error' on failure
     """
     try:
-        client = get_client()
-        response = client.auth.set_session(access_token, refresh_token)
-
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        response = throwaway.auth.set_session(access_token, refresh_token)
         if response and response.user:
             return {
                 'success': True,
@@ -610,14 +664,28 @@ def set_session_from_url(access_token: str, refresh_token: str) -> Dict:
                 'session': _session_to_dict(response.session)
             }
         return {'error': 'Failed to set session'}
-
     except Exception as e:
         return {'error': f'Session error: {str(e)}'}
 
 
 def exchange_code_for_session(code: str) -> Dict:
-    """
-    Exchange OAuth code for session (PKCE flow fallback).
+    """Exchange OAuth code for session via throwaway client (D-10) with
+    explicit PKCE code verifier round-trip (Codex review round 1 H1).
+
+    Phase 90 D-09/D-10: PKCE bootstrap -- this is the ONLY function
+    allowed to call `auth.exchange_code_for_session` per the D-15
+    static AST scanner (Class A allowlist: enclosing function name
+    must match `exchange_code_for_session`).
+
+    Codex review round 1 H1: the code_verifier is read from
+    `safe_user_get('oauth_code_verifier')` (set by get_oauth_url
+    Step 1.6 above) and passed explicitly as the `code_verifier`
+    parameter to GoTrue's exchange_code_for_session. The verifier
+    cannot be retrieved from the throwaway's own in-memory storage
+    because that storage is fresh on every throwaway construction --
+    the verifier set by the EARLIER throwaway in get_oauth_url is
+    gone. We pop after read so the verifier isn't reusable across
+    OAuth attempts (defense in depth -- verifier should be one-shot).
 
     Args:
         code: The authorization code from URL query parameter
@@ -626,9 +694,29 @@ def exchange_code_for_session(code: str) -> Dict:
         Dict with 'user' and 'session' on success, or 'error' on failure
     """
     try:
-        client = get_client()
-        response = client.auth.exchange_code_for_session({'auth_code': code})
-
+        from web.safe_storage import safe_user_pop
+        # Pop the PKCE verifier persisted by get_oauth_url (Step 1.6).
+        # Pop (not get) so one verifier serves one OAuth round-trip.
+        code_verifier = safe_user_pop('oauth_code_verifier', None)
+        if not code_verifier:
+            # No verifier in storage -- either the user came directly to
+            # the callback without going through get_oauth_url, or the
+            # NiceGUI session was pruned between the URL request and the
+            # callback. The exchange will fail; surface a clearer error
+            # than GoTrue's "Code verifier and code challenge do not match".
+            logger.warning(
+                "exchange_code_for_session: no PKCE code_verifier in storage -- "
+                "OAuth round-trip lost the verifier (session prune or direct callback)"
+            )
+            return {'error': 'OAuth verifier missing -- please retry login'}
+        # Codex round 2 P1 fix: dict-options form raises AttributeError
+        # at runtime; default flow_type in SyncClientOptions is already
+        # 'pkce'. Bare 2-arg form is equivalent and simpler.
+        throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        response = throwaway.auth.exchange_code_for_session({
+            'auth_code': code,
+            'code_verifier': code_verifier,  # H1: explicit verifier round-trip
+        })
         if response and response.user:
             return {
                 'success': True,
@@ -636,7 +724,6 @@ def exchange_code_for_session(code: str) -> Dict:
                 'session': _session_to_dict(response.session)
             }
         return {'error': 'Failed to exchange code for session'}
-
     except Exception as e:
         return {'error': f'Code exchange error: {str(e)}'}
 
