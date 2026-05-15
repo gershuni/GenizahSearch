@@ -29,14 +29,6 @@ from web.state import AppState
 from web.user_lists import UserListsManager
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Phase 89 Task 3 deletion pending — _user_lists_mgr still exists on "
-        "AppState until Task 3's atomic commit deletes the field. Task 3 "
-        "removes this xfail marker in the SAME commit (R9 + R10)."
-    ),
-)
 def test_appstate_does_not_have_user_lists_mgr():
     """Direct attribute access on AppState() for ``_user_lists_mgr`` is False.
 

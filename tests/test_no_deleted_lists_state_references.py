@@ -447,23 +447,12 @@ def test_scanner_ignores_strings_and_comments():
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Phase 89 Task 3 deletion pending — this scan will turn green once "
-        "_user_lists_mgr field is deleted from web/state.py + init_user_lists_mgr "
-        "method is gone + web/main.py:1508 call is gone. Task 3 removes this "
-        "xfail marker in the SAME atomic commit as the deletion (R9 + R10)."
-    ),
-)
 def test_no_deleted_lists_references_in_web_and_tests():
     """Production guard: no Python file under web/ or tests/ references any
     of the Phase-89-deleted names via the forms enumerated in D-10/R7/R8.
 
     This is the permanent CI lint. If it fails after a future PR has shipped
     Phase 89, that PR is restoring deleted plumbing.
-
-    Marked xfail(strict=True) until Task 3 lands the deletion — see R9.
     """
     violations = []
     for scan_dir in SCAN_DIRS:

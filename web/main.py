@@ -1516,9 +1516,6 @@ async def initialize_engine():
             print("[init] 2/6 ListsManager...", flush=True)
             state.lists_mgr = ListsManager(state.meta_mgr)
 
-            # Initialize user lists manager (auth-aware wrapper)
-            state.init_user_lists_mgr()
-
             # 2. Lab Settings & Engine
             print("[init] 3/6 LabEngine...", flush=True)
             state.lab_engine = LabEngine(state.meta_mgr, None)
