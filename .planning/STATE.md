@@ -4,8 +4,8 @@ milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
 stopped_at: Phase 999.3 context gathered
-last_updated: "2026-05-15T09:07:10.671Z"
-last_activity: 2026-05-15 -- Phase 999.1 planning complete
+last_updated: "2026-05-15T09:30:33.621Z"
+last_activity: 2026-05-15 -- Phase 90 execution started
 progress:
   total_phases: 10
   completed_phases: 3
@@ -21,14 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-13)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 89 complete — ready to discuss Phase 90 (Auth Caching Rewrite)
+**Current focus:** Phase 90 — Auth Caching Rewrite -- No set_session
 
 ## Current Position
 
-Phase: 89 (Lists Cache Per-Request) — COMPLETE (2/2 plans shipped, all 4 ROADMAP SCs verified)
+Phase: 90 (Auth Caching Rewrite -- No set_session) — EXECUTING
+Plan: 1 of 2
 Next: Phase 90 (Auth Caching Rewrite — No set_session)
-Status: Ready to execute
-Last activity: 2026-05-15 -- Phase 999.1 planning complete
+Status: Executing Phase 90
+Last activity: 2026-05-15 -- Phase 90 execution started
 
 Progress: [█████░░░░░] 50%
 
