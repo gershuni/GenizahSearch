@@ -1782,6 +1782,37 @@ class ResultDialog(QDialog):
     def _refresh_find_highlights(self):
         apply_find_highlight(self.text_ms, self.find_ms_input.text().strip())
 
+    def _scroll_to_first_highlight(self, text_browser, pattern_str):
+        """Scroll text_browser viewport to the first regex match of pattern_str.
+
+        Deferred via QTimer.singleShot(0) so it runs after Qt layout — the
+        dialog renders before .exec(), and before the widget is mapped
+        ensureCursorVisible() has no viewport geometry to scroll within.
+
+        Uses toPlainText() instead of regex-on-HTML because setHtml() wraps
+        matches in <b style='color:red;'>...</b> and the original
+        highlight_pattern won't match cleanly across tags.
+        """
+        if not pattern_str or text_browser is None:
+            return
+        def _do_scroll():
+            try:
+                flags = re.IGNORECASE
+                if '\\n' in pattern_str or pattern_str.startswith('^') or '^\\' in pattern_str:
+                    flags |= re.MULTILINE
+                regex = re.compile(pattern_str, flags)
+            except re.error:
+                return
+            plain = text_browser.toPlainText()
+            m = regex.search(plain)
+            if not m:
+                return
+            cursor = text_browser.textCursor()
+            cursor.setPosition(m.start())
+            text_browser.setTextCursor(cursor)
+            text_browser.ensureCursorVisible()
+        QTimer.singleShot(0, _do_scroll)
+
     def _apply_source_highlights(self, text, pattern_str):
         if not text:
             return ""
@@ -1912,6 +1943,7 @@ class ResultDialog(QDialog):
         if source_text:
             self.src_widget.setVisible(True)
             self.text_src.setHtml(self._htmlify(source_text))
+            self._scroll_to_first_highlight(self.text_src, pattern_str)
         else:
             self.src_widget.setVisible(False)
             self.text_src.clear()
@@ -2087,6 +2119,7 @@ class ResultDialog(QDialog):
         
         self.text_ms.setHtml(self._htmlify(raw_text))
         self._refresh_find_highlights()
+        self._scroll_to_first_highlight(self.text_ms, pattern_str)
 
         # Load versions for this page
         self._rd_load_versions()

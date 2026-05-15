@@ -327,23 +327,33 @@ class TestSearchCompositionLogicStaticContract:
     serializer collision that produced "'int' object is not iterable" on
     /api/export/parallels/json downloads. Static-source assertions lock this
     rename so a future refactor can't quietly reintroduce the bug.
+
+    Bugfix 2026-05-15: chunk_count is now derived post-hoc from unique
+    chunk_hits contents (via _count_unique_chunks) so repeated source phrases
+    and cross-Tantivy-segment hits don't inflate the user-facing `min chunks`
+    filter. The inline `rec['chunk_count'] += 1` counter was removed.
     """
 
-    def test_chunk_count_replaces_old_int_counter(self):
-        """The int counter must be 'chunk_count', not 'chunk_hits'."""
+    def test_chunk_count_derived_from_unique_chunk_hits(self):
+        """chunk_count must be derived from unique chunk_hits, not incremented
+        inline. Inline increment would re-introduce the 2026-05-15 bug where
+        repeated source phrases inflated `min chunks` filter results."""
         with open("genizah_core.py", encoding="utf-8") as f:
             src = f.read()
-        # The doc_hits defaultdict in search_composition_logic uses chunk_count
-        # for the int counter; the inner increment uses chunk_count.
-        assert "'chunk_count': 0" in src, (
-            "search_composition_logic doc_hits defaultdict must init "
-            "'chunk_count' (was 'chunk_hits' before Phase 77 rename)"
+        assert "rec['chunk_count'] += 1" not in src, (
+            "Inline chunk_count increment was removed in the 2026-05-15 bugfix "
+            "(it inflated the counter when source phrases repeated). "
+            "chunk_count must be derived post-hoc from unique chunk_hits via "
+            "_count_unique_chunks() in build_items."
         )
-        assert "rec['chunk_count'] += 1" in src, (
-            "Per-chunk increment must use chunk_count (was chunk_hits before rename)"
+        assert "_count_unique_chunks" in src, (
+            "Helper _count_unique_chunks must exist (module-level near "
+            "get_boundary_stats) and be used to derive chunk_count from "
+            "unique chunk_hits contents."
         )
-        assert "'chunk_count': data.get('chunk_count', 0)" in src, (
-            "build_items output must surface chunk_count int counter on items"
+        assert "_count_unique_chunks(data.get('chunk_hits', []))" in src, (
+            "build_items output (and lab_composition_search item dict) must "
+            "compute chunk_count as _count_unique_chunks(data.get('chunk_hits', []))"
         )
 
     def test_chunk_hits_list_appended_per_chunk(self):
@@ -381,4 +391,205 @@ class TestSearchCompositionLogicStaticContract:
         assert "'chunk_hits': data.get('chunk_hits', [])" in src, (
             "build_items output must surface data['chunk_hits'] (list) for "
             "shared.search_serializer.serialize_parallels_payload to consume"
+        )
+
+
+class TestCountUniqueChunks:
+    """Pure unit test for the _count_unique_chunks helper added in the
+    2026-05-15 bugfix. The helper drives the corrected `min chunks` filter
+    in both search_composition_logic and lab_composition_search."""
+
+    def test_empty_inputs_return_zero(self):
+        from genizah_core import _count_unique_chunks
+        assert _count_unique_chunks([]) == 0
+        assert _count_unique_chunks(None) == 0
+        assert _count_unique_chunks(()) == 0
+
+    def test_distinct_chunks_counted_once_each(self):
+        from genizah_core import _count_unique_chunks
+        hits = [
+            (0, "ברוך אתה ה'", 0.9, "snippet A"),
+            (5, "מלך העולם", 0.8, "snippet B"),
+            (10, "אלהי ישראל", 0.7, "snippet C"),
+        ]
+        assert _count_unique_chunks(hits) == 3
+
+    def test_repeated_chunk_text_deduped(self):
+        """The core bug: a phrase repeating in the source produces multiple
+        chunks with the same content at different indices. They must collapse
+        to one in chunk_count."""
+        from genizah_core import _count_unique_chunks
+        hits = [
+            (0, "ברוך אתה ה'", 0.9, "snippet A"),
+            (12, "ברוך אתה ה'", 0.85, "snippet A"),  # repeat in source, same i? no, different i
+            (25, "ברוך אתה ה'", 0.7, "snippet B"),
+            (40, "מלך העולם", 0.6, "snippet C"),
+        ]
+        # 4 raw hits → 2 unique chunk_text values
+        assert _count_unique_chunks(hits) == 2
+
+    def test_malformed_inputs_ignored(self):
+        """Defensive: non-tuple entries, short tuples, empty chunk_text."""
+        from genizah_core import _count_unique_chunks
+        hits = [
+            (0, "ברוך אתה ה'", 0.9, "snippet"),
+            None,
+            "not a tuple",
+            (1,),  # too short
+            (2, "", 0.5, "x"),  # empty chunk_text
+            (3, "מלך", 0.4, "y"),
+        ]
+        assert _count_unique_chunks(hits) == 2
+
+
+class TestLabCompositionMinChunksFilter:
+    """Behavioral test: lab_composition_search full-mode min_boundary_matches
+    must use the derived chunk_count (unique source-chunk contents), not the
+    internal hits_count counter that was previously broken at line 1602.
+
+    This re-uses the same monkeypatch pattern as TestChunkHitsBehavior."""
+
+    def _build_engine(self):
+        from genizah_core import LabEngine, LabSettings
+
+        engine = LabEngine.__new__(LabEngine)
+        engine.settings = LabSettings()
+        engine.settings.comp_min_score = 1
+        engine.settings.min_should_match = 50
+        engine.dynamic_rank_map = None
+        engine._filter_match_count = 0
+        engine.lab_index = MagicMock()
+        engine.lab_index.parse_query.return_value = MagicMock(name="query_obj")
+        engine.lab_searcher = MagicMock()
+        return engine
+
+    def test_full_mode_uses_chunk_count_not_hits_count(self):
+        """With min_boundary_matches=2 and boundary_mode='full', a source where
+        the same phrase repeats so chunk_hits has identical chunk_text values
+        must NOT pass — the user-facing filter reads unique chunks."""
+        from genizah_core import LabEngine
+
+        engine = self._build_engine()
+
+        # Source where every chunk is the same content (12 identical tokens).
+        # Sliding window produces multiple chunks with chunk_size=4, but they
+        # all have identical chunk_text → unique count = 1.
+        source_text = " ".join(["ברוך"] * 12)
+
+        synthetic_uid = "uid_repeat_test"
+        synthetic_doc = {
+            "content": ["ברוך אתה ה' " * 5],
+            "unique_id": [synthetic_uid],
+            "full_header": ["header_9988776655443322_IE99_P3"],
+            "source": ["V0.8"],
+        }
+
+        def _make_search_result(*_args, **_kwargs):
+            res = MagicMock()
+            res.hits = [(0.9, "addr_99")]
+            return res
+
+        engine.lab_searcher.search.side_effect = _make_search_result
+        engine.lab_searcher.doc.return_value = synthetic_doc
+
+        def fake_metrics(self, text, query_fingerprints_list,
+                         original_query_str, freq_map=None):
+            matches = []
+            for idx, fp in enumerate(query_fingerprints_list):
+                matches.append({
+                    "fp": fp, "word": f"word_{idx}",
+                    "start": idx * 3, "end": idx * 3 + 5,
+                })
+            best_window = (0, len(matches) - 1) if matches else (0, 0)
+            return 100.0, matches, best_window
+
+        with patch.object(LabEngine, "_calculate_match_metrics",
+                          autospec=True, side_effect=fake_metrics), \
+             patch.object(LabEngine, "_is_phrase_statistically_weak",
+                          autospec=True, return_value=False):
+
+            # Run with min_boundary_matches=2 — should reject because only 1
+            # unique chunk_text exists in chunk_hits (all tokens repeat).
+            result = engine.lab_composition_search(
+                source_text,
+                mode="variants",
+                chunk_size=4,
+                boundary_mode='full',
+                min_boundary_matches=2,
+            )
+
+        all_items = (list(result.get("main", []))
+                     + list(result.get("filtered", []))
+                     + list(result.get("known", [])))
+        matching = [i for i in all_items if i.get("uid") == synthetic_uid]
+        assert not matching, (
+            "lab_composition_search must filter out a manuscript whose only "
+            "chunk_hits share identical chunk_text when min_boundary_matches=2. "
+            f"Got {len(matching)} item(s) for uid {synthetic_uid!r}, items={matching}"
+        )
+
+    def test_full_mode_passes_when_enough_unique_chunks(self):
+        """Sanity: distinct chunk_text values should still pass the filter."""
+        from genizah_core import LabEngine
+
+        engine = self._build_engine()
+
+        # 12 distinct Hebrew tokens → multiple distinct chunk_text values
+        source_tokens = [
+            "אלף", "בית", "גימל", "דלת", "הא", "וו",
+            "זין", "חית", "טית", "יוד", "כף", "למד",
+        ]
+        source_text = " ".join(source_tokens)
+
+        synthetic_uid = "uid_distinct_test"
+        synthetic_doc = {
+            "content": ["צורת המשפט במכתב יד זה דוגמה למבחן " * 3],
+            "unique_id": [synthetic_uid],
+            "full_header": ["header_9988776655443322_IE99_P3"],
+            "source": ["V0.8"],
+        }
+
+        def _make_search_result(*_args, **_kwargs):
+            res = MagicMock()
+            res.hits = [(0.9, "addr_99")]
+            return res
+
+        engine.lab_searcher.search.side_effect = _make_search_result
+        engine.lab_searcher.doc.return_value = synthetic_doc
+
+        def fake_metrics(self, text, query_fingerprints_list,
+                         original_query_str, freq_map=None):
+            matches = []
+            for idx, fp in enumerate(query_fingerprints_list):
+                matches.append({
+                    "fp": fp, "word": f"word_{idx}",
+                    "start": idx * 3, "end": idx * 3 + 5,
+                })
+            best_window = (0, len(matches) - 1) if matches else (0, 0)
+            return 100.0, matches, best_window
+
+        with patch.object(LabEngine, "_calculate_match_metrics",
+                          autospec=True, side_effect=fake_metrics), \
+             patch.object(LabEngine, "_is_phrase_statistically_weak",
+                          autospec=True, return_value=False):
+
+            result = engine.lab_composition_search(
+                source_text,
+                mode="variants",
+                chunk_size=4,
+                boundary_mode='full',
+                min_boundary_matches=2,
+            )
+
+        all_items = (list(result.get("main", []))
+                     + list(result.get("filtered", []))
+                     + list(result.get("known", [])))
+        target = next((i for i in all_items if i.get("uid") == synthetic_uid), None)
+        assert target is not None, (
+            "Distinct-token source must produce a passing item; "
+            f"uid {synthetic_uid!r} missing. Items: {all_items}"
+        )
+        assert target.get("chunk_count", 0) >= 2, (
+            f"Expected chunk_count >= 2 for distinct-token source; "
+            f"got {target.get('chunk_count')}, chunk_hits={target.get('chunk_hits')}"
         )

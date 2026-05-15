@@ -501,6 +501,23 @@ def get_boundary_stats(text: str, delimiter: str, chunk_size: int, min_distance:
     }
 
 
+def _count_unique_chunks(chunk_hits):
+    """Count distinct source-chunk contents from a chunk_hits list.
+
+    Used by both search_composition_logic and lab_composition_search to derive
+    the user-facing `chunk_count` (the basis for the `min chunks` filter).
+    Counting by chunk_text dedupes (a) sliding-window indices with identical
+    content from repeated source phrases and (b) cross-Tantivy-segment hits
+    that already share (i, ms_snip) after the per-rec dedup step in each
+    caller. Defensive against malformed inputs.
+    """
+    return len({
+        hit[1]
+        for hit in (chunk_hits or ())
+        if isinstance(hit, (tuple, list)) and len(hit) > 1 and hit[1]
+    })
+
+
 def natural_sort_key(text):
     """Sort strings containing numbers naturally (e.g. 'Item 2' < 'Item 10')."""
     normalized = re.sub(r'^\s*ms\.?\s*', '', text or "", flags=re.IGNORECASE)
@@ -1577,6 +1594,12 @@ class LabEngine:
                 # manuscript_snippet). May be empty if no chunks matched
                 # (defensive default for forward compatibility).
                 'chunk_hits': data.get('chunk_hits', []),
+                # User-facing chunk_count: unique source-chunk contents. The
+                # internal `hits_count` counter (line 1448) drives the noise
+                # gate at line 1480 and is left alone. The full-mode
+                # min_boundary_matches filter below reads this derived field
+                # so repeated source phrases don't inflate the result.
+                'chunk_count': _count_unique_chunks(data.get('chunk_hits', [])),
             }
             raw_final_items.append(item)
 
@@ -1599,7 +1622,10 @@ class LabEngine:
             # Apply min_boundary_matches filter
             if min_boundary_matches > 0:
                 if boundary_mode == 'full':
-                    if item.get('hits_count', 0) < min_boundary_matches:
+                    # Use derived chunk_count (unique source chunks), not
+                    # the internal hits_count which was never surfaced on
+                    # the item dict (latent always-zero bug pre-fix).
+                    if item.get('chunk_count', 0) < min_boundary_matches:
                         continue
                 else:
                     if item.get('boundary_match_count', 0) < min_boundary_matches:
@@ -7933,10 +7959,12 @@ class SearchEngine:
         doc_hits = defaultdict(lambda: {
             'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(),
             'patterns': set(), 'boundary_chunk_scores': [], 'crossed_boundaries': set(),
-            'chunk_count': 0,  # Number of distinct chunks that matched this document
             # Phase 77 D-13: per-chunk attribution mirrors lab_composition_search
             # at line 1366. Same tuple shape (chunk_index, chunk_text, score, snippet)
             # so shared.search_serializer consumes both producers uniformly.
+            # chunk_count is derived from chunk_hits at build_items time via
+            # _count_unique_chunks() so it reflects unique source-chunk contents,
+            # not raw Tantivy hits (matters when source repeats a phrase).
             'chunk_hits': [],
             'is_filtered': False  # True if ANY match came from filtered chunk
         })
@@ -8027,7 +8055,11 @@ class SearchEngine:
                             # Save indices of found words in *source* text
                             rec['src_indices'].update(range(token_idx, token_idx + chunk_size))
                             rec['patterns'].add(regex.pattern)
-                            rec['chunk_count'] += 1
+                            # chunk_count is derived post-hoc from unique
+                            # chunk_hits contents in build_items below;
+                            # incrementing here would inflate the count
+                            # whenever the source repeats a phrase or Tantivy
+                            # returns the same uid from multiple segments.
 
                             # Phase 77 D-13: per-chunk attribution mirrors
                             # lab_composition_search at line 1390. ms_snip is a
@@ -8170,11 +8202,13 @@ class SearchEngine:
                     'has_boundary_matches': has_boundary_matches,
                     'boundary_match_count': len(data.get('crossed_boundaries', set())),
                     'boundary_quality': boundary_quality_normalized,
-                    # Phase 77: chunk_count is the int counter (was 'chunk_hits'
-                    # before the D-13 rename). chunk_hits is now a list of
+                    # chunk_count is derived from unique chunk_hits contents,
+                    # not raw Tantivy hits, so repeated source phrases and
+                    # cross-segment duplicates don't inflate the user-facing
+                    # `min chunks` filter. chunk_hits remains the list of
                     # (chunk_index, chunk_text, score, ms_snip) tuples for
                     # serialize_parallels_payload matches[].
-                    'chunk_count': data.get('chunk_count', 0),
+                    'chunk_count': _count_unique_chunks(data.get('chunk_hits', [])),
                     'chunk_hits': data.get('chunk_hits', []),
                     # Filtering flag and reason
                     'is_filtered': data.get('is_filtered', False),
