@@ -118,20 +118,31 @@ class GlobalAuthState:
 
     @classmethod
     def clear_auth(cls):
-        """Clear authentication (logout)."""
-        app.storage.user.pop(cls.USER_KEY, None)
-        app.storage.user.pop(cls.PROFILE_KEY, None)
-        app.storage.user.pop('auth_session', None)
-        # Reset PostHog identity on logout
+        """Clear authentication (logout). Revoke server-side BEFORE local cleanup
+        so the token is actually invalidated on Supabase's side (Phase 90 D-11).
+
+        Local key cleanup happens in a finally block so it runs even when
+        server revocation fails -- half-state (revoked server-side but local
+        keys still present) is worse than no revocation at all.
+        """
+        from web.safe_storage import safe_user_get
+        auth_session = safe_user_get('auth_session') or {}
+        access_token = auth_session.get('access_token')
+        try:
+            # AUTHW-04: server-side revocation FIRST, with the user's own token
+            supabase_sign_out(access_token)
+        except Exception:
+            pass  # Server revocation failed; local cleanup still runs below
+        finally:
+            # AUTHW-03: local keys popped unconditionally (no half-state)
+            app.storage.user.pop(cls.USER_KEY, None)
+            app.storage.user.pop(cls.PROFILE_KEY, None)
+            app.storage.user.pop('auth_session', None)
+        # PostHog reset stays as-is
         try:
             ui.run_javascript('if(window.posthog)posthog.reset()')
         except Exception:
             pass  # PostHog analytics optional; failure is non-fatal
-        # Also sign out from Supabase client
-        try:
-            supabase_sign_out()
-        except Exception:
-            pass  # Supabase sign_out failed; local session cleared anyway
 
     @classmethod
     def get_username(cls) -> str:

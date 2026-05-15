@@ -8,7 +8,7 @@ Edit user profile details and change password.
 from nicegui import ui
 from web.translations import tr
 from web.auth_state import GlobalAuthState, create_login_dialog
-from web.supabase_client import update_profile, get_user_client, get_user_corrections_count
+from web.supabase_client import update_profile, get_user_corrections_count
 from web.components.typography import h1, h2
 
 
@@ -145,18 +145,21 @@ async def create_profile_page():
                         return
 
                     try:
-                        # Use per-user client so password is set for the correct user
-                        client = get_user_client()
-                        response = client.auth.update_user({'password': new_password_input.value})
+                        # Phase 90 D-02: GoTrue's update_user requires a local
+                        # session (gotrue_client.py:690), which AUTHC-02
+                        # forbids. Use the dedicated REST helper which PUTs
+                        # /auth/v1/user with the full 4-header tetrad.
+                        from web.supabase_client import change_password as supabase_change_password
+                        result = supabase_change_password(new_password_input.value)
 
-                        if response and response.user:
+                        if result.get('success'):
                             ui.notify(tr('Password changed successfully'), type='positive')
                             # Clear password fields
                             current_password_input.value = ''
                             new_password_input.value = ''
                             confirm_password_input.value = ''
                         else:
-                            password_error.text = tr('Failed to change password')
+                            password_error.text = result.get('error') or tr('Failed to change password')
                             password_error.classes('visible', remove='hidden')
                     except Exception as e:
                         password_error.text = str(e)
