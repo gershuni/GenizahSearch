@@ -186,4 +186,22 @@ After the initial Codex round-1 synthesis was committed at `a9fecfaf`, the user 
 
 ---
 
+## Codex Round 3 (user-supplied review of round-2 revision)
+
+After the round-2 patch landed at commit `fbcfde49`, Codex was asked to re-review and surfaced one more blocking finding on D-11's `sign_out` implementation:
+
+| # | Severity | Finding | Resolution |
+|---|----------|---------|------------|
+| P1 | BLOCKING | D-11's `throwaway.auth.sign_out()` is a no-op revocation. GoTrue's high-level `sign_out()` reads `self.get_session()` first (`gotrue_client.py:789-793`) and only calls `admin.sign_out` when a LOCAL session exists. Throwaway has none (we never call `set_session`), so the revocation branch is skipped silently. | D-11 body changed to call `throwaway.auth.admin.sign_out(access_token, "global")` directly. That helper at `gotrue_admin_api.py:69-79` POSTs `/auth/v1/logout?scope=global` with the bearer JWT — the actual revocation. Also removed the unnecessary `_apply_user_auth_to_client(throwaway, access_token)` preamble: `admin.sign_out(jwt, scope)` carries the JWT via its parameter (gotrue's `_request` injects it as `Authorization` per `gotrue_base_api.py:60`); the throwaway's apikey instance header satisfies the gateway. PostgREST/functions/storage sub-clients are irrelevant for the sign_out call. |
+
+**Why this took 3 rounds:** Each layer of fix exposed a new layer of failure. Round 1 caught that the singleton being authenticated was the core leak (F3). Round 2 caught that anonymous-singleton-only breaks today's accidental revocation (P1). Round 3 caught that the proposed fix in round 2 (throwaway with `auth.sign_out()`) ALSO doesn't revoke because the high-level helper requires a local session. The underlying gotrue API surface is unfriendly to this use case — there's no documented "revoke this JWT directly" public method except `admin.sign_out(jwt, scope)`, which is namespaced under "admin" but in practice accepts any user's own JWT and is the right tool here.
+
+**Final D-11 shape (after 3 rounds):**
+1. Throwaway is created (carries apikey via `create_client`).
+2. `throwaway.auth.admin.sign_out(access_token, "global")` issues `POST /auth/v1/logout?scope=global` with both headers — actual revocation.
+3. No `_apply_user_auth_to_client` preamble needed (the call doesn't go through postgrest/functions/storage).
+4. Local cleanup in `clear_auth` (D-11b) still runs in `finally:` block — no half-state.
+
+---
+
 *Audit-trail-only document.*

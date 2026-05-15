@@ -164,12 +164,24 @@ Delete the process-wide auth client cache (`_client_cache`, `_session_locks`, `_
           return {'success': True, 'note': 'no active session to revoke'}
       try:
           throwaway = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-          _apply_user_auth_to_client(throwaway, access_token)
-          throwaway.auth.sign_out()
+          # CODEX ROUND-3 P1: do NOT call throwaway.auth.sign_out().
+          # GoTrue's high-level sign_out() reads self.get_session() first
+          # (gotrue_client.py:789-793) and only invokes admin.sign_out when
+          # a LOCAL session exists. Since v7.12 AUTHC-02 forbids
+          # set_session(), the throwaway never has a local session — so
+          # auth.sign_out() degenerates to a no-op on the network side.
+          # The admin namespace (gotrue_admin_api.py:69-79) exposes the
+          # raw POST /auth/v1/logout?scope=global call which carries the
+          # JWT directly — that IS the actual revocation we need.
+          throwaway.auth.admin.sign_out(access_token, "global")
           return {'success': True}
       except Exception as e:
           return {'error': f'Logout error: {str(e)}'}
   ```
+
+  **Why not `_apply_user_auth_to_client(throwaway, access_token)` first?** Because `admin.sign_out(jwt, scope)` carries the access token as its own `jwt=` parameter, which GoTrue's `_request` helper puts into the `Authorization` header directly (`gotrue_base_api.py:60`). The throwaway's `apikey` instance header (set by `create_client`) supplies the gateway requirement. The postgrest/functions/storage sub-clients are irrelevant for this call — sign_out is a pure GoTrue admin API operation.
+
+  **Alternative direct-httpx path (equivalent):** the same effect is achievable with a direct `httpx.post(f"{SUPABASE_URL}/auth/v1/logout", params={"scope": "global"}, headers={...4 headers...})` — same shape as `change_password` (D-02). Use the `admin.sign_out` helper because it's the public API entry, error-handling is consistent with the rest of `web/supabase_client.py`, and it survives gotrue version bumps that might change the endpoint path.
 
 - **D-11b (clear_auth reorder — Codex round-2 P1):** Modify `web/auth_state.py:120-134:GlobalAuthState.clear_auth` to read the access token, call `supabase_sign_out(access_token)`, **then** pop the local keys. Final shape:
 
@@ -362,7 +374,7 @@ Plan 90-02:
 - `tests/test_supabase_corrections_client.py` — does not touch `get_user_client` directly per grep. Should pass unchanged.
 - `tests/test_version_selector_pending.py` — mocks `set_session` at the client level. Plan 90-01 must audit and either retarget the mocks or confirm the test still passes (the function under test does not go through `get_user_client`'s rewritten path).
 
-### External red-team review (Codex rounds 1 + 2 — Phase 88/89 pattern, doubled here)
+### External red-team review (Codex rounds 1 + 2 + 3 — Phase 88/89 pattern, tripled here)
 - `_tmp/codex_phase90_discuss_review_prompt.md` — Claude's round-1 proposed decisions sent to Codex.
 - `_tmp/codex_phase90_discuss_review_response.txt` — Codex round-1 verdicts. Three blocking findings:
   1. **F1: Token application incomplete** — postgrest.auth + functions.set_auth alone breaks `profile.py:149` password change (GoTrue `update_user` needs local session) and `puzzle.py` authenticated storage upload (storage IS used authenticated, not anonymous-only).
@@ -374,10 +386,15 @@ Plan 90-02:
   - **P1 (BLOCKING): `change_password` headers incomplete.** Original "with the bearer header" instruction was missing `apikey`; Supabase's gateway requires both. GoTrue's `gotrue_base_api.py:54-58` merges instance headers (which include `apikey`) with per-call headers — bypassing GoTrue means we lose that merge. **Fix:** D-02 expanded to spell out all four headers explicitly (`apikey`, `Authorization: Bearer ...`, `Content-Type: application/json`, `Accept: application/json`) plus JSON body shape.
   - **P2 (MEDIUM): D-15 chain-matching misses aliased forms.** Seed-trap #3 (`auth = client.auth; auth.set_session(...)`) requires alias tracking to catch under chain-matching. **Fix:** D-15 switched to terminal-attribute-name matching (`node.func.attr in {...}`) — catches all aliases trivially. Also added Class B (singleton-resurrection ban: `get_client().auth.<mutating>(...)` with broader method set including `sign_in_*`, `refresh_session`, `update_user`, `sign_out`). Seed traps expanded from 6 to 10 with the Class B traps.
   - **P3 (LOW): Allowlist count inconsistency.** Document said both "4 → 3" and "3 → 2" in different places. Actual count today: 3 file entries. Phase 90 takes 3 → 2. Fixed in canonical_refs and D-13 plan list.
+- **Codex round 3** (user-supplied review of the round-2-revised CONTEXT.md):
+  - **P1 (BLOCKING): D-11's `throwaway.auth.sign_out()` is still a no-op revocation.** Verified at `gotrue_client.py:789-793`: high-level `sign_out()` reads `self.get_session()` first and only calls `admin.sign_out(...)` when a LOCAL session exists. Since v7.12 AUTHC-02 forbids `set_session()` (the whole point of the throwaway pattern), the throwaway has no local session — so `auth.sign_out()` evaluates `access_token = None` and skips the `admin.sign_out` branch. Network revocation never fires. **Fix:** D-11 body changed to call `throwaway.auth.admin.sign_out(access_token, "global")` directly (`gotrue_admin_api.py:69-79` exposes the raw `POST /auth/v1/logout?scope=global` with the bearer JWT — exactly the revocation we need). Removed the unnecessary `_apply_user_auth_to_client(throwaway, access_token)` preamble because `admin.sign_out(jwt, scope)` carries the JWT directly via the `jwt=` parameter (which gotrue's `_request` injects as the Authorization header per `gotrue_base_api.py:60`); the throwaway's apikey instance header satisfies the gateway. The postgrest/functions/storage sub-clients are irrelevant for the sign_out call. Direct httpx POST to `/auth/v1/logout?scope=global` would be an equivalent alternative — chose `admin.sign_out` for consistency with the rest of `web/supabase_client.py`'s use of the supabase-py public API.
 
 ### Upstream source-read references (verified facts, NOT in the project tree)
-- `supabase_auth/_sync/gotrue_client.py:713` — `set_session()` networked behavior (Codex finding; verified by source-read). Cited in AUTHC-05 docstring.
+- `supabase_auth/_sync/gotrue_client.py:713` — `set_session()` networked behavior (Codex round-1 finding; verified by source-read). Cited in AUTHC-05 docstring.
 - `supabase_auth/_sync/gotrue_client.py:690` — `update_user()` requires local session via `get_session()` (D-02 rationale).
+- `supabase_auth/_sync/gotrue_client.py:778-797` — high-level `sign_out()` reads `self.get_session()` and skips `admin.sign_out` when no local session exists (Codex round-3 P1 finding — the reason D-11 calls `admin.sign_out` directly).
+- `supabase_auth/_sync/gotrue_admin_api.py:69-79` — `admin.sign_out(jwt, scope)` POSTs `/auth/v1/logout?scope=...` with the bearer JWT carried via the `jwt=` parameter. The actual revocation API.
+- `supabase_auth/_sync/gotrue_base_api.py:54-60` — header merge behavior: instance headers (`apikey`) + per-call headers (`Authorization` from `jwt=` parameter) + computed `Content-Type` + API version header. Bypassing GoTrue means losing the instance-header merge (D-02 rationale).
 - `supabase/_sync/client.py:334-346` — `_listen_to_auth_events` mutates singleton headers (D-09 rationale).
 - `postgrest/base_client.py:37-54` — `auth(token)` is local-only header mutation (D-01 verification).
 - `supabase_functions/_sync/functions_client.py:111` — `set_auth(token)` is local-only header mutation (D-01 verification).
@@ -433,6 +450,8 @@ This is the Phase-89-equivalent high-value Codex catch (per-ACCESS vs. per-reque
   2. **P1 (BLOCKING) — `change_password` request headers:** Original "with the bearer header" guidance missed `apikey` (Supabase's gateway rejects without it). GoTrue's base client at `gotrue_base_api.py:54-58` merges instance + per-call headers; bypassing GoTrue loses that merge. D-02 expanded to all 4 headers + JSON body shape.
   3. **P2 (MEDIUM) — Static scanner alias gap:** Chain-matching `.auth.set_session(...)` can't catch aliased `auth = client.auth; auth.set_session(...)` without explicit alias tracking. Switched to attribute-name matching (catches all aliases trivially). Added Class B singleton-resurrection ban.
   4. **P3 (LOW) — Allowlist count inconsistency:** "4 → 3" vs "3 → 2" in different places. Actual: 3 file entries today, Phase 90 takes 3 → 2.
+- **Codex round-3 catch (1 additional blocking finding on the round-2 revision):**
+  1. **P1 (BLOCKING) — D-11's `throwaway.auth.sign_out()` is a no-op:** GoTrue's high-level `sign_out()` at `gotrue_client.py:789-793` reads `self.get_session()` first; since the throwaway has no local session (no `set_session` call ever made), the `admin.sign_out` branch is skipped and revocation never fires. **Fix:** D-11 now calls `throwaway.auth.admin.sign_out(access_token, "global")` directly, which POSTs `/auth/v1/logout?scope=global` with the bearer JWT (`gotrue_admin_api.py:69-79`). Removed the unnecessary `_apply_user_auth_to_client(throwaway, access_token)` preamble — `admin.sign_out` carries the JWT via its `jwt=` parameter.
 
 </specifics>
 
@@ -453,4 +472,4 @@ This is the Phase-89-equivalent high-value Codex catch (per-ACCESS vs. per-reque
 
 *Phase: 90-auth-caching-rewrite-no-set-session*
 *Context gathered: 2026-05-15*
-*Workflow note: This CONTEXT.md captures recommendations refined by **two rounds** of Codex external review. Round 1 (`_tmp/codex_phase90_discuss_review_response.txt`): three blocking findings (F1 storage/auth path completeness, F2 reactive-refresh coverage gap, F3 singleton authentication leak via supabase event listener) plus the refresh-race subtlety (post-lock stale-snapshot comparison). Round 2 (user-supplied review of the round-1 synthesis): four findings — P1 sign_out regression after D-10 (forcing AUTHW-03 + AUTHW-04 pull-forward into Phase 90 via D-11 + D-11b), P1 change_password headers incomplete (D-02 expanded to all 4 headers + JSON body), P2 D-15 chain-matching alias gap (D-15 switched to attribute-name matching + Class B singleton-resurrection ban + 10 seed traps), P3 allowlist count inconsistency (fixed to 3 → 2). Pattern matches Phases 88 and 89; user direction: "I'm non-technical for these decisions; ask Codex".*
+*Workflow note: This CONTEXT.md captures recommendations refined by **three rounds** of Codex external review. Round 1 (`_tmp/codex_phase90_discuss_review_response.txt`): three blocking findings (F1 storage/auth path completeness, F2 reactive-refresh coverage gap, F3 singleton authentication leak via supabase event listener) plus the refresh-race subtlety (post-lock stale-snapshot comparison). Round 2 (user-supplied review of the round-1 synthesis): four findings — P1 sign_out regression after D-10 (forcing AUTHW-03 + AUTHW-04 pull-forward via D-11 + D-11b), P1 change_password headers incomplete (D-02 expanded to all 4 headers + JSON body), P2 D-15 chain-matching alias gap (D-15 switched to attribute-name matching + Class B singleton-resurrection ban + 10 seed traps), P3 allowlist count inconsistency (fixed to 3 → 2). Round 3 (user-supplied review of the round-2 revision): one blocking finding — P1 D-11's `throwaway.auth.sign_out()` is a no-op because gotrue's high-level sign_out skips revocation when no local session exists (`gotrue_client.py:789-793`); D-11 now calls `throwaway.auth.admin.sign_out(access_token, "global")` directly to hit `/auth/v1/logout?scope=global` with the bearer JWT. Pattern matches Phases 88 and 89; user direction: "I'm non-technical for these decisions; ask Codex". Three rounds is unusual — this is the highest-correctness-stakes phase of the milestone, and each Codex round uncovered a real bug class the prior synthesis missed.*
