@@ -299,7 +299,9 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
   3. Refresh-only locks are keyed by `_session_uuid` values (not access tokens, not storage object IDs) — a token refresh mid-flight does not orphan the lock or create a second lock for the same session.
   4. Static grep returns zero matches for `auth_resurrection` or the resurrection guard function name introduced in commit `cca23db3` — the guard is removed because the cache that made it necessary no longer exists.
   5. A code comment in the auth path documents the Codex finding (citing `gotrue_client.py:713`) explaining why `set_session()` is not called mid-flight, visible to future contributors without requiring them to find the Codex transcripts.
-**Plans**: TBD
+**Plans**: 2 plans (90-01 through 90-02)
+- [ ] 90-01-PLAN.md -- Behavior rewrite (get_user_client/sign_in/sign_out/set_session_from_url/exchange_code_for_session/4 retry blocks/clear_auth reorder/profile.py change_password) + Codex round-1/2/3 fixes + AUTHC-05 docstring + allowlist 3->2 (AUTHC-02, AUTHC-03, AUTHC-04, AUTHC-05)
+- [ ] 90-02-PLAN.md -- Delete 4 globals + 2 helpers + atomic-commit install of 3 permanent CI guards: static AST scanner with 10 seed traps (D-15), runtime attr-absence over 6 names (D-16), behavioral refresh-lock test Tests A/B/C (D-17) (AUTHC-01, AUTHC-03, AUTHC-04)
 
 ### Phase 91: Atomic Auth State Writes
 **Goal**: Migrate auth state writes through safe_storage helpers; `sign_out` revokes server-side on the user's authenticated client before popping `auth_session`.
@@ -335,10 +337,10 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 | 87. Foundations -- Session UUID and Safe Storage Chokepoint | v7.12 | 8/8 | Complete    | 2026-05-13 |
 | 88. State Separation by Deletion | v7.12 | 3/3 | Complete    | 2026-05-14 |
 | 89. Lists Cache Per-Request | v7.12 | 2/2 | Complete   | 2026-05-15 |
-| 90. Auth Caching Rewrite -- No set_session | v7.12 | 0/TBD | Not started | - |
+| 90. Auth Caching Rewrite -- No set_session | v7.12 | 0/2 | Planned | - |
 | 91. Atomic Auth State Writes | v7.12 | 0/TBD | Not started | - |
 | 92. Final Sweep and Acceptance | v7.12 | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-14 -- Phase 89 (Lists Cache Per-Request) planned: 2 plans across 2 waves. 89-01: per-access factory + stateless fetch + delegation audit + test rewrite (LISTS-02, LISTS-03, LISTS-04). 89-02: singleton deletion + Phase 88 survivor-test fix (D-09 atomic commit) + static AST guard + runtime attr-absence test (LISTS-01, LISTS-03). All 4 LISTS-XX requirements covered.*
+*Last updated: 2026-05-15 -- Phase 90 (Auth Caching Rewrite -- No set_session) planned: 2 plans across 2 waves. 90-01 (wave 1): behavior rewrite (get_user_client/sign_in/sign_out/set_session_from_url/exchange_code_for_session/4 retry blocks/profile.py change_password helper/clear_auth revoke-before-pop reorder) per Codex round-1/2/3 fixes + AUTHC-05 docstring + Phase 87 allowlist self-elimination (3->2) (closes AUTHC-02, AUTHC-03, AUTHC-04, AUTHC-05). 90-02 (wave 2, depends_on 90-01): atomic deletion of 4 globals + 2 helpers + install of 3 permanent CI guards (static AST scanner D-15 with 10 seed traps, runtime attr-absence D-16, behavioral refresh-lock test D-17 Tests A/B/C) (closes AUTHC-01, finalizes AUTHC-03, closes AUTHC-04). All 5 AUTHC-XX requirements covered.*
