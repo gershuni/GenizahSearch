@@ -14,29 +14,14 @@ Replaces the FastAPI backend for data operations.
 import logging
 import threading
 import time
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List
 from supabase import create_client, Client
 from supabase_auth.errors import AuthApiError
 from shared.supabase_provider import get_url, get_anon_key
 
 logger = logging.getLogger(__name__)
 
-# Per-user session lock to prevent concurrent token refresh (race condition fix).
-# 2026-05-12 Codex review CRITICAL fix: keys changed from ``id(storage)`` to the
-# session's access_token. CPython can reuse object ids after a pruned session
-# storage dict is GC'd, which let a NEW session inherit a CACHED authenticated
-# client belonging to the previous user. Keying by a stable per-session token
-# eliminates that cross-user leak: a fresh session has a fresh access_token and
-# cannot collide with another user's entry.
-_session_locks: Dict[str, threading.Lock] = {}
-_locks_guard = threading.Lock()
-# Cached authenticated clients: access_token -> (client, expiry_timestamp).
-_client_cache: Dict[str, Tuple[Client, float]] = {}
-_CLIENT_CACHE_TTL = 50  # seconds (Supabase access tokens last 60s)
-
-# Phase 90 (Plan 90-01): NEW refresh-only locks keyed by _session_uuid.
-# Distinct from the prior cache's refresh-lock map (keyed by access_token)
-# declared just above as dead code awaiting Plan 90-02 deletion.
+# Phase 90 (Plan 90-01): refresh-only locks keyed by _session_uuid.
 # _refresh_locks does NOT cache any Client objects -- it serializes refresh
 # ROTATIONS only, so the one-time-use refresh token never races concurrent
 # consumption. Per CONTEXT D-07: lock-dict growth is bounded by distinct
@@ -44,10 +29,6 @@ _CLIENT_CACHE_TTL = 50  # seconds (Supabase access tokens last 60s)
 # held lock + pop = a second lock for the same uuid = defeated
 # serialization). Process restart prunes naturally. Same trade-off as
 # Phase 89 lists factory.
-# R3-H1 fix (a): comment intentionally avoids the literal identifier of
-# the prior cache's refresh-lock map so Plan 90-02's deletion-verification
-# AST scans (which look for that identifier by Name node in this file)
-# don't trip on documentation substrings.
 _refresh_locks: Dict[str, threading.Lock] = {}
 _refresh_locks_guard = threading.Lock()
 REFRESH_SKEW_SEC = 60  # refresh within last minute of token validity
@@ -88,41 +69,10 @@ def reset_client():
     _client = None
 
 
-def _prune_session_client_cache(now: float | None = None) -> None:
-    """Remove expired per-session Supabase clients and their locks.
-
-    Access tokens rotate frequently. Without pruning, every token seen by the
-    process leaves behind a cached client and lock until restart.
-    """
-    now = time.time() if now is None else now
-    with _locks_guard:
-        expired_keys = [
-            key for key, (_client_obj, expiry) in list(_client_cache.items())
-            if expiry <= now
-        ]
-        for key in expired_keys:
-            _client_cache.pop(key, None)
-            _session_locks.pop(key, None)
-
-
 def _is_jwt_expired(error) -> bool:
     """Check if a Supabase error is a JWT expiry."""
     msg = str(error)
     return 'JWT expired' in msg or 'PGRST303' in msg
-
-
-def _clear_stale_auth(storage):
-    """Clear stale auth tokens from user storage to break the retry loop.
-
-    When a refresh token is already consumed (e.g., concurrent tab usage),
-    continuing to retry with the same token produces an infinite error loop.
-    Clearing the tokens forces the UI to show the user as logged out so they
-    can re-authenticate with fresh credentials.
-    """
-    storage.pop('auth_session', None)
-    storage.pop('auth_user', None)
-    storage.pop('auth_profile', None)
-    logger.warning("[get_user_client] Cleared stale auth — user must re-login")
 
 
 def _apply_user_auth_to_client(client: Client, access_token: str) -> None:
