@@ -92,24 +92,3 @@ allowed_raw_access:
       3 sites — any new raw access in main.py outside this block will fail the
       count test even if it superficially substring-matches.
 
-  - file: web/supabase_client.py
-    patterns:
-      - source: "_app.storage.user"
-        expected_count: 1
-        enclosing: "get_user_client (captured-handle pattern, Codex round 4 CRITICAL-1)"
-    justification: |
-      Line 111 (`storage = _app.storage.user`) is the captured-handle pattern
-      inside `get_user_client()`. The AST scanner records the source segment
-      of the bare `Attribute` access — which is just `_app.storage.user`, NOT
-      the full assignment statement `storage = _app.storage.user`. The pattern
-      must be a substring of the recorded segment, so we match on
-      `_app.storage.user` and scope it via `enclosing: get_user_client`.
-      Codex round 4 CRITICAL-1 flagged this as unsafe (FilePersistentDict can
-      be GC'd mid-flight). Phase 90 AUTHC-01 DELETES `get_user_client()`
-      entirely (and `_client_cache`, `_session_locks`, `_locks_guard`,
-      `_CLIENT_CACHE_TTL`), making this allowlist entry self-eliminating.
-      Line 263 (`sign_out`) IS migrated in Phase 87 Plan 04 (uses
-      `_app.storage.user.get` alias — that's a Call site, not a bare
-      Attribute, so it's a different AST node with its own source segment
-      and does NOT count against this allowlist entry's expected_count=1).
-

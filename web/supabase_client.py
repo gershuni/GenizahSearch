@@ -281,98 +281,92 @@ def _refresh_user_session(stale_refresh_token: Optional[str] = None) -> bool:
 
 
 def get_user_client() -> Client:
-    """Get a per-user Supabase client authenticated with the current user's session tokens.
+    """Return a freshly-built, fully-authenticated supabase Client for the
+    current user. Stable signature -- all 30+ call sites use this verbatim.
 
-    Uses a per-session lock + short-lived cache to prevent the race condition where
-    concurrent requests all try to consume the same one-time-use refresh token.
-    The first request refreshes and caches; subsequent requests reuse the cached client.
+    Phase 90 (D-05, D-12) request-scoped strategy:
+      1. Read tokens via safe_user_get('auth_session') -- routes through the
+         Phase 87 chokepoint (replaces the old captured-handle pattern
+         `storage = _app.storage.user` at the previous line 128 which is
+         unsafe per Codex round-4 CRITICAL-1: FilePersistentDict can be
+         GC'd mid-flight when prune_user_storage fires).
+      2. No tokens -> return the anonymous module singleton get_client()
+         (existing fallback semantics preserved).
+      3. Proactively check `_access_token_near_expiry(access_token)`; if
+         True, call `_refresh_user_session(stale_refresh_token=...)` which
+         rotates under a `_session_uuid`-keyed lock with stale-snapshot
+         short-circuit. Re-read tokens post-refresh.
+      4. Build a fresh request-scoped client via `create_client(...)`.
+      5. Apply user auth by LOCAL header mutation via
+         `_apply_user_auth_to_client(client, access_token)` -- sets all
+         three sub-clients (PostgREST, functions, storage) without any
+         network call.
+      6. Return the fresh client. NO caching -- Phase 90 D-12 invariant.
 
-    Falls back to the singleton client if no user session tokens are available.
+    AUTHC-05: Why we do NOT invoke the GoTrue session-setting helper
+    on the client here -- verified at
+    `supabase_auth/_sync/gotrue_client.py:713`: that helper is NETWORKED
+    (it calls `get_user(access_token)` when JWT is valid, or
+    `_refresh_access_token(refresh_token)` when expired). Calling it on
+    every authenticated request would add a round-trip per call, and
+    burning the one-time-use refresh token concurrently across requests
+    would log users out. Local header mutation (D-01) is sufficient for
+    every PostgREST/functions/storage path in this codebase; GoTrue's
+    `auth.update_user(...)` is the one exception, handled by the dedicated
+    `change_password(...)` REST helper (D-02).
 
-    2026-05-12 Codex review CRITICAL fix: the cache + lock dicts are keyed by
-    ``access_token`` (a stable per-session identifier) instead of the previous
-    ``id(app.storage.user)``. CPython can reuse object ids after a session
-    storage dict is GC'd by ``prune_user_storage``, which let a fresh session
-    that happened to land on the same memory address inherit a cached
-    authenticated client belonging to a different user.
+    Singleton-anonymous-only invariant (D-09, D-10): all five bootstrap
+    helpers (sign_in / sign_up / set_session_from_url /
+    exchange_code_for_session / get_oauth_url) use throwaway clients --
+    they never touch the singleton's auth state. This prevents the
+    supabase event-listener leak at
+    `supabase/_sync/client.py:338-346` from authenticating get_client()
+    with the most-recently-signed-in user's token (Codex round-1 F3 +
+    plan-checker round catch).
     """
     try:
-        from nicegui import app as _app
-        storage = _app.storage.user
-        _prune_session_client_cache()
-
-        # Read tokens FIRST so the cache key is bound to the actual session,
-        # not to a memory-address proxy. No tokens → anonymous singleton client.
-        auth_session = storage.get('auth_session') or {}
+        from web.safe_storage import safe_user_get
+        auth_session = safe_user_get('auth_session') or {}
         access_token = auth_session.get('access_token')
         refresh_token = auth_session.get('refresh_token')
 
         if not access_token or not refresh_token:
-            logger.info("[get_user_client] No auth_session tokens in user storage — user should re-login")
+            logger.info("[get_user_client] No auth_session tokens — returning anonymous singleton")
             return get_client()
 
-        cache_key = access_token  # Unique per-session, rotates on refresh.
-
-        # Fast path: return cached client if still valid.
-        now = time.time()
-        cached = _client_cache.get(cache_key)
-        if cached and cached[1] > now:
-            return cached[0]
-
-        # Get or create a lock for this session.
-        with _locks_guard:
-            if cache_key not in _session_locks:
-                _session_locks[cache_key] = threading.Lock()
-            lock = _session_locks[cache_key]
-
-        with lock:
-            # Re-check cache after acquiring lock (another thread may have refreshed).
-            cached = _client_cache.get(cache_key)
-            if cached and cached[1] > now:
-                return cached[0]
-
-            # Re-read tokens after lock acquisition. If a concurrent logout /
-            # _clear_stale_auth fired while we waited for the lock,
-            # auth_session is now gone — do NOT resurrect cleared auth by
-            # falling back to pre-lock tokens (Codex 3rd-pass CRITICAL).
-            auth_session = storage.get('auth_session') or {}
-            access_token_inner = auth_session.get('access_token')
-            refresh_token_inner = auth_session.get('refresh_token')
-            if not access_token_inner or not refresh_token_inner:
-                logger.info("[get_user_client] auth_session cleared while waiting for lock — returning anonymous")
-                _client_cache.pop(cache_key, None)
+        # Proactive refresh: if access_token is near expiry, rotate
+        # BEFORE building the client. Stale-snapshot comparison inside
+        # _refresh_user_session prevents concurrent burn (D-06).
+        #
+        # R3-M1 fix: honor _refresh_user_session's return value. False
+        # means either no persisted UUID (prune race) OR a terminal
+        # refresh failure cleared auth_session. Either way, fall back
+        # to the anonymous singleton -- do NOT build an authenticated
+        # client with a stale token.
+        if _access_token_near_expiry(access_token):
+            refreshed = _refresh_user_session(stale_refresh_token=refresh_token)
+            if not refreshed:
+                logger.info(
+                    "[get_user_client] Refresh failed/skipped (no persisted "
+                    "UUID or terminal refresh error cleared auth_session) -- "
+                    "returning anonymous singleton"
+                )
+                return get_client()
+            # Re-read after refresh attempt -- _refresh_user_session may
+            # have rotated tokens AND/OR popped auth_session entirely on
+            # terminal failure (Codex review round 1 H3 cleanup branch).
+            # Reading post-refresh observes whichever side effect won.
+            auth_session = safe_user_get('auth_session') or {}
+            access_token = auth_session.get('access_token')
+            if not access_token:
+                logger.info("[get_user_client] Refresh attempt left no access_token — returning anonymous")
                 return get_client()
 
-            try:
-                user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-                resp = user_client.auth.set_session(access_token_inner, refresh_token_inner)
-                # Update stored tokens — set_session may have refreshed them.
-                if resp and resp.session:
-                    storage['auth_session'] = {
-                        'access_token': resp.session.access_token,
-                        'refresh_token': resp.session.refresh_token,
-                    }
-                    new_key = resp.session.access_token
-                else:
-                    new_key = access_token_inner
-                if new_key != cache_key:
-                    _client_cache.pop(cache_key, None)
-                    with _locks_guard:
-                        _session_locks.pop(cache_key, None)
-                _client_cache[new_key] = (user_client, now + _CLIENT_CACHE_TTL)
-                _prune_session_client_cache(now)
-                return user_client
-            except Exception as e:
-                logger.error(f"[get_user_client] set_session failed: {e}")
-                _client_cache.pop(cache_key, None)
-                # Clear auth only for terminal token errors (consumed/expired/invalid);
-                # transient network or Supabase outages should NOT log the user out.
-                err_msg = str(e).lower()
-                if 'refresh token' in err_msg or 'invalid' in err_msg or 'expired' in err_msg:
-                    _clear_stale_auth(storage)
-                return get_client()
+        user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        _apply_user_auth_to_client(user_client, access_token)
+        return user_client
     except Exception as e:
-        logger.error(f"[get_user_client] Error creating per-user client: {e}")
+        logger.error(f"[get_user_client] Error building per-user client: {e}")
         return get_client()
 
 
@@ -735,8 +729,8 @@ def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
                 logger.error(f"Error getting lists (fallback): {e2}")
                 return []
         if _is_jwt_expired(e):
-            logger.warning("JWT expired in get_user_lists, resetting client and retrying")
-            reset_client()
+            logger.warning("JWT expired in get_user_lists, refreshing session and retrying")
+            _refresh_user_session()
             try:
                 return get_user_lists(user_id=user_id, include_deleted=include_deleted)
             except Exception as e2:
@@ -975,8 +969,8 @@ def get_projects(user_id: str) -> List[Dict]:
         return response.data or []
     except Exception as e:
         if _is_jwt_expired(e):
-            logger.warning("JWT expired in get_projects, resetting client and retrying")
-            reset_client()
+            logger.warning("JWT expired in get_projects, refreshing session and retrying")
+            _refresh_user_session()
             try:
                 client = get_client()
                 return client.table('projects').select('*').eq('user_id', user_id).order('created_at').execute().data or []
@@ -1154,8 +1148,8 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
         return _enrich_with_profiles(client, comments)
     except Exception as e:
         if _is_jwt_expired(e):
-            logger.warning("JWT expired in get_comments, resetting client and retrying")
-            reset_client()
+            logger.warning("JWT expired in get_comments, refreshing session and retrying")
+            _refresh_user_session()
             try:
                 client = get_client()
                 query = client.table('comments').select('*')
@@ -1320,8 +1314,8 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
         return rows
     except Exception as e:
         if _is_jwt_expired(e):
-            logger.warning("JWT expired in get_fragment_joins, resetting client and retrying")
-            reset_client()
+            logger.warning("JWT expired in get_fragment_joins, refreshing session and retrying")
+            _refresh_user_session()
             try:
                 return get_fragment_joins(user_id=user_id, fragment_sys_id=fragment_sys_id, status=status)
             except Exception as e2:
