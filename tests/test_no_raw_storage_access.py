@@ -194,10 +194,25 @@ def test_allowlist_well_formed():
     """FOUND-03 schema check: every allowlist entry has file + patterns + justification.
 
     Per H1, each pattern must be a dict with `source` and `expected_count`.
+
+    Phase 91 D-07 (Codex F3): The previous hard-assert `assert entries, ...`
+    was correct from Phase 87 through Phase 90 (the allowlist always had at
+    least the web/auth_state.py entry). Plan 91-01 self-eliminates the last
+    two entries, taking the allowlist 2 -> 0. The empty-list state is the
+    v7.12 Path B goal -- the lint invariant (no raw access in web/ outside
+    the allowlist) holds trivially when the allowlist is empty. The
+    validators below remain to police schema for any future re-additions.
     """
     allowlist = _load_allowlist()
     entries = allowlist.get('allowed_raw_access', [])
-    assert entries, "Allowlist is empty — at minimum web/auth_state.py should be allowlisted"
+    # Post-Phase-91 (AUTHW-01 + AUTHW-02): allowlist may be empty -- the
+    # web/auth_state.py and web/main.py raw accesses are now migrated to
+    # safe_storage helpers. An empty list still passes the lint invariant
+    # (every raw access in web/ outside the empty allowlist is rejected,
+    # so zero raw accesses == green). If a new raw access is ever
+    # justified, re-add an entry with explicit justification +
+    # expected_count. The schema validators below stay applicable to
+    # every PRESENT entry but are a no-op when entries == [].
     for entry in entries:
         assert 'file' in entry, f"Entry missing 'file': {entry}"
         assert 'patterns' in entry, f"Entry {entry['file']} missing 'patterns'"

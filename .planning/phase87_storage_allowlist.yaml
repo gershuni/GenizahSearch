@@ -17,78 +17,13 @@
 # To add an entry: open a PR with justification — entries require review.
 # To extend an entry: bump expected_count if the new raw access is also justified.
 
-allowed_raw_access:
-  - file: web/auth_state.py
-    patterns:
-      - source: "app.storage.user.get(cls.USER_KEY)"
-        expected_count: 1
-        enclosing: "GlobalAuthState.get_user"
-      - source: "app.storage.user.get(cls.PROFILE_KEY)"
-        expected_count: 1
-        enclosing: "GlobalAuthState.get_profile"
-      - source: "app.storage.user[cls.USER_KEY]"
-        expected_count: 1
-        enclosing: "GlobalAuthState.set_auth (line 95)"
-      - source: "app.storage.user[cls.PROFILE_KEY]"
-        expected_count: 2
-        enclosing: "GlobalAuthState.set_auth (line 97) + GlobalAuthState.update_profile_cache (line 117)"
-      - source: "app.storage.user['auth_session']"
-        expected_count: 1
-        enclosing: "GlobalAuthState (auth_session access)"
-      - source: "app.storage.user.pop(cls.USER_KEY, None)"
-        expected_count: 1
-        enclosing: "GlobalAuthState.clear_user"
-      - source: "app.storage.user.pop(cls.PROFILE_KEY, None)"
-        expected_count: 1
-        enclosing: "GlobalAuthState.clear_profile"
-      - source: "app.storage.user.pop('auth_session', None)"
-        expected_count: 1
-        enclosing: "GlobalAuthState (auth_session clear)"
-    justification: |
-      GlobalAuthState class methods (lines 42, 50, 95, 97, 117, 122, 123, 124,
-      176) already wrap each access in try/except. Phase 91 AUTHW-01 explicitly
-      migrates this file as part of the atomic auth-write refactor. Migrating
-      here would duplicate Phase 91's work. The atomicity guarantees Phase 91
-      needs (write all 3 auth keys together or roll back) require coordinated
-      changes that Phase 87 cannot make in isolation. See REQUIREMENTS.md
-      AUTHW-01 for the migration plan.
-      Total expected: 8 unique patterns covering all 9 historical raw-access sites.
-      Verified counts in web/auth_state.py (revision-2 audit):
-        get(cls.USER_KEY)        =1 (line 42)
-        get(cls.PROFILE_KEY)     =1 (line 50)
-        [cls.USER_KEY]           =1 (line 95, set_auth)
-        [cls.PROFILE_KEY]        =2 (line 97 in set_auth + line 117 in update_profile_cache)
-        ['auth_session']         =1 (line 176, do_login)
-        pop(cls.USER_KEY, None)  =1 (line 122)
-        pop(cls.PROFILE_KEY, None)=1 (line 123)
-        pop('auth_session', None)=1 (line 124)
-        TOTAL = 9 access sites, 8 distinct source patterns (PROFILE_KEY assignment
-        appears twice at lines 97 and 117, sharing source segment).
-      expected_count enforces exact match — adding a 10th raw access in this file
-      (even one that substring-matches an existing pattern) will fail
-      test_allowlist_counts_exact.
-
-  - file: web/main.py
-    patterns:
-      - source: "app.storage.user[GlobalAuthState.USER_KEY]"
-        expected_count: 1
-        enclosing: "OAuth callback at main.py:1458"
-      - source: "app.storage.user[GlobalAuthState.PROFILE_KEY]"
-        expected_count: 1
-        enclosing: "OAuth callback at main.py:1460"
-      - source: "app.storage.user['auth_session']"
-        expected_count: 1
-        enclosing: "OAuth callback at main.py:1463"
-    justification: |
-      OAuth callback handler at main.py:1458-1463 writes USER_KEY, PROFILE_KEY,
-      and auth_session as a 3-key atomic block during the OAuth success path.
-      Atomicity of this multi-key write must be preserved for security
-      (half-login state is worse than no-login). Phase 91 AUTHW-02 explicitly
-      migrates this site as part of the auth-write atomicity refactor with
-      appropriate test coverage (test_auth_callback_resilience.py).
-      All OTHER main.py raw accesses (lines 327, 493, 567, 587, 598, 657, 663,
-      664, 691, 820, 952, 960, 968, 1283) are migrated in Phase 87 Plan 04.
-      With expected_count=1 per pattern, the OAuth block is locked at exactly
-      3 sites — any new raw access in main.py outside this block will fail the
-      count test even if it superficially substring-matches.
-
+# Post-Phase-91 (2026-05-15) state: list is empty -- v7.12 Path B goal achieved.
+# Milestone progression of allowlist size:
+#   Phase 87 finalization: 4 entries (auth_state, main, supabase_client, export_state)
+#   Phase 88 (state separation):  3 entries (export_state self-eliminated)
+#   Phase 90 (auth caching):       2 entries (supabase_client self-eliminated)
+#   Phase 91 (atomic auth writes): 0 entries (auth_state + main self-eliminated)
+# The Phase 87 lint scanner (tests/test_no_raw_storage_access.py) now enforces
+# zero raw `app.storage.user.*` accesses anywhere under web/. Any new raw
+# access requires a PR re-adding an entry here with explicit justification.
+allowed_raw_access: []
