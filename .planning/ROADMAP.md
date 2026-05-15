@@ -315,7 +315,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
   5. The `persist_value` safe-wrap in `web/components/filter_panel.py` introduced in commit `cca23db3` is retained and passes the existing filter-panel tests.
 **Plans**: 2 plans (91-01 through 91-02)
 - [x] 91-01-PLAN.md -- Migration of 12 raw access sites + multi-write rollback (set_auth bool/do_login session-first/complete_login show_error UX) + complete_login factored out of auth_callback_route for testability + tests/test_auth_callback_resilience.py with 3 D-08 tests + allowlist self-elimination 2->0 + Phase 87 lint scanner empty-allowlist fix per D-07 (Codex F3) (AUTHW-01, AUTHW-02, AUTHW-05; AUTHW-03/AUTHW-04 inherited from Phase 90)
-- [ ] 91-02-PLAN.md -- tests/test_persist_value_uses_safe_storage.py AST retention guard for filter_panel.py:persist_value (3 production assertions + 2 seed-trap sanity tests) atomic-CI-guard commit, no production code touched (AUTHW-06)
+- [x] 91-02-PLAN.md -- tests/test_persist_value_uses_safe_storage.py AST retention guard for filter_panel.py:persist_value (3 production assertions + 2 seed-trap sanity tests) atomic-CI-guard commit, no production code touched (AUTHW-06)
 
 ### Phase 92: Final Sweep and Acceptance
 **Goal**: Audit `web/` for any remaining raw `app.storage.user` accesses, re-validate against the 4 Codex transcripts, run cross-user smoke tests, and document the architecture in `docs/guides/MULTITENANT.md`.
@@ -340,7 +340,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 | 88. State Separation by Deletion | v7.12 | 3/3 | Complete    | 2026-05-14 |
 | 89. Lists Cache Per-Request | v7.12 | 2/2 | Complete   | 2026-05-15 |
 | 90. Auth Caching Rewrite -- No set_session | v7.12 | 2/2 | Complete   | 2026-05-15 |
-| 91. Atomic Auth State Writes | v7.12 | 1/3 | In Progress|  |
+| 91. Atomic Auth State Writes | v7.12 | 2/3 | In Progress|  |
 | 92. Final Sweep and Acceptance | v7.12 | 0/TBD | Not started | - |
 
 ## Backlog
@@ -349,7 +349,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 
 **Goal:** Web search-result parity with desktop — surface the page/image number (`display['img']`, same field desktop's `COL_IMG` renders at `genizah_app.py:16111`) on each search-result card so users see which folio a hit came from without opening Quick View. Strict parity scope; folio labels (`1r`/`2v`), grouping, sorting, and parallels-list extension are all explicitly deferred.
 **Requirements:** FOLIO-01
-**Plans:** 1/3 plans executed
+**Plans:** 2/3 plans executed
 
 Plans:
 - [ ] 999.1-01-PLAN.md — Render display.img inline after shelfmark on result card title line; human smoke-check (FOLIO-01)
