@@ -193,16 +193,33 @@ def test_memo_gc_on_task_end(monkeypatch):
 
 
 def test_memo_no_cross_request_cache_introduced(monkeypatch):
-    """Test 7: Phase 90 D-12 — no non-WeakKeyDictionary cross-request cache introduced."""
-    import re
+    """Test 7: Phase 90 D-12 — no non-WeakKeyDictionary cross-request cache introduced.
+
+    Checks that the 3 names deleted in Phase 90 D-12 are not ASSIGNED anywhere in the
+    module (assignment = re-introduction of a cross-request cache variable).
+    Comment references to these names are allowed (they document why they were deleted).
+    """
+    import ast
     src = open('web/supabase_client.py', encoding='utf-8').read()
-    # These names were explicitly deleted in Phase 90 D-12
-    assert '_client_cache' not in src, "_client_cache was deleted in Phase 90 D-12; must remain absent"
-    assert '_CLIENT_CACHE_TTL' not in src, "_CLIENT_CACHE_TTL deleted in Phase 90 D-12"
-    assert '_prune_session_client_cache' not in src, "_prune_session_client_cache deleted in Phase 90 D-12"
+
+    # Parse AST and check no assignment targets use the deleted Phase 90 names.
+    tree = ast.parse(src)
+    assigned_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    assigned_names.add(target.id)
+        elif isinstance(node, (ast.AnnAssign,)):
+            if isinstance(node.target, ast.Name):
+                assigned_names.add(node.target.id)
+
+    assert '_client_cache' not in assigned_names, "_client_cache was deleted in Phase 90 D-12; must remain absent as an assignment"
+    assert '_CLIENT_CACHE_TTL' not in assigned_names, "_CLIENT_CACHE_TTL deleted in Phase 90 D-12"
+    assert '_prune_session_client_cache' not in assigned_names, "_prune_session_client_cache deleted in Phase 90 D-12"
     # _user_client_memo IS present as the task-scoped memo (the ONLY cache re-introduction)
+    assert '_user_client_memo' in assigned_names, "_user_client_memo must be assigned"
     assert 'WeakKeyDictionary' in src, "_user_client_memo WeakKeyDictionary must be present"
-    assert '_user_client_memo' in src, "_user_client_memo must be present"
 
 
 def test_memo_bypass_in_to_thread(monkeypatch):

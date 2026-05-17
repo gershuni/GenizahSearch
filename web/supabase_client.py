@@ -11,10 +11,12 @@ This module provides the Supabase client and helper functions for:
 Replaces the FastAPI backend for data operations.
 """
 
+import asyncio as _asyncio_memo
 import logging
 import os
 import threading
 import time
+import weakref as _weakref_memo
 from contextvars import ContextVar
 from typing import Optional, Dict, List
 from supabase import create_client, Client
@@ -105,8 +107,43 @@ def _inst_snapshot() -> Dict:
 
 # ============= END Phase 92.2 D-VER-01 instrumentation =============
 
+# ============================================================================
+# Phase 92.2 D-MEMO-01..04: Task-scoped get_user_client() memo
+# ============================================================================
+# WHY: Per-render /lists fanout was building ~30 Clients per request (Phase
+# 92.1 reader migration moved 12 readers to get_user_client()). Each build
+# costs 50-100ms (create_client + _apply_user_auth_to_client headers).
+#
+# WHAT: A weakref.WeakKeyDictionary keyed by asyncio.current_task(). The
+# value is a dict keyed by (_session_uuid, access_token). When the task
+# finishes (= when the /lists request completes in NiceGUI), Python GC
+# reclaims the entry. The memo CANNOT survive across requests — that is
+# the Phase 90 D-12 "no cross-request caching" invariant, preserved by
+# construction here.
+#
+# WHY NOT nicegui.context.client (Codex Issue 1 + CONTEXT.md D-MEMO-01):
+# NiceGUI Client is per-page (per-tab), not per-request. Memoizing on it
+# would create a per-tab long-lived cache — directly reopens Phase 90 D-12.
+#
+# KEY COMPOSITION (Codex CONFIRM, CONTEXT.md D-MEMO-02 + Reviews Codex-MEDIUM-2):
+# (get_persisted_session_uuid(), access_token). get_persisted_session_uuid()
+# is the strict UUID-validating accessor — it refuses malformed UUIDs and
+# never mints. This prevents the memo from being poisoned by a malformed
+# or absent session_uuid (which would otherwise key the dict on None or a
+# garbage string).
+#
+# PATTERN DRIFT FROM Phase 90 D-12:
+# Phase 90 D-12 explicitly deleted _client_cache + _CLIENT_CACHE_TTL +
+# _prune_session_client_cache from this file to close the multitenant
+# safety hole. This is the FIRST re-introduction of any caching in
+# get_user_client(). It is permitted because WeakKeyDictionary keyed
+# by asyncio.Task makes the cache lifetime equal to the request
+# lifetime in NiceGUI — Python GC enforces the invariant rather than
+# explicit eviction. Future contributors: do NOT widen this to a
+# cross-request cache; the Phase 90 D-12 hole reopens immediately.
+_user_client_memo: '_weakref_memo.WeakKeyDictionary' = _weakref_memo.WeakKeyDictionary()
 
-# Phase 90 (Plan 90-01): refresh-only locks keyed by _session_uuid.
+# ============= Phase 90 (Plan 90-01): refresh-only locks keyed by _session_uuid.
 # _refresh_locks does NOT cache any Client objects -- it serializes refresh
 # ROTATIONS only, so the one-time-use refresh token never races concurrent
 # consumption. Per CONTEXT D-07: lock-dict growth is bounded by distinct
@@ -397,9 +434,48 @@ def get_user_client() -> Client:
                 logger.info("[get_user_client] Refresh attempt left no access_token — returning anonymous")
                 return get_client()
 
+        # Phase 92.2 D-MEMO-01..04: task-scoped memo (Reviews Codex-MEDIUM-2 +
+        # Gemini-MEDIUM — use the validated get_persisted_session_uuid() accessor;
+        # this is the SOLE _session_uuid read in get_user_client() — no redundancy
+        # by construction because get_user_client() did NOT previously read
+        # _session_uuid at all; it reads auth_session via safe_user_get at the top).
+        from web.safe_storage import get_persisted_session_uuid as _gp_uuid
+        session_uuid = _gp_uuid()  # validated; returns None for malformed/missing
+
+        memo_task = None
+        memo_key = None
+        if session_uuid:
+            try:
+                memo_task = _asyncio_memo.current_task()
+            except RuntimeError:
+                memo_task = None
+            if memo_task is not None:
+                memo_key = (session_uuid, access_token)
+                task_memo = _user_client_memo.get(memo_task)
+                if task_memo is not None:
+                    cached = task_memo.get(memo_key)
+                    if cached is not None:
+                        logger.debug(
+                            "[get_user_client] memo hit for task=%s key=(uuid=%s..., tok=%s...)",
+                            id(memo_task), session_uuid[:8], access_token[:8] if access_token else None,
+                        )
+                        return cached
+
         user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
         _inst_record_client_build()  # Phase 92.2 D-VER-01: count authenticated client builds
         _apply_user_auth_to_client(user_client, access_token)
+
+        # Store in memo if task scope is available (asyncio.current_task() is not None).
+        # Reviews Codex-MEDIUM-3: when called from run.io_bound / asyncio.to_thread,
+        # asyncio.current_task() returns None and we correctly fall through to "no memo
+        # entry written" — fresh client built each call. Test 8 verifies.
+        if memo_task is not None and memo_key is not None:
+            task_memo = _user_client_memo.get(memo_task)
+            if task_memo is None:
+                task_memo = {}
+                _user_client_memo[memo_task] = task_memo
+            task_memo[memo_key] = user_client
+
         return user_client
     except Exception as e:
         logger.error(f"[get_user_client] Error building per-user client: {e}")
