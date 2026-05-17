@@ -487,6 +487,10 @@ def change_password(new_password: str) -> Dict:
 def get_current_user() -> Optional[Dict]:
     """Get the currently authenticated user."""
     try:
+        # Phase 92.1 KEEP get_client(): GoTrue auth-API inspection of the
+        # anonymous singleton (NOT a table read). Migrating to get_user_client
+        # would build a fresh Client just to read its auth state -- wasteful
+        # and pointless. Singleton stays anonymous-only post-Phase 90 D-10.
         client = get_client()
         response = client.auth.get_user()
         if response and response.user:
@@ -499,6 +503,8 @@ def get_current_user() -> Optional[Dict]:
 def get_session() -> Optional[Dict]:
     """Get the current session."""
     try:
+        # Phase 92.1 KEEP get_client(): same rationale as get_current_user above
+        # -- auth-API inspection of the singleton, not a table read.
         client = get_client()
         session = client.auth.get_session()
         if session:
@@ -708,6 +714,14 @@ def _session_to_dict(session) -> Dict:
 def get_profile(user_id: str) -> Optional[Dict]:
     """Get a user's profile."""
     try:
+        # Phase 92.1 KEEP get_client(): TO public fields only. MUST migrate to
+        # get_user_client if private fields (e.g., email, settings) are ever added
+        # to this SELECT. Today the profiles SELECT is `TO public USING (true)`;
+        # the anon singleton returns rows correctly. Migrating would build a fresh
+        # authenticated Client (refresh check + header mutation) on every authenticated
+        # profile read for zero correctness gain. get_profile is called from
+        # page-render fast paths (/me, /lists, /admin badge).
+        # See PLAN 92.1-01 reader_disposition_table.
         client = get_client()
         response = client.table('profiles').select('*').eq('id', user_id).single().execute()
         return response.data
@@ -718,6 +732,12 @@ def get_profile(user_id: str) -> Optional[Dict]:
 def get_user_corrections_count(user_id: str) -> int:
     """Get count of approved corrections for a user."""
     try:
+        # Phase 92.1 KEEP get_client(): TO public fields only (query is approved-only,
+        # TO public branch suffices). MUST migrate to get_user_client if extended to
+        # count non-approved-self or any other user-private filter. Current query is
+        # `.eq('status', 'approved')` -- the corrections `TO public USING (status='approved')`
+        # RLS branch handles anon and authenticated identically. Anon already returns the
+        # correct count.
         client = get_client()
         response = client.table('corrections').select('id', count='exact').eq('author_id', user_id).eq('status', 'approved').execute()
         return response.count if response.count is not None else 0
@@ -749,7 +769,9 @@ def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
         include_deleted: If True, include soft-deleted lists (for trash view)
     """
     try:
-        client = get_client()
+        # READER-01 (Phase 92.1) BUG-FIX ROOT: user_lists SELECT RLS is `TO authenticated`;
+        # anon singleton returns 0 rows. Smoke run 1 Symptom 1 -- 2026-05-17.
+        client = get_user_client()
         query = client.table('user_lists').select('*').eq('user_id', user_id)
         if not include_deleted:
             query = query.is_('deleted_at', 'null')
@@ -759,7 +781,9 @@ def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
         # Fallback if deleted_at column doesn't exist yet
         if 'deleted_at' in str(e):
             try:
-                client = get_client()
+                # READER-01 (Phase 92.1): same migration as main path -- fallback when
+                # deleted_at column doesn't exist yet.
+                client = get_user_client()
                 response = client.table('user_lists').select('*').eq('user_id', user_id).order('created_at').execute()
                 return response.data or []
             except Exception as e2:
@@ -780,7 +804,8 @@ def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
 def get_deleted_lists(user_id: str) -> List[Dict]:
     """Get soft-deleted lists for a user (trash view)."""
     try:
-        client = get_client()
+        # READER-01 (Phase 92.1): same RLS policy as user_lists; trash view broken when anon.
+        client = get_user_client()
         response = client.table('user_lists').select('*').eq('user_id', user_id).not_.is_('deleted_at', 'null').order('deleted_at', desc=True).execute()
         return response.data or []
     except Exception as e:
@@ -896,7 +921,8 @@ def empty_trash(user_id: str) -> Dict:
 def get_list_items(list_id: int) -> List[Dict]:
     """Get all items in a list."""
     try:
-        client = get_client()
+        # READER-01 (Phase 92.1): list_items SELECT RLS is `TO authenticated`; anon returns 0 rows.
+        client = get_user_client()
         response = client.table('list_items').select('*').eq('list_id', list_id).order('added_at', desc=True).execute()
         return response.data or []
     except Exception as e:
@@ -955,7 +981,8 @@ def delete_list_item(item_id: int) -> Dict:
 def get_recent_items(user_id: str, limit: int = 50) -> List[Dict]:
     """Get recent items for a user."""
     try:
-        client = get_client()
+        # READER-01 (Phase 92.1): recent_items is user-scoped `TO authenticated`.
+        client = get_user_client()
         response = client.table('recent_items').select('*').eq('user_id', user_id).order('viewed_at', desc=True).limit(limit).execute()
         return response.data or []
     except Exception as e:
@@ -1001,7 +1028,9 @@ def add_recent_item(user_id: str, sys_id: str, shelfmark: str = None,
 def get_projects(user_id: str) -> List[Dict]:
     """Get all projects for a user."""
     try:
-        client = get_client()
+        # READER-01 (Phase 92.1): projects SELECT RLS is `TO authenticated`; projects panel
+        # was empty for logged-in users before this migration (same bug class as user_lists).
+        client = get_user_client()
         response = client.table('projects').select('*').eq('user_id', user_id).order('created_at').execute()
         return response.data or []
     except Exception as e:
@@ -1009,7 +1038,9 @@ def get_projects(user_id: str) -> List[Dict]:
             logger.warning("JWT expired in get_projects, refreshing session and retrying")
             _refresh_user_session()
             try:
-                client = get_client()
+                # READER-01 (Phase 92.1): retry path -- after _refresh_user_session rotates
+                # tokens, get_user_client reads the fresh tokens from safe_storage.
+                client = get_user_client()
                 return client.table('projects').select('*').eq('user_id', user_id).order('created_at').execute().data or []
             except Exception as e2:
                 logger.error(f"Error getting projects (retry): {e2}")
@@ -1064,7 +1095,10 @@ def delete_project(project_id: int) -> Dict:
 def get_corrections(sys_id: str = None, author_id: str = None, status: str = None, ie_id: str = None) -> List[Dict]:
     """Get corrections with optional filters, including author profile data."""
     try:
-        client = get_client()
+        # READER-01 (Phase 92.1): corrections has dual RLS (`TO public` for approved AND
+        # `TO authenticated` for own-any-status). Anon path missed user's own pending. When not
+        # logged in, get_user_client falls back to anon singleton (`TO public` still works).
+        client = get_user_client()
         # Fetch corrections (profile data is fetched separately below)
         query = client.table('corrections').select('*')
 
@@ -1168,7 +1202,9 @@ def _enrich_with_profiles(client, rows: List[Dict], id_field: str = 'author_id')
 def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = True, ie_id: str = None) -> List[Dict]:
     """Get comments with optional filters."""
     try:
-        client = get_client()
+        # READER-01 (Phase 92.1): comments has dual RLS (`TO public` for is_public=true,
+        # `TO authenticated` for own private). Anonymous path missed user's own private comments.
+        client = get_user_client()
         query = client.table('comments').select('*')
 
         if sys_id:
@@ -1188,7 +1224,8 @@ def get_comments(sys_id: str = None, author_id: str = None, is_public: bool = Tr
             logger.warning("JWT expired in get_comments, refreshing session and retrying")
             _refresh_user_session()
             try:
-                client = get_client()
+                # READER-01 (Phase 92.1): retry path after refresh -- same dual-RLS rationale.
+                client = get_user_client()
                 query = client.table('comments').select('*')
                 if sys_id:
                     query = query.eq('sys_id', sys_id)
@@ -1240,7 +1277,9 @@ def create_comment(author_id: str, sys_id: str, content: str, shelfmark: str = N
 def get_discoveries(user_id: str = None, type: str = None, status: str = None) -> List[Dict]:
     """Get discoveries with optional filters."""
     try:
-        client = get_client()
+        # READER-01 (Phase 92.1): SELECT is `TO public` (is_hidden=false) but auth client
+        # carries auth.uid() context for downstream votes / ownership checks.
+        client = get_user_client()
         query = client.table('discoveries').select('*')
 
         if user_id:
@@ -1323,6 +1362,9 @@ def get_fragment_joins(user_id: str = None, fragment_sys_id: str = None,
         try:
             client = get_user_client()
         except Exception:
+            # Phase 92.1 KEEP get_client(): legitimate Exception fallback ONLY when
+            # get_user_client itself raised. fragment_joins SELECT is `TO public` so
+            # the anon singleton still returns rows. Pattern verified correct.
             client = get_client()  # Operation failed; use fallback value
         query = client.table('fragment_joins').select('*')
 
@@ -1458,7 +1500,11 @@ def update_discovery(discovery_id: int, data: Dict) -> Dict:
 def get_discovery_responses(discovery_id: int) -> List[Dict]:
     """Get responses for a discovery."""
     try:
-        client = get_client()
+        # READER-01 (Phase 92.1): consistency with companion writer create_discovery_response
+        # (which already uses get_user_client). Reader filters only discovery_id (no per-user
+        # scoping), so anon fallback is preserved if RLS is TO public; if RLS is TO authenticated
+        # the migration ensures auth.uid() is bound. Per Reviews M2 -- rationale tightened.
+        client = get_user_client()
         response = client.table('discovery_responses').select('*').eq(
             'discovery_id', discovery_id
         ).order('created_at', desc=False).execute()
@@ -1576,6 +1622,24 @@ def get_feed_items(item_type: str = None, period: str = None,
                    limit: int = 50, offset: int = 0, include_hidden: bool = False) -> Dict:
     """Get activity feed items combining discoveries, corrections, comments, and joins."""
     try:
+        # Phase 92.1 KEEP get_client() (Reviews R2-1 Option C, 2026-05-17): RLS evidence
+        # verified at docs/guides/SUPABASE_GUIDE.md:498-502 + scripts/fix_rls_policies.sql:60-95
+        # -- the ONLY SELECT policy on `discoveries` is `TO public USING (is_hidden = false)`;
+        # admin policies exist for UPDATE/DELETE only, NOT for SELECT. Hidden rows are
+        # invisible to BOTH anon and authenticated client roles under RLS. The Python-side
+        # `.eq('is_hidden', False)` filter at line 1587 is SKIPPED when `include_hidden=True`
+        # (callers: web/pages/discoveries.py:423 + :588-593 pass `include_hidden=is_admin`),
+        # but the database still filters server-side -- so get_client() and get_user_client()
+        # return IDENTICAL rows for this query regardless of include_hidden. Migration would
+        # NOT surface hidden rows; it would only add per-request Client build cost. The
+        # corrections branch is `.eq('status', 'approved')` (line 1622) -- the TO public
+        # USING (status='approved') branch handles both roles identically. The comments
+        # branch is `.eq('is_public', True)` (line 1644) -- the TO public USING (is_public=true)
+        # branch ditto. MUST migrate to get_user_client if a `TO authenticated USING (role=
+        # 'admin')` SELECT policy is ever added to discoveries (then admin-visible hidden
+        # rows would actually appear in this query when called with include_hidden=True),
+        # OR if any branch is extended to return user-private rows (e.g., user's own pending
+        # corrections in the feed).
         client = get_client()
         items = []
 

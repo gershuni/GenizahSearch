@@ -536,6 +536,14 @@ TO authenticated
 USING (auth.uid() = user_id);
 ```
 
+### BANNED_TABLES extension protocol (Phase 92.1)
+
+When adding a new user-scoped table to the schema (one whose RLS SELECT policy is `TO authenticated USING (auth.uid() = user_id)` or any user-private filter), also add the table name to `BANNED_TABLES` in `tests/test_no_anonymous_reads_on_authenticated_tables.py`. This ensures the AST scanner CI guard catches any future `get_client().table('<new_table>')` regression that would silently return 0 rows for logged-in users (the post-Phase-90 anon singleton invariant means anonymous-role reads never see RLS-`TO authenticated` rows).
+
+The scanner's known blind spots — module-level `table = get_client().table` aliases and wrapper functions like `def _q(name): return get_client().table(name)` — are documented in the scanner's seed-trap section with `xfail-strict` placeholders; do not rely on the scanner alone for those patterns. Code review remains the second line of defense.
+
+Partial-auth tables (`corrections`, `comments`, `discoveries`) — those with both a `TO public USING (<filter>)` AND a `TO authenticated USING (auth.uid()=<owner>)` SELECT branch — are deliberately NOT in `BANNED_TABLES` because their `get_client()` reads remain valid for the public branch. The per-function migration in `web/supabase_client.py` switches to `get_user_client()` for those readers so the authenticated branch becomes reachable. If a future schema change extends such a table to a user-private-only filter (no public branch), add it to `BANNED_TABLES`.
+
 ---
 
 ## OAuth Authentication
