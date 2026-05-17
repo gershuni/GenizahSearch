@@ -3,11 +3,11 @@ gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
 status: verifying
-stopped_at: "Phase 92.1 Complete (code shipped); Phase 92 awaiting SWEEP-05 smoke run 2 before Plan 92-02 can run. Plan 92.1-01 migrated 12 reader functions in `web/supabase_client.py` from anonymous singleton `get_client()` to per-request authenticated `get_user_client()` (6 KEEP sites annotated per Reviews M2); installed AST scanner CI guard + behavioral regression tests + BANNED_TABLES extension protocol. Plan 92.1-02 diagnosed Symptom 3 via 3-point `request_contextvar` capture — NO-REPRO branch confirmed (3 successful list creations + zero `safe_user_get('auth_session') unexpected failure` WARNINGs + Supabase rows 279/280/281 persisted with correct user_id). Symptom 3 was eliminated as a side-effect of Plan 92.1-01's reader migration. Permanent CI guard installed: `_create_and_add_handler` module-level helper refactor + 5-test regression suite at `tests/test_add_to_list_dialog_ui_context.py`. Plan 92.1-03 (this closeout) flipped STATE/ROADMAP/OPEN_ISSUES/CLAUDE.md to reflect code-ship state; OPEN_ISSUES P1 entry marked `Fixed in code; verification pending SWEEP-05 smoke run 2` per Reviews M4 (full ✅-Fixed-with-date flip + Open count decrement happen in the smoke run 2 PASS commit owned by Plan 92-02's Task 0 pre-flight gate)."
-last_updated: "2026-05-17T11:04:39.150Z"
+stopped_at: Phase 92.2 context gathered (Codex-adjusted)
+last_updated: "2026-05-17T13:01:39.457Z"
 last_activity: "2026-05-17 -- Phase 92.1 (Reader-Client Retrofit) code shipped: 12 reader sites migrated + 6 KEEP annotated + AST scanner + behavioral tests + Symptom-3 NO-REPRO branch + 5-test regression guard + closeout docs"
 progress:
-  total_phases: 11
+  total_phases: 12
   completed_phases: 6
   total_plans: 30
   completed_plans: 22
@@ -104,7 +104,7 @@ Progress: [█████████░] 87%
 
 ## Session Continuity
 
-Last session: 2026-05-17 -- Phase 92.1 (Reader-Client Retrofit) shipped 3/3 plans
-Stopped at: Phase 92.1 Complete (code shipped); Phase 92 awaiting SWEEP-05 smoke run 2 before Plan 92-02 can run. Plan 92.1-01 migrated 12 reader functions in `web/supabase_client.py` from anonymous singleton `get_client()` to per-request authenticated `get_user_client()` (6 KEEP sites annotated per Reviews M2); installed AST scanner CI guard + behavioral regression tests + BANNED_TABLES extension protocol. Plan 92.1-02 diagnosed Symptom 3 via 3-point `request_contextvar` capture — NO-REPRO branch confirmed (3 successful list creations + zero `safe_user_get('auth_session') unexpected failure` WARNINGs + Supabase rows 279/280/281 persisted with correct user_id). Symptom 3 was eliminated as a side-effect of Plan 92.1-01's reader migration. Permanent CI guard installed: `_create_and_add_handler` module-level helper refactor + 5-test regression suite at `tests/test_add_to_list_dialog_ui_context.py`. Plan 92.1-03 (this closeout) flipped STATE/ROADMAP/OPEN_ISSUES/CLAUDE.md to reflect code-ship state; OPEN_ISSUES P1 entry marked `Fixed in code; verification pending SWEEP-05 smoke run 2` per Reviews M4 (full ✅-Fixed-with-date flip + Open count decrement happen in the smoke run 2 PASS commit owned by Plan 92-02's Task 0 pre-flight gate).
-Resume file: .planning/phases/92-final-sweep-and-acceptance/92-SWEEP-05-SMOKE.md (Hillel re-runs smoke run 2 manually and commits PASS verdict) + .planning/phases/92.1-reader-client-retrofit/92.1-SUMMARY.md (consolidated phase summary)
+Last session: 2026-05-17T13:01:39.449Z
+Stopped at: Phase 92.2 context gathered (Codex-adjusted)
+Resume file: .planning/phases/92.2-lists-performance-investigation/92.2-CONTEXT.md
 Next step: Hillel re-runs SWEEP-05 smoke run 2 in a real browser session per `.planning/phases/92-final-sweep-and-acceptance/92-SWEEP-05-SMOKE.md` — exercises R0 (existing lists fetch + new list creation from both /lists AND search-results paths) plus R1/R2/R3 (logout-mid-flight, refresh race, optional puzzle write). If `Overall: PASS` is committed, Plan 92-02 Task 0 pre-flight gate verifies the commit, flips OPEN_ISSUES.md P1 to `✅ Fixed (date)`, and `/gsd-execute-phase 92` proceeds with Plan 92-02 (v7.12 closeout docs + MULTITENANT.md). `deploy.sh` remains blocked until Plan 92-02 ships.
