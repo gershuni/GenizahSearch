@@ -140,6 +140,6 @@ This is wrong -- `user_lists` SELECT policy is `TO authenticated`, so the anon r
 - **Smoke = FAIL.** Plan 92-02 cannot run (D-02 gate intact).
 - **v7.12 milestone NOT shippable.** `deploy.sh` stays blocked.
 - **Plan 92-01 artifacts remain valid** -- the AST scan / grep evidence / surface audit / transcript audit are correct as far as they cover. SWEEP-05 is correctly recorded as FAIL.
-- **Insert Phase 92.5** (decided 2026-05-17 with user) to migrate the ~13 reader functions in `supabase_client.py` from `get_client()` to `get_user_client()`, add a regression test suite, and trace + fix the secondary symptom 3 (`safe_user_get('auth_session') ... UI context` console error in the add-to-list-dialog post-create path).
-- After Phase 92.5 ships and passes its own UAT, redo this smoke (Smoke run 2) -- if PASS, then Plan 92-02 closeout docs proceed.
+- **Phase 92.1 (Reader-Client Retrofit) inserted 2026-05-17** to migrate the ~13 reader functions in `supabase_client.py` from `get_client()` to `get_user_client()`, add a regression test suite, and trace + fix the secondary symptom 3 (`safe_user_get('auth_session') ... UI context` console error in the add-to-list-dialog post-create path). Directory `.planning/phases/92.1-reader-client-retrofit/` created via `gsd-sdk query phase.insert`; ROADMAP.md Backlog entry has `(INSERTED)` marker.
+- After Phase 92.1 ships and passes its own UAT, redo this smoke (Smoke run 2) -- if PASS, then Plan 92-02 closeout docs proceed.
 - See `docs/OPEN_ISSUES.md` P1 section for the formal bug entry (added 2026-05-17).

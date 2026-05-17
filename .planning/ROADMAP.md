@@ -348,6 +348,16 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 
 ## Backlog
 
+### Phase 92.1: Reader-Client Retrofit (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 92
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 92.1 to break down)
+
 ### Phase 999.1: Search results by folio (BACKLOG — PLANNED)
 
 **Goal:** Web search-result parity with desktop — surface the page/image number (`display['img']`, same field desktop's `COL_IMG` renders at `genizah_app.py:16111`) on each search-result card so users see which folio a hit came from without opening Quick View. Strict parity scope; folio labels (`1r`/`2v`), grouping, sorting, and parallels-list extension are all explicitly deferred.
