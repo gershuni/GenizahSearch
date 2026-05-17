@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
-stopped_at: Phase 92 PAUSED -- Plan 92-01 shipped audit artifacts; SWEEP-05 smoke run 1 FAILED; P0 reader-client regression diagnosed; inserting Phase 92.1 next
-last_updated: "2026-05-17T16:30:00.000Z"
-last_activity: 2026-05-17 -- Phase 92 Plan 92-01 complete; smoke FAIL; user chose to insert Phase 92.1 for reader-client retrofit
+stopped_at: Phase 92 PAUSED at smoke gate after Plan 92-01 shipped audit artifacts; SWEEP-05 smoke run 1 FAILED at R0 baseline (existing lists not loading + new list creation silently failing for logged-in users); root cause = Phase 90 D-09/D-10 left ~13 reader functions in web/supabase_client.py using anonymous singleton `get_client()` instead of `get_user_client()`, so RLS-`TO authenticated` SELECT policies return 0 rows
+last_updated: "2026-05-17T05:38:02.619Z"
+last_activity: 2026-05-17 -- Phase 92.1 planning complete
 progress:
-  total_phases: 10
+  total_phases: 11
   completed_phases: 5
-  total_plans: 25
-  completed_plans: 18
-  percent: 72
+  total_plans: 28
+  completed_plans: 19
+  percent: 68
 ---
 
 # Project State
@@ -28,8 +28,8 @@ See: .planning/PROJECT.md (updated 2026-05-13)
 Phase: 92 (Final Sweep and Acceptance) — PAUSED ON SMOKE FAIL
 Plan: 1 of 2 complete (Plan 92-01 audit artifacts shipped at commit `5ccecab5` + merge `c0e3a706` + tracking `3f6919bb`); Plan 92-02 blocked behind Phase 92.1
 Next: `/gsd-plan-phase 92.1` — Phase 92.1 (Reader-Client Retrofit) inserted 2026-05-17. Directory `.planning/phases/92.1-reader-client-retrofit/` created; ROADMAP.md Backlog has `(INSERTED)` entry. Plan the phase next.
-Status: Phase 92 paused; v7.12 milestone NOT shippable; deploy.sh stays blocked; see docs/OPEN_ISSUES.md P1 entry + .planning/phases/92-final-sweep-and-acceptance/92-SWEEP-05-SMOKE.md "Smoke run 1 -- 2026-05-17 -- FAILED at R0" for the regression details
-Last activity: 2026-05-17 -- Plan 92-01 complete; smoke run 1 FAIL; reader-client regression root-caused to Phase 90 (D-09/D-10 anon-only invariant + missed reader migration)
+Status: Ready to execute
+Last activity: 2026-05-17 -- Phase 92.1 planning complete
 
 Progress: [████████░░] 75%
 
