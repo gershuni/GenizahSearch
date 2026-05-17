@@ -77,7 +77,7 @@ Close the P0 RLS-reachability regression introduced by Phase 90 D-09/D-10 — th
 - [ ] **READER-03**: Diagnose and fix Symptom 3 (`safe_user_get('auth_session') unexpected failure: app.storage.user can only be used within a UI context` from search-results → Add to list → Create new list → Save path). The fix MUST be at the call-site / context-binding layer, NOT a log-level downgrade in safe_storage.py.
 - [ ] **READER-04**: Install a permanent AST-scanner CI guard at `tests/test_no_anonymous_reads_on_authenticated_tables.py` that bans `get_client().table('<user_scoped_table>')...` patterns. Mirror the structure of `tests/test_no_set_session_outside_oauth.py` (REPO_ROOT, SCAN_DIRS, EXEMPT_FILES, parametrized seed-trap block, _iter_py_files helper). BANNED_TABLES set includes at minimum: user_lists, list_items, recent_items, projects. Also document the BANNED_TABLES extension protocol in `docs/guides/SUPABASE_GUIDE.md` near the RLS section so future schema changes know to extend the scanner.
 - [ ] **READER-05**: Behavioral regression tests at `tests/test_supabase_client_reader_rls.py` covering at minimum 5 migrated readers (get_user_lists, get_list_items, get_recent_items, get_projects, get_deleted_lists). Each test seeds `web.safe_storage.app` with a SimpleNamespace storage containing `auth_session={'access_token': 'good.jwt', 'refresh_token': 'good-refresh'}` and asserts `_apply_user_auth_to_client` was invoked with the expected access_token. Uses `monkeypatch.setattr` pattern from `tests/test_auth_revocation_and_headers.py:149-203`.
-- [ ] **READER-06**: Closeout docs — `.planning/ROADMAP.md` Phase 92.1 finalized; `docs/OPEN_ISSUES.md` P1 entry marked `Fixed in code; verification pending SWEEP-05 smoke run 2` (full `✅ Fixed (YYYY-MM-DD)` only after Hillel commits smoke PASS verdict per Reviews M4); `CLAUDE.md` "Recently Changed" gains one Phase 92.1 line under the active v7.12 milestone; `.planning/phases/92.1-reader-client-retrofit/92.1-SUMMARY.md` written summarizing migrated readers, scanner, and symptom-3 fix.
+- [x] **READER-06**: Closeout docs — `.planning/ROADMAP.md` Phase 92.1 finalized; `docs/OPEN_ISSUES.md` P1 entry marked `Fixed in code; verification pending SWEEP-05 smoke run 2` (full `✅ Fixed (YYYY-MM-DD)` only after Hillel commits smoke PASS verdict per Reviews M4); `CLAUDE.md` "Recently Changed" gains one Phase 92.1 line under the active v7.12 milestone; `.planning/phases/92.1-reader-client-retrofit/92.1-SUMMARY.md` written summarizing migrated readers, scanner, and symptom-3 fix.
 
 ---
 
@@ -136,7 +136,7 @@ Close the P0 RLS-reachability regression introduced by Phase 90 D-09/D-10 — th
 | READER-03 | Phase 92.1 | Pending |
 | READER-04 | Phase 92.1 | Pending |
 | READER-05 | Phase 92.1 | Pending |
-| READER-06 | Phase 92.1 | Pending |
+| READER-06 | Phase 92.1 | Complete |
 
 ---
 

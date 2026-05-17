@@ -345,7 +345,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 | 90. Auth Caching Rewrite -- No set_session | v7.12 | 2/2 | Complete   | 2026-05-15 |
 | 91. Atomic Auth State Writes | v7.12 | 3/3 | Complete    | 2026-05-15 |
 | 92. Final Sweep and Acceptance | v7.12 | 1/2 | In Progress|  |
-| 92.1. Reader-Client Retrofit | v7.12 | 3/3 | Complete (code; smoke pending) | 2026-05-17 |
+| 92.1. Reader-Client Retrofit | v7.12 | 3/3 | Complete   | 2026-05-17 |
 
 ## Backlog
 
@@ -354,7 +354,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 **Goal:** Close the P0 reader-client RLS-reachability regression introduced by Phase 90 D-09/D-10. Migrate ~12 reader functions in `web/supabase_client.py` from the anonymous singleton `get_client()` to the per-request authenticated `get_user_client()`; install an AST-scanner CI guard and behavioral regression tests; trace and fix the secondary `safe_user_get('auth_session')` UI-context console error in the add-to-list-dialog "Create new list" path. After ship, Phase 92 SWEEP-05 smoke run 2 must PASS R0 before Plan 92-02 closeout docs can run.
 **Requirements:** READER-01, READER-02, READER-03, READER-04, READER-05, READER-06
 **Depends on:** Phase 92
-**Plans:** 3/3 plans complete (code shipped; SWEEP-05 smoke run 2 verification pending)
+**Plans:** 3/3 plans complete
 **Status:** Complete (code; smoke pending) -- 2026-05-17
 
 Plans:

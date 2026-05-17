@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
-status: executing
-stopped_at: Phase 92.1 Complete (code shipped); Phase 92 awaiting SWEEP-05 smoke run 2 before Plan 92-02 can run
-last_updated: "2026-05-17T13:00:00.000Z"
-last_activity: 2026-05-17 -- Phase 92.1 (Reader-Client Retrofit) code shipped in 3 plans; reader migration + AST scanner + symptom-3 NO-REPRO branch + permanent CI guards; awaiting SWEEP-05 smoke run 2 verification
+status: verifying
+stopped_at: "Phase 92.1 Complete (code shipped); Phase 92 awaiting SWEEP-05 smoke run 2 before Plan 92-02 can run. Plan 92.1-01 migrated 12 reader functions in `web/supabase_client.py` from anonymous singleton `get_client()` to per-request authenticated `get_user_client()` (6 KEEP sites annotated per Reviews M2); installed AST scanner CI guard + behavioral regression tests + BANNED_TABLES extension protocol. Plan 92.1-02 diagnosed Symptom 3 via 3-point `request_contextvar` capture — NO-REPRO branch confirmed (3 successful list creations + zero `safe_user_get('auth_session') unexpected failure` WARNINGs + Supabase rows 279/280/281 persisted with correct user_id). Symptom 3 was eliminated as a side-effect of Plan 92.1-01's reader migration. Permanent CI guard installed: `_create_and_add_handler` module-level helper refactor + 5-test regression suite at `tests/test_add_to_list_dialog_ui_context.py`. Plan 92.1-03 (this closeout) flipped STATE/ROADMAP/OPEN_ISSUES/CLAUDE.md to reflect code-ship state; OPEN_ISSUES P1 entry marked `Fixed in code; verification pending SWEEP-05 smoke run 2` per Reviews M4 (full ✅-Fixed-with-date flip + Open count decrement happen in the smoke run 2 PASS commit owned by Plan 92-02's Task 0 pre-flight gate)."
+last_updated: "2026-05-17T11:04:39.150Z"
+last_activity: "2026-05-17 -- Phase 92.1 (Reader-Client Retrofit) code shipped: 12 reader sites migrated + 6 KEEP annotated + AST scanner + behavioral tests + Symptom-3 NO-REPRO branch + 5-test regression guard + closeout docs"
 progress:
   total_phases: 11
   completed_phases: 6
