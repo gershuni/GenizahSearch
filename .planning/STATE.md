@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
-stopped_at: Phase 92 context gathered
-last_updated: "2026-05-17T03:41:22.913Z"
-last_activity: 2026-05-17 -- Phase 92 execution started
+stopped_at: Phase 92 PAUSED -- Plan 92-01 shipped audit artifacts; SWEEP-05 smoke run 1 FAILED; P0 reader-client regression diagnosed; inserting Phase 92.5 next
+last_updated: "2026-05-17T16:30:00.000Z"
+last_activity: 2026-05-17 -- Phase 92 Plan 92-01 complete; smoke FAIL; user chose to insert Phase 92.5 for reader-client retrofit
 progress:
   total_phases: 10
   completed_phases: 5
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-13)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 92 — Final Sweep and Acceptance
+**Current focus:** Phase 92 PAUSED — P0 reader-client regression discovered in smoke test; inserting Phase 92.5 to retrofit ~13 reader functions in `web/supabase_client.py` from `get_client()` (anonymous singleton) to `get_user_client()` before Plan 92-02 closeout docs can ship
 
 ## Current Position
 
-Phase: 92 (Final Sweep and Acceptance) — EXECUTING
-Plan: 1 of 2
-Next: Phase 92 (Final Sweep and Acceptance)
-Status: Executing Phase 92
-Last activity: 2026-05-17 -- Phase 92 execution started
+Phase: 92 (Final Sweep and Acceptance) — PAUSED ON SMOKE FAIL
+Plan: 1 of 2 complete (Plan 92-01 audit artifacts shipped at commit `5ccecab5` + merge `c0e3a706` + tracking `3f6919bb`); Plan 92-02 blocked behind Phase 92.5
+Next: `/gsd-insert-phase 92.5` — insert reader-client retrofit phase between 92 and 93 (decided with user 2026-05-17 after smoke run 1 FAIL)
+Status: Phase 92 paused; v7.12 milestone NOT shippable; deploy.sh stays blocked; see docs/OPEN_ISSUES.md P1 entry + .planning/phases/92-final-sweep-and-acceptance/92-SWEEP-05-SMOKE.md "Smoke run 1 -- 2026-05-17 -- FAILED at R0" for the regression details
+Last activity: 2026-05-17 -- Plan 92-01 complete; smoke run 1 FAIL; reader-client regression root-caused to Phase 90 (D-09/D-10 anon-only invariant + missed reader migration)
 
 Progress: [████████░░] 75%
 
@@ -42,9 +42,10 @@ Progress: [████████░░] 75%
 | 89 | Lists Cache Per-Request | LISTS-01..04 | Complete |
 | 90 | Auth Caching Rewrite -- No set_session | AUTHC-01..05 | Complete |
 | 91 | Atomic Auth State Writes | AUTHW-01..06 | Complete |
-| 92 | Final Sweep and Acceptance | SWEEP-01..06 | Pending |
+| 92 | Final Sweep and Acceptance | SWEEP-01..06 | In Progress -- Plan 92-01 Complete, Plan 92-02 BLOCKED on Phase 92.5 |
+| 92.5 | Reader-Client Retrofit (planned 2026-05-17) | TBD via /gsd-insert-phase | Pending insertion |
 
-**Dependency order:** 87 must complete first (all others depend on it). 91 also depends on 90. 92 depends on all of 87-91.
+**Dependency order:** 87 must complete first (all others depend on it). 91 also depends on 90. 92 depends on all of 87-91. Phase 92.5 inserted between 92 and 93 to close the Phase 90 reader-client regression discovered during 92's smoke test -- Plan 92-02 cannot run until 92.5 ships and SWEEP-05 smoke run 2 passes.
 
 ## Performance Metrics
 
@@ -97,7 +98,7 @@ Progress: [████████░░] 75%
 
 ## Session Continuity
 
-Last session: 2026-05-15T16:07:27.627Z
-Stopped at: Phase 92 context gathered
-Resume file: .planning/phases/92-final-sweep-and-acceptance/92-CONTEXT.md
-Next step: `/gsd-discuss-phase 92` (Final Sweep and Acceptance). Phase 92 closes SWEEP-01..06: full `web/` static-grep audit (zero raw `app.storage.user`), cross-user concurrent smoke test, re-audit of the 4 Codex review transcripts, `docs/guides/MULTITENANT.md` write. Phase 87 lint scanner now enforces zero raw accesses anywhere in `web/` (allowlist 0 entries) — Phase 92 SWEEP-01/SWEEP-02 become verification rather than discovery.
+Last session: 2026-05-17 -- Phase 92 partial execution
+Stopped at: Phase 92 PAUSED at smoke gate after Plan 92-01 shipped audit artifacts; SWEEP-05 smoke run 1 FAILED at R0 baseline (existing lists not loading + new list creation silently failing for logged-in users); root cause = Phase 90 D-09/D-10 left ~13 reader functions in web/supabase_client.py using anonymous singleton `get_client()` instead of `get_user_client()`, so RLS-`TO authenticated` SELECT policies return 0 rows
+Resume file: .planning/phases/92-final-sweep-and-acceptance/92-SWEEP-05-SMOKE.md (Smoke run 1 -- 2026-05-17 -- FAILED block) + docs/OPEN_ISSUES.md (new P1 entry)
+Next step: `/gsd-insert-phase 92.5` to scope the reader-client retrofit phase. Phase 92.5 must: (a) migrate ~13 readers from get_client() to get_user_client(), (b) audit-and-test authenticated SELECT-RLS reachability, (c) trace and fix the secondary UI-context error in web/components/add_to_list_dialog.py (`safe_user_get('auth_session') ... UI context` in the post-create re-render path), (d) install a regression test mocking authenticated sessions and asserting SELECT-RLS reachability vs anon-singleton baseline, (e) redo SWEEP-05 smoke run 2 and confirm PASS before Plan 92-02 closeout docs ship.

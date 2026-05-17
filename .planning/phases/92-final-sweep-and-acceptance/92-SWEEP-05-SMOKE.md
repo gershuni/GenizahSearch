@@ -94,3 +94,52 @@ Wait for `NiceGUI ready on http://localhost:8080` (or 8081).
 *Plan 92-02 cannot start until this file is committed with all checkboxes checked AND `Overall: PASS` is recorded. Plan 92-02 Task 0 pre-flight gate verifies this state.*
 
 *Source: D-08 in `.planning/phases/92-final-sweep-and-acceptance/92-CONTEXT.md`*
+
+---
+
+## Smoke run 1 -- 2026-05-17 -- FAILED at R0
+
+**Tester:** Hillel Gershuni
+**Server commit at test time:** `3f6919bb` (master-main, post Plan 92-01 closeout commit)
+**Verdict:** Overall FAIL -- smoke aborted at R0 before R1/R2/R3 could be exercised.
+
+**Symptoms observed (3 distinct):**
+
+1. **Logged-in main user: existing lists not fetched.** User logs in to his main account; the `/lists` page shows no lists despite the account having pre-existing lists in Supabase.
+2. **New list creation from `/lists` page silently fails.** From a freshly registered user account, clicking "New list" (or "New project") in the lists module shows a positive toast "list/project added" but the list/project does NOT actually persist (does not appear in the page; not in DB on inspection). No console error logged in this path.
+3. **New list from search-results path errors in console.** Path: search results -> "Add to list" -> "Create new list" -> Save. Browser console emits a single error: `safe_user_get('auth_session') unexpected failure: app.storage.user can only be used within a UI context`. The new list does not get added.
+
+**Root cause diagnosed in this session (P0 regression):**
+
+Phase 90's "singleton-anonymous-only" invariant (D-09 / D-10) closed a multitenant leak by routing all five bootstrap helpers (`sign_in` / `sign_up` / `set_session_from_url` / `exchange_code_for_session` / `get_oauth_url`) through throwaway clients, so the module-level singleton `_client` returned by `get_client()` is no longer auto-authenticated by the Supabase SIGNED_IN event listener after login.
+
+But Phase 90 did **not** migrate the ~13 reader functions in `web/supabase_client.py` that still use `get_client()` (anonymous) instead of `get_user_client()`:
+- `get_profile` (line 711) -- masked because `profiles` SELECT RLS is `TO public`
+- `get_user_lists` (line 752) -- **broken**: RLS `TO authenticated USING (auth.uid()=user_id)`, anon role gets 0 rows
+- `get_deleted_lists` (line 783)
+- `get_list_items` (line 899)
+- recent-items reader (line 958)
+- `get_projects` (line 1004)
+- project list-items reader (line 1067)
+- Lines 1171, 1191, 1243, 1326, 1461, 1579 (other readers, all `TO authenticated` per `docs/guides/SUPABASE_GUIDE.md:430-451`)
+
+**Smoking gun in Phase 90 planning artifacts:**
+`.planning/phases/90-auth-caching-rewrite-no-set-session/90-DISCUSSION-LOG.md:147` records the false assumption:
+> "Existing callers already check `is_logged_in()` before doing user-scoped operations. Keeping the fallback preserves the read-paths where the anonymous client is the correct choice (`get_user_lists` reads work anonymously; only writes need auth)."
+
+This is wrong -- `user_lists` SELECT policy is `TO authenticated`, so the anon role gets zero rows. Before Phase 90, the Supabase SIGNED_IN event listener auto-authenticated the singleton so reads worked despite using `get_client()`; Phase 90 closed that channel for the (correct) multitenant-safety reason but missed the reader migration.
+
+**Why no gate caught this:**
+- Phase 87 lint scanner only checks raw `app.storage.user` access -- not RLS reachability
+- Phase 92-01 SWEEP-01 AST scan checks the same invariant -- correctly verified zero violations
+- Phase 90 tests likely mocked Supabase or exercised write paths only (no end-to-end SELECT-RLS coverage)
+- No live cross-user smoke test was run between Phase 90 ship (2026-05-14) and this Phase 92-01 closeout
+- Phase 92-01 SWEEP-04 transcript audit's claim "all 23 Codex findings addressed" is now incomplete -- this regression escaped the cross-AI review window
+
+**Disposition:**
+- **Smoke = FAIL.** Plan 92-02 cannot run (D-02 gate intact).
+- **v7.12 milestone NOT shippable.** `deploy.sh` stays blocked.
+- **Plan 92-01 artifacts remain valid** -- the AST scan / grep evidence / surface audit / transcript audit are correct as far as they cover. SWEEP-05 is correctly recorded as FAIL.
+- **Insert Phase 92.5** (decided 2026-05-17 with user) to migrate the ~13 reader functions in `supabase_client.py` from `get_client()` to `get_user_client()`, add a regression test suite, and trace + fix the secondary symptom 3 (`safe_user_get('auth_session') ... UI context` console error in the add-to-list-dialog post-create path).
+- After Phase 92.5 ships and passes its own UAT, redo this smoke (Smoke run 2) -- if PASS, then Plan 92-02 closeout docs proceed.
+- See `docs/OPEN_ISSUES.md` P1 section for the formal bug entry (added 2026-05-17).
