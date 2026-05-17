@@ -23,10 +23,33 @@ from web.components.typography import h1, h3
 from web.components.project_tree import create_project_tree
 from web.auth_state import GlobalAuthState
 from genizah_core import get_library_display
-from typing import Optional
+from typing import Optional, Dict
 import asyncio
 
 logger = logging.getLogger(__name__)
+
+# Phase 92.2 D-FANOUT-01 + Reviews MUST-FIX 1: sentinel distinguishes
+# 'caller did not pass counts' from 'counts intentionally None (legacy fallback)'.
+_COUNTS_UNSET = object()
+
+
+def _load_list_item_counts() -> Optional[Dict[int, int]]:
+    """Return batched item counts for logged-in users; None means legacy fallback.
+
+    Reviews MUST-FIX 1: None vs {} semantics are CRITICAL. None signals
+    'RPC failed or anonymous — caller MUST trigger per-list legacy fetch'.
+    An empty dict means 'RPC succeeded with zero rows — a valid batched
+    result for a user with no items'. Never return {} on failure.
+    """
+    counts: Optional[Dict[int, int]] = None
+    try:
+        if GlobalAuthState.is_logged_in() and GlobalAuthState.get_user_id():
+            from web.supabase_client import get_list_item_counts
+            counts = get_list_item_counts()
+    except Exception as _e:
+        logger.warning("get_list_item_counts failed; falling back to per-list counts: %s", _e)
+        counts = None
+    return counts
 
 
 def _lists_task_probe(label: str, **fields) -> None:
@@ -155,20 +178,41 @@ def create_lists_page():
     lists_sidebar_container = None
     list_content_container = None
 
-    def refresh_ui():
-        """Trigger a full UI refresh."""
+    def refresh_ui(lists_mgr=None, data=None, counts=_COUNTS_UNSET):
+        """Trigger a full UI refresh, threading lists_mgr + data + counts through.
+
+        Phase 92.2 Reviews Codex-HIGH 1: accepts and threads the capture triple so
+        callers that already hold data/counts avoid re-fetching.
+        """
         page_state.refresh_trigger += 1
-        render_lists_sidebar()
-        render_list_content()
+        if lists_mgr is None:
+            lists_mgr = state.lists_mgr
+        if lists_mgr is not None and data is None:
+            data = lists_mgr.data
+        if counts is _COUNTS_UNSET:
+            counts = _load_list_item_counts()
+        render_lists_sidebar(lists_mgr=lists_mgr, data=data, counts=counts)
+        render_list_content(lists_mgr=lists_mgr, data=data, counts=counts)
 
     async def async_refresh_ui():
-        """Async version of refresh_ui - refreshes data from API if authenticated."""
-        if GlobalAuthState.is_logged_in() and hasattr(state.lists_mgr, 'refresh_data'):
+        """Async refresh — consumes the data returned by refresh_data() and threads
+        it forward (Reviews Codex-HIGH 2: avoids double-fetch on the warm path).
+        """
+        lists_mgr = state.lists_mgr
+        data = None
+
+        if lists_mgr is not None:
             try:
-                await state.lists_mgr.refresh_data()
+                if GlobalAuthState.is_logged_in() and hasattr(lists_mgr, 'refresh_data'):
+                    data = await lists_mgr.refresh_data()  # Task 6.5 returns Dict
+                else:
+                    data = lists_mgr.data
             except Exception as e:
-                logger.error(f"Error refreshing lists data: {e}")
-        refresh_ui()
+                logger.error("Error refreshing lists data: %s", e)
+                data = None
+
+        counts = _load_list_item_counts() if lists_mgr is not None else None
+        refresh_ui(lists_mgr=lists_mgr, data=data, counts=counts)
 
     def _schedule_async_refresh(reason: str):
         """Schedule an async_refresh_ui() task, emitting task-probe log at lifecycle
@@ -401,47 +445,48 @@ def create_lists_page():
         dialog.open()
 
     # --- Render Lists Sidebar ---
-    def render_lists_sidebar():
+    def render_lists_sidebar(lists_mgr=None, data=None, counts=_COUNTS_UNSET):
         """Render the left sidebar with project tree.
 
-        Phase 92.2 D-VER-01 instrumentation: capture lists_mgr ONCE at entry;
-        wrap tree-render in a perf_counter() span (capturing `data = lists_mgr.data`
-        INSIDE the timed try: so the fetch cost is measured); emit a separate
-        lists_sidebar_decomposition log line at exit with L/S/Cp/Cs breakdown
-        REUSING the captured `data` local — NO second .data access in the
-        untimed finally: window.
-        NOTE: total_wall_clock_ms is NOT emitted here — it comes from the ASGI
-        middleware in web/main.py (canonical D-VER-02 source per Reviews MUST-FIX 4).
+        Phase 92.2 D-FANOUT-01 + Reviews Codex-HIGH 1: capture lists_mgr +
+        data + counts ONCE; thread through create_project_tree. Reviews
+        MUST-FIX 1: counts may be None (legacy fallback) or a (possibly empty)
+        dict; _COUNTS_UNSET means 'caller did not provide — default-fetch'.
+
+        Reviews Round-2 HIGH-1 pre-merge: this version PRESERVES Plan 01 Task 2b's
+        _t_render_start / try / finally instrumentation harness AND Plan 01
+        Task 2c's _schedule_async_refresh task-probe wiring.
+        Reviews Round-2 MEDIUM-3: emits request_id in the decomposition log line.
         """
-        lists_mgr = state.lists_mgr  # capture ONCE — factory property per Phase 89 D-03/D-04
+        # Capture lists_mgr ONCE — factory property per Phase 89 D-03/D-04.
+        lists_mgr = state.lists_mgr if lists_mgr is None else lists_mgr
 
         from web.supabase_client import _INSTRUMENTATION_ENABLED, _inst_snapshot, _inst_request_id
         import json as _json
         import time as _time
 
         _t_render_start = _time.perf_counter() if _INSTRUMENTATION_ENABLED else None
-        data = None  # hoisted so finally: can read it without NameError
 
         try:
-            # Capture `data` INSIDE the timed try: block so the .data access cost
-            # IS measured by sidebar_render_ms AND inherited by the ASGI middleware's
-            # total_wall_clock_ms (Reviews Round-2 HIGH-2 Path A).
-            if lists_mgr is not None:
+            # Capture `data` and `counts` INSIDE the timed try: block so the
+            # .data + RPC access costs ARE measured by sidebar_render_ms AND
+            # inherited by the ASGI middleware's total_wall_clock_ms.
+            if lists_mgr is not None and data is None:
                 data = lists_mgr.data
-            # Reviews Round-2 HIGH-2 Path A (baseline contamination fix):
-            # Pass `data=data` through to `create_project_tree` so the existing
-            # `create_project_tree` does NOT call `lists_mgr.data` again internally.
-            # UserListsManager._get_cached_data() is fresh-on-every-call per
-            # Phase 89 D-03/D-04, so every .data access is a NEW Supabase fetch.
-            # The instrumentation baseline would record 2 .data fetches per render
-            # where production does 1, inflating the pre-fix metric by ~1 fetch.
+            if counts is _COUNTS_UNSET:
+                counts = _load_list_item_counts()
+
+            def _select_from_sidebar(list_id, mgr=lists_mgr, threaded_data=data, threaded_counts=counts):
+                select_list(list_id, lists_mgr=mgr, data=threaded_data, counts=threaded_counts)
+
             create_project_tree(
                 lists_mgr=lists_mgr,
                 container=lists_sidebar_container,
-                on_select=select_list,
+                on_select=_select_from_sidebar,
                 selected_list_id=page_state.selected_list_id,
                 on_refresh=lambda: _schedule_async_refresh('project_tree_refresh'),
                 data=data,
+                counts=counts,
             )
         finally:
             if _INSTRUMENTATION_ENABLED:
@@ -460,8 +505,9 @@ def create_lists_page():
                         S += 1
 
                 predicted_queries = 4 + L + 2 * S
-                print(
-                    'lists_sidebar_decomposition=' + _json.dumps({
+                logger.info(
+                    'lists_sidebar_decomposition=%s',
+                    _json.dumps({
                         'phase': '92.2',
                         'event': 'lists_sidebar_decomposition',
                         'request_id': _inst_request_id.get(),  # Reviews Round-2 MEDIUM-3
@@ -479,20 +525,29 @@ def create_lists_page():
                             'ratio': (snap['query_count'] / predicted_queries) if predicted_queries > 0 else None,
                         },
                     }, sort_keys=True),
-                    flush=True,
                 )
 
     # --- Select List ---
-    def select_list(list_id: str):
-        """Select a list to view its contents."""
+    def select_list(list_id: str, lists_mgr=None, data=None, counts=None):
+        """Select a list to view its contents.
+
+        Reviews Codex-HIGH 1: accepts and threads lists_mgr + data + counts so
+        list-click latency drops alongside sidebar latency (Hillel reported BOTH slow).
+        """
         # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 4
         _lists_task_probe('list_select_callback', list_id=list_id)
         page_state.selected_list_id = list_id
-        render_list_content()
+        render_list_content(lists_mgr=lists_mgr, data=data, counts=counts)
 
     # --- Render List Content ---
-    def render_list_content():
-        """Render the selected list's content."""
+    def render_list_content(lists_mgr=None, data=None, counts=None):
+        """Render the selected list's content.
+
+        Reviews Codex-HIGH 1: accepts and threads lists_mgr + data + counts.
+        Hillel reported BOTH /lists load AND list-click slow; this function
+        is the list-click hot path. Capture lists_mgr ONCE at entry; use
+        threaded data for color/items; use threaded counts for expected_count.
+        """
         list_content_container.clear()
 
         with list_content_container:
@@ -503,12 +558,17 @@ def create_lists_page():
                     ui.label(tr('Select a list to view its contents')).classes('text-xl mt-4').style('color: var(--text-muted);')
                 return
 
-            if not state.lists_mgr:
+            # Capture lists_mgr ONCE — factory property per Phase 89 D-03/D-04
+            lists_mgr = state.lists_mgr if lists_mgr is None else lists_mgr
+            if not lists_mgr:
                 ui.label(tr('Lists manager not available')).classes('text-red-500')
                 return
 
+            if data is None:
+                data = lists_mgr.data
+
             list_id = page_state.selected_list_id
-            lists = state.lists_mgr.data.get('lists', {})
+            lists = data.get('lists', {})
             list_data = lists.get(list_id)
 
             if not list_data:
@@ -517,10 +577,10 @@ def create_lists_page():
 
             # List Header
             is_system = list_data.get('is_system', False)
-            # Use project-inherited color if available
+            # Use project-inherited color — pass data= to avoid a second .data fetch
             display_color = (
-                state.lists_mgr.get_list_display_color(list_id)
-                if hasattr(state.lists_mgr, 'get_list_display_color')
+                lists_mgr.get_list_display_color(list_id, data=data)
+                if hasattr(lists_mgr, 'get_list_display_color')
                 else list_data.get('color', '#FFD700')
             )
             with ui.row().classes('w-full justify-between items-start mb-6 pb-4 border-b-2').style(
@@ -534,7 +594,7 @@ def create_lists_page():
                             current_name=list_data.get('name', 'Unnamed'),
                             list_id=list_id,
                             is_system=is_system,
-                            lists_mgr=state.lists_mgr,
+                            lists_mgr=lists_mgr,
                             tr_func=tr,
                             classes='text-3xl font-bold',
                             on_save_callback=refresh_ui
@@ -550,9 +610,17 @@ def create_lists_page():
                         on_click=lambda: export_list(list_id)
                     ).props('flat').classes('text-primary')
 
-            # Get items
-            items_list = state.lists_mgr.get_items_in_list_sync(list_id)
+            # Get items — use captured lists_mgr (not state.lists_mgr factory)
+            items_list = lists_mgr.get_items_in_list_sync(list_id)
             items_data = [(item.get('item_id'), item) for item in items_list]
+
+            # expected_count: prefer threaded counts dict over len(items_data) when available
+            expected_count = len(items_data)
+            if counts is not None:
+                try:
+                    expected_count = counts.get(int(list_id), len(items_data))
+                except (TypeError, ValueError):
+                    expected_count = len(items_data)
 
             if not items_data:
                 with ui.column().classes('w-full items-center justify-center py-16'):
@@ -563,7 +631,7 @@ def create_lists_page():
                 return
 
             # Items Grid/List
-            ui.label(f"{len(items_data)} {tr('items')}").classes('text-sm mb-4').style('color: var(--text-tertiary);')
+            ui.label(f"{expected_count} {tr('items')}").classes('text-sm mb-4').style('color: var(--text-tertiary);')
 
             # Track expanded items
             expanded_items = {}

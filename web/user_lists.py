@@ -924,11 +924,24 @@ class UserListsManager:
         if self.local_mgr:
             self.local_mgr.load()
 
-    async def refresh_data(self):
-        """Refresh data from Supabase."""
+    async def refresh_data(self) -> Dict:
+        """Refresh and return data from the backing store.
+
+        Phase 92.2 Reviews Codex-HIGH 2: returns the fetched dict so callers
+        (notably async_refresh_ui in web/pages/lists.py) can thread it
+        forward without re-fetching. Previously `-> None` and the caller
+        had to do a separate `lists_mgr.data` access -- that triggered a
+        second fetch on the warm path. Return-type drift is backwards-
+        compatible because Python lets `None`-returning callers ignore
+        the return value; the only caller that consumes the new return
+        is the threaded async_refresh_ui added in Phase 92.2 Task 6 Part D.
+        """
         self.invalidate_cache()
         if self.is_authenticated:
-            self._get_cached_data()
+            return self._get_cached_data()
+        if self.local_mgr:
+            return self.local_mgr.data
+        return self._get_default_data()
 
 
 def get_lists_manager(local_mgr: Optional[ListsManager] = None,

@@ -32,6 +32,30 @@ import logging
 LOGGER = logging.getLogger(__name__)
 
 
+def _resolve_list_item_count(list_id: str, lists_mgr, counts: Optional[Dict[int, int]]) -> int:
+    """Resolve item count with correct legacy-fallback semantics.
+
+    Phase 92.2 Reviews MUST-FIX 1: None means 'no batched result available —
+    use legacy per-list fetch'. An empty dict means 'batched result was empty
+    (zero items for this user) — return 0 WITHOUT triggering the legacy fallback'.
+
+    Args:
+        list_id: string list ID
+        lists_mgr: UserListsManager (used only for legacy fallback when counts is None)
+        counts: None -> legacy fallback; {} -> valid empty batched result; {id: n} -> use value
+    """
+    if counts is None:
+        try:
+            return lists_mgr._get_list_item_count(list_id)
+        except Exception:
+            return 0
+
+    try:
+        return counts.get(int(list_id), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def create_project_tree(
     lists_mgr,
     container,
@@ -39,6 +63,7 @@ def create_project_tree(
     selected_list_id: Optional[str] = None,
     on_refresh: Optional[Callable[[], None]] = None,
     data: Optional[Dict] = None,
+    counts: Optional[Dict[int, int]] = None,
 ):
     """
     Create a collapsible project tree in the given container.
@@ -132,7 +157,9 @@ def create_project_tree(
                                 selected_list_id=selected_list_id,
                                 on_select=on_select,
                                 on_refresh=on_refresh,
-                                show_color=True
+                                show_color=True,
+                                data=data,
+                                counts=counts,
                             )
 
                 # Projects section
@@ -146,7 +173,9 @@ def create_project_tree(
                         expanded_projects=expanded_projects,
                         selected_list_id=selected_list_id,
                         on_select=on_select,
-                        on_refresh=on_refresh
+                        on_refresh=on_refresh,
+                        data=data,
+                        counts=counts,
                     )
 
                 # Standalone lists section (lists not in any project)
@@ -170,7 +199,9 @@ def create_project_tree(
                                     selected_list_id=selected_list_id,
                                     on_select=on_select,
                                     on_refresh=on_refresh,
-                                    show_color=True
+                                    show_color=True,
+                                    data=data,
+                                    counts=counts,
                                 )
 
                     # System lists at bottom (excluding Recently Viewed which is at top)
@@ -187,7 +218,9 @@ def create_project_tree(
                                     selected_list_id=selected_list_id,
                                     on_select=on_select,
                                     on_refresh=on_refresh,
-                                    show_color=True
+                                    show_color=True,
+                                    data=data,
+                                    counts=counts,
                                 )
 
                 # Empty state
@@ -208,7 +241,9 @@ def _render_project_group(
     expanded_projects: Dict,
     selected_list_id: Optional[str],
     on_select: Optional[Callable],
-    on_refresh: Optional[Callable]
+    on_refresh: Optional[Callable],
+    data: Optional[Dict] = None,
+    counts: Optional[Dict[int, int]] = None,
 ):
     """Render a project with its lists as a collapsible group."""
     project_name = project_data.get('name', 'Unnamed Project')
@@ -281,7 +316,9 @@ def _render_project_group(
                         on_select=on_select,
                         on_refresh=on_refresh,
                         show_color=False,  # Color shown on project header
-                        parent_color=project_color
+                        parent_color=project_color,
+                        data=data,
+                        counts=counts,
                     )
             else:
                 ui.label(tr('No lists in this project')).classes(
@@ -296,25 +333,37 @@ def _render_list_item(
     on_select: Optional[Callable],
     on_refresh: Optional[Callable],
     show_color: bool = True,
-    parent_color: Optional[str] = None
+    parent_color: Optional[str] = None,
+    data: Optional[Dict] = None,
+    counts: Optional[Dict[int, int]] = None,
 ):
-    """Render a single list item."""
+    """Render a single list item.
+
+    Args:
+        data: Pre-fetched lists_mgr.data dict threaded from caller (Phase 92.2 D-FANOUT-01).
+              When provided, passed to get_list_display_color() so it need not call
+              lists_mgr.data again internally.
+        counts: Batched item counts dict threaded from caller (Phase 92.2 D-FANOUT-02).
+                None = use legacy per-list fallback; {} = valid empty result; {id:n} = value.
+                Passed to _resolve_list_item_count() which owns the None-vs-{} semantics.
+    """
     list_id = list_data.get('id')
     list_name = list_data.get('name', 'Unnamed')
     is_system = list_data.get('is_system', False)
     is_selected = selected_list_id == list_id
 
-    # Get display color
+    # Get display color — pass data= so get_list_display_color() avoids a second .data fetch
     if show_color:
-        color = lists_mgr.get_list_display_color(list_id) if hasattr(lists_mgr, 'get_list_display_color') else list_data.get('color', '#FFD700')
+        color = (
+            lists_mgr.get_list_display_color(list_id, data=data)
+            if hasattr(lists_mgr, 'get_list_display_color')
+            else list_data.get('color', '#FFD700')
+        )
     else:
         color = parent_color or '#999'
 
-    # Get item count
-    try:
-        count = lists_mgr._get_list_item_count(list_id)
-    except Exception:
-        count = 0  # Count query failed; use zero as fallback
+    # Get item count via helper that owns None-vs-{} semantics (Phase 92.2 Reviews MUST-FIX 1)
+    count = _resolve_list_item_count(list_id, lists_mgr, counts)
 
     # Item container
     item_classes = 'w-full p-2 rounded cursor-pointer transition-all'
