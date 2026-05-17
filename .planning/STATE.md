@@ -4,8 +4,8 @@ milestone: v7.12
 milestone_name: Multitenant Architecture
 status: executing
 stopped_at: Phase 92.2 context gathered (Codex-adjusted)
-last_updated: "2026-05-17T14:48:48.750Z"
-last_activity: 2026-05-17 -- Phase 92.2 planning complete
+last_updated: "2026-05-17T15:49:35.919Z"
+last_activity: 2026-05-17 -- Phase 92.2 execution started
 progress:
   total_phases: 12
   completed_phases: 6
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-13)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 92 — AWAITING SWEEP-05 SMOKE RUN 2 (Phase 92.1 code shipped 2026-05-17; closeout docs of parent Phase 92 blocked behind smoke run 2 PASS)
+**Current focus:** Phase 92.2 — lists-performance-investigation
 
 ## Current Position
 
-Phase: 92 (Final Sweep and Acceptance) — AWAITING SWEEP-05 SMOKE RUN 2
-Plan: Phase 92.1 (Reader-Client Retrofit) 3/3 plans complete; Phase 92 Plan 92-02 still BLOCKED behind Hillel's manual SWEEP-05 smoke run 2 PASS commit
+Phase: 92.2 (lists-performance-investigation) — EXECUTING
+Plan: 1 of 2
 Next: Hillel re-runs SWEEP-05 smoke run 2 manually per `.planning/phases/92-final-sweep-and-acceptance/92-SWEEP-05-SMOKE.md` and commits PASS verdict; THEN `/gsd-execute-phase 92` runs Plan 92-02 (v7.12 closeout docs + MULTITENANT.md). After Plan 92-02 ships, `deploy.sh` unblocks.
-Status: Ready to execute
-Last activity: 2026-05-17 -- Phase 92.2 planning complete
+Status: Executing Phase 92.2
+Last activity: 2026-05-17 -- Phase 92.2 execution started
 
 Progress: [█████████░] 87%
 
