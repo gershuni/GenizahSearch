@@ -40,6 +40,11 @@ PUZZLE_RATE_LIMIT_BUCKET_TTL = max(60, int(os.environ.get('PUZZLE_RATE_LIMIT_BUC
 # Concurrency cap for NLI IIIF fetches (prevents burst-flooding the upstream)
 _nli_semaphore = threading.Semaphore(NLI_MAX_CONCURRENT_FETCHES)
 
+# Phase 92.2 D-NLI-01: serialize os.replace across concurrent background threads
+# to avoid [WinError 5] access-denied races on Windows. Lock is acquired BEFORE
+# writing the temp file so concurrent callers queue rather than race on the rename.
+_nli_persist_lock = threading.Lock()
+
 # Persistent session for NLI requests (connection reuse via keep-alive)
 _nli_session = requests.Session()
 _nli_session.headers.update({
@@ -263,13 +268,22 @@ def _save_nli_persistent_cache(
     cache_path: str = NLI_PERSISTENT_CACHE_FILE,
     *,
     now: float | None = None,
-) -> None:
-    """Persist positive NLI FL-ID cache entries with an atomic file replace."""
+) -> bool:
+    """Persist positive NLI FL-ID cache entries with an atomic file replace.
+
+    Phase 92.2 D-NLI-01: serializes writes via _nli_persist_lock to prevent
+    [WinError 5] access-denied races when multiple background threads call
+    os.replace() on the same target simultaneously. Retries os.replace at
+    100/250/500ms before logging WARNING once and returning False.
+
+    Returns:
+        True on success, False on final failure (all retries exhausted).
+    """
     import time as _time
 
     now = _time.time() if now is None else now
     if NLI_DISK_CACHE_TTL <= 0:
-        return
+        return True  # disabled; not an error
 
     entries = {}
     for system_id, fl_ids in cache.items():
@@ -290,20 +304,54 @@ def _save_nli_persistent_cache(
 
     payload = {'version': 1, 'entries': entries}
     temp_path = f"{cache_path}.tmp.{os.getpid()}.{threading.get_ident()}"
-    try:
-        cache_dir = os.path.dirname(cache_path)
-        if cache_dir:
-            os.makedirs(cache_dir, exist_ok=True)
-        with open(temp_path, 'w', encoding='utf-8') as handle:
-            json.dump(payload, handle, ensure_ascii=True, sort_keys=True)
-        os.replace(temp_path, cache_path)
-    except Exception as e:
-        logger.warning(f"Failed to persist NLI FL-ID cache to {cache_path}: {e}")
+
+    # D-NLI-01: acquire lock BEFORE writing the temp file so concurrent callers
+    # queue rather than race on the atomic rename (Reviews Codex-LOW-1: barrier
+    # belongs outside the lock in tests; the lock itself is the serializer here).
+    with _nli_persist_lock:
+        try:
+            cache_dir = os.path.dirname(cache_path)
+            if cache_dir:
+                os.makedirs(cache_dir, exist_ok=True)
+            with open(temp_path, 'w', encoding='utf-8') as handle:
+                json.dump(payload, handle, ensure_ascii=True, sort_keys=True)
+        except Exception as e:
+            logger.warning("Failed to write NLI FL-ID cache temp file %s: %s", temp_path, e)
+            try:
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except Exception:
+                pass
+            return False
+
+        # Retry os.replace at 100/250/500ms on EACCES / WinError 5
+        _replace_delays = (0.1, 0.25, 0.5)
+        last_exc: Exception | None = None
+        for attempt, delay in enumerate((*_replace_delays, None), start=1):
+            try:
+                os.replace(temp_path, cache_path)
+                return True
+            except Exception as exc:
+                last_exc = exc
+                if delay is None:
+                    break
+                logger.debug(
+                    "os.replace NLI cache attempt %d failed (%s); retrying in %.0fms",
+                    attempt, exc, delay * 1000,
+                )
+                _time.sleep(delay)
+
+        # All retries exhausted — warn ONCE and clean up temp file
+        logger.warning(
+            "Failed to persist NLI FL-ID cache to %s after %d attempts: %s",
+            cache_path, len(_replace_delays) + 1, last_exc,
+        )
         try:
             if os.path.exists(temp_path):
                 os.remove(temp_path)
         except Exception:
-            pass  # Cache operation failed; continue without cached data
+            pass
+        return False
 
 def init_api_routes(app_override=None):
     """Register API routes for image proxy and exports.
