@@ -1,0 +1,264 @@
+{
+  "phase": "92.2-lists-performance-investigation",
+  "plan": "01",
+  "artifact_kind": "pre_fix_baseline",
+  "captured_by": "Hillel Gershuni",
+  "captured_at": "2026-05-17T18:33:51.754031Z",
+  "environment": {
+    "user_account_hash": "966602d4fcf2",
+    "user_account_hash_note": "sha256(\"hillel@dicta.org.il\")[:12]; raw email captured in commit author metadata.",
+    "python_version": "3.11.9",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "git_head_at_capture": "b6ff35919361f3b03cc3cb5ecd000da69af85810",
+    "server_port": 8083,
+    "server_started_at": "within this capture session (NICEGUI_RELOAD=false, single-process)",
+    "sample_collected_at": "within ~30s of server-start; first 2 anonymous renders dropped before authenticated session was established"
+  },
+  "cold_discard_sample": {
+    "request_id": "769efa81655e",
+    "label": "cold_discard",
+    "request": {
+      "method": "GET",
+      "path": "/lists"
+    },
+    "response": {
+      "body_flushed": true,
+      "response_bytes": 69577,
+      "status_code": 200
+    },
+    "totals": {
+      "client_build_count": 26,
+      "max_query_latency_ms": 168.55020000366494,
+      "p50_query_latency_ms": 113.02560003241524,
+      "p95_query_latency_ms": 131.29480002680793,
+      "query_count": 26,
+      "request_id": "769efa81655e",
+      "total_wall_clock_ms": 32084.451299975626
+    },
+    "decomposition": {
+      "Cp": 0,
+      "Cs": 8,
+      "L": 8,
+      "S": 8,
+      "predicted_queries_from_codex_formula": "4 + L + 2*S",
+      "predicted_query_count": 28
+    },
+    "delta_vs_codex_formula": {
+      "observed_minus_predicted": -2,
+      "ratio": 0.9285714285714286
+    },
+    "sidebar_render_ms": 32027.81189995585
+  },
+  "samples": [
+    {
+      "request_id": "9f7c6b2a92c8",
+      "label": "warm",
+      "request": {
+        "method": "GET",
+        "path": "/lists"
+      },
+      "response": {
+        "body_flushed": true,
+        "response_bytes": 69577,
+        "status_code": 200
+      },
+      "totals": {
+        "client_build_count": 26,
+        "max_query_latency_ms": 365.02130003646016,
+        "p50_query_latency_ms": 120.05879997741431,
+        "p95_query_latency_ms": 187.3444999800995,
+        "query_count": 26,
+        "request_id": "9f7c6b2a92c8",
+        "total_wall_clock_ms": 35469.287499960046
+      },
+      "decomposition": {
+        "Cp": 0,
+        "Cs": 8,
+        "L": 8,
+        "S": 8,
+        "predicted_queries_from_codex_formula": "4 + L + 2*S",
+        "predicted_query_count": 28
+      },
+      "delta_vs_codex_formula": {
+        "observed_minus_predicted": -2,
+        "ratio": 0.9285714285714286
+      },
+      "sidebar_render_ms": 35447.47600000119
+    },
+    {
+      "request_id": "f7153932da86",
+      "label": "warm",
+      "request": {
+        "method": "GET",
+        "path": "/lists"
+      },
+      "response": {
+        "body_flushed": true,
+        "response_bytes": 69577,
+        "status_code": 200
+      },
+      "totals": {
+        "client_build_count": 26,
+        "max_query_latency_ms": 171.94850003579631,
+        "p50_query_latency_ms": 109.55210000975057,
+        "p95_query_latency_ms": 152.76610001455992,
+        "query_count": 26,
+        "request_id": "f7153932da86",
+        "total_wall_clock_ms": 34237.92330001015
+      },
+      "decomposition": {
+        "Cp": 0,
+        "Cs": 8,
+        "L": 8,
+        "S": 8,
+        "predicted_queries_from_codex_formula": "4 + L + 2*S",
+        "predicted_query_count": 28
+      },
+      "delta_vs_codex_formula": {
+        "observed_minus_predicted": -2,
+        "ratio": 0.9285714285714286
+      },
+      "sidebar_render_ms": 34197.83269998152
+    },
+    {
+      "request_id": "57b28c23f9b0",
+      "label": "warm",
+      "request": {
+        "method": "GET",
+        "path": "/lists"
+      },
+      "response": {
+        "body_flushed": true,
+        "response_bytes": 69577,
+        "status_code": 200
+      },
+      "totals": {
+        "client_build_count": 26,
+        "max_query_latency_ms": 371.8800999922678,
+        "p50_query_latency_ms": 143.98729999084026,
+        "p95_query_latency_ms": 292.2526999609545,
+        "query_count": 26,
+        "request_id": "57b28c23f9b0",
+        "total_wall_clock_ms": 45763.27300001867
+      },
+      "decomposition": {
+        "Cp": 0,
+        "Cs": 8,
+        "L": 8,
+        "S": 8,
+        "predicted_queries_from_codex_formula": "4 + L + 2*S",
+        "predicted_query_count": 28
+      },
+      "delta_vs_codex_formula": {
+        "observed_minus_predicted": -2,
+        "ratio": 0.9285714285714286
+      },
+      "sidebar_render_ms": 45684.79659996228
+    }
+  ],
+  "gate_metrics": {
+    "aggregation_rule": "all_3_warm_samples_must_pass",
+    "sample_count": 3,
+    "warm_total_wall_clock_ms": [
+      35469.287499960046,
+      34237.92330001015,
+      45763.27300001867
+    ],
+    "min_warm_total_wall_clock_ms": 34237.92330001015,
+    "max_warm_total_wall_clock_ms": 45763.27300001867,
+    "mean_warm_total_wall_clock_ms": 38490.16126666296,
+    "all_warm_total_wall_clock_ms_lte_5000": false,
+    "gate_threshold_ms": 5000,
+    "formula_ratio_values": [
+      0.9285714285714286,
+      0.9285714285714286,
+      0.9285714285714286
+    ],
+    "all_formula_ratios_within_20pct": true
+  },
+  "capture_notes": [
+    "Method: Hillel ran web/main.py with GS_LISTS_PERF_INSTRUMENTATION=1, GENIZAH_PORT=8083, NICEGUI_RELOAD=false, NICEGUI_SHOW=false. Logged in as hillel@dicta.org.il. Hit /lists multiple times to produce cold + warm renders. Captured to baseline_capture.log via Tee-Object.",
+    "Hard gate aggregation rule LOCKED to all_3_warm_samples_must_pass (Reviews MUST-FIX 3).",
+    "All 3 warm samples are ABOVE the 5000ms threshold by 6.8x to 9.2x \u2014 regression confirmed pre-Wave-2 fix.",
+    "query_count == client_build_count == 26 per render \u2014 every Supabase query rebuilds a fresh authenticated Client (the structural cost the Phase 92.1 D-09/D-10 reader migration introduced and Plan 92.2-02 closes via task-scoped WeakKeyDictionary memo).",
+    "Codex formula prediction 4+L+2S=28 vs observed query_count=26 \u2014 ratio ~0.93, within 20% so formula validated. The (formula - observed) gap of 2 likely reflects branch coverage variability (e.g., projects-fetch short-circuit on empty result).",
+    "Lifecycle task probes recorded only `initial_page_render` label \u2014 Hillel did not exercise refresh-button, list-select, or async_refresh_ui paths during capture. NiceGUI task identity is `starlette.middleware.base.BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.coro` per render, ID changes per request \u2192 confirms each request gets its own asyncio.Task, validating Wave 2 memo key choice (Codex-MEDIUM-1).",
+    "D-VER-01 forensic intent satisfied: this artifact is grep-discoverable years later as quantitative proof of the regression closed by Plan 92.2-02."
+  ],
+  "all_captured_samples_for_reference": {
+    "count": 10,
+    "note": "Includes anonymous-shell renders (qc=0) and additional authenticated renders beyond the 3 chosen warm samples. Kept for forensic completeness.",
+    "samples": [
+      {
+        "request_id": "af816f35c87a",
+        "role": "anonymous_shell",
+        "total_wall_clock_ms": 166.60789999878034,
+        "query_count": 0,
+        "client_build_count": 0
+      },
+      {
+        "request_id": "79e235865ba3",
+        "role": "anonymous_shell",
+        "total_wall_clock_ms": 130.60909998603165,
+        "query_count": 0,
+        "client_build_count": 0
+      },
+      {
+        "request_id": "769efa81655e",
+        "role": "cold_discard",
+        "total_wall_clock_ms": 32084.451299975626,
+        "query_count": 26,
+        "client_build_count": 26
+      },
+      {
+        "request_id": "9f7c6b2a92c8",
+        "role": "warm_locked",
+        "total_wall_clock_ms": 35469.287499960046,
+        "query_count": 26,
+        "client_build_count": 26
+      },
+      {
+        "request_id": "f7153932da86",
+        "role": "warm_locked",
+        "total_wall_clock_ms": 34237.92330001015,
+        "query_count": 26,
+        "client_build_count": 26
+      },
+      {
+        "request_id": "57b28c23f9b0",
+        "role": "warm_locked",
+        "total_wall_clock_ms": 45763.27300001867,
+        "query_count": 26,
+        "client_build_count": 26
+      },
+      {
+        "request_id": "b963b93f8e49",
+        "role": "additional_warm",
+        "total_wall_clock_ms": 34603.95289998269,
+        "query_count": 26,
+        "client_build_count": 26
+      },
+      {
+        "request_id": "11980815efc3",
+        "role": "additional_warm",
+        "total_wall_clock_ms": 42347.7837999817,
+        "query_count": 26,
+        "client_build_count": 26
+      },
+      {
+        "request_id": "cb1d2eb28971",
+        "role": "additional_warm",
+        "total_wall_clock_ms": 22971.689100028016,
+        "query_count": 26,
+        "client_build_count": 26
+      },
+      {
+        "request_id": "f6291c7e4df5",
+        "role": "additional_warm",
+        "total_wall_clock_ms": 43490.376200003084,
+        "query_count": 26,
+        "client_build_count": 26
+      }
+    ]
+  }
+}
