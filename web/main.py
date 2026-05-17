@@ -32,6 +32,117 @@ apply_all_patches()
 
 
 # ---------------------------------------------------------------------------
+# Phase 92.2 D-VER-01: ASGI middleware — canonical total_wall_clock_ms source
+#
+# _ListsPerfRouteTimingMiddleware times the /lists request from entry to
+# http.response.body with more_body=False (the ASGI body-flush boundary).
+# This is the canonical D-VER-02 wall-clock source: "request received →
+# response body flushed." Previous plan-revision wrapped only
+# render_lists_sidebar() which missed create_layout(), render_list_content(),
+# and the actual flush time (Reviews MUST-FIX 4).
+#
+# Dormant unless GS_LISTS_PERF_INSTRUMENTATION=1 (checks _INSTRUMENTATION_ENABLED
+# from web.supabase_client AFTER the path check — zero overhead for non-/lists
+# paths in production).
+#
+# Mounted via app.add_middleware() AFTER apply_all_patches() so NiceGUI's
+# framework patches are in place first.
+# ---------------------------------------------------------------------------
+
+class _ListsPerfRouteTimingMiddleware:
+    """ASGI middleware: time /lists requests and emit structured perf log."""
+
+    def __init__(self, asgi_app):
+        self.asgi_app = asgi_app
+
+    async def __call__(self, scope, receive, send):
+        if scope.get('type') != 'http' or scope.get('path') != '/lists':
+            await self.asgi_app(scope, receive, send)
+            return
+
+        from web.supabase_client import (
+            _INSTRUMENTATION_ENABLED,
+            _inst_reset,
+            _inst_set_request_id,
+            _inst_snapshot,
+        )
+
+        if not _INSTRUMENTATION_ENABLED:
+            await self.asgi_app(scope, receive, send)
+            return
+
+        import json as _json
+        import time as _time
+        import uuid as _uuid
+
+        _inst_reset()
+        # Reviews Round-2 MEDIUM-3: per-request correlation ID. Short
+        # (12-hex-char prefix of a UUID4) disambiguates concurrent /lists
+        # requests. Set the ContextVar so downstream emitters
+        # (lists_sidebar_decomposition, lists_task_probe) can read it via
+        # `_inst_request_id.get()` and Task 3 + Plan 02 Task 9 can pair
+        # log lines by `request_id` instead of fragile timestamp proximity.
+        request_id = _uuid.uuid4().hex[:12]
+        _inst_set_request_id(request_id)
+        started = _time.perf_counter()
+        status_code = None
+        response_bytes = 0
+
+        async def send_wrapper(message):
+            nonlocal status_code, response_bytes
+            if message.get('type') == 'http.response.start':
+                status_code = message.get('status')
+            elif message.get('type') == 'http.response.body':
+                body = message.get('body') or b''
+                response_bytes += len(body)
+                if not message.get('more_body', False):
+                    elapsed_ms = (_time.perf_counter() - started) * 1000.0
+                    record = {
+                        'phase': '92.2',
+                        'event': 'lists_perf_baseline',
+                        'source': 'asgi_request_body_flush',
+                        'request_id': request_id,  # Reviews Round-2 MEDIUM-3
+                        'request': {'path': '/lists', 'method': scope.get('method')},
+                        'response': {
+                            'status_code': status_code,
+                            'response_bytes': response_bytes,
+                            'body_flushed': True,
+                        },
+                        'totals': {
+                            'total_wall_clock_ms': elapsed_ms,
+                            **_inst_snapshot(),
+                        },
+                    }
+                    logging.getLogger(__name__).info(
+                        'lists_perf_baseline=%s',
+                        _json.dumps(record, sort_keys=True),
+                    )
+            await send(message)
+
+        try:
+            await self.asgi_app(scope, receive, send_wrapper)
+        except Exception:
+            elapsed_ms = (_time.perf_counter() - started) * 1000.0
+            record = {
+                'phase': '92.2',
+                'event': 'lists_perf_baseline',
+                'source': 'asgi_request_exception',
+                'request_id': request_id,  # Reviews Round-2 MEDIUM-3
+                'request': {'path': '/lists', 'method': scope.get('method')},
+                'response': {'body_flushed': False},
+                'totals': {'total_wall_clock_ms': elapsed_ms, **_inst_snapshot()},
+            }
+            logging.getLogger(__name__).exception(
+                'lists_perf_baseline=%s',
+                _json.dumps(record, sort_keys=True),
+            )
+            raise
+
+
+app.add_middleware(_ListsPerfRouteTimingMiddleware)
+
+
+# ---------------------------------------------------------------------------
 # Middleware: inject font-display: swap into NiceGUI's bundled fonts.css
 # ---------------------------------------------------------------------------
 from starlette.responses import Response as _StarletteResponse

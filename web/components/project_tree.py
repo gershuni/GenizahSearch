@@ -37,7 +37,8 @@ def create_project_tree(
     container,
     on_select: Optional[Callable[[str], None]] = None,
     selected_list_id: Optional[str] = None,
-    on_refresh: Optional[Callable[[], None]] = None
+    on_refresh: Optional[Callable[[], None]] = None,
+    data: Optional[Dict] = None,
 ):
     """
     Create a collapsible project tree in the given container.
@@ -48,6 +49,10 @@ def create_project_tree(
         on_select: Callback when a list is selected (receives list_id)
         selected_list_id: Currently selected list ID (for highlighting)
         on_refresh: Callback to refresh the entire UI after changes
+        data: Optional pre-fetched data dict. When provided, avoids a second
+              lists_mgr.data fetch (Reviews Round-2 HIGH-2 Path A — baseline
+              contamination fix). When None, falls back to lists_mgr.data.
+              Plan 92.2-02 Task 6 extends the contract with `counts` on top.
     """
     container.clear()
 
@@ -56,10 +61,13 @@ def create_project_tree(
             ui.label(tr('Lists manager not available')).classes('text-red-500')
         return
 
-    # Get data
-    data = lists_mgr.data
+    # Reviews Round-2 HIGH-2 Path A: when caller threads `data`, use it directly;
+    # when None, fall back to existing lists_mgr.data fetch (preserves backward
+    # compatibility for any non-/lists caller that ships before Plan 92.2-02).
+    if data is None:
+        data = lists_mgr.data
     projects = data.get('projects', {})
-    lists_by_project = lists_mgr.get_lists_by_project()
+    lists_by_project = lists_mgr.get_lists_by_project(data=data)
 
     # State for expanded/collapsed projects
     expanded_projects = {}

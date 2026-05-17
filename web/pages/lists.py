@@ -29,6 +29,37 @@ import asyncio
 logger = logging.getLogger(__name__)
 
 
+def _lists_task_probe(label: str, **fields) -> None:
+    """Record asyncio task identity at lifecycle points.
+
+    Phase 92.2 / Reviews Codex-MEDIUM-1: emits lists_task_probe=<json> with
+    id(asyncio.current_task()) at 4 lifecycle points so Plan 92.2-02's
+    task-scope memo assumption is empirically verified by reading the JSON
+    log BEFORE the memo lands. Zero production cost when env var is off
+    (short-circuits on first line).
+    """
+    import json as _json
+    import os as _os
+
+    if _os.getenv('GS_LISTS_PERF_INSTRUMENTATION') != '1':
+        return
+
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        task = None
+
+    record = {
+        'phase': '92.2',
+        'event': 'lists_task_probe',
+        'label': label,
+        'current_task_id': id(task) if task is not None else None,
+        'current_task_name': task.get_name() if task is not None else None,
+        **fields,
+    }
+    logger.info('lists_task_probe=%s', _json.dumps(record, sort_keys=True))
+
+
 def create_inline_edit_label(
     current_name: str,
     list_id: str,
@@ -109,6 +140,9 @@ def create_inline_edit_label(
 def create_lists_page():
     """Create the personal lists management page."""
 
+    # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 1
+    _lists_task_probe('initial_page_render')
+
     # State
     class ListsPageState:
         def __init__(self):
@@ -135,6 +169,14 @@ def create_lists_page():
             except Exception as e:
                 logger.error(f"Error refreshing lists data: {e}")
         refresh_ui()
+
+    def _schedule_async_refresh(reason: str):
+        """Schedule an async_refresh_ui() task, emitting task-probe log at lifecycle
+        points 2 and 3 (Reviews Codex-MEDIUM-1: verify NiceGUI task-per-callback)."""
+        _lists_task_probe('asyncio.create_task(async_refresh_ui())', reason=reason)
+        task = asyncio.create_task(async_refresh_ui())
+        _lists_task_probe('async_refresh_task_created', reason=reason, created_task_id=id(task))
+        return task
 
     # --- Create New List Dialog ---
     def show_create_list_dialog():
@@ -360,19 +402,91 @@ def create_lists_page():
 
     # --- Render Lists Sidebar ---
     def render_lists_sidebar():
-        """Render the left sidebar with project tree."""
-        # Use the new project tree component
-        create_project_tree(
-            lists_mgr=state.lists_mgr,
-            container=lists_sidebar_container,
-            on_select=select_list,
-            selected_list_id=page_state.selected_list_id,
-            on_refresh=lambda: asyncio.create_task(async_refresh_ui())
-        )
+        """Render the left sidebar with project tree.
+
+        Phase 92.2 D-VER-01 instrumentation: capture lists_mgr ONCE at entry;
+        wrap tree-render in a perf_counter() span (capturing `data = lists_mgr.data`
+        INSIDE the timed try: so the fetch cost is measured); emit a separate
+        lists_sidebar_decomposition log line at exit with L/S/Cp/Cs breakdown
+        REUSING the captured `data` local — NO second .data access in the
+        untimed finally: window.
+        NOTE: total_wall_clock_ms is NOT emitted here — it comes from the ASGI
+        middleware in web/main.py (canonical D-VER-02 source per Reviews MUST-FIX 4).
+        """
+        lists_mgr = state.lists_mgr  # capture ONCE — factory property per Phase 89 D-03/D-04
+
+        from web.supabase_client import _INSTRUMENTATION_ENABLED, _inst_snapshot, _inst_request_id
+        import json as _json
+        import time as _time
+
+        _t_render_start = _time.perf_counter() if _INSTRUMENTATION_ENABLED else None
+        data = None  # hoisted so finally: can read it without NameError
+
+        try:
+            # Capture `data` INSIDE the timed try: block so the .data access cost
+            # IS measured by sidebar_render_ms AND inherited by the ASGI middleware's
+            # total_wall_clock_ms (Reviews Round-2 HIGH-2 Path A).
+            if lists_mgr is not None:
+                data = lists_mgr.data
+            # Reviews Round-2 HIGH-2 Path A (baseline contamination fix):
+            # Pass `data=data` through to `create_project_tree` so the existing
+            # `create_project_tree` does NOT call `lists_mgr.data` again internally.
+            # UserListsManager._get_cached_data() is fresh-on-every-call per
+            # Phase 89 D-03/D-04, so every .data access is a NEW Supabase fetch.
+            # The instrumentation baseline would record 2 .data fetches per render
+            # where production does 1, inflating the pre-fix metric by ~1 fetch.
+            create_project_tree(
+                lists_mgr=lists_mgr,
+                container=lists_sidebar_container,
+                on_select=select_list,
+                selected_list_id=page_state.selected_list_id,
+                on_refresh=lambda: _schedule_async_refresh('project_tree_refresh'),
+                data=data,
+            )
+        finally:
+            if _INSTRUMENTATION_ENABLED:
+                sidebar_ms = (_time.perf_counter() - _t_render_start) * 1000.0
+                snap = _inst_snapshot()
+                L = S = Cp = 0
+                # Reuse the captured `data` local from the timed try: block.
+                # Do NOT re-access lists_mgr.data here — the timed window already
+                # paid that cost; a second fetch in finally: would contaminate
+                # the baseline numbers AND escape the ASGI middleware's wall-clock span.
+                for _lid, _ldata in (data or {}).get('lists', {}).items():
+                    L += 1
+                    if _ldata.get('project_id'):
+                        Cp += 1
+                    else:
+                        S += 1
+
+                predicted_queries = 4 + L + 2 * S
+                logger.info(
+                    "lists_sidebar_decomposition=%s",
+                    _json.dumps({
+                        'phase': '92.2',
+                        'event': 'lists_sidebar_decomposition',
+                        'request_id': _inst_request_id.get(),  # Reviews Round-2 MEDIUM-3
+                        'sidebar_render_ms': sidebar_ms,
+                        'decomposition': {
+                            'L': L,
+                            'S': S,
+                            'Cp': Cp,
+                            'Cs': S,
+                            'predicted_queries_from_codex_formula': '4 + L + 2*S',
+                            'predicted_query_count': predicted_queries,
+                        },
+                        'delta_vs_codex_formula': {
+                            'observed_minus_predicted': snap['query_count'] - predicted_queries,
+                            'ratio': (snap['query_count'] / predicted_queries) if predicted_queries > 0 else None,
+                        },
+                    }, sort_keys=True),
+                )
 
     # --- Select List ---
     def select_list(list_id: str):
         """Select a list to view its contents."""
+        # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 4
+        _lists_task_probe('list_select_callback', list_id=list_id)
         page_state.selected_list_id = list_id
         render_list_content()
 
@@ -687,9 +801,15 @@ def create_lists_page():
                 # Show sync status
                 if GlobalAuthState.is_logged_in():
                     ui.icon('cloud_done', size='sm').classes('text-green-600').tooltip(tr('Lists auto-sync between this site and the desktop app'))
+
+                    # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 3
+                    async def _refresh_button_click():
+                        _lists_task_probe('refresh_button_click')
+                        await async_refresh_ui()
+
                     ui.button(
                         icon='refresh',
-                        on_click=async_refresh_ui,
+                        on_click=_refresh_button_click,
                     ).props('flat round dense').tooltip(tr('Refresh lists from cloud'))
                 else:
                     ui.icon('cloud_off', size='sm').classes('text-gray-400').tooltip(tr('Local storage only - log in to sync'))
