@@ -350,13 +350,15 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 
 ### Phase 92.1: Reader-Client Retrofit (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
+**Goal:** Close the P0 reader-client RLS-reachability regression introduced by Phase 90 D-09/D-10. Migrate ~12 reader functions in `web/supabase_client.py` from the anonymous singleton `get_client()` to the per-request authenticated `get_user_client()`; install an AST-scanner CI guard and behavioral regression tests; trace and fix the secondary `safe_user_get('auth_session')` UI-context console error in the add-to-list-dialog "Create new list" path. After ship, Phase 92 SWEEP-05 smoke run 2 must PASS R0 before Plan 92-02 closeout docs can run.
+**Requirements:** READER-01, READER-02, READER-03, READER-04, READER-05, READER-06
 **Depends on:** Phase 92
-**Plans:** 0 plans
+**Plans:** 3 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 92.1 to break down)
+- [ ] 92.1-01-PLAN.md — Reader migration in web/supabase_client.py + AST scanner CI guard + behavioral regression tests + READER-XX registration in REQUIREMENTS.md (READER-01, READER-02, READER-04, READER-05)
+- [ ] 92.1-02-PLAN.md — Diagnose and fix Symptom 3 (safe_user_get UI-context error in add-to-list-dialog "Create new list" path) + regression test (READER-03)
+- [ ] 92.1-03-PLAN.md — Closeout docs: ROADMAP/STATE/OPEN_ISSUES/CLAUDE.md "Recently Changed" + SUMMARY.md (READER-06)
 
 ### Phase 999.1: Search results by folio (BACKLOG — PLANNED)
 
