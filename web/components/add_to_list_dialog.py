@@ -40,6 +40,66 @@ def get_star_icon(lists_mgr, sys_id: str) -> str:
     return 'star_border'
 
 
+async def _create_and_add_handler(
+    *,
+    name: str,
+    project_id: Optional[str],
+    lists_mgr,
+    sys_id: str,
+    fl_id: Optional[str],
+    new_list_note_value: str,
+    dialog,
+    on_success: Optional[Callable] = None,
+    is_logged_in: bool,
+) -> bool:
+    """Phase 92.1 READER-03: extracted from inline closure to make the
+    create-new-list-and-add-item flow unit-testable without instantiating a
+    ui.dialog (which requires a full NiceGUI client context). Returns True on
+    success (list created + item added + dialog.close called), False on any
+    failure path (notify already shown to user).
+
+    Revision Blocker 2 (2026-05-17): this extraction is the LOCKED first step
+    of Plan 92.1-02 Task 2 regardless of Task 1 diagnosis outcome. The
+    no-repro branch was confirmed during browser reproduction (3 successful
+    list creations, zero safe_user_get('auth_session') WARNINGs, Supabase
+    rows persisted with correct user_id) -- Symptom 3 is gone as a
+    side-effect of Plan 92.1-01's reader migration. This function exists
+    to make `tests/test_add_to_list_dialog_ui_context.py` possible as a
+    permanent CI regression guard.
+    """
+    if not name:
+        ui.notify(tr('Please enter a list name'), type='warning')
+        return False
+    try:
+        if is_logged_in:
+            new_list_id = await lists_mgr.create_list(name, project_id=project_id)
+        else:
+            new_list_id = lists_mgr.create_list_sync(name, project_id=project_id)
+    except Exception as e:
+        ui.notify(f"Error: {e}", type='negative')
+        return False
+    if not new_list_id:
+        ui.notify(tr('Failed to create list'), type='negative')
+        return False
+    try:
+        if is_logged_in:
+            result = await lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_value, fl_id=fl_id)
+        else:
+            result = lists_mgr.add_item_sync(sys_id, new_list_id, note=new_list_note_value, fl_id=fl_id)
+    except Exception as e:
+        ui.notify(f"Error: {e}", type='negative')
+        return False
+    if not result:
+        ui.notify(tr('Failed to add item'), type='negative')
+        return False
+    ui.notify(f"{tr('List created')}: {name}", type='positive')
+    ui.notify(tr('Added to list'), type='positive')
+    dialog.close()
+    if on_success:
+        on_success()
+    return True
+
+
 def show_add_to_list_dialog(
     sys_id: str,
     shelfmark: str,
@@ -66,23 +126,6 @@ def show_add_to_list_dialog(
     if not lists_mgr:
         ui.notify(tr('Lists manager not available'), type='warning')
         return
-
-    # READER-03 DIAG P1 (Phase 92.1 Plan 02 Task 1 -- Reviews R2-2, temporary,
-    # Task 2 removes this). Capture nicegui.storage.request_contextvar state at
-    # dialog OPENER time. Compare with P2 (button registration) and P3 (handler
-    # firing) to identify which Reviews R2-2 case (a/b/c/d) the failure falls
-    # into. The captured `id()` lets us prove whether the SAME request is bound
-    # across all three points.
-    try:
-        import logging as _logging_p1
-        from nicegui.storage import request_contextvar as _rcv_p1
-        _r1 = _rcv_p1.get()
-        _logging_p1.getLogger('web.components.add_to_list_dialog').warning(
-            "[READER-03 DIAG P1] dialog-entry request_contextvar=%s",
-            'None' if _r1 is None else 'bound:%s' % id(_r1),
-        )
-    except Exception:
-        pass
 
     # State for inline list creation
     creating_new_list = {'active': False}
@@ -197,95 +240,22 @@ def show_add_to_list_dialog(
                     ui.button(tr('Back'), on_click=back_to_list_selection).props('flat')
 
                 async def create_and_add():
-                    # READER-03 DIAG P3 (Phase 92.1 Plan 02 Task 1 -- Reviews R2-2,
-                    # temporary, Task 2 removes this). Capture request_contextvar
-                    # state at HANDLER FIRING time. This is the PRIMARY diagnostic
-                    # signal: if P3 is None, the contextvar is unbound at click time
-                    # and `app.storage.user` access raises the UI-context error.
-                    try:
-                        import logging as _logging_p3
-                        from nicegui.storage import request_contextvar as _rcv_p3
-                        _r3 = _rcv_p3.get()
-                        _logging_p3.getLogger('web.components.add_to_list_dialog').warning(
-                            "[READER-03 DIAG P3] handler-firing request_contextvar=%s",
-                            'None' if _r3 is None else 'bound:%s' % id(_r3),
-                        )
-                    except Exception:
-                        pass
-
-                    name = new_list_name.value.strip()
-                    project_id = selected_project['value']
-                    if not name:
-                        ui.notify(tr('Please enter a list name'), type='warning')
-                        return
-
-                    # Create the new list - use async if authenticated, sync otherwise
-                    # Color is inherited from project or defaults to gold for standalone
-                    is_logged_in = GlobalAuthState.is_logged_in()
-
-                    # READER-03 DIAG P3.5 (Phase 92.1 Plan 02 Task 1 -- Revision Warning 7,
-                    # temporary, Task 2 removes this). Capture traceback immediately before
-                    # the failing call so we know which function chain reached
-                    # safe_user_get('auth_session') at the moment the UI-context error fires.
-                    try:
-                        import traceback as _traceback_p35
-                        import logging as _logging_p35
-                        from nicegui.storage import request_contextvar as _rcv_p35
-                        _r35 = _rcv_p35.get()
-                        _logging_p35.getLogger('web.components.add_to_list_dialog').warning(
-                            "[READER-03 DIAG P3.5] pre-create_list request_contextvar=%s, stack:\n%s",
-                            'None' if _r35 is None else 'bound:%s' % id(_r35),
-                            ''.join(_traceback_p35.format_stack()[-5:]),
-                        )
-                    except Exception:
-                        pass
-
-                    try:
-                        if is_logged_in:
-                            new_list_id = await lists_mgr.create_list(name, project_id=project_id)
-                        else:
-                            new_list_id = lists_mgr.create_list_sync(name, project_id=project_id)
-                    except Exception as e:
-                        ui.notify(f"Error: {e}", type='negative')
-                        return
-
-                    if new_list_id:
-                        # Add item to the new list
-                        try:
-                            if is_logged_in:
-                                result = await lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
-                            else:
-                                result = lists_mgr.add_item_sync(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
-                        except Exception as e:
-                            ui.notify(f"Error: {e}", type='negative')
-                            return
-
-                        if result:
-                            ui.notify(f"{tr('List created')}: {name}", type='positive')
-                            ui.notify(tr('Added to list'), type='positive')
-                            dialog.close()
-                            if on_success:
-                                on_success()
-                        else:
-                            ui.notify(tr('Failed to add item'), type='negative')
-                    else:
-                        ui.notify(tr('Failed to create list'), type='negative')
-
-                # READER-03 DIAG P2 (Phase 92.1 Plan 02 Task 1 -- Reviews R2-2,
-                # temporary, Task 2 removes this). Capture request_contextvar
-                # state at BUTTON REGISTRATION time. If P1==bound and P2==bound
-                # but P3==None, case-c applies (capture ctx at button registration).
-                # If P1==bound and P2==None, case-b applies (capture at dialog entry).
-                try:
-                    import logging as _logging_p2
-                    from nicegui.storage import request_contextvar as _rcv_p2
-                    _r2 = _rcv_p2.get()
-                    _logging_p2.getLogger('web.components.add_to_list_dialog').warning(
-                        "[READER-03 DIAG P2] button-registration request_contextvar=%s",
-                        'None' if _r2 is None else 'bound:%s' % id(_r2),
+                    # READER-03 (Phase 92.1) -- delegate to module-level helper
+                    # for testability (Plan 92.1-02 Task 2 Revision Blocker 2
+                    # mandatory refactor; no-repro branch confirmed -- the refactor
+                    # is the permanent regression guard, exercised by
+                    # tests/test_add_to_list_dialog_ui_context.py).
+                    await _create_and_add_handler(
+                        name=new_list_name.value.strip(),
+                        project_id=selected_project['value'],
+                        lists_mgr=lists_mgr,
+                        sys_id=sys_id,
+                        fl_id=fl_id,
+                        new_list_note_value=new_list_note_input.value,
+                        dialog=dialog,
+                        on_success=on_success,
+                        is_logged_in=GlobalAuthState.is_logged_in(),
                     )
-                except Exception:
-                    pass
 
                 ui.button(tr('Create and Add'), on_click=create_and_add).classes('btn-primary')
 
