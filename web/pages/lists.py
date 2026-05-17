@@ -360,15 +360,85 @@ def create_lists_page():
 
     # --- Render Lists Sidebar ---
     def render_lists_sidebar():
-        """Render the left sidebar with project tree."""
-        # Use the new project tree component
-        create_project_tree(
-            lists_mgr=state.lists_mgr,
-            container=lists_sidebar_container,
-            on_select=select_list,
-            selected_list_id=page_state.selected_list_id,
-            on_refresh=lambda: asyncio.create_task(async_refresh_ui())
-        )
+        """Render the left sidebar with project tree.
+
+        Phase 92.2 D-VER-01 instrumentation: capture lists_mgr ONCE at entry;
+        wrap tree-render in a perf_counter() span (capturing `data = lists_mgr.data`
+        INSIDE the timed try: so the fetch cost is measured); emit a separate
+        lists_sidebar_decomposition log line at exit with L/S/Cp/Cs breakdown
+        REUSING the captured `data` local — NO second .data access in the
+        untimed finally: window.
+        NOTE: total_wall_clock_ms is NOT emitted here — it comes from the ASGI
+        middleware in web/main.py (canonical D-VER-02 source per Reviews MUST-FIX 4).
+        """
+        lists_mgr = state.lists_mgr  # capture ONCE — factory property per Phase 89 D-03/D-04
+
+        from web.supabase_client import _INSTRUMENTATION_ENABLED, _inst_snapshot, _inst_request_id
+        import json as _json
+        import time as _time
+
+        _t_render_start = _time.perf_counter() if _INSTRUMENTATION_ENABLED else None
+        data = None  # hoisted so finally: can read it without NameError
+
+        try:
+            # Capture `data` INSIDE the timed try: block so the .data access cost
+            # IS measured by sidebar_render_ms AND inherited by the ASGI middleware's
+            # total_wall_clock_ms (Reviews Round-2 HIGH-2 Path A).
+            if lists_mgr is not None:
+                data = lists_mgr.data
+            # Reviews Round-2 HIGH-2 Path A (baseline contamination fix):
+            # Pass `data=data` through to `create_project_tree` so the existing
+            # `create_project_tree` does NOT call `lists_mgr.data` again internally.
+            # UserListsManager._get_cached_data() is fresh-on-every-call per
+            # Phase 89 D-03/D-04, so every .data access is a NEW Supabase fetch.
+            # The instrumentation baseline would record 2 .data fetches per render
+            # where production does 1, inflating the pre-fix metric by ~1 fetch.
+            create_project_tree(
+                lists_mgr=lists_mgr,
+                container=lists_sidebar_container,
+                on_select=select_list,
+                selected_list_id=page_state.selected_list_id,
+                on_refresh=lambda: _schedule_async_refresh('project_tree_refresh'),
+                data=data,
+            )
+        finally:
+            if _INSTRUMENTATION_ENABLED:
+                sidebar_ms = (_time.perf_counter() - _t_render_start) * 1000.0
+                snap = _inst_snapshot()
+                L = S = Cp = 0
+                # Reuse the captured `data` local from the timed try: block.
+                # Do NOT re-access lists_mgr.data here — the timed window already
+                # paid that cost; a second fetch in finally: would contaminate
+                # the baseline numbers AND escape the ASGI middleware's wall-clock span.
+                for _lid, _ldata in (data or {}).get('lists', {}).items():
+                    L += 1
+                    if _ldata.get('project_id'):
+                        Cp += 1
+                    else:
+                        S += 1
+
+                predicted_queries = 4 + L + 2 * S
+                logger.info(
+                    "lists_sidebar_decomposition=%s",
+                    _json.dumps({
+                        'phase': '92.2',
+                        'event': 'lists_sidebar_decomposition',
+                        'request_id': _inst_request_id.get(),  # Reviews Round-2 MEDIUM-3
+                        'sidebar_render_ms': sidebar_ms,
+                        'decomposition': {
+                            'L': L,
+                            'S': S,
+                            'Cp': Cp,
+                            'Cs': S,
+                            'predicted_queries_from_codex_formula': '4 + L + 2*S',
+                            'predicted_query_count': predicted_queries,
+                        },
+                        'delta_vs_codex_formula': {
+                            'observed_minus_predicted': snap['query_count'] - predicted_queries,
+                            'ratio': (snap['query_count'] / predicted_queries) if predicted_queries > 0 else None,
+                        },
+                    }, sort_keys=True),
+                )
 
     # --- Select List ---
     def select_list(list_id: str):

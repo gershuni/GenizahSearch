@@ -759,7 +759,7 @@ class UserListsManager:
             return self.local_mgr.update_list_project(list_id, project_id)
         return False
 
-    def get_list_display_color(self, list_id: str) -> str:
+    def get_list_display_color(self, list_id: str, data: Optional[Dict] = None) -> str:
         """
         Get the display color for a list, considering project inheritance.
 
@@ -767,10 +767,15 @@ class UserListsManager:
         1. System lists (Recently Viewed) -> gray
         2. Lists in projects -> project's color
         3. Standalone lists -> gold
+
+        Args:
+            data: Optional pre-fetched data dict (Reviews Round-2 HIGH-2 Path A /
+                  CONTEXT.md D-FANOUT-01). When None, falls back to _get_cached_data().
         """
-        data = self._get_cached_data() if self.is_authenticated else (
-            self.local_mgr.data if self.local_mgr else self._get_default_data()
-        )
+        if data is None:
+            data = self._get_cached_data() if self.is_authenticated else (
+                self.local_mgr.data if self.local_mgr else self._get_default_data()
+            )
 
         list_data = data.get('lists', {}).get(str(list_id), {})
 
@@ -788,16 +793,21 @@ class UserListsManager:
         # Standalone lists use gold
         return '#FFD700'
 
-    def get_lists_by_project(self) -> Dict[Optional[str], List[Dict]]:
+    def get_lists_by_project(self, data: Optional[Dict] = None) -> Dict[Optional[str], List[Dict]]:
         """
         Get lists organized by project.
+
+        Args:
+            data: Optional pre-fetched data dict (Reviews Round-2 HIGH-2 Path A /
+                  CONTEXT.md D-FANOUT-01). When None, falls back to _get_cached_data().
 
         Returns:
             Dict mapping project_id (or None for standalone) to list of lists
         """
-        data = self._get_cached_data() if self.is_authenticated else (
-            self.local_mgr.data if self.local_mgr else self._get_default_data()
-        )
+        if data is None:
+            data = self._get_cached_data() if self.is_authenticated else (
+                self.local_mgr.data if self.local_mgr else self._get_default_data()
+            )
 
         by_project: Dict[Optional[str], List[Dict]] = {None: []}
 
