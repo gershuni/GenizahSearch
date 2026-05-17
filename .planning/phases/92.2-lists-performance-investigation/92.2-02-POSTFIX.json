@@ -1,0 +1,192 @@
+{
+  "phase": "92.2-lists-performance-investigation",
+  "plan": "02",
+  "artifact_kind": "post_fix_measurement",
+  "captured_by": "Hillel Gershuni",
+  "captured_at": "2026-05-17T19:32:07.854317Z",
+  "environment": {
+    "user_account_hash": "966602d4fcf2",
+    "user_account_hash_note": "sha256(\"hillel@dicta.org.il\")[:12]; same account as 92.2-01-BASELINE.json.",
+    "python_version": "3.11.9",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "git_head_at_capture": "1b0ed298d6ddf743712ab4ae2f68897af7dcc06c",
+    "server_port": 8083,
+    "server_started_at": "within this capture session (NICEGUI_RELOAD=false, single-process)",
+    "rpc_pushed_to_supabase": true,
+    "rpc_push_note": "Hillel pushed migrations/add_list_item_counts_rpc.sql to production Supabase before this capture; verified zero-arg function exists with EXECUTE granted to authenticated + service_role."
+  },
+  "cold_discard_sample": {
+    "request_id": "cc0e1dfb5c51",
+    "label": "cold_discard",
+    "request": {
+      "method": "GET",
+      "path": "/lists"
+    },
+    "response": {
+      "body_flushed": true,
+      "response_bytes": 69577,
+      "status_code": 200
+    },
+    "totals": {
+      "client_build_count": 1,
+      "max_query_latency_ms": 186.74719997216016,
+      "p50_query_latency_ms": 81.17340004537255,
+      "p95_query_latency_ms": 186.74719997216016,
+      "query_count": 2,
+      "request_id": "cc0e1dfb5c51",
+      "total_wall_clock_ms": 2641.246900020633
+    }
+  },
+  "samples": [
+    {
+      "request_id": "bf6bb199c825",
+      "label": "warm",
+      "request": {
+        "method": "GET",
+        "path": "/lists"
+      },
+      "response": {
+        "body_flushed": true,
+        "response_bytes": 69577,
+        "status_code": 200
+      },
+      "totals": {
+        "client_build_count": 1,
+        "max_query_latency_ms": 104.48160005034879,
+        "p50_query_latency_ms": 74.3135999655351,
+        "p95_query_latency_ms": 104.48160005034879,
+        "query_count": 2,
+        "request_id": "bf6bb199c825",
+        "total_wall_clock_ms": 1910.5054000392556
+      }
+    },
+    {
+      "request_id": "d633902d695e",
+      "label": "warm",
+      "request": {
+        "method": "GET",
+        "path": "/lists"
+      },
+      "response": {
+        "body_flushed": true,
+        "response_bytes": 69577,
+        "status_code": 200
+      },
+      "totals": {
+        "client_build_count": 1,
+        "max_query_latency_ms": 115.81440002191812,
+        "p50_query_latency_ms": 76.2383000110276,
+        "p95_query_latency_ms": 115.81440002191812,
+        "query_count": 2,
+        "request_id": "d633902d695e",
+        "total_wall_clock_ms": 1912.0146000059322
+      }
+    },
+    {
+      "request_id": "a67f460dcfb3",
+      "label": "warm",
+      "request": {
+        "method": "GET",
+        "path": "/lists"
+      },
+      "response": {
+        "body_flushed": true,
+        "response_bytes": 69577,
+        "status_code": 200
+      },
+      "totals": {
+        "client_build_count": 1,
+        "max_query_latency_ms": 106.60689999349415,
+        "p50_query_latency_ms": 75.04800002789125,
+        "p95_query_latency_ms": 106.60689999349415,
+        "query_count": 2,
+        "request_id": "a67f460dcfb3",
+        "total_wall_clock_ms": 2168.87150000548
+      }
+    }
+  ],
+  "gate_metrics": {
+    "aggregation_rule": "all_3_warm_samples_must_pass",
+    "sample_count": 3,
+    "warm_total_wall_clock_ms": [
+      1910.5054000392556,
+      1912.0146000059322,
+      2168.87150000548
+    ],
+    "min_warm_total_wall_clock_ms": 1910.5054000392556,
+    "max_warm_total_wall_clock_ms": 2168.87150000548,
+    "mean_warm_total_wall_clock_ms": 1997.1305000168893,
+    "all_warm_total_wall_clock_ms_lte_5000": true,
+    "gate_threshold_ms": 5000,
+    "warm_query_count_per_render": [
+      2,
+      2,
+      2
+    ],
+    "warm_client_build_count_per_render": [
+      1,
+      1,
+      1
+    ],
+    "all_renders_query_count_lte_6": true,
+    "all_renders_client_build_count_lte_1": true
+  },
+  "improvement_vs_baseline": {
+    "baseline_max_ms": 45763.27300001867,
+    "postfix_max_ms": 2168.87150000548,
+    "baseline_mean_ms": 38490.16126666296,
+    "postfix_mean_ms": 1997.1305000168893,
+    "wall_clock_speedup_factor_mean": 19.272732185672123,
+    "wall_clock_speedup_factor_max": 21.10003889114825,
+    "baseline_query_count_per_render": 26,
+    "postfix_query_count_per_render": 2,
+    "query_count_reduction_factor": 13.0,
+    "baseline_client_builds_per_render": 26,
+    "postfix_client_builds_per_render": 1,
+    "client_build_reduction_factor": 26.0
+  },
+  "capture_notes": [
+    "HARD GATE result: True (all 3 warm samples below 5000ms).",
+    "Mean wall-clock improvement: 38490ms to 1997ms = 19.3x speedup.",
+    "Max wall-clock improvement: 45763ms to 2169ms = 21.1x speedup.",
+    "Query count: 26 per render to 2 per render = 13.0x reduction.",
+    "Client build count: 26 per render to 1 per render = 26.0x reduction. WeakKeyDictionary memo on get_user_client() is working as designed: a single authenticated Client is built and reused for all queries within a single asyncio.Task.",
+    "Target was at most 6 queries (1 batched RPC + at most 4 reader calls); observed 2 -- significantly better than target, suggesting the threaded data parameter eliminated additional queries beyond the get_list_item_counts batching.",
+    "Sidebar decomposition log lines absent: with `data` threaded through and pre-loaded, the sidebar render path no longer enters the L+2S Supabase fetch branch -- by design (the threaded data parameter eliminates the per-list fetch that drove L+2S cost). Wall-clock from the ASGI middleware is the canonical gate metric (Reviews MUST-FIX 4).",
+    "D-VER-05 review gate: NOT triggered. The pre-fix baseline confirmed the Codex cost-formula prediction (ratio 0.929), validating the fix shape from CONTEXT.md; the post-fix measurement confirms the fix works as predicted.",
+    "Plan 92.2-02 must_haves satisfied: 3 warm renders <= 5s (gate met by ~2.3x margin); query_count drop from baseline (26 to 2); client_build_count = 1 per render (memo dedupes all calls)."
+  ],
+  "all_captured_samples_for_reference": {
+    "count": 4,
+    "samples": [
+      {
+        "request_id": "cc0e1dfb5c51",
+        "role": "cold_discard",
+        "total_wall_clock_ms": 2641.246900020633,
+        "query_count": 2,
+        "client_build_count": 1
+      },
+      {
+        "request_id": "bf6bb199c825",
+        "role": "warm_locked",
+        "total_wall_clock_ms": 1910.5054000392556,
+        "query_count": 2,
+        "client_build_count": 1
+      },
+      {
+        "request_id": "d633902d695e",
+        "role": "warm_locked",
+        "total_wall_clock_ms": 1912.0146000059322,
+        "query_count": 2,
+        "client_build_count": 1
+      },
+      {
+        "request_id": "a67f460dcfb3",
+        "role": "warm_locked",
+        "total_wall_clock_ms": 2168.87150000548,
+        "query_count": 2,
+        "client_build_count": 1
+      }
+    ]
+  }
+}
