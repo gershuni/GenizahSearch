@@ -29,6 +29,37 @@ import asyncio
 logger = logging.getLogger(__name__)
 
 
+def _lists_task_probe(label: str, **fields) -> None:
+    """Record asyncio task identity at lifecycle points.
+
+    Phase 92.2 / Reviews Codex-MEDIUM-1: emits lists_task_probe=<json> with
+    id(asyncio.current_task()) at 4 lifecycle points so Plan 92.2-02's
+    task-scope memo assumption is empirically verified by reading the JSON
+    log BEFORE the memo lands. Zero production cost when env var is off
+    (short-circuits on first line).
+    """
+    import json as _json
+    import os as _os
+
+    if _os.getenv('GS_LISTS_PERF_INSTRUMENTATION') != '1':
+        return
+
+    try:
+        task = asyncio.current_task()
+    except RuntimeError:
+        task = None
+
+    record = {
+        'phase': '92.2',
+        'event': 'lists_task_probe',
+        'label': label,
+        'current_task_id': id(task) if task is not None else None,
+        'current_task_name': task.get_name() if task is not None else None,
+        **fields,
+    }
+    logger.info('lists_task_probe=%s', _json.dumps(record, sort_keys=True))
+
+
 def create_inline_edit_label(
     current_name: str,
     list_id: str,
@@ -109,6 +140,9 @@ def create_inline_edit_label(
 def create_lists_page():
     """Create the personal lists management page."""
 
+    # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 1
+    _lists_task_probe('initial_page_render')
+
     # State
     class ListsPageState:
         def __init__(self):
@@ -135,6 +169,14 @@ def create_lists_page():
             except Exception as e:
                 logger.error(f"Error refreshing lists data: {e}")
         refresh_ui()
+
+    def _schedule_async_refresh(reason: str):
+        """Schedule an async_refresh_ui() task, emitting task-probe log at lifecycle
+        points 2 and 3 (Reviews Codex-MEDIUM-1: verify NiceGUI task-per-callback)."""
+        _lists_task_probe('asyncio.create_task(async_refresh_ui())', reason=reason)
+        task = asyncio.create_task(async_refresh_ui())
+        _lists_task_probe('async_refresh_task_created', reason=reason, created_task_id=id(task))
+        return task
 
     # --- Create New List Dialog ---
     def show_create_list_dialog():
@@ -443,6 +485,8 @@ def create_lists_page():
     # --- Select List ---
     def select_list(list_id: str):
         """Select a list to view its contents."""
+        # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 4
+        _lists_task_probe('list_select_callback', list_id=list_id)
         page_state.selected_list_id = list_id
         render_list_content()
 
@@ -757,9 +801,15 @@ def create_lists_page():
                 # Show sync status
                 if GlobalAuthState.is_logged_in():
                     ui.icon('cloud_done', size='sm').classes('text-green-600').tooltip(tr('Lists auto-sync between this site and the desktop app'))
+
+                    # Phase 92.2 / Reviews Codex-MEDIUM-1: probe lifecycle point 3
+                    async def _refresh_button_click():
+                        _lists_task_probe('refresh_button_click')
+                        await async_refresh_ui()
+
                     ui.button(
                         icon='refresh',
-                        on_click=async_refresh_ui,
+                        on_click=_refresh_button_click,
                     ).props('flat round dense').tooltip(tr('Refresh lists from cloud'))
                 else:
                     ui.icon('cloud_off', size='sm').classes('text-gray-400').tooltip(tr('Local storage only - log in to sync'))
