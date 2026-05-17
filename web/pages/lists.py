@@ -57,7 +57,7 @@ def _lists_task_probe(label: str, **fields) -> None:
         'current_task_name': task.get_name() if task is not None else None,
         **fields,
     }
-    logger.info('lists_task_probe=%s', _json.dumps(record, sort_keys=True))
+    print('lists_task_probe=' + _json.dumps(record, sort_keys=True), flush=True)
 
 
 def create_inline_edit_label(
@@ -460,9 +460,8 @@ def create_lists_page():
                         S += 1
 
                 predicted_queries = 4 + L + 2 * S
-                logger.info(
-                    "lists_sidebar_decomposition=%s",
-                    _json.dumps({
+                print(
+                    'lists_sidebar_decomposition=' + _json.dumps({
                         'phase': '92.2',
                         'event': 'lists_sidebar_decomposition',
                         'request_id': _inst_request_id.get(),  # Reviews Round-2 MEDIUM-3
@@ -480,6 +479,7 @@ def create_lists_page():
                             'ratio': (snap['query_count'] / predicted_queries) if predicted_queries > 0 else None,
                         },
                     }, sort_keys=True),
+                    flush=True,
                 )
 
     # --- Select List ---

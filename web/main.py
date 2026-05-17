@@ -113,9 +113,9 @@ class _ListsPerfRouteTimingMiddleware:
                             **_inst_snapshot(),
                         },
                     }
-                    logging.getLogger(__name__).info(
-                        'lists_perf_baseline=%s',
-                        _json.dumps(record, sort_keys=True),
+                    print(
+                        'lists_perf_baseline=' + _json.dumps(record, sort_keys=True),
+                        flush=True,
                     )
             await send(message)
 
@@ -132,9 +132,9 @@ class _ListsPerfRouteTimingMiddleware:
                 'response': {'body_flushed': False},
                 'totals': {'total_wall_clock_ms': elapsed_ms, **_inst_snapshot()},
             }
-            logging.getLogger(__name__).exception(
-                'lists_perf_baseline=%s',
-                _json.dumps(record, sort_keys=True),
+            print(
+                'lists_perf_baseline=' + _json.dumps(record, sort_keys=True),
+                flush=True,
             )
             raise
 

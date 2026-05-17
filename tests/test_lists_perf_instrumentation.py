@@ -210,9 +210,14 @@ def _make_fake_receive():
     return fake_receive
 
 
-def test_asgi_middleware_lists_path_emits_log(caplog):
+def test_asgi_middleware_lists_path_emits_log(capsys):
     """Test 7 (Reviews Round-2 MEDIUM-1): /lists path + instrumentation enabled
-    emits exactly ONE lists_perf_baseline= log record with correct shape."""
+    emits exactly ONE lists_perf_baseline= line on stdout with correct shape.
+
+    Phase 92.2-01 follow-up: emission moved from logging.getLogger(__name__) to
+    print(flush=True) because the project uses a dedicated 'genizah' logger
+    chain with propagate=False, so root-logger-namespace records would be
+    silently dropped during real captures."""
     import web.main as main_mod
     from web.main import _ListsPerfRouteTimingMiddleware
 
@@ -230,22 +235,23 @@ def test_asgi_middleware_lists_path_emits_log(caplog):
         received_messages.append(message)
 
     with patch.object(mod, '_INSTRUMENTATION_ENABLED', True):
-        with caplog.at_level(logging.INFO):
-            middleware = _ListsPerfRouteTimingMiddleware(tracked_fake_app)
-            asyncio.run(middleware(scope, _make_fake_receive(), fake_send))
+        middleware = _ListsPerfRouteTimingMiddleware(tracked_fake_app)
+        asyncio.run(middleware(scope, _make_fake_receive(), fake_send))
 
     # App was called exactly once
     assert len(fake_app_calls) == 1
 
-    # Exactly one lists_perf_baseline= log record
-    baseline_records = [r for r in caplog.records if 'lists_perf_baseline=' in r.getMessage()]
-    assert len(baseline_records) == 1, (
-        f"Expected 1 lists_perf_baseline= log record, got {len(baseline_records)}"
+    captured = capsys.readouterr()
+    baseline_lines = [
+        line for line in captured.out.splitlines()
+        if 'lists_perf_baseline=' in line
+    ]
+    assert len(baseline_lines) == 1, (
+        f"Expected 1 lists_perf_baseline= stdout line, got {len(baseline_lines)}"
     )
 
     # Parse the JSON payload
-    msg = baseline_records[0].getMessage()
-    json_str = msg.split('lists_perf_baseline=', 1)[1]
+    json_str = baseline_lines[0].split('lists_perf_baseline=', 1)[1]
     payload = json.loads(json_str)
 
     assert payload['source'] == 'asgi_request_body_flush'
@@ -258,9 +264,9 @@ def test_asgi_middleware_lists_path_emits_log(caplog):
     assert all(c in '0123456789abcdef' for c in payload['request_id'])
 
 
-def test_asgi_middleware_non_lists_path_short_circuits(caplog):
+def test_asgi_middleware_non_lists_path_short_circuits(capsys):
     """Test 8 (Reviews Round-2 MEDIUM-1): non-/lists path emits ZERO
-    lists_perf_baseline= log records but still delegates to the app."""
+    lists_perf_baseline= stdout lines but still delegates to the app."""
     from web.main import _ListsPerfRouteTimingMiddleware
 
     fake_app_calls = []
@@ -277,23 +283,26 @@ def test_asgi_middleware_non_lists_path_short_circuits(caplog):
         received_messages_8.append(message)
 
     with patch.object(mod, '_INSTRUMENTATION_ENABLED', True):
-        with caplog.at_level(logging.INFO):
-            middleware = _ListsPerfRouteTimingMiddleware(tracked_fake_app)
-            asyncio.run(middleware(scope, _make_fake_receive(), fake_send_8))
+        middleware = _ListsPerfRouteTimingMiddleware(tracked_fake_app)
+        asyncio.run(middleware(scope, _make_fake_receive(), fake_send_8))
 
     # App was still called once (middleware delegates)
     assert len(fake_app_calls) == 1
 
-    # Zero baseline log records
-    baseline_records = [r for r in caplog.records if 'lists_perf_baseline=' in r.getMessage()]
-    assert len(baseline_records) == 0, (
-        f"Expected 0 lists_perf_baseline= log records for non-/lists path, got {len(baseline_records)}"
+    # Zero baseline stdout lines
+    captured = capsys.readouterr()
+    baseline_lines = [
+        line for line in captured.out.splitlines()
+        if 'lists_perf_baseline=' in line
+    ]
+    assert len(baseline_lines) == 0, (
+        f"Expected 0 lists_perf_baseline= stdout lines for non-/lists path, got {len(baseline_lines)}"
     )
 
 
-def test_asgi_middleware_instrumentation_disabled_short_circuits(caplog):
+def test_asgi_middleware_instrumentation_disabled_short_circuits(capsys):
     """Test 9 (Reviews Round-2 MEDIUM-1): /lists path but instrumentation
-    disabled -> ZERO lists_perf_baseline= log records, app still called once."""
+    disabled -> ZERO lists_perf_baseline= stdout lines, app still called once."""
     from web.main import _ListsPerfRouteTimingMiddleware
 
     fake_app_calls = []
@@ -310,15 +319,18 @@ def test_asgi_middleware_instrumentation_disabled_short_circuits(caplog):
         received_messages_9.append(message)
 
     with patch.object(mod, '_INSTRUMENTATION_ENABLED', False):
-        with caplog.at_level(logging.INFO):
-            middleware = _ListsPerfRouteTimingMiddleware(tracked_fake_app)
-            asyncio.run(middleware(scope, _make_fake_receive(), fake_send_9))
+        middleware = _ListsPerfRouteTimingMiddleware(tracked_fake_app)
+        asyncio.run(middleware(scope, _make_fake_receive(), fake_send_9))
 
     # App was still called once
     assert len(fake_app_calls) == 1
 
-    # Zero baseline log records (instrumentation disabled)
-    baseline_records = [r for r in caplog.records if 'lists_perf_baseline=' in r.getMessage()]
-    assert len(baseline_records) == 0, (
-        f"Expected 0 lists_perf_baseline= records when disabled, got {len(baseline_records)}"
+    # Zero baseline stdout lines (instrumentation disabled)
+    captured = capsys.readouterr()
+    baseline_lines = [
+        line for line in captured.out.splitlines()
+        if 'lists_perf_baseline=' in line
+    ]
+    assert len(baseline_lines) == 0, (
+        f"Expected 0 lists_perf_baseline= stdout lines when disabled, got {len(baseline_lines)}"
     )
