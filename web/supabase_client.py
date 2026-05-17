@@ -923,6 +923,52 @@ def update_profile(user_id: str, data: Dict) -> Dict:
 # LISTS OPERATIONS
 # ============================================================================
 
+def get_list_item_counts() -> Dict[int, int]:
+    """Batched item-count lookup for the authenticated caller's lists.
+
+    Phase 92.2 D-FANOUT-02 + Reviews MUST-FIX 1, 2: replaces the per-list
+    `_get_list_item_count` fanout with ONE RPC call. The RPC
+    `get_list_item_counts_for_user()` is `security invoker` so the
+    caller's auth.uid() applies to the inner user_lists RLS policy.
+    Zero-arg signature — identity derived from JWT inside the function
+    (Reviews MUST-FIX 2 — eliminates `p_user_id` anti-pattern).
+
+    Returns:
+        Dict[int, int] mapping list_id to item_count. Lists with zero
+        items are absent from the result; callers should default to 0
+        via `counts.get(list_id, 0)`. Empty dict means "no rows" (a
+        valid batched result for a user with no items) — NOT an error
+        indicator.
+
+    Raises:
+        Exception: re-raises any non-JWT-expired error so the caller's
+            `counts=None` fallback path is reachable (Reviews MUST-FIX 1).
+            The previous design swallowed all errors to `{}` which broke
+            the fallback semantics — `counts={}` reads as "0 items for
+            every list" instead of "per-list legacy fetch needed."
+    """
+    def _execute() -> Dict[int, int]:
+        client = get_user_client()
+        response = client.rpc('get_list_item_counts_for_user', {}).execute()
+        rows = response.data or []
+        counts: Dict[int, int] = {}
+        for row in rows:
+            if 'list_id' not in row:
+                continue
+            counts[int(row['list_id'])] = int(row.get('item_count') or 0)
+        return counts
+
+    try:
+        return _execute()
+    except Exception as e:
+        if _is_jwt_expired(e):
+            logger.warning("JWT expired in get_list_item_counts, refreshing session and retrying")
+            if _refresh_user_session():
+                return _execute()
+        logger.error("Error getting list item counts: %s", e)
+        raise
+
+
 def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
     """Get all lists for a user.
 
