@@ -1,0 +1,10 @@
+# Independent AST scan of web/ for raw app.storage.user accesses
+# Phase 92 SWEEP-01 Surface 1 evidence -- reproduces the tests/test_no_raw_storage_access.py logic standalone
+# Scan timestamp (UTC): 2026-05-17T03:45:09.406624Z
+# Repo HEAD: b94eed74
+# Files scanned: 65 (skipped web/safe_storage.py = the chokepoint)
+# Allowlist BYPASSED: this raw scan ignores .planning/phase87_storage_allowlist.yaml so the result is unfiltered
+# Total violations: 0
+
+OK: 0 raw app.storage.user accesses found in web/ (excluding web/safe_storage.py).
+This independently confirms the Phase 87 lint scanner enforcement.
