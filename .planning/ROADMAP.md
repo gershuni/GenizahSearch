@@ -349,6 +349,16 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 
 ## Backlog
 
+### Phase 92.2: lists-performance-investigation (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 92
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 92.2 to break down)
+
 ### Phase 92.1: Reader-Client Retrofit (INSERTED)
 
 **Goal:** Close the P0 reader-client RLS-reachability regression introduced by Phase 90 D-09/D-10. Migrate ~12 reader functions in `web/supabase_client.py` from the anonymous singleton `get_client()` to the per-request authenticated `get_user_client()`; install an AST-scanner CI guard and behavioral regression tests; trace and fix the secondary `safe_user_get('auth_session')` UI-context console error in the add-to-list-dialog "Create new list" path. After ship, Phase 92 SWEEP-05 smoke run 2 must PASS R0 before Plan 92-02 closeout docs can run.
