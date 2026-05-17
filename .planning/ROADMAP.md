@@ -351,13 +351,14 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 
 ### Phase 92.2: lists-performance-investigation (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
+**Goal:** Close the `/lists` 36s warm-render regression introduced by Phase 92.1 (12 readers moved to per-request authenticated `get_user_client()` triggered an `~4 + L + 2*S` Supabase fanout + ~30 Client builds per render). Two plans / two waves. Plan 92.2-01 is instrumentation-only and commits a permanent forensic JSON baseline artifact (D-VER-01..05). Plan 92.2-02 applies the Codex-adjusted fix: task-scoped `WeakKeyDictionary` memo on `get_user_client()` keyed by `asyncio.current_task()` + `(_session_uuid, access_token)` (D-MEMO-01..04); `data`+`counts` threaded once through `/lists` render path (D-FANOUT-01); batched Supabase RPC `get_list_item_counts_for_user(uuid)` replaces per-list fanout (D-FANOUT-02); NLI cache `[WinError 5]` race fix (D-NLI-01); SUPABASE_GUIDE.md wording fix (D-DOC-01). HARD GATE: `/lists` ≤5s warm before Plan 92-02 closeout can run. `deploy.sh` stays blocked until this ships AND SWEEP-05 smoke run 2 passes.
+**Requirements**: None minted (urgent insert; must_haves derived from CONTEXT.md `<domain>` Phase Boundary)
 **Depends on:** Phase 92
-**Plans:** 0 plans
+**Plans:** 2 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 92.2 to break down)
+- [ ] 92.2-01-PLAN.md — Instrumentation-only: commit baseline JSON forensic artifact for `/lists` warm render on Hillel’s real environment (D-VER-01..05)
+- [ ] 92.2-02-PLAN.md — Fix: task-scoped memo (D-MEMO-01..04) + threaded data/counts (D-FANOUT-01) + batched RPC (D-FANOUT-02) + NLI cache lock+retry (D-NLI-01) + SUPABASE_GUIDE.md wording fix (D-DOC-01); HARD GATE `/lists` ≤5s warm
 
 ### Phase 92.1: Reader-Client Retrofit (INSERTED)
 
