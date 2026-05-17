@@ -542,7 +542,9 @@ When adding a new user-scoped table to the schema (one whose RLS SELECT policy i
 
 The scanner's known blind spots — module-level `table = get_client().table` aliases and wrapper functions like `def _q(name): return get_client().table(name)` — are documented in the scanner's seed-trap section with `xfail-strict` placeholders; do not rely on the scanner alone for those patterns. Code review remains the second line of defense.
 
-Partial-auth tables (`corrections`, `comments`, `discoveries`) — those with both a `TO public USING (<filter>)` AND a `TO authenticated USING (auth.uid()=<owner>)` SELECT branch — are deliberately NOT in `BANNED_TABLES` because their `get_client()` reads remain valid for the public branch. The per-function migration in `web/supabase_client.py` switches to `get_user_client()` for those readers so the authenticated branch becomes reachable. If a future schema change extends such a table to a user-private-only filter (no public branch), add it to `BANNED_TABLES`.
+Partial-auth tables (`corrections`, `comments`) — those with both a `TO public USING (<filter>)` AND a `TO authenticated USING (auth.uid()=<owner>)` SELECT branch — are deliberately NOT in `BANNED_TABLES` because their `get_client()` reads remain valid for the public branch. The per-function migration in `web/supabase_client.py` switches to `get_user_client()` for those readers so the authenticated branch becomes reachable. If a future schema change extends such a table to a user-private-only filter (no public branch), add it to `BANNED_TABLES`.
+
+Note: `discoveries` is NOT in this partial-auth list. Its only SELECT policy is `TO public USING (is_hidden=false)` (see `scripts/fix_rls_policies.sql:60-95`) — there is no `TO authenticated` branch, so the anon client and authenticated client return identical rows and `get_client()` reads are correct. Do not add `discoveries` to `BANNED_TABLES`.
 
 ---
 
