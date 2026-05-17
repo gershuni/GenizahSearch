@@ -329,7 +329,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
   4. Each issue previously flagged in the 4 Codex review transcripts (`_tmp/codex_*_response.txt`) is either marked "addressed" with a pointer to the commit/phase that fixed it, or "waived" with an explicit written rationale -- no issue is left silently unaddressed.
   5. `docs/guides/MULTITENANT.md` exists and documents: the `safe_storage` chokepoint pattern, the `_session_uuid` stable cache key, the request-scoped auth strategy with the `set_session()` prohibition, the per-request lists instantiation, and the deletion-not-migration discipline -- sufficient for a future contributor to understand and extend the architecture without reading the Codex transcripts.
 **Plans**: 2 plans (92-01 + 92-02)
-- [ ] 92-01-PLAN.md -- SWEEP-01..05: AST scan + 5-surface audit + thematic transcript audit + smoke scaffold (closes SWEEP-01, SWEEP-02, SWEEP-03, SWEEP-04, SWEEP-05)
+- [x] 92-01-PLAN.md -- SWEEP-01..05: AST scan + 5-surface audit + thematic transcript audit + smoke scaffold (closes SWEEP-01, SWEEP-02, SWEEP-03, SWEEP-04, SWEEP-05)
 - [ ] 92-02-PLAN.md -- SWEEP-06: docs/guides/MULTITENANT.md + closeout docs (depends_on 92-01; gated on human smoke PASS commit per D-02; closes SWEEP-06)
 
 ## Progress
@@ -344,7 +344,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 | 89. Lists Cache Per-Request | v7.12 | 2/2 | Complete   | 2026-05-15 |
 | 90. Auth Caching Rewrite -- No set_session | v7.12 | 2/2 | Complete   | 2026-05-15 |
 | 91. Atomic Auth State Writes | v7.12 | 3/3 | Complete    | 2026-05-15 |
-| 92. Final Sweep and Acceptance | v7.12 | 0/2 | Not started | - |
+| 92. Final Sweep and Acceptance | v7.12 | 1/2 | In Progress|  |
 
 ## Backlog
 
@@ -352,7 +352,7 @@ FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with 
 
 **Goal:** Web search-result parity with desktop — surface the page/image number (`display['img']`, same field desktop's `COL_IMG` renders at `genizah_app.py:16111`) on each search-result card so users see which folio a hit came from without opening Quick View. Strict parity scope; folio labels (`1r`/`2v`), grouping, sorting, and parallels-list extension are all explicitly deferred.
 **Requirements:** FOLIO-01
-**Plans:** 3/3 plans complete
+**Plans:** 1/2 plans executed
 
 Plans:
 - [ ] 999.1-01-PLAN.md — Render display.img inline after shelfmark on result card title line; human smoke-check (FOLIO-01)
