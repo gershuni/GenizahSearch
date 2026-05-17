@@ -12,14 +12,99 @@ Replaces the FastAPI backend for data operations.
 """
 
 import logging
+import os
 import threading
 import time
+from contextvars import ContextVar
 from typing import Optional, Dict, List
 from supabase import create_client, Client
 from supabase_auth.errors import AuthApiError
 from shared.supabase_provider import get_url, get_anon_key
 
 logger = logging.getLogger(__name__)
+
+# ============= Phase 92.2 D-VER-01 instrumentation =============
+# Dormant unless GS_LISTS_PERF_INSTRUMENTATION=1 is set in environment.
+# Per-task isolation via ContextVar (Reviews MUST-FIX 4):
+#   - One ContextVar value per asyncio.Task (= per NiceGUI HTTP request)
+#   - No threading.Lock needed — ContextVar.set() writes to the current
+#     context only; concurrent requests in the same process cannot
+#     contaminate each other's counters.
+#   - Safe under pytest -n auto parallel runners (Gemini-MEDIUM).
+
+_INSTRUMENTATION_ENABLED: bool = os.getenv('GS_LISTS_PERF_INSTRUMENTATION') == '1'
+_inst_query_count: ContextVar[int] = ContextVar('_inst_query_count', default=0)
+_inst_client_build_count: ContextVar[int] = ContextVar('_inst_client_build_count', default=0)
+_inst_query_latencies_ms: ContextVar[tuple] = ContextVar(
+    '_inst_query_latencies_ms',
+    default=(),
+)
+# Reviews Round-2 MEDIUM-3: per-request correlation ID set by the ASGI
+# middleware (web/main.py _ListsPerfRouteTimingMiddleware) at the start of
+# each /lists request; consumed by the sidebar decomposition log (lists.py)
+# and any later log emissions that need to be paired with the canonical
+# wall-clock record. Without this, pairing log lines by timestamp
+# proximity silently fails under any concurrency (multiple browser tabs
+# hitting /lists at the same moment, or pytest -n auto).
+_inst_request_id: ContextVar[str] = ContextVar('_inst_request_id', default='')
+
+
+def _inst_set_request_id(rid: str) -> None:
+    """Set the per-request correlation ID. Called by the ASGI middleware
+    at request entry; the value is then read by `_inst_request_id.get()`
+    from every downstream emitter in the same task."""
+    if not _INSTRUMENTATION_ENABLED:
+        return
+    _inst_request_id.set(rid or '')
+
+
+def _inst_reset() -> None:
+    """Reset all instrumentation counters for the current task context."""
+    if not _INSTRUMENTATION_ENABLED:
+        return
+    _inst_query_count.set(0)
+    _inst_client_build_count.set(0)
+    _inst_query_latencies_ms.set(())
+    _inst_request_id.set('')
+
+
+def _inst_record_query(latency_ms: float) -> None:
+    """Record a Supabase query with its latency in milliseconds."""
+    if not _INSTRUMENTATION_ENABLED:
+        return
+    _inst_query_count.set(_inst_query_count.get() + 1)
+    _inst_query_latencies_ms.set(_inst_query_latencies_ms.get() + (float(latency_ms),))
+
+
+def _inst_record_client_build() -> None:
+    """Record that a new authenticated Client was built (create_client call)."""
+    if not _INSTRUMENTATION_ENABLED:
+        return
+    _inst_client_build_count.set(_inst_client_build_count.get() + 1)
+
+
+def _inst_snapshot() -> Dict:
+    """Return a snapshot dict of current instrumentation counters for this task."""
+    latencies = sorted(_inst_query_latencies_ms.get())
+    n = len(latencies)
+
+    def _pct(p: float) -> float:
+        if n == 0:
+            return 0.0
+        idx = min(n - 1, round((n - 1) * p))
+        return float(latencies[idx])
+
+    return {
+        'query_count': _inst_query_count.get(),
+        'client_build_count': _inst_client_build_count.get(),
+        'p50_query_latency_ms': _pct(0.50),
+        'p95_query_latency_ms': _pct(0.95),
+        'max_query_latency_ms': max(latencies) if latencies else 0.0,
+        'request_id': _inst_request_id.get(),  # Reviews Round-2 MEDIUM-3
+    }
+
+# ============= END Phase 92.2 D-VER-01 instrumentation =============
+
 
 # Phase 90 (Plan 90-01): refresh-only locks keyed by _session_uuid.
 # _refresh_locks does NOT cache any Client objects -- it serializes refresh
@@ -313,6 +398,7 @@ def get_user_client() -> Client:
                 return get_client()
 
         user_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        _inst_record_client_build()  # Phase 92.2 D-VER-01: count authenticated client builds
         _apply_user_auth_to_client(user_client, access_token)
         return user_client
     except Exception as e:
@@ -775,7 +861,9 @@ def get_user_lists(user_id: str, include_deleted: bool = False) -> List[Dict]:
         query = client.table('user_lists').select('*').eq('user_id', user_id)
         if not include_deleted:
             query = query.is_('deleted_at', 'null')
+        _t = time.perf_counter()
         response = query.order('created_at').execute()
+        _inst_record_query((time.perf_counter() - _t) * 1000.0)  # Phase 92.2 D-VER-01
         return response.data or []
     except Exception as e:
         # Fallback if deleted_at column doesn't exist yet
@@ -923,7 +1011,9 @@ def get_list_items(list_id: int) -> List[Dict]:
     try:
         # READER-01 (Phase 92.1): list_items SELECT RLS is `TO authenticated`; anon returns 0 rows.
         client = get_user_client()
+        _t = time.perf_counter()
         response = client.table('list_items').select('*').eq('list_id', list_id).order('added_at', desc=True).execute()
+        _inst_record_query((time.perf_counter() - _t) * 1000.0)  # Phase 92.2 D-VER-01
         return response.data or []
     except Exception as e:
         logger.error(f"Error getting list items: {e}")
@@ -983,7 +1073,9 @@ def get_recent_items(user_id: str, limit: int = 50) -> List[Dict]:
     try:
         # READER-01 (Phase 92.1): recent_items is user-scoped `TO authenticated`.
         client = get_user_client()
+        _t = time.perf_counter()
         response = client.table('recent_items').select('*').eq('user_id', user_id).order('viewed_at', desc=True).limit(limit).execute()
+        _inst_record_query((time.perf_counter() - _t) * 1000.0)  # Phase 92.2 D-VER-01
         return response.data or []
     except Exception as e:
         logger.error(f"Error getting recent items: {e}")
@@ -1031,7 +1123,9 @@ def get_projects(user_id: str) -> List[Dict]:
         # READER-01 (Phase 92.1): projects SELECT RLS is `TO authenticated`; projects panel
         # was empty for logged-in users before this migration (same bug class as user_lists).
         client = get_user_client()
+        _t = time.perf_counter()
         response = client.table('projects').select('*').eq('user_id', user_id).order('created_at').execute()
+        _inst_record_query((time.perf_counter() - _t) * 1000.0)  # Phase 92.2 D-VER-01
         return response.data or []
     except Exception as e:
         if _is_jwt_expired(e):
