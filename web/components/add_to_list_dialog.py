@@ -10,6 +10,9 @@ Provides a reusable dialog for adding items to personal lists with:
 - Per-device storage for anonymous users
 """
 
+import asyncio
+import contextvars
+
 from nicegui import ui
 from web.translations import tr, get_language
 from web.components.typography import h3
@@ -40,6 +43,66 @@ def get_star_icon(lists_mgr, sys_id: str) -> str:
     return 'star_border'
 
 
+async def _create_and_add_handler(
+    *,
+    name: str,
+    project_id: Optional[str],
+    lists_mgr,
+    sys_id: str,
+    fl_id: Optional[str],
+    new_list_note_value: str,
+    dialog,
+    on_success: Optional[Callable] = None,
+    is_logged_in: bool,
+) -> bool:
+    """Phase 92.1 READER-03: extracted from inline closure so the
+    create-new-list-and-add-item flow is unit-testable without instantiating a
+    ui.dialog (which requires a full NiceGUI client context).
+
+    Returns True on success (list created + item added + ``dialog.close()``
+    invoked), False on every failure path (with a ``ui.notify`` already shown
+    to the user). The handler MUST be invoked inside a re-bound NiceGUI
+    request context (see ``show_add_to_list_dialog`` for the
+    ``contextvars.copy_context()`` rebind that wraps both this handler and
+    ``do_add``).
+    """
+    if not name:
+        ui.notify(tr('Please enter a list name'), type='warning')
+        return False
+    try:
+        if is_logged_in:
+            new_list_id = await lists_mgr.create_list(name, project_id=project_id)
+        else:
+            new_list_id = lists_mgr.create_list_sync(name, project_id=project_id)
+    except Exception as e:
+        ui.notify(f"Error: {e}", type='negative')
+        return False
+    if not new_list_id:
+        ui.notify(tr('Failed to create list'), type='negative')
+        return False
+    try:
+        if is_logged_in:
+            result = await lists_mgr.add_item(
+                sys_id, new_list_id, note=new_list_note_value, fl_id=fl_id,
+            )
+        else:
+            result = lists_mgr.add_item_sync(
+                sys_id, new_list_id, note=new_list_note_value, fl_id=fl_id,
+            )
+    except Exception as e:
+        ui.notify(f"Error: {e}", type='negative')
+        return False
+    if not result:
+        ui.notify(tr('Failed to add item'), type='negative')
+        return False
+    ui.notify(f"{tr('List created')}: {name}", type='positive')
+    ui.notify(tr('Added to list'), type='positive')
+    dialog.close()
+    if on_success:
+        on_success()
+    return True
+
+
 def show_add_to_list_dialog(
     sys_id: str,
     shelfmark: str,
@@ -66,6 +129,19 @@ def show_add_to_list_dialog(
     if not lists_mgr:
         ui.notify(tr('Lists manager not available'), type='warning')
         return
+
+    # READER-03 (Phase 92.1) -- Reviews C2 + R2-2 case-b (2026-05-17): capture the
+    # request context at dialog-entry time. The nested async on_click handlers
+    # (create_and_add, do_add) execute under NiceGUI's event-listener dispatch,
+    # which can leave `nicegui.storage.request_contextvar.get() is None` at
+    # handler firing -- causing `safe_user_get('auth_session')` to fail with
+    # "app.storage.user can only be used within a UI context" (Phase 92 SWEEP-05
+    # smoke run 1 Symptom 3). We snapshot the live `contextvars.Context` here
+    # (which includes the bound `request_contextvar`) and re-enter it when the
+    # handlers fire. The snapshot lets `safe_user_get` read LIVE storage at
+    # click time; we do NOT freeze the auth_session value itself (Reviews
+    # H-AGREED-1 -- stale-token / logout-after-dialog-open footgun).
+    _captured_ctx = contextvars.copy_context()
 
     # State for inline list creation
     creating_new_list = {'active': False}
@@ -180,47 +256,37 @@ def show_add_to_list_dialog(
                     ui.button(tr('Back'), on_click=back_to_list_selection).props('flat')
 
                 async def create_and_add():
-                    name = new_list_name.value.strip()
-                    project_id = selected_project['value']
-                    if not name:
-                        ui.notify(tr('Please enter a list name'), type='warning')
-                        return
+                    # READER-03 (Phase 92.1) -- thin closure that delegates to
+                    # the module-level `_create_and_add_handler` so the body is
+                    # unit-testable without ui.dialog instantiation. The
+                    # `_bound_create_and_add` wrapper below re-enters the
+                    # dialog-entry-captured context so safe_user_get can read
+                    # live auth_session at click time.
+                    await _create_and_add_handler(
+                        name=new_list_name.value.strip(),
+                        project_id=selected_project['value'],
+                        lists_mgr=lists_mgr,
+                        sys_id=sys_id,
+                        fl_id=fl_id,
+                        new_list_note_value=new_list_note_input.value,
+                        dialog=dialog,
+                        on_success=on_success,
+                        is_logged_in=GlobalAuthState.is_logged_in(),
+                    )
 
-                    # Create the new list - use async if authenticated, sync otherwise
-                    # Color is inherited from project or defaults to gold for standalone
-                    is_logged_in = GlobalAuthState.is_logged_in()
-                    try:
-                        if is_logged_in:
-                            new_list_id = await lists_mgr.create_list(name, project_id=project_id)
-                        else:
-                            new_list_id = lists_mgr.create_list_sync(name, project_id=project_id)
-                    except Exception as e:
-                        ui.notify(f"Error: {e}", type='negative')
-                        return
+                async def _bound_create_and_add():
+                    # READER-03 (Phase 92.1) -- Reviews M-R2-1 + M-R2-2 case-b
+                    # (2026-05-17): schedule the click handler inside the
+                    # dialog-entry-captured context so `request_contextvar`
+                    # resolves at click time. asyncio.create_task(coro,
+                    # context=ctx) is Python 3.11+ and gives back an awaitable
+                    # Task so NiceGUI can await completion and surface
+                    # exceptions cleanly. We deliberately avoid fire-and-forget
+                    # task creation patterns that drop exceptions on the floor.
+                    task = asyncio.create_task(create_and_add(), context=_captured_ctx)
+                    return await task
 
-                    if new_list_id:
-                        # Add item to the new list
-                        try:
-                            if is_logged_in:
-                                result = await lists_mgr.add_item(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
-                            else:
-                                result = lists_mgr.add_item_sync(sys_id, new_list_id, note=new_list_note_input.value, fl_id=fl_id)
-                        except Exception as e:
-                            ui.notify(f"Error: {e}", type='negative')
-                            return
-
-                        if result:
-                            ui.notify(f"{tr('List created')}: {name}", type='positive')
-                            ui.notify(tr('Added to list'), type='positive')
-                            dialog.close()
-                            if on_success:
-                                on_success()
-                        else:
-                            ui.notify(tr('Failed to add item'), type='negative')
-                    else:
-                        ui.notify(tr('Failed to create list'), type='negative')
-
-                ui.button(tr('Create and Add'), on_click=create_and_add).classes('btn-primary')
+                ui.button(tr('Create and Add'), on_click=_bound_create_and_add).classes('btn-primary')
 
         # Action buttons for existing list selection
         with ui.row().classes('w-full justify-end gap-2 mt-6') as action_row:
@@ -252,7 +318,17 @@ def show_add_to_list_dialog(
                 else:
                     ui.notify(tr('Already in list'), type='info')
 
-            add_btn = ui.button(tr('Add'), on_click=do_add).classes('btn-primary')
+            async def _bound_do_add():
+                # READER-03 (Phase 92.1) -- Reviews M-R2-2 case-b (2026-05-17):
+                # do_add transits the SAME failing storage chain as
+                # create_and_add (lists_mgr.add_item -> get_user_client ->
+                # safe_user_get('auth_session')), so it MUST share the
+                # dialog-entry-captured context via asyncio.create_task(coro,
+                # context=ctx) + await.
+                task = asyncio.create_task(do_add(), context=_captured_ctx)
+                return await task
+
+            add_btn = ui.button(tr('Add'), on_click=_bound_do_add).classes('btn-primary')
 
             # Hide add button when no lists exist (user must create one)
             if not list_options:
