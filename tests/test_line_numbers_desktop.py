@@ -134,6 +134,47 @@ def test_line_number_area_line_count_matches_split(textedit):
     assert textedit._line_number_area._line_count == 3
 
 
+def test_paints_one_position_per_source_line_for_br_separated_html(textedit, qapp):
+    """Regression (smoke-check finding 2026-05-18): when the body widget
+    receives HTML with `<br>` separators inside a single block (the form
+    genizah_app.py's transcription renders use), the gutter must paint one
+    number per source line — NOT just one.
+
+    Pre-fix: iterating QTextBlocks alone yielded a single block for a
+    `<br>`-separated transcription, so only "1" appeared. Post-fix:
+    walking QTextLayout's visual QTextLines within each block correctly
+    yields one position per `<br>`.
+
+    This test exercises the y-computation method directly (no real screen
+    needed); the painter is a thin wrapper over the same positions list.
+    """
+    # 3 source lines packaged as a single `<br>`-separated HTML block —
+    # the canonical shape highlight_text() produces.
+    apply_line_numbered_text(
+        textedit,
+        "<p>line one<br>line two<br>line three</p>",
+        source_text="line one\nline two\nline three",
+        is_html=True,
+    )
+    # Force layout to be computed (in a headless test the document
+    # layout is not always triggered automatically).
+    textedit.show()
+    qapp.processEvents()
+    textedit.document().adjustSize()
+    qapp.processEvents()
+
+    positions = textedit._line_number_area._compute_line_positions()
+    assert len(positions) == 3, (
+        f"expected 3 line positions for 3-line `<br>`-separated HTML, "
+        f"got {len(positions)}: {positions!r}"
+    )
+    # y-positions must be strictly ascending (line 2 below line 1, etc.)
+    ys = [p[0] for p in positions]
+    assert ys == sorted(ys) and len(set(ys)) == 3, (
+        f"line y-positions must be distinct and ascending; got {ys!r}"
+    )
+
+
 def test_clipboard_isolation_invariant(textedit):
     """Test 3 (D-04): toPlainText() of the body returns NO gutter digits.
 

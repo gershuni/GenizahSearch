@@ -84,6 +84,50 @@ class LineNumberArea(QWidget):
     def sizeHint(self) -> QSize:
         return QSize(self.gutter_width(), 0)
 
+    def _compute_line_positions(self) -> list[tuple[int, int]]:
+        """Return [(y_in_viewport, height), ...] one entry per source line.
+
+        Walks the body widget's QTextLayout visually: each block contributes
+        its own QTextLines (one per `<br>` soft-break and one for the start
+        of the block). A QTextBlock may contain MANY visual lines when the
+        rendered HTML uses `<br>` separators inside a single `<p>` / `<div>`
+        — which is what genizah_app's transcription renders do. Iterating
+        QTextBlock alone would yield 1 entry for a 100-line `<br>`-separated
+        transcription; QTextLine walking yields all 100.
+
+        Coordinates are in body-viewport space (scroll already subtracted).
+        Returned list has at most `self._line_count` entries; visual lines
+        beyond the source line count are dropped (defends against soft-wrap
+        creating extra visual lines when the body widget is narrower than
+        the longest transcription line — those extras get no number).
+        """
+        body = self._body
+        scroll_y = (
+            body.verticalScrollBar().value()
+            if isinstance(body, QAbstractScrollArea)
+            else 0
+        )
+        doc = body.document()
+        positions: list[tuple[int, int]] = []
+        block = doc.firstBlock()
+        while block.isValid() and len(positions) < self._line_count:
+            layout = block.layout()
+            block_top = doc.documentLayout().blockBoundingRect(block).top()
+            n_visual = layout.lineCount() if layout is not None else 1
+            for i in range(n_visual):
+                if len(positions) >= self._line_count:
+                    break
+                if layout is not None:
+                    tline = layout.lineAt(i)
+                    y = int(block_top + tline.y()) - scroll_y
+                    h = max(1, int(tline.height()))
+                else:
+                    y = int(block_top) - scroll_y
+                    h = max(1, int(doc.documentLayout().blockBoundingRect(block).height()))
+                positions.append((y, h))
+            block = block.next()
+        return positions
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.fillRect(event.rect(), QColor(_GUTTER_BG_HEX))
@@ -95,39 +139,17 @@ class LineNumberArea(QWidget):
 
         body = self._body
         gutter_w = self.gutter_width()
-        scroll_y = (
-            body.verticalScrollBar().value()
-            if isinstance(body, QAbstractScrollArea)
-            else 0
-        )
         viewport_height = (
             body.viewport().height() if hasattr(body, "viewport") else self.height()
         )
 
-        # Walk QTextBlocks for accurate line-y alignment. Each `<br>` in the
-        # rendered HTML (or each `\n` in plain text) maps 1:1 to a QTextBlock
-        # for normal transcription content. Use blockBoundingRect for y.
-        doc = body.document()
-        block = doc.firstBlock()
-        line_no = 1
-        while block.isValid() and line_no <= self._line_count:
-            block_rect = doc.documentLayout().blockBoundingRect(block)
-            top = int(block_rect.top()) - scroll_y
-            block_height = max(1, int(block_rect.height()))
-            # Cull blocks outside the visible viewport
-            if top + block_height > 0 and top < viewport_height:
+        for line_no, (y, h) in enumerate(self._compute_line_positions(), start=1):
+            if y + h > 0 and y < viewport_height:
                 painter.drawText(
-                    QRect(
-                        0,
-                        top,
-                        gutter_w - _GUTTER_PADDING_PX,
-                        block_height,
-                    ),
+                    QRect(0, y, gutter_w - _GUTTER_PADDING_PX, h),
                     int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop),
                     str(line_no),
                 )
-            block = block.next()
-            line_no += 1
 
 
 def _ensure_gutter(widget) -> LineNumberArea:
