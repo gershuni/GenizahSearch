@@ -472,12 +472,13 @@ def create_result_card(search_state, refs, index, result):
                     # D-04 (revised 2026-05-15): chip styling IS allowed, but position stays after
                     # the shelfmark — must NOT be moved into the left-side colored-pill cluster.
                     # Theme-aware via existing CSS vars — adapts to light / parchment / dark modes.
-                    # D-05: display only — no click handler, no link, no tooltip.
+                    # D-05 (revised 2026-05-18 after Task 2 smoke check): descriptive tooltip is
+                    # allowed; still no click handler and no link.
                     _img_num = display.get('img')
                     if _img_num:
                         ui.label(str(_img_num)).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                             'background: var(--bg-tertiary); color: var(--text-muted);'
-                        )
+                        ).tooltip(tr('Image number'))
 
                 # Phase 57 JOIN-03: Partner container placed outside badge row, inside content column
                 if _has_vs:

@@ -3183,6 +3183,8 @@ TRANSLATIONS = {
     'Show more': 'הצג עוד',
     'remaining': 'נותרו',
     'from visual similarity': 'מדמיון חזותי',
+    # Phase 999.1 (FOLIO-01): tooltip for the per-card image-number chip after the shelfmark
+    'Image number': 'מספר תמונה',
 }
 
 # Hebrew library display names (keyed by library_code)
