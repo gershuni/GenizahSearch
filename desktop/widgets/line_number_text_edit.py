@@ -255,12 +255,6 @@ def _install_resize_hook(widget) -> None:
     widget._line_number_resize_hooked = True
 
 
-_BIDI_CONTROLS = (
-    "‎‏"
-    "‪‫‬‭‮"
-    "⁦⁧⁨⁩"
-)
-
 
 _BIDI_CONTROLS = (
     "‎‏"
