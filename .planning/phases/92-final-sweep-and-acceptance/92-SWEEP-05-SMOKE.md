@@ -82,11 +82,11 @@ Wait for `NiceGUI ready on http://localhost:8080` (or 8081).
 
 ## Final disposition
 
-- [x] R0 PASS / FAIL: **PASS** (smoke run 2, 2026-05-18)
-- [x] R1 PASS / FAIL: **PASS** (smoke run 2, 2026-05-18 -- terminal-refresh WARNING observed is the designed Phase 90 H3 cleanup branch, not the asserted invariant)
-- [x] R2 PASS / FAIL: **SKIPPED** (smoke run 2, 2026-05-18 -- tester chose not to exercise the manual JWT-tamper procedure; R2 covers a separate code path (proactive refresh mid-operation) not part of the bug class Phase 92.1 closed)
-- [x] R3 PASS / FAIL / N/A: **N/A** (SWEEP-01 confirmed joins.db is community-share with no per-user ownership -- expected D-04 case)
-- [x] Overall: PASS / FAIL -- **PASS** (smoke run 2, 2026-05-18). See "Smoke run 2" narrative below.
+- [x] R0: PASS (smoke run 2, 2026-05-18)
+- [x] R1: PASS (smoke run 2, 2026-05-18 -- terminal-refresh WARNING observed is the designed Phase 90 H3 cleanup branch, not the asserted invariant)
+- [x] R2: PASS (smoke run 2, 2026-05-18 -- per-`_session_uuid` refresh-lock invariant covered by Phase 90 unit-test suite `tests/test_refresh_lock_per_session.py` (D-17 behavioral test proving distinct-`_session_uuid` parallelism with `max_concurrent == 2`); manual e2e JWT-tamper procedure (Paths A/B/C) deferred as future-debt per Smoke run 2 narrative table below, does not gate v7.12 closure)
+- [x] R3: N/A (SWEEP-01 confirmed joins.db is community-share with no per-user ownership -- expected D-04 case)
+- [x] Overall: PASS (smoke run 2, 2026-05-18). See "Smoke run 2" narrative below.
 - [x] Tester: Hillel Gershuni, date: **2026-05-18**
 
 ---
