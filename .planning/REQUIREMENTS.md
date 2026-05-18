@@ -89,6 +89,27 @@ These are stand-alone backlog phases (`999.x`) that don't belong to a milestone.
 
 - [x] **FOLIO-01**: Surface `result['display']['img']` (page/image number) inline after the shelfmark on each web `/search` result card for desktop COL_IMG parity. Theme-aware chip using existing `var(--bg-tertiary)` / `var(--text-muted)` tokens; falsy value renders nothing. Descriptive tooltip `tr('Image number')` / "מספר תמונה" added post-smoke-check per D-05 revision 2026-05-18.
 
+### Line Numbering — Phase 999.4
+
+WEB pillar (Plan 999.4-01):
+
+- [x] **LINE-NUM-01**: `_render_line_numbered_html(text, highlight_html, line_height, font_size, show_line_numbers)` helper at module scope in `web/pages/browse.py` rendering a CSS-grid two-column layout (gutter span + body div) per source line.
+- [x] **LINE-NUM-02**: Helper wired into `render_text_content` (Browse single-page + version views) AND `render_text_section` (Quick View) AND Full Manuscript View loop (post-smoke-check scope extension).
+- [x] **LINE-NUM-03**: Numbers restart at 1 when navigating to a new sys_id/folio/version (each `_render_line_numbered_html` call counts independently).
+- [x] **LINE-NUM-04**: Toggle button (`format_list_numbered` icon, `tr('Toggle line numbers')` tooltip) in Browse `version_row` AND Quick View view-mode header row.
+- [x] **LINE-NUM-05**: Persistence via `safe_user_get/safe_user_set` under key `ui.show_line_numbers`; default True per D-07.
+- [x] **LINE-NUM-06**: D-04 copy-paste invariant — gutter span has `user-select: none` AND lives in a separate CSS-grid column; pasted text from the body contains zero line-number digits.
+
+DESKTOP pillar (Plan 999.4-02):
+
+- [x] **LINE-NUM-07**: New module `desktop/widgets/line_number_text_edit.py` with `LineNumberArea(QWidget)` sibling gutter + `apply_line_numbered_text(widget, html, *, source_text, pages, is_html)` helper.
+- [x] **LINE-NUM-08**: Helper wired into `genizah_app.py:self.browse_text` at 6 transcription render sites + `desktop/result_dialog.py:self.text_ms` at 4 setHtml sites. Toggle button (`# Lines`, `checkable=True`) in Browse find-row AND ResultDialog find-row. Persistence via `load_app_config('show_line_numbers', True)` / `save_app_config({'show_line_numbers': bool})`.
+
+SHARED:
+
+- [x] **LINE-NUM-09**: `text.split('\n')` numbering invariant (D-10) — line count uses `split('\n')` NOT `splitlines()`, so blank lines and trailing empties get their own number; aligned with Responsa `L<N>:` parser at `genizah_core.py:7679-7691`. Verified by `tests/test_line_numbers_web.py::test_render_line_numbered_html_blank_count_matches` AND `tests/test_line_numbers_desktop.py::test_line_number_area_line_count_matches_split`.
+- [x] **LINE-NUM-10**: D-04 copy-paste invariant on desktop — `LineNumberArea` is a SIBLING `QWidget` (not part of `QTextDocument`), so Qt's text cursor cannot extend into it; `widget.toPlainText()` contains zero gutter digits. Verified structurally by `tests/test_line_numbers_desktop.py::test_clipboard_isolation_invariant`.
+
 ## Future Requirements (deferred)
 
 - Per-session rate limiting keyed by `_session_uuid` (currently per-IP; could be tightened post-v7.12 if abuse appears)
@@ -146,7 +167,17 @@ These are stand-alone backlog phases (`999.x`) that don't belong to a milestone.
 | READER-05 | Phase 92.1 | Complete |
 | READER-06 | Phase 92.1 | Complete |
 | FOLIO-01 | Phase 999.1 (backlog) | Complete |
+| LINE-NUM-01 | Phase 999.4 Plan 01 (backlog) | Complete |
+| LINE-NUM-02 | Phase 999.4 Plan 01 (backlog) | Complete |
+| LINE-NUM-03 | Phase 999.4 Plan 01 (backlog) | Complete |
+| LINE-NUM-04 | Phase 999.4 Plan 01 (backlog) | Complete |
+| LINE-NUM-05 | Phase 999.4 Plan 01 (backlog) | Complete |
+| LINE-NUM-06 | Phase 999.4 Plan 01 (backlog) | Complete |
+| LINE-NUM-07 | Phase 999.4 Plan 02 (backlog) | Complete |
+| LINE-NUM-08 | Phase 999.4 Plan 02 (backlog) | Complete |
+| LINE-NUM-09 | Phase 999.4 Plan 01+02 (backlog) | Complete |
+| LINE-NUM-10 | Phase 999.4 Plan 02 (backlog) | Complete |
 
 ---
 
-*Last updated: 2026-05-18 -- v7.12 Path B Multitenant Architecture milestone SHIPPED (38/38 across phases 87, 88, 89, 90, 91, 92, 92.1; Plan 92.2 = internal perf sub-phase, no new requirements). Backlog phase 999.1 (Search results by folio) also shipped 2026-05-18 — FOLIO-01 Complete via web/pages/search_results.py:469-481 + genizah_translations.py 'Image number' tooltip (commits 8368a962 + 9db7b18e); not part of the v7.12 milestone.*
+*Last updated: 2026-05-18 -- v7.12 Path B Multitenant Architecture milestone SHIPPED (38/38 across phases 87, 88, 89, 90, 91, 92, 92.1; Plan 92.2 = internal perf sub-phase, no new requirements). Backlog phases shipped 2026-05-18 alongside v7.12: 999.1 (FOLIO-01 via commits 8368a962 + 9db7b18e), 999.4 (LINE-NUM-01..10 across 2 plans / 9 commits — web at 69a48986/ba666564/9bde739e/e63d0e91, desktop at 30cc144e/7a93d4eb/b3a491a9/346546ad/cbb4a3fb/0c164687/05a5740b). Both backlog phases are independent of the v7.12 milestone scope.*
