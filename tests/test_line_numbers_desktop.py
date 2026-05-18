@@ -13,11 +13,21 @@ These tests skip cleanly when PyQt6 is unavailable (e.g. minimal CI env).
 """
 from __future__ import annotations
 
+import os
 import sys
 
 import pytest
 
 pytest.importorskip("PyQt6.QtWidgets")
+
+# Headless Qt: when no display server is available (e.g. CI on Linux without
+# Xvfb), Qt aborts with SIGABRT on QApplication() construction. Force the
+# offscreen platform plugin before importing QApplication so CI can run these
+# tests without an X server. Local dev machines with a real display keep their
+# native plugin because os.environ.setdefault is a no-op when DISPLAY is set
+# and a user has explicitly chosen a QT_QPA_PLATFORM.
+if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QTextEdit, QTextBrowser  # noqa: E402
