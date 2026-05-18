@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.11.2
+# Genizah Search Pro 7.12.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,35 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.11.2?
+## What's New in Version 7.12.0?
+
+### v7.12.0: Multitenant Safety and Line Numbering
+
+A milestone release closing two big threads at once:
+
+**For all users — new feature:** Every transcription text view now
+shows a line-number gutter on the right-hand (RTL leading-edge)
+side, with numbers matching the Responsa `L<N>:word` search syntax
+and restarting at 1 for each folio. Copy-paste never picks up the
+numbers. Toggle on/off via the line-number button in the
+transcription header. Available in web Browse, web Quick View, web
+Full Manuscript View, desktop Browse tab, and desktop ResultDialog.
+
+**For web users — small parity win:** Search result cards now show
+the page/image number inline after the shelfmark (the same field
+the desktop app's `COL_IMG` column shows), so you can tell which
+folio a hit came from without opening Quick View.
+
+**Behind the scenes:** The web app now has multitenant safety as a
+structural property rather than a per-bug-fix property. The
+cross-user xlsx export filename leak fixed in v7.11.1 was one
+instance of a class of bugs (search results, lists, exports, auth
+state could all bleed between concurrent users on the same server);
+v7.12 replaces the entire pattern with intentional primitives:
+per-session UUID, single chokepoint adapter for all per-user state,
+request-scoped auth that doesn't call `set_session` mid-flight,
+real server-side `sign_out` revocation. Architecture documented in
+`docs/guides/MULTITENANT.md`. Web-only refactor; desktop unaffected.
 
 ### v7.11.2: Composition Search Bug Fixes
 
@@ -242,7 +270,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.11.2_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.12.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

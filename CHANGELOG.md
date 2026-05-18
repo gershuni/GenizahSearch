@@ -4,6 +4,102 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [7.12.0] - Multitenant Safety and Line Numbering - 2026-05-18
+
+Bundles the v7.12 Path B multitenant architecture refactor with two
+user-visible features (line numbering, web folio chip).
+
+The architectural work is invisible to individual users but
+load-bearing for concurrent use: the web app can no longer leak one
+user's data (search results, exports, lists, auth state, etc.) into
+another user's browser session. The cross-user xlsx export filename
+leak fixed in v7.11.1 was one instance of this bug class; v7.12
+makes the whole class structurally impossible.
+
+### New Features
+
+- **Line numbering on transcription text** — a right-side (RTL
+  leading-edge) line-number gutter appears next to every transcription,
+  on both web and desktop. Numbers correspond to source-text lines
+  (matching the existing `L<N>:word` Responsa search syntax). Lines
+  restart at 1 for each folio/page. Copy-paste from the body never
+  picks up the numbers — the gutter is structurally separate from the
+  text. Toggle via the `format_list_numbered` button in the
+  transcription header (web) or the `# Lines` button in the find row
+  (desktop); default ON; persisted per user. Surfaces covered: web
+  Browse single-page view, web Quick View dialog, web Full Manuscript
+  View, desktop Browse tab, desktop ResultDialog. (both)
+- **Folio chip on web search result cards** — each web search result
+  card now shows the page/image number inline after the shelfmark (the
+  same field desktop's `COL_IMG` shows). You no longer need to open
+  Quick View to know which folio a hit came from. Theme-aware chip;
+  Hebrew/English tooltip "Image number" / "מספר תמונה". (web)
+
+### Improvements
+
+- **NLI image cache resilience** — the persistent image-FL-ID cache
+  no longer fails with `[WinError 5]` on Windows when two requests
+  finish writing simultaneously. Added a process-wide lock and
+  retry-with-backoff on `os.replace`. (web)
+
+### Bug Fixes
+
+- **Memory leak in search export payload** — long-running web server
+  processes were accumulating RSS at ~300 MB/hour because
+  `export_search_payload` retained the full unbounded result list
+  per user. Now capped at 5,000 results with `truncated` metadata so
+  downstream UX can advise "showing first 5K of N" if needed. RSS
+  dropped from 7.5 GB → 1.78 GB after deploy. (web)
+- **4 P2 UI/UX bugs surfaced during line-numbering smoke checks** —
+  chip overflow on long shelfmarks, Distance field overflow on small
+  viewports, redundant Distance fields appearing twice, bright-mode
+  ResultDialog white-on-white text, bright-mode dark toolbars. (both)
+
+### Internal — Multitenant Architecture (Path B)
+
+A web-only architectural refactor across 6 core phases (87-92) plus
+two inserted sub-phases (92.1, 92.2). 49/49 requirements satisfied
+across 28 plans. Zero net user-visible behavior change beyond the
+two features listed under New Features above, plus the cross-user
+leak class closure.
+
+- **`web/safe_storage.py` is now the chokepoint for all per-user
+  state.** 131 raw `app.storage.user` accesses across 14 files
+  migrated through it. The allowlist of permitted raw accesses is
+  empty (`allowed_raw_access: []`); a permanent CI guard
+  (`tests/test_no_raw_storage_access.py`) rejects any new raw
+  access at lint time.
+- **State separation by deletion, not migration.** 10 per-user mirror
+  fields on `AppState` physically deleted; `web/export_state.py` is
+  the only path for per-user export state. The `_TEST_BACKEND` shim
+  is gone (tests use `SimpleNamespace` fixture injection through
+  `web.safe_storage.app` monkeypatching).
+- **Lists cache rewritten per-request.** `UserListsManager` singleton
+  attribute + 10-second TTL plumbing all deleted; per-request
+  instantiation. Cross-user list cache leak structurally impossible.
+- **Auth caching rewritten without process-wide cache.** Request-scoped
+  auth via local header mutation. NO `auth.set_session()` mid-flight
+  (Codex finding: `gotrue_client.py:713` `set_session()` is networked,
+  not local). Refresh-only locking keyed by stable `_session_uuid`
+  (token-keyed locks rotate when tokens rotate).
+- **Server-side `sign_out` revocation.** `throwaway.auth.admin.sign_out(jwt, "global")`
+  actually revokes the user's token at Supabase before local keys are
+  popped. The anonymous singleton could not have done this.
+- **Atomic auth state writes.** `set_auth` returns `bool` with symmetric
+  2-key rollback on partial-write failure; `do_login` and OAuth callback
+  apply defensive 3-key caller-level cleanup. `set_auth(profile=None)`
+  clears stale `auth_profile` (closes a role-confusion security leak
+  caught by Codex).
+- **Reader-client RLS retrofit.** 12 reader functions in
+  `web/supabase_client.py` migrated from anonymous singleton to
+  authenticated `get_user_client()` so `TO authenticated` SELECT
+  policies return rows for logged-in users.
+- **Architecture reference:** `docs/guides/MULTITENANT.md` (~2150
+  words, 8 sections) is the canonical doc for future contributors
+  touching per-user state.
+
+---
+
 ## [7.11.2] - Composition Search Bug Fixes - 2026-05-15
 
 Desktop-only patch addressing two user-reported bugs in composition
