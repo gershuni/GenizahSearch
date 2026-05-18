@@ -38,6 +38,103 @@ def _warn_bridge_import_failed(exc: Exception) -> None:
     )
 
 
+def _render_line_numbered_html(
+    text: str,
+    highlight_html: str | None = None,
+    line_height: str = "2.2",
+    font_size: str = "1.4rem",
+    show_line_numbers: bool = True,
+) -> str:
+    """Render transcription text with an RTL-aware line-number gutter (Phase 999.4).
+
+    Per D-10, a "line" is one element of `text.split('\\n')`. Blank lines
+    DO get a number — preserving 1-to-1 alignment with the Responsa
+    `L<N>:word` search syntax in genizah_core.py:7679-7691 (parser) and
+    :4970-5010 (line_constraints).
+
+    When `show_line_numbers=False` the helper returns plain rendered HTML
+    with NO gutter — the body still gets the same RTL+Hebrew-font styling.
+
+    `highlight_html` (if provided) is the caller's pre-escaped, highlight-
+    marked HTML (e.g. from `highlight_text(text)` at browse.py:1573-1597,
+    or from `_apply_highlight_marks` in search_results.py). When None, the
+    raw `text` is HTML-escaped locally so XSS-bearing source text cannot
+    inject live tags.
+
+    Defense-in-depth: if `highlight_html` contains `<br>` separators (some
+    callers pre-convert `\\n` to `<br>` before rendering), the helper
+    normalizes them back to `\\n` so line counting still matches
+    `text.split('\\n')`.
+
+    The gutter is a SEPARATE grid column with `user-select: none` so a user
+    drag-selecting inside the body copies the body only, NOT the line
+    numbers (D-04 invariant — tested structurally via
+    tests/test_line_numbers_web.py::test_render_line_numbered_html_copy_paste_invariant
+    and confirmed end-to-end in the Phase 999.4 Plan 01 human-verify smoke check).
+    """
+    import html as _html_module
+
+    if not text and not highlight_html:
+        return ""
+
+    if not show_line_numbers:
+        if highlight_html is not None:
+            # Preserve visual line breaks for non-line-numbered mode.
+            body = highlight_html.replace('\n', '<br>')
+        else:
+            body = _html_module.escape(text).replace('\n', '<br>')
+        return (
+            f'<div class="transcription-text" style="'
+            f'font-size: {font_size}; line-height: {line_height}; '
+            f'direction: rtl; text-align: right; '
+            f'font-family: \'David\', \'Frank Ruehl\', \'Noto Sans Hebrew\', serif; '
+            f'white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word;'
+            f'">{body}</div>'
+        )
+
+    # Line-numbered render.
+    if highlight_html is not None:
+        # Some callers pre-convert \n to <br>; normalize for counting.
+        normalized = (
+            highlight_html
+            .replace('<br>', '\n')
+            .replace('<br/>', '\n')
+            .replace('<br />', '\n')
+        )
+        body_lines = normalized.split('\n')
+    else:
+        escaped = _html_module.escape(text)
+        body_lines = escaped.split('\n')
+
+    # Gutter: one number per body line (D-10 — blank lines counted).
+    numbers = '\n'.join(str(i + 1) for i in range(len(body_lines)))
+    body = '\n'.join(body_lines)
+
+    return (
+        f'<div class="line-numbered-text" style="'
+        f'direction: rtl; text-align: right; '
+        f'line-height: {line_height}; font-size: {font_size}; '
+        f'font-family: \'David\', \'Frank Ruehl\', \'Noto Sans Hebrew\', serif; '
+        f'display: grid; grid-template-columns: max-content 1fr; gap: 0.6em;'
+        f'">'
+        f'<span class="line-number-gutter" style="'
+        f'color: var(--text-muted, #9ca3af); '
+        f'font-size: 0.75em; '
+        f'text-align: left; '
+        f'font-family: \'Inter\', system-ui, sans-serif; '
+        f'user-select: none; -webkit-user-select: none; '
+        f'direction: ltr; '
+        f'padding-left: 0.4em; '
+        f'border-left: 1px solid var(--border-light, #e5e7eb); '
+        f'white-space: pre; line-height: {line_height};'
+        f'">{numbers}</span>'
+        f'<div class="line-numbered-body" style="'
+        f'white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word;'
+        f'">{body}</div>'
+        f'</div>'
+    )
+
+
 from web.safe_storage import safe_user_get, safe_user_set
 from web.services import (
     get_service,
@@ -4204,25 +4301,33 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             current_text = {'value': page.text}
 
                             def render_text_content(text: str):
-                                """Render text content with optional highlighting."""
+                                """Render text content with optional highlighting + optional line-number gutter (Phase 999.4)."""
                                 text_container.clear()
+                                # D-07: line numbers ON by default; coerced to bool to defend against type drift.
+                                show_ln = bool(safe_user_get('ui.show_line_numbers', True))
                                 with text_container:
                                     with ui.scroll_area().classes('w-full').style('height: calc(60vh - 80px); padding: 20px;'):
                                         if text:
-                                            if state.highlight_terms:
-                                                display_text = highlight_text(text)
-                                                ui.html(f'<div class="transcription-text" style="font-size: 1.4rem; line-height: 2.2;">{display_text}</div>', sanitize=False)
-                                            else:
-                                                ui.label(text).style(
-                                                    'font-size: 1.4rem; line-height: 2.2; direction: rtl; text-align: right; '
-                                                    'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap; '
-                                                    'overflow-wrap: break-word; word-break: break-word;'
-                                                )
+                                            highlight_html = highlight_text(text) if state.highlight_terms else None
+                                            html_str = _render_line_numbered_html(
+                                                text=text,
+                                                highlight_html=highlight_html,
+                                                line_height="2.2",
+                                                font_size="1.4rem",
+                                                show_line_numbers=show_ln,
+                                            )
+                                            ui.html(html_str, sanitize=False)
                                         else:
                                             with ui.column().classes('items-center justify-center h-full'):
                                                 ui.icon('text_snippet', size='4rem').style('color: var(--text-muted);')
                                                 ui.label(tr('No text available')).classes('mt-4 text-xl').style('color: var(--text-muted);')
                                 text_container.update()
+
+                            def _toggle_line_numbers():
+                                """D-08: persist toggle via safe_storage chokepoint, then re-render."""
+                                current = bool(safe_user_get('ui.show_line_numbers', True))
+                                safe_user_set('ui.show_line_numbers', not current)
+                                render_text_content(current_text['value'])
 
                             def handle_version_change(new_text: str, version_info: dict):
                                 """Handle version selection - update displayed text."""
@@ -4254,6 +4359,15 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 version_row = ui.row().classes('items-center p-2 border-b')
                                 enrichment_refs['version_container'] = version_row
                                 enrichment_refs['version_change_handler'] = handle_version_change
+
+                                # Phase 999.4 — line-number toggle (D-07, D-08).
+                                # Always visible when text is present, regardless of enrichment state.
+                                with version_row:
+                                    ui.button(
+                                        icon='format_list_numbered',
+                                        on_click=_toggle_line_numbers,
+                                    ).props('flat round dense').tooltip(tr('Toggle line numbers'))
+
                                 if state.enrichment_loaded:
                                     with version_row:
                                         create_version_selector(
