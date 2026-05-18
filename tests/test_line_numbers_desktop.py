@@ -158,32 +158,37 @@ def test_clipboard_isolation_invariant(textedit):
 
 
 def test_toggle_hides_gutter(textedit, _stub_config):
-    """Test 4 (D-09): toggling show_line_numbers config hides/shows the gutter."""
-    # Default: visible
+    """Test 4 (D-09): toggling show_line_numbers config hides/shows the gutter.
+
+    We use ``isVisibleTo(parent)`` (which checks intrinsic visibility), not
+    ``isVisible()`` (which additionally requires ancestor visibility — tests
+    don't show the parent QTextEdit, so ``isVisible()`` always returns False).
+    """
+    # Default: intended visible
     _stub_config["show_line_numbers"] = True
     apply_line_numbered_text(
         textedit, "html", source_text="a\nb", is_html=False
     )
-    assert textedit._line_number_area.isVisible() is True
+    assert textedit._line_number_area.isVisibleTo(textedit) is True
 
     # Flip OFF and re-apply
     _stub_config["show_line_numbers"] = False
     apply_line_numbered_text(
         textedit, "html", source_text="a\nb", is_html=False
     )
-    assert textedit._line_number_area.isVisible() is False
+    assert textedit._line_number_area.isVisibleTo(textedit) is False
 
     # Flip ON again
     _stub_config["show_line_numbers"] = True
     apply_line_numbered_text(
         textedit, "html", source_text="a\nb", is_html=False
     )
-    assert textedit._line_number_area.isVisible() is True
+    assert textedit._line_number_area.isVisibleTo(textedit) is True
 
     # refresh_visibility() should also respect a config flip without re-applying text
     _stub_config["show_line_numbers"] = False
     refresh_visibility(textedit)
-    assert textedit._line_number_area.isVisible() is False
+    assert textedit._line_number_area.isVisibleTo(textedit) is False
 
 
 def test_config_persistence_default_true(textedit, monkeypatch):
