@@ -1779,18 +1779,35 @@ def open_advanced_dialog(search_state, refs, index, result):
                     current_display_text = {'value': display_text, 'html': text_html}
 
                     def render_text_section(html_to_render: str):
-                        """Render pre-formatted HTML text content (called on initial render and version change)."""
+                        """Render pre-formatted HTML text content + optional line-number gutter (Phase 999.4).
+
+                        Quick View always passes pre-built highlight HTML; per D-10 the line
+                        count is taken from the SOURCE text (current_display_text['value']),
+                        not from the rendered HTML.
+                        """
+                        from web.safe_storage import safe_user_get
+                        from web.pages.browse import _render_line_numbered_html
                         nonlocal text_content_container
                         if text_content_container is None:
                             return
+                        # D-07: line numbers ON by default; coerced to bool against type drift.
+                        show_ln = bool(safe_user_get('ui.show_line_numbers', True))
+                        source_text = current_display_text.get('value') or ''
                         text_content_container.clear()
                         with text_content_container:
                             with ui.scroll_area().classes('w-full').style('max-height: 70vh;'):
-                                with ui.element('div').classes('p-6').style(
-                                    'direction: rtl; text-align: right; '
-                                    'line-height: 2.4; font-size: 1.2rem; font-family: "SBL Hebrew", "David", serif;'
-                                ):
-                                    ui.html(html_to_render or '', sanitize=False)
+                                if source_text or html_to_render:
+                                    html_str = _render_line_numbered_html(
+                                        text=source_text,
+                                        highlight_html=html_to_render or '',
+                                        line_height="2.4",
+                                        font_size="1.2rem",
+                                        show_line_numbers=show_ln,
+                                    )
+                                    with ui.element('div').classes('p-6'):
+                                        ui.html(html_str, sanitize=False)
+                                else:
+                                    ui.html('', sanitize=False)
                         text_content_container.update()
 
                     # Page Text Section with inline editing
@@ -1870,6 +1887,17 @@ def open_advanced_dialog(search_state, refs, index, result):
                                             next_page_btn.set_enabled(current_p_num < total_pages)
 
                                     with ui.row().classes('gap-1'):
+                                        # Phase 999.4 — line-number toggle (D-08).
+                                        def _toggle_quick_view_line_numbers():
+                                            from web.safe_storage import safe_user_get, safe_user_set
+                                            current = bool(safe_user_get('ui.show_line_numbers', True))
+                                            safe_user_set('ui.show_line_numbers', not current)
+                                            render_text_section(current_display_text.get('html', ''))
+
+                                        ui.button(
+                                            icon='format_list_numbered',
+                                            on_click=_toggle_quick_view_line_numbers,
+                                        ).props('flat round size=sm').tooltip(tr('Toggle line numbers'))
                                         ui.button(icon='content_copy', on_click=lambda t=display_text: copy_result_text(t)).props('flat round size=sm').tooltip(tr('Copy Text'))
                                         if sys_id and current_text:
                                             ui.button(icon='edit', on_click=lambda: toggle_edit_mode(current_text)).props('flat round size=sm').tooltip(tr('Edit'))
