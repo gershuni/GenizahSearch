@@ -186,9 +186,14 @@ class LineNumberArea(QWidget):
 
         for y, h, number in self._compute_line_positions():
             if y + h > 0 and y < viewport_height:
+                # AlignVCenter — cursorRect's height includes the CSS line-
+                # spacing leading, so centering vertically anchors the (small)
+                # gutter glyph to roughly the same baseline-area as the body
+                # text. AlignTop made numbers appear hugging the top of the
+                # line space, visually offset from the body text glyphs.
                 painter.drawText(
                     QRect(0, y, gutter_w - _GUTTER_PADDING_PX, h),
-                    int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop),
+                    int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
                     str(number),
                 )
 
@@ -249,42 +254,84 @@ def _install_resize_hook(widget) -> None:
     widget._line_number_resize_hooked = True
 
 
+_BIDI_CONTROLS = (
+    "‎‏"
+    "‪‫‬‭‮"
+    "⁦⁧⁨⁩"
+)
+
+
+_BIDI_CONTROLS = (
+    "‎‏"
+    "‪‫‬‭‮"
+    "⁦⁧⁨⁩"
+)
+
+
 def _normalize_block_text(s: str) -> str:
     """Normalize block text for matching against page sources.
 
     Qt represents `<br>` soft-line breaks inside a single QTextBlock as
-    U+2028 LINE SEPARATOR in `block.text()`. Source pages use `\\n`. Map
-    both to `\\n` and strip surrounding whitespace.
+    U+2028 LINE SEPARATOR in `block.text()`. Source pages use `\n`. Map
+    both to `\n`, strip Unicode directional control marks (Qt's HTML
+    renderer inserts these around RTL `<div dir='rtl'>` content), and
+    strip leading/trailing whitespace on each line so an extra space
+    Qt added at a line edge does not break equality.
     """
-    return s.replace(" ", "\n").strip()
+    s = s.replace(" ", "\n")
+    for ctl in _BIDI_CONTROLS:
+        s = s.replace(ctl, "")
+    lines = [line.strip() for line in s.split("\n")]
+    return "\n".join(lines).strip()
 
 
 def _mark_blocks_for_pages(doc, pages):
     """Tag QTextBlocks: setUserState(page_idx) for matched content blocks,
     setUserState(-1) for separators/titles.
 
-    Walks blocks in order, walks pages in order. A block whose normalized
-    text equals the next-expected page source is consumed as that page's
-    content block. Any block that doesn't match (and any leftover blocks
-    after all pages are consumed) is marked as a separator.
+    Matching strategy per block:
+      1. Try EXACT equality against the next-expected unmatched page first
+         (preserves source ordering for typical View All / Reading Desk
+         content where pages render in order).
+      2. If no exact match, scan all unmatched pages for exact equality
+         (defensive against out-of-order block emission).
+      3. If still none, try substring match (block contains page OR page
+         contains block) -- handles Qt edge cases where rendered block
+         text gains or loses small whitespace runs relative to the raw
+         page source. Each transcription page is long enough that
+         cross-page substring collisions are extremely unlikely.
+      4. If still no match, the block is a separator (userState = -1).
 
     Returns the count of pages successfully matched.
     """
     norm_pages = [_normalize_block_text(p) for p in pages]
-    page_idx = 0
+    unmatched = list(range(len(norm_pages)))
     block = doc.firstBlock()
     while block.isValid():
-        if page_idx < len(norm_pages):
-            block_text = _normalize_block_text(block.text())
-            target = norm_pages[page_idx]
-            if target and block_text == target:
-                block.setUserState(page_idx)
-                page_idx += 1
-                block = block.next()
-                continue
-        block.setUserState(-1)
+        matched_idx = None
+        block_text = _normalize_block_text(block.text())
+        if block_text and unmatched:
+            first = unmatched[0]
+            if block_text == norm_pages[first]:
+                matched_idx = first
+            if matched_idx is None:
+                for i in unmatched:
+                    if block_text == norm_pages[i]:
+                        matched_idx = i
+                        break
+            if matched_idx is None:
+                for i in unmatched:
+                    p = norm_pages[i]
+                    if p and (p in block_text or block_text in p):
+                        matched_idx = i
+                        break
+        if matched_idx is not None:
+            block.setUserState(matched_idx)
+            unmatched.remove(matched_idx)
+        else:
+            block.setUserState(-1)
         block = block.next()
-    return page_idx
+    return len(norm_pages) - len(unmatched)
 
 
 def apply_line_numbered_text(
