@@ -15,11 +15,8 @@ monkeypatched.
 
 import threading
 import time
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
 import os
-import json
-import tempfile
 
 
 # ---------------------------------------------------------------------------

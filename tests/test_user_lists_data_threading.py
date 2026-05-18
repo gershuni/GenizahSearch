@@ -12,7 +12,7 @@ UserListsManager.get_list_display_color() and get_lists_by_project().
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from web.user_lists import UserListsManager
 
 

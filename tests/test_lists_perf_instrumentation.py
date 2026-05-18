@@ -12,9 +12,7 @@ Gemini-MEDIUM: Use patch.object NOT direct mutation (safe under pytest -n auto).
 
 import asyncio
 import json
-import logging
-import unittest
-from unittest.mock import patch, AsyncMock, MagicMock
+from unittest.mock import patch
 
 import web.supabase_client as mod
 
@@ -135,7 +133,6 @@ def test_baseline_log_line_is_valid_json(caplog):
 def test_no_raw_storage_user_in_instrumentation_code():
     """AST negative-control: no new raw app.storage.user access introduced
     in the instrumentation section of web/supabase_client.py."""
-    import ast
     import os
 
     filepath = os.path.join(
@@ -218,7 +215,6 @@ def test_asgi_middleware_lists_path_emits_log(capsys):
     print(flush=True) because the project uses a dedicated 'genizah' logger
     chain with propagate=False, so root-logger-namespace records would be
     silently dropped during real captures."""
-    import web.main as main_mod
     from web.main import _ListsPerfRouteTimingMiddleware
 
     fake_app_calls = []

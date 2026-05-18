@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import re
 
-import pytest
 
 from web.pages.browse import _render_line_numbered_html
 

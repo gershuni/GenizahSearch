@@ -21,7 +21,6 @@ whose ``storage.user`` is a fresh dict (Phase 88 Refinement 6).
 """
 from types import SimpleNamespace
 
-import pytest
 
 
 def _make_stub(initial_storage: dict):

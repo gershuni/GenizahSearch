@@ -13,7 +13,7 @@ Uses asyncio.run() to avoid pytest-asyncio dependency (mirrors Phase 91 pattern)
 """
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from web.user_lists import UserListsManager
 

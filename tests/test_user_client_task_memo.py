@@ -18,9 +18,8 @@ import asyncio
 import gc
 import weakref
 from types import SimpleNamespace
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 import web.supabase_client as mod
 
