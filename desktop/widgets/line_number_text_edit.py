@@ -25,7 +25,7 @@ from __future__ import annotations
 from typing import Optional
 
 from PyQt6.QtCore import QRect, QSize, Qt
-from PyQt6.QtGui import QColor, QFont, QPainter
+from PyQt6.QtGui import QColor, QFont, QPainter, QTextCursor
 from PyQt6.QtWidgets import QAbstractScrollArea, QWidget
 
 from genizah_core import load_app_config, save_app_config
@@ -72,7 +72,16 @@ class LineNumberArea(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
     def set_line_count(self, n: int) -> None:
+        """Legacy single-page mode: continuous numbering 1..n across the whole document."""
         self._line_count = max(0, int(n))
+        self._per_page_mode = False
+        self.update()
+
+    def set_per_page_mode(self, enabled: bool) -> None:
+        """Per-page mode reads block userState (see `_mark_blocks_for_pages`)."""
+        self._per_page_mode = bool(enabled)
+        # In per-page mode `_line_count` is the total across pages — used only
+        # to size the gutter width to fit the largest expected number.
         self.update()
 
     def gutter_width(self) -> int:
@@ -84,47 +93,79 @@ class LineNumberArea(QWidget):
     def sizeHint(self) -> QSize:
         return QSize(self.gutter_width(), 0)
 
-    def _compute_line_positions(self) -> list[tuple[int, int]]:
-        """Return [(y_in_viewport, height), ...] one entry per source line.
+    def _compute_line_positions(self) -> list[tuple[int, int, int]]:
+        """Return [(y_in_viewport, height, number), ...] for each numbered line.
 
-        Walks the body widget's QTextLayout visually: each block contributes
-        its own QTextLines (one per `<br>` soft-break and one for the start
-        of the block). A QTextBlock may contain MANY visual lines when the
-        rendered HTML uses `<br>` separators inside a single `<p>` / `<div>`
-        — which is what genizah_app's transcription renders do. Iterating
-        QTextBlock alone would yield 1 entry for a 100-line `<br>`-separated
-        transcription; QTextLine walking yields all 100.
+        Uses `body.cursorRect(cursor)` to get the y-position of every visual
+        line — this respects CSS line-height and font-size from the rendered
+        HTML, which `QTextLayout.lineAt(i).y()` does not always do (the older
+        approach drifted relative to the body text when CSS line-height was
+        > 1). cursorRect returns viewport-relative coordinates, which align
+        with the gutter widget's own coordinate system.
 
-        Coordinates are in body-viewport space (scroll already subtracted).
-        Returned list has at most `self._line_count` entries; visual lines
-        beyond the source line count are dropped (defends against soft-wrap
-        creating extra visual lines when the body widget is narrower than
-        the longest transcription line — those extras get no number).
+        Two modes:
+        - Legacy (per_page_mode=False): numbering is continuous 1..N across
+          the entire document; N == self._line_count.
+        - Per-page (per_page_mode=True): walks QTextBlocks; blocks with
+          `block.userState() >= 0` are page-content blocks (resets numbering
+          to 1 when the userState value changes); blocks with userState == -1
+          are separators and get no numbers.
         """
         body = self._body
-        scroll_y = (
-            body.verticalScrollBar().value()
-            if isinstance(body, QAbstractScrollArea)
-            else 0
-        )
         doc = body.document()
-        positions: list[tuple[int, int]] = []
+        positions: list[tuple[int, int, int]] = []
+
+        if getattr(self, "_per_page_mode", False):
+            current_page = -1
+            line_in_page = 0
+            block = doc.firstBlock()
+            while block.isValid():
+                state = block.userState()
+                if state < 0:
+                    block = block.next()
+                    continue
+                if state != current_page:
+                    current_page = state
+                    line_in_page = 0
+                layout = block.layout()
+                n_visual = layout.lineCount() if layout is not None else 1
+                for i in range(n_visual):
+                    if layout is not None:
+                        tline = layout.lineAt(i)
+                        line_start = tline.textStart()
+                    else:
+                        line_start = 0
+                    cursor = QTextCursor(doc)
+                    cursor.setPosition(block.position() + line_start)
+                    rect = body.cursorRect(cursor)
+                    y = rect.y()
+                    h = max(1, rect.height())
+                    line_in_page += 1
+                    positions.append((y, h, line_in_page))
+                block = block.next()
+            return positions
+
+        # Legacy mode: continuous numbering, capped at self._line_count.
         block = doc.firstBlock()
-        while block.isValid() and len(positions) < self._line_count:
+        line_no = 0
+        while block.isValid() and line_no < self._line_count:
             layout = block.layout()
-            block_top = doc.documentLayout().blockBoundingRect(block).top()
             n_visual = layout.lineCount() if layout is not None else 1
             for i in range(n_visual):
-                if len(positions) >= self._line_count:
+                if line_no >= self._line_count:
                     break
                 if layout is not None:
                     tline = layout.lineAt(i)
-                    y = int(block_top + tline.y()) - scroll_y
-                    h = max(1, int(tline.height()))
+                    line_start = tline.textStart()
                 else:
-                    y = int(block_top) - scroll_y
-                    h = max(1, int(doc.documentLayout().blockBoundingRect(block).height()))
-                positions.append((y, h))
+                    line_start = 0
+                cursor = QTextCursor(doc)
+                cursor.setPosition(block.position() + line_start)
+                rect = body.cursorRect(cursor)
+                y = rect.y()
+                h = max(1, rect.height())
+                line_no += 1
+                positions.append((y, h, line_no))
             block = block.next()
         return positions
 
@@ -134,7 +175,7 @@ class LineNumberArea(QWidget):
         painter.setPen(QColor(_GUTTER_COLOR_HEX))
         painter.setFont(self._font)
 
-        if self._line_count == 0:
+        if self._line_count == 0 and not getattr(self, "_per_page_mode", False):
             return
 
         body = self._body
@@ -143,12 +184,12 @@ class LineNumberArea(QWidget):
             body.viewport().height() if hasattr(body, "viewport") else self.height()
         )
 
-        for line_no, (y, h) in enumerate(self._compute_line_positions(), start=1):
+        for y, h, number in self._compute_line_positions():
             if y + h > 0 and y < viewport_height:
                 painter.drawText(
                     QRect(0, y, gutter_w - _GUTTER_PADDING_PX, h),
                     int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop),
-                    str(line_no),
+                    str(number),
                 )
 
 
@@ -208,11 +249,50 @@ def _install_resize_hook(widget) -> None:
     widget._line_number_resize_hooked = True
 
 
+def _normalize_block_text(s: str) -> str:
+    """Normalize block text for matching against page sources.
+
+    Qt represents `<br>` soft-line breaks inside a single QTextBlock as
+    U+2028 LINE SEPARATOR in `block.text()`. Source pages use `\\n`. Map
+    both to `\\n` and strip surrounding whitespace.
+    """
+    return s.replace(" ", "\n").strip()
+
+
+def _mark_blocks_for_pages(doc, pages):
+    """Tag QTextBlocks: setUserState(page_idx) for matched content blocks,
+    setUserState(-1) for separators/titles.
+
+    Walks blocks in order, walks pages in order. A block whose normalized
+    text equals the next-expected page source is consumed as that page's
+    content block. Any block that doesn't match (and any leftover blocks
+    after all pages are consumed) is marked as a separator.
+
+    Returns the count of pages successfully matched.
+    """
+    norm_pages = [_normalize_block_text(p) for p in pages]
+    page_idx = 0
+    block = doc.firstBlock()
+    while block.isValid():
+        if page_idx < len(norm_pages):
+            block_text = _normalize_block_text(block.text())
+            target = norm_pages[page_idx]
+            if target and block_text == target:
+                block.setUserState(page_idx)
+                page_idx += 1
+                block = block.next()
+                continue
+        block.setUserState(-1)
+        block = block.next()
+    return page_idx
+
+
 def apply_line_numbered_text(
     widget,
     rendered_html_or_text: str,
     *,
     source_text: Optional[str] = None,
+    pages: Optional[list] = None,
     is_html: bool = True,
 ) -> None:
     """Set widget text + render the line-number gutter.
@@ -223,6 +303,13 @@ def apply_line_numbered_text(
             is True, else plain text.
         source_text: raw pre-HTML text for line-counting (D-10). If None,
             ``rendered_html_or_text`` is used (correct for plain-text mode).
+            Ignored when ``pages`` is provided.
+        pages: optional list of per-page raw text. When provided, the
+            painter enters per-page mode: numbering restarts at 1 inside
+            each matched content block. Separator/title blocks (anything
+            that doesn't match the next expected page source) get no
+            numbers. Used by Full Manuscript View for web-parity per-page
+            restart.
         is_html: if True call ``widget.setHtml(...)``, else ``setPlainText(...)``.
 
     Reads toggle state from app config; default True per D-07.
@@ -233,18 +320,29 @@ def apply_line_numbered_text(
     else:
         widget.setPlainText(rendered_html_or_text)
 
-    # Step 2: compute line count from source (D-10: split('\n'), not splitlines())
-    counting_source = source_text if source_text is not None else rendered_html_or_text
-    if counting_source:
-        line_count = len(counting_source.split("\n"))
-    else:
-        line_count = 0
-
-    # Step 3: ensure the gutter exists and update count (D-11: per-call reset)
+    # Step 2: configure mode + line counting
     area = _ensure_gutter(widget)
-    area.set_line_count(line_count)
+    if pages is not None:
+        # Per-page mode. Mark each QTextBlock with userState; the painter
+        # walks the marks to number per page with reset.
+        matched = _mark_blocks_for_pages(widget.document(), pages)
+        # Total = sum of per-page source line counts. Used only for sizing
+        # the gutter width (so 3-digit numbers in long pages still fit).
+        max_per_page = max(
+            (len(p.split("\n")) for p in pages), default=0
+        )
+        area._line_count = max(0, int(max_per_page))
+        area.set_per_page_mode(True)
+    else:
+        # Legacy single-page mode.
+        counting_source = source_text if source_text is not None else rendered_html_or_text
+        if counting_source:
+            line_count = len(counting_source.split("\n"))
+        else:
+            line_count = 0
+        area.set_line_count(line_count)
 
-    # Step 4: apply visibility from config (D-07 default True)
+    # Step 3: apply visibility from config (D-07 default True)
     enabled = is_line_numbers_enabled()
     area.setVisible(enabled)
     _reposition_gutter(widget)

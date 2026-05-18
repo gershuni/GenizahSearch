@@ -134,6 +134,56 @@ def test_line_number_area_line_count_matches_split(textedit):
     assert textedit._line_number_area._line_count == 3
 
 
+def test_per_page_mode_resets_counter_at_each_page(textedit, qapp):
+    """Regression (2026-05-18 smoke check) for the Full Manuscript / Reading
+    Desk surface: with `pages=[p1, p2, p3]`, the painter assigns numbering
+    that RESTARTS at 1 for each matched content block. Separator/title
+    blocks get no numbers.
+
+    The web Plan 01 Full Manuscript View has per-page restart; desktop must
+    match for parity. Without this, an all-pages render numbers continuously
+    (and incorrectly numbers the page-title separator rows).
+    """
+    # 3 pages, each with 3 source lines. The rendered HTML includes a
+    # separator `<div>` before each page's content `<div dir='rtl'>`.
+    pages = ["a1\na2\na3", "b1\nb2\nb3", "c1\nc2\nc3"]
+    sep = "<div style='background:#eee;'><b>Image: {}</b></div>"
+    page = "<div dir='rtl'>{}</div>"
+    full_html = "".join(
+        sep.format(i + 1) + page.format(p.replace("\n", "<br>"))
+        for i, p in enumerate(pages)
+    )
+    apply_line_numbered_text(textedit, full_html, pages=pages, is_html=True)
+    textedit.show()
+    qapp.processEvents()
+    textedit.document().adjustSize()
+    qapp.processEvents()
+
+    area = textedit._line_number_area
+    assert getattr(area, "_per_page_mode", False), "expected per-page mode active"
+
+    # Walk QTextBlocks and confirm: 3 blocks were tagged with userState 0/1/2
+    # (the page content blocks). Other blocks (separators) have userState == -1.
+    doc = textedit.document()
+    block = doc.firstBlock()
+    matched_states = []
+    while block.isValid():
+        s = block.userState()
+        if s >= 0:
+            matched_states.append(s)
+        block = block.next()
+    assert matched_states == [0, 1, 2], (
+        f"expected 3 page-content blocks tagged 0,1,2; got {matched_states!r}"
+    )
+
+    # Painter returns 9 positions with numbers 1,2,3,1,2,3,1,2,3.
+    positions = area._compute_line_positions()
+    numbers = [n for _, _, n in positions]
+    assert numbers == [1, 2, 3, 1, 2, 3, 1, 2, 3], (
+        f"expected per-page restart numbering [1,2,3,1,2,3,1,2,3]; got {numbers!r}"
+    )
+
+
 def test_paints_one_position_per_source_line_for_br_separated_html(textedit, qapp):
     """Regression (smoke-check finding 2026-05-18): when the body widget
     receives HTML with `<br>` separators inside a single block (the form

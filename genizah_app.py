@@ -6409,19 +6409,9 @@ class GenizahGUI(QMainWindow):
         self.btn_b_edit.setEnabled(False)
         community_bar.addWidget(self.btn_b_edit)
 
-        # Phase 999.4 — Line-number gutter toggle (shared config key with ResultDialog)
-        self.btn_b_line_numbers = QPushButton(tr("# Lines"))
-        self.btn_b_line_numbers.setCheckable(True)
-        self.btn_b_line_numbers.setChecked(is_line_numbers_enabled())
-        self.btn_b_line_numbers.setToolTip(tr("Toggle line numbers"))
-
-        def _toggle_browse_line_numbers():
-            new_state = self.btn_b_line_numbers.isChecked()
-            set_line_numbers_enabled(new_state)
-            refresh_line_number_visibility(self.browse_text)
-
-        self.btn_b_line_numbers.clicked.connect(_toggle_browse_line_numbers)
-        community_bar.addWidget(self.btn_b_line_numbers)
+        # Phase 999.4 line-numbers toggle moved to browse_find_row (below) so
+        # it sits next to the Find input — matching the ResultDialog placement
+        # which the user identified as the correct UX location 2026-05-18.
 
         # Add Comment button
         self.btn_b_comment = QPushButton(tr("💬 Comment"))
@@ -6529,6 +6519,21 @@ class GenizahGUI(QMainWindow):
         self.browse_find_input.setPlaceholderText(tr("Find in text..."))
         self.browse_find_input.textChanged.connect(lambda text: apply_find_highlight(self.browse_text, text.strip()))
         browse_find_row.addWidget(self.browse_find_input)
+
+        # Phase 999.4 — line-numbers toggle next to Find input (matches the
+        # ResultDialog placement at desktop/result_dialog.py).
+        self.btn_b_line_numbers = QPushButton(tr("# Lines"))
+        self.btn_b_line_numbers.setCheckable(True)
+        self.btn_b_line_numbers.setChecked(is_line_numbers_enabled())
+        self.btn_b_line_numbers.setToolTip(tr("Toggle line numbers"))
+
+        def _toggle_browse_line_numbers():
+            new_state = self.btn_b_line_numbers.isChecked()
+            set_line_numbers_enabled(new_state)
+            refresh_line_number_visibility(self.browse_text)
+
+        self.btn_b_line_numbers.clicked.connect(_toggle_browse_line_numbers)
+        browse_find_row.addWidget(self.btn_b_line_numbers)
         text_layout.addLayout(browse_find_row)
 
         # Reading Desk toolbar (hidden by default, shown when reading desk is active)
@@ -9353,12 +9358,12 @@ class GenizahGUI(QMainWindow):
                 )
 
         full_html = "\n".join(html_parts)
-        # Phase 999.4: route through gutter helper. source_text joins fragment
-        # bodies with `\n` so the per-fragment "Current"/"remove" header rows
-        # are NOT counted as transcription lines.
-        raw_text = '\n'.join(raw_text_parts)
+        # Phase 999.4: route through gutter helper in PER-FRAGMENT mode.
+        # Each fragment's content gets numbered 1..N independently. The
+        # per-fragment "Current" / "remove" header rows don't match any
+        # source-text entry, so the painter skips them.
         apply_line_numbered_text(
-            self.browse_text, full_html, source_text=raw_text, is_html=True,
+            self.browse_text, full_html, pages=raw_text_parts, is_html=True,
         )
 
         # === RIGHT PANE: Stacked Images in viewer pane ===
@@ -10000,12 +10005,14 @@ class GenizahGUI(QMainWindow):
             return
 
         full_html = "".join(html_content)
-        # Phase 999.4: route through gutter helper. source_text joins per-page
-        # text bodies with '\n' so the gutter counts only transcription lines
-        # (image separators between pages are HTML chrome, not source lines).
-        raw_text = '\n'.join(raw_text_parts)
+        # Phase 999.4: route through gutter helper in PER-PAGE mode so each
+        # page's content gets numbered 1..N independently (matches the web
+        # Plan 01 Full Manuscript View behaviour). The image separators are
+        # rendered as their own QTextBlocks and skipped by the painter
+        # because they don't match any page's source text — see
+        # `_mark_blocks_for_pages` in desktop/widgets/line_number_text_edit.py.
         apply_line_numbered_text(
-            self.browse_text, full_html, source_text=raw_text, is_html=True,
+            self.browse_text, full_html, pages=raw_text_parts, is_html=True,
         )
         apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
 
