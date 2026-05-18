@@ -2702,17 +2702,31 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 if doc_page.full_header:
                                     ui.label(doc_page.full_header).classes('text-xs font-mono').style('color: var(--text-tertiary);')
 
-                            # Page text
+                            # Page text — Phase 999.4 Plan 01 FMV extension (post-smoke-check):
+                            # Route Full Manuscript View through `_render_line_numbered_html`
+                            # so each page gets its own gutter restarting at 1. The toggle
+                            # state is the same `ui.show_line_numbers` storage key the
+                            # single-page Browse + Quick View toggles read.
                             if doc_page.text:
-                                display_text = doc_page.text
+                                _show_ln = bool(safe_user_get('ui.show_line_numbers', True))
                                 if state.highlight_terms:
-                                    display_text = highlight_text(doc_page.text)
-                                    ui.html(f'<div class="transcription-text" style="font-size: 1.3rem; line-height: 2.0;">{display_text}</div>', sanitize=False)
-                                else:
-                                    ui.label(doc_page.text).style(
-                                        'font-size: 1.3rem; line-height: 2.0; direction: rtl; text-align: right; '
-                                        'font-family: "David", "Frank Ruehl", "Noto Sans Hebrew", serif; white-space: pre-wrap;'
+                                    _hl_html = highlight_text(doc_page.text)
+                                    _fmv_html = _render_line_numbered_html(
+                                        text=doc_page.text,
+                                        highlight_html=_hl_html,
+                                        line_height='2.0',
+                                        font_size='1.3rem',
+                                        show_line_numbers=_show_ln,
                                     )
+                                else:
+                                    _fmv_html = _render_line_numbered_html(
+                                        text=doc_page.text,
+                                        highlight_html=None,
+                                        line_height='2.0',
+                                        font_size='1.3rem',
+                                        show_line_numbers=_show_ln,
+                                    )
+                                ui.html(_fmv_html, sanitize=False)
                             else:
                                 ui.label(tr('No text available')).classes('italic').style('color: var(--text-muted);')
             elif state.view_joined:
