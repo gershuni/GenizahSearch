@@ -92,7 +92,13 @@ def _render_line_numbered_html(
             f'">{body}</div>'
         )
 
-    # Line-numbered render.
+    # Line-numbered render — per-line grid rows for robust alignment.
+    # Each logical line gets ONE grid row containing a (gutter, body) cell pair.
+    # If a body line wraps to multiple visual lines, the row grows in height and
+    # the gutter number stays anchored to the top via `align-self: start`. The
+    # body cell carries an absolute `min-height` so blank lines reserve their
+    # row height instead of collapsing to zero (D-10 visual parity with the
+    # Responsa `L<N>:` parser).
     if highlight_html is not None:
         # Some callers pre-convert \n to <br>; normalize for counting.
         normalized = (
@@ -106,32 +112,48 @@ def _render_line_numbered_html(
         escaped = _html_module.escape(text)
         body_lines = escaped.split('\n')
 
-    # Gutter: one number per body line (D-10 — blank lines counted).
-    numbers = '\n'.join(str(i + 1) for i in range(len(body_lines)))
-    body = '\n'.join(body_lines)
+    # Absolute row line-height computed from the unitless multiplier × the body
+    # font-size. Using calc() keeps the gutter span's line-box exactly as tall
+    # as the body cell, eliminating drift from unitless `line-height` inheriting
+    # against the gutter's smaller (0.75em) own font-size.
+    row_line_height = f"calc({line_height} * {font_size})"
+
+    gutter_style = (
+        "color: var(--text-muted, #9ca3af); "
+        "font-size: 0.75em; "
+        "text-align: left; "
+        "font-family: 'Inter', system-ui, sans-serif; "
+        "user-select: none; -webkit-user-select: none; "
+        "direction: ltr; "
+        "padding-left: 0.4em; "
+        "border-left: 1px solid var(--border-light, #e5e7eb); "
+        "align-self: start; "
+        f"line-height: {row_line_height};"
+    )
+    body_row_style = (
+        "white-space: pre-wrap; "
+        "overflow-wrap: break-word; "
+        "word-break: break-word; "
+        f"min-height: {row_line_height};"
+    )
+
+    rows = []
+    for idx, line_content in enumerate(body_lines):
+        rows.append(
+            f'<span class="line-number-gutter" style="{gutter_style}">{idx + 1}</span>'
+            f'<div class="line-numbered-body-row" style="{body_row_style}">{line_content}</div>'
+        )
 
     return (
         f'<div class="line-numbered-text" style="'
         f'direction: rtl; text-align: right; '
         f'line-height: {line_height}; font-size: {font_size}; '
         f'font-family: \'David\', \'Frank Ruehl\', \'Noto Sans Hebrew\', serif; '
-        f'display: grid; grid-template-columns: max-content 1fr; gap: 0.6em;'
+        f'display: grid; grid-template-columns: max-content 1fr; '
+        f'column-gap: 0.6em; row-gap: 0;'
         f'">'
-        f'<span class="line-number-gutter" style="'
-        f'color: var(--text-muted, #9ca3af); '
-        f'font-size: 0.75em; '
-        f'text-align: left; '
-        f'font-family: \'Inter\', system-ui, sans-serif; '
-        f'user-select: none; -webkit-user-select: none; '
-        f'direction: ltr; '
-        f'padding-left: 0.4em; '
-        f'border-left: 1px solid var(--border-light, #e5e7eb); '
-        f'white-space: pre; line-height: {line_height};'
-        f'">{numbers}</span>'
-        f'<div class="line-numbered-body" style="'
-        f'white-space: pre-wrap; overflow-wrap: break-word; word-break: break-word;'
-        f'">{body}</div>'
-        f'</div>'
+        + ''.join(rows)
+        + '</div>'
     )
 
 
