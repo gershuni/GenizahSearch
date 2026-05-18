@@ -373,14 +373,14 @@ Plans:
 - [x] 92.1-02-PLAN.md — Diagnose Symptom 3 (NO-REPRO branch — bug eliminated as side-effect of 92.1-01) + mandatory _create_and_add_handler refactor + 5-test regression guard (READER-03)
 - [x] 92.1-03-PLAN.md — Closeout docs: ROADMAP/STATE/OPEN_ISSUES/CLAUDE.md "Recently Changed" + SUMMARY.md (READER-06)
 
-### Phase 999.1: Search results by folio (BACKLOG — PLANNED)
+### Phase 999.1: Search results by folio (BACKLOG — SHIPPED 2026-05-18)
 
 **Goal:** Web search-result parity with desktop — surface the page/image number (`display['img']`, same field desktop's `COL_IMG` renders at `genizah_app.py:16111`) on each search-result card so users see which folio a hit came from without opening Quick View. Strict parity scope; folio labels (`1r`/`2v`), grouping, sorting, and parallels-list extension are all explicitly deferred.
-**Requirements:** FOLIO-01
-**Plans:** 1/2 plans executed
+**Requirements:** FOLIO-01 ✅
+**Plans:** 1/1 plans executed
 
 Plans:
-- [ ] 999.1-01-PLAN.md — Render display.img inline after shelfmark on result card title line; human smoke-check (FOLIO-01)
+- [x] 999.1-01-PLAN.md — Render display.img inline after shelfmark on result card title line; human smoke-check; post-approval `tr('Image number')` tooltip revision (FOLIO-01) — commits `8368a962` + `9db7b18e`
 
 ### Phase 999.2: Filtering by PGP (BACKLOG — PLANNED)
 

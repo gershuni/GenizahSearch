@@ -81,6 +81,14 @@ Close the P0 RLS-reachability regression introduced by Phase 90 D-09/D-10 — th
 
 ---
 
+## Backlog — small phases shipped after the v7.12 milestone close
+
+These are stand-alone backlog phases (`999.x`) that don't belong to a milestone. Tracked here for FOLIO-XX / PGP-FILTER-XX / PGP-EXPORT-XX / LINE-NUM-XX traceability.
+
+### Search Results by Folio — Phase 999.1
+
+- [x] **FOLIO-01**: Surface `result['display']['img']` (page/image number) inline after the shelfmark on each web `/search` result card for desktop COL_IMG parity. Theme-aware chip using existing `var(--bg-tertiary)` / `var(--text-muted)` tokens; falsy value renders nothing. Descriptive tooltip `tr('Image number')` / "מספר תמונה" added post-smoke-check per D-05 revision 2026-05-18.
+
 ## Future Requirements (deferred)
 
 - Per-session rate limiting keyed by `_session_uuid` (currently per-IP; could be tightened post-v7.12 if abuse appears)
@@ -137,7 +145,8 @@ Close the P0 RLS-reachability regression introduced by Phase 90 D-09/D-10 — th
 | READER-04 | Phase 92.1 | Complete |
 | READER-05 | Phase 92.1 | Complete |
 | READER-06 | Phase 92.1 | Complete |
+| FOLIO-01 | Phase 999.1 (backlog) | Complete |
 
 ---
 
-*Last updated: 2026-05-18 -- v7.12 Path B Multitenant Architecture milestone SHIPPED. 38/38 requirements Complete across 7 phases (87, 88, 89, 90, 91, 92, 92.1). Plan 92.2 (lists-performance-investigation) was an internal perf sub-phase with no new milestone requirements (instrumentation + task-scoped client memo + zero-arg RPC) and is recorded in CLAUDE.md/STATE.md/ROADMAP.md but not in this requirements tracker.*
+*Last updated: 2026-05-18 -- v7.12 Path B Multitenant Architecture milestone SHIPPED (38/38 across phases 87, 88, 89, 90, 91, 92, 92.1; Plan 92.2 = internal perf sub-phase, no new requirements). Backlog phase 999.1 (Search results by folio) also shipped 2026-05-18 — FOLIO-01 Complete via web/pages/search_results.py:469-481 + genizah_translations.py 'Image number' tooltip (commits 8368a962 + 9db7b18e); not part of the v7.12 milestone.*
