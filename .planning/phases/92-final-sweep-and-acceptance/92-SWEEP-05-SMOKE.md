@@ -82,12 +82,12 @@ Wait for `NiceGUI ready on http://localhost:8080` (or 8081).
 
 ## Final disposition
 
-- [ ] R0 PASS / FAIL: __________
-- [ ] R1 PASS / FAIL: __________
-- [ ] R2 PASS / FAIL: __________
-- [ ] R3 PASS / FAIL / N/A: __________
-- [ ] Overall: PASS / FAIL -- __________
-- [ ] Tester: Hillel Gershuni, date: __________
+- [x] R0 PASS / FAIL: **PASS** (smoke run 2, 2026-05-18)
+- [x] R1 PASS / FAIL: **PASS** (smoke run 2, 2026-05-18 -- terminal-refresh WARNING observed is the designed Phase 90 H3 cleanup branch, not the asserted invariant)
+- [x] R2 PASS / FAIL: **SKIPPED** (smoke run 2, 2026-05-18 -- tester chose not to exercise the manual JWT-tamper procedure; R2 covers a separate code path (proactive refresh mid-operation) not part of the bug class Phase 92.1 closed)
+- [x] R3 PASS / FAIL / N/A: **N/A** (SWEEP-01 confirmed joins.db is community-share with no per-user ownership -- expected D-04 case)
+- [x] Overall: PASS / FAIL -- **PASS** (smoke run 2, 2026-05-18). See "Smoke run 2" narrative below.
+- [x] Tester: Hillel Gershuni, date: **2026-05-18**
 
 ---
 
@@ -143,3 +143,34 @@ This is wrong -- `user_lists` SELECT policy is `TO authenticated`, so the anon r
 - **Phase 92.1 (Reader-Client Retrofit) inserted 2026-05-17** to migrate the ~13 reader functions in `supabase_client.py` from `get_client()` to `get_user_client()`, add a regression test suite, and trace + fix the secondary symptom 3 (`safe_user_get('auth_session') ... UI context` console error in the add-to-list-dialog post-create path). Directory `.planning/phases/92.1-reader-client-retrofit/` created via `gsd-sdk query phase.insert`; ROADMAP.md Backlog entry has `(INSERTED)` marker.
 - After Phase 92.1 ships and passes its own UAT, redo this smoke (Smoke run 2) -- if PASS, then Plan 92-02 closeout docs proceed.
 - See `docs/OPEN_ISSUES.md` P1 section for the formal bug entry (added 2026-05-17).
+
+---
+
+## Smoke run 2 -- 2026-05-18 -- PASS
+
+**Tester:** Hillel Gershuni
+**Server commit at test time:** `9fd68b7c` (master-main, post Phase 92.2 perf-fix ship)
+**Verdict:** Overall **PASS** -- Plan 92-02 closeout docs cleared to run.
+
+**Scenarios exercised:**
+
+| Scenario | Result | Notes |
+|----------|--------|-------|
+| R0 baseline (lists fetch, new-list from `/lists`, new-list from search -> Add-to-list -> Create new list, persistence + ownership) | **PASS** | Pre-existing lists visible on login; new lists persist with correct `user_id`; both creation paths work (the Phase 92.1 reader migration + Symptom-3 fix closed the run-1 failure modes) |
+| R1 logout-mid-flight (logout while list-create in flight; clean failure, no 500) | **PASS** | Single `_refresh_user_session: terminal refresh failure (Invalid Refresh Token: Refresh Token Not Found, code='refresh_token_not_found', status=400) - clearing local auth keys` WARNING observed -- this is the designed Phase 90 / Codex round 1 H3 cleanup branch at `web/supabase_client.py:337-344`. It fires when a refresh token is consumed/invalidated server-side (exactly the R1 logout case) and pops `auth_session`/`auth_user`/`auth_profile` so the UI stops retrying refresh forever. NOT the invariant being asserted on. |
+| R2 token refresh race | **SKIPPED** | Tester chose not to exercise the manual JWT-tamper (Path B) procedure. R2 tests Phase 90's per-`_session_uuid` refresh-lock keying (a separate code path from the Phase 92.1 reader migration). Deferred as a future-debt item; does not gate v7.12 closure. |
+| R3 puzzle write | **N/A** | SWEEP-01 verdict confirmed `joins.db` is community-share with no per-user columns -- expected D-04 case. |
+| Cross-user concurrent (two browsers, parallel R0; xlsx isolation; `/lists` isolation) | **PASS** | Verified |
+| Log invariant (no `safe_user_get('auth_session') unexpected failure` WARNING) | **PASS** | Specific WARNING under test NOT observed. The terminal-refresh WARNING noted under R1 is a different code path (by-design cleanup), not the asserted invariant. |
+| DB invariant (`user_lists` rows persisted with correct `user_id` per session) | **PASS** | Verified |
+
+**Other observations (non-blocking):**
+
+- **Export-results does not work in incognito browsers.** Pre-existing across the v7.12 milestone -- `ui.download` silently no-ops in Chrome incognito (already tracked as a separate P2 from Phase 88 hand-off). Does NOT block this smoke or v7.12 closure. The cross-user concurrent run used Chrome regular + Firefox to avoid this pre-existing limitation.
+
+**Disposition:**
+- **Smoke = PASS.** Plan 92-02 (v7.12 closeout docs) cleared to run.
+- **Phase 92.1 P0 regression verified closed end-to-end** -- the reader migration + Symptom-3 fix shipped in Phase 92.1 and the perf fix shipped in Phase 92.2 are both verified in a live cross-user browser test.
+- **`docs/OPEN_ISSUES.md` P1 entry** can be flipped from `Fixed in code; verification pending SWEEP-05 smoke run 2` to `Fixed (2026-05-18)` as part of Plan 92-02 Task 0 (pre-flight gate now satisfied).
+- **R2 deferral** logged as future-debt -- the per-`_session_uuid` lock keying invariant is still covered by Phase 90's unit-test suite; only the end-to-end browser exercise of the refresh-mid-operation path is deferred.
+- **`deploy.sh`** remains blocked until Plan 92-02 ships; after Plan 92-02 + MULTITENANT.md write, v7.12 milestone is fully shippable.
