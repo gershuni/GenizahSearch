@@ -211,7 +211,7 @@ class ResultDialog(QDialog):
         self.btn_external_link = QPushButton(tr("External Website"))
         self.btn_external_link.setVisible(False)
         self.btn_external_link.clicked.connect(self.open_external_link)
-        self.lbl_info = QLabel(); self.lbl_info.setStyleSheet("font-size: 11px;"); self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lbl_info = QLabel(); self.lbl_info.setStyleSheet("font-size: 11px; color: palette(text);"); self.lbl_info.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lbl_meta_loading = QLabel(tr("Loading...")); self.lbl_meta_loading.setStyleSheet("color: orange; font-size: 11px;"); self.lbl_meta_loading.setVisible(False)
 
         # Domain info (inlined on info_row)

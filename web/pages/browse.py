@@ -4011,7 +4011,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                             else:
                                 page_input = ui.number(
                                     value=page.p_num, min=1, max=page.total_pages
-                                ).classes('w-14').props('dense outlined')
+                                ).classes('w-24').props('dense outlined')
 
                                 async def handle_go_click():
                                     try:

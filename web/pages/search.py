@@ -2489,8 +2489,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             """Toggle scope and show/hide distance spinners and line modifiers."""
             builder_state['scope'] = value
             show_dists = (value in ('word_range', 'lines'))
-            for ds in distance_spinners:
-                ds.set_visibility(show_dists)
+            n = builder_state.get('num_components', 2)
+            for i, ds in enumerate(distance_spinners):
+                ds.set_visibility(show_dists and i < n - 1)
             # Show/hide line position modifiers
             is_lines = (value == 'lines')
             if 'line_start' in mod_cbs:
@@ -2668,11 +2669,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 for ci in range(4):
                     # Distance spinner BEFORE component (except for first component)
                     if ci > 0:
-                        with ui.column().classes('items-center justify-center gap-0').style('min-width: 60px;') as dist_col:
+                        with ui.column().classes('items-center justify-center gap-0').style('min-width: 130px;') as dist_col:
                             ui.label(tr('Distance')).classes('text-xs').style('color: var(--text-muted);')
                             dist_num = ui.number(
                                 value=0, min=0, max=50
-                            ).classes('w-16').props('outlined dense')
+                            ).classes('w-32').props('outlined dense')
 
                             def _make_dist_handler(dn, idx):
                                 def handler():

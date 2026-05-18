@@ -477,7 +477,8 @@ def create_result_card(search_state, refs, index, result):
                     _img_num = display.get('img')
                     if _img_num:
                         ui.label(str(_img_num)).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
-                            'background: var(--bg-tertiary); color: var(--text-muted);'
+                            'background: var(--bg-tertiary); color: var(--text-muted); '
+                            'min-width: 2.4em; text-align: center;'
                         ).tooltip(tr('Image number'))
 
                 # Phase 57 JOIN-03: Partner container placed outside badge row, inside content column
@@ -1868,7 +1869,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                             ).props('flat round size=xs').tooltip(tr('Previous Page'))
                                             prev_page_btn.set_enabled(current_p_num > 1)
 
-                                            page_input = ui.number(value=current_p_num, min=1, max=total_pages).classes('w-12').props('dense outlined borderless')
+                                            page_input = ui.number(value=current_p_num, min=1, max=total_pages).classes('w-20').props('dense outlined borderless')
                                             ui.label(f"/{total_pages}").classes('text-xs').style('color: var(--text-secondary);')
 
                                             async def go_to_page():
