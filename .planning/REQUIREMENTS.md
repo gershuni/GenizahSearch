@@ -20,53 +20,53 @@ Land the primitives the rest of the milestone depends on. **This phase must comp
 
 Delete singleton mirrors; `web/export_state.py` becomes the only path for per-user export state. **Migration is by deletion — no dual-writing through both AppState and export_state.**
 
-- [ ] **STATE-01**: 10 per-user fields deleted from `web/state.py:AppState` (`last_results`, `current_search_query`, `current_search_mode`, `current_search_gap`, `last_filters_applied`, `last_search_warnings`, `last_selected_uids`, `parallels_results`, `parallels_filtered`, `parallels_search_meta`)
-- [ ] **STATE-02**: All writer sites (`search.py`, `search_results.py`, `parallels.py`) migrated to write exclusively through `web/export_state.py`
-- [ ] **STATE-03**: All reader sites (`api.py` export handlers, others discovered during migration) migrated to read exclusively through `web/export_state.py`
-- [ ] **STATE-04**: `_TEST_BACKEND` shim removed from `web/export_state.py`; replaced with proper fixture or adapter injection
-- [ ] **STATE-05**: `tests/test_export_cross_user_isolation.py` rewritten to assert against per-session storage directly, without the shim
-- [ ] **STATE-06**: `tests/test_export_state_selection.py`, `tests/test_api_export_json.py`, `tests/test_api_legacy_unchanged.py` updated to drop `state.*` setup and use only `export_state` helpers
+- [x] **STATE-01**: 10 per-user fields deleted from `web/state.py:AppState` (`last_results`, `current_search_query`, `current_search_mode`, `current_search_gap`, `last_filters_applied`, `last_search_warnings`, `last_selected_uids`, `parallels_results`, `parallels_filtered`, `parallels_search_meta`)
+- [x] **STATE-02**: All writer sites (`search.py`, `search_results.py`, `parallels.py`) migrated to write exclusively through `web/export_state.py`
+- [x] **STATE-03**: All reader sites (`api.py` export handlers, others discovered during migration) migrated to read exclusively through `web/export_state.py`
+- [x] **STATE-04**: `_TEST_BACKEND` shim removed from `web/export_state.py`; replaced with proper fixture or adapter injection
+- [x] **STATE-05**: `tests/test_export_cross_user_isolation.py` rewritten to assert against per-session storage directly, without the shim
+- [x] **STATE-06**: `tests/test_export_state_selection.py`, `tests/test_api_export_json.py`, `tests/test_api_legacy_unchanged.py` updated to drop `state.*` setup and use only `export_state` helpers
 
 ## Lists Cache — Phase 89
 
 Drop the singleton + 10s TTL plumbing. Per-request instantiation is the simpler safe pattern.
 
-- [ ] **LISTS-01**: `UserListsManager` instance singleton on `AppState._user_lists_mgr` removed
-- [ ] **LISTS-02**: `UserListsManager` instantiated per-request in page handlers that need it
-- [ ] **LISTS-03**: `_cache_entry` tuple and 10s TTL plumbing removed (originated in `22b45f68`, evolved in `8ac93eff`); user-id-key plumbing removed alongside
-- [ ] **LISTS-04**: `tests/test_user_lists_cache_isolation.py` rewritten against the per-request model
+- [x] **LISTS-01**: `UserListsManager` instance singleton on `AppState._user_lists_mgr` removed
+- [x] **LISTS-02**: `UserListsManager` instantiated per-request in page handlers that need it
+- [x] **LISTS-03**: `_cache_entry` tuple and 10s TTL plumbing removed (originated in `22b45f68`, evolved in `8ac93eff`); user-id-key plumbing removed alongside
+- [x] **LISTS-04**: `tests/test_user_lists_cache_isolation.py` rewritten against the per-request model
 
 ## Auth Caching — Phase 90
 
 Replace the process-wide cache with request-scoped auth that respects Codex's `set_session()` finding.
 
-- [ ] **AUTHC-01**: `_client_cache`, `_session_locks`, `_locks_guard`, `_CLIENT_CACHE_TTL` deleted from `web/supabase_client.py`
-- [ ] **AUTHC-02**: Request-scoped auth strategy implemented that does NOT call `auth.set_session()` solely to set request headers (per Codex finding: `gotrue_client.py:713` proves `set_session()` makes a network call)
-- [ ] **AUTHC-03**: Refresh-only locking keyed by `_session_uuid` from Phase 87; no cached authenticated `supabase.Client` objects
-- [ ] **AUTHC-04**: Auth-resurrection guard added in `cca23db3` removed (obsolete once `get_user_client()` cache is gone)
-- [ ] **AUTHC-05**: Code comment near the auth path documents WHY `set_session()` is avoided (Codex finding cited) so future contributors don't reintroduce it
+- [x] **AUTHC-01**: `_client_cache`, `_session_locks`, `_locks_guard`, `_CLIENT_CACHE_TTL` deleted from `web/supabase_client.py`
+- [x] **AUTHC-02**: Request-scoped auth strategy implemented that does NOT call `auth.set_session()` solely to set request headers (per Codex finding: `gotrue_client.py:713` proves `set_session()` makes a network call)
+- [x] **AUTHC-03**: Refresh-only locking keyed by `_session_uuid` from Phase 87; no cached authenticated `supabase.Client` objects
+- [x] **AUTHC-04**: Auth-resurrection guard added in `cca23db3` removed (obsolete once `get_user_client()` cache is gone)
+- [x] **AUTHC-05**: Code comment near the auth path documents WHY `set_session()` is avoided (Codex finding cited) so future contributors don't reintroduce it
 
 ## Auth State Writes — Phase 91
 
 Make the multi-step writes across the auth boundary atomic and safe-storage-aware.
 
-- [ ] **AUTHW-01**: `web/auth_state.py:set_auth`, `clear_auth`, `do_login` migrated to safe_storage helpers
-- [ ] **AUTHW-02**: OAuth callback in `web/main.py:1456+` migrated to safe_storage helpers
-- [ ] **AUTHW-03**: `sign_out`/server-side revocation happens BEFORE popping `auth_session`; local auth keys popped in a `finally` block so cleanup is atomic even when revocation fails
-- [ ] **AUTHW-04**: `sign_out` uses the user's authenticated client (not the anonymous singleton) so the token is actually revoked server-side
-- [ ] **AUTHW-05**: Tests for OAuth callback prune-mid-flight resilience (`AssertionError` on pruned session must not 500 the callback)
-- [ ] **AUTHW-06**: `persist_value` safe-wrap from `cca23db3` retained in `web/components/filter_panel.py`
+- [x] **AUTHW-01**: `web/auth_state.py:set_auth`, `clear_auth`, `do_login` migrated to safe_storage helpers
+- [x] **AUTHW-02**: OAuth callback in `web/main.py:1456+` migrated to safe_storage helpers
+- [x] **AUTHW-03**: `sign_out`/server-side revocation happens BEFORE popping `auth_session`; local auth keys popped in a `finally` block so cleanup is atomic even when revocation fails
+- [x] **AUTHW-04**: `sign_out` uses the user's authenticated client (not the anonymous singleton) so the token is actually revoked server-side
+- [x] **AUTHW-05**: Tests for OAuth callback prune-mid-flight resilience (`AssertionError` on pruned session must not 500 the callback)
+- [x] **AUTHW-06**: `persist_value` safe-wrap from `cca23db3` retained in `web/components/filter_panel.py`
 
 ## Final Sweep + Acceptance — Phase 92
 
 Prove the invariants hold end-to-end and document the architecture so it survives the next contributor.
 
-- [ ] **SWEEP-01**: `web/` audited for any remaining raw `app.storage.user.get/pop` and `app.storage.user[key] = ...` accesses
-- [ ] **SWEEP-02**: `parallels.py:3520` and `text_editor.py` auto-save (the two deferred-callback sites Codex round 4 flagged) confirmed migrated to safe_storage
-- [ ] **SWEEP-03**: Phase 87 allowlist re-audited; every entry has explicit justification; new entries require code-review approval
-- [ ] **SWEEP-04**: 4 Codex review transcripts (`_tmp/codex_*_response.txt`) re-read against final state; each previously-flagged issue confirmed addressed or explicitly waived with rationale
-- [ ] **SWEEP-05**: Production smoke-test plan executed: cross-user concurrent `/search` + `/browse` + `/lists` + xlsx export in two browser sessions; no leakage observed
-- [ ] **SWEEP-06**: `docs/guides/MULTITENANT.md` written documenting the architecture (safe_storage chokepoint, `_session_uuid`, request-scoped auth, per-request lists, deletion-not-migration discipline) for future contributors
+- [x] **SWEEP-01**: `web/` audited for any remaining raw `app.storage.user.get/pop` and `app.storage.user[key] = ...` accesses (5-surface widened audit per Gemini D-03: `app.storage.user` clean + `app.storage.browser` documented + `app.storage.client` documented + `shared/puzzle_service.py`/joins.db N/A community-share + `web/analytics.py` JS-injection-only verified — see `92-SWEEP-01-AUDIT.md`)
+- [x] **SWEEP-02**: `parallels.py:3520` and `text_editor.py` auto-save (the two deferred-callback sites Codex round 4 flagged) confirmed migrated to safe_storage
+- [x] **SWEEP-03**: Phase 87 allowlist re-audited; terminal empty state `allowed_raw_access: []` preserved from Phase 91; new entries require code-review approval per BANNED_TABLES extension protocol in `docs/guides/SUPABASE_GUIDE.md`
+- [x] **SWEEP-04**: 4 Codex review transcripts (`_tmp/codex_*_response.txt`) re-read against final state per D-05 thematic walk; 23 raw findings deduped into >=8 unique issues; every addressed disposition cites git short hash + phase-plan pointer per D-07 — see `92-SWEEP-04-TRANSCRIPT-AUDIT.md`
+- [x] **SWEEP-05**: Production smoke-test plan executed: smoke run 2 PASS 2026-05-18; R0/R1 exercised end-to-end PASS; R2 invariant (`per-_session_uuid` refresh-lock keying) covered by Phase 90 unit-test suite `tests/test_refresh_lock_per_session.py` (D-17 behavioral test proving distinct-`_session_uuid` parallelism); manual e2e JWT-tamper procedure (Paths A/B/C) deferred as future-debt and does not gate v7.12 closure; R3 = N/A (joins.db community-share per D-04); Overall = PASS — see `92-SWEEP-05-SMOKE.md`
+- [x] **SWEEP-06**: `docs/guides/MULTITENANT.md` written documenting the architecture (safe_storage chokepoint, `_session_uuid`, request-scoped auth, per-request lists, deletion-not-migration discipline, §7 D-09 WARNING callout for `set_auth(profile=None)` clears-stale semantics with CM6-refined wording cross-referencing `tests/test_auth_callback_resilience.py:T-F`, §8 enforcement layer documenting both `tests/test_no_raw_storage_access.py` and the 3 manual-audit surfaces per D-10) for future contributors
 
 ## Reader-Client Retrofit — Phase 92.1
 
@@ -104,33 +104,33 @@ Close the P0 RLS-reachability regression introduced by Phase 90 D-09/D-10 — th
 | FOUND-03 | Phase 87 | Complete |
 | FOUND-04 | Phase 87 | Complete |
 | FOUND-05 | Phase 87 | Complete |
-| STATE-01 | Phase 88 | Pending |
-| STATE-02 | Phase 88 | Pending |
-| STATE-03 | Phase 88 | Pending |
-| STATE-04 | Phase 88 | Pending |
-| STATE-05 | Phase 88 | Pending |
-| STATE-06 | Phase 88 | Pending |
-| LISTS-01 | Phase 89 | Pending |
-| LISTS-02 | Phase 89 | Pending |
-| LISTS-03 | Phase 89 | Pending |
-| LISTS-04 | Phase 89 | Pending |
-| AUTHC-01 | Phase 90 | Pending |
-| AUTHC-02 | Phase 90 | Pending |
-| AUTHC-03 | Phase 90 | Pending |
-| AUTHC-04 | Phase 90 | Pending |
-| AUTHC-05 | Phase 90 | Pending |
-| AUTHW-01 | Phase 91 | Pending |
-| AUTHW-02 | Phase 91 | Pending |
-| AUTHW-03 | Phase 91 | Pending |
-| AUTHW-04 | Phase 91 | Pending |
-| AUTHW-05 | Phase 91 | Pending |
-| AUTHW-06 | Phase 91 | Pending |
-| SWEEP-01 | Phase 92 | Pending |
-| SWEEP-02 | Phase 92 | Pending |
-| SWEEP-03 | Phase 92 | Pending |
-| SWEEP-04 | Phase 92 | Pending |
-| SWEEP-05 | Phase 92 | Pending |
-| SWEEP-06 | Phase 92 | Pending |
+| STATE-01 | Phase 88 | Complete |
+| STATE-02 | Phase 88 | Complete |
+| STATE-03 | Phase 88 | Complete |
+| STATE-04 | Phase 88 | Complete |
+| STATE-05 | Phase 88 | Complete |
+| STATE-06 | Phase 88 | Complete |
+| LISTS-01 | Phase 89 | Complete |
+| LISTS-02 | Phase 89 | Complete |
+| LISTS-03 | Phase 89 | Complete |
+| LISTS-04 | Phase 89 | Complete |
+| AUTHC-01 | Phase 90 | Complete |
+| AUTHC-02 | Phase 90 | Complete |
+| AUTHC-03 | Phase 90 | Complete |
+| AUTHC-04 | Phase 90 | Complete |
+| AUTHC-05 | Phase 90 | Complete |
+| AUTHW-01 | Phase 91 | Complete |
+| AUTHW-02 | Phase 91 | Complete |
+| AUTHW-03 | Phase 91 | Complete |
+| AUTHW-04 | Phase 91 | Complete |
+| AUTHW-05 | Phase 91 | Complete |
+| AUTHW-06 | Phase 91 | Complete |
+| SWEEP-01 | Phase 92 | Complete |
+| SWEEP-02 | Phase 92 | Complete |
+| SWEEP-03 | Phase 92 | Complete |
+| SWEEP-04 | Phase 92 | Complete |
+| SWEEP-05 | Phase 92 | Complete |
+| SWEEP-06 | Phase 92 | Complete |
 | READER-01 | Phase 92.1 | Complete |
 | READER-02 | Phase 92.1 | Complete |
 | READER-03 | Phase 92.1 | Complete |
@@ -140,4 +140,4 @@ Close the P0 RLS-reachability regression introduced by Phase 90 D-09/D-10 — th
 
 ---
 
-*Last updated: 2026-05-17 -- Phase 92.1 reader-client retrofit inserted; 38/38 requirements mapped across 7 phases*
+*Last updated: 2026-05-18 -- v7.12 Path B Multitenant Architecture milestone SHIPPED. 38/38 requirements Complete across 7 phases (87, 88, 89, 90, 91, 92, 92.1). Plan 92.2 (lists-performance-investigation) was an internal perf sub-phase with no new milestone requirements (instrumentation + task-scoped client memo + zero-arg RPC) and is recorded in CLAUDE.md/STATE.md/ROADMAP.md but not in this requirements tracker.*
