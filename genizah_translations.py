@@ -2797,6 +2797,10 @@ TRANSLATIONS = {
     "Translation": "תרגום",
     "Translations ON": "תרגומים מופעלים",
     "Translations OFF": "תרגומים כבויים",
+
+    # Phase 999.4 - Line-number gutter
+    "Toggle line numbers": "הצג/הסתר מספרי שורות",
+    "# Lines": "# שורות",
     "Show translated descriptions when available": "הצג תיאורים מתורגמים כאשר זמינים",
 
     # Phase 46-06 - Extended field translations

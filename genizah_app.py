@@ -54,6 +54,12 @@ from desktop.widgets import (
     _get_initial_image_index,
     ShelfmarkCompleter,
 )
+from desktop.widgets.line_number_text_edit import (
+    apply_line_numbered_text,
+    is_line_numbers_enabled,
+    set_line_numbers_enabled,
+    refresh_visibility as refresh_line_number_visibility,
+)
 from desktop.title_helpers import (
     _get_title_svc, _truncate_title, _is_hebrew_text,
     _translate_hebrew_date, _resolve_display_title,
@@ -3362,7 +3368,8 @@ class GenizahGUI(QMainWindow):
             pass
         # Restore to original text before editing
         original = getattr(self, 'browse_original_edit_text', self.browse_original_text)
-        self.browse_text.setPlainText(original)
+        # Phase 999.4: route through gutter helper so line numbers re-render
+        apply_line_numbered_text(self.browse_text, original, source_text=original, is_html=False)
         self.browse_text.setReadOnly(True)
         self.browse_text.setStyleSheet("")
         self.browse_edit_bar.hide()
@@ -3632,7 +3639,13 @@ class GenizahGUI(QMainWindow):
             return
         # Apply RTL formatting like browse_render_page does
         browse_html_text = text.replace('\n', '<br>')
-        self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
+        # Phase 999.4: route through gutter helper (source_text = raw `text`)
+        apply_line_numbered_text(
+            self.browse_text,
+            f"<div dir='rtl'>{browse_html_text}</div>",
+            source_text=text,
+            is_html=True,
+        )
         apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
 
     # ── PGP Version Selector Helpers (shared by Browse tab and ResultDialog) ──
@@ -6396,6 +6409,20 @@ class GenizahGUI(QMainWindow):
         self.btn_b_edit.setEnabled(False)
         community_bar.addWidget(self.btn_b_edit)
 
+        # Phase 999.4 — Line-number gutter toggle (shared config key with ResultDialog)
+        self.btn_b_line_numbers = QPushButton(tr("# Lines"))
+        self.btn_b_line_numbers.setCheckable(True)
+        self.btn_b_line_numbers.setChecked(is_line_numbers_enabled())
+        self.btn_b_line_numbers.setToolTip(tr("Toggle line numbers"))
+
+        def _toggle_browse_line_numbers():
+            new_state = self.btn_b_line_numbers.isChecked()
+            set_line_numbers_enabled(new_state)
+            refresh_line_number_visibility(self.browse_text)
+
+        self.btn_b_line_numbers.clicked.connect(_toggle_browse_line_numbers)
+        community_bar.addWidget(self.btn_b_line_numbers)
+
         # Add Comment button
         self.btn_b_comment = QPushButton(tr("💬 Comment"))
         self.btn_b_comment.setToolTip(tr("Add a comment on this document"))
@@ -6580,6 +6607,10 @@ class GenizahGUI(QMainWindow):
         self.browse_edit_mode = False
         self.browse_original_text = ""
         text_layout.addWidget(self.browse_text)
+
+        # Phase 999.4: attach line-number gutter as sibling widget (D-04 selection-safe).
+        # First real render (browse_render_page etc.) will populate via apply_line_numbered_text.
+        apply_line_numbered_text(self.browse_text, "", source_text="", is_html=True)
 
         # Install link click handler for genizah:// URLs in QTextEdit
         # (QTextEdit doesn't have anchorClicked signal like QTextBrowser,
@@ -8577,7 +8608,13 @@ class GenizahGUI(QMainWindow):
         layout_dir = Qt.LayoutDirection.RightToLeft if is_rtl else Qt.LayoutDirection.LeftToRight
         self.browse_text.setLayoutDirection(layout_dir)
         browse_html_text = text.replace('\n', '<br>')
-        self.browse_text.setHtml(f"<div dir='{direction}'>{browse_html_text}</div>")
+        # Phase 999.4: route through gutter helper (source_text = raw `text`)
+        apply_line_numbered_text(
+            self.browse_text,
+            f"<div dir='{direction}'>{browse_html_text}</div>",
+            source_text=text,
+            is_html=True,
+        )
         apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
 
     def _browse_refresh_pgp_for_page(self):
@@ -9235,6 +9272,9 @@ class GenizahGUI(QMainWindow):
 
         # === LEFT PANE: Stacked Texts in browse_text ===
         html_parts = []
+        # Phase 999.4: parallel accumulator of raw transcription text so the
+        # line-number gutter can count source `\n` lines across all fragments.
+        raw_text_parts: list[str] = []
 
         # Header bar with exit button
         html_parts.append(
@@ -9304,6 +9344,8 @@ class GenizahGUI(QMainWindow):
                     f"font-size: 16px; line-height: 1.6;'>"
                     f"{html_text}</div>"
                 )
+                # Phase 999.4: track raw lines for the gutter
+                raw_text_parts.append(display_text)
             else:
                 html_parts.append(
                     "<div style='padding: 10px; color: #95a5a6; font-style: italic;'>"
@@ -9311,7 +9353,13 @@ class GenizahGUI(QMainWindow):
                 )
 
         full_html = "\n".join(html_parts)
-        self.browse_text.setHtml(full_html)
+        # Phase 999.4: route through gutter helper. source_text joins fragment
+        # bodies with `\n` so the per-fragment "Current"/"remove" header rows
+        # are NOT counted as transcription lines.
+        raw_text = '\n'.join(raw_text_parts)
+        apply_line_numbered_text(
+            self.browse_text, full_html, source_text=raw_text, is_html=True,
+        )
 
         # === RIGHT PANE: Stacked Images in viewer pane ===
         self._browse_rd_render_images()
@@ -9852,6 +9900,10 @@ class GenizahGUI(QMainWindow):
         QApplication.processEvents() # Refresh UI
 
         html_content = []
+        # Phase 999.4: parallel raw-text accumulator for the line-number gutter.
+        # Per-page sections joined with '\n' so the gutter counts the same
+        # source lines that exist in the rendered HTML.
+        raw_text_parts: list[str] = []
 
         # If browsing a Part, load all folios in the Part
         if self.current_browse_part_id and self.current_browse_part_folios:
@@ -9902,6 +9954,8 @@ class GenizahGUI(QMainWindow):
                     content = p['text'].replace("\n", "<br>")
 
                     html_content.append(anchor + separator + f"<div dir='rtl'>{content}</div>")
+                    # Phase 999.4: accumulate raw page text for the gutter
+                    raw_text_parts.append(p.get('text', ''))
         else:
             # Single folio mode (original behavior)
             pages = self.searcher.get_full_manuscript(self.current_browse_sid)
@@ -9938,13 +9992,21 @@ class GenizahGUI(QMainWindow):
                 content = p['text'].replace("\n", "<br>")
 
                 html_content.append(anchor + separator + f"<div dir='rtl'>{content}</div>")
+                # Phase 999.4: accumulate raw page text for the gutter
+                raw_text_parts.append(p.get('text', ''))
 
         if not html_content:
             QMessageBox.warning(self, tr("Error"), tr("Could not load full text."))
             return
 
         full_html = "".join(html_content)
-        self.browse_text.setHtml(full_html)
+        # Phase 999.4: route through gutter helper. source_text joins per-page
+        # text bodies with '\n' so the gutter counts only transcription lines
+        # (image separators between pages are HTML chrome, not source lines).
+        raw_text = '\n'.join(raw_text_parts)
+        apply_line_numbered_text(
+            self.browse_text, full_html, source_text=raw_text, is_html=True,
+        )
         apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
 
         # Update info label with Oxford Part info in View All mode
@@ -21467,7 +21529,15 @@ class GenizahGUI(QMainWindow):
             except Exception:
                 pass  # UI element update optional; continue rendering
         browse_html_text = page_text.replace('\n', '<br>')
-        self.browse_text.setHtml(f"<div dir='rtl'>{browse_html_text}</div>")
+        # Phase 999.4: route through gutter helper. source_text is page_text
+        # (with potential `*` highlight markers — count is unaffected since
+        # markers don't introduce or remove `\n`).
+        apply_line_numbered_text(
+            self.browse_text,
+            f"<div dir='rtl'>{browse_html_text}</div>",
+            source_text=page_text,
+            is_html=True,
+        )
         apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
         
         full_header = pd.get('full_header', '')
