@@ -25,6 +25,12 @@ from desktop.widgets import (
     apply_find_highlight, _get_folio_number_from_shelfmark,
     _get_folio_image_index,
 )
+from desktop.widgets.line_number_text_edit import (
+    apply_line_numbered_text,
+    is_line_numbers_enabled,
+    set_line_numbers_enabled,
+    refresh_visibility as refresh_line_number_visibility,
+)
 from desktop.title_helpers import (
     _get_title_svc, _is_hebrew_text, _translate_hebrew_date,
     _resolve_display_title, _set_label_with_tooltip,
@@ -448,9 +454,27 @@ class ResultDialog(QDialog):
         self.find_ms_input.setPlaceholderText(tr("Find in text..."))
         self.find_ms_input.textChanged.connect(lambda text: apply_find_highlight(self.text_ms, text.strip()))
         ms_find_row.addWidget(self.find_ms_input)
+
+        # Phase 999.4 — Line-number gutter toggle (shared config key with Browse tab)
+        self.btn_rd_line_numbers = QPushButton(tr("# Lines"))
+        self.btn_rd_line_numbers.setCheckable(True)
+        self.btn_rd_line_numbers.setChecked(is_line_numbers_enabled())
+        self.btn_rd_line_numbers.setToolTip(tr("Toggle line numbers"))
+
+        def _toggle_rd_line_numbers():
+            new_state = self.btn_rd_line_numbers.isChecked()
+            set_line_numbers_enabled(new_state)
+            refresh_line_number_visibility(self.text_ms)
+
+        self.btn_rd_line_numbers.clicked.connect(_toggle_rd_line_numbers)
+        ms_find_row.addWidget(self.btn_rd_line_numbers)
+
         ms_text_layout.addLayout(ms_find_row)
         self.text_ms = QTextBrowser(); self.text_ms.setFont(QFont("SBL Hebrew", 16)); self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
         ms_text_layout.addWidget(self.text_ms)
+        # Phase 999.4: attach line-number gutter as sibling widget (D-04 selection-safe).
+        # First real render at _rd_display_text / browse_render_page will populate.
+        apply_line_numbered_text(self.text_ms, "", source_text="", is_html=True)
 
         # 2. Source Context (Below Manuscript Text)
         self.src_widget = QWidget() # Container to hide/show easily
@@ -1257,7 +1281,10 @@ class ResultDialog(QDialog):
     def _rd_display_text(self, text):
         """Display text in the manuscript viewer."""
         if text:
-            self.text_ms.setHtml(self._htmlify(text))
+            # Phase 999.4: route through gutter helper (source_text = raw `text`)
+            apply_line_numbered_text(
+                self.text_ms, self._htmlify(text), source_text=text, is_html=True,
+            )
 
     def _rd_display_pgp_text(self, text, is_rtl=True):
         """Display PGP edition/translation text with proper directionality."""
@@ -1267,7 +1294,13 @@ class ResultDialog(QDialog):
         layout_dir = Qt.LayoutDirection.RightToLeft if is_rtl else Qt.LayoutDirection.LeftToRight
         self.text_ms.setLayoutDirection(layout_dir)
         html_text = text.replace('\n', '<br>')
-        self.text_ms.setHtml(f"<div dir='{direction}'>{html_text}</div>")
+        # Phase 999.4: route through gutter helper (source_text = raw `text`)
+        apply_line_numbered_text(
+            self.text_ms,
+            f"<div dir='{direction}'>{html_text}</div>",
+            source_text=text,
+            is_html=True,
+        )
         self._refresh_find_highlights()
 
     def _on_rd_pgp_loaded(self, sys_id, sources, pgp_doc):
@@ -1928,7 +1961,10 @@ class ResultDialog(QDialog):
             except re.error:
                 pass
 
-        self.text_ms.setHtml(self._htmlify(ms_raw))
+        # Phase 999.4: route through gutter helper (source_text = raw `ms_raw`)
+        apply_line_numbered_text(
+            self.text_ms, self._htmlify(ms_raw), source_text=ms_raw, is_html=True,
+        )
         self._refresh_find_highlights()
         
         # 2. Source Context
@@ -2116,8 +2152,11 @@ class ResultDialog(QDialog):
                 highlighted_text = regex.sub(r'*\g<0>*', raw_text)
                 raw_text = highlighted_text
             except re.error: pass
-        
-        self.text_ms.setHtml(self._htmlify(raw_text))
+
+        # Phase 999.4: route through gutter helper (source_text = raw `raw_text`)
+        apply_line_numbered_text(
+            self.text_ms, self._htmlify(raw_text), source_text=raw_text, is_html=True,
+        )
         self._refresh_find_highlights()
         self._scroll_to_first_highlight(self.text_ms, pattern_str)
 
