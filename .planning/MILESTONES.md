@@ -1,5 +1,37 @@
 # Project Milestones: GenizahSearch
 
+## v7.12 Multitenant Architecture (Path B) (Shipped: 2026-05-18)
+
+**Phases completed:** 10 phases (87, 88, 89, 90, 91, 92, 92.1 INSERTED, 92.2 INSERTED, 999.1 promoted, 999.4 promoted), 28 plans
+**Git range:** `af9f749c` → `315777d1` (277 commits)
+**Scope:** Python +10,587 / -1,604 across 66 files; tests +7,034 / -386 across 35 files
+**Timeline:** 2026-05-13 → 2026-05-18 (6 days wall clock)
+**Requirements:** 49/49 satisfied (38 v7.12 core + 11 promoted backlog)
+
+**Delivered:** Refactored GenizahSearch's web layer off the desktop-inherited single-user mental model so per-user state, auth, and caches cannot leak across concurrent sessions sharing one Python process. The cross-user xlsx export filename leak fixed in v7.11.1 was one instance of a class of bugs surfaced across 4 rounds of Codex review; v7.12 replaces that pattern with intentional multitenant primitives.
+
+**Key accomplishments:**
+
+- **Phase 87 — Foundations:** 131 raw `app.storage.user` access sites migrated across 14 files through the new `web/safe_storage.py` chokepoint with `_session_uuid` minted on first request. AST-based pytest lint scanner (`tests/test_no_raw_storage_access.py`) installed as permanent CI guard. 8 plans across 8 waves.
+- **Phase 88 — State Separation by Deletion:** 10 per-user fields physically deleted from `web/state.py:AppState`; `web/export_state.py` becomes the sole path for per-user export state. `_TEST_BACKEND` shim replaced by `SimpleNamespace`-based fixture pattern. Two permanent regression guards (runtime attr-absence + static AST scanner with alias-import coverage).
+- **Phase 89 — Lists Cache Per-Request:** `UserListsManager` singleton + `_cache_entry` tuple + 10s TTL plumbing all deleted. Per-request instantiation in page handlers. Cross-user cache leak structurally impossible.
+- **Phase 90 — Auth Caching Rewrite (No set_session):** Request-scoped auth via local header mutation; proactive refresh gated by `_refresh_locks` keyed by `_session_uuid` (not access tokens — stable across rotation). All 5 auth-mutating helpers use throwaway clients to sidestep the supabase event-listener leak. `sign_out` uses `throwaway.auth.admin.sign_out(jwt, "global")` for real server-side revocation. 4 globals + 2 helpers atomically deleted with 3 CI guards installed in a single commit.
+- **Phase 91 — Atomic Auth State Writes:** 12 raw accesses migrated. `set_auth` returns `bool` with symmetric user/profile 2-key rollback AND treats `profile=None` as "clear stale auth_profile" (Codex HIGH catch — stale profile leaked role via `GlobalAuthState.get_role()`/`is_admin()`/`is_editor()`). `do_login` and `_oauth_complete_login` use session-first multi-write ordering with defensive 3-key caller-level cleanup. Phase 87 allowlist self-eliminates: **2 → 0 entries** (lint scanner now enforces zero raw `app.storage.user` accesses anywhere under `web/`).
+- **Phase 92 — Final Sweep and Acceptance:** 5-surface widened SWEEP-01 audit clean (`app.storage.user` + `app.storage.browser` + `app.storage.client` + `joins.db` + `web/analytics.py`). 4 Codex transcripts re-audited thematically; 23 raw findings deduped into 13 unique issues with git short-hash citations. SWEEP-05 smoke run 2 PASS 2026-05-18 against server commit `9fd68b7c`: R0/R1/R2/cross-user concurrent all PASS. `docs/guides/MULTITENANT.md` shipped as architecture reference (~2150 words, 8 sections).
+- **Phase 92.1 INSERTED — Reader-Client Retrofit:** Closed P0 RLS-reachability regression introduced by Phase 90's singleton-anonymous-only invariant. 12 reader call sites in `web/supabase_client.py` migrated from anonymous `get_client()` to authenticated `get_user_client()`. 6 KEEP sites annotated with forward-looking RLS evidence (e.g. verified `discoveries` only SELECT policy is `TO public USING (is_hidden=false)` with no admin SELECT branch). AST scanner `tests/test_no_anonymous_reads_on_authenticated_tables.py` with `BANNED_TABLES = {user_lists, list_items, recent_items, projects}`. 5-test regression suite exercising the REAL `lists_mgr.create_list → get_user_client → safe_user_get('auth_session')` chain.
+- **Phase 92.2 INSERTED — Lists Performance Investigation:** Closed `/lists` 36s warm-render regression introduced by Phase 92.1 reader migration. Pre-fix BASELINE 35.5/34.2/45.8s; post-fix POSTFIX 1.9/1.9/2.2s — **19.3x mean speedup, 26x reduction in Client builds per render**. Fix: task-scoped `WeakKeyDictionary` memo on `get_user_client()` keyed by `(get_persisted_session_uuid(), access_token)` with `asyncio.current_task()` as the WeakKey; sync-context bypass for `run.io_bound`; zero-arg `get_list_item_counts_for_user()` RPC pushed to prod Supabase replaces per-list fanout; `data`+`counts` threaded through `/lists` render path. Per-user Client cache (E-path) explicitly REJECTED — Codex flagged "reopens Phase 90's scary surface."
+- **Phase 999.1 promoted — Search Results by Folio:** Small theme-aware chip after shelfmark on web `/search` result cards rendering `result['display']['img']` for desktop COL_IMG parity. Adapts to light/parchment/dark themes via existing CSS tokens; descriptive `tr('Image number')` tooltip.
+- **Phase 999.4 promoted — Line Numbering:** Right-side (RTL leading-edge) line-number gutter on 5 surfaces (web Browse + Quick View + Full Manuscript View; desktop Browse tab + ResultDialog). Numbering anchored to `text.split('\n')` matching the existing Responsa `L<N>:` parser. D-04 copy-paste invariant achieved structurally on both surfaces (CSS-grid column with `user-select: none` on web; sibling `QWidget` outside `QTextDocument` on desktop). Shipped across 13 commits over 4 human-verify smoke-check rounds.
+
+**Architecture reference:** `docs/guides/MULTITENANT.md`
+**Live CI enforcement:** `tests/test_no_raw_storage_access.py` (allowlist `[]`)
+
+**Known deferred items at close:** 96 stale audit items predating v7.12 (38 debug sessions, 50 quick tasks, 5 todos, 1 seed, 2 verification gaps substantively closed by SWEEP-05 PASS but with `human_needed` status flag not yet flipped). See STATE.md Deferred Items.
+
+**Tag posture:** No git tag created during milestone close — deferred to `/release` skill which bundles the web changes with the next desktop installer build. Web-only milestones do not get standalone tags per `feedback_no_github_release_for_web_only.md`, but v7.12 ships alongside desktop changes (Phase 999.4 LINE-NUM-07/08/09/10 + v7.11.2 desktop patch bundling) so the release will tag both.
+
+---
+
 ## v7.10 Search API (Shipped: 2026-05-05)
 
 **Phases completed:** 8 phases, 37 plans, 52 tasks

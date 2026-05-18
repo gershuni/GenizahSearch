@@ -130,6 +130,65 @@ Public HTTP/JSON research-automation API: `/api/search`, `/api/browse`, `/api/pa
 
 ---
 
+## Milestone: v7.12 — Multitenant Architecture (Path B)
+
+**Shipped:** 2026-05-18
+**Phases:** 10 (87-92 + 92.1/92.2 inserted + 999.1/999.4 promoted) | **Plans:** 28
+**Git:** 277 commits, +10,587 / -1,604 Python LOC, +7,034 / -386 test LOC | **Wall clock:** 6 days (2026-05-13 → 2026-05-18)
+**Requirements:** 49/49 satisfied (38 v7.12 core + 11 promoted backlog)
+
+### What Was Built
+
+Refactored GenizahSearch's web layer off the desktop-inherited single-user mental model. 131 raw `app.storage.user` accesses migrated through a single chokepoint adapter (`web/safe_storage.py`); allowlist driven to zero. 10 per-user `AppState` mirror fields physically deleted (state separation by deletion, not migration). `UserListsManager` singleton + 10s TTL plumbing deleted; per-request instantiation. Process-wide auth client cache (4 globals + 2 helpers) deleted; request-scoped auth via local header mutation; refresh locks keyed by `_session_uuid`; NO `auth.set_session()` mid-flight (Codex constraint at `gotrue_client.py:713`). `sign_out` uses `throwaway.auth.admin.sign_out(jwt, "global")` for real server-side revocation. Two emergency sub-phases shipped during execution: Phase 92.1 (reader-client RLS retrofit) after SWEEP-05 smoke run 1 failed at R0; Phase 92.2 (`/lists` 19.3x perf fix via task-scoped `WeakKeyDictionary` memo) after evening UAT measured 36s warm load. `docs/guides/MULTITENANT.md` shipped as architecture reference. Two backlog phases (FOLIO-01 + LINE-NUM-01..10) promoted into archive because they shipped in same window.
+
+### What Worked
+
+1. **Foundations-first ordering (Phase 87 before everything else)** — landing the chokepoint + AST lint scanner + allowlist FIRST meant every subsequent phase had a stable invariant to work against. Phases 88-92 could focus on deletion-not-migration without worrying about new raw accesses sneaking in.
+2. **State separation by DELETION, not migration** — dual-write through `AppState` mirrors would have invited regression every refactor. Physically deleting the 10 fields + installing AST scanner regression guard made cross-user export leak structurally impossible. The pattern repeated 4 times (export state, lists cache, auth client cache, raw storage access) — each time deletion beat migration.
+3. **Cross-AI plan review (Gemini + Codex) BEFORE execution** — caught 7 critical items the internal plan-checker missed. The Phase 92 SWEEP-01 widening from 1 surface to 5 (Gemini D-03 CRITICAL) was load-bearing — without it, the `app.storage.browser` cookie scope and `web/analytics.py` JS injection paths would not have been audited. The Phase 91 stale `auth_profile` security leak (Codex HIGH) prevented a role-confusion bug from shipping.
+4. **Encoding cross-AI findings as locked decisions in CONTEXT.md BEFORE planning** — Gemini/Codex flag → D-XX decision baked into CONTEXT.md → plan executes against locked decisions. No re-litigation during execution. Phase 92 had 9 such D-XX entries; Phase 92.1 had 17.
+5. **Two emergency sub-phase insertions worked cleanly** — Phase 92.1 (RLS reader regression) and Phase 92.2 (lists perf regression) were both inserted mid-milestone with full plan + cross-AI review + CI guards in 24-hour cycles. The pattern: smoke test FAILS → ROADMAP gets a new INSERTED row → `/gsd-plan-phase` with reviews → `/gsd-execute-phase` → re-run smoke. Sub-phase numbering (92.1, 92.2) made the insertion semantics unambiguous.
+6. **HARD GATE forensic baseline for Phase 92.2 perf fix** — Plan 92.2-01 was instrumentation-only and committed a baseline JSON forensic artifact (3 warm samples 35.5/34.2/45.8s, `query_count=client_build_count=26`). Plan 92.2-02 shipped the fix and committed a postfix JSON (3 warm samples 1.9/1.9/2.2s, `query_count=2 client_build_count=1`). HARD GATE `all_warm_total_wall_clock_ms_lte_5000` passed by 2.3x margin. The before/after artifacts make the fix self-auditing.
+7. **Per-phase atomic CI guard discipline** — Phase 90 D-15/D-16/D-17 three guards installed in a SINGLE commit alongside the 4-global deletion. Phase 91 separated AUTHW-05 (7 tests in one file) from AUTHW-06 (6 tests in another file) for clean blast radius. Phase 92.1 added the AST scanner + behavioral regression + dialog-context regression as three separate files. Each guard is isolated and traceable.
+8. **`_session_uuid` as stable cache key** — tokens rotate; UUIDs don't. Refresh-only locking keyed by `_session_uuid` (Test B: `max_concurrent == 2` for distinct UUIDs) survived every subsequent design pressure. The single architectural primitive that everything else built on.
+
+### What Was Inefficient
+
+1. **Phase 90 D-09/D-10 missed the reader-client RLS reachability problem** — the singleton-anonymous-only invariant correctly stopped the SIGNED_IN-event-listener leak but left 12 reader functions using the anonymous singleton. Pre-Phase-90 the Supabase event listener auto-authenticated the singleton; Phase 90 correctly closed that channel but missed the readers. The bug surfaced 4 days later in SWEEP-05 smoke run 1 and required an emergency Phase 92.1 insertion. Better cross-checking the planning artifact (`.planning/phases/90-.../90-DISCUSSION-LOG.md:147`) against the live RLS policies in `docs/guides/SUPABASE_GUIDE.md:429-432` would have caught the false assumption "`get_user_lists` reads work anonymously."
+2. **Phase 92.1 reader migration introduced a 36s perf regression** — moving 12 readers to per-request `get_user_client()` made every reader build a fresh authenticated `Client` instance. Required emergency Phase 92.2 insertion. The `~4 + L + 2*S` Supabase fanout was visible in Codex's repo evidence (`web/components/project_tree.py:60 + :301`) but not surfaced during plan review because the perf cost wasn't load-bearing for the RLS-reachability fix itself.
+3. **REQUIREMENTS.md checkbox drift mid-phase** — Phase 92.1 verifier flagged that READER-01..05 checkboxes remained `[ ]` despite the requirements being satisfied; only READER-06 was flipped by the SDK post-ship sync. Pattern same as v7.8: SDK sync doesn't catch all states. Manual flip needed at close.
+4. **Gemini 429 quota mid-review** — Phase 91 round 2 lost Gemini coverage; Phase 92 lost Codex coverage. Each round had only one AI reviewer. The symmetric loss pattern (different AI each time) preserved overall coverage but added uncertainty per individual phase.
+5. **Pre-existing 96-item open artifact backlog** — same audit-debt drag as v7.10. The 2 v7.12-specific verification gaps were buried under 94 historical items. `gsd-tools.cjs audit-open` doesn't distinguish "stale from prior milestone" from "actionable in this milestone."
+
+### Patterns Established
+
+1. **Chokepoint adapter + AST lint scanner pattern** — pick one critical resource (storage, auth, RLS reachability), build a thin adapter module with the safe API, install an AST scanner that bans direct access outside an allowlist YAML, drive allowlist to zero by phased migration. Repeatable for any singleton-class problem.
+2. **Deletion-not-migration discipline** — when refactoring away a pattern, physically delete the old surface in the same commit that installs the regression guard. Dual-write windows invite re-introduction. Phase 88 (AppState fields), Phase 89 (lists singleton), Phase 90 (auth caches), Phase 91 (allowlist itself) all followed this.
+3. **Cross-AI plan review encoded as locked CONTEXT.md decisions** — Gemini/Codex round 1 → 7+ findings encoded as D-02..D-10 → plan executes against locked decisions, no re-litigation. Round 2 catches NEW items, encoded as NEW-H/NEW-M/NEW-L → applied via `/gsd-plan-phase --reviews` before execution.
+4. **Emergency sub-phase insertion (92.1, 92.2)** — when a smoke test fails mid-milestone, insert a decimal-numbered sub-phase rather than reworking the parent phase. Preserves the parent's "shipped" semantics while making the insertion auditable in ROADMAP.
+5. **HARD GATE forensic baseline + postfix artifact** — for perf regressions, commit a baseline JSON before the fix and a postfix JSON after. Multi-sample aggregation rule locked in CONTEXT.md as MUST-FIX. The artifacts make the fix self-auditing across reviews.
+6. **Symmetric N-key rollback for multi-write boundaries** — `set_auth` writes 2 keys atomically with symmetric rollback; `do_login` and `_oauth_complete_login` add defensive 3-key caller-level cleanup with stale-pre-seed regression tests.
+7. **No git tag for web-only milestones** (refined from v7.10) — but v7.12 ships alongside desktop changes (LINE-NUM-07/08 + v7.11.2 patch), so the tag is deferred to `/release` which bundles both. The pattern: tag only when you have something for desktop users to install.
+8. **5-surface multitenant audit (Gemini D-03 widening)** — `app.storage.user` is necessary but not sufficient. Multitenant leaks live wherever global state touches disk or external APIs: `app.storage.browser` (cookies), `app.storage.client` (NiceGUI client slot), persistent SQLite files (joins.db), JS injection paths (analytics.py). Audit all 5 surfaces.
+
+### Key Lessons
+
+1. **Plan-time assumptions about RLS reachability MUST be checked against live `SUPABASE_GUIDE.md` evidence.** Phase 90's "`get_user_lists` reads work anonymously" assumption cost 4 days + emergency Phase 92.1. The fix is to grep `SUPABASE_GUIDE.md` for the actual SELECT policy on every BANNED_TABLES entry before the discussion log locks.
+2. **Perf-sensitive paths need pre-merge instrumentation, not post-ship measurement.** Phase 92.1's reader migration shipped without `/lists` perf measurement; the regression surfaced in evening UAT 12 hours later. Better: add ContextVar-based query counters in the migration commit itself, run a baseline + verify path before merging.
+3. **Cross-AI review is load-bearing for architectural milestones.** The Phase 92 5-surface audit widening (Gemini D-03 CRITICAL) and Phase 91 stale auth_profile leak (Codex HIGH) were not caught by internal plan-checker. Budget 2 review rounds per phase as a baseline; encode findings as locked CONTEXT.md decisions; revision-iterate via `/gsd-plan-phase --reviews` before execution.
+4. **Atomic CI guard installation alongside code deletion** prevents the post-deletion regression window. Phase 90's three guards (D-15/D-16/D-17) shipped in the same commit as the 4-global deletion. Phase 91 separated AUTHW-05 from AUTHW-06 across two single-test-file commits. Each guard is one commit, one file, one purpose.
+5. **`_session_uuid` is the right primitive.** Token-keyed locks rotate when tokens rotate (orphaning the lock); UUID-keyed locks are stable across refresh. Codex's `gotrue_client.py:713` finding (NO `set_session()` mid-flight because it's networked) made this constraint visible early; everything else built on it.
+6. **Deletion-not-migration discipline propagates correctly through CI.** Phase 88's static AST scanner (`tests/test_no_deleted_state_references.py`) walks alias imports + chained attribute access; same pattern in Phase 90 D-15. Once a deletion is permanent, the scanner makes re-introduction impossible without explicit allowlist.
+
+### Cost Observations
+
+- Model mix: opus (planner + executor + verifier); sonnet for review subagents
+- Sessions: ~10-12 focused sessions across 6 days wall clock
+- Notable: highest single-milestone plan count to date (28 plans vs v7.10's 37 across 9 days). Plans/day = 4.7 — within v7.10's neighborhood despite the two emergency sub-phase insertions. Per-phase plan count averaged 2.8 (lower than v7.10's 4.6) because v7.12 phases were more vertically integrated (one chokepoint per phase) vs v7.10's horizontal-by-endpoint shape.
+- Two emergency sub-phases added ~25% to phase count + ~30% to wall clock. Worth it: both shipped clean fixes with full cross-AI review + atomic CI guards in 24-hour cycles. The decimal-numbering convention (92.1, 92.2) made the insertion auditable.
+
+---
+
 ## Cross-Milestone Trends
 
 | Milestone | Phases | Plans | Days | Plans/Day | Key Theme |
@@ -146,9 +205,11 @@ Public HTTP/JSON research-automation API: `/api/search`, `/api/browse`, `/api/pa
 | v6.5.0 | 5 | 26 | 15 | 1.7 | Search UX + translations |
 | v7.8 | 4 | 9 | 1 | 9.0 | Structural foundation / CI |
 | v7.10 | 8 | 37 | 9 | 4.1 | Public Search API + reference Skill |
+| v7.12 | 10 | 28 | 6 | 4.7 | Multitenant architecture (Path B) |
 
 **Observations:**
 - v6.5.0 had the lowest plans/day ratio — reflects the large batch translation work (multi-day server jobs) and bug-fix tail
 - Gap closure plans (UAT-driven) continue to be valuable but add ~30% overhead to phase count
 - Quick tasks are an effective escape valve for urgent fixes during milestone execution
 - v7.8 shipped fastest per-plan (~14 hours wall clock for 9 plans) — scoped to structural changes with CI safety net as the first deliverable
+- v7.12 had the highest phase count (10) due to two emergency sub-phase insertions (92.1, 92.2) and two promoted backlog phases (999.1, 999.4). Per-phase plan count (2.8) was lower than v7.10 (4.6) reflecting vertically-integrated phase shape (one chokepoint per phase) vs horizontal-by-endpoint shape. Pattern: architectural milestones benefit from fewer-plans-per-phase + cross-AI review depth, not more plans.

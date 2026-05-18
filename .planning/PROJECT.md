@@ -8,13 +8,27 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current State (after v7.11.1 shipped)
+## Current State (after v7.12 shipped)
+
+**Shipped:** v7.12 Multitenant Architecture (Path B) (2026-05-18)
+- 10 phases (87-92 + 92.1/92.2 inserted + 999.1/999.4 promoted backlog), 28 plans, 49/49 requirements satisfied
+- 131 raw `app.storage.user` accesses migrated through `web/safe_storage.py` chokepoint; allowlist driven to 0 entries; `tests/test_no_raw_storage_access.py` is the permanent CI guard
+- 10 per-user `AppState` mirror fields deleted (state separation by deletion, not migration)
+- `UserListsManager` singleton + 10s TTL plumbing deleted; per-request instantiation
+- Process-wide auth client cache (4 globals + 2 helpers) deleted; request-scoped auth via local header mutation; refresh locks keyed by `_session_uuid`; NO `auth.set_session()` mid-flight (Codex constraint at `gotrue_client.py:713` respected)
+- `sign_out` uses `throwaway.auth.admin.sign_out(jwt, "global")` for real server-side revocation
+- Phase 92.1 (INSERTED) closed P0 RLS-reachability regression: 12 reader sites migrated from anonymous `get_client()` to authenticated `get_user_client()`
+- Phase 92.2 (INSERTED) closed `/lists` 36s warm-render regression: task-scoped `WeakKeyDictionary` memo + zero-arg RPC + threading; **19.3x mean speedup**
+- 5-surface SWEEP audit clean; SWEEP-05 smoke run 2 PASS 2026-05-18 (R0/R1/R2/cross-user concurrent)
+- `docs/guides/MULTITENANT.md` shipped as architecture reference
+- Promoted backlog: Phase 999.1 (search-result folio chip parity) + Phase 999.4 (line-number gutter web + desktop)
+- `deploy.sh` UNBLOCKED. Git tag deferred to `/release` (web + desktop bundle)
 
 **Shipped:** v7.11.1 Web Hotfix (2026-05-12)
 - 4 user-reported bugs closed: cross-user xlsx export filename leak (the originating report), /help 500 (chained `set_visibility()` returning None), /browse 500 on pruned NiceGUI session AssertionError, lists "Sync Now" UX confusion (renamed + added "Refresh from Cloud")
 - Deployed at commit `242664d3`; git tag `v7.11.1`; web-only (no GitHub Release per desktop-poll prompt avoidance)
 - Server systemd override bumped `SEARCH_API_BROWSE_CORE_TIMEOUT` 2.0 → 5.0s to mitigate cold-Tantivy-reader race; applies on next restart
-- 4 rounds of Codex code review of post-release hotfixes (`22b45f68 → cca23db3`) surfaced deeper architectural problem behind the export leak — singleton-thinking in web layer spanning `AppState`, `UserListsManager`, `get_user_client()` cache, raw `app.storage.user` reads at 30+ bootstrap sites. The 5 hold commits on `master-main` past `242664d3` are partial fixes, deferred to v7.12 Path B (this milestone) for proper architectural treatment.
+- 4 rounds of Codex code review of post-release hotfixes (`22b45f68 → cca23db3`) surfaced deeper architectural problem behind the export leak — singleton-thinking in web layer spanning `AppState`, `UserListsManager`, `get_user_client()` cache, raw `app.storage.user` reads at 30+ bootstrap sites. v7.12 Path B (shipped above) addressed each strand intentionally.
 
 **Shipped:** v7.11.0 CUDL Coverage & Synthetic Inventories (2026-05-12)
 - 3-phase milestone (Phases 84/85/86) closing the gap between CUDL's ~141K classmark catalogue and GenizahSearch's libraries.csv
@@ -209,21 +223,32 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - /browse 500 fixed (AssertionError on pruned NiceGUI session state during browse render) -- v7.11.1
 - Lists "Sync Now" UX clarified (renamed + added explicit "Refresh from Cloud" button) -- v7.11.1
 
+- ✓ `_session_uuid` minted on first request, stored in `app.storage.user`, stable across token refresh -- v7.12 (FOUND-01)
+- ✓ `web/safe_storage.py` adopted as the single chokepoint adapter; 131 raw `app.storage.user` access sites migrated; allowlist driven to 0 entries -- v7.12 (FOUND-02..04)
+- ✓ AST-based pytest lint scanner enforces zero raw `app.storage.user` accesses under `web/` (permanent CI guard) -- v7.12 (FOUND-04)
+- ✓ 10 per-user `AppState` mirror fields deleted; `web/export_state.py` is the sole path for per-user export state -- v7.12 (STATE-01..06)
+- ✓ `_TEST_BACKEND` shim removed; tests use `SimpleNamespace`-based fixture injection through `web.safe_storage.app` monkeypatching -- v7.12 (STATE-04..05)
+- ✓ Cross-user xlsx + parallels export leak structurally impossible (SWEEP-05 smoke run 2 PASS 2026-05-18) -- v7.12 (STATE-01..06, SWEEP-05)
+- ✓ `UserListsManager` singleton + `_cache_entry` tuple + 10s TTL plumbing deleted; per-request instantiation in page handlers -- v7.12 (LISTS-01..04)
+- ✓ Process-wide `_client_cache` + `_session_locks` + `_locks_guard` + `_CLIENT_CACHE_TTL` deleted; request-scoped auth via local header mutation -- v7.12 (AUTHC-01)
+- ✓ NO `auth.set_session()` mid-flight (Codex constraint at `gotrue_client.py:713` respected); static AST scanner enforces -- v7.12 (AUTHC-02)
+- ✓ Refresh-only locking keyed by `_session_uuid` (NOT access tokens; stable across rotation); D-17 behavioral test proves `max_concurrent == 2` for distinct UUIDs -- v7.12 (AUTHC-03)
+- ✓ Auth-resurrection guard removed; AST scanner with 13 seed traps catches `get_client().auth.<mutating>` resurrection ban -- v7.12 (AUTHC-04)
+- ✓ Code comment in auth path documents WHY `set_session()` is avoided (Codex finding cited) -- v7.12 (AUTHC-05)
+- ✓ Auth state writes migrated to safe_storage helpers; `set_auth` returns `bool` with symmetric 2-key rollback + `profile=None` clears stale -- v7.12 (AUTHW-01, AUTHW-02)
+- ✓ `sign_out` calls `throwaway.auth.admin.sign_out(jwt, "global")` for real server-side revocation; local keys popped in `finally` -- v7.12 (AUTHW-03, AUTHW-04)
+- ✓ OAuth callback prune-mid-flight resilience tested via `tests/test_auth_callback_resilience.py` (7 tests) -- v7.12 (AUTHW-05)
+- ✓ `persist_value` safe-wrap in `filter_panel.py` retained; 6-test retention guard installed -- v7.12 (AUTHW-06)
+- ✓ 5-surface SWEEP-01 audit clean (`app.storage.user` + `app.storage.browser` + `app.storage.client` + `joins.db` + `web/analytics.py`) -- v7.12 (SWEEP-01)
+- ✓ 12 reader sites in `web/supabase_client.py` migrated from anonymous `get_client()` to authenticated `get_user_client()`; AST scanner CI guard -- v7.12 (READER-01..06)
+- ✓ `/lists` warm-render: 36s → 2s (19.3x mean speedup) via task-scoped `WeakKeyDictionary` memo + zero-arg `get_list_item_counts_for_user()` RPC -- v7.12 (Phase 92.2)
+- ✓ `docs/guides/MULTITENANT.md` shipped as architecture reference (~2150 words, 8 sections) -- v7.12 (SWEEP-06)
+- ✓ Web search-result folio chip parity with desktop COL_IMG (`display['img']` chip after shelfmark) -- v7.12 (FOLIO-01)
+- ✓ Right-side line-number gutter on 5 surfaces (web Browse + Quick View + Full Manuscript View; desktop Browse + ResultDialog) with copy-paste invariant -- v7.12 (LINE-NUM-01..10)
+
 ### Active
 
-**Milestone v7.12: Multitenant Architecture (Path B)**
-
-Goal: Refactor GenizahSearch's web layer off the desktop-inherited single-user mental model so per-user state, auth, and caches cannot leak across concurrent sessions sharing one Python process. The cross-user xlsx export leak fixed in v7.11.1 was one instance of a class of bugs surfaced across 4 rounds of Codex review. This milestone replaces that pattern with intentional multitenant primitives. **Constraint:** no mid-flight `auth.set_session()` calls — Codex verified at `gotrue_client.py:713` that it is networked (calls `get_user(access_token)` when JWT valid, `_refresh_access_token(refresh_token)` when expired), not local-only.
-
-Target features:
-- Stable per-session UUID (`_session_uuid`) minted on first request, stored in `app.storage.user`, used as cache key wherever caching survives Path B (tokens rotate; UUIDs don't)
-- `web/safe_storage.py` adopted/finalized as the single chokepoint adapter for all per-user state; zero raw `app.storage.user.get/pop/[key] = ...` outside an explicit whitelist
-- State separation by deletion: `web/export_state.py` becomes the sole source of truth for last_results / current_search_query / parallels_*; singleton mirrors on `AppState` deleted (not dual-written); `_TEST_BACKEND` shim replaced with proper fixture/adapter injection
-- Lists cache redesign: `UserListsManager` instantiated per-request; singleton on `AppState._user_lists_mgr` and 10s cache plumbing removed entirely (not load-bearing during multitenant safety work)
-- Auth caching rewrite: process-wide `_client_cache / _session_locks / _locks_guard / _CLIENT_CACHE_TTL` deleted; replaced with request-scoped auth strategy that does NOT call `set_session()` to set headers; refresh-only locking keyed by `_session_uuid`, with no cached authenticated client objects
-- Atomic auth state writes: `web/auth_state.py:set_auth/clear_auth/do_login` and OAuth callback migrated to safe_storage helpers; `sign_out`/server revocation happens before popping `auth_session`; local auth keys popped in `finally`; `sign_out` uses user's authenticated client (not anonymous singleton) so token is actually server-side revoked
-- Final sweep + acceptance: web/ audited for any remaining raw `app.storage.user` accesses (including deferred callbacks like parallels.py:3520 and text_editor.py auto-save); whitelist from Phase 87 empty or every entry has explicit justification
-- Test coverage rewritten without `_TEST_BACKEND` shim: test_export_cross_user_isolation.py, test_user_lists_cache_isolation.py (re-written to per-request model), test_safe_storage.py (kept), test_browse_state.py (kept)
+*(No active milestone — v7.12 closed 2026-05-18; next milestone TBD. Backlog 999.2 (PGP filter) and 999.3 (PGP downloads) remain planned.)*
 
 ### Out of Scope
 
@@ -305,13 +330,15 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | Inline justification comments for silent handlers (not converting to logging) | Preserves intentional suppression behavior; grep-visible; zero behavioral change | Good |
 | Root-anchored .gitignore patterns with explicit exemption block | Prevents accidentally hiding subdirectory files; intentional assets documented at the source of truth | Good |
 | PKCE-only OAuth callback (implicit flow removed) | Removes unused dead code path; aligns with Supabase default; confirmed via production testing | Good |
-| v7.12 Path B: foundations first (session UUID + safe_storage chokepoint) | Subsequent phases need stable cache key + zero-raw-storage invariant before auth/lists can be rewritten safely | — Pending |
-| v7.12 Path B: state separation by deletion, not migration | Dual-write through singleton mirrors invites regression; `web/export_state.py` becomes the only path | — Pending |
-| v7.12 Path B: lists cache goes per-request (drop the 10s TTL) | Cache was a perf optimization not load-bearing for normal use; not worth preserving during multitenant safety refactor | — Pending |
-| v7.12 Path B: NO `auth.set_session()` per request | Codex verified gotrue_client.py:713 — `set_session()` is networked (calls `get_user` or `_refresh_access_token`); request-scoped auth must avoid it | — Pending |
-| v7.12 Path B: refresh-only locking keyed by `_session_uuid` | Token-keyed locks rotate when tokens rotate; UUID-keyed locks are stable across refresh; no cached authenticated client objects | — Pending |
-| v7.12 Path B: `sign_out` calls user's authenticated client (not anonymous singleton) | Anonymous singleton can't revoke the user's token server-side; revocation must happen with the user's credentials before popping auth_session | — Pending |
-| v7.12 Path B: `_TEST_BACKEND` shim removed | Tests should use real session storage with proper fixtures or adapter injection, not a parallel-universe storage backend | — Pending |
+| v7.12 Path B: foundations first (session UUID + safe_storage chokepoint) | Subsequent phases need stable cache key + zero-raw-storage invariant before auth/lists can be rewritten safely | ✓ Good — 131 sites migrated cleanly under the chokepoint |
+| v7.12 Path B: state separation by deletion, not migration | Dual-write through singleton mirrors invites regression; `web/export_state.py` becomes the only path | ✓ Good — 10 AppState fields physically gone; cross-user leak structurally impossible |
+| v7.12 Path B: lists cache goes per-request (drop the 10s TTL) | Cache was a perf optimization not load-bearing for normal use; not worth preserving during multitenant safety refactor | ✓ Good — Phase 92.2 perf fix made memoization request-scoped instead |
+| v7.12 Path B: NO `auth.set_session()` per request | Codex verified gotrue_client.py:713 — `set_session()` is networked (calls `get_user` or `_refresh_access_token`); request-scoped auth must avoid it | ✓ Good — request-scoped auth via local header mutation works correctly |
+| v7.12 Path B: refresh-only locking keyed by `_session_uuid` | Token-keyed locks rotate when tokens rotate; UUID-keyed locks are stable across refresh; no cached authenticated client objects | ✓ Good — D-17 behavioral test proves `max_concurrent == 2` for distinct UUIDs |
+| v7.12 Path B: `sign_out` calls user's authenticated client (not anonymous singleton) | Anonymous singleton can't revoke the user's token server-side; revocation must happen with the user's credentials before popping auth_session | ✓ Good — AUTHW-03/04 pulled forward from Phase 91 to Phase 90 per Codex P1 |
+| v7.12 Path B: `_TEST_BACKEND` shim removed | Tests should use real session storage with proper fixtures or adapter injection, not a parallel-universe storage backend | ✓ Good — `SimpleNamespace` + `monkeypatch.setattr('web.safe_storage.app', ...)` is the canonical pattern |
+| v7.12 Path B: task-scoped `WeakKeyDictionary` memo for `get_user_client()` | Per-user Client cache (E-path) rejected — Codex flagged "reopens Phase 90's scary surface." Memo keyed by `asyncio.current_task()` cannot survive across requests by construction | ✓ Good — 19.3x mean `/lists` speedup; Phase 90 D-12 invariant preserved |
+| v7.12 Path B: cross-AI plan review BEFORE execution | Gemini + Codex caught items internal plan-checker missed (e.g. Phase 92 5-surface audit widening; Phase 91 stale auth_profile security leak) | ✓ Good — pattern applied to every v7.12 phase plan |
 
 ## Evolution
 
@@ -331,4 +358,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-13 — v7.12 Multitenant Architecture (Path B) milestone started*
+*Last updated: 2026-05-18 — v7.12 Multitenant Architecture (Path B) milestone SHIPPED. 49/49 requirements satisfied across 10 phases / 28 plans / 277 commits. Architecture reference: `docs/guides/MULTITENANT.md`. Live CI enforcement: `tests/test_no_raw_storage_access.py` (allowlist `[]`). `deploy.sh` UNBLOCKED. Next milestone TBD.*
