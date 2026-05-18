@@ -467,7 +467,16 @@ class ResultDialog(QDialog):
             refresh_line_number_visibility(self.text_ms)
 
         self.btn_rd_line_numbers.clicked.connect(_toggle_rd_line_numbers)
-        ms_find_row.addWidget(self.btn_rd_line_numbers)
+        # In Hebrew (RTL) UI the gutter sits on the visual right of the text
+        # pane; placing the toggle at index 0 of the QHBoxLayout makes RTL
+        # mirroring render it on the rightmost edge, directly above the
+        # gutter. LTR UI keeps the toggle appended on the right of the find
+        # row (preserving the existing English-UI layout).
+        from genizah_core import CURRENT_LANG as _cur_lang_for_lines_btn
+        if _cur_lang_for_lines_btn == 'he':
+            ms_find_row.insertWidget(0, self.btn_rd_line_numbers)
+        else:
+            ms_find_row.addWidget(self.btn_rd_line_numbers)
 
         ms_text_layout.addLayout(ms_find_row)
         self.text_ms = QTextBrowser(); self.text_ms.setFont(QFont("SBL Hebrew", 16)); self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)

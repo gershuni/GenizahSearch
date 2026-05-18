@@ -115,6 +115,15 @@ class LineNumberArea(QWidget):
         doc = body.document()
         positions: list[tuple[int, int, int]] = []
 
+        # We walk SOURCE-LINE segments (block.text() split by U+2028, Qt's
+        # representation of `<br>`), NOT visual lines. This is the key
+        # invariant for the post-2026-05-18 smoke check: when the body
+        # widget word-wraps a long source line to multiple visual lines,
+        # the wrapped continuations must NOT get their own number — they
+        # share the number of the first visual line of that segment.
+        # cursorRect at the segment's start character gives the y of that
+        # first visual line; subsequent visual lines (wraps) have no
+        # cursor query, so they don't get numbered.
         if getattr(self, "_per_page_mode", False):
             current_page = -1
             line_in_page = 0
@@ -127,21 +136,17 @@ class LineNumberArea(QWidget):
                 if state != current_page:
                     current_page = state
                     line_in_page = 0
-                layout = block.layout()
-                n_visual = layout.lineCount() if layout is not None else 1
-                for i in range(n_visual):
-                    if layout is not None:
-                        tline = layout.lineAt(i)
-                        line_start = tline.textStart()
-                    else:
-                        line_start = 0
+                segments = block.text().split(" ")
+                offset_in_block = 0
+                for segment in segments:
                     cursor = QTextCursor(doc)
-                    cursor.setPosition(block.position() + line_start)
+                    cursor.setPosition(block.position() + offset_in_block)
                     rect = body.cursorRect(cursor)
                     y = rect.y()
                     h = max(1, rect.height())
                     line_in_page += 1
                     positions.append((y, h, line_in_page))
+                    offset_in_block += len(segment) + 1
                 block = block.next()
             return positions
 
@@ -149,23 +154,19 @@ class LineNumberArea(QWidget):
         block = doc.firstBlock()
         line_no = 0
         while block.isValid() and line_no < self._line_count:
-            layout = block.layout()
-            n_visual = layout.lineCount() if layout is not None else 1
-            for i in range(n_visual):
+            segments = block.text().split(" ")
+            offset_in_block = 0
+            for segment in segments:
                 if line_no >= self._line_count:
                     break
-                if layout is not None:
-                    tline = layout.lineAt(i)
-                    line_start = tline.textStart()
-                else:
-                    line_start = 0
                 cursor = QTextCursor(doc)
-                cursor.setPosition(block.position() + line_start)
+                cursor.setPosition(block.position() + offset_in_block)
                 rect = body.cursorRect(cursor)
                 y = rect.y()
                 h = max(1, rect.height())
                 line_no += 1
                 positions.append((y, h, line_no))
+                offset_in_block += len(segment) + 1
             block = block.next()
         return positions
 

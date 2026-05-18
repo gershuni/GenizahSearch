@@ -6533,7 +6533,17 @@ class GenizahGUI(QMainWindow):
             refresh_line_number_visibility(self.browse_text)
 
         self.btn_b_line_numbers.clicked.connect(_toggle_browse_line_numbers)
-        browse_find_row.addWidget(self.btn_b_line_numbers)
+        # In Hebrew (RTL) UI, the gutter sits on the visual right of the text
+        # pane. Inserting the toggle at index 0 of the QHBoxLayout makes it
+        # render on the rightmost edge under RTL mirroring — directly above
+        # the gutter. In LTR (English) the toggle stays appended on the right
+        # of the find row to preserve the existing English-UI layout the user
+        # is accustomed to.
+        from genizah_core import CURRENT_LANG as _cur_lang_for_lines_btn
+        if _cur_lang_for_lines_btn == 'he':
+            browse_find_row.insertWidget(0, self.btn_b_line_numbers)
+        else:
+            browse_find_row.addWidget(self.btn_b_line_numbers)
         text_layout.addLayout(browse_find_row)
 
         # Reading Desk toolbar (hidden by default, shown when reading desk is active)
@@ -9337,20 +9347,40 @@ class GenizahGUI(QMainWindow):
                                 text_direction = 'ltr'
                             break
 
-            # Fallback to V0.8 text from pages
-            if not display_text and entry.pages:
-                page_texts = [p.get('text', '') for p in entry.pages if p.get('text')]
-                display_text = '\n\n'.join(page_texts)
+            # Fallback to V0.8 text from pages — Phase 999.4: emit ONE
+            # `<div>` (and ONE raw_text_parts entry) per page so the
+            # per-page block matcher restarts numbering at each page rather
+            # than at each fragment. PGP edition path keeps its single
+            # `<div>` because there is no internal page concept.
+            page_texts_v08 = (
+                [p.get('text', '') for p in entry.pages if p.get('text')]
+                if (not display_text and entry.pages)
+                else []
+            )
 
-            if display_text:
-                html_text = display_text.replace('\n', '<br>')
+            def _emit_content_div(text_body):
+                html_text = text_body.replace('\n', '<br>')
                 html_parts.append(
                     f"<div dir='{text_direction}' style='padding: 10px; font-family: SBL Hebrew, serif; "
                     f"font-size: 16px; line-height: 1.6;'>"
                     f"{html_text}</div>"
                 )
-                # Phase 999.4: track raw lines for the gutter
-                raw_text_parts.append(display_text)
+                raw_text_parts.append(text_body)
+
+            if display_text:
+                _emit_content_div(display_text)
+            elif page_texts_v08:
+                for page_idx, page_text in enumerate(page_texts_v08):
+                    if page_idx > 0:
+                        # Visible page separator inside the fragment so the user
+                        # sees the page break the gutter is restarting at.
+                        html_parts.append(
+                            "<div style='margin: 12px 0; padding: 4px 10px; "
+                            "background: #f8f9fa; color: #6c757d; font-size: 11px; "
+                            "border-top: 1px dashed #ced4da;'>"
+                            f"page {page_idx + 1}</div>"
+                        )
+                    _emit_content_div(page_text)
             else:
                 html_parts.append(
                     "<div style='padding: 10px; color: #95a5a6; font-style: italic;'>"
