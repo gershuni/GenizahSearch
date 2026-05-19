@@ -2139,6 +2139,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Hide domain filter and printed filter buttons
         _set_btn_visible(domain_filter_btn, False)
         _set_btn_visible(printed_filter_btn, False)
+        # Phase 999.2 (PGP-FILTER-02): hide PGP button + reset in-memory state on New Search.
+        # The persisted 'search_pgp_filter' key is reset by clear_search_snapshot() below
+        # (Task 1 Edit 2 added it to that helper's defaults dict — MEDIUM-2 fix routes
+        # through the central path instead of the session-persistence-gated persist_value).
+        _set_btn_visible(pgp_filter_btn, False)
+        search_state.pgp_filter = 'all'
+        _update_pgp_filter_btn()
+        _update_pgp_filter_chip()
         # Phase 55: Clear refinement chain
         _clear_refinement_chain()
         search_within_btn.set_visibility(False)
@@ -4582,6 +4590,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.result_domains = dict(search_state.all_result_domains)
             _set_btn_visible(printed_filter_btn, len(search_state.printed_ids) > 0)
             _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
+            # Phase 999.2 (PGP-FILTER-02, D-07): PGP button visible iff some result has PGP.
+            _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
+            # Re-sync defensively — enrichment can fire multiple times per session
+            # (stage1 + stage2 background passes both call this function), and the
+            # button state must reflect the latest search context on every call.
+            _update_pgp_filter_btn()
+            _update_pgp_filter_chip()  # Sync chip (includes MEDIUM-1 zero-hits gating)
             _update_domain_filter_btn()
             # Phase 56: refresh exclusion chips when results render
             _update_exclude_btn()
@@ -4852,7 +4867,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     asyncio.ensure_future(_after_delay(0.1, _deferred_filter_init))
 
     async def _deferred_transcription_restore():
-        """Restore transcription indicators for saved results asynchronously."""
+        """Restore transcription indicators for saved results asynchronously.
+
+        Phase 999.2 (PGP-FILTER-02 + HIGH-4): on session reload, after fetching
+        transcription_sys_ids, the PGP button + chip must be synced to the restored
+        pgp_filter state AND the result set must be rendered through the unified
+        filter cascade — otherwise a persisted pgp_filter='only_pgp' restores the
+        state but renders unfiltered results (silent inconsistency).
+        """
         if search_state.results:
             sys_ids = [
                 r.get('display', {}).get('id')
@@ -4863,7 +4885,22 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state.transcription_sys_ids = await run.io_bound(
                     get_sys_ids_with_transcriptions, sys_ids
                 )
-                render_results(search_state.results, page=search_state.current_page)
+                # Phase 999.2: PGP button + chip visibility now that transcription data is loaded.
+                _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
+                _update_pgp_filter_btn()
+                _update_pgp_filter_chip()
+                # Phase 999.2 (HIGH-4): use the unified filtered render cascade so the
+                # restored pgp_filter state actually filters results. Dispatch mirrors
+                # _toggle_pgp_filter — pick the right entry point based on active filters.
+                if search_state.exclusion_sources:
+                    _apply_manuscript_exclusions(reset_expansion=False)
+                elif search_state.domain_exclusions and search_state.has_domain_data:
+                    _apply_domain_exclusions(reset_expansion=False)
+                elif search_state.printed_filter != 'all' or search_state.pgp_filter != 'all':
+                    _apply_printed_filter_and_render(search_state.results, reset_expansion=False)
+                else:
+                    # Original behavior: no filters active, raw render preserves pagination.
+                    render_results(search_state.results, page=search_state.current_page)
 
     # Cat-2: deferred enrichment on restore - results container must be mounted.
     asyncio.ensure_future(_after_delay(0.2, _deferred_transcription_restore))
