@@ -15,11 +15,11 @@
 
 ### PGP Filter — Phase 93 (5 requirements) — promoted from backlog 999.2-filtering-by-pgp
 
-- [ ] **PGP-FILTER-01**: Post-search 3-state filter button (`all` → `only_pgp` → `hide_pgp` → `all`) rendered in the search results toolbar immediately after the existing `printed_filter_btn` (`web/pages/search.py:1430-1434`). Labels per state: `'All'` / `'Has PGP'` / `'No PGP'`, all wrapped in `tr()`. Same `outline dense no-caps` styling as `printed_filter`.
-- [ ] **PGP-FILTER-02**: Button visibility gated by current result set — hidden until `bool(search_state.transcription_sys_ids)` is true. Same idiom as `_set_btn_visible(printed_filter_btn, False)` in the existing printed-filter flow.
-- [ ] **PGP-FILTER-03**: Active-filter chip shown in the results header row (co-located with `exclusion_chips_row` at `web/pages/search.py:1448-1449`) when state is `only_pgp` or `hide_pgp`. Chip labels mirror state: `'Only PGP'` / `'Hiding PGP'`, translated. Single-click chip → revert to `all`.
-- [ ] **PGP-FILTER-04**: Filter cascade applies PGP filter AFTER `printed_filter` in the existing render pipeline (`web/pages/search.py:1409-1414`). Stacks with `exclusion_sources`, `domain_exclusions`, refinement chain — no re-query, post-search only.
-- [ ] **PGP-FILTER-05**: Choice persisted via `persist_value('search_pgp_filter', ...)` routed through `web/safe_storage.py` chokepoint (Phase 87 invariant). Bootstrap read via `_safe_get('search_pgp_filter', 'all')` at search-page init, mirroring `printed_filter` at `:148`.
+- [x] **PGP-FILTER-01**: Post-search 3-state filter button (`all` → `only_pgp` → `hide_pgp` → `all`) rendered in the search results toolbar immediately after the existing `printed_filter_btn` (`web/pages/search.py:1430-1434`). Labels per state: `'Filter PGP'` / `'Has PGP'` / `'No PGP'`, all wrapped in `tr()`. Same `outline dense no-caps` styling as `printed_filter`. *(Labels amended 2026-05-19 per user smoke: `'All'` → `'Filter PGP'` for self-describing default state, mirroring `'Filter Printed'` pattern.)*
+- [x] **PGP-FILTER-02**: Button visibility gated by current result set — hidden until `bool(search_state.transcription_sys_ids)` is true. Same idiom as `_set_btn_visible(printed_filter_btn, False)` in the existing printed-filter flow.
+- [x] **PGP-FILTER-03**: ~~Active-filter chip shown in the results header row~~ **Superseded 2026-05-19 by user smoke direction.** The chip was removed because the colored button label (green for `Has PGP`, red for `No PGP`) already conveys active-filter state. Duplicate visual indicator was confusing in live UX. `_update_pgp_filter_chip` retained as no-op stub so callers stay stable.
+- [x] **PGP-FILTER-04**: Filter cascade applies PGP filter AFTER `printed_filter` in the existing render pipeline (`web/pages/search.py:1409-1414`). Stacks with `exclusion_sources`, `domain_exclusions`, refinement chain — no re-query, post-search only. Verified by `tests/test_pgp_filter_cascade.py` (static AST guard).
+- [x] **PGP-FILTER-05**: Choice persisted via `persist_value('search_pgp_filter', ...)` routed through `web/safe_storage.py` chokepoint (Phase 87 invariant). Bootstrap read via `_safe_get('search_pgp_filter', 'all')` at search-page init, mirroring `printed_filter` at `:148`. Central reset via `clear_search_snapshot` defaults dict.
 
 ### Export Metadata — Phase 94 (9 requirements) — promoted from backlog 999.3-adding-pgp-to-downloaded-data; web + desktop xlsx
 
@@ -69,11 +69,11 @@ These were explicitly deferred during `/gsd-discuss-phase` for 999.2 / 999.3 and
 
 | REQ-ID | Phase | Plan slots (estimated) | Source CONTEXT | Status |
 |--------|-------|------------------------|----------------|--------|
-| PGP-FILTER-01 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Pending |
-| PGP-FILTER-02 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Pending |
-| PGP-FILTER-03 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Pending |
-| PGP-FILTER-04 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Pending |
-| PGP-FILTER-05 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Pending |
+| PGP-FILTER-01 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Complete |
+| PGP-FILTER-02 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Complete |
+| PGP-FILTER-03 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Superseded (user smoke 2026-05-19 — chip removed) |
+| PGP-FILTER-04 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Complete |
+| PGP-FILTER-05 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Complete |
 | EXPORT-META-01 | 94 | 4 (wave-shared) | `.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md` | Pending |
 | EXPORT-META-02 | 94 | 4 (wave-shared) | `.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md` | Pending |
 | EXPORT-META-03 | 94 | 4 (wave-shared) | `.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md` | Pending |
