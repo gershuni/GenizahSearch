@@ -1476,11 +1476,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         # no-op so callers (_toggle_pgp_filter, restore paths) stay stable.
                         return
 
+                    # Mirrors printed_filter_btn construction exactly (no icon per user, smoke-feedback 2026-05-19).
                     pgp_filter_btn = ui.button(
-                        tr('Filter PGP'),  # smoke-feedback 2026-05-19: self-describing default label
+                        tr('Filter PGP'),
                         on_click=lambda: _toggle_pgp_filter()
-                    ).classes('text-sm').props('outline dense no-caps').tooltip(tr('Filter by PGP presence'))
-                    _set_btn_visible(pgp_filter_btn, False)  # D-07 — Task 5 flips to True post-enrichment
+                    ).classes('text-sm').props('outline dense no-caps')
+                    pgp_filter_btn.tooltip(tr('Filter by PGP coverage'))
+                    _set_btn_visible(pgp_filter_btn, False)
                     # If session restored a non-'all' state, sync the button now (still hidden until enrichment).
                     if search_state.pgp_filter != 'all':
                         _update_pgp_filter_btn()

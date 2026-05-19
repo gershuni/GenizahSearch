@@ -2684,7 +2684,7 @@ TRANSLATIONS = {
     "No PGP": "ללא PGP",
     "Only PGP": "PGP בלבד",
     "Hiding PGP": "ללא PGP",
-    "Filter by PGP presence": "סנן לפי נוכחות PGP",
+    "Filter by PGP coverage": "סנן לפי כיסוי PGP",
     # Composition / parallels min-chunks
     "Min. chunk matches": "מינ' התאמות מקטע",
     "Minimum matching chunks per manuscript": "מספר מינימלי של מקטעים תואמים לכתב יד",
