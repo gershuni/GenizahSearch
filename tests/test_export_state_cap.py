@@ -283,6 +283,7 @@ def test_compact_parallels_preserves_live_ui_metadata():
         'boundary_match_count': 3,       # parallels.py:3127
         'filter_reason': 'high_frequency',  # parallels.py:3063-3067
         'is_text_filtered': True,        # parallels.py:3068
+        'is_filtered': True,             # parallels.py:3070 (self-audit catch)
     }
 
     compacted = export_state.compact_parallels_result_rows([row])
@@ -301,6 +302,12 @@ def test_compact_parallels_preserves_live_ui_metadata():
     assert kept['boundary_match_count'] == 3
     assert kept['filter_reason'] == 'high_frequency'
     assert kept['is_text_filtered'] is True
+    # Self-audit (post-Codex-round-2): is_filtered is the coarse
+    # "filtered for some reason" flag; the chip-rendering fall-through
+    # at parallels.py:3070-3072 makes the field functionally redundant
+    # with the post-loop default, but locking the contract prevents
+    # future drift if non-display callers ever depend on the flag.
+    assert kept['is_filtered'] is True
 
 
 def test_compact_nicegui_export_storage_rewrites_legacy_payloads(tmp_path):
@@ -591,9 +598,10 @@ def test_parallels_export_row_keeps_safe_allowlist(monkeypatch):
     allowed = {
         'uid', 'sys_id', 'sort_score', 'score', 'snippet', 'match_terms',
         'source_ctx', 'text', 'raw_header', 'chunk_hits',
-        # Round-2 live-UI scalars (web/pages/parallels.py:3063-3068, 3124-3127).
+        # Round-2 live-UI scalars (web/pages/parallels.py:3063-3071, 3124-3127).
         'final_score', 'has_boundary_matches', 'boundary_quality',
         'boundary_match_count', 'filter_reason', 'is_text_filtered',
+        'is_filtered',
     }
     assert set(row.keys()) <= allowed
     # Critical retention invariants.
