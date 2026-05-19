@@ -261,19 +261,19 @@ def _serialize_item(
         parsed = {}
     final_sys_id = sys_id_raw or parsed.get('sys_id') or ''
 
-    # SEED-002: rehydrate display fields from meta_mgr when the row carries
-    # the compact uid-only shape stored by web/export_state.py (no display
-    # dict). Mirrors the fallback already used in _to_parallels_envelope_item
-    # (lines 716-738). Tier 2: uid -> sys_id; Tier 3: raw_header regex.
+    # SEED-002 fixup (2026-05-19): rehydrate display fields from meta_mgr when
+    # the row carries the compact shape stored by web/export_state.py (no
+    # display dict). Tier order matches web.export_service._resolve_result_display:
+    #   Tier 2: result['sys_id'] (compactor-synthesized; the canonical path)
+    #   Tier 3: raw_header regex (legacy / non-compacted rows)
+    #   Tier 4: parse_full_id_components(uid) (legacy / sys-id-bearing uids)
+    # When the sys_id resolves but meta_mgr returns Unknown, the shelfmark
+    # falls back to ``ID: {sys_id}`` mirroring genizah_core.py:4925.
     if not display and meta_mgr is not None:
         _sid = ''
-        uid_for_parse = result.get('uid', '') or ''
-        if uid_for_parse:
-            try:
-                parsed_uid = meta_mgr.parse_full_id_components(uid_for_parse) or {}
-                _sid = parsed_uid.get('sys_id') or ''
-            except Exception:
-                _sid = ''
+        explicit_sys = result.get('sys_id')
+        if isinstance(explicit_sys, str) and explicit_sys:
+            _sid = explicit_sys
         if not _sid and raw_header:
             try:
                 m = re.search(r'(99\d{8,})', raw_header)
@@ -281,16 +281,24 @@ def _serialize_item(
                     _sid = m.group(1)
             except Exception:
                 _sid = ''
+        if not _sid:
+            uid_for_parse = result.get('uid', '') or ''
+            if uid_for_parse:
+                try:
+                    parsed_uid = meta_mgr.parse_full_id_components(uid_for_parse) or {}
+                    _sid = parsed_uid.get('sys_id') or ''
+                except Exception:
+                    _sid = ''
         if _sid:
             try:
                 _meta = meta_mgr.get_meta_for_id(_sid)
                 if isinstance(_meta, tuple) and len(_meta) >= 2:
-                    _shelf = _meta[0] or ''
+                    _shelf = _meta[0] or f'ID: {_sid}'
                     _title = _meta[1] or ''
                 else:
-                    _shelf, _title = '', ''
+                    _shelf, _title = f'ID: {_sid}', ''
             except Exception:
-                _shelf, _title = '', ''
+                _shelf, _title = f'ID: {_sid}', ''
             try:
                 _lib = meta_mgr.get_library_for_id(_sid) or ''
             except Exception:

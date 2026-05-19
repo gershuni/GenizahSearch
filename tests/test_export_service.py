@@ -363,21 +363,20 @@ class TestExportService:
         assert ws.cell(row=2, column=7).value == "Rehydrated full text"
         searcher.get_full_text_by_id.assert_called_once_with('uid-1')
 
-    def test_excel_export_rehydrates_display_from_uid(self, export_service):
-        """SEED-002: when a compacted (uid-only) row is exported, the helper
-        ``_resolve_result_display`` should rehydrate shelfmark/title/library
-        from ``meta_mgr.get_meta_for_id`` via the parsed sys_id."""
+    def test_excel_export_rehydrates_display_from_production_uid(self, export_service):
+        """SEED-002 fixup: production text-search rows have uid='IE..._P..._FL...'
+        with NO sys_id digits. After compaction the resolver must use the
+        top-level ``sys_id`` field (synthesized by the compactor from
+        display.id / raw_header) to look up shelfmark/title via meta_mgr."""
         export_service.meta_mgr.get_meta_for_id.return_value = ('T-S 12.345', 'Test Title')
         export_service.meta_mgr.get_library_for_id.return_value = 'CUL'
-        export_service.meta_mgr.parse_full_id_components.return_value = {
-            'sys_id': '9912345678901234',
-            'ie_id': 'IE1',
-            'p_num': '1',
-            'fl_id': 'FL1',
-        }
 
+        # Post-compaction row: production-shape uid + explicit sys_id +
+        # raw_header. NO display dict (it was stripped by the compactor).
         compact_results = [{
-            'uid': '9912345678901234_IE1_P1_FL1',
+            'uid': 'IE188433865_P1_FL1',
+            'sys_id': '99001234567890',
+            'raw_header': '99001234567890 IE188433865 P1 FL1',
             'sort_score': 0.95,
             'snippet': 'snippet',
             'match_terms': [],
@@ -389,15 +388,69 @@ class TestExportService:
         # Column 1 = Shelfmark, 3 = Title, 4 = System ID
         assert ws.cell(row=2, column=1).value == 'T-S 12.345'
         assert ws.cell(row=2, column=3).value == 'Test Title'
-        assert ws.cell(row=2, column=4).value == '9912345678901234'
-        # Verify get_meta_for_id was called with the extracted sys_id.
-        export_service.meta_mgr.get_meta_for_id.assert_any_call('9912345678901234')
+        assert ws.cell(row=2, column=4).value == '99001234567890'
+        # Verify get_meta_for_id was called with the synthesized sys_id.
+        export_service.meta_mgr.get_meta_for_id.assert_any_call('99001234567890')
+
+    def test_excel_export_id_prefix_fallback_when_meta_empty(self, export_service):
+        """SEED-002 fixup: when the sys_id resolves but meta_mgr returns an
+        EMPTY shelfmark (rare -- typically a synthetic row whose
+        libraries.csv entry got mangled, OR a csv_bank entry written with
+        empty shelfmark), the shelfmark falls back to ``ID: {sys_id}``.
+        Mirrors MetadataManager.get_display_data at genizah_core.py:4925
+        (``shelf or f'ID: {sys_id}'``), restoring JSON byte-equivalence
+        with the legacy path (Codex Issue 4)."""
+        # NOTE: meta_mgr.get_meta_for_id returns ('Unknown', '') for missing
+        # ids in production (genizah_core.py:3473-3505). 'Unknown' is truthy,
+        # so it passes through verbatim. The ID: fallback fires only when
+        # csv_bank has the sys_id but with empty shelfmark.
+        export_service.meta_mgr.get_meta_for_id.return_value = ('', '')
+        export_service.meta_mgr.get_library_for_id.return_value = ''
+
+        compact_results = [{
+            'uid': 'IE188433865_P1_FL1',
+            'sys_id': '99001234567890',
+            'raw_header': '99001234567890 IE188433865 P1 FL1',
+            'sort_score': 0.5,
+            'snippet': '',
+            'match_terms': [],
+        }]
+        content, _filename = export_service.export_search_results_excel(compact_results, "q")
+
+        wb = openpyxl.load_workbook(io.BytesIO(content))
+        ws = wb.active
+        # Shelfmark cell shows the "ID: ..." fallback (matches get_display_data).
+        assert ws.cell(row=2, column=1).value == 'ID: 99001234567890'
+
+    def test_excel_export_resolves_metadata_only_row_post_compaction(self, export_service):
+        """SEED-002 fixup regression: metadata-only rows (Title/Shelfmark mode)
+        have uid='' AND raw_header='' AND no display dict post-compaction --
+        ONLY the synthesized ``sys_id`` carries identity. Without the fixup
+        these rows collapsed to 'Unknown' in every export."""
+        export_service.meta_mgr.get_meta_for_id.return_value = ('T-S NS 329.96', 'Synthetic')
+        export_service.meta_mgr.get_library_for_id.return_value = 'CUL'
+
+        compact_results = [{
+            'uid': '',
+            'raw_header': '',
+            'sys_id': '99800000000000123',  # Phase 85 18-digit synthetic
+            'sort_score': 0.0,
+            'snippet': '',
+            'match_terms': [],
+        }]
+        content, _filename = export_service.export_search_results_excel(compact_results, "q")
+
+        wb = openpyxl.load_workbook(io.BytesIO(content))
+        ws = wb.active
+        assert ws.cell(row=2, column=1).value == 'T-S NS 329.96'
+        assert ws.cell(row=2, column=3).value == 'Synthetic'
+        assert ws.cell(row=2, column=4).value == '99800000000000123'
 
     def test_excel_export_graceful_degradation_on_unknown_uid(self, export_service):
-        """SEED-002: when the uid can't parse to a sys_id and no raw_header is
-        present, the export must fall back to 'Unknown' (not crash, not produce
+        """SEED-002: when neither sys_id nor raw_header nor uid yields a usable
+        sys_id, the export must fall back to 'Unknown' (not crash, not produce
         a MagicMock-coerced string)."""
-        # Critical: explicitly configure ALL three mock returns. Without this,
+        # Critical: explicitly configure ALL mock returns. Without this,
         # MagicMock returns MagicMock objects that coerce to "<MagicMock ...>"
         # strings in the cell — a false-positive failure mode.
         export_service.meta_mgr.parse_full_id_components.return_value = {'sys_id': None}
@@ -406,6 +459,7 @@ class TestExportService:
 
         compact_results = [{
             'uid': 'malformed-no-sys-id',
+            # No sys_id field, no raw_header — every tier yields nothing.
             'sort_score': 0.0,
             'snippet': 's',
             'match_terms': [],
@@ -418,32 +472,32 @@ class TestExportService:
         assert ws.cell(row=2, column=1).value == 'Unknown'
 
     def test_excel_output_equivalent_legacy_vs_compacted(self, export_service):
-        """SEED-002: a legacy row (with display dict) and a compacted row
-        (uid only) that resolve to the same sys_id must produce identical
-        Excel cell values for Shelfmark, Library code, and Title."""
+        """SEED-002 fixup: a legacy row (with display dict) and a compacted
+        row (production uid + synthesized sys_id) that resolve to the same
+        sys_id must produce identical Excel cell values for Shelfmark,
+        Library code, and Title."""
         export_service.meta_mgr.get_meta_for_id.return_value = ('T-S 99.1', 'Same Title')
         export_service.meta_mgr.get_library_for_id.return_value = 'CUL'
-        export_service.meta_mgr.parse_full_id_components.return_value = {
-            'sys_id': '9912345678901111',
-            'ie_id': 'IE1',
-            'p_num': '1',
-            'fl_id': 'FL1',
-        }
 
         legacy_row = {
             'display': {
                 'shelfmark': 'T-S 99.1',
                 'title': 'Same Title',
                 'library_code': 'CUL',
-                'id': '9912345678901111',
+                'id': '99001111111111111',
             },
-            'uid': '9912345678901111_IE1_P1_FL1',
+            'uid': 'IE188433865_P1_FL1',
+            'raw_header': '99001111111111111 IE188433865 P1 FL1',
             'sort_score': 0.5,
             'snippet': 's',
             'match_terms': [],
         }
+        # Post-compaction shape: production uid (no sys_id digits),
+        # synthesized sys_id, raw_header; NO display dict.
         compact_row = {
-            'uid': '9912345678901111_IE1_P1_FL1',
+            'uid': 'IE188433865_P1_FL1',
+            'sys_id': '99001111111111111',
+            'raw_header': '99001111111111111 IE188433865 P1 FL1',
             'sort_score': 0.5,
             'snippet': 's',
             'match_terms': [],

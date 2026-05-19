@@ -28,6 +28,7 @@ Read functions adopt (Phase 88 D-11 extension, Refinement 4 -- Codex review):
 """
 import json
 import os
+import re
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Callable
 
@@ -44,18 +45,40 @@ _PARALLELS_KEY = 'export_parallels_payload'
 # Capping by row count was not enough by itself: a handful of rows can still
 # weigh many MB when each carries a full manuscript transcription.
 #
-# SEED-002 (2026-05-19): the row compactors now use explicit allowlists
-# storing ONLY query-specific fields ({uid, sort_score, snippet, match_terms}
-# for search; same plus {score, source_ctx, text, raw_header} for parallels).
+# SEED-002 (2026-05-19, fixup 2026-05-19): the row compactors use explicit
+# allowlists storing query-specific fields plus the minimal identity fields
+# needed to rehydrate display metadata at export/serialize time:
+#   - search:    {uid, sys_id, sort_score, snippet, match_terms, raw_header}
+#   - parallels: {uid, sys_id, sort_score, score, snippet, match_terms,
+#                 source_ctx, text, raw_header, chunk_hits}
 # Display fields (shelfmark, title, library_code, library_name) rehydrate
 # from meta_mgr at export/serialize time via
 # ``web.export_service._resolve_result_display`` and the analogous fallback
 # in ``shared.search_serializer._serialize_item``. Full text rehydrates from
 # Tantivy via ``_resolve_result_full_text``. The ed6f89c4 field-strip
-# invariants are subsumed by the allowlist (full_text, raw_file_hl, content,
-# chunk_hits, display are all absent post-compaction).
+# invariants are subsumed by the allowlist (full_text, raw_file_hl, content
+# are all absent post-compaction).
 #
-# `score` and `raw_header` are INTENTIONALLY KEPT on parallels rows:
+# Why ``sys_id`` AND ``raw_header`` on search rows (initial fix kept neither):
+#   - production text-search uids are ``IE..._P..._FL...`` with no sys_id digits
+#     so ``parse_full_id_components(uid)['sys_id']`` returns None for the common
+#     case (verified at genizah_core.py:3617-3666, 3652-3666). Without an
+#     identity field, every exported shelfmark collapsed to 'Unknown'.
+#   - metadata-only rows (Title/Shelfmark mode at genizah_core.py:7440-7462)
+#     have uid='' AND raw_header=''; only ``display.id`` carries the sys_id.
+#     The compactor extracts it into a top-level ``sys_id`` field so the
+#     metadata-only path survives compaction.
+#   - ``raw_header`` is also needed by ``shared.search_serializer._serialize_item``
+#     to populate ``locator.volume_ie`` / ``locator.p_num`` for the public
+#     /api/search export envelope.
+#
+# Why ``chunk_hits`` is kept on parallels (initial fix dropped it):
+#   - shared/search_serializer.py:828 reads ``sub.get('chunk_hits')`` to build
+#     the per-row ``matches`` array in /api/export/parallels/json. Dropping it
+#     collapses every row to one degenerate match. Capped at 100 entries x
+#     1000 chars (same caps as ed6f89c4) to bound storage.
+#
+# ``score`` and ``raw_header`` are INTENTIONALLY KEPT on parallels rows:
 #   - live parallels UI reads them at 13 sites in web/pages/parallels.py
 #     (score: 2827/2831/2865/2868/3123/3310/3372; raw_header:
 #     2841/3134/3140/3359/3373) via compact_parallels_result_rows feeding
@@ -64,51 +87,149 @@ _PARALLELS_KEY = 'export_parallels_payload'
 #     /api/parallels aggregate_score; dropping it collapses sort order
 _EXPORT_RESULTS_CAP = 5000
 _PARALLELS_TEXT_STORAGE_CHARS = 4000
+_PARALLELS_CHUNK_HITS_CAP = 100
+_PARALLELS_CHUNK_TEXT_STORAGE_CHARS = 1000
 
 # Allowlists: only these keys are kept in stored / live-state rows.
-_SEARCH_ROW_ALLOWLIST = frozenset(('uid', 'sort_score', 'snippet', 'match_terms'))
-_PARALLELS_ROW_ALLOWLIST = frozenset((
-    'uid', 'sort_score', 'score', 'snippet', 'match_terms',
-    'source_ctx', 'text', 'raw_header',
+_SEARCH_ROW_ALLOWLIST = frozenset((
+    'uid', 'sys_id', 'sort_score', 'snippet', 'match_terms', 'raw_header',
 ))
+_PARALLELS_ROW_ALLOWLIST = frozenset((
+    'uid', 'sys_id', 'sort_score', 'score', 'snippet', 'match_terms',
+    'source_ctx', 'text', 'raw_header', 'chunk_hits',
+))
+
+# Pre-compiled at module load for the per-row compaction hot path. Matches
+# the production sys_id pattern (99 followed by 8+ digits, e.g. 99001234567890
+# or the Phase-85 synthetic 18-digit shape).
+_SYS_ID_RE = re.compile(r'(99\d{8,})')
+
+
+def _extract_sys_id_from_row(row: Dict[str, Any]) -> str:
+    """Best-effort sys_id extraction at compaction time.
+
+    Used to populate the top-level ``sys_id`` field before allowlist filtering
+    drops the heavy ``display`` dict. Looking in priority order:
+
+      1. ``row['sys_id']`` (already set by caller / earlier compaction step)
+      2. ``row['display']['id']`` (legacy / metadata-only rows -- the only
+         channel that carries sys_id when both uid and raw_header are empty)
+      3. ``row['raw_header']`` regex (normal text-search rows)
+      4. ``row['uid']`` regex (legacy rows where uid was a sys-id-bearing string)
+
+    Returns '' when no sys_id can be derived. The resolver / serializer then
+    falls back to the 'Unknown' / 'ID: {sys_id}' chain.
+    """
+    existing = row.get('sys_id')
+    if isinstance(existing, str) and existing:
+        return existing
+    display = row.get('display')
+    if isinstance(display, dict):
+        did = display.get('id')
+        if isinstance(did, str) and did:
+            return did
+    raw_header = row.get('raw_header')
+    if isinstance(raw_header, str) and raw_header:
+        m = _SYS_ID_RE.search(raw_header)
+        if m:
+            return m.group(1)
+    uid = row.get('uid')
+    if isinstance(uid, str) and uid:
+        m = _SYS_ID_RE.search(uid)
+        if m:
+            return m.group(1)
+    return ''
+
+
+def _compact_chunk_hit(hit: Any) -> Tuple[Any, bool]:
+    """Compact one parallels chunk_hit while preserving tuple/list shape.
+
+    Restored from ed6f89c4 for SEED-002 fixup. chunk_hits tuples are
+    (chunk_index, source_chunk_text, score, manuscript_snippet); indices 1
+    and 3 are strings capped at ``_PARALLELS_CHUNK_TEXT_STORAGE_CHARS``.
+    """
+    changed = False
+    if isinstance(hit, tuple):
+        items = list(hit)
+        original_type = tuple
+    elif isinstance(hit, list):
+        items = list(hit)
+        original_type = list
+    else:
+        return hit, False
+
+    for idx in (1, 3):
+        if idx < len(items) and isinstance(items[idx], str):
+            truncated = items[idx][:_PARALLELS_CHUNK_TEXT_STORAGE_CHARS]
+            if truncated != items[idx]:
+                items[idx] = truncated
+                changed = True
+
+    return (tuple(items) if original_type is tuple else items), changed
 
 
 def _compact_search_result_row(row: Any) -> Tuple[Any, bool]:
-    """Return a uid-only search result row plus a changed flag.
+    """Return an allowlist-pruned search result row plus a changed flag.
 
-    SEED-002 (2026-05-19): kept keys are the allowlist intersection of the
-    input dict. All other fields (display, full_text, full_text_excerpt,
-    raw_file_hl, content, score, raw_header, etc.) are dropped — they
-    rehydrate from meta_mgr / Tantivy at export time.
+    SEED-002 fixup (2026-05-19): kept keys are the allowlist intersection of
+    the input dict, plus a synthesized ``sys_id`` extracted from
+    ``display.id`` / ``raw_header`` / ``uid`` BEFORE the display dict is
+    dropped. All other fields (display, full_text, full_text_excerpt,
+    raw_file_hl, content, score, etc.) are dropped — they rehydrate from
+    meta_mgr / Tantivy at export time.
     """
     if not isinstance(row, dict):
         return row, False
+
+    # Synthesize sys_id BEFORE allowlist filtering -- this is the only chance
+    # to read display.id (the canonical channel for metadata-only rows, which
+    # have uid='' AND raw_header='').
+    synth_sys_id = _extract_sys_id_from_row(row)
 
     kept: Dict[str, Any] = {}
     for key in _SEARCH_ROW_ALLOWLIST:
         if key in row:
             kept[key] = row[key]
+    if synth_sys_id and not kept.get('sys_id'):
+        kept['sys_id'] = synth_sys_id
+
     changed = bool(set(row.keys()) - _SEARCH_ROW_ALLOWLIST)
+    # Also flag changed when we ADDED sys_id (caller didn't supply it but we
+    # synthesized one) -- ensures downstream truncated/changed tracking is
+    # honest about the rewrite.
+    if synth_sys_id and not row.get('sys_id'):
+        changed = True
     return kept, changed
 
 
 def _compact_parallels_result_row(row: Any) -> Tuple[Any, bool]:
-    """Return a safe-allowlist parallels result row plus a changed flag.
+    """Return an allowlist-pruned parallels result row plus a changed flag.
 
-    SEED-002 (2026-05-19): kept keys are the allowlist intersection of the
-    input dict; ``source_ctx`` and ``text`` retain the 4000-char truncation
-    cap from ed6f89c4. ``score`` and ``raw_header`` are INTENTIONALLY KEPT
-    (see module docstring). All other fields (display, full_text, raw_file_hl,
-    content, chunk_hits, etc.) are dropped.
+    SEED-002 fixup (2026-05-19): kept keys are the allowlist intersection of
+    the input dict; ``source_ctx`` and ``text`` retain the 4000-char
+    truncation cap from ed6f89c4. ``chunk_hits`` is kept (capped at
+    ``_PARALLELS_CHUNK_HITS_CAP`` entries x
+    ``_PARALLELS_CHUNK_TEXT_STORAGE_CHARS`` chars per index, matching
+    ed6f89c4) because the public ``/api/export/parallels/json`` serializer
+    reads it at ``shared/search_serializer.py:828``. ``sys_id`` is synthesized
+    from display.id / raw_header before display is dropped. All other fields
+    (display, full_text, raw_file_hl, content, etc.) are dropped.
     """
     if not isinstance(row, dict):
         return row, False
+
+    synth_sys_id = _extract_sys_id_from_row(row)
 
     kept: Dict[str, Any] = {}
     for key in _PARALLELS_ROW_ALLOWLIST:
         if key in row:
             kept[key] = row[key]
+    if synth_sys_id and not kept.get('sys_id'):
+        kept['sys_id'] = synth_sys_id
+
     changed = bool(set(row.keys()) - _PARALLELS_ROW_ALLOWLIST)
+    if synth_sys_id and not row.get('sys_id'):
+        changed = True
 
     # Preserve the source_ctx / text 4000-char cap for storage safety —
     # these fields are the longest survivors in the new allowlist and a
@@ -120,6 +241,22 @@ def _compact_parallels_result_row(row: Any) -> Tuple[Any, bool]:
             if truncated != value:
                 kept[key] = truncated
                 changed = True
+
+    # chunk_hits cap: 100 entries x 1000 chars per text index, restored from
+    # ed6f89c4 to bound worst-case storage at ~200 KB/row. Without this a
+    # composition-search row with thousands of chunk_hits could blow past
+    # the 5MB-per-row target on its own.
+    chunk_hits = kept.get('chunk_hits')
+    if isinstance(chunk_hits, list):
+        source_hits = chunk_hits[:_PARALLELS_CHUNK_HITS_CAP]
+        if len(source_hits) != len(chunk_hits):
+            changed = True
+        compact_hits = []
+        for hit in source_hits:
+            compact_hit, hit_changed = _compact_chunk_hit(hit)
+            compact_hits.append(compact_hit)
+            changed = changed or hit_changed
+        kept['chunk_hits'] = compact_hits
 
     return kept, changed
 

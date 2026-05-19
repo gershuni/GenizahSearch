@@ -76,21 +76,27 @@ def _resolve_result_full_text(result: Dict[str, Any]) -> str:
 def _resolve_result_display(result: Dict[str, Any], meta_mgr) -> tuple:
     """Return (shelfmark, title, library_code, library_name) for an export row.
 
-    SEED-002 (2026-05-19) — 3-tier fallback mirrors the lazy-rehydration
-    pattern of ``_resolve_result_full_text``:
+    SEED-002 fixup (2026-05-19) — tier order updated after Codex review:
 
-      Tier 1: row's ``display`` dict (non-empty) -> verbatim. This preserves
-              back-compat for callers passing the legacy shape (e.g. live
-              search-result rows before they hit export_state compaction).
-      Tier 2: extract sys_id from ``uid`` via
-              ``meta_mgr.parse_full_id_components`` -> meta_mgr lookups.
-              This is the post-Task-1 uid-only row path.
+      Tier 1: row's ``display`` dict (non-empty) -> verbatim. Preserves
+              back-compat for legacy live rows before export_state compaction.
+      Tier 2: ``result['sys_id']`` -> meta_mgr. The compactor at
+              ``web/export_state.py:_extract_sys_id_from_row`` synthesizes
+              this from display.id / raw_header / uid before allowlist
+              filtering, so it is the canonical identity channel for all
+              post-compaction rows (text-search AND metadata-only).
       Tier 3: extract sys_id from ``raw_header`` via regex ``(99\\d{8,})``.
-              Mirrors the parallels-envelope idiom at
-              ``shared/search_serializer.py:716-738`` so legacy parallels
-              fixtures (carrying raw_header but no uid) keep working.
-      Fallback: ('Unknown', '', '', '') when meta_mgr is None or neither
-                uid nor raw_header parses to a sys_id.
+              Legacy fallback for rows that bypassed the compactor.
+      Tier 4: extract sys_id from ``uid`` via
+              ``meta_mgr.parse_full_id_components`` -> meta_mgr lookups.
+              Legacy fallback for rows that bypassed the compactor AND have
+              a sys-id-bearing uid (NOT the production text-search shape,
+              which uses ``IE..._P..._FL...`` -- see genizah_core.py:3617).
+      Fallback: ('Unknown', '', '', '') when meta_mgr is None or no tier
+                yields a sys_id. When a sys_id is known but meta_mgr lookups
+                return Unknown, shelfmark falls back to ``ID: {sys_id}``,
+                mirroring ``MetadataManager.get_display_data`` at
+                ``genizah_core.py:4925``.
 
     library_name is resolved via the existing ``core_get_library_display``
     helper, with the library_code as the fallback when localization fails.
@@ -107,17 +113,12 @@ def _resolve_result_display(result: Dict[str, Any], meta_mgr) -> tuple:
         if not meta_mgr:
             return ('Unknown', '', '', '')
 
-        # Tier 2: uid -> sys_id via meta_mgr's parser
-        sys_id = ''
-        uid = result.get('uid', '') or ''
-        if uid:
-            try:
-                parsed = meta_mgr.parse_full_id_components(uid) or {}
-                sys_id = parsed.get('sys_id') or ''
-            except Exception:
-                sys_id = ''
+        # Tier 2: explicit sys_id field synthesized by the compactor. This is
+        # the path the vast majority of compacted rows take.
+        sys_id_candidate = result.get('sys_id')
+        sys_id = sys_id_candidate if isinstance(sys_id_candidate, str) else ''
 
-        # Tier 3: raw_header regex fallback (legacy parallels-row idiom)
+        # Tier 3: raw_header regex (legacy fallback when compactor didn't run)
         if not sys_id:
             raw_header = result.get('raw_header', '') or ''
             if raw_header:
@@ -128,19 +129,32 @@ def _resolve_result_display(result: Dict[str, Any], meta_mgr) -> tuple:
                 except Exception:
                     sys_id = ''
 
+        # Tier 4: uid parsing (legacy fallback for sys-id-bearing uids)
+        if not sys_id:
+            uid = result.get('uid', '') or ''
+            if uid:
+                try:
+                    parsed = meta_mgr.parse_full_id_components(uid) or {}
+                    sys_id = parsed.get('sys_id') or ''
+                except Exception:
+                    sys_id = ''
+
         if not sys_id:
             return ('Unknown', '', '', '')
 
-        # meta_mgr lookups with graceful per-call fallback
+        # meta_mgr lookups with graceful per-call fallback. When meta_mgr has
+        # the sys_id but no shelfmark (rare -- typically a synthetic row whose
+        # libraries.csv entry got mangled), fall back to "ID: {sys_id}"
+        # matching genizah_core.MetadataManager.get_display_data.
         try:
             meta = meta_mgr.get_meta_for_id(sys_id)
             if isinstance(meta, tuple) and len(meta) >= 2:
-                shelfmark = meta[0] or 'Unknown'
+                shelfmark = meta[0] or f'ID: {sys_id}'
                 title = meta[1] or ''
             else:
-                shelfmark, title = 'Unknown', ''
+                shelfmark, title = f'ID: {sys_id}', ''
         except Exception:
-            shelfmark, title = 'Unknown', ''
+            shelfmark, title = f'ID: {sys_id}', ''
         try:
             library_code = meta_mgr.get_library_for_id(sys_id) or ''
         except Exception:
@@ -432,10 +446,22 @@ class ExportService:
             snippet = clean_text_single_line(remove_highlight_markers(res.get('snippet', '')))
             full_text = clean_text_single_line(_resolve_result_full_text(res))[:32000]
 
-            # Resolve sys_id for the "System ID" column: prefer legacy display.id
-            # when present, else parse from uid (graceful '' fallback).
+            # Resolve sys_id for the "System ID" column. SEED-002 fixup tier
+            # order matches _resolve_result_display:
+            #   1. legacy display.id  2. row.sys_id (compactor-synthesized)
+            #   3. raw_header regex   4. parse_full_id_components(uid) (legacy)
             legacy_display = res.get('display') if isinstance(res.get('display'), dict) else {}
             sys_id_for_cell = (legacy_display or {}).get('id') or ''
+            if not sys_id_for_cell:
+                explicit_sys = res.get('sys_id')
+                if isinstance(explicit_sys, str):
+                    sys_id_for_cell = explicit_sys
+            if not sys_id_for_cell:
+                raw_header = res.get('raw_header', '') or ''
+                if raw_header:
+                    m = re.search(r'(99\d{8,})', raw_header)
+                    if m:
+                        sys_id_for_cell = m.group(1)
             if not sys_id_for_cell and self.meta_mgr:
                 try:
                     parsed = self.meta_mgr.parse_full_id_components(res.get('uid', '') or '') or {}
@@ -518,9 +544,21 @@ class ExportService:
             if res.get('snippet'):
                 add_highlighted_hebrew_paragraph(doc, res['snippet'])
 
-            # System ID: prefer legacy display.id, else parse from uid.
+            # System ID: SEED-002 fixup tier order matches the Excel path:
+            #   1. legacy display.id  2. row.sys_id  3. raw_header regex
+            #   4. parse_full_id_components(uid) (legacy)
             legacy_display = res.get('display') if isinstance(res.get('display'), dict) else {}
             sys_id_for_text = (legacy_display or {}).get('id') or ''
+            if not sys_id_for_text:
+                explicit_sys = res.get('sys_id')
+                if isinstance(explicit_sys, str):
+                    sys_id_for_text = explicit_sys
+            if not sys_id_for_text:
+                raw_header = res.get('raw_header', '') or ''
+                if raw_header:
+                    m = re.search(r'(99\d{8,})', raw_header)
+                    if m:
+                        sys_id_for_text = m.group(1)
             if not sys_id_for_text and self.meta_mgr:
                 try:
                     parsed = self.meta_mgr.parse_full_id_components(res.get('uid', '') or '') or {}
