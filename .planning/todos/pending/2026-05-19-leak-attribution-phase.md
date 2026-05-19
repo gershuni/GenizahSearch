@@ -3,13 +3,57 @@ title: "Attribute the secondary web memory leak (~411 MB/hr) and ship a fix"
 created: 2026-05-19
 area: web
 priority: high
+status: provisionally-superseded
+status_note: "2026-05-19 commit ed6f89c4 ships row-level field stripping in web/export_state.py (was the missing half of the 2026-05-18 cap fix); awaiting post-deploy soak verification. If `/_internal/memstat` shows RSS growth < 30 MB/hr and export_search_payload no longer dominates top_keys after >=2h uptime, this todo CLOSES (no attribution phase needed). If the soak verdict stays in the warning band, this attribution work re-activates."
 source: P1 web memory leak re-opened 2026-05-19 -- 11h soak verdict warning band (411 MB/hr)
 predecessor: .planning/todos/done/2026-05-18-verify-memstat-after-export-cap-fix.md
-predecessor_outcome: "Cap fix (commit f2e456d4) closed the export_search_payload surface (498 MB -> 512 KB live payload; 906 MB -> 4.5 MB top file on disk) but a different surface is now leaking ~411 MB/hr -- WORSE than the pre-fix 300 MB/hr baseline."
-not_yet_scheduled: "v7.13 roadmap is locked at Phases 93 + 94 (Research-Grade Downloads & PGP Filter, 14/14 reqs mapped 2026-05-19). This attribution work has to be inserted as a separate phase after v7.13 ships, OR as an urgent insertion if the growth rate worsens (e.g. RSS climbs past ~10 GB before v7.13 ships)."
+predecessor_outcome: "Cap fix (commit f2e456d4) closed the export_search_payload row-count surface (498 MB -> 512 KB live payload; 906 MB -> 4.5 MB top file on disk) but the row-FIELD surface was still leaking: each row carried multi-MB full_text / raw_file_hl / content fields, so 35 rows × MB each still ballooned per-session storage. Codex CLI diagnosed and patched this in commit ed6f89c4."
+not_yet_scheduled: "v7.13 roadmap is locked at Phases 93 + 94 (Research-Grade Downloads & PGP Filter, 14/14 reqs mapped 2026-05-19). This attribution work has to be inserted as a separate phase after v7.13 ships, OR as an urgent insertion if the growth rate worsens AFTER the ed6f89c4 field-strip fix proves insufficient."
 ---
 
 # Attribute the secondary web memory leak and ship a fix
+
+## STATUS: PROVISIONALLY SUPERSEDED (2026-05-19)
+
+**A second fix was shipped before this attribution work began.** Commit
+`ed6f89c4` (authored by Codex CLI, applied to master-main by Claude) ships
+row-level stripping of `full_text` / `raw_file_hl` / `content` fields at write
+time in `web/export_state.py` -- the missing half of the 2026-05-18 count cap.
+Diagnosis: capping rows alone could not bound multi-MB transcripts × few rows;
+35 results carrying full manuscript text could still write hundreds of MB per
+session. The fix also adds:
+
+- Lazy Tantivy rehydration in `web/export_service.py:_resolve_result_full_text`
+  -- Excel exports still get full text via `searcher.get_full_text_by_id(uid)`
+  at download time, not from session storage.
+- `app.on_startup` hook `compact_export_storage_on_startup` in `web/main.py`
+  rewriting legacy oversized `.nicegui/storage-user-*.json` files in-place via
+  `tmp + os.replace`.
+- `top_keys` per user payload in `web/storage_diagnostics.py` so post-deploy we
+  can directly observe whether the export payloads are still dominant.
+
+Tests: 2051 passed / 20 skipped / 2 xfailed / 0 failures in the full pytest
+suite (3m 56s). Ruff clean on all 8 source files.
+
+### Awaiting verification
+
+Pull `/_internal/memstat` after >=2h uptime under real traffic. Success criteria:
+
+1. `export_search_payload` / `export_parallels_payload` no longer appear as
+   dominant `top_keys` in any user payload.
+2. RSS growth rate < 30 MB/hr (band-1 threshold from the predecessor todo).
+
+**If both pass:** this todo CLOSES (move to `.planning/todos/done/` with a
+verdict note; flip the OPEN_ISSUES P1 row to ✅ Fixed (2026-05-19, ed6f89c4);
+decrement P1 Open 1->0 / Total Open 34->33). The attribution work below is no
+longer needed.
+
+**If either fails:** the field-strip fix was also insufficient and the
+attribution work below RE-ACTIVATES. Proceed to Plan 01 (objgraph +
+tracemalloc endpoints) as originally scoped. The 6 candidate surfaces below
+remain the same.
+
+---
 
 ## Context
 
