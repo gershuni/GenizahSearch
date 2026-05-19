@@ -299,15 +299,24 @@ _objgraph_baseline_taken = False
 def _objgraph_endpoint(
     x_memstat_secret: str = Header(default=''),
     limit: int = 30,
+    action: str = 'stats',
+    target_class: str = 'ObservableDict',
+    sample: int = 3,
+    max_depth: int = 8,
 ):
     """Snapshot-and-diff heap attribution by Python class.
 
-    First call: takes a baseline (no growth shown, returns most_common_types).
-    Subsequent calls: returns growth() since last call AND most_common_types.
+    Actions (query param ?action=...):
+      - 'stats' (default): returns most_common_types + growth_since_last_call.
+        First call takes a baseline. This is the original endpoint behavior.
+      - 'backrefs': for `sample` instances of `target_class` (default
+        ObservableDict), walk gc.get_referrers up to `max_depth` and return
+        a string-summary chain to root. Used to attribute orphan objects to
+        their retention path (added 2026-05-19 for framework-retention leak
+        investigation, see .planning/quick/260519-hoi-investigate-framework-retention).
 
     objgraph.growth() shows new+grown types since baseline. most_common_types
-    shows the current top-N classes by instance count. Both together let you
-    see which classes are accumulating vs. which are dominant in absolute terms.
+    shows the current top-N classes by instance count.
     """
     global _objgraph_baseline_taken
     if not _MEMSTAT_SECRET:
@@ -319,7 +328,58 @@ def _objgraph_endpoint(
     except ImportError:
         raise HTTPException(status_code=503, detail='objgraph not installed (pip install objgraph)')
     limit = max(1, min(int(limit), 200))
+    sample = max(1, min(int(sample), 20))
+    max_depth = max(1, min(int(max_depth), 20))
     _gc.collect()
+
+    if action == 'backrefs':
+        # Find instances of target_class and walk referrers up to root.
+        instances = objgraph.by_type(target_class)
+        total_count = len(instances)
+        # Take a small evenly-spaced sample so we don't always get the newest.
+        if total_count == 0:
+            return JSONResponse({
+                'pid': os.getpid(),
+                'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
+                'action': 'backrefs',
+                'target_class': target_class,
+                'total_count': 0,
+                'samples': [],
+                'note': f'no instances of {target_class} found',
+            })
+        step = max(1, total_count // sample)
+        sampled = [instances[i * step] for i in range(sample) if i * step < total_count]
+        samples_out = []
+        for idx, obj in enumerate(sampled):
+            chain = _walk_referrers(obj, max_depth=max_depth)
+            samples_out.append({
+                'sample_index': idx,
+                'instance_id': id(obj),
+                'instance_repr': _safe_repr(obj, 200),
+                'instance_size_keys': len(obj) if hasattr(obj, '__len__') else None,
+                'chain': chain,
+            })
+        # Free the strong refs we just created.
+        del instances, sampled
+        _gc.collect()
+        return JSONResponse({
+            'pid': os.getpid(),
+            'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
+            'action': 'backrefs',
+            'target_class': target_class,
+            'total_count': total_count,
+            'sample_count': len(samples_out),
+            'max_depth': max_depth,
+            'samples': samples_out,
+            'note': (
+                'Each sample shows gc.get_referrers walk up to max_depth. '
+                'A chain ending at a NiceGUI Storage / app.storage internal '
+                'dict identifies the retention root. A short chain ending '
+                'at a frame, function, or generator suggests a live closure.'
+            ),
+        })
+
+    # Default action: stats (original behavior)
     most_common = objgraph.most_common_types(limit=limit)
     if _objgraph_baseline_taken:
         growth = objgraph.growth(limit=limit, peak_stats={})
@@ -330,15 +390,106 @@ def _objgraph_endpoint(
     return JSONResponse({
         'pid': os.getpid(),
         'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
+        'action': 'stats',
         'baseline_was_taken_this_call': not bool(growth) and _objgraph_baseline_taken,
         'most_common_types': [{'class': c, 'count': n} for c, n in most_common],
         'growth_since_last_call': [{'class': c, 'count': n, 'delta': d} for c, n, d in growth],
         'note': (
             'most_common_types = absolute instance counts. '
             'growth_since_last_call = delta since previous /_internal/objgraph call '
-            '(or empty if this is the first call after process start).'
+            '(or empty if this is the first call after process start). '
+            'Use action=backrefs&target_class=ObservableDict to trace retention path.'
         ),
     })
+
+
+def _safe_repr(obj, max_chars: int) -> str:
+    """Return a bounded repr() that won't blow up on huge dicts."""
+    try:
+        cls_name = type(obj).__name__
+        if hasattr(obj, '__len__'):
+            try:
+                size_hint = f' len={len(obj)}'
+            except Exception:
+                size_hint = ''
+        else:
+            size_hint = ''
+        # Try to extract a tiny preview key for dicts.
+        preview = ''
+        if isinstance(obj, dict) and obj:
+            try:
+                keys = list(obj.keys())[:3]
+                preview = f' keys={keys!r}'
+            except Exception:
+                pass
+        s = f'<{cls_name}{size_hint}{preview}>'
+        return s[:max_chars]
+    except Exception:
+        return f'<{type(obj).__name__} repr-failed>'
+
+
+def _walk_referrers(obj, max_depth: int) -> list:
+    """Walk gc.get_referrers up to max_depth hops, returning a list of
+    string descriptions of intermediate objects.
+
+    Each entry is a dict {depth, type, repr, is_frame, is_module}. The walk
+    stops early if it hits a module, frame, or NiceGUI Storage instance.
+    Visited ids tracked to avoid cycles.
+    """
+    chain = []
+    visited = {id(obj)}
+    current_frontier = [obj]
+    for depth in range(1, max_depth + 1):
+        next_frontier = []
+        for cur in current_frontier:
+            refs = _gc.get_referrers(cur)
+            for ref in refs:
+                rid = id(ref)
+                if rid in visited:
+                    continue
+                visited.add(rid)
+                cls_name = type(ref).__name__
+                # Skip internal noise refs: the chain list itself, current_frontier list, our local frames.
+                if cls_name == 'frame' and getattr(ref, 'f_code', None) is not None:
+                    code = ref.f_code
+                    if code.co_filename and 'main.py' in code.co_filename and code.co_name in ('_walk_referrers', '_objgraph_endpoint'):
+                        continue
+                if cls_name == 'list' and ref is current_frontier:
+                    continue
+                if cls_name == 'list' and ref is chain:
+                    continue
+                entry = {
+                    'depth': depth,
+                    'type': cls_name,
+                    'repr': _safe_repr(ref, 200),
+                    'is_frame': cls_name == 'frame',
+                    'is_module': cls_name == 'module',
+                }
+                # Special anchors: identify NiceGUI internals as roots.
+                if cls_name == 'dict':
+                    # Try to detect if this is the _users dict, _tabs dict, etc.
+                    try:
+                        from nicegui import app as _nicegui_app
+                        storage = getattr(_nicegui_app, 'storage', None)
+                        if storage is not None:
+                            if ref is getattr(storage, '_users', None):
+                                entry['anchor'] = 'storage._users'
+                            elif ref is getattr(storage, '_tabs', None):
+                                entry['anchor'] = 'storage._tabs'
+                    except Exception:
+                        pass
+                chain.append(entry)
+                # Stop walking further from a frame, module, or anchored dict.
+                if entry.get('is_frame') or entry.get('is_module') or entry.get('anchor'):
+                    continue
+                next_frontier.append(ref)
+                # Cap fan-out per level to bound memory.
+                if len(chain) >= 200:
+                    return chain
+        if not next_frontier:
+            break
+        current_frontier = next_frontier
+    return chain
 
 
 # ---------------------------------------------------------------------------
