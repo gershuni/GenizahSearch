@@ -13,13 +13,14 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 **Goal:** Surface PGP coverage at the result-set level on `/search` and upgrade downloaded xlsx artifacts into citation-grade dossiers so a downloaded file stands alone as a scholarly source.
 
 **Target features:**
-- Post-search 3-state PGP filter on `/search` toolbar (`All` / `Has PGP` / `No PGP`) with active-filter chip, persisted via `web/safe_storage.py` chokepoint (web-only — promoted backlog 999.2).
-- Multi-sheet xlsx downloads: main sheet gains `Has PGP` / `Is Printed` / `Domains` / `IIIF Manifest` (soft) columns; NEW `Manuscripts` sub-sheet (one row per unique `sys_id` with PGP + NLI + catalog + library viewer + GenizahSearch URL); NEW `Bibliography` sub-sheet (one row per FJMS bib entry, joinable by `System ID`); JSON gains 3 additive per-item flags (`has_pgp`, `is_printed`, `domains`). English-only, no transcription text. Web-only (promoted backlog 999.3).
+- Post-search 3-state PGP filter on `/search` toolbar (`All` / `Has PGP` / `No PGP`) with active-filter chip, persisted via `web/safe_storage.py` chokepoint. **Web only** — desktop already exposes the same signal via a sortable `COL_PGP` badge column at `genizah_app.py:5599-5634` (promoted backlog 999.2).
+- Multi-sheet xlsx downloads on BOTH web AND desktop: main sheet gains `Has PGP` / `Is Printed` / `Domains` / `IIIF Manifest` (soft) columns; NEW `Manuscripts` sub-sheet (one row per unique `sys_id` with PGP + NLI + catalog + library viewer + GenizahSearch URL); NEW `Bibliography` sub-sheet (one row per FJMS bib entry, joinable by `System ID`). Web JSON also gains 3 additive per-item flags (`has_pgp`, `is_printed`, `domains`); desktop has no JSON export. English-only, no transcription text. Web and desktop share `shared/export_dossier.py` helpers so workbook structure is identical (promoted backlog 999.3 + 2026-05-19 desktop-parity scope expansion).
 
 **Scope guardrails:**
-- Web only — desktop is explicitly out of scope per both phase CONTEXT files.
+- Phase 93 web only (desktop already covered by existing column sort).
+- Phase 94 xlsx on both apps via shared helpers; JSON and state-plumbing portions web-only by construction.
 - All per-user persistence MUST go through `web/safe_storage.py` (Phase 87 multitenant invariant).
-- `printed_ids` must plumb through `web/export_state.set_search_export(...)` so the export pipeline can read it alongside `transcription_sys_ids`.
+- `printed_ids` must plumb through `web/export_state.set_search_export(...)` on web so the export pipeline can read it alongside `transcription_sys_ids`. Desktop reads `_printed_sys_ids` and `_pgp_transcription_sys_ids` directly at the export call site.
 - JSON envelope schema_version stays 1 (additive changes only per Phase 83 stability commitment).
 
 ## Current State (after v7.12 shipped)
@@ -262,24 +263,25 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-**v7.13 Research-Grade Downloads & PGP Filter** (started 2026-05-19; phases 93 + 94 promoted from backlog 999.2 + 999.3):
+**v7.13 Research-Grade Downloads & PGP Filter** (started 2026-05-19; phases 93 + 94 promoted from backlog 999.2 + 999.3; 14 reqs):
 
-PGP Filter (web `/search`):
+PGP Filter (web `/search` only):
 - [ ] **PGP-FILTER-01**: Post-search 3-state filter button (`all` → `only_pgp` → `hide_pgp` → `all`) in results toolbar, immediately after `printed_filter_btn` — see `web/pages/search.py:1430-1434`
 - [ ] **PGP-FILTER-02**: Button hidden until current result set contains at least one PGP-tagged hit (`_set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))`)
 - [ ] **PGP-FILTER-03**: Active-filter chip in results header row when state is `only_pgp` or `hide_pgp` (co-located with `exclusion_chips_row` at `search.py:1448-1449`)
 - [ ] **PGP-FILTER-04**: Filter cascade slots in after `printed_filter`; stacks with manuscript exclusions, domain exclusions, refinement chain
 - [ ] **PGP-FILTER-05**: Choice persisted via `persist_value('search_pgp_filter', ...)` routed through `web/safe_storage.py` chokepoint; bootstrap read at search-page init
 
-Export Metadata (xlsx + JSON):
-- [ ] **EXPORT-META-01**: Main xlsx sheet appends `Has PGP`, `Is Printed`, `Domains` columns after `Full Text` (pipe-delimited lists, empty cell for missing, "Yes"/empty for booleans)
-- [ ] **EXPORT-META-02**: NEW `Manuscripts` sub-sheet: one row per unique `sys_id` with PGP fields, NLI description, FJMS catalog summary (planner picks 3-5 fields with rationale), library viewer URL, GenizahSearch deep link
-- [ ] **EXPORT-META-03**: NEW `Bibliography` sub-sheet: one row per FJMS bib entry, joinable to `Manuscripts` via `System ID`, no row cap
-- [ ] **EXPORT-META-04**: Sheet order `Genizah Results` → `Manuscripts` → `Bibliography`; first sheet remains default-active on open
-- [ ] **EXPORT-META-05**: English-only metadata; no transcription text; no Hebrew translation lookups; graceful Hebrew fallback only when English variant absent
-- [ ] **EXPORT-META-06**: `printed_ids` plumbed through `web/export_state.set_search_export(...)` alongside existing `transcription_sys_ids`
-- [ ] **EXPORT-META-07**: JSON per-item gains additive `has_pgp` (bool), `is_printed` (bool), `domains` (list); envelope schema_version stays 1; no `pgp` subobject, no dossier in JSON
-- [ ] **EXPORT-META-08**: `IIIF Manifest` per-page column on main sheet — soft scope; planner may defer to Manuscripts sub-sheet with documented rationale
+Export Metadata (xlsx web+desktop; JSON web-only):
+- [ ] **EXPORT-META-01** (web + desktop): Main xlsx sheet appends `Has PGP`, `Is Printed`, `Domains` columns after `Full Text` (pipe-delimited lists, empty cell for missing, "Yes"/empty for booleans)
+- [ ] **EXPORT-META-02** (web + desktop): NEW `Manuscripts` sub-sheet: one row per unique `sys_id` with PGP fields, NLI description, FJMS catalog summary (planner picks 3-5 fields with rationale), library viewer URL, GenizahSearch deep link
+- [ ] **EXPORT-META-03** (web + desktop): NEW `Bibliography` sub-sheet: one row per FJMS bib entry, joinable to `Manuscripts` via `System ID`, no row cap
+- [ ] **EXPORT-META-04** (web + desktop): Sheet order `Genizah Results` → `Manuscripts` → `Bibliography`; first sheet remains default-active on open
+- [ ] **EXPORT-META-05** (web + desktop): English-only metadata; no transcription text; no Hebrew translation lookups; graceful Hebrew fallback only when English variant absent
+- [ ] **EXPORT-META-06** (web only): `printed_ids` plumbed through `web/export_state.set_search_export(...)` alongside existing `transcription_sys_ids`
+- [ ] **EXPORT-META-07** (web only): JSON per-item gains additive `has_pgp` (bool), `is_printed` (bool), `domains` (list); envelope schema_version stays 1; no `pgp` subobject, no dossier in JSON
+- [ ] **EXPORT-META-08** (web + desktop, soft): `IIIF Manifest` per-page column on main sheet — soft scope; planner may defer to Manuscripts sub-sheet with documented rationale
+- [ ] **EXPORT-META-09** (desktop): Desktop xlsx search-results export rewired to emit the same 3-sheet workbook as web, reusing `shared/export_dossier.py` helpers at `genizah_app.py:export_results('xlsx')`. CSV/TXT/DOCX exports NOT modified.
 
 ### Out of Scope
 
@@ -389,4 +391,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-19 — v7.13 Research-Grade Downloads & PGP Filter milestone STARTED. 13 active requirements across 2 phases (93 PGP filter + 94 export metadata), both promoted from backlog (999.2 + 999.3) with `CONTEXT.md` already in place from prior `/gsd-discuss-phase` runs. Web-only milestone; multitenant invariants from v7.12 carry forward (zero raw `app.storage.user` access under `web/`, enforced by `tests/test_no_raw_storage_access.py`).*
+*Last updated: 2026-05-19 — v7.13 Research-Grade Downloads & PGP Filter milestone STARTED. 14 active requirements across 2 phases (93 PGP filter on web + 94 export metadata web+desktop xlsx), both promoted from backlog (999.2 + 999.3) with `CONTEXT.md` already in place from prior `/gsd-discuss-phase` runs. Phase 94 expanded 2026-05-19 to include desktop xlsx parity via shared `shared/export_dossier.py` helpers (EXPORT-META-09). Multitenant invariants from v7.12 carry forward (zero raw `app.storage.user` access under `web/`, enforced by `tests/test_no_raw_storage_access.py`).*

@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v7.13
 milestone_name: "Research-Grade Downloads & PGP Filter"
-status: defining-requirements
-stopped_at: "v7.13 started 2026-05-19; PROJECT.md updated, requirements gathering in progress, roadmapper not yet spawned."
+status: roadmap-locked
+stopped_at: "v7.13 roadmap locked 2026-05-19 + scope-clarified same day (Phase 93 web-only confirmed; Phase 94 expanded to web + desktop xlsx; EXPORT-META-09 added); 14/14 reqs mapped, traceability locked; awaiting `/gsd-review-backlog` to rename 999.2-* / 999.3-* directories, then `/gsd-plan-phase 93` and `/gsd-discuss-phase 94 --revise` (CONTEXT.md needs desktop-parity refresh) followed by `/gsd-plan-phase 94`."
 last_updated: "2026-05-19T00:00:00.000Z"
-last_activity: 2026-05-19 -- v7.13 milestone started; 999.2 and 999.3 promoted from backlog
+last_activity: 2026-05-19 -- v7.13 roadmap locked + Phase 94 desktop-parity scope expansion applied; 14/14 requirements mapped across 2 phases
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
-  total_plans: 0
+  total_plans: 5
   completed_plans: 0
   percent: 0
 ---
@@ -25,12 +25,23 @@ See: .planning/PROJECT.md (updated 2026-05-19)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Not started (roadmap locked)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-05-19 -- Milestone v7.13 started
+Status: Roadmap locked; awaiting backlog rename + planning
+Last activity: 2026-05-19 -- Roadmapper locked phase↔requirement map; 13/13 requirements covered
 
-Progress: [          ] v7.13 0% (0/13 reqs)
+Progress: [          ] v7.13 0% (0/14 reqs, 0/5 plans, 0/2 phases)
+
+## Phase Plan Estimates
+
+| Phase | Name | Reqs | Plan slots (est) | Scope | CONTEXT.md status |
+|-------|------|------|------------------|-------|-------------------|
+| 93    | PGP Filter on `/search` | 5 | 1 | web only | LOCKED (`.planning/phases/999.2-filtering-by-pgp/999.2-CONTEXT.md`) |
+| 94    | Research-Grade Export Metadata | 9 | 4 | web + desktop xlsx (JSON + state plumbing web-only) | LOCKED, BROADENED 2026-05-17, FURTHER EXPANDED 2026-05-19 with desktop parity (`.planning/phases/999.3-adding-pgp-to-downloaded-data/999.3-CONTEXT.md`); CONTEXT.md needs refresh OR planner incorporates EXPORT-META-09 directly; prior `999.3-01-PLAN.md` SUPERSEDED |
+
+**Total:** 14 requirements, 5 plan slots (estimated), 2 phases.
+
+Phase 93 and Phase 94 are independent (neither depends on the other) and can ship in parallel.
 
 ## Promoted Backlog (this milestone)
 
@@ -62,6 +73,9 @@ The full `gsd-tools.cjs audit-open` report at close included 96 items. The v7.12
 ## Session Continuity
 
 Last session: 2026-05-19T00:00:00.000Z
-Stopped at: "v7.13 milestone scaffold created. Requirements being defined; roadmapper not yet spawned."
+Stopped at: "v7.13 roadmap locked + Phase 94 scope expanded to web + desktop xlsx (EXPORT-META-09 added). Phases 93+94 + per-milestone roadmap written. Traceability locked. Awaiting backlog rename + per-phase planning."
 Resume file: None
-Next step: Finish writing REQUIREMENTS.md, spawn `gsd-roadmapper` for phases 93 + 94, then `/gsd-review-backlog` to rename `999.2-*` / `999.3-*` phase directories into `93-*` / `94-*`, then `/gsd-discuss-phase 93` (or proceed straight to `/gsd-plan-phase 93` since CONTEXT.md is already in place from the original backlog discussion).
+Next step: Run `/gsd-review-backlog` to rename `999.2-*` / `999.3-*` phase directories into `93-*` / `94-*`. Then:
+- `/gsd-plan-phase 93` — Phase 93 CONTEXT.md is ready, prior `999.2-01-PLAN.md` is a valid baseline, web only.
+- `/gsd-discuss-phase 94 --revise` first to refresh CONTEXT.md with the desktop-parity scope (or planner incorporates EXPORT-META-09 directly from REQUIREMENTS.md), then `/gsd-plan-phase 94`. Prior `999.3-01-PLAN.md` is SUPERSEDED — re-plan from scratch covering web + desktop xlsx + web-only JSON.
+Phases independent — order is human's choice.

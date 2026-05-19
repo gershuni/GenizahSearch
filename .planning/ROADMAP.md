@@ -21,8 +21,18 @@
 - **v7.10 Search API** -- Phases 77-83 (shipped 2026-05-05)
 - **v7.11 CUDL Coverage & Synthetic Inventories** -- Phases 84-86 (shipped 2026-05-12)
 - **v7.12 Multitenant Architecture (Path B)** -- Phases 87-92 + 92.1 + 92.2 + promoted 999.1/999.4 (shipped 2026-05-18)
+- **v7.13 Research-Grade Downloads & PGP Filter** -- Phases 93-94 (ACTIVE; started 2026-05-19; Phase 93 web-only / Phase 94 web + desktop xlsx)
 
 ## Phases
+
+<details>
+<summary>v7.13 Research-Grade Downloads & PGP Filter (Phases 93-94) -- ACTIVE (started 2026-05-19)</summary>
+
+See: .planning/milestones/v7.13-ROADMAP.md
+
+2 phases, ~5 plans (estimated), 14 requirements (5 PGP-FILTER + 9 EXPORT-META). Both phases promoted from backlog (999.2 + 999.3) with CONTEXT.md already locked. Phase 93 (PGP Filter on `/search`, web-only): post-search 3-state filter toggle (`All` / `Has PGP` / `No PGP`) in results toolbar with active-filter chip, persisted via `web/safe_storage.py` chokepoint; desktop is out of scope because it already exposes the signal via the sortable `COL_PGP` badge column. Phase 94 (Research-Grade Export Metadata, web + desktop xlsx): 3-sheet xlsx workbook (`Genizah Results` + new `Manuscripts` dossier sub-sheet + new `Bibliography` sub-sheet) on BOTH apps via shared `shared/export_dossier.py` helpers, with English-only metadata and no transcription text; on web only, JSON gains 3 additive per-item flags (`has_pgp`, `is_printed`, `domains`) with envelope `schema_version` unchanged; desktop has no JSON export. Phases independent (parallel-shippable). v7.12 multitenant invariants carry forward (zero raw `app.storage.user` under `web/`).
+
+</details>
 
 <details>
 <summary>v1 External Data Integration (Phases 1-7) -- SHIPPED 2026-02-07</summary>
@@ -243,27 +253,9 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 ## Backlog
 
-### Phase 999.2: Filtering by PGP (PLANNED)
-
-**Goal:** Add a 3-state post-search PGP filter toggle (`All` / `Has PGP` / `No PGP`) to the web `/search` results toolbar, modeled directly on the existing `printed_filter` pattern at `web/pages/search.py:1402-1434`. Plus an active-filter chip in the results header (co-located with `exclusion_chips_row`) and session persistence via `web/safe_storage.py`. Web only — parallels and desktop explicitly out of scope (D-12). The filter operates on the in-memory result list using `search_state.transcription_sys_ids` (the same set that drives the green PGP badge in `search_results.py:397-400`); no search-pipeline changes.
-**Requirements:** PGP-FILTER-01, PGP-FILTER-02, PGP-FILTER-03, PGP-FILTER-04, PGP-FILTER-05
-**Plans:** 1 plan
-
-Plans:
-- [ ] 999.2-01-PLAN.md — pgp_filter field on SearchUIState + bootstrap read + cycle handler + label/color updater + button after printed_filter_btn + cascade integration (printed → PGP → measurement) + active-filter chip with click-to-clear + post-enrichment visibility flip + New Search reset + human smoke-check (PGP-FILTER-01..05)
-
-### Phase 999.3: Adding PGP to downloaded data (PLANNED)
-
-**Goal:** Extend the Excel **and** JSON search-results exports with PGP scholarly metadata so researchers can sort, filter, and cite PGP data directly from the downloaded artifact (spreadsheet OR JSON). Excel gains 6 columns (`PGP URL`, `PGP Description`, `PGP Type`, `PGP Date`, `PGP Languages`, `PGP Tags`) appended after `Full Text`. JSON gains a per-item `pgp` subobject using the canonical 10-key `_build_pgp_subset` projection — or `null` when no PGP record. Both surfaces consume ONE shared helper (`shared/search_serializer.py:_pgp_subset_for_sys_id`) so they never drift. Word, list, and parallels exports explicitly OUT OF SCOPE per D-10; parallels JSON envelope also untouched (injection happens at the `serialize_search_payload` loop layer, not inside the shared `_serialize_item`, so `_to_parallels_envelope_item` does not inherit it). Always-English (D-04), pipe-delimited multi-values with no spaces (D-05), empty cells / `null` (NOT `{}`) for missing data (D-06). Also fixes a latent character-iteration bug in `languages_primary`/`languages_secondary` projection (pgp.db stores these as comma-separated TEXT, not JSON) via the new `_split_pgp_languages` internal — without modifying `_build_pgp_subset` so browse stays stable.
-**Requirements:** METADATA-EXPORT-01, METADATA-EXPORT-02, METADATA-EXPORT-03, METADATA-EXPORT-04, METADATA-EXPORT-05, METADATA-EXPORT-06, METADATA-EXPORT-07 (formerly PGP-EXPORT-01..05 — INVALIDATED by 2026-05-17 scope expansion; full goal text + audit notes will be rewritten in Plan 03)
-**Plans:** 3 plans across 3 waves
-
-Plans:
-- [ ] 999.3-01-PLAN.md — State plumbing + JSON additions. Extends `set_search_export(...)` with 3 enrichment kwargs; adds `update_search_export_enrichment(...)` sibling; wires 3 callsites in `web/pages/search.py` + 1 post-enrichment update; extends `_serialize_item` + `serialize_search_payload` with conditional emission of `has_pgp`/`is_printed`; `/api/export/json` passes the cast sets through. Parallels JSON D-10 preserved. 17 new tests (METADATA-EXPORT-01..04).
-- [ ] 999.3-02-PLAN.md — Xlsx restructure + 4 lookup helpers + 3 sheets. Creates NEW `shared/export_dossier.py` with 4 helpers (PGP/NLI/Catalog/Bibliography) + `_split_pgp_languages` bug fix. Restructures `export_search_results_excel` into 3-sheet builder (`Genizah Results` + `Manuscripts` + `Bibliography`). Endpoint passes session enrichment through. 38 new tests (METADATA-EXPORT-05..06).
-- [ ] 999.3-03-PLAN.md — Human smoke verification on real Excel + JSON downloads (4 test scenarios, D-04/D-05/D-06/D-10 invariant checks); REQUIREMENTS.md update with INVALIDATED predecessor note; ROADMAP.md final-shape update. autonomous=false. (METADATA-EXPORT-07).
+Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Phase 94 (research-grade exports) on 2026-05-19. No active backlog entries remain at this milestone boundary.
 
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-18 — v7.12 Path B Multitenant Architecture milestone SHIPPED and archived to `.planning/milestones/v7.12-ROADMAP.md`. 49/49 requirements satisfied across 10 phases / 28 plans. Promoted backlog phases 999.1 (FOLIO-01) and 999.4 (LINE-NUM-01..10) merged into the v7.12 archive because they shipped alongside the milestone close. Phase 999.2 (PGP filter) and Phase 999.3 (PGP downloads) remain planned in Backlog. `deploy.sh` UNBLOCKED. Git tag deferred to `/release` (web + desktop bundle).*
+*Last updated: 2026-05-19 — v7.13 milestone ACTIVE (Research-Grade Downloads & PGP Filter). Phases 93 + 94 promoted from backlog 999.2 + 999.3; per-milestone roadmap at `.planning/milestones/v7.13-ROADMAP.md`. 13 requirements (5 PGP-FILTER + 8 EXPORT-META). Web only; desktop unaffected. v7.12 multitenant invariants carry forward.*
