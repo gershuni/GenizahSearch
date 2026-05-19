@@ -2678,6 +2678,13 @@ TRANSLATIONS = {
     "Showing all": "מציג הכל",
     "Hiding printed": "מסתיר דפוסים",
     "Only printed": "דפוסים בלבד",
+    # PGP filter (Phase 93)
+    "Filter PGP": "סנן PGP",
+    "Has PGP": "PGP בלבד",
+    "No PGP": "ללא PGP",
+    "Only PGP": "PGP בלבד",
+    "Hiding PGP": "ללא PGP",
+    "Filter by PGP presence": "סנן לפי נוכחות PGP",
     # Composition / parallels min-chunks
     "Min. chunk matches": "מינ' התאמות מקטע",
     "Minimum matching chunks per manuscript": "מספר מינימלי של מקטעים תואמים לכתב יד",

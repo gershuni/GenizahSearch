@@ -1455,66 +1455,29 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             _apply_printed_filter_and_render(search_state.results)
 
                     def _update_pgp_filter_btn():
+                        # Labels mirror Filter Printed pattern (smoke-feedback 2026-05-19):
+                        # default state shows "Filter PGP" not "All" so the button is self-describing.
                         if search_state.pgp_filter == 'all':
-                            pgp_filter_btn.text = tr('All')  # D-05
+                            pgp_filter_btn.text = tr('Filter PGP')
                             pgp_filter_btn.props(remove='color')
                             pgp_filter_btn.props('outline dense no-caps')
                         elif search_state.pgp_filter == 'only_pgp':
-                            pgp_filter_btn.text = tr('Has PGP')  # D-05
+                            pgp_filter_btn.text = tr('Has PGP')
                             pgp_filter_btn.props(remove='color')
-                            pgp_filter_btn.props('outline dense no-caps color=green')  # D-06
+                            pgp_filter_btn.props('outline dense no-caps color=green')
                         elif search_state.pgp_filter == 'hide_pgp':
-                            pgp_filter_btn.text = tr('No PGP')  # D-05
+                            pgp_filter_btn.text = tr('No PGP')
                             pgp_filter_btn.props(remove='color')
-                            pgp_filter_btn.props('outline dense no-caps color=red')  # D-06
+                            pgp_filter_btn.props('outline dense no-caps color=red')
 
                     def _update_pgp_filter_chip():
-                        """Render the active-PGP-filter chip near exclusion_chips_row.
-
-                        Phase 999.2 (PGP-FILTER-03, D-08, D-09, MEDIUM-1). Clears + re-renders the chip
-                        container on every state change. Click-to-clear via _clear_pgp_filter.
-
-                        Hidden conditions (BOTH gate independently):
-                          1. pgp_filter == 'all' (no active filter)
-                          2. transcription_sys_ids is empty (no PGP-tagged results to filter; happens
-                             when a persisted 'only_pgp' state restores into a search whose results have
-                             zero PGP hits — the chip must not appear in that scenario).
-                        """
-                        pgp_filter_chip_row.clear()
-                        if search_state.pgp_filter == 'all' or not search_state.transcription_sys_ids:
-                            pgp_filter_chip_row.set_visibility(False)
-                            return
-                        pgp_filter_chip_row.set_visibility(True)
-                        with pgp_filter_chip_row:
-                            if search_state.pgp_filter == 'only_pgp':
-                                chip_label = tr('Only PGP')  # D-09
-                                chip_color = 'green'  # D-06 (visual consistency with button)
-                            else:  # hide_pgp
-                                chip_label = tr('Hiding PGP')  # D-09
-                                chip_color = 'red'  # D-06
-                            ui.chip(
-                                chip_label, icon='close',
-                                on_click=lambda: _clear_pgp_filter()
-                            ).props(f'outline dense removable color={chip_color}')
-
-                    def _clear_pgp_filter():
-                        """Reset PGP filter to 'all' and re-apply cascade (chip click handler, D-09)."""
-                        if search_state.pgp_filter == 'all':
-                            return  # No-op
-                        search_state.pgp_filter = 'all'
-                        persist_value('search_pgp_filter', 'all')  # D-10
-                        _update_pgp_filter_btn()
-                        _update_pgp_filter_chip()
-                        # Re-apply cascade — same dispatch as _toggle_pgp_filter
-                        if search_state.exclusion_sources:
-                            _apply_manuscript_exclusions()
-                        elif search_state.domain_exclusions and search_state.has_domain_data:
-                            _apply_domain_exclusions()
-                        elif search_state.results:
-                            _apply_printed_filter_and_render(search_state.results)
+                        # Chip removed per smoke-feedback 2026-05-19: the colored button label
+                        # already conveys state, the chip was duplicate. Function preserved as a
+                        # no-op so callers (_toggle_pgp_filter, restore paths) stay stable.
+                        return
 
                     pgp_filter_btn = ui.button(
-                        tr('All'),  # D-05 (initial label = 'all' state label)
+                        tr('Filter PGP'),  # smoke-feedback 2026-05-19: self-describing default label
                         on_click=lambda: _toggle_pgp_filter()
                     ).classes('text-sm').props('outline dense no-caps').tooltip(tr('Filter by PGP presence'))
                     _set_btn_visible(pgp_filter_btn, False)  # D-07 — Task 5 flips to True post-enrichment
@@ -1537,13 +1500,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     exclusion_chips_row = ui.row().classes('gap-1 items-center')
                     exclusion_chips_row.set_visibility(bool(search_state.exclusion_sources))
 
-                    # Phase 999.2 (PGP-FILTER-03, D-08): PGP filter chip — co-located with
-                    # exclusion_chips_row so all active-filter indicators share one zone.
-                    # Visible only when search_state.pgp_filter != 'all' AND there are PGP hits.
-                    pgp_filter_chip_row = ui.row().classes('gap-1 items-center')
-                    pgp_filter_chip_row.set_visibility(
-                        search_state.pgp_filter != 'all' and bool(search_state.transcription_sys_ids)
-                    )
+                    # Phase 93 chip removed per smoke-feedback 2026-05-19: the colored button label
+                    # alone conveys filter state (Filter PGP / Has PGP / No PGP); a chip on top of it
+                    # was visual duplication. The _update_pgp_filter_chip no-op above keeps callers stable.
 
                 with ui.row().classes('gap-2'):
                     # Bulk actions (initially hidden)
