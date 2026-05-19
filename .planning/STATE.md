@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v7.13
-milestone_name: "Research-Grade Downloads & PGP Filter"
-status: roadmap-locked
-stopped_at: "v7.13 roadmap locked 2026-05-19 + scope-clarified same day (Phase 93 web-only confirmed; Phase 94 expanded to web + desktop xlsx; EXPORT-META-09 added); 14/14 reqs mapped, traceability locked; awaiting `/gsd-review-backlog` to rename 999.2-* / 999.3-* directories, then `/gsd-plan-phase 93` and `/gsd-discuss-phase 94 --revise` (CONTEXT.md needs desktop-parity refresh) followed by `/gsd-plan-phase 94`."
-last_updated: "2026-05-19T00:00:00.000Z"
-last_activity: 2026-05-19 -- Completed quick task 260519-hoi: shipped SEED-002 uid-only export payload (~44x per-row reduction) after objgraph+tracemalloc attribution data confirmed per-search ~110 MB Python heap allocation in _compact_*_result_row + NiceGUI Observable wrapping; commit 2a7440d6; awaiting post-deploy soak verification
+milestone: v5.6.0
+milestone_name: milestone
+status: executing
+stopped_at: "v7.13 roadmap locked + Phase 94 scope expanded to web + desktop xlsx (EXPORT-META-09 added). Phases 93+94 + per-milestone roadmap written. Traceability locked. Awaiting backlog rename + per-phase planning."
+last_updated: "2026-05-19T15:10:13.945Z"
+last_activity: 2026-05-19 -- Phase 93 execution started
 progress:
-  total_phases: 2
-  completed_phases: 0
-  total_plans: 5
-  completed_plans: 0
-  percent: 0
+  total_phases: 4
+  completed_phases: 2
+  total_plans: 7
+  completed_plans: 3
+  percent: 43
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-19)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v7.13 Research-Grade Downloads & PGP Filter — promote backlog 999.2 (post-search PGP filter) and 999.3 (multi-sheet xlsx + 3 JSON flags) into phases 93 + 94.
+**Current focus:** Phase 93 — filtering-by-pgp
 
 ## Current Position
 
-Phase: Not started (roadmap locked)
-Plan: —
-Status: Roadmap locked; awaiting backlog rename + planning
-Last activity: 2026-05-19 -- Completed quick task 260519-hoi: shipped SEED-002 uid-only export payload (commit 2a7440d6); 44x per-row reduction; awaiting post-deploy soak
+Phase: 93 (filtering-by-pgp) — EXECUTING
+Plan: 1 of 1
+Status: Executing Phase 93
+Last activity: 2026-05-19 -- Phase 93 execution started
 
 Progress: [          ] v7.13 0% (0/14 reqs, 0/5 plans, 0/2 phases)
 
@@ -83,6 +83,8 @@ Last session: 2026-05-19T00:00:00.000Z
 Stopped at: "v7.13 roadmap locked + Phase 94 scope expanded to web + desktop xlsx (EXPORT-META-09 added). Phases 93+94 + per-milestone roadmap written. Traceability locked. Awaiting backlog rename + per-phase planning."
 Resume file: None
 Next step: `/gsd-review-backlog` (2026-05-19) already renamed the directories. Now:
+
 - `/gsd-plan-phase 93` — Phase 93 CONTEXT.md is ready, prior `93-01-PLAN.md` (originally `999.2-01-PLAN.md`) is a valid baseline, web only.
 - `/gsd-discuss-phase 94 --revise` first to refresh CONTEXT.md with the desktop-parity scope (or planner incorporates EXPORT-META-09 directly from REQUIREMENTS.md), then `/gsd-plan-phase 94`. Prior Plan 1 (now `94-01-PLAN.SUPERSEDED.md`) is SUPERSEDED — re-plan from scratch covering web + desktop xlsx + web-only JSON.
+
 Phases independent — order is human's choice.
