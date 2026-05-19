@@ -23,7 +23,10 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - `printed_ids` must plumb through `web/export_state.set_search_export(...)` on web so the export pipeline can read it alongside `transcription_sys_ids`. Desktop reads `_printed_sys_ids` and `_pgp_transcription_sys_ids` directly at the export call site.
 - JSON envelope schema_version stays 1 (additive changes only per Phase 83 stability commitment).
 
-## Current State (after v7.12 shipped)
+## Current State (after v7.12 shipped; Phase 93 of v7.13 complete)
+
+**In-flight:** v7.13 Research-Grade Downloads & PGP Filter — Phase 93 complete 2026-05-19; Phase 94 pending
+- Phase 93 (PGP filter on `/search`, web-only): post-search 3-state filter button (`Filter PGP` / `Has PGP` / `No PGP`) mirroring the `printed_filter` pattern, with strict cascade discipline across 6 render branches, session persistence via the Phase 87 `safe_storage` chokepoint, and a static AST guard test (`tests/test_pgp_filter_cascade.py`) preventing cascade-drift regressions. 4/5 PGP-FILTER reqs satisfied; PGP-FILTER-03 (chip) superseded by user smoke direction (colored button label already conveys state). Hebrew translations: `סנן PGP` / `PGP בלבד` / `ללא PGP` / `סנן לפי כיסוי PGP`.
 
 **Shipped:** v7.12 Multitenant Architecture (Path B) (2026-05-18)
 - 10 phases (87-92 + 92.1/92.2 inserted + 999.1/999.4 promoted backlog), 28 plans, 49/49 requirements satisfied
@@ -391,4 +394,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-19 — v7.13 Research-Grade Downloads & PGP Filter milestone STARTED. 14 active requirements across 2 phases (93 PGP filter on web + 94 export metadata web+desktop xlsx), both promoted from backlog (999.2 + 999.3) with `CONTEXT.md` already in place from prior `/gsd-discuss-phase` runs. Phase 94 expanded 2026-05-19 to include desktop xlsx parity via shared `shared/export_dossier.py` helpers (EXPORT-META-09). Multitenant invariants from v7.12 carry forward (zero raw `app.storage.user` access under `web/`, enforced by `tests/test_no_raw_storage_access.py`).*
+*Last updated: 2026-05-19 — Phase 93 (PGP filter on `/search`) COMPLETE. 4/5 PGP-FILTER reqs satisfied directly; PGP-FILTER-03 (chip) marked Superseded after user smoke feedback removed the chip in favor of self-conveying button label. Phase 94 still pending. Multitenant invariants from v7.12 carry forward (zero raw `app.storage.user` access under `web/`, enforced by `tests/test_no_raw_storage_access.py`). Phase 93 added a 2nd CI guard: `tests/test_pgp_filter_cascade.py` (static AST scanner ensuring every render branch calling `_apply_printed_filter` also calls `_apply_pgp_filter`).*
