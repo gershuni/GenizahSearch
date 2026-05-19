@@ -1469,10 +1469,49 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             pgp_filter_btn.props('outline dense no-caps color=red')  # D-06
 
                     def _update_pgp_filter_chip():
-                        # STUB — Phase 999.2: real implementation lands in Task 4. Safe no-op until then,
-                        # so _toggle_pgp_filter does not NameError if exercised between Task 2 and Task 4
-                        # commits. Task 4 Edit 2 REPLACES this function definition in place.
-                        pass
+                        """Render the active-PGP-filter chip near exclusion_chips_row.
+
+                        Phase 999.2 (PGP-FILTER-03, D-08, D-09, MEDIUM-1). Clears + re-renders the chip
+                        container on every state change. Click-to-clear via _clear_pgp_filter.
+
+                        Hidden conditions (BOTH gate independently):
+                          1. pgp_filter == 'all' (no active filter)
+                          2. transcription_sys_ids is empty (no PGP-tagged results to filter; happens
+                             when a persisted 'only_pgp' state restores into a search whose results have
+                             zero PGP hits — the chip must not appear in that scenario).
+                        """
+                        pgp_filter_chip_row.clear()
+                        if search_state.pgp_filter == 'all' or not search_state.transcription_sys_ids:
+                            pgp_filter_chip_row.set_visibility(False)
+                            return
+                        pgp_filter_chip_row.set_visibility(True)
+                        with pgp_filter_chip_row:
+                            if search_state.pgp_filter == 'only_pgp':
+                                chip_label = tr('Only PGP')  # D-09
+                                chip_color = 'green'  # D-06 (visual consistency with button)
+                            else:  # hide_pgp
+                                chip_label = tr('Hiding PGP')  # D-09
+                                chip_color = 'red'  # D-06
+                            ui.chip(
+                                chip_label, icon='close',
+                                on_click=lambda: _clear_pgp_filter()
+                            ).props(f'outline dense removable color={chip_color}')
+
+                    def _clear_pgp_filter():
+                        """Reset PGP filter to 'all' and re-apply cascade (chip click handler, D-09)."""
+                        if search_state.pgp_filter == 'all':
+                            return  # No-op
+                        search_state.pgp_filter = 'all'
+                        persist_value('search_pgp_filter', 'all')  # D-10
+                        _update_pgp_filter_btn()
+                        _update_pgp_filter_chip()
+                        # Re-apply cascade — same dispatch as _toggle_pgp_filter
+                        if search_state.exclusion_sources:
+                            _apply_manuscript_exclusions()
+                        elif search_state.domain_exclusions and search_state.has_domain_data:
+                            _apply_domain_exclusions()
+                        elif search_state.results:
+                            _apply_printed_filter_and_render(search_state.results)
 
                     pgp_filter_btn = ui.button(
                         tr('All'),  # D-05 (initial label = 'all' state label)
@@ -1497,6 +1536,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # active exclusions at a glance from the results bar.
                     exclusion_chips_row = ui.row().classes('gap-1 items-center')
                     exclusion_chips_row.set_visibility(bool(search_state.exclusion_sources))
+
+                    # Phase 999.2 (PGP-FILTER-03, D-08): PGP filter chip — co-located with
+                    # exclusion_chips_row so all active-filter indicators share one zone.
+                    # Visible only when search_state.pgp_filter != 'all' AND there are PGP hits.
+                    pgp_filter_chip_row = ui.row().classes('gap-1 items-center')
+                    pgp_filter_chip_row.set_visibility(
+                        search_state.pgp_filter != 'all' and bool(search_state.transcription_sys_ids)
+                    )
 
                 with ui.row().classes('gap-2'):
                     # Bulk actions (initially hidden)
