@@ -52,6 +52,27 @@ from shared_export_utils import (
 )
 
 
+def _resolve_result_full_text(result: Dict[str, Any]) -> str:
+    """Return full text for export, rehydrating compact session rows if needed."""
+    full_text = result.get('full_text') or ''
+    if full_text:
+        return str(full_text)
+
+    uid = result.get('uid') or ''
+    if uid:
+        try:
+            from web.state import state as web_state
+            searcher = getattr(web_state, 'searcher', None)
+            if searcher and hasattr(searcher, 'get_full_text_by_id'):
+                fetched = searcher.get_full_text_by_id(uid)
+                if fetched:
+                    return str(fetched)
+        except Exception:
+            pass
+
+    return str(result.get('full_text_excerpt') or '')
+
+
 # ============================================================================
 # Word Document RTL Utilities
 # ============================================================================
@@ -315,7 +336,7 @@ class ExportService:
         for res in results:
             display = res.get('display', {})
             snippet = clean_text_single_line(remove_highlight_markers(res.get('snippet', '')))
-            full_text = clean_text_single_line(res.get('full_text', ''))[:32000]
+            full_text = clean_text_single_line(_resolve_result_full_text(res))[:32000]
 
             # Get full library name
             library_code = display.get('library_code', '')

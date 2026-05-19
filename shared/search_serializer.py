@@ -267,7 +267,7 @@ def _serialize_item(
     match_terms = _extract_match_terms(snippet_raw)
 
     # Excerpt slice (D-02 -- no full_text field)
-    full_text = result.get('full_text', '') or ''
+    full_text = result.get('full_text', '') or result.get('full_text_excerpt', '') or ''
     excerpt = full_text[:500] if full_text else ''
 
     # Library

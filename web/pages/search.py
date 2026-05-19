@@ -29,6 +29,7 @@ from web.pages.search_state import (
     domain_display_name,
     persist_search_snapshot, clear_search_snapshot, clear_search_filters,
     get_search_active_snapshot, restore_search_snapshot,
+    compact_result_rows,
 )
 from web.pages.search_results import (
     toggle_expansion as _toggle_expansion,
@@ -2263,8 +2264,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             display = res.get('display', {})
             shelfmark = display.get('shelfmark', 'Unknown')
             full_text = res.get('full_text', '')
+            if not full_text and res.get('uid') and state.searcher:
+                try:
+                    full_text = state.searcher.get_full_text_by_id(res.get('uid')) or ''
+                except Exception:
+                    full_text = ''
             snippet = res.get('snippet', '').replace('*', '')
-            text = full_text or snippet
+            text = full_text or res.get('full_text_excerpt', '') or snippet
 
             compiled_text.append(f"=== {i}. {shelfmark} ===\n{text}\n")
 
@@ -4121,6 +4127,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 warnings=_last_search_warnings,
                 selected_uids=None,
             )
+            results = compact_result_rows(results)
+            search_state.results = results
 
             # Compute elapsed
             total_elapsed = time.time() - search_state.search_start_time if search_state.search_start_time else 0
@@ -4211,6 +4219,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             warnings=_last_search_warnings,
             selected_uids=None,
         )
+        results = compact_result_rows(results)
         search_state.is_running = False
         search_state.is_cancelled = False
         search_state.progress = 1.0

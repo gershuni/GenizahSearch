@@ -252,3 +252,23 @@ def test_search_history_compacts_embedded_results():
         )
 
         assert storage['search_history'][0]['state'] == {'printed_filter': 'all'}
+
+
+def test_compact_result_rows_strips_heavy_text_and_keeps_excerpt():
+    from web.pages.search_state import compact_result_rows
+
+    compacted = compact_result_rows([{
+        'display': {'id': 'abc', 'full_text': 'nested', 'content': 'nested-heavy'},
+        'full_text': 'x' * 1000,
+        'raw_file_hl': 'y' * 1000,
+        'content': 'z' * 1000,
+        'snippet': 'small',
+    }])
+
+    row = compacted[0]
+    assert 'full_text' not in row
+    assert 'raw_file_hl' not in row
+    assert 'content' not in row
+    assert row['full_text_excerpt'] == 'x' * 500
+    assert 'full_text' not in row['display']
+    assert 'content' not in row['display']

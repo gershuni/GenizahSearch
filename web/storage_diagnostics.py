@@ -14,6 +14,24 @@ def _safe_json_size(value: Any) -> int | None:
         return None
 
 
+def _top_payload_keys(payload: Any, limit: int = 5) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    rows: list[dict[str, Any]] = []
+    for key, value in payload.items():
+        rows.append({
+            'key': str(key),
+            'bytes_estimate': _safe_json_size(value),
+            'type': type(value).__name__,
+            'length': len(value) if hasattr(value, '__len__') else None,
+        })
+    rows.sort(
+        key=lambda item: item['bytes_estimate'] if item['bytes_estimate'] is not None else -1,
+        reverse=True,
+    )
+    return rows[:limit]
+
+
 def _format_timestamp(timestamp: float) -> str:
     return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(timestamp))
 
@@ -45,6 +63,7 @@ def summarize_nicegui_storage(storage: Any, clients: Iterable[Any]) -> dict[str,
             'session_id': session_id,
             'bytes_estimate': payload_size,
             'key_count': len(payload) if hasattr(payload, '__len__') else None,
+            'top_keys': _top_payload_keys(payload),
             'last_modified_utc': _format_timestamp(getattr(payload, 'last_modified', 0.0))
             if getattr(payload, 'last_modified', None) else None,
             'has_active_client': session_id in active_session_ids,

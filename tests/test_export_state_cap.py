@@ -20,6 +20,7 @@ Pattern matches tests/test_export_state_selection.py: monkeypatch
 whose ``storage.user`` is a fresh dict (Phase 88 Refinement 6).
 """
 from types import SimpleNamespace
+import json
 
 
 
@@ -37,6 +38,10 @@ def _result(i: int) -> dict:
         'full_text': 'x' * 100,
         'score': 0.5,
     }
+
+
+def _json_size(value) -> int:
+    return len(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +79,8 @@ def test_set_search_export_passes_small_list_through(monkeypatch):
     assert len(payload['results']) == 100
     assert payload['truncated'] is False
     assert payload['total_count'] == 100
+    assert 'full_text' not in payload['results'][0]
+    assert payload['results'][0]['full_text_excerpt'] == 'x' * 100
 
 
 def test_set_search_export_handles_empty_and_non_list(monkeypatch):
@@ -94,6 +101,30 @@ def test_set_search_export_handles_empty_and_non_list(monkeypatch):
     assert p['results'] == []
     assert p['truncated'] is False
     assert p['total_count'] == 0
+
+
+def test_set_search_export_strips_heavy_text_fields_even_for_few_results(monkeypatch):
+    """A small result count can still be huge when rows carry full manuscripts."""
+    from web import export_state
+
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+
+    rows = []
+    for i in range(35):
+        row = _result(i)
+        row['full_text'] = 'x' * 500_000
+        row['raw_file_hl'] = 'y' * 500_000
+        rows.append(row)
+
+    export_state.set_search_export(results=rows, query='foo')
+
+    payload = storage['export_search_payload']
+    assert len(payload['results']) == 35
+    assert _json_size(payload) < 100_000
+    assert all('full_text' not in r for r in payload['results'])
+    assert all('raw_file_hl' not in r for r in payload['results'])
+    assert payload['results'][0]['full_text_excerpt'] == 'x' * export_state._SEARCH_FULL_TEXT_EXCERPT_CHARS
 
 
 # ---------------------------------------------------------------------------
@@ -132,6 +163,7 @@ def test_update_search_export_results_caps_and_preserves_other_fields(monkeypatc
     assert payload['filters'] == {'library': 'CUL'}
     assert payload['warnings'] == ['hello']
     assert payload['selected_uids'] == ['u5']
+    assert 'full_text' not in payload['results'][0]
 
 
 def test_update_search_export_results_noops_when_payload_missing(monkeypatch):
@@ -166,6 +198,79 @@ def test_set_parallels_export_caps_both_lists_independently(monkeypatch):
     assert payload['truncated'] is True  # OR of the two
     assert payload['total_count'] == 8_000
     assert payload['filtered_total_count'] == 50
+
+
+def test_set_parallels_export_strips_full_text_and_caps_chunk_hits(monkeypatch):
+    from web import export_state
+
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+
+    row = _result(1)
+    row.update({
+        'full_text': 'x' * 500_000,
+        'content': 'y' * 500_000,
+        'source_ctx': 's' * 10_000,
+        'text': 't' * 10_000,
+        'chunk_hits': [(0, 'a' * 5000, 10, 'b' * 5000)] * 200,
+    })
+
+    export_state.set_parallels_export(results=[row], filtered=[])
+
+    stored = storage['export_parallels_payload']['results'][0]
+    assert 'full_text' not in stored
+    assert 'content' not in stored
+    assert len(stored['source_ctx']) == export_state._PARALLELS_TEXT_STORAGE_CHARS
+    assert len(stored['text']) == export_state._PARALLELS_TEXT_STORAGE_CHARS
+    assert len(stored['chunk_hits']) == export_state._PARALLELS_CHUNK_HITS_CAP
+    assert len(stored['chunk_hits'][0][1]) == export_state._PARALLELS_CHUNK_TEXT_STORAGE_CHARS
+    assert len(stored['chunk_hits'][0][3]) == export_state._PARALLELS_CHUNK_TEXT_STORAGE_CHARS
+
+
+def test_compact_parallels_result_rows_for_live_state():
+    from web import export_state
+
+    row = _result(1)
+    row.update({'full_text': 'x' * 500_000, 'content': 'y' * 500_000})
+
+    compacted = export_state.compact_parallels_result_rows([row])
+
+    assert len(compacted) == 1
+    assert 'full_text' not in compacted[0]
+    assert 'content' not in compacted[0]
+
+
+def test_compact_nicegui_export_storage_rewrites_legacy_payloads(tmp_path):
+    from web import export_state
+
+    storage_dir = tmp_path / '.nicegui'
+    storage_dir.mkdir()
+    legacy_payload = {
+        'export_search_payload': {
+            'results': [_result(1) | {'full_text': 'x' * 500_000, 'raw_file_hl': 'y' * 500_000}],
+            'query': 'foo',
+        }
+    }
+    storage_file = storage_dir / 'storage-user-legacy.json'
+    storage_file.write_text(json.dumps(legacy_payload, ensure_ascii=False), encoding='utf-8')
+    loaded_user = {
+        'export_search_payload': {
+            'results': [_result(2) | {'full_text': 'z' * 500_000}],
+            'query': 'bar',
+        }
+    }
+    storage = SimpleNamespace(path=storage_dir, _users={'loaded': loaded_user})
+
+    summary = export_state.compact_nicegui_export_storage(storage)
+
+    assert summary['files_compacted'] == 1
+    assert summary['loaded_users_compacted'] == 1
+    assert storage_file.stat().st_size < 20_000
+    rewritten = json.loads(storage_file.read_text(encoding='utf-8'))
+    stored_row = rewritten['export_search_payload']['results'][0]
+    assert 'full_text' not in stored_row
+    assert 'raw_file_hl' not in stored_row
+    assert 'full_text' not in loaded_user['export_search_payload']['results'][0]
 
 
 def test_set_parallels_export_clean_when_both_small(monkeypatch):

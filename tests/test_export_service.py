@@ -336,6 +336,33 @@ class TestExportService:
         # Check data row
         assert ws.cell(row=2, column=1).value == "T-S 12.345"
 
+    def test_export_search_results_excel_rehydrates_compact_full_text(self, export_service, monkeypatch):
+        """Compact export-state rows should still produce full-text Excel."""
+        from web.state import state as runtime_state
+
+        searcher = MagicMock()
+        searcher.get_full_text_by_id.return_value = "Rehydrated full text"
+        monkeypatch.setattr(runtime_state, 'searcher', searcher, raising=False)
+
+        compact_results = [{
+            'uid': 'uid-1',
+            'display': {
+                'shelfmark': 'T-S 12.345',
+                'title': 'title',
+                'id': '9912345678901234',
+            },
+            'snippet': 'snippet',
+            'full_text_excerpt': 'short excerpt',
+            'sort_score': 0.95,
+        }]
+
+        content, _filename = export_service.export_search_results_excel(compact_results, "query")
+
+        wb = openpyxl.load_workbook(io.BytesIO(content))
+        ws = wb.active
+        assert ws.cell(row=2, column=7).value == "Rehydrated full text"
+        searcher.get_full_text_by_id.assert_called_once_with('uid-1')
+
     def test_export_search_results_excel_empty_raises(self, export_service):
         """Should raise ValueError for empty results."""
         with pytest.raises(ValueError, match="No results to export"):

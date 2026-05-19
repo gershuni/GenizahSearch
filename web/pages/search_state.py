@@ -209,6 +209,7 @@ _SEARCH_SNAPSHOT_VERSION = 1
 _SEARCH_ACTIVE_TAB_VERSION = 1
 _SEARCH_ACTIVE_TAB_KEY = 'search_active_snapshot'
 _SEARCH_ACTIVE_USER_FALLBACK_LIMIT = 250
+_SEARCH_RESULT_EXCERPT_CHARS = 500
 
 # Legacy keys owned by these helpers (D-08 - no format change).
 # Bootstrap-input keys (search_mode, search_query, search_preset,
@@ -256,14 +257,25 @@ def _compact_result_rows(results: list) -> list:
     for r in results or []:
         sr = dict(r) if isinstance(r, dict) else r
         if isinstance(sr, dict):
-            sr.pop('full_text', None)
+            full_text = sr.pop('full_text', None)
+            if full_text:
+                sr['full_text_excerpt'] = str(full_text)[:_SEARCH_RESULT_EXCERPT_CHARS]
+            sr.pop('raw_file_hl', None)
+            sr.pop('content', None)
             disp = sr.get('display')
             if disp and isinstance(disp, dict):
                 d = dict(disp)
                 d.pop('full_text', None)
+                d.pop('raw_file_hl', None)
+                d.pop('content', None)
                 sr['display'] = d
         compacted.append(sr)
     return compacted
+
+
+def compact_result_rows(results: list) -> list:
+    """Public wrapper for compacting active/search-persisted result rows."""
+    return _compact_result_rows(results)
 
 
 def get_search_active_snapshot() -> dict:

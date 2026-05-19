@@ -2326,12 +2326,19 @@ def create_parallels_page(initial_text: str = None):
                         'boundary_options': None,  # Phase 77: not yet exposed as user-settable; placeholder for parity with /api/parallels API-02
                         'warnings': [],  # Phase 78 will populate
                     }
-                    from web.export_state import set_parallels_export
+                    from web.export_state import (
+                        compact_parallels_result_rows,
+                        set_parallels_export,
+                    )
                     set_parallels_export(
                         results=main_results,
                         filtered=filtered_results,
                         meta=_parallels_search_meta,
                     )
+                    main_results = compact_parallels_result_rows(main_results)
+                    filtered_results = compact_parallels_result_rows(filtered_results)
+                    p_state.results = main_results
+                    p_state.filtered_results = filtered_results
                     # Also store in user storage (for UI persistence across page reloads)
                     safe_user_set('parallels_results', _compact_result_rows(
                         main_results[:_PARALLELS_ACTIVE_USER_FALLBACK_LIMIT]

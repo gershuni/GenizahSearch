@@ -1680,6 +1680,20 @@ async def auth_callback_route(code: str = None, error: str = None, error_descrip
 # Startup Logic
 # ============================================================================
 
+async def compact_export_storage_on_startup():
+    """Shrink legacy oversized export payloads before users reconnect."""
+    def _compact_sync():
+        from web.export_state import compact_nicegui_export_storage
+        return compact_nicegui_export_storage(app.storage)
+
+    try:
+        summary = await run.io_bound(_compact_sync)
+        if summary.get('loaded_users_compacted') or summary.get('files_compacted') or summary.get('errors'):
+            print(f"[init] Export storage compaction: {summary}", flush=True)
+    except Exception as e:
+        print(f"[init] Export storage compaction failed (non-fatal): {e}", flush=True)
+
+
 async def initialize_engine():
     """Heavy initialization running in a separate thread via run.io_bound."""
     print("[init] Starting background initialization...")
@@ -1736,6 +1750,7 @@ async def initialize_engine():
     if init_ok:
         asyncio.create_task(_prewarm_fjms_background())
 
+app.on_startup(compact_export_storage_on_startup)
 app.on_startup(initialize_engine)
 
 def _find_free_port(start_port: int, max_attempts: int = 10) -> int:

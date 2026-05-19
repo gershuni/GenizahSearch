@@ -48,6 +48,7 @@ def test_summarize_nicegui_storage_reports_counts_and_sizes(tmp_path):
     assert summary['nicegui_user_storage_payload_total_bytes_estimate'] > 0
     assert summary['nicegui_top_user_sessions'][0]['session_id'] == 'stale'
     assert summary['nicegui_top_user_sessions'][0]['has_active_client'] is False
+    assert summary['nicegui_top_user_sessions'][0]['top_keys'][0]['key'] == 'search_history'
     assert summary['nicegui_top_storage_files'][0]['name'] == 'storage-user-stale.json'
 
 
