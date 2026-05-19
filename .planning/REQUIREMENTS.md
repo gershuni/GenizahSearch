@@ -69,24 +69,24 @@ These were explicitly deferred during `/gsd-discuss-phase` for 999.2 / 999.3 and
 
 | REQ-ID | Phase | Plan slots (estimated) | Source CONTEXT | Status |
 |--------|-------|------------------------|----------------|--------|
-| PGP-FILTER-01 | 93 | 1 | `.planning/phases/999.2-filtering-by-pgp/999.2-CONTEXT.md` | Pending |
-| PGP-FILTER-02 | 93 | 1 | `.planning/phases/999.2-filtering-by-pgp/999.2-CONTEXT.md` | Pending |
-| PGP-FILTER-03 | 93 | 1 | `.planning/phases/999.2-filtering-by-pgp/999.2-CONTEXT.md` | Pending |
-| PGP-FILTER-04 | 93 | 1 | `.planning/phases/999.2-filtering-by-pgp/999.2-CONTEXT.md` | Pending |
-| PGP-FILTER-05 | 93 | 1 | `.planning/phases/999.2-filtering-by-pgp/999.2-CONTEXT.md` | Pending |
-| EXPORT-META-01 | 94 | 4 (wave-shared) | `.planning/phases/999.3-adding-pgp-to-downloaded-data/999.3-CONTEXT.md` | Pending |
-| EXPORT-META-02 | 94 | 4 (wave-shared) | `.planning/phases/999.3-adding-pgp-to-downloaded-data/999.3-CONTEXT.md` | Pending |
-| EXPORT-META-03 | 94 | 4 (wave-shared) | `.planning/phases/999.3-adding-pgp-to-downloaded-data/999.3-CONTEXT.md` | Pending |
-| EXPORT-META-04 | 94 | 4 (wave-shared) | `.planning/phases/999.3-adding-pgp-to-downloaded-data/999.3-CONTEXT.md` | Pending |
-| EXPORT-META-05 | 94 | 4 (wave-shared) | `.planning/phases/999.3-adding-pgp-to-downloaded-data/999.3-CONTEXT.md` | Pending |
-| EXPORT-META-06 | 94 | 4 (wave-shared) | `.planning/phases/999.3-adding-pgp-to-downloaded-data/999.3-CONTEXT.md` | Pending |
-| EXPORT-META-07 | 94 | 4 (wave-shared) | `.planning/phases/999.3-adding-pgp-to-downloaded-data/999.3-CONTEXT.md` | Pending |
-| EXPORT-META-08 | 94 | 4 (wave-shared) | `.planning/phases/999.3-adding-pgp-to-downloaded-data/999.3-CONTEXT.md` | Pending |
-| EXPORT-META-09 | 94 | 4 (wave-shared; landed in Wave 4 — desktop parity) | `.planning/phases/999.3-adding-pgp-to-downloaded-data/999.3-CONTEXT.md` + user scope clarification 2026-05-19 | Pending |
+| PGP-FILTER-01 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Pending |
+| PGP-FILTER-02 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Pending |
+| PGP-FILTER-03 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Pending |
+| PGP-FILTER-04 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Pending |
+| PGP-FILTER-05 | 93 | 1 | `.planning/phases/93-filtering-by-pgp/93-CONTEXT.md` | Pending |
+| EXPORT-META-01 | 94 | 4 (wave-shared) | `.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md` | Pending |
+| EXPORT-META-02 | 94 | 4 (wave-shared) | `.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md` | Pending |
+| EXPORT-META-03 | 94 | 4 (wave-shared) | `.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md` | Pending |
+| EXPORT-META-04 | 94 | 4 (wave-shared) | `.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md` | Pending |
+| EXPORT-META-05 | 94 | 4 (wave-shared) | `.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md` | Pending |
+| EXPORT-META-06 | 94 | 4 (wave-shared) | `.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md` | Pending |
+| EXPORT-META-07 | 94 | 4 (wave-shared) | `.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md` | Pending |
+| EXPORT-META-08 | 94 | 4 (wave-shared) | `.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md` | Pending |
+| EXPORT-META-09 | 94 | 4 (wave-shared; landed in Wave 4 — desktop parity) | `.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md` + user scope clarification 2026-05-19 | Pending |
 
 **Coverage:** 14/14 requirements mapped (5 → Phase 93, 9 → Phase 94). No orphans. No duplicates.
 
-**Note on Phase 94 plan slot count:** The "Plan slots (estimated)" column shows 4 per EXPORT-META-* requirement because Phase 94's plans are organized by *wave* (shared dossier module → web state plumbing → web xlsx restructure → desktop xlsx parity), not by per-requirement. All 9 EXPORT-META requirements span the 4-plan estimate, not 4 plans each. The prior backlog plan `999.3-01-PLAN.md` is SUPERSEDED by (a) the 2026-05-17 CONTEXT.md broadening AND (b) the 2026-05-19 desktop-parity scope addition; it will be re-planned from scratch via `/gsd-plan-phase 94`. The original `999.3-CONTEXT.md` does NOT yet record the desktop-parity scope — `/gsd-discuss-phase 94` should be re-run to refresh CONTEXT.md before planning, OR the planner should incorporate EXPORT-META-09's intent directly from this file.
+**Note on Phase 94 plan slot count:** The "Plan slots (estimated)" column shows 4 per EXPORT-META-* requirement because Phase 94's plans are organized by *wave* (shared dossier module → web state plumbing → web xlsx restructure → desktop xlsx parity), not by per-requirement. All 9 EXPORT-META requirements span the 4-plan estimate, not 4 plans each. The prior backlog plan `94-01-PLAN.SUPERSEDED.md` (originally `999.3-01-PLAN.md`) is SUPERSEDED by (a) the 2026-05-17 CONTEXT.md broadening AND (b) the 2026-05-19 desktop-parity scope addition; it will be re-planned from scratch via `/gsd-plan-phase 94`. The original `94-CONTEXT.md` does NOT yet record the desktop-parity scope — `/gsd-discuss-phase 94` should be re-run to refresh CONTEXT.md before planning, OR the planner should incorporate EXPORT-META-09's intent directly from this file.
 
 ---
 

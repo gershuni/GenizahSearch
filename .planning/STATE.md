@@ -36,8 +36,8 @@ Progress: [          ] v7.13 0% (0/14 reqs, 0/5 plans, 0/2 phases)
 
 | Phase | Name | Reqs | Plan slots (est) | Scope | CONTEXT.md status |
 |-------|------|------|------------------|-------|-------------------|
-| 93    | PGP Filter on `/search` | 5 | 1 | web only | LOCKED (`.planning/phases/999.2-filtering-by-pgp/999.2-CONTEXT.md`) |
-| 94    | Research-Grade Export Metadata | 9 | 4 | web + desktop xlsx (JSON + state plumbing web-only) | LOCKED, BROADENED 2026-05-17, FURTHER EXPANDED 2026-05-19 with desktop parity (`.planning/phases/999.3-adding-pgp-to-downloaded-data/999.3-CONTEXT.md`); CONTEXT.md needs refresh OR planner incorporates EXPORT-META-09 directly; prior `999.3-01-PLAN.md` SUPERSEDED |
+| 93    | PGP Filter on `/search` | 5 | 1 | web only | LOCKED (`.planning/phases/93-filtering-by-pgp/93-CONTEXT.md`) |
+| 94    | Research-Grade Export Metadata | 9 | 4 | web + desktop xlsx (JSON + state plumbing web-only) | LOCKED, BROADENED 2026-05-17, FURTHER EXPANDED 2026-05-19 with desktop parity (`.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md`); CONTEXT.md needs refresh OR planner incorporates EXPORT-META-09 directly; prior `94-01-PLAN.SUPERSEDED.md` SUPERSEDED |
 
 **Total:** 14 requirements, 5 plan slots (estimated), 2 phases.
 
@@ -50,7 +50,7 @@ Phase 93 and Phase 94 are independent (neither depends on the other) and can shi
 | 93    | 999.2-filtering-by-pgp | PGP filter on /search | PGP-FILTER-01..05 |
 | 94    | 999.3-adding-pgp-to-downloaded-data | Research-grade xlsx + JSON metadata | EXPORT-META-01..08 |
 
-Run `/gsd-review-backlog` after this milestone scaffold is committed to physically rename the phase directories (`999.2-*` → `93-*` and `999.3-*` → `94-*`) and update phase identifiers inside their CONTEXT.md / PLAN files.
+`/gsd-review-backlog` (2026-05-19) renamed the phase directories (`999.2-*` → `93-filtering-by-pgp` and `999.3-*` → `94-adding-pgp-to-downloaded-data`) and updated frontmatter `phase:` fields in all 5 plan files. Internal historical references to "999.2" / "999.3" inside plan bodies are preserved as-is for git-history continuity.
 
 ## Deferred Items
 
@@ -82,7 +82,7 @@ The full `gsd-tools.cjs audit-open` report at close included 96 items. The v7.12
 Last session: 2026-05-19T00:00:00.000Z
 Stopped at: "v7.13 roadmap locked + Phase 94 scope expanded to web + desktop xlsx (EXPORT-META-09 added). Phases 93+94 + per-milestone roadmap written. Traceability locked. Awaiting backlog rename + per-phase planning."
 Resume file: None
-Next step: Run `/gsd-review-backlog` to rename `999.2-*` / `999.3-*` phase directories into `93-*` / `94-*`. Then:
-- `/gsd-plan-phase 93` — Phase 93 CONTEXT.md is ready, prior `999.2-01-PLAN.md` is a valid baseline, web only.
-- `/gsd-discuss-phase 94 --revise` first to refresh CONTEXT.md with the desktop-parity scope (or planner incorporates EXPORT-META-09 directly from REQUIREMENTS.md), then `/gsd-plan-phase 94`. Prior `999.3-01-PLAN.md` is SUPERSEDED — re-plan from scratch covering web + desktop xlsx + web-only JSON.
+Next step: `/gsd-review-backlog` (2026-05-19) already renamed the directories. Now:
+- `/gsd-plan-phase 93` — Phase 93 CONTEXT.md is ready, prior `93-01-PLAN.md` (originally `999.2-01-PLAN.md`) is a valid baseline, web only.
+- `/gsd-discuss-phase 94 --revise` first to refresh CONTEXT.md with the desktop-parity scope (or planner incorporates EXPORT-META-09 directly from REQUIREMENTS.md), then `/gsd-plan-phase 94`. Prior Plan 1 (now `94-01-PLAN.SUPERSEDED.md`) is SUPERSEDED — re-plan from scratch covering web + desktop xlsx + web-only JSON.
 Phases independent — order is human's choice.
