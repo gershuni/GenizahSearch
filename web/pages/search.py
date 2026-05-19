@@ -3212,16 +3212,45 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             filtered.append(r)
         return filtered
 
+    def _apply_pgp_filter(results_list):
+        """Apply PGP-presence filter to a results list and return filtered list.
+
+        Phase 999.2 (PGP-FILTER-04, D-03, D-11). Mirrors _apply_printed_filter shape.
+        Criterion: a result has PGP iff its sys_id is in search_state.transcription_sys_ids
+        (the same set that drives the green 'PGP' badge in search_results.py:397-400).
+        """
+        if search_state.pgp_filter == 'all' or not search_state.transcription_sys_ids:
+            return results_list
+        filtered = []
+        for r in results_list:
+            sys_id = r.get('display', {}).get('id')
+            has_pgp = bool(sys_id and sys_id in search_state.transcription_sys_ids)
+            if search_state.pgp_filter == 'only_pgp' and not has_pgp:
+                continue
+            elif search_state.pgp_filter == 'hide_pgp' and has_pgp:
+                continue
+            filtered.append(r)
+        return filtered
+
     def _apply_printed_filter_and_render(results_list, reset_expansion=True):
-        """Apply printed filter to results and re-render (used when no domain exclusions active)."""
+        """Apply printed filter + PGP filter to results and re-render (used when no domain exclusions active).
+
+        Phase 999.2 (PGP-FILTER-04, D-11): PGP filter stacks AFTER printed_filter and BEFORE
+        measurement post-filters, per the canonical cascade ordering.
+        """
         filtered = _apply_printed_filter(results_list)
+        filtered = _apply_pgp_filter(filtered)  # Phase 999.2 (D-11)
         # Apply measurement post-filters (Phase 54, review concern #1)
         filtered = _apply_measurement_post_filters(filtered, search_state)
         total = len(search_state.results)
         showing = len(filtered)
+        count_parts = []
         if search_state.printed_filter != 'all':
-            filter_label = tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed')
-            results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({filter_label})"
+            count_parts.append(tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed'))
+        if search_state.pgp_filter != 'all':  # Phase 999.2 (D-09)
+            count_parts.append(tr('Only PGP') if search_state.pgp_filter == 'only_pgp' else tr('Hiding PGP'))
+        if count_parts:
+            results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({', '.join(count_parts)})"
         else:
             results_count.text = f"{total} {tr('Results')}"
         render_results(filtered, page=0, reset_expansion=reset_expansion)
@@ -3238,7 +3267,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _apply_word_search_exclusions_and_render()
             elif search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions(reset_expansion=reset_expansion)
-            elif search_state.printed_filter != 'all' and search_state.printed_ids:
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all':
+                # Phase 999.2 (PGP-FILTER-04): route through unified printed+PGP filter when EITHER is active.
                 _apply_printed_filter_and_render(search_state.results, reset_expansion=reset_expansion)
             elif search_state.results:
                 filtered = _apply_measurement_post_filters(search_state.results, search_state)
@@ -3265,7 +3295,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _apply_word_search_exclusions_and_render()
             elif search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions(reset_expansion=reset_expansion)
-            elif search_state.printed_filter != 'all' and search_state.printed_ids:
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all':
+                # Phase 999.2 (PGP-FILTER-04): widened — routes through unified printed+PGP helper.
                 _apply_printed_filter_and_render(filtered, reset_expansion=reset_expansion)
             else:
                 filtered2 = _apply_measurement_post_filters(filtered, search_state)
@@ -3639,8 +3670,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.results = filtered
             _apply_domain_exclusions()
             search_state.results = original_results
-        elif search_state.printed_filter != 'all' and search_state.printed_ids:
+        elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all':
+            # Phase 999.2 (PGP-FILTER-04): widened — apply printed AND/OR PGP filter post-word-search.
             filtered = _apply_printed_filter(filtered)
+            filtered = _apply_pgp_filter(filtered)  # Phase 999.2 (D-11)
             filtered = _apply_measurement_post_filters(filtered, search_state)
             total = len(search_state.results)
             showing = len(filtered)
@@ -3696,6 +3729,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Apply printed filter on top of domain-filtered results
         filtered = _apply_printed_filter(filtered)
+        # Apply PGP filter on top of printed-filtered results (Phase 999.2, D-11)
+        filtered = _apply_pgp_filter(filtered)
         # Apply measurement post-filters (Phase 54, review concern #1)
         filtered = _apply_measurement_post_filters(filtered, search_state)
 
@@ -3707,6 +3742,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             count_parts.append(f"{len(search_state.domain_exclusions)} {tr('domains excluded')}")
         if search_state.printed_filter != 'all':
             count_parts.append(tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed'))
+        if search_state.pgp_filter != 'all':  # Phase 999.2 (D-09)
+            count_parts.append(tr('Only PGP') if search_state.pgp_filter == 'only_pgp' else tr('Hiding PGP'))
         if count_parts:
             results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({', '.join(count_parts)})"
         else:
@@ -4503,7 +4540,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _update_exclude_btn()
 
         def _render_with_filters(reset_expansion=True):
-            """Re-render applying exclusions and filters."""
+            """Re-render applying exclusions and filters.
+
+            Phase 999.2 (PGP-FILTER-04, HIGH-1): the printed-filter elif is widened to
+            also fire when PGP filter is active, so PGP-only filtering routes through
+            _apply_printed_filter_and_render (which applies BOTH printed and PGP per Task 3).
+            """
             # Phase 56: Manuscript exclusions run first in the chain
             if search_state.exclusion_sources:
                 _apply_manuscript_exclusions(reset_expansion=reset_expansion)
@@ -4526,7 +4568,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             if search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions(reset_expansion=reset_expansion)
-            elif search_state.printed_filter != 'all' and search_state.printed_ids:
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all':
+                # Phase 999.2 (PGP-FILTER-04, HIGH-1): widened — printed OR PGP routes through
+                # the unified _apply_printed_filter_and_render (which applies BOTH per Task 3).
                 search_state.domain_excluded_results = []
                 _apply_printed_filter_and_render(display_results, reset_expansion=reset_expansion)
             else:
