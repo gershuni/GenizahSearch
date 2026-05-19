@@ -8,6 +8,20 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
+## Current Milestone: v7.13 Research-Grade Downloads & PGP Filter
+
+**Goal:** Surface PGP coverage at the result-set level on `/search` and upgrade downloaded xlsx artifacts into citation-grade dossiers so a downloaded file stands alone as a scholarly source.
+
+**Target features:**
+- Post-search 3-state PGP filter on `/search` toolbar (`All` / `Has PGP` / `No PGP`) with active-filter chip, persisted via `web/safe_storage.py` chokepoint (web-only — promoted backlog 999.2).
+- Multi-sheet xlsx downloads: main sheet gains `Has PGP` / `Is Printed` / `Domains` / `IIIF Manifest` (soft) columns; NEW `Manuscripts` sub-sheet (one row per unique `sys_id` with PGP + NLI + catalog + library viewer + GenizahSearch URL); NEW `Bibliography` sub-sheet (one row per FJMS bib entry, joinable by `System ID`); JSON gains 3 additive per-item flags (`has_pgp`, `is_printed`, `domains`). English-only, no transcription text. Web-only (promoted backlog 999.3).
+
+**Scope guardrails:**
+- Web only — desktop is explicitly out of scope per both phase CONTEXT files.
+- All per-user persistence MUST go through `web/safe_storage.py` (Phase 87 multitenant invariant).
+- `printed_ids` must plumb through `web/export_state.set_search_export(...)` so the export pipeline can read it alongside `transcription_sys_ids`.
+- JSON envelope schema_version stays 1 (additive changes only per Phase 83 stability commitment).
+
 ## Current State (after v7.12 shipped)
 
 **Shipped:** v7.12 Multitenant Architecture (Path B) (2026-05-18)
@@ -248,7 +262,24 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-*(No active milestone — v7.12 closed 2026-05-18; next milestone TBD. Backlog 999.2 (PGP filter) and 999.3 (PGP downloads) remain planned.)*
+**v7.13 Research-Grade Downloads & PGP Filter** (started 2026-05-19; phases 93 + 94 promoted from backlog 999.2 + 999.3):
+
+PGP Filter (web `/search`):
+- [ ] **PGP-FILTER-01**: Post-search 3-state filter button (`all` → `only_pgp` → `hide_pgp` → `all`) in results toolbar, immediately after `printed_filter_btn` — see `web/pages/search.py:1430-1434`
+- [ ] **PGP-FILTER-02**: Button hidden until current result set contains at least one PGP-tagged hit (`_set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))`)
+- [ ] **PGP-FILTER-03**: Active-filter chip in results header row when state is `only_pgp` or `hide_pgp` (co-located with `exclusion_chips_row` at `search.py:1448-1449`)
+- [ ] **PGP-FILTER-04**: Filter cascade slots in after `printed_filter`; stacks with manuscript exclusions, domain exclusions, refinement chain
+- [ ] **PGP-FILTER-05**: Choice persisted via `persist_value('search_pgp_filter', ...)` routed through `web/safe_storage.py` chokepoint; bootstrap read at search-page init
+
+Export Metadata (xlsx + JSON):
+- [ ] **EXPORT-META-01**: Main xlsx sheet appends `Has PGP`, `Is Printed`, `Domains` columns after `Full Text` (pipe-delimited lists, empty cell for missing, "Yes"/empty for booleans)
+- [ ] **EXPORT-META-02**: NEW `Manuscripts` sub-sheet: one row per unique `sys_id` with PGP fields, NLI description, FJMS catalog summary (planner picks 3-5 fields with rationale), library viewer URL, GenizahSearch deep link
+- [ ] **EXPORT-META-03**: NEW `Bibliography` sub-sheet: one row per FJMS bib entry, joinable to `Manuscripts` via `System ID`, no row cap
+- [ ] **EXPORT-META-04**: Sheet order `Genizah Results` → `Manuscripts` → `Bibliography`; first sheet remains default-active on open
+- [ ] **EXPORT-META-05**: English-only metadata; no transcription text; no Hebrew translation lookups; graceful Hebrew fallback only when English variant absent
+- [ ] **EXPORT-META-06**: `printed_ids` plumbed through `web/export_state.set_search_export(...)` alongside existing `transcription_sys_ids`
+- [ ] **EXPORT-META-07**: JSON per-item gains additive `has_pgp` (bool), `is_printed` (bool), `domains` (list); envelope schema_version stays 1; no `pgp` subobject, no dossier in JSON
+- [ ] **EXPORT-META-08**: `IIIF Manifest` per-page column on main sheet — soft scope; planner may defer to Manuscripts sub-sheet with documented rationale
 
 ### Out of Scope
 
@@ -358,4 +389,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-18 — v7.12 Multitenant Architecture (Path B) milestone SHIPPED. 49/49 requirements satisfied across 10 phases / 28 plans / 277 commits. Architecture reference: `docs/guides/MULTITENANT.md`. Live CI enforcement: `tests/test_no_raw_storage_access.py` (allowlist `[]`). `deploy.sh` UNBLOCKED. Next milestone TBD.*
+*Last updated: 2026-05-19 — v7.13 Research-Grade Downloads & PGP Filter milestone STARTED. 13 active requirements across 2 phases (93 PGP filter + 94 export metadata), both promoted from backlog (999.2 + 999.3) with `CONTEXT.md` already in place from prior `/gsd-discuss-phase` runs. Web-only milestone; multitenant invariants from v7.12 carry forward (zero raw `app.storage.user` access under `web/`, enforced by `tests/test_no_raw_storage_access.py`).*
