@@ -251,6 +251,58 @@ def test_compact_parallels_result_rows_for_live_state():
     assert 'content' not in compacted[0]
 
 
+def test_compact_parallels_preserves_live_ui_metadata():
+    """SEED-002 fixup round 2 (Codex catch): compact_parallels_result_rows()
+    is used at web/pages/parallels.py:2338-2339 to overwrite the LIVE
+    main_results / filtered_results BEFORE they land in p_state.results.
+    The UI reads these 6 small scalars from p_state.results:
+      - final_score / has_boundary_matches / boundary_quality /
+        boundary_match_count at parallels.py:3124-3127 (boost badge +
+        boundary chips on each per-match row)
+      - filter_reason / is_text_filtered at parallels.py:3063-3068 (specific
+        reason chip on filtered manuscript groups)
+    The original SEED-002 commit + round-1 fixup BOTH dropped these fields,
+    which would have silently degraded the parallels UI in production
+    (boost badges gone, generic 'Filtered' label everywhere). This test
+    locks the contract so they survive compaction."""
+    from web import export_state
+
+    row = {
+        'uid': 'IE188433865_P1_FL1',
+        'raw_header': '99001234567890 IE188433865 P1 FL1',
+        'sort_score': 0.7,
+        'score': 85.3,
+        'snippet': '',
+        'match_terms': [],
+        'source_ctx': 'src',
+        'text': 'manuscript',
+        # Live-UI scalars that MUST survive compaction:
+        'final_score': 2150.0,           # combined-mode boosted score (parallels.py:3124)
+        'has_boundary_matches': True,    # parallels.py:3125
+        'boundary_quality': 0.82,        # parallels.py:3126
+        'boundary_match_count': 3,       # parallels.py:3127
+        'filter_reason': 'high_frequency',  # parallels.py:3063-3067
+        'is_text_filtered': True,        # parallels.py:3068
+    }
+
+    compacted = export_state.compact_parallels_result_rows([row])
+    assert len(compacted) == 1
+    kept = compacted[0]
+
+    # Round-1 contract still holds: identity + body fields are present.
+    assert kept['score'] == 85.3
+    assert kept['raw_header'] == '99001234567890 IE188433865 P1 FL1'
+
+    # Round-2 contract: live-UI scalars survive compaction so the parallels
+    # UI keeps rendering boost badges and specific filter reasons.
+    assert kept['final_score'] == 2150.0
+    assert kept['has_boundary_matches'] is True
+    assert kept['boundary_quality'] == 0.82
+    assert kept['boundary_match_count'] == 3
+    assert kept['filter_reason'] == 'high_frequency'
+    assert kept['is_text_filtered'] is True
+
+
 def test_compact_nicegui_export_storage_rewrites_legacy_payloads(tmp_path):
     from web import export_state
 
@@ -536,8 +588,13 @@ def test_parallels_export_row_keeps_safe_allowlist(monkeypatch):
     export_state.set_parallels_export(results=full_shape, filtered=[])
 
     row = storage['export_parallels_payload']['results'][0]
-    allowed = {'uid', 'sys_id', 'sort_score', 'score', 'snippet', 'match_terms',
-               'source_ctx', 'text', 'raw_header', 'chunk_hits'}
+    allowed = {
+        'uid', 'sys_id', 'sort_score', 'score', 'snippet', 'match_terms',
+        'source_ctx', 'text', 'raw_header', 'chunk_hits',
+        # Round-2 live-UI scalars (web/pages/parallels.py:3063-3068, 3124-3127).
+        'final_score', 'has_boundary_matches', 'boundary_quality',
+        'boundary_match_count', 'filter_reason', 'is_text_filtered',
+    }
     assert set(row.keys()) <= allowed
     # Critical retention invariants.
     assert row.get('score') == 85.3, "score MUST be kept (parallels UI + aggregate_score)"

@@ -85,6 +85,23 @@ _PARALLELS_KEY = 'export_parallels_payload'
 #     p_state.results
 #   - shared/search_serializer.py:691 sums score into the public
 #     /api/parallels aggregate_score; dropping it collapses sort order
+#
+# Why the 6 live-UI scalars (final_score, has_boundary_matches,
+# boundary_quality, boundary_match_count, filter_reason, is_text_filtered)
+# are kept on parallels rows (Codex round-2 catch):
+#   - compact_parallels_result_rows() at web/pages/parallels.py:2338-2339
+#     overwrites main_results / filtered_results with the compacted version
+#     BEFORE assigning into p_state.results. The live UI then reads:
+#       * final_score / has_boundary_matches / boundary_quality /
+#         boundary_match_count at parallels.py:3124-3127 to render the
+#         "boost" score badge and boundary-match indicator chips.
+#       * filter_reason / is_text_filtered at parallels.py:3063-3068 to
+#         show the specific filter reason ("Found in source text" /
+#         "High frequency") on filtered-result chips.
+#     Without these in the allowlist the boost badge disappears, boundary
+#     match counts collapse to 0, and every filtered chip shows a generic
+#     'Filtered' instead of the actual reason. Cost: ~50 bytes/row of small
+#     scalars (1 float, 1 int, 2 bools, 1 short string, 1 derived int).
 _EXPORT_RESULTS_CAP = 5000
 _PARALLELS_TEXT_STORAGE_CHARS = 4000
 _PARALLELS_CHUNK_HITS_CAP = 100
@@ -97,6 +114,9 @@ _SEARCH_ROW_ALLOWLIST = frozenset((
 _PARALLELS_ROW_ALLOWLIST = frozenset((
     'uid', 'sys_id', 'sort_score', 'score', 'snippet', 'match_terms',
     'source_ctx', 'text', 'raw_header', 'chunk_hits',
+    # Live-UI scalars (see module docstring "Why the 6 live-UI scalars..."):
+    'final_score', 'has_boundary_matches', 'boundary_quality',
+    'boundary_match_count', 'filter_reason', 'is_text_filtered',
 ))
 
 # Pre-compiled at module load for the per-row compaction hot path. Matches
