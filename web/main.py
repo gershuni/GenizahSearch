@@ -283,6 +283,153 @@ def _memstat_endpoint(x_memstat_secret: str = Header(default='')):
     return JSONResponse(stats)
 
 
+# ---------------------------------------------------------------------------
+# Debug endpoint: /_internal/objgraph — concrete-class heap attribution
+# Added 2026-05-19 after the field-strip fix (commit ed6f89c4) bounded
+# app.storage.user export payloads but RSS kept climbing — the leak is
+# in the Python heap, not in storage. objgraph names the leaking classes.
+# Gated by the same MEMSTAT_SECRET header as /_internal/memstat.
+# ---------------------------------------------------------------------------
+import gc as _gc
+
+_objgraph_baseline_taken = False
+
+
+@app.get('/_internal/objgraph')
+def _objgraph_endpoint(
+    x_memstat_secret: str = Header(default=''),
+    limit: int = 30,
+):
+    """Snapshot-and-diff heap attribution by Python class.
+
+    First call: takes a baseline (no growth shown, returns most_common_types).
+    Subsequent calls: returns growth() since last call AND most_common_types.
+
+    objgraph.growth() shows new+grown types since baseline. most_common_types
+    shows the current top-N classes by instance count. Both together let you
+    see which classes are accumulating vs. which are dominant in absolute terms.
+    """
+    global _objgraph_baseline_taken
+    if not _MEMSTAT_SECRET:
+        raise HTTPException(status_code=503, detail='objgraph disabled (MEMSTAT_SECRET unset)')
+    if x_memstat_secret != _MEMSTAT_SECRET:
+        raise HTTPException(status_code=401, detail='unauthorized')
+    try:
+        import objgraph
+    except ImportError:
+        raise HTTPException(status_code=503, detail='objgraph not installed (pip install objgraph)')
+    limit = max(1, min(int(limit), 200))
+    _gc.collect()
+    most_common = objgraph.most_common_types(limit=limit)
+    if _objgraph_baseline_taken:
+        growth = objgraph.growth(limit=limit, peak_stats={})
+    else:
+        objgraph.growth(limit=limit, peak_stats={})  # prime the internal baseline
+        growth = []
+        _objgraph_baseline_taken = True
+    return JSONResponse({
+        'pid': os.getpid(),
+        'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
+        'baseline_was_taken_this_call': not bool(growth) and _objgraph_baseline_taken,
+        'most_common_types': [{'class': c, 'count': n} for c, n in most_common],
+        'growth_since_last_call': [{'class': c, 'count': n, 'delta': d} for c, n, d in growth],
+        'note': (
+            'most_common_types = absolute instance counts. '
+            'growth_since_last_call = delta since previous /_internal/objgraph call '
+            '(or empty if this is the first call after process start).'
+        ),
+    })
+
+
+# ---------------------------------------------------------------------------
+# Debug endpoint: /_internal/tracemalloc — allocator-level heap attribution
+# Added 2026-05-19 (same context as /_internal/objgraph). Where objgraph
+# tells us WHICH CLASSES are growing, tracemalloc tells us WHICH FILE:LINE
+# allocated the bytes. Both complement each other.
+# Gated by the same MEMSTAT_SECRET header.
+# ---------------------------------------------------------------------------
+import tracemalloc as _tracemalloc
+
+_tracemalloc_previous_snapshot = None
+
+
+@app.get('/_internal/tracemalloc')
+def _tracemalloc_endpoint(
+    x_memstat_secret: str = Header(default=''),
+    limit: int = 30,
+    group_by: str = 'lineno',
+):
+    """Snapshot-and-diff allocator attribution by file:line.
+
+    First call: starts tracemalloc (if not started), takes a baseline.
+    Subsequent calls: returns top allocators by net bytes growth since
+    baseline AND current top allocators by absolute bytes.
+
+    group_by: 'lineno' (default) for file:line granularity, 'filename'
+    for file-level, 'traceback' for full call stack.
+    """
+    global _tracemalloc_previous_snapshot
+    if not _MEMSTAT_SECRET:
+        raise HTTPException(status_code=503, detail='tracemalloc disabled (MEMSTAT_SECRET unset)')
+    if x_memstat_secret != _MEMSTAT_SECRET:
+        raise HTTPException(status_code=401, detail='unauthorized')
+    if group_by not in ('lineno', 'filename', 'traceback'):
+        raise HTTPException(status_code=400, detail='group_by must be lineno|filename|traceback')
+    limit = max(1, min(int(limit), 200))
+    if not _tracemalloc.is_tracing():
+        _tracemalloc.start(25)  # depth 25 frames
+        return JSONResponse({
+            'pid': os.getpid(),
+            'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
+            'note': 'tracemalloc started; call again in 60+ seconds to see allocation deltas.',
+            'top_allocators': [],
+            'growth_since_last_call': [],
+        })
+    _gc.collect()
+    snapshot = _tracemalloc.take_snapshot()
+    snapshot = snapshot.filter_traces((
+        _tracemalloc.Filter(False, '<frozen importlib._bootstrap>'),
+        _tracemalloc.Filter(False, '<frozen importlib._bootstrap_external>'),
+        _tracemalloc.Filter(False, '<unknown>'),
+    ))
+    top = snapshot.statistics(group_by)[:limit]
+    diff = []
+    if _tracemalloc_previous_snapshot is not None:
+        diff = snapshot.compare_to(_tracemalloc_previous_snapshot, group_by)[:limit]
+    _tracemalloc_previous_snapshot = snapshot
+
+    def _fmt_stat(s):
+        return {
+            'file': str(s.traceback[0].filename) if s.traceback else '?',
+            'line': s.traceback[0].lineno if s.traceback else 0,
+            'size_bytes': s.size,
+            'count': s.count,
+        }
+
+    def _fmt_diff(s):
+        return {
+            'file': str(s.traceback[0].filename) if s.traceback else '?',
+            'line': s.traceback[0].lineno if s.traceback else 0,
+            'size_bytes': s.size,
+            'size_diff_bytes': s.size_diff,
+            'count': s.count,
+            'count_diff': s.count_diff,
+        }
+
+    return JSONResponse({
+        'pid': os.getpid(),
+        'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
+        'group_by': group_by,
+        'top_allocators': [_fmt_stat(s) for s in top],
+        'growth_since_last_call': [_fmt_diff(s) for s in diff],
+        'note': (
+            'top_allocators = current top allocators by absolute size. '
+            'growth_since_last_call = delta since previous /_internal/tracemalloc call. '
+            'Both filter out frozen importlib bootstrap noise.'
+        ),
+    })
+
+
 logger = logging.getLogger(__name__)
 from web.state import state
 from web.api import init_api_routes
