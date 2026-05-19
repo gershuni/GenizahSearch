@@ -363,6 +363,106 @@ class TestExportService:
         assert ws.cell(row=2, column=7).value == "Rehydrated full text"
         searcher.get_full_text_by_id.assert_called_once_with('uid-1')
 
+    def test_excel_export_rehydrates_display_from_uid(self, export_service):
+        """SEED-002: when a compacted (uid-only) row is exported, the helper
+        ``_resolve_result_display`` should rehydrate shelfmark/title/library
+        from ``meta_mgr.get_meta_for_id`` via the parsed sys_id."""
+        export_service.meta_mgr.get_meta_for_id.return_value = ('T-S 12.345', 'Test Title')
+        export_service.meta_mgr.get_library_for_id.return_value = 'CUL'
+        export_service.meta_mgr.parse_full_id_components.return_value = {
+            'sys_id': '9912345678901234',
+            'ie_id': 'IE1',
+            'p_num': '1',
+            'fl_id': 'FL1',
+        }
+
+        compact_results = [{
+            'uid': '9912345678901234_IE1_P1_FL1',
+            'sort_score': 0.95,
+            'snippet': 'snippet',
+            'match_terms': [],
+        }]
+        content, _filename = export_service.export_search_results_excel(compact_results, "query")
+
+        wb = openpyxl.load_workbook(io.BytesIO(content))
+        ws = wb.active
+        # Column 1 = Shelfmark, 3 = Title, 4 = System ID
+        assert ws.cell(row=2, column=1).value == 'T-S 12.345'
+        assert ws.cell(row=2, column=3).value == 'Test Title'
+        assert ws.cell(row=2, column=4).value == '9912345678901234'
+        # Verify get_meta_for_id was called with the extracted sys_id.
+        export_service.meta_mgr.get_meta_for_id.assert_any_call('9912345678901234')
+
+    def test_excel_export_graceful_degradation_on_unknown_uid(self, export_service):
+        """SEED-002: when the uid can't parse to a sys_id and no raw_header is
+        present, the export must fall back to 'Unknown' (not crash, not produce
+        a MagicMock-coerced string)."""
+        # Critical: explicitly configure ALL three mock returns. Without this,
+        # MagicMock returns MagicMock objects that coerce to "<MagicMock ...>"
+        # strings in the cell — a false-positive failure mode.
+        export_service.meta_mgr.parse_full_id_components.return_value = {'sys_id': None}
+        export_service.meta_mgr.get_meta_for_id.return_value = ('Unknown', '')
+        export_service.meta_mgr.get_library_for_id.return_value = ''
+
+        compact_results = [{
+            'uid': 'malformed-no-sys-id',
+            'sort_score': 0.0,
+            'snippet': 's',
+            'match_terms': [],
+        }]
+        content, _filename = export_service.export_search_results_excel(compact_results, "query")
+
+        wb = openpyxl.load_workbook(io.BytesIO(content))
+        ws = wb.active
+        # Must be the literal string 'Unknown', not a MagicMock repr.
+        assert ws.cell(row=2, column=1).value == 'Unknown'
+
+    def test_excel_output_equivalent_legacy_vs_compacted(self, export_service):
+        """SEED-002: a legacy row (with display dict) and a compacted row
+        (uid only) that resolve to the same sys_id must produce identical
+        Excel cell values for Shelfmark, Library code, and Title."""
+        export_service.meta_mgr.get_meta_for_id.return_value = ('T-S 99.1', 'Same Title')
+        export_service.meta_mgr.get_library_for_id.return_value = 'CUL'
+        export_service.meta_mgr.parse_full_id_components.return_value = {
+            'sys_id': '9912345678901111',
+            'ie_id': 'IE1',
+            'p_num': '1',
+            'fl_id': 'FL1',
+        }
+
+        legacy_row = {
+            'display': {
+                'shelfmark': 'T-S 99.1',
+                'title': 'Same Title',
+                'library_code': 'CUL',
+                'id': '9912345678901111',
+            },
+            'uid': '9912345678901111_IE1_P1_FL1',
+            'sort_score': 0.5,
+            'snippet': 's',
+            'match_terms': [],
+        }
+        compact_row = {
+            'uid': '9912345678901111_IE1_P1_FL1',
+            'sort_score': 0.5,
+            'snippet': 's',
+            'match_terms': [],
+        }
+
+        legacy_content, _ = export_service.export_search_results_excel([legacy_row], "q")
+        compact_content, _ = export_service.export_search_results_excel([compact_row], "q")
+
+        legacy_wb = openpyxl.load_workbook(io.BytesIO(legacy_content))
+        compact_wb = openpyxl.load_workbook(io.BytesIO(compact_content))
+        legacy_ws = legacy_wb.active
+        compact_ws = compact_wb.active
+
+        # Columns 1 (Shelfmark), 2 (Library), 3 (Title) must match.
+        for col in (1, 2, 3):
+            assert legacy_ws.cell(row=2, column=col).value == compact_ws.cell(row=2, column=col).value, \
+                f"column {col} differs: legacy={legacy_ws.cell(row=2, column=col).value!r}, " \
+                f"compact={compact_ws.cell(row=2, column=col).value!r}"
+
     def test_export_search_results_excel_empty_raises(self, export_service):
         """Should raise ValueError for empty results."""
         with pytest.raises(ValueError, match="No results to export"):

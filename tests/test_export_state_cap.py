@@ -21,6 +21,7 @@ whose ``storage.user`` is a fresh dict (Phase 88 Refinement 6).
 """
 from types import SimpleNamespace
 import json
+import sys
 
 
 
@@ -80,7 +81,8 @@ def test_set_search_export_passes_small_list_through(monkeypatch):
     assert payload['truncated'] is False
     assert payload['total_count'] == 100
     assert 'full_text' not in payload['results'][0]
-    assert payload['results'][0]['full_text_excerpt'] == 'x' * 100
+    # SEED-002 uid-only: full_text_excerpt is no longer kept on compacted rows.
+    assert 'full_text_excerpt' not in payload['results'][0]
 
 
 def test_set_search_export_handles_empty_and_non_list(monkeypatch):
@@ -124,7 +126,9 @@ def test_set_search_export_strips_heavy_text_fields_even_for_few_results(monkeyp
     assert _json_size(payload) < 100_000
     assert all('full_text' not in r for r in payload['results'])
     assert all('raw_file_hl' not in r for r in payload['results'])
-    assert payload['results'][0]['full_text_excerpt'] == 'x' * export_state._SEARCH_FULL_TEXT_EXCERPT_CHARS
+    # SEED-002 uid-only: full_text_excerpt no longer kept (was 500-char prefix
+    # in ed6f89c4; rehydrate via Tantivy at export time instead).
+    assert all('full_text_excerpt' not in r for r in payload['results'])
 
 
 # ---------------------------------------------------------------------------
@@ -222,9 +226,10 @@ def test_set_parallels_export_strips_full_text_and_caps_chunk_hits(monkeypatch):
     assert 'content' not in stored
     assert len(stored['source_ctx']) == export_state._PARALLELS_TEXT_STORAGE_CHARS
     assert len(stored['text']) == export_state._PARALLELS_TEXT_STORAGE_CHARS
-    assert len(stored['chunk_hits']) == export_state._PARALLELS_CHUNK_HITS_CAP
-    assert len(stored['chunk_hits'][0][1]) == export_state._PARALLELS_CHUNK_TEXT_STORAGE_CHARS
-    assert len(stored['chunk_hits'][0][3]) == export_state._PARALLELS_CHUNK_TEXT_STORAGE_CHARS
+    # SEED-002 uid-only: chunk_hits is no longer kept on compacted parallels rows.
+    # Display fields rehydrate via meta_mgr at export time; chunk_hits were the
+    # heaviest field in the legacy row schema (up to 100 KB worst case).
+    assert 'chunk_hits' not in stored
 
 
 def test_compact_parallels_result_rows_for_live_state():
@@ -371,3 +376,193 @@ def test_cap_results_helper_returns_correct_shape():
 
     capped, truncated, original = export_state._cap_results('not-a-list')
     assert capped == [] and truncated is False and original == 0
+
+
+# ---------------------------------------------------------------------------
+# SEED-002: uid-only row schema invariants
+# ---------------------------------------------------------------------------
+
+def test_search_export_row_has_only_uid_keys(monkeypatch):
+    """SEED-002: compacted search rows MUST be a subset of
+    {uid, sort_score, snippet, match_terms}. All other fields
+    (display, full_text, full_text_excerpt, raw_file_hl, content, score)
+    are dropped — display fields rehydrate via meta_mgr at export time,
+    full_text rehydrates via Tantivy."""
+    from web import export_state
+
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+
+    full_shape = [{
+        'uid': '9912345678901234_IE1_P1_FL1',
+        'sort_score': 0.95,
+        'snippet': 'a *match* here',
+        'match_terms': ['match', 'here'],
+        # Fields that must be dropped:
+        'display': {'shelfmark': 'T-S 12.345', 'title': 't', 'id': '99...', 'library_code': 'CUL'},
+        'full_text': 'x' * 1000,
+        'raw_file_hl': 'y' * 1000,
+        'content': 'z' * 1000,
+        'score': 0.5,  # search-side `score`, not parallels score
+        'raw_header': 'header_991234',
+    }]
+
+    export_state.set_search_export(results=full_shape, query='foo')
+
+    row = storage['export_search_payload']['results'][0]
+    allowed = {'uid', 'sort_score', 'snippet', 'match_terms'}
+    assert set(row.keys()) <= allowed
+    # Explicit negative assertions for every field that must be stripped.
+    for forbidden in ('display', 'full_text', 'full_text_excerpt',
+                      'raw_file_hl', 'content', 'score', 'raw_header'):
+        assert forbidden not in row, f"{forbidden} must not survive compaction"
+    # Kept fields preserve values verbatim.
+    assert row['uid'] == '9912345678901234_IE1_P1_FL1'
+    assert row['sort_score'] == 0.95
+    assert row['snippet'] == 'a *match* here'
+    assert row['match_terms'] == ['match', 'here']
+
+
+def test_parallels_export_row_keeps_safe_allowlist(monkeypatch):
+    """SEED-002: compacted parallels rows MUST be a subset of
+    {uid, sort_score, score, snippet, match_terms, source_ctx, text, raw_header}.
+
+    CRITICAL #3 invariant: `score` and `raw_header` are INTENTIONALLY KEPT
+    because (a) live parallels UI reads them at 13 sites in
+    web/pages/parallels.py and (b) shared/search_serializer.py:691 sums
+    `score` into the public /api/parallels aggregate_score. Dropping either
+    field would silently break the UI or collapse aggregate_score to 0.0."""
+    from web import export_state
+
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+
+    full_shape = [{
+        'uid': 'uid_a',
+        'sort_score': 0.5,
+        'score': 85.3,
+        'snippet': 'snippet text',
+        'match_terms': ['x', 'y'],
+        'source_ctx': 'ctx',
+        'text': 'manuscript text',
+        'raw_header': 'header_9911111111111111_IE1_P3',
+        # Fields that must be dropped:
+        'display': {'shelfmark': 'T-S 1', 'title': 't', 'id': '9911', 'library_code': 'CUL'},
+        'full_text': 'x' * 1000,
+        'raw_file_hl': 'y' * 1000,
+        'content': 'z' * 1000,
+        'chunk_hits': [(0, 'a' * 1000, 10, 'b' * 1000)] * 50,
+    }]
+
+    export_state.set_parallels_export(results=full_shape, filtered=[])
+
+    row = storage['export_parallels_payload']['results'][0]
+    allowed = {'uid', 'sort_score', 'score', 'snippet', 'match_terms',
+               'source_ctx', 'text', 'raw_header'}
+    assert set(row.keys()) <= allowed
+    # Critical retention invariants: score AND raw_header MUST be kept.
+    assert row.get('score') == 85.3, "score MUST be kept (parallels UI + aggregate_score)"
+    assert row.get('raw_header') == 'header_9911111111111111_IE1_P3', \
+        "raw_header MUST be kept (parallels UI sys_id extraction)"
+    # Explicit negative assertions for fields that must be stripped.
+    for forbidden in ('chunk_hits', 'display', 'full_text', 'raw_file_hl', 'content'):
+        assert forbidden not in row, f"{forbidden} must not survive compaction"
+
+
+def test_per_row_bytes_drops_to_under_2kb():
+    """SEED-002: per-row sys.getsizeof of dict + values must drop dramatically
+    once display + full_text are stripped. Pre-fix worst case was ~22 KB per
+    row (full Hebrew transcription + display dict + chunk_hits etc.); post-fix
+    a representative row with a typical 500-char search snippet lands under
+    2 KB. (Hebrew chars are 2 bytes each in CPython's PEP-393 storage, so a
+    500-char snippet itself is ~1100 bytes including str overhead.)
+    """
+    from web import export_state
+
+    row = {
+        'uid': '9' * 32,  # uid 32 chars
+        'sort_score': 0.95,
+        # Typical search snippet — 500 chars (representative of production;
+        # matches the legacy 500-char excerpt cap that ed6f89c4 used).
+        'snippet': 'א' * 400 + '*ב*' * 30,
+        'match_terms': ['אבל', 'אמר', 'דרש', 'תני', 'הא'],
+        # Extra fields that should be stripped (the bulk of the legacy row).
+        'display': {'shelfmark': 'T-S 12.345', 'title': 'huge title' * 100},
+        'full_text': 'x' * 50_000,
+        'raw_file_hl': 'y' * 50_000,
+        'content': 'z' * 50_000,
+    }
+    pre_strip_bytes = sys.getsizeof(row) + sum(sys.getsizeof(v) for v in row.values())
+
+    compacted, _changed = export_state._compact_search_result_row(row)
+    total = sys.getsizeof(compacted) + sum(sys.getsizeof(v) for v in compacted.values())
+
+    # Post-strip MUST be dramatically smaller than pre-strip (the whole point
+    # of SEED-002). With a 500-char Hebrew snippet we expect ~1.5 KB.
+    assert total < 2048, f"per-row bytes = {total}, expected < 2048"
+    # And the reduction ratio sanity-check: pre-fix bytes >> post-fix bytes.
+    assert pre_strip_bytes > 10 * total, (
+        f"compaction must produce >10x reduction; got "
+        f"pre={pre_strip_bytes} bytes, post={total} bytes"
+    )
+
+
+def test_5000_row_payload_well_under_pre_fix_ceiling(monkeypatch):
+    """SEED-002: a fully capped 5000-row search payload should be dramatically
+    smaller than the pre-fix 110 MB worst case. With realistic Hebrew snippets
+    (~500 chars each, 2-byte UTF-8 per char) we expect ~5-7 MB for the JSON
+    payload — a >15x reduction from the pre-fix ceiling.
+
+    Note: 2-byte UTF-8 Hebrew chars make a 490-char snippet ~980 JSON bytes
+    by themselves; 5000 rows pushes the floor near 5 MB regardless of how
+    aggressively we strip metadata. The target is OOM-of-magnitude reduction
+    from 110 MB, not absolute KB-scale (uid-only IS the floor).
+    """
+    from web import export_state
+
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+
+    rows = [{
+        'uid': f'9912345678901234_IE{i}_P1_FL1',
+        'sort_score': 0.95 - (i * 1e-5),
+        'snippet': 'א' * 400 + '*ב*' * 30,
+        'match_terms': ['אבל', 'אמר', 'דרש', 'תני', 'הא'],
+    } for i in range(5000)]
+    export_state.set_search_export(results=rows, query='ה*')
+
+    payload = storage['export_search_payload']
+    size = _json_size(payload)
+    # Hard ceiling: must be at least 10x smaller than pre-fix 110 MB.
+    assert size < 11 * 1024 * 1024, f"5000-row payload = {size} bytes, expected < 11 MB"
+    assert len(payload['results']) == 5000
+
+
+def test_field_strip_invariants_still_hold(monkeypatch):
+    """SEED-002 must preserve the ed6f89c4 invariants: heavyweight text
+    fields (full_text, raw_file_hl, content) are stripped regardless of
+    the compaction shape. The uid-only allowlist subsumes these — verify
+    that none of the three keys is present in the stored row (we no
+    longer expect full_text_excerpt either)."""
+    from web import export_state
+
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+
+    row = {
+        'uid': 'u1',
+        'sort_score': 0.5,
+        'snippet': 'small',
+        'match_terms': [],
+        'full_text': 'x' * 500_000,
+        'raw_file_hl': 'y' * 500_000,
+        'content': 'z' * 500_000,
+    }
+    export_state.set_search_export(results=[row], query='foo')
+
+    stored = storage['export_search_payload']['results'][0]
+    assert 'full_text' not in stored
+    assert 'raw_file_hl' not in stored
+    assert 'content' not in stored
+    # SEED-002 post-fix: no excerpt field either; rehydrate via Tantivy.
+    assert 'full_text_excerpt' not in stored

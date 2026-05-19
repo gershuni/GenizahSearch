@@ -73,6 +73,95 @@ def _resolve_result_full_text(result: Dict[str, Any]) -> str:
     return str(result.get('full_text_excerpt') or '')
 
 
+def _resolve_result_display(result: Dict[str, Any], meta_mgr) -> tuple:
+    """Return (shelfmark, title, library_code, library_name) for an export row.
+
+    SEED-002 (2026-05-19) — 3-tier fallback mirrors the lazy-rehydration
+    pattern of ``_resolve_result_full_text``:
+
+      Tier 1: row's ``display`` dict (non-empty) -> verbatim. This preserves
+              back-compat for callers passing the legacy shape (e.g. live
+              search-result rows before they hit export_state compaction).
+      Tier 2: extract sys_id from ``uid`` via
+              ``meta_mgr.parse_full_id_components`` -> meta_mgr lookups.
+              This is the post-Task-1 uid-only row path.
+      Tier 3: extract sys_id from ``raw_header`` via regex ``(99\\d{8,})``.
+              Mirrors the parallels-envelope idiom at
+              ``shared/search_serializer.py:716-738`` so legacy parallels
+              fixtures (carrying raw_header but no uid) keep working.
+      Fallback: ('Unknown', '', '', '') when meta_mgr is None or neither
+                uid nor raw_header parses to a sys_id.
+
+    library_name is resolved via the existing ``core_get_library_display``
+    helper, with the library_code as the fallback when localization fails.
+    """
+    if not isinstance(result, dict):
+        return ('Unknown', '', '', '')
+
+    display = result.get('display') if isinstance(result.get('display'), dict) else None
+    if display:
+        shelfmark = display.get('shelfmark', '') or 'Unknown'
+        title = display.get('title', '') or ''
+        library_code = display.get('library_code', '') or ''
+    else:
+        if not meta_mgr:
+            return ('Unknown', '', '', '')
+
+        # Tier 2: uid -> sys_id via meta_mgr's parser
+        sys_id = ''
+        uid = result.get('uid', '') or ''
+        if uid:
+            try:
+                parsed = meta_mgr.parse_full_id_components(uid) or {}
+                sys_id = parsed.get('sys_id') or ''
+            except Exception:
+                sys_id = ''
+
+        # Tier 3: raw_header regex fallback (legacy parallels-row idiom)
+        if not sys_id:
+            raw_header = result.get('raw_header', '') or ''
+            if raw_header:
+                try:
+                    m = re.search(r'(99\d{8,})', raw_header)
+                    if m:
+                        sys_id = m.group(1)
+                except Exception:
+                    sys_id = ''
+
+        if not sys_id:
+            return ('Unknown', '', '', '')
+
+        # meta_mgr lookups with graceful per-call fallback
+        try:
+            meta = meta_mgr.get_meta_for_id(sys_id)
+            if isinstance(meta, tuple) and len(meta) >= 2:
+                shelfmark = meta[0] or 'Unknown'
+                title = meta[1] or ''
+            else:
+                shelfmark, title = 'Unknown', ''
+        except Exception:
+            shelfmark, title = 'Unknown', ''
+        try:
+            library_code = meta_mgr.get_library_for_id(sys_id) or ''
+        except Exception:
+            library_code = ''
+
+    # Resolve library display name via the existing helper (handles
+    # localization + has its own library_code fallback).
+    library_name = ''
+    if library_code:
+        try:
+            from genizah_core import get_library_display as core_get_library_display
+            from web.translations import get_language
+            library_name = core_get_library_display(
+                library_code, short=False, lang=get_language()
+            ) or library_code
+        except Exception:
+            library_name = library_code
+
+    return (shelfmark, title, library_code, library_name)
+
+
 # ============================================================================
 # Word Document RTL Utilities
 # ============================================================================
@@ -334,19 +423,31 @@ class ExportService:
         center_align = get_cell_alignment('center')
 
         for res in results:
-            display = res.get('display', {})
+            # SEED-002: rehydrate display fields from uid via meta_mgr if
+            # the row is compacted (no display dict). Legacy rows with a
+            # non-empty display dict are returned verbatim by the helper.
+            shelfmark, title, _library_code, library_name = _resolve_result_display(
+                res, self.meta_mgr
+            )
             snippet = clean_text_single_line(remove_highlight_markers(res.get('snippet', '')))
             full_text = clean_text_single_line(_resolve_result_full_text(res))[:32000]
 
-            # Get full library name
-            library_code = display.get('library_code', '')
-            library_name = self.get_library_display(library_code, short=False) if library_code else ''
+            # Resolve sys_id for the "System ID" column: prefer legacy display.id
+            # when present, else parse from uid (graceful '' fallback).
+            legacy_display = res.get('display') if isinstance(res.get('display'), dict) else {}
+            sys_id_for_cell = (legacy_display or {}).get('id') or ''
+            if not sys_id_for_cell and self.meta_mgr:
+                try:
+                    parsed = self.meta_mgr.parse_full_id_components(res.get('uid', '') or '') or {}
+                    sys_id_for_cell = parsed.get('sys_id') or ''
+                except Exception:
+                    sys_id_for_cell = ''
 
             row = [
-                sanitize_text_for_excel(display.get('shelfmark', '')),
+                sanitize_text_for_excel(shelfmark),
                 sanitize_text_for_excel(library_name),
-                sanitize_text_for_excel(display.get('title', '')),
-                sanitize_text_for_excel(display.get('id', '')),
+                sanitize_text_for_excel(title),
+                sanitize_text_for_excel(sys_id_for_cell),
                 str(res.get('sort_score', '')),
                 sanitize_text_for_excel(snippet),
                 sanitize_text_for_excel(full_text),
@@ -394,15 +495,11 @@ class ExportService:
         doc.add_heading(title_text, 0)
 
         for i, res in enumerate(results):
-            display = res.get('display', {})
-            shelf = display.get('shelfmark', 'Unknown')
-            title = display.get('title', '')
-            library_code = display.get('library_code', '')
-
-            # Get library name
-            library_name = ''
-            if library_code:
-                library_name = self.get_library_display(library_code, short=False)
+            # SEED-002: rehydrate display fields from uid via meta_mgr when
+            # the row is compacted; legacy rows pass through unchanged.
+            shelf, title, _library_code, library_name = _resolve_result_display(
+                res, self.meta_mgr
+            )
 
             # Build display header with library
             display_header = f"{library_name}, {shelf}" if library_name else shelf
@@ -421,8 +518,16 @@ class ExportService:
             if res.get('snippet'):
                 add_highlighted_hebrew_paragraph(doc, res['snippet'])
 
-            # System ID
-            doc.add_paragraph(f"System ID: {display.get('id', '')}")
+            # System ID: prefer legacy display.id, else parse from uid.
+            legacy_display = res.get('display') if isinstance(res.get('display'), dict) else {}
+            sys_id_for_text = (legacy_display or {}).get('id') or ''
+            if not sys_id_for_text and self.meta_mgr:
+                try:
+                    parsed = self.meta_mgr.parse_full_id_components(res.get('uid', '') or '') or {}
+                    sys_id_for_text = parsed.get('sys_id') or ''
+                except Exception:
+                    sys_id_for_text = ''
+            doc.add_paragraph(f"System ID: {sys_id_for_text}")
             doc.add_paragraph("_" * 40)
 
         add_word_credits(doc)
@@ -525,19 +630,12 @@ class ExportService:
 
         def add_results(results: List[Dict], start_idx: int, is_filtered: bool) -> int:
             for idx, item in enumerate(results, start_idx):
-                raw_header = item.get('raw_header', '')
-                sys_id = None
-                shelfmark, title = 'Unknown', ''
-                library_name = ''
-
-                if raw_header:
-                    sys_match = re.search(r'(99\d{8,})', raw_header)
-                    if sys_match:
-                        sys_id = sys_match.group(1)
-                        shelfmark, title = self.get_metadata(sys_id)
-                        library_code = self.get_library_code(sys_id)
-                        # Get full library name
-                        library_name = self.get_library_display(library_code, short=False) if library_code else ''
+                # SEED-002: tier-3 raw_header fallback inside the helper
+                # handles legacy fixtures; tier-2 uid path handles
+                # post-Task-1 compacted rows that may still carry raw_header.
+                shelfmark, title, _library_code, library_name = _resolve_result_display(
+                    item, self.meta_mgr
+                )
 
                 source_ctx = clean_text_single_line(remove_highlight_markers(item.get('source_ctx', '')))
                 ms_text = clean_text_single_line(remove_highlight_markers(item.get('text', '')))
@@ -613,22 +711,11 @@ class ExportService:
                 doc.add_heading(section_title, 1)
 
             for idx, item in enumerate(results, start_idx):
-                raw_header = item.get('raw_header', '')
-                shelfmark, title = 'Unknown', ''
-                sys_id = ''
-
-                if raw_header:
-                    sys_match = re.search(r'(99\d{8,})', raw_header)
-                    if sys_match:
-                        sys_id = sys_match.group(1)
-                        shelfmark, title = self.get_metadata(sys_id)
-
-                # Get library info
-                library_name = ''
-                if sys_id:
-                    library_code = self.get_library_code(sys_id)
-                    if library_code:
-                        library_name = self.get_library_display(library_code, short=False)
+                # SEED-002: use the shared rehydration helper (uid -> sys_id
+                # for compacted rows; raw_header -> sys_id for legacy rows).
+                shelfmark, title, _library_code, library_name = _resolve_result_display(
+                    item, self.meta_mgr
+                )
 
                 # Build display header with library
                 display_header = f"{library_name}, {shelfmark}" if library_name else shelfmark

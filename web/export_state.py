@@ -42,116 +42,86 @@ _PARALLELS_KEY = 'export_parallels_payload'
 # session load (forensic evidence captured 2026-05-18: a single user
 # storage file held a 498 MB results list out of 864 MB total).
 # Capping by row count was not enough by itself: a handful of rows can still
-# weigh many MB when each carries a full manuscript transcription. The write
-# paths below also strip heavyweight text fields and keep only a short excerpt;
-# full text is rehydrated from Tantivy at download time.
+# weigh many MB when each carries a full manuscript transcription.
+#
+# SEED-002 (2026-05-19): the row compactors now use explicit allowlists
+# storing ONLY query-specific fields ({uid, sort_score, snippet, match_terms}
+# for search; same plus {score, source_ctx, text, raw_header} for parallels).
+# Display fields (shelfmark, title, library_code, library_name) rehydrate
+# from meta_mgr at export/serialize time via
+# ``web.export_service._resolve_result_display`` and the analogous fallback
+# in ``shared.search_serializer._serialize_item``. Full text rehydrates from
+# Tantivy via ``_resolve_result_full_text``. The ed6f89c4 field-strip
+# invariants are subsumed by the allowlist (full_text, raw_file_hl, content,
+# chunk_hits, display are all absent post-compaction).
+#
+# `score` and `raw_header` are INTENTIONALLY KEPT on parallels rows:
+#   - live parallels UI reads them at 13 sites in web/pages/parallels.py
+#     (score: 2827/2831/2865/2868/3123/3310/3372; raw_header:
+#     2841/3134/3140/3359/3373) via compact_parallels_result_rows feeding
+#     p_state.results
+#   - shared/search_serializer.py:691 sums score into the public
+#     /api/parallels aggregate_score; dropping it collapses sort order
 _EXPORT_RESULTS_CAP = 5000
-_SEARCH_FULL_TEXT_EXCERPT_CHARS = 500
 _PARALLELS_TEXT_STORAGE_CHARS = 4000
-_PARALLELS_CHUNK_HITS_CAP = 100
-_PARALLELS_CHUNK_TEXT_STORAGE_CHARS = 1000
 
-
-def _text_prefix(value: Any, max_chars: int) -> str:
-    if value is None:
-        return ''
-    text = value if isinstance(value, str) else str(value)
-    return text[:max_chars]
+# Allowlists: only these keys are kept in stored / live-state rows.
+_SEARCH_ROW_ALLOWLIST = frozenset(('uid', 'sort_score', 'snippet', 'match_terms'))
+_PARALLELS_ROW_ALLOWLIST = frozenset((
+    'uid', 'sort_score', 'score', 'snippet', 'match_terms',
+    'source_ctx', 'text', 'raw_header',
+))
 
 
 def _compact_search_result_row(row: Any) -> Tuple[Any, bool]:
-    """Return a storage-safe search result row plus a changed flag."""
+    """Return a uid-only search result row plus a changed flag.
+
+    SEED-002 (2026-05-19): kept keys are the allowlist intersection of the
+    input dict. All other fields (display, full_text, full_text_excerpt,
+    raw_file_hl, content, score, raw_header, etc.) are dropped — they
+    rehydrate from meta_mgr / Tantivy at export time.
+    """
     if not isinstance(row, dict):
         return row, False
 
-    compact = dict(row)
-    changed = False
-
-    full_text = compact.pop('full_text', None)
-    if full_text is not None:
-        changed = True
-        excerpt = _text_prefix(full_text, _SEARCH_FULL_TEXT_EXCERPT_CHARS)
-        if excerpt:
-            compact['full_text_excerpt'] = excerpt
-    elif 'full_text_excerpt' in compact:
-        excerpt = _text_prefix(compact.get('full_text_excerpt'), _SEARCH_FULL_TEXT_EXCERPT_CHARS)
-        if compact.get('full_text_excerpt') != excerpt:
-            changed = True
-            compact['full_text_excerpt'] = excerpt
-
-    for key in ('raw_file_hl', 'content'):
-        if key in compact:
-            compact.pop(key, None)
-            changed = True
-
-    display = compact.get('display')
-    if isinstance(display, dict):
-        display_compact = dict(display)
-        for key in ('full_text', 'raw_file_hl', 'content'):
-            if key in display_compact:
-                display_compact.pop(key, None)
-                changed = True
-        if display_compact is not display:
-            compact['display'] = display_compact
-
-    return compact, changed
-
-
-def _compact_chunk_hit(hit: Any) -> Tuple[Any, bool]:
-    """Compact one parallels chunk_hit while preserving tuple/list shape."""
-    changed = False
-    if isinstance(hit, tuple):
-        items = list(hit)
-        original_type = tuple
-    elif isinstance(hit, list):
-        items = list(hit)
-        original_type = list
-    else:
-        return hit, False
-
-    for idx in (1, 3):
-        if idx < len(items) and isinstance(items[idx], str):
-            truncated = items[idx][:_PARALLELS_CHUNK_TEXT_STORAGE_CHARS]
-            if truncated != items[idx]:
-                items[idx] = truncated
-                changed = True
-
-    return (tuple(items) if original_type is tuple else items), changed
+    kept: Dict[str, Any] = {}
+    for key in _SEARCH_ROW_ALLOWLIST:
+        if key in row:
+            kept[key] = row[key]
+    changed = bool(set(row.keys()) - _SEARCH_ROW_ALLOWLIST)
+    return kept, changed
 
 
 def _compact_parallels_result_row(row: Any) -> Tuple[Any, bool]:
-    """Return a storage-safe parallels result row plus a changed flag."""
+    """Return a safe-allowlist parallels result row plus a changed flag.
+
+    SEED-002 (2026-05-19): kept keys are the allowlist intersection of the
+    input dict; ``source_ctx`` and ``text`` retain the 4000-char truncation
+    cap from ed6f89c4. ``score`` and ``raw_header`` are INTENTIONALLY KEPT
+    (see module docstring). All other fields (display, full_text, raw_file_hl,
+    content, chunk_hits, etc.) are dropped.
+    """
     if not isinstance(row, dict):
         return row, False
 
-    compact = dict(row)
-    changed = False
+    kept: Dict[str, Any] = {}
+    for key in _PARALLELS_ROW_ALLOWLIST:
+        if key in row:
+            kept[key] = row[key]
+    changed = bool(set(row.keys()) - _PARALLELS_ROW_ALLOWLIST)
 
-    for key in ('full_text', 'content', 'raw_file_hl'):
-        if key in compact:
-            compact.pop(key, None)
-            changed = True
-
+    # Preserve the source_ctx / text 4000-char cap for storage safety —
+    # these fields are the longest survivors in the new allowlist and a
+    # pathological caller could still push KB-range strings here.
     for key in ('source_ctx', 'text'):
-        if key in compact and isinstance(compact[key], str):
-            truncated = compact[key][:_PARALLELS_TEXT_STORAGE_CHARS]
-            if truncated != compact[key]:
-                compact[key] = truncated
+        value = kept.get(key)
+        if isinstance(value, str):
+            truncated = value[:_PARALLELS_TEXT_STORAGE_CHARS]
+            if truncated != value:
+                kept[key] = truncated
                 changed = True
 
-    chunk_hits = compact.get('chunk_hits')
-    if isinstance(chunk_hits, list):
-        source_hits = chunk_hits[:_PARALLELS_CHUNK_HITS_CAP]
-        if len(source_hits) != len(chunk_hits):
-            changed = True
-        compact_hits = []
-        for hit in source_hits:
-            compact_hit, hit_changed = _compact_chunk_hit(hit)
-            compact_hits.append(compact_hit)
-            changed = changed or hit_changed
-        compact['chunk_hits'] = compact_hits
-
-    return compact, changed
+    return kept, changed
 
 
 def _identity_result_row(row: Any) -> Tuple[Any, bool]:

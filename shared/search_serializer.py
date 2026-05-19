@@ -261,6 +261,48 @@ def _serialize_item(
         parsed = {}
     final_sys_id = sys_id_raw or parsed.get('sys_id') or ''
 
+    # SEED-002: rehydrate display fields from meta_mgr when the row carries
+    # the compact uid-only shape stored by web/export_state.py (no display
+    # dict). Mirrors the fallback already used in _to_parallels_envelope_item
+    # (lines 716-738). Tier 2: uid -> sys_id; Tier 3: raw_header regex.
+    if not display and meta_mgr is not None:
+        _sid = ''
+        uid_for_parse = result.get('uid', '') or ''
+        if uid_for_parse:
+            try:
+                parsed_uid = meta_mgr.parse_full_id_components(uid_for_parse) or {}
+                _sid = parsed_uid.get('sys_id') or ''
+            except Exception:
+                _sid = ''
+        if not _sid and raw_header:
+            try:
+                m = re.search(r'(99\d{8,})', raw_header)
+                if m:
+                    _sid = m.group(1)
+            except Exception:
+                _sid = ''
+        if _sid:
+            try:
+                _meta = meta_mgr.get_meta_for_id(_sid)
+                if isinstance(_meta, tuple) and len(_meta) >= 2:
+                    _shelf = _meta[0] or ''
+                    _title = _meta[1] or ''
+                else:
+                    _shelf, _title = '', ''
+            except Exception:
+                _shelf, _title = '', ''
+            try:
+                _lib = meta_mgr.get_library_for_id(_sid) or ''
+            except Exception:
+                _lib = ''
+            display = {
+                'id': _sid,
+                'shelfmark': _shelf,
+                'title': _title,
+                'library_code': _lib,
+            }
+            final_sys_id = final_sys_id or _sid
+
     # Snippet stripped + match_terms (D-03)
     snippet_raw = result.get('snippet', '') or ''
     snippet_clean = remove_highlight_markers(snippet_raw)
