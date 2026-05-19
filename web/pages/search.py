@@ -1435,6 +1435,54 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ).classes('text-sm').props('outline dense no-caps')
                     _set_btn_visible(printed_filter_btn, False)
 
+                    # Phase 999.2 (PGP-FILTER-01): PGP filter toggle (hidden until search has PGP data).
+                    # Mirrors _toggle_printed_filter end-to-end per CONTEXT D-01..D-11. D-12: web only.
+                    def _toggle_pgp_filter():
+                        states = ['all', 'only_pgp', 'hide_pgp']  # D-02 cycle order
+                        current_idx = states.index(search_state.pgp_filter)
+                        search_state.pgp_filter = states[(current_idx + 1) % 3]
+                        persist_value('search_pgp_filter', search_state.pgp_filter)  # D-10
+                        _update_pgp_filter_btn()
+                        _update_pgp_filter_chip()  # D-08 (real impl lands in Task 4; stub below until then)
+                        # Re-apply filters and re-render — same cascade as _toggle_printed_filter.
+                        # PGP filter is applied INSIDE every render branch per D-11 (Task 3); this dispatch
+                        # only chooses the right cascade entry point.
+                        if search_state.exclusion_sources:
+                            _apply_manuscript_exclusions()
+                        elif search_state.domain_exclusions and search_state.has_domain_data:
+                            _apply_domain_exclusions()
+                        elif search_state.results:
+                            _apply_printed_filter_and_render(search_state.results)
+
+                    def _update_pgp_filter_btn():
+                        if search_state.pgp_filter == 'all':
+                            pgp_filter_btn.text = tr('All')  # D-05
+                            pgp_filter_btn.props(remove='color')
+                            pgp_filter_btn.props('outline dense no-caps')
+                        elif search_state.pgp_filter == 'only_pgp':
+                            pgp_filter_btn.text = tr('Has PGP')  # D-05
+                            pgp_filter_btn.props(remove='color')
+                            pgp_filter_btn.props('outline dense no-caps color=green')  # D-06
+                        elif search_state.pgp_filter == 'hide_pgp':
+                            pgp_filter_btn.text = tr('No PGP')  # D-05
+                            pgp_filter_btn.props(remove='color')
+                            pgp_filter_btn.props('outline dense no-caps color=red')  # D-06
+
+                    def _update_pgp_filter_chip():
+                        # STUB — Phase 999.2: real implementation lands in Task 4. Safe no-op until then,
+                        # so _toggle_pgp_filter does not NameError if exercised between Task 2 and Task 4
+                        # commits. Task 4 Edit 2 REPLACES this function definition in place.
+                        pass
+
+                    pgp_filter_btn = ui.button(
+                        tr('All'),  # D-05 (initial label = 'all' state label)
+                        on_click=lambda: _toggle_pgp_filter()
+                    ).classes('text-sm').props('outline dense no-caps').tooltip(tr('Filter by PGP presence'))
+                    _set_btn_visible(pgp_filter_btn, False)  # D-07 — Task 5 flips to True post-enrichment
+                    # If session restored a non-'all' state, sync the button now (still hidden until enrichment).
+                    if search_state.pgp_filter != 'all':
+                        _update_pgp_filter_btn()
+
                     # Phase 55: "Search within" button (D-01)
                     search_within_btn = ui.button(
                         '', icon='filter_list',
