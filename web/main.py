@@ -347,6 +347,15 @@ def _objgraph_endpoint(
 # tells us WHICH CLASSES are growing, tracemalloc tells us WHICH FILE:LINE
 # allocated the bytes. Both complement each other.
 # Gated by the same MEMSTAT_SECRET header.
+#
+# SAFETY: tracemalloc.start(N) slows the entire process by ~N× because every
+# Python allocation must record an N-frame call stack. depth=25 is enough to
+# wedge a busy NiceGUI service (observed 2026-05-19 — accept queue backed up
+# to 134 connections). This endpoint therefore:
+#   - NEVER auto-starts tracemalloc. Explicit ?action=start is required.
+#   - Defaults depth to 1 (just the immediate allocation frame) when started.
+#   - Hard-caps depth at 5 to prevent another wedge.
+#   - Provides ?action=stop so tracing can be disabled without a restart.
 # ---------------------------------------------------------------------------
 import tracemalloc as _tracemalloc
 
@@ -358,12 +367,21 @@ def _tracemalloc_endpoint(
     x_memstat_secret: str = Header(default=''),
     limit: int = 30,
     group_by: str = 'lineno',
+    action: str = 'snapshot',
+    depth: int = 1,
 ):
-    """Snapshot-and-diff allocator attribution by file:line.
+    """Allocator attribution by file:line. Explicit start/stop semantics.
 
-    First call: starts tracemalloc (if not started), takes a baseline.
-    Subsequent calls: returns top allocators by net bytes growth since
-    baseline AND current top allocators by absolute bytes.
+    Actions (query param ?action=...):
+      - 'snapshot' (default): take snapshot + diff vs previous. Returns
+        408-style 'not started' message if tracing isn't on.
+      - 'start': begin tracing at the given depth (default 1, max 5).
+        Returns immediately; snapshot data won't be useful until ~60s of
+        traffic has flowed. The user MUST call 'stop' when done — leaving
+        tracing on indefinitely slows the process.
+      - 'stop': halt tracing and clear the stored baseline. Returns the
+        last snapshot diff before stopping.
+      - 'status': report whether tracing is on and how many traces exist.
 
     group_by: 'lineno' (default) for file:line granularity, 'filename'
     for file-level, 'traceback' for full call stack.
@@ -375,13 +393,80 @@ def _tracemalloc_endpoint(
         raise HTTPException(status_code=401, detail='unauthorized')
     if group_by not in ('lineno', 'filename', 'traceback'):
         raise HTTPException(status_code=400, detail='group_by must be lineno|filename|traceback')
+    if action not in ('snapshot', 'start', 'stop', 'status'):
+        raise HTTPException(status_code=400, detail='action must be snapshot|start|stop|status')
     limit = max(1, min(int(limit), 200))
-    if not _tracemalloc.is_tracing():
-        _tracemalloc.start(25)  # depth 25 frames
+    depth = max(1, min(int(depth), 5))  # HARD CAP — depth >5 risks wedging the event loop
+    now_utc = _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime())
+
+    if action == 'status':
         return JSONResponse({
-            'pid': os.getpid(),
-            'timestamp_utc': _memstat_time.strftime('%Y-%m-%dT%H:%M:%SZ', _memstat_time.gmtime()),
-            'note': 'tracemalloc started; call again in 60+ seconds to see allocation deltas.',
+            'pid': os.getpid(), 'timestamp_utc': now_utc,
+            'is_tracing': _tracemalloc.is_tracing(),
+            'traceback_limit': _tracemalloc.get_traceback_limit() if _tracemalloc.is_tracing() else 0,
+            'traced_memory_bytes': list(_tracemalloc.get_traced_memory()) if _tracemalloc.is_tracing() else [0, 0],
+            'has_baseline_snapshot': _tracemalloc_previous_snapshot is not None,
+        })
+
+    if action == 'start':
+        if _tracemalloc.is_tracing():
+            return JSONResponse({
+                'pid': os.getpid(), 'timestamp_utc': now_utc,
+                'note': f'tracemalloc already running at depth={_tracemalloc.get_traceback_limit()}',
+                'is_tracing': True,
+            })
+        _tracemalloc.start(depth)
+        return JSONResponse({
+            'pid': os.getpid(), 'timestamp_utc': now_utc,
+            'note': f'tracemalloc started at depth={depth}. Let traffic flow for 60+ seconds, then call ?action=snapshot. Call ?action=stop when done.',
+            'is_tracing': True,
+            'traceback_limit': depth,
+        })
+
+    if action == 'stop':
+        if not _tracemalloc.is_tracing():
+            return JSONResponse({
+                'pid': os.getpid(), 'timestamp_utc': now_utc,
+                'note': 'tracemalloc was not running',
+                'is_tracing': False,
+            })
+        # Take a final snapshot before stopping so the caller gets the last delta
+        final_diff = []
+        try:
+            _gc.collect()
+            final = _tracemalloc.take_snapshot()
+            final = final.filter_traces((
+                _tracemalloc.Filter(False, '<frozen importlib._bootstrap>'),
+                _tracemalloc.Filter(False, '<frozen importlib._bootstrap_external>'),
+                _tracemalloc.Filter(False, '<unknown>'),
+            ))
+            if _tracemalloc_previous_snapshot is not None:
+                final_diff = final.compare_to(_tracemalloc_previous_snapshot, group_by)[:limit]
+        except Exception:
+            pass
+        _tracemalloc.stop()
+        _tracemalloc_previous_snapshot = None
+
+        def _fmt_final(s):
+            return {
+                'file': str(s.traceback[0].filename) if s.traceback else '?',
+                'line': s.traceback[0].lineno if s.traceback else 0,
+                'size_bytes': s.size, 'size_diff_bytes': s.size_diff,
+                'count': s.count, 'count_diff': s.count_diff,
+            }
+        return JSONResponse({
+            'pid': os.getpid(), 'timestamp_utc': now_utc,
+            'note': 'tracemalloc stopped. Baseline cleared.',
+            'is_tracing': False,
+            'final_diff_before_stop': [_fmt_final(s) for s in final_diff],
+        })
+
+    # action == 'snapshot' (default)
+    if not _tracemalloc.is_tracing():
+        return JSONResponse({
+            'pid': os.getpid(), 'timestamp_utc': now_utc,
+            'note': 'tracemalloc is NOT running. Call /_internal/tracemalloc?action=start&depth=1 first. WARNING: tracing slows the process — keep depth low (1-3) and call ?action=stop when done.',
+            'is_tracing': False,
             'top_allocators': [],
             'growth_since_last_call': [],
         })
