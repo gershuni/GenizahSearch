@@ -1,14 +1,16 @@
 ---
 title: "Attribute the secondary web memory leak (~411 MB/hr) and ship a fix"
 created: 2026-05-19
+closed: 2026-05-19
 area: web
 priority: high
-status: provisionally-superseded
-status_note: "2026-05-19 commit ed6f89c4 ships row-level field stripping in web/export_state.py (was the missing half of the 2026-05-18 cap fix); awaiting post-deploy soak verification. If `/_internal/memstat` shows RSS growth < 30 MB/hr and export_search_payload no longer dominates top_keys after >=2h uptime, this todo CLOSES (no attribution phase needed). If the soak verdict stays in the warning band, this attribution work re-activates."
+status: done
+status_note: "Closed 2026-05-19 PM after SEED-002 fix deploy + production memstat/objgraph/backref investigation. Attribution path identified, evidence captured, future-phase fix sketched. See verdict block below."
 source: P1 web memory leak re-opened 2026-05-19 -- 11h soak verdict warning band (411 MB/hr)
 predecessor: .planning/todos/done/2026-05-18-verify-memstat-after-export-cap-fix.md
 predecessor_outcome: "Cap fix (commit f2e456d4) closed the export_search_payload row-count surface (498 MB -> 512 KB live payload; 906 MB -> 4.5 MB top file on disk) but the row-FIELD surface was still leaking: each row carried multi-MB full_text / raw_file_hl / content fields, so 35 rows × MB each still ballooned per-session storage. Codex CLI diagnosed and patched this in commit ed6f89c4."
-not_yet_scheduled: "v7.13 roadmap is locked at Phases 93 + 94 (Research-Grade Downloads & PGP Filter, 14/14 reqs mapped 2026-05-19). This attribution work has to be inserted as a separate phase after v7.13 ships, OR as an urgent insertion if the growth rate worsens AFTER the ed6f89c4 field-strip fix proves insufficient."
+attribution: ".planning/quick/260519-hoi-investigate-framework-retention/INVESTIGATION.md (full open-log) + PROPOSED-FIX.md (future-phase workaround sketch)"
+verdict: "The residual ~200 MB per heavy UI search is allocator high-water mark from NiceGUI ObservableDict wrapping work on the storage write path, NOT a logical leak. Decisive proof: 20 heavy API calls (same Tantivy scan, same regex work, NO user-storage persistence) grew RSS by only 34 MB total (1.7 MB/call) vs ~200 MB/call via UI = 117x difference. ObservableDict count is stable at ~44K (legitimate working set), only bytes grow (pymalloc holds pages once allocated). SEED-002 is doing its job (per-row payload 22 KB -> 1.6 KB, capped at 5000 rows). Operationally acceptable with periodic restart; future-phase workaround is to store the payload as a JSON-encoded string to bypass NiceGUI's auto-wrapping entirely."
 ---
 
 # Attribute the secondary web memory leak and ship a fix

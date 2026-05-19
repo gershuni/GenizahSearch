@@ -1,11 +1,14 @@
 ---
 id: SEED-002
-status: dormant
+status: shipped
 planted: 2026-05-19
 planted_during: v7.13 — roadmap locked (Phases 93 + 94), pre-Phase-93
-trigger_when: v7.13 milestone close (natural absorption into v7.14), OR earlier if /_internal/memstat soak shows export_search_payload >100 MB as dominant top_key under real production traffic
+shipped: 2026-05-19
+shipped_commits: 2a7440d6 + 43a0fa0a + 7633a40e + 0aa92f82 (initial fix + 3 fixup commits per Codex round-1 review + self-audit catch)
+trigger_when: SHIPPED
 scope: medium
-predecessor_fix: commit ed6f89c4 (2026-05-19) — field-strip fix that capped export payloads at 110 MB/user worst case but did not eliminate them
+predecessor_fix: commit ed6f89c4 (2026-05-19 morning) — field-strip fix that capped export payloads at 110 MB/user worst case but did not eliminate them
+successor_investigation: .planning/quick/260519-hoi-investigate-framework-retention/INVESTIGATION.md + PROPOSED-FIX.md — post-deploy investigation confirmed SEED-002 reduced per-row payload from 22 KB → 1.6 KB (in-RAM) and ~500 B (logical), and attributed the residual ~200 MB/heavy-search RSS pressure to NiceGUI ObservableDict wrapping work on the storage write path (NOT a logical leak; pymalloc high-water mark). Future-phase fix sketched: store payloads as JSON-encoded strings to bypass NiceGUI's auto-wrapping entirely.
 ---
 
 # SEED-002: uid-only export payload — store {uid, sort_score, snippet, match_terms} per row and rehydrate the rest at export time
