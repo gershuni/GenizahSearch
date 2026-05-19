@@ -147,6 +147,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _de = _safe_get('domain_exclusions')
         search_state.domain_exclusions = set(_de) if _de is not None else set()
         search_state.printed_filter = _safe_get('search_printed_filter', 'all')
+        search_state.pgp_filter = _safe_get('search_pgp_filter', 'all')  # Phase 999.2 (PGP-FILTER-05, D-10)
 
     # Clear exclusions if initial_domain provided (from browse page navigation)
     if initial_domain:

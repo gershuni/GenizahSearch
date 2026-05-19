@@ -53,6 +53,7 @@ class SearchUIState:
         self.search_start_time: float = 0.0  # For elapsed timer display
         self.printed_ids: set = set()  # sys_ids with FragmentMaterial=Printed
         self.printed_filter: str = 'all'  # 'all', 'hide_printed', 'only_printed'
+        self.pgp_filter: str = 'all'  # Phase 999.2: 'all', 'only_pgp', 'hide_pgp' — post-search PGP-presence filter
         self.domain_excluded_results: list = []  # Results hidden by domain exclusion (with reasons)
         # Pre-search filter state (Search only in... panel)
         self.filter_domains: list = []      # Selected domain filters (multi-select)
@@ -452,6 +453,7 @@ def clear_search_snapshot() -> None:
         'search_results': [],
         'domain_exclusions': [],
         'search_printed_filter': 'all',
+        'search_pgp_filter': 'all',  # Phase 999.2 (PGP-FILTER-05, D-10) — central New-Search reset path
         'word_search_excluded_ids': [],
         'search_exclusion_sources': [],
     }
