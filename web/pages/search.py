@@ -147,6 +147,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _de = _safe_get('domain_exclusions')
         search_state.domain_exclusions = set(_de) if _de is not None else set()
         search_state.printed_filter = _safe_get('search_printed_filter', 'all')
+        search_state.pgp_filter = _safe_get('search_pgp_filter', 'all')  # Phase 999.2 (PGP-FILTER-05, D-10)
 
     # Clear exclusions if initial_domain provided (from browse page navigation)
     if initial_domain:
@@ -1434,6 +1435,93 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ).classes('text-sm').props('outline dense no-caps')
                     _set_btn_visible(printed_filter_btn, False)
 
+                    # Phase 999.2 (PGP-FILTER-01): PGP filter toggle (hidden until search has PGP data).
+                    # Mirrors _toggle_printed_filter end-to-end per CONTEXT D-01..D-11. D-12: web only.
+                    def _toggle_pgp_filter():
+                        states = ['all', 'only_pgp', 'hide_pgp']  # D-02 cycle order
+                        current_idx = states.index(search_state.pgp_filter)
+                        search_state.pgp_filter = states[(current_idx + 1) % 3]
+                        persist_value('search_pgp_filter', search_state.pgp_filter)  # D-10
+                        _update_pgp_filter_btn()
+                        _update_pgp_filter_chip()  # D-08 (real impl lands in Task 4; stub below until then)
+                        # Re-apply filters and re-render — same cascade as _toggle_printed_filter.
+                        # PGP filter is applied INSIDE every render branch per D-11 (Task 3); this dispatch
+                        # only chooses the right cascade entry point.
+                        if search_state.exclusion_sources:
+                            _apply_manuscript_exclusions()
+                        elif search_state.domain_exclusions and search_state.has_domain_data:
+                            _apply_domain_exclusions()
+                        elif search_state.results:
+                            _apply_printed_filter_and_render(search_state.results)
+
+                    def _update_pgp_filter_btn():
+                        if search_state.pgp_filter == 'all':
+                            pgp_filter_btn.text = tr('All')  # D-05
+                            pgp_filter_btn.props(remove='color')
+                            pgp_filter_btn.props('outline dense no-caps')
+                        elif search_state.pgp_filter == 'only_pgp':
+                            pgp_filter_btn.text = tr('Has PGP')  # D-05
+                            pgp_filter_btn.props(remove='color')
+                            pgp_filter_btn.props('outline dense no-caps color=green')  # D-06
+                        elif search_state.pgp_filter == 'hide_pgp':
+                            pgp_filter_btn.text = tr('No PGP')  # D-05
+                            pgp_filter_btn.props(remove='color')
+                            pgp_filter_btn.props('outline dense no-caps color=red')  # D-06
+
+                    def _update_pgp_filter_chip():
+                        """Render the active-PGP-filter chip near exclusion_chips_row.
+
+                        Phase 999.2 (PGP-FILTER-03, D-08, D-09, MEDIUM-1). Clears + re-renders the chip
+                        container on every state change. Click-to-clear via _clear_pgp_filter.
+
+                        Hidden conditions (BOTH gate independently):
+                          1. pgp_filter == 'all' (no active filter)
+                          2. transcription_sys_ids is empty (no PGP-tagged results to filter; happens
+                             when a persisted 'only_pgp' state restores into a search whose results have
+                             zero PGP hits — the chip must not appear in that scenario).
+                        """
+                        pgp_filter_chip_row.clear()
+                        if search_state.pgp_filter == 'all' or not search_state.transcription_sys_ids:
+                            pgp_filter_chip_row.set_visibility(False)
+                            return
+                        pgp_filter_chip_row.set_visibility(True)
+                        with pgp_filter_chip_row:
+                            if search_state.pgp_filter == 'only_pgp':
+                                chip_label = tr('Only PGP')  # D-09
+                                chip_color = 'green'  # D-06 (visual consistency with button)
+                            else:  # hide_pgp
+                                chip_label = tr('Hiding PGP')  # D-09
+                                chip_color = 'red'  # D-06
+                            ui.chip(
+                                chip_label, icon='close',
+                                on_click=lambda: _clear_pgp_filter()
+                            ).props(f'outline dense removable color={chip_color}')
+
+                    def _clear_pgp_filter():
+                        """Reset PGP filter to 'all' and re-apply cascade (chip click handler, D-09)."""
+                        if search_state.pgp_filter == 'all':
+                            return  # No-op
+                        search_state.pgp_filter = 'all'
+                        persist_value('search_pgp_filter', 'all')  # D-10
+                        _update_pgp_filter_btn()
+                        _update_pgp_filter_chip()
+                        # Re-apply cascade — same dispatch as _toggle_pgp_filter
+                        if search_state.exclusion_sources:
+                            _apply_manuscript_exclusions()
+                        elif search_state.domain_exclusions and search_state.has_domain_data:
+                            _apply_domain_exclusions()
+                        elif search_state.results:
+                            _apply_printed_filter_and_render(search_state.results)
+
+                    pgp_filter_btn = ui.button(
+                        tr('All'),  # D-05 (initial label = 'all' state label)
+                        on_click=lambda: _toggle_pgp_filter()
+                    ).classes('text-sm').props('outline dense no-caps').tooltip(tr('Filter by PGP presence'))
+                    _set_btn_visible(pgp_filter_btn, False)  # D-07 — Task 5 flips to True post-enrichment
+                    # If session restored a non-'all' state, sync the button now (still hidden until enrichment).
+                    if search_state.pgp_filter != 'all':
+                        _update_pgp_filter_btn()
+
                     # Phase 55: "Search within" button (D-01)
                     search_within_btn = ui.button(
                         '', icon='filter_list',
@@ -1448,6 +1536,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # active exclusions at a glance from the results bar.
                     exclusion_chips_row = ui.row().classes('gap-1 items-center')
                     exclusion_chips_row.set_visibility(bool(search_state.exclusion_sources))
+
+                    # Phase 999.2 (PGP-FILTER-03, D-08): PGP filter chip — co-located with
+                    # exclusion_chips_row so all active-filter indicators share one zone.
+                    # Visible only when search_state.pgp_filter != 'all' AND there are PGP hits.
+                    pgp_filter_chip_row = ui.row().classes('gap-1 items-center')
+                    pgp_filter_chip_row.set_visibility(
+                        search_state.pgp_filter != 'all' and bool(search_state.transcription_sys_ids)
+                    )
 
                 with ui.row().classes('gap-2'):
                     # Bulk actions (initially hidden)
@@ -2043,6 +2139,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # Hide domain filter and printed filter buttons
         _set_btn_visible(domain_filter_btn, False)
         _set_btn_visible(printed_filter_btn, False)
+        # Phase 999.2 (PGP-FILTER-02): hide PGP button + reset in-memory state on New Search.
+        # The persisted 'search_pgp_filter' key is reset by clear_search_snapshot() below
+        # (Task 1 Edit 2 added it to that helper's defaults dict — MEDIUM-2 fix routes
+        # through the central path instead of the session-persistence-gated persist_value).
+        _set_btn_visible(pgp_filter_btn, False)
+        search_state.pgp_filter = 'all'
+        _update_pgp_filter_btn()
+        _update_pgp_filter_chip()
         # Phase 55: Clear refinement chain
         _clear_refinement_chain()
         search_within_btn.set_visibility(False)
@@ -3163,16 +3267,45 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             filtered.append(r)
         return filtered
 
+    def _apply_pgp_filter(results_list):
+        """Apply PGP-presence filter to a results list and return filtered list.
+
+        Phase 999.2 (PGP-FILTER-04, D-03, D-11). Mirrors _apply_printed_filter shape.
+        Criterion: a result has PGP iff its sys_id is in search_state.transcription_sys_ids
+        (the same set that drives the green 'PGP' badge in search_results.py:397-400).
+        """
+        if search_state.pgp_filter == 'all' or not search_state.transcription_sys_ids:
+            return results_list
+        filtered = []
+        for r in results_list:
+            sys_id = r.get('display', {}).get('id')
+            has_pgp = bool(sys_id and sys_id in search_state.transcription_sys_ids)
+            if search_state.pgp_filter == 'only_pgp' and not has_pgp:
+                continue
+            elif search_state.pgp_filter == 'hide_pgp' and has_pgp:
+                continue
+            filtered.append(r)
+        return filtered
+
     def _apply_printed_filter_and_render(results_list, reset_expansion=True):
-        """Apply printed filter to results and re-render (used when no domain exclusions active)."""
+        """Apply printed filter + PGP filter to results and re-render (used when no domain exclusions active).
+
+        Phase 999.2 (PGP-FILTER-04, D-11): PGP filter stacks AFTER printed_filter and BEFORE
+        measurement post-filters, per the canonical cascade ordering.
+        """
         filtered = _apply_printed_filter(results_list)
+        filtered = _apply_pgp_filter(filtered)  # Phase 999.2 (D-11)
         # Apply measurement post-filters (Phase 54, review concern #1)
         filtered = _apply_measurement_post_filters(filtered, search_state)
         total = len(search_state.results)
         showing = len(filtered)
+        count_parts = []
         if search_state.printed_filter != 'all':
-            filter_label = tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed')
-            results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({filter_label})"
+            count_parts.append(tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed'))
+        if search_state.pgp_filter != 'all':  # Phase 999.2 (D-09)
+            count_parts.append(tr('Only PGP') if search_state.pgp_filter == 'only_pgp' else tr('Hiding PGP'))
+        if count_parts:
+            results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({', '.join(count_parts)})"
         else:
             results_count.text = f"{total} {tr('Results')}"
         render_results(filtered, page=0, reset_expansion=reset_expansion)
@@ -3189,7 +3322,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _apply_word_search_exclusions_and_render()
             elif search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions(reset_expansion=reset_expansion)
-            elif search_state.printed_filter != 'all' and search_state.printed_ids:
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all':
+                # Phase 999.2 (PGP-FILTER-04): route through unified printed+PGP filter when EITHER is active.
                 _apply_printed_filter_and_render(search_state.results, reset_expansion=reset_expansion)
             elif search_state.results:
                 filtered = _apply_measurement_post_filters(search_state.results, search_state)
@@ -3216,7 +3350,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _apply_word_search_exclusions_and_render()
             elif search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions(reset_expansion=reset_expansion)
-            elif search_state.printed_filter != 'all' and search_state.printed_ids:
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all':
+                # Phase 999.2 (PGP-FILTER-04): widened — routes through unified printed+PGP helper.
                 _apply_printed_filter_and_render(filtered, reset_expansion=reset_expansion)
             else:
                 filtered2 = _apply_measurement_post_filters(filtered, search_state)
@@ -3590,8 +3725,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.results = filtered
             _apply_domain_exclusions()
             search_state.results = original_results
-        elif search_state.printed_filter != 'all' and search_state.printed_ids:
+        elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all':
+            # Phase 999.2 (PGP-FILTER-04): widened — apply printed AND/OR PGP filter post-word-search.
             filtered = _apply_printed_filter(filtered)
+            filtered = _apply_pgp_filter(filtered)  # Phase 999.2 (D-11)
             filtered = _apply_measurement_post_filters(filtered, search_state)
             total = len(search_state.results)
             showing = len(filtered)
@@ -3647,6 +3784,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Apply printed filter on top of domain-filtered results
         filtered = _apply_printed_filter(filtered)
+        # Apply PGP filter on top of printed-filtered results (Phase 999.2, D-11)
+        filtered = _apply_pgp_filter(filtered)
         # Apply measurement post-filters (Phase 54, review concern #1)
         filtered = _apply_measurement_post_filters(filtered, search_state)
 
@@ -3658,6 +3797,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             count_parts.append(f"{len(search_state.domain_exclusions)} {tr('domains excluded')}")
         if search_state.printed_filter != 'all':
             count_parts.append(tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed'))
+        if search_state.pgp_filter != 'all':  # Phase 999.2 (D-09)
+            count_parts.append(tr('Only PGP') if search_state.pgp_filter == 'only_pgp' else tr('Hiding PGP'))
         if count_parts:
             results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({', '.join(count_parts)})"
         else:
@@ -4449,12 +4590,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.result_domains = dict(search_state.all_result_domains)
             _set_btn_visible(printed_filter_btn, len(search_state.printed_ids) > 0)
             _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
+            # Phase 999.2 (PGP-FILTER-02, D-07): PGP button visible iff some result has PGP.
+            _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
+            # Re-sync defensively — enrichment can fire multiple times per session
+            # (stage1 + stage2 background passes both call this function), and the
+            # button state must reflect the latest search context on every call.
+            _update_pgp_filter_btn()
+            _update_pgp_filter_chip()  # Sync chip (includes MEDIUM-1 zero-hits gating)
             _update_domain_filter_btn()
             # Phase 56: refresh exclusion chips when results render
             _update_exclude_btn()
 
         def _render_with_filters(reset_expansion=True):
-            """Re-render applying exclusions and filters."""
+            """Re-render applying exclusions and filters.
+
+            Phase 999.2 (PGP-FILTER-04, HIGH-1): the printed-filter elif is widened to
+            also fire when PGP filter is active, so PGP-only filtering routes through
+            _apply_printed_filter_and_render (which applies BOTH printed and PGP per Task 3).
+            """
             # Phase 56: Manuscript exclusions run first in the chain
             if search_state.exclusion_sources:
                 _apply_manuscript_exclusions(reset_expansion=reset_expansion)
@@ -4477,7 +4630,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             if search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions(reset_expansion=reset_expansion)
-            elif search_state.printed_filter != 'all' and search_state.printed_ids:
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all':
+                # Phase 999.2 (PGP-FILTER-04, HIGH-1): widened — printed OR PGP routes through
+                # the unified _apply_printed_filter_and_render (which applies BOTH per Task 3).
                 search_state.domain_excluded_results = []
                 _apply_printed_filter_and_render(display_results, reset_expansion=reset_expansion)
             else:
@@ -4712,7 +4867,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     asyncio.ensure_future(_after_delay(0.1, _deferred_filter_init))
 
     async def _deferred_transcription_restore():
-        """Restore transcription indicators for saved results asynchronously."""
+        """Restore transcription indicators for saved results asynchronously.
+
+        Phase 999.2 (PGP-FILTER-02 + HIGH-4): on session reload, after fetching
+        transcription_sys_ids, the PGP button + chip must be synced to the restored
+        pgp_filter state AND the result set must be rendered through the unified
+        filter cascade — otherwise a persisted pgp_filter='only_pgp' restores the
+        state but renders unfiltered results (silent inconsistency).
+        """
         if search_state.results:
             sys_ids = [
                 r.get('display', {}).get('id')
@@ -4723,7 +4885,22 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state.transcription_sys_ids = await run.io_bound(
                     get_sys_ids_with_transcriptions, sys_ids
                 )
-                render_results(search_state.results, page=search_state.current_page)
+                # Phase 999.2: PGP button + chip visibility now that transcription data is loaded.
+                _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
+                _update_pgp_filter_btn()
+                _update_pgp_filter_chip()
+                # Phase 999.2 (HIGH-4): use the unified filtered render cascade so the
+                # restored pgp_filter state actually filters results. Dispatch mirrors
+                # _toggle_pgp_filter — pick the right entry point based on active filters.
+                if search_state.exclusion_sources:
+                    _apply_manuscript_exclusions(reset_expansion=False)
+                elif search_state.domain_exclusions and search_state.has_domain_data:
+                    _apply_domain_exclusions(reset_expansion=False)
+                elif search_state.printed_filter != 'all' or search_state.pgp_filter != 'all':
+                    _apply_printed_filter_and_render(search_state.results, reset_expansion=False)
+                else:
+                    # Original behavior: no filters active, raw render preserves pagination.
+                    render_results(search_state.results, page=search_state.current_page)
 
     # Cat-2: deferred enrichment on restore - results container must be mounted.
     asyncio.ensure_future(_after_delay(0.2, _deferred_transcription_restore))
