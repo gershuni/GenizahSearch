@@ -5,7 +5,7 @@ milestone_name: "Research-Grade Downloads & PGP Filter"
 status: roadmap-locked
 stopped_at: "v7.13 roadmap locked 2026-05-19 + scope-clarified same day (Phase 93 web-only confirmed; Phase 94 expanded to web + desktop xlsx; EXPORT-META-09 added); 14/14 reqs mapped, traceability locked; awaiting `/gsd-review-backlog` to rename 999.2-* / 999.3-* directories, then `/gsd-plan-phase 93` and `/gsd-discuss-phase 94 --revise` (CONTEXT.md needs desktop-parity refresh) followed by `/gsd-plan-phase 94`."
 last_updated: "2026-05-19T00:00:00.000Z"
-last_activity: 2026-05-19 -- v7.13 roadmap locked + Phase 94 desktop-parity scope expansion applied; 14/14 requirements mapped across 2 phases
+last_activity: 2026-05-19 -- Completed quick task 260519-9pk: re-opened P1 web memory leak in OPEN_ISSUES.md after 11h soak measured 411 MB/hr growth (⚠️ secondary-leak verdict); follow-up attribution phase scoped at .planning/todos/pending/2026-05-19-leak-attribution-phase.md
 progress:
   total_phases: 2
   completed_phases: 0
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-19)
 Phase: Not started (roadmap locked)
 Plan: —
 Status: Roadmap locked; awaiting backlog rename + planning
-Last activity: 2026-05-19 -- Roadmapper locked phase↔requirement map; 13/13 requirements covered
+Last activity: 2026-05-19 -- Completed quick task 260519-9pk: re-opened P1 web memory leak (OPEN_ISSUES.md); 411 MB/hr post-soak verdict ⚠️ secondary leak
 
 Progress: [          ] v7.13 0% (0/14 reqs, 0/5 plans, 0/2 phases)
 
@@ -69,6 +69,12 @@ The full `gsd-tools.cjs audit-open` report at close included 96 items. The v7.12
 ## Recently Closed Milestones
 
 - **v7.12 Multitenant Architecture (Path B)** — shipped 2026-05-18; 10 phases (87-92 + 92.1/92.2 inserted + 999.1/999.4 promoted); 28 plans; 49/49 requirements satisfied. See `.planning/milestones/v7.12-ROADMAP.md`.
+
+## Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260519-9pk | Re-open P1 web memory leak — investigate secondary leak after export-cap fix | 2026-05-19 | 0a91bc97 | [260519-9pk-re-open-p1-web-memory-leak-investigate-s](./quick/260519-9pk-re-open-p1-web-memory-leak-investigate-s/) |
 
 ## Session Continuity
 
