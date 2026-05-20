@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Phase 94 EXPORT-META Wave 3: 3-sheet xlsx structure tests.
+"""Phase 94 EXPORT-META Wave 3: xlsx structure tests.
 
-Tests `web.export_service.ExportService.export_search_results_excel` after the
-Wave 3 restructure into a 3-sheet workbook (Genizah Results + Manuscripts +
-Bibliography) consuming `shared.export_dossier` (Wave 1) and the session
+Tests `web.export_service.ExportService.export_search_results_excel`. The
+workbook layout was finalized in smoke verification round 2 (2026-05-21) as
+a 4-sheet workbook: Search Results + Manuscripts + Bibliography +
+Credits and Info. Consumes `shared.export_dossier` (Wave 1) and the session
 payload kwargs threaded through `web.api.export_excel` (Wave 2).
 
 Test fixture strategy:
@@ -112,8 +113,8 @@ def test_workbook_has_three_sheets_in_order(export_service, stub_dossier):
     results = [_make_result('99001234567890')]
     content, _ = export_service.export_search_results_excel(results, 'q')
     wb = _load_wb(content)
-    assert wb.sheetnames == ['Genizah Results', 'Manuscripts', 'Bibliography']
-    assert wb.active.title == 'Genizah Results'
+    assert wb.sheetnames == ['Search Results', 'Manuscripts', 'Bibliography']
+    assert wb.active.title == 'Search Results'
 
 
 def test_main_sheet_has_12_headers_in_unified_order(export_service, stub_dossier):
@@ -121,7 +122,7 @@ def test_main_sheet_has_12_headers_in_unified_order(export_service, stub_dossier
     results = [_make_result('99001234567890')]
     content, _ = export_service.export_search_results_excel(results, 'q')
     wb = _load_wb(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     headers = [ws.cell(1, c).value for c in range(1, 13)]
     assert headers == [
         'System ID', 'Library', 'Shelfmark', 'Title',
@@ -137,7 +138,7 @@ def test_has_pgp_yes_or_empty(export_service, stub_dossier):
         results, 'q', transcription_sys_ids={'A'},
     )
     wb = _load_wb(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     # Has PGP is column 9.
     assert ws.cell(2, 9).value == 'Yes'
     assert ws.cell(3, 9).value in ('', None)
@@ -150,7 +151,7 @@ def test_is_printed_yes_or_empty(export_service, stub_dossier):
         results, 'q', printed_ids={'B'},
     )
     wb = _load_wb(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     # Is Printed is column 10.
     assert ws.cell(2, 10).value in ('', None)
     assert ws.cell(3, 10).value == 'Yes'
@@ -163,7 +164,7 @@ def test_domains_pipe_joined(export_service, stub_dossier):
         results, 'q', result_domains={'A': ['Bible', 'Letter', 'Legal']},
     )
     wb = _load_wb(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     # Domains is column 11.
     assert ws.cell(2, 11).value == 'Bible|Letter|Legal'
 
@@ -173,7 +174,7 @@ def test_iiif_manifest_empty_in_wave3(export_service, stub_dossier):
     results = [_make_result('A')]
     content, _ = export_service.export_search_results_excel(results, 'q')
     wb = _load_wb(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     # IIIF Manifest is column 12.
     assert ws.cell(2, 12).value in ('', None)
 
@@ -227,7 +228,8 @@ def test_bibliography_zero_rows_when_no_entries(export_service, stub_dossier):
 
 def test_conditional_rtl_he(export_service, stub_dossier):
     """Test 12a: lang='he' -> all 3 sheets RTL. D-04 REVISED (2026-05-20):
-    sheet titles are now bilingual ('תוצאות גניזה', 'כתבי יד', 'ביבליוגרפיה')."""
+    sheet titles are now bilingual ('תוצאות חיפוש', 'כתבי יד', 'ביבליוגרפיה').
+    Main sheet renamed 'תוצאות גניזה' -> 'תוצאות חיפוש' on 2026-05-21."""
     from shared.export_dossier import sheet_titles
     results = [_make_result('A')]
     content, _ = export_service.export_search_results_excel(results, 'q', lang='he')
@@ -243,7 +245,7 @@ def test_conditional_rtl_en(export_service, stub_dossier):
     results = [_make_result('A')]
     content, _ = export_service.export_search_results_excel(results, 'q', lang='en')
     wb = _load_wb(content)
-    for name in ['Genizah Results', 'Manuscripts', 'Bibliography']:
+    for name in ['Search Results', 'Manuscripts', 'Bibliography']:
         assert wb[name].sheet_view.rightToLeft in (False, None), f"sheet {name} should be LTR"
 
 
@@ -253,7 +255,7 @@ def test_rich_snippet_with_marker(export_service, stub_dossier):
     results = [_make_result('A', snippet='foo *bar* baz')]
     content, _ = export_service.export_search_results_excel(results, 'q')
     wb = _load_wb(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     # Snippet is column 7.
     snippet_cell = ws.cell(2, 7).value
     assert isinstance(snippet_cell, CellRichText), (
@@ -266,7 +268,7 @@ def test_plain_snippet_without_marker(export_service, stub_dossier):
     results = [_make_result('A', snippet='no marker here')]
     content, _ = export_service.export_search_results_excel(results, 'q')
     wb = _load_wb(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     snippet_cell = ws.cell(2, 7).value
     assert isinstance(snippet_cell, str)
     assert 'no marker here' in snippet_cell
@@ -277,7 +279,7 @@ def test_backward_compat_no_new_kwargs(export_service, stub_dossier):
     results = [_make_result('A')]
     content, _ = export_service.export_search_results_excel(results, 'q')
     wb = _load_wb(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     # All 3 new columns render empty for every row.
     assert ws.cell(2, 9).value in ('', None)
     assert ws.cell(2, 10).value in ('', None)
@@ -328,7 +330,7 @@ def test_image_page_and_source_columns_populated(export_service, stub_dossier):
     results = [_make_result('A', img='2v', source='pgp')]
     content, _ = export_service.export_search_results_excel(results, 'q')
     wb = _load_wb(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     assert ws.cell(2, 5).value == '2v'
     assert ws.cell(2, 6).value == 'pgp'
 
@@ -366,8 +368,8 @@ def test_en_lang_produces_english_sheet_titles_and_headers(export_service, stub_
     results = [_make_result('99001234567890')]
     content, _ = export_service.export_search_results_excel(results, 'q', lang='en')
     wb = _load_wb(content)
-    assert wb.sheetnames == ['Genizah Results', 'Manuscripts', 'Bibliography']
-    assert [wb['Genizah Results'].cell(1, c).value for c in range(1, 13)] == main_header_row('en')
+    assert wb.sheetnames == ['Search Results', 'Manuscripts', 'Bibliography']
+    assert [wb['Search Results'].cell(1, c).value for c in range(1, 13)] == main_header_row('en')
     assert [wb['Manuscripts'].cell(1, c).value for c in range(1, 15)] == manuscript_header_row('en')
     assert [wb['Bibliography'].cell(1, c).value for c in range(1, 9)] == bibliography_header_row('en')
 
@@ -389,6 +391,6 @@ def test_image_page_and_source_columns_compacted_row(export_service, stub_dossie
     }]
     content, _ = export_service.export_search_results_excel(results, 'q')
     wb = _load_wb(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     assert ws.cell(2, 5).value == '3r'
     assert ws.cell(2, 6).value == 'doc'

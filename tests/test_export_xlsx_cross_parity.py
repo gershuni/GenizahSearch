@@ -141,7 +141,9 @@ def test_main_sheet_headers_byte_identical(stub_dossier):
     results = [_make_result('99001234567890')]
     wb_web = _build_web(results)
     wb_desktop = _build_desktop(results)
-    sheet_name = 'Genizah Results'
+    # Smoke verification round 2 (2026-05-21): main sheet renamed
+    # 'Genizah Results' -> 'Search Results' on both apps; parity preserved.
+    sheet_name = 'Search Results'
     hr_web = _find_header_row(wb_web[sheet_name])
     hr_desktop = _find_header_row(wb_desktop[sheet_name])
     assert hr_web and hr_desktop, 'header rows not found in one of the workbooks'

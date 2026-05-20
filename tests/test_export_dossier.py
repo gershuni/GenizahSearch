@@ -1078,18 +1078,25 @@ class TestBilingualHeaderRows:
 
     def test_sheet_titles_en(self):
         titles = sheet_titles('en')
+        # Smoke verification round 2 (2026-05-21): main sheet renamed
+        # 'Genizah Results' -> 'Search Results'; new 'credits_info' key for
+        # the 4th sheet that holds credits + per-export search metadata.
         assert titles == {
-            'main': "Genizah Results",
+            'main': "Search Results",
             'manuscripts': "Manuscripts",
             'bibliography': "Bibliography",
+            'credits_info': "Credits and Info",
         }
 
     def test_sheet_titles_he(self):
         titles = sheet_titles('he')
+        # Smoke verification round 2 (2026-05-21): main sheet renamed
+        # 'תוצאות גניזה' -> 'תוצאות חיפוש'; new 'credits_info' key.
         assert titles == {
-            'main': "תוצאות גניזה",
+            'main': "תוצאות חיפוש",
             'manuscripts': "כתבי יד",
             'bibliography': "ביבליוגרפיה",
+            'credits_info': "קרדיט ומידע",
         }
 
     def test_sheet_titles_default_lang_is_english(self):

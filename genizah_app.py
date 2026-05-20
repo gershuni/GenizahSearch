@@ -2497,10 +2497,12 @@ def _build_search_results_xlsx_bytes(
     writes them to the user-chosen path via Qt's ``QFileDialog`` flow.
 
     The structure mirrors :meth:`web.export_service.ExportService.export_search_results_excel`
-    exactly: same sheet names (``'Genizah Results'``, ``'Manuscripts'``,
-    ``'Bibliography'``), same 12-column main-sheet header order per D-01,
-    same shared dossier row builders. Cross-app parity is pinned by
-    :file:`tests/test_export_xlsx_cross_parity.py` (MUST-FIX 94-04-C).
+    exactly: same sheet names (``'Search Results'``, ``'Manuscripts'``,
+    ``'Bibliography'``, ``'Credits and Info'``), same 12-column main-sheet
+    header order per D-01, same shared dossier row builders. Cross-app parity
+    is pinned by :file:`tests/test_export_xlsx_cross_parity.py` (MUST-FIX
+    94-04-C). Sheet was renamed from ``'Genizah Results'`` to
+    ``'Search Results'`` in smoke verification round 2 (2026-05-21).
 
     Args:
         results: list of result dicts (each has ``display`` + ``snippet`` + …).
@@ -2555,7 +2557,8 @@ def _build_search_results_xlsx_bytes(
     ws_main = wb.active
     # D-04 REVISED (2026-05-20): sheet title follows lang via sheet_titles(lang).
     # The cross-parity test still passes because it builds both workbooks
-    # with default lang='en' -> 'Genizah Results' on both sides.
+    # with default lang='en' -> 'Search Results' on both sides (renamed from
+    # 'Genizah Results' in smoke verification round 2 on 2026-05-21).
     ws_main.title = _titles['main'][:31]
     ws_main.sheet_view.rightToLeft = rtl
 

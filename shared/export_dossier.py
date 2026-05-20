@@ -18,6 +18,24 @@ and header rows are now bilingual via :func:`sheet_titles`,
 unchanged. The D-02 prohibition on transcription text in NEW dossier surfaces
 is unchanged. The D-10 parallels-envelope strip is unchanged.
 
+REFINED 2026-05-21 (smoke verification round 2)
+-----------------------------------------------
+
+After Hillel's round-2 smoke verification, three further refinements:
+
+1. The main sheet was renamed: ``"Genizah Results"`` → ``"Search Results"``
+   (English) and ``"תוצאות גניזה"`` → ``"תוצאות חיפוש"`` (Hebrew). This is
+   purely a sheet-title change — column layout, row builders, and the
+   parity contract are unaffected.
+2. A 4th sheet (``"Credits and Info"`` / ``"קרדיט ומידע"``) holds the
+   credits text + per-export search metadata (Search Query / Mode / Gap /
+   Lab Mode / Deep Scan / Date+time / Result count) + a hyperlink cell to
+   GenizahSearch.com. The main sheet no longer carries inline credits.
+   See :func:`build_credits_info_sheet`.
+3. Domain names on the main sheet are Hebrew-substituted when ``lang='he'``
+   if a ``domain_name_map`` (qualified-EN-name → HE-display-name) is provided
+   by the caller. See :func:`substitute_domains_with_map`.
+
 Translation rule: where a source DB has both Hebrew and English variants of
 a field, the variant matching the UI language is preferred; the other
 variant is used as fallback when the preferred one is absent.
@@ -213,15 +231,20 @@ _BIBLIOGRAPHY_HEADERS_HE: List[str] = [
 ]
 
 _SHEET_TITLES_EN: Dict[str, str] = {
-    'main': "Genizah Results",
+    'main': "Search Results",
     'manuscripts': "Manuscripts",
     'bibliography': "Bibliography",
+    # Smoke verification round 2 (2026-05-21): new 4th sheet for credits +
+    # search metadata. The main sheet no longer carries the credit/metadata
+    # rows that previously rode above (desktop) or below (web) the data rows.
+    'credits_info': "Credits and Info",
 }
 
 _SHEET_TITLES_HE: Dict[str, str] = {
-    'main': "תוצאות גניזה",
+    'main': "תוצאות חיפוש",
     'manuscripts': "כתבי יד",
     'bibliography': "ביבליוגרפיה",
+    'credits_info': "קרדיט ומידע",
 }
 
 

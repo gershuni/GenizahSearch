@@ -341,8 +341,9 @@ class TestExportService:
         # Verify Excel content
         stream = io.BytesIO(content)
         wb = openpyxl.load_workbook(stream)
-        # Default-active sheet is "Genizah Results" per D-03.
-        ws = wb['Genizah Results']
+        # Default-active sheet is "Search Results" per D-03 (renamed from
+        # "Genizah Results" in smoke verification round 2 on 2026-05-21).
+        ws = wb['Search Results']
 
         # Check headers (unified 12-column order per D-01).
         assert ws.cell(row=1, column=1).value == "System ID"
@@ -374,7 +375,7 @@ class TestExportService:
 
         wb = openpyxl.load_workbook(io.BytesIO(content))
         # Phase 94 Wave 3: Full Text column moved from 7 to 8 in unified layout.
-        ws = wb['Genizah Results']
+        ws = wb['Search Results']
         assert ws.cell(row=2, column=8).value == "Rehydrated full text"
         searcher.get_full_text_by_id.assert_called_once_with('uid-1')
 
@@ -400,7 +401,7 @@ class TestExportService:
 
         wb = openpyxl.load_workbook(io.BytesIO(content))
         # Phase 94 Wave 3 unified layout: col 1 = System ID, 3 = Shelfmark, 4 = Title.
-        ws = wb['Genizah Results']
+        ws = wb['Search Results']
         assert ws.cell(row=2, column=1).value == '99001234567890'
         assert ws.cell(row=2, column=3).value == 'T-S 12.345'
         assert ws.cell(row=2, column=4).value == 'Test Title'
@@ -434,7 +435,7 @@ class TestExportService:
 
         wb = openpyxl.load_workbook(io.BytesIO(content))
         # Phase 94 Wave 3 unified layout: Shelfmark is column 3.
-        ws = wb['Genizah Results']
+        ws = wb['Search Results']
         # Shelfmark cell shows the "ID: ..." fallback (matches get_display_data).
         assert ws.cell(row=2, column=3).value == 'ID: 99001234567890'
 
@@ -458,7 +459,7 @@ class TestExportService:
 
         wb = openpyxl.load_workbook(io.BytesIO(content))
         # Phase 94 Wave 3 unified layout: col 1 = System ID, 3 = Shelfmark, 4 = Title.
-        ws = wb['Genizah Results']
+        ws = wb['Search Results']
         assert ws.cell(row=2, column=1).value == '99800000000000123'
         assert ws.cell(row=2, column=3).value == 'T-S NS 329.96'
         assert ws.cell(row=2, column=4).value == 'Synthetic'
@@ -485,7 +486,7 @@ class TestExportService:
 
         wb = openpyxl.load_workbook(io.BytesIO(content))
         # Phase 94 Wave 3 unified layout: Shelfmark is column 3.
-        ws = wb['Genizah Results']
+        ws = wb['Search Results']
         # Must be the literal string 'Unknown', not a MagicMock repr.
         assert ws.cell(row=2, column=3).value == 'Unknown'
 
@@ -527,8 +528,8 @@ class TestExportService:
         legacy_wb = openpyxl.load_workbook(io.BytesIO(legacy_content))
         compact_wb = openpyxl.load_workbook(io.BytesIO(compact_content))
         # Phase 94 Wave 3: explicit sheet name; unified 4-column identity prefix.
-        legacy_ws = legacy_wb['Genizah Results']
-        compact_ws = compact_wb['Genizah Results']
+        legacy_ws = legacy_wb['Search Results']
+        compact_ws = compact_wb['Search Results']
 
         # Columns 1 (System ID), 2 (Library), 3 (Shelfmark), 4 (Title) must match.
         for col in (1, 2, 3, 4):
@@ -714,7 +715,7 @@ class TestEdgeCases:
 
         stream = io.BytesIO(content)
         wb = openpyxl.load_workbook(stream)
-        ws = wb['Genizah Results']
+        ws = wb['Search Results']
 
         # Hebrew shelfmark should be preserved (column 3 in unified layout).
         assert ws.cell(row=2, column=3).value == 'ת-ס 12.345'
@@ -737,7 +738,7 @@ class TestEdgeCases:
 
         stream = io.BytesIO(content)
         wb = openpyxl.load_workbook(stream)
-        ws = wb['Genizah Results']
+        ws = wb['Search Results']
 
         # Full text should be truncated (column 8 in unified layout).
         assert len(ws.cell(row=2, column=8).value) <= 32000

@@ -429,8 +429,9 @@ class ExportService:
 
         Phase 94 EXPORT-META Wave 3: produces a 3-sheet workbook consisting of:
 
-        1. **Genizah Results** (default-active per D-03) — unified 12-column
-           main sheet per D-01:
+        1. **Search Results** (default-active per D-03) — unified 12-column
+           main sheet per D-01. Sheet was renamed from ``"Genizah Results"``
+           to ``"Search Results"`` in smoke verification round 2 (2026-05-21):
            ['System ID', 'Library', 'Shelfmark', 'Title', 'Image/Page',
             'Source', 'Snippet', 'Full Text', 'Has PGP', 'Is Printed',
             'Domains', 'IIIF Manifest'].
@@ -450,10 +451,11 @@ class ExportService:
            Zero rows when sys_id has no bib entries.
 
         Conditional RTL per D-04: ``lang == 'he'`` -> all 3 sheets RTL;
-        otherwise LTR. Sheet name "Genizah Results" is the locked English
-        literal per EXPORT-META-09 (cross-app parity with desktop Wave 4 —
-        overrides desktop's prior ``tr('Search Results')`` translation
-        pattern for this specific string).
+        otherwise LTR. Sheet name is ``"Search Results"`` (English) /
+        ``"תוצאות חיפוש"`` (Hebrew) per smoke verification round 2
+        (2026-05-21); previously ``"Genizah Results"`` / ``"תוצאות גניזה"``.
+        Cross-app parity with desktop Wave 4 preserved via shared
+        :func:`shared.export_dossier.sheet_titles`.
 
         Library name on all sheets is hard-pinned English per D-04 / Pattern
         1.8 / Shared Pattern F — routes through

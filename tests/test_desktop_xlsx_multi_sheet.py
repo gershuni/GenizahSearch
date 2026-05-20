@@ -92,18 +92,18 @@ def _find_header_row(ws):
 
 
 def test_workbook_has_3_sheets_in_order(stub_dossier):
-    # MUST-FIX 94-04-A: sheet name is now ENGLISH-LOCKED 'Genizah Results'
+    # MUST-FIX 94-04-A: sheet name is now ENGLISH-LOCKED 'Search Results'
     # (matches web for EXPORT-META-09 parity).
     content = _build([_make_result('99001234567890')])
     wb = _load(content)
-    assert wb.sheetnames == ['Genizah Results', 'Manuscripts', 'Bibliography']
-    assert wb.active.title == 'Genizah Results'
+    assert wb.sheetnames == ['Search Results', 'Manuscripts', 'Bibliography']
+    assert wb.active.title == 'Search Results'
 
 
 def test_main_sheet_12_columns_unified_order(stub_dossier):
     content = _build([_make_result('A')])
     wb = _load(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     header_row = _find_header_row(ws)
     assert header_row is not None
     headers = [ws.cell(header_row, c).value for c in range(1, 13)]
@@ -121,7 +121,7 @@ def test_has_pgp_and_is_printed_yes_or_empty(stub_dossier):
         printed_ids={'B'},
     )
     wb = _load(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     header_row = _find_header_row(ws)
     # Row A is header_row + 1, Row B is header_row + 2
     assert ws.cell(header_row + 1, 9).value == 'Yes'
@@ -136,7 +136,7 @@ def test_domains_pipe_joined(stub_dossier):
         result_domains={'A': ['Bible', 'Letter', 'Legal']},
     )
     wb = _load(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     header_row = _find_header_row(ws)
     assert ws.cell(header_row + 1, 11).value == 'Bible|Letter|Legal'
 
@@ -144,7 +144,7 @@ def test_domains_pipe_joined(stub_dossier):
 def test_iiif_manifest_empty(stub_dossier):
     content = _build([_make_result('A')])
     wb = _load(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     header_row = _find_header_row(ws)
     assert ws.cell(header_row + 1, 12).value in ('', None)
 
@@ -152,7 +152,7 @@ def test_iiif_manifest_empty(stub_dossier):
 def test_full_text_column(stub_dossier):
     content = _build([_make_result('A', full_text='specific page text')])
     wb = _load(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     header_row = _find_header_row(ws)
     assert ws.cell(header_row + 1, 8).value == 'specific page text'
 
@@ -164,7 +164,7 @@ def test_full_text_excerpt_fallback(stub_dossier):
     res['full_text_excerpt'] = 'excerpt only'
     content = _build([res])
     wb = _load(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     header_row = _find_header_row(ws)
     assert ws.cell(header_row + 1, 8).value == 'excerpt only'
 
@@ -208,7 +208,7 @@ def test_conditional_rtl_he(stub_dossier):
 def test_conditional_rtl_en(stub_dossier):
     content = _build([_make_result('A')], lang='en')
     wb = _load(content)
-    for name in ['Genizah Results', 'Manuscripts', 'Bibliography']:
+    for name in ['Search Results', 'Manuscripts', 'Bibliography']:
         assert wb[name].sheet_view.rightToLeft in (False, None)
 
 
@@ -216,7 +216,7 @@ def test_rich_snippet_renders(stub_dossier):
     from openpyxl.cell.rich_text import CellRichText
     content = _build([_make_result('A', snippet='foo *bar* baz')])
     wb = _load(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     header_row = _find_header_row(ws)
     snippet_cell = ws.cell(header_row + 1, 7).value
     assert isinstance(snippet_cell, CellRichText)
@@ -265,7 +265,7 @@ def test_full_text_fetcher_hydrates_when_missing(stub_dossier):
         full_text_fetcher=lambda uid: 'hydrated text for ' + uid,
     )
     wb = _load(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     header_row = _find_header_row(ws)
     # Full Text column is col 8.
     cell = ws.cell(header_row + 1, 8).value
@@ -291,7 +291,7 @@ def test_full_text_fetcher_none_means_empty_cell(stub_dossier):
         full_text_fetcher=None,
     )
     wb = _load(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     header_row = _find_header_row(ws)
     assert ws.cell(header_row + 1, 8).value in ('', None)
 
@@ -354,8 +354,8 @@ def test_en_lang_produces_english_sheet_titles_and_headers_default(stub_dossier)
         lang='en',
     )
     wb = _load(content)
-    assert wb.sheetnames == ['Genizah Results', 'Manuscripts', 'Bibliography']
-    ws_main = wb['Genizah Results']
+    assert wb.sheetnames == ['Search Results', 'Manuscripts', 'Bibliography']
+    ws_main = wb['Search Results']
     header_row = _find_header_row(ws_main)
     assert [ws_main.cell(header_row, c).value for c in range(1, 13)] == main_header_row('en')
     assert [wb['Manuscripts'].cell(1, c).value for c in range(1, 15)] == manuscript_header_row('en')
@@ -369,7 +369,7 @@ def test_credit_text_preserved_above_headers(stub_dossier):
         search_info_text='Query: foo\nMode: text',
     )
     wb = _load(content)
-    ws = wb['Genizah Results']
+    ws = wb['Search Results']
     # Header row is found by scanning for 'System ID' — should be > 1
     header_row = _find_header_row(ws)
     assert header_row > 1, f"header row should be after credit+info rows; got {header_row}"
