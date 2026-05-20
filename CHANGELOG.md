@@ -4,11 +4,10 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [7.13.0] - 2026-05-21
 
-Bundles v7.13 milestone work (Research-Grade Downloads & PGP Filter). No version
-bump in this section — version bump + tag + GitHub Release happen at the
-milestone-closeout ritual after this entry stabilizes.
+Bundles v7.13 milestone work (Research-Grade Downloads & PGP Filter), the
+homepage About + FAQ additions, and a desktop sync-merge bug fix.
 
 ### Added — Phase 94: Research-Grade Export Metadata (web + desktop)
 
@@ -95,17 +94,32 @@ milestone-closeout ritual after this entry stabilizes.
   by user smoke direction 2026-05-19 — the colored button label already
   conveys filter state, so the chip was redundant. (web)
 
+### Added — Homepage About + FAQ (web)
+
+- **Bilingual About + FAQ sections on the homepage** — new to the site
+  (added during SEO work; not previously published). Links to MiDRASH,
+  FGP, PGP, NLI, CUDL, the Responsa Project, and Manchester. The visible
+  FAQ accordion also provides FAQPage JSON-LD.
+- **Manuscript JSON-LD** on manuscript pages.
+- **Title/meta length cleanup, image alt text, and llms.txt.**
+- **Favicon shrunk 401 KB → 9 KB** (44× reduction).
+
+### Added — Help page (web)
+
+- Help page documents the new 4-sheet xlsx export and the JSON export
+  format, and adds a new **Public API & AI Tools** section linking to
+  the Search API endpoints and the `cairo-genizah-research` Claude skill.
+
 ### Fixed
 
-- **Domains list dedupes per sys_id** (94-04 smoke round-5). Manuscripts
-  with multiple FJMS rows for the same domain previously rendered
-  `Arabic Tafsir|Arabic Tafsir|...` × N times in the Domains cell. Now
-  deduped at source. Side benefit: the web search Domains badge count now
-  reflects unique manuscripts per domain rather than total FJMS rows. (both)
-- **Image/Page emits int for pure-numeric values** (94-04 smoke round-6).
-  Pure-numeric Image/Page values are now written as `int` so Excel no longer
-  flags them with the "Number stored as text" warning. Mixed-content values
-  (e.g., `1r` for recto) stay as strings. (both)
+- **Desktop list-merge no longer duplicates items** — when the app
+  prompts to merge differences between the web list and the desktop
+  list, items previously appeared twice in the desktop list while
+  staying single in the web list. Pre-existing duplicates from past
+  syncs now clean up automatically on the next merge. (desktop)
+- **"Important" translation-disclaimer callout is readable in dark
+  mode** — light text on a light fallback background. Now themed
+  properly. (web)
 
 ### Internal
 

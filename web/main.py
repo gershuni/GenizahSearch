@@ -1068,7 +1068,7 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                ui.label(tr('New: Public Search API — programmatic access to search, browse, and parallels for researchers and AI tools. See the API section in the README.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
+                ui.label(tr('New: improved Excel downloads, transcription line numbers, PGP filter')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
                     # Explicit user dismiss (X button): persist the flag unconditionally.
                     safe_user_set('whats_new_dismissed', WHATS_NEW_VERSION)

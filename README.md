@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.12.0
+# Genizah Search Pro 7.13.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,39 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.12.0?
+## What's New in Version 7.13.0?
+
+### v7.13.0: Research-Grade Export & Polish
+
+This release turns the xlsx download from a flat results table into a
+**four-sheet citation-ready workbook** designed for academic use, adds
+a **PGP filter** to web search, adds new bilingual About + FAQ sections
+to the homepage (new to the site), and fixes a list-merge bug on
+desktop.
+
+**Citation-ready Excel downloads (web + desktop):** every xlsx export
+now produces four sheets — **Search Results**, **Manuscripts**,
+**Bibliography**, and **Credits and Info** — with bilingual column
+headers matching your UI language. Every Search Results row gets a
+clickable **Image URL** pointing to the proxied folio image. Every
+Manuscripts row gets clickable PGP, Library Viewer, and GenizahSearch
+URLs. The web JSON export gains `has_pgp`, `is_printed`, and `domains`
+keys per item.
+
+**PGP filter (web):** a new 3-state toggle in the search results
+toolbar — `Filter PGP` → `Has PGP` → `No PGP` — appears once your
+current results include at least one PGP-tagged manuscript.
+
+**Homepage + Help page polish:** new bilingual About + FAQ sections
+on the homepage, more links to source projects (MiDRASH, FGP, PGP,
+NLI, CUDL, the Responsa Project), a faster homepage (favicon shrunk
+44×), and a new "Public API & AI Tools" Help page section linking to
+the Search API endpoints and the `cairo-genizah-research` Claude skill.
+
+**For desktop users — bug fix:** the cloud-merge prompt no longer
+duplicates items when reconciling lists that exist on both web and
+desktop. Existing duplicates from past syncs clean up automatically
+on the next merge.
 
 ### v7.12.0: Multitenant Safety and Line Numbering
 
@@ -270,7 +302,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.12.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.13.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

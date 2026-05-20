@@ -228,7 +228,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("Additional Cambridge CUDL manuscripts are now available with images and information."))
+        self.lbl_msg.setText(tr("New: improved Excel downloads and transcription line numbers."))
         self.show()
 
     def on_learn_more(self):
@@ -262,9 +262,9 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr('108 manuscripts from the Cambridge CUDL catalog that did not previously appear in the app — because they have no record in the National Library of Israel catalog — are now available for viewing. You can see images, catalog, and bibliographic information (including T-S NS 329.96 and about 100 others).'),
-            tr('Automatic recognition of alternative shelfmark forms for manuscripts from the Mosseri collection and other collections. Shelfmark search now finds thousands of manuscripts that previously could not be found due to differences in writing convention.'),
-            tr('Bug fix in submitting user comments on manuscripts.'),
+            tr("Excel downloads are now a 4-sheet research workbook: Search Results, Manuscripts, Bibliography, and Credits and Info. Includes full text plus links to library viewers and images."),
+            tr("Line numbering in transcriptions: when viewing a manuscript, line numbers appear beside the text. Toggle via the '# Lines' button."),
+            tr("Bug fix: when merging lists between the website and the desktop app, items no longer duplicate in the desktop app. Pre-existing duplicates from past syncs clean up automatically on the next sync."),
         ]
         align = 'right' if is_heb else 'left'
         dir_attr = "rtl" if is_heb else "ltr"

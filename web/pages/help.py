@@ -57,6 +57,7 @@ def _create_english_content():
                 ('catalog-browse', 'Browse by Identification'),
                 ('lists', 'Lists'),
                 ('export', 'Exporting Data'),
+                ('api', 'Public API & AI Tools'),
             ]
             if WEB_PUZZLE_ENABLED:
                 toc_items.insert(8, ('puzzle', 'Fragment Puzzle'))
@@ -293,7 +294,7 @@ When enabled, translated text appears with a clickable **Translated/Original** b
 
         ui.markdown('''
 > **Important:** Translations are machine-generated scholarly aids and may contain errors, including incorrect terminology, hallucinated content, or inconsistent transliterations. Always verify against the original text for research purposes. If you encounter a problematic translation, click the **Report** button next to the translated text to help us improve quality.
-        ''').style('color: var(--text-secondary); background: var(--surface-1, #f8f9fa); border-left: 3px solid var(--warning, #f59e0b); padding: 8px 12px; border-radius: 4px; margin-top: 4px;')
+        ''').style('color: var(--text-secondary); background: var(--bg-tertiary); border-left: 3px solid var(--warning, #f59e0b); padding: 8px 12px; border-radius: 4px; margin-top: 4px;')
 
     # === Parallels Search ===
     with ui.card().classes('w-full p-6'):
@@ -579,13 +580,56 @@ Save important manuscripts to personal lists for later reference.
         ui.markdown('''
 At any stage, you can export results for external use:
 
-- **📄 Word (DOCX):** Formatted report suitable for academic work
-- **📊 Excel (XLSX):** Spreadsheet with rich formatting and color highlighting of found words
+- **📊 Excel (XLSX) — Research workbook:** a 4-sheet citation-ready
+  workbook:
+  - **Search Results** — your hits with snippet, full text, PGP and
+    Printed flags, Domains, and a clickable image link per row
+  - **Manuscripts** — one row per unique manuscript with clickable PGP,
+    Library Viewer, and GenizahSearch URLs
+  - **Bibliography** — one row per bibliography entry, linked to
+    Manuscripts by System ID
+  - **Credits and Info** — query, search mode, gap setting, timestamp,
+    and result count
+- **📄 Word (DOCX):** formatted report suitable for academic prose
+- **JSON:** programmatic format with the same enrichment fields as the
+  Excel workbook (`has_pgp`, `is_printed`, `domains` per item) — see
+  the **Public API & AI Tools** section below
+
+Headers and sheet titles appear in Hebrew or English, matching your UI
+language.
 
 **Export locations:**
 - **Search Results:** Export buttons above the results table
 - **Parallels Results:** Export buttons in the results header
 - **Lists:** Export individual lists from the Lists page
+        ''').style('color: var(--text-secondary);')
+
+    # === Public API & AI Tools ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-api"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('api').classes('text-2xl text-primary')
+            h2('Public API & AI Tools', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+GenizahSearch exposes a public HTTP/JSON API for researchers and AI
+tools that need programmatic access to the corpus.
+
+**Endpoints:**
+- `POST /api/search` — text search across the corpus
+- `GET /api/browse` — fetch transcription, metadata, and image for a
+  manuscript
+- `POST /api/parallels` — find Genizah manuscripts containing chunks
+  matching a long source text
+
+**OpenAPI schema:** [`/api/openapi.json`](/api/openapi.json) describes
+the full API.
+
+**Cairo Genizah Research skill for Claude:** a ready-to-use
+[Claude skill](https://github.com/gershuni/GenizahSearch/tree/main/skills/cairo-genizah-research)
+drives this API to find candidate witnesses for a phrase, piyyut,
+responsum, letter, or composition, returning a tiered ranked list
+with browse text, library attribution, and image URLs.
         ''').style('color: var(--text-secondary);')
 
     # === Contact ===
@@ -622,6 +666,7 @@ def _create_hebrew_content():
                 ('catalog-browse', 'עיון לפי זיהוי'),
                 ('lists', 'רשימות'),
                 ('export', 'ייצוא נתונים'),
+                ('api', 'ממשק API ציבורי וכלי AI'),
             ]
             if WEB_PUZZLE_ENABLED:
                 toc_items.insert(8, ('puzzle', 'פאזל קטעים'))
@@ -845,7 +890,7 @@ def _create_hebrew_content():
 
         ui.markdown('''
 > **חשוב:** התרגומים הם כלי עזר ממוחשבים ועלולים להכיל שגיאות, לרבות מונחים שגויים, תוכן שאינו מופיע במקור, או תעתיקים לא עקביים. יש לאמת תמיד מול הטקסט המקורי לצורכי מחקר. אם נתקלתם בתרגום בעייתי, לחצו על כפתור **דיווח** ליד הטקסט המתורגם כדי לסייע לנו לשפר את האיכות.
-        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right; background: var(--surface-1, #f8f9fa); border-right: 3px solid var(--warning, #f59e0b); padding: 8px 12px; border-radius: 4px; margin-top: 4px;')
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right; background: var(--bg-tertiary); border-right: 3px solid var(--warning, #f59e0b); padding: 8px 12px; border-radius: 4px; margin-top: 4px;')
 
     # === Parallels Search ===
     with ui.card().classes('w-full p-6'):
@@ -1122,13 +1167,40 @@ def _create_hebrew_content():
         ui.markdown('''
 בכל שלב, ניתן לייצא תוצאות לשימוש חיצוני:
 
+- **📊 Excel (XLSX) — חוברת מחקרית:** חוברת בת 4 גיליונות מוכנה לציטוט:
+  - **תוצאות חיפוש** — התוצאות עם קטעי טקסט, טקסט מלא, סימוני PGP ומהדורה מודפסת, תחומים, וקישור לחיץ לתמונה בכל שורה
+  - **כתבי יד** — שורה לכל כתב יד עם קישורים לחיצים ל-PGP, לצפייה בספרייה ול-GenizahSearch
+  - **ביבליוגרפיה** — שורה לכל פריט ביבליוגרפי, מקושר לגיליון כתבי היד לפי מזהה מערכת
+  - **קרדיטים ומידע** — שאילתה, מצב חיפוש, הגדרת מרווח, תאריך, מספר תוצאות
 - **📄 Word (DOCX):** דוח מעוצב המתאים לעבודה אקדמית
-- **📊 Excel (XLSX):** גיליון אלקטרוני עם עיצוב עשיר והדגשת צבע של מילים שנמצאו
+- **JSON:** פורמט תכנותי עם אותם שדות העשרה כמו חוברת ה-Excel (‎`has_pgp`, `is_printed`, `domains` לכל פריט) — ראו את הסעיף **ממשק API ציבורי וכלי AI** למטה
+
+כותרות העמודות ושמות הגיליונות מוצגים בעברית או באנגלית, לפי שפת הממשק.
 
 **מיקומי ייצוא:**
 - **תוצאות חיפוש:** כפתורי הייצוא מעל טבלת התוצאות
 - **תוצאות מקבילות:** כפתורי הייצוא בכותרת התוצאות
 - **רשימות:** ייצוא רשימות בודדות מעמוד הרשימות
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === ממשק API ציבורי וכלי AI ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-api"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('api').classes('text-2xl text-primary')
+            h2('ממשק API ציבורי וכלי AI', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+מערכת GenizahSearch מציעה ממשק HTTP/JSON ציבורי לחוקרים ולכלי AI הזקוקים לגישה תכנותית לקורפוס.
+
+**נקודות קצה:**
+- `POST /api/search` — חיפוש טקסטואלי בקורפוס
+- `GET /api/browse` — טעינת תעתיק, מטא-נתונים ותמונה של כתב יד
+- `POST /api/parallels` — מציאת כתבי יד מהגניזה הכוללים מקטעים תואמים לטקסט מקור ארוך
+
+**סכמת OpenAPI:** [`/api/openapi.json`](/api/openapi.json) מתעדת את המבנה המלא של ה-API.
+
+**סקיל Cairo Genizah Research ל-Claude:** [סקיל מוכן לשימוש](https://github.com/gershuni/GenizahSearch/tree/main/skills/cairo-genizah-research) המפעיל את ה-API למציאת עדי נוסח לביטוי, פיוט, תשובה, מכתב או חיבור, ומחזיר רשימה מדורגת עם טקסט מתוך עמוד העיון, ייחוס לספרייה וקישורי תמונה.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Contact ===

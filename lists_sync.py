@@ -158,6 +158,57 @@ class ListsCloudSync:
             logger.error(f"Failed to create backup: {e}")
             return False
 
+    def _dedupe_and_index_local_items(self):
+        """
+        Merge local items that share a cloud_id (pre-existing duplicates from
+        earlier sync bugs) and return lookup maps for matching cloud rows to
+        local item keys.
+
+        Why duplicates can exist: desktop search adds items keyed as
+        ``{sys_id}::img::{img}`` while cloud only stores ``sys_id`` + ``fl_id``.
+        sync_from_cloud used to compute ``{sys_id}::fl::{fl_id}`` and insert a
+        second local item alongside the original ``::img::`` one.
+        """
+        items = self.lists_manager.data.get('items', {})
+
+        cloud_id_to_keys: Dict[str, list] = {}
+        for k, v in items.items():
+            cid = v.get('cloud_id')
+            if cid:
+                cloud_id_to_keys.setdefault(cid, []).append(k)
+
+        # Merge any pre-existing duplicates: keep most-recently-modified key,
+        # transfer list memberships into it, drop the rest.
+        for cid, keys in cloud_id_to_keys.items():
+            if len(keys) < 2:
+                continue
+            keys_sorted = sorted(
+                keys,
+                key=lambda k: items[k].get('modified', items[k].get('added', 0)),
+                reverse=True,
+            )
+            canonical = keys_sorted[0]
+            for other in keys_sorted[1:]:
+                for lst in items[other].get('lists', []):
+                    if lst not in items[canonical]['lists']:
+                        items[canonical]['lists'].append(lst)
+                del items[other]
+            logger.info(
+                f"Merged {len(keys) - 1} duplicate local item(s) sharing cloud_id {cid}"
+            )
+
+        cloud_id_to_item_id: Dict[str, str] = {}
+        sys_id_fl_id_to_item_id: Dict[tuple, str] = {}
+        for k, v in items.items():
+            cid = v.get('cloud_id')
+            if cid:
+                cloud_id_to_item_id[cid] = k
+            sys_id = v.get('sys_id')
+            if sys_id:
+                sys_id_fl_id_to_item_id[(sys_id, v.get('fl_id'))] = k
+
+        return cloud_id_to_item_id, sys_id_fl_id_to_item_id
+
     def sync_from_cloud(self) -> Dict[str, Any]:
         """
         Pull lists and items from Supabase and merge with local data.
@@ -332,6 +383,11 @@ class ListsCloudSync:
                     self.lists_manager.data.setdefault('lists_order', []).append(new_id)
                     result['lists_added'] += 1
 
+            # Build lookup maps and clean up any pre-existing local duplicates
+            # (caused by past syncs that keyed items by `img` while cloud keyed by
+            # `fl_id`). Matching priority below: cloud_id → (sys_id, fl_id) → computed key.
+            cloud_id_to_item_id, sys_id_fl_id_to_item_id = self._dedupe_and_index_local_items()
+
             # Fetch items for each cloud list
             for cloud_id, local_id in cloud_to_local.items():
                 # Skip syncing items for deleted lists
@@ -349,7 +405,12 @@ class ListsCloudSync:
                         continue
 
                     fl_id = cloud_item.get('fl_id')
-                    item_id = self.lists_manager._build_item_id(sys_id, fl_id=fl_id)
+                    cloud_row_id = cloud_item['id']
+                    item_id = (
+                        cloud_id_to_item_id.get(cloud_row_id)
+                        or sys_id_fl_id_to_item_id.get((sys_id, fl_id))
+                        or self.lists_manager._build_item_id(sys_id, fl_id=fl_id)
+                    )
 
                     items = self.lists_manager.data.get('items', {})
                     if item_id in items:
@@ -362,7 +423,9 @@ class ListsCloudSync:
                             items[item_id]['note'] = cloud_item['note']
                         if cloud_item.get('tags'):
                             items[item_id]['tags'] = cloud_item['tags']
-                        items[item_id]['cloud_id'] = cloud_item['id']
+                        items[item_id]['cloud_id'] = cloud_row_id
+                        cloud_id_to_item_id[cloud_row_id] = item_id
+                        sys_id_fl_id_to_item_id[(sys_id, fl_id)] = item_id
                     else:
                         # New item
                         items[item_id] = {
@@ -375,9 +438,11 @@ class ListsCloudSync:
                             'modified': time.time(),
                             'shelfmark_override': None,
                             'fl_id': fl_id,
-                            'cloud_id': cloud_item['id']
+                            'cloud_id': cloud_row_id
                         }
                         self.lists_manager.data['items'] = items
+                        cloud_id_to_item_id[cloud_row_id] = item_id
+                        sys_id_fl_id_to_item_id[(sys_id, fl_id)] = item_id
                         result['items_added'] += 1
 
             self.lists_manager.save()
