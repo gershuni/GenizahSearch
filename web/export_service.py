@@ -480,8 +480,9 @@ class ExportService:
             raise ValueError("No results to export")
 
         from shared.export_dossier import (
-            MANUSCRIPT_HEADERS, BIBLIOGRAPHY_HEADERS,
             build_manuscript_row, build_bibliography_rows,
+            main_header_row, manuscript_header_row, bibliography_header_row,
+            sheet_titles,
         )
         from shared_export_utils import build_rich_snippet_cell
         from genizah_core import get_library_display as core_get_library_display
@@ -522,8 +523,11 @@ class ExportService:
             except Exception:
                 lib_code = ''
             try:
+                # D-04 REVISED (2026-05-20): library_name follows ``lang``.
+                # Hebrew UI -> Hebrew library name (with English fallback inside
+                # get_library_display) via LIBRARY_CODES_HE; English UI -> English.
                 lib_name = (
-                    core_get_library_display(lib_code, short=False, lang='en')
+                    core_get_library_display(lib_code, short=False, lang=lang)
                     if lib_code else ''
                 )
             except Exception:
@@ -536,21 +540,19 @@ class ExportService:
             }
 
         # --- Workbook + 3 sheets ---
-        # MUST-FIX 94-03-E: "Genizah Results" is the locked English literal
-        # per EXPORT-META-09 cross-app parity (Wave 4 desktop mirrors this).
-        wb, ws_main = create_excel_workbook("Genizah Results", rtl_sheet=rtl)
-        ws_manu = wb.create_sheet(title="Manuscripts")
-        ws_bib = wb.create_sheet(title="Bibliography")
+        # D-04 REVISED (2026-05-20): sheet titles are localized via sheet_titles(lang).
+        # MUST-FIX 94-03-E (English-locked sheet name) is SUPERSEDED by this
+        # bilingual revision; the cross-parity test still passes because it
+        # builds both workbooks with the SAME lang (default 'en').
+        _titles = sheet_titles(lang)
+        wb, ws_main = create_excel_workbook(_titles['main'], rtl_sheet=rtl)
+        ws_manu = wb.create_sheet(title=_titles['manuscripts'])
+        ws_bib = wb.create_sheet(title=_titles['bibliography'])
         ws_manu.sheet_view.rightToLeft = rtl
         ws_bib.sheet_view.rightToLeft = rtl
 
-        # --- Main sheet: unified 12-column order per D-01 ---
-        main_headers = [
-            "System ID", "Library", "Shelfmark", "Title",
-            "Image/Page", "Source",
-            "Snippet", "Full Text",
-            "Has PGP", "Is Printed", "Domains", "IIIF Manifest",
-        ]
+        # --- Main sheet: unified 12-column order per D-01, bilingual headers ---
+        main_headers = main_header_row(lang)
         style_excel_header(ws_main, main_headers)
         set_excel_column_widths(ws_main, {
             'A': 18, 'B': 25, 'C': 22, 'D': 35,
@@ -595,10 +597,12 @@ class ExportService:
                 except Exception:
                     sys_id_for_cell = ''
 
-            # D-04 / Pattern 1.8 / Shared Pattern F: re-resolve library_name
-            # via the English-pinned core helper. `library_name_live` from
-            # `_resolve_result_display` routes through UI lang, which would
-            # leak Hebrew names on a Hebrew-UI export. Bypass it here.
+            # D-04 REVISED (2026-05-20): library_name follows ``lang``.
+            # When lang == 'he' the row shows the Hebrew library name (via
+            # LIBRARY_CODES_HE in get_library_display); when lang == 'en' the
+            # English name. `library_name_live` from `_resolve_result_display`
+            # routes through UI lang too, but we re-resolve via the lang-aware
+            # core helper for explicit determinism on this path.
             lib_code_for_cell = ''
             try:
                 if self.meta_mgr and sys_id_for_cell:
@@ -613,7 +617,7 @@ class ExportService:
                     lib_code_for_cell = disp_lib or ''
             try:
                 library_name = (
-                    core_get_library_display(lib_code_for_cell, short=False, lang='en')
+                    core_get_library_display(lib_code_for_cell, short=False, lang=lang)
                     if lib_code_for_cell else ''
                 )
             except Exception:
@@ -697,7 +701,8 @@ class ExportService:
                 seen.add(sid)
                 unique_sys_ids.append(sid)
 
-        style_excel_header(ws_manu, list(MANUSCRIPT_HEADERS))
+        # D-04 REVISED (2026-05-20): bilingual headers via manuscript_header_row(lang).
+        style_excel_header(ws_manu, manuscript_header_row(lang))
         set_excel_column_widths(ws_manu, {
             'A': 18, 'B': 22, 'C': 25, 'D': 35, 'E': 30, 'F': 60,
             'G': 18, 'H': 14, 'I': 25, 'J': 25, 'K': 22, 'L': 50,
@@ -711,12 +716,13 @@ class ExportService:
             ])
 
         # --- Bibliography sub-sheet (D-02 / D-03) ---
-        style_excel_header(ws_bib, list(BIBLIOGRAPHY_HEADERS))
+        # D-04 REVISED (2026-05-20): bilingual headers via bibliography_header_row(lang).
+        style_excel_header(ws_bib, bibliography_header_row(lang))
         set_excel_column_widths(ws_bib, {
             'A': 18, 'B': 22, 'C': 25, 'D': 40, 'E': 30, 'F': 12, 'G': 14, 'H': 20,
         })
         for sid in unique_sys_ids:
-            for row in build_bibliography_rows(sid, _meta_resolver):
+            for row in build_bibliography_rows(sid, _meta_resolver, lang=lang):
                 ws_bib.append([
                     sanitize_text_for_excel(v) if isinstance(v, str) else v
                     for v in row

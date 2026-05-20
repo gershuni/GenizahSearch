@@ -6,6 +6,22 @@ pipelines consume this module to emit the new `Manuscripts` and `Bibliography`
 sub-sheets. Behavior is identical across both apps so the workbook structure
 is uniform.
 
+D-04 REVISION (2026-05-20, smoke verification gap fix)
+-----------------------------------------------------
+
+The original D-04 prohibition on Hebrew content was REVERSED during smoke
+verification: when `lang == 'he'`, row content is now Hebrew-preferred with
+graceful English fallback (and vice versa for `lang == 'en'`). Sheet titles
+and header rows are now bilingual via :func:`sheet_titles`,
+:func:`main_header_row`, :func:`manuscript_header_row`,
+:func:`bibliography_header_row`. The view-direction conditional RTL is
+unchanged. The D-02 prohibition on transcription text in NEW dossier surfaces
+is unchanged. The D-10 parallels-envelope strip is unchanged.
+
+Translation rule: where a source DB has both Hebrew and English variants of
+a field, the variant matching the UI language is preferred; the other
+variant is used as fallback when the preferred one is absent.
+
 Public API
 ----------
 
@@ -145,6 +161,108 @@ BIBLIOGRAPHY_HEADERS: List[str] = [
 
 
 # ---------------------------------------------------------------------------
+# Bilingual header rows + sheet titles (D-04 REVISED 2026-05-20)
+# ---------------------------------------------------------------------------
+#
+# Hebrew translations match the canonical strings already present in
+# ``genizah_translations.TRANSLATIONS`` (used by the desktop ``tr()`` helper).
+# When ``lang == 'en'`` the helpers return the corresponding English constant
+# verbatim for back-compat with prior callers that read ``MANUSCRIPT_HEADERS``
+# / ``BIBLIOGRAPHY_HEADERS`` directly.
+
+_MAIN_HEADERS_EN: List[str] = [
+    "System ID", "Library", "Shelfmark", "Title",
+    "Image/Page", "Source",
+    "Snippet", "Full Text",
+    "Has PGP", "Is Printed", "Domains", "IIIF Manifest",
+]
+
+_MAIN_HEADERS_HE: List[str] = [
+    "מספר מערכת", "ספרייה", "מספר מדף", "כותרת",
+    "תמונה/עמוד", "מקור",
+    "קטע", "טקסט מלא",
+    "יש PGP", "מודפס", "תחומים", "מניפסט IIIF",
+]
+
+_MANUSCRIPT_HEADERS_HE: List[str] = [
+    "מספר מערכת",
+    "מספר מדף",
+    "ספרייה",
+    "כותרת",
+    "כתובת PGP",
+    "תיאור PGP",
+    "סוג PGP",
+    "תאריך PGP",
+    "שפות PGP",
+    "תגיות PGP",
+    "רשומה בקטלוג הספרייה הלאומית",
+    "תקציר קטלוגי",
+    "קישור לצפייה בספרייה",
+    "קישור ל-GenizahSearch",
+]
+
+_BIBLIOGRAPHY_HEADERS_HE: List[str] = [
+    "מספר מערכת",
+    "מספר מדף",
+    "מחבר המאמר",
+    "שם המאמר",
+    "כותרת רצה",
+    "שנת הפרסום",
+    "עמוד אזכור",
+    "קיצור הקטלוג",
+]
+
+_SHEET_TITLES_EN: Dict[str, str] = {
+    'main': "Genizah Results",
+    'manuscripts': "Manuscripts",
+    'bibliography': "Bibliography",
+}
+
+_SHEET_TITLES_HE: Dict[str, str] = {
+    'main': "תוצאות גניזה",
+    'manuscripts': "כתבי יד",
+    'bibliography': "ביבליוגרפיה",
+}
+
+
+def main_header_row(lang: str = 'en') -> List[str]:
+    """Return the 12 main-sheet column headers in the requested language.
+
+    Phase 94 D-04 REVISED (2026-05-20): Hebrew when ``lang == 'he'``, English
+    otherwise. The returned list is a fresh copy so callers cannot mutate the
+    module constants.
+    """
+    if lang == 'he':
+        return list(_MAIN_HEADERS_HE)
+    return list(_MAIN_HEADERS_EN)
+
+
+def manuscript_header_row(lang: str = 'en') -> List[str]:
+    """Return the 14 Manuscripts sub-sheet column headers in the requested language.
+
+    When ``lang == 'en'`` returns the English row matching :data:`MANUSCRIPT_HEADERS`
+    verbatim (back-compat). When ``lang == 'he'`` returns the Hebrew row.
+    """
+    if lang == 'he':
+        return list(_MANUSCRIPT_HEADERS_HE)
+    return list(MANUSCRIPT_HEADERS)
+
+
+def bibliography_header_row(lang: str = 'en') -> List[str]:
+    """Return the 8 Bibliography sub-sheet column headers in the requested language."""
+    if lang == 'he':
+        return list(_BIBLIOGRAPHY_HEADERS_HE)
+    return list(BIBLIOGRAPHY_HEADERS)
+
+
+def sheet_titles(lang: str = 'en') -> Dict[str, str]:
+    """Return a dict of localized sheet titles keyed by ``main`` / ``manuscripts`` / ``bibliography``."""
+    if lang == 'he':
+        return dict(_SHEET_TITLES_HE)
+    return dict(_SHEET_TITLES_EN)
+
+
+# ---------------------------------------------------------------------------
 # MetaResolver type alias
 # ---------------------------------------------------------------------------
 
@@ -183,7 +301,10 @@ def _split_pgp_languages(value: Any) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
-def pgp_subset_for_sys_id(sys_id: str) -> Optional[Dict[str, Any]]:
+def pgp_subset_for_sys_id(
+    sys_id: str,
+    lang: str = 'en',
+) -> Optional[Dict[str, Any]]:
     """Return a 6-key PGP projection for a manuscript or ``None``.
 
     Keys (always present when the helper returns a dict; values may be None):
@@ -199,6 +320,15 @@ def pgp_subset_for_sys_id(sys_id: str) -> Optional[Dict[str, Any]]:
 
     The helper NEVER emits ``page_section_text``, ``transcription``,
     ``full_text``, or any field outside the 6-key whitelist (D-02 boundary).
+
+    D-04 REVISED (2026-05-20): when ``lang == 'he'`` and the PGP sidecar has
+    a Hebrew translation for ``description`` (and/or ``document_type``) in
+    the ``pgp_translations`` table (per ``shared/translation_service.py``),
+    the Hebrew variant is preferred with English fallback. Type / date /
+    languages / tags stay in their canonical English/categorical form (these
+    are normalized vocabulary, not free-text). ``document_type_he`` is
+    preferred when available because the desktop already surfaces translated
+    document types in browse/search UI.
     """
     if not sys_id:
         return None
@@ -215,19 +345,55 @@ def pgp_subset_for_sys_id(sys_id: str) -> Optional[Dict[str, Any]]:
         langs_secondary = _split_pgp_languages(doc.get('languages_secondary'))
         # Merge primary + secondary, dedupe while preserving order.
         languages = list(langs_primary)
-        for lang in langs_secondary:
-            if lang not in languages:
-                languages.append(lang)
+        for entry_lang in langs_secondary:
+            if entry_lang not in languages:
+                languages.append(entry_lang)
+
+        description = doc.get('description')
+        document_type = doc.get('document_type')
+
+        # D-04 REVISED: prefer Hebrew when lang=='he' AND a translation exists.
+        if lang == 'he':
+            he_translation = _pgp_translation_he_for_sys_id(sys_id)
+            if he_translation:
+                desc_he = he_translation.get('description_he')
+                if desc_he and str(desc_he).strip():
+                    description = desc_he
+                type_he = he_translation.get('document_type_he')
+                if type_he and str(type_he).strip():
+                    document_type = type_he
+
         return {
             'pgp_url': doc.get('pgp_url'),
-            'description': doc.get('description'),
-            'document_type': doc.get('document_type'),
+            'description': description,
+            'document_type': document_type,
             'date_display': date_display,
             'languages': languages,
             'tags': list(doc.get('tags') or []),
         }
     except Exception as e:
         logger.warning("pgp_subset_for_sys_id(%s) failed: %s", sys_id, e)
+        return None
+
+
+def _pgp_translation_he_for_sys_id(sys_id: str) -> Optional[Dict[str, Any]]:
+    """Return ``{description_he, document_type_he}`` for a sys_id, or ``None``.
+
+    Thin wrapper around :meth:`TranslationService.get_pgp_translations_by_sys_ids`
+    for the single-sys_id case. Exception-resilient: returns ``None`` on any
+    failure or when the sidecar lacks ``pgp_translations``. Module-scope
+    factory (not lazy) so tests can monkeypatch at
+    ``shared.export_dossier._pgp_translation_he_for_sys_id``.
+    """
+    try:
+        from shared.translation_service import TranslationService
+        svc = TranslationService(thread_safe=True)
+        if not svc.pgp_available():
+            return None
+        result = svc.get_pgp_translations_by_sys_ids([sys_id])
+        return result.get(sys_id)
+    except Exception as e:
+        logger.warning("_pgp_translation_he_for_sys_id(%s) failed: %s", sys_id, e)
         return None
 
 
@@ -280,25 +446,30 @@ def nli_subset_for_sys_id(sys_id: str) -> Optional[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def catalog_summary_for_sys_id(sys_id: str) -> Optional[Dict[str, Any]]:
+def catalog_summary_for_sys_id(
+    sys_id: str,
+    lang: str = 'en',
+) -> Optional[Dict[str, Any]]:
     """Return a narrow FJMS catalog projection for a manuscript or ``None``.
 
-    Returns 4 fields: ``title`` (English first, Hebrew fallback per D-04),
-    ``author_text``, ``copy_date`` (already sentinel-normalized to None by the
-    service at :meth:`FjmsService.get_catalog_records`), ``copy_place``.
+    Returns 4 fields: ``title``, ``author_text``, ``copy_date`` (sentinel-
+    normalized to None by the service at :meth:`FjmsService.get_catalog_records`),
+    ``copy_place``.
 
     **Aggregation strategy:** *first non-empty per field* across all records
     returned by :meth:`FjmsService.get_catalog_records`. Multiple records
     arise when a manuscript has been cataloged by several teams; we pick
     the first scholar-provided value for each field independently rather
     than picking a single record verbatim, because cataloging is often
-    partial. Field choice rationale:
+    partial.
 
-    - **title** + **author_text** + **copy_date** + **copy_place** cover the
-      core scholarly metadata most likely to be cited.
-    - ``textual_frame_eng`` and ``genizah_title_eng`` are intentionally NOT
-      surfaced — they would duplicate the PGP ``description`` and
-      ``document_type`` columns already present on the Manuscripts sheet.
+    D-04 REVISED (2026-05-20): title preference depends on ``lang``. When
+    ``lang == 'he'``, ``title_heb`` (Hebrew) is preferred with English
+    fallback (``title``). When ``lang == 'en'``, English ``title`` is
+    preferred with Hebrew fallback. ``author_text`` / ``copy_place`` are
+    not Hebrew-translated in the FJMS sidecar (free-text scholar notes),
+    so they pass through unchanged. ``copy_date`` is numeric — language-
+    independent.
 
     **Codex MUST-FIX 3 / D-02 boundary:** uses
     :meth:`FjmsService.get_catalog_records` only. The detail variant
@@ -322,7 +493,11 @@ def catalog_summary_for_sys_id(sys_id: str) -> Optional[Dict[str, Any]]:
                     return v
             return None
 
-        title = _pick('title') or _pick('title_heb')  # D-04: English first, Hebrew fallback.
+        # D-04 REVISED: language-preferred title selection.
+        if lang == 'he':
+            title = _pick('title_heb') or _pick('title')
+        else:
+            title = _pick('title') or _pick('title_heb')
         author_text = _pick('author_text')
         copy_date = _pick('copy_date')
         copy_place = _pick('copy_place')
@@ -346,7 +521,10 @@ def catalog_summary_for_sys_id(sys_id: str) -> Optional[Dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def bibliography_for_sys_id(sys_id: str) -> List[Dict[str, Any]]:
+def bibliography_for_sys_id(
+    sys_id: str,
+    lang: str = 'en',
+) -> List[Dict[str, Any]]:
     """Return 0..N FJMS bibliography entries projected to 6 whitelisted keys.
 
     Keys per entry: ``running_title``, ``title_year``, ``mention_page``,
@@ -358,6 +536,13 @@ def bibliography_for_sys_id(sys_id: str) -> List[Dict[str, Any]]:
     The extended fields ``comment`` / ``note_for_display`` / ``catalog_entry``
     that the service may include are deliberately dropped — they don't fit
     the dossier sub-sheet structure and risk D-02 boundary creep.
+
+    D-04 REVISED (2026-05-20): when ``lang == 'he'`` and the underlying
+    bibliography row exposes ``running_title_heb`` / ``article_author_heb``
+    fields, the Hebrew variants are preferred with English fallback. The
+    other 4 keys (``title_year`` int, ``mention_page`` short string,
+    ``article_name`` free-text not translated, ``catalog_acronym`` short
+    string) are language-neutral.
     """
     if not sys_id:
         return []
@@ -366,13 +551,26 @@ def bibliography_for_sys_id(sys_id: str) -> List[Dict[str, Any]]:
         if not fjms or not fjms.is_available():
             return []
         entries = fjms.get_bibliography(sys_id) or []
+        prefer_he = (lang == 'he')
+
+        def _pick_he(entry, he_key, en_key):
+            if prefer_he:
+                v = entry.get(he_key)
+                if v and str(v).strip():
+                    return v
+                return entry.get(en_key)
+            v = entry.get(en_key)
+            if v and str(v).strip():
+                return v
+            return entry.get(he_key)
+
         return [
             {
-                'running_title': e.get('running_title'),
+                'running_title': _pick_he(e, 'running_title_heb', 'running_title'),
                 'title_year': e.get('title_year'),
                 'mention_page': e.get('mention_page'),
                 'article_name': e.get('article_name'),
-                'article_author_eng': e.get('article_author_eng'),
+                'article_author_eng': _pick_he(e, 'article_author_heb', 'article_author_eng'),
                 'catalog_acronym': e.get('catalog_acronym'),
             }
             for e in entries
@@ -401,19 +599,22 @@ def build_manuscript_row(
     :func:`build_bibliography_rows`).
 
     Returns a list of exactly 14 Python primitives matching
-    :data:`MANUSCRIPT_HEADERS` order. Missing data renders as empty strings
-    (NOT 'N/A' / placeholders — D-06).
+    :data:`MANUSCRIPT_HEADERS` (English) / :func:`manuscript_header_row('he')`
+    (Hebrew) order. Missing data renders as empty strings (NOT 'N/A' /
+    placeholders — D-06).
 
-    The ``lang`` parameter is reserved for the CALLER's downstream sheet-view
-    direction decision; row content is always English regardless of ``lang``
-    value per D-04 / Codex SHOULD-FIX 9.
+    D-04 REVISED (2026-05-20): when ``lang == 'he'`` the row prefers
+    Hebrew variants from each source DB (PGP description / type via
+    ``pgp_translations`` table, FJMS catalog title via ``title_heb``,
+    library name via ``get_library_display(code, lang='he')``) with
+    English graceful fallback. The Catalog Summary cell field labels
+    (``Title:`` / ``Author:`` / ``Date:`` / ``Place:``) also follow the
+    requested language.
 
-    ``library_name`` comes from the caller-supplied ``meta_resolver``, which
-    is expected to call ``genizah_core.get_library_display(code, short=False,
-    lang='en')``. On unknown library codes that function returns the input
-    code unchanged (``LIBRARY_CODES.get(code, code)`` semantics at
-    ``genizah_core.py:1820-1838``) — this is acceptable graceful degradation
-    per D-06 / MUST-FIX 94-01-B.
+    ``library_name`` comes from the caller-supplied ``meta_resolver``;
+    callers MUST construct the resolver such that ``library_name`` reflects
+    ``lang`` (i.e. call ``genizah_core.get_library_display(code,
+    short=False, lang=lang)``).
     """
     if meta_resolver is not None and sys_id:
         meta = meta_resolver(sys_id)
@@ -429,9 +630,9 @@ def build_manuscript_row(
         title = ''
         library_name = ''
 
-    pgp = pgp_subset_for_sys_id(sys_id) or {}
+    pgp = pgp_subset_for_sys_id(sys_id, lang=lang) or {}
     nli = nli_subset_for_sys_id(sys_id) or {}
-    catalog = catalog_summary_for_sys_id(sys_id) or {}
+    catalog = catalog_summary_for_sys_id(sys_id, lang=lang) or {}
 
     # D-05: pipe-joined, NO surrounding spaces.
     languages_pipe = '|'.join(pgp.get('languages') or [])
@@ -439,13 +640,23 @@ def build_manuscript_row(
 
     # Catalog Summary cell: 'Title: X | Author: Y | Date: Z | Place: W'
     # with empty fields omitted entirely (CONTEXT D-08 helper 3 strategy).
+    # D-04 REVISED: labels follow the row's language.
+    if lang == 'he':
+        _labels = (
+            ('title', 'כותרת'),
+            ('author_text', 'מחבר'),
+            ('copy_date', 'תאריך'),
+            ('copy_place', 'מקום'),
+        )
+    else:
+        _labels = (
+            ('title', 'Title'),
+            ('author_text', 'Author'),
+            ('copy_date', 'Date'),
+            ('copy_place', 'Place'),
+        )
     cat_parts: List[str] = []
-    for key, label in (
-        ('title', 'Title'),
-        ('author_text', 'Author'),
-        ('copy_date', 'Date'),
-        ('copy_place', 'Place'),
-    ):
+    for key, label in _labels:
         v = catalog.get(key)
         if v is not None and str(v).strip():
             cat_parts.append(f"{label}: {v}")
@@ -481,20 +692,27 @@ def build_manuscript_row(
 def build_bibliography_rows(
     sys_id: str,
     meta_resolver: Optional[MetaResolver],
+    lang: str = 'en',
 ) -> List[List[Any]]:
     """Build 0..N Bibliography sub-sheet rows for a sys_id.
 
     Calls :func:`bibliography_for_sys_id` ONLY (Codex MUST-FIX 4).
 
     Returns a list of row-lists, each row exactly 8 cells matching
-    :data:`BIBLIOGRAPHY_HEADERS` order. Empty list when the sys_id has no
-    bib entries.
+    :data:`BIBLIOGRAPHY_HEADERS` (English) /
+    :func:`bibliography_header_row('he')` (Hebrew) order. Empty list when
+    the sys_id has no bib entries.
 
     Per D-06, missing string fields render as empty cells.
+
+    D-04 REVISED (2026-05-20): when ``lang == 'he'`` the row prefers Hebrew
+    variants from each underlying bib entry (running_title_heb,
+    article_author_heb) with English graceful fallback. Threading lang
+    happens via :func:`bibliography_for_sys_id`.
     """
     if not sys_id:
         return []
-    entries = bibliography_for_sys_id(sys_id) or []
+    entries = bibliography_for_sys_id(sys_id, lang=lang) or []
     if not entries:
         return []
 

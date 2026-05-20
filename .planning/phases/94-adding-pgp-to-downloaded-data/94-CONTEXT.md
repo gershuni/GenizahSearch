@@ -122,6 +122,80 @@ Sheet order in the workbook (both apps): `Genizah Results` (default-active) → 
 
 **Shared module contract:** `shared/export_dossier.py` row builders accept a `lang` parameter that is DOCUMENTED as ONLY for downstream view direction. The shared module itself does NOT set sheet_view (that's the caller's job). Row content is always English.
 
+**REVISED 2026-05-20 (smoke verification gap fix):** The English-only-content
+prohibition above is REVERSED for row content. After Hillel ran the
+post-Wave 4 smoke verification on real exports, two gaps were reported:
+
+1. Hebrew UI must produce Hebrew xlsx (headers + sheet names). The desktop
+   previously used Qt `tr()` for these strings and `ws.title = tr("Search Results")`;
+   the Wave 4 restructure dropped header/sheet-title translation. Web was
+   English-only since inception so this is also a forward-improvement on
+   the web side.
+
+2. Metadata source language: when the source DB has both Hebrew and English
+   variants of a field, prefer the variant matching the UI language (with
+   graceful fallback to the other variant).
+
+**New contract:**
+
+- `lang='he'` → Hebrew sheet titles + headers + Hebrew-preferred metadata
+  content (with English fallback per field).
+- `lang='en'` → English everywhere (with Hebrew fallback per field; symmetric
+  for back-compat with the pre-reversal behavior).
+- The reversal scope is NARROW: only the row content layer. The D-02
+  prohibition on transcription / full-text in NEW dossier surfaces is
+  UNCHANGED. The D-10 parallels-envelope strip is UNCHANGED. The
+  conditional RTL view-direction logic is UNCHANGED.
+
+**Implementation surfaces (Phase 94-04 follow-up commit):**
+
+- `shared/export_dossier.py` gains 4 new bilingual helpers: `main_header_row(lang)`,
+  `manuscript_header_row(lang)`, `bibliography_header_row(lang)`,
+  `sheet_titles(lang) -> {main, manuscripts, bibliography}`. The English
+  `MANUSCRIPT_HEADERS` / `BIBLIOGRAPHY_HEADERS` constants remain for
+  back-compat — `manuscript_header_row('en')` returns them verbatim.
+- `pgp_subset_for_sys_id(sys_id, lang='en')` prefers Hebrew `description` /
+  `document_type` from the existing `pgp_translations` table (via
+  `shared/translation_service.py:TranslationService.get_pgp_translations_by_sys_ids`)
+  when `lang == 'he'`. Service is already battle-tested — no new infrastructure.
+- `catalog_summary_for_sys_id(sys_id, lang='en')` flips title preference:
+  `title_heb` first when `lang == 'he'`, else `title` first. The other
+  fields (`author_text`, `copy_date`, `copy_place`) are not Hebrew-translated
+  in the FJMS sidecar so they pass through unchanged.
+- `bibliography_for_sys_id(sys_id, lang='en')` prefers `running_title_heb` /
+  `article_author_heb` when `lang == 'he'`. These columns were already
+  surfaced by `FjmsService.get_bibliography` (Phase 33 META-03) — no new
+  service method required.
+- `build_manuscript_row(sys_id, meta_resolver, lang='en')` threads `lang` to
+  its 3 inner helpers AND localizes the Catalog Summary cell field labels
+  (`Title:` → `כותרת:`, `Author:` → `מחבר:`, `Date:` → `תאריך:`, `Place:` → `מקום:`).
+- `build_bibliography_rows(sys_id, meta_resolver, lang='en')` threads `lang` through.
+- Web caller: `web/export_service.py:export_search_results_excel` consumes
+  the new bilingual helpers, calls `get_library_display(code, lang=lang)`.
+- Desktop caller: `genizah_app.py:_build_search_results_xlsx_bytes` ditto.
+  `export_results('xlsx')` builds the meta_resolver with
+  `_row_lang = CURRENT_LANG`; `headers_main = main_header_row(CURRENT_LANG)`.
+
+**Service inventory notes (for the parent CONTEXT integrity):**
+
+- `pgp_translations` table EXISTS in the production `pgp_data/pgp.db` sidecar.
+  The worktree's copy may be empty (test mocks the call path anyway).
+- `FjmsService.get_bibliography` already returns Hebrew variants
+  (`running_title_heb`, `article_author_heb`, `title_acronym_heb`) — no
+  service-layer additions needed.
+- `NliCrossrefService.get_catalog_entry` returns Neubauer-Cowley reference
+  strings (numeric-with-prefix) that are language-neutral — no Hebrew
+  accessor needed; the column passes through verbatim per the original D-08
+  contract.
+- `genizah_core.get_library_display(code, short=False, lang='he')` was
+  already lang-aware via `LIBRARY_CODES_HE` — no core changes needed.
+
+The MUST-FIX 94-04-B (English-locked desktop headers) and 94-04-E (English-locked
+sheet title literal "Genizah Results") clauses are **SUPERSEDED** by this
+revision. The cross-parity test (MUST-FIX 94-04-C) still passes because it
+builds both apps' workbooks at the default `lang='en'` -> identical English
+output on both sides.
+
 ### D-05 — Multi-value field formatting
 List-valued cells use the pipe character `|` with NO surrounding spaces: `'Bible|Letter|Legal'`. Applies to: Domains, PGP Languages, PGP Tags. NOT applied to URL fields.
 

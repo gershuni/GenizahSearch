@@ -2470,6 +2470,238 @@ class SettingsDialog(QDialog):
         return lbl
 
 
+# ---------------------------------------------------------------------------
+# Phase 94 EXPORT-META-09 — desktop xlsx 3-sheet builder (module-level helper).
+# ---------------------------------------------------------------------------
+def _build_search_results_xlsx_bytes(
+    results,
+    headers_main=None,
+    meta_resolver=None,
+    sanitize_fn=None,
+    credit_text='',
+    search_info_text='',
+    transcription_sys_ids=None,
+    printed_ids=None,
+    result_domains=None,
+    lang='en',
+    # MUST-FIX 94-04-D: optional Tantivy-backed full_text hydration
+    # callback for rows lacking 'full_text' / 'full_text_excerpt' keys
+    # (e.g., PGP tag rows from genizah_app.py:17065-17076). When None,
+    # missing full_text renders as empty.
+    full_text_fetcher=None,
+):
+    """Build the 3-sheet workbook bytes for desktop xlsx search-results export.
+
+    Phase 94 EXPORT-META-09 — desktop parity with web's 3-sheet structure
+    via :mod:`shared.export_dossier`. Returns the workbook bytes; caller
+    writes them to the user-chosen path via Qt's ``QFileDialog`` flow.
+
+    The structure mirrors :meth:`web.export_service.ExportService.export_search_results_excel`
+    exactly: same sheet names (``'Genizah Results'``, ``'Manuscripts'``,
+    ``'Bibliography'``), same 12-column main-sheet header order per D-01,
+    same shared dossier row builders. Cross-app parity is pinned by
+    :file:`tests/test_export_xlsx_cross_parity.py` (MUST-FIX 94-04-C).
+
+    Args:
+        results: list of result dicts (each has ``display`` + ``snippet`` + …).
+        headers_main: 12-col main-sheet headers (caller supplies English literals
+            per MUST-FIX 94-04-B — desktop's prior ``tr()`` convention is
+            EXPLICITLY OVERRIDDEN for these specific strings).
+        meta_resolver: callable ``sys_id -> {shelfmark, title, library_code,
+            library_name}`` (the MetaResolver contract from
+            :mod:`shared.export_dossier`).
+        sanitize_fn: callable ``text -> sanitized text`` (desktop's
+            :meth:`GenizahGUI._sanitize_for_excel`).
+        credit_text: multi-line credit text rendered above the header row.
+        search_info_text: search-info lines rendered after credits.
+        transcription_sys_ids: set of sys_ids with PGP — ``'Yes'`` in Has PGP col.
+        printed_ids: set of sys_ids that are printed — ``'Yes'`` in Is Printed col.
+        result_domains: dict ``sys_id -> list of domain names`` — pipe-joined.
+        lang: ``'he'`` / ``'en'`` for conditional RTL view direction (D-04).
+        full_text_fetcher: optional callable ``uid -> str`` for hydrating
+            rows that lack ``full_text`` / ``full_text_excerpt`` (MUST-FIX 94-04-D).
+            Pass ``None`` to skip hydration (e.g., test contexts without a searcher).
+
+    Returns:
+        bytes — the ``.xlsx`` file content.
+    """
+    import io
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from shared.export_dossier import (
+        build_manuscript_row, build_bibliography_rows,
+        main_header_row, manuscript_header_row, bibliography_header_row,
+        sheet_titles,
+    )
+    from shared_export_utils import build_rich_snippet_cell
+
+    rtl = (lang == 'he')
+    _trans_set = set(transcription_sys_ids or [])
+    _printed_set = set(printed_ids or [])
+    _domains_map = dict(result_domains or {})
+
+    # D-04 REVISED (2026-05-20): bilingual headers + sheet titles.
+    # `headers_main` kwarg kept for back-compat with the cross-parity test
+    # fixture which passes an explicit English list; when None, falls back
+    # to lang-aware main_header_row(lang).
+    if headers_main is None:
+        headers_main = main_header_row(lang)
+    if sanitize_fn is None:
+        sanitize_fn = lambda x: '' if x is None else str(x)  # noqa: E731
+
+    _titles = sheet_titles(lang)
+
+    wb = openpyxl.Workbook()
+    ws_main = wb.active
+    # D-04 REVISED (2026-05-20): sheet title follows lang via sheet_titles(lang).
+    # The cross-parity test still passes because it builds both workbooks
+    # with default lang='en' -> 'Genizah Results' on both sides.
+    ws_main.title = _titles['main'][:31]
+    ws_main.sheet_view.rightToLeft = rtl
+
+    ws_manu = wb.create_sheet(title=_titles['manuscripts'])
+    ws_manu.sheet_view.rightToLeft = rtl
+    ws_bib = wb.create_sheet(title=_titles['bibliography'])
+    ws_bib.sheet_view.rightToLeft = rtl
+
+    # --- Main sheet: credit + search-info rows (existing desktop pattern) ---
+    current_row = 1
+    for line in (credit_text or '').split('\n'):
+        if not line.strip():
+            continue
+        cell = ws_main.cell(row=current_row, column=1, value=sanitize_fn(line))
+        cell.font = Font(bold=True, color="555555")
+        current_row += 1
+    for line in (search_info_text or '').split('\n'):
+        if not line.strip():
+            continue
+        cell = ws_main.cell(row=current_row, column=1, value=sanitize_fn(line))
+        cell.font = Font(bold=True, color="555555")
+        current_row += 1
+    current_row += 1  # blank row before headers
+
+    # --- Main sheet headers (12-col unified order per D-01) ---
+    for col_idx, header in enumerate(headers_main, 1):
+        cell = ws_main.cell(row=current_row, column=col_idx, value=header)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+    current_row += 1
+
+    # --- Main sheet data rows ---
+    for res in results:
+        display_dict = res.get('display') or {}
+        sys_id = display_dict.get('id') or res.get('sys_id') or ''
+        meta = meta_resolver(sys_id) if sys_id else None
+        shelfmark = (meta.get('shelfmark') if meta else (display_dict.get('shelfmark') or ''))
+        title = (meta.get('title') if meta else (display_dict.get('title') or ''))
+        library_name = (meta.get('library_name') if meta else '')
+        img_page = str(display_dict.get('img', '') or '')
+        source_label = display_dict.get('source', '') or ''
+
+        snippet_raw = res.get('raw_file_hl', '') or res.get('snippet', '') or ''
+        # D-02 amendment: Full Text grandfathered (Tantivy-indexed page text).
+        # Desktop result dict carries 'full_text' or 'full_text_excerpt'
+        # (PATTERNS.md Pattern 7.3).
+        full_text = res.get('full_text') or res.get('full_text_excerpt') or ''
+        # MUST-FIX 94-04-D: fallback hydration via Tantivy when the row
+        # lacks stored text (PGP tag rows at :17065-17076 omit full_text).
+        # Mirrors the existing fallback pattern at genizah_app.py:17813-17815.
+        if not full_text and full_text_fetcher is not None:
+            uid = res.get('uid', '')
+            if uid:
+                try:
+                    full_text = full_text_fetcher(uid) or ''
+                except Exception:
+                    full_text = ''
+        full_text = (full_text or '')[:32000]
+
+        has_pgp_cell = 'Yes' if (sys_id and sys_id in _trans_set) else ''
+        is_printed_cell = 'Yes' if (sys_id and sys_id in _printed_set) else ''
+        domains_list = _domains_map.get(sys_id, []) or []
+        domains_cell = '|'.join(d for d in domains_list if d)
+        iiif_cell = ''  # D-13 deferred — column header present, cells empty
+
+        row_cells = [
+            sanitize_fn(sys_id),
+            sanitize_fn(library_name),
+            sanitize_fn(shelfmark),
+            sanitize_fn(title),
+            sanitize_fn(img_page),
+            sanitize_fn(source_label),
+            None,  # Snippet — written below via build_rich_snippet_cell
+            sanitize_fn(full_text),
+            has_pgp_cell,
+            is_printed_cell,
+            sanitize_fn(domains_cell),
+            iiif_cell,
+        ]
+        for col_idx, val in enumerate(row_cells, 1):
+            if col_idx == 7:
+                # MUST-FIX 94-04-F: shared rich-text snippet helper (D-14 DRY).
+                ws_main.cell(
+                    row=current_row, column=col_idx,
+                    value=build_rich_snippet_cell(snippet_raw, sanitize_fn),
+                )
+            else:
+                ws_main.cell(row=current_row, column=col_idx, value=val)
+        current_row += 1
+
+    # --- Manuscripts sub-sheet ---
+    # D-04 REVISED (2026-05-20): bilingual headers via manuscript_header_row(lang).
+    for col_idx, header in enumerate(manuscript_header_row(lang), 1):
+        cell = ws_manu.cell(row=1, column=col_idx, value=header)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+
+    # Dedupe sys_ids in first-occurrence order per D-12.
+    seen = set()
+    unique_sys_ids = []
+    for r in results:
+        sid = (r.get('display') or {}).get('id') or r.get('sys_id') or ''
+        if sid and sid not in seen:
+            seen.add(sid)
+            unique_sys_ids.append(sid)
+
+    manu_row = 2
+    for sid in unique_sys_ids:
+        row = build_manuscript_row(sid, meta_resolver, lang=lang)
+        for col_idx, val in enumerate(row, 1):
+            v = sanitize_fn(val) if isinstance(val, str) else val
+            ws_manu.cell(row=manu_row, column=col_idx, value=v)
+        manu_row += 1
+
+    # --- Bibliography sub-sheet ---
+    # D-04 REVISED (2026-05-20): bilingual headers via bibliography_header_row(lang).
+    for col_idx, header in enumerate(bibliography_header_row(lang), 1):
+        cell = ws_bib.cell(row=1, column=col_idx, value=header)
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+
+    bib_row = 2
+    for sid in unique_sys_ids:
+        for row in build_bibliography_rows(sid, meta_resolver, lang=lang):
+            for col_idx, val in enumerate(row, 1):
+                v = sanitize_fn(val) if isinstance(val, str) else val
+                ws_bib.cell(row=bib_row, column=col_idx, value=v)
+            bib_row += 1
+
+    # --- Column widths ---
+    for col, width in zip('ABCDEFGHIJKL', [18, 25, 22, 35, 14, 14, 50, 80, 10, 12, 25, 30]):
+        ws_main.column_dimensions[col].width = width
+    for col, width in zip('ABCDEFGHIJKLMN', [18, 22, 25, 35, 30, 60, 18, 14, 25, 25, 22, 50, 30, 35]):
+        ws_manu.column_dimensions[col].width = width
+    for col, width in zip('ABCDEFGH', [18, 22, 25, 40, 30, 12, 14, 20]):
+        ws_bib.column_dimensions[col].width = width
+
+    # --- Default-active sheet per D-03 ---
+    wb.active = wb.index(ws_main)
+
+    # --- Return bytes ---
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
     browse_thumb_resolved = pyqtSignal(str, object)
@@ -17980,91 +18212,93 @@ class GenizahGUI(QMainWindow):
             search_info_lines.append(tr("Deep Scan") + f": {'On' if self.chk_lab_deep.isChecked() else 'Off'}")
         search_info_text = "\n".join(search_info_lines)
 
-        # --- XLSX with inline highlighting ---
+        # --- XLSX with 3-sheet citation-grade workbook (Phase 94 EXPORT-META-09) ---
         if fmt == 'xlsx':
             try:
-                import openpyxl
-                from openpyxl.styles import Font, PatternFill
-                from openpyxl.cell.rich_text import TextBlock, CellRichText
-                from openpyxl.cell.text import InlineFont
-                wb = openpyxl.Workbook()
-                ws = wb.active
-                ws.title = tr("Search Results")
-                ws.sheet_view.rightToLeft = True
+                from genizah_core import get_library_display as core_get_library_display
+                from shared.export_dossier import main_header_row
 
-                # Fonts used for rich text snippets
-                font_red = InlineFont(color='FF0000', b=True)
-                font_normal = InlineFont(color='000000', b=False)
+                # D-04 REVISED (2026-05-20): build a lang-aware meta_resolver.
+                # When CURRENT_LANG == 'he' the row shows the Hebrew library
+                # name (via LIBRARY_CODES_HE in get_library_display); else
+                # English. Codex SHOULD-FIX 8 pattern (primitive 4-key dict).
+                meta_mgr = self.meta_mgr
+                _row_lang = CURRENT_LANG
+                def _meta_resolver(sid):
+                    if not sid or meta_mgr is None:
+                        return None
+                    try:
+                        shelf, mtitle = meta_mgr.get_meta_for_id(sid)
+                        shelf = shelf or f'ID: {sid}'
+                        mtitle = mtitle or ''
+                    except Exception:
+                        shelf, mtitle = f'ID: {sid}', ''
+                    try:
+                        lib_code = meta_mgr.get_library_for_id(sid) or ''
+                    except Exception:
+                        lib_code = ''
+                    try:
+                        lib_name = core_get_library_display(lib_code, short=False, lang=_row_lang) if lib_code else ''
+                    except Exception:
+                        lib_name = lib_code
+                    return {
+                        'shelfmark': shelf, 'title': mtitle,
+                        'library_code': lib_code, 'library_name': lib_name,
+                    }
 
-                # Helper to write rich text cells
-                def write_rich_cell(row, col, text):
-                    safe_text = self._sanitize_for_excel(text)
+                # D-04 REVISED (2026-05-20): main-sheet headers follow CURRENT_LANG.
+                # When Hebrew UI is active the headers render in Hebrew (e.g.
+                # 'מספר מערכת' / 'ספרייה'); English UI keeps the English row.
+                # MUST-FIX 94-04-B (English-locked headers) is SUPERSEDED by
+                # this bilingual revision per smoke verification 2026-05-20.
+                headers_main = main_header_row(_row_lang)
 
-                    if '*' not in safe_text:
-                        ws.cell(row=row, column=col, value=safe_text)
-                        return
+                # MUST-FIX 94-04-E: pre-export domain readiness check.
+                # _result_domain_map is reset to {} BEFORE the async
+                # DomainEnrichmentWorker starts (genizah_app.py:16414, 16422
+                # reset; :16727-16729 worker start). Export buttons enable
+                # earlier (:16414). Click-export-immediately would yield empty
+                # Domains cells. Warn the user with a non-blocking dialog so
+                # they can cancel and wait, or proceed with the documented gap.
+                _has_sys_ids = any(
+                    (r.get('display') or {}).get('id') or r.get('sys_id')
+                    for r in results_to_export
+                )
+                if (not self._result_domain_map) and _has_sys_ids:
+                    reply = QMessageBox.warning(
+                        self,
+                        tr("Domain enrichment pending"),
+                        tr("Domain enrichment is still running. Exporting now will produce empty Domains cells. Continue?"),
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.No,
+                    )
+                    if reply == QMessageBox.StandardButton.No:
+                        return  # user cancels; export aborts cleanly
 
-                    # Split by asterisk markers
-                    parts = safe_text.split('*')
-                    rich_string = CellRichText()
-
-                    for i, part in enumerate(parts):
-                        if not part:
-                            continue
-                        # Odd indices represent highlighted text
-                        if i % 2 == 1:
-                            rich_string.append(TextBlock(font_red, part))
-                        else:
-                            # Even indices are plain text
-                            rich_string.append(TextBlock(font_normal, part))
-
-                    ws.cell(row=row, column=col, value=rich_string)
-
-                # Credit header
-                current_row = 1
-                for line in credit_text.split('\n'):
-                    if not line.strip(): continue
-                    cell = ws.cell(row=current_row, column=1, value=self._sanitize_for_excel(line))
-                    cell.font = Font(bold=True, color="555555")
-                    current_row += 1
-                for line in search_info_text.split('\n'):
-                    if not line.strip():
-                        continue
-                    cell = ws.cell(row=current_row, column=1, value=self._sanitize_for_excel(line))
-                    cell.font = Font(bold=True, color="555555")
-                    current_row += 1
-                current_row += 1
-
-                # Table headers
-                for col_idx, header in enumerate(headers, 1):
-                    cell = ws.cell(row=current_row, column=col_idx, value=header)
-                    cell.font = Font(bold=True, color="FFFFFF")
-                    cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
-                current_row += 1
-
-                # Data rows
-                for row_data in data_rows:
-                    for col_idx, val in enumerate(row_data, 1):
-                        val_str = str(val)
-
-                        # Column 7 holds the snippet (after adding Library column)
-                        if col_idx == 7:
-                            write_rich_cell(current_row, col_idx, val_str)
-                        else:
-                            # Strip markers/HTML in other columns
-                            clean_val = val_str.replace('*', '')
-                            ws.cell(row=current_row, column=col_idx, value=self._sanitize_for_excel(clean_val))
-
-                    current_row += 1
-
-                # Column widths
-                ws.column_dimensions['A'].width = 15
-                ws.column_dimensions['B'].width = 20
-                ws.column_dimensions['C'].width = 25  # Library
-                ws.column_dimensions['D'].width = 40
-                ws.column_dimensions['G'].width = 80  # Wider snippet column
-
-                wb.save(path)
+                content = _build_search_results_xlsx_bytes(
+                    results=results_to_export,
+                    headers_main=headers_main,
+                    meta_resolver=_meta_resolver,
+                    sanitize_fn=self._sanitize_for_excel,
+                    credit_text=credit_text,
+                    search_info_text=search_info_text,
+                    transcription_sys_ids=self._pgp_transcription_sys_ids,
+                    printed_ids=self._printed_sys_ids,
+                    result_domains=self._result_domain_map,
+                    lang=CURRENT_LANG,
+                    # MUST-FIX 94-04-D: Tantivy-backed hydration callback for
+                    # rows that lack full_text (e.g., PGP tag rows appended at
+                    # :17065-17076). Mirrors the existing fallback pattern at
+                    # :17813-17815. When the searcher is unavailable, the
+                    # callback returns ''.
+                    full_text_fetcher=lambda uid: (
+                        (self.searcher.get_full_text_by_id(uid) or '')
+                        if (uid and getattr(self, 'searcher', None) is not None)
+                        else ''
+                    ),
+                )
+                with open(path, 'wb') as f:
+                    f.write(content)
                 self._save_last_folder(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
 
