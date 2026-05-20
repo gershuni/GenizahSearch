@@ -730,9 +730,9 @@ app.add_static_files('/static', STATIC_DIR)
 # ============================================================================
 
 _SITE_URL = 'https://genizahsearch.com'
-_DEFAULT_TITLE = 'Dicta Genizah Search — Cairo Genizah Manuscripts & Texts'
-_DEFAULT_DESCRIPTION = 'חיפוש מלא בכתבי יד מהגניזה הקהירית — טקסטים, תעתיקים, פרשנות ומקבילות מ-255,000 קטעי גניזת קהיר. Search Cairo Genizah manuscripts, transcriptions & parallels.'
-_DEFAULT_KEYWORDS = 'Cairo Genizah, Genizah manuscripts, Genizah transcriptions, Genizah parallels, midrash manuscripts, Jewish manuscripts, Cairo Genizah search, Dicta Genizah Search, גניזה קהירית, חיפוש בגניזה הקהירית, כתבי יד גניזת קהיר, תעתיקים, מקבילות, פרשנות, מדרש'
+_DEFAULT_TITLE = 'Dicta Genizah Search — Cairo Genizah Transcriptions'
+_DEFAULT_DESCRIPTION = 'חיפוש בכתבי יד מהגניזה הקהירית — תעתיקים, תמונות ומטא-דאטה ל-255,000 קטעי גניזת קהיר. Search Cairo Genizah manuscripts: transcriptions, images & metadata.'
+_DEFAULT_KEYWORDS = 'Cairo Genizah, Genizah manuscripts, Genizah transcriptions, Genizah images, Genizah metadata, browse Cairo Genizah, Cairo Genizah search, Jewish manuscripts, Dicta Genizah Search, MiDRASH transcriptions, גניזה קהירית, חיפוש בגניזה הקהירית, כתבי יד גניזת קהיר, תעתיקים, עיון בגניזה'
 
 
 def page_meta(
