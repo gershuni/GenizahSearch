@@ -2095,6 +2095,13 @@ def init_api_routes(app_override=None):
         _transcription_sys_ids = set(payload.get('transcription_sys_ids') or [])
         _printed_ids = set(payload.get('printed_ids') or [])
         _result_domains = payload.get('result_domains') or {}
+        # Smoke verification round 2 (2026-05-21): credits-info-sheet
+        # metadata + Hebrew domain substitution. ``mode`` / ``gap`` came
+        # from set_search_export's existing kwargs; ``domain_name_map`` is
+        # the new kwarg added in this commit.
+        _search_mode = payload.get('mode')
+        _search_gap = payload.get('gap')
+        _domain_name_map = payload.get('domain_name_map') or {}
 
         # Phase 94 EXPORT-META-05 / D-04: UI lang controls sheet view direction
         # (content stays English regardless).
@@ -2117,6 +2124,10 @@ def init_api_routes(app_override=None):
                 printed_ids=_printed_ids,
                 result_domains=_result_domains,
                 lang=_ui_lang,
+                # Smoke verification round 2 (2026-05-21):
+                search_mode=_search_mode,
+                search_gap=_search_gap,
+                domain_name_map=_domain_name_map,
             )
             if _sel and len(_results) < len(all_results):
                 root, _, ext = filename.rpartition('.')

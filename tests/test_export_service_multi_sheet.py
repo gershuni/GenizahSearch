@@ -108,12 +108,14 @@ def _load_wb(content):
 # ---------------------------------------------------------------------------
 
 
-def test_workbook_has_three_sheets_in_order(export_service, stub_dossier):
-    """Test 1+2: workbook has 3 sheets in expected order; first is default-active."""
+def test_workbook_has_four_sheets_in_order(export_service, stub_dossier):
+    """Smoke verification round 2 (2026-05-21): workbook now has 4 sheets in
+    expected order: Search Results / Manuscripts / Bibliography /
+    Credits and Info. First sheet is still default-active."""
     results = [_make_result('99001234567890')]
     content, _ = export_service.export_search_results_excel(results, 'q')
     wb = _load_wb(content)
-    assert wb.sheetnames == ['Search Results', 'Manuscripts', 'Bibliography']
+    assert wb.sheetnames == ['Search Results', 'Manuscripts', 'Bibliography', 'Credits and Info']
     assert wb.active.title == 'Search Results'
 
 
@@ -337,14 +339,19 @@ def test_image_page_and_source_columns_populated(export_service, stub_dossier):
 
 def test_he_lang_produces_hebrew_sheet_titles_and_headers(export_service, stub_dossier):
     """D-04 REVISED (2026-05-20): lang='he' yields Hebrew sheet titles AND
-    Hebrew header rows on all 3 sheets. Pin canonical strings explicitly."""
+    Hebrew header rows on all 4 sheets. Pin canonical strings explicitly.
+    Smoke verification round 2 (2026-05-21): 'credits_info' is now a 4th
+    sheet alongside main / manuscripts / bibliography."""
     from shared.export_dossier import sheet_titles, main_header_row, manuscript_header_row, bibliography_header_row
     results = [_make_result('99001234567890')]
     content, _ = export_service.export_search_results_excel(results, 'q', lang='he')
     wb = _load_wb(content)
     he_titles = sheet_titles('he')
     # Sheets present under Hebrew titles.
-    assert wb.sheetnames == [he_titles['main'], he_titles['manuscripts'], he_titles['bibliography']]
+    assert wb.sheetnames == [
+        he_titles['main'], he_titles['manuscripts'],
+        he_titles['bibliography'], he_titles['credits_info'],
+    ]
     # Main sheet headers Hebrew.
     ws_main = wb[he_titles['main']]
     expected_main = main_header_row('he')
@@ -360,15 +367,19 @@ def test_he_lang_produces_hebrew_sheet_titles_and_headers(export_service, stub_d
     expected_bib = bibliography_header_row('he')
     actual_bib = [ws_bib.cell(1, c).value for c in range(1, 9)]
     assert actual_bib == expected_bib, f"Hebrew bib headers mismatch: {actual_bib}"
+    # Credits and Info sheet (smoke round 2): title text matches Hebrew.
+    ws_credits = wb[he_titles['credits_info']]
+    assert ws_credits.cell(1, 1).value == he_titles['credits_info']
 
 
 def test_en_lang_produces_english_sheet_titles_and_headers(export_service, stub_dossier):
-    """Symmetric back-compat: lang='en' yields English titles/headers."""
+    """Symmetric back-compat: lang='en' yields English titles/headers.
+    Smoke verification round 2 (2026-05-21): 4-sheet expectation."""
     from shared.export_dossier import main_header_row, manuscript_header_row, bibliography_header_row
     results = [_make_result('99001234567890')]
     content, _ = export_service.export_search_results_excel(results, 'q', lang='en')
     wb = _load_wb(content)
-    assert wb.sheetnames == ['Search Results', 'Manuscripts', 'Bibliography']
+    assert wb.sheetnames == ['Search Results', 'Manuscripts', 'Bibliography', 'Credits and Info']
     assert [wb['Search Results'].cell(1, c).value for c in range(1, 13)] == main_header_row('en')
     assert [wb['Manuscripts'].cell(1, c).value for c in range(1, 15)] == manuscript_header_row('en')
     assert [wb['Bibliography'].cell(1, c).value for c in range(1, 9)] == bibliography_header_row('en')

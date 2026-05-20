@@ -91,12 +91,14 @@ def _find_header_row(ws):
     return None
 
 
-def test_workbook_has_3_sheets_in_order(stub_dossier):
-    # MUST-FIX 94-04-A: sheet name is now ENGLISH-LOCKED 'Search Results'
-    # (matches web for EXPORT-META-09 parity).
+def test_workbook_has_4_sheets_in_order(stub_dossier):
+    # MUST-FIX 94-04-A: sheet name is ENGLISH-LOCKED 'Search Results' on
+    # both apps (matches web for EXPORT-META-09 parity).
+    # Smoke verification round 2 (2026-05-21): a 4th 'Credits and Info'
+    # sheet was added; main sheet is still default-active.
     content = _build([_make_result('99001234567890')])
     wb = _load(content)
-    assert wb.sheetnames == ['Search Results', 'Manuscripts', 'Bibliography']
+    assert wb.sheetnames == ['Search Results', 'Manuscripts', 'Bibliography', 'Credits and Info']
     assert wb.active.title == 'Search Results'
 
 
@@ -309,7 +311,8 @@ def test_manuscripts_headers_match_shared_constants(stub_dossier):
 def test_he_lang_produces_hebrew_sheet_titles_and_headers(stub_dossier):
     """D-04 REVISED (2026-05-20): when no explicit headers_main is passed
     and lang='he', the desktop helper produces Hebrew sheet titles AND
-    Hebrew header rows on all 3 sheets.
+    Hebrew header rows on all sheets. Smoke verification round 2
+    (2026-05-21): 4-sheet expectation (added Credits and Info).
     """
     from genizah_app import _build_search_results_xlsx_bytes
     from shared.export_dossier import sheet_titles, main_header_row, manuscript_header_row, bibliography_header_row
@@ -322,7 +325,10 @@ def test_he_lang_produces_hebrew_sheet_titles_and_headers(stub_dossier):
     )
     wb = _load(content)
     he_titles = sheet_titles('he')
-    assert wb.sheetnames == [he_titles['main'], he_titles['manuscripts'], he_titles['bibliography']]
+    assert wb.sheetnames == [
+        he_titles['main'], he_titles['manuscripts'],
+        he_titles['bibliography'], he_titles['credits_info'],
+    ]
     ws_main = wb[he_titles['main']]
     header_row = _find_header_row_he(ws_main)
     expected_main = main_header_row('he')
@@ -344,7 +350,8 @@ def _find_header_row_he(ws):
 
 def test_en_lang_produces_english_sheet_titles_and_headers_default(stub_dossier):
     """Symmetric back-compat for en. When headers_main is omitted, defaults
-    to main_header_row('en'); sheet titles stay English."""
+    to main_header_row('en'); sheet titles stay English.
+    Smoke verification round 2 (2026-05-21): 4-sheet expectation."""
     from genizah_app import _build_search_results_xlsx_bytes
     from shared.export_dossier import main_header_row, manuscript_header_row, bibliography_header_row
     content = _build_search_results_xlsx_bytes(
@@ -354,7 +361,7 @@ def test_en_lang_produces_english_sheet_titles_and_headers_default(stub_dossier)
         lang='en',
     )
     wb = _load(content)
-    assert wb.sheetnames == ['Search Results', 'Manuscripts', 'Bibliography']
+    assert wb.sheetnames == ['Search Results', 'Manuscripts', 'Bibliography', 'Credits and Info']
     ws_main = wb['Search Results']
     header_row = _find_header_row(ws_main)
     assert [ws_main.cell(header_row, c).value for c in range(1, 13)] == main_header_row('en')
@@ -362,7 +369,15 @@ def test_en_lang_produces_english_sheet_titles_and_headers_default(stub_dossier)
     assert [wb['Bibliography'].cell(1, c).value for c in range(1, 9)] == bibliography_header_row('en')
 
 
-def test_credit_text_preserved_above_headers(stub_dossier):
+def test_credit_text_and_search_info_text_ignored_on_main_sheet(stub_dossier):
+    """Smoke verification round 2 (2026-05-21): the desktop helper used to
+    render ``credit_text`` and ``search_info_text`` above the main-sheet
+    header row. Round-2 moved both to the dedicated 'Credits and Info'
+    sheet via the new per-field kwargs. The legacy kwargs are still
+    accepted (for back-compat with older test fixtures + the desktop
+    call site mid-migration) but are IGNORED on the main sheet — the
+    header row is now row 1.
+    """
     content = _build(
         [_make_result('A')],
         credit_text='Credit line 1\nCredit line 2',
@@ -370,8 +385,16 @@ def test_credit_text_preserved_above_headers(stub_dossier):
     )
     wb = _load(content)
     ws = wb['Search Results']
-    # Header row is found by scanning for 'System ID' — should be > 1
+    # Header row is now row 1 because the credit_text/search_info_text args
+    # are IGNORED. Compare the pre-round-2 assertion `header_row > 1`.
     header_row = _find_header_row(ws)
-    assert header_row > 1, f"header row should be after credit+info rows; got {header_row}"
-    # Row 1 should contain 'Credit line 1' (or some credit text)
-    assert 'Credit' in (ws.cell(1, 1).value or '')
+    assert header_row == 1, f"header row should be row 1; got {header_row}"
+    # Row 1 should be the header row; 'Credit line 1' must NOT appear on
+    # the main sheet anywhere.
+    main_cells = [ws.cell(r, 1).value for r in range(1, 10)]
+    assert 'Credit line 1' not in main_cells
+    # Sanity check — the credits sheet is the canonical home for the
+    # credit/search-meta content now.
+    assert 'Credits and Info' in wb.sheetnames
+
+

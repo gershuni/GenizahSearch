@@ -2478,6 +2478,12 @@ def _build_search_results_xlsx_bytes(
     headers_main=None,
     meta_resolver=None,
     sanitize_fn=None,
+    # Smoke verification round 2 (2026-05-21): ``credit_text`` and
+    # ``search_info_text`` are now IGNORED on the main sheet. Both are
+    # accepted as kwargs for back-compat with older test fixtures, but the
+    # content they used to render above the main-sheet header row is now
+    # surfaced on the dedicated "Credits and Info" sheet via the new
+    # search-metadata kwargs (``search_query`` / ``search_mode`` / ...).
     credit_text='',
     search_info_text='',
     transcription_sys_ids=None,
@@ -2489,12 +2495,27 @@ def _build_search_results_xlsx_bytes(
     # (e.g., PGP tag rows from genizah_app.py:17065-17076). When None,
     # missing full_text renders as empty.
     full_text_fetcher=None,
+    # Smoke verification round 2 (2026-05-21):
+    # Per-export search metadata for the new "Credits and Info" sheet.
+    # All optional — omitted rows are simply skipped by the builder.
+    search_query=None,
+    search_mode=None,
+    search_gap=None,
+    lab_mode_on=None,
+    deep_scan_on=None,
+    export_datetime=None,
+    # Smoke verification round 2 (2026-05-21):
+    # qualified-EN-name -> HE-display-name dict for Hebrew domain
+    # substitution on the main sheet when ``lang == 'he'``. Unknown
+    # names pass through unchanged.
+    domain_name_map=None,
 ):
-    """Build the 3-sheet workbook bytes for desktop xlsx search-results export.
+    """Build the 4-sheet workbook bytes for desktop xlsx search-results export.
 
-    Phase 94 EXPORT-META-09 — desktop parity with web's 3-sheet structure
-    via :mod:`shared.export_dossier`. Returns the workbook bytes; caller
-    writes them to the user-chosen path via Qt's ``QFileDialog`` flow.
+    Phase 94 EXPORT-META-09 + smoke verification round 2 (2026-05-21) —
+    desktop parity with web's 4-sheet structure via :mod:`shared.export_dossier`.
+    Returns the workbook bytes; caller writes them to the user-chosen path
+    via Qt's ``QFileDialog`` flow.
 
     The structure mirrors :meth:`web.export_service.ExportService.export_search_results_excel`
     exactly: same sheet names (``'Search Results'``, ``'Manuscripts'``,
@@ -2514,8 +2535,11 @@ def _build_search_results_xlsx_bytes(
             :mod:`shared.export_dossier`).
         sanitize_fn: callable ``text -> sanitized text`` (desktop's
             :meth:`GenizahGUI._sanitize_for_excel`).
-        credit_text: multi-line credit text rendered above the header row.
-        search_info_text: search-info lines rendered after credits.
+        credit_text: IGNORED (smoke verification round 2). Kept for back-compat.
+            Credits now live on the dedicated "Credits and Info" sheet.
+        search_info_text: IGNORED (smoke verification round 2). Kept for
+            back-compat. Search metadata now lives on the dedicated
+            "Credits and Info" sheet via the per-field kwargs below.
         transcription_sys_ids: set of sys_ids with PGP — ``'Yes'`` in Has PGP col.
         printed_ids: set of sys_ids that are printed — ``'Yes'`` in Is Printed col.
         result_domains: dict ``sys_id -> list of domain names`` — pipe-joined.
@@ -2523,6 +2547,14 @@ def _build_search_results_xlsx_bytes(
         full_text_fetcher: optional callable ``uid -> str`` for hydrating
             rows that lack ``full_text`` / ``full_text_excerpt`` (MUST-FIX 94-04-D).
             Pass ``None`` to skip hydration (e.g., test contexts without a searcher).
+        search_query, search_mode, search_gap, lab_mode_on, deep_scan_on,
+        export_datetime: per-field search metadata surfaced on the new
+            "Credits and Info" sheet. Each is independently optional;
+            see :func:`shared.export_dossier.build_credits_info_sheet`.
+        domain_name_map: qualified-EN-name -> HE-display-name. When
+            ``lang == 'he'`` and the map is provided, the main-sheet Domains
+            column substitutes names through it. Unknown names pass through
+            unchanged.
 
     Returns:
         bytes — the ``.xlsx`` file content.
@@ -2532,15 +2564,22 @@ def _build_search_results_xlsx_bytes(
     from openpyxl.styles import Font, PatternFill
     from shared.export_dossier import (
         build_manuscript_row, build_bibliography_rows,
+        build_credits_info_sheet,
         main_header_row, manuscript_header_row, bibliography_header_row,
         sheet_titles,
     )
     from shared_export_utils import build_rich_snippet_cell
 
+    # credit_text + search_info_text are intentionally ignored on the main
+    # sheet now (smoke verification round 2). Silence Ruff's unused-arg
+    # warning by binding them to a no-op local.
+    _ = (credit_text, search_info_text)
+
     rtl = (lang == 'he')
     _trans_set = set(transcription_sys_ids or [])
     _printed_set = set(printed_ids or [])
     _domains_map = dict(result_domains or {})
+    _domain_name_map = dict(domain_name_map or {})
 
     # D-04 REVISED (2026-05-20): bilingual headers + sheet titles.
     # `headers_main` kwarg kept for back-compat with the cross-parity test
@@ -2566,24 +2605,16 @@ def _build_search_results_xlsx_bytes(
     ws_manu.sheet_view.rightToLeft = rtl
     ws_bib = wb.create_sheet(title=_titles['bibliography'])
     ws_bib.sheet_view.rightToLeft = rtl
-
-    # --- Main sheet: credit + search-info rows (existing desktop pattern) ---
-    current_row = 1
-    for line in (credit_text or '').split('\n'):
-        if not line.strip():
-            continue
-        cell = ws_main.cell(row=current_row, column=1, value=sanitize_fn(line))
-        cell.font = Font(bold=True, color="555555")
-        current_row += 1
-    for line in (search_info_text or '').split('\n'):
-        if not line.strip():
-            continue
-        cell = ws_main.cell(row=current_row, column=1, value=sanitize_fn(line))
-        cell.font = Font(bold=True, color="555555")
-        current_row += 1
-    current_row += 1  # blank row before headers
+    # Smoke verification round 2 (2026-05-21): 4th sheet.
+    ws_credits = wb.create_sheet(title=_titles['credits_info'])
+    ws_credits.sheet_view.rightToLeft = rtl
 
     # --- Main sheet headers (12-col unified order per D-01) ---
+    # Smoke verification round 2 (2026-05-21): the previous
+    # ``credit_text`` / ``search_info_text`` rows above the header are gone.
+    # The header row is now row 1; data rows follow directly. The credit +
+    # search-metadata content is on the dedicated "Credits and Info" sheet.
+    current_row = 1
     for col_idx, header in enumerate(headers_main, 1):
         cell = ws_main.cell(row=current_row, column=col_idx, value=header)
         cell.font = Font(bold=True, color="FFFFFF")
@@ -2621,6 +2652,13 @@ def _build_search_results_xlsx_bytes(
         has_pgp_cell = 'Yes' if (sys_id and sys_id in _trans_set) else ''
         is_printed_cell = 'Yes' if (sys_id and sys_id in _printed_set) else ''
         domains_list = _domains_map.get(sys_id, []) or []
+        # Smoke verification round 2 (2026-05-21): Hebrew domain
+        # substitution. When lang=='he' and a domain_name_map is provided,
+        # substitute English domain names with their Hebrew display forms.
+        # Unknown names pass through unchanged so synthetic / unrecognized
+        # domains still render (never drop).
+        if lang == 'he' and _domain_name_map:
+            domains_list = [_domain_name_map.get(d, d) for d in domains_list]
         domains_cell = '|'.join(d for d in domains_list if d)
         iiif_cell = ''  # D-13 deferred — column header present, cells empty
 
@@ -2688,6 +2726,27 @@ def _build_search_results_xlsx_bytes(
                 ws_bib.cell(row=bib_row, column=col_idx, value=v)
             bib_row += 1
 
+    # --- Credits and Info sheet (smoke verification round 2, 2026-05-21) ---
+    # Holds the canonical Stoekl Ben Ezra citation block + per-export search
+    # metadata (Query / Mode / Gap / Lab Mode / Deep Scan / date+time /
+    # result count) + a GenizahSearch.com hyperlink. Desktop surfaces
+    # Lab Mode and Deep Scan rows when the caller passes those flags;
+    # they default to None (skipped row) when the call site doesn't supply
+    # them (e.g., the test fixtures).
+    import datetime as _dt
+    _export_dt = export_datetime or _dt.datetime.now().isoformat(sep=' ', timespec='seconds')
+    build_credits_info_sheet(
+        ws_credits,
+        lang=lang,
+        search_query=search_query,
+        search_mode=search_mode,
+        search_gap=search_gap,
+        lab_mode_on=lab_mode_on,
+        deep_scan_on=deep_scan_on,
+        export_datetime=_export_dt,
+        result_count=len(results) if results is not None else 0,
+    )
+
     # --- Column widths ---
     for col, width in zip('ABCDEFGHIJKL', [18, 25, 22, 35, 14, 14, 50, 80, 10, 12, 25, 30]):
         ws_main.column_dimensions[col].width = width
@@ -2695,6 +2754,8 @@ def _build_search_results_xlsx_bytes(
         ws_manu.column_dimensions[col].width = width
     for col, width in zip('ABCDEFGH', [18, 22, 25, 40, 30, 12, 14, 20]):
         ws_bib.column_dimensions[col].width = width
+    # Credits and Info sheet column widths are set by build_credits_info_sheet
+    # itself (col A = 30 / col B = 70).
 
     # --- Default-active sheet per D-03 ---
     wb.active = wb.index(ws_main)
@@ -18278,13 +18339,79 @@ class GenizahGUI(QMainWindow):
                     if reply == QMessageBox.StandardButton.No:
                         return  # user cancels; export aborts cleanly
 
+                # Smoke verification round 2 (2026-05-21): Hebrew domain
+                # substitution. Build the EN->HE display-name map at export
+                # time via a single FJMS query on the unique sys_ids of the
+                # results being exported. Chosen over a search-time-cached
+                # map because:
+                #   (a) export is rare relative to search — paying the lookup
+                #       cost only when the user actually exports avoids
+                #       per-search overhead.
+                #   (b) desktop search-state doesn't already carry the
+                #       Hebrew domain names, so search-time caching would
+                #       require a new piece of state alongside
+                #       _result_domain_map.
+                # Skipped entirely on lang='en' to avoid the FJMS hit.
+                _domain_name_map_for_xlsx: dict = {}
+                if CURRENT_LANG == 'he' and self._result_domain_map:
+                    try:
+                        from shared.fjms_service import (
+                            get_fjms_service,
+                            qualify_domain_name,
+                        )
+                        _fjms_svc = get_fjms_service(thread_safe=True)
+                        if _fjms_svc and _fjms_svc.is_available():
+                            _unique_sids = [
+                                (r.get('display') or {}).get('id') or r.get('sys_id') or ''
+                                for r in results_to_export
+                            ]
+                            _unique_sids = list({s for s in _unique_sids if s})
+                            _raw = _fjms_svc.get_domains_for_sys_ids(_unique_sids) or {}
+                            for _sys_id, _doms in _raw.items():
+                                _child_names = {d['domain'] for d in _doms}
+                                for d in _doms:
+                                    qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
+                                    if (
+                                        qname != d['domain']
+                                        and d.get('domain_heb')
+                                        and d.get('parent_domain_heb')
+                                    ):
+                                        _domain_name_map_for_xlsx[qname] = (
+                                            f"{d['domain_heb']} ({d['parent_domain_heb']})"
+                                        )
+                                    if (
+                                        d.get('domain_heb')
+                                        and d['domain'] not in _domain_name_map_for_xlsx
+                                    ):
+                                        _domain_name_map_for_xlsx[d['domain']] = d['domain_heb']
+                                    if (
+                                        d.get('parent_domain_heb')
+                                        and d.get('parent_domain')
+                                        and d['parent_domain'] not in _domain_name_map_for_xlsx
+                                    ):
+                                        _domain_name_map_for_xlsx[d['parent_domain']] = d['parent_domain_heb']
+                                # Strip parent rows that are also child rows
+                                # to match the web _process_domain_data exclude
+                                # rule (avoids double-listing).
+                                _ = _child_names
+                    except Exception:
+                        # Defensive: a failed Hebrew-name lookup falls back
+                        # to English display via the unchanged-pass-through
+                        # contract in shared.export_dossier.
+                        _domain_name_map_for_xlsx = {}
+
                 content = _build_search_results_xlsx_bytes(
                     results=results_to_export,
                     headers_main=headers_main,
                     meta_resolver=_meta_resolver,
                     sanitize_fn=self._sanitize_for_excel,
-                    credit_text=credit_text,
-                    search_info_text=search_info_text,
+                    # Smoke verification round 2 (2026-05-21): credit_text +
+                    # search_info_text are no longer rendered on the main
+                    # sheet. Their content lives on the "Credits and Info"
+                    # sheet now (built from the per-field kwargs below).
+                    # We still pass empty strings for back-compat / clarity.
+                    credit_text='',
+                    search_info_text='',
                     transcription_sys_ids=self._pgp_transcription_sys_ids,
                     printed_ids=self._printed_sys_ids,
                     result_domains=self._result_domain_map,
@@ -18299,6 +18426,20 @@ class GenizahGUI(QMainWindow):
                         if (uid and getattr(self, 'searcher', None) is not None)
                         else ''
                     ),
+                    # Smoke verification round 2 (2026-05-21):
+                    # per-export search metadata for the new Credits and Info
+                    # sheet. Each field is independently optional; the builder
+                    # skips rows with empty values.
+                    search_query=export_query,
+                    search_mode=self.mode_combo.currentText(),
+                    search_gap=(self.gap_input.text() or None),
+                    lab_mode_on=self.btn_lab_mode_toggle.isChecked(),
+                    deep_scan_on=(
+                        self.chk_lab_deep.isChecked()
+                        if self.btn_lab_mode_toggle.isChecked()
+                        else None
+                    ),
+                    domain_name_map=_domain_name_map_for_xlsx,
                 )
                 with open(path, 'wb') as f:
                     f.write(content)

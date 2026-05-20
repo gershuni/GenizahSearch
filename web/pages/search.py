@@ -4650,11 +4650,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Phase 94 EXPORT-META-06: propagate enrichment to the export
                 # payload so /api/export/excel and /api/export/json reflect
                 # has_pgp / is_printed / domains for visible-page results.
+                # Smoke verification round 2 (2026-05-21) added the
+                # ``domain_name_map`` kwarg for the xlsx Hebrew domain
+                # substitution path; built by ``_process_domain_data`` above.
                 from web.export_state import update_search_export_enrichment
                 update_search_export_enrichment(
                     transcription_sys_ids=search_state.transcription_sys_ids,
                     printed_ids=search_state.printed_ids,
                     result_domains=search_state.result_domains,
+                    domain_name_map=search_state.domain_name_map,
                 )
                 # Pre-cache domain hierarchy
                 if search_state.all_result_domains:
@@ -4707,11 +4711,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # background-enriched chunks have folded their sys_ids into
                 # search_state. Single write covers all enriched data -- avoids
                 # N writes inside the chunk loop.
+                # Smoke verification round 2 (2026-05-21): re-sync the Hebrew
+                # domain_name_map alongside the other enrichment signals.
                 from web.export_state import update_search_export_enrichment
                 update_search_export_enrichment(
                     transcription_sys_ids=search_state.transcription_sys_ids,
                     printed_ids=search_state.printed_ids,
                     result_domains=search_state.result_domains,
+                    domain_name_map=search_state.domain_name_map,
                 )
             _t_stage2_done = time.perf_counter()
             logger.info("Search perf: background_enrichment_ms=%.0f (ids=%d)", (_t_stage2_done - _t_stage2) * 1000, len(remaining_ids))

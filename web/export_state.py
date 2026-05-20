@@ -504,6 +504,13 @@ def set_search_export(
     transcription_sys_ids: Optional[Any] = None,
     printed_ids: Optional[Any] = None,
     result_domains: Optional[Dict[str, List[str]]] = None,
+    # Smoke verification round 2 (2026-05-21):
+    # qualified-EN-name -> HE-display-name dict for the xlsx Hebrew domain
+    # substitution. Built at search time in
+    # ``web/pages/search.py:_process_domain_data`` from FJMS sidecar
+    # ``domain_heb`` / ``parent_domain_heb`` columns. None / empty means no
+    # Hebrew substitution (English names pass through verbatim).
+    domain_name_map: Optional[Dict[str, str]] = None,
 ) -> None:
     """Write the search export payload to this user's session.
 
@@ -518,6 +525,11 @@ def set_search_export(
     to empty containers; the post-enrichment site in
     ``web/pages/search.py`` calls ``update_search_export_enrichment(...)``
     once the live values are computed.
+
+    Smoke verification round 2 (2026-05-21) added a 4th additive kwarg
+    ``domain_name_map`` (qualified-EN-name -> HE-display-name). When the
+    xlsx is exported with ``lang='he'``, the main-sheet Domains column
+    substitutes names through this map; English exports ignore it.
     """
     capped, truncated, original, _changed = _compact_results(
         results,
@@ -528,6 +540,7 @@ def set_search_export(
     _trans_list = sorted(set(transcription_sys_ids)) if transcription_sys_ids else []
     _printed_list = sorted(set(printed_ids)) if printed_ids else []
     _domains_dict = dict(result_domains) if result_domains else {}
+    _domain_name_map = dict(domain_name_map) if domain_name_map else {}
     safe_user_set(_SEARCH_KEY, {
         'results': capped,
         'query': query,
@@ -542,6 +555,8 @@ def set_search_export(
         'transcription_sys_ids': _trans_list,
         'printed_ids': _printed_list,
         'result_domains': _domains_dict,
+        # Smoke verification round 2 (2026-05-21) -- Hebrew domain substitution.
+        'domain_name_map': _domain_name_map,
     })
 
 
@@ -596,6 +611,7 @@ def update_search_export_enrichment(
     transcription_sys_ids: Optional[Any] = None,
     printed_ids: Optional[Any] = None,
     result_domains: Optional[Dict[str, List[str]]] = None,
+    domain_name_map: Optional[Dict[str, str]] = None,
 ) -> None:
     """Patch enrichment fields after async post-search enrichment completes.
 
@@ -605,6 +621,11 @@ def update_search_export_enrichment(
     field leaves the existing value untouched (so the Stage-2 call can
     re-emit all 3 fields without clobbering Stage-1 state for a field that
     somehow regressed between stages).
+
+    Smoke verification round 2 (2026-05-21) added the ``domain_name_map``
+    kwarg (qualified-EN-name -> HE-display-name) for the xlsx-export Hebrew
+    domain substitution path. Same opt-in semantics: passing None leaves
+    the existing map untouched.
 
     Follows the Phase 88 D-11 (isinstance guard) + D-12 (copy-on-update)
     invariants -- same pattern as update_search_export_selection.
@@ -619,6 +640,8 @@ def update_search_export_enrichment(
         payload['printed_ids'] = sorted(set(printed_ids))
     if result_domains is not None:
         payload['result_domains'] = dict(result_domains)
+    if domain_name_map is not None:
+        payload['domain_name_map'] = dict(domain_name_map)
     safe_user_set(_SEARCH_KEY, payload)
 
 

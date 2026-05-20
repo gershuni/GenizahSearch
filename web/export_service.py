@@ -423,11 +423,22 @@ class ExportService:
         # Phase 94 EXPORT-META-05/D-04 — UI lang for conditional sheet RTL.
         # Content is always English per D-04; lang ONLY controls view direction.
         lang: str = 'en',
+        # Smoke verification round 2 (2026-05-21):
+        # search-metadata + domain-name-map kwargs for the new 4th sheet
+        # ("Credits and Info") and Hebrew domain substitution on the main
+        # sheet. ``search_mode`` / ``search_gap`` mirror desktop's
+        # search_info_text rendering (Lab Mode / Deep Scan are desktop-only).
+        # ``domain_name_map`` is the qualified-EN-name -> HE-display-name map
+        # built at search time in ``web/pages/search.py:_process_domain_data``.
+        search_mode: Optional[str] = None,
+        search_gap: Optional[Any] = None,
+        domain_name_map: Optional[Dict[str, str]] = None,
     ) -> tuple:
         """
-        Export search results to a 3-sheet Excel workbook.
+        Export search results to a 4-sheet Excel workbook.
 
-        Phase 94 EXPORT-META Wave 3: produces a 3-sheet workbook consisting of:
+        Phase 94 EXPORT-META Wave 3 + smoke verification round 2 (2026-05-21):
+        produces a 4-sheet workbook consisting of:
 
         1. **Search Results** (default-active per D-03) — unified 12-column
            main sheet per D-01. Sheet was renamed from ``"Genizah Results"``
@@ -450,7 +461,16 @@ class ExportService:
            :func:`shared.export_dossier.build_bibliography_rows` (8 columns).
            Zero rows when sys_id has no bib entries.
 
-        Conditional RTL per D-04: ``lang == 'he'`` -> all 3 sheets RTL;
+        4. **Credits and Info** (smoke verification round 2, 2026-05-21) —
+           dedicated sheet holding the canonical Stoekl Ben Ezra citation
+           chain + per-export search metadata (Query / Mode / Gap / date+time
+           / result count) + a hyperlink to GenizahSearch.com via
+           :func:`shared.export_dossier.build_credits_info_sheet`. Replaces
+           the prior inline credits block at the bottom of the main sheet
+           (``add_excel_credits(ws_main)`` is no longer called on the
+           xlsx-multi-sheet path).
+
+        Conditional RTL per D-04: ``lang == 'he'`` -> all 4 sheets RTL;
         otherwise LTR. Sheet name is ``"Search Results"`` (English) /
         ``"תוצאות חיפוש"`` (Hebrew) per smoke verification round 2
         (2026-05-21); previously ``"Genizah Results"`` / ``"תוצאות גניזה"``.
@@ -483,16 +503,23 @@ class ExportService:
 
         from shared.export_dossier import (
             build_manuscript_row, build_bibliography_rows,
+            build_credits_info_sheet,
             main_header_row, manuscript_header_row, bibliography_header_row,
             sheet_titles,
         )
         from shared_export_utils import build_rich_snippet_cell
         from genizah_core import get_library_display as core_get_library_display
+        import datetime as _dt
 
         rtl = (lang == 'he')
         _trans_set = set(transcription_sys_ids or [])
         _printed_set = set(printed_ids or [])
         _domains_map = dict(result_domains or {})
+        # Smoke verification round 2 (2026-05-21): qualified-EN-name -> HE
+        # display-name map for Hebrew Domains-column substitution. Built at
+        # search time in web/pages/search.py:_process_domain_data and
+        # persisted into the export payload (web/export_state.py).
+        _domain_name_map = dict(domain_name_map or {})
 
         # MUST-FIX 94-03-B: the legacy ``extract`` term-binding pattern is
         # REMOVED from the restructured function body. The new Snippet column
@@ -550,8 +577,14 @@ class ExportService:
         wb, ws_main = create_excel_workbook(_titles['main'], rtl_sheet=rtl)
         ws_manu = wb.create_sheet(title=_titles['manuscripts'])
         ws_bib = wb.create_sheet(title=_titles['bibliography'])
+        # Smoke verification round 2 (2026-05-21): 4th sheet for credits +
+        # search metadata. The inline ``add_excel_credits(ws_main)`` call
+        # that previously appended a Credits block at the bottom of the
+        # main sheet is REMOVED below in this commit.
+        ws_credits = wb.create_sheet(title=_titles['credits_info'])
         ws_manu.sheet_view.rightToLeft = rtl
         ws_bib.sheet_view.rightToLeft = rtl
+        ws_credits.sheet_view.rightToLeft = rtl
 
         # --- Main sheet: unified 12-column order per D-01, bilingual headers ---
         main_headers = main_header_row(lang)
@@ -649,6 +682,13 @@ class ExportService:
             has_pgp_cell = 'Yes' if (sys_id_for_cell and sys_id_for_cell in _trans_set) else ''
             is_printed_cell = 'Yes' if (sys_id_for_cell and sys_id_for_cell in _printed_set) else ''
             domains_list = _domains_map.get(sys_id_for_cell, []) or []
+            # Smoke verification round 2 (2026-05-21): Hebrew domain
+            # substitution. When lang=='he' and a domain_name_map is supplied,
+            # substitute English domain names with their Hebrew display
+            # forms. Unknown names pass through unchanged so synthetic /
+            # unrecognized domains still render (never drop).
+            if lang == 'he' and _domain_name_map:
+                domains_list = [_domain_name_map.get(d, d) for d in domains_list]
             domains_cell = '|'.join(d for d in domains_list if d)
             # IIIF Manifest column DEFERRED per D-13 — header present, cells empty.
             iiif_cell = ''
@@ -690,7 +730,10 @@ class ExportService:
             ws_main.cell(row=current_row, column=11).alignment = ltr_align  # Domains
             ws_main.cell(row=current_row, column=12).alignment = ltr_align  # IIIF Manifest
 
-        add_excel_credits(ws_main)
+        # Smoke verification round 2 (2026-05-21): inline ``add_excel_credits``
+        # call removed. Credits + per-export search metadata now live on the
+        # dedicated 4th sheet ("Credits and Info") built below; the main
+        # sheet no longer carries a Credits block at the bottom.
 
         # --- Manuscripts sub-sheet (D-02 / D-03 / D-12) ---
         # Dedupe sys_ids in first-occurrence order per D-12.
@@ -729,6 +772,25 @@ class ExportService:
                     sanitize_text_for_excel(v) if isinstance(v, str) else v
                     for v in row
                 ])
+
+        # --- Credits and Info sheet (smoke verification round 2, 2026-05-21) ---
+        # Holds the canonical Stoekl Ben Ezra citation block + per-export
+        # search metadata (Query / Mode / Gap / date+time / result count) +
+        # a GenizahSearch.com hyperlink. Web does NOT surface a Lab Mode
+        # toggle, so ``lab_mode_on`` is omitted (the builder skips the row
+        # entirely on None — see :func:`build_credits_info_sheet`).
+        _export_dt = _dt.datetime.now().isoformat(sep=' ', timespec='seconds')
+        build_credits_info_sheet(
+            ws_credits,
+            lang=lang,
+            search_query=search_query or None,
+            search_mode=search_mode,
+            search_gap=search_gap,
+            lab_mode_on=None,  # Web has no Lab Mode UI; omit the row.
+            deep_scan_on=None,
+            export_datetime=_export_dt,
+            result_count=len(results),
+        )
 
         # --- Default-active sheet per D-03 ---
         wb.active = wb.index(ws_main)
