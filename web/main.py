@@ -1532,7 +1532,15 @@ def dashboard_page():
                 "name": "האם השימוש באתר הגניזה של דיקטה חופשי?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "כן. גם יישום הרשת ב-genizahsearch.com וגם יישום שולחן העבודה ל-Windows המיועד להורדה הם חופשיים לשימוש אקדמי, חינוכי ומחקרי-אישי. הפרויקט מנוהל על ידי דיקטה — המרכז הישראלי לניתוח טקסטים — כמשאב מחקרי שאינו מסחרי."
+                    "text": "כן. גם יישום הרשת ב-genizahsearch.com וגם יישום שולחן העבודה ל-Windows המיועד להורדה הם חופשיים לשימוש אקדמי, חינוכי ומחקרי-אישי. השימוש בתעתיקים שבפרויקט זה מחייב ציטוט של פרסום MiDRASH הנזכר לעיל (https://doi.org/10.5281/zenodo.17734473) ברישיון CC BY 4.0. התמונות מסופקות על ידי הספריות המקוריות וכפופות לרישיון הרלוונטי."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "מי יצר את האתר?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "האתר נוצר על ידי הלל גרשוני, בתמיכת דיקטה. ניתן ליצור עמו קשר בכתובת gershuni@gmail.com."
                 }
             }
         ]
@@ -1584,7 +1592,15 @@ def dashboard_page():
                 "name": "Is Dicta Genizah Search free to use?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "Yes. The web application at genizahsearch.com and the downloadable Windows desktop application are both free for academic, educational, and personal research use. The project is operated by Dicta — the Israel Center for Text Analysis — as a non-commercial scholarly resource."
+                    "text": "Yes. The web application at genizahsearch.com and the downloadable Windows desktop application are both free for academic, educational, and personal research use. Using the transcriptions in this project requires citing the above-mentioned MiDRASH publication (https://doi.org/10.5281/zenodo.17734473) under the CC BY 4.0 License. The images are provided by the original libraries and are subject to the relevant license."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Who created this website?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The website was created by Hillel Gershuni, with the support of Dicta. Feel free to contact him at gershuni@gmail.com."
                 }
             }
         ]
