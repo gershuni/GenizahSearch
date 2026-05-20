@@ -239,9 +239,16 @@ class TestExportService:
 
     @pytest.fixture
     def mock_meta_mgr(self):
-        """Create a mock MetadataManager."""
+        """Create a mock MetadataManager.
+
+        Phase 94 Wave 3: also configures ``get_library_for_id`` because the
+        restructured ``export_search_results_excel`` calls it to resolve the
+        English-only Library column (D-04 / Shared Pattern F).
+        """
         mgr = MagicMock()
         mgr.get_meta_for_id.return_value = ("T-S 12.345", "Test Title")
+        mgr.get_library_for_id.return_value = "CUL"
+        mgr.parse_full_id_components.return_value = {}
         return mgr
 
     @pytest.fixture
@@ -317,7 +324,12 @@ class TestExportService:
         }
 
     def test_export_search_results_excel(self, export_service, sample_search_results):
-        """Should export search results to valid Excel file."""
+        """Should export search results to valid Excel file.
+
+        Phase 94 Wave 3 unified layout: cols are
+        [System ID, Library, Shelfmark, Title, Image/Page, Source, Snippet,
+         Full Text, Has PGP, Is Printed, Domains, IIIF Manifest].
+        """
         content, filename = export_service.export_search_results_excel(
             sample_search_results, "test query"
         )
@@ -329,12 +341,14 @@ class TestExportService:
         # Verify Excel content
         stream = io.BytesIO(content)
         wb = openpyxl.load_workbook(stream)
-        ws = wb.active
+        # Default-active sheet is "Genizah Results" per D-03.
+        ws = wb['Genizah Results']
 
-        # Check headers
-        assert ws.cell(row=1, column=1).value == "Shelfmark"
-        # Check data row
-        assert ws.cell(row=2, column=1).value == "T-S 12.345"
+        # Check headers (unified 12-column order per D-01).
+        assert ws.cell(row=1, column=1).value == "System ID"
+        assert ws.cell(row=1, column=3).value == "Shelfmark"
+        # Check data row — Shelfmark is now column 3.
+        assert ws.cell(row=2, column=3).value == "T-S 12.345"
 
     def test_export_search_results_excel_rehydrates_compact_full_text(self, export_service, monkeypatch):
         """Compact export-state rows should still produce full-text Excel."""
@@ -359,8 +373,9 @@ class TestExportService:
         content, _filename = export_service.export_search_results_excel(compact_results, "query")
 
         wb = openpyxl.load_workbook(io.BytesIO(content))
-        ws = wb.active
-        assert ws.cell(row=2, column=7).value == "Rehydrated full text"
+        # Phase 94 Wave 3: Full Text column moved from 7 to 8 in unified layout.
+        ws = wb['Genizah Results']
+        assert ws.cell(row=2, column=8).value == "Rehydrated full text"
         searcher.get_full_text_by_id.assert_called_once_with('uid-1')
 
     def test_excel_export_rehydrates_display_from_production_uid(self, export_service):
@@ -384,11 +399,11 @@ class TestExportService:
         content, _filename = export_service.export_search_results_excel(compact_results, "query")
 
         wb = openpyxl.load_workbook(io.BytesIO(content))
-        ws = wb.active
-        # Column 1 = Shelfmark, 3 = Title, 4 = System ID
-        assert ws.cell(row=2, column=1).value == 'T-S 12.345'
-        assert ws.cell(row=2, column=3).value == 'Test Title'
-        assert ws.cell(row=2, column=4).value == '99001234567890'
+        # Phase 94 Wave 3 unified layout: col 1 = System ID, 3 = Shelfmark, 4 = Title.
+        ws = wb['Genizah Results']
+        assert ws.cell(row=2, column=1).value == '99001234567890'
+        assert ws.cell(row=2, column=3).value == 'T-S 12.345'
+        assert ws.cell(row=2, column=4).value == 'Test Title'
         # Verify get_meta_for_id was called with the synthesized sys_id.
         export_service.meta_mgr.get_meta_for_id.assert_any_call('99001234567890')
 
@@ -418,9 +433,10 @@ class TestExportService:
         content, _filename = export_service.export_search_results_excel(compact_results, "q")
 
         wb = openpyxl.load_workbook(io.BytesIO(content))
-        ws = wb.active
+        # Phase 94 Wave 3 unified layout: Shelfmark is column 3.
+        ws = wb['Genizah Results']
         # Shelfmark cell shows the "ID: ..." fallback (matches get_display_data).
-        assert ws.cell(row=2, column=1).value == 'ID: 99001234567890'
+        assert ws.cell(row=2, column=3).value == 'ID: 99001234567890'
 
     def test_excel_export_resolves_metadata_only_row_post_compaction(self, export_service):
         """SEED-002 fixup regression: metadata-only rows (Title/Shelfmark mode)
@@ -441,10 +457,11 @@ class TestExportService:
         content, _filename = export_service.export_search_results_excel(compact_results, "q")
 
         wb = openpyxl.load_workbook(io.BytesIO(content))
-        ws = wb.active
-        assert ws.cell(row=2, column=1).value == 'T-S NS 329.96'
-        assert ws.cell(row=2, column=3).value == 'Synthetic'
-        assert ws.cell(row=2, column=4).value == '99800000000000123'
+        # Phase 94 Wave 3 unified layout: col 1 = System ID, 3 = Shelfmark, 4 = Title.
+        ws = wb['Genizah Results']
+        assert ws.cell(row=2, column=1).value == '99800000000000123'
+        assert ws.cell(row=2, column=3).value == 'T-S NS 329.96'
+        assert ws.cell(row=2, column=4).value == 'Synthetic'
 
     def test_excel_export_graceful_degradation_on_unknown_uid(self, export_service):
         """SEED-002: when neither sys_id nor raw_header nor uid yields a usable
@@ -467,9 +484,10 @@ class TestExportService:
         content, _filename = export_service.export_search_results_excel(compact_results, "query")
 
         wb = openpyxl.load_workbook(io.BytesIO(content))
-        ws = wb.active
+        # Phase 94 Wave 3 unified layout: Shelfmark is column 3.
+        ws = wb['Genizah Results']
         # Must be the literal string 'Unknown', not a MagicMock repr.
-        assert ws.cell(row=2, column=1).value == 'Unknown'
+        assert ws.cell(row=2, column=3).value == 'Unknown'
 
     def test_excel_output_equivalent_legacy_vs_compacted(self, export_service):
         """SEED-002 fixup: a legacy row (with display dict) and a compacted
@@ -508,11 +526,12 @@ class TestExportService:
 
         legacy_wb = openpyxl.load_workbook(io.BytesIO(legacy_content))
         compact_wb = openpyxl.load_workbook(io.BytesIO(compact_content))
-        legacy_ws = legacy_wb.active
-        compact_ws = compact_wb.active
+        # Phase 94 Wave 3: explicit sheet name; unified 4-column identity prefix.
+        legacy_ws = legacy_wb['Genizah Results']
+        compact_ws = compact_wb['Genizah Results']
 
-        # Columns 1 (Shelfmark), 2 (Library), 3 (Title) must match.
-        for col in (1, 2, 3):
+        # Columns 1 (System ID), 2 (Library), 3 (Shelfmark), 4 (Title) must match.
+        for col in (1, 2, 3, 4):
             assert legacy_ws.cell(row=2, column=col).value == compact_ws.cell(row=2, column=col).value, \
                 f"column {col} differs: legacy={legacy_ws.cell(row=2, column=col).value!r}, " \
                 f"compact={compact_ws.cell(row=2, column=col).value!r}"
@@ -675,7 +694,10 @@ class TestEdgeCases:
     """Test edge cases and special scenarios."""
 
     def test_hebrew_text_in_excel(self):
-        """Hebrew text should be properly exported to Excel."""
+        """Hebrew text should be properly exported to Excel.
+
+        Phase 94 Wave 3 unified layout: Shelfmark is column 3.
+        """
         svc = ExportService()
         results = [{
             'display': {
@@ -692,13 +714,16 @@ class TestEdgeCases:
 
         stream = io.BytesIO(content)
         wb = openpyxl.load_workbook(stream)
-        ws = wb.active
+        ws = wb['Genizah Results']
 
-        # Hebrew shelfmark should be preserved
-        assert ws.cell(row=2, column=1).value == 'ת-ס 12.345'
+        # Hebrew shelfmark should be preserved (column 3 in unified layout).
+        assert ws.cell(row=2, column=3).value == 'ת-ס 12.345'
 
     def test_very_long_text_in_excel(self):
-        """Very long text should be truncated."""
+        """Very long text should be truncated.
+
+        Phase 94 Wave 3 unified layout: Full Text is column 8.
+        """
         svc = ExportService()
         long_text = "A" * 50000  # Exceeds Excel cell limit
         results = [{
@@ -712,10 +737,10 @@ class TestEdgeCases:
 
         stream = io.BytesIO(content)
         wb = openpyxl.load_workbook(stream)
-        ws = wb.active
+        ws = wb['Genizah Results']
 
-        # Full text should be truncated
-        assert len(ws.cell(row=2, column=7).value) <= 32000
+        # Full text should be truncated (column 8 in unified layout).
+        assert len(ws.cell(row=2, column=8).value) <= 32000
 
     def test_special_characters_in_filename(self):
         """Special characters in query should create safe filename."""

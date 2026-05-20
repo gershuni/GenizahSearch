@@ -2090,18 +2090,33 @@ def init_api_routes(app_override=None):
             _results = all_results
 
         # Phase 94 EXPORT-META-06: enrichment signals from session payload.
-        # Wave 2 plumbs them into scope here; Wave 3 wires them into the
-        # restructured export_search_results_excel signature.
+        # Wave 2 plumbed them into scope here; Wave 3 closes the kwarg pass
+        # below via the restructured export_search_results_excel signature.
         _transcription_sys_ids = set(payload.get('transcription_sys_ids') or [])
         _printed_ids = set(payload.get('printed_ids') or [])
         _result_domains = payload.get('result_domains') or {}
-        # TODO(Wave 3 / EXPORT-META-06): pass _transcription_sys_ids,
-        # _printed_ids, _result_domains as kwargs to export_search_results_excel.
+
+        # Phase 94 EXPORT-META-05 / D-04: UI lang controls sheet view direction
+        # (content stays English regardless).
+        # MUST-FIX 94-03-C: read the canonical per-user UI lang from the
+        # safe_storage chokepoint (web/main.py:832-834, 1001-1002) — NOT
+        # from the module-global get_language() in the translations module,
+        # which may not reflect the current per-request user state under
+        # the multitenant architecture (Phase 87-92 invariants).
+        from web.safe_storage import safe_user_get
+        _ui_lang = safe_user_get('ui_language', 'he')
+        # Normalize: anything other than 'en' is treated as 'he' (the default).
+        _ui_lang = 'en' if _ui_lang == 'en' else 'he'
 
         try:
             export_svc = get_export_service(state.meta_mgr)
             content, filename = export_svc.export_search_results_excel(
-                _results, query
+                _results, query,
+                # Phase 94 EXPORT-META Wave 3 kwarg activation:
+                transcription_sys_ids=_transcription_sys_ids,
+                printed_ids=_printed_ids,
+                result_domains=_result_domains,
+                lang=_ui_lang,
             )
             if _sel and len(_results) < len(all_results):
                 root, _, ext = filename.rpartition('.')

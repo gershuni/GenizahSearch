@@ -755,3 +755,105 @@ def test_field_strip_invariants_still_hold(monkeypatch):
     assert 'content' not in stored
     # SEED-002 post-fix: no excerpt field either; rehydrate via Tantivy.
     assert 'full_text_excerpt' not in stored
+
+
+# ---------------------------------------------------------------------------
+# Phase 94 MUST-FIX 94-03-A: img + source synthesis through compaction
+# ---------------------------------------------------------------------------
+# Wave 3's main-sheet Image/Page + Source columns must work for both LIVE
+# rows (display dict present) and COMPACTED rows (display dict stripped).
+# The fix extends _SEARCH_ROW_ALLOWLIST to include 'img' and 'source', and
+# adds synthesis from display.img / display.source BEFORE the display dict
+# is dropped (mirrors the SEED-002 sys_id synthesis pattern).
+
+
+def test_allowlist_contains_img_and_source():
+    """Phase 94 MUST-FIX 94-03-A: img + source keys survive compaction."""
+    from web.export_state import _SEARCH_ROW_ALLOWLIST
+    assert 'img' in _SEARCH_ROW_ALLOWLIST
+    assert 'source' in _SEARCH_ROW_ALLOWLIST
+
+
+def test_compact_synthesizes_img_and_source_from_display(monkeypatch):
+    """Phase 94 MUST-FIX 94-03-A: when display dict carries img + source and
+    top-level keys are absent, compaction hoists both to top level BEFORE
+    dropping the display dict (analog of SEED-002 sys_id synthesis)."""
+    from web import export_state
+
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+
+    row = {
+        'uid': 'IE188433865_P1_FL1',
+        'sort_score': 0.9,
+        'snippet': 'a *match* here',
+        'match_terms': ['match'],
+        'raw_header': '99001234567890 IE188433865 P1 FL1',
+        'display': {
+            'id': '99001234567890',
+            'shelfmark': 'T-S 12.345',
+            'img': '1r',
+            'source': 'ms',
+        },
+    }
+    export_state.set_search_export(results=[row], query='foo')
+
+    stored = storage['export_search_payload']['results'][0]
+    assert stored.get('img') == '1r', "img must be hoisted from display before display is dropped"
+    assert stored.get('source') == 'ms', "source must be hoisted from display before display is dropped"
+    # display dict itself is still dropped (heavy)
+    assert 'display' not in stored
+    # other allowlist keys survive
+    assert stored['uid'] == 'IE188433865_P1_FL1'
+    assert stored['sys_id'] == '99001234567890'
+    assert stored['snippet'] == 'a *match* here'
+
+
+def test_compact_top_level_img_wins_over_display(monkeypatch):
+    """Phase 94 MUST-FIX 94-03-A: top-level img/source survive compaction
+    verbatim (allowlist hit); display.img / display.source are NOT consulted
+    when top-level value already present. (Allowlist-first matches the
+    SEED-002 sys_id 'top-level wins' pattern.)"""
+    from web import export_state
+
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+
+    row = {
+        'uid': 'u1',
+        'sys_id': '99001234567890',
+        'img': '2v',  # top-level present
+        'source': 'doc',  # top-level present
+        'display': {
+            'id': '99001234567890',
+            'img': '1r',  # display has different value
+            'source': 'ms',
+        },
+    }
+    export_state.set_search_export(results=[row], query='foo')
+
+    stored = storage['export_search_payload']['results'][0]
+    assert stored['img'] == '2v', "top-level img must win over display.img"
+    assert stored['source'] == 'doc', "top-level source must win over display.source"
+
+
+def test_compact_no_display_no_synth_passes_through(monkeypatch):
+    """Phase 94 MUST-FIX 94-03-A: when no display dict, top-level img/source
+    pass through unchanged (no synthesis attempted, no clobber)."""
+    from web import export_state
+
+    storage: dict = {}
+    monkeypatch.setattr('web.safe_storage.app', _make_stub(storage))
+
+    row = {
+        'uid': 'u1',
+        'sys_id': '99001234567890',
+        'img': '3r',
+        'source': 'pgp',
+        # no display dict
+    }
+    export_state.set_search_export(results=[row], query='foo')
+
+    stored = storage['export_search_payload']['results'][0]
+    assert stored['img'] == '3r'
+    assert stored['source'] == 'pgp'

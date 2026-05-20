@@ -47,8 +47,12 @@ from shared_export_utils import (
     remove_highlight_markers,
     make_safe_filename,
     encode_filename_for_header as encode_filename_for_header,  # re-exported for web.api
-    contains_any_term,
-    extract_search_terms,
+    # Phase 94 Wave 3 (MUST-FIX 94-03-B): contains_any_term + extract_search_terms
+    # are no longer used inside export_search_results_excel (replaced by
+    # build_rich_snippet_cell), but stay imported for backward-compat re-export
+    # to test_export_service.py and any external callers.
+    contains_any_term as contains_any_term,
+    extract_search_terms as extract_search_terms,
 )
 
 
@@ -410,48 +414,168 @@ class ExportService:
     def export_search_results_excel(
         self,
         results: List[Dict[str, Any]],
-        search_query: str = ""
+        search_query: str = "",
+        *,
+        # Phase 94 EXPORT-META-06 — enrichment signals from session payload.
+        transcription_sys_ids: Optional[set] = None,
+        printed_ids: Optional[set] = None,
+        result_domains: Optional[Dict[str, List[str]]] = None,
+        # Phase 94 EXPORT-META-05/D-04 — UI lang for conditional sheet RTL.
+        # Content is always English per D-04; lang ONLY controls view direction.
+        lang: str = 'en',
     ) -> tuple:
         """
-        Export search results to Excel format.
+        Export search results to a 3-sheet Excel workbook.
+
+        Phase 94 EXPORT-META Wave 3: produces a 3-sheet workbook consisting of:
+
+        1. **Genizah Results** (default-active per D-03) — unified 12-column
+           main sheet per D-01:
+           ['System ID', 'Library', 'Shelfmark', 'Title', 'Image/Page',
+            'Source', 'Snippet', 'Full Text', 'Has PGP', 'Is Printed',
+            'Domains', 'IIIF Manifest'].
+           Snippet column uses rich-text rendering per D-14 via
+           ``shared_export_utils.build_rich_snippet_cell``.
+           IIIF Manifest column is DEFERRED per D-13 (header present, cells
+           empty). Per-page IIIF resolution would require per-row plumbing
+           not warranted for this phase; the sys_id-scoped Library Viewer
+           URL on the Manuscripts sub-sheet provides reachability instead.
+
+        2. **Manuscripts** (dossier sub-sheet) — one row per UNIQUE sys_id
+           via :func:`shared.export_dossier.build_manuscript_row` (14 columns).
+           First-occurrence dedupe per D-12.
+
+        3. **Bibliography** (sub-sheet) — one row per FJMS bib entry via
+           :func:`shared.export_dossier.build_bibliography_rows` (8 columns).
+           Zero rows when sys_id has no bib entries.
+
+        Conditional RTL per D-04: ``lang == 'he'`` -> all 3 sheets RTL;
+        otherwise LTR. Sheet name "Genizah Results" is the locked English
+        literal per EXPORT-META-09 (cross-app parity with desktop Wave 4 —
+        overrides desktop's prior ``tr('Search Results')`` translation
+        pattern for this specific string).
+
+        Library name on all sheets is hard-pinned English per D-04 / Pattern
+        1.8 / Shared Pattern F — routes through
+        ``genizah_core.get_library_display(code, short=False, lang='en')``
+        directly, bypassing the UI-lang-aware instance method
+        :meth:`get_library_display`.
+
+        Args:
+            results: search result list (live or compacted).
+            search_query: original query string (used for filename only).
+            transcription_sys_ids: set of sys_ids with PGP transcription —
+                Has PGP column renders 'Yes' / empty per row (D-06).
+            printed_ids: set of sys_ids known to be printed — Is Printed
+                column renders 'Yes' / empty per row (D-06).
+            result_domains: ``{sys_id: [domain_str, ...]}`` mapping;
+                Domains column renders pipe-joined string per D-05.
+            lang: UI language ('he' or 'en'). Controls sheet view direction
+                only; content stays English regardless.
 
         Returns:
-            (bytes, filename) tuple
+            (bytes, filename) tuple.
         """
         if not results:
             raise ValueError("No results to export")
 
-        search_terms = extract_search_terms(search_query)
-        wb, ws = create_excel_workbook("Genizah Results")
+        from shared.export_dossier import (
+            MANUSCRIPT_HEADERS, BIBLIOGRAPHY_HEADERS,
+            build_manuscript_row, build_bibliography_rows,
+        )
+        from shared_export_utils import build_rich_snippet_cell
+        from genizah_core import get_library_display as core_get_library_display
 
-        headers = ["Shelfmark", "Library", "Title", "System ID", "Score", "Snippet", "Full Text"]
-        style_excel_header(ws, headers)
+        rtl = (lang == 'he')
+        _trans_set = set(transcription_sys_ids or [])
+        _printed_set = set(printed_ids or [])
+        _domains_map = dict(result_domains or {})
 
-        set_excel_column_widths(ws, {
-            'A': 25, 'B': 15, 'C': 35, 'D': 18, 'E': 10, 'F': 50, 'G': 80,
+        # MUST-FIX 94-03-B: the legacy ``extract`` term-binding pattern is
+        # REMOVED from the restructured function body. The new Snippet column
+        # uses ``build_rich_snippet_cell`` (Wave 1) which operates on the
+        # snippet's ``*``-markers directly, not on a pre-extracted terms list.
+        # Leaving the binding in place would trigger Ruff F841 (unused-
+        # variable). The term-extractor helper itself stays defined and
+        # re-exported in ``shared_export_utils`` for other callers.
+
+        # --- Build the meta_resolver callable (Codex SHOULD-FIX 8) ---
+        # Maps sys_id -> {shelfmark, title, library_code, library_name};
+        # library_name is hard-pinned English per D-04 / Pattern 1.8 / Shared
+        # Pattern F. NEVER routes through self.get_library_display (which
+        # consults UI lang) on the dossier path.
+        meta_mgr = self.meta_mgr
+
+        def _meta_resolver(sys_id):
+            if not sys_id or meta_mgr is None:
+                return None
+            try:
+                meta = meta_mgr.get_meta_for_id(sys_id)
+                if isinstance(meta, tuple) and len(meta) >= 2:
+                    shelf, title = (meta[0] or f'ID: {sys_id}'), (meta[1] or '')
+                else:
+                    shelf, title = f'ID: {sys_id}', ''
+            except Exception:
+                shelf, title = f'ID: {sys_id}', ''
+            try:
+                lib_code = meta_mgr.get_library_for_id(sys_id) or ''
+            except Exception:
+                lib_code = ''
+            try:
+                lib_name = (
+                    core_get_library_display(lib_code, short=False, lang='en')
+                    if lib_code else ''
+                )
+            except Exception:
+                lib_name = lib_code  # Graceful fallback to code (MUST-FIX 94-01-B).
+            return {
+                'shelfmark': shelf,
+                'title': title,
+                'library_code': lib_code,
+                'library_name': lib_name,
+            }
+
+        # --- Workbook + 3 sheets ---
+        # MUST-FIX 94-03-E: "Genizah Results" is the locked English literal
+        # per EXPORT-META-09 cross-app parity (Wave 4 desktop mirrors this).
+        wb, ws_main = create_excel_workbook("Genizah Results", rtl_sheet=rtl)
+        ws_manu = wb.create_sheet(title="Manuscripts")
+        ws_bib = wb.create_sheet(title="Bibliography")
+        ws_manu.sheet_view.rightToLeft = rtl
+        ws_bib.sheet_view.rightToLeft = rtl
+
+        # --- Main sheet: unified 12-column order per D-01 ---
+        main_headers = [
+            "System ID", "Library", "Shelfmark", "Title",
+            "Image/Page", "Source",
+            "Snippet", "Full Text",
+            "Has PGP", "Is Printed", "Domains", "IIIF Manifest",
+        ]
+        style_excel_header(ws_main, main_headers)
+        set_excel_column_widths(ws_main, {
+            'A': 18, 'B': 25, 'C': 22, 'D': 35,
+            'E': 14, 'F': 14, 'G': 50, 'H': 80,
+            'I': 10, 'J': 12, 'K': 25, 'L': 30,
         })
 
-        highlight_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
         rtl_align = get_cell_alignment('rtl')
         ltr_align = get_cell_alignment('ltr')
         center_align = get_cell_alignment('center')
 
         for res in results:
-            # SEED-002: rehydrate display fields from uid via meta_mgr if
-            # the row is compacted (no display dict). Legacy rows with a
+            # SEED-002 fixup: rehydrate display fields from uid via meta_mgr
+            # if the row is compacted (no display dict). Legacy rows with a
             # non-empty display dict are returned verbatim by the helper.
-            shelfmark, title, _library_code, library_name = _resolve_result_display(
-                res, self.meta_mgr
+            shelfmark_live, title_live, _library_code, library_name_live = (
+                _resolve_result_display(res, self.meta_mgr)
             )
-            snippet = clean_text_single_line(remove_highlight_markers(res.get('snippet', '')))
-            full_text = clean_text_single_line(_resolve_result_full_text(res))[:32000]
+
+            display_dict = res.get('display') if isinstance(res.get('display'), dict) else {}
+            display_dict = display_dict or {}
 
             # Resolve sys_id for the "System ID" column. SEED-002 fixup tier
-            # order matches _resolve_result_display:
-            #   1. legacy display.id  2. row.sys_id (compactor-synthesized)
-            #   3. raw_header regex   4. parse_full_id_components(uid) (legacy)
-            legacy_display = res.get('display') if isinstance(res.get('display'), dict) else {}
-            sys_id_for_cell = (legacy_display or {}).get('id') or ''
+            # order matches _resolve_result_display.
+            sys_id_for_cell = display_dict.get('id') or ''
             if not sys_id_for_cell:
                 explicit_sys = res.get('sys_id')
                 if isinstance(explicit_sys, str):
@@ -464,40 +588,142 @@ class ExportService:
                         sys_id_for_cell = m.group(1)
             if not sys_id_for_cell and self.meta_mgr:
                 try:
-                    parsed = self.meta_mgr.parse_full_id_components(res.get('uid', '') or '') or {}
+                    parsed = self.meta_mgr.parse_full_id_components(
+                        res.get('uid', '') or ''
+                    ) or {}
                     sys_id_for_cell = parsed.get('sys_id') or ''
                 except Exception:
                     sys_id_for_cell = ''
 
-            row = [
-                sanitize_text_for_excel(shelfmark),
-                sanitize_text_for_excel(library_name),
-                sanitize_text_for_excel(title),
+            # D-04 / Pattern 1.8 / Shared Pattern F: re-resolve library_name
+            # via the English-pinned core helper. `library_name_live` from
+            # `_resolve_result_display` routes through UI lang, which would
+            # leak Hebrew names on a Hebrew-UI export. Bypass it here.
+            lib_code_for_cell = ''
+            try:
+                if self.meta_mgr and sys_id_for_cell:
+                    raw_lib = self.meta_mgr.get_library_for_id(sys_id_for_cell)
+                    if isinstance(raw_lib, str):
+                        lib_code_for_cell = raw_lib
+            except Exception:
+                lib_code_for_cell = ''
+            if not lib_code_for_cell:
+                disp_lib = display_dict.get('library_code')
+                if isinstance(disp_lib, str):
+                    lib_code_for_cell = disp_lib or ''
+            try:
+                library_name = (
+                    core_get_library_display(lib_code_for_cell, short=False, lang='en')
+                    if lib_code_for_cell else ''
+                )
+            except Exception:
+                library_name = lib_code_for_cell or (
+                    library_name_live if isinstance(library_name_live, str) else ''
+                )
+
+            # MUST-FIX 94-03-A: Image/Page + Source survive compaction via
+            # _SEARCH_ROW_ALLOWLIST extension + _compact_search_result_row
+            # synthesis (web/export_state.py). Bounded fallback: live rows
+            # expose display.img/display.source; compacted rows expose
+            # top-level img/source. Either path yields non-empty cells.
+            img_page = display_dict.get('img') or res.get('img') or ''
+            source_label = display_dict.get('source') or res.get('source') or ''
+
+            # MUST-FIX 94-03-D: snippet read after compaction.
+            # _SEARCH_ROW_ALLOWLIST keeps only 'snippet' (which already
+            # carries the *...* markers from genizah_core.highlight());
+            # 'raw_file_hl' is STRIPPED during compaction so the legacy
+            # `or res.get('raw_file_hl')` fallback was dead code for
+            # compacted rows. Live rows also populate 'snippet' identically,
+            # so dropping the fallback is safe.
+            snippet_raw = res.get('snippet') or ''
+            full_text = clean_text_single_line(_resolve_result_full_text(res))[:32000]
+
+            # D-01 / D-05 / D-06 — new appended columns.
+            has_pgp_cell = 'Yes' if (sys_id_for_cell and sys_id_for_cell in _trans_set) else ''
+            is_printed_cell = 'Yes' if (sys_id_for_cell and sys_id_for_cell in _printed_set) else ''
+            domains_list = _domains_map.get(sys_id_for_cell, []) or []
+            domains_cell = '|'.join(d for d in domains_list if d)
+            # IIIF Manifest column DEFERRED per D-13 — header present, cells empty.
+            iiif_cell = ''
+
+            row_cells = [
                 sanitize_text_for_excel(sys_id_for_cell),
-                str(res.get('sort_score', '')),
-                sanitize_text_for_excel(snippet),
+                sanitize_text_for_excel(library_name),
+                sanitize_text_for_excel(shelfmark_live),
+                sanitize_text_for_excel(title_live),
+                sanitize_text_for_excel(img_page),
+                sanitize_text_for_excel(source_label),
+                None,  # Snippet — written via build_rich_snippet_cell below.
                 sanitize_text_for_excel(full_text),
+                has_pgp_cell,
+                is_printed_cell,
+                sanitize_text_for_excel(domains_cell),
+                iiif_cell,
             ]
-            ws.append(row)
+            ws_main.append(row_cells)
+            current_row = ws_main.max_row
 
-            current_row = ws.max_row
-            ws.cell(row=current_row, column=1).alignment = rtl_align
-            ws.cell(row=current_row, column=2).alignment = ltr_align  # Library code is LTR
-            ws.cell(row=current_row, column=3).alignment = rtl_align
-            ws.cell(row=current_row, column=4).alignment = ltr_align
-            ws.cell(row=current_row, column=5).alignment = center_align
+            # Snippet column (col 7) gets rich-text rendering per D-14.
+            ws_main.cell(
+                row=current_row, column=7,
+                value=build_rich_snippet_cell(snippet_raw, sanitize_text_for_excel),
+            )
 
-            snippet_cell = ws.cell(row=current_row, column=6)
-            snippet_cell.alignment = rtl_align
-            if contains_any_term(snippet, search_terms):
-                snippet_cell.fill = highlight_fill
+            # Per-cell alignment (existing pattern).
+            ws_main.cell(row=current_row, column=1).alignment = ltr_align  # System ID
+            ws_main.cell(row=current_row, column=2).alignment = ltr_align  # Library (English)
+            ws_main.cell(row=current_row, column=3).alignment = rtl_align if rtl else ltr_align  # Shelfmark
+            ws_main.cell(row=current_row, column=4).alignment = rtl_align if rtl else ltr_align  # Title
+            ws_main.cell(row=current_row, column=5).alignment = ltr_align  # Image/Page
+            ws_main.cell(row=current_row, column=6).alignment = ltr_align  # Source
+            ws_main.cell(row=current_row, column=7).alignment = rtl_align if rtl else ltr_align  # Snippet
+            ws_main.cell(row=current_row, column=8).alignment = rtl_align if rtl else ltr_align  # Full Text
+            ws_main.cell(row=current_row, column=9).alignment = center_align  # Has PGP
+            ws_main.cell(row=current_row, column=10).alignment = center_align  # Is Printed
+            ws_main.cell(row=current_row, column=11).alignment = ltr_align  # Domains
+            ws_main.cell(row=current_row, column=12).alignment = ltr_align  # IIIF Manifest
 
-            fulltext_cell = ws.cell(row=current_row, column=7)
-            fulltext_cell.alignment = rtl_align
-            if contains_any_term(full_text, search_terms):
-                fulltext_cell.fill = highlight_fill
+        add_excel_credits(ws_main)
 
-        add_excel_credits(ws)
+        # --- Manuscripts sub-sheet (D-02 / D-03 / D-12) ---
+        # Dedupe sys_ids in first-occurrence order per D-12.
+        seen = set()
+        unique_sys_ids = []
+        for r in results:
+            sid_disp = r.get('display') if isinstance(r.get('display'), dict) else {}
+            sid = (sid_disp or {}).get('id') or r.get('sys_id') or ''
+            if sid and sid not in seen:
+                seen.add(sid)
+                unique_sys_ids.append(sid)
+
+        style_excel_header(ws_manu, list(MANUSCRIPT_HEADERS))
+        set_excel_column_widths(ws_manu, {
+            'A': 18, 'B': 22, 'C': 25, 'D': 35, 'E': 30, 'F': 60,
+            'G': 18, 'H': 14, 'I': 25, 'J': 25, 'K': 22, 'L': 50,
+            'M': 30, 'N': 35,
+        })
+        for sid in unique_sys_ids:
+            row = build_manuscript_row(sid, _meta_resolver, lang=lang)
+            ws_manu.append([
+                sanitize_text_for_excel(v) if isinstance(v, str) else v
+                for v in row
+            ])
+
+        # --- Bibliography sub-sheet (D-02 / D-03) ---
+        style_excel_header(ws_bib, list(BIBLIOGRAPHY_HEADERS))
+        set_excel_column_widths(ws_bib, {
+            'A': 18, 'B': 22, 'C': 25, 'D': 40, 'E': 30, 'F': 12, 'G': 14, 'H': 20,
+        })
+        for sid in unique_sys_ids:
+            for row in build_bibliography_rows(sid, _meta_resolver):
+                ws_bib.append([
+                    sanitize_text_for_excel(v) if isinstance(v, str) else v
+                    for v in row
+                ])
+
+        # --- Default-active sheet per D-03 ---
+        wb.active = wb.index(ws_main)
 
         filename = make_safe_filename(search_query) + ".xlsx"
         return save_workbook_to_bytes(wb), filename
