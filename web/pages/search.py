@@ -3899,6 +3899,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # search.py:4232-4242. Pass it through verbatim (None when no active filters).
             _filters_applied = params.get('filters')
             _warnings = ['restored-from-history']
+            # SHOULD-FIX 94-02-C: history-restore ships empty enrichment containers,
+            # but the export consumer needs to know has_pgp/is_printed/domains are
+            # NOT authoritative on a restored snapshot. Surface a machine-readable
+            # marker in the warnings list; live re-runs of the search repopulate
+            # enrichment via update_search_export_enrichment and the marker no
+            # longer applies on the next set_search_export.
+            _warnings = list(_warnings or []) + ['metadata_incomplete_restored_from_history']
             from web.export_state import set_search_export
             set_search_export(
                 results=_results,
@@ -3908,6 +3915,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 filters=_filters_applied,
                 warnings=_warnings,
                 selected_uids=None,
+                # Phase 94 EXPORT-META-06: history-restore replays a completed search
+                # without re-running enrichment; ship empty containers -- user can
+                # re-run the search to repopulate enrichment if needed.
+                transcription_sys_ids=set(),
+                printed_ids=set(),
+                result_domains={},
             )
             # Update count display
             results_count.text = f"{len(search_state.results)} {tr('Results')}"
@@ -4228,6 +4241,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 filters=_last_filters_applied,
                 warnings=_last_search_warnings,
                 selected_uids=None,
+                # Phase 94 EXPORT-META-06: enrichment runs AFTER this call; the
+                # update_search_export_enrichment(...) post-write at the Stage-1
+                # / Stage-2 sites patches the live values in.
+                transcription_sys_ids=set(),
+                printed_ids=set(),
+                result_domains={},
             )
             results = compact_result_rows(results)
             search_state.results = results
@@ -4320,6 +4339,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             filters=_last_filters_applied,
             warnings=_last_search_warnings,
             selected_uids=None,
+            # Phase 94 EXPORT-META-06: enrichment runs AFTER this call; the
+            # update_search_export_enrichment(...) post-write at the Stage-1
+            # / Stage-2 sites patches the live values in.
+            transcription_sys_ids=set(),
+            printed_ids=set(),
+            result_domains={},
         )
         results = compact_result_rows(results)
         search_state.is_running = False
@@ -4622,6 +4647,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state.printed_ids = printed_ids
                 search_state.translation_data = trans_data
                 search_state.vs_availability.update(vs_avail)  # Phase 57
+                # Phase 94 EXPORT-META-06: propagate enrichment to the export
+                # payload so /api/export/excel and /api/export/json reflect
+                # has_pgp / is_printed / domains for visible-page results.
+                from web.export_state import update_search_export_enrichment
+                update_search_export_enrichment(
+                    transcription_sys_ids=search_state.transcription_sys_ids,
+                    printed_ids=search_state.printed_ids,
+                    result_domains=search_state.result_domains,
+                )
                 # Pre-cache domain hierarchy
                 if search_state.all_result_domains:
                     def fetch_hierarchy():
@@ -4669,6 +4703,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             if search_state.search_generation == this_generation:
                 _apply_enrichment_to_ui()
                 _render_with_filters(reset_expansion=False)
+                # Phase 94 EXPORT-META-06: re-sync export payload after all
+                # background-enriched chunks have folded their sys_ids into
+                # search_state. Single write covers all enriched data -- avoids
+                # N writes inside the chunk loop.
+                from web.export_state import update_search_export_enrichment
+                update_search_export_enrichment(
+                    transcription_sys_ids=search_state.transcription_sys_ids,
+                    printed_ids=search_state.printed_ids,
+                    result_domains=search_state.result_domains,
+                )
             _t_stage2_done = time.perf_counter()
             logger.info("Search perf: background_enrichment_ms=%.0f (ids=%d)", (_t_stage2_done - _t_stage2) * 1000, len(remaining_ids))
 

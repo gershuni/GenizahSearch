@@ -95,6 +95,56 @@ _filename_counter = itertools.count()
 # Private helpers
 # -----------------------------------------------------------------------------
 
+# MUST-FIX 94-02-A -- Shared sys_id regex for batch resolution. Matches the
+# production sys_id pattern (99 followed by 8+ digits, e.g. 99001234567890 or
+# Phase-85 synthetic 18-digit shape).
+_SYS_ID_REGEX = re.compile(r'(99\d{8,})')
+
+
+def _extract_sys_id_for_batch(result: dict, meta_mgr=None) -> str:
+    """MUST-FIX 94-02-A -- Shared sys_id resolution chain for batch lookups.
+
+    Mirrors ``_serialize_item``'s SEED-002 fallback so the batch builder
+    in ``serialize_search_payload`` resolves the same sys_id as the
+    per-item serializer. Without this, compacted rows (post
+    ``_compact_search_result_row`` -- display dict stripped) yield an
+    empty sys_ids list to the FJMS domain batch, and the ``domains``
+    key is empty for every item that reached the export path through
+    the session payload.
+
+    Resolution order:
+      1. Top-level ``result['sys_id']`` (preserved by compaction allowlist)
+      2. ``result['display']['id']`` (live, pre-compaction)
+      3. ``raw_header`` regex match (``99\\d{8,}``)
+      4. ``uid`` parsed via ``meta_mgr.parse_full_id_components(uid)`` when available
+    """
+    if not isinstance(result, dict):
+        return ''
+    sid = result.get('sys_id')
+    if isinstance(sid, str) and sid.strip():
+        return sid.strip()
+    display = result.get('display') or {}
+    if isinstance(display, dict):
+        did = display.get('id')
+        if isinstance(did, str) and did.strip():
+            return did.strip()
+    raw = result.get('raw_header') or ''
+    if isinstance(raw, str) and raw:
+        m = _SYS_ID_REGEX.search(raw)
+        if m:
+            return m.group(1)
+    uid = result.get('uid') or ''
+    if uid and meta_mgr is not None:
+        try:
+            parsed = meta_mgr.parse_full_id_components(uid) or {}
+            sid2 = parsed.get('sys_id')
+            if isinstance(sid2, str) and sid2.strip():
+                return sid2.strip()
+        except Exception:
+            pass
+    return ''
+
+
 def _extract_match_terms(snippet: Optional[str]) -> list[str]:
     """D-03: Extract unique *term* markers in order of first appearance.
 
@@ -235,6 +285,14 @@ def _serialize_item(
     meta_mgr: Any,
     domain_batch: dict[str, list[dict]],
     catalog_batch: dict[str, dict],
+    # Phase 94 EXPORT-META-07 -- additive per-item enrichment flags.
+    # MUST-FIX 94-02-B opt-in / D-11 public API stability: when BOTH
+    # kwargs are None (public /api/search path), has_pgp and is_printed
+    # are OMITTED from the returned dict entirely. When EITHER kwarg is
+    # provided (export path), BOTH keys are ALWAYS boolean (never None,
+    # never missing) per CONTEXT D-06.
+    transcription_sys_ids: Optional[set] = None,
+    printed_sys_ids: Optional[set] = None,
 ) -> dict:
     """Single source of truth for per-item shape (D-14 / EXPORT-03).
 
@@ -244,6 +302,10 @@ def _serialize_item(
     Per-item shape (D-01 modified, D-02, D-03, D-04):
         {uid, locator, score, shelfmark, title, library, domains, dating,
          snippet, excerpt, match_terms, image_url}
+
+    Phase 94 EXPORT-META-07: OPTIONAL per-item additive flags ``has_pgp``
+    and ``is_printed`` (always boolean per D-06) appear ONLY when at least
+    one of ``transcription_sys_ids`` / ``printed_sys_ids`` is provided.
     """
     from shared_export_utils import remove_highlight_markers
 
@@ -345,7 +407,16 @@ def _serialize_item(
     except (ValueError, TypeError):
         score = 0.0
 
-    return {
+    # Phase 94 EXPORT-META-07 / MUST-FIX 94-02-B -- additive boolean flags,
+    # schema_version stays 1. Opt-in semantics: when both kwargs are None
+    # (public /api/search path), OMIT both keys entirely. When EITHER kwarg
+    # is provided (export path), BOTH keys are ALWAYS boolean (never None,
+    # never missing) per D-06.
+    _emit_enrichment_flags = (
+        transcription_sys_ids is not None or printed_sys_ids is not None
+    )
+
+    out = {
         'uid': result.get('uid', '') or '',
         'locator': {
             'sys_id': final_sys_id or None,
@@ -370,6 +441,17 @@ def _serialize_item(
         # HIGH-07: pass library_code so non-NLI providers get null
         'image_url': _build_image_url(final_sys_id, parsed.get('p_num'), library_code),
     }
+    # MUST-FIX 94-02-B: emit has_pgp/is_printed ONLY when caller opted in.
+    # When the caller passes either set kwarg (the export path), BOTH keys
+    # are emitted as booleans per D-06. When neither is passed (the public
+    # /api/search path), both keys are absent so the prior response shape
+    # is unchanged.
+    if _emit_enrichment_flags:
+        _trans_set = transcription_sys_ids or set()
+        _printed_set = printed_sys_ids or set()
+        out['has_pgp'] = bool(final_sys_id and final_sys_id in _trans_set)
+        out['is_printed'] = bool(final_sys_id and final_sys_id in _printed_set)
+    return out
 
 
 def _utc_iso_now() -> str:
@@ -429,6 +511,21 @@ def serialize_search_payload(
     # Phase 81A — when present, embedded verbatim under top-level `request`.
     # Phase 77 download path leaves this None to preserve back-compat.
     request_echo: Optional[dict] = None,
+    # Phase 94 EXPORT-META-07 -- enrichment flags propagated to each item
+    # via _serialize_item. When BOTH are None (public /api/search path),
+    # the additive has_pgp/is_printed keys are OMITTED per D-11 (MUST-FIX
+    # 94-02-B). When EITHER set is provided (export path), both keys are
+    # emitted as booleans per D-06.
+    transcription_sys_ids: Optional[set] = None,
+    printed_sys_ids: Optional[set] = None,
+    # MUST-FIX 94-02-A -- when provided, per-item ``domains`` populated
+    # directly from this dict (sys_id -> List[str]) instead of doing a
+    # fresh FJMS batch lookup. The session payload already has up-to-date
+    # domains; this kwarg short-circuits the FJMS round-trip. When None,
+    # falls back to FJMS lookup (the batch builder uses
+    # ``_extract_sys_id_for_batch`` so compacted rows are not silently
+    # dropped).
+    result_domains: Optional[dict] = None,
 ) -> dict:
     """Phase 77 EXPORT-01/03. Same shape Phase 78 /api/search will inherit.
 
@@ -446,14 +543,27 @@ def serialize_search_payload(
     Returns:
         Envelope dict per D-05/06/07/09/10. JSON-serializable with json.dumps(ensure_ascii=False).
     """
-    # Batch domain + catalog lookup
-    sys_ids = [
-        (r.get('display') or {}).get('id', '')
-        for r in results
-        if (r.get('display') or {}).get('id')
-    ]
-    sys_ids = [s for s in sys_ids if s]
-    domain_batch, catalog_batch = _safe_fjms_lookups(sys_ids)
+    # MUST-FIX 94-02-A -- short-circuit FJMS domain lookup when caller
+    # supplied result_domains from the session payload. Skill consumers
+    # of /api/search (no session) get the FJMS-batch behavior. The
+    # _serialize_item consumer expects domain_batch in the shape
+    # ``sys_id -> List[{'domain': str, ...}]``; convert the simpler
+    # ``sys_id -> List[str]`` kwarg shape here.
+    if result_domains is not None:
+        domain_batch = {
+            sid: [{'domain': d} for d in (dlist or [])]
+            for sid, dlist in result_domains.items()
+        }
+        # No catalog batch on the short-circuit path -- the export path
+        # does not need catalog.copy_date for dating; the JSON consumer
+        # gets None for dating which is the documented behavior when
+        # FJMS does not have a catalog row.
+        catalog_batch = {}
+    else:
+        # MUST-FIX 94-02-A: use shared helper that survives compacted rows.
+        sys_ids = [_extract_sys_id_for_batch(r, meta_mgr=meta_mgr) for r in results]
+        sys_ids = [s for s in sys_ids if s]
+        domain_batch, catalog_batch = _safe_fjms_lookups(sys_ids)
 
     items = [
         _serialize_item(
@@ -461,6 +571,9 @@ def serialize_search_payload(
             meta_mgr=meta_mgr,
             domain_batch=domain_batch,
             catalog_batch=catalog_batch,
+            # Phase 94 EXPORT-META-07 thread-through:
+            transcription_sys_ids=transcription_sys_ids,
+            printed_sys_ids=printed_sys_ids,
         )
         for r in results
     ]
@@ -808,6 +921,15 @@ def _to_parallels_envelope_item(
         domain_batch=domain_batch,
         catalog_batch=catalog_batch,
     )
+    # Phase 94 EXPORT-META-07 / D-10: parallels envelope shape does NOT
+    # inherit search-side additive flags. With the opt-in / MUST-FIX
+    # 94-02-B semantics ``_serialize_item`` does not emit the keys when
+    # both kwargs are None (the path this function takes), so this strip
+    # is defense-in-depth against future callers that opt in here. The
+    # negative regression test tests/test_parallels_envelope_no_pgp_keys.py
+    # pins the contract.
+    item.pop('has_pgp', None)
+    item.pop('is_printed', None)
 
     # D-13 matches[] -- consume Plan 02's chunk_hits when it is a list of
     # per-chunk tuples (lab_composition_search path). Two collision cases fall
