@@ -46,21 +46,21 @@ def _make_result(sys_id, snippet='foo *bar* baz', img='1r', source='ms',
 @pytest.fixture
 def stub_dossier(monkeypatch):
     from shared import export_dossier
-    monkeypatch.setattr(export_dossier, 'pgp_subset_for_sys_id', lambda s: {
+    monkeypatch.setattr(export_dossier, 'pgp_subset_for_sys_id', lambda s, **kw: {
         'pgp_url': f'https://pgp.example/{s}',
         'description': f'PGP desc {s}', 'document_type': 'Letter',
         'date_display': '1100', 'languages': ['Hebrew', 'Aramaic'],
         'tags': ['letter'],
     } if s else None)
-    monkeypatch.setattr(export_dossier, 'nli_subset_for_sys_id', lambda s: {
+    monkeypatch.setattr(export_dossier, 'nli_subset_for_sys_id', lambda s, **kw: {
         'catalog_entry': f'Neubauer {s[-4:]}',
         'library_viewer_url': f'https://cudl.example/{s}',
     } if s else None)
-    monkeypatch.setattr(export_dossier, 'catalog_summary_for_sys_id', lambda s: {
+    monkeypatch.setattr(export_dossier, 'catalog_summary_for_sys_id', lambda s, **kw: {
         'title': f'CatTitle {s}', 'author_text': 'Author',
         'copy_date': '1180', 'copy_place': 'Fustat',
     } if s else None)
-    monkeypatch.setattr(export_dossier, 'bibliography_for_sys_id', lambda s: [{
+    monkeypatch.setattr(export_dossier, 'bibliography_for_sys_id', lambda s, **kw: [{
         'running_title': 'Med. Soc.', 'title_year': 1967, 'mention_page': '123',
         'article_name': 'Letter', 'article_author_eng': 'Goitein',
         'catalog_acronym': 'MS',
@@ -195,9 +195,13 @@ def test_bibliography_has_row_when_entries(stub_dossier):
 
 
 def test_conditional_rtl_he(stub_dossier):
+    """D-04 REVISED (2026-05-20): sheet titles are bilingual when lang='he'."""
+    from shared.export_dossier import sheet_titles
     content = _build([_make_result('A')], lang='he')
     wb = _load(content)
-    for name in ['Genizah Results', 'Manuscripts', 'Bibliography']:
+    he_titles = sheet_titles('he')
+    for key in ('main', 'manuscripts', 'bibliography'):
+        name = he_titles[key]
         assert wb[name].sheet_view.rightToLeft is True
 
 
@@ -218,16 +222,18 @@ def test_rich_snippet_renders(stub_dossier):
     assert isinstance(snippet_cell, CellRichText)
 
 
-def test_main_headers_english_locked_regardless_of_locale(stub_dossier):
-    # MUST-FIX 94-04-B: main-sheet headers are English-locked literals.
-    # Even when desktop locale is 'he', the headers row contains the
-    # English strings (NOT Hebrew translations). EXPORT-META-09 parity
-    # requires byte-identical header rows between web and desktop.
-    # The fixture's _build() passes a literal English headers_main list;
-    # verify the resulting workbook reflects exactly those literals.
+def test_main_headers_english_when_caller_pins_english_list(stub_dossier):
+    # D-04 REVISED (2026-05-20): MUST-FIX 94-04-B is SUPERSEDED. The helper
+    # accepts an explicit ``headers_main`` kwarg for back-compat; when the
+    # caller passes a literal English list (as the parity-test fixture does),
+    # the resulting workbook reflects exactly those literals regardless of
+    # ``lang``. The new bilingual default behavior is covered by
+    # ``test_main_headers_hebrew_when_lang_he_and_no_explicit_headers``.
     content = _build([_make_result('A')], lang='he')
     wb = _load(content)
-    ws = wb['Genizah Results']
+    # In Hebrew lang the sheet title is now Hebrew.
+    from shared.export_dossier import sheet_titles
+    ws = wb[sheet_titles('he')['main']]
     header_row = _find_header_row(ws)
     assert header_row is not None
     headers = [ws.cell(header_row, c).value for c in range(1, 13)]
@@ -298,6 +304,62 @@ def test_manuscripts_headers_match_shared_constants(stub_dossier):
     bib_headers = [wb['Bibliography'].cell(1, c).value for c in range(1, 9)]
     assert manu_headers == list(MANUSCRIPT_HEADERS)
     assert bib_headers == list(BIBLIOGRAPHY_HEADERS)
+
+
+def test_he_lang_produces_hebrew_sheet_titles_and_headers(stub_dossier):
+    """D-04 REVISED (2026-05-20): when no explicit headers_main is passed
+    and lang='he', the desktop helper produces Hebrew sheet titles AND
+    Hebrew header rows on all 3 sheets.
+    """
+    from genizah_app import _build_search_results_xlsx_bytes
+    from shared.export_dossier import sheet_titles, main_header_row, manuscript_header_row, bibliography_header_row
+    content = _build_search_results_xlsx_bytes(
+        results=[_make_result('99001234567890')],
+        # headers_main intentionally omitted -> defaults to main_header_row(lang)
+        meta_resolver=_meta_resolver_fake,
+        sanitize_fn=_identity_sanitize,
+        lang='he',
+    )
+    wb = _load(content)
+    he_titles = sheet_titles('he')
+    assert wb.sheetnames == [he_titles['main'], he_titles['manuscripts'], he_titles['bibliography']]
+    ws_main = wb[he_titles['main']]
+    header_row = _find_header_row_he(ws_main)
+    expected_main = main_header_row('he')
+    actual_main = [ws_main.cell(header_row, c).value for c in range(1, 13)]
+    assert actual_main == expected_main, f"Hebrew main headers mismatch: {actual_main}"
+    ws_manu = wb[he_titles['manuscripts']]
+    assert [ws_manu.cell(1, c).value for c in range(1, 15)] == manuscript_header_row('he')
+    ws_bib = wb[he_titles['bibliography']]
+    assert [ws_bib.cell(1, c).value for c in range(1, 9)] == bibliography_header_row('he')
+
+
+def _find_header_row_he(ws):
+    # The Hebrew main-sheet header starts with 'מספר מערכת' (System ID).
+    for r in range(1, 25):
+        if ws.cell(r, 1).value == 'מספר מערכת':
+            return r
+    return None
+
+
+def test_en_lang_produces_english_sheet_titles_and_headers_default(stub_dossier):
+    """Symmetric back-compat for en. When headers_main is omitted, defaults
+    to main_header_row('en'); sheet titles stay English."""
+    from genizah_app import _build_search_results_xlsx_bytes
+    from shared.export_dossier import main_header_row, manuscript_header_row, bibliography_header_row
+    content = _build_search_results_xlsx_bytes(
+        results=[_make_result('99001234567890')],
+        meta_resolver=_meta_resolver_fake,
+        sanitize_fn=_identity_sanitize,
+        lang='en',
+    )
+    wb = _load(content)
+    assert wb.sheetnames == ['Genizah Results', 'Manuscripts', 'Bibliography']
+    ws_main = wb['Genizah Results']
+    header_row = _find_header_row(ws_main)
+    assert [ws_main.cell(header_row, c).value for c in range(1, 13)] == main_header_row('en')
+    assert [wb['Manuscripts'].cell(1, c).value for c in range(1, 15)] == manuscript_header_row('en')
+    assert [wb['Bibliography'].cell(1, c).value for c in range(1, 9)] == bibliography_header_row('en')
 
 
 def test_credit_text_preserved_above_headers(stub_dossier):

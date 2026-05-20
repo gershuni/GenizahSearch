@@ -24,11 +24,15 @@ from shared.export_dossier import (
     MANUSCRIPT_HEADERS,
     _split_pgp_languages,
     bibliography_for_sys_id,
+    bibliography_header_row,
     build_bibliography_rows,
     build_manuscript_row,
     catalog_summary_for_sys_id,
+    main_header_row,
+    manuscript_header_row,
     nli_subset_for_sys_id,
     pgp_subset_for_sys_id,
+    sheet_titles,
 )
 
 
@@ -723,9 +727,9 @@ class TestBuildManuscriptRow:
         }
 
     def test_row_length_matches_headers(self, monkeypatch):
-        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s: None)
+        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s, **kw: None)
         row = build_manuscript_row('99001234567890', self._meta_resolver)
         assert len(row) == len(MANUSCRIPT_HEADERS), (
             f"row has {len(row)} cells, headers has {len(MANUSCRIPT_HEADERS)}"
@@ -734,7 +738,7 @@ class TestBuildManuscriptRow:
     def test_row_order_and_content(self, monkeypatch):
         monkeypatch.setattr(
             'shared.export_dossier.pgp_subset_for_sys_id',
-            lambda s: {
+            lambda s, **kw: {
                 'pgp_url': 'https://pgp.example/123',
                 'description': 'A letter',
                 'document_type': 'Letter',
@@ -745,14 +749,14 @@ class TestBuildManuscriptRow:
         )
         monkeypatch.setattr(
             'shared.export_dossier.nli_subset_for_sys_id',
-            lambda s: {
+            lambda s, **kw: {
                 'catalog_entry': 'Neubauer 2603.1',
                 'library_viewer_url': 'https://cudl.example',
             },
         )
         monkeypatch.setattr(
             'shared.export_dossier.catalog_summary_for_sys_id',
-            lambda s: {
+            lambda s, **kw: {
                 'title': 'Mishneh Torah',
                 'author_text': 'Maimonides',
                 'copy_date': '1180',
@@ -780,13 +784,13 @@ class TestBuildManuscriptRow:
 
     def test_does_not_call_bibliography_helper(self, monkeypatch):
         # Codex MUST-FIX 4: manuscript row does NOT call bibliography helper.
-        def trap(_):
+        def trap(_, **kw):
             raise AssertionError("MUST NOT be called (Codex MUST-FIX 4)")
 
         monkeypatch.setattr('shared.export_dossier.bibliography_for_sys_id', trap)
-        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s: None)
+        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s, **kw: None)
         row = build_manuscript_row('99001234567890', self._meta_resolver)
         assert len(row) == 14  # If bibliography was called, AssertionError would fire
 
@@ -794,38 +798,38 @@ class TestBuildManuscriptRow:
         # D-05: pipe character, NO surrounding spaces.
         monkeypatch.setattr(
             'shared.export_dossier.pgp_subset_for_sys_id',
-            lambda s: {
+            lambda s, **kw: {
                 'pgp_url': '', 'description': '', 'document_type': '',
                 'date_display': '',
                 'languages': ['Hebrew', 'Aramaic', 'Judeo-Arabic'],
                 'tags': [],
             },
         )
-        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s: None)
+        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s, **kw: None)
         row = build_manuscript_row('99001234567890', self._meta_resolver)
         assert row[8] == 'Hebrew|Aramaic|Judeo-Arabic'
 
     def test_pipe_joined_tags_no_spaces(self, monkeypatch):
         monkeypatch.setattr(
             'shared.export_dossier.pgp_subset_for_sys_id',
-            lambda s: {
+            lambda s, **kw: {
                 'pgp_url': '', 'description': '', 'document_type': '',
                 'date_display': '',
                 'languages': [],
                 'tags': ['letter', 'legal'],
             },
         )
-        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s: None)
+        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s, **kw: None)
         row = build_manuscript_row('99001234567890', self._meta_resolver)
         assert row[9] == 'letter|legal'
 
     def test_missing_data_renders_empty_cells(self, monkeypatch):
         # D-06: empty cells for missing data — never 'N/A' / '—' / 'None'.
-        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s: None)
+        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s, **kw: None)
         # meta_resolver returns None for the sys_id
         row = build_manuscript_row('99001234567890', lambda s: None)
         assert row[0] == '99001234567890'
@@ -838,9 +842,9 @@ class TestBuildManuscriptRow:
         assert row[13].startswith('https://genizahsearch.com')
 
     def test_meta_resolver_none_returns_empty_meta_cells(self, monkeypatch):
-        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s: None)
+        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s, **kw: None)
         row = build_manuscript_row('99001234567890', None)
         assert row[0] == '99001234567890'
         assert row[1] == ''
@@ -850,9 +854,9 @@ class TestBuildManuscriptRow:
         assert row[13] == 'https://genizahsearch.com/browse?sys_id=99001234567890'
 
     def test_genizah_search_url_verbatim(self, monkeypatch):
-        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s: None)
+        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s, **kw: None)
         row = build_manuscript_row('ABC123', self._meta_resolver)
         assert row[13] == 'https://genizahsearch.com/browse?sys_id=ABC123'
 
@@ -861,9 +865,9 @@ class TestBuildManuscriptRow:
         # unchanged (LIBRARY_CODES.get(code, code) fallback at
         # genizah_core.py:1820-1838).
         from genizah_core import get_library_display as core_get_library_display
-        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s: None)
-        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s: None)
+        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s, **kw: None)
 
         def _meta(sys_id):
             lib_code = 'UNKNOWN_XYZ'
@@ -896,14 +900,14 @@ class TestBuildBibliographyRows:
         }
 
     def test_empty_when_no_entries(self, monkeypatch):
-        monkeypatch.setattr('shared.export_dossier.bibliography_for_sys_id', lambda s: [])
+        monkeypatch.setattr('shared.export_dossier.bibliography_for_sys_id', lambda s, **kw: [])
         rows = build_bibliography_rows('99001234567890', self._meta_resolver)
         assert rows == []
 
     def test_row_length_and_order(self, monkeypatch):
         monkeypatch.setattr(
             'shared.export_dossier.bibliography_for_sys_id',
-            lambda s: [{
+            lambda s, **kw: [{
                 'running_title': 'Med. Soc.',
                 'title_year': 1967,
                 'mention_page': '123',
@@ -928,7 +932,7 @@ class TestBuildBibliographyRows:
     def test_multiple_entries(self, monkeypatch):
         monkeypatch.setattr(
             'shared.export_dossier.bibliography_for_sys_id',
-            lambda s: [
+            lambda s, **kw: [
                 {'running_title': 'A', 'title_year': 1900, 'mention_page': '1',
                  'article_name': 'a1', 'article_author_eng': 'auth_a',
                  'catalog_acronym': 'CA'},
@@ -945,20 +949,20 @@ class TestBuildBibliographyRows:
 
     def test_does_not_call_other_helpers(self, monkeypatch):
         # Codex MUST-FIX 4: bibliography row only calls helper 4.
-        def trap(_):
+        def trap(_, **kw):
             raise AssertionError("MUST NOT be called (Codex MUST-FIX 4)")
 
         monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', trap)
         monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', trap)
         monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', trap)
-        monkeypatch.setattr('shared.export_dossier.bibliography_for_sys_id', lambda s: [])
+        monkeypatch.setattr('shared.export_dossier.bibliography_for_sys_id', lambda s, **kw: [])
         rows = build_bibliography_rows('99001234567890', self._meta_resolver)
         assert rows == []
 
     def test_meta_resolver_none_blank_shelfmark(self, monkeypatch):
         monkeypatch.setattr(
             'shared.export_dossier.bibliography_for_sys_id',
-            lambda s: [{
+            lambda s, **kw: [{
                 'running_title': 'A', 'title_year': 1900, 'mention_page': '1',
                 'article_name': '', 'article_author_eng': '', 'catalog_acronym': '',
             }],
@@ -971,10 +975,509 @@ class TestBuildBibliographyRows:
     def test_empty_sys_id_returns_empty(self, monkeypatch):
         monkeypatch.setattr(
             'shared.export_dossier.bibliography_for_sys_id',
-            lambda s: [{'running_title': 'x', 'title_year': 1, 'mention_page': '1',
+            lambda s, **kw: [{'running_title': 'x', 'title_year': 1, 'mention_page': '1',
                         'article_name': '', 'article_author_eng': '',
                         'catalog_acronym': ''}],
         )
         rows = build_bibliography_rows('', self._meta_resolver)
         # bibliography_for_sys_id('') returns []; rows is []
         assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# Bilingual API (D-04 REVISED 2026-05-20)
+# ---------------------------------------------------------------------------
+
+
+class TestBilingualHeaderRows:
+    """Coverage for the new lang-aware header / sheet-title helpers.
+
+    Pinned via independent test class so any future Hebrew translation drift
+    is caught loudly. Hebrew strings match the canonical entries already
+    present in ``genizah_translations.TRANSLATIONS`` (used by ``tr()``).
+    """
+
+    # English contract — back-compat with prior callers reading constants directly.
+    def test_main_header_row_en_returns_12_columns(self):
+        row = main_header_row('en')
+        assert len(row) == 12
+        assert row[0] == "System ID"
+        assert row[1] == "Library"
+        assert row[2] == "Shelfmark"
+        assert row[3] == "Title"
+        assert row[4] == "Image/Page"
+        assert row[5] == "Source"
+        assert row[6] == "Snippet"
+        assert row[7] == "Full Text"
+        assert row[8] == "Has PGP"
+        assert row[9] == "Is Printed"
+        assert row[10] == "Domains"
+        assert row[11] == "IIIF Manifest"
+
+    def test_main_header_row_he_returns_12_hebrew_columns(self):
+        row = main_header_row('he')
+        assert len(row) == 12
+        assert row[0] == "מספר מערכת"
+        assert row[1] == "ספרייה"
+        assert row[2] == "מספר מדף"
+        assert row[3] == "כותרת"
+        assert row[4] == "תמונה/עמוד"
+        assert row[5] == "מקור"
+        assert row[6] == "קטע"
+        assert row[7] == "טקסט מלא"
+        assert row[8] == "יש PGP"
+        assert row[9] == "מודפס"
+        assert row[10] == "תחומים"
+        assert row[11] == "מניפסט IIIF"
+
+    def test_main_header_row_default_lang_is_english(self):
+        assert main_header_row() == main_header_row('en')
+
+    def test_main_header_row_returns_fresh_copy(self):
+        # Callers can mutate the returned list without affecting future returns.
+        row = main_header_row('en')
+        row[0] = 'mutated'
+        assert main_header_row('en')[0] == "System ID"
+
+    def test_manuscript_header_row_en_matches_constant(self):
+        # Back-compat: the English variant matches MANUSCRIPT_HEADERS verbatim.
+        assert manuscript_header_row('en') == list(MANUSCRIPT_HEADERS)
+
+    def test_manuscript_header_row_he_returns_14_hebrew_columns(self):
+        row = manuscript_header_row('he')
+        assert len(row) == 14
+        assert row[0] == "מספר מערכת"
+        assert row[1] == "מספר מדף"
+        assert row[2] == "ספרייה"
+        assert row[3] == "כותרת"
+        assert row[4] == "כתובת PGP"
+        assert row[5] == "תיאור PGP"
+        assert row[6] == "סוג PGP"
+        assert row[7] == "תאריך PGP"
+        assert row[8] == "שפות PGP"
+        assert row[9] == "תגיות PGP"
+        assert row[10] == "רשומה בקטלוג הספרייה הלאומית"
+        assert row[11] == "תקציר קטלוגי"
+        assert row[12] == "קישור לצפייה בספרייה"
+        assert row[13] == "קישור ל-GenizahSearch"
+
+    def test_bibliography_header_row_en_matches_constant(self):
+        assert bibliography_header_row('en') == list(BIBLIOGRAPHY_HEADERS)
+
+    def test_bibliography_header_row_he_returns_8_hebrew_columns(self):
+        row = bibliography_header_row('he')
+        assert len(row) == 8
+        assert row[0] == "מספר מערכת"
+        assert row[1] == "מספר מדף"
+        assert row[2] == "מחבר המאמר"
+        assert row[3] == "שם המאמר"
+        assert row[4] == "כותרת רצה"
+        assert row[5] == "שנת הפרסום"
+        assert row[6] == "עמוד אזכור"
+        assert row[7] == "קיצור הקטלוג"
+
+    def test_sheet_titles_en(self):
+        titles = sheet_titles('en')
+        assert titles == {
+            'main': "Genizah Results",
+            'manuscripts': "Manuscripts",
+            'bibliography': "Bibliography",
+        }
+
+    def test_sheet_titles_he(self):
+        titles = sheet_titles('he')
+        assert titles == {
+            'main': "תוצאות גניזה",
+            'manuscripts': "כתבי יד",
+            'bibliography': "ביבליוגרפיה",
+        }
+
+    def test_sheet_titles_default_lang_is_english(self):
+        assert sheet_titles() == sheet_titles('en')
+
+    def test_unknown_lang_falls_back_to_english(self):
+        # Defensive default — unknown lang codes don't error, they degrade to EN.
+        assert main_header_row('fr') == main_header_row('en')
+        assert sheet_titles('fr') == sheet_titles('en')
+
+
+# ---------------------------------------------------------------------------
+# D-04 REVISED — source-language metadata
+# ---------------------------------------------------------------------------
+
+
+class TestPgpSubsetLangPreference:
+    """``lang`` parameter on pgp_subset_for_sys_id picks Hebrew translation
+    via the existing pgp_translations table when ``lang == 'he'``.
+    """
+
+    def test_lang_en_returns_english_description(self, monkeypatch):
+        monkeypatch.setattr(
+            'shared.export_dossier.get_document_for_fragment',
+            lambda sys_id, page_num=None: {
+                'pgp_url': 'u',
+                'description': 'A letter (English)',
+                'document_type': 'Letter',
+                'languages_primary': [], 'languages_secondary': [],
+                'tags': [],
+                'inferred_date_display': '1100',
+                'doc_date_standard': '1100', 'doc_date_original': '1100',
+            },
+        )
+        # Even if a Hebrew translation exists, lang='en' uses English.
+        monkeypatch.setattr(
+            'shared.export_dossier._pgp_translation_he_for_sys_id',
+            lambda sys_id: {
+                'description_he': 'מכתב', 'document_type_he': 'מכתב',
+            },
+        )
+        result = pgp_subset_for_sys_id('99001234567890', lang='en')
+        assert result['description'] == 'A letter (English)'
+        assert result['document_type'] == 'Letter'
+
+    def test_lang_he_prefers_hebrew_description(self, monkeypatch):
+        monkeypatch.setattr(
+            'shared.export_dossier.get_document_for_fragment',
+            lambda sys_id, page_num=None: {
+                'pgp_url': 'u',
+                'description': 'A letter (English)',
+                'document_type': 'Letter',
+                'languages_primary': [], 'languages_secondary': [],
+                'tags': [],
+                'inferred_date_display': '1100',
+                'doc_date_standard': '1100', 'doc_date_original': '1100',
+            },
+        )
+        monkeypatch.setattr(
+            'shared.export_dossier._pgp_translation_he_for_sys_id',
+            lambda sys_id: {
+                'description_he': 'מכתב באנגלית', 'document_type_he': 'מכתב',
+            },
+        )
+        result = pgp_subset_for_sys_id('99001234567890', lang='he')
+        assert result['description'] == 'מכתב באנגלית'
+        assert result['document_type'] == 'מכתב'
+
+    def test_lang_he_falls_back_to_english_when_no_translation(self, monkeypatch):
+        monkeypatch.setattr(
+            'shared.export_dossier.get_document_for_fragment',
+            lambda sys_id, page_num=None: {
+                'pgp_url': 'u',
+                'description': 'A letter (English)',
+                'document_type': 'Letter',
+                'languages_primary': [], 'languages_secondary': [],
+                'tags': [],
+                'inferred_date_display': '1100',
+                'doc_date_standard': '1100', 'doc_date_original': '1100',
+            },
+        )
+        monkeypatch.setattr(
+            'shared.export_dossier._pgp_translation_he_for_sys_id',
+            lambda sys_id: None,
+        )
+        result = pgp_subset_for_sys_id('99001234567890', lang='he')
+        # Graceful fallback to English when Hebrew translation is absent.
+        assert result['description'] == 'A letter (English)'
+        assert result['document_type'] == 'Letter'
+
+    def test_lang_he_partial_translation_falls_back_per_field(self, monkeypatch):
+        # description_he present, document_type_he missing -> Hebrew desc,
+        # English type.
+        monkeypatch.setattr(
+            'shared.export_dossier.get_document_for_fragment',
+            lambda sys_id, page_num=None: {
+                'pgp_url': 'u',
+                'description': 'A letter (English)',
+                'document_type': 'Letter',
+                'languages_primary': [], 'languages_secondary': [],
+                'tags': [],
+                'inferred_date_display': '1100',
+                'doc_date_standard': '1100', 'doc_date_original': '1100',
+            },
+        )
+        monkeypatch.setattr(
+            'shared.export_dossier._pgp_translation_he_for_sys_id',
+            lambda sys_id: {'description_he': 'מכתב', 'document_type_he': ''},
+        )
+        result = pgp_subset_for_sys_id('99001234567890', lang='he')
+        assert result['description'] == 'מכתב'
+        assert result['document_type'] == 'Letter'
+
+
+class TestCatalogSummaryLangPreference:
+    """``lang`` parameter on catalog_summary_for_sys_id picks title_heb
+    when ``lang == 'he'``.
+    """
+
+    def test_lang_en_prefers_english_title(self, monkeypatch):
+        monkeypatch.setattr(
+            'shared.export_dossier.get_fjms_service',
+            lambda thread_safe=True: _FakeFjms(records=[
+                {
+                    'title': 'Mishneh Torah',
+                    'title_heb': 'משנה תורה',
+                    'author_text': 'Maimonides',
+                    'copy_date': '1180',
+                    'copy_place': 'Fustat',
+                },
+            ]),
+        )
+        result = catalog_summary_for_sys_id('99001234567890', lang='en')
+        assert result['title'] == 'Mishneh Torah'
+
+    def test_lang_he_prefers_hebrew_title(self, monkeypatch):
+        monkeypatch.setattr(
+            'shared.export_dossier.get_fjms_service',
+            lambda thread_safe=True: _FakeFjms(records=[
+                {
+                    'title': 'Mishneh Torah',
+                    'title_heb': 'משנה תורה',
+                    'author_text': 'Maimonides',
+                    'copy_date': '1180',
+                    'copy_place': 'Fustat',
+                },
+            ]),
+        )
+        result = catalog_summary_for_sys_id('99001234567890', lang='he')
+        assert result['title'] == 'משנה תורה'
+
+    def test_lang_he_falls_back_to_english_when_no_hebrew_title(self, monkeypatch):
+        monkeypatch.setattr(
+            'shared.export_dossier.get_fjms_service',
+            lambda thread_safe=True: _FakeFjms(records=[
+                {
+                    'title': 'Mishneh Torah',
+                    'title_heb': '',
+                    'author_text': 'Maimonides',
+                    'copy_date': '1180',
+                    'copy_place': 'Fustat',
+                },
+            ]),
+        )
+        result = catalog_summary_for_sys_id('99001234567890', lang='he')
+        assert result['title'] == 'Mishneh Torah'
+
+    def test_lang_en_falls_back_to_hebrew_when_no_english_title(self, monkeypatch):
+        # Symmetric back-compat: previously the helper used English-first /
+        # Hebrew-fallback; the revised behavior preserves the fallback path.
+        monkeypatch.setattr(
+            'shared.export_dossier.get_fjms_service',
+            lambda thread_safe=True: _FakeFjms(records=[
+                {
+                    'title': '',
+                    'title_heb': 'משנה תורה',
+                    'author_text': None,
+                    'copy_date': None,
+                    'copy_place': None,
+                },
+            ]),
+        )
+        result = catalog_summary_for_sys_id('99001234567890', lang='en')
+        assert result['title'] == 'משנה תורה'
+
+
+class TestBibliographyLangPreference:
+    """``lang`` parameter on bibliography_for_sys_id prefers running_title_heb
+    and article_author_heb when ``lang == 'he'``.
+    """
+
+    def test_lang_en_prefers_english_fields(self, monkeypatch):
+        monkeypatch.setattr(
+            'shared.export_dossier.get_fjms_service',
+            lambda thread_safe=True: _FakeFjms(bib=[{
+                'running_title': 'Med. Soc.',
+                'running_title_heb': 'מד. סוס.',
+                'title_year': 1967,
+                'mention_page': '123',
+                'article_name': 'Letter to Goitein',
+                'article_author_eng': 'Goitein',
+                'article_author_heb': 'גויטיין',
+                'catalog_acronym': 'MedSoc',
+            }]),
+        )
+        result = bibliography_for_sys_id('99001234567890', lang='en')
+        assert len(result) == 1
+        assert result[0]['running_title'] == 'Med. Soc.'
+        assert result[0]['article_author_eng'] == 'Goitein'
+
+    def test_lang_he_prefers_hebrew_fields(self, monkeypatch):
+        monkeypatch.setattr(
+            'shared.export_dossier.get_fjms_service',
+            lambda thread_safe=True: _FakeFjms(bib=[{
+                'running_title': 'Med. Soc.',
+                'running_title_heb': 'מד. סוס.',
+                'title_year': 1967,
+                'mention_page': '123',
+                'article_name': 'Letter to Goitein',
+                'article_author_eng': 'Goitein',
+                'article_author_heb': 'גויטיין',
+                'catalog_acronym': 'MedSoc',
+            }]),
+        )
+        result = bibliography_for_sys_id('99001234567890', lang='he')
+        assert len(result) == 1
+        assert result[0]['running_title'] == 'מד. סוס.'
+        assert result[0]['article_author_eng'] == 'גויטיין'
+
+    def test_lang_he_falls_back_to_english_when_no_hebrew(self, monkeypatch):
+        monkeypatch.setattr(
+            'shared.export_dossier.get_fjms_service',
+            lambda thread_safe=True: _FakeFjms(bib=[{
+                'running_title': 'Med. Soc.',
+                'running_title_heb': '',
+                'title_year': 1967,
+                'mention_page': '123',
+                'article_name': 'Letter to Goitein',
+                'article_author_eng': 'Goitein',
+                'article_author_heb': '',
+                'catalog_acronym': 'MedSoc',
+            }]),
+        )
+        result = bibliography_for_sys_id('99001234567890', lang='he')
+        assert result[0]['running_title'] == 'Med. Soc.'
+        assert result[0]['article_author_eng'] == 'Goitein'
+
+
+class TestBuildManuscriptRowBilingual:
+    """``build_manuscript_row`` threads lang through to its 3 helpers AND
+    localizes the Catalog Summary cell labels.
+    """
+
+    def _meta_resolver_en(self, sys_id):
+        return {
+            'shelfmark': 'T-S 12.123',
+            'title': 'Test Manuscript',
+            'library_code': 'CUL',
+            'library_name': 'Cambridge University Library',
+        }
+
+    def _meta_resolver_he(self, sys_id):
+        return {
+            'shelfmark': 'T-S 12.123',
+            'title': 'Test Manuscript',
+            'library_code': 'CUL',
+            # Hebrew library name (mimics what get_library_display(lang='he') yields).
+            'library_name': 'ספריית האוניברסיטה של קיימברידג\'',
+        }
+
+    def test_lang_he_passes_lang_to_pgp_helper(self, monkeypatch):
+        seen_lang = []
+
+        def _pgp(sys_id, lang='en'):
+            seen_lang.append(('pgp', lang))
+            return {
+                'pgp_url': '', 'description': '', 'document_type': '',
+                'date_display': '', 'languages': [], 'tags': [],
+            }
+
+        def _catalog(sys_id, lang='en'):
+            seen_lang.append(('catalog', lang))
+            return None
+
+        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', _pgp)
+        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', _catalog)
+        build_manuscript_row('99001234567890', self._meta_resolver_he, lang='he')
+        assert ('pgp', 'he') in seen_lang
+        assert ('catalog', 'he') in seen_lang
+
+    def test_lang_he_library_name_from_resolver(self, monkeypatch):
+        # The caller is responsible for supplying a lang-aware meta_resolver.
+        # Here we verify the row reflects whatever the resolver returned.
+        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.catalog_summary_for_sys_id', lambda s, **kw: None)
+        row = build_manuscript_row('99001234567890', self._meta_resolver_he, lang='he')
+        assert row[2] == 'ספריית האוניברסיטה של קיימברידג\''  # column 2 = Library
+
+    def test_lang_he_catalog_summary_uses_hebrew_labels(self, monkeypatch):
+        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr(
+            'shared.export_dossier.catalog_summary_for_sys_id',
+            lambda s, **kw: {
+                'title': 'משנה תורה',
+                'author_text': 'הרמב\"ם',
+                'copy_date': '1180',
+                'copy_place': 'פסטאט',
+            },
+        )
+        row = build_manuscript_row('99001234567890', self._meta_resolver_he, lang='he')
+        cell = row[11]
+        # Hebrew labels per D-04 REVISED.
+        assert 'כותרת:' in cell
+        assert 'מחבר:' in cell
+        assert 'תאריך:' in cell
+        assert 'מקום:' in cell
+        assert 'משנה תורה' in cell
+        assert 'פסטאט' in cell
+        # NO English labels.
+        assert 'Title:' not in cell
+        assert 'Author:' not in cell
+
+    def test_lang_en_catalog_summary_uses_english_labels(self, monkeypatch):
+        monkeypatch.setattr('shared.export_dossier.pgp_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr('shared.export_dossier.nli_subset_for_sys_id', lambda s, **kw: None)
+        monkeypatch.setattr(
+            'shared.export_dossier.catalog_summary_for_sys_id',
+            lambda s, **kw: {
+                'title': 'Mishneh Torah',
+                'author_text': 'Maimonides',
+                'copy_date': '1180',
+                'copy_place': 'Fustat',
+            },
+        )
+        row = build_manuscript_row('99001234567890', self._meta_resolver_en, lang='en')
+        cell = row[11]
+        assert 'Title: Mishneh Torah' in cell
+        assert 'Author: Maimonides' in cell
+        # NO Hebrew labels.
+        assert 'כותרת:' not in cell
+
+
+class TestBuildBibliographyRowsBilingual:
+    """``build_bibliography_rows`` threads lang through to ``bibliography_for_sys_id``."""
+
+    def _meta_resolver(self, sys_id):
+        return {
+            'shelfmark': 'T-S 12.123',
+            'title': '',
+            'library_code': '',
+            'library_name': '',
+        }
+
+    def test_lang_threads_through(self, monkeypatch):
+        seen_lang = []
+
+        def _bib(sys_id, lang='en'):
+            seen_lang.append(lang)
+            return [{
+                'running_title': 'r', 'title_year': 1900,
+                'mention_page': '1', 'article_name': 'a',
+                'article_author_eng': 'auth', 'catalog_acronym': 'CA',
+            }]
+
+        monkeypatch.setattr('shared.export_dossier.bibliography_for_sys_id', _bib)
+        build_bibliography_rows('99001234567890', self._meta_resolver, lang='he')
+        assert 'he' in seen_lang
+
+    def test_lang_he_hebrew_author_in_row(self, monkeypatch):
+        # End-to-end: real bibliography_for_sys_id behavior with mocked service.
+        monkeypatch.setattr(
+            'shared.export_dossier.get_fjms_service',
+            lambda thread_safe=True: _FakeFjms(bib=[{
+                'running_title': 'Med. Soc.',
+                'running_title_heb': 'מד. סוס.',
+                'title_year': 1967,
+                'mention_page': '123',
+                'article_name': 'Letter',
+                'article_author_eng': 'Goitein',
+                'article_author_heb': 'גויטיין',
+                'catalog_acronym': 'MS',
+            }]),
+        )
+        rows = build_bibliography_rows('99001234567890', self._meta_resolver, lang='he')
+        assert len(rows) == 1
+        # Column 2 = Article Author, column 4 = Running Title (Hebrew).
+        assert rows[0][2] == 'גויטיין'
+        assert rows[0][4] == 'מד. סוס.'

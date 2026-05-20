@@ -76,21 +76,21 @@ def _make_result(sys_id='99001234567890'):
 @pytest.fixture
 def stub_dossier(monkeypatch):
     from shared import export_dossier
-    monkeypatch.setattr(export_dossier, 'pgp_subset_for_sys_id', lambda s: {
+    monkeypatch.setattr(export_dossier, 'pgp_subset_for_sys_id', lambda s, **kw: {
         'pgp_url': f'https://pgp.example/{s}',
         'description': f'PGP desc {s}', 'document_type': 'Letter',
         'date_display': '1100', 'languages': ['Hebrew', 'Aramaic'],
         'tags': ['letter'],
     } if s else None)
-    monkeypatch.setattr(export_dossier, 'nli_subset_for_sys_id', lambda s: {
+    monkeypatch.setattr(export_dossier, 'nli_subset_for_sys_id', lambda s, **kw: {
         'catalog_entry': f'Neubauer {s[-4:]}',
         'library_viewer_url': f'https://cudl.example/{s}',
     } if s else None)
-    monkeypatch.setattr(export_dossier, 'catalog_summary_for_sys_id', lambda s: {
+    monkeypatch.setattr(export_dossier, 'catalog_summary_for_sys_id', lambda s, **kw: {
         'title': f'CatTitle {s}', 'author_text': 'Author',
         'copy_date': '1180', 'copy_place': 'Fustat',
     } if s else None)
-    monkeypatch.setattr(export_dossier, 'bibliography_for_sys_id', lambda s: [{
+    monkeypatch.setattr(export_dossier, 'bibliography_for_sys_id', lambda s, **kw: [{
         'running_title': 'Med. Soc.', 'title_year': 1967, 'mention_page': '123',
         'article_name': 'Letter', 'article_author_eng': 'Goitein',
         'catalog_acronym': 'MS',
