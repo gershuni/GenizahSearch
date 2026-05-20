@@ -466,6 +466,14 @@ def set_search_export(
     filters: Optional[Dict[str, Any]] = None,
     warnings: Optional[List[str]] = None,
     selected_uids: Optional[List[str]] = None,
+    # Phase 94 EXPORT-META-06: enrichment signals for the xlsx + JSON export
+    # pipeline. Defaults to empty containers -- search.py post-enrichment
+    # site calls update_search_export_enrichment(...) once the live values
+    # are computed. Accept set or list; cast to sorted list internally for
+    # JSON-safety (NiceGUI storage round-trips through JSON).
+    transcription_sys_ids: Optional[Any] = None,
+    printed_ids: Optional[Any] = None,
+    result_domains: Optional[Dict[str, List[str]]] = None,
 ) -> None:
     """Write the search export payload to this user's session.
 
@@ -473,11 +481,23 @@ def set_search_export(
     the per-session leak that grew RSS unbounded under heavy wildcard
     searches. ``truncated`` and ``total_count`` are emitted so downstream
     consumers can surface a "showing first N of M" hint if they choose.
+
+    Phase 94 EXPORT-META-06 added 3 enrichment signal kwargs
+    (``transcription_sys_ids``, ``printed_ids``, ``result_domains``) which
+    propagate into the xlsx and JSON export pipelines. All three default
+    to empty containers; the post-enrichment site in
+    ``web/pages/search.py`` calls ``update_search_export_enrichment(...)``
+    once the live values are computed.
     """
     capped, truncated, original, _changed = _compact_results(
         results,
         _compact_search_result_row,
     )
+    # Phase 94 EXPORT-META-06: cast sets to sorted lists for JSON-safety
+    # (NiceGUI storage round-trips through JSON).
+    _trans_list = sorted(set(transcription_sys_ids)) if transcription_sys_ids else []
+    _printed_list = sorted(set(printed_ids)) if printed_ids else []
+    _domains_dict = dict(result_domains) if result_domains else {}
     safe_user_set(_SEARCH_KEY, {
         'results': capped,
         'query': query,
@@ -488,6 +508,10 @@ def set_search_export(
         'selected_uids': selected_uids,
         'truncated': truncated,
         'total_count': original,
+        # Phase 94 EXPORT-META-06 -- enrichment signals
+        'transcription_sys_ids': _trans_list,
+        'printed_ids': _printed_list,
+        'result_domains': _domains_dict,
     })
 
 
@@ -535,6 +559,36 @@ def update_search_export_selection(selected_uids: Optional[List[str]]) -> None:
         return
     payload = dict(payload)
     payload['selected_uids'] = selected_uids
+    safe_user_set(_SEARCH_KEY, payload)
+
+
+def update_search_export_enrichment(
+    transcription_sys_ids: Optional[Any] = None,
+    printed_ids: Optional[Any] = None,
+    result_domains: Optional[Dict[str, List[str]]] = None,
+) -> None:
+    """Patch enrichment fields after async post-search enrichment completes.
+
+    Phase 94 EXPORT-META-06. Called from web/pages/search.py after the
+    Stage-1 visible-page enrichment block and after the Stage-2 background-
+    chunk loop. Each kwarg is patched independently -- passing None for a
+    field leaves the existing value untouched (so the Stage-2 call can
+    re-emit all 3 fields without clobbering Stage-1 state for a field that
+    somehow regressed between stages).
+
+    Follows the Phase 88 D-11 (isinstance guard) + D-12 (copy-on-update)
+    invariants -- same pattern as update_search_export_selection.
+    """
+    payload = safe_user_get(_SEARCH_KEY, None)
+    if not isinstance(payload, dict):
+        return  # D-11: poisoned-shape or missing payload (silent no-op)
+    payload = dict(payload)  # D-12: copy-on-update
+    if transcription_sys_ids is not None:
+        payload['transcription_sys_ids'] = sorted(set(transcription_sys_ids))
+    if printed_ids is not None:
+        payload['printed_ids'] = sorted(set(printed_ids))
+    if result_domains is not None:
+        payload['result_domains'] = dict(result_domains)
     safe_user_set(_SEARCH_KEY, payload)
 
 
