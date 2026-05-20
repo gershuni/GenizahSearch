@@ -404,6 +404,58 @@ def init_api_routes(app_override=None):
         )
         return Response(content=content, media_type="text/plain")
 
+    # ── /llms.txt ─ guidance for LLM crawlers (https://llmstxt.org) ──
+    @target_app.get('/llms.txt')
+    def llms_txt():
+        content = (
+            "# Dicta Genizah Search\n"
+            "\n"
+            "> A collaborative research platform for the Cairo Genizah: full-text\n"
+            "> search across ~255,000 manuscript fragments, with transcriptions,\n"
+            "> high-resolution images, scholarly metadata, parallels, and\n"
+            "> midrash/halakhic source linking. Bilingual (Hebrew / English).\n"
+            "\n"
+            "Maintained by Dicta — Israel Center for Text Analysis. Public,\n"
+            "non-commercial scholarly resource.\n"
+            "\n"
+            "## Primary entry points\n"
+            "\n"
+            "- [Home](https://genizahsearch.com/): site overview and navigation\n"
+            "- [About](https://genizahsearch.com/about): project background and the Cairo Genizah\n"
+            "- [Help](https://genizahsearch.com/help): user guide and search tips\n"
+            "- [Catalog browse](https://genizahsearch.com/catalog-browse): structured browse by domain, author, work\n"
+            "- [Browse manuscript](https://genizahsearch.com/browse): per-manuscript view (e.g. /browse?sys_id=...)\n"
+            "- [Discoveries](https://genizahsearch.com/discoveries): community-shared joins and findings\n"
+            "- [Download desktop](https://genizahsearch.com/download): Windows desktop application\n"
+            "\n"
+            "## Machine-readable endpoints\n"
+            "\n"
+            "- [OpenAPI](https://genizahsearch.com/api/openapi.json): public search API contract\n"
+            "- [API docs](https://genizahsearch.com/api/docs): Swagger UI\n"
+            "- [Sitemap index](https://genizahsearch.com/sitemap.xml): all indexable URLs\n"
+            "\n"
+            "## What is the Cairo Genizah\n"
+            "\n"
+            "The Cairo Genizah is a collection of ~400,000 Jewish manuscript\n"
+            "fragments discovered in the Ben Ezra Synagogue in Fustat (Old Cairo).\n"
+            "It spans roughly the 9th-19th centuries and includes biblical,\n"
+            "rabbinic, liturgical, halakhic, mystical, scientific, and documentary\n"
+            "material in Hebrew, Aramaic, Judeo-Arabic, and other languages.\n"
+            "Major holding libraries include Cambridge University Library (Taylor-Schechter),\n"
+            "the Jewish Theological Seminary, the National Library of Russia,\n"
+            "Oxford Bodleian, the British Library, and the National Library of Israel.\n"
+            "\n"
+            "## Crawler guidance\n"
+            "\n"
+            "- /search and /parallels are dynamic result pages — prefer /browse?sys_id=...\n"
+            "  for stable, citation-worthy manuscript URLs.\n"
+            "- Per-manuscript metadata (shelfmark, library, transcription, bibliography)\n"
+            "  is rendered client-side via WebSocket hydration; allow time for the\n"
+            "  full DOM before extraction.\n"
+            "- User-account, admin, and API paths are excluded — see /robots.txt.\n"
+        )
+        return Response(content=content, media_type="text/plain")
+
     # -- Sitemap index (split into static pages + manuscript chunks) --
     # Cache sorted sys_ids to avoid re-sorting on every request
     _sitemap_sys_ids_cache = {'ids': None}

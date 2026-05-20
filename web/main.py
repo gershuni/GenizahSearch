@@ -730,9 +730,9 @@ app.add_static_files('/static', STATIC_DIR)
 # ============================================================================
 
 _SITE_URL = 'https://genizahsearch.com'
-_DEFAULT_TITLE = 'Dicta Genizah Search | חיפוש בגניזה הקהירית — אתר הגניזה של דיקטה'
-_DEFAULT_DESCRIPTION = 'חיפוש מלא בכתבי יד מהגניזה הקהירית — טקסטים, תמונות, קטלוג ומטא-דאטה מ-255,000 קטעי גניזת קהיר. אתר הגניזה של דיקטה.'
-_DEFAULT_KEYWORDS = 'חיפוש בגניזה הקהירית, חיפוש גניזה, כתבי יד גניזת קהיר, גניזה קהירית, מחקר גניזה, Cairo Genizah search, Genizah manuscripts, Jewish manuscripts, Dicta Genizah Search'
+_DEFAULT_TITLE = 'Dicta Genizah Search — Cairo Genizah Transcriptions'
+_DEFAULT_DESCRIPTION = 'חיפוש בכתבי יד מהגניזה הקהירית — תעתיקים, תמונות ומטא-דאטה ל-255,000 קטעי גניזת קהיר. Search Cairo Genizah manuscripts: transcriptions, images & metadata.'
+_DEFAULT_KEYWORDS = 'Cairo Genizah, Genizah manuscripts, Genizah transcriptions, Genizah images, Genizah metadata, browse Cairo Genizah, Cairo Genizah search, Jewish manuscripts, Dicta Genizah Search, MiDRASH transcriptions, גניזה קהירית, חיפוש בגניזה הקהירית, כתבי יד גניזת קהיר, תעתיקים, עיון בגניזה'
 
 
 def page_meta(
@@ -755,7 +755,7 @@ def page_meta(
 <meta name="keywords" content="{_DEFAULT_KEYWORDS}">
 <meta name="author" content="Dicta Genizah Search">
 <meta name="theme-color" content="#059669">
-<!-- Preconnect hints -->
+<meta http-equiv="content-language" content="he, en"><!-- Preconnect hints -->
 {'<link rel="preconnect" href="https://iiif.nli.org.il">' if needs_iiif else ''}
 <link rel="dns-prefetch" href="https://cudl.lib.cam.ac.uk">
 <link rel="dns-prefetch" href="https://eu.i.posthog.com">
@@ -1482,6 +1482,57 @@ def dashboard_page():
     }
     </script>
     ''')
+    # Structured data: FAQPage — curated Q&As eligible for Google rich snippets
+    ui.add_head_html('''
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "What is the Cairo Genizah?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The Cairo Genizah is a collection of roughly 400,000 Jewish manuscript fragments discovered in the late 19th century in the attic of the Ben Ezra Synagogue in Fustat (Old Cairo). It spans the 9th through 19th centuries and includes Bible, Talmud, rabbinic literature, halakhah, liturgy, scientific texts, and documentary materials in Hebrew, Aramaic, and Judeo-Arabic."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "What does Dicta Genizah Search provide?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "An online database of automatic transcriptions, high-resolution manuscript images, and scholarly metadata for approximately 255,000 Cairo Genizah fragments. Users can run full-text search across the corpus, browse manuscripts alongside their images, find textual parallels and physical joins between fragments, and share discoveries."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Where do the transcriptions come from?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "The transcriptions are produced automatically by Dicta's MiDRASH engine — a machine-reading pipeline trained on medieval Hebrew manuscripts. Because they are computer-generated, some reading errors are expected; community corrections and discoveries are welcomed."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Which libraries' images are available?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "High-resolution manuscript images are sourced from leading holding libraries including Cambridge University Library (Taylor-Schechter), the Jewish Theological Seminary, Oxford Bodleian, the National Library of Israel, the National Library of Russia, the British Library, and others. Scholarly metadata is drawn from FGP, PGP, and NLI catalog data."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Is Dicta Genizah Search free to use?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. The web application at genizahsearch.com and the downloadable Windows desktop application are both free for academic, educational, and personal research use. The project is operated by Dicta — the Israel Center for Text Analysis — as a non-commercial scholarly resource."
+                }
+            }
+        ]
+    }
+    </script>
+    ''')
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)
     ui.add_head_html(COMMON_STYLES)
@@ -1597,6 +1648,46 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
         }}
         </script>
         ''')
+        # Structured data: Manuscript (CreativeWork subtype) — per-page rich data
+        # so individual fragments can surface in Knowledge Graph / SERPs.
+        import json as _json
+        _library_code = ''
+        _library_name = ''
+        try:
+            if _row:
+                _library_code = (_row.get('library_code') or '').strip()
+                if _library_code:
+                    from genizah_core import get_library_display as _glib
+                    _library_name = _glib(_library_code, short=False) or _library_code
+        except Exception:
+            _library_name = ''  # Library lookup failed; omit holdingArchive
+        _ms_url = f'https://genizahsearch.com/browse?sys_id={sys_id}'
+        _ms_data = {
+            "@context": "https://schema.org",
+            "@type": "Manuscript",
+            "name": _shelfmark_display,
+            "identifier": sys_id,
+            "url": _ms_url,
+            "isPartOf": {
+                "@type": "Collection",
+                "name": "Cairo Genizah",
+            },
+            "about": "Cairo Genizah manuscript fragment",
+            "inLanguage": ["he", "arc", "jrb"],
+        }
+        if _library_name:
+            _ms_data["holdingArchive"] = {
+                "@type": "ArchiveOrganization",
+                "name": _library_name,
+            }
+        # Escape '<' so a shelfmark containing '</script' can't break out of the
+        # surrounding <script> tag (JSON spec allows literal '<' inside strings).
+        _ms_json = _json.dumps(_ms_data, ensure_ascii=False, indent=2).replace('<', r'<')
+        ui.add_head_html(
+            '<script type="application/ld+json">\n'
+            + _ms_json
+            + '\n</script>'
+        )
     else:
         ui.add_head_html(page_meta(
             '/browse',
