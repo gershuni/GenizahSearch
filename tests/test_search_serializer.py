@@ -1043,3 +1043,221 @@ class TestPhase85ExistingFilePreserved:
                 f"REVIEWS-MODE Codex HIGH violation: pre-existing class "
                 f"{cls_name} missing — Phase 85 must APPEND only."
             )
+
+
+class TestSerializeItemEnrichmentFlags:
+    """Phase 94 EXPORT-META-07: has_pgp / is_printed per-item additive bools.
+
+    Tests:
+      1-2: has_pgp True/False per set membership
+      3:   flags OMITTED when both kwargs are None (MUST-FIX 94-02-B opt-in /
+           D-11 public API stability for /api/search)
+      4:   flags ALWAYS boolean when either kwarg provided (D-06)
+      5:   empty sys_id with kwargs provided yields False (not None)
+      6:   serialize_search_payload threads kwargs through
+      7:   schema_version stays 1
+      8:   result_domains kwarg short-circuits FJMS (MUST-FIX 94-02-A)
+      9:   _extract_sys_id_for_batch covers compacted rows (MUST-FIX 94-02-A)
+    """
+
+    def _make_result(self, sys_id='99001234567890'):
+        return {
+            'uid': f'IE_x_P_y_FL_{sys_id}',
+            'display': {
+                'id': sys_id,
+                'shelfmark': 'T-S 1.1',
+                'title': 'X',
+                'library_code': 'CUL',
+            },
+            'snippet': '',
+            'raw_header': '',
+            'sort_score': 1.0,
+        }
+
+    def test_has_pgp_true_when_sys_id_in_set(self):
+        from shared.search_serializer import _serialize_item
+        item = _serialize_item(
+            self._make_result('99001234567890'),
+            meta_mgr=None, domain_batch={}, catalog_batch={},
+            transcription_sys_ids={'99001234567890'},
+        )
+        assert item['has_pgp'] is True
+        assert item['is_printed'] is False
+
+    def test_has_pgp_false_when_sys_id_not_in_set(self):
+        from shared.search_serializer import _serialize_item
+        item = _serialize_item(
+            self._make_result('99001234567890'),
+            meta_mgr=None, domain_batch={}, catalog_batch={},
+            transcription_sys_ids={'other'},
+        )
+        assert item['has_pgp'] is False
+
+    def test_flags_omitted_when_kwargs_none(self):
+        # MUST-FIX 94-02-B -- preserve public /api/search shape per D-11.
+        # When NEITHER set kwarg is provided, the per-item dict does
+        # NOT contain has_pgp / is_printed keys at all.
+        from shared.search_serializer import _serialize_item
+        item = _serialize_item(
+            self._make_result('99001234567890'),
+            meta_mgr=None, domain_batch={}, catalog_batch={},
+        )
+        assert 'has_pgp' not in item, (
+            f"D-11 violation: has_pgp leaked into /api/search shape: {list(item.keys())}"
+        )
+        assert 'is_printed' not in item, (
+            f"D-11 violation: is_printed leaked: {list(item.keys())}"
+        )
+
+    def test_flags_always_boolean_when_either_kwarg_provided(self):
+        # MUST-FIX 94-02-B -- D-06 contract: when caller opts in, BOTH keys
+        # are emitted as bool. Even providing only transcription_sys_ids
+        # causes is_printed to also be emitted (consistency).
+        from shared.search_serializer import _serialize_item
+        item = _serialize_item(
+            self._make_result('99001234567890'),
+            meta_mgr=None, domain_batch={}, catalog_batch={},
+            transcription_sys_ids=set(),
+        )
+        assert 'has_pgp' in item
+        assert 'is_printed' in item
+        assert isinstance(item['has_pgp'], bool)
+        assert isinstance(item['is_printed'], bool)
+
+    def test_empty_sys_id_with_kwargs_provided(self):
+        # MUST-FIX 94-02-B -- when caller opts in but sys_id is empty,
+        # both flags are False (NEVER None -- D-06).
+        from shared.search_serializer import _serialize_item
+        # Empty sys_id (no display.id, no raw_header)
+        empty_result = {
+            'uid': '',
+            'display': {'shelfmark': '', 'title': '', 'library_code': ''},
+            'snippet': '',
+            'raw_header': '',
+            'sort_score': 0.0,
+        }
+        item = _serialize_item(
+            empty_result,
+            meta_mgr=None, domain_batch={}, catalog_batch={},
+            transcription_sys_ids={'X'},  # opt-in but no match
+        )
+        assert isinstance(item['has_pgp'], bool)
+        assert isinstance(item['is_printed'], bool)
+        assert item['has_pgp'] is False
+        assert item['is_printed'] is False
+
+    def test_is_printed_true_when_sys_id_in_set(self):
+        from shared.search_serializer import _serialize_item
+        item = _serialize_item(
+            self._make_result('99001234567890'),
+            meta_mgr=None, domain_batch={}, catalog_batch={},
+            printed_sys_ids={'99001234567890'},
+        )
+        assert item['has_pgp'] is False
+        assert item['is_printed'] is True
+
+    def test_serialize_search_payload_threads_kwargs(self):
+        from shared.search_serializer import serialize_search_payload
+        r1 = self._make_result('A')
+        r2 = self._make_result('B')
+        envelope = serialize_search_payload(
+            [r1, r2],
+            meta_mgr=None,
+            transcription_sys_ids={'A'},
+            printed_sys_ids={'B'},
+        )
+        assert envelope['results'][0]['has_pgp'] is True
+        assert envelope['results'][0]['is_printed'] is False
+        assert envelope['results'][1]['has_pgp'] is False
+        assert envelope['results'][1]['is_printed'] is True
+
+    def test_envelope_schema_version_unchanged(self):
+        from shared.search_serializer import serialize_search_payload
+        envelope = serialize_search_payload(
+            [self._make_result()],
+            meta_mgr=None,
+            transcription_sys_ids={'A'},
+        )
+        assert envelope['schema_version'] == 1
+
+    def test_result_domains_kwarg_short_circuits_fjms(self, monkeypatch):
+        # MUST-FIX 94-02-A -- when result_domains provided, per-item domains
+        # come from the dict (sys_id -> list); no FJMS round-trip.
+        from shared import search_serializer
+
+        def _raise(*a, **k):
+            raise AssertionError(
+                "FJMS MUST NOT be called when result_domains is provided"
+            )
+        monkeypatch.setattr(search_serializer, '_safe_fjms_lookups', _raise)
+        envelope = search_serializer.serialize_search_payload(
+            [self._make_result('A')],
+            meta_mgr=None,
+            result_domains={'A': ['Bible', 'Letter']},
+        )
+        domains = envelope['results'][0].get('domains') or []
+        # The exact rendering depends on whether _serialize_item flattens
+        # the inner dict shape; assert the names are reachable in either form.
+        flat = []
+        for d in domains:
+            if isinstance(d, dict):
+                flat.append(d.get('domain', '') or d.get('name', ''))
+            else:
+                flat.append(str(d))
+        assert 'Bible' in flat and 'Letter' in flat
+
+    def test_extract_sys_id_for_batch_covers_compacted_rows(self):
+        # MUST-FIX 94-02-A -- the shared helper covers all 4 fallback paths.
+        from shared.search_serializer import _extract_sys_id_for_batch
+        # Path 1: top-level sys_id
+        assert _extract_sys_id_for_batch({'sys_id': 'A'}) == 'A'
+        # Path 2: display.id
+        assert _extract_sys_id_for_batch({'display': {'id': 'B'}}) == 'B'
+        # Path 3: raw_header regex
+        assert _extract_sys_id_for_batch(
+            {'raw_header': 'IE_x_P_y_FL_z 99001234567890'}
+        ) == '99001234567890'
+
+        # Path 4: uid via meta_mgr
+        class _MetaMgr:
+            def parse_full_id_components(self, uid):
+                return {'sys_id': 'C'}
+        assert _extract_sys_id_for_batch(
+            {'uid': 'IE_x'}, meta_mgr=_MetaMgr()
+        ) == 'C'
+        # All-empty fallback
+        assert _extract_sys_id_for_batch({}) == ''
+
+    def test_serialize_search_payload_batch_builder_covers_compacted_rows(self, monkeypatch):
+        # MUST-FIX 94-02-A -- the batch sys_id builder MUST use the shared
+        # helper so compacted rows (no display dict) still reach FJMS.
+        from shared import search_serializer
+        captured: list[str] = []
+
+        def _capture(sys_ids):
+            captured.extend(sys_ids)
+            return ({}, {})
+        monkeypatch.setattr(search_serializer, '_safe_fjms_lookups', _capture)
+
+        live_row = {
+            'uid': 'live',
+            'display': {'id': 'A', 'library_code': 'CUL', 'shelfmark': '',
+                        'title': ''},
+            'snippet': '', 'raw_header': '', 'sort_score': 0.0,
+        }
+        # Compacted row -- no display key
+        compacted_row = {
+            'uid': '',
+            'sys_id': 'B',
+            'raw_header': 'IE_x_P_y_FL_z 99001234567B',
+            'snippet': '', 'sort_score': 0.0,
+        }
+        search_serializer.serialize_search_payload(
+            [live_row, compacted_row], meta_mgr=None,
+        )
+        assert 'A' in captured, f"Live row sys_id missing from batch: {captured}"
+        assert 'B' in captured, (
+            f"MUST-FIX 94-02-A violation: compacted row sys_id missing from "
+            f"FJMS batch -- the batch builder did not use the shared resolver. "
+            f"Captured: {captured}"
+        )
