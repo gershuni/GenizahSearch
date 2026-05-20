@@ -23,9 +23,11 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - `printed_ids` must plumb through `web/export_state.set_search_export(...)` on web so the export pipeline can read it alongside `transcription_sys_ids`. Desktop reads `_printed_sys_ids` and `_pgp_transcription_sys_ids` directly at the export call site.
 - JSON envelope schema_version stays 1 (additive changes only per Phase 83 stability commitment).
 
-## Current State (after v7.12 shipped; Phase 93 of v7.13 complete)
+## Current State (v7.13 milestone CLOSEABLE — Phase 93 + Phase 94 both shipped)
 
-**In-flight:** v7.13 Research-Grade Downloads & PGP Filter — Phase 93 complete 2026-05-19; Phase 94 pending
+**In-flight:** v7.13 Research-Grade Downloads & PGP Filter — Phase 93 complete 2026-05-19; Phase 94 complete 2026-05-21; milestone closeout (`deploy.sh` / version bump 7.13.0 / git tag / desktop GitHub Release) pending as a separate ritual.
+
+**Phase 94 (Research-Grade Export Metadata, web + desktop xlsx) shipped 2026-05-21:** 4-wave implementation + 6 rounds of smoke-verification UX patches Hillel approved same day. Final workbook: 4-sheet bilingual xlsx (`Search Results` + `Manuscripts` + `Bibliography` + `Credits and Info`) on both web and desktop via shared `shared/export_dossier.py` helpers. Web JSON gains 3 additive per-item flags (`has_pgp` / `is_printed` / `domains`) with envelope `schema_version` unchanged; desktop has no JSON export. CONTEXT D-04 REVERSED 2026-05-20 for the row-content layer only. Cross-parity invariant pinned by `tests/test_export_xlsx_cross_parity.py`. All 9 EXPORT-META-01..09 reqs satisfied.
 - Phase 93 (PGP filter on `/search`, web-only): post-search 3-state filter button (`Filter PGP` / `Has PGP` / `No PGP`) mirroring the `printed_filter` pattern, with strict cascade discipline across 6 render branches, session persistence via the Phase 87 `safe_storage` chokepoint, and a static AST guard test (`tests/test_pgp_filter_cascade.py`) preventing cascade-drift regressions. 4/5 PGP-FILTER reqs satisfied; PGP-FILTER-03 (chip) superseded by user smoke direction (colored button label already conveys state). Hebrew translations: `סנן PGP` / `PGP בלבד` / `ללא PGP` / `סנן לפי כיסוי PGP`.
 
 **Shipped:** v7.12 Multitenant Architecture (Path B) (2026-05-18)
@@ -264,27 +266,20 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - ✓ Web search-result folio chip parity with desktop COL_IMG (`display['img']` chip after shelfmark) -- v7.12 (FOLIO-01)
 - ✓ Right-side line-number gutter on 5 surfaces (web Browse + Quick View + Full Manuscript View; desktop Browse + ResultDialog) with copy-paste invariant -- v7.12 (LINE-NUM-01..10)
 
+- ✓ Post-search 3-state PGP filter button on `/search` results toolbar (`Filter PGP` / `Has PGP` / `No PGP`) persisted via `web/safe_storage.py` chokepoint; cascade discipline pinned by `tests/test_pgp_filter_cascade.py` static AST guard -- v7.13 (PGP-FILTER-01, PGP-FILTER-02, PGP-FILTER-04, PGP-FILTER-05; PGP-FILTER-03 chip Superseded by user smoke direction)
+- ✓ Main xlsx sheet appends per-row `Has PGP` / `Is Printed` / `Domains` columns (Yes/empty booleans + pipe-delimited domains, multi-folio rows repeat per-row) on both web and desktop; Domains deduped per sys_id -- v7.13 (EXPORT-META-01)
+- ✓ NEW `Manuscripts` xlsx sub-sheet — one row per unique `sys_id` (first-occurrence dedupe) with PGP URL + Description + Type + Date + Languages + Tags + NLI Catalog Entry + Catalog Summary + Library Viewer URL + GenizahSearch URL; URL cells clickable hyperlinks with blue-underline styling on both apps via `shared/export_dossier.py:build_manuscript_row` -- v7.13 (EXPORT-META-02)
+- ✓ NEW `Bibliography` xlsx sub-sheet — one row per FJMS bib entry, joinable to `Manuscripts` by System ID; 8 columns with real FJMS field names (running_title / title_year / mention_page / article_name / article_author_eng / catalog_acronym) via `shared/export_dossier.py:build_bibliography_rows` -- v7.13 (EXPORT-META-03)
+- ✓ 4-sheet xlsx workbook order on both apps (`Search Results` → `Manuscripts` → `Bibliography` → `Credits and Info`; first sheet default-active); 4th `Credits and Info` sheet carries search metadata (Query / Mode / Gap / generated_at / result count) + GenizahSearch.com hyperlink + Creator credit -- v7.13 (EXPORT-META-04)
+- ✓ Bilingual xlsx exports: lang='he' produces Hebrew sheet titles + headers + Hebrew-preferred metadata (with English fallback per field); lang='en' produces English everywhere (with Hebrew fallback). D-02 transcription-text prohibition UNCHANGED; D-10 parallels-envelope strip UNCHANGED; conditional RTL view-direction UNCHANGED. 4 new bilingual helpers in `shared/export_dossier.py` (`main_header_row` / `manuscript_header_row` / `bibliography_header_row` / `sheet_titles`) -- v7.13 (EXPORT-META-05)
+- ✓ `printed_ids` plumbed through `web/export_state.set_search_export(...)` alongside `transcription_sys_ids` + `result_domains`; new sibling helper `update_search_export_enrichment(...)` with independent-field patch semantics; 5 call sites in `web/pages/search.py` -- v7.13 (EXPORT-META-06)
+- ✓ Web JSON per-item gains additive `has_pgp` (bool) / `is_printed` (bool) / `domains` (list); envelope `schema_version` stays 1; opt-in semantics preserve `/api/search` public response shape (D-11). Parallels JSON envelope unchanged (D-10 negative invariant pinned by `tests/test_parallels_envelope_no_pgp_keys.py`) -- v7.13 (EXPORT-META-07)
+- ✓ `IIIF Manifest` column DEFERRED per D-13 soft scope: header present on main sheet but cells empty on both apps; Library Viewer URL on Manuscripts sub-sheet provides sys_id-scoped reachability instead -- v7.13 (EXPORT-META-08)
+- ✓ Desktop xlsx search-results export rewired to emit the same 4-sheet bilingual workbook as web via `shared/export_dossier.py`; new module-level pure-function `_build_search_results_xlsx_bytes(...)` at `genizah_app.py:2473` (Qt-free, offline-testable); cross-parity invariant pinned by `tests/test_export_xlsx_cross_parity.py`; CSV / TXT / DOCX branches at `genizah_app.py:18294+` unchanged -- v7.13 (EXPORT-META-09)
+
 ### Active
 
-**v7.13 Research-Grade Downloads & PGP Filter** (started 2026-05-19; phases 93 + 94 promoted from backlog 999.2 + 999.3; 14 reqs):
-
-PGP Filter (web `/search` only):
-- [ ] **PGP-FILTER-01**: Post-search 3-state filter button (`all` → `only_pgp` → `hide_pgp` → `all`) in results toolbar, immediately after `printed_filter_btn` — see `web/pages/search.py:1430-1434`
-- [ ] **PGP-FILTER-02**: Button hidden until current result set contains at least one PGP-tagged hit (`_set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))`)
-- [ ] **PGP-FILTER-03**: Active-filter chip in results header row when state is `only_pgp` or `hide_pgp` (co-located with `exclusion_chips_row` at `search.py:1448-1449`)
-- [ ] **PGP-FILTER-04**: Filter cascade slots in after `printed_filter`; stacks with manuscript exclusions, domain exclusions, refinement chain
-- [ ] **PGP-FILTER-05**: Choice persisted via `persist_value('search_pgp_filter', ...)` routed through `web/safe_storage.py` chokepoint; bootstrap read at search-page init
-
-Export Metadata (xlsx web+desktop; JSON web-only):
-- [ ] **EXPORT-META-01** (web + desktop): Main xlsx sheet appends `Has PGP`, `Is Printed`, `Domains` columns after `Full Text` (pipe-delimited lists, empty cell for missing, "Yes"/empty for booleans)
-- [ ] **EXPORT-META-02** (web + desktop): NEW `Manuscripts` sub-sheet: one row per unique `sys_id` with PGP fields, NLI description, FJMS catalog summary (planner picks 3-5 fields with rationale), library viewer URL, GenizahSearch deep link
-- [ ] **EXPORT-META-03** (web + desktop): NEW `Bibliography` sub-sheet: one row per FJMS bib entry, joinable to `Manuscripts` via `System ID`, no row cap
-- [ ] **EXPORT-META-04** (web + desktop): Sheet order `Genizah Results` → `Manuscripts` → `Bibliography`; first sheet remains default-active on open
-- [ ] **EXPORT-META-05** (web + desktop): English-only metadata; no transcription text; no Hebrew translation lookups; graceful Hebrew fallback only when English variant absent
-- [ ] **EXPORT-META-06** (web only): `printed_ids` plumbed through `web/export_state.set_search_export(...)` alongside existing `transcription_sys_ids`
-- [ ] **EXPORT-META-07** (web only): JSON per-item gains additive `has_pgp` (bool), `is_printed` (bool), `domains` (list); envelope schema_version stays 1; no `pgp` subobject, no dossier in JSON
-- [ ] **EXPORT-META-08** (web + desktop, soft): `IIIF Manifest` per-page column on main sheet — soft scope; planner may defer to Manuscripts sub-sheet with documented rationale
-- [ ] **EXPORT-META-09** (desktop): Desktop xlsx search-results export rewired to emit the same 3-sheet workbook as web, reusing `shared/export_dossier.py` helpers at `genizah_app.py:export_results('xlsx')`. CSV/TXT/DOCX exports NOT modified.
+*(v7.13 Research-Grade Downloads & PGP Filter requirements moved to Validated 2026-05-21 after Phase 94 closeout — see entries above with `-- v7.13` annotation. 14/14 requirements satisfied across both phases (Phase 93 PGP filter shipped 2026-05-19 + Phase 94 export metadata shipped 2026-05-21). Milestone closeout (`deploy.sh` / version bump 7.13.0 / git tag / desktop GitHub Release) pending as a separate ritual.)*
 
 ### Out of Scope
 
@@ -394,4 +389,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-19 — Phase 93 (PGP filter on `/search`) COMPLETE. 4/5 PGP-FILTER reqs satisfied directly; PGP-FILTER-03 (chip) marked Superseded after user smoke feedback removed the chip in favor of self-conveying button label. Phase 94 still pending. Multitenant invariants from v7.12 carry forward (zero raw `app.storage.user` access under `web/`, enforced by `tests/test_no_raw_storage_access.py`). Phase 93 added a 2nd CI guard: `tests/test_pgp_filter_cascade.py` (static AST scanner ensuring every render branch calling `_apply_printed_filter` also calls `_apply_pgp_filter`).*
+*Last updated: 2026-05-21 — Phase 94 (Research-Grade Export Metadata, web + desktop xlsx) COMPLETE. All 9 EXPORT-META-01..09 requirements satisfied after Hillel approved smoke verification 2026-05-21 across 6 rounds of UX patches (bilingual headers + source-language metadata, sheet rename + 4th Credits-and-Info sheet, label realignment + Creator credit + link rename, clickable Manuscripts URLs, per-sys_id Domains dedupe, Image/Page int coercion). v7.13 milestone now closeable (Phase 93 already complete 2026-05-19; Phase 94 complete 2026-05-21; 14/14 requirements). Milestone closeout (`deploy.sh` / version bump 7.13.0 / `[7.13.0]` CHANGELOG section / git tag / desktop GitHub Release) pending as separate ritual. Earlier 2026-05-19: Phase 93 (PGP filter on `/search`) COMPLETE — 4/5 PGP-FILTER reqs satisfied directly; PGP-FILTER-03 (chip) marked Superseded after user smoke feedback removed the chip in favor of self-conveying button label. Multitenant invariants from v7.12 carry forward (zero raw `app.storage.user` access under `web/`, enforced by `tests/test_no_raw_storage_access.py`; allowlist `[]`). Phase 93 added 1 CI guard (`tests/test_pgp_filter_cascade.py` static AST scanner); Phase 94 added 1 CI guard (`tests/test_export_xlsx_cross_parity.py` cross-app parity at `lang='en'`) + 7 smoke-round regression test files. Final test count: 2316 passed / 20 skipped / 2 xfailed. Ruff clean.*

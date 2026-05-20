@@ -196,6 +196,67 @@ revision. The cross-parity test (MUST-FIX 94-04-C) still passes because it
 builds both apps' workbooks at the default `lang='en'` -> identical English
 output on both sides.
 
+**REFINED 2026-05-21 (smoke verification rounds 3 + 4 + 5 + 6 — final
+Phase 94 closeout):** After the 2026-05-20 REVISED bilingual rework
+landed (smoke round-1) and the 2026-05-20 sheet rename + 4th Credits-and-Info
+sheet landed (smoke round-2), Hillel's continued verification surfaced
+4 additional UX refinements that landed atop the bilingual contract
+without contradicting it. All 4 refinements ship within the same
+narrow scope — row content + visual presentation — and leave the D-02
+transcription-text prohibition, D-10 parallels-envelope strip, conditional
+RTL view-direction, cross-parity invariant (at `lang='en'`), and Phase 87
+multitenant invariant unchanged.
+
+**Smoke round 3 — label realignment + web mode tr() + Creator credit + link rename (commit `bd71ce83`):**
+
+- Credits-and-Info cell labels reordered for visual flow per Hillel's review.
+- Web `web/api.py` Credits-and-Info metadata cells now route through
+  `tr()` for the same Hebrew/English UX as desktop. Web search-meta
+  labels (Query / Mode / Gap / generated_at / result count) match
+  desktop's structure exactly.
+- Creator credit line refined.
+- Hyperlink label renamed (e.g., `GenizahSearch` → `Visit GenizahSearch.com`
+  style).
+
+**Smoke round 4 — Manuscripts URL cells clickable (commit `2e8d5301`):**
+
+- The 3 URL columns on the Manuscripts sub-sheet (`PGP URL`,
+  `Library Viewer URL`, `GenizahSearch URL`) now emit openpyxl
+  `Hyperlink` objects with `FONT_BLUE_UNDERLINE` styling instead of
+  plain text. No more copy-and-paste-the-URL friction in the citation
+  use case.
+- Default for URL columns flipped from "plain text for citation safety"
+  (D-04 original Claude's Discretion bullet) to "clickable hyperlinks"
+  — citation users were universally requesting clickable links.
+
+**Smoke round 5 — per-sys_id Domains dedupe (commit `d65ac0b8`):**
+
+- Smoking gun: a manuscript with N FJMS rows for the same domain
+  rendered the domain N times in the `Domains` cell — e.g.,
+  `Arabic Tafsir|Arabic Tafsir|Arabic Tafsir|Arabic Tafsir|Arabic Tafsir|Arabic Tafsir|Arabic Tafsir`
+  for a manuscript with 7 FJMS rows all classifying it as Arabic Tafsir.
+- Fix: dedupe at source per sys_id. Implementation: deduplication
+  happens inside the domain-list assembly path before pipe-joining
+  (D-05 pipe-joining contract unchanged).
+- Side benefit: the web search Domains badge count now reflects unique
+  manuscripts per domain rather than total FJMS rows — a UX improvement
+  that fell out of the export fix.
+
+**Smoke round 6 — Image/Page int coercion (commit `9c5bae42`):**
+
+- Pure-numeric `Image/Page` values are now written as `int` (via
+  `ws.cell(...).value = int(...)`) so Excel no longer flags them with
+  the "Number stored as text" warning that surfaced as a yellow
+  triangle in every Image/Page cell.
+- Mixed-content values (e.g., `1r` for recto, `2v` for verso) stay as
+  strings — only pure-numeric values are int-coerced.
+- Scope: main sheet `Image/Page` column on both web and desktop.
+
+After round 6 Hillel confirmed `approved` on the 20-point verification
+checklist. Phase 94 Task 2 (Human Smoke Verification Checkpoint)
+is now PASSED. Task 3 (docs closeout) flips the 9 EXPORT-META
+requirements to Complete and ships the final SUMMARY.
+
 ### D-05 — Multi-value field formatting
 List-valued cells use the pipe character `|` with NO surrounding spaces: `'Bible|Letter|Legal'`. Applies to: Domains, PGP Languages, PGP Tags. NOT applied to URL fields.
 

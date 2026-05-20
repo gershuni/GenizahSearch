@@ -4,6 +4,128 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+Bundles v7.13 milestone work (Research-Grade Downloads & PGP Filter). No version
+bump in this section — version bump + tag + GitHub Release happen at the
+milestone-closeout ritual after this entry stabilizes.
+
+### Added — Phase 94: Research-Grade Export Metadata (web + desktop)
+
+- **`shared/export_dossier.py` module** (94-01) — single source of truth for
+  citation-grade xlsx export data shaping. 4 lookup helpers
+  (`pgp_subset_for_sys_id` / `nli_subset_for_sys_id` /
+  `catalog_summary_for_sys_id` / `bibliography_for_sys_id`), 2 row emitters
+  (`build_manuscript_row` / `build_bibliography_rows`), 2 header constants
+  (`MANUSCRIPT_HEADERS` 14-col / `BIBLIOGRAPHY_HEADERS` 8-col), and the
+  `build_rich_snippet_cell` helper extracted from desktop's prior inner closure
+  for the `*...*` red-bold snippet rendering. Codex MUST-FIX 1-4 folded in
+  (real FJMS field names, `NLI Catalog Entry` naming, narrow `get_catalog_records`
+  query — never the `get_catalog_detail` variant which loads `full_texts`,
+  bibliography off the `build_manuscript_row` path). (both)
+- **Bilingual headers + source-language metadata** (94-04 smoke round-1,
+  D-04 REVERSED 2026-05-20). 4 new bilingual helpers in `shared/export_dossier.py`
+  (`main_header_row(lang)` / `manuscript_header_row(lang)` /
+  `bibliography_header_row(lang)` / `sheet_titles(lang)`). All 3 dossier
+  helpers thread `lang` and prefer Hebrew when `lang='he'` (with English
+  fallback per field); English when `lang='en'` (with Hebrew fallback).
+  `pgp_translations` table consulted via
+  `TranslationService.get_pgp_translations_by_sys_ids` only on `lang='he'`.
+  (both)
+- **4-sheet workbook** (94-03 web + 94-04 desktop + smoke round-2). Web and
+  desktop xlsx exports now produce 4 sheets:
+  1. **Search Results** (renamed from `Genizah Results` in smoke round-2;
+     bilingual via `sheet_titles(lang)`) — 12-col main sheet with per-row
+     metadata: System ID / Library / Shelfmark / Title / Image/Page / Source
+     / Snippet / Full Text / Has PGP / Is Printed / Domains / IIIF Manifest.
+     Snippet column emits rich-text `*...*` matches in red+bold.
+  2. **Manuscripts** — one row per unique sys_id (first-occurrence dedupe).
+     14 columns including PGP URL / Library Viewer URL / GenizahSearch URL
+     (all clickable hyperlinks with blue-underline styling after smoke round-4).
+  3. **Bibliography** — one row per FJMS bib entry, joinable to Manuscripts
+     by System ID. 8 columns.
+  4. **Credits and Info** (NEW in smoke round-2) — search metadata
+     (Query / Mode / Gap / generated_at / result count) + clickable
+     GenizahSearch.com hyperlink + Creator credit. Parity across web and
+     desktop.
+  Conditional RTL view-direction on all 4 sheets per UI language. (both)
+- **Web JSON additive per-item flags** (94-02). The `/api/search` JSON
+  envelope's per-item dict gains 3 keys: `has_pgp` (bool), `is_printed` (bool),
+  `domains` (list). Opt-in semantics (MUST-FIX 94-02-B): keys are omitted
+  on the public `/api/search` path (preserves D-11 stable response shape)
+  and emitted on the JSON export path. Envelope `schema_version` stays `1`
+  (Phase 83 additive-change commitment). Parallels JSON envelope unchanged
+  (D-10 negative invariant pinned by `tests/test_parallels_envelope_no_pgp_keys.py`).
+  (web)
+- **Web state plumbing** (94-02). `web/export_state.set_search_export(...)`
+  extended with 3 enrichment kwargs (`transcription_sys_ids`, `printed_ids`,
+  `result_domains`); new sibling helper `update_search_export_enrichment(...)`
+  with independent-field patch semantics. 5 call sites in `web/pages/search.py`.
+  History-restore branch flags restored snapshots via the
+  `metadata_incomplete_restored_from_history` warning marker. (web)
+- **Desktop xlsx parity** (94-04, EXPORT-META-09). New module-level pure-function
+  helper `_build_search_results_xlsx_bytes(...)` at `genizah_app.py:2473`
+  (Qt-free, fully unit-testable offline) consumed by the rewritten xlsx branch
+  of `export_results('xlsx')`. Cross-app parity invariant pinned by
+  `tests/test_export_xlsx_cross_parity.py` (identical sheet names + headers
+  across web and desktop on identical input at `lang='en'`). Desktop CSV / TXT
+  / DOCX branches at `genizah_app.py:18294+` are byte-identical to pre-Phase-94
+  (xlsx-only scope). (desktop)
+- **Web Credits and Info sheet metadata** (smoke round-3): web `web/api.py`
+  Credits-and-Info labels route through `tr()` for the same Hebrew/English UX
+  as desktop. Web search metadata cells (Query / Mode / Gap / generated_at /
+  result count) match desktop's Credits-and-Info structure exactly. (web)
+
+### Added — Phase 93: PGP Filter on `/search` (web only, shipped 2026-05-19)
+
+- Post-search 3-state filter button in the search results toolbar (`Filter PGP`
+  default → `Has PGP` only-PGP → `No PGP` hide-PGP → back to `Filter PGP`).
+  Same `outline dense no-caps` styling as the existing `printed_filter` button.
+  Hidden until the current result set contains at least one PGP-tagged hit.
+  Stacks AFTER `printed_filter` in the render cascade (verified by
+  `tests/test_pgp_filter_cascade.py` static AST guard). Choice persisted via
+  `persist_value('search_pgp_filter', ...)` routed through the
+  `web/safe_storage.py` chokepoint (Phase 87 invariant preserved). Hebrew
+  translations: `סנן PGP` / `PGP בלבד` / `ללא PGP` / `סנן לפי כיסוי PGP`.
+  PGP-FILTER-03 (active-filter chip) was originally planned but superseded
+  by user smoke direction 2026-05-19 — the colored button label already
+  conveys filter state, so the chip was redundant. (web)
+
+### Fixed
+
+- **Domains list dedupes per sys_id** (94-04 smoke round-5). Manuscripts
+  with multiple FJMS rows for the same domain previously rendered
+  `Arabic Tafsir|Arabic Tafsir|...` × N times in the Domains cell. Now
+  deduped at source. Side benefit: the web search Domains badge count now
+  reflects unique manuscripts per domain rather than total FJMS rows. (both)
+- **Image/Page emits int for pure-numeric values** (94-04 smoke round-6).
+  Pure-numeric Image/Page values are now written as `int` so Excel no longer
+  flags them with the "Number stored as text" warning. Mixed-content values
+  (e.g., `1r` for recto) stay as strings. (both)
+
+### Internal
+
+- **Cross-app parity test** (`tests/test_export_xlsx_cross_parity.py`):
+  pins identical sheet names + identical 12-col main / 14-col Manuscripts
+  / 8-col Bibliography headers across web and desktop on identical input at
+  `lang='en'`. Survives the 2026-05-20 D-04 reversal (which made headers
+  + sheet titles lang-dependent — identical when both apps pick the same lang).
+- **6 rounds of smoke-verification regression tests** added across
+  `tests/test_export_bilingual.py` / `test_credits_sheet.py` /
+  `test_smoke_round2_gaps_a_d.py` / `test_smoke_round3_label_realignment.py`
+  / `test_manuscripts_urls_clickable.py` / `test_domains_dedupe.py` /
+  `test_image_page_int_coercion.py`. Each round shipped as an atomic commit
+  pair (production fix + matching regression test).
+- Final test count after Phase 94 closure: **2316 passed / 20 skipped /
+  2 xfailed** across the full test suite. Ruff clean across all touched
+  production + test files.
+- **Phase 87 multitenant invariant unaffected:** zero raw `app.storage.user.*`
+  accesses introduced under `web/` across all 4 Phase 94 plans + 6 smoke
+  rounds. Allowlist remains `[]`. `tests/test_no_raw_storage_access.py`
+  green throughout.
+
+---
+
 ## [7.12.0] - Multitenant Safety and Line Numbering - 2026-05-18
 
 Bundles the v7.12 Path B multitenant architecture refactor with two
