@@ -112,8 +112,20 @@ _PARALLELS_CHUNK_HITS_CAP = 100
 _PARALLELS_CHUNK_TEXT_STORAGE_CHARS = 1000
 
 # Allowlists: only these keys are kept in stored / live-state rows.
+#
+# Phase 94 MUST-FIX 94-03-A (2026-05-20): 'img' + 'source' added so Wave 3's
+# main-sheet Image/Page + Source columns (web/export_service.py
+# export_search_results_excel restructure) render non-empty cells for
+# compacted rows. Without these keys top-level, the display dict is dropped
+# at compaction time and the cells render empty for any row that survives
+# a session-storage round-trip. Cost: ~tens of bytes per row (short scalar
+# strings like '1r' / 'ms' / 'pgp'). Synthesis from display.img /
+# display.source happens BEFORE allowlist filtering in
+# _compact_search_result_row, mirroring the SEED-002 sys_id synthesis at
+# _extract_sys_id_from_row.
 _SEARCH_ROW_ALLOWLIST = frozenset((
     'uid', 'sys_id', 'sort_score', 'snippet', 'match_terms', 'raw_header',
+    'img', 'source',
 ))
 _PARALLELS_ROW_ALLOWLIST = frozenset((
     'uid', 'sys_id', 'sort_score', 'score', 'snippet', 'match_terms',
@@ -217,6 +229,24 @@ def _compact_search_result_row(row: Any) -> Tuple[Any, bool]:
             kept[key] = row[key]
     if synth_sys_id and not kept.get('sys_id'):
         kept['sys_id'] = synth_sys_id
+
+    # Phase 94 MUST-FIX 94-03-A: synthesize img + source from display BEFORE
+    # the display dict is dropped. Top-level values (already copied into
+    # `kept` via the allowlist loop above) win; synthesis only kicks in when
+    # the top-level key is absent. Mirrors the SEED-002 sys_id synthesis
+    # pattern. Wave 3's main-sheet Image/Page + Source columns read these
+    # via the bounded fallback `display.get(...) or res.get(...)` so cells
+    # are non-empty regardless of compaction state.
+    display = row.get('display')
+    if isinstance(display, dict):
+        if 'img' not in kept:
+            img_v = display.get('img')
+            if isinstance(img_v, str) and img_v:
+                kept['img'] = img_v
+        if 'source' not in kept:
+            src_v = display.get('source')
+            if isinstance(src_v, str) and src_v:
+                kept['source'] = src_v
 
     changed = bool(set(row.keys()) - _SEARCH_ROW_ALLOWLIST)
     # Also flag changed when we ADDED sys_id (caller didn't supply it but we
