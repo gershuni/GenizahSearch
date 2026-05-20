@@ -56,6 +56,57 @@ from shared_export_utils import (
 )
 
 
+# Smoke round 3 (2026-05-21): map raw mode keys persisted in the session
+# payload (lowercase like 'exact' / 'variants_extended' / 'pgp_tags') to a
+# human-readable label localized via tr(). Mirrors desktop's
+# ``self.mode_combo.currentText()`` which is already a Qt-tr'd string at
+# export time. The English ``tr()`` strings here match the labels rendered
+# in the search-mode dropdown in ``web/pages/search.py:472-495``.
+_RAW_MODE_LABEL_KEYS: Dict[str, str] = {
+    'exact': 'Exact',
+    'literal': 'Exact',
+    'variants': 'Variants',
+    'variants_basic': 'Variants Basic',
+    'variants_extended': 'Variants Extended',
+    'variants_maximum': 'Variants Maximum',
+    'responsa': 'Responsa',
+    'fuzzy': 'Fuzzy',
+    'Regex': 'Regex',
+    'regex': 'Regex',
+    'Shelfmark': 'Shelfmark',
+    'shelfmark': 'Shelfmark',
+    'Title': 'Title',
+    'title': 'Title',
+    'pgp_tags': 'PGP Tags',
+}
+
+
+def _localize_search_mode(raw_mode: Optional[str], lang: str = 'en') -> Optional[str]:
+    """Translate a raw mode key from the session payload to a localized label.
+
+    Looks up directly in :data:`genizah_translations.TRANSLATIONS` keyed by the
+    English label (e.g. ``'Exact'``) when ``lang == 'he'`` — avoids relying on
+    ``web.translations.tr()`` which reads a module-global current-language that
+    is unreliable under the Phase 87/92 multitenant architecture.
+
+    Returns the original string unchanged when the key is unknown so the
+    credits sheet still surfaces *something* useful (e.g. a future mode key
+    added to the dropdown but not yet listed here).
+    """
+    if not raw_mode:
+        return raw_mode
+    label_key = _RAW_MODE_LABEL_KEYS.get(raw_mode)
+    if not label_key:
+        return raw_mode
+    if lang == 'en':
+        return label_key
+    try:
+        from genizah_translations import TRANSLATIONS
+        return TRANSLATIONS.get(label_key, label_key)
+    except Exception:
+        return label_key
+
+
 def _resolve_result_full_text(result: Dict[str, Any]) -> str:
     """Return full text for export, rehydrating compact session rows if needed."""
     full_text = result.get('full_text') or ''
@@ -779,12 +830,17 @@ class ExportService:
         # a GenizahSearch.com hyperlink. Web does NOT surface a Lab Mode
         # toggle, so ``lab_mode_on`` is omitted (the builder skips the row
         # entirely on None — see :func:`build_credits_info_sheet`).
+        # Smoke round 3 (2026-05-21): translate raw mode keys ('exact',
+        # 'variants', etc.) to localized labels via ``tr()`` so Hebrew UI
+        # exports show 'מדויק' instead of 'exact' (parity with desktop's
+        # ``mode_combo.currentText()``).
         _export_dt = _dt.datetime.now().isoformat(sep=' ', timespec='seconds')
+        _search_mode_label = _localize_search_mode(search_mode, lang=lang)
         build_credits_info_sheet(
             ws_credits,
             lang=lang,
             search_query=search_query or None,
-            search_mode=search_mode,
+            search_mode=_search_mode_label,
             search_gap=search_gap,
             lab_mode_on=None,  # Web has no Lab Mode UI; omit the row.
             deep_scan_on=None,
