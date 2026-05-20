@@ -2569,6 +2569,7 @@ def _build_search_results_xlsx_bytes(
         main_header_row, manuscript_header_row, bibliography_header_row,
         sheet_titles,
         apply_manuscript_row_hyperlinks,
+        build_image_url_for_row, apply_main_row_image_url_hyperlink,
     )
     from shared_export_utils import build_rich_snippet_cell
 
@@ -2662,7 +2663,11 @@ def _build_search_results_xlsx_bytes(
         if lang == 'he' and _domain_name_map:
             domains_list = [_domain_name_map.get(d, d) for d in domains_list]
         domains_cell = '|'.join(d for d in domains_list if d)
-        iiif_cell = ''  # D-13 deferred — column header present, cells empty
+        # Phase 94.1 (2026-05-21): D-13 LIFTED. Per-folio Image URL via
+        # the GenizahSearch proxy. ``library_code`` comes from the meta
+        # resolver's primitive dict (Codex SHOULD-FIX 8 contract).
+        _lib_code_for_url = (meta.get('library_code') if meta else '') or ''
+        image_url_cell = build_image_url_for_row(sys_id, _lib_code_for_url, img_page)
 
         row_cells = [
             sanitize_fn(sys_id),
@@ -2678,7 +2683,7 @@ def _build_search_results_xlsx_bytes(
             has_pgp_cell,
             is_printed_cell,
             sanitize_fn(domains_cell),
-            iiif_cell,
+            image_url_cell,
         ]
         for col_idx, val in enumerate(row_cells, 1):
             if col_idx == 7:
@@ -2689,6 +2694,8 @@ def _build_search_results_xlsx_bytes(
                 )
             else:
                 ws_main.cell(row=current_row, column=col_idx, value=val)
+        # Phase 94.1: image-URL cell is clickable when non-empty.
+        apply_main_row_image_url_hyperlink(ws_main, current_row, image_url_cell)
         current_row += 1
 
     # --- Manuscripts sub-sheet ---

@@ -129,7 +129,7 @@ def test_main_sheet_has_12_headers_in_unified_order(export_service, stub_dossier
     assert headers == [
         'System ID', 'Library', 'Shelfmark', 'Title',
         'Image/Page', 'Source', 'Snippet', 'Full Text',
-        'Has PGP', 'Is Printed', 'Domains', 'IIIF Manifest',
+        'Has PGP', 'Is Printed', 'Domains', 'Image URL',
     ]
 
 
@@ -171,14 +171,22 @@ def test_domains_pipe_joined(export_service, stub_dossier):
     assert ws.cell(2, 11).value == 'Bible|Letter|Legal'
 
 
-def test_iiif_manifest_empty_in_wave3(export_service, stub_dossier):
-    """Test 7: IIIF Manifest column header present but cells empty (D-13)."""
+def test_image_url_populated_in_phase_94_1(export_service, stub_dossier):
+    """Test 7: Phase 94.1 LIFTED D-13. Column 12 ('Image URL') now holds
+    a per-folio proxy URL (https://genizahsearch.com/api/.../page=N).
+    Renamed from 'Image URL' on 2026-05-21.
+    """
     results = [_make_result('A')]
     content, _ = export_service.export_search_results_excel(results, 'q')
     wb = _load_wb(content)
     ws = wb['Search Results']
-    # IIIF Manifest is column 12.
-    assert ws.cell(2, 12).value in ('', None)
+    # Column 12 = Image URL.
+    cell_value = ws.cell(2, 12).value
+    assert isinstance(cell_value, str) and cell_value
+    assert cell_value.startswith('https://genizahsearch.com/api/')
+    # The cell is a clickable hyperlink.
+    assert ws.cell(2, 12).hyperlink is not None
+    assert ws.cell(2, 12).hyperlink.target == cell_value
 
 
 def test_manuscripts_sheet_headers(export_service, stub_dossier):

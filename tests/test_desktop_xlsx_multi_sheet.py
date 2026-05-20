@@ -73,7 +73,7 @@ def _build(results, **kwargs):
         results=results,
         headers_main=['System ID', 'Library', 'Shelfmark', 'Title',
                       'Image/Page', 'Source', 'Snippet', 'Full Text',
-                      'Has PGP', 'Is Printed', 'Domains', 'IIIF Manifest'],
+                      'Has PGP', 'Is Printed', 'Domains', 'Image URL'],
         meta_resolver=_meta_resolver_fake,
         sanitize_fn=_identity_sanitize,
         **kwargs,
@@ -112,7 +112,7 @@ def test_main_sheet_12_columns_unified_order(stub_dossier):
     assert headers == [
         'System ID', 'Library', 'Shelfmark', 'Title',
         'Image/Page', 'Source', 'Snippet', 'Full Text',
-        'Has PGP', 'Is Printed', 'Domains', 'IIIF Manifest',
+        'Has PGP', 'Is Printed', 'Domains', 'Image URL',
     ]
 
 
@@ -143,12 +143,17 @@ def test_domains_pipe_joined(stub_dossier):
     assert ws.cell(header_row + 1, 11).value == 'Bible|Letter|Legal'
 
 
-def test_iiif_manifest_empty(stub_dossier):
+def test_image_url_populated(stub_dossier):
+    # Phase 94.1 LIFTED D-13. Column 12 now holds a per-folio proxy URL.
     content = _build([_make_result('A')])
     wb = _load(content)
     ws = wb['Search Results']
     header_row = _find_header_row(ws)
-    assert ws.cell(header_row + 1, 12).value in ('', None)
+    cell_value = ws.cell(header_row + 1, 12).value
+    assert isinstance(cell_value, str) and cell_value
+    assert cell_value.startswith('https://genizahsearch.com/api/')
+    assert ws.cell(header_row + 1, 12).hyperlink is not None
+    assert ws.cell(header_row + 1, 12).hyperlink.target == cell_value
 
 
 def test_full_text_column(stub_dossier):
@@ -242,7 +247,7 @@ def test_main_headers_english_when_caller_pins_english_list(stub_dossier):
     assert headers == [
         'System ID', 'Library', 'Shelfmark', 'Title',
         'Image/Page', 'Source', 'Snippet', 'Full Text',
-        'Has PGP', 'Is Printed', 'Domains', 'IIIF Manifest',
+        'Has PGP', 'Is Printed', 'Domains', 'Image URL',
     ], f"headers were {headers}"
 
 
@@ -261,7 +266,7 @@ def test_full_text_fetcher_hydrates_when_missing(stub_dossier):
         results=results,
         headers_main=['System ID', 'Library', 'Shelfmark', 'Title',
                       'Image/Page', 'Source', 'Snippet', 'Full Text',
-                      'Has PGP', 'Is Printed', 'Domains', 'IIIF Manifest'],
+                      'Has PGP', 'Is Printed', 'Domains', 'Image URL'],
         meta_resolver=_meta_resolver_fake,
         sanitize_fn=_identity_sanitize,
         full_text_fetcher=lambda uid: 'hydrated text for ' + uid,
@@ -287,7 +292,7 @@ def test_full_text_fetcher_none_means_empty_cell(stub_dossier):
         results=results,
         headers_main=['System ID', 'Library', 'Shelfmark', 'Title',
                       'Image/Page', 'Source', 'Snippet', 'Full Text',
-                      'Has PGP', 'Is Printed', 'Domains', 'IIIF Manifest'],
+                      'Has PGP', 'Is Printed', 'Domains', 'Image URL'],
         meta_resolver=_meta_resolver_fake,
         sanitize_fn=_identity_sanitize,
         full_text_fetcher=None,

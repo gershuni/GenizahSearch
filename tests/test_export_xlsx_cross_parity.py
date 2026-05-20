@@ -110,7 +110,7 @@ def _build_desktop(results):
         results=results,
         headers_main=['System ID', 'Library', 'Shelfmark', 'Title',
                       'Image/Page', 'Source', 'Snippet', 'Full Text',
-                      'Has PGP', 'Is Printed', 'Domains', 'IIIF Manifest'],
+                      'Has PGP', 'Is Printed', 'Domains', 'Image URL'],
         meta_resolver=_meta_resolver_fake,
         sanitize_fn=_identity_sanitize,
     )

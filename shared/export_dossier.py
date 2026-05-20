@@ -231,15 +231,119 @@ _MAIN_HEADERS_EN: List[str] = [
     "System ID", "Library", "Shelfmark", "Title",
     "Image/Page", "Source",
     "Snippet", "Full Text",
-    "Has PGP", "Is Printed", "Domains", "IIIF Manifest",
+    "Has PGP", "Is Printed", "Domains", "Image URL",
 ]
 
 _MAIN_HEADERS_HE: List[str] = [
     "מספר מערכת", "ספרייה", "מספר מדף", "כותרת",
     "תמונה/עמוד", "מקור",
     "קטע", "טקסט מלא",
-    "יש PGP", "מודפס", "תחומים", "מניפסט IIIF",
+    "יש PGP", "מודפס", "תחומים", "כתובת תמונה",
 ]
+
+
+# Main-sheet column index (0-based) of the per-folio Image URL cell.
+# Used by the export sites to make the cell a clickable hyperlink.
+MAIN_IMAGE_URL_COLUMN_INDEX: int = 11
+
+# Default proxy base used when no override is passed. Production
+# https://genizahsearch.com is the canonical host for the image-proxy
+# endpoints (/api/nli_image_by_sysid, /api/oxford_image, etc.). Override
+# via the ``base_url`` kwarg if exporting from a non-prod environment
+# and you want absolute URLs to point somewhere else.
+DEFAULT_IMAGE_URL_BASE: str = "https://genizahsearch.com"
+
+
+def build_image_url_for_row(
+    sys_id: Optional[str],
+    library_code: Optional[str],
+    img_page: Any,
+    base_url: str = DEFAULT_IMAGE_URL_BASE,
+) -> str:
+    """Build the per-folio Image-URL cell value for a main-sheet row.
+
+    Returns an absolute URL pointing to the GenizahSearch image-proxy
+    endpoint that serves the IIIF image for the specific folio shown in
+    this row. Returns '' for synthetic sys_ids, missing sys_ids, or any
+    other path where no image can be resolved (the cell stays empty
+    rather than emitting a broken link).
+
+    The proxy URL is stable while the GenizahSearch web app is up; the
+    backend transparently maps to NLI / CUDL / Manchester / JTS / Oxford
+    IIIF endpoints via the existing per-library proxy chain.
+
+    URL pattern:
+        Oxford library:    {base_url}/api/oxford_image/{sys_id}?page={N}
+        All others:        {base_url}/api/nli_image_by_sysid/{sys_id}?page={N}
+
+    where ``N`` is the 0-based page index derived from ``img_page``
+    (which is the 1-based page number stored on the search result row).
+    Non-numeric folio markers like '5r' / '12v' have their leading digits
+    extracted and converted; markers with no leading digits fall back to
+    page 0 so the link still resolves to the first folio rather than
+    breaking.
+    """
+    if not sys_id:
+        return ''
+    # Defer the heavy genizah_core import to call time so the dossier
+    # module stays importable without the search engine in the loop
+    # (matters under the test environment).
+    try:
+        from shared.synthetic_sys_id import is_synthetic_sys_id
+        if is_synthetic_sys_id(sys_id):
+            return ''
+    except Exception:
+        pass
+    page_idx = _img_page_to_page_index(img_page)
+    sys_id_str = str(sys_id).strip()
+    if not sys_id_str:
+        return ''
+    if library_code == 'Oxford':
+        return f"{base_url}/api/oxford_image/{sys_id_str}?page={page_idx}"
+    return f"{base_url}/api/nli_image_by_sysid/{sys_id_str}?page={page_idx}"
+
+
+def _img_page_to_page_index(img_page: Any) -> int:
+    """Translate a 1-based page label (5 / '5' / '5r' / 'fol. 3v') to a
+    0-based page index for the proxy URL ``?page=`` query string.
+
+    Always returns a non-negative int. Anything that does not parse falls
+    back to 0 so the URL still points at the first folio rather than 404.
+    """
+    import re as _re
+    if img_page is None:
+        return 0
+    if isinstance(img_page, bool):
+        return 0
+    if isinstance(img_page, int):
+        return max(0, img_page - 1)
+    s = str(img_page).strip()
+    if not s:
+        return 0
+    m = _re.match(r'(\d+)', s)
+    if not m:
+        return 0
+    try:
+        return max(0, int(m.group(1)) - 1)
+    except (TypeError, ValueError):
+        return 0
+
+
+def apply_main_row_image_url_hyperlink(ws, excel_row: int, url: str) -> None:
+    """Mark the Image-URL cell on a main-sheet data row as clickable.
+
+    Pairs with :func:`build_image_url_for_row`. Empty URLs are no-ops.
+    ``excel_row`` is the 1-based worksheet row number where the data row
+    was just appended.
+    """
+    if not url:
+        return
+    if not (url.startswith('http://') or url.startswith('https://')):
+        return
+    from openpyxl.styles import Font
+    cell = ws.cell(row=excel_row, column=MAIN_IMAGE_URL_COLUMN_INDEX + 1)
+    cell.hyperlink = url
+    cell.font = Font(color="0563C1", underline="single")
 
 _MANUSCRIPT_HEADERS_HE: List[str] = [
     "מספר מערכת",

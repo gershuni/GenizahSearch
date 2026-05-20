@@ -561,6 +561,7 @@ class ExportService:
             main_header_row, manuscript_header_row, bibliography_header_row,
             sheet_titles,
             apply_manuscript_row_hyperlinks,
+            build_image_url_for_row, apply_main_row_image_url_hyperlink,
         )
         from shared_export_utils import build_rich_snippet_cell
         from genizah_core import get_library_display as core_get_library_display
@@ -745,8 +746,15 @@ class ExportService:
             if lang == 'he' and _domain_name_map:
                 domains_list = [_domain_name_map.get(d, d) for d in domains_list]
             domains_cell = '|'.join(d for d in domains_list if d)
-            # IIIF Manifest column DEFERRED per D-13 — header present, cells empty.
-            iiif_cell = ''
+            # Phase 94.1 (2026-05-21): D-13 LIFTED. The previously-deferred
+            # 12th column is renamed 'Image URL' / 'כתובת תמונה' and now
+            # carries a per-folio proxy URL (https://genizahsearch.com/api/
+            # nli_image_by_sysid/{sys_id}?page=N or /api/oxford_image/...
+            # for Oxford). Synthetic sys_ids return '' so the cell stays
+            # empty for advanced-search-only manuscripts.
+            image_url_cell = build_image_url_for_row(
+                sys_id_for_cell, lib_code_for_cell, img_page,
+            )
 
             row_cells = [
                 sanitize_text_for_excel(sys_id_for_cell),
@@ -762,7 +770,7 @@ class ExportService:
                 has_pgp_cell,
                 is_printed_cell,
                 sanitize_text_for_excel(domains_cell),
-                iiif_cell,
+                image_url_cell,
             ]
             ws_main.append(row_cells)
             current_row = ws_main.max_row
@@ -772,6 +780,9 @@ class ExportService:
                 row=current_row, column=7,
                 value=build_rich_snippet_cell(snippet_raw, sanitize_text_for_excel),
             )
+
+            # Phase 94.1: image-URL cell is clickable when non-empty.
+            apply_main_row_image_url_hyperlink(ws_main, current_row, image_url_cell)
 
             # Per-cell alignment (existing pattern).
             ws_main.cell(row=current_row, column=1).alignment = ltr_align  # System ID
@@ -785,7 +796,7 @@ class ExportService:
             ws_main.cell(row=current_row, column=9).alignment = center_align  # Has PGP
             ws_main.cell(row=current_row, column=10).alignment = center_align  # Is Printed
             ws_main.cell(row=current_row, column=11).alignment = ltr_align  # Domains
-            ws_main.cell(row=current_row, column=12).alignment = ltr_align  # IIIF Manifest
+            ws_main.cell(row=current_row, column=12).alignment = ltr_align  # Image URL
 
         # Smoke verification round 2 (2026-05-21): inline ``add_excel_credits``
         # call removed. Credits + per-export search metadata now live on the

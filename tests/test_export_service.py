@@ -328,7 +328,7 @@ class TestExportService:
 
         Phase 94 Wave 3 unified layout: cols are
         [System ID, Library, Shelfmark, Title, Image/Page, Source, Snippet,
-         Full Text, Has PGP, Is Printed, Domains, IIIF Manifest].
+         Full Text, Has PGP, Is Printed, Domains, Image URL].
         """
         content, filename = export_service.export_search_results_excel(
             sample_search_results, "test query"

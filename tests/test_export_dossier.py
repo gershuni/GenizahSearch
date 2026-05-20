@@ -1012,7 +1012,7 @@ class TestBilingualHeaderRows:
         assert row[8] == "Has PGP"
         assert row[9] == "Is Printed"
         assert row[10] == "Domains"
-        assert row[11] == "IIIF Manifest"
+        assert row[11] == "Image URL"
 
     def test_main_header_row_he_returns_12_hebrew_columns(self):
         row = main_header_row('he')
@@ -1028,7 +1028,7 @@ class TestBilingualHeaderRows:
         assert row[8] == "יש PGP"
         assert row[9] == "מודפס"
         assert row[10] == "תחומים"
-        assert row[11] == "מניפסט IIIF"
+        assert row[11] == "כתובת תמונה"
 
     def test_main_header_row_default_lang_is_english(self):
         assert main_header_row() == main_header_row('en')
