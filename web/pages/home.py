@@ -258,82 +258,9 @@ def create_page():
                     return  # Carousel slots gone; stop rotating cleanly
         asyncio.ensure_future(_auto_rotate())
 
-        # === SEO content: bilingual project overview ===
-        # Static crawler-visible text in both languages so search engines can
-        # index either; addresses the SEOptimer "thin content" flag on /.
-        with ui.element('section').classes('w-full mt-3 px-6 py-4').style(
-            'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
-        ):
-            ui.html(
-                '''
-<div lang="he" dir="rtl" style="text-align: right; margin-bottom: 1.25rem; color: var(--text-secondary); font-size: 0.95rem; line-height: 1.6;">
-  <h2 style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem 0;">אודות חיפוש בגניזה הקהירית של דיקטה</h2>
-  <p style="margin: 0;">
-    חיפוש בגניזה הקהירית של דיקטה הוא מאגר מקוון של תעתיקים, תמונות ומטא-דאטה ל-255,000 קטעי כתבי יד מגניזת קהיר.
-    הגניזה הקהירית התגלתה בסוף המאה ה-19 בעליית הגג של בית הכנסת בן-עזרא בפוסטאט (קהיר העתיקה),
-    והיא כוללת מאות אלפי קטעי כתבי יד עבריים, ארמיים ויהודיים-ערביים מהמאה התשיעית ועד המאה התשע-עשרה —
-    תנ"ך, תלמוד, ספרות חז"ל, הלכה, פיוט, מסמכים, מדע ועוד.
-    האתר משלב תעתיקים אוטומטיים שהופקו במנוע MiDRASH של דיקטה, תמונות באיכות גבוהה מספריות מובילות
-    (קיימברידג&apos;, JTS, אוקספורד, הספרייה הלאומית של ישראל ועוד), ומטא-דאטה קטלוגית מ-FGP, PGP ו-NLI.
-    ניתן לחפש חופשי בטקסט המלא של הקורפוס, לדפדף בקטעים יחד עם הצילומים,
-    לזהות מקבילות וצירופים (joins) בין קטעים, ולשתף תגליות עם קהילת החוקרים.
-  </p>
-</div>
-<div lang="en" dir="ltr" style="text-align: left; color: var(--text-secondary); font-size: 0.95rem; line-height: 1.6;">
-  <h2 style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem 0;">About Dicta Genizah Search</h2>
-  <p style="margin: 0;">
-    Dicta Genizah Search is an online database of transcriptions, images, and scholarly metadata for ~255,000 Cairo Genizah manuscript fragments.
-    The Cairo Genizah, discovered in the late 19th century in the attic of the Ben Ezra Synagogue in Fustat (Old Cairo),
-    contains hundreds of thousands of Hebrew, Aramaic, and Judeo-Arabic manuscript fragments spanning the 9th through 19th centuries —
-    Bible, Talmud, rabbinic literature, halakhah, liturgy, documentary texts, science, and more.
-    This site combines automatic transcriptions produced by Dicta&apos;s MiDRASH engine, high-resolution manuscript images from
-    leading libraries (Cambridge Taylor-Schechter, JTS, Oxford Bodleian, the National Library of Israel, and others),
-    and scholarly metadata from FGP, PGP, and NLI.
-    You can run full-text search across the corpus, browse fragments alongside their images,
-    locate textual parallels and physical joins between fragments, and share discoveries with the research community.
-  </p>
-</div>
-''',
-                sanitize=False,
-            )
-
-        # === FAQ section ===
-        # Visible Q&A content that mirrors the FAQPage JSON-LD in <head>.
-        # Google requires FAQPage rich-result candidates to have the same
-        # question/answer text visible on the source page; <details>/<summary>
-        # accordion is explicitly supported. Each summary/answer below must
-        # stay byte-identical to the FAQPage JSON-LD entries in web/main.py.
-        with ui.element('section').classes('w-full mt-3 px-6 py-4').style(
-            'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
-        ):
-            ui.html(
-                '''
-<h2 lang="en" style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.75rem 0;">Frequently Asked Questions</h2>
-<div lang="en" dir="ltr" style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.6;">
-  <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
-    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">What is the Cairo Genizah?</summary>
-    <p style="margin: 0.5rem 0 0 0;">The Cairo Genizah is a collection of roughly 400,000 Jewish manuscript fragments discovered in the late 19th century in the attic of the Ben Ezra Synagogue in Fustat (Old Cairo). It spans the 9th through 19th centuries and includes Bible, Talmud, rabbinic literature, halakhah, liturgy, scientific texts, and documentary materials in Hebrew, Aramaic, and Judeo-Arabic.</p>
-  </details>
-  <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
-    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">What does Dicta Genizah Search provide?</summary>
-    <p style="margin: 0.5rem 0 0 0;">An online database of automatic transcriptions, high-resolution manuscript images, and scholarly metadata for approximately 255,000 Cairo Genizah fragments. Users can run full-text search across the corpus, browse manuscripts alongside their images, find textual parallels and physical joins between fragments, and share discoveries.</p>
-  </details>
-  <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
-    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">Where do the transcriptions come from?</summary>
-    <p style="margin: 0.5rem 0 0 0;">The transcriptions are produced automatically by Dicta&apos;s MiDRASH engine — a machine-reading pipeline trained on medieval Hebrew manuscripts. Because they are computer-generated, some reading errors are expected; community corrections and discoveries are welcomed.</p>
-  </details>
-  <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
-    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">Which libraries&apos; images are available?</summary>
-    <p style="margin: 0.5rem 0 0 0;">High-resolution manuscript images are sourced from leading holding libraries including Cambridge University Library (Taylor-Schechter), the Jewish Theological Seminary, Oxford Bodleian, the National Library of Israel, the National Library of Russia, the British Library, and others. Scholarly metadata is drawn from FGP, PGP, and NLI catalog data.</p>
-  </details>
-  <details style="margin-bottom: 0; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
-    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">Is Dicta Genizah Search free to use?</summary>
-    <p style="margin: 0.5rem 0 0 0;">Yes. The web application at genizahsearch.com and the downloadable Windows desktop application are both free for academic, educational, and personal research use. The project is operated by Dicta — the Israel Center for Text Analysis — as a non-commercial scholarly resource.</p>
-  </details>
-</div>
-''',
-                sanitize=False,
-            )
+        # About + FAQ sections moved to the bottom of the page (below
+        # Credits) and lang-gated. See _render_about_and_faq() at the
+        # bottom of create_page().
 
         # === Seasonal banner (Pesach/other themes) — hidden until next seasonal activation ===
         # The Pesach banner code is preserved in git history and the supporting module
@@ -653,3 +580,123 @@ def create_page():
 
                     # License
                     ui.label(tr('Licensed under CC BY 4.0')).classes('text-xs mt-2').style('color: var(--text-muted);')
+
+        # === SEO content + FAQ — moved to bottom of page 2026-05-21 ===
+        # One block per UI language (no longer rendering both side-by-side).
+        # The matching FAQPage JSON-LD in web/main.py:dashboard_page() is
+        # also lang-gated so the Q&A text on the page matches the
+        # structured-data payload byte-for-byte (Google rich-result rule).
+        _is_he = is_rtl()
+        with ui.element('section').classes('w-full mt-4 px-6 py-4').style(
+            'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
+        ):
+            if _is_he:
+                ui.html(
+                    '''
+<div lang="he" dir="rtl" style="text-align: right; color: var(--text-secondary); font-size: 0.95rem; line-height: 1.7;">
+  <h2 style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem 0;">על אודות אתר הגניזה של דיקטה</h2>
+  <p style="margin: 0;">
+    אתר הגניזה של דיקטה הוא מרכז מחקר רב עוצמה עם תעתיקים, תמונות ומידע של 255,000 קטעי כתבי יד מגניזת קהיר.
+    הגניזה הקהירית התגלתה בסוף המאה ה-19 בעליית הגג של בית הכנסת בן-עזרא בפוסטאט (קהיר העתיקה),
+    והיא כוללת מאות אלפי קטעי כתבי יד בעברית, בארמית ובערבית-יהודית שמתוארכים מן המאה השמינית ועד המאה התשע-עשרה —
+    תנ"ך, תלמוד, ספרות חז"ל, הלכה, פילוסופיה, תפילה, פיוט, מסמכים רשמיים, מכתבים, מדע, מאגיה ועוד.
+    האתר משלב תעתיקים אוטומטיים שהופקו על ידי פרויקט MiDRASH בתמיכת האיחוד האירופי,
+    תמונות באיכות גבוהה מאתר &quot;כתיב&quot; של הספרייה הלאומית של ישראל ומספריות ברחבי העולם,
+    ומידע קטלוגי ממקורות מגוונים, בראשם פרויקט הגניזה של פרידברג, אתר &quot;כתיב&quot;,
+    פרויקט הגניזה של פרינסטון, ספריות קמברידג&apos;, אוקספורד, מנצ&apos;סטר, בית המדרש לרבנים באמריקה ועוד.
+    ניתן לחפש חופשי בטקסט המלא של הקורפוס, לדפדף בקטעים יחד עם הצילומים,
+    לזהות מקבילות לטקסטים ידועים ולמצוא צירופים חדשים בין קטעים, ולשתף תגליות עם קהילת החוקרים.
+    התעתיקים האוטומטיים כוללים שיבושים רבים, ועל כן מומלץ להשתמש בחיפוש מתקדם בצורות שונות:
+    וריאנטים לחילופים נפוצים בין אותיות, עמום לחילופים חופשיים,
+    וחיפוש מתקדם בעזרת מצב סגנון פרויקט השו&quot;ת או ביטוי רגולרי.
+  </p>
+</div>
+''',
+                    sanitize=False,
+                )
+            else:
+                ui.html(
+                    '''
+<div lang="en" dir="ltr" style="text-align: left; color: var(--text-secondary); font-size: 0.95rem; line-height: 1.7;">
+  <h2 style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem 0;">About Dicta Genizah Search</h2>
+  <p style="margin: 0;">
+    Dicta Genizah Search is a powerful research hub with transcriptions, images, and metadata for 255,000 manuscript fragments from the Cairo Genizah.
+    The Cairo Genizah was discovered in the late 19th century in the attic of the Ben Ezra Synagogue in Fustat (Old Cairo),
+    and contains hundreds of thousands of manuscript fragments in Hebrew, Aramaic, and Judeo-Arabic dated from the 8th through the 19th centuries —
+    Bible, Talmud, rabbinic literature, halakhah, philosophy, prayer, piyyut, official documents, letters, science, magic, and more.
+    The site combines automatic transcriptions produced by the MiDRASH Project with support from the European Union,
+    high-resolution images from the National Library of Israel&apos;s &quot;Ktiv&quot; website and from libraries around the world,
+    and catalog metadata from diverse sources — chief among them the Friedberg Genizah Project, the &quot;Ktiv&quot; website,
+    the Princeton Geniza Project, and the libraries of Cambridge, Oxford, Manchester, the Jewish Theological Seminary, and others.
+    You can run full-text search across the corpus, browse fragments alongside their images,
+    identify parallels to known texts and find new joins between fragments, and share discoveries with the research community.
+    The automatic transcriptions contain many errors, so it is recommended to use advanced search in various forms:
+    Variants for common letter swaps, Fuzzy for free substitutions,
+    and advanced search using Responsa-style mode or regular expressions.
+  </p>
+</div>
+''',
+                    sanitize=False,
+                )
+
+        with ui.element('section').classes('w-full mt-3 px-6 py-4').style(
+            'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
+        ):
+            if _is_he:
+                ui.html(
+                    '''
+<h2 lang="he" dir="rtl" style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.75rem 0; text-align: right;">שאלות נפוצות</h2>
+<div lang="he" dir="rtl" style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.7; text-align: right;">
+  <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
+    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">מהי גניזת קהיר?</summary>
+    <p style="margin: 0.5rem 0 0 0;">גניזת קהיר היא אוסף של מאות אלפי קטעי כתבי יד יהודיים שהתגלה בסוף המאה ה-19 בעליית הגג של בית הכנסת בן-עזרא בפוסטאט (קהיר העתיקה). האוסף משתרע מן המאה השמינית ועד המאה התשע-עשרה וכולל תנ"ך, תלמוד, ספרות חז"ל, הלכה, פילוסופיה, תפילה, פיוט, מסמכים רשמיים, מכתבים, מדע, מאגיה ועוד — בעברית, בארמית ובערבית-יהודית.</p>
+  </details>
+  <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
+    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">מה מציע אתר הגניזה של דיקטה?</summary>
+    <p style="margin: 0.5rem 0 0 0;">מרכז מחקר עם תעתיקים אוטומטיים, תמונות באיכות גבוהה ומידע קטלוגי ל-255,000 קטעי גניזה. ניתן לחפש חופשי בטקסט המלא של הקורפוס, לדפדף בקטעים יחד עם הצילומים, לזהות מקבילות לטקסטים ידועים, למצוא צירופים חדשים בין קטעים, ולשתף תגליות עם קהילת החוקרים.</p>
+  </details>
+  <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
+    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">מהיכן באים התעתיקים?</summary>
+    <p style="margin: 0.5rem 0 0 0;">התעתיקים מופקים אוטומטית על ידי פרויקט MiDRASH (בתמיכת האיחוד האירופי) — מנוע קריאת-מכונה שאומן על כתבי יד עבריים מימי הביניים. כיוון שמדובר בתעתוק ממוחשב, ישנם שיבושים רבים. מומלץ להשתמש במצבי חיפוש מתקדמים: וריאנטים לחילופים נפוצים בין אותיות, עמום לחילופים חופשיים, וחיפוש בסגנון פרויקט השו"ת או ביטוי רגולרי לשליטה מדויקת יותר.</p>
+  </details>
+  <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
+    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">מהיכן באים התמונות והמידע הקטלוגי?</summary>
+    <p style="margin: 0.5rem 0 0 0;">תמונות באיכות גבוהה מגיעות מאתר "כתיב" של הספרייה הלאומית של ישראל ומספריות ברחבי העולם. המידע הקטלוגי נשאב ממקורות מגוונים, בראשם פרויקט הגניזה של פרידברג (FGP), אתר "כתיב", פרויקט הגניזה של פרינסטון (PGP), וספריות קמברידג', אוקספורד, מנצ'סטר, בית המדרש לרבנים באמריקה (JTS) ועוד.</p>
+  </details>
+  <details style="margin-bottom: 0; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
+    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">האם השימוש באתר הגניזה של דיקטה חופשי?</summary>
+    <p style="margin: 0.5rem 0 0 0;">כן. גם יישום הרשת ב-genizahsearch.com וגם יישום שולחן העבודה ל-Windows המיועד להורדה הם חופשיים לשימוש אקדמי, חינוכי ומחקרי-אישי. הפרויקט מנוהל על ידי דיקטה — המרכז הישראלי לניתוח טקסטים — כמשאב מחקרי שאינו מסחרי.</p>
+  </details>
+</div>
+''',
+                    sanitize=False,
+                )
+            else:
+                ui.html(
+                    '''
+<h2 lang="en" style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.75rem 0;">Frequently Asked Questions</h2>
+<div lang="en" dir="ltr" style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.7;">
+  <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
+    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">What is the Cairo Genizah?</summary>
+    <p style="margin: 0.5rem 0 0 0;">The Cairo Genizah is a collection of hundreds of thousands of Jewish manuscript fragments discovered in the late 19th century in the attic of the Ben Ezra Synagogue in Fustat (Old Cairo). It spans the 8th through 19th centuries and includes Bible, Talmud, rabbinic literature, halakhah, philosophy, prayer, piyyut, documentary materials, letters, science, magic, and more — in Hebrew, Aramaic, and Judeo-Arabic.</p>
+  </details>
+  <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
+    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">What does Dicta Genizah Search provide?</summary>
+    <p style="margin: 0.5rem 0 0 0;">A research hub with automatic transcriptions, high-resolution manuscript images, and catalog metadata for 255,000 Cairo Genizah fragments. Users can run full-text search across the corpus, browse fragments alongside their images, identify parallels to known texts, find new joins between fragments, and share discoveries with the research community.</p>
+  </details>
+  <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
+    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">Where do the transcriptions come from?</summary>
+    <p style="margin: 0.5rem 0 0 0;">The transcriptions are produced automatically by the MiDRASH Project (supported by the European Union) — a machine-reading pipeline trained on medieval Hebrew manuscripts. Because they are computer-generated, they contain many reading errors. We recommend using advanced search modes: Variants for common letter swaps, Fuzzy for free substitutions, and Responsa-style or regular-expression search for finer control.</p>
+  </details>
+  <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
+    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">Where do the images and metadata come from?</summary>
+    <p style="margin: 0.5rem 0 0 0;">High-resolution images come from the National Library of Israel&apos;s &quot;Ktiv&quot; website and from libraries around the world. Catalog metadata is drawn from diverse sources — chief among them the Friedberg Genizah Project (FGP), the &quot;Ktiv&quot; website, the Princeton Geniza Project (PGP), and the libraries of Cambridge, Oxford, Manchester, the Jewish Theological Seminary (JTS), and others.</p>
+  </details>
+  <details style="margin-bottom: 0; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
+    <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">Is Dicta Genizah Search free to use?</summary>
+    <p style="margin: 0.5rem 0 0 0;">Yes. The web application at genizahsearch.com and the downloadable Windows desktop application are both free for academic, educational, and personal research use. The project is operated by Dicta — the Israel Center for Text Analysis — as a non-commercial scholarly resource.</p>
+  </details>
+</div>
+''',
+                    sanitize=False,
+                )

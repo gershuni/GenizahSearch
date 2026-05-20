@@ -1482,19 +1482,77 @@ def dashboard_page():
     }
     </script>
     ''')
-    # Structured data: FAQPage — curated Q&As eligible for Google rich snippets
-    ui.add_head_html('''
+    # Structured data: FAQPage — curated Q&As eligible for Google rich snippets.
+    # The visible FAQ accordion on /home is lang-gated 2026-05-21; emit the
+    # matching language's Q&A payload so the JSON-LD stays byte-aligned to the
+    # visible page text (Google's rich-result requirement).
+    _faq_lang = _resolve_ui_language()
+    if _faq_lang == 'he':
+        ui.add_head_html('''
     <script type="application/ld+json">
     {
         "@context": "https://schema.org",
         "@type": "FAQPage",
+        "inLanguage": "he",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "מהי גניזת קהיר?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "גניזת קהיר היא אוסף של מאות אלפי קטעי כתבי יד יהודיים שהתגלה בסוף המאה ה-19 בעליית הגג של בית הכנסת בן-עזרא בפוסטאט (קהיר העתיקה). האוסף משתרע מן המאה השמינית ועד המאה התשע-עשרה וכולל תנ׳ך, תלמוד, ספרות חז׳ל, הלכה, פילוסופיה, תפילה, פיוט, מסמכים רשמיים, מכתבים, מדע, מאגיה ועוד — בעברית, בארמית ובערבית-יהודית."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "מה מציע אתר הגניזה של דיקטה?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "מרכז מחקר עם תעתיקים אוטומטיים, תמונות באיכות גבוהה ומידע קטלוגי ל-255,000 קטעי גניזה. ניתן לחפש חופשי בטקסט המלא של הקורפוס, לדפדף בקטעים יחד עם הצילומים, לזהות מקבילות לטקסטים ידועים, למצוא צירופים חדשים בין קטעים, ולשתף תגליות עם קהילת החוקרים."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "מהיכן באים התעתיקים?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "התעתיקים מופקים אוטומטית על ידי פרויקט MiDRASH (בתמיכת האיחוד האירופי) — מנוע קריאת-מכונה שאומן על כתבי יד עבריים מימי הביניים. כיוון שמדובר בתעתוק ממוחשב, ישנם שיבושים רבים. מומלץ להשתמש במצבי חיפוש מתקדמים: וריאנטים לחילופים נפוצים בין אותיות, עמום לחילופים חופשיים, וחיפוש בסגנון פרויקט השו׳ת או ביטוי רגולרי לשליטה מדויקת יותר."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "מהיכן באים התמונות והמידע הקטלוגי?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "תמונות באיכות גבוהה מגיעות מאתר כתיב של הספרייה הלאומית של ישראל ומספריות ברחבי העולם. המידע הקטלוגי נשאב ממקורות מגוונים, בראשם פרויקט הגניזה של פרידברג (FGP), אתר כתיב, פרויקט הגניזה של פרינסטון (PGP), וספריות קמברידג', אוקספורד, מנצ'סטר, בית המדרש לרבנים באמריקה (JTS) ועוד."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "האם השימוש באתר הגניזה של דיקטה חופשי?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "כן. גם יישום הרשת ב-genizahsearch.com וגם יישום שולחן העבודה ל-Windows המיועד להורדה הם חופשיים לשימוש אקדמי, חינוכי ומחקרי-אישי. הפרויקט מנוהל על ידי דיקטה — המרכז הישראלי לניתוח טקסטים — כמשאב מחקרי שאינו מסחרי."
+                }
+            }
+        ]
+    }
+    </script>
+    ''')
+    else:
+        ui.add_head_html('''
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "inLanguage": "en",
         "mainEntity": [
             {
                 "@type": "Question",
                 "name": "What is the Cairo Genizah?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "The Cairo Genizah is a collection of roughly 400,000 Jewish manuscript fragments discovered in the late 19th century in the attic of the Ben Ezra Synagogue in Fustat (Old Cairo). It spans the 9th through 19th centuries and includes Bible, Talmud, rabbinic literature, halakhah, liturgy, scientific texts, and documentary materials in Hebrew, Aramaic, and Judeo-Arabic."
+                    "text": "The Cairo Genizah is a collection of hundreds of thousands of Jewish manuscript fragments discovered in the late 19th century in the attic of the Ben Ezra Synagogue in Fustat (Old Cairo). It spans the 8th through 19th centuries and includes Bible, Talmud, rabbinic literature, halakhah, philosophy, prayer, piyyut, documentary materials, letters, science, magic, and more — in Hebrew, Aramaic, and Judeo-Arabic."
                 }
             },
             {
@@ -1502,7 +1560,7 @@ def dashboard_page():
                 "name": "What does Dicta Genizah Search provide?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "An online database of automatic transcriptions, high-resolution manuscript images, and scholarly metadata for approximately 255,000 Cairo Genizah fragments. Users can run full-text search across the corpus, browse manuscripts alongside their images, find textual parallels and physical joins between fragments, and share discoveries."
+                    "text": "A research hub with automatic transcriptions, high-resolution manuscript images, and catalog metadata for 255,000 Cairo Genizah fragments. Users can run full-text search across the corpus, browse fragments alongside their images, identify parallels to known texts, find new joins between fragments, and share discoveries with the research community."
                 }
             },
             {
@@ -1510,15 +1568,15 @@ def dashboard_page():
                 "name": "Where do the transcriptions come from?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "The transcriptions are produced automatically by Dicta's MiDRASH engine — a machine-reading pipeline trained on medieval Hebrew manuscripts. Because they are computer-generated, some reading errors are expected; community corrections and discoveries are welcomed."
+                    "text": "The transcriptions are produced automatically by the MiDRASH Project (supported by the European Union) — a machine-reading pipeline trained on medieval Hebrew manuscripts. Because they are computer-generated, they contain many reading errors. We recommend using advanced search modes: Variants for common letter swaps, Fuzzy for free substitutions, and Responsa-style or regular-expression search for finer control."
                 }
             },
             {
                 "@type": "Question",
-                "name": "Which libraries' images are available?",
+                "name": "Where do the images and metadata come from?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "High-resolution manuscript images are sourced from leading holding libraries including Cambridge University Library (Taylor-Schechter), the Jewish Theological Seminary, Oxford Bodleian, the National Library of Israel, the National Library of Russia, the British Library, and others. Scholarly metadata is drawn from FGP, PGP, and NLI catalog data."
+                    "text": "High-resolution images come from the National Library of Israel's “Ktiv” website and from libraries around the world. Catalog metadata is drawn from diverse sources — chief among them the Friedberg Genizah Project (FGP), the “Ktiv” website, the Princeton Geniza Project (PGP), and the libraries of Cambridge, Oxford, Manchester, the Jewish Theological Seminary (JTS), and others."
                 }
             },
             {
