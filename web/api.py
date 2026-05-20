@@ -2089,6 +2089,15 @@ def init_api_routes(app_override=None):
         else:
             _results = all_results
 
+        # Phase 94 EXPORT-META-06: enrichment signals from session payload.
+        # Wave 2 plumbs them into scope here; Wave 3 wires them into the
+        # restructured export_search_results_excel signature.
+        _transcription_sys_ids = set(payload.get('transcription_sys_ids') or [])
+        _printed_ids = set(payload.get('printed_ids') or [])
+        _result_domains = payload.get('result_domains') or {}
+        # TODO(Wave 3 / EXPORT-META-06): pass _transcription_sys_ids,
+        # _printed_ids, _result_domains as kwargs to export_search_results_excel.
+
         try:
             export_svc = get_export_service(state.meta_mgr)
             content, filename = export_svc.export_search_results_excel(
@@ -2245,6 +2254,15 @@ def init_api_routes(app_override=None):
                 gap=session_payload.get('gap'),
                 filters=session_payload.get('filters'),
                 warnings=session_payload.get('warnings') or [],
+                # Phase 94 EXPORT-META-07: pass enrichment sets so per-item
+                # has_pgp / is_printed are populated correctly (opt-in path
+                # per MUST-FIX 94-02-B -- public /api/search at search_api.py
+                # does NOT pass these, preserving its prior response shape).
+                transcription_sys_ids=set(session_payload.get('transcription_sys_ids') or []),
+                printed_sys_ids=set(session_payload.get('printed_ids') or []),
+                # MUST-FIX 94-02-A: short-circuit FJMS round-trip -- the
+                # session payload already has up-to-date domains.
+                result_domains=session_payload.get('result_domains') or {},
             )
             filename = build_search_filename()
             if _sel and len(_results) < len(all_results):
