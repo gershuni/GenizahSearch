@@ -258,6 +258,45 @@ def create_page():
                     return  # Carousel slots gone; stop rotating cleanly
         asyncio.ensure_future(_auto_rotate())
 
+        # === SEO content: bilingual project overview ===
+        # Static crawler-visible text in both languages so search engines can
+        # index either; addresses the SEOptimer "thin content" flag on /.
+        with ui.element('section').classes('w-full mt-3 px-6 py-4').style(
+            'background: var(--bg-tertiary); border: 1px solid var(--border-light); border-radius: 8px;'
+        ):
+            ui.html(
+                '''
+<div lang="he" dir="rtl" style="text-align: right; margin-bottom: 1.25rem; color: var(--text-secondary); font-size: 0.95rem; line-height: 1.6;">
+  <h2 style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem 0;">אודות חיפוש בגניזה הקהירית של דיקטה</h2>
+  <p style="margin: 0;">
+    חיפוש בגניזה הקהירית של דיקטה הוא מאגר מקוון של תעתיקים, תמונות ומטא-דאטה ל-255,000 קטעי כתבי יד מגניזת קהיר.
+    הגניזה הקהירית התגלתה בסוף המאה ה-19 בעליית הגג של בית הכנסת בן-עזרא בפוסטאט (קהיר העתיקה),
+    והיא כוללת מאות אלפי קטעי כתבי יד עבריים, ארמיים ויהודיים-ערביים מהמאה התשיעית ועד המאה התשע-עשרה —
+    תנ"ך, תלמוד, ספרות חז"ל, הלכה, פיוט, מסמכים, מדע ועוד.
+    האתר משלב תעתיקים אוטומטיים שהופקו במנוע MiDRASH של דיקטה, תמונות באיכות גבוהה מספריות מובילות
+    (קיימברידג&apos;, JTS, אוקספורד, הספרייה הלאומית של ישראל ועוד), ומטא-דאטה קטלוגית מ-FGP, PGP ו-NLI.
+    ניתן לחפש חופשי בטקסט המלא של הקורפוס, לדפדף בקטעים יחד עם הצילומים,
+    לזהות מקבילות וצירופים (joins) בין קטעים, ולשתף תגליות עם קהילת החוקרים.
+  </p>
+</div>
+<div lang="en" dir="ltr" style="text-align: left; color: var(--text-secondary); font-size: 0.95rem; line-height: 1.6;">
+  <h2 style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem 0;">About Dicta Genizah Search</h2>
+  <p style="margin: 0;">
+    Dicta Genizah Search is an online database of transcriptions, images, and scholarly metadata for ~255,000 Cairo Genizah manuscript fragments.
+    The Cairo Genizah, discovered in the late 19th century in the attic of the Ben Ezra Synagogue in Fustat (Old Cairo),
+    contains hundreds of thousands of Hebrew, Aramaic, and Judeo-Arabic manuscript fragments spanning the 9th through 19th centuries —
+    Bible, Talmud, rabbinic literature, halakhah, liturgy, documentary texts, science, and more.
+    This site combines automatic transcriptions produced by Dicta&apos;s MiDRASH engine, high-resolution manuscript images from
+    leading libraries (Cambridge Taylor-Schechter, JTS, Oxford Bodleian, the National Library of Israel, and others),
+    and scholarly metadata from FGP, PGP, and NLI.
+    You can run full-text search across the corpus, browse fragments alongside their images,
+    locate textual parallels and physical joins between fragments, and share discoveries with the research community.
+  </p>
+</div>
+''',
+                sanitize=False,
+            )
+
         # === Seasonal banner (Pesach/other themes) — hidden until next seasonal activation ===
         # The Pesach banner code is preserved in git history and the supporting module
         # web/pesach.py remains as a reusable template for future seasonal themes
