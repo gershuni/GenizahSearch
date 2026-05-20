@@ -21,16 +21,16 @@
 - **v7.10 Search API** -- Phases 77-83 (shipped 2026-05-05)
 - **v7.11 CUDL Coverage & Synthetic Inventories** -- Phases 84-86 (shipped 2026-05-12)
 - **v7.12 Multitenant Architecture (Path B)** -- Phases 87-92 + 92.1 + 92.2 + promoted 999.1/999.4 (shipped 2026-05-18)
-- **v7.13 Research-Grade Downloads & PGP Filter** -- Phases 93-94 (ACTIVE; started 2026-05-19; Phase 93 web-only / Phase 94 web + desktop xlsx)
+- **v7.13 Research-Grade Downloads & PGP Filter** -- Phases 93-94 (ACTIVE; started 2026-05-19; Phase 93 web-only COMPLETE 2026-05-19; Phase 94 web + desktop xlsx COMPLETE 2026-05-21; milestone closeable)
 
 ## Phases
 
 <details>
-<summary>v7.13 Research-Grade Downloads & PGP Filter (Phases 93-94) -- ACTIVE (started 2026-05-19)</summary>
+<summary>v7.13 Research-Grade Downloads & PGP Filter (Phases 93-94) -- BOTH PHASES COMPLETE (Phase 93 2026-05-19; Phase 94 2026-05-21; milestone closeable)</summary>
 
 See: .planning/milestones/v7.13-ROADMAP.md
 
-2 phases, ~5 plans (estimated), 14 requirements (5 PGP-FILTER + 9 EXPORT-META). Both phases promoted from backlog (999.2 + 999.3) with CONTEXT.md already locked. Phase 93 (PGP Filter on `/search`, web-only): post-search 3-state filter toggle (`All` / `Has PGP` / `No PGP`) in results toolbar with active-filter chip, persisted via `web/safe_storage.py` chokepoint; desktop is out of scope because it already exposes the signal via the sortable `COL_PGP` badge column. Phase 94 (Research-Grade Export Metadata, web + desktop xlsx): 3-sheet xlsx workbook (`Genizah Results` + new `Manuscripts` dossier sub-sheet + new `Bibliography` sub-sheet) on BOTH apps via shared `shared/export_dossier.py` helpers, with English-only metadata and no transcription text; on web only, JSON gains 3 additive per-item flags (`has_pgp`, `is_printed`, `domains`) with envelope `schema_version` unchanged; desktop has no JSON export. Phases independent (parallel-shippable). v7.12 multitenant invariants carry forward (zero raw `app.storage.user` under `web/`).
+2 phases, 5 plans (Phase 93: 1; Phase 94: 4 waves), 14/14 requirements satisfied (5 PGP-FILTER + 9 EXPORT-META). Both phases promoted from backlog (999.2 + 999.3). Phase 93 (PGP Filter on `/search`, web-only) shipped 2026-05-19 with 4/5 PGP-FILTER reqs directly satisfied; PGP-FILTER-03 (chip) superseded by user smoke direction (colored button label already conveys state). Phase 94 (Research-Grade Export Metadata, web + desktop xlsx) shipped 2026-05-21 after a 4-wave implementation (94-01 shared dossier primitives → 94-02 web state plumbing + JSON envelope → 94-03 web xlsx restructure → 94-04 desktop xlsx parity + smoke verification + docs closeout). The final workbook is 4-sheet (`Search Results` + `Manuscripts` + `Bibliography` + `Credits and Info`) bilingual (lang='he' produces Hebrew sheet titles + headers + Hebrew-preferred metadata, lang='en' produces English everywhere) with clickable Manuscripts URLs, deduped Domains, int Image/Page values, and a 4th Credits-and-Info sheet carrying search metadata + GenizahSearch.com hyperlink + Creator credit — refined across 6 rounds of smoke-verification patches (bilingual headers + source-language metadata + sheet rename + 4th sheet + label realignment + clickable URLs + Domains dedupe + Image/Page int coercion). On web only, JSON gains 3 additive per-item flags (`has_pgp`, `is_printed`, `domains`) with envelope `schema_version` unchanged; desktop has no JSON export. CONTEXT D-04 was REVERSED 2026-05-20 for the row content layer only (the D-02 transcription-text prohibition + D-10 parallels-envelope strip + conditional RTL view-direction are UNCHANGED). v7.12 multitenant invariants carry forward (zero raw `app.storage.user` under `web/`; allowlist still `[]`).
 
 </details>
 
@@ -258,4 +258,4 @@ Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Pha
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-19 — v7.13 milestone ACTIVE (Research-Grade Downloads & PGP Filter). Phases 93 + 94 promoted from backlog 999.2 + 999.3; per-milestone roadmap at `.planning/milestones/v7.13-ROADMAP.md`. 13 requirements (5 PGP-FILTER + 8 EXPORT-META). Web only; desktop unaffected. v7.12 multitenant invariants carry forward.*
+*Last updated: 2026-05-21 — v7.13 milestone CLOSEABLE. Phase 93 (PGP filter on `/search`, web only) COMPLETE 2026-05-19; Phase 94 (Research-Grade Export Metadata, web + desktop xlsx) COMPLETE 2026-05-21 after a 4-wave implementation + 6 rounds of smoke-verification patches Hillel approved on the same day. 14/14 requirements satisfied across both phases (5 PGP-FILTER + 9 EXPORT-META). Milestone closeout (`deploy.sh`, version bump, `[7.13.0]` CHANGELOG section, git tag, desktop GitHub Release) is a separate ritual — not performed in this commit. v7.12 multitenant invariants carry forward unchanged (zero raw `app.storage.user` access under `web/`; allowlist `[]`).*
