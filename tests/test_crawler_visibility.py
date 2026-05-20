@@ -28,6 +28,20 @@ def test_robots_txt_limits_wayback_to_public_pages():
         assert f'Disallow: {path}' in text
 
 
+def test_llms_txt_exposes_site_overview():
+    bare = FastAPI()
+    init_api_routes(app_override=bare)
+
+    response = TestClient(bare).get('/llms.txt')
+
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('text/plain')
+    text = response.text
+    assert text.startswith('# Dicta Genizah Search')
+    assert 'genizahsearch.com/about' in text
+    assert 'sitemap.xml' in text
+
+
 def test_archive_crawler_runtime_block_only_hits_non_public_paths():
     archive_ua = (
         'Mozilla/5.0 (compatible; archive.org_bot '

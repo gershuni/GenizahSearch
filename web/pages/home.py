@@ -197,8 +197,10 @@ def create_page():
             with card:
                 with ui.row().classes('w-full items-center gap-6 p-5 flex-wrap'):
                     if slide.get('img'):
+                        import html as _html
+                        _alt = _html.escape(slide.get('heading', ''))
                         ui.html(
-                            f'<img src="{slide["img"]}" alt="" loading="lazy"'
+                            f'<img src="{slide["img"]}" alt="{_alt}" loading="lazy"'
                             ' style="width: 100px; height: 80px; object-fit: cover; border-radius: 8px; opacity: 0.9;">',
                             sanitize=False
                         )
