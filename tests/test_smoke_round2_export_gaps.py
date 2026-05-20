@@ -689,3 +689,105 @@ def test_update_search_export_enrichment_patches_domain_name_map(stub_user_stora
     payload2 = get_search_export()
     assert payload2['domain_name_map'] == {'Bible': 'מקרא'}
     assert sorted(payload2['transcription_sys_ids']) == ['A']
+
+
+# ===========================================================================
+# Smoke round 4 (2026-05-21): Manuscripts-sheet URL cells are clickable
+# ===========================================================================
+
+
+def test_apply_manuscript_row_hyperlinks_sets_pgp_url():
+    from openpyxl import Workbook
+    from shared.export_dossier import apply_manuscript_row_hyperlinks
+
+    wb = Workbook()
+    ws = wb.active
+    # Pad the row with 14 cells matching MANUSCRIPT_HEADERS order.
+    row = [
+        'sys123', 'T-S 12.345', 'CUL', 'Some Title',
+        'https://www.princeton.edu/genizah-project/document/sys123',  # PGP URL (idx 4)
+        'desc', 'Letter', '1100', 'Hebrew', 'tag1',
+        'NLI Catalog', 'Catalog Summary',
+        'https://cudl.lib.cam.ac.uk/view/MS-T-S-12-00345',  # Library Viewer URL (idx 12)
+        'https://genizahsearch.com/sys/sys123',  # GenizahSearch URL (idx 13)
+    ]
+    # Mimic the append-then-hyperlink flow.
+    ws.append(row)
+    apply_manuscript_row_hyperlinks(ws, 1, row)
+
+    # Column E = 5 (1-based) = idx 4 = PGP URL.
+    assert ws.cell(row=1, column=5).hyperlink is not None
+    assert ws.cell(row=1, column=5).hyperlink.target == row[4]
+    # Column M = 13 = idx 12 = Library Viewer URL.
+    assert ws.cell(row=1, column=13).hyperlink is not None
+    assert ws.cell(row=1, column=13).hyperlink.target == row[12]
+    # Column N = 14 = idx 13 = GenizahSearch URL.
+    assert ws.cell(row=1, column=14).hyperlink is not None
+    assert ws.cell(row=1, column=14).hyperlink.target == row[13]
+
+
+def test_apply_manuscript_row_hyperlinks_skips_empty_cells():
+    from openpyxl import Workbook
+    from shared.export_dossier import apply_manuscript_row_hyperlinks
+
+    wb = Workbook()
+    ws = wb.active
+    row = [
+        'sys123', 'T-S 12.345', 'CUL', 'Some Title',
+        '',  # PGP URL EMPTY
+        'desc', 'Letter', '1100', 'Hebrew', 'tag1',
+        'NLI Catalog', 'Catalog Summary',
+        None,  # Library Viewer URL is None (sys_id not in library viewer set)
+        'https://genizahsearch.com/sys/sys123',  # GenizahSearch URL — always present
+    ]
+    ws.append(row)
+    apply_manuscript_row_hyperlinks(ws, 1, row)
+
+    # Empty cells should NOT acquire a hyperlink — and openpyxl raise nothing.
+    assert ws.cell(row=1, column=5).hyperlink is None
+    assert ws.cell(row=1, column=13).hyperlink is None
+    # The non-empty one still works.
+    assert ws.cell(row=1, column=14).hyperlink is not None
+
+
+def test_apply_manuscript_row_hyperlinks_skips_non_url_strings():
+    from openpyxl import Workbook
+    from shared.export_dossier import apply_manuscript_row_hyperlinks
+
+    wb = Workbook()
+    ws = wb.active
+    row = [''] * 14
+    # Plain string in the PGP URL slot — must not become a hyperlink.
+    row[4] = 'not-a-url'
+    ws.append(row)
+    apply_manuscript_row_hyperlinks(ws, 1, row)
+    assert ws.cell(row=1, column=5).hyperlink is None
+
+
+def test_apply_manuscript_row_hyperlinks_applies_blue_underline_font():
+    from openpyxl import Workbook
+    from shared.export_dossier import apply_manuscript_row_hyperlinks
+
+    wb = Workbook()
+    ws = wb.active
+    row = [''] * 14
+    row[13] = 'https://genizahsearch.com/sys/sys123'
+    ws.append(row)
+    apply_manuscript_row_hyperlinks(ws, 1, row)
+
+    cell = ws.cell(row=1, column=14)
+    # openpyxl encodes the colour as an aRGB hex string with FF alpha; the
+    # blue we set is 0563C1 → "000563C1" via the ``rgb`` property.
+    assert cell.font.color is not None
+    assert cell.font.color.rgb in ('0563C1', 'FF0563C1', '000563C1')
+    assert cell.font.underline == 'single'
+
+
+def test_manuscript_url_column_indices_constant():
+    from shared.export_dossier import MANUSCRIPT_HEADERS, MANUSCRIPT_URL_COLUMN_INDICES
+
+    # Sanity-check: indices line up with the headers labelled as URLs. This
+    # locks the constant against silent drift if MANUSCRIPT_HEADERS is ever
+    # reordered.
+    url_header_names = {MANUSCRIPT_HEADERS[i] for i in MANUSCRIPT_URL_COLUMN_INDICES}
+    assert url_header_names == {'PGP URL', 'Library Viewer URL', 'GenizahSearch URL'}

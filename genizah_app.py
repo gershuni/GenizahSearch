@@ -2567,6 +2567,7 @@ def _build_search_results_xlsx_bytes(
         build_credits_info_sheet,
         main_header_row, manuscript_header_row, bibliography_header_row,
         sheet_titles,
+        apply_manuscript_row_hyperlinks,
     )
     from shared_export_utils import build_rich_snippet_cell
 
@@ -2709,6 +2710,10 @@ def _build_search_results_xlsx_bytes(
         for col_idx, val in enumerate(row, 1):
             v = sanitize_fn(val) if isinstance(val, str) else val
             ws_manu.cell(row=manu_row, column=col_idx, value=v)
+        # Smoke round 4 (2026-05-21): make the 3 URL columns clickable
+        # (PGP URL / Library Viewer URL / GenizahSearch URL). Pass the RAW
+        # row values — the hyperlink target must be the unsanitized URL.
+        apply_manuscript_row_hyperlinks(ws_manu, manu_row, row)
         manu_row += 1
 
     # --- Bibliography sub-sheet ---

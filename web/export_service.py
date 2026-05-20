@@ -557,6 +557,7 @@ class ExportService:
             build_credits_info_sheet,
             main_header_row, manuscript_header_row, bibliography_header_row,
             sheet_titles,
+            apply_manuscript_row_hyperlinks,
         )
         from shared_export_utils import build_rich_snippet_cell
         from genizah_core import get_library_display as core_get_library_display
@@ -810,6 +811,12 @@ class ExportService:
                 sanitize_text_for_excel(v) if isinstance(v, str) else v
                 for v in row
             ])
+            # Smoke round 4 (2026-05-21): make the 3 URL columns clickable
+            # (PGP URL / Library Viewer URL / GenizahSearch URL). Pass the
+            # RAW row values — the hyperlink target must be the unsanitized
+            # URL, while the cell display value (already appended above) is
+            # the sanitized form.
+            apply_manuscript_row_hyperlinks(ws_manu, ws_manu.max_row, row)
 
         # --- Bibliography sub-sheet (D-02 / D-03) ---
         # D-04 REVISED (2026-05-20): bilingual headers via bibliography_header_row(lang).

@@ -178,6 +178,45 @@ BIBLIOGRAPHY_HEADERS: List[str] = [
 ]  # 8 columns; matches build_bibliography_rows row output order.
 
 
+# Smoke round 4 (2026-05-21): which Manuscripts-sheet columns hold a URL
+# that should be rendered as a clickable hyperlink. 0-based indices into
+# the build_manuscript_row output: PGP URL = 4, Library Viewer URL = 12,
+# GenizahSearch URL = 13. Used by :func:`apply_manuscript_row_hyperlinks`.
+MANUSCRIPT_URL_COLUMN_INDICES: tuple = (4, 12, 13)
+
+
+def apply_manuscript_row_hyperlinks(ws, excel_row: int, row_values: List[Any]) -> None:
+    """Mark URL cells in a Manuscripts-sheet data row as clickable.
+
+    Targets the columns listed in :data:`MANUSCRIPT_URL_COLUMN_INDICES`
+    (PGP URL / Library Viewer URL / GenizahSearch URL). Cells whose value
+    is empty, non-string, or does not parse as an http(s) URL are left
+    untouched — that way unknown / missing IIIF viewer URLs fall through as
+    plain empty cells without raising.
+
+    ``excel_row`` is the 1-based worksheet row number where the data row was
+    just appended (e.g. 2 for the first data row directly under the header).
+    ``row_values`` is the 14-cell list returned by :func:`build_manuscript_row`
+    — passed in so callers do not have to re-read the cell value after the
+    ``sanitize_text_for_excel`` pass that some call sites apply.
+    """
+    from openpyxl.styles import Font
+
+    hyperlink_font = Font(color="0563C1", underline="single")
+    for idx in MANUSCRIPT_URL_COLUMN_INDICES:
+        if idx >= len(row_values):
+            continue
+        val = row_values[idx]
+        if not val or not isinstance(val, str):
+            continue
+        v = val.strip()
+        if not (v.startswith('http://') or v.startswith('https://')):
+            continue
+        cell = ws.cell(row=excel_row, column=idx + 1)
+        cell.hyperlink = v
+        cell.font = hyperlink_font
+
+
 # ---------------------------------------------------------------------------
 # Bilingual header rows + sheet titles (D-04 REVISED 2026-05-20)
 # ---------------------------------------------------------------------------
