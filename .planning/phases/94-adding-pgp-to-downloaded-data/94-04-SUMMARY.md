@@ -42,6 +42,7 @@ tech-stack:
     - "Clickable URL cells (smoke round-4): Manuscripts sub-sheet URL cells emit openpyxl Hyperlink objects with FONT_BLUE_UNDERLINE styling. PGP URL / Library Viewer URL / GenizahSearch URL all clickable."
     - "Per-sys_id Domains dedupe (smoke round-5): the Domains list is deduped at source so a manuscript with multiple FJMS rows for the same domain renders the domain once. Web Domains-badge count now reflects unique manuscripts per domain rather than total FJMS rows."
     - "Image/Page int coercion (smoke round-6): pure-numeric Image/Page values written as int via ws.cell(...).value = int(...) — eliminates Excel's 'Number stored as text' warning. Mixed-content values (e.g., '1r') stay as strings."
+    - "Per-folio Image URL on main sheet (Phase 94.1, smoke round-7): D-13 LIFTED 2026-05-21. Column 12 renamed 'IIIF Manifest' → 'Image URL' (EN) / 'מניפסט IIIF' → 'כתובת תמונה' (HE); cells now hold a per-folio proxy URL via shared/export_dossier.build_image_url_for_row (https://genizahsearch.com/api/oxford_image/{sys_id}?page={N} for Oxford, .../nli_image_by_sysid/{sys_id}?page={N} for everything else); synthetic sys_ids emit empty cell; cells are clickable openpyxl hyperlinks."
     - "Cross-app parity regression test (MUST-FIX 94-04-C): tests/test_export_xlsx_cross_parity.py pins identical sheet names + header rows across web and desktop. Scope: STRUCTURE only (sheet names + headers); does NOT pin cell-value identity (web's _resolve_result_full_text vs desktop's full_text_fetcher can legitimately produce different strings)."
 
 key-files:
@@ -71,7 +72,7 @@ key-decisions:
   - "MUST-FIX 94-04-F applied: shared_export_utils.build_rich_snippet_cell consumed at col 7 of main-sheet data rows. The inline write_rich_cell helper at the old :18000-18021 is gone from the xlsx branch (deleted as part of the full xlsx-branch replacement)."
   - "D-04 amendment applied: ws.sheet_view.rightToLeft = (CURRENT_LANG == 'he') applied to ALL sheets uniformly (replaces the old hard-pin at :17993). CURRENT_LANG read from genizah_core module-level (canonical desktop locale source)."
   - "D-04 REVERSED 2026-05-20 (smoke verification gap fix): English-only-content prohibition reversed for the row content layer. lang='he' → Hebrew sheet titles + headers + Hebrew-preferred metadata (with English fallback per field); lang='en' → English everywhere (with Hebrew fallback). D-02 transcription-text prohibition UNCHANGED. D-10 parallels-envelope strip UNCHANGED. Conditional RTL view-direction logic UNCHANGED."
-  - "D-13 deferral applied: IIIF Manifest column header present on main sheet but cells always empty — matches web's deferral from Wave 3."
+  - "D-13 originally applied as a soft deferral (IIIF Manifest column header present on main sheet but cells always empty — matched web's deferral from Wave 3). LIFTED 2026-05-21 in Phase 94.1 (commit e01bfd14): column renamed 'Image URL' / 'כתובת תמונה' and populated with per-folio GenizahSearch proxy URLs via build_image_url_for_row; cells are clickable openpyxl hyperlinks; synthetic sys_ids stay empty. Resolution rationale: per-folio IIIF Image URL resolution would require runtime IIIF manifest fetches per library — too heavy for the export path — so the export emits stable proxy URLs that route through the existing GenizahSearch web app's per-library image-proxy endpoint chain (Oxford → /api/oxford_image; everything else → /api/nli_image_by_sysid with the NLI fallback to Cambridge/Manchester/JTS)."
   - "D-12 dedupe applied: Manuscripts sub-sheet builds unique_sys_ids in first-occurrence order — multi-folio hits for the same manuscript produce ONE Manuscripts row."
   - "Smoke round-2 (commit 0d512794 + 09effd26 + 5e10b1ab): main sheet renamed 'Genizah Results' → 'Search Results' (bilingual via sheet_titles(lang)). 4th 'Credits and Info' sheet added on both apps with search metadata + GenizahSearch.com hyperlink + Creator credit. Hebrew domain substitution wired."
   - "Smoke round-3 (commit bd71ce83): label realignment per Hillel's review (specific cell labels reordered for visual flow), web mode tr() applied to search-meta labels in Credits and Info sheet, Creator credit line added, link rename ('GenizahSearch' → 'Visit GenizahSearch.com' style)."
@@ -98,7 +99,7 @@ completed: 2026-05-21
 - **Duration (wall clock):** ~3.5 days end-to-end including 6 rounds of smoke-verification patches.
 - **Tasks:** 3 (Tasks 1 + 1.5 atomic; Task 2 = human checkpoint; Task 3 = docs closeout).
 - **Pre-checkpoint test count:** 218 passed across the Phase 94 wave-1-3 + wave-4 test files (+22 new tests in Wave 4 Tasks 1 + 1.5).
-- **Post-checkpoint test count:** 2316 passed / 20 skipped / 2 xfailed across the full test suite after all 6 smoke rounds landed.
+- **Post-checkpoint test count:** 2326 passed / 21 skipped / 2 xfailed across the full test suite after all 6 smoke rounds + Phase 94.1 (smoke round 7 — D-13 lift to populated Image URL column) landed.
 - **Ruff:** clean across all touched production + test files at every commit boundary.
 
 ## What This Wave Delivered

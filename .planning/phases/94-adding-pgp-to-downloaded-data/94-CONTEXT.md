@@ -57,7 +57,7 @@ Final column order on the `Genizah Results` sheet, identical on web and desktop:
 
 ```
 System ID | Library | Shelfmark | Title | Image/Page | Source |
-Snippet | Full Text | Has PGP | Is Printed | Domains | IIIF Manifest
+Snippet | Full Text | Has PGP | Is Printed | Domains | Image URL
 ```
 
 12 columns total. The first 7 match desktop's existing layout (`genizah_app.py:17910`). `Full Text` is column 8. The 4 new metadata columns are columns 9-12.
@@ -67,12 +67,12 @@ Snippet | Full Text | Has PGP | Is Printed | Domains | IIIF Manifest
 - REORDERS: previous web layout was `Shelfmark | Library | Title | System ID | Score | Snippet | Full Text` → new layout puts `System ID` first, then `Library | Shelfmark | Title`.
 - GAINS `Image/Page` (per-row folio/page reference; derive from `result['display']['img']` or equivalent in web's result dict — planner identifies the exact field).
 - GAINS `Source` (per-row source label; derive from `result['display']['source']` or equivalent).
-- GAINS the 4 new appended columns: `Has PGP`, `Is Printed`, `Domains`, `IIIF Manifest`.
+- GAINS the 4 new appended columns: `Has PGP`, `Is Printed`, `Domains`, `Image URL`.
 
 **Desktop changes from previous main-sheet layout:**
 - KEEPS its existing 7 columns (`System ID, Library, Shelfmark, Title, Image/Page, Source, Snippet`) unchanged in order.
 - GAINS `Full Text` (column 8) — read from the desktop search result's full-text field (verify what's available in the desktop result dict; planner identifies the field).
-- GAINS the 4 new appended columns: `Has PGP`, `Is Printed`, `Domains`, `IIIF Manifest`.
+- GAINS the 4 new appended columns: `Has PGP`, `Is Printed`, `Domains`, `Image URL`.
 
 **Column data sources (both apps):**
 
@@ -89,7 +89,7 @@ Snippet | Full Text | Has PGP | Is Printed | Domains | IIIF Manifest
 | Has PGP | `sys_id in transcription_sys_ids` → `"Yes"` / empty cell (D-06) |
 | Is Printed | `sys_id in printed_ids` → `"Yes"` / empty cell |
 | Domains | pipe-joined `result_domains[sys_id]` per D-05 — e.g. `Bible\|Letter\|Legal` |
-| IIIF Manifest | per-page IIIF URL when available (NLI / Cambridge / Manchester / JTS via existing image-resolution logic); empty cell otherwise. Per D-13, may be DEFERRED to the Manuscripts sub-sheet with documented rationale — Claude's Discretion. |
+| Image URL | per-folio proxy URL via the GenizahSearch image-proxy endpoint chain (D-13 LIFTED 2026-05-21 in Phase 94.1); `https://genizahsearch.com/api/oxford_image/{sys_id}?page={N}` for Oxford / `…/nli_image_by_sysid/{sys_id}?page={N}` for everything else; synthetic sys_ids emit empty cell; cell is a clickable openpyxl hyperlink. Header renamed from `IIIF Manifest` → `Image URL` (EN) / `מניפסט IIIF` → `כתובת תמונה` (HE). |
 
 **Per-row repetition:** Multi-folio hits for the same manuscript repeat the 4 new flag/URL cells on every row. The Manuscripts sub-sheet dedupes — ONE row per unique sys_id — so the dossier data lives there exactly once.
 
@@ -266,7 +266,7 @@ For JSON, lists stay as native arrays (no pipe-joining).
 Empty cells for missing values. Do NOT write `"N/A"`, `"—"`, `"None"`, or any placeholder. JSON: `is_printed` and `has_pgp` are always boolean (`true`/`false`, never `null`); `domains` is `[]` when none.
 
 ### D-07 — Per-row repetition (main sheet)
-Multi-folio hits for the same manuscript repeat the per-row flag/value cells (`Has PGP`, `Is Printed`, `Domains`, `IIIF Manifest`) on every row. The Manuscripts sub-sheet dedupes — ONE row per unique sys_id — so the dossier data lives there exactly once.
+Multi-folio hits for the same manuscript repeat the per-row flag/value cells (`Has PGP`, `Is Printed`, `Domains`, `Image URL`) on every row. The Manuscripts sub-sheet dedupes — ONE row per unique sys_id — so the dossier data lives there exactly once.
 
 ### D-08 — Data sources & helpers (REVISED 2026-05-19 per Codex critique)
 
@@ -333,6 +333,8 @@ If the planner DOES emit the IIIF Manifest column on the main sheet (column 12 i
 
 If the planner DEFERS this column, document the rationale (likely "per-page IIIF resolution requires too much new plumbing for this phase; provide a manifest URL on the Manuscripts sub-sheet instead via `library_viewer_url`").
 
+**LIFTED 2026-05-21 (Phase 94.1):** D-13 is no longer deferred. Column 12 was renamed `Image URL` (EN) / `כתובת תמונה` (HE) and now carries a per-folio image URL routed through the GenizahSearch web app's existing image-proxy endpoints — `https://genizahsearch.com/api/oxford_image/{sys_id}?page={N}` for Oxford, `https://genizahsearch.com/api/nli_image_by_sysid/{sys_id}?page={N}` for everything else (NLI / CUL / Manchester / JTS all flow through the NLI-by-sys_id proxy's cross-library fallback chain). Synthetic sys_ids (Phase 53 metadata-only) emit an empty cell. The cell is clickable (blue underline, openpyxl hyperlink). Trade-off: links require the GenizahSearch web app to be reachable — not raw IIIF URLs. Real-IIIF-URL resolution would require runtime IIIF manifest fetches per library and was rejected as too heavy for the export path. Helper: `shared.export_dossier.build_image_url_for_row(sys_id, library_code, img_page, base_url=…)` + `apply_main_row_image_url_hyperlink(ws, excel_row, url)`. Constant: `MAIN_IMAGE_URL_COLUMN_INDEX = 11`. Default base: `DEFAULT_IMAGE_URL_BASE = "https://genizahsearch.com"`. Tested at `tests/test_smoke_round2_export_gaps.py` round-7 block (11 tests).
+
 ### D-14 — Rich-text snippet rendering (REVISED 2026-05-19, NEW)
 Desktop's existing snippet rendering (`*` markers in `raw_file_hl` → red bold inline run via `openpyxl.cell.rich_text.TextBlock`, `CellRichText`, `openpyxl.cell.text.InlineFont`) at `genizah_app.py:17988-18030` is the canonical pattern. Web's main sheet `Snippet` column adopts the same rendering — extract the existing desktop helper (`write_rich_cell` inner function at `:18000`) into a small shared helper in `shared_export_utils` or `shared/export_dossier.py` (planner's call). Sub-sheets (Manuscripts, Bibliography) stay plain text — no rich-text in dossier columns.
 
@@ -355,8 +357,8 @@ If Gemini is quota-exhausted at review time (per `feedback_codex_during_discuss_
 - Column widths for all new columns (planner sets via `set_excel_column_widths`).
 - Exact FJMS catalog-records fields to surface in `Catalog Summary` (3-5 fields, rationale required; verify what `get_catalog_records()` exposes — likely a subset of the 37 catalog fields).
 - Whether the optional `build_dossier_rows` higher-level wrapper ships in Wave 1 or is deferred.
-- Whether `IIIF Manifest` lives on the main sheet (D-13 soft scope) or only on the Manuscripts sub-sheet.
-- Whether URLs become clickable Excel hyperlinks vs plain text. Default: plain text for citation safety.
+- ~~Whether `IIIF Manifest` lives on the main sheet (D-13 soft scope) or only on the Manuscripts sub-sheet.~~ RESOLVED 2026-05-21 (Phase 94.1): column kept on main sheet, renamed `Image URL`, populated with proxy URLs (see D-13 LIFTED block).
+- ~~Whether URLs become clickable Excel hyperlinks vs plain text. Default: plain text for citation safety.~~ RESOLVED 2026-05-21 (smoke round 4 + Phase 94.1): URLs are clickable openpyxl hyperlinks with blue-underline styling on both the Manuscripts sheet (PGP / Library Viewer / GenizahSearch URLs) and the main sheet (Image URL).
 - Whether to escape pipe characters in tag/language values that legitimately contain them. Default: leave as-is.
 - Sheet names: `Manuscripts` and `Bibliography` are locked (don't translate or abbreviate). Main sheet name stays `Genizah Results` on web, desktop uses `tr("Search Results")` (existing convention).
 - Exact field on web result dict for `Image/Page` and `Source` columns — planner inspects `_serialize_item` and search-state to identify the closest analogs to desktop's `d.get('img', '')` and `d.get('source', '')`.

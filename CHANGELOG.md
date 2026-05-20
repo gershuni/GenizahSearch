@@ -37,8 +37,12 @@ milestone-closeout ritual after this entry stabilizes.
   1. **Search Results** (renamed from `Genizah Results` in smoke round-2;
      bilingual via `sheet_titles(lang)`) — 12-col main sheet with per-row
      metadata: System ID / Library / Shelfmark / Title / Image/Page / Source
-     / Snippet / Full Text / Has PGP / Is Printed / Domains / IIIF Manifest.
-     Snippet column emits rich-text `*...*` matches in red+bold.
+     / Snippet / Full Text / Has PGP / Is Printed / Domains / Image URL.
+     Snippet column emits rich-text `*...*` matches in red+bold. Image URL
+     (originally locked as the empty `IIIF Manifest` column per D-13) was
+     renamed and populated in Phase 94.1 (2026-05-21) with per-folio
+     `https://genizahsearch.com/api/.../?page=N` proxy URLs — clickable
+     openpyxl hyperlinks; synthetic sys_ids emit empty cell.
   2. **Manuscripts** — one row per unique sys_id (first-occurrence dedupe).
      14 columns including PGP URL / Library Viewer URL / GenizahSearch URL
      (all clickable hyperlinks with blue-underline styling after smoke round-4).
