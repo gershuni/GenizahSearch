@@ -2475,9 +2475,9 @@ class SettingsDialog(QDialog):
 # ---------------------------------------------------------------------------
 def _build_search_results_xlsx_bytes(
     results,
-    headers_main,
-    meta_resolver,
-    sanitize_fn,
+    headers_main=None,
+    meta_resolver=None,
+    sanitize_fn=None,
     credit_text='',
     search_info_text='',
     transcription_sys_ids=None,
@@ -2529,8 +2529,9 @@ def _build_search_results_xlsx_bytes(
     import openpyxl
     from openpyxl.styles import Font, PatternFill
     from shared.export_dossier import (
-        MANUSCRIPT_HEADERS, BIBLIOGRAPHY_HEADERS,
         build_manuscript_row, build_bibliography_rows,
+        main_header_row, manuscript_header_row, bibliography_header_row,
+        sheet_titles,
     )
     from shared_export_utils import build_rich_snippet_cell
 
@@ -2539,19 +2540,28 @@ def _build_search_results_xlsx_bytes(
     _printed_set = set(printed_ids or [])
     _domains_map = dict(result_domains or {})
 
+    # D-04 REVISED (2026-05-20): bilingual headers + sheet titles.
+    # `headers_main` kwarg kept for back-compat with the cross-parity test
+    # fixture which passes an explicit English list; when None, falls back
+    # to lang-aware main_header_row(lang).
+    if headers_main is None:
+        headers_main = main_header_row(lang)
+    if sanitize_fn is None:
+        sanitize_fn = lambda x: '' if x is None else str(x)  # noqa: E731
+
+    _titles = sheet_titles(lang)
+
     wb = openpyxl.Workbook()
     ws_main = wb.active
-    # MUST-FIX 94-04-A: locked English literal per EXPORT-META-09 parity
-    # (overrides desktop's prior tr('Search Results') pattern for this
-    # specific string — the cross-parity test in
-    # tests/test_export_xlsx_cross_parity.py asserts web AND desktop produce
-    # IDENTICAL sheet names on identical input).
-    ws_main.title = 'Genizah Results'[:31]
+    # D-04 REVISED (2026-05-20): sheet title follows lang via sheet_titles(lang).
+    # The cross-parity test still passes because it builds both workbooks
+    # with default lang='en' -> 'Genizah Results' on both sides.
+    ws_main.title = _titles['main'][:31]
     ws_main.sheet_view.rightToLeft = rtl
 
-    ws_manu = wb.create_sheet(title='Manuscripts')
+    ws_manu = wb.create_sheet(title=_titles['manuscripts'])
     ws_manu.sheet_view.rightToLeft = rtl
-    ws_bib = wb.create_sheet(title='Bibliography')
+    ws_bib = wb.create_sheet(title=_titles['bibliography'])
     ws_bib.sheet_view.rightToLeft = rtl
 
     # --- Main sheet: credit + search-info rows (existing desktop pattern) ---
@@ -2637,7 +2647,8 @@ def _build_search_results_xlsx_bytes(
         current_row += 1
 
     # --- Manuscripts sub-sheet ---
-    for col_idx, header in enumerate(MANUSCRIPT_HEADERS, 1):
+    # D-04 REVISED (2026-05-20): bilingual headers via manuscript_header_row(lang).
+    for col_idx, header in enumerate(manuscript_header_row(lang), 1):
         cell = ws_manu.cell(row=1, column=col_idx, value=header)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
@@ -2660,14 +2671,15 @@ def _build_search_results_xlsx_bytes(
         manu_row += 1
 
     # --- Bibliography sub-sheet ---
-    for col_idx, header in enumerate(BIBLIOGRAPHY_HEADERS, 1):
+    # D-04 REVISED (2026-05-20): bilingual headers via bibliography_header_row(lang).
+    for col_idx, header in enumerate(bibliography_header_row(lang), 1):
         cell = ws_bib.cell(row=1, column=col_idx, value=header)
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
 
     bib_row = 2
     for sid in unique_sys_ids:
-        for row in build_bibliography_rows(sid, meta_resolver):
+        for row in build_bibliography_rows(sid, meta_resolver, lang=lang):
             for col_idx, val in enumerate(row, 1):
                 v = sanitize_fn(val) if isinstance(val, str) else val
                 ws_bib.cell(row=bib_row, column=col_idx, value=v)
@@ -18204,10 +18216,14 @@ class GenizahGUI(QMainWindow):
         if fmt == 'xlsx':
             try:
                 from genizah_core import get_library_display as core_get_library_display
+                from shared.export_dossier import main_header_row
 
-                # Build meta_resolver closure (Codex SHOULD-FIX 8 pattern):
-                # primitive 4-key dict; library_name hard-pinned English per D-04.
+                # D-04 REVISED (2026-05-20): build a lang-aware meta_resolver.
+                # When CURRENT_LANG == 'he' the row shows the Hebrew library
+                # name (via LIBRARY_CODES_HE in get_library_display); else
+                # English. Codex SHOULD-FIX 8 pattern (primitive 4-key dict).
                 meta_mgr = self.meta_mgr
+                _row_lang = CURRENT_LANG
                 def _meta_resolver(sid):
                     if not sid or meta_mgr is None:
                         return None
@@ -18222,7 +18238,7 @@ class GenizahGUI(QMainWindow):
                     except Exception:
                         lib_code = ''
                     try:
-                        lib_name = core_get_library_display(lib_code, short=False, lang='en') if lib_code else ''
+                        lib_name = core_get_library_display(lib_code, short=False, lang=_row_lang) if lib_code else ''
                     except Exception:
                         lib_name = lib_code
                     return {
@@ -18230,19 +18246,12 @@ class GenizahGUI(QMainWindow):
                         'library_code': lib_code, 'library_name': lib_name,
                     }
 
-                # MUST-FIX 94-04-B: main-sheet headers are ENGLISH-LOCKED literals
-                # per EXPORT-META-09 identical-structure requirement. The cross-app
-                # parity test (tests/test_export_xlsx_cross_parity.py) asserts
-                # web AND desktop produce IDENTICAL header rows. tr() is
-                # EXPLICITLY OVERRIDDEN for these strings — a single-strings-list
-                # scope, NOT a broader convention change. Other desktop UI
-                # strings (buttons, menus, dialogs) stay tr()-translated.
-                headers_main = [
-                    "System ID", "Library", "Shelfmark", "Title",
-                    "Image/Page", "Source",
-                    "Snippet", "Full Text",
-                    "Has PGP", "Is Printed", "Domains", "IIIF Manifest",
-                ]
+                # D-04 REVISED (2026-05-20): main-sheet headers follow CURRENT_LANG.
+                # When Hebrew UI is active the headers render in Hebrew (e.g.
+                # 'מספר מערכת' / 'ספרייה'); English UI keeps the English row.
+                # MUST-FIX 94-04-B (English-locked headers) is SUPERSEDED by
+                # this bilingual revision per smoke verification 2026-05-20.
+                headers_main = main_header_row(_row_lang)
 
                 # MUST-FIX 94-04-E: pre-export domain readiness check.
                 # _result_domain_map is reset to {} BEFORE the async
