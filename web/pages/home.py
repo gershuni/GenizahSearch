@@ -33,7 +33,7 @@ def create_page():
                 f'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); direction: {banner_dir};'
             ) as ocr_banner:
                 ui.icon('psychology').classes('text-base').style('color: var(--primary-600);')
-                ui.label(tr('Computer-read manuscripts — expect some reading errors!')).classes('text-xs flex-1').style('color: var(--text-secondary);')
+                ui.label(tr('Computer-read manuscripts; expect some reading errors!')).classes('text-xs flex-1').style('color: var(--text-secondary);')
                 ui.link(tr('Learn more →'), '/about').classes('text-xs').style('color: var(--primary-600); text-decoration: none;')
                 def dismiss_banner():
                     # Explicit user dismiss (X button): persist unconditionally.
@@ -50,7 +50,7 @@ def create_page():
                     # Persist the dismissed flag only if the banner is still alive
                     # and we actually hide it. If the user left /home before 10s,
                     # .delete() raises and we must not mark the disclaimer as seen
-                    # — otherwise navigating away inside 10s permanently hides it.
+                    # Otherwise navigating away inside 10s permanently hides it.
                     try:
                         ocr_banner.delete()
                     except Exception:
@@ -67,10 +67,10 @@ def create_page():
         ):
             with ui.row().classes('w-full items-center justify-between gap-4 flex-wrap'):
                 with ui.column().classes('gap-1 flex-1 min-w-0'):
-                    h1(tr('Dicta Genizah Search — Full-Text Manuscript Search'),
+                    h1(tr('Dicta Genizah Search: Full-Text Manuscript Search'),
                        classes='text-lg font-bold',
                        style='color: var(--text-primary); margin: 0;')
-                    ui.label(tr('Search over 255,000 MiDRASH transcriptions — text, variants, parallels, joins, and images')).classes(
+                    ui.label(tr('Search over 255,000 MiDRASH transcriptions: text, variants, parallels, joins, and images')).classes(
                         'text-sm'
                     ).style('color: var(--text-secondary);')
 
@@ -158,7 +158,7 @@ def create_page():
                 'icon': None,
                 'img': 'https://upload.wikimedia.org/wikipedia/commons/f/f7/Education_%28T-S_K5.13%29_%28cropped%29.jpg',
                 'heading': tr('What is the Cairo Genizah?'),
-                'body': tr('Hundreds of thousands of medieval manuscripts from a Cairo synagogue attic — now searchable for the first time'),
+                'body': tr('Hundreds of thousands of medieval manuscripts from a Cairo synagogue attic, now searchable for the first time'),
                 'link': '/about',
             },
             {
@@ -176,7 +176,7 @@ def create_page():
             {
                 'icon': 'computer',
                 'heading': tr('Desktop App'),
-                'body': tr('A downloadable Windows application for power users — fast local search, offline access, and advanced workflows.'),
+                'body': tr('A downloadable Windows application for power users: fast local search, offline access, and advanced workflows.'),
                 'link': '/download',
             },
             {
@@ -262,7 +262,7 @@ def create_page():
         # Credits) and lang-gated. See _render_about_and_faq() at the
         # bottom of create_page().
 
-        # === Seasonal banner (Pesach/other themes) — hidden until next seasonal activation ===
+        # === Seasonal banner (Pesach/other themes), hidden until next seasonal activation ===
         # The Pesach banner code is preserved in git history and the supporting module
         # web/pesach.py remains as a reusable template for future seasonal themes
         # (e.g. Rosh Hashanah, Hanukkah, Shavuot). To re-enable: uncomment below and
@@ -581,7 +581,7 @@ def create_page():
                     # License
                     ui.label(tr('Licensed under CC BY 4.0')).classes('text-xs mt-2').style('color: var(--text-muted);')
 
-        # === SEO content + FAQ — moved to bottom of page 2026-05-21 ===
+        # === SEO content + FAQ, moved to bottom of page 2026-05-21 ===
         # One block per UI language (no longer rendering both side-by-side).
         # The matching FAQPage JSON-LD in web/main.py:dashboard_page() is
         # also lang-gated so the Q&A text on the page matches the
@@ -594,16 +594,16 @@ def create_page():
                 ui.html(
                     '''
 <div lang="he" dir="rtl" style="text-align: right; color: var(--text-secondary); font-size: 0.95rem; line-height: 1.7;">
-  <h2 style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem 0;">על אודות אתר הגניזה של דיקטה</h2>
+  <h2 style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem 0;">על אודות אתר הגניזה של <a href="https://dicta.org.il/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">דיקטה</a></h2>
   <p style="margin: 0;">
-    אתר הגניזה של דיקטה הוא מרכז מחקר רב עוצמה עם תעתיקים, תמונות ומידע של 255,000 קטעי כתבי יד מגניזת קהיר.
+    אתר הגניזה של <a href="https://dicta.org.il/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">דיקטה</a> הוא מרכז מחקר רב עוצמה עם תעתיקים, תמונות ומידע של 255,000 קטעי כתבי יד מ<a href="https://he.wikipedia.org/wiki/%D7%92%D7%A0%D7%99%D7%96%D7%AA_%D7%A7%D7%94%D7%99%D7%A8" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">גניזת קהיר</a>.
     הגניזה הקהירית התגלתה בסוף המאה ה-19 בעליית הגג של בית הכנסת בן-עזרא בפוסטאט (קהיר העתיקה),
-    והיא כוללת מאות אלפי קטעי כתבי יד בעברית, בארמית ובערבית-יהודית שמתוארכים מן המאה השמינית ועד המאה התשע-עשרה —
+    והיא כוללת מאות אלפי קטעי כתבי יד בעברית, בארמית ובערבית-יהודית שמתוארכים מן המאה השמינית ועד המאה התשע-עשרה:
     תנ"ך, תלמוד, ספרות חז"ל, הלכה, פילוסופיה, תפילה, פיוט, מסמכים רשמיים, מכתבים, מדע, מאגיה ועוד.
-    האתר משלב תעתיקים אוטומטיים שהופקו על ידי <a href="https://www.midrashproject.org/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט MiDRASH</a> בתמיכת האיחוד האירופי,
+    האתר משלב תעתיקים אוטומטיים שהופקו על ידי <a href="https://www.midrash.eu" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט MiDRASH</a> בתמיכת האיחוד האירופי,
     תמונות באיכות גבוהה מ<a href="https://web.nli.org.il/sites/nlis/he/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">אתר &quot;כתיב&quot;</a> של הספרייה הלאומית של ישראל ומספריות ברחבי העולם,
     ומידע קטלוגי ממקורות מגוונים, בראשם <a href="https://fjms.genizah.org/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט הגניזה של פרידברג</a>, <a href="https://web.nli.org.il/sites/nlis/he/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">אתר &quot;כתיב&quot;</a>,
-    <a href="https://geniza.princeton.edu/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט הגניזה של פרינסטון</a>, ספריות <a href="https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">קמברידג&apos;</a>, <a href="https://digital.bodleian.ox.ac.uk/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">אוקספורד</a>, <a href="https://luna.manchester.ac.uk/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">מנצ&apos;סטר</a>, בית המדרש לרבנים באמריקה ועוד.
+    <a href="https://geniza.princeton.edu/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט הגניזה של פרינסטון</a>, ספריות <a href="https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">קמברידג&apos;</a>, <a href="https://digital.bodleian.ox.ac.uk/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">אוקספורד</a>, <a href="https://www.library.manchester.ac.uk/resources/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">מנצ&apos;סטר</a>, <a href="https://www.jtsa.edu/library-special-collections/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">בית המדרש לרבנים באמריקה</a> ועוד.
     ניתן לחפש חופשי בטקסט המלא של הקורפוס, לדפדף בקטעים יחד עם הצילומים,
     לזהות מקבילות לטקסטים ידועים ולמצוא צירופים חדשים בין קטעים, ולשתף תגליות עם קהילת החוקרים.
     התעתיקים האוטומטיים כוללים שיבושים רבים, ועל כן מומלץ להשתמש בחיפוש מתקדם בצורות שונות:
@@ -618,21 +618,21 @@ def create_page():
                 ui.html(
                     '''
 <div lang="en" dir="ltr" style="text-align: left; color: var(--text-secondary); font-size: 0.95rem; line-height: 1.7;">
-  <h2 style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem 0;">About Dicta Genizah Search</h2>
+  <h2 style="color: var(--text-primary); font-size: 1.1rem; font-weight: 700; margin: 0 0 0.5rem 0;">About <a href="https://dicta.org.il/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Dicta</a> Genizah Search</h2>
   <p style="margin: 0;">
-    Dicta Genizah Search is a powerful research hub with transcriptions, images, and metadata for 255,000 manuscript fragments from the Cairo Genizah.
+    <a href="https://dicta.org.il/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Dicta</a> Genizah Search is a powerful research hub with transcriptions, images, and metadata for 255,000 manuscript fragments from the <a href="https://en.wikipedia.org/wiki/Cairo_Geniza" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Cairo Genizah</a>.
     The Cairo Genizah was discovered in the late 19th century in the attic of the Ben Ezra Synagogue in Fustat (Old Cairo),
-    and contains hundreds of thousands of manuscript fragments in Hebrew, Aramaic, and Judeo-Arabic dated from the 8th through the 19th centuries —
+    and contains hundreds of thousands of manuscript fragments in Hebrew, Aramaic, and Judeo-Arabic dated from the 8th through the 19th centuries:
     Bible, Talmud, rabbinic literature, halakhah, philosophy, prayer, piyyut, official documents, letters, science, magic, and more.
-    The site combines automatic transcriptions produced by the <a href="https://www.midrashproject.org/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">MiDRASH Project</a> with support from the European Union,
+    The site combines automatic transcriptions produced by the <a href="https://www.midrash.eu" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">MiDRASH Project</a> with support from the European Union,
     high-resolution images from the National Library of Israel&apos;s <a href="https://web.nli.org.il/sites/nlis/en/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">&quot;Ktiv&quot; website</a> and from libraries around the world,
-    and catalog metadata from diverse sources — chief among them the <a href="https://fjms.genizah.org/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Friedberg Genizah Project</a>, the <a href="https://web.nli.org.il/sites/nlis/en/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">&quot;Ktiv&quot; website</a>,
-    the <a href="https://geniza.princeton.edu/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Princeton Geniza Project</a>, and the libraries of <a href="https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Cambridge</a>, <a href="https://digital.bodleian.ox.ac.uk/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Oxford</a>, <a href="https://luna.manchester.ac.uk/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Manchester</a>, the Jewish Theological Seminary, and others.
+    and catalog metadata from diverse sources, chief among them the <a href="https://fjms.genizah.org/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Friedberg Genizah Project</a>, the <a href="https://web.nli.org.il/sites/nlis/en/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">&quot;Ktiv&quot; website</a>,
+    the <a href="https://geniza.princeton.edu/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Princeton Geniza Project</a>, and the libraries of <a href="https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Cambridge</a>, <a href="https://digital.bodleian.ox.ac.uk/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Oxford</a>, <a href="https://www.library.manchester.ac.uk/resources/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Manchester</a>, the <a href="https://www.jtsa.edu/library-special-collections/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Jewish Theological Seminary</a>, and others.
     You can run full-text search across the corpus, browse fragments alongside their images,
     identify parallels to known texts and find new joins between fragments, and share discoveries with the research community.
     The automatic transcriptions contain many errors, so it is recommended to use advanced search in various forms:
     Variants for common letter swaps, Fuzzy for free substitutions,
-    and advanced search using Responsa-style mode or regular expressions.
+    and advanced search using Responsa-Project-style mode or regular expressions.
   </p>
 </div>
 ''',
@@ -649,7 +649,7 @@ def create_page():
 <div lang="he" dir="rtl" style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.7; text-align: right;">
   <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">מהי גניזת קהיר?</summary>
-    <p style="margin: 0.5rem 0 0 0;">גניזת קהיר היא אוסף של מאות אלפי קטעי כתבי יד יהודיים שהתגלה בסוף המאה ה-19 בעליית הגג של בית הכנסת בן-עזרא בפוסטאט (קהיר העתיקה). האוסף משתרע מן המאה השמינית ועד המאה התשע-עשרה וכולל תנ"ך, תלמוד, ספרות חז"ל, הלכה, פילוסופיה, תפילה, פיוט, מסמכים רשמיים, מכתבים, מדע, מאגיה ועוד — בעברית, בארמית ובערבית-יהודית.</p>
+    <p style="margin: 0.5rem 0 0 0;"><a href="https://he.wikipedia.org/wiki/%D7%92%D7%A0%D7%99%D7%96%D7%AA_%D7%A7%D7%94%D7%99%D7%A8" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">גניזת קהיר</a> היא אוסף של מאות אלפי קטעי כתבי יד יהודיים שהתגלה בסוף המאה ה-19 בעליית הגג של בית הכנסת בן-עזרא בפוסטאט (קהיר העתיקה). האוסף משתרע מן המאה השמינית ועד המאה התשע-עשרה וכולל תנ"ך, תלמוד, ספרות חז"ל, הלכה, פילוסופיה, תפילה, פיוט, מסמכים רשמיים, מכתבים, מדע, מאגיה ועוד, בעברית, בארמית ובערבית-יהודית.</p>
   </details>
   <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">מה מציע אתר הגניזה של דיקטה?</summary>
@@ -657,15 +657,15 @@ def create_page():
   </details>
   <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">מהיכן באים התעתיקים?</summary>
-    <p style="margin: 0.5rem 0 0 0;">התעתיקים מופקים אוטומטית על ידי <a href="https://www.midrashproject.org/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט MiDRASH</a> (בתמיכת האיחוד האירופי) — מנוע קריאת-מכונה שאומן על כתבי יד עבריים מימי הביניים. כיוון שמדובר בתעתוק ממוחשב, ישנם שיבושים רבים. מומלץ להשתמש במצבי חיפוש מתקדמים: וריאנטים לחילופים נפוצים בין אותיות, עמום לחילופים חופשיים, וחיפוש בסגנון פרויקט השו"ת או ביטוי רגולרי לשליטה מדויקת יותר.</p>
+    <p style="margin: 0.5rem 0 0 0;">התעתיקים מופקים אוטומטית על ידי <a href="https://www.midrash.eu" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט MiDRASH</a> (בתמיכת האיחוד האירופי), מנוע קריאת-מכונה שאומן על כתבי יד עבריים מימי הביניים. כיוון שמדובר בתעתוק ממוחשב, ישנם שיבושים רבים. מומלץ להשתמש במצבי חיפוש מתקדמים: וריאנטים לחילופים נפוצים בין אותיות, עמום לחילופים חופשיים, וחיפוש בסגנון פרויקט השו"ת או ביטוי רגולרי לשליטה מדויקת יותר.</p>
   </details>
   <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">מהיכן באים התמונות והמידע הקטלוגי?</summary>
-    <p style="margin: 0.5rem 0 0 0;">תמונות באיכות גבוהה מגיעות מ<a href="https://web.nli.org.il/sites/nlis/he/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">אתר "כתיב"</a> של הספרייה הלאומית של ישראל ומספריות ברחבי העולם. המידע הקטלוגי נשאב ממקורות מגוונים, בראשם <a href="https://fjms.genizah.org/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט הגניזה של פרידברג</a> (FGP), <a href="https://web.nli.org.il/sites/nlis/he/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">אתר "כתיב"</a>, <a href="https://geniza.princeton.edu/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט הגניזה של פרינסטון</a> (PGP), וספריות <a href="https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">קמברידג'</a>, <a href="https://digital.bodleian.ox.ac.uk/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">אוקספורד</a>, <a href="https://luna.manchester.ac.uk/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">מנצ'סטר</a>, בית המדרש לרבנים באמריקה (JTS) ועוד.</p>
+    <p style="margin: 0.5rem 0 0 0;">תמונות באיכות גבוהה מגיעות מ<a href="https://web.nli.org.il/sites/nlis/he/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">אתר "כתיב"</a> של הספרייה הלאומית של ישראל ומספריות ברחבי העולם. המידע הקטלוגי נשאב ממקורות מגוונים, בראשם <a href="https://fjms.genizah.org/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט הגניזה של פרידברג</a> (FGP), <a href="https://web.nli.org.il/sites/nlis/he/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">אתר "כתיב"</a>, <a href="https://geniza.princeton.edu/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט הגניזה של פרינסטון</a> (PGP), וספריות <a href="https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">קמברידג'</a>, <a href="https://digital.bodleian.ox.ac.uk/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">אוקספורד</a>, <a href="https://www.library.manchester.ac.uk/resources/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">מנצ'סטר</a>, <a href="https://www.jtsa.edu/library-special-collections/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">בית המדרש לרבנים באמריקה</a> (JTS) ועוד.</p>
   </details>
   <details style="margin-bottom: 0; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">האם השימוש באתר הגניזה של דיקטה חופשי?</summary>
-    <p style="margin: 0.5rem 0 0 0;">כן. גם יישום הרשת ב-genizahsearch.com וגם יישום שולחן העבודה ל-Windows המיועד להורדה הם חופשיים לשימוש אקדמי, חינוכי ומחקרי-אישי. הפרויקט מנוהל על ידי דיקטה — המרכז הישראלי לניתוח טקסטים — כמשאב מחקרי שאינו מסחרי.</p>
+    <p style="margin: 0.5rem 0 0 0;">כן. גם יישום הרשת ב-genizahsearch.com וגם יישום שולחן העבודה ל-Windows המיועד להורדה הם חופשיים לשימוש אקדמי, חינוכי ומחקרי-אישי. הפרויקט מנוהל על ידי <a href="https://dicta.org.il/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">דיקטה</a>, המרכז הישראלי לניתוח טקסטים, כמשאב מחקרי שאינו מסחרי.</p>
   </details>
 </div>
 ''',
@@ -678,7 +678,7 @@ def create_page():
 <div lang="en" dir="ltr" style="color: var(--text-secondary); font-size: 0.95rem; line-height: 1.7;">
   <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">What is the Cairo Genizah?</summary>
-    <p style="margin: 0.5rem 0 0 0;">The Cairo Genizah is a collection of hundreds of thousands of Jewish manuscript fragments discovered in the late 19th century in the attic of the Ben Ezra Synagogue in Fustat (Old Cairo). It spans the 8th through 19th centuries and includes Bible, Talmud, rabbinic literature, halakhah, philosophy, prayer, piyyut, documentary materials, letters, science, magic, and more — in Hebrew, Aramaic, and Judeo-Arabic.</p>
+    <p style="margin: 0.5rem 0 0 0;">The <a href="https://en.wikipedia.org/wiki/Cairo_Geniza" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Cairo Genizah</a> is a collection of hundreds of thousands of Jewish manuscript fragments discovered in the late 19th century in the attic of the Ben Ezra Synagogue in Fustat (Old Cairo). It spans the 8th through 19th centuries and includes Bible, Talmud, rabbinic literature, halakhah, philosophy, prayer, piyyut, documentary materials, letters, science, magic, and more, in Hebrew, Aramaic, and Judeo-Arabic.</p>
   </details>
   <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">What does Dicta Genizah Search provide?</summary>
@@ -686,15 +686,15 @@ def create_page():
   </details>
   <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">Where do the transcriptions come from?</summary>
-    <p style="margin: 0.5rem 0 0 0;">The transcriptions are produced automatically by the <a href="https://www.midrashproject.org/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">MiDRASH Project</a> (supported by the European Union) — a machine-reading pipeline trained on medieval Hebrew manuscripts. Because they are computer-generated, they contain many reading errors. We recommend using advanced search modes: Variants for common letter swaps, Fuzzy for free substitutions, and Responsa-style or regular-expression search for finer control.</p>
+    <p style="margin: 0.5rem 0 0 0;">The transcriptions are produced automatically by the <a href="https://www.midrash.eu" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">MiDRASH Project</a> (supported by the European Union), a machine-reading pipeline trained on medieval Hebrew manuscripts. Because they are computer-generated, they contain many reading errors. We recommend using advanced search modes: Variants for common letter swaps, Fuzzy for free substitutions, and Responsa-Project-style or regular-expression search for finer control.</p>
   </details>
   <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">Where do the images and metadata come from?</summary>
-    <p style="margin: 0.5rem 0 0 0;">High-resolution images come from the National Library of Israel&apos;s <a href="https://web.nli.org.il/sites/nlis/en/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">&quot;Ktiv&quot; website</a> and from libraries around the world. Catalog metadata is drawn from diverse sources — chief among them the <a href="https://fjms.genizah.org/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Friedberg Genizah Project</a> (FGP), the <a href="https://web.nli.org.il/sites/nlis/en/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">&quot;Ktiv&quot; website</a>, the <a href="https://geniza.princeton.edu/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Princeton Geniza Project</a> (PGP), and the libraries of <a href="https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Cambridge</a>, <a href="https://digital.bodleian.ox.ac.uk/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Oxford</a>, <a href="https://luna.manchester.ac.uk/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Manchester</a>, the Jewish Theological Seminary (JTS), and others.</p>
+    <p style="margin: 0.5rem 0 0 0;">High-resolution images come from the National Library of Israel&apos;s <a href="https://web.nli.org.il/sites/nlis/en/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">&quot;Ktiv&quot; website</a> and from libraries around the world. Catalog metadata is drawn from diverse sources, chief among them the <a href="https://fjms.genizah.org/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Friedberg Genizah Project</a> (FGP), the <a href="https://web.nli.org.il/sites/nlis/en/manuscript" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">&quot;Ktiv&quot; website</a>, the <a href="https://geniza.princeton.edu/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Princeton Geniza Project</a> (PGP), and the libraries of <a href="https://www.lib.cam.ac.uk/collections/departments/taylor-schechter-genizah-research-unit" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Cambridge</a>, <a href="https://digital.bodleian.ox.ac.uk/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Oxford</a>, <a href="https://www.library.manchester.ac.uk/resources/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Manchester</a>, the <a href="https://www.jtsa.edu/library-special-collections/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Jewish Theological Seminary</a> (JTS), and others.</p>
   </details>
   <details style="margin-bottom: 0; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">Is Dicta Genizah Search free to use?</summary>
-    <p style="margin: 0.5rem 0 0 0;">Yes. The web application at genizahsearch.com and the downloadable Windows desktop application are both free for academic, educational, and personal research use. The project is operated by Dicta — the Israel Center for Text Analysis — as a non-commercial scholarly resource.</p>
+    <p style="margin: 0.5rem 0 0 0;">Yes. The web application at genizahsearch.com and the downloadable Windows desktop application are both free for academic, educational, and personal research use. The project is operated by <a href="https://dicta.org.il/" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">Dicta</a>, the Israel Center for Text Analysis, as a non-commercial scholarly resource.</p>
   </details>
 </div>
 ''',
