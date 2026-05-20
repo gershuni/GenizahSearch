@@ -889,3 +889,66 @@ def test_desktop_on_domain_enrichment_dedupe_logic():
     assert filtered_deduped == ['Arabic Tafsir'], (
         f"Post-dedupe filtered should have 1 entry, got {filtered_deduped}"
     )
+
+
+# ===========================================================================
+# Smoke round 6 (2026-05-21): Image/Page numeric values are written as int
+# so Excel does not flag "Number stored as text".
+# ===========================================================================
+
+
+def test_coerce_img_page_pure_int_returns_int():
+    from shared_export_utils import coerce_img_page_cell
+    assert coerce_img_page_cell('5') == 5
+    assert coerce_img_page_cell('42') == 42
+    assert coerce_img_page_cell('  17  ') == 17  # surrounding whitespace OK
+
+
+def test_coerce_img_page_negative_int():
+    from shared_export_utils import coerce_img_page_cell
+    assert coerce_img_page_cell('-3') == -3
+
+
+def test_coerce_img_page_zero():
+    from shared_export_utils import coerce_img_page_cell
+    assert coerce_img_page_cell('0') == 0
+
+
+def test_coerce_img_page_folio_marker_stays_string():
+    from shared_export_utils import coerce_img_page_cell
+    assert coerce_img_page_cell('5r') == '5r'
+    assert coerce_img_page_cell('12v') == '12v'
+    assert coerce_img_page_cell('fol. 3v') == 'fol. 3v'
+    assert coerce_img_page_cell('12-14') == '12-14'
+
+
+def test_coerce_img_page_empty_inputs():
+    from shared_export_utils import coerce_img_page_cell
+    assert coerce_img_page_cell('') == ''
+    assert coerce_img_page_cell(None) == ''
+    assert coerce_img_page_cell('   ') == ''
+
+
+def test_coerce_img_page_native_int_passes_through():
+    from shared_export_utils import coerce_img_page_cell
+    # Already an int — return verbatim, no string round-trip.
+    assert coerce_img_page_cell(7) == 7
+    assert coerce_img_page_cell(0) == 0
+
+
+def test_coerce_img_page_bool_not_coerced_to_int():
+    # bool is an int subclass, so a naive isinstance(int) check would
+    # silently turn True/False into 1/0. Verify we keep bools as strings.
+    from shared_export_utils import coerce_img_page_cell
+    out = coerce_img_page_cell(True)
+    assert isinstance(out, str)
+    assert out == 'True'
+
+
+def test_coerce_img_page_float_stays_string():
+    # Floats are rare in Image/Page but if one slips in we keep it as a
+    # string — partial-page numbers (2.5) probably indicate a data error
+    # and we don't want to lose precision via int truncation.
+    from shared_export_utils import coerce_img_page_cell
+    out = coerce_img_page_cell('2.5')
+    assert out == '2.5'

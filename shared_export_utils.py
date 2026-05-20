@@ -61,6 +61,42 @@ def sanitize_text_for_excel(text: Optional[str], max_length: int = 32700) -> str
     return t
 
 
+def coerce_img_page_cell(value):
+    """Return ``value`` as ``int`` when it's a pure integer string; else as a
+    sanitized string.
+
+    The Image/Page column on the main search-results sheet usually holds a
+    page number (``'5'``, ``'42'``) but can also hold non-numeric folio
+    markers (``'5r'``, ``'12-14'``, ``'fol. 3v'``). Smoke verification
+    round 6 (2026-05-21): writing ``str('5')`` triggers Excel's green
+    "Number stored as text" warning. Return an ``int`` so Excel recognizes
+    it as numeric; non-numeric values fall through to the sanitized string
+    path unchanged.
+
+    Returns:
+        int when the trimmed value is a pure decimal integer (including a
+        leading minus sign);
+        sanitized string otherwise (empty string for empty / None input).
+    """
+    if value is None:
+        return ''
+    if isinstance(value, bool):
+        # bool is an int subclass — keep as-is to avoid silently coercing
+        # ``True``/``False`` into ``1``/``0``.
+        return sanitize_text_for_excel(str(value))
+    if isinstance(value, int):
+        return value
+    s = str(value).strip()
+    if not s:
+        return ''
+    if s.isdigit() or (s.startswith('-') and len(s) > 1 and s[1:].isdigit()):
+        try:
+            return int(s)
+        except (TypeError, ValueError):
+            pass
+    return sanitize_text_for_excel(s)
+
+
 def clean_text_single_line(text: Optional[str]) -> str:
     """
     Replace line breaks with spaces and normalize whitespace.

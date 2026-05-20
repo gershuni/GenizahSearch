@@ -53,6 +53,9 @@ from shared_export_utils import (
     # to test_export_service.py and any external callers.
     contains_any_term as contains_any_term,
     extract_search_terms as extract_search_terms,
+    # Smoke round 6 (2026-05-21): Image/Page column emits ints for pure-
+    # numeric values so Excel no longer flags "Number stored as text".
+    coerce_img_page_cell,
 )
 
 
@@ -750,7 +753,9 @@ class ExportService:
                 sanitize_text_for_excel(library_name),
                 sanitize_text_for_excel(shelfmark_live),
                 sanitize_text_for_excel(title_live),
-                sanitize_text_for_excel(img_page),
+                # Smoke round 6 (2026-05-21): pure-numeric Image/Page values
+                # become int so Excel doesn't flag "Number stored as text".
+                coerce_img_page_cell(img_page),
                 sanitize_text_for_excel(source_label),
                 None,  # Snippet — written via build_rich_snippet_cell below.
                 sanitize_text_for_excel(full_text),

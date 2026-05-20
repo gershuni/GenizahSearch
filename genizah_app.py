@@ -75,6 +75,7 @@ from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
 from shared_export_utils import sanitize_text_for_excel as shared_sanitize_excel
+from shared_export_utils import coerce_img_page_cell
 from shared.reading_desk_model import ReadingDeskEntry, ReadingDeskState
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature, enrich_snippet_with_chain_terms, compute_all_terms_filter
 from shared.exclusion_service import (
@@ -2668,7 +2669,9 @@ def _build_search_results_xlsx_bytes(
             sanitize_fn(library_name),
             sanitize_fn(shelfmark),
             sanitize_fn(title),
-            sanitize_fn(img_page),
+            # Smoke round 6 (2026-05-21): pure-numeric Image/Page values
+            # become int so Excel doesn't flag "Number stored as text".
+            coerce_img_page_cell(img_page),
             sanitize_fn(source_label),
             None,  # Snippet — written below via build_rich_snippet_cell
             sanitize_fn(full_text),
