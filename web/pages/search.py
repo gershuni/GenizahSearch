@@ -4559,6 +4559,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             for sys_id, doms in raw_domains.items():
                 child_names = {d['domain'] for d in doms}
                 filtered = [qualify_domain_name(d['domain'], d.get('parent_domain')) for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+                # Smoke round 5 (2026-05-21): dedupe in first-seen order.
+                # A manuscript can have multiple FJMS rows for the same
+                # domain; without dedupe the Domains xlsx cell rendered the
+                # name n times (e.g. 'Arabic Tafsir|Arabic Tafsir|...').
+                # dict.fromkeys preserves insertion order on Python 3.7+.
+                filtered = list(dict.fromkeys(filtered))
                 if filtered:
                     search_state.all_result_domains[sys_id] = filtered
                 for d in doms:

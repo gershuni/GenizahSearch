@@ -791,3 +791,101 @@ def test_manuscript_url_column_indices_constant():
     # reordered.
     url_header_names = {MANUSCRIPT_HEADERS[i] for i in MANUSCRIPT_URL_COLUMN_INDICES}
     assert url_header_names == {'PGP URL', 'Library Viewer URL', 'GenizahSearch URL'}
+
+
+# ===========================================================================
+# Smoke round 5 (2026-05-21): Domains list dedupes when one sys_id has
+# multiple FJMS rows for the same domain (e.g. 'Arabic Tafsir' × 7).
+# ===========================================================================
+
+
+def _process_domain_data_inline(raw_domains):
+    """Re-implement web's _process_domain_data filter+dedupe in isolation.
+
+    Avoids the heavy NiceGUI import chain that web/pages/search.py requires
+    at import time; mirrors the exact two-line transform we ship there.
+    """
+    from shared.fjms_service import qualify_domain_name
+    out = {}
+    for sys_id, doms in raw_domains.items():
+        child_names = {d['domain'] for d in doms}
+        filtered = [
+            qualify_domain_name(d['domain'], d.get('parent_domain'))
+            for d in doms
+            if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])
+        ]
+        filtered = list(dict.fromkeys(filtered))
+        if filtered:
+            out[sys_id] = filtered
+    return out
+
+
+def test_domains_dedupe_same_name_repeated():
+    """A sys_id with 7 FJMS rows tagged 'Arabic Tafsir' yields ONE entry."""
+    raw = {
+        'sys123': [
+            {'domain': 'Arabic Tafsir', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None}
+        ] * 7,
+    }
+    out = _process_domain_data_inline(raw)
+    assert out['sys123'] == ['Arabic Tafsir'], (
+        f"Expected single entry, got {out['sys123']}"
+    )
+
+
+def test_domains_dedupe_preserves_first_seen_order():
+    """Mixed duplicates collapse but order survives."""
+    raw = {
+        'sys456': [
+            {'domain': 'Bible', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None},
+            {'domain': 'Letter', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None},
+            {'domain': 'Bible', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None},
+            {'domain': 'Letter', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None},
+            {'domain': 'Legal', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None},
+        ],
+    }
+    out = _process_domain_data_inline(raw)
+    assert out['sys456'] == ['Bible', 'Letter', 'Legal']
+
+
+def test_domains_dedupe_keeps_distinct_qualified_names():
+    """Qualified names ('Other (Liturgy and Brakhot)') stay distinct from
+    their unqualified counterparts.
+    """
+    raw = {
+        'sys789': [
+            {'domain': 'Other', 'parent_domain': 'Liturgy and Brakhot', 'domain_heb': None, 'parent_domain_heb': None},
+            {'domain': 'Other', 'parent_domain': 'Bible', 'domain_heb': None, 'parent_domain_heb': None},
+            {'domain': 'Other', 'parent_domain': 'Liturgy and Brakhot', 'domain_heb': None, 'parent_domain_heb': None},
+        ],
+    }
+    out = _process_domain_data_inline(raw)
+    # Both qualified names appear once; the duplicate of the first is gone.
+    assert len(out['sys789']) == 2
+    assert len(set(out['sys789'])) == 2
+
+
+def test_desktop_on_domain_enrichment_dedupe_logic():
+    """Mirrors the dedupe step inserted in genizah_app.py:_on_domain_enrichment_loaded.
+
+    Re-implements the transform locally to avoid PyQt6 import dependencies
+    in the unit-test pytest environment.
+    """
+    from shared.fjms_service import qualify_domain_name
+    raw = {
+        'sysAAA': [
+            {'domain': 'Arabic Tafsir', 'parent_domain': None, 'domain_heb': None, 'parent_domain_heb': None}
+        ] * 5,
+    }
+    sys_id, doms = next(iter(raw.items()))
+    child_names = {d['domain'] for d in doms}
+    filtered = [
+        qualify_domain_name(d['domain'], d.get('parent_domain'))
+        for d in doms
+        if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])
+    ]
+    filtered_deduped = list(dict.fromkeys(filtered))
+    assert len(filtered) == 5, "Pre-dedupe filtered should still have 5 entries"
+    assert filtered_deduped == ['Arabic Tafsir'], (
+        f"Post-dedupe filtered should have 1 entry, got {filtered_deduped}"
+    )

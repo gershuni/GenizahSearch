@@ -15896,6 +15896,14 @@ class GenizahGUI(QMainWindow):
                 for d in doms
                 if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])
             ]
+            # Smoke round 5 (2026-05-21): dedupe in first-seen order. A
+            # manuscript can have multiple FJMS rows tagging the same
+            # domain (e.g. 7 separate catalog entries each labelled 'Arabic
+            # Tafsir'); the comprehension above preserved every one of them
+            # and the Domains export cell rendered 'Arabic Tafsir|Arabic
+            # Tafsir|...' n times. dict.fromkeys preserves insertion order
+            # (Python 3.7+) and collapses duplicates to a single entry.
+            filtered = list(dict.fromkeys(filtered))
             if filtered:
                 self._result_domain_map[sys_id] = filtered
                 for d in filtered:
@@ -15990,6 +15998,9 @@ class GenizahGUI(QMainWindow):
         for sys_id, doms in raw_domains.items():
             child_names = {d['domain'] for d in doms}
             filtered_doms = [qualify_domain_name(d['domain'], d.get('parent_domain')) for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+            # Smoke round 5 (2026-05-21): dedupe per Domains-cell symptom on
+            # the search-result side. See sibling fix in _on_domain_enrichment_loaded.
+            filtered_doms = list(dict.fromkeys(filtered_doms))
             if filtered_doms:
                 self._comp_result_domain_map[sys_id] = filtered_doms
             for d in doms:
