@@ -97,6 +97,68 @@ def remove_highlight_markers(text: Optional[str]) -> str:
 
 
 # ============================================================================
+# Rich-text snippet rendering (Phase 94 D-14)
+# ============================================================================
+
+def build_rich_snippet_cell(text, sanitize_fn=None):
+    """Render snippet text with ``*``-bracketed highlights as openpyxl rich text.
+
+    Phase 94 D-14: extracted from desktop's ``write_rich_cell`` inner helper at
+    ``genizah_app.py:18000`` so web's main-sheet Snippet column can adopt the
+    same red+bold highlight rendering. Both apps consume this helper
+    identically; the sanitize callback lets desktop pass its
+    ``self._sanitize_for_excel`` and web pass the module-level
+    ``sanitize_text_for_excel``.
+
+    Args:
+        text: snippet text containing ``*foo*`` markers for highlighted runs.
+        sanitize_fn: optional callable applied BEFORE splitting on ``*``.
+            Typically :func:`sanitize_text_for_excel` from this module. Pass
+            ``None`` to skip sanitization (caller has already sanitized).
+
+    Returns:
+        - ``str`` (the sanitized text) when no ``*`` markers present.
+        - :class:`openpyxl.cell.rich_text.CellRichText` when markers present:
+          odd-indexed parts (between markers) become red+bold; even-indexed
+          parts (outside markers) become normal black.
+        - Empty string ``''`` when text is empty / None.
+
+    Sub-sheets (Manuscripts, Bibliography) should NOT use this helper —
+    Phase 94 D-14 limits rich-text to the main-sheet Snippet column only.
+
+    Sanitize-first ordering (T-94-01 mitigation): the sanitize callback
+    runs BEFORE the ``*``-split so that formula-injection prefix
+    (``"'="`` for ``'='``-leading text) is preserved into the first split
+    part rather than getting interleaved with highlight markers.
+    """
+    if not text:
+        return ''
+    safe_text = sanitize_fn(text) if sanitize_fn else str(text)
+    if '*' not in safe_text:
+        return safe_text
+
+    # Late import: openpyxl rich-text is a hot dependency we don't want to
+    # pay on import for callers that never render snippets.
+    from openpyxl.cell.rich_text import CellRichText, TextBlock
+    from openpyxl.cell.text import InlineFont
+
+    font_red = InlineFont(color='FF0000', b=True)
+    font_normal = InlineFont(color='000000', b=False)
+
+    parts = safe_text.split('*')
+    rich = CellRichText()
+    for i, part in enumerate(parts):
+        if not part:
+            continue
+        # Odd indices = highlighted (between markers); even indices = plain.
+        if i % 2 == 1:
+            rich.append(TextBlock(font_red, part))
+        else:
+            rich.append(TextBlock(font_normal, part))
+    return rich
+
+
+# ============================================================================
 # Filename Sanitization
 # ============================================================================
 

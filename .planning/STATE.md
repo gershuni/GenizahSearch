@@ -4,8 +4,8 @@ milestone: v5.6.0
 milestone_name: milestone
 status: executing
 stopped_at: Phase 94 context revised — desktop parity + Codex-tightened shared module API
-last_updated: "2026-05-20T02:18:31.607Z"
-last_activity: 2026-05-20 -- Phase 94 planning complete
+last_updated: "2026-05-20T03:17:14.482Z"
+last_activity: 2026-05-20 -- Phase 94 execution started
 progress:
   total_phases: 4
   completed_phases: 3
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-19)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 93 — filtering-by-pgp
+**Current focus:** Phase 94 — adding-pgp-to-downloaded-data
 
 ## Current Position
 
-Phase: 94
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-20 -- Phase 94 planning complete
+Phase: 94 (adding-pgp-to-downloaded-data) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 94
+Last activity: 2026-05-20 -- Phase 94 execution started
 
 Progress: [          ] v7.13 0% (0/14 reqs, 0/5 plans, 0/2 phases)
 
