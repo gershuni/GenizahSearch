@@ -4,6 +4,42 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### v7.14 — My Library (Phase 95)
+
+Desktop-only first-class feature: index your own `.docx` / `.pdf` / `.txt`
+files into a separate Tantivy side-index that surfaces inline in normal
+Search, Composition Search, and Parallels results with a clear `LOCAL` badge
+and a three-state filter (`All` / `Only Local` / `No Local`). Personal corpora
+never leave the device: three regression tests pin the cloud-write boundaries
+(`/api/search` serializer, `lists_sync.sync_item_to_cloud`, corrections
+submit).
+
+New tab: **My Library** (7th tab, desktop). Multi-folder management; per-file
+status panel; cancellation responsive mid-file; 5,000 files / 2 GB scale
+ceiling with pre-scan dialog. Auto-rescan at app start.
+
+PyMuPDF (`fitz`) is now a desktop dependency for PDF extraction. Installer
+size grows by ~25 MB. The `GenizahSearchPro.spec` now includes
+`collect_all('pymupdf')` and a Hebrew PDF fixture for packaging smoke.
+Headless `--self-test-pymupdf` CLI flag validates PyMuPDF binary bundling
+without launching the Qt event loop.
+
+`shared/export_dossier.py` row builders gain `skip_local` kwarg: desktop
+exports include LOCAL rows; web exports exclude them (defense-in-depth).
+Static AST guard `tests/test_web_library_options_no_local.py` pins the
+web LIBRARY_CODES invariant (no LOCAL entry in web library-filter dropdowns).
+
+Help page (web + desktop) and About dialog (both apps) updated with My Library
+section (bilingual EN + HE), D-33 cleartext-on-disk disclosure, and D-32
+Seewald attribution.
+
+Inspired by Yehuda Seewald's external GenizahLocal prototype. Credit in About
++ Help.
+
+---
+
 ## [7.13.0] - 2026-05-21
 
 Bundles v7.13 milestone work (Research-Grade Downloads & PGP Filter), the

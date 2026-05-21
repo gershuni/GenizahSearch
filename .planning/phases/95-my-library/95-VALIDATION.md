@@ -3,7 +3,7 @@ phase: 95
 slug: my-library
 status: draft
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-05-21
 updated: 2026-05-21
 ---
