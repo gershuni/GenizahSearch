@@ -8,16 +8,11 @@ Tests:
 from __future__ import annotations
 
 import ast
-import hashlib
 import inspect
 import json
 import os
 import shutil
-import sqlite3
-import tempfile
-import textwrap
-from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -430,12 +425,6 @@ class TestLabCompositionSearchLocalLab:
 
     def test_search_engine_has_required_attrs(self):
         """SearchEngine must declare local_lab_searcher, local_lab_searcher_stale, _lab_local_meta."""
-        try:
-            import genizah_core
-        except ImportError:
-            pytest.skip("genizah_core not importable")
-
-        import ast as _ast
         src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "genizah_core.py")
         if not os.path.exists(src_path):
             pytest.skip("genizah_core.py not found")
