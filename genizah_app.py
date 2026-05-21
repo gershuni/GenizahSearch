@@ -6739,6 +6739,14 @@ class GenizahGUI(QMainWindow):
         nav_bar.addWidget(self.btn_b_save)
         nav_bar.addWidget(self.btn_b_toggle_img)
 
+        # Phase 95 D-28 — "Open file" button for LOCAL browse hits.
+        self.browse_open_file_btn = QPushButton(tr("Open file"))
+        self.browse_open_file_btn.setToolTip(tr("Open this file with the default application (LOCAL documents only)"))
+        self.browse_open_file_btn.clicked.connect(self._on_browse_open_file_clicked)
+        self.browse_open_file_btn.setVisible(False)  # shown only when a LOCAL hit is browsed
+        self._current_local_filepath: str | None = None
+        nav_bar.addWidget(self.browse_open_file_btn)
+
         nav_bar.addStretch()
         text_layout.addWidget(_make_scrollable_row(nav_bar))
 
@@ -10209,6 +10217,18 @@ class GenizahGUI(QMainWindow):
     def toggle_browse_image(self):
         visible = self.btn_b_toggle_img.isChecked()
         self.browse_viewer.setVisible(visible)
+
+    def _set_browse_image_pane_visible(self, visible: bool):
+        """Phase 95 D-27 helper — programmatic equivalent of toggle_browse_image.
+
+        Keeps the toolbar toggle button state in sync with the pane visibility.
+        Used by LOCAL hits which always render text-only (no image).
+        I15 RESOLVED: wraps the existing browse_viewer.setVisible + btn_b_toggle_img pattern.
+        """
+        if hasattr(self, 'btn_b_toggle_img'):
+            self.btn_b_toggle_img.setChecked(visible)
+        if hasattr(self, 'browse_viewer'):
+            self.browse_viewer.setVisible(visible)
 
     def browse_search_parallels(self):
         if not self.current_browse_sid: return
@@ -18118,6 +18138,17 @@ class GenizahGUI(QMainWindow):
             return
         if row >= len(sorted_results):
             row = 0
+        res = sorted_results[row]
+        # Phase 95 D-27 — LOCAL hits open Browse panel text-only instead of ResultDialog.
+        try:
+            from shared.local_sys_id import is_local_sys_id as _is_local
+            sid = (res.get('display', {}) or {}).get('id') if isinstance(res, dict) else None
+            if sid and _is_local(sid):
+                self._open_local_browse(sid, res)
+                # Restore image pane for Genizah hits when user later clicks a non-LOCAL row
+                return
+        except Exception:
+            pass
         ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
 
     def show_full_text_for_result(self, res):
@@ -18370,7 +18401,58 @@ class GenizahGUI(QMainWindow):
             self._set_last_browse_field("sys")     # Force sys_id priority
         self.browse_sys_input.setText(sid)
         self.tabs.setCurrentWidget(self.browse_tab)
+        # Phase 95 D-27 — restore image pane for Genizah hits (was hidden for LOCAL hits).
+        try:
+            from shared.local_sys_id import is_local_sys_id as _is_local
+            if not _is_local(sid):
+                self._set_browse_image_pane_visible(True)
+                self._current_local_filepath = None
+                if hasattr(self, 'browse_open_file_btn'):
+                    self.browse_open_file_btn.setVisible(False)
+        except Exception:
+            pass
         self.browse_load()
+
+    def _lookup_local_filepath(self, sys_id: str):
+        """Phase 95 D-28 — look up the canonical filepath for a LOCAL sys_id.
+
+        Queries the LocalIndexer's local_files SQLite table via get_filepath().
+        Returns the filepath string or None if not found / indexer unavailable.
+        """
+        my_lib_tab = getattr(self, 'my_library_tab', None)
+        indexer = getattr(my_lib_tab, '_indexer', None) if my_lib_tab else None
+        if indexer is None:
+            return None
+        try:
+            return indexer.get_filepath(sys_id)
+        except Exception:
+            return None
+
+    def _open_local_browse(self, sys_id: str, res: dict):
+        """Phase 95 D-27 — open a LOCAL hit in Browse panel text-only mode.
+
+        Reuses existing Browse machinery. Calls _set_browse_image_pane_visible(False)
+        so the image pane is hidden (I15 resolved) and shows the 'Open file' button.
+        """
+        from shared.local_sys_id import is_local_sys_id as _is_local
+        if not _is_local(sys_id):
+            return
+        # Look up the filepath for the Open File button (D-28).
+        filepath = self._lookup_local_filepath(sys_id)
+        # Route through the existing browse machinery (sets current_browse_sid, populates text).
+        self.open_result_in_browse(res)
+        # Hide image pane — LOCAL files have no images (D-27, I15).
+        self._set_browse_image_pane_visible(False)
+        # Show / populate the Open file button (D-28).
+        self._current_local_filepath = filepath
+        self.browse_open_file_btn.setVisible(bool(filepath))
+        self.browse_open_file_btn.setEnabled(bool(filepath))
+
+    def _on_browse_open_file_clicked(self):
+        """Phase 95 D-28 — launch OS default app for the current LOCAL file."""
+        filepath = getattr(self, '_current_local_filepath', None)
+        if filepath and os.path.exists(filepath):
+            os.startfile(filepath)  # Windows-native
 
     def send_result_to_composition(self, res, source_text=None, title=None):
         if not source_text:

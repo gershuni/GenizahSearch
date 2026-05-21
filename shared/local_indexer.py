@@ -551,6 +551,17 @@ class LocalIndexer:
         self._conn.commit()
         return count
 
+    def get_filepath(self, sys_id: str) -> Optional[str]:
+        """Return the canonical filepath for a LOCAL sys_id, or None if not found.
+
+        Used by the Browse panel 'Open file' button (D-28) to obtain the source
+        file path so os.startfile() can launch the OS default application.
+        """
+        row = self._conn.execute(
+            "SELECT filepath FROM local_files WHERE sys_id = ?", (sys_id,)
+        ).fetchone()
+        return row["filepath"] if row else None
+
     def list_folders(self) -> list[dict]:
         """Return all registered folders ordered by added_at (D-15 / D-16).
 
