@@ -331,7 +331,15 @@ class MyLibraryTab(QWidget):
         self._worker.start()
 
     def _on_worker_finished(self, result: dict, toast: bool) -> None:
-        """Worker completed: unlock mutex, reload indexes, show toast (HIGH-1 + D-25)."""
+        """Worker completed: unlock mutex, reload indexes, always show summary (HIGH-1 + D-25).
+
+        B2 feedback fix: always show a summary status message after every Refresh
+        (including the zero-work case where no files needed re-indexing).  The
+        progress bar hits 100% momentarily before being hidden so the user can
+        see completion even when the status table remains empty.
+        """
+        # B2: briefly show 100% so the bar visually completes before disappearing
+        self._progress_bar.setValue(100)
         self._progress_bar.setVisible(False)
         self._btn_refresh.setEnabled(True)
         self._btn_add.setEnabled(True)
@@ -355,16 +363,48 @@ class MyLibraryTab(QWidget):
         # Refresh folder list (status may have changed, e.g. unavailable)
         self._refresh_folder_list_ui()
 
-        if toast:
-            indexed = result.get("indexed", 0)
-            msg = tr(f"My Library updated: {indexed} new files indexed")
-            self._show_status_message(msg)
+        # B2 feedback fix: always show a completion summary — status bar for
+        # both the startup silent-rescan (toast=True) and manual Refresh
+        # (toast=False, the case the user reported gave no feedback).
+        indexed = result.get("indexed", 0)
+        skipped = result.get("skipped", 0)
+        errors = result.get("errors", 0)
+        cancelled = result.get("cancelled", False)
+        if cancelled:
+            msg = tr(f"Refresh cancelled — {indexed} files indexed, {skipped} up to date")
+        else:
+            msg = tr(
+                f"Refresh complete — {indexed} re-indexed, {skipped} up to date"
+                + (f", {errors} errors" if errors else "")
+            )
+        self._show_status_message(msg)
+
+        # For startup silent-rescan (toast=True) that had actual work: also
+        # surface a QLabel summary so it is visible even if status bar is hidden.
+        # (Manual Refresh already shows the status table rows as visual confirmation.)
+        if toast and indexed > 0:
+            self._show_refresh_summary_label(indexed, skipped, errors)
 
         # Process any queued action
         if self._queued_action is not None:
             action = self._queued_action
             self._queued_action = None
             action()
+
+    def _show_refresh_summary_label(
+        self, indexed: int, skipped: int, errors: int
+    ) -> None:
+        """Show a non-modal summary label above the status table (B2 feedback).
+
+        Only called for the startup background rescan when it found new work
+        (toast=True and indexed > 0).  For manual Refresh the status table rows
+        themselves serve as the visual confirmation.
+        """
+        msg = tr(
+            f"Last scan: {indexed} new files indexed, {skipped} up to date"
+            + (f", {errors} errors" if errors else "")
+        )
+        self._show_status_message(msg)
 
     def _on_worker_error(self, msg: str) -> None:
         """Worker raised an unhandled error."""
