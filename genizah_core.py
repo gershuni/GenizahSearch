@@ -813,9 +813,9 @@ class LabEngine:
         stored in .meta.json by build_lab_side_index. Side effect: sets
         self.local_lab_searcher_stale.
         """
-        if self.local_lab_searcher is None:
+        if getattr(self, "local_lab_searcher", None) is None:
             return False
-        meta = self._lab_local_meta
+        meta = getattr(self, "_lab_local_meta", None)
         if not meta:
             self.local_lab_searcher_stale = True
             LAB_LOGGER.info("CR-02: LabEngine LOCAL LAB has no .meta.json — stale")
