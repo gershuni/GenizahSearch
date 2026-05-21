@@ -504,6 +504,52 @@ class LocalIndexer:
         self._conn.commit()
         return count
 
+    def list_folders(self) -> list[dict]:
+        """Return all registered folders ordered by added_at (D-15 / D-16).
+
+        Each dict has keys: folder_id, path, added_at, last_scanned_at, status.
+        Used by MyLibraryTab to populate the folder list widget and by
+        prescan_count_all for the W8 aggregate ceiling check.
+        """
+        rows = self._conn.execute(
+            "SELECT folder_id, path, added_at, last_scanned_at, status "
+            "FROM folders ORDER BY added_at"
+        ).fetchall()
+        return [
+            {
+                "folder_id": row["folder_id"],
+                "path": row["path"],
+                "added_at": row["added_at"],
+                "last_scanned_at": row["last_scanned_at"],
+                "status": row["status"],
+            }
+            for row in rows
+        ]
+
+    def prescan_count_all(self) -> tuple[int, int]:
+        """W8: aggregate prescan across all registered, available folders.
+
+        Iterates every registered folder; folders with status='unavailable' OR
+        whose path is not a directory (D-40) are excluded from the sum.
+        Used by MyLibraryTab Refresh per D-16 multi-folder support.
+        The aggregate is the input to the D-26/D-41 ceiling-check dialog —
+        thresholds apply to the AGGREGATE, not per-folder.
+
+        Returns: (total_file_count, total_bytes)
+        """
+        total_files = 0
+        total_bytes = 0
+        for folder in self.list_folders():
+            path = folder["path"]
+            if folder.get("status") == "unavailable":
+                continue
+            if not os.path.isdir(path):
+                continue  # treat as unavailable
+            f, b = self.prescan_count(path)
+            total_files += f
+            total_bytes += b
+        return total_files, total_bytes
+
     def _get_folder_paths(self) -> list[str]:
         rows = self._conn.execute("SELECT path FROM folders").fetchall()
         return [r["path"] for r in rows]

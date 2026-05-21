@@ -1,23 +1,307 @@
 # -*- coding: utf-8 -*-
-"""Wave 0 stub — Phase 95 REQ-10 + D-26: pre-scan ceiling enforcement.
+"""Phase 95 REQ-10 + D-26 + D-41 + W8: pre-scan ceiling enforcement.
 
-Real implementation: desktop/my_library_tab.py (Wave 3, Plan 95-07).
+Covers:
+  - Single-folder Add Folder ceiling (file_count > 5000 OR bytes > 2 GB)
+  - W8 RESOLVED: multi-folder AGGREGATE ceiling for Refresh
+  - Unavailable folders excluded from Refresh aggregate
 """
+from __future__ import annotations
 
+import sys
+import unittest.mock as mock
+
+import pytest
+
+try:
+    from PyQt6.QtWidgets import QApplication, QWidget, QMessageBox
+    from PyQt6.QtCore import Qt
+
+    _app = QApplication.instance() or QApplication(sys.argv)
+    QT_AVAILABLE = True
+except ImportError:
+    QT_AVAILABLE = False
+
+pytestmark = pytest.mark.skipif(
+    not QT_AVAILABLE, reason="PyQt6 not available"
+)
+
+
+@pytest.fixture(autouse=True)
+def _ensure_app():
+    if QT_AVAILABLE:
+        from PyQt6.QtWidgets import QApplication
+        if QApplication.instance() is None:
+            QApplication(sys.argv)
+    yield
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _make_mock_indexer(folders=None, prescan_single=None, prescan_all=None):
+    m = mock.MagicMock()
+    m.list_folders.return_value = folders or []
+    m.prescan_count.return_value = prescan_single or (0, 0)
+    m.prescan_count_all.return_value = prescan_all or (0, 0)
+    m.scan_all.return_value = {
+        "indexed": 0, "skipped": 0, "errors": 0, "cancelled": False
+    }
+    m.startup_recovery.return_value = {
+        "pending_deletes_recovered": 0,
+        "pending_inserts_recovered": 0,
+    }
+    return m
+
+
+def _make_tab(mock_idx):
+    from desktop.my_library_tab import MyLibraryTab
+
+    parent = QWidget()
+    parent.searcher = mock.MagicMock()
+    parent.statusBar = mock.MagicMock(return_value=mock.MagicMock())
+
+    with (
+        mock.patch("desktop.my_library_tab.LocalIndexer") as MockIdx,
+        mock.patch("desktop.my_library_tab.os.makedirs"),
+    ):
+        MockIdx.return_value = mock_idx
+        tab = MyLibraryTab(parent)
+    return tab
+
+
+# ---------------------------------------------------------------------------
+# Single-folder ceiling (Add Folder path)
+# ---------------------------------------------------------------------------
 
 def test_prescan_warning_above_5000_files():
-    """REQ-10 + D-26: when pre-scan counts > 5000 files, a modal warning dialog
-    appears: 'Indexing N files — performance may degrade. Continue?'
-    """
-    raise NotImplementedError(
-        "Wave 0 stub for REQ-10/D-26 prescan file-count ceiling — implemented in Wave 3 plan 95-07"
+    """REQ-10 + D-26: Add Folder path shows dialog when prescan > 5000 files."""
+    mock_idx = _make_mock_indexer(prescan_single=(5001, 1_000_000_000))
+    tab = _make_tab(mock_idx)
+
+    called_with = {}
+
+    def fake_question(parent, title, text, buttons, default):
+        called_with["title"] = title
+        called_with["text"] = text
+        return QMessageBox.StandardButton.Cancel  # user cancels
+
+    with mock.patch("desktop.my_library_tab.QMessageBox.question", side_effect=fake_question):
+        result = tab._check_ceiling_single_folder("/some/folder")
+
+    assert not result, "Should return False when user cancels"
+    assert "question" in str(fake_question)  # called
+    assert "5,001" in called_with.get("text", ""), (
+        f"Dialog text should contain formatted file count '5,001'; got: {called_with.get('text')}"
     )
 
 
 def test_prescan_warning_above_2gb():
-    """REQ-10 + D-41: when pre-scan total_bytes > 2 GB, a modal warning dialog
-    appears showing both file count and size: 'Indexing N files (X.X GB) — ...'
-    """
-    raise NotImplementedError(
-        "Wave 0 stub for REQ-10/D-41 prescan 2 GB ceiling — implemented in Wave 3 plan 95-07"
+    """REQ-10 + D-41: Add Folder path shows dialog when prescan > 2 GB."""
+    mock_idx = _make_mock_indexer(prescan_single=(100, 2_500_000_000))
+    tab = _make_tab(mock_idx)
+
+    called_with = {}
+
+    def fake_question(parent, title, text, buttons, default):
+        called_with["title"] = title
+        called_with["text"] = text
+        return QMessageBox.StandardButton.Cancel
+
+    with mock.patch("desktop.my_library_tab.QMessageBox.question", side_effect=fake_question):
+        result = tab._check_ceiling_single_folder("/some/folder")
+
+    assert not result, "Should return False when user cancels"
+    text = called_with.get("text", "")
+    assert "2.5 GB" in text or "2,500" in text, (
+        f"Dialog text should contain '2.5 GB' or '2,500'; got: {text}"
     )
+
+
+def test_no_dialog_below_ceiling_single_folder():
+    """D-26: no dialog shown when prescan is under both thresholds (single folder)."""
+    mock_idx = _make_mock_indexer(prescan_single=(100, 100_000_000))
+    tab = _make_tab(mock_idx)
+
+    with mock.patch(
+        "desktop.my_library_tab.QMessageBox.question"
+    ) as qmock:
+        result = tab._check_ceiling_single_folder("/some/folder")
+
+    assert result is True, "Should return True (proceed) when under threshold"
+    qmock.assert_not_called()
+
+
+def test_user_confirms_proceeds():
+    """D-26: when user clicks Yes on ceiling dialog, scan proceeds (returns True)."""
+    mock_idx = _make_mock_indexer(prescan_single=(6000, 3_000_000_000))
+    tab = _make_tab(mock_idx)
+
+    with mock.patch(
+        "desktop.my_library_tab.QMessageBox.question",
+        return_value=QMessageBox.StandardButton.Yes,
+    ):
+        result = tab._check_ceiling_single_folder("/huge/folder")
+
+    assert result is True, "Should return True when user confirms"
+
+
+# ---------------------------------------------------------------------------
+# W8: multi-folder AGGREGATE ceiling (Refresh path)
+# ---------------------------------------------------------------------------
+
+def test_refresh_aggregates_prescan_across_all_folders():
+    """W8: Refresh uses prescan_count_all() which aggregates across folders.
+
+    Sub-test A: aggregate (3000 files, 1.5 GB) is under threshold → no dialog.
+    Sub-test B: aggregate (6000 files, 2.5 GB) is over threshold → dialog shown.
+    """
+    # --- Sub-test A: under threshold ---
+    folders_3 = [
+        {"folder_id": i, "path": f"/f{i}", "added_at": 0.0,
+         "last_scanned_at": 0.0, "status": "active"}
+        for i in range(3)
+    ]
+    mock_idx_a = _make_mock_indexer(
+        folders=folders_3,
+        prescan_all=(3000, 1_500_000_000),  # under 5000 files and under 2 GB
+    )
+    tab_a = _make_tab(mock_idx_a)
+
+    with mock.patch("desktop.my_library_tab.QMessageBox.question") as qmock_a:
+        result_a = tab_a._check_ceiling_refresh_aggregate()
+
+    assert result_a is True, "Under threshold: should proceed without dialog"
+    qmock_a.assert_not_called()
+
+    # --- Sub-test B: over threshold ---
+    mock_idx_b = _make_mock_indexer(
+        folders=folders_3,
+        prescan_all=(6000, 2_500_000_000),  # over 5000 files AND over 2 GB
+    )
+    tab_b = _make_tab(mock_idx_b)
+
+    called_with = {}
+
+    def fake_question(parent, title, text, buttons, default):
+        called_with["title"] = title
+        called_with["text"] = text
+        return QMessageBox.StandardButton.Cancel
+
+    with mock.patch(
+        "desktop.my_library_tab.QMessageBox.question", side_effect=fake_question
+    ):
+        result_b = tab_b._check_ceiling_refresh_aggregate()
+
+    assert not result_b, "Over threshold: should show dialog (user cancels)"
+    text = called_with.get("text", "")
+    assert "6,000" in text or "6000" in text, (
+        f"Dialog text should include aggregate file count; got: {text}"
+    )
+    assert "2.5 GB" in text or "2,500" in text, (
+        f"Dialog text should include aggregate size; got: {text}"
+    )
+
+
+def test_refresh_aggregate_excludes_unavailable_folders():
+    """W8: aggregate ceiling for Refresh excludes unavailable folders (D-40).
+
+    3 folders: 2 available (status='active'), 1 unavailable.
+    prescan_count() should only be called for the 2 available folders.
+    The unavailable folder contributes 0 to the aggregate.
+    """
+    folders = [
+        {"folder_id": 1, "path": "/f1", "added_at": 0.0,
+         "last_scanned_at": 0.0, "status": "active"},
+        {"folder_id": 2, "path": "/f2", "added_at": 0.0,
+         "last_scanned_at": 0.0, "status": "active"},
+        {"folder_id": 3, "path": "/f3_unavail", "added_at": 0.0,
+         "last_scanned_at": 0.0, "status": "unavailable"},
+    ]
+    # prescan_count_all() returns sum for only the 2 available folders
+    mock_idx = _make_mock_indexer(
+        folders=folders,
+        prescan_all=(2000, 1_000_000_000),  # 2 × 1000 files, 2 × 500 MB
+    )
+    # Also stub per-folder prescan so we can verify unavailable is not called
+    def per_folder_prescan(path):
+        if "unavail" in path:
+            raise AssertionError(
+                f"prescan_count should NOT be called for unavailable folder: {path}"
+            )
+        return (1000, 500_000_000)
+
+    mock_idx.prescan_count.side_effect = per_folder_prescan
+    # prescan_count_all() already set via prescan_all; override side_effect to use return_value
+    mock_idx.prescan_count_all.side_effect = None
+    mock_idx.prescan_count_all.return_value = (2000, 1_000_000_000)
+
+    tab = _make_tab(mock_idx)
+
+    with mock.patch("desktop.my_library_tab.QMessageBox.question") as qmock:
+        result = tab._check_ceiling_refresh_aggregate()
+
+    # 2000 files < 5000 and 1 GB < 2 GB → under threshold → no dialog
+    assert result is True, "Under threshold (unavailable excluded): should proceed"
+    qmock.assert_not_called()
+
+    # Verify prescan_count_all was called (not per-folder prescan_count)
+    mock_idx.prescan_count_all.assert_called()
+
+
+def test_aggregate_both_thresholds_checked():
+    """W8: aggregate ceiling triggers on file_count > 5000 even if bytes < 2 GB."""
+    folders_1 = [
+        {"folder_id": 1, "path": "/f1", "added_at": 0.0,
+         "last_scanned_at": 0.0, "status": "active"},
+    ]
+    # File count triggers (> 5000), bytes does not (< 2 GB)
+    mock_idx = _make_mock_indexer(
+        folders=folders_1,
+        prescan_all=(5001, 500_000_000),
+    )
+    tab = _make_tab(mock_idx)
+
+    called = []
+
+    def fake_question(parent, title, text, buttons, default):
+        called.append(text)
+        return QMessageBox.StandardButton.Cancel
+
+    with mock.patch(
+        "desktop.my_library_tab.QMessageBox.question", side_effect=fake_question
+    ):
+        result = tab._check_ceiling_refresh_aggregate()
+
+    assert not result, "Should show dialog when file_count > 5000"
+    assert called, "QMessageBox.question must have been called"
+
+
+def test_aggregate_bytes_threshold_triggers():
+    """W8: aggregate ceiling triggers on total_bytes > 2 GB even if count < 5000."""
+    folders_1 = [
+        {"folder_id": 1, "path": "/f1", "added_at": 0.0,
+         "last_scanned_at": 0.0, "status": "active"},
+    ]
+    # Bytes triggers (> 2 GiB = 2,147,483,648), count does not (< 5000)
+    # Use 2.2 GiB = 2_362_232_012 bytes to safely exceed the threshold
+    mock_idx = _make_mock_indexer(
+        folders=folders_1,
+        prescan_all=(100, 2 * 1024 ** 3 + 1),
+    )
+    tab = _make_tab(mock_idx)
+
+    called = []
+
+    def fake_question(parent, title, text, buttons, default):
+        called.append(text)
+        return QMessageBox.StandardButton.Cancel
+
+    with mock.patch(
+        "desktop.my_library_tab.QMessageBox.question", side_effect=fake_question
+    ):
+        result = tab._check_ceiling_refresh_aggregate()
+
+    assert not result, "Should show dialog when total_bytes > 2 GB"
+    assert called, "QMessageBox.question must have been called"

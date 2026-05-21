@@ -71,6 +71,7 @@ from desktop.dialogs_filter import ExcludeDialog, DomainFilterDialog, PreSearchF
 from desktop.viewers import ZoomableScrollArea, FullscreenImageWindow, ManuscriptViewerWidget, _make_scrollable_row, _generate_oxford_dynamic_url  # noqa: F401
 from desktop.puzzle import PuzzleFragmentItem, PuzzleCanvasView, PuzzleExportThread, PuzzlePublishThread, PuzzleCanvasWindow  # noqa: F401
 from desktop.vs_cache import DesktopVSCache, VSFetchThread, VSDownloadThread  # noqa: F401
+from desktop.my_library_tab import MyLibraryTab  # Phase 95 — 7th tab
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -3089,6 +3090,8 @@ class GenizahGUI(QMainWindow):
         self.tabs.addTab(self.catalog_browse_tab, tr("Browse by Identification"))
         self.tabs.addTab(self.lists_tab, tr("Personal Lists"))
         self.tabs.addTab(self.community_tab, tr("Community"))
+        self.my_library_tab = MyLibraryTab(self)
+        self.tabs.addTab(self.my_library_tab, tr("My Library"))
 
         # Settings Dialog (persistent, created once)
         self.settings_dialog = SettingsDialog(self)
