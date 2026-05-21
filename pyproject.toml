@@ -12,6 +12,7 @@
 markers = [
     "slow: marks tests as slow; run with `pytest -m slow`",
     "e2e: marks tests requiring Selenium/ChromeDriver (paired with slow)",
+    "packaging: marks tests requiring the packaged EXE (release CI only; Phase 95 D-43)",
 ]
 
 # Phase 85 (Plan 85-03 cross-plan integration fix): restrict collection to
