@@ -689,6 +689,17 @@ class LabEngine:
         self.lab_index_needs_rebuild = False
         self.dynamic_rank_map = None
 
+        # CR-02 FIX: LOCAL LAB side-index attributes — mirror SearchEngine so
+        # LabEngine.lab_composition_search can query LOCAL LAB hits in LAB mode.
+        # Previously these attributes only existed on SearchEngine, so the
+        # `getattr(self, "_check_local_lab_freshness", None)` guard in
+        # lab_composition_search returned None and the entire LOCAL LAB hook
+        # was silently skipped — REQ-6 (three-surface coverage) was broken.
+        self.local_lab_searcher = None
+        self._local_lab_index = None
+        self.local_lab_searcher_stale = False
+        self._lab_local_meta = None
+
         # Try load dynamic weights
         if os.path.exists(Config.LAB_WEIGHTS_FILE):
             try:
@@ -698,6 +709,9 @@ class LabEngine:
                 pass  # Dynamic weights file corrupt or unreadable; use defaults
 
         self._reload_lab_index()
+        # CR-02 FIX: open LOCAL LAB side-index at startup so LAB-mode
+        # Composition Search sees LOCAL hits without waiting for a refresh.
+        self.reload_local_lab_index()
 
     def _close_index(self):
         self.lab_searcher = None
@@ -724,16 +738,97 @@ class LabEngine:
                 self.lab_index = tantivy.Index.open(Config.LAB_INDEX_DIR)
                 self._ensure_lab_tokenizers(self.lab_index)
                 self.lab_searcher = self.lab_index.searcher()
-                
+
                 # Simplified robust check
                 self.lab_index_needs_rebuild = False
                 return True
             except Exception as e:
                 LAB_LOGGER.error(f"Failed to load Lab Index: {e}")
                 self._close_index()
-        
+
         self.lab_index_needs_rebuild = True
         return False
+
+    # ------------------------------------------------------------------
+    # CR-02 FIX: LOCAL LAB side-index handling on LabEngine
+    # ------------------------------------------------------------------
+    # These mirror the SearchEngine.reload_local_lab_index /
+    # _check_local_lab_freshness methods so LabEngine.lab_composition_search
+    # actually surfaces LOCAL hits in LAB mode (REQ-6).  Wired by
+    # MyLibraryTab on startup + after every Refresh / Add / Remove.
+    def reload_local_lab_index(self) -> None:
+        """Reopen the LOCAL LAB side-index against the current Config.LOCAL_LAB_INDEX_DIR.
+
+        Idempotent + defensive: D-37 semantics — on any open failure the
+        searcher falls back to None and the LAB-mode composition path
+        cleanly skips LOCAL.
+        """
+        self.local_lab_searcher = None
+        self._local_lab_index = None
+        self._lab_local_meta = None
+        try:
+            if os.path.isdir(Config.LOCAL_LAB_INDEX_DIR):
+                from shared.local_indexer import build_local_lab_schema, LocalIndexer
+                schema = build_local_lab_schema()
+                local_lab_index = tantivy.Index(schema, path=Config.LOCAL_LAB_INDEX_DIR)
+                self._local_lab_index = local_lab_index
+                self.local_lab_searcher = local_lab_index.searcher()
+                self._lab_local_meta = LocalIndexer.read_lab_meta(Config.LOCAL_LAB_INDEX_DIR)
+                LAB_LOGGER.info(
+                    "CR-02: LabEngine LOCAL LAB side-index reopened: %s",
+                    Config.LOCAL_LAB_INDEX_DIR,
+                )
+            else:
+                LAB_LOGGER.info(
+                    "CR-02: LabEngine LOCAL LAB side-index dir absent; searcher=None"
+                )
+        except Exception as e:
+            LAB_LOGGER.warning(
+                "CR-02: LabEngine LOCAL LAB side-index unavailable: %r", e
+            )
+            self.local_lab_searcher = None
+            self._local_lab_index = None
+            self._lab_local_meta = None
+
+    def _current_lab_weights_hash(self) -> str:
+        """Compute hash of current LAB weights for D-38 staleness check.
+
+        Mirrors SearchEngine._current_lab_weights_hash; uses the real
+        dynamic_rank_map / settings that live on LabEngine.
+        """
+        import hashlib as _hashlib
+        import json as _json
+        weights_dict = {
+            "dynamic_rank_map": self.dynamic_rank_map if self.dynamic_rank_map else None,
+            "use_dynamic_weights": getattr(self.settings, "use_dynamic_weights", False),
+        }
+        return _hashlib.sha256(
+            _json.dumps(weights_dict, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+
+    def _check_local_lab_freshness(self) -> bool:
+        """Return True if LOCAL LAB index is fresh; False if stale or missing.
+
+        D-38 mirror on LabEngine: compares current LAB weights_hash to value
+        stored in .meta.json by build_lab_side_index. Side effect: sets
+        self.local_lab_searcher_stale.
+        """
+        if self.local_lab_searcher is None:
+            return False
+        meta = self._lab_local_meta
+        if not meta:
+            self.local_lab_searcher_stale = True
+            LAB_LOGGER.info("CR-02: LabEngine LOCAL LAB has no .meta.json — stale")
+            return False
+        current_hash = self._current_lab_weights_hash()
+        if meta.get("weights_hash") != current_hash:
+            self.local_lab_searcher_stale = True
+            LAB_LOGGER.info(
+                "CR-02: LabEngine LOCAL LAB index stale (weights changed)"
+            )
+            return False
+        self.local_lab_searcher_stale = False
+        return True
 
     @staticmethod
     def lab_index_normalize(text):

@@ -579,3 +579,94 @@ class TestCR01CurrentLabWeightsHashNoCrash:
         # The freshness check should be False because the meta hash will not
         # match the "no-weights" hash; but the important assertion is that
         # the call returned cleanly without AttributeError.
+
+
+# ---------------------------------------------------------------------------
+# CR-02 regression — LabEngine must have its own LOCAL LAB attributes +
+# _check_local_lab_freshness so lab_composition_search actually surfaces
+# LOCAL hits in LAB mode (previously the getattr(...) guard returned None
+# and the entire LOCAL LAB hook was silently skipped).
+# ---------------------------------------------------------------------------
+
+class TestCR02LabEngineHasLocalLabHook:
+    """CR-02: REQ-6 — LAB Composition Search must surface LOCAL hits."""
+
+    def test_lab_engine_has_check_local_lab_freshness(self):
+        """LabEngine must define _check_local_lab_freshness as a method."""
+        try:
+            from genizah_core import LabEngine
+        except ImportError:
+            pytest.skip("genizah_core not importable")
+
+        assert hasattr(LabEngine, "_check_local_lab_freshness"), (
+            "CR-02: LabEngine._check_local_lab_freshness must exist so "
+            "lab_composition_search's getattr guard activates the LOCAL LAB hook"
+        )
+        # Must be callable (a real bound-method, not just a stub attribute).
+        assert callable(LabEngine._check_local_lab_freshness)
+
+    def test_lab_engine_has_local_lab_attrs(self):
+        """LabEngine __init__ must set local_lab_searcher, _local_lab_index,
+        _lab_local_meta, local_lab_searcher_stale."""
+        try:
+            from genizah_core import LabEngine
+        except ImportError:
+            pytest.skip("genizah_core not importable")
+
+        # Read source — actual instantiation requires meta_mgr/var_mgr.
+        src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "genizah_core.py")
+        with open(src_path, "r", encoding="utf-8") as f:
+            source = f.read()
+
+        # AST check: LabEngine.__init__ must assign all four attributes.
+        tree = ast.parse(source)
+        found_class = False
+        attr_names = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef) and node.name == "LabEngine":
+                found_class = True
+                for child in ast.walk(node):
+                    if isinstance(child, ast.FunctionDef) and child.name == "__init__":
+                        for stmt in ast.walk(child):
+                            if isinstance(stmt, ast.Attribute) and isinstance(stmt.value, ast.Name):
+                                if stmt.value.id == "self":
+                                    attr_names.add(stmt.attr)
+                break
+        assert found_class, "LabEngine class not found"
+        for required in (
+            "local_lab_searcher",
+            "_local_lab_index",
+            "_lab_local_meta",
+            "local_lab_searcher_stale",
+        ):
+            assert required in attr_names, (
+                f"CR-02: LabEngine.__init__ must assign self.{required}"
+            )
+
+    def test_lab_engine_has_reload_local_lab_index(self):
+        """LabEngine must define reload_local_lab_index for MyLibraryTab to call."""
+        try:
+            from genizah_core import LabEngine
+        except ImportError:
+            pytest.skip("genizah_core not importable")
+
+        assert hasattr(LabEngine, "reload_local_lab_index"), (
+            "CR-02: LabEngine.reload_local_lab_index must exist so "
+            "MyLibraryTab can wire LAB-side reloads after Refresh/Add/Remove"
+        )
+
+    def test_my_library_tab_calls_lab_engine_reload(self):
+        """MyLibraryTab._reload_all_local_indexes must invoke lab_engine.reload_local_lab_index."""
+        my_lib_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "desktop",
+            "my_library_tab.py",
+        )
+        if not os.path.exists(my_lib_path):
+            pytest.skip("desktop/my_library_tab.py not found")
+        with open(my_lib_path, "r", encoding="utf-8") as f:
+            source = f.read()
+        assert "lab_engine.reload_local_lab_index" in source, (
+            "CR-02: MyLibraryTab must call lab_engine.reload_local_lab_index "
+            "so LAB-mode Composition Search sees newly indexed LOCAL files"
+        )

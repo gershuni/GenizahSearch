@@ -181,6 +181,43 @@ class MyLibraryTab(QWidget):
             return None
         return getattr(self._parent_window, "searcher", None)
 
+    @property
+    def lab_engine(self):
+        """Return parent window's LabEngine (self._parent_window.lab_engine).
+
+        Returns None if parent is None or LAB engine not yet constructed.
+        CR-02: needed so we can call lab_engine.reload_local_lab_index() in
+        the same code paths that call search_engine.reload_local_indexes().
+        """
+        if self._parent_window is None:
+            return None
+        return getattr(self._parent_window, "lab_engine", None)
+
+    def _reload_all_local_indexes(self) -> None:
+        """CR-02: reload BOTH SearchEngine and LabEngine LOCAL LAB searchers.
+
+        Wraps the previous self.search_engine.reload_local_indexes() pattern
+        and adds the LAB-side reload so LAB-mode Composition Search also
+        picks up newly indexed LOCAL files.  Each call is wrapped in its
+        own try/except so a LAB failure does not block the main reload.
+        """
+        if self.search_engine is not None:
+            try:
+                self.search_engine.reload_local_indexes()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "MyLibraryTab._reload_all_local_indexes: "
+                    "search_engine.reload_local_indexes failed: %s", exc
+                )
+        if self.lab_engine is not None:
+            try:
+                self.lab_engine.reload_local_lab_index()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "MyLibraryTab._reload_all_local_indexes: "
+                    "lab_engine.reload_local_lab_index failed: %s", exc
+                )
+
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
@@ -349,13 +386,9 @@ class MyLibraryTab(QWidget):
 
         # HIGH-1 review fix: reload BEFORE toast so by the time the user
         # dismisses the toast, search already picks up the new content.
-        if self.search_engine is not None:
-            try:
-                self.search_engine.reload_local_indexes()
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "MyLibraryTab._on_worker_finished: reload_local_indexes failed: %s", exc
-                )
+        # CR-02: also reload LabEngine LOCAL LAB searcher so LAB-mode
+        # Composition Search sees newly indexed LOCAL files.
+        self._reload_all_local_indexes()
 
         # Release mutex AFTER reload
         self._indexer_mutex.unlock()
@@ -435,30 +468,18 @@ class MyLibraryTab(QWidget):
 
         Reloads LOCAL indexes so any recovered pending-deletes or pending-inserts
         are visible to the live SearchEngine session.
+        CR-02: also reloads LabEngine LOCAL LAB searcher (REQ-6).
         """
-        if self.search_engine is not None:
-            try:
-                self.search_engine.reload_local_indexes()
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "MyLibraryTab._on_startup_recovery_completed: "
-                    "reload_local_indexes failed: %s", exc
-                )
+        self._reload_all_local_indexes()
 
     def _on_rebuild_lab_completed(self) -> None:
         """HIGH-1 call site 3: called after rebuild_local_lab_index() finishes.
 
         Reloads LOCAL indexes (includes the LAB side-index) so the live session
         uses the freshly-built LAB fingerprints for Composition/Parallels.
+        CR-02: also reloads LabEngine LOCAL LAB searcher (REQ-6).
         """
-        if self.search_engine is not None:
-            try:
-                self.search_engine.reload_local_indexes()
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "MyLibraryTab._on_rebuild_lab_completed: "
-                    "reload_local_indexes failed: %s", exc
-                )
+        self._reload_all_local_indexes()
 
     # ------------------------------------------------------------------
     # Button handlers
@@ -540,14 +561,8 @@ class MyLibraryTab(QWidget):
 
         # HIGH-1 review fix: deleted LOCAL docs must disappear from live search
         # immediately, not only after app restart.
-        if self.search_engine is not None:
-            try:
-                self.search_engine.reload_local_indexes()
-            except Exception as exc2:  # noqa: BLE001
-                logger.warning(
-                    "MyLibraryTab._on_remove_folder_clicked: "
-                    "reload_local_indexes failed: %s", exc2
-                )
+        # CR-02: also reload LabEngine LOCAL LAB searcher (REQ-6).
+        self._reload_all_local_indexes()
 
         self._refresh_folder_list_ui()
 
