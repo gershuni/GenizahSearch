@@ -1,7 +1,12 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('icon.ico', '.'), ('Help.html', '.'), ('oxford_full_db.json', '.'), ('libraries.csv', '.'), ('ie_volume_map.json', '.'), ('bodleian_master_index.csv', '.'), ('pgp_tag_translations.py', '.'), ('shared_export_utils.py', '.'), ('shared', 'shared'), ('libraries_translations.db', '.'), ('fist_data\\fjms_enrichment.db', 'fist_data'), ('fist_data\\vs_manifest.txt', 'fist_data'), ('nli_data\\nli_crossref.db', 'nli_data'), ('pgp_data\\pgp.db', 'pgp_data'), ('tests\\fixtures\\local_indexer\\hebrew_sample.pdf', 'tests/fixtures/local_indexer')]
+# WR-05: hebrew_sample.pdf (6.3 MB) was shipped in every production installer
+# even though it is only used by tests/test_local_pyinstaller_smoke.py
+# (@pytest.mark.packaging — release CI only).  Removed from production datas;
+# the packaging smoke test is responsible for adding the fixture to its own
+# on-the-fly build when needed.
+datas = [('icon.ico', '.'), ('Help.html', '.'), ('oxford_full_db.json', '.'), ('libraries.csv', '.'), ('ie_volume_map.json', '.'), ('bodleian_master_index.csv', '.'), ('pgp_tag_translations.py', '.'), ('shared_export_utils.py', '.'), ('shared', 'shared'), ('libraries_translations.db', '.'), ('fist_data\\fjms_enrichment.db', 'fist_data'), ('fist_data\\vs_manifest.txt', 'fist_data'), ('nli_data\\nli_crossref.db', 'nli_data'), ('pgp_data\\pgp.db', 'pgp_data')]
 binaries = []
 hiddenimports = ['tantivy', 'numpy', 'PIL', 'fitz', 'pymupdf']
 tmp_ret = collect_all('tantivy')
