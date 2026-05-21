@@ -1815,6 +1815,8 @@ LIBRARY_CODES = {
     'CentralArch': 'Central Archives for the History of the Jewish People',
     'JCMainz': 'Jewish Community of Mainz',
     'Corwin': 'Corwin Collection',
+    # Phase 95 D-13 — My Library namespace (LOCAL sys_ids start with 97).
+    'LOCAL': 'My Library',
 }
 
 def get_library_display(code: str, short: bool = True, lang: str = None) -> str:
@@ -2008,6 +2010,11 @@ class Config:
     LAB_CONFIG_FILE = os.path.join(LAB_DIR, "lab_config.json")
     LAB_WEIGHTS_FILE = os.path.join(LAB_DIR, "lab_weights.json")
     LAB_LOG_FILE = os.path.join(LAB_DIR, "lab_genizah.log")
+
+    # Phase 95 D-14 — My Library side-indexes (co-located with INDEX_DIR for
+    # portable-mode inheritance).
+    LOCAL_INDEX_DIR = os.path.join(INDEX_DIR, "LocalIndex")
+    LOCAL_LAB_INDEX_DIR = os.path.join(INDEX_DIR, "LocalLabIndex")
 
     # 6. Bundled Internal Resources (Packaged inside the EXE/_internal)
     LIBRARIES_CSV = os.path.join(INTERNAL_DIR, "libraries.csv")
@@ -3638,7 +3645,8 @@ class MetadataManager:
         return sys.group(1) if sys else "UNKNOWN"
 
     def parse_header_smart(self, full_header):
-        sys_match = re.search(r'(99\d{8,})', full_header)
+        # Phase 95 D-13 (Codex P0) — broaden to recognize LOCAL 97-prefix in addition to 99.
+        sys_match = re.search(r'((?:99|97)\d{8,})', full_header)
         sys_id = sys_match.group(1) if sys_match else None
         p_num = "Unknown"
         p_match = re.search(r'_P(\d+)_', full_header)
@@ -3656,8 +3664,9 @@ class MetadataManager:
         """
         result = {'sys_id': None, 'ie_id': None, 'p_num': None, 'fl_id': None}
 
-        # 1. System ID (99...)
-        sys_match = re.search(r'(99\d{8,})', full_header)
+        # 1. System ID (99... or 97... for LOCAL — Phase 95 D-13 Codex P0)
+        # Phase 95 D-13 (Codex P0) — broaden for LOCAL 97-prefix.
+        sys_match = re.search(r'((?:99|97)\d{8,})', full_header)
         if sys_match:
             result['sys_id'] = sys_match.group(1)
 
@@ -3665,6 +3674,11 @@ class MetadataManager:
         ie_match = re.search(r'(IE\d+)', full_header)
         if ie_match:
             result['ie_id'] = ie_match.group(1)
+        # Phase 95 D-34 — LOCAL full_header has no IE\d+ component; instead uses F\d{4}.
+        if not result.get('ie_id'):
+            f_match = re.search(r'_F(\d{3,5})', full_header)
+            if f_match:
+                result['ie_id'] = f"F{f_match.group(1)}"
 
         # 3. Page Number (P...)
         p_match = re.search(r'_?(P\d+)', full_header)
