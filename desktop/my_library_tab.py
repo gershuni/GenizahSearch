@@ -218,6 +218,66 @@ class MyLibraryTab(QWidget):
                     "lab_engine.reload_local_lab_index failed: %s", exc
                 )
 
+    def _maybe_rebuild_lab_if_stale(self) -> bool:
+        """WR-08: D-38 weights-hash invalidation entry point.
+
+        Inspects LabEngine._check_local_lab_freshness AFTER the LAB searcher
+        is reopened. If the LAB index is present but stale (weights_hash
+        mismatch, or .meta.json missing), call SearchEngine.rebuild_local_lab_index
+        to rebuild it from the durable main LOCAL Tantivy index.
+
+        Returns True if a rebuild was triggered. Defensive: any exception is
+        logged + swallowed so a LAB rebuild failure never blocks normal
+        Refresh/Add/Remove flow.
+
+        Trigger points (mirror reload sites): startup recovery, worker
+        finished, folder removed. No rebuild is attempted if (a) the LAB
+        searcher could not be opened at all, or (b) the indexer is None.
+        """
+        if self._indexer is None:
+            return False
+        lab = self.lab_engine
+        search = self.search_engine
+        if lab is None or search is None:
+            return False
+        try:
+            if lab.local_lab_searcher is None:
+                # No LAB index present yet — nothing to rebuild (first build
+                # is triggered explicitly by the user via "Rebuild LAB", not
+                # by a freshness check on an absent index).
+                return False
+            # Freshness check raises only on serious misuse — guard anyway.
+            try:
+                fresh = lab._check_local_lab_freshness()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "MyLibraryTab._maybe_rebuild_lab_if_stale: "
+                    "lab._check_local_lab_freshness raised: %s", exc
+                )
+                return False
+            if fresh:
+                return False
+            # Stale: rebuild via SearchEngine (Option C callback wiring).
+            logger.info(
+                "WR-08: LAB index stale (weights_hash mismatch) — triggering rebuild"
+            )
+            try:
+                search.rebuild_local_lab_index(self._indexer)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "MyLibraryTab._maybe_rebuild_lab_if_stale: "
+                    "rebuild_local_lab_index failed: %s", exc
+                )
+                return False
+            # Reload so the freshly-built LAB is visible in live session.
+            self._reload_all_local_indexes()
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "MyLibraryTab._maybe_rebuild_lab_if_stale: unexpected error: %s", exc
+            )
+            return False
+
     # ------------------------------------------------------------------
     # UI construction
     # ------------------------------------------------------------------
@@ -390,6 +450,11 @@ class MyLibraryTab(QWidget):
         # Composition Search sees newly indexed LOCAL files.
         self._reload_all_local_indexes()
 
+        # WR-08: if the LAB index is stale (D-38 weights_hash mismatch),
+        # rebuild it now while we are already on the post-Refresh code
+        # path. Defensive — never blocks normal Refresh flow.
+        self._maybe_rebuild_lab_if_stale()
+
         # Release mutex AFTER reload
         self._indexer_mutex.unlock()
 
@@ -469,8 +534,11 @@ class MyLibraryTab(QWidget):
         Reloads LOCAL indexes so any recovered pending-deletes or pending-inserts
         are visible to the live SearchEngine session.
         CR-02: also reloads LabEngine LOCAL LAB searcher (REQ-6).
+        WR-08: also triggers a LAB rebuild if the on-disk index is stale
+        (e.g. user changed LAB weights between sessions).
         """
         self._reload_all_local_indexes()
+        self._maybe_rebuild_lab_if_stale()
 
     def _on_rebuild_lab_completed(self) -> None:
         """HIGH-1 call site 3: called after rebuild_local_lab_index() finishes.

@@ -670,3 +670,82 @@ class TestCR02LabEngineHasLocalLabHook:
             "CR-02: MyLibraryTab must call lab_engine.reload_local_lab_index "
             "so LAB-mode Composition Search sees newly indexed LOCAL files"
         )
+
+
+# ---------------------------------------------------------------------------
+# WR-08 regression — MyLibraryTab must wire rebuild_local_lab_index so
+# D-38 weights_hash invalidation actually triggers a rebuild end-to-end.
+# ---------------------------------------------------------------------------
+
+class TestWR08RebuildLabWiring:
+    """WR-08: rebuild_local_lab_index was dead code — never called from any
+    UI entry point. D-38's invalidation triggers were unimplemented.
+    """
+
+    def test_my_library_tab_has_rebuild_helper(self):
+        """MyLibraryTab must define _maybe_rebuild_lab_if_stale."""
+        my_lib_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "desktop",
+            "my_library_tab.py",
+        )
+        with open(my_lib_path, "r", encoding="utf-8") as f:
+            source = f.read()
+        assert "_maybe_rebuild_lab_if_stale" in source, (
+            "WR-08: MyLibraryTab must define _maybe_rebuild_lab_if_stale"
+        )
+        assert "rebuild_local_lab_index" in source, (
+            "WR-08: MyLibraryTab must call SearchEngine.rebuild_local_lab_index"
+        )
+
+    def test_my_library_tab_wires_rebuild_on_worker_finished(self):
+        """_on_worker_finished must invoke _maybe_rebuild_lab_if_stale."""
+        my_lib_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "desktop",
+            "my_library_tab.py",
+        )
+        with open(my_lib_path, "r", encoding="utf-8") as f:
+            source = f.read()
+
+        tree = ast.parse(source)
+        found_fn = False
+        found_call = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_on_worker_finished":
+                found_fn = True
+                fn_source = ast.get_source_segment(source, node) or ""
+                if "_maybe_rebuild_lab_if_stale" in fn_source:
+                    found_call = True
+                break
+        assert found_fn, "_on_worker_finished function not found"
+        assert found_call, (
+            "WR-08: _on_worker_finished must call _maybe_rebuild_lab_if_stale "
+            "so a Refresh after weights change rebuilds the LAB index"
+        )
+
+    def test_my_library_tab_wires_rebuild_on_startup_recovery(self):
+        """_on_startup_recovery_completed must invoke _maybe_rebuild_lab_if_stale."""
+        my_lib_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)),
+            "desktop",
+            "my_library_tab.py",
+        )
+        with open(my_lib_path, "r", encoding="utf-8") as f:
+            source = f.read()
+        tree = ast.parse(source)
+        found_fn = False
+        found_call = False
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == "_on_startup_recovery_completed":
+                found_fn = True
+                fn_source = ast.get_source_segment(source, node) or ""
+                if "_maybe_rebuild_lab_if_stale" in fn_source:
+                    found_call = True
+                break
+        assert found_fn, "_on_startup_recovery_completed function not found"
+        assert found_call, (
+            "WR-08: _on_startup_recovery_completed must call "
+            "_maybe_rebuild_lab_if_stale so a weights change between sessions "
+            "is picked up at startup"
+        )
