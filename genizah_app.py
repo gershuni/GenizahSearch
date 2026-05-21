@@ -2720,7 +2720,10 @@ def _build_search_results_xlsx_bytes(
 
     manu_row = 2
     for sid in unique_sys_ids:
-        row = build_manuscript_row(sid, meta_resolver, lang=lang)
+        # Phase 95 D-45: desktop includes LOCAL rows (skip_local=False).
+        row = build_manuscript_row(sid, meta_resolver, lang=lang, skip_local=False)
+        if row is None:
+            continue
         for col_idx, val in enumerate(row, 1):
             v = sanitize_fn(val) if isinstance(val, str) else val
             ws_manu.cell(row=manu_row, column=col_idx, value=v)
@@ -2739,7 +2742,8 @@ def _build_search_results_xlsx_bytes(
 
     bib_row = 2
     for sid in unique_sys_ids:
-        for row in build_bibliography_rows(sid, meta_resolver, lang=lang):
+        # Phase 95 D-45: desktop includes LOCAL rows (skip_local=False).
+        for row in build_bibliography_rows(sid, meta_resolver, lang=lang, skip_local=False):
             for col_idx, val in enumerate(row, 1):
                 v = sanitize_fn(val) if isinstance(val, str) else val
                 ws_bib.cell(row=bib_row, column=col_idx, value=v)

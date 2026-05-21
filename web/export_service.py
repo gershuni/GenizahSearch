@@ -822,7 +822,10 @@ class ExportService:
             'M': 30, 'N': 35,
         })
         for sid in unique_sys_ids:
-            row = build_manuscript_row(sid, _meta_resolver, lang=lang)
+            # Phase 95 D-45: web defense-in-depth — skip LOCAL sys_ids.
+            row = build_manuscript_row(sid, _meta_resolver, lang=lang, skip_local=True)
+            if row is None:
+                continue
             ws_manu.append([
                 sanitize_text_for_excel(v) if isinstance(v, str) else v
                 for v in row
@@ -841,7 +844,8 @@ class ExportService:
             'A': 18, 'B': 22, 'C': 25, 'D': 40, 'E': 30, 'F': 12, 'G': 14, 'H': 20,
         })
         for sid in unique_sys_ids:
-            for row in build_bibliography_rows(sid, _meta_resolver, lang=lang):
+            # Phase 95 D-45: web defense-in-depth — skip LOCAL sys_ids.
+            for row in build_bibliography_rows(sid, _meta_resolver, lang=lang, skip_local=True):
                 ws_bib.append([
                     sanitize_text_for_excel(v) if isinstance(v, str) else v
                     for v in row

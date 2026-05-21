@@ -990,7 +990,8 @@ def build_manuscript_row(
     sys_id: str,
     meta_resolver: Optional[MetaResolver],
     lang: str = 'en',
-) -> List[Any]:
+    skip_local: bool = False,
+) -> Optional[List[Any]]:
     """Build one Manuscripts sub-sheet row for a sys_id.
 
     Calls 3 helpers — :func:`pgp_subset_for_sys_id`,
@@ -1003,6 +1004,14 @@ def build_manuscript_row(
     :data:`MANUSCRIPT_HEADERS` (English) / :func:`manuscript_header_row('he')`
     (Hebrew) order. Missing data renders as empty strings (NOT 'N/A' /
     placeholders — D-06).
+
+    Phase 95 D-45: when ``skip_local=True``, returns ``None`` for LOCAL
+    sys_ids (detected via :func:`~shared.local_sys_id.is_local_sys_id`).
+    Web export passes ``skip_local=True`` (defense-in-depth — web Tantivy
+    never indexes LOCAL docs, but the shared helper is hardened regardless).
+    Desktop export passes ``skip_local=False`` (LOCAL rows ARE included in
+    the user's local xlsx file; PGP / NLI / Library-Viewer URL cells are
+    empty for LOCAL rows since no upstream metadata exists).
 
     D-04 REVISED (2026-05-20): when ``lang == 'he'`` the row prefers
     Hebrew variants from each source DB (PGP description / type via
@@ -1017,6 +1026,14 @@ def build_manuscript_row(
     ``lang`` (i.e. call ``genizah_core.get_library_display(code,
     short=False, lang=lang)``).
     """
+    # Phase 95 D-45: skip LOCAL rows on web export path.
+    if skip_local and sys_id:
+        try:
+            from shared.local_sys_id import is_local_sys_id
+            if is_local_sys_id(sys_id):
+                return None
+        except Exception:
+            pass
     if meta_resolver is not None and sys_id:
         meta = meta_resolver(sys_id)
     else:
@@ -1094,6 +1111,7 @@ def build_bibliography_rows(
     sys_id: str,
     meta_resolver: Optional[MetaResolver],
     lang: str = 'en',
+    skip_local: bool = False,
 ) -> List[List[Any]]:
     """Build 0..N Bibliography sub-sheet rows for a sys_id.
 
@@ -1106,6 +1124,10 @@ def build_bibliography_rows(
 
     Per D-06, missing string fields render as empty cells.
 
+    Phase 95 D-45: when ``skip_local=True``, returns ``[]`` immediately for
+    LOCAL sys_ids. Web export passes ``skip_local=True``; desktop passes
+    ``skip_local=False``.
+
     D-04 REVISED (2026-05-20): when ``lang == 'he'`` the row prefers Hebrew
     variants from each underlying bib entry (running_title_heb,
     article_author_heb) with English graceful fallback. Threading lang
@@ -1113,6 +1135,14 @@ def build_bibliography_rows(
     """
     if not sys_id:
         return []
+    # Phase 95 D-45: skip LOCAL rows on web export path.
+    if skip_local:
+        try:
+            from shared.local_sys_id import is_local_sys_id
+            if is_local_sys_id(sys_id):
+                return []
+        except Exception:
+            pass
     entries = bibliography_for_sys_id(sys_id, lang=lang) or []
     if not entries:
         return []
