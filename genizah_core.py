@@ -3638,7 +3638,8 @@ class MetadataManager:
         return sys.group(1) if sys else "UNKNOWN"
 
     def parse_header_smart(self, full_header):
-        sys_match = re.search(r'(99\d{8,})', full_header)
+        # Phase 95 D-13 (Codex P0) — broaden to recognize LOCAL 97-prefix in addition to 99.
+        sys_match = re.search(r'((?:99|97)\d{8,})', full_header)
         sys_id = sys_match.group(1) if sys_match else None
         p_num = "Unknown"
         p_match = re.search(r'_P(\d+)_', full_header)
@@ -3656,8 +3657,9 @@ class MetadataManager:
         """
         result = {'sys_id': None, 'ie_id': None, 'p_num': None, 'fl_id': None}
 
-        # 1. System ID (99...)
-        sys_match = re.search(r'(99\d{8,})', full_header)
+        # 1. System ID (99... or 97... for LOCAL — Phase 95 D-13 Codex P0)
+        # Phase 95 D-13 (Codex P0) — broaden for LOCAL 97-prefix.
+        sys_match = re.search(r'((?:99|97)\d{8,})', full_header)
         if sys_match:
             result['sys_id'] = sys_match.group(1)
 
@@ -3665,6 +3667,11 @@ class MetadataManager:
         ie_match = re.search(r'(IE\d+)', full_header)
         if ie_match:
             result['ie_id'] = ie_match.group(1)
+        # Phase 95 D-34 — LOCAL full_header has no IE\d+ component; instead uses F\d{4}.
+        if not result.get('ie_id'):
+            f_match = re.search(r'_F(\d{3,5})', full_header)
+            if f_match:
+                result['ie_id'] = f"F{f_match.group(1)}"
 
         # 3. Page Number (P...)
         p_match = re.search(r'_?(P\d+)', full_header)
