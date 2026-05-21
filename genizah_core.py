@@ -6474,7 +6474,8 @@ class SearchEngine:
         self.reload_index()
         self.start_fl_id_index_build()
         # Phase 95 — open LOCAL side-index alongside main (D-14 + D-37 fallback).
-        self.local_searcher = None
+        self.local_index = None       # tantivy.Index for LOCAL side-index
+        self.local_searcher = None    # tantivy.Searcher snapshot
         self.local_lab_searcher = None
         self._lab_local_meta = None
         self._open_local_searcher()
@@ -6482,15 +6483,17 @@ class SearchEngine:
     def _open_local_searcher(self) -> None:
         """Open the LOCAL Tantivy side-index with D-37 corrupt/missing fallback.
 
-        Sets self.local_searcher (None on any open failure — D-37).
-        Called at __init__ and by reload_local_indexes().
+        Sets self.local_index + self.local_searcher (both None on any open
+        failure — D-37).  Called at __init__ and by reload_local_indexes().
         """
+        self.local_index = None
         self.local_searcher = None
         try:
             if os.path.isdir(Config.LOCAL_INDEX_DIR):
                 from shared.local_indexer import build_local_schema
                 schema = build_local_schema()
                 local_index = tantivy.Index(schema, path=Config.LOCAL_INDEX_DIR)
+                self.local_index = local_index
                 self.local_searcher = local_index.searcher()
                 LOGGER.info("LOCAL side-index opened: %s", Config.LOCAL_INDEX_DIR)
             else:
@@ -6503,6 +6506,7 @@ class SearchEngine:
             LOGGER.warning(
                 "LOCAL index unavailable, main search continues without LOCAL hits: %r", e
             )
+            self.local_index = None
             self.local_searcher = None
 
     def reload_local_indexes(self) -> None:
@@ -6552,13 +6556,13 @@ class SearchEngine:
         expansion pipeline used by the main searcher). The divergence is documented
         as a deferred follow-up — see plan 95-05 <deferred> block.
         """
-        if self.local_searcher is None:
+        if self.local_searcher is None or self.local_index is None:
             return []
         try:
-            local_index = self.local_searcher.index
-            # Use the same content fields as the main schema for query parity.
+            # Use self.local_index (kept alongside local_searcher) for parse_query.
+            # tantivy.Searcher has no .index attribute — Index must be stored separately.
             # MEDIUM-1 deferred: full query builder (variants/Responsa) not extracted yet.
-            tantivy_q = local_index.parse_query(
+            tantivy_q = self.local_index.parse_query(
                 query_str, ["content", "content_head", "content_tail"]
             )
             search_limit = limit or Config.SEARCH_LIMIT
