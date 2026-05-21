@@ -587,9 +587,6 @@ class LocalIndexer:
                     result["cancelled"] = True
                     break
 
-                if self._progress_cb:
-                    self._progress_cb(idx, total_files, os.path.basename(filepath))
-
                 cached_row = cached.get(filepath)
                 try:
                     stat = os.stat(filepath)
@@ -609,6 +606,11 @@ class LocalIndexer:
                 ):
                     result["skipped"] += 1
                     continue
+
+                # Fire progress callback only for files actually being indexed/re-indexed
+                # (not for cache hits) — matches D-23 "per file being processed" semantics
+                if self._progress_cb:
+                    self._progress_cb(idx, total_files, os.path.basename(filepath))
 
                 # Need to index (new or modified)
                 if cached_row is not None and cached_row["sys_id"]:
@@ -760,22 +762,25 @@ class LocalIndexer:
         folder_path: str,
         cancel_check: Callable[[], bool],
     ) -> Iterator[tuple[str, int]]:
-        """Yield (canonical_filepath, file_size) for supported files in folder."""
+        """Yield (canonical_filepath, file_size) for ALL files in folder.
+
+        Note: unsupported extensions are included so _index_one_file can record
+        them with extraction_status='unsupported'. The extension check happens
+        inside _index_one_file, not here.
+        """
         try:
             for dirpath, _dirs, files in os.walk(folder_path, followlinks=False):
                 if cancel_check():
                     return
                 try:
                     for fname in files:
-                        ext = os.path.splitext(fname)[1].lower()
-                        if ext in _SUPPORTED_EXTENSIONS:
-                            fpath = os.path.join(dirpath, fname)
-                            canonical = _canonical_filepath(fpath)
-                            try:
-                                fsize = os.path.getsize(fpath)
-                            except OSError:
-                                fsize = 0
-                            yield canonical, fsize
+                        fpath = os.path.join(dirpath, fname)
+                        canonical = _canonical_filepath(fpath)
+                        try:
+                            fsize = os.path.getsize(fpath)
+                        except OSError:
+                            fsize = 0
+                        yield canonical, fsize
                 except OSError as exc:
                     logger.warning(
                         "_iterate_supported_files: OSError in %s: %s", dirpath, exc
@@ -1124,7 +1129,12 @@ class LocalIndexer:
     # ------------------------------------------------------------------
 
     def close(self) -> None:
-        """Flush + close Tantivy writer and SQLite connection."""
+        """Flush + close Tantivy writer and SQLite connection.
+
+        Explicitly deletes the Tantivy writer and index objects to release the
+        Tantivy lockfile (LockBusy prevention for subsequent open() calls in
+        the same process or a different process).
+        """
         if self._pending_filepaths:
             try:
                 self._commit_batch()
@@ -1132,6 +1142,15 @@ class LocalIndexer:
                 logger.warning("LocalIndexer.close: commit_batch failed: %s", exc)
         try:
             self._writer.commit()
+        except Exception:
+            pass
+        # Delete writer first (releases Tantivy lockfile), then index object
+        try:
+            del self._writer
+        except Exception:
+            pass
+        try:
+            del self._index
         except Exception:
             pass
         try:
