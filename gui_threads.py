@@ -53,13 +53,14 @@ class SearchThread(QThread):
     results_signal = pyqtSignal(list)
     progress_signal = pyqtSignal(int, int)
     error_signal = pyqtSignal(str)
-    def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None, text_position=None):
+    def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None, text_position=None, corpus_scope="all"):
         super().__init__()
         self.searcher = searcher; self.query = query; self.mode = mode; self.gap = gap
         self.exclude_words = exclude_words
         self.responsa_options = responsa_options
         self.restrict_sys_ids = restrict_sys_ids
         self.text_position = text_position
+        self.corpus_scope = corpus_scope  # Phase 95 smoke-fix: 'all'|'genizah'|'local'
         self.cancel_flag = False
 
     def run(self):
@@ -78,6 +79,7 @@ class SearchThread(QThread):
                 responsa_options=self.responsa_options,
                 restrict_sys_ids=self.restrict_sys_ids,
                 text_position=self.text_position,
+                corpus_scope=self.corpus_scope,
             )
 
             self.results_signal.emit(results)

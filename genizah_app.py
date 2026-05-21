@@ -5569,6 +5569,27 @@ class GenizahGUI(QMainWindow):
 
         row1.addWidget(self.btn_search)
 
+        # Phase 95 smoke-fix (item 2): pre-search corpus selector.
+        # Determines which index(es) are queried: Genizah-only / Local-only / ALL.
+        self.corpus_scope_combo = QComboBox()
+        if CURRENT_LANG == 'he':
+            self.corpus_scope_combo.addItem("הכול", "all")
+            self.corpus_scope_combo.addItem("גניזה", "genizah")
+            self.corpus_scope_combo.addItem("מקומי", "local")
+        else:
+            self.corpus_scope_combo.addItem("ALL", "all")
+            self.corpus_scope_combo.addItem("Genizah", "genizah")
+            self.corpus_scope_combo.addItem("Local", "local")
+        self.corpus_scope_combo.setToolTip(tr("Select which corpus to search"))
+        self.corpus_scope_combo.setFixedWidth(90)
+        # Restore persisted scope from session
+        _saved_scope = self._settings.value("myLibrary/search_corpus_scope", "all", type=str)
+        _scope_idx = self.corpus_scope_combo.findData(_saved_scope)
+        if _scope_idx >= 0:
+            self.corpus_scope_combo.setCurrentIndex(_scope_idx)
+        self.corpus_scope_combo.currentIndexChanged.connect(self._on_corpus_scope_changed)
+        row1.addWidget(self.corpus_scope_combo)
+
         # "New" button to reset/clear search state
         self.btn_reset_search = QPushButton(tr("New"))
         self.btn_reset_search.setToolTip(tr("Clear and start a new search"))
@@ -16215,6 +16236,11 @@ class GenizahGUI(QMainWindow):
                 # Auto-trigger search
                 self.start_search()
 
+    def _on_corpus_scope_changed(self, _index):
+        """Phase 95 smoke-fix (item 2): persist the corpus scope selection."""
+        scope = self.corpus_scope_combo.currentData() or "all"
+        self._settings.setValue("myLibrary/search_corpus_scope", scope)
+
     def toggle_search(self):
         # PGP Tags mode — execute tag search instead of text search
         if self.mode_combo.currentIndex() == self.MODE_PGP_TAGS:
@@ -16334,7 +16360,11 @@ class GenizahGUI(QMainWindow):
             self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit)
         else:
             text_position = [None, 'start', 'end', 'line_start', 'line_end'][self.text_position_combo.currentIndex()]
-            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position)
+            # Phase 95 smoke-fix (item 2): read corpus scope from pre-search dropdown.
+            _corpus_scope = "all"
+            if hasattr(self, 'corpus_scope_combo'):
+                _corpus_scope = self.corpus_scope_combo.currentData() or "all"
+            self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope)
 
         self.search_thread.results_signal.connect(self.on_search_finished)
         self.search_thread.progress_signal.connect(self._on_search_progress)
@@ -16518,11 +16548,38 @@ class GenizahGUI(QMainWindow):
             parsed = self.meta_mgr.parse_full_id_components(res.get('raw_header', ''))
             sid = parsed['sys_id'] or meta.get('id')
 
+            # Phase 95 smoke-fix items (A): LOCAL hits use display dict for
+            # shelfmark (filename) and library (parent_folder/folder_name).
+            _is_local_hit = meta.get('source') == 'LOCAL'
+
             # Metadata Check
-            shelf, title = self.meta_mgr.get_meta_for_id(sid)
-            library_code = self.meta_mgr.get_library_for_id(sid)
-            needs_fetch = (shelf == "Unknown" and (not title))
-            if needs_fetch: ids_to_fetch.append(sid)
+            if _is_local_hit:
+                # LOCAL hits: shelfmark = filename from display dict (set by indexer).
+                # get_meta_for_id strips all non-digit chars from LOCAL sys_ids → always "Unknown".
+                shelf = meta.get('shelfmark', '') or sid
+                title = meta.get('title', '')
+                library_code = ''
+                needs_fetch = False
+                # Compute parent_folder/folder_name for Library column.
+                _local_library_display = ''
+                try:
+                    _fp = self._lookup_local_filepath(sid)
+                    if _fp:
+                        _dir = os.path.dirname(_fp)
+                        _folder = os.path.basename(_dir)
+                        _parent = os.path.basename(os.path.dirname(_dir))
+                        if _parent:
+                            _local_library_display = f"{_parent}/{_folder}"
+                        else:
+                            _local_library_display = _folder
+                except Exception:
+                    _local_library_display = ''
+            else:
+                _local_library_display = ''
+                shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                library_code = self.meta_mgr.get_library_for_id(sid)
+                needs_fetch = (shelf == "Unknown" and (not title))
+                if needs_fetch: ids_to_fetch.append(sid)
 
             # Checkbox
             item_chk = QTableWidgetItem()
@@ -16578,11 +16635,16 @@ class GenizahGUI(QMainWindow):
 
             self.results_table.setItem(row_idx, self.COL_SHELF, item_shelf)
 
-            # Library column with tooltip for full name
-            item_library = QTableWidgetItem(library_code if library_code else "")
-            if library_code:
-                full_library_name = get_library_display(library_code, short=False)
-                item_library.setToolTip(full_library_name)
+            # Library column: LOCAL hits show parent_folder/folder_name (smoke-fix A).
+            if _is_local_hit:
+                item_library = QTableWidgetItem(_local_library_display)
+                if _local_library_display:
+                    item_library.setToolTip(_local_library_display)
+            else:
+                item_library = QTableWidgetItem(library_code if library_code else "")
+                if library_code:
+                    full_library_name = get_library_display(library_code, short=False)
+                    item_library.setToolTip(full_library_name)
             self.results_table.setItem(row_idx, self.COL_LIBRARY, item_library)
 
             self.results_table.setItem(row_idx, self.COL_TITLE, item_title)
@@ -18139,16 +18201,12 @@ class GenizahGUI(QMainWindow):
         if row >= len(sorted_results):
             row = 0
         res = sorted_results[row]
-        # Phase 95 D-27 — LOCAL hits open Browse panel text-only instead of ResultDialog.
-        try:
-            from shared.local_sys_id import is_local_sys_id as _is_local
-            sid = (res.get('display', {}) or {}).get('id') if isinstance(res, dict) else None
-            if sid and _is_local(sid):
-                self._open_local_browse(sid, res)
-                # Restore image pane for Genizah hits when user later clicks a non-LOCAL row
-                return
-        except Exception:
-            pass
+        # Phase 95 smoke-fix (E): LOCAL double-click → ResultDialog (shows text).
+        # The Browse panel path was removed because Browse does not render file text
+        # correctly for LOCAL hits. ResultDialog already renders full_text which is
+        # populated for LOCAL hits by _build_local_result_dict. The "Open file"
+        # button is injected into ResultDialog by _inject_open_file_btn_into_rd()
+        # so the user can still launch the source file from there.
         ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
 
     def show_full_text_for_result(self, res):
