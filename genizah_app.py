@@ -2868,6 +2868,8 @@ class GenizahGUI(QMainWindow):
         self._local_filter_state_composition = 'all'
         self._local_filter_state_parallels = 'all'
         self._local_filter_inactive_chip_visible = False
+        # Phase 95-08 smoke-fix — corpus scope selector persistence (session JSON, not QSettings)
+        self._search_corpus_scope = 'all'             # 'all' | 'genizah' | 'local'
         self._comp_results_from_parallels = False      # track source surface for comp_tree
         self._domain_worker = None
         self._pgp_tags_worker = None
@@ -5582,8 +5584,8 @@ class GenizahGUI(QMainWindow):
             self.corpus_scope_combo.addItem("Local", "local")
         self.corpus_scope_combo.setToolTip(tr("Select which corpus to search"))
         self.corpus_scope_combo.setFixedWidth(90)
-        # Restore persisted scope from session
-        _saved_scope = self._settings.value("myLibrary/search_corpus_scope", "all", type=str)
+        # Restore persisted scope from session JSON (set by _restore_session or _on_corpus_scope_changed)
+        _saved_scope = getattr(self, '_search_corpus_scope', 'all')
         _scope_idx = self.corpus_scope_combo.findData(_saved_scope)
         if _scope_idx >= 0:
             self.corpus_scope_combo.setCurrentIndex(_scope_idx)
@@ -16237,9 +16239,10 @@ class GenizahGUI(QMainWindow):
                 self.start_search()
 
     def _on_corpus_scope_changed(self, _index):
-        """Phase 95 smoke-fix (item 2): persist the corpus scope selection."""
+        """Phase 95 smoke-fix (item 2): persist the corpus scope selection via session JSON."""
         scope = self.corpus_scope_combo.currentData() or "all"
-        self._settings.setValue("myLibrary/search_corpus_scope", scope)
+        self._search_corpus_scope = scope
+        self._schedule_session_save()
 
     def toggle_search(self):
         # PGP Tags mode — execute tag search instead of text search
@@ -23410,6 +23413,7 @@ class GenizahGUI(QMainWindow):
                     'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
                     'printed_filter': getattr(self, '_printed_filter_state', 'all'),
                     'local_filter': getattr(self, '_local_filter_state_search', 'all'),
+                    'search_corpus_scope': getattr(self, '_search_corpus_scope', 'all'),
                     'printed_ids': sorted(getattr(self, '_printed_sys_ids', set())),
                     'excluded_sys_ids': sorted(getattr(self, 'excluded_sys_ids', set())),
                     'excluded_shelfmarks': sorted(getattr(self, 'excluded_shelfmarks', set())),
@@ -23561,6 +23565,14 @@ class GenizahGUI(QMainWindow):
             # Phase 95 D-39 — restore LOCAL filter state per surface.
             self._local_filter_state_search = reg.get('local_filter', 'all')
             self._update_local_filter_btn_search()
+            # Phase 95-08 smoke-fix — restore corpus scope selector.
+            self._search_corpus_scope = reg.get('search_corpus_scope', 'all')
+            if hasattr(self, 'corpus_scope_combo'):
+                _idx = self.corpus_scope_combo.findData(self._search_corpus_scope)
+                if _idx >= 0:
+                    self.corpus_scope_combo.blockSignals(True)
+                    self.corpus_scope_combo.setCurrentIndex(_idx)
+                    self.corpus_scope_combo.blockSignals(False)
             self._printed_sys_ids = set(reg.get('printed_ids', []))
             self.excluded_sys_ids = set(reg.get('excluded_sys_ids', []))
             self.excluded_shelfmarks = set(reg.get('excluded_shelfmarks', []))
