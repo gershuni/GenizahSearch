@@ -6473,6 +6473,172 @@ class SearchEngine:
         self._fl_id_index_lock = threading.Lock()
         self.reload_index()
         self.start_fl_id_index_build()
+        # Phase 95 — open LOCAL side-index alongside main (D-14 + D-37 fallback).
+        self.local_index = None       # tantivy.Index for LOCAL side-index
+        self.local_searcher = None    # tantivy.Searcher snapshot
+        self.local_lab_searcher = None
+        self._lab_local_meta = None
+        self._open_local_searcher()
+
+    def _open_local_searcher(self) -> None:
+        """Open the LOCAL Tantivy side-index with D-37 corrupt/missing fallback.
+
+        Sets self.local_index + self.local_searcher (both None on any open
+        failure — D-37).  Called at __init__ and by reload_local_indexes().
+        """
+        self.local_index = None
+        self.local_searcher = None
+        try:
+            if os.path.isdir(Config.LOCAL_INDEX_DIR):
+                from shared.local_indexer import build_local_schema
+                schema = build_local_schema()
+                local_index = tantivy.Index(schema, path=Config.LOCAL_INDEX_DIR)
+                self.local_index = local_index
+                self.local_searcher = local_index.searcher()
+                LOGGER.info("LOCAL side-index opened: %s", Config.LOCAL_INDEX_DIR)
+            else:
+                LOGGER.info(
+                    "LOCAL side-index dir not present (no scan yet?): %s",
+                    Config.LOCAL_INDEX_DIR,
+                )
+        except Exception as e:
+            # D-37 — fall back to Genizah-only; surface in UI via banner (Plan 07).
+            LOGGER.warning(
+                "LOCAL index unavailable, main search continues without LOCAL hits: %r", e
+            )
+            self.local_index = None
+            self.local_searcher = None
+
+    def reload_local_indexes(self) -> None:
+        """HIGH-1 review fix: reopen LOCAL Tantivy searchers (main + LAB) so newly
+        committed docs become visible in the live session.
+
+        Called by MyLibraryTab (Plan 07) AFTER every refresh / delete / rebuild /
+        recovery commit. Idempotent + defensive: on any open failure, the searcher
+        falls back to None (D-37 semantics).
+        """
+        self._open_local_searcher()
+        self.reload_local_lab_index()
+
+    def reload_local_lab_index(self) -> None:
+        """HIGH-1 review fix (LAB-only narrow reload). Reopens self.local_lab_searcher
+        and re-reads the .meta.json staleness sentinel.
+
+        Plan 06 (LAB plan) also touches this method; coordinate via co-edit.
+        """
+        self.local_lab_searcher = None
+        self._lab_local_meta = None
+        try:
+            if os.path.isdir(Config.LOCAL_LAB_INDEX_DIR):
+                from shared.local_indexer import build_local_lab_schema
+                schema = build_local_lab_schema()
+                local_lab_index = tantivy.Index(schema, path=Config.LOCAL_LAB_INDEX_DIR)
+                self.local_lab_searcher = local_lab_index.searcher()
+                LOGGER.info(
+                    "HIGH-1 reload: LOCAL LAB side-index reopened: %s",
+                    Config.LOCAL_LAB_INDEX_DIR,
+                )
+            else:
+                LOGGER.info(
+                    "HIGH-1 reload: LOCAL LAB side-index dir absent; searcher=None"
+                )
+        except Exception as e:
+            LOGGER.warning(
+                "HIGH-1 reload: LOCAL LAB side-index unavailable: %r", e
+            )
+            self.local_lab_searcher = None
+            self._lab_local_meta = None
+
+    def _query_local_index(self, query_str: str, mode: str, gap: int, limit=None):
+        """Query the LOCAL side-index. Returns [] if local_searcher is None (D-37).
+
+        MEDIUM-1 note: this uses a simplified parse_query (not the full Responsa
+        expansion pipeline used by the main searcher). The divergence is documented
+        as a deferred follow-up — see plan 95-05 <deferred> block.
+        """
+        if self.local_searcher is None or self.local_index is None:
+            return []
+        try:
+            # Use self.local_index (kept alongside local_searcher) for parse_query.
+            # tantivy.Searcher has no .index attribute — Index must be stored separately.
+            # MEDIUM-1 deferred: full query builder (variants/Responsa) not extracted yet.
+            tantivy_q = self.local_index.parse_query(
+                query_str, ["content", "content_head", "content_tail"]
+            )
+            search_limit = limit or Config.SEARCH_LIMIT
+            res_obj = self.local_searcher.search(tantivy_q, search_limit)
+            hits = res_obj.hits if hasattr(res_obj, "hits") else res_obj
+            results = []
+            for score, doc_address in hits:
+                doc = self.local_searcher.doc(doc_address)
+                results.append(self._build_local_result_dict(doc, score))
+            return results
+        except Exception as e:
+            LOGGER.warning("LOCAL index query failed: %r", e)
+            return []
+
+    def _build_local_result_dict(self, doc, score) -> dict:
+        """Construct a result row from a LOCAL Tantivy doc per D-34 shape."""
+        unique_id = doc.get_first("unique_id") or ""
+        full_header = doc.get_first("full_header") or ""
+        content = doc.get_first("content") or ""
+        shelfmark = doc.get_first("shelfmark") or ""
+        # Parse sys_id + p_num from full_header (format: {sys_id}_LOCAL_P{page}_F{file_id})
+        sys_id = ""
+        p_num = "1"
+        if full_header:
+            parts = full_header.split("_LOCAL_P")
+            if len(parts) == 2:
+                sys_id = parts[0]
+                # p_num is before the _F suffix
+                p_part = parts[1].split("_F")[0]
+                p_num = p_part
+        snippet = content[:200] if content else ""
+        return {
+            "uid": unique_id,
+            "full_text": content,
+            "snippet": snippet,
+            "sys_id": sys_id,
+            "p_num": p_num,
+            "score": float(score),
+            "display": {
+                "id": sys_id,
+                "source": "LOCAL",
+                "library_code": "LOCAL",
+                "shelfmark": shelfmark,
+            },
+            "full_header": full_header,
+        }
+
+    def _rrf_merge(self, genizah_hits, local_hits, k: int = 60, limit=None):
+        """Reciprocal Rank Fusion merger (D-08 Codex P0). BM25 scores from two
+        independent indexes are NOT comparable; RRF fuses by rank (Cormack/Clarke 2009).
+
+        Tie-break: Genizah first when LOCAL and Genizah hits have identical scores.
+        The tie-break is content-driven (display.source != 'LOCAL' → Genizah) so it
+        is ORDER-INDEPENDENT — passing (local, genizah) vs (genizah, local) gives the
+        same result (W7 requirement).
+        """
+        rrf: dict = {}
+        for rank, hit in enumerate(genizah_hits, start=1):
+            uid = hit["uid"]
+            rrf.setdefault(uid, {"hit": hit, "score": 0.0})
+            rrf[uid]["score"] += 1.0 / (k + rank)
+        for rank, hit in enumerate(local_hits, start=1):
+            uid = hit["uid"]
+            rrf.setdefault(uid, {"hit": hit, "score": 0.0})
+            rrf[uid]["score"] += 1.0 / (k + rank)
+        # Tie-break: Genizah (non-LOCAL) first at equal score.
+        # display.source == 'LOCAL' → local (lower priority on tie).
+        # Any other source (V0.8, V0.7) → Genizah (higher priority on tie).
+        # True > False → non-LOCAL sorts higher at equal score (reverse=True).
+        fused = sorted(
+            rrf.values(),
+            key=lambda r: (r["score"], r["hit"].get("display", {}).get("source") != "LOCAL"),
+            reverse=True,
+        )
+        out = [r["hit"] for r in fused]
+        return out[:limit] if limit else out
 
     # ------------------------------------------------------------------
     #  FL ID Index (background build for O(1) browse-by-FL lookup)
@@ -7877,6 +8043,22 @@ class SearchEngine:
 
         LOGGER.debug(f"Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}, interrupted: {was_interrupted}")
         deduped = self._deduplicate(results)
+
+        # Phase 95 D-08 (Codex P0): LOCAL hits merge AFTER _deduplicate.
+        # The dedup body at _deduplicate() whitelists V0.8/V0.7 only and would
+        # otherwise DROP LOCAL hits. RRF k=60 used (BM25 IDF from two independent
+        # indexes is not comparable; raw score sort would mis-rank — Codex revision).
+        if getattr(self, "local_searcher", None) is not None:
+            try:
+                local_hits = self._query_local_index(query_str, mode, gap)
+            except Exception as _e:
+                LOGGER.warning(
+                    "LOCAL side-index query failed; main results unaffected: %r", _e
+                )
+                local_hits = []
+            if local_hits:
+                deduped = self._rrf_merge(deduped, local_hits, k=60)
+        # End Phase 95 D-08 LOCAL merge.
 
         # --- Apply Exclusion Filter (NOT Filter) ---
         if exclude_words and deduped:
