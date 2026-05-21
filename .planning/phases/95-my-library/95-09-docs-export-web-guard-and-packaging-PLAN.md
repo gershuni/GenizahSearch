@@ -26,7 +26,8 @@ must_haves:
     - "shared/export_dossier.py row builders accept skip_local: bool kwarg; web sets True, desktop sets False (D-45)"
     - "Desktop xlsx export INCLUDES LOCAL rows; web xlsx export EXCLUDES LOCAL rows (D-45)"
     - "Web library-options builders filter out 'LOCAL' (D-30 web side); pinned via static AST guard (D-46)"
-    - "PyInstaller packaging smoke test passes when run against dist/GenizahSearchPro.exe (D-43 gated @pytest.mark.packaging)"
+    - "HIGH-5 review fix: PyInstaller packaging smoke ACTUALLY EXECUTES `dist/GenizahSearchPro.exe --self-test-pymupdf` via subprocess and asserts exit code 0 + `PYMUPDF_OK` marker on stdout. The previous smoke only imported `fitz` in the venv and inspected the .spec text — it could NOT catch the `fitz._fitz` packaged-binary failure D-43 is designed to catch."
+    - "HIGH-5 review fix: `genizah_app.py` accepts a new `--self-test-pymupdf` CLI flag that imports fitz, opens `tests/fixtures/local_indexer/hebrew_sample.pdf`, extracts one page via `get_text('blocks')`, prints `PYMUPDF_OK` (or `PYMUPDF_FAIL: <reason>`) to stdout, and exits 0 (success) or 1 (failure) WITHOUT launching the Qt event loop or any GUI."
     - "OPEN_ISSUES.md, CHANGELOG.md, CLAUDE.md updated with Phase 95 entries"
   artifacts:
     - path: "web/pages/help.py"
@@ -68,8 +69,12 @@ Close out Phase 95 with documentation, defense-in-depth web guards, export path 
 - Any web library-filter dropdown that iterates `LIBRARY_CODES` must filter out `'LOCAL'`. Apply to `web/pages/search.py` + `web/pages/browse.py` consumers.
 - Static AST guard `tests/test_web_library_options_no_local.py` scans every `.py` under `web/pages/` for `LIBRARY_CODES` iteration without LOCAL filter.
 
-**(D) Packaging smoke (D-43):**
-- `tests/test_local_pyinstaller_smoke.py` runs against `dist/GenizahSearchPro.exe`: imports `fitz`, opens a Hebrew PDF, asserts text returned. Gated `@pytest.mark.packaging` — runs in release CI only.
+**(D) Packaging smoke (D-43 + HIGH-5 review fix):**
+- **HIGH-5 review fix:** add `--self-test-pymupdf` CLI flag to `genizah_app.py` that runs a minimal PyMuPDF Hebrew-PDF self-test WITHOUT launching the Qt event loop, prints `PYMUPDF_OK` (or `PYMUPDF_FAIL: <reason>`) to stdout, and exits 0 (success) or 1 (failure).
+- `tests/test_local_pyinstaller_smoke.py` shipped with TWO tiers:
+  - Tier 1 (always-on, no EXE required): venv-side `import fitz` + Hebrew extraction smoke (the pre-HIGH-5 behavior). This is the development-time signal.
+  - Tier 2 (HIGH-5 review fix — release-gated, EXE required): subprocess-invokes `dist/GenizahSearchPro.exe --self-test-pymupdf`, asserts `returncode == 0` AND `b"PYMUPDF_OK"` in stdout. This is the deployment-time signal — only this tier catches `fitz._fitz` packaged-binary failure that D-43 was designed to prevent.
+- Both tiers gated `@pytest.mark.packaging` — runs in release CI only.
 
 Plus: project bookkeeping per CLAUDE.md (OPEN_ISSUES.md + CHANGELOG.md + CLAUDE.md "Recently Changed").
 
@@ -414,7 +419,7 @@ D-43 packaging smoke fixture:
 </task>
 
 <task type="auto">
-  <name>Task 4: PyInstaller packaging smoke test (D-43 — gated @pytest.mark.packaging)</name>
+  <name>Task 4: PyInstaller packaging smoke — `--self-test-pymupdf` CLI flag + Tier-1 venv smoke + Tier-2 packaged-EXE subprocess smoke (D-43 + HIGH-5 review fix; gated @pytest.mark.packaging)</name>
   <read_first>
     - GenizahSearchPro.spec (already updated in Plan 01 Task 3)
     - tests/fixtures/local_indexer/hebrew_sample.pdf (Plan 01 Task 1)
@@ -422,7 +427,69 @@ D-43 packaging smoke fixture:
     - .planning/phases/95-my-library/95-PATTERNS.md ("Tests with no analog" — D-43 packaging smoke)
   </read_first>
   <action>
-    Replace the Wave-0 stub in `tests/test_local_pyinstaller_smoke.py` with the real test:
+    **HIGH-5 review fix — wire `--self-test-pymupdf` into `genizah_app.py` FIRST, then write the test.**
+
+    **Step 1 — Add the CLI flag to `genizah_app.py`.** Locate the existing `if __name__ == "__main__":` block (or whatever entry point starts the Qt application). BEFORE it constructs `QApplication`, parse `sys.argv` for the new flag:
+
+    ```python
+    # Phase 95 HIGH-5 review fix — PyInstaller packaging self-test.
+    # Runs without Qt event loop so packaged EXE can be tested headlessly.
+    if "--self-test-pymupdf" in sys.argv:
+        import sys as _sys
+        import pathlib as _pathlib
+        try:
+            import fitz  # PyMuPDF — D-43 dependency
+        except Exception as e:
+            print(f"PYMUPDF_FAIL: import failed: {e}", file=_sys.stderr)
+            _sys.exit(1)
+        # Try the fixture; if absent, fall back to a synthetic one-page PDF.
+        fixture_path = _pathlib.Path(__file__).parent / "tests" / "fixtures" / "local_indexer" / "hebrew_sample.pdf"
+        if not fixture_path.exists():
+            print("PYMUPDF_FAIL: fixture missing (tests/fixtures/local_indexer/hebrew_sample.pdf)", file=_sys.stderr)
+            _sys.exit(1)
+        try:
+            doc = fitz.open(str(fixture_path))
+            if doc.page_count < 1:
+                print("PYMUPDF_FAIL: fixture has 0 pages", file=_sys.stderr)
+                _sys.exit(1)
+            page = doc[0]
+            blocks = page.get_text("blocks")
+            text_parts = [b[4].strip() for b in blocks if len(b) >= 7 and b[6] == 0 and b[4].strip()]
+            text = "\n\n".join(text_parts)
+            doc.close()
+            if not text:
+                print("PYMUPDF_FAIL: extracted text is empty", file=_sys.stderr)
+                _sys.exit(1)
+            print("PYMUPDF_OK")
+            _sys.exit(0)
+        except Exception as e:
+            print(f"PYMUPDF_FAIL: extraction raised: {e!r}", file=_sys.stderr)
+            _sys.exit(1)
+    ```
+
+    The flag MUST be checked BEFORE `QApplication([])` is constructed (or any Qt import that does GUI side effects). This keeps the self-test headless.
+
+    For the PyInstaller bundle, the fixture path resolution needs to handle frozen execution. PyInstaller sets `sys._MEIPASS` to the extracted bundle root. Adjust the fixture lookup:
+
+    ```python
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        # Packaged EXE — fixture lives next to the executable under tests/fixtures/...
+        # The fixture is included via .spec datas entry (Step 2 below).
+        base = _pathlib.Path(sys._MEIPASS)
+    else:
+        base = _pathlib.Path(__file__).parent
+    fixture_path = base / "tests" / "fixtures" / "local_indexer" / "hebrew_sample.pdf"
+    ```
+
+    **Step 2 — Update `GenizahSearchPro.spec` to ship the fixture.** Add to the `datas` list:
+
+    ```python
+    datas += [('tests/fixtures/local_indexer/hebrew_sample.pdf', 'tests/fixtures/local_indexer')]
+    ```
+
+    (Adds ~50-200 KB to the EXE — acceptable cost for a deployment-correctness signal.)
+
+    **Step 3 — Replace the Wave-0 stub in `tests/test_local_pyinstaller_smoke.py` with BOTH tiers (Tier 1 venv-side + Tier 2 packaged-EXE subprocess):**
 
     ```python
     # -*- coding: utf-8 -*-
@@ -499,6 +566,48 @@ D-43 packaging smoke fixture:
         content = spec_path.read_text(encoding="utf-8")
         assert "collect_all('pymupdf')" in content or 'collect_all("pymupdf")' in content, \\
             "GenizahSearchPro.spec missing collect_all('pymupdf') call — D-43 regression"
+
+
+    def test_packaged_exe_self_test_pymupdf_subprocess():
+        """HIGH-5 review fix — Tier 2 packaged-EXE smoke.
+
+        Subprocess-invokes `dist/GenizahSearchPro.exe --self-test-pymupdf` and asserts:
+          (a) returncode == 0
+          (b) `b"PYMUPDF_OK"` in stdout
+
+        Without this test, packaged-EXE `fitz._fitz` binary collection failure would
+        slip through (the Tier 1 venv-side test only covers the venv-side fitz import,
+        not the PyInstaller-bundled binary). This is the actual deployment correctness
+        signal that D-43 was designed to surface.
+        """
+        import subprocess
+        repo_root = pathlib.Path(__file__).parent.parent
+        exe_path = repo_root / "dist" / "GenizahSearchPro.exe"
+        if not exe_path.exists():
+            pytest.skip(f"Packaged EXE not built at {exe_path} — release-CI only test")
+
+        # Use a timeout so a hanging launch (e.g., Qt accidentally constructing a
+        # window) does not block the test runner forever.
+        try:
+            result = subprocess.run(
+                [str(exe_path), "--self-test-pymupdf"],
+                capture_output=True,
+                timeout=30,
+            )
+        except subprocess.TimeoutExpired:
+            pytest.fail(
+                "HIGH-5: dist/GenizahSearchPro.exe --self-test-pymupdf timed out after 30s — "
+                "likely the CLI flag was not honored before Qt event loop started"
+            )
+
+        assert result.returncode == 0, (
+            f"HIGH-5: packaged-EXE self-test returned {result.returncode}. "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert b"PYMUPDF_OK" in result.stdout, (
+            f"HIGH-5: packaged-EXE self-test did not print PYMUPDF_OK marker. "
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
     ```
 
     Also ensure pytest configuration recognizes the `packaging` mark. In `pyproject.toml` (or `pytest.ini`), verify `packaging` is in `markers`:
@@ -516,6 +625,12 @@ D-43 packaging smoke fixture:
     <automated>python -m pytest -m packaging tests/test_local_pyinstaller_smoke.py -x -q</automated>
   </verify>
   <acceptance_criteria>
+    - HIGH-5 review fix — `genizah_app.py` accepts `--self-test-pymupdf`: `grep -c "self-test-pymupdf" genizah_app.py` returns ≥ 1.
+    - HIGH-5 review fix — the flag handler exits BEFORE Qt construction: read genizah_app.py and confirm `if "--self-test-pymupdf" in sys.argv:` appears BEFORE `QApplication(` in source order. Static check: `python -c "src=open('genizah_app.py',encoding='utf-8').read(); flag_idx=src.find('--self-test-pymupdf'); qapp_idx=src.find('QApplication('); assert flag_idx > 0 and flag_idx < qapp_idx, 'HIGH-5: self-test flag must be parsed BEFORE QApplication construction'"` exits 0.
+    - HIGH-5 review fix — `GenizahSearchPro.spec` ships the Hebrew fixture: `grep -c "hebrew_sample.pdf" GenizahSearchPro.spec` returns ≥ 1.
+    - HIGH-5 review fix — Tier 2 subprocess test shipped: `grep -c "def test_packaged_exe_self_test_pymupdf_subprocess" tests/test_local_pyinstaller_smoke.py` returns 1.
+    - HIGH-5 review fix — Tier 2 asserts the EXE behavior: `grep -c "PYMUPDF_OK" tests/test_local_pyinstaller_smoke.py` returns ≥ 1.
+    - HIGH-5 review fix — when run with a pre-built EXE present, the subprocess test passes: `python -m pytest -m packaging tests/test_local_pyinstaller_smoke.py::test_packaged_exe_self_test_pymupdf_subprocess -x -q` exits 0 (or SKIPs cleanly with "Packaged EXE not built" if dist/ is absent — both are acceptable; release CI MUST have the EXE built and the test MUST pass).
     - `python -m pytest -m packaging tests/test_local_pyinstaller_smoke.py -x -q` exits 0 (PASS or SKIP for fixture-deferred case).
     - `python -m pytest tests/ -q` does NOT run the packaging tests by default (verify via grep that `@pytest.mark.packaging` properly excludes them — `python -m pytest tests/ --collect-only 2>&amp;1 | grep test_local_pyinstaller_smoke | head -3` should show them but they should not execute under default `pytest tests/`).
     - `pyproject.toml` markers list includes `"packaging"` (or pytest does not warn about unknown marker).
@@ -569,6 +684,8 @@ D-43 packaging smoke fixture:
        ```
 
     4. Do NOT bump version yet — version bump happens at release time per CLAUDE.md `python scripts/bump_version.py X.Y.Z`. Phase 95 closes the v7.14 milestone but the release commit is a separate action.
+
+    5. **LOW-1 review fix — flip `wave_0_complete: false` → `wave_0_complete: true` in `.planning/phases/95-my-library/95-VALIDATION.md`.** Plan 01 Task 7 deferred this flag flip until downstream waves had picked up the 26 stubs. By the time Plan 09 closes out, all stubs have been turned GREEN (Plans 02-08 + this plan). Verify: `python -m pytest tests/test_local_*.py tests/test_my_library_tab.py tests/test_canonical_filepath.py tests/test_folder_overlap_detection.py tests/test_web_library_options_no_local.py tests/test_export_dossier_local_handling.py tests/test_side_index_merge.py -q` exits 0 with no SKIP / NotImplementedError patterns matching "Wave 0 placeholder". Only then edit the VALIDATION.md frontmatter line. If any stub is still unflipped, halt the closeout: open a `<deferred>` block in this plan documenting which stubs remain and why.
   </action>
   <verify>
     <automated>python -c "import sys; ok=True
@@ -584,6 +701,8 @@ sys.exit(0 if ok else 1)"</automated>
     - CHANGELOG.md has an Unreleased or v7.14 section with the Phase 95 entry.
     - CLAUDE.md "Recently Changed" has a Phase 95 line at the top.
     - DO NOT modify version.py / version_info.txt / .iss / README.md version line — version bump is a separate release-time action per CLAUDE.md.
+    - LOW-1 review fix — `.planning/phases/95-my-library/95-VALIDATION.md` frontmatter now has `wave_0_complete: true` (verifies LOW-1 deferred flip from Plan 01 Task 7 has been completed at closeout).
+    - LOW-1 review fix — confirmation that ALL 26 Wave-0 stubs have been picked up (no SKIP / NotImplementedError matching "Wave 0 placeholder" remains): `python -m pytest tests/test_local_*.py tests/test_my_library_tab.py tests/test_canonical_filepath.py tests/test_folder_overlap_detection.py tests/test_web_library_options_no_local.py tests/test_export_dossier_local_handling.py tests/test_side_index_merge.py -q 2>&amp;1 | grep -c "Wave 0 placeholder"` returns 0.
   </acceptance_criteria>
   <done>3 docs files updated; no version bump (release-time concern).</done>
 </task>

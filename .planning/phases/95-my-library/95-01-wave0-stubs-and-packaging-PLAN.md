@@ -46,11 +46,12 @@ autonomous: false
 requirements: [REQ-1, REQ-2, REQ-3, REQ-4, REQ-5, REQ-6, REQ-7, REQ-8, REQ-9, REQ-10]
 must_haves:
   truths:
-    - "26 red-stub test files exist and are collectable by pytest"
+    - "26 skipped-placeholder stub test files exist and are collectable by pytest (LOW-1 review fix — terminology: 'skipped-placeholder' replaces 'red-stub'; these are NOT true TDD-red failing assertions, they are downstream-pickup placeholders)"
     - "pymupdf>=1.24,<2.0 is in requirements.txt"
     - "GenizahSearchPro.spec collects pymupdf binaries via collect_all('pymupdf')"
     - "Hebrew PDF fixture + expected.txt committed for D-44 quality test"
-    - "All Wave-0 stubs fail with NotImplementedError or skip (red) — no false greens"
+    - "Every Wave-0 stub either raises NotImplementedError OR is an explicit pytest.skip/xfail carrying a tracking reference to the implementing plan (LOW-1 review fix)"
+    - "wave_0_complete is set to true ONLY after downstream waves (02-09) demonstrate they have picked up these stubs (LOW-1 review fix — the flag is no longer flipped immediately at Wave-0 commit time; see Task 7)"
   artifacts:
     - path: "tests/test_local_sys_id_namespace.py"
       provides: "Wave-0 red stub for REQ-2 namespace"
@@ -379,7 +380,7 @@ tantivy==0.25.1
 </task>
 
 <task type="auto">
-  <name>Task 6: Create 26 red-stub test files (Wave 0 contract)</name>
+  <name>Task 6: Create 26 skipped-placeholder stub test files (Wave 0 contract — LOW-1 review fix: terminology clarified)</name>
   <read_first>
     - .planning/phases/95-my-library/95-VALIDATION.md (Wave 0 Requirements — list of 26 stub files)
     - tests/test_synthetic_sys_id.py (template for sys_id tests)
@@ -387,10 +388,11 @@ tantivy==0.25.1
     - .planning/phases/95-my-library/95-PATTERNS.md ("Per-Test Pattern Assignments" section)
   </read_first>
   <action>
-    Create 26 test files, each containing AT LEAST ONE failing/skipped stub test that:
+    Create 26 test files, each containing AT LEAST ONE explicit placeholder stub (LOW-1 review fix: these are placeholders, NOT TDD-red failing assertions) that:
     - Imports the target module IF it exists (else uses `pytest.importorskip(...)` so collection succeeds);
-    - Has a `pytest.skip("Wave 0 stub — implemented in Wave N")` or `raise NotImplementedError(...)` body;
-    - Is collectable by `pytest --collect-only` (no syntax errors).
+    - Has a `pytest.skip("Wave 0 placeholder — implemented in Wave N plan NN")` or `raise NotImplementedError("Wave 0 placeholder — implemented in Wave N plan NN")` body;
+    - Is collectable by `pytest --collect-only` (no syntax errors);
+    - Carries a TRACKING REFERENCE to the implementing plan in its skip/NotImplementedError message (the verifier uses this to confirm Wave-1+ replaced the stub with a real assertion).
 
     Files to create (exact paths from VALIDATION.md):
 
@@ -459,12 +461,18 @@ tantivy==0.25.1
 </task>
 
 <task type="auto">
-  <name>Task 7: Mark VALIDATION.md nyquist_compliant: true</name>
+  <name>Task 7: Mark VALIDATION.md nyquist_compliant: true (LOW-1 review fix: wave_0_complete is NOT flipped here)</name>
   <read_first>
-    - .planning/phases/95-my-library/95-VALIDATION.md (current frontmatter has `nyquist_compliant: false`)
+    - .planning/phases/95-my-library/95-VALIDATION.md (current frontmatter has `nyquist_compliant: false` AND `wave_0_complete: false`)
   </read_first>
   <action>
-    Edit `.planning/phases/95-my-library/95-VALIDATION.md` frontmatter line `nyquist_compliant: false` → `nyquist_compliant: true` AND `wave_0_complete: false` → `wave_0_complete: true`.
+    **LOW-1 review fix — flag flip split into two steps:**
+
+    Step A (THIS task): Flip ONLY `nyquist_compliant: false` → `nyquist_compliant: true`. This is correct at Wave-0 commit time — Nyquist compliance is about the verification *infrastructure* (26 stubs collectable, fixtures in place, pinned packaging spec), not about whether the stubs have been picked up.
+
+    Step B (DEFERRED to Plan 09 closeout): Flip `wave_0_complete: false` → `wave_0_complete: true` ONLY after Plan 09 (the final closeout plan) confirms ALL 26 stubs have been picked up by Waves 1-3 and turned GREEN. Plan 09 Task 5 (project bookkeeping) is the natural place to flip this flag.
+
+    Edit `.planning/phases/95-my-library/95-VALIDATION.md` frontmatter line `nyquist_compliant: false` → `nyquist_compliant: true`. Leave `wave_0_complete: false` UNCHANGED (Plan 09 flips it).
 
     Also update the per-task verification map: the planner has now mapped TBD-01..TBD-26 to concrete plan numbers (02-08). Update the `Plan` column of the per-task map with the correct plan IDs:
     - TBD-01 (REQ-1 PyMuPDF Hebrew) → Plan 03 Wave 1
@@ -503,14 +511,15 @@ tantivy==0.25.1
     - [x] `nyquist_compliant: true` set in frontmatter
   </action>
   <verify>
-    <automated>python -c "import re; s=open('.planning/phases/95-my-library/95-VALIDATION.md',encoding='utf-8').read(); assert 'nyquist_compliant: true' in s; assert 'wave_0_complete: true' in s; print('OK')"</automated>
+    <automated>python -c "import re; s=open('.planning/phases/95-my-library/95-VALIDATION.md',encoding='utf-8').read(); assert 'nyquist_compliant: true' in s; assert 'wave_0_complete: false' in s, 'LOW-1: wave_0_complete must remain false at Wave-0; Plan 09 closeout flips it'; print('OK')"</automated>
   </verify>
   <acceptance_criteria>
-    - VALIDATION.md frontmatter has `nyquist_compliant: true` AND `wave_0_complete: true`.
+    - VALIDATION.md frontmatter has `nyquist_compliant: true` (LOW-1 review fix: ONLY this flag flips at Wave-0).
+    - VALIDATION.md frontmatter still has `wave_0_complete: false` after this task (LOW-1 review fix: Plan 09 closeout flips it after stub-pickup confirmation).
     - Per-task map's `Plan` column has 02, 03, 04, 05, 06, 07, 08, or 09 (no `TBD` remaining).
     - Validation Sign-Off section has at least 4 checked boxes.
   </acceptance_criteria>
-  <done>VALIDATION.md updated to compliant state.</done>
+  <done>VALIDATION.md nyquist_compliant flipped; wave_0_complete deferred to Plan 09 per LOW-1 review fix.</done>
 </task>
 
 </tasks>
@@ -550,7 +559,7 @@ After all tasks complete:
 - Hebrew PDF fixture + expected.txt present (or D-44 xfail-deferred per user choice).
 - Conftest fixtures (`temp_local_index_dir`, `mock_supabase_client`, `local_indexer_fixtures_dir`) discoverable.
 - LOCAL sys_id fixture constants importable.
-- VALIDATION.md frontmatter `nyquist_compliant: true`, `wave_0_complete: true`.
+- VALIDATION.md frontmatter `nyquist_compliant: true`, `wave_0_complete: false at Wave-0; flipped to true by Plan 09 closeout (per LOW-1).`
 </success_criteria>
 
 <output>
