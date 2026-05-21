@@ -6657,12 +6657,32 @@ class SearchEngine:
             self._lab_local_meta = None
 
     def _current_lab_weights_hash(self) -> str:
-        """Compute hash of current LAB weights for D-38 staleness check."""
+        """Compute hash of current LAB weights for D-38 staleness check.
+
+        CR-01 FIX: ``dynamic_rank_map`` and ``settings`` are NOT defined on
+        :class:`SearchEngine` — they live on :class:`LabEngine`.  Until the
+        two classes share a registry, ``getattr`` with safe defaults is the
+        smallest correctness fix:
+
+          * On a real :class:`SearchEngine` (no LAB attrs) the function returns
+            a deterministic hash of "no weights" → never crashes.
+          * On a :class:`LabEngine` instance (or a SearchEngine that has been
+            wired to a LabEngine and forwards attribute access), the real LAB
+            weights are picked up via ``getattr`` and the hash matches what
+            ``build_lab_side_index`` writes into ``.meta.json``.
+        """
         import hashlib as _hashlib
         import json as _json
+        # CR-01: use getattr defaults so missing attrs don't raise.
+        dyn_map = getattr(self, "dynamic_rank_map", None)
+        settings = getattr(self, "settings", None)
         weights_dict = {
-            "dynamic_rank_map": self.dynamic_rank_map if self.dynamic_rank_map else None,
-            "use_dynamic_weights": getattr(self.settings, "use_dynamic_weights", False),
+            "dynamic_rank_map": dyn_map if dyn_map else None,
+            "use_dynamic_weights": (
+                getattr(settings, "use_dynamic_weights", False)
+                if settings is not None
+                else False
+            ),
         }
         return _hashlib.sha256(
             _json.dumps(weights_dict, sort_keys=True, default=str).encode("utf-8")
@@ -8493,7 +8513,18 @@ class SearchEngine:
         # Phase 95 D-09 / REQ-6: LOCAL LAB extension for search_composition_logic (I14).
         # Same pattern as lab_composition_search LOCAL LAB hook above — queries
         # local_lab_searcher with the same regex/fingerprint scoring. NOT RRF (D-09).
-        if not was_cancelled and self._check_local_lab_freshness():
+        # CR-01 FIX: wrap freshness call in try/except — D-37 fallback semantics
+        # (LOCAL LAB unavailable should NEVER break standard Composition Search).
+        try:
+            _lab_fresh = self._check_local_lab_freshness()
+        except Exception as _lab_fresh_exc:
+            LOGGER.warning(
+                "search_composition_logic: _check_local_lab_freshness raised %r — "
+                "skipping LOCAL LAB extension (D-37 fallback).",
+                _lab_fresh_exc,
+            )
+            _lab_fresh = False
+        if not was_cancelled and _lab_fresh:
             try:
                 _local_lab_index_scl = getattr(self, "_local_lab_index", None)
                 _local_lab_searcher_scl = self.local_lab_searcher

@@ -521,3 +521,61 @@ class TestLabCompositionSearchLocalLab:
         assert len(matches) == 0, (
             f"D-09: RRF must not be used for LAB scoring; found: {matches}"
         )
+
+
+# ---------------------------------------------------------------------------
+# CR-01 regression — _current_lab_weights_hash must NOT raise on real
+# SearchEngine instances (which do NOT have dynamic_rank_map / settings attrs).
+# Previously the existing tests masked the bug by hand-attaching attributes
+# via object.__new__ + manual setattr.
+# ---------------------------------------------------------------------------
+
+class TestCR01CurrentLabWeightsHashNoCrash:
+    """CR-01: _current_lab_weights_hash must use getattr defaults so it does
+    not crash on plain SearchEngine objects that lack LabEngine state."""
+
+    def test_no_attrs_does_not_raise(self):
+        """A SearchEngine without dynamic_rank_map and without settings must
+        still return a valid sha256 hex string from _current_lab_weights_hash.
+        """
+        try:
+            from genizah_core import SearchEngine
+        except ImportError:
+            pytest.skip("genizah_core not importable")
+
+        # Construct WITHOUT touching __init__; do NOT hand-attach LabEngine attrs.
+        engine = object.__new__(SearchEngine)
+        # Sanity: confirm the attributes truly don't exist (otherwise this
+        # regression test is masking the same way the original tests did).
+        assert not hasattr(engine, "dynamic_rank_map"), (
+            "Test setup invariant: dynamic_rank_map must NOT be set"
+        )
+        assert not hasattr(engine, "settings"), (
+            "Test setup invariant: settings must NOT be set"
+        )
+
+        # The method must not raise AttributeError.
+        result = engine._current_lab_weights_hash()
+        assert isinstance(result, str)
+        assert len(result) == 64, "sha256 hex digest must be 64 chars"
+
+    def test_check_freshness_no_attrs_returns_bool(self):
+        """End-to-end: _check_local_lab_freshness must not crash on bare
+        SearchEngine — even with a non-None local_lab_searcher + meta.
+        """
+        try:
+            from genizah_core import SearchEngine
+        except ImportError:
+            pytest.skip("genizah_core not importable")
+
+        engine = object.__new__(SearchEngine)
+        engine.local_lab_searcher = MagicMock()  # not None — exercises the hash path
+        engine.local_lab_searcher_stale = False
+        engine._lab_local_meta = {"weights_hash": "deadbeef" * 8, "lab_schema_version": 1}
+        # Deliberately do NOT set dynamic_rank_map / settings (CR-01 invariant).
+
+        result = engine._check_local_lab_freshness()
+        assert isinstance(result, bool)
+        # The freshness check should be False because the meta hash will not
+        # match the "no-weights" hash; but the important assertion is that
+        # the call returned cleanly without AttributeError.
