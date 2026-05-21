@@ -78,3 +78,47 @@ def _register_skill_package() -> None:
 
 
 _register_skill_package()
+
+
+# ---------------------------------------------------------------------------
+# Phase 95 (Plan 95-01 Wave 0): shared fixtures for LOCAL indexer tests.
+# Used by Wave 1-3 plans (02-08).
+# ---------------------------------------------------------------------------
+import os
+from unittest.mock import MagicMock
+
+import pytest
+
+
+@pytest.fixture
+def temp_local_index_dir(tmp_path, monkeypatch):
+    """Isolated LOCAL_INDEX_DIR + LOCAL_LAB_INDEX_DIR for indexer tests (D-14)."""
+    local = tmp_path / "LocalIndex"
+    lab = tmp_path / "LocalLabIndex"
+    local.mkdir()
+    lab.mkdir()
+    # Monkey-patch genizah_core.Config when the indexer reads it.
+    from genizah_core import Config
+    monkeypatch.setattr(Config, "LOCAL_INDEX_DIR", str(local), raising=False)
+    monkeypatch.setattr(Config, "LOCAL_LAB_INDEX_DIR", str(lab), raising=False)
+    return {"local": str(local), "lab": str(lab)}
+
+
+@pytest.fixture
+def mock_supabase_client():
+    """Mock Supabase client for cloud-write gate tests (REQ-9).
+
+    Used by test_local_namespace_no_lists_leak.py and
+    test_local_namespace_no_corrections_leak.py. Any call to
+    .table(...) or .from_(...) on this mock is RECORDED — tests assert
+    call_count == 0 when LOCAL sys_id is passed."""
+    mock = MagicMock(name="supabase_client")
+    mock.table = MagicMock(name="supabase_client.table")
+    mock.from_ = MagicMock(name="supabase_client.from_")
+    return mock
+
+
+@pytest.fixture
+def local_indexer_fixtures_dir():
+    """Path to tests/fixtures/local_indexer/."""
+    return os.path.join(os.path.dirname(__file__), "fixtures", "local_indexer")

@@ -91,33 +91,33 @@ updated: 2026-05-21
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_local_indexer.py` — stubs for REQ-1 + REQ-4 (PyMuPDF Hebrew + RTL helpers) — turns green in Plan 03
-- [ ] `tests/test_local_sys_id_namespace.py` — stubs for REQ-2 (sys_id format guarantees) — turns green in Plan 02
-- [ ] `tests/test_local_sys_id_parser_compat.py` — stubs for D-13 (parser generalization) — turns green in Plan 02
-- [ ] `tests/test_local_post_dedup_merge.py` — stubs for D-08 (post-dedup ordering) — turns green in Plan 05
-- [ ] `tests/test_side_index_merge.py` — stubs for REQ-3 (RRF merger + W7 tie-break) — turns green in Plan 05
-- [ ] `tests/test_local_lab_invalidation.py` — stubs for D-09 + D-38 — turns green in Plan 06
-- [ ] `tests/test_local_indexer_incremental.py` — stubs for REQ-5 (mtime cache) — turns green in Plan 03
-- [ ] `tests/test_local_two_phase_commit.py` — stubs for D-21 (fault-injection harness) — turns green in Plan 03
-- [ ] `tests/test_local_delete_by_uid.py` — stubs for D-20 + D-36 — turns green in Plan 03
-- [ ] `tests/test_local_indexer_mutex.py` — stubs for D-25 — turns green in Plan 07
-- [ ] `tests/test_local_index_open_fallback.py` — stubs for D-37 — turns green in Plan 05
-- [ ] `tests/test_local_unavailable_folder.py` — stubs for D-40 — turns green in Plan 07
-- [ ] `tests/test_folder_overlap_detection.py` — stubs for D-17 (Windows path normalization) — turns green in Plan 03
-- [ ] `tests/test_canonical_filepath.py` — stubs for D-42 — turns green in Plan 02
-- [ ] `tests/test_local_filter_cascade.py` — stubs for REQ-6 cascade discipline (static AST) — turns green in Plan 08
-- [ ] `tests/test_local_filter_persistence.py` — stubs for D-39 per-surface keys — turns green in Plan 08
-- [ ] `tests/test_local_namespace_no_api_leak.py` — stubs for REQ-9 /api/search — turns green in Plan 04
-- [ ] `tests/test_local_namespace_no_lists_leak.py` — stubs for REQ-9 + D-30 (Codex P0) — turns green in Plan 04
-- [ ] `tests/test_local_namespace_no_corrections_leak.py` — stubs for REQ-9 corrections — turns green in Plan 04
-- [ ] `tests/test_web_library_options_no_local.py` — stubs for D-46 (static AST) — turns green in Plan 09
-- [ ] `tests/test_export_dossier_local_handling.py` — stubs for D-45 — turns green in Plan 09
-- [ ] `tests/test_local_schema_evolution.py` — stubs for D-35 — turns green in Plan 03
-- [ ] `tests/test_local_ceiling_enforcement.py` — stubs for REQ-10 (per-folder + W8 aggregate) — turns green in Plan 07
-- [ ] `tests/test_my_library_tab.py` — stubs for REQ-7 + REQ-8 (badge + tab registration) — turns green in Plan 07 (tab) + Plan 08 (badge)
-- [ ] `tests/test_local_pyinstaller_smoke.py` — stubs for D-43 (gated `@pytest.mark.packaging`) — turns green in Plan 09
-- [ ] `tests/fixtures/local_indexer/hebrew_sample.pdf` + `.expected.txt` — fixture for D-44 (planner picks)
-- [ ] `tests/conftest.py` — fixtures: temp INDEX_DIR, mock Tantivy, mock Supabase client (for cloud-write gate tests)
+- [x] `tests/test_local_indexer.py` — stubs for REQ-1 + REQ-4 (PyMuPDF Hebrew + RTL helpers) — turns green in Plan 03
+- [x] `tests/test_local_sys_id_namespace.py` — stubs for REQ-2 (sys_id format guarantees) — turns green in Plan 02
+- [x] `tests/test_local_sys_id_parser_compat.py` — stubs for D-13 (parser generalization) — turns green in Plan 02
+- [x] `tests/test_local_post_dedup_merge.py` — stubs for D-08 (post-dedup ordering) — turns green in Plan 05
+- [x] `tests/test_side_index_merge.py` — stubs for REQ-3 (RRF merger + W7 tie-break) — turns green in Plan 05
+- [x] `tests/test_local_lab_invalidation.py` — stubs for D-09 + D-38 — turns green in Plan 06
+- [x] `tests/test_local_indexer_incremental.py` — stubs for REQ-5 (mtime cache) — turns green in Plan 03
+- [x] `tests/test_local_two_phase_commit.py` — stubs for D-21 (fault-injection harness) — turns green in Plan 03
+- [x] `tests/test_local_delete_by_uid.py` — stubs for D-20 + D-36 — turns green in Plan 03
+- [x] `tests/test_local_indexer_mutex.py` — stubs for D-25 — turns green in Plan 07
+- [x] `tests/test_local_index_open_fallback.py` — stubs for D-37 — turns green in Plan 05
+- [x] `tests/test_local_unavailable_folder.py` — stubs for D-40 — turns green in Plan 07
+- [x] `tests/test_folder_overlap_detection.py` — stubs for D-17 (Windows path normalization) — turns green in Plan 03
+- [x] `tests/test_canonical_filepath.py` — stubs for D-42 — turns green in Plan 02
+- [x] `tests/test_local_filter_cascade.py` — stubs for REQ-6 cascade discipline (static AST) — turns green in Plan 08
+- [x] `tests/test_local_filter_persistence.py` — stubs for D-39 per-surface keys — turns green in Plan 08
+- [x] `tests/test_local_namespace_no_api_leak.py` — stubs for REQ-9 /api/search — turns green in Plan 04
+- [x] `tests/test_local_namespace_no_lists_leak.py` — stubs for REQ-9 + D-30 (Codex P0) — turns green in Plan 04
+- [x] `tests/test_local_namespace_no_corrections_leak.py` — stubs for REQ-9 corrections — turns green in Plan 04
+- [x] `tests/test_web_library_options_no_local.py` — stubs for D-46 (static AST) — turns green in Plan 09
+- [x] `tests/test_export_dossier_local_handling.py` — stubs for D-45 — turns green in Plan 09
+- [x] `tests/test_local_schema_evolution.py` — stubs for D-35 — turns green in Plan 03
+- [x] `tests/test_local_ceiling_enforcement.py` — stubs for REQ-10 (per-folder + W8 aggregate) — turns green in Plan 07
+- [x] `tests/test_my_library_tab.py` — stubs for REQ-7 + REQ-8 (badge + tab registration) — turns green in Plan 07 (tab) + Plan 08 (badge)
+- [x] `tests/test_local_pyinstaller_smoke.py` — stubs for D-43 (gated `@pytest.mark.packaging`) — turns green in Plan 09
+- [x] `tests/fixtures/local_indexer/hebrew_sample.pdf` + `.expected.txt` — fixture for D-44 (committed 2026-05-21)
+- [x] `tests/conftest.py` — fixtures: temp INDEX_DIR, mock Tantivy, mock Supabase client (for cloud-write gate tests)
 
 *Pytest framework already installed; no install needed.*
 
@@ -148,6 +148,6 @@ updated: 2026-05-21
 - [ ] Sampling continuity: no 3 consecutive tasks without automated verify (verified during execute)
 - [ ] Feedback latency < 130s (full suite) (verified during execute)
 - [x] `nyquist_compliant: true` set in frontmatter
-- [ ] `wave_0_complete: true` — pending Plan 01 execution
+- [ ] `wave_0_complete: true` — deferred to Plan 09 closeout per LOW-1 review fix
 
 **Approval:** plan-set approved; ready for `/gsd-execute-phase 95 --wave 0` (W3 — 2026-05-21).
