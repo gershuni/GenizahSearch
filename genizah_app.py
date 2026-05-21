@@ -2450,6 +2450,9 @@ class SettingsDialog(QDialog):
             <p>The underlying dataset is licensed under the Creative Commons Attribution 4.0
             International (<a href='https://creativecommons.org/licenses/by/4.0/'>CC BY 4.0</a>) license.</p>
 
+            <h3>My Library</h3>
+            <p><em>My Library feature inspired by Yehuda Seewald's GenizahLocal prototype.</em></p>
+
             <h3>Citation</h3>
             <p style='background-color: {self._cit_bg}; border: 1px solid {self._cit_border};
                border-radius: 4px; padding: 8px; font-size: 11px;'>

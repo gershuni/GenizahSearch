@@ -485,6 +485,7 @@ def _create_hebrew_content():
                 לזכרו של מורנו ורבנו, פרופ' מנחם כהנא ז"ל.
             </p>
             <p>יוצר האתר: הלל גרשוני · <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a></p>
+            <p style="font-style: italic; font-size: 0.82rem;">תכונת הספרייה שלי בהשראת אב-טיפוס GenizahLocal של יהודה זיוואלד.</p>
         </div>
         ''')
 
@@ -674,5 +675,6 @@ def _create_english_content():
                 Dedicated to the memory of our beloved teacher, Prof. Menachem Kahana z"l.
             </p>
             <p>Site creator: Hillel Gershuni · <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a></p>
+            <p style="font-style: italic; font-size: 0.82rem;">My Library feature inspired by Yehuda Seewald's GenizahLocal prototype.</p>
         </div>
         ''')

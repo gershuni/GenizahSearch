@@ -58,6 +58,7 @@ def _create_english_content():
                 ('lists', 'Lists'),
                 ('export', 'Exporting Data'),
                 ('api', 'Public API & AI Tools'),
+                ('my-library', 'My Library — Local Documents'),
             ]
             if WEB_PUZZLE_ENABLED:
                 toc_items.insert(8, ('puzzle', 'Fragment Puzzle'))
@@ -632,6 +633,46 @@ responsum, letter, or composition, returning a tiered ranked list
 with browse text, library attribution, and image URLs.
         ''').style('color: var(--text-secondary);')
 
+    # === My Library — Local Documents (Phase 95 D-31 + D-32 + D-33) ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props('name="help-my-library"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('folder_open').classes('text-2xl text-primary')
+            h2('My Library — Local Documents', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+The **My Library** tab (desktop app only) lets you index your own `.docx`, `.pdf`,
+and `.txt` files alongside the Genizah corpus. Your personal documents appear inline
+in Search, Composition Search, and Parallels results with a `LOCAL` badge and a
+three-state filter button.
+
+**What gets indexed:** Word documents, PDFs (text-layer PDFs only — scanned PDFs
+without OCR are skipped), and plain text files. Other formats are ignored silently.
+
+**Where data lives:** `%LOCALAPPDATA%\\GenizahSearchPro\\Index\\LocalIndex\\`
+on Windows. Portable installations keep their LOCAL data with the install folder.
+
+**Privacy guarantee:** Your local documents are NEVER uploaded to
+GenizahSearch's servers. Three boundaries enforce this:
+- The `/api/search` JSON endpoint drops LOCAL items defensively.
+- The Lists cloud sync aborts entirely if any list item is LOCAL.
+- The corrections submission rejects LOCAL document IDs with a clear error.
+
+Your indexed text is stored on disk in cleartext inside the local index — it is
+never uploaded to GenizahSearch's servers. Use OS-level disk encryption
+(BitLocker / FileVault) if you need at-rest encryption.
+
+**Three-state filter:** Each result surface (Search, Composition Search, Parallels)
+has a filter button cycling All → Only Local → No Local → All. The button is hidden
+when the current result set has no LOCAL hits.
+
+**Hostname-rename caveat:** If you rename your computer's hostname, the SQLite cache
+is invalidated and the next scan re-extracts all files. This is rare; documented for
+completeness.
+
+*My Library feature inspired by Yehuda Seewald's GenizahLocal prototype.*
+        ''').style('color: var(--text-secondary);')
+
     # === Contact ===
     with ui.card().classes('w-full p-6'):
         with ui.row().classes('items-center gap-3 mb-4'):
@@ -667,6 +708,7 @@ def _create_hebrew_content():
                 ('lists', 'רשימות'),
                 ('export', 'ייצוא נתונים'),
                 ('api', 'ממשק API ציבורי וכלי AI'),
+                ('my-library', 'הספרייה שלי — מסמכים מקומיים'),
             ]
             if WEB_PUZZLE_ENABLED:
                 toc_items.insert(8, ('puzzle', 'פאזל קטעים'))
@@ -1201,6 +1243,42 @@ def _create_hebrew_content():
 **סכמת OpenAPI:** [`/api/openapi.json`](/api/openapi.json) מתעדת את המבנה המלא של ה-API.
 
 **סקיל Cairo Genizah Research ל-Claude:** [סקיל מוכן לשימוש](https://github.com/gershuni/GenizahSearch/tree/main/skills/cairo-genizah-research) המפעיל את ה-API למציאת עדי נוסח לביטוי, פיוט, תשובה, מכתב או חיבור, ומחזיר רשימה מדורגת עם טקסט מתוך עמוד העיון, ייחוס לספרייה וקישורי תמונה.
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === הספרייה שלי — מסמכים מקומיים (Phase 95 D-31 + D-32 + D-33) ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props('name="help-my-library"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('folder_open').classes('text-2xl text-primary')
+            h2('הספרייה שלי — מסמכים מקומיים', classes='text-xl font-bold', style='color: var(--text-primary); direction: rtl; text-align: right;')
+
+        ui.markdown('''
+לשונית **הספרייה שלי** (באפליקציה לשולחן העבודה בלבד) מאפשרת לכם לאנדקס קובצי `.docx`, `.pdf`
+ו-`.txt` משלכם לצד קורפוס הגניזה. המסמכים האישיים שלכם מופיעים ישירות בתוצאות החיפוש,
+חיפוש חיבורים ומקבילות עם תגית `LOCAL` וכפתור סינון תלת-מצבי.
+
+**מה מאונדקס:** מסמכי Word, קובצי PDF (PDF עם שכבת טקסט בלבד — קובצי PDF סרוקים ללא OCR
+מדולגים), וקובצי טקסט רגיל. פורמטים אחרים מתעלמים בשקט.
+
+**היכן נשמרים הנתונים:** `%LOCALAPPDATA%\\GenizahSearchPro\\Index\\LocalIndex\\`
+ב-Windows. התקנות ניידות שומרות את נתוני LOCAL עם תיקיית ההתקנה.
+
+**ערבות פרטיות:** המסמכים המקומיים שלכם לעולם אינם מועלים לשרתי GenizahSearch.
+שלושה גבולות אוכפים זאת:
+- נקודת הקצה `/api/search` מסננת פריטי LOCAL באופן הגנתי.
+- סנכרון ענן של רשימות מבוטל לחלוטין אם כל פריט ברשימה הוא LOCAL.
+- הגשת תיקונים דוחה מזהי מסמך LOCAL עם שגיאה ברורה.
+
+הטקסט המאונדקס נשמר בקובץ אינדקס מקומי בטקסט גלוי — הוא לעולם לא מועלה לשרתי GenizahSearch.
+השתמש בהצפנת דיסק ברמת מערכת ההפעלה (BitLocker / FileVault) אם נדרשת הצפנה במנוחה.
+
+**סינון תלת-מצבי:** כל משטח תוצאות (חיפוש, חיפוש חיבורים, מקבילות) כולל כפתור סינון
+המחזר בין הכל ← רק מקומי ← ללא מקומי ← הכל. הכפתור מוסתר כאשר בסט התוצאות הנוכחי אין פגיעות LOCAL.
+
+**אזהרת שינוי שם מחשב:** אם תשנו את שם המחשב שלכם, מטמון ה-SQLite מתבטל
+והסריקה הבאה מחלצת מחדש את כל הקבצים. זה נדיר; מתועד לצורך שלמות.
+
+*תכונת הספרייה שלי בהשראת אב-טיפוס GenizahLocal של יהודה זיוואלד.*
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Contact ===

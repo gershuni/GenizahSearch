@@ -515,6 +515,43 @@
     </ul>
     <p><b>Note:</b> Export applies to selected results (checkboxes). If nothing is selected, the software exports all available results in the table.</p>
     </div>
+
+    <div class="section">
+    <h2 id="my-library">My Library — Local Documents</h2>
+    <p>The <b>My Library</b> tab lets you index your own <code>.docx</code>, <code>.pdf</code>, and <code>.txt</code>
+    files alongside the Genizah corpus. Your personal documents appear inline in Search, Composition Search,
+    and Parallels results with a <code>LOCAL</code> badge and a three-state filter button.</p>
+
+    <h4>What gets indexed</h4>
+    <p>Word documents, PDFs (text-layer PDFs only — scanned PDFs without OCR are skipped), and plain text files.
+    Other formats are ignored silently.</p>
+
+    <h4>Where data lives</h4>
+    <p><code>%LOCALAPPDATA%\GenizahSearchPro\Index\LocalIndex\</code> on Windows.
+    Portable installations keep their LOCAL data with the install folder.</p>
+
+    <h4>Privacy guarantee</h4>
+    <p>Your local documents are <b>NEVER</b> uploaded to GenizahSearch's servers. Three boundaries enforce this:</p>
+    <ul>
+        <li>The <code>/api/search</code> JSON endpoint drops LOCAL items defensively.</li>
+        <li>The Lists cloud sync aborts entirely if any list item is LOCAL.</li>
+        <li>The corrections submission rejects LOCAL document IDs with a clear error.</li>
+    </ul>
+    <p><b>Cleartext disclosure:</b> Your indexed text is stored on disk in cleartext inside the local index —
+    it is never uploaded to GenizahSearch's servers. Use OS-level disk encryption (BitLocker / FileVault)
+    if you need at-rest encryption.</p>
+
+    <h4>Three-state filter</h4>
+    <p>Each result surface (Search, Composition Search, Parallels) has a filter button cycling
+    <b>All</b> &rarr; <b>Only Local</b> &rarr; <b>No Local</b> &rarr; <b>All</b>.
+    The button is hidden when the current result set has no LOCAL hits.</p>
+
+    <h4>Hostname-rename caveat</h4>
+    <p>If you rename your computer's hostname, the SQLite cache is invalidated and the next scan
+    re-extracts all files. This is rare; documented for completeness.</p>
+
+    <p><em>My Library feature inspired by Yehuda Seewald's GenizahLocal prototype.</em></p>
+    </div>
 </div>
 <!-- END_LANG_EN -->
 
@@ -945,6 +982,42 @@
         <li><b><bdi dir="ltr">DOCX</bdi> (וורד):</b> מסמך מעוצב של מייקרוסופט וורד.</li>
     </ul>
     <p><b>שימו לב:</b> הייצוא מתייחס לתוצאות שנבחרו (באמצעות תיבות הסימון). אם לא נבחר כלום, התוכנה תייצא את כל התוצאות הקיימות בטבלה.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="my-library">הספרייה שלי — מסמכים מקומיים</h2>
+    <p>לשונית <b>הספרייה שלי</b> מאפשרת לכם לאנדקס קובצי <code dir="ltr">.docx</code>, <code dir="ltr">.pdf</code>
+    ו-<code dir="ltr">.txt</code> משלכם לצד קורפוס הגניזה. המסמכים האישיים שלכם מופיעים ישירות
+    בתוצאות החיפוש, חיפוש חיבורים ומקבילות עם תגית <code>LOCAL</code> וכפתור סינון תלת-מצבי.</p>
+
+    <h4>מה מאונדקס</h4>
+    <p>מסמכי Word, קובצי PDF (PDF עם שכבת טקסט בלבד — קובצי PDF סרוקים ללא OCR מדולגים),
+    וקובצי טקסט רגיל. פורמטים אחרים מתעלמים בשקט.</p>
+
+    <h4>היכן נשמרים הנתונים</h4>
+    <p><code dir="ltr">%LOCALAPPDATA%\GenizahSearchPro\Index\LocalIndex\</code> ב-Windows.
+    התקנות ניידות שומרות את נתוני LOCAL עם תיקיית ההתקנה.</p>
+
+    <h4>ערבות פרטיות</h4>
+    <p>המסמכים המקומיים שלכם <b>לעולם אינם מועלים</b> לשרתי GenizahSearch. שלושה גבולות אוכפים זאת:</p>
+    <ul>
+        <li>נקודת הקצה <code dir="ltr">/api/search</code> מסננת פריטי LOCAL באופן הגנתי.</li>
+        <li>סנכרון ענן של רשימות מבוטל לחלוטין אם כל פריט ברשימה הוא LOCAL.</li>
+        <li>הגשת תיקונים דוחה מזהי מסמך LOCAL עם שגיאה ברורה.</li>
+    </ul>
+    <p><b>גילוי נאות:</b> הטקסט המאונדקס נשמר בקובץ אינדקס מקומי בטקסט גלוי — הוא לעולם לא מועלה לשרתי GenizahSearch.
+    השתמש בהצפנת דיסק ברמת מערכת ההפעלה (BitLocker / FileVault) אם נדרשת הצפנה במנוחה.</p>
+
+    <h4>סינון תלת-מצבי</h4>
+    <p>כל משטח תוצאות (חיפוש, חיפוש חיבורים, מקבילות) כולל כפתור סינון המחזר בין
+    <b>הכל</b> &larr; <b>רק מקומי</b> &larr; <b>ללא מקומי</b> &larr; <b>הכל</b>.
+    הכפתור מוסתר כאשר בסט התוצאות הנוכחי אין פגיעות LOCAL.</p>
+
+    <h4>אזהרת שינוי שם מחשב</h4>
+    <p>אם תשנו את שם המחשב שלכם, מטמון ה-SQLite מתבטל והסריקה הבאה מחלצת מחדש את כל הקבצים.
+    זה נדיר; מתועד לצורך שלמות.</p>
+
+    <p><em>תכונת הספרייה שלי בהשראת אב-טיפוס GenizahLocal של יהודה זיוואלד.</em></p>
     </div>
 </div>
 <!-- END_LANG_HE -->
