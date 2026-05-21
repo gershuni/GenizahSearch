@@ -30,15 +30,27 @@
 
 ### Phase 95: My Library — Local Document Indexing
 
-**Goal:** Desktop users can point GenizahSearch at a folder of `.docx` / `.pdf` files and have those documents indexed into the desktop app's existing Tantivy + libraries.csv search machinery, so personal corpora surface inline in normal search / Composition Search / Parallels results with a clear `LOCAL` badge and a per-search opt-in toggle. Productizes Yehuda Seewald's external prototype (`seewald_addition/`) as a first-class in-app feature — no second installation, no `Program Files` UAC patching, no shared sys_id namespace with NLI / PGP / CUDL data, no web / API / Supabase exposure.
+**Goal:** Desktop users can point GenizahSearch at folders of `.docx` / `.pdf` / `.txt` files and have those documents indexed into a SEPARATE Tantivy side-index merged into normal search / Composition Search / Parallels results with a clear `LOCAL` badge and a three-state filter button. Personal corpora NEVER leak to the cloud — three regression tests pin the cloud-write boundaries (`/api/search`, `lists_sync.sync_item_to_cloud`, corrections submit). Productizes Yehuda Seewald's external prototype (`seewald_addition/`) as a first-class in-app feature — no second installation, no `Program Files` UAC patching, no shared sys_id namespace collision, no web / API / Supabase exposure.
 
 **Depends on:** Nothing — independent feature
 
-**Source CONTEXT:** (to be created by /gsd-discuss-phase 95)
+**Source CONTEXT:** `.planning/phases/95-my-library/95-CONTEXT.md` (46 locked decisions, post-Codex critique; AUTHORITATIVE)
+**Source SPEC:** `.planning/phases/95-my-library/95-SPEC.md` (10 requirements + 22 acceptance criteria — AUTHORITATIVE)
 
-**Plans:** ~3 plans (estimated): (1) local-index builder + namespace + extraction (port Seewald's RTL / single-word-per-line fixes), (2) desktop "My Library" UI tab + settings + toggle wiring into existing search/Composition/Parallels surfaces, (3) namespace isolation guards (no LOCAL in /api/search, no LOCAL in cloud Lists export, no LOCAL in corrections submission).
+**Plans:** 9 plans across 5 waves:
+- [ ] 95-01-PLAN.md — Wave 0: 26 red-stub tests + requirements.txt pymupdf pin + GenizahSearchPro.spec collect_all(pymupdf) + D-44 Hebrew fixture + conftest fixtures
+- [ ] 95-02-PLAN.md — Wave 1: shared/local_sys_id.py + parse_header_smart/parse_full_id_components generalization (Codex D-13 P0) + LIBRARY_CODES extension + Config.LOCAL_*_DIR
+- [ ] 95-03-PLAN.md — Wave 1: shared/local_indexer.py core (PyMuPDF + python-docx + TXT + RTL helpers as dead code + LOCAL Tantivy schema with tokenizer_name="raw" on unique_id + SQLite cache + two-phase commit + delete-by-uid + folder overlap detection + unavailable-folder handling)
+- [ ] 95-04-PLAN.md — Wave 1: Three cloud-write gates — shared/search_serializer.py + corrections_client.py + lists_sync.py (Codex D-30 P0 — gate at TOP of sync_item_to_cloud BEFORE _get_client())
+- [ ] 95-05-PLAN.md — Wave 2: Main search merger via RRF k=60 POST-_deduplicate (Codex D-08 P0) + D-37 corrupt-index fallback
+- [ ] 95-06-PLAN.md — Wave 2: LOCAL LAB side-index + weights_hash invalidation contract (D-09 + D-38); custom fingerprint scoring preserved
+- [ ] 95-07-PLAN.md — Wave 3: desktop/my_library_tab.py (MyLibraryTab as 7th tab — Pitfall #4) + LocalIndexerWorker QThread + QMutex serialization (D-25) + mid-file cancellation (D-24 Codex P1) + pre-scan ceiling dialog (D-26 + D-41)
+- [ ] 95-08-PLAN.md — Wave 3: COL_SRC LOCAL badge in blue (D-11) + three-state LOCAL filter on Search/Composition/Parallels (REQ-6 + D-10 + D-39) + D-10 P1 no-op chip + LOCAL hit click -> Browse panel text-only + Open file (D-27 + D-28)
+- [ ] 95-09-PLAN.md — Wave 4: Help + About docs (D-31 + D-32 + D-33 cleartext disclosure, EN + HE both apps) + export_dossier skip_local kwarg (D-45) + web LIBRARY_CODES static AST guard (D-46) + PyInstaller packaging smoke (D-43 @pytest.mark.packaging) + OPEN_ISSUES/CHANGELOG/CLAUDE.md bookkeeping
 
-**UI hint:** yes — new desktop tab + result-list badge.
+**Wave structure:** 0 (01) -> 1 (3 parallel: 02, 03, 04) -> 2 (05) -> 3 (2 parallel: 06, 07) -> 4 (08) -> 5 (09). Note: 06 bumped to wave 3 to avoid genizah_core.py overlap with 05; 08 bumped to wave 4 to avoid genizah_app.py overlap with 07; 09 bumped to wave 5 because it depends on 08.
+
+**UI hint:** yes — new 7th desktop tab + result-list LOCAL badge + three-state filter button mirroring Phase 93 PGP pattern.
 
 <details>
 <summary>v7.13 Research-Grade Downloads & PGP Filter (Phases 93-94) -- BOTH PHASES COMPLETE (Phase 93 2026-05-19; Phase 94 2026-05-21; milestone closeable)</summary>
