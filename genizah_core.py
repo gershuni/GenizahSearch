@@ -1815,6 +1815,8 @@ LIBRARY_CODES = {
     'CentralArch': 'Central Archives for the History of the Jewish People',
     'JCMainz': 'Jewish Community of Mainz',
     'Corwin': 'Corwin Collection',
+    # Phase 95 D-13 — My Library namespace (LOCAL sys_ids start with 97).
+    'LOCAL': 'My Library',
 }
 
 def get_library_display(code: str, short: bool = True, lang: str = None) -> str:
@@ -2008,6 +2010,11 @@ class Config:
     LAB_CONFIG_FILE = os.path.join(LAB_DIR, "lab_config.json")
     LAB_WEIGHTS_FILE = os.path.join(LAB_DIR, "lab_weights.json")
     LAB_LOG_FILE = os.path.join(LAB_DIR, "lab_genizah.log")
+
+    # Phase 95 D-14 — My Library side-indexes (co-located with INDEX_DIR for
+    # portable-mode inheritance).
+    LOCAL_INDEX_DIR = os.path.join(INDEX_DIR, "LocalIndex")
+    LOCAL_LAB_INDEX_DIR = os.path.join(INDEX_DIR, "LocalLabIndex")
 
     # 6. Bundled Internal Resources (Packaged inside the EXE/_internal)
     LIBRARIES_CSV = os.path.join(INTERNAL_DIR, "libraries.csv")

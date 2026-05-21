@@ -3296,4 +3296,6 @@ LIBRARY_CODES_HE = {
     'CentralArch': 'הארכיון המרכזי לתולדות העם היהודי',
     'JCMainz': 'הקהילה היהודית של מיינץ',
     'Corwin': 'אוסף קורווין',
+    # Phase 95 D-13 — My Library namespace (LOCAL sys_ids start with 97).
+    'LOCAL': 'הספרייה שלי',
 }
