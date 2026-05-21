@@ -28,6 +28,11 @@ must_haves:
     - "RTL helpers (_fix_rtl_line, _fix_rtl_page, _join_fragmented_lines) ported VERBATIM as dead code (D-02)"
     - "Folder overlap detection uses os.path.commonpath after _canonical_filepath normalization"
     - "Unavailable folder marked status='unavailable' on auto-rescan; rows preserved"
+    - "HIGH-3 review fix: _delete_file uses crash-safe THREE-STEP protocol (mark pending_delete=1 in SQLite → Tantivy delete + commit → SQLite final DELETE). The old 'SQLite DELETE then Tantivy' ordering is REMOVED."
+    - "HIGH-3 review fix: _recover_pending_deletes() runs at LocalIndexer init; replays steps 2-3 for any rows left with pending_delete=1 from a previous crash."
+    - "HIGH-3 review fix: local_files table has a `pending_delete INTEGER NOT NULL DEFAULT 0` column (D-21 commitment now actually implemented per HIGH-3 review)."
+    - "HIGH-4 review fix (option b LOCKED): page text for LAB rebuild is read from main LOCAL Tantivy `content` stored field by UID — NOT from SQLite (this plan's schema stores metadata only) and NOT by re-extracting from source files. See Plan 06 for the reader-side implementation."
+    - "MEDIUM-2 review fix: TXT extraction tries utf-8-sig with errors=strict; on UnicodeDecodeError, attempts cp1255 (legacy Windows Hebrew); on both failures, the file is marked extraction_status='encoding_error' and NO replacement characters are indexed."
   artifacts:
     - path: "shared/local_indexer.py"
       provides: "LocalIndexer class, build_local_schema(), extract_pdf_pages, extract_docx_pages, extract_txt, _fix_rtl_line (dead code), folder enumeration, mtime cache, two-phase commit, delete-by-uid"
@@ -49,7 +54,10 @@ must_haves:
 ---
 
 <objective>
-Build the Qt-free indexer engine in `shared/local_indexer.py`: PyMuPDF page extraction, python-docx 20-paragraph chunking, TXT reading, RTL helpers as dead code, LOCAL Tantivy + LAB Tantivy schema builders (with `tokenizer_name="raw"` on `unique_id`), SQLite cache (`folders`, `processed_files`, `local_pages`, `local_files` per D-35), folder enumeration with overlap detection (D-17 + D-42), incremental re-extract, delete-by-uid (D-20), two-phase commit (D-21), and the cancellation hooks (cooperative flag — Qt-side wrapper lives in Plan 07).
+
+**Content source for LAB rebuild (HIGH-4 review fix, option b LOCKED):** Page text for the LAB side-index (Plan 06) is sourced by reading the `content` stored field from the main LOCAL Tantivy side-index, keyed by `unique_id`. This plan's SQLite schema (`local_files` / `local_pages`) stores metadata + UID tracking only — NOT page text. Rationale documented in this objective and mirrored in Plan 06's objective. Choice rationale: option (b) survives source-file deletion + D-40 folder-unavailability (the LAB index stays consistent with the main LOCAL index, which is the right semantic per D-40); option (a) breaks on missing source files; option (c) doubles storage cost. The main LOCAL schema already has `content` with `stored=True` (95-RESEARCH.md line 439 + this plan's interfaces block), so this option requires zero schema additions.
+
+Build the Qt-free indexer engine in `shared/local_indexer.py`: PyMuPDF page extraction, python-docx 20-paragraph chunking, TXT reading, RTL helpers as dead code, LOCAL Tantivy + LAB Tantivy schema builders (with `tokenizer_name="raw"` on `unique_id`), SQLite cache (`folders`, `processed_files`, `local_pages`, `local_files` per D-35), folder enumeration with overlap detection (D-17 + D-42), incremental re-extract, crash-safe delete with `pending_delete` two-phase protocol (HIGH-3 review fix — D-21 commitment now implemented), two-phase commit (D-21), and the cancellation hooks (cooperative flag — Qt-side wrapper lives in Plan 07).
 
 Purpose: This is the workhorse. Without it, nothing indexes; without correct `tokenizer_name="raw"`, every modify silently doubles row count (Pitfall #2 — load-bearing); without two-phase commit, a crash mid-batch corrupts state (Pitfall #6). Wave 2 (search merger) reads this module's output; Wave 3 (MyLibraryTab) wraps it in a QThread.
 
@@ -136,7 +144,11 @@ CREATE TABLE local_files(
     extraction_status TEXT NOT NULL,
     last_indexed_at REAL NOT NULL,
     sha256_full TEXT,
-    error_msg TEXT
+    error_msg TEXT,
+    -- HIGH-3 review fix: crash-safe delete via pending_delete two-phase protocol.
+    -- 0 = healthy row; 1 = marked for deletion (Tantivy delete pending or not yet confirmed).
+    -- Startup recovery scans rows WHERE pending_delete=1 and replays the Tantivy delete + SQLite DELETE.
+    pending_delete INTEGER NOT NULL DEFAULT 0
 );
 ```
 </interfaces>
@@ -162,7 +174,8 @@ CREATE TABLE local_files(
     - `LocalIndexer.remove_folder(path: str) -> int` — synchronous delete; returns # of files removed.
     - `LocalIndexer.scan_all(cancel_check=lambda: False) -> dict` — runs through all registered folders; returns `{"indexed": N, "skipped": N, "errors": N, "cancelled": bool}`.
     - `LocalIndexer.prescan_count(folder_path: str) -> (file_count, total_bytes)` — fast count for D-26 ceiling dialog.
-    - `LocalIndexer.startup_recovery() -> dict` — at app start: find `processed_files.status='pending'` rows, re-extract; returns count.
+    - `LocalIndexer.startup_recovery() -> dict` — at app start: HIGH-3 review fix — TWO-PASS recovery. Pass A: call `_recover_pending_deletes()` first (finishes any crash-interrupted deletes). Pass B: find `processed_files.status='pending'` rows, re-extract. Returns `{'pending_deletes_recovered': N, 'pending_inserts_recovered': M}`.
+    - `LocalIndexer._recover_pending_deletes() -> int` — HIGH-3 review fix — NEW startup recovery for crash-interrupted deletes. SELECTs `local_files` rows WHERE `pending_delete=1`; for each: replays Tantivy delete-by-uid + SQLite final cleanup (idempotent). Returns count of completed deletes. Called from `__init__` AND from `startup_recovery()` Pass A.
     - `LocalIndexer.close() -> None` — flush + close writer + close SQLite connection.
 
     Pure helpers (module level, importable by tests):
@@ -185,6 +198,8 @@ CREATE TABLE local_files(
     - `test_deleted_file_removed` — delete one file; rescan; assert `local_files` row gone AND `writer.delete_documents` was called for each of that file's `local_pages` UIDs.
     - `test_delete_by_uid_with_raw_tokenizer` — insert doc with `unique_id="LOCAL_970012345601234567_P1"`; call `writer.delete_documents(Term("unique_id", uid))`; commit; searcher returns 0 hits. (Without raw tokenizer this would silently fail per Pitfall #2 / tantivy-py #297.)
     - `test_crash_between_tantivy_and_sqlite_recovers` — Fault inject: kill process between Tantivy commit + SQLite UPDATE. Restart indexer. Assert `startup_recovery()` re-extracts the pending files. (Two-phase commit per D-21.)
+    - `test_crash_between_pending_delete_and_tantivy_commit_recovers` — **HIGH-3 review fix — NEW test.** Set up an indexed file (its sys_id has rows in `local_files`, `local_pages`, and Tantivy docs). Manually simulate step 1 of the new `_delete_file`: `UPDATE local_files SET pending_delete=1 WHERE sys_id=?` (commit). Do NOT proceed to step 2 (Tantivy delete). Close + reopen the LocalIndexer. Assert: (a) the searcher returns ZERO hits for that sys_id's UIDs (recovery completed step 2). (b) The `local_files` / `local_pages` / `processed_files` rows for that sys_id are GONE (recovery completed step 3). (c) `_recover_pending_deletes` logged a count of 1.
+    - `test_crash_between_tantivy_commit_and_sqlite_final_delete_recovers` — **HIGH-3 review fix — NEW test.** Similar setup, but simulate steps 1+2 completed (`pending_delete=1` flag set AND Tantivy delete-by-uid committed); only step 3 missing. Reopen LocalIndexer. Recovery re-runs step 2 (idempotent — Tantivy ignores already-deleted UIDs) and completes step 3. Final state: no Tantivy hits, no SQLite rows.
     - `test_folders_table_schema`, `test_local_files_table_schema`, `test_local_pages_table_schema`, `test_processed_files_table_schema` — introspect via `PRAGMA table_info(...)`; assert exact column names and types per D-35.
     - `test_overlap_via_commonpath` — register `/a/b`; try `/a/b/c` (descendant — REJECT), `/a` (ancestor — REJECT), `/a/b` (exact — REJECT), `/a/b2` (sibling — ACCEPT).
     - `test_unavailable_folder_marked_status_unavailable` — register folder; delete the actual filesystem folder; trigger `scan_all`; assert folder's `status` column is `unavailable` AND existing `local_files` rows are PRESERVED (not deleted).
@@ -344,7 +359,9 @@ CREATE TABLE local_files(
                 extraction_status TEXT    NOT NULL,
                 last_indexed_at   REAL    NOT NULL,
                 sha256_full       TEXT,
-                error_msg         TEXT
+                error_msg         TEXT,
+                -- HIGH-3 review fix: crash-safe delete via pending_delete two-phase protocol.
+                pending_delete    INTEGER NOT NULL DEFAULT 0
             );
         """)
         conn.commit()
@@ -374,10 +391,24 @@ CREATE TABLE local_files(
     - `_iterate_supported_files(folder_path, cancel_check)` — `os.walk(followlinks=False)` per D-26 hardening; try/except OSError per directory; yield `(filepath, file_size_bytes)`; check cancel between directories.
     - `_index_one_file(filepath, folder_id, cancel_check)` — compute canonical, generate sys_id (with collision retry up to 4 slots), extract, write docs to Tantivy writer, INSERT/UPDATE `local_files` + `local_pages` + `processed_files` with `status='pending'`, NO commit yet (commit happens at batch boundary).
     - `_commit_batch()` — Two-phase commit per D-21: (1) Tantivy `writer.commit()`, (2) SQLite `UPDATE processed_files SET status='committed' WHERE filepath IN (...)`.
-    - `_delete_file(sys_id, filepath)` — SELECT uids from `local_pages`, `writer.delete_documents(Term("unique_id", uid))` per uid, DELETE from `local_pages` / `local_files` / `processed_files`.
+    - `_delete_file(sys_id, filepath)` — **HIGH-3 review fix: crash-safe three-step protocol replaces the old "delete SQLite then Tantivy" ordering.** The new sequence:
+        1. **Mark**: BEGIN TRANSACTION → `UPDATE local_files SET pending_delete=1 WHERE sys_id=?` → COMMIT (SQLite is now durably aware that this sys_id is being deleted; if we crash here, `_recover_pending_deletes()` finishes the job at next startup).
+        2. **Tantivy delete**: SELECT all uids FROM `local_pages` WHERE `sys_id=?`; for each uid call `writer.delete_documents(Term("unique_id", uid))`; `writer.commit()` (durable on disk).
+        3. **Final SQLite cleanup**: BEGIN TRANSACTION → DELETE FROM `local_pages` WHERE sys_id=?; DELETE FROM `local_files` WHERE sys_id=?; DELETE FROM `processed_files` WHERE sys_id=? → COMMIT. (Only runs after Tantivy commit succeeded.)
+      If a crash occurs between step 1 and step 2: `_recover_pending_deletes()` replays steps 2 and 3.
+      If a crash occurs between step 2 and step 3: `_recover_pending_deletes()` re-runs step 2 (idempotent — deleting an already-deleted UID is a Tantivy no-op) and then step 3.
+      The OLD ordering (SQLite DELETE before Tantivy commit, per the original Plan 03 lines 377-378 the reviewer flagged) is REMOVED.
+    - `_recover_pending_deletes()` — **HIGH-3 review fix: NEW startup recovery method.** Called from `LocalIndexer.__init__` (or via explicit `startup_recovery()` per D-21). Body:
+        1. SELECT `sys_id` FROM `local_files` WHERE `pending_delete=1`.
+        2. For each pending sys_id: run step 2 (Tantivy delete-by-uid loop + commit) and step 3 (SQLite final cleanup) from `_delete_file`. Idempotent.
+        3. Log the count: `logger.info("HIGH-3 recovery: completed %d pending deletes", n)`.
+      Pin via `tests/test_local_two_phase_commit.py::test_crash_between_pending_delete_and_tantivy_commit_recovers`.
     - `remove_folder(folder_path)` — synchronous: SELECT sys_ids in folder, loop `_delete_file`, commit, DELETE folder row.
     - `scan_all(cancel_check)` — for each `folders` row with `status='active'`: check `os.path.isdir(path)`; if False, UPDATE `status='unavailable'` and continue; if True, iterate files, diff against `processed_files`, route to `_index_one_file` / `_delete_file` accordingly.
-    - `startup_recovery()` — SELECT `filepath FROM processed_files WHERE status='pending'`; for each, call `_delete_file` then re-extract (idempotent).
+    - `startup_recovery()` — Two-pass recovery on app startup (D-21 + HIGH-3 review fix):
+        - Pass A (HIGH-3 — NEW): call `_recover_pending_deletes()` first. This finishes any deletes interrupted by a crash before they could complete; the LOCAL Tantivy index is reconciled with `local_files`/`local_pages`.
+        - Pass B (D-21 existing): SELECT `filepath FROM processed_files WHERE status='pending'`; for each, call `_delete_file` then re-extract (idempotent — uses the new crash-safe `_delete_file` above).
+      Order matters: pending deletes are resolved BEFORE pending inserts so the writer doesn't fight itself.
     - `prescan_count(folder_path)` — return `(file_count, total_bytes)` via `os.walk(followlinks=False)` with try/except OSError; per D-26.
 
     **8. Cancellation hooks:**
@@ -473,46 +504,75 @@ CREATE TABLE local_files(
 </task>
 
 <task type="auto">
-  <name>Task 3: TXT encoding policy smoke test + lock decision in plan SUMMARY (D-07)</name>
+  <name>Task 3: TXT encoding policy - strict utf-8-sig + cp1255 fallback + encoding_error on dual failure (D-07 + MEDIUM-2 review fix)</name>
   <read_first>
     - shared/local_indexer.py extract_txt implementation (Task 1)
     - .planning/phases/95-my-library/95-CONTEXT.md (D-07: starting policy utf-8-sig only; planner picks)
   </read_first>
   <action>
-    Run a quick smoke test against representative Hebrew TXT samples to determine if `utf-8-sig` alone is sufficient or if `cp1255` fallback is needed.
+    **MEDIUM-2 review fix (2026-05-21):** the previous policy locked at `utf-8-sig` with `errors="replace"`, which silently corrupts non-UTF-8 input (cp1255 or damaged) by emitting U+FFFD replacement characters that then get indexed as garbage. The reviewer flagged this as a MEDIUM concern. Policy revised: try utf-8-sig with `errors="strict"`; on `UnicodeDecodeError`, fall back to `cp1255` (legacy Windows Hebrew, commonly produced by older Hebrew text editors); on a second `UnicodeDecodeError`, mark the file `extraction_status="encoding_error"` and emit NO Tantivy docs. The user sees the failure in the per-file status panel rather than getting silently-corrupt indexed content.
 
-    Smoke test procedure:
-    1. Create 3 test TXT files (in `/tmp/` or a scratch dir — NOT in `tests/fixtures/`):
-       - One UTF-8 Hebrew file (BOM-less).
-       - One UTF-8-sig Hebrew file (with BOM).
-       - One cp1255-encoded Hebrew file (legacy Windows Hebrew encoding).
-    2. Run `extract_txt` against each.
-    3. Verify which succeed and which fail.
-
-    Decision rule:
-    - If only the cp1255 file fails: that's the expected v1 boundary; `utf-8-sig` only is the policy. RECORD: "TXT policy: utf-8-sig only (D-07 locked)".
-    - If cp1255 failure surfaces real-world breakage (user complains in alpha test): add `cp1255` fallback in a small follow-up. For Phase 95 v1, lock at `utf-8-sig` per CONTEXT D-07 starting position.
-
-    Implementation in `extract_txt`:
+    Implementation in `extract_txt` (MEDIUM-2 strict + cp1255 fallback):
     ```python
     def extract_txt(filepath: str) -> Iterator[tuple[int, str, str]]:
-        """TXT extraction (D-07 — utf-8-sig only in v1; cp1255 fallback deferred)."""
-        with open(filepath, "r", encoding=_DEFAULT_TXT_ENCODING, errors="replace") as f:
-            text = f.read()
+        """TXT extraction (D-07 + MEDIUM-2 review fix: strict utf-8-sig + cp1255 fallback;
+        encoding_error on both failures - no silent replacement-character indexing).
+
+        Encoding policy:
+          1. Try utf-8-sig with errors='strict'.
+          2. On UnicodeDecodeError, try cp1255 with errors='strict' (legacy Windows Hebrew).
+          3. On second UnicodeDecodeError, raise EncodingError - caller (LocalIndexer._index_one_file)
+             catches and sets local_files.extraction_status = 'encoding_error'. No docs emitted.
+
+        DO NOT use errors='replace'. The replacement character (U+FFFD) silently corrupts
+        the index and breaks search for the affected files (MEDIUM-2 review fix).
+        """
+        try:
+            with open(filepath, "r", encoding="utf-8-sig", errors="strict") as f:
+                text = f.read()
+        except UnicodeDecodeError as utf8_err:
+            try:
+                with open(filepath, "r", encoding="cp1255", errors="strict") as f:
+                    text = f.read()
+                logger.info(
+                    "extract_txt fallback to cp1255 for %s (utf-8-sig failed: %s)",
+                    filepath, utf8_err,
+                )
+            except UnicodeDecodeError as cp1255_err:
+                raise EncodingError(
+                    f"Cannot decode {filepath} as utf-8-sig or cp1255: "
+                    f"utf-8 error: {utf8_err}; cp1255 error: {cp1255_err}"
+                )
         yield (1, text, os.path.basename(filepath))
+
+
+    class EncodingError(Exception):
+        """Raised by extract_txt when both utf-8-sig and cp1255 fail (MEDIUM-2)."""
+        pass
     ```
 
-    Record the smoke test outcome in `.planning/phases/95-my-library/95-03-SUMMARY.md` (created at end of plan). Update CONTEXT D-07 "Open decision" to "LOCKED — utf-8-sig only" with a footnote citing the SUMMARY.
+    The caller `_index_one_file` MUST wrap `extract_txt` in `try/except EncodingError` and set `local_files.extraction_status = "encoding_error"` + `error_msg = str(e)`. No Tantivy docs are emitted for the file. The UI status panel surfaces this row to the user.
+
+    Behavior tests to ADD in `tests/test_local_indexer.py`:
+    - `test_txt_utf8_sig_strict` - UTF-8-sig file with Hebrew BOM decodes successfully on first attempt; NO `replace` characters in indexed content.
+    - `test_txt_cp1255_fallback` - cp1255-encoded Hebrew file triggers second-attempt fallback that succeeds; indexed content matches the round-tripped expected text; NO `replace` characters.
+    - `test_txt_undecodable_marked_encoding_error` - A file whose bytes are NEITHER valid utf-8-sig NOR valid cp1255 (e.g., random bytes 0x80-0xFF). Indexer marks `local_files.extraction_status == "encoding_error"`. NO `local_pages` rows emitted for that sys_id. NO Tantivy docs added. The error_msg column contains both UnicodeDecodeError messages.
+    - `test_txt_no_replacement_chars_indexed` - Negative regression: the character U+FFFD does NOT appear in any indexed content. Scan stored `content` field across all LOCAL Tantivy docs and assert `�` substring is absent.
+
+    Record the policy decision in `.planning/phases/95-my-library/95-03-SUMMARY.md`. Update CONTEXT D-07 status to: "LOCKED - utf-8-sig strict + cp1255 fallback + encoding_error on both failures (MEDIUM-2 review fix, 2026-05-21)".
   </action>
   <verify>
-    <automated>python -c "from shared.local_indexer import extract_txt; import tempfile, os; f = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8-sig'); f.write('שלום עולם'); f.close(); result = list(extract_txt(f.name)); assert len(result) == 1; assert 'שלום' in result[0][1]; os.unlink(f.name); print('OK')"</automated>
+    <automated>python -m pytest tests/test_local_indexer.py -x -q -k "txt_utf8_sig_strict or txt_cp1255_fallback or txt_undecodable_marked_encoding_error or txt_no_replacement_chars_indexed"</automated>
   </verify>
   <acceptance_criteria>
-    - `extract_txt` handles utf-8-sig Hebrew correctly (verify command exits 0).
-    - `errors="replace"` is used (verify via `grep "errors=.replace." shared/local_indexer.py` returns ≥ 1).
-    - SUMMARY.md (created in this plan's completion) records the D-07 lock decision.
+    - `extract_txt` uses `errors="strict"` (MEDIUM-2): `grep "errors=.strict." shared/local_indexer.py` returns >= 2 (one per encoding attempt).
+    - `extract_txt` does NOT use `errors="replace"`: `grep -c "errors=.replace." shared/local_indexer.py` returns 0.
+    - `EncodingError` class defined: `grep -c "class EncodingError" shared/local_indexer.py` returns 1.
+    - cp1255 fallback present: `grep -c "cp1255" shared/local_indexer.py` returns >= 2 (the open call + the error message).
+    - All 4 new behavior tests pass: `python -m pytest tests/test_local_indexer.py -x -q -k "txt_utf8_sig_strict or txt_cp1255_fallback or txt_undecodable_marked_encoding_error or txt_no_replacement_chars_indexed"` exits 0.
+    - SUMMARY.md records the locked policy and the MEDIUM-2 review-fix attribution.
   </acceptance_criteria>
-  <done>TXT extraction works for utf-8-sig; D-07 locked at utf-8-sig only; documented in SUMMARY.</done>
+  <done>TXT extraction uses strict decoding with cp1255 fallback; encoding_error surfaced; no silent replacement characters in indexed content (MEDIUM-2 review fix).</done>
 </task>
 
 </tasks>
@@ -552,7 +612,7 @@ CREATE TABLE local_files(
 - SQLite schema matches D-35 exactly (4 tables — `folders`, `processed_files`, `local_pages`, `local_files`).
 - Two-phase commit per D-21 with `startup_recovery()` re-extracting pending rows.
 - Folder overlap detection per D-17 + D-42 (commonpath after canonical normalization).
-- TXT policy locked at `utf-8-sig` only (D-07).
+- TXT policy: utf-8-sig strict → cp1255 fallback → EncodingError on dual failure (D-07 + MEDIUM-2 review fold). No errors="replace" anywhere in the codepath.
 - 7 Wave-0 stub files turned GREEN.
 - No writes to Transcriptions.txt / libraries.csv / browse_map.pkl / metadata_cache.pkl (SPEC Constraint #6).
 </success_criteria>

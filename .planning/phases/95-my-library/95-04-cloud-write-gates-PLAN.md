@@ -175,13 +175,14 @@ items = [
 <tasks>
 
 <task type="auto" tdd="true">
-  <name>Task 1: Insert LOCAL gates at TOP of sync_item_to_cloud and sync_list_to_cloud (D-30 Codex P0) — field names PINNED (B2)</name>
+  <name>Task 1: Insert LOCAL gates at TOP of sync_item_to_cloud and sync_list_to_cloud (D-30 Codex P0 + HIGH-2 review fix) — field names PINNED (B2)</name>
   <read_first>
     - lists_sync.py:697-734 (sync_list_to_cloud — confirmed: no item iteration)
     - lists_sync.py:619-635 (sync_to_cloud — canonical iteration pattern; PIN source for the gate)
     - lists_sync.py:736-770 (sync_item_to_cloud body — Codex P0 placement target)
     - .planning/phases/95-my-library/95-PATTERNS.md ("lists_sync.py modifications (D-30 Codex P0)")
     - .planning/phases/95-my-library/95-CONTEXT.md (D-30 Codex revision — the FOUR-STEP gate)
+    - .planning/phases/95-my-library/95-REVIEWS.md (HIGH-2 finding: sys_id derivation must run BEFORE the `if item_data:` branch so a LOCAL `item_id` with missing `item_data` is ALSO gated)
   </read_first>
   <behavior>
     Test `test_sync_item_to_cloud_zero_get_client_calls_for_local`:
@@ -212,34 +213,62 @@ items = [
     - REGRESSION: synthetic 99-prefix sys_id (`'990001234560000000'`) should NOT trigger the LOCAL gate. The natural lookup at line 762 (or wherever the existing flow ended up) still applies.
     - Assert function does NOT short-circuit at the LOCAL gate (set up the rest of the mocks so the call proceeds further).
 
-    Test `test_sync_item_to_cloud_missing_item_data`:
-    - `item_id` not in `lists_manager.data['items']`. The gate's `item_data = ... .get(item_id)` returns None.
-    - Function should NOT crash; proceed to existing flow (which will eventually return False for other reasons).
+    Test `test_sync_item_to_cloud_missing_item_data_non_local_item_id`:
+    - HIGH-2 review fix — this is the non-LOCAL "missing item_data" path; asserts the function does NOT regress in the OTHER direction.
+    - `item_id="some-non-local-id"` not in `lists_manager.data['items']`. The gate's lookup yields None. After HIGH-2 fix the function still derives `sys_id = item_id`, but `is_local_sys_id("some-non-local-id")` is False, so the gate does NOT short-circuit.
+    - Function should NOT crash; should proceed to existing flow (which will eventually return False for OTHER reasons — `_get_client` may be called, `sync_list_to_cloud` may be called, etc.).
     - Assert no exceptions raised.
+    - Assert the LOCAL-gate `return False` was NOT taken — the function reached at least `is_sync_available()`.
+
+    Test `test_sync_item_to_cloud_local_item_id_missing_data`:
+    - **HIGH-2 review fix — NEW LOAD-BEARING TEST.** This pins the HIGH-2 regression: when `item_data` is None AND `item_id` itself is a LOCAL sys_id, the function MUST still short-circuit BEFORE any cloud touch.
+    - Patch `LocalListsManager._get_client` with `MagicMock(return_value=None)`.
+    - Patch `LocalListsManager.sync_list_to_cloud` with `MagicMock(return_value=False)`.
+    - Patch Supabase client construction (any cloud-touching method on the manager) as a MagicMock recording call_count.
+    - Do NOT add anything to `manager.lists_manager.data['items']` — the lookup MUST return None.
+    - Call `sync_item_to_cloud(item_id="970012345601234567", list_id="fake-list-id")` (LOCAL sys_id supplied as the item_id itself, no item_data).
+    - Assert return value is `False`.
+    - Assert `_get_client.call_count == 0` (LOAD-BEARING — without the HIGH-2 fix, the function would fall through `if item_data:` and reach `_get_client()` because `is_sync_available()` returns True under the test fixture).
+    - Assert `sync_list_to_cloud.call_count == 0`.
+    - Assert NO method on the mocked Supabase client was called (e.g., `.from_().insert().execute()` chain — verify via the mock's recorded calls).
+    - Verify the gate logged at INFO level: `caplog.text` contains `"local-only item, not synced"` with the LOCAL sys_id.
+    - Why: HIGH-2 fix — LOCAL items must never touch the cloud even when `item_data` is missing from the in-memory store (e.g., race condition where the item was removed locally between the caller looking it up and `sync_item_to_cloud` running).
   </behavior>
   <action>
-    1. Locate `def sync_item_to_cloud(self, item_id: str, list_id: str) -> bool:` in `lists_sync.py` (verified line 736). Insert the LOCAL gate AS THE FIRST STATEMENTS of the function body, BEFORE `if not self.is_sync_available():`:
+    1. Locate `def sync_item_to_cloud(self, item_id: str, list_id: str) -> bool:` in `lists_sync.py` (verified line 736). Insert the LOCAL gate AS THE FIRST STATEMENTS of the function body, BEFORE `if not self.is_sync_available():`.
 
-    Per CONTEXT D-30 Codex revision four-step protocol:
+    **HIGH-2 REVIEW FIX (load-bearing):** The `sys_id` derivation MUST run BEFORE the `if item_data:` branch so that when `item_data` is None and `item_id` itself is a LOCAL sys_id, the gate STILL fires. The previous draft hid the `sys_id` derivation INSIDE `if item_data:` — that path let a LOCAL `item_id` with missing `item_data` slip past the gate into the cloud flow.
+
+    Per CONTEXT D-30 Codex revision four-step protocol + HIGH-2 fix:
     ```python
     def sync_item_to_cloud(self, item_id: str, list_id: str) -> bool:
         """Push a specific item to cloud."""
-        # ===== Phase 95 LOCAL gate (D-30 Codex P0, REQ-9) =====
+        # ===== Phase 95 LOCAL gate (D-30 Codex P0 + HIGH-2 review fix, REQ-9) =====
         # MUST run BEFORE _get_client() and sync_list_to_cloud() — both leak
         # cloud activity even though the natural sys_id lookup is at line ~762.
+        # HIGH-2: derive sys_id BEFORE the `if item_data:` branch so a LOCAL
+        # item_id with missing item_data is ALSO gated (the previous draft
+        # nested the derivation INSIDE the `if item_data:` body which let this
+        # case slip through).
         # Lookup from in-memory self.lists_manager.data only (no network).
         item_data = self.lists_manager.data.get('items', {}).get(item_id)
-        if item_data:
-            sys_id = item_data.get('sys_id', item_id)
-            if is_local_sys_id(sys_id):
-                logger.info("[local-only item, not synced] item_id=%s sys_id=%s", item_id, sys_id)
-                return False
-        # ======================================================
+        sys_id = item_data.get('sys_id', item_id) if item_data else item_id
+        if is_local_sys_id(sys_id):
+            logger.info("[local-only item, not synced] item_id=%s sys_id=%s", item_id, sys_id)
+            return False
+        # ===========================================================================
         if not self.is_sync_available():   # existing body continues unchanged
             return False
         try:
             ...
     ```
+
+    **Sequence requirements (the executor MUST preserve exactly):**
+    - LINE 1 of the function body (after the docstring): `item_data = self.lists_manager.data.get('items', {}).get(item_id)`.
+    - LINE 2: `sys_id = item_data.get('sys_id', item_id) if item_data else item_id` (the HIGH-2 line).
+    - LINE 3: `if is_local_sys_id(sys_id):` followed by the logger.info + `return False`.
+    - There MUST be NO `if item_data:` branch wrapping the `sys_id` derivation — flatten the sequence so `sys_id` is always defined and `is_local_sys_id(sys_id)` is always evaluated, regardless of whether `item_data` is None.
+    - The pre-existing `if not self.is_sync_available()` line is the FIRST cloud-touching call and MUST come AFTER the gate above.
 
     2. Add the import at module top (after existing imports):
     ```python
@@ -285,13 +314,17 @@ items = [
     - `grep -c "from shared.local_sys_id import is_local_sys_id" lists_sync.py` returns 1.
     - `grep -c "local-only item, not synced\\|list contains LOCAL items" lists_sync.py` returns ≥ 2.
     - The exact iteration uses `self.lists_manager.data.get('items', {})` AND `item_data.get('lists')`. Verify: `grep -c "item_data.get('lists'" lists_sync.py` returns ≥ 1 (the new gate).
-    - The LOCAL gate appears BEFORE `_get_client()` and `sync_list_to_cloud(` calls. Verify by reading the function bodies — the FIRST statement after the docstring (other than the gate block itself) is the gate.
-    - `python -m pytest tests/test_local_namespace_no_lists_leak.py -x -q` exits 0 with all tests PASSED.
-    - The critical assertion `_get_client.call_count == 0` passes.
+    - The LOCAL gate appears BEFORE `_get_client()` and `sync_list_to_cloud(` calls. Verify by reading the function bodies — the FIRST executable statement after the docstring is the `item_data = ...` lookup, followed by `sys_id = ...` derivation, followed by `if is_local_sys_id(sys_id):` gate, followed by `return False`. NO cloud-touching call appears before the gate.
+    - HIGH-2 review fix — the sys_id derivation runs BEFORE (and OUTSIDE of) any `if item_data:` branch: read the source body and confirm the sequence is `item_data = self.lists_manager.data.get('items', {}).get(item_id)` then `sys_id = item_data.get('sys_id', item_id) if item_data else item_id` then `if is_local_sys_id(sys_id):`. Static check: `grep -c "sys_id = item_data.get(.sys_id., item_id) if item_data else item_id" lists_sync.py` returns 1.
+    - HIGH-2 review fix — line-order static check: the `sys_id = item_data.get(...) if item_data else item_id` line MUST appear BEFORE the FIRST `if item_data:` line in `lists_sync.py`. Verify by comparing line numbers from two greps: `grep -nE "sys_id = item_data\.get\(.*\) if item_data else item_id" lists_sync.py | head -1` returns a line number STRICTLY LESS THAN the line number from `grep -nE "^[[:space:]]*if item_data:" lists_sync.py | head -1` (use the FIRST occurrence of each). If `if item_data:` does not appear at all (the executor flattened it away), that ALSO satisfies the AC.
+    - HIGH-2 review fix — load-bearing test: `python -m pytest tests/test_local_namespace_no_lists_leak.py::test_sync_item_to_cloud_local_item_id_missing_data -x -q` exits 0. The test asserts `_get_client.call_count == 0` when `item_data` is None AND `item_id="970012345601234567"`.
+    - HIGH-2 review fix — the regression test for the non-LOCAL path also passes: `python -m pytest tests/test_local_namespace_no_lists_leak.py::test_sync_item_to_cloud_missing_item_data_non_local_item_id -x -q` exits 0. (Verifies the gate did NOT over-fire — non-LOCAL item_id with missing item_data still proceeds to the existing flow.)
+    - `python -m pytest tests/test_local_namespace_no_lists_leak.py -x -q` exits 0 with all tests PASSED (including the new HIGH-2 tests).
+    - The critical assertion `_get_client.call_count == 0` passes for BOTH item_data-present AND item_data-absent LOCAL paths.
     - REGRESSION: `python -m pytest tests/ -k "lists_sync or sync_item or sync_list" -x -q` exits 0.
     - `python -m ruff check lists_sync.py tests/test_local_namespace_no_lists_leak.py` exits 0.
   </acceptance_criteria>
-  <done>Both functions gated at top BEFORE any cloud call; iteration uses pinned field names `data['items']` + `item_data['lists']` + `item_data['sys_id']`; tests assert zero `_get_client` invocations for LOCAL sys_ids.</done>
+  <done>Both functions gated at top BEFORE any cloud call; sys_id derivation handles missing item_data per HIGH-2 review fix (flattened — no `if item_data:` wrapper around the derivation); iteration uses pinned field names `data['items']` + `item_data['lists']` + `item_data['sys_id']`; tests assert zero `_get_client` invocations for LOCAL sys_ids in BOTH item_data-present and item_data-absent scenarios.</done>
 </task>
 
 <task type="auto" tdd="true">
@@ -443,7 +476,7 @@ items = [
 | Threat ID | Category | Component | Disposition | Mitigation Plan |
 |-----------|----------|-----------|-------------|-----------------|
 | T-95-13 | Information disclosure | LOCAL sys_id leaks via `/api/search` JSON response to external HTTP consumers | mitigate | `shared/search_serializer.py:_is_local_item` filter drops the row pre-serialization; pinned by `tests/test_local_namespace_no_api_leak.py` (T1 from phase-level threat list) |
-| T-95-14 | Information disclosure | LOCAL sys_id leaks via Lists sync to Supabase | mitigate | D-30 Codex P0 fix — gate at TOP of `sync_item_to_cloud` AND `sync_list_to_cloud` BEFORE `_get_client()`; pinned by `tests/test_local_namespace_no_lists_leak.py` which asserts `_get_client.call_count == 0` (T2). B2 — field names pinned from `sync_to_cloud:619-635` canonical pattern: `data['items']` flat dict, `item_data['lists']` membership, `item_data['sys_id']` |
+| T-95-14 | Information disclosure | LOCAL sys_id leaks via Lists sync to Supabase | mitigate | D-30 Codex P0 fix + HIGH-2 review fix — gate at TOP of `sync_item_to_cloud` AND `sync_list_to_cloud` BEFORE `_get_client()`; HIGH-2: sys_id derivation runs OUTSIDE the `if item_data:` branch (`sys_id = item_data.get('sys_id', item_id) if item_data else item_id`) so a LOCAL item_id with missing item_data is ALSO gated. Pinned by `tests/test_local_namespace_no_lists_leak.py::test_sync_item_to_cloud_zero_get_client_calls_for_local` AND `::test_sync_item_to_cloud_local_item_id_missing_data` (HIGH-2 load-bearing test). B2 — field names pinned from `sync_to_cloud:619-635` canonical pattern: `data['items']` flat dict, `item_data['lists']` membership, `item_data['sys_id']` |
 | T-95-15 | Information disclosure | LOCAL sys_id leaks via corrections submit | mitigate | Existing SYNTH-06 gate extended; distinct error code `local_corrections_disabled` per REQ-9 acceptance; pinned by `tests/test_local_namespace_no_corrections_leak.py` (T3) |
 | T-95-16 | Tampering | Future contributor adds new cloud-write surface without LOCAL gate | accept (partially mitigated) | Plan 09 adds `tests/test_web_library_options_no_local.py` static AST guard for `LIBRARY_CODES` consumers; cloud-write boundaries are a more open surface, but the helper `is_local_sys_id` is the single source of truth — code review catches new gates |
 | T-95-17 | Repudiation | Silent gate trigger leaves no audit trail | mitigate | All three gates log at INFO level with sys_id; ops can grep logs for `"local-only"` / `"list contains LOCAL"` to verify gate triggered |
@@ -459,7 +492,7 @@ items = [
 
 <success_criteria>
 - 3 cloud-write boundaries gated with `is_local_sys_id` check.
-- `lists_sync.sync_item_to_cloud` gate is the FIRST STATEMENT of the function (BEFORE `is_sync_available()` at line 738) — verified by reading the source.
+- `lists_sync.sync_item_to_cloud` gate is the FIRST STATEMENT of the function (BEFORE `is_sync_available()` at line 738) — verified by reading the source. The `sys_id` derivation runs OUTSIDE any `if item_data:` branch (HIGH-2 review fix).
 - `lists_sync.sync_list_to_cloud` aborts entire list sync if ANY item belonging to the list has LOCAL sys_id. **B2 — iteration uses pinned field names: `data.get('items', {})` flat dict, `item_data.get('lists', [])` membership, `item_data.get('sys_id', iid)` lookup.**
 - `corrections_client` returns `local_corrections_disabled` error code (distinct from `synthetic_corrections_disabled`).
 - `shared/search_serializer.py` filters LOCAL items before `_serialize_item`.
@@ -472,5 +505,5 @@ items = [
 After completion, create `.planning/phases/95-my-library/95-04-SUMMARY.md` documenting:
 - Exact line numbers where each gate was inserted in each file
 - Confirmation that the `sync_list_to_cloud` gate iterates `data['items']` flat dict and checks `item_data['lists']` membership (B2 resolution)
-- Confirmation that the `_get_client.call_count == 0` assertion passes (the load-bearing Codex P0 verification)
+- Confirmation that the `_get_client.call_count == 0` assertion passes for BOTH item_data-present AND item_data-absent LOCAL paths (HIGH-2 review fix)
 </output>

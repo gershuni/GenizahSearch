@@ -23,6 +23,8 @@ must_haves:
     - "Refresh triggers a MULTI-FOLDER aggregate pre-scan: file_count and total_bytes are SUMMED across ALL registered folders (per D-16 multi-folder support); thresholds apply to the aggregate; D-26/D-41 are PER-TRIGGER, not per-folder (W8 RESOLVED)"
     - "Unavailable folders are excluded from Refresh aggregate (they're skipped per D-40); but registered + available folders contribute to the sum"
     - "Unavailable folders shown with warning icon + tooltip; rows preserved (D-40)"
+    - "HIGH-1 review fix: AFTER every refresh / delete / rebuild / startup-recovery commit, MyLibraryTab calls `self.search_engine.reload_local_indexes()` so the live SearchEngine session sees newly indexed files without app restart (the reload methods themselves live in Plan 05 Task 3)."
+    - "HIGH-1 review fix: the four call sites are `_on_worker_finished` (Refresh), `_on_remove_folder_clicked` (Delete), `rebuild_local_lab_index` callback (Rebuild), and `_on_startup_recovery_completed` (startup_recovery from D-21 + Plan 03 HIGH-3 recovery)."
   artifacts:
     - path: "desktop/my_library_tab.py"
       provides: "MyLibraryTab(QWidget), LocalIndexerWorker(QThread)"
@@ -40,9 +42,23 @@ must_haves:
       to: "MyLibraryTab"
       via: "self.tabs.addTab(self.my_library_tab, tr('My Library'))"
       pattern: "self.tabs.addTab"
+    - from: "desktop/my_library_tab.py:MyLibraryTab._on_worker_finished + _on_remove_folder_clicked + _on_startup_recovery_completed + rebuild_local_lab_index callback"
+      to: "SearchEngine.reload_local_indexes() (Plan 05 Task 3)"
+      via: "post-commit Tantivy searcher reopen for live-session visibility (HIGH-1 review fix)"
+      pattern: "reload_local_indexes"
 ---
 
 <objective>
+
+**HIGH-1 RESOLVED — Live-search reload wiring (this plan side).** After every commit on either the LOCAL main side-index OR the LOCAL LAB side-index, MyLibraryTab MUST call `self.search_engine.reload_local_indexes()` (defined in Plan 05 Task 3). The four call sites:
+
+1. `_on_worker_finished` — Refresh worker finished (D-25 auto-rescan and manual Refresh both reach here).
+2. `_on_remove_folder_clicked` — synchronous Delete commit completes (D-20).
+3. `_on_rebuild_lab_completed` (NEW callback paired with Plan 06's `rebuild_local_lab_index`) — LOCAL LAB rebuild finished.
+4. `_on_startup_recovery_completed` — Plan 03 `startup_recovery()` Pass A (HIGH-3 pending_delete recovery) + Pass B (D-21 pending insert recovery) completed.
+
+Without these reload calls, newly indexed / deleted / rebuilt files only become visible to live search after an app restart. The reviewer flagged this as a HIGH blocker on the main product promise.
+
 Build the desktop UI for My Library: the `MyLibraryTab(QWidget)` with multi-folder management (D-16), a QThread worker wrapping the Qt-free indexer from Plan 03, cooperative cancellation per D-24 Codex revision (between files AND between pages), QMutex gating all mutations per D-25 Codex revision, pre-scan ceiling dialog per D-26 + D-41 (both file_count and total_bytes shown), unavailable-folder handling per D-40, and tab registration as the 7th tab in `genizah_app.py:3091` (Pitfall #4 — NOT 6th).
 
 **W8 RESOLVED — Per-folder vs cumulative ceiling-check specification for multi-folder Refresh (D-16):**
@@ -220,13 +236,13 @@ def prescan_count_all(self) -> tuple[int, int]:
        - `run(self)`: calls `self.indexer.scan_all(cancel_check=lambda: self._cancel_requested)`; emits finished or error.
 
     4. `class MyLibraryTab(QWidget)`:
-       - `__init__(self, parent=None)`: builds UI, inits indexer, calls `_auto_rescan_on_startup`.
+       - `__init__(self, parent=None)`: builds UI, inits indexer, calls `_auto_rescan_on_startup`. **(HIGH-1 review fix)** Stashes `self.search_engine = parent.engine` (or the equivalent way genizah_app exposes its SearchEngine instance — executor verifies the exact attribute name during execution). This is the handle the four call sites use to invoke `reload_local_indexes()`. If `parent` does not yet have a `.engine` attribute at construction time (lazy init), use `weakref.proxy` or a deferred property; the executor decides during execution.
        - Instance state: `self._indexer`, `self._worker`, `self._indexer_mutex = QMutex()` (D-25), `self._queued_action = None` (max queue depth 1 per D-25 Codex revision), `self._settings = QSettings("Dicta", "GenizahSearchPro")` (D-15 — UI prefs only; folder list lives in SQLite per D-15).
        - `_build_ui()`: QVBoxLayout with three sections (folder list + Add/Remove buttons; Refresh/Cancel + QProgressBar; per-file status QTableWidget cols `Filename | Pages | Status`).
-       - `_init_indexer()`: instantiate `LocalIndexer(index_dir=Config.LOCAL_INDEX_DIR, lab_index_dir=Config.LOCAL_LAB_INDEX_DIR, db_path=...)`; call `startup_recovery()` (D-21).
+       - `_init_indexer()`: instantiate `LocalIndexer(index_dir=Config.LOCAL_INDEX_DIR, lab_index_dir=Config.LOCAL_LAB_INDEX_DIR, db_path=...)`; call `startup_recovery()` (D-21 + Plan 03 HIGH-3 two-pass recovery). **(HIGH-1 review fix)** AFTER `startup_recovery()` returns, call `self.search_engine.reload_local_indexes()` so any pending-delete recoveries OR pending-insert re-extracts are visible to the live search session (the LOCAL searcher was opened in SearchEngine.__init__ BEFORE startup_recovery ran, so it has a stale snapshot of the pre-recovery state).
        - `_auto_rescan_on_startup()`: D-25 silent background rescan with toast on completion.
        - `_start_worker(toast_on_complete)`: `self._indexer_mutex.tryLock()`; if held, queue the request (collapse if already queued); else spawn `LocalIndexerWorker`, disable mutation buttons, enable Cancel.
-       - `_on_worker_finished(result, toast)`: unlock mutex, re-enable buttons, show status bar toast `"My Library updated: N new files indexed"` (D-25), process queued action if present.
+       - `_on_worker_finished(result, toast)`: **(HIGH-1 review fix)** unlock mutex, re-enable buttons, call `self.search_engine.reload_local_indexes()` (the load-bearing reload — newly indexed files become live-searchable in the current session), show status bar toast `"My Library updated: N new files indexed"` (D-25), process queued action if present. The reload MUST run BEFORE the toast so by the time the user dismisses the toast, search already picks up the new content.
        - `_on_worker_error(msg)`: unlock mutex, show `QMessageBox.warning`.
 
        **W8 RESOLVED — Two ceiling-check entry points, AGGREGATE for Refresh:**
@@ -291,7 +307,7 @@ def prescan_count_all(self) -> tuple[int, int]:
        ```
 
        - `_on_add_folder_clicked()`: `QFileDialog.getExistingDirectory`; call `_check_ceiling_single_folder(path)`; if `True`, `indexer.add_folder(path)`; on overlap, show "This folder is already covered by an existing entry."
-       - `_on_remove_folder_clicked()`: `indexer.remove_folder(current_item_path)` (D-20 synchronous delete).
+       - `_on_remove_folder_clicked()`: `indexer.remove_folder(current_item_path)` (D-20 synchronous delete) **then call `self.search_engine.reload_local_indexes()` (HIGH-1 review fix — deleted LOCAL docs must disappear from live search immediately, not only after restart).**
        - `_on_refresh_clicked()`: call `_check_ceiling_refresh_aggregate()`; if `True`, `_start_worker(toast_on_complete=False)`.
        - `_on_cancel_clicked()`: `self._worker.cancel()` (D-24 cooperative flag).
        - `_on_progress_updated(current, total, filename)`: update progress bar.
@@ -351,6 +367,9 @@ def prescan_count_all(self) -> tuple[int, int]:
     - `grep -c "_auto_rescan_on_startup" desktop/my_library_tab.py` returns ≥ 2.
     - `python -m pytest tests/test_my_library_tab.py tests/test_local_indexer_mutex.py tests/test_local_ceiling_enforcement.py -x -q` exits 0.
     - W8 — `python -m pytest tests/test_local_ceiling_enforcement.py::test_refresh_aggregates_prescan_across_all_folders tests/test_local_ceiling_enforcement.py::test_refresh_aggregate_excludes_unavailable_folders -x -q` exits 0.
+    - HIGH-1 review fix — verify reload wiring at all four call sites: `grep -c "self.search_engine.reload_local_indexes()" desktop/my_library_tab.py` returns ≥ 4 (one per call site: `_on_worker_finished`, `_on_remove_folder_clicked`, `_on_rebuild_lab_completed`, `_on_startup_recovery_completed`).
+    - HIGH-1 review fix — end-to-end test: index a fresh file via Refresh, immediately run a search containing a known token from that file in the SAME app session (no restart), assert at least one LOCAL hit appears. This is the user-facing scenario the reviewer flagged. Test name: `tests/test_my_library_tab.py::test_refresh_then_search_in_same_session_returns_local_hits`.
+    - HIGH-1 review fix — delete-then-search regression: remove a folder, immediately run a search containing a token from that folder's files, assert ZERO LOCAL hits (the docs are gone from live search, not just from disk).
     - `python -m ruff check desktop/my_library_tab.py` exits 0.
   </acceptance_criteria>
   <done>MyLibraryTab + LocalIndexerWorker shipped; QMutex gates mutations; ceiling dialog implemented with TWO entry points (single-folder for Add, aggregate for Refresh per W8); 3 tests green.</done>

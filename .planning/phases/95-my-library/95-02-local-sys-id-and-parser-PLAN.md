@@ -15,7 +15,7 @@ requirements: [REQ-2]
 must_haves:
   truths:
     - "is_local_sys_id(s) returns True for any 18-digit 97-prefixed string"
-    - "is_local_sys_id returns False for every row in libraries.csv (regression scan)"
+    - "is_local_sys_id returns False for EVERY row in libraries.csv — FULL ~255K-row scan, no 1,000-row cap (MEDIUM-3 review fix; SPEC REQ-2 acceptance literal)"
     - "is_synthetic_sys_id continues to return False for 97-prefixed IDs (disjoint namespaces)"
     - "machine_id and content_hash always produce exactly 8 decimal digits (D-19 % 10**8 contract)"
     - "_canonical_filepath produces identical strings for equivalent Windows paths (UNC, junction, casing)"
@@ -353,27 +353,45 @@ D-34 LOCAL full_header format:
     - `ALLOWLIST = {"shared/synthetic_sys_id.py", "tests/test_synthetic_sys_id.py"}` → `ALLOWLIST = {"shared/local_sys_id.py", "tests/test_local_sys_id_namespace.py"}`
     - Also scan for `int(local_id)` and `int(sys_id)` patterns within functions whose name contains `local`.
 
-    For `test_full_libraries_csv_no_local`:
+    For `test_full_libraries_csv_no_local` (MEDIUM-3 review fix — removed 1,000-row cap; SPEC REQ-2 requires every row):
     ```python
     def test_full_libraries_csv_no_local():
-        """SPEC REQ-2 acceptance: is_local_sys_id is False for every sys_id in libraries.csv."""
+        """SPEC REQ-2 acceptance: is_local_sys_id is False for EVERY sys_id in libraries.csv.
+
+        MEDIUM-3 review fix (2026-05-21): the previous version capped iteration at
+        1,000 rows for runtime savings. SPEC REQ-2 explicitly requires the scan of
+        every row in libraries.csv (255K rows). The cap is removed; the full file
+        is scanned. Runtime cost: ~0.5-1.5s on a modern machine — acceptable for a
+        locked acceptance criterion. This is a one-time check at test time, NOT a
+        runtime cost on every search.
+        """
         csv_path = pathlib.Path(__file__).parent.parent / "libraries.csv"
         if not csv_path.exists():
             pytest.skip("libraries.csv not present in test environment")
-        # Bounded iteration: read first 1000 rows in CI, full scan in nightly.
         import csv as csvmod
         offenders = []
+        row_count = 0
         with open(csv_path, encoding="utf-8-sig", errors="replace") as f:
             reader = csvmod.reader(f)
             for i, row in enumerate(reader):
+                row_count += 1
                 if not row:
                     continue
                 sid = row[0].strip()
                 if is_local_sys_id(sid):
                     offenders.append((i, sid))
-                if i > 1000 and not offenders:  # bounded check; collision risk negligible
-                    break
-        assert not offenders, f"libraries.csv contains LOCAL-classified rows: {offenders[:10]}"
+                    if len(offenders) > 50:
+                        # Bail early if the helper is fundamentally broken (don't drown the assert message).
+                        break
+        # MEDIUM-3: the scan covered the FULL file, not a 1,000-row prefix.
+        assert row_count > 200_000, (
+            f"libraries.csv only had {row_count} rows scanned; SPEC REQ-2 requires "
+            f"~255K rows. Test may be reading the wrong file or hitting an early termination."
+        )
+        assert not offenders, (
+            f"libraries.csv contains {len(offenders)} LOCAL-classified rows (97-prefix); "
+            f"first 10: {offenders[:10]}. Namespace boundary is violated."
+        )
     ```
   </action>
   <verify>

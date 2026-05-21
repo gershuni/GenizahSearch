@@ -19,6 +19,8 @@ must_haves:
     - "On weights_hash mismatch, local_lab_index query is skipped and a 'stale, rebuild?' signal is emitted (D-38)"
     - "Same pattern applied to search_composition_logic at genizah_core.py:7923 (non-LAB Composition Search) per REQ-6 three-surface coverage"
     - "Fingerprint helpers _compute_fingerprint_dyn / _compute_fingerprint_static / _normalize_text are LOCKED to Option C (callback injection from genizah_core.py SearchEngine into LocalIndexer.build_lab_side_index)"
+    - "HIGH-4 review fix: LAB rebuild content source is the main LOCAL Tantivy stored `content` field (option b LOCKED) — `_iterate_lab_source_rows` opens the main LOCAL Tantivy index and reads `content` per `unique_id`. NOT re-extraction from source files (option a — fails on D-40 unavailable folders), NOT a SQLite `page_text` column (option c — doubles storage)."
+    - "HIGH-4 review fix: source-file deletion + LAB rebuild = LOCAL file STILL appears in LAB (the main LOCAL Tantivy snapshot is durable). Explicit LOCAL LAB invalidation (D-38 weights_hash) or explicit LOCAL Tantivy delete (Plan 03 _delete_file) are the only paths to remove a LOCAL doc from the LAB."
   artifacts:
     - path: "shared/local_indexer.py"
       provides: "build_lab_side_index() method on LocalIndexer; write .meta.json with weights_hash; accepts callback functions for fingerprint computation (Option C)"
@@ -44,6 +46,9 @@ must_haves:
 ---
 
 <objective>
+
+**Content source for LAB rebuild (HIGH-4 review fix, option b LOCKED):** Page text for the LAB side-index is sourced by reading the `content` stored field from the main LOCAL Tantivy side-index, keyed by `unique_id`. The main LOCAL schema (Plan 03) already has `content` with `stored=True` (95-RESEARCH.md line 439), so this option requires zero schema additions. Choice rationale (per HIGH-4 review fix on 2026-05-21): option (b) survives source-file deletion + D-40 folder-unavailability (the LAB rebuild reads from the durable LOCAL Tantivy snapshot, NOT from source files that may be missing); option (a) re-extracts from source files which breaks on missing/unavailable files (wrong semantic vs D-40); option (c) adds a `page_text` SQLite column doubling storage cost. The same decision is mirrored in Plan 03 (which CLARIFIES that its `local_files` schema does NOT store page text — the main LOCAL Tantivy stored content field is the page-text source for LAB).
+
 Add the LOCAL LAB side-index (D-09) and its invalidation contract (D-38) so that Composition Search and Parallels can include LOCAL hits. Key constraint from CONTEXT D-09 (Codex revision): `fingerprint_dyn` depends on the current LAB `dynamic_rank_map`; if LAB weights change in settings OR main LAB rebuilds, the LOCAL LAB side-index becomes silently stale (wrong fingerprints → wrong Composition matches).
 
 D-38 invalidation triggers: persist `weights_hash = sha256(json.dumps(current_lab_weights, sort_keys=True))` + `lab_schema_version` to `<LOCAL_LAB_INDEX_DIR>/.meta.json` at build time. At Composition/Parallels query time, compare current LAB weights_hash to stored value; if mismatch, skip LOCAL LAB query AND surface non-modal banner `"My Library LAB index out of date — Rebuild?"`.
@@ -150,6 +155,18 @@ def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter
     - `test_lab_meta_weights_hash_deterministic` — given same weights dict, `build_lab_side_index` writes the same `weights_hash`. Different weights → different hash.
     - `test_lab_meta_versioning` — `lab_schema_version` is an int ≥ 1; future schema bumps invalidate the index.
     - `test_build_lab_side_index_callback_signature_option_c` — assert `build_lab_side_index`'s signature has the three callback parameters `fingerprint_dyn_fn`, `fingerprint_static_fn`, `normalize_text_fn` (W5 — Option C LOCKED).
+    - `test_lab_rebuild_after_source_file_deleted` (HIGH-4 review fix — NEW load-bearing test):
+      1. Index a small file via the full LOCAL indexer (it gets a sys_id, rows in `local_files` + `local_pages`, AND Tantivy docs in main LOCAL Tantivy).
+      2. Build the LAB side-index. Confirm the LOCAL doc is present in LAB.
+      3. DELETE the source file from disk (`os.remove`).
+      4. Rebuild the LAB side-index (call `build_lab_side_index` again with same weights — simulates user clicking Refresh in MyLibraryTab).
+      5. **Critical HIGH-4 assertion (option b semantic):** the LOCAL doc IS STILL in LAB. The page text comes from the main LOCAL Tantivy stored content field, not the source file. The source file being missing is irrelevant for LAB rebuild.
+      6. **Removing the LOCAL doc from LAB requires explicit `LocalIndexer._delete_file(sys_id)` (which removes from main LOCAL Tantivy first, then LAB rebuild sees zero rows for that sys_id).** Verify this second leg: call `_delete_file`, rebuild LAB, assert LOCAL doc absent.
+    - `test_lab_rebuild_after_folder_unavailable_d40` (HIGH-4 review fix — companion test):
+      1. Index a file; build LAB. LOCAL doc present in LAB.
+      2. Make the folder unavailable (D-40 — `shutil.rmtree` of the folder; `folders.status` becomes `unavailable` on next scan).
+      3. Rebuild LAB.
+      4. **Critical:** LOCAL doc IS STILL in LAB (because D-40 explicitly says rows are preserved when folder unavailable; HIGH-4 option b honors this by reading content from durable main LOCAL Tantivy, not source files).
   </behavior>
   <action>
     Add the following method to `LocalIndexer` class in `shared/local_indexer.py`. **W5 — Option C LOCKED: fingerprint helpers are passed as callback functions.** Options A and B are STRUCK.
@@ -198,8 +215,14 @@ def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter
         lab_index = tantivy.Index(schema, path=self._lab_index_dir)
         writer = lab_index.writer(heap_size=50_000_000)
 
-        # For each indexed file (SELECT from local_files), compute the LAB
-        # representation per page (using injected fingerprint helpers — Option C).
+        # For each indexed page, compute the LAB representation using injected
+        # fingerprint helpers (Option C).
+        #
+        # HIGH-4 review fix (2026-05-21, option b LOCKED): `_iterate_lab_source_rows()`
+        # reads page TEXT from the main LOCAL Tantivy stored `content` field, keyed
+        # by `unique_id`. It does NOT re-extract from source files (option a — would
+        # break on D-40 unavailable folders) and does NOT read from SQLite (option c —
+        # this plan does not add a `page_text` column).
         for sys_id, uid, page_num, file_id, content in self._iterate_lab_source_rows():
             fingerprint_dyn = fingerprint_dyn_fn(content, dynamic_rank_map)
             fingerprint_static = fingerprint_static_fn(content)
@@ -238,7 +261,73 @@ def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter
 
     **W5 — Critical: NO Option A/B fallback.** The function signature uses keyword-only callback parameters (`*,` separator). If a caller omits any callback, the function raises `TypeError` at call time — fail-fast contract. The Qt-side caller in Plan 07 wires the LAB engine and passes the SearchEngine-bound closures.
 
-    Add a helper to expose `weights_hash` from the meta file:
+    **HIGH-4 review fix — `_iterate_lab_source_rows()` implementation (option b — read content from main LOCAL Tantivy by UID):**
+
+    ```python
+    def _iterate_lab_source_rows(self):
+        """HIGH-4 review fix (option b LOCKED): yield (sys_id, uid, page_num, file_id, content)
+        tuples sourced from the MAIN LOCAL Tantivy stored content field.
+
+        The SQLite local_files table stores metadata only (no page_text column per Plan 03 +
+        HIGH-4 decision). `local_pages` tracks the (sys_id, uid, page_num) mapping; the
+        page TEXT lives in the main LOCAL Tantivy index at the `content` stored field.
+
+        This generator:
+          1. SELECTs (sys_id, uid, page_num, file_id) from `local_pages` JOIN `local_files`
+             ORDER BY sys_id, page_num.
+          2. Opens the main LOCAL Tantivy index (the one Plan 03 builds).
+          3. For each uid: searches by `unique_id` (term query against the raw-tokenized
+             field per Pitfall #2), retrieves the doc, reads `content` from stored fields.
+          4. Yields the tuple.
+
+        Failure modes:
+          - main LOCAL Tantivy missing: log WARNING and yield nothing (LAB rebuild produces an
+            empty LAB index — same fallback semantics as D-37).
+          - uid present in `local_pages` but missing from main LOCAL Tantivy: log WARNING per
+            uid, skip. (Indicates main LOCAL Tantivy and local_pages are out-of-sync —
+            startup recovery from Plan 03 HIGH-3 fix should have reconciled, but log helps
+            diagnose if it didn't.)
+        """
+        import os as _os
+        try:
+            if not _os.path.isdir(self._main_index_dir):
+                logger.warning("HIGH-4: main LOCAL Tantivy missing at %s; LAB rebuild empty",
+                               self._main_index_dir)
+                return
+            main_schema = build_local_schema()
+            main_index = tantivy.Index(main_schema, path=self._main_index_dir)
+            searcher = main_index.searcher()
+        except Exception as e:
+            logger.warning("HIGH-4: cannot open main LOCAL Tantivy for LAB rebuild: %r", e)
+            return
+
+        rows = self._sqlite_conn.execute(
+            "SELECT lp.sys_id, lp.uid, lp.page_num, lf.file_id "
+            "FROM local_pages lp "
+            "JOIN local_files lf ON lf.sys_id = lp.sys_id "
+            "WHERE lf.pending_delete = 0 "  # HIGH-3 review fix: skip rows marked for delete
+            "ORDER BY lp.sys_id, lp.page_num"
+        ).fetchall()
+        for sys_id, uid, page_num, file_id in rows:
+            try:
+                q = main_index.parse_query(uid, ["unique_id"])
+                top = searcher.search(q, limit=1).hits
+                if not top:
+                    logger.warning("HIGH-4: uid %s present in local_pages but missing "
+                                   "from main LOCAL Tantivy — skipping", uid)
+                    continue
+                _, doc_addr = top[0]
+                doc = searcher.doc(doc_addr)
+                content = doc.get_first("content") or ""
+                yield (sys_id, uid, page_num, file_id, content)
+            except Exception as e:
+                logger.warning("HIGH-4: uid %s read failed: %r — skipping", uid, e)
+                continue
+    ```
+
+    Constructor adjustment: `LocalIndexer.__init__` MUST receive (or expose) `index_dir` so `_iterate_lab_source_rows` can open the main LOCAL Tantivy. The existing constructor signature from Plan 03 already takes `index_dir`; the LAB method stashes it as `self._main_index_dir`.
+
+        Add a helper to expose `weights_hash` from the meta file:
     ```python
     @staticmethod
     def read_lab_meta(lab_index_dir: str) -> Optional[dict]:

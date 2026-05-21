@@ -9,6 +9,7 @@ files_modified:
   - tests/test_local_post_dedup_merge.py
   - tests/test_side_index_merge.py
   - tests/test_local_index_open_fallback.py
+  - tests/test_local_reload_after_refresh.py
 autonomous: true
 requirements: [REQ-3]
 must_haves:
@@ -37,12 +38,20 @@ must_haves:
       to: "RRF k=60 algorithm"
       via: "Reciprocal Rank Fusion"
       pattern: "1.0 / \\(k \\+ rank\\)"
+    - from: "SearchEngine.reload_local_indexes"
+      to: "MyLibraryTab refresh / delete / rebuild / recovery callbacks (Plan 07)"
+      via: "post-commit reopen of Tantivy searcher handles"
+      pattern: "reload_local_indexes"
 ---
 
 <objective>
 Wire the LOCAL side-index into the main search dispatch. Per Codex D-08 P0: LOCAL hits MUST merge AFTER `_deduplicate()` at `genizah_core.py:7390`, NOT before — the existing `_deduplicate()` body at `:7916-7921` whitelists only V0.8 / V0.7 sources and would silently drop LOCAL. Use RRF k=60 (NOT raw BM25 — Codex revision) because BM25 IDF is index-local and scores from two independent Tantivy indexes are not directly comparable.
 
 Also implement D-37 fallback: if `tantivy.Index.open(Config.LOCAL_INDEX_DIR)` raises at search-init (missing files, file lock from crashed previous instance, corruption), main search proceeds normally — LOCAL hits are absent, the LOCAL filter button stays hidden (gated in Plan 08), and a status-bar "My Library index unavailable — Rebuild?" notice is surfaced.
+
+**HIGH-1 RESOLVED — Live-search reload after refresh.** The original plan opened `self.local_searcher` only during `SearchEngine.__init__`. Plan 07 ran refresh workers but did not specify reloading the Tantivy searcher handles after commits. Result: newly indexed files would not appear until app restart, breaking the main product promise. Task 3 (NEW) adds `SearchEngine.reload_local_indexes()` and `SearchEngine.reload_local_lab_index()` methods that close + reopen the Tantivy index handles. Plan 07 then calls these methods after every MyLibraryTab Refresh, Delete, Rebuild, and Recovery commit (Plan 07 update covers the call-site wiring).
+
+**MEDIUM-1 RESOLVED — Query semantics parity.** Task 2 extension: refactor `_query_local_index` to call the same query-builder helper from `genizah_core.py` that the main search uses, parameterized by which fields to search. Validation: a test asserts phrase mode and gap mode produce identical hit-sets on a fixture containing both main-index and LOCAL documents. If the full refactor is too invasive for this revision, the divergence is documented in a `<deferred>` block with a follow-up test exercising each query mode against LOCAL fixtures and a TODO referencing this plan.
 
 **W7 RESOLVED — Dedicated tie-break test:** the must_haves list explicitly calls out Genizah-first tie-break, but the original plan had no test FORCING the equal-RRF-score scenario. Task 2 ADDS `test_rrf_tiebreak_genizah_first` to `tests/test_side_index_merge.py` with a fixture constructed to produce identical RRF scores; assertion: the Genizah hit ranks first in the merged output.
 
@@ -475,6 +484,148 @@ def _rrf_merge(self, genizah_hits, local_hits, k=60, limit=None):
   </acceptance_criteria>
   <done>LOCAL merge inserted post-dedup; RRF used; dedup body untouched; all 3 test files green including the new W7 tie-break test and the W6 AST-from-pytest test.</done>
 </task>
+
+<task type="auto" tdd="true">
+  <name>Task 3: HIGH-1 review fix — SearchEngine.reload_local_indexes() + reload_local_lab_index() + MEDIUM-1 shared query builder (or deferred)</name>
+  <read_first>
+    - genizah_core.py — SearchEngine __init__ (LOCAL searcher init added in Task 1)
+    - genizah_core.py — locate the main search query construction site (for MEDIUM-1 shared helper extraction)
+    - .planning/phases/95-my-library/95-REVIEWS.md (HIGH-1 + MEDIUM-1 findings)
+    - desktop/my_library_tab.py (Plan 07 — call sites that will invoke these reload methods)
+  </read_first>
+  <behavior>
+    Test `test_reload_local_indexes_picks_up_new_docs_without_restart` (HIGH-1 load-bearing):
+    - Construct a `SearchEngine` against a LOCAL Tantivy index containing 0 docs initially.
+    - Confirm a search for some token returns 0 LOCAL hits.
+    - In a SEPARATE process / writer, ADD a doc to the LOCAL Tantivy index and commit (simulates MyLibraryTab refresh worker committing on a background thread).
+    - Without calling reload, the search STILL returns 0 LOCAL hits (Tantivy searcher is snapshotted at open time — this is the bug HIGH-1 flags).
+    - Call `engine.reload_local_indexes()`.
+    - Search again: now returns 1 LOCAL hit (the newly committed doc).
+    - This pins HIGH-1: the live search session can see newly indexed files without restart.
+
+    Test `test_reload_local_lab_index_picks_up_new_docs`:
+    - Same shape as above but against `local_lab_searcher` after a LOCAL LAB commit.
+    - Call `engine.reload_local_lab_index()`.
+    - Composition Search returns the newly indexed LOCAL LAB doc.
+
+    Test `test_reload_local_indexes_no_op_when_dir_missing`:
+    - HIGH-1 + D-37 interaction: when `Config.LOCAL_INDEX_DIR` does not exist (first launch, never indexed), `reload_local_indexes()` leaves `self.local_searcher = None` and does NOT raise. Logs at INFO "no LOCAL index to reload".
+
+    Test `test_reload_local_indexes_recovers_from_transient_lock_error`:
+    - Simulate a transient open failure (mock `tantivy.Index` to raise `IOError` on first call, succeed on second). `reload_local_indexes()` logs the failure at WARNING and leaves `local_searcher = None` (defensive — same D-37 fallback semantics on reload as at init).
+
+    Test `test_query_semantics_phrase_mode_parity_with_main` (MEDIUM-1 — required if option A taken; otherwise the deferred test below):
+    - Build a small main-index fixture (1 doc with phrase "ABC DEF GHI") AND a LOCAL fixture (1 doc with same phrase).
+    - Run a phrase-mode search for `"DEF GHI"` against both indexes.
+    - Assert: hit count from each index is identical (1 hit each). Same for gap-mode (1-gap permitting "DEF X GHI"-style matches per the engine's gap semantics).
+    - If the full refactor was DEFERRED (MEDIUM-1 option B), this test is marked `@pytest.mark.xfail(reason="MEDIUM-1 deferred to follow-up: shared query builder not yet extracted; see deferred block in 95-05")`.
+  </behavior>
+  <action>
+    **HIGH-1 implementation — `SearchEngine.reload_local_indexes()`:**
+
+    Add to `SearchEngine` in `genizah_core.py` (next to the existing `local_searcher` init from Task 1):
+
+    ```python
+    def reload_local_indexes(self) -> None:
+        """HIGH-1 review fix: reopen LOCAL Tantivy searchers (main + LAB) so newly
+        committed docs become visible in the live session.
+
+        Called by MyLibraryTab (Plan 07) AFTER every refresh / delete / rebuild /
+        recovery commit. Idempotent + defensive: on any open failure, the searcher
+        falls back to None (D-37 semantics).
+
+        Side effects:
+          - self.local_searcher: reopened or set to None (defensive on failure).
+          - self.local_lab_searcher: reopened or set to None.
+          - self._lab_local_meta: re-read from <LOCAL_LAB_INDEX_DIR>/.meta.json.
+        """
+        # Reload main LOCAL side-index.
+        self.local_searcher = None
+        try:
+            if os.path.isdir(Config.LOCAL_INDEX_DIR):
+                from shared.local_indexer import build_local_schema
+                schema = build_local_schema()
+                local_index = tantivy.Index(schema, path=Config.LOCAL_INDEX_DIR)
+                self.local_searcher = local_index.searcher()
+                logger.info("HIGH-1 reload: LOCAL side-index reopened: %s", Config.LOCAL_INDEX_DIR)
+            else:
+                logger.info("HIGH-1 reload: LOCAL side-index dir absent; searcher=None")
+        except Exception as e:
+            logger.warning("HIGH-1 reload: LOCAL side-index unavailable: %r", e)
+            self.local_searcher = None
+        # Delegate LAB reload to the narrower method (Plan 06 adds it too).
+        self.reload_local_lab_index()
+
+    def reload_local_lab_index(self) -> None:
+        """HIGH-1 review fix (LAB-only narrow reload). Reopens self.local_lab_searcher
+        and re-reads the .meta.json staleness sentinel.
+
+        Plan 06 (LAB plan) also touches this method; coordinate via co-edit.
+        """
+        self.local_lab_searcher = None
+        self._lab_local_meta = None
+        try:
+            if os.path.isdir(Config.LOCAL_LAB_INDEX_DIR):
+                from shared.local_indexer import build_local_lab_schema, LocalIndexer
+                schema = build_local_lab_schema()
+                local_lab_index = tantivy.Index(schema, path=Config.LOCAL_LAB_INDEX_DIR)
+                self.local_lab_searcher = local_lab_index.searcher()
+                self._lab_local_meta = LocalIndexer.read_lab_meta(Config.LOCAL_LAB_INDEX_DIR)
+                logger.info("HIGH-1 reload: LOCAL LAB side-index reopened: %s",
+                            Config.LOCAL_LAB_INDEX_DIR)
+            else:
+                logger.info("HIGH-1 reload: LOCAL LAB side-index dir absent; searcher=None")
+        except Exception as e:
+            logger.warning("HIGH-1 reload: LOCAL LAB side-index unavailable: %r", e)
+            self.local_lab_searcher = None
+            self._lab_local_meta = None
+    ```
+
+    **MEDIUM-1 implementation — shared query-builder helper:**
+
+    Option A (preferred — full refactor): extract the query-construction logic from the main searcher into a helper `_build_tantivy_query(query_str, mode, gap, fields)`. Replace both the main searcher call AND `_query_local_index`'s `parse_query(query, ["content", "content_head", "content_tail"])` with calls to this helper. The fields list is the only difference between the two call sites.
+
+    Option B (deferred, only if A is too invasive): keep `_query_local_index` using a fresh `parse_query` but document the divergence in `<deferred>` (added below) and add `@pytest.mark.xfail`-marked tests asserting phrase / gap / exclusion / Hebrew-expansion parity — these become a follow-up plan in v7.14.x. The deferred path is acceptable per the reviewer's wording ("if a full refactor is too invasive for this revision, document the divergence in the plan's `<deferred>` block").
+
+    Executor decides A vs B during execution by inspecting the actual size of the main search query-construction code:
+    - If the query construction is ≤ 50 LOC and self-contained → take Option A.
+    - If the query construction touches Responsa expansion, exclusion lists, refinement chains, or multiple call sites → take Option B and document.
+
+    Either way, ship `test_query_semantics_phrase_mode_parity_with_main`. Under Option A it passes; under Option B it xfails with the deferred reason string.
+
+    Wire-up note: Plan 07 will call `engine.reload_local_indexes()` from `MyLibraryTab._on_worker_finished`, `_on_delete_completed`, `_on_rebuild_completed`, and `_on_startup_recovery_completed`. The Plan 07 update lands separately.
+  </action>
+  <verify>
+    <automated>python -m pytest tests/test_local_reload_after_refresh.py -x -q</automated>
+  </verify>
+  <acceptance_criteria>
+    - `grep -c "def reload_local_indexes" genizah_core.py` returns 1.
+    - `grep -c "def reload_local_lab_index" genizah_core.py` returns 1.
+    - HIGH-1 load-bearing test passes: `python -m pytest tests/test_local_reload_after_refresh.py::test_reload_local_indexes_picks_up_new_docs_without_restart -x -q` exits 0.
+    - `python -m pytest tests/test_local_reload_after_refresh.py -x -q` exits 0 (all 4-5 reload tests pass).
+    - MEDIUM-1 parity test is shipped (pass under Option A; xfail under Option B). Either way: `python -m pytest tests/test_local_reload_after_refresh.py::test_query_semantics_phrase_mode_parity_with_main -q 2>&amp;1 | grep -E "passed|xfailed"` returns a match.
+    - If Option B taken: `<deferred>` block in this plan (or in `95-05-SUMMARY.md`) documents the shared-query-builder follow-up with explicit follow-up test names.
+    - Plan 07 has been updated to call `engine.reload_local_indexes()` at the four documented call sites (verify by reading Plan 07; cross-plan coordination required).
+    - `python -m ruff check genizah_core.py tests/test_local_reload_after_refresh.py` exits 0.
+  </acceptance_criteria>
+  <done>HIGH-1 reload methods shipped; MEDIUM-1 either taken (Option A — shared builder) or documented as deferred with a follow-up test; Plan 07 wire-up coordinated.</done>
+</task>
+
+<deferred>
+## MEDIUM-1 deferred follow-up (only if Option B was taken in Task 3)
+
+If the executor takes Option B (no shared query-builder extraction in this plan), this `<deferred>` block records the open work:
+
+- **Follow-up plan:** Extract `_build_tantivy_query(query_str, mode, gap, fields)` from main searcher and route `_query_local_index` through it. Target: a future v7.14.x patch plan.
+- **Tests gated by xfail:**
+  - `tests/test_local_reload_after_refresh.py::test_query_semantics_phrase_mode_parity_with_main` — phrase mode parity.
+  - `tests/test_local_reload_after_refresh.py::test_query_semantics_gap_mode_parity_with_main` — gap mode parity.
+  - `tests/test_local_reload_after_refresh.py::test_query_semantics_exclusion_parity_with_main` — exclusion lists.
+  - `tests/test_local_reload_after_refresh.py::test_query_semantics_hebrew_expansion_parity_with_main` — Hebrew expansion / Responsa syntax.
+- **Trigger to unxfail:** when the shared helper lands, remove the `xfail` markers and assert pass.
+
+The follow-up MUST be a real plan, not a backlog ticket — semantic divergence between LOCAL and main search is a user-visible defect.
+</deferred>
 
 </tasks>
 
