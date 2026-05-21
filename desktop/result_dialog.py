@@ -324,6 +324,18 @@ class ResultDialog(QDialog):
         action_row.addWidget(self.btn_toggle_image)
         action_row.addWidget(self.btn_rd_translations)
 
+        # Phase 95 smoke-fix (E): "Open file" button for LOCAL hits.
+        # Visible only when current result is a LOCAL file. Calls os.startfile().
+        self.btn_rd_open_file = QPushButton(tr("Open file"))
+        self.btn_rd_open_file.setToolTip(tr("Open the source file in the default OS application"))
+        self.btn_rd_open_file.setStyleSheet(
+            "QPushButton { background-color: #2980b9; color: white; border-radius: 4px; padding: 2px 8px; }"
+        )
+        self.btn_rd_open_file.setVisible(False)  # Hidden until a LOCAL result is shown
+        self.btn_rd_open_file.clicked.connect(self._rd_open_local_file)
+        self._rd_local_filepath = None  # filepath for the current LOCAL result
+        action_row.addWidget(self.btn_rd_open_file)
+
         action_row.addStretch()
 
         # --- Second row: Community features (Edit, Version, Comment) ---
@@ -1877,6 +1889,13 @@ class ResultDialog(QDialog):
                 url = url.replace("/iiif/", "/view/")
             QDesktopServices.openUrl(QUrl(url))
 
+    def _rd_open_local_file(self):
+        """Phase 95 smoke-fix (E): launch the LOCAL source file in the OS default app."""
+        import os
+        filepath = getattr(self, '_rd_local_filepath', None)
+        if filepath and os.path.exists(filepath):
+            os.startfile(filepath)  # Windows-native
+
     def _htmlify(self, text):
         if not text: return ""
         t = text.replace("\n", "<br>")
@@ -1920,7 +1939,25 @@ class ResultDialog(QDialog):
                 else:
                     data['full_text'] = data.get('text', '')
         self.data = data
-        
+
+        # Phase 95 smoke-fix (E): show "Open file" button for LOCAL hits only.
+        try:
+            from shared.local_sys_id import is_local_sys_id as _is_local
+            _src_id = (data.get('display', {}) or {}).get('id', '')
+            if _src_id and _is_local(_src_id) and self._app:
+                # Look up filepath from the indexer via parent app helper
+                _fp = None
+                if hasattr(self._app, '_lookup_local_filepath'):
+                    _fp = self._app._lookup_local_filepath(_src_id)
+                self._rd_local_filepath = _fp
+                self.btn_rd_open_file.setVisible(bool(_fp))
+            else:
+                self._rd_local_filepath = None
+                self.btn_rd_open_file.setVisible(False)
+        except Exception:
+            self._rd_local_filepath = None
+            self.btn_rd_open_file.setVisible(False)
+
         # Nav UI Updates
         self.lbl_res_count.setText(tr("Result {} of {}").format(idx + 1, len(self.all_results)))
         self.btn_res_prev.setEnabled(idx > 0)

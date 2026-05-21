@@ -7838,7 +7838,7 @@ class SearchEngine:
         results.sort(key=lambda r: natural_sort_key(r.get('display', {}).get('shelfmark', '')))
         return results
 
-    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None):
+    def execute_search(self, query_str, mode, gap, progress_callback=None, exclude_words=None, responsa_options=None, restrict_sys_ids: set = None, text_position: str = None, corpus_scope: str = "all"):
         # R2-#1: discard any stale per-thread downgrade signal from a prior
         # invocation (e.g., a prior request that crashed before consuming).
         # Keeps the signal one-shot per execute_search call, so it cannot
@@ -7851,6 +7851,19 @@ class SearchEngine:
         # --- Metadata Search Modes (csv_bank-backed, no Tantivy needed) ---
         if mode in ['Title', 'Shelfmark']:
             return self._execute_metadata_search(query_str, mode, progress_callback, restrict_sys_ids)
+
+        # Phase 95 smoke-fix (item 2): corpus_scope gates which index is queried.
+        # 'local' → query LOCAL side-index only (skip Genizah Tantivy).
+        # 'genizah' → query Genizah only (LOCAL merge block below is skipped).
+        # 'all' → current behavior: Genizah + LOCAL merged via RRF.
+        if corpus_scope == "local":
+            if getattr(self, "local_searcher", None) is None:
+                return []
+            try:
+                return self._query_local_index(query_str, mode, gap)
+            except Exception as _le:
+                LOGGER.warning("LOCAL-only search failed: %r", _le)
+                return []
 
         if not self.searcher: return []
         _line_constraints = {}  # Per-line position constraints (L3:word syntax)
@@ -8229,7 +8242,8 @@ class SearchEngine:
         # The dedup body at _deduplicate() whitelists V0.8/V0.7 only and would
         # otherwise DROP LOCAL hits. RRF k=60 used (BM25 IDF from two independent
         # indexes is not comparable; raw score sort would mis-rank — Codex revision).
-        if getattr(self, "local_searcher", None) is not None:
+        # Phase 95 smoke-fix (item 2): skip LOCAL merge when corpus_scope='genizah'.
+        if corpus_scope != "genizah" and getattr(self, "local_searcher", None) is not None:
             try:
                 local_hits = self._query_local_index(query_str, mode, gap)
             except Exception as _e:
