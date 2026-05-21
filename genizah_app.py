@@ -24240,6 +24240,52 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 if __name__ == "__main__":
+    # Phase 95 HIGH-5 review fix — PyInstaller packaging self-test.
+    # MUST be checked BEFORE QApplication construction so the EXE runs
+    # headlessly (no Qt event loop, no GUI side effects).
+    if "--self-test-pymupdf" in sys.argv:
+        import pathlib as _pathlib
+        try:
+            import fitz  # PyMuPDF — D-43 packaging dependency
+        except Exception as _e:
+            print(f"PYMUPDF_FAIL: import failed: {_e}", file=sys.stderr)
+            sys.exit(1)
+        # Resolve fixture path: frozen EXE uses _MEIPASS, dev uses script dir.
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            _base = _pathlib.Path(sys._MEIPASS)
+        else:
+            _base = _pathlib.Path(__file__).parent
+        _fixture = _base / "tests" / "fixtures" / "local_indexer" / "hebrew_sample.pdf"
+        if not _fixture.exists():
+            print(
+                "PYMUPDF_FAIL: fixture missing "
+                "(tests/fixtures/local_indexer/hebrew_sample.pdf)",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        try:
+            _doc = fitz.open(str(_fixture))
+            if _doc.page_count < 1:
+                print("PYMUPDF_FAIL: fixture has 0 pages", file=sys.stderr)
+                sys.exit(1)
+            _page = _doc[0]
+            _blocks = _page.get_text("blocks")
+            _text_parts = [
+                b[4].strip()
+                for b in _blocks
+                if len(b) >= 7 and b[6] == 0 and b[4].strip()
+            ]
+            _text = "\n\n".join(_text_parts)
+            _doc.close()
+            if not _text:
+                print("PYMUPDF_FAIL: extracted text is empty", file=sys.stderr)
+                sys.exit(1)
+            print("PYMUPDF_OK")
+            sys.exit(0)
+        except Exception as _e:
+            print(f"PYMUPDF_FAIL: extraction raised: {_e!r}", file=sys.stderr)
+            sys.exit(1)
+
     try:
         import ctypes
         if hasattr(ctypes, 'windll'):
