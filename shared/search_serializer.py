@@ -50,6 +50,8 @@ from typing import Any, Optional
 # /api/parallels response items. Skill consumers branch on this field for
 # browse-honesty annotations (see docs/SEARCH_API.md).
 from shared.synthetic_sys_id import is_synthetic_sys_id
+# Phase 95 REQ-9 defense-in-depth: filter LOCAL items from /api/* payloads.
+from shared.local_sys_id import is_local_sys_id
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +101,18 @@ _filename_counter = itertools.count()
 # production sys_id pattern (99 followed by 8+ digits, e.g. 99001234567890 or
 # Phase-85 synthetic 18-digit shape).
 _SYS_ID_REGEX = re.compile(r'(99\d{8,})')
+
+
+def _is_local_item(result: dict) -> bool:
+    """Return True if a result row is a LOCAL hit (REQ-9 defense-in-depth).
+
+    Web Tantivy has no LOCAL data today, but the helper is shared and a
+    belt-and-suspenders gate avoids future regressions.
+    """
+    display = result.get('display', {}) or {}
+    sys_id = display.get('id', '') or result.get('sys_id', '') or ''
+    library_code = display.get('library_code', '') or ''
+    return library_code == 'LOCAL' or is_local_sys_id(sys_id)
 
 
 def _extract_sys_id_for_batch(result: dict, meta_mgr=None) -> str:
@@ -564,6 +578,11 @@ def serialize_search_payload(
         sys_ids = [_extract_sys_id_for_batch(r, meta_mgr=meta_mgr) for r in results]
         sys_ids = [s for s in sys_ids if s]
         domain_batch, catalog_batch = _safe_fjms_lookups(sys_ids)
+
+    # Phase 95 REQ-9 defense-in-depth — drop LOCAL items before serializing.
+    # Web Tantivy has no LOCAL data today, but the helper is shared and a
+    # belt-and-suspenders gate avoids future regressions.
+    results = [r for r in results if not _is_local_item(r)]
 
     items = [
         _serialize_item(

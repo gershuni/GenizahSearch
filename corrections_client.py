@@ -18,6 +18,8 @@ from urllib3.util.retry import Retry
 # because page_number semantics are undefined for image-less synthetic rows.
 # UI hide on web + desktop is defense-in-depth; this is the load-bearing gate.
 from shared.synthetic_sys_id import is_synthetic_sys_id
+# Phase 95 REQ-9 — LOCAL sys_ids never reach the corrections cloud surface.
+from shared.local_sys_id import is_local_sys_id
 
 logger = logging.getLogger(__name__)
 
@@ -620,6 +622,12 @@ class CorrectionsClient:
             return (
                 None,
                 "synthetic_corrections_disabled: corrections cannot be added to synthetic sys_ids",
+            )
+        # Phase 95 REQ-9 — LOCAL sys_ids never reach the corrections cloud surface.
+        if is_local_sys_id(document_id):
+            return (
+                None,
+                "local_corrections_disabled: corrections cannot be added to LOCAL sys_ids",
             )
         try:
             payload = {
