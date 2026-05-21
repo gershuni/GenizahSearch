@@ -12,6 +12,8 @@ import logging
 import time
 from typing import Optional, Dict, Any
 
+from shared.local_sys_id import is_local_sys_id
+
 logger = logging.getLogger(__name__)
 
 # Try to import Supabase
@@ -696,6 +698,20 @@ class ListsCloudSync:
 
     def sync_list_to_cloud(self, list_id: str) -> bool:
         """Push a specific list and its items to cloud."""
+        # ===== Phase 95 LOCAL gate (D-30 Codex P0, REQ-9) =====
+        # Abort entire list sync if any item belonging to this list has a LOCAL sys_id.
+        # B2 — field names pinned from sync_to_cloud:619-635 canonical pattern.
+        # Items are stored as a flat dict at self.lists_manager.data['items'].
+        # Each item dict has a 'lists' list field holding the list_ids it belongs to.
+        # The sys_id is in 'sys_id' (fallback item_id).
+        items_map = self.lists_manager.data.get('items', {})
+        for iid, item_data in items_map.items():
+            if list_id not in (item_data.get('lists') or []):
+                continue  # item not in this list
+            if is_local_sys_id(item_data.get('sys_id', iid)):
+                logger.info("[list contains LOCAL items, not synced] list_id=%s", list_id)
+                return False
+        # ======================================================
         if not self.is_sync_available():
             return False
 
@@ -735,6 +751,20 @@ class ListsCloudSync:
 
     def sync_item_to_cloud(self, item_id: str, list_id: str) -> bool:
         """Push a specific item to cloud."""
+        # ===== Phase 95 LOCAL gate (D-30 Codex P0 + HIGH-2 review fix, REQ-9) =====
+        # MUST run BEFORE _get_client() and sync_list_to_cloud() — both leak
+        # cloud activity even though the natural sys_id lookup is at line ~762.
+        # HIGH-2: derive sys_id BEFORE the `if item_data:` branch so a LOCAL
+        # item_id with missing item_data is ALSO gated (the previous draft
+        # nested the derivation INSIDE the `if item_data:` body which let this
+        # case slip through).
+        # Lookup from in-memory self.lists_manager.data only (no network).
+        item_data = self.lists_manager.data.get('items', {}).get(item_id)
+        sys_id = item_data.get('sys_id', item_id) if item_data else item_id
+        if is_local_sys_id(sys_id):
+            logger.info("[local-only item, not synced] item_id=%s sys_id=%s", item_id, sys_id)
+            return False
+        # ===========================================================================
         if not self.is_sync_available():
             return False
 
