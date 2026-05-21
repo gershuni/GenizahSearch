@@ -37,6 +37,9 @@ the file is marked extraction_status='encoding_error'.
 """
 from __future__ import annotations
 
+import datetime
+import hashlib
+import json
 import logging
 import os
 import re
@@ -1123,6 +1126,203 @@ class LocalIndexer:
         )
         self._conn.commit()
         self._pending_filepaths.clear()
+
+    # ------------------------------------------------------------------
+    # LOCAL LAB side-index builder (D-09 + D-38 + HIGH-4 + W5 Option C)
+    # ------------------------------------------------------------------
+
+    def build_lab_side_index(
+        self,
+        lab_weights: dict,
+        *,
+        fingerprint_dyn_fn: Callable,   # Callable[[str, dict | None], str] — computes fingerprint_dyn
+        fingerprint_static_fn: Callable, # Callable[[str], str] — computes static fingerprint
+        normalize_text_fn: Callable,     # Callable[[str], str] — normalizes content
+        lab_schema_version: int = 1,
+        dynamic_rank_map=None,
+    ) -> None:
+        """Build LOCAL LAB side-index (D-09) and write .meta.json (D-38).
+
+        W5 LOCKED — Option C: fingerprint helpers are passed as keyword-only
+        callback functions from genizah_core.py's SearchEngine. This keeps
+        shared/local_indexer.py free of any genizah_core import (no circular-dep
+        risk). Options A and B are STRUCK per plan 95-06.
+
+        HIGH-4 review fix (option b LOCKED): page text is sourced from the MAIN
+        LOCAL Tantivy stored `content` field via _iterate_lab_source_rows(). It
+        does NOT re-extract from source files (option a — fails on D-40 unavailable
+        folders) and does NOT read from a SQLite `page_text` column (option c —
+        this plan does not add that column).
+
+        D-38: writes <LOCAL_LAB_INDEX_DIR>/.meta.json with:
+          - weights_hash = sha256(json.dumps(lab_weights, sort_keys=True))
+          - lab_schema_version
+          - last_built_at (ISO 8601 UTC)
+
+        Arguments:
+            lab_weights: dict of current LAB dynamic weights (for weights_hash).
+            fingerprint_dyn_fn: callable(content, dynamic_rank_map) -> str.
+            fingerprint_static_fn: callable(content) -> str.
+            normalize_text_fn: callable(content) -> str.
+            lab_schema_version: int (bump when LAB schema changes to invalidate).
+            dynamic_rank_map: dict | None (forwarded to fingerprint_dyn_fn).
+        """
+        os.makedirs(self._lab_index_dir, exist_ok=True)
+        schema = build_local_lab_schema()
+        lab_index = tantivy.Index(schema, path=self._lab_index_dir)
+        # Register tokenizers needed by the LAB schema
+        try:
+            lab_index.register_tokenizer(
+                "whitespace",
+                tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.whitespace()).build(),
+            )
+        except Exception:
+            pass  # May fail on reopen — non-fatal
+        try:
+            lab_index.register_tokenizer(
+                "simple",
+                tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.simple()).build(),
+            )
+        except Exception:
+            pass
+
+        writer = lab_index.writer(heap_size=50_000_000)
+
+        rows_written = 0
+        for sys_id, uid, page_num, file_id, content in self._iterate_lab_source_rows():
+            try:
+                fingerprint_dyn = fingerprint_dyn_fn(content, dynamic_rank_map)
+                fingerprint_static = fingerprint_static_fn(content)
+                text_normalized = normalize_text_fn(content)
+                full_header = _make_full_header(sys_id, page_num, file_id)
+
+                doc = tantivy.Document(
+                    unique_id=uid,
+                    content=content,
+                    text_normalized=text_normalized,
+                    fingerprint=fingerprint_static,
+                    fingerprint_dyn=fingerprint_dyn,
+                    full_header=full_header,
+                    shelfmark=sys_id,
+                    source="LOCAL",
+                )
+                writer.add_document(doc)
+                rows_written += 1
+            except Exception as exc:
+                logger.warning(
+                    "build_lab_side_index: failed to write uid %s: %r — skipping", uid, exc
+                )
+
+        writer.commit()
+        writer.wait_merging_threads()
+
+        # Write .meta.json (D-38).
+        weights_hash = hashlib.sha256(
+            json.dumps(lab_weights, sort_keys=True).encode("utf-8")
+        ).hexdigest()
+        meta = {
+            "weights_hash": weights_hash,
+            "lab_schema_version": lab_schema_version,
+            "last_built_at": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+        meta_path = os.path.join(self._lab_index_dir, ".meta.json")
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
+
+        logger.info(
+            "LOCAL LAB side-index built: %d pages, weights_hash=%s",
+            rows_written,
+            weights_hash[:8],
+        )
+
+    def _iterate_lab_source_rows(self) -> Iterator[tuple[str, str, int, int, str]]:
+        """HIGH-4 review fix (option b LOCKED): yield (sys_id, uid, page_num, file_id, content)
+        sourced from the MAIN LOCAL Tantivy stored content field.
+
+        The SQLite local_files table stores metadata only (no page_text column per Plan 03 +
+        HIGH-4 decision). `local_pages` tracks the (sys_id, uid, page_num) mapping; the page
+        TEXT lives in the main LOCAL Tantivy index at the `content` stored field.
+
+        Generator steps:
+          1. SELECT (sys_id, uid, page_num, file_id) from local_pages JOIN local_files.
+          2. Open the main LOCAL Tantivy index.
+          3. For each uid: search by unique_id (raw tokenizer), retrieve stored `content`.
+          4. Yield the tuple.
+
+        Failure modes:
+          - main LOCAL Tantivy missing: log WARNING and yield nothing.
+          - uid present in local_pages but missing from main LOCAL Tantivy: log WARNING, skip.
+        """
+        try:
+            if not os.path.isdir(self._index_dir):
+                logger.warning(
+                    "HIGH-4: main LOCAL Tantivy missing at %s; LAB rebuild empty",
+                    self._index_dir,
+                )
+                return
+            main_schema = build_local_schema()
+            main_index = tantivy.Index(main_schema, path=self._index_dir)
+            # Register raw tokenizer so unique_id term queries work
+            try:
+                main_index.register_tokenizer(
+                    "raw",
+                    tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.raw()).build(),
+                )
+            except Exception:
+                pass  # Non-fatal if already registered
+            searcher = main_index.searcher()
+        except Exception as exc:
+            logger.warning(
+                "HIGH-4: cannot open main LOCAL Tantivy for LAB rebuild: %r", exc
+            )
+            return
+
+        rows = self._conn.execute(
+            "SELECT lp.sys_id, lp.uid, lp.page_num, lf.file_id "
+            "FROM local_pages lp "
+            "JOIN local_files lf ON lf.sys_id = lp.sys_id "
+            "WHERE lf.pending_delete = 0 "
+            "ORDER BY lp.sys_id, lp.page_num"
+        ).fetchall()
+
+        for row in rows:
+            sys_id = row["sys_id"]
+            uid = row["uid"]
+            page_num = row["page_num"]
+            file_id = row["file_id"]
+            try:
+                # Use raw term query on unique_id (raw tokenizer — Pitfall #2)
+                q = main_index.parse_query(uid, ["unique_id"])
+                top = searcher.search(q, limit=1).hits
+                if not top:
+                    logger.warning(
+                        "HIGH-4: uid %s in local_pages but missing from main LOCAL Tantivy — skipping",
+                        uid,
+                    )
+                    continue
+                _, doc_addr = top[0]
+                doc = searcher.doc(doc_addr)
+                content = doc.get_first("content") or ""
+                yield sys_id, uid, page_num, file_id, content
+            except Exception as exc:
+                logger.warning("HIGH-4: uid %s read failed: %r — skipping", uid, exc)
+                continue
+
+    @staticmethod
+    def read_lab_meta(lab_index_dir: str) -> Optional[dict]:
+        """Read .meta.json for LOCAL LAB invalidation check (D-38).
+
+        Returns the parsed dict, or None if the file is absent or unreadable.
+        """
+        meta_path = os.path.join(lab_index_dir, ".meta.json")
+        if not os.path.exists(meta_path):
+            return None
+        try:
+            with open(meta_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as exc:
+            logger.warning("LOCAL LAB meta read failed: %r", exc)
+            return None
 
     # ------------------------------------------------------------------
     # Close
