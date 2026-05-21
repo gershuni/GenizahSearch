@@ -7,11 +7,8 @@ main search returns Genizah-only results without exception.
 from __future__ import annotations
 
 import os
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 
 # ---------------------------------------------------------------------------
