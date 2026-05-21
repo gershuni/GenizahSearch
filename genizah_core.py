@@ -1488,6 +1488,108 @@ class LabEngine:
         except InterruptedError:
             was_interrupted = True
 
+        # Phase 95 D-09: LOCAL LAB extension — query LOCAL LAB side-index with same
+        # fingerprint scoring path (NOT RRF, NOT BM25 — custom scoring per D-09).
+        # Results merged into results_map so Part 3 handles them uniformly.
+        # Guard: _check_local_lab_freshness is defined on SearchEngine (not LabEngine).
+        _freshness_fn = getattr(self, "_check_local_lab_freshness", None)
+        if not was_interrupted and callable(_freshness_fn) and _freshness_fn():
+            try:
+                local_lab_index = getattr(self, "_local_lab_index", None)
+                local_lab_searcher = self.local_lab_searcher
+                if local_lab_index is not None and local_lab_searcher is not None:
+                    for _i, (_token_start_idx, _chunk_tokens, _chunk_crossed_bounds) in enumerate(chunks_data):
+                        _chunk_text = " ".join(_chunk_tokens)
+                        if self._is_phrase_statistically_weak(_chunk_text):
+                            continue
+                        _fp_str = text_to_fingerprint(_chunk_text, freq_map=target_map)
+                        if not _fp_str or len(_chunk_tokens) < 4:
+                            continue
+                        _fp_list = _fp_str.split()
+                        _needed_unique_fps = set(_fp_list)
+                        _clauses = [f'{target_field}:{t}' for t in _fp_str.split()]
+                        _core_query = " OR ".join(_clauses)
+                        try:
+                            _q_obj = local_lab_index.parse_query(_core_query)
+                        except (ValueError, RuntimeError):
+                            continue
+                        if not _q_obj:
+                            continue
+                        try:
+                            _res = local_lab_searcher.search(_q_obj, 5000)
+                            _local_iter = _res.hits
+                        except Exception:
+                            continue
+                        for _score, _doc_addr in _local_iter:
+                            try:
+                                _doc = local_lab_searcher.doc(_doc_addr)
+                                _content = _doc['content'][0]
+                                _uid = _doc['unique_id'][0]
+                                if filter_text and len(_chunk_tokens) >= 3:
+                                    _clean_chunk = ' '.join(re.findall(r'[א-ת]+', _chunk_text))
+                                    if _clean_chunk and _clean_chunk in filter_text:
+                                        pass  # LOCAL LAB hits not filter-excluded by source_text
+                                _match_score, _matches, _best_window = self._calculate_match_metrics(
+                                    _content, _fp_list, _chunk_text, freq_map=target_map
+                                )
+                                _found_unique_fps = set(
+                                    m['fp'] for m in _matches[_best_window[0]:_best_window[1] + 1]
+                                )
+                                _common_fps = _found_unique_fps.intersection(_needed_unique_fps)
+                                if len(_needed_unique_fps) > 0:
+                                    if (len(_common_fps) / len(_needed_unique_fps)) < min_pct_ratio:
+                                        continue
+                                if _match_score < MIN_SCORE_THRESHOLD:
+                                    continue
+                                if _uid not in results_map:
+                                    results_map[_uid] = {
+                                        'uid': _uid, 'total_score': 0, 'hits_count': 0,
+                                        'raw_header': _doc['full_header'][0],
+                                        'source': _doc['source'][0],
+                                        'content': _content, 'best_chunk_score': -1,
+                                        'all_found_words': set(), 'src_indices': set(),
+                                        'ms_matches': [], 'is_text_filtered': False,
+                                        'boundary_chunk_scores': [],
+                                        'crossed_boundaries': set(),
+                                        'chunk_hits': [],
+                                    }
+                                _rec = results_map[_uid]
+                                if _chunk_crossed_bounds:
+                                    _rec['boundary_chunk_scores'].append(_match_score)
+                                    _rec['crossed_boundaries'].update(_chunk_crossed_bounds)
+                                _rec['total_score'] += _match_score
+                                _rec['hits_count'] += 1
+                                _token_end_idx = _token_start_idx + len(_chunk_tokens)
+                                _rec['src_indices'].update(range(_token_start_idx, _token_end_idx))
+                                _start_m, _end_m = _best_window
+                                if _matches:
+                                    _rec['ms_matches'].append(
+                                        (_matches[_start_m]['start'], _matches[_end_m]['end'])
+                                    )
+                                    for _m in _matches[_start_m:_end_m + 1]:
+                                        _rec['all_found_words'].add(_m['word'])
+                                    _ms_snip = _content[
+                                        _matches[_start_m]['start']:_matches[_end_m]['end']
+                                    ]
+                                    _seen_llb = _rec.setdefault('_chunk_hit_keys', {})
+                                    _key_llb = (_i, _ms_snip)
+                                    _existing_llb = _seen_llb.get(_key_llb)
+                                    if _existing_llb is None:
+                                        _seen_llb[_key_llb] = len(_rec['chunk_hits'])
+                                        _rec['chunk_hits'].append(
+                                            (_i, _chunk_text, _match_score, _ms_snip)
+                                        )
+                                    elif _match_score > _rec['chunk_hits'][_existing_llb][2]:
+                                        _rec['chunk_hits'][_existing_llb] = (
+                                            _i, _chunk_text, _match_score, _ms_snip
+                                        )
+                            except (KeyError, IndexError, TypeError):
+                                pass
+            except Exception as _local_lab_exc:
+                LOGGER.warning(
+                    "lab_composition_search: LOCAL LAB scan failed: %r", _local_lab_exc
+                )
+
         # (Part 3: Result Processing) - runs even if interrupted to return partial results
         raw_final_items = []
         is_short_search = (total_chunks <= 3)
@@ -6474,10 +6576,12 @@ class SearchEngine:
         self.reload_index()
         self.start_fl_id_index_build()
         # Phase 95 — open LOCAL side-index alongside main (D-14 + D-37 fallback).
-        self.local_index = None       # tantivy.Index for LOCAL side-index
-        self.local_searcher = None    # tantivy.Searcher snapshot
-        self.local_lab_searcher = None
-        self._lab_local_meta = None
+        self.local_index = None            # tantivy.Index for LOCAL side-index
+        self.local_searcher = None         # tantivy.Searcher snapshot
+        self.local_lab_searcher = None     # tantivy.Searcher for LOCAL LAB side-index
+        self._local_lab_index = None       # tantivy.Index for LOCAL LAB side-index (parse_query)
+        self.local_lab_searcher_stale = False  # D-38: True when weights_hash mismatch
+        self._lab_local_meta = None        # dict from .meta.json, or None
         self._open_local_searcher()
 
     def _open_local_searcher(self) -> None:
@@ -6524,16 +6628,19 @@ class SearchEngine:
         """HIGH-1 review fix (LAB-only narrow reload). Reopens self.local_lab_searcher
         and re-reads the .meta.json staleness sentinel.
 
-        Plan 06 (LAB plan) also touches this method; coordinate via co-edit.
+        Plan 06: also reads .meta.json for D-38 weights_hash freshness check.
         """
         self.local_lab_searcher = None
         self._lab_local_meta = None
         try:
             if os.path.isdir(Config.LOCAL_LAB_INDEX_DIR):
-                from shared.local_indexer import build_local_lab_schema
+                from shared.local_indexer import build_local_lab_schema, LocalIndexer
                 schema = build_local_lab_schema()
                 local_lab_index = tantivy.Index(schema, path=Config.LOCAL_LAB_INDEX_DIR)
                 self.local_lab_searcher = local_lab_index.searcher()
+                # Phase 95 D-38: read .meta.json for weights_hash freshness check
+                self._lab_local_meta = LocalIndexer.read_lab_meta(Config.LOCAL_LAB_INDEX_DIR)
+                self._local_lab_index = local_lab_index  # kept for parse_query
                 LOGGER.info(
                     "HIGH-1 reload: LOCAL LAB side-index reopened: %s",
                     Config.LOCAL_LAB_INDEX_DIR,
@@ -6548,6 +6655,80 @@ class SearchEngine:
             )
             self.local_lab_searcher = None
             self._lab_local_meta = None
+
+    def _current_lab_weights_hash(self) -> str:
+        """Compute hash of current LAB weights for D-38 staleness check."""
+        import hashlib as _hashlib
+        import json as _json
+        weights_dict = {
+            "dynamic_rank_map": self.dynamic_rank_map if self.dynamic_rank_map else None,
+            "use_dynamic_weights": getattr(self.settings, "use_dynamic_weights", False),
+        }
+        return _hashlib.sha256(
+            _json.dumps(weights_dict, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+
+    def _check_local_lab_freshness(self) -> bool:
+        """Return True if LOCAL LAB index is fresh; False if stale or missing.
+
+        Side effect: sets self.local_lab_searcher_stale.
+        D-38: compares current LAB weights_hash to value stored in .meta.json.
+        """
+        if self.local_lab_searcher is None:
+            return False
+        meta = self._lab_local_meta
+        if not meta:
+            self.local_lab_searcher_stale = True
+            LOGGER.info("LOCAL LAB index has no .meta.json — treating as stale")
+            return False
+        current_hash = self._current_lab_weights_hash()
+        if meta.get("weights_hash") != current_hash:
+            self.local_lab_searcher_stale = True
+            LOGGER.info(
+                "LOCAL LAB index stale (weights changed); banner surface required"
+            )
+            return False
+        self.local_lab_searcher_stale = False
+        return True
+
+    def rebuild_local_lab_index(self, local_indexer) -> None:
+        """Trigger LOCAL LAB rebuild via LocalIndexer, passing fingerprint helpers
+        as callbacks (W5 — Option C LOCKED). Called from MyLibraryTab Refresh
+        (Plan 07) and Tools→Rebuild LAB (per D-38).
+
+        The three bound-method callbacks (_compute_fingerprint_dyn,
+        _compute_fingerprint_static, _normalize_text) are thin wrappers around
+        the existing text_to_fingerprint / lab_index_normalize helpers in this class.
+        """
+        lab_weights = {
+            "dynamic_rank_map": self.dynamic_rank_map,
+            "use_dynamic_weights": getattr(self.settings, "use_dynamic_weights", False),
+        }
+        local_indexer.build_lab_side_index(
+            lab_weights=lab_weights,
+            fingerprint_dyn_fn=self._compute_fingerprint_dyn,
+            fingerprint_static_fn=self._compute_fingerprint_static,
+            normalize_text_fn=self._normalize_text,
+            lab_schema_version=1,
+            dynamic_rank_map=self.dynamic_rank_map,
+        )
+        # Reload so newly built index is visible in live session
+        self.reload_local_lab_index()
+
+    def _compute_fingerprint_dyn(self, content: str, dynamic_rank_map) -> str:
+        """Compute fingerprint_dyn for a content string using the given rank map.
+        W5 Option C callback — wraps text_to_fingerprint with dynamic weights."""
+        return text_to_fingerprint(content, freq_map=dynamic_rank_map)
+
+    def _compute_fingerprint_static(self, content: str) -> str:
+        """Compute static fingerprint for a content string using HEBREW_FREQ.
+        W5 Option C callback — wraps text_to_fingerprint with static weights."""
+        return text_to_fingerprint(content, freq_map=HEBREW_FREQ)
+
+    def _normalize_text(self, content: str) -> str:
+        """Normalize content for the text_normalized field.
+        W5 Option C callback — wraps lab_index_normalize."""
+        return self.lab_index_normalize(content)
 
     def _query_local_index(self, query_str: str, mode: str, gap: int, limit=None):
         """Query the LOCAL side-index. Returns [] if local_searcher is None (D-37).
@@ -8294,6 +8475,90 @@ class SearchEngine:
                     LAB_LOGGER.warning(f"Failed composition chunk processing at token {token_idx}: {e}")
         except InterruptedError:
             was_cancelled = True
+
+        # Phase 95 D-09 / REQ-6: LOCAL LAB extension for search_composition_logic (I14).
+        # Same pattern as lab_composition_search LOCAL LAB hook above — queries
+        # local_lab_searcher with the same regex/fingerprint scoring. NOT RRF (D-09).
+        if not was_cancelled and self._check_local_lab_freshness():
+            try:
+                _local_lab_index_scl = getattr(self, "_local_lab_index", None)
+                _local_lab_searcher_scl = self.local_lab_searcher
+                if _local_lab_index_scl is not None and _local_lab_searcher_scl is not None:
+                    for _i_scl, (_token_idx_scl, _chunk_scl, _chunk_crossed_scl) in enumerate(chunks_data):
+                        _t_query_scl = self.build_tantivy_query(_chunk_scl, mode)
+                        _regex_scl = self.build_regex_pattern(_chunk_scl, mode, 0)
+                        if not _regex_scl:
+                            continue
+                        _is_freq_filtered_scl = False
+                        _is_text_filtered_scl = False
+                        if filter_text and _regex_scl.search(filter_text):
+                            _is_text_filtered_scl = True
+                        try:
+                            _query_scl = _local_lab_index_scl.parse_query(
+                                _t_query_scl, ["content"]
+                            )
+                            _hits_scl = _local_lab_searcher_scl.search(_query_scl, 50).hits
+                            _is_freq_filtered_scl = len(_hits_scl) > max_freq
+                            for _score_scl, _doc_addr_scl in _hits_scl:
+                                _doc_scl = _local_lab_searcher_scl.doc(_doc_addr_scl)
+                                _content_scl = _doc_scl['content'][0]
+                                _match_content_scl = (
+                                    _content_scl
+                                    if _query_has_brackets(' '.join(_chunk_scl))
+                                    else _strip_brackets(_content_scl)
+                                )
+                                if _regex_scl.search(_match_content_scl):
+                                    _uid_scl = _doc_scl['unique_id'][0]
+                                    _rec_scl = doc_hits[_uid_scl]
+                                    if _is_text_filtered_scl or _is_freq_filtered_scl:
+                                        _rec_scl['is_filtered'] = True
+                                        if _is_text_filtered_scl:
+                                            _rec_scl['filter_reason'] = 'source_text'
+                                        elif _is_freq_filtered_scl:
+                                            _rec_scl['filter_reason'] = 'high_frequency'
+                                    _rec_scl['head'] = _doc_scl['full_header'][0]
+                                    _rec_scl['src'] = _doc_scl['source'][0]
+                                    _rec_scl['content'] = _content_scl
+                                    _orig_m_scl = _regex_scl.search(_content_scl)
+                                    _ms_match_scl = _orig_m_scl or _regex_scl.search(_match_content_scl)
+                                    _rec_scl['matches'].append(_ms_match_scl.span())
+                                    _rec_scl['src_indices'].update(
+                                        range(_token_idx_scl, _token_idx_scl + chunk_size)
+                                    )
+                                    _rec_scl['patterns'].add(_regex_scl.pattern)
+                                    if _chunk_crossed_scl:
+                                        _rec_scl['boundary_chunk_scores'].append(_score_scl)
+                                        _rec_scl['crossed_boundaries'].update(_chunk_crossed_scl)
+                                    try:
+                                        _ms_s_scl, _ms_e_scl = _ms_match_scl.span()
+                                        _snip_s_scl = max(0, _ms_s_scl - 60)
+                                        _snip_e_scl = min(len(_content_scl), _ms_e_scl + 60)
+                                        _ms_snip_scl = (
+                                            _content_scl[_snip_s_scl:_ms_s_scl]
+                                            + f"*{_content_scl[_ms_s_scl:_ms_e_scl]}*"
+                                            + _content_scl[_ms_e_scl:_snip_e_scl]
+                                        )
+                                    except Exception:
+                                        _ms_snip_scl = ''
+                                    _seen_scl = _rec_scl.setdefault('_chunk_hit_keys', {})
+                                    _key_scl = (_i_scl, _ms_snip_scl)
+                                    _existing_scl = _seen_scl.get(_key_scl)
+                                    _new_score_scl = float(_score_scl)
+                                    if _existing_scl is None:
+                                        _seen_scl[_key_scl] = len(_rec_scl['chunk_hits'])
+                                        _rec_scl['chunk_hits'].append(
+                                            (_i_scl, ' '.join(_chunk_scl), _new_score_scl, _ms_snip_scl)
+                                        )
+                                    elif _new_score_scl > _rec_scl['chunk_hits'][_existing_scl][2]:
+                                        _rec_scl['chunk_hits'][_existing_scl] = (
+                                            _i_scl, ' '.join(_chunk_scl), _new_score_scl, _ms_snip_scl
+                                        )
+                        except Exception:
+                            pass
+            except Exception as _scl_exc:
+                LAB_LOGGER.warning(
+                    "search_composition_logic: LOCAL LAB scan failed: %r", _scl_exc
+                )
 
         # 3. Build results with Wide Context
         def build_items(hits_dict):
