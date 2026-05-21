@@ -351,3 +351,78 @@ def test_txt_no_replacement_chars_indexed(tmp_path, local_indexer_fixtures_dir):
             assert "�" not in content, (
                 f"Replacement character found in indexed content: {content!r}"
             )
+
+
+# ---------------------------------------------------------------------------
+# WR-01: file_id baked into Tantivy full_header on FIRST index (not 0)
+# ---------------------------------------------------------------------------
+
+def test_file_id_populated_on_first_index(tmp_path, local_indexer_fixtures_dir):
+    """WR-01: newly-indexed files must get a real file_id (non-zero) in their
+    Tantivy full_header field. Previously file_id was 0 on first index because
+    the local_files row was inserted only AFTER page extraction completed.
+    Fix: _index_one_file now pre-INSERTs a placeholder row before extraction.
+    """
+    index_dir = str(tmp_path / "idx")
+    lab_dir = str(tmp_path / "lab")
+    db_path = str(tmp_path / "test.sqlite3")
+    os.makedirs(index_dir)
+    os.makedirs(lab_dir)
+
+    folder = str(tmp_path / "docs")
+    os.makedirs(folder)
+
+    # Write a single small txt file.
+    txt_path = os.path.join(folder, "wr01_sample.txt")
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write("Sample content for WR-01 file_id regression test.\n")
+
+    indexer = LocalIndexer(index_dir, lab_dir, db_path)
+    try:
+        indexer.add_folder(folder)
+        indexer.scan_all()
+        # Verify file_id assigned in SQLite
+        row = indexer._conn.execute(
+            "SELECT file_id, sys_id FROM local_files WHERE original_filename = ?",
+            ("wr01_sample.txt",),
+        ).fetchone()
+        assert row is not None, "local_files row missing for indexed file"
+        file_id = row["file_id"]
+        sys_id = row["sys_id"]
+        assert file_id > 0, f"WR-01: file_id must be > 0 on first index, got {file_id}"
+    finally:
+        indexer.close()
+
+    # Reopen and inspect Tantivy stored full_header field
+    import tantivy
+    from shared.local_indexer import build_local_schema
+    schema = build_local_schema()
+    idx = tantivy.Index(schema, path=index_dir)
+    searcher = idx.searcher()
+    query = idx.parse_query("Sample WR-01", ["content"])
+    results = searcher.search(query, 10)
+    assert results.hits, "Expected at least one search hit for the indexed sample"
+
+    found_real_file_id = False
+    for _score, doc_addr in results.hits:
+        doc = searcher.doc(doc_addr)
+        full_header = doc.get_first("full_header")
+        if full_header is None:
+            continue
+        header_str = str(full_header)
+        # Header format: {sys_id}_LOCAL_P{n}_F{file_id:04d}
+        # WR-01 invariant: F suffix must NOT be 0000 (previous fallback value).
+        import re as _re
+        m = _re.search(r"_F(\d+)$", header_str)
+        if m:
+            f_suffix = int(m.group(1))
+            assert f_suffix > 0, (
+                f"WR-01: full_header has F0000 sentinel — file_id was not "
+                f"populated when _write_page_doc ran. header={header_str!r}"
+            )
+            assert f_suffix == file_id, (
+                f"WR-01: full_header F-suffix ({f_suffix}) must match "
+                f"local_files.file_id ({file_id}). header={header_str!r}"
+            )
+            found_real_file_id = True
+    assert found_real_file_id, "No Tantivy hits exposed a parseable full_header"

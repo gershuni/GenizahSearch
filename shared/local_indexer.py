@@ -951,6 +951,30 @@ class LocalIndexer:
         )
         self._conn.commit()
 
+        # WR-01 FIX: pre-insert local_files row with status='pending' BEFORE
+        # extraction so _write_page_doc can read the real file_id and bake
+        # it into the per-page full_header (D-34 unique F-suffix per file).
+        # The row gets UPDATEd to its final state by _finish_file once
+        # extraction completes. Use INSERT OR IGNORE so re-index runs don't
+        # clobber an existing row (the modified-file path already called
+        # _delete_file at scan_all line ~725 to clear stale rows).
+        now = time.time()
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO local_files (
+                sys_id, filepath, folder_id, display_title,
+                original_filename, file_extension, page_count,
+                file_size_bytes, extraction_status, last_indexed_at,
+                sha256_full, error_msg, pending_delete
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, 'pending', ?, NULL, NULL, 0)
+            """,
+            (
+                sys_id, canonical, folder_id, basename,
+                basename, ext, file_size, now,
+            ),
+        )
+        self._conn.commit()
+
         # Extract pages
         if ext not in _SUPPORTED_EXTENSIONS:
             return self._finish_file(
@@ -1005,24 +1029,52 @@ class LocalIndexer:
         mtime: float,
         display_title: Optional[str] = None,
     ) -> tuple[str, int]:
-        """Upsert local_files row. Returns (extraction_status, page_count)."""
+        """Upsert local_files row. Returns (extraction_status, page_count).
+
+        WR-01 FIX: _index_one_file now pre-INSERTs a placeholder row before
+        extraction so _write_page_doc can read the real file_id.  Therefore
+        _finish_file UPDATEs the existing row instead of INSERT OR REPLACE
+        (which would DELETE+INSERT and reassign file_id, breaking the
+        already-written full_header).  If for some reason the pre-INSERT
+        was missed, fall through to INSERT.
+        """
         now = time.time()
-        self._conn.execute(
+        cursor = self._conn.execute(
             """
-            INSERT OR REPLACE INTO local_files (
-                sys_id, filepath, folder_id, display_title,
-                original_filename, file_extension, page_count,
-                file_size_bytes, extraction_status, last_indexed_at,
-                sha256_full, error_msg, pending_delete
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 0)
+            UPDATE local_files
+               SET filepath = ?, folder_id = ?, display_title = ?,
+                   original_filename = ?, file_extension = ?, page_count = ?,
+                   file_size_bytes = ?, extraction_status = ?, last_indexed_at = ?,
+                   sha256_full = NULL, error_msg = ?, pending_delete = 0
+             WHERE sys_id = ?
             """,
             (
-                sys_id, filepath, folder_id, display_title or basename,
+                filepath, folder_id, display_title or basename,
                 basename, ext, page_count,
                 file_size, extraction_status, now,
                 error_msg,
+                sys_id,
             ),
         )
+        if cursor.rowcount == 0:
+            # Fallback — no pre-existing row to update (shouldn't normally
+            # happen since _index_one_file always pre-INSERTs).
+            self._conn.execute(
+                """
+                INSERT OR REPLACE INTO local_files (
+                    sys_id, filepath, folder_id, display_title,
+                    original_filename, file_extension, page_count,
+                    file_size_bytes, extraction_status, last_indexed_at,
+                    sha256_full, error_msg, pending_delete
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, 0)
+                """,
+                (
+                    sys_id, filepath, folder_id, display_title or basename,
+                    basename, ext, page_count,
+                    file_size, extraction_status, now,
+                    error_msg,
+                ),
+            )
         self._conn.commit()
         # Track for batch commit
         self._pending_filepaths.append(filepath)
@@ -1036,8 +1088,14 @@ class LocalIndexer:
         title: str,
         folder_id: int,
     ) -> str:
-        """Write one Tantivy doc for a page and record in local_pages. Returns uid."""
-        # Get file_id from local_files (may not be committed yet, try 0 as fallback)
+        """Write one Tantivy doc for a page and record in local_pages. Returns uid.
+
+        WR-01 FIX: _index_one_file now pre-INSERTs the local_files row with
+        status='pending' BEFORE extraction, so file_id is populated on
+        first index too. The `else 0` branch is kept as a defensive
+        fallback only — under normal flow file_id is always non-zero here.
+        """
+        # Get file_id from local_files (pre-inserted by _index_one_file).
         file_row = self._conn.execute(
             "SELECT file_id FROM local_files WHERE sys_id = ?", (sys_id,)
         ).fetchone()
