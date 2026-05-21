@@ -2863,6 +2863,12 @@ class GenizahGUI(QMainWindow):
         self._printed_badge_worker = None
         self._printed_sys_ids = set()
         self._printed_filter_state = 'all'  # 'all', 'hide_printed', 'only_printed'
+        # Phase 95 REQ-6 D-10 D-39 — three-state LOCAL filter state (per-surface)
+        self._local_filter_state_search = 'all'       # 'all' | 'only_local' | 'no_local'
+        self._local_filter_state_composition = 'all'
+        self._local_filter_state_parallels = 'all'
+        self._local_filter_inactive_chip_visible = False
+        self._comp_results_from_parallels = False      # track source surface for comp_tree
         self._domain_worker = None
         self._pgp_tags_worker = None
         self._pgp_tag_search_worker = None
@@ -5831,6 +5837,20 @@ class GenizahGUI(QMainWindow):
         self.search_within_btn.clicked.connect(self._enter_refine_mode)
         row2.addWidget(self.search_within_btn)
 
+        # Phase 95 REQ-6 D-10 — three-state LOCAL filter button (search surface).
+        self.local_filter_btn_search = QPushButton(self)
+        self.local_filter_btn_search.setStyleSheet("QPushButton { padding: 2px 6px; }")
+        self.local_filter_btn_search.clicked.connect(self._toggle_local_filter_search)
+        self.local_filter_btn_search.setVisible(False)  # hidden until LOCAL hits exist
+        row2.addWidget(self.local_filter_btn_search)
+
+        # Inline chip for D-10 P1 no-op message
+        self.local_filter_inactive_lbl_search = QLabel("")
+        self.local_filter_inactive_lbl_search.setStyleSheet("color: #e67e22; font-size: 11px;")
+        self.local_filter_inactive_lbl_search.setVisible(False)
+        row2.addWidget(self.local_filter_inactive_lbl_search)
+        self._update_local_filter_btn_search()
+
         row2.addStretch()
         row2.addWidget(btn_help)
 
@@ -6393,6 +6413,19 @@ class GenizahGUI(QMainWindow):
         self.btn_comp_add_to_list.clicked.connect(self.comp_add_selected_to_list)
         self.btn_comp_add_to_list.setEnabled(False)
         exp_layout.addWidget(self.btn_comp_add_to_list)
+
+        # Phase 95 REQ-6 D-10 — three-state LOCAL filter button (composition surface).
+        self.local_filter_btn_composition = QPushButton(self)
+        self.local_filter_btn_composition.setStyleSheet("QPushButton { padding: 2px 6px; }")
+        self.local_filter_btn_composition.clicked.connect(self._toggle_local_filter_composition)
+        self.local_filter_btn_composition.setVisible(False)
+        exp_layout.addWidget(self.local_filter_btn_composition)
+        self.local_filter_inactive_lbl_composition = QLabel("")
+        self.local_filter_inactive_lbl_composition.setStyleSheet("color: #e67e22; font-size: 11px;")
+        self.local_filter_inactive_lbl_composition.setVisible(False)
+        exp_layout.addWidget(self.local_filter_inactive_lbl_composition)
+        self._update_local_filter_btn_composition()
+
         exp_layout.addStretch()
         self.lbl_comp_export = QLabel(tr("Save Report"))
         exp_layout.addWidget(self.lbl_comp_export)
@@ -6577,9 +6610,21 @@ class GenizahGUI(QMainWindow):
         self.btn_b_external_link.clicked.connect(self._browse_open_external_link)
         self._browse_external_url = None
 
+        # Phase 95 REQ-6 D-10 — three-state LOCAL filter button (parallels surface).
+        self.local_filter_btn_parallels = QPushButton(self)
+        self.local_filter_btn_parallels.setStyleSheet("QPushButton { padding: 2px 6px; }")
+        self.local_filter_btn_parallels.clicked.connect(self._toggle_local_filter_parallels)
+        self.local_filter_btn_parallels.setVisible(False)
+        self.local_filter_inactive_lbl_parallels = QLabel("")
+        self.local_filter_inactive_lbl_parallels.setStyleSheet("color: #e67e22; font-size: 11px;")
+        self.local_filter_inactive_lbl_parallels.setVisible(False)
+        self._update_local_filter_btn_parallels()
+
         # ext_info_row layout: Puzzle, Parallels, List | Info | Bib FJMS, Bib NLI, Catalog | Ktiv, External Link | stretch | Translations
         ext_info_row.addWidget(self.btn_b_add_to_puzzle)
         ext_info_row.addWidget(self.btn_find_parallels)
+        ext_info_row.addWidget(self.local_filter_btn_parallels)
+        ext_info_row.addWidget(self.local_filter_inactive_lbl_parallels)
         ext_info_row.addWidget(self.btn_browse_add_to_list)
         ext_info_row.addWidget(self.btn_b_ext_info)
         ext_info_row.addWidget(self.btn_b_bibliography_fjms)
@@ -16759,6 +16804,8 @@ class GenizahGUI(QMainWindow):
             for r in (self.last_results or [])
         )
         self.results_table.setColumnHidden(self.COL_SRC, not (has_multiple_sources or has_local))
+        # Phase 95 REQ-6 — update LOCAL filter button visibility after search results land.
+        self._update_local_filter_visibility_search()
 
         # Initialize domain data (will be populated asynchronously by DomainEnrichmentWorker)
         self._result_domain_map = {}
@@ -17175,6 +17222,139 @@ class GenizahGUI(QMainWindow):
         item = self.results_table.item(row, column)
         return item.text() if item else ""
 
+    # ------------------------------------------------------------------
+    # Phase 95 REQ-6 D-10 D-39 — LOCAL three-state filter
+    # ------------------------------------------------------------------
+
+    def _apply_local_filter(self, results, state):
+        """Apply LOCAL three-state filter per D-10 / D-10 P1.
+
+        state: 'all' | 'only_local' | 'no_local'.
+        D-10 P1: when state is only_local/no_local AND zero LOCAL hits exist,
+        return unfiltered results (NO-OP) and set the inactive-chip flag.
+        """
+        if state == 'all':
+            self._local_filter_inactive_chip_visible = False
+            return results
+        has_local = any(
+            (r.get('display', {}) or {}).get('source') == 'LOCAL'
+            for r in results
+        )
+        if not has_local:
+            # D-10 P1 NO-OP — preserve state but show inline chip.
+            self._local_filter_inactive_chip_visible = True
+            return results
+        self._local_filter_inactive_chip_visible = False
+        if state == 'only_local':
+            return [r for r in results if (r.get('display', {}) or {}).get('source') == 'LOCAL']
+        if state == 'no_local':
+            return [r for r in results if (r.get('display', {}) or {}).get('source') != 'LOCAL']
+        return results
+
+    def _toggle_local_filter_search(self):
+        """Cycle the LOCAL filter state for the Search surface (D-10 / D-39)."""
+        states = ['all', 'only_local', 'no_local']
+        cur = states.index(self._local_filter_state_search)
+        self._local_filter_state_search = states[(cur + 1) % 3]
+        self._update_local_filter_btn_search()
+        self._apply_results_table_filters()
+        self._schedule_session_save()
+
+    def _toggle_local_filter_composition(self):
+        """Cycle the LOCAL filter state for the Composition surface (D-10 / D-39)."""
+        states = ['all', 'only_local', 'no_local']
+        cur = states.index(self._local_filter_state_composition)
+        self._local_filter_state_composition = states[(cur + 1) % 3]
+        self._update_local_filter_btn_composition()
+        self._apply_comp_tree_filters()
+        self._schedule_session_save()
+
+    def _toggle_local_filter_parallels(self):
+        """Cycle the LOCAL filter state for the Parallels surface (D-10 / D-39)."""
+        states = ['all', 'only_local', 'no_local']
+        cur = states.index(self._local_filter_state_parallels)
+        self._local_filter_state_parallels = states[(cur + 1) % 3]
+        self._update_local_filter_btn_parallels()
+        self._apply_comp_tree_filters()
+        self._schedule_session_save()
+
+    def _update_local_filter_btn_search(self):
+        """Update label on the Search surface LOCAL filter button."""
+        if not hasattr(self, 'local_filter_btn_search'):
+            return
+        labels = {
+            'all': (tr("Filter Local"), tr("סנן מקומי")),
+            'only_local': (tr("Only Local"), tr("רק מקומי")),
+            'no_local': (tr("No Local"), tr("ללא מקומי")),
+        }
+        text_en, text_he = labels.get(self._local_filter_state_search, labels['all'])
+        self.local_filter_btn_search.setText(text_he if CURRENT_LANG == 'he' else text_en)
+
+    def _update_local_filter_btn_composition(self):
+        """Update label on the Composition surface LOCAL filter button."""
+        if not hasattr(self, 'local_filter_btn_composition'):
+            return
+        labels = {
+            'all': (tr("Filter Local"), tr("סנן מקומי")),
+            'only_local': (tr("Only Local"), tr("רק מקומי")),
+            'no_local': (tr("No Local"), tr("ללא מקומי")),
+        }
+        text_en, text_he = labels.get(self._local_filter_state_composition, labels['all'])
+        self.local_filter_btn_composition.setText(text_he if CURRENT_LANG == 'he' else text_en)
+
+    def _update_local_filter_btn_parallels(self):
+        """Update label on the Parallels surface LOCAL filter button."""
+        if not hasattr(self, 'local_filter_btn_parallels'):
+            return
+        labels = {
+            'all': (tr("Filter Local"), tr("סנן מקומי")),
+            'only_local': (tr("Only Local"), tr("רק מקומי")),
+            'no_local': (tr("No Local"), tr("ללא מקומי")),
+        }
+        text_en, text_he = labels.get(self._local_filter_state_parallels, labels['all'])
+        self.local_filter_btn_parallels.setText(text_he if CURRENT_LANG == 'he' else text_en)
+
+    def _update_local_filter_visibility_search(self):
+        """Show/hide the Search LOCAL filter button based on LOCAL hits presence."""
+        if not hasattr(self, 'local_filter_btn_search'):
+            return
+        has_local = any(
+            (r.get('display', {}) or {}).get('source') == 'LOCAL'
+            for r in (self.last_results or [])
+        )
+        self.local_filter_btn_search.setVisible(has_local)
+        if not has_local:
+            self.local_filter_inactive_lbl_search.setVisible(False)
+
+    def _update_local_filter_visibility_comp(self, has_local: bool):
+        """Show/hide the Composition LOCAL filter button based on LOCAL hits presence."""
+        if not hasattr(self, 'local_filter_btn_composition'):
+            return
+        self.local_filter_btn_composition.setVisible(has_local)
+        if not has_local:
+            self.local_filter_inactive_lbl_composition.setVisible(False)
+
+    def _update_local_filter_visibility_parallels(self, has_local: bool):
+        """Show/hide the Parallels LOCAL filter button based on LOCAL hits presence."""
+        if not hasattr(self, 'local_filter_btn_parallels'):
+            return
+        self.local_filter_btn_parallels.setVisible(has_local)
+        if not has_local:
+            self.local_filter_inactive_lbl_parallels.setVisible(False)
+
+    def _show_local_filter_chip(self, surface: str, visible: bool):
+        """Show or hide the no-op chip for the given surface."""
+        chip_map = {
+            'search': getattr(self, 'local_filter_inactive_lbl_search', None),
+            'composition': getattr(self, 'local_filter_inactive_lbl_composition', None),
+            'parallels': getattr(self, 'local_filter_inactive_lbl_parallels', None),
+        }
+        lbl = chip_map.get(surface)
+        if lbl is not None:
+            if visible:
+                lbl.setText(tr("My Library filter inactive — no LOCAL hits in this query"))
+            lbl.setVisible(visible)
+
     def _apply_results_table_filters(self):
         # 1. Gather rules
         list_active = self.list_filter_state.get('active', False)
@@ -17194,7 +17374,17 @@ class GenizahGUI(QMainWindow):
                        'line_count_min', 'line_count_max', 'line_height_min', 'line_height_max',
                        'text_density_min', 'text_density_max']
         ) or getattr(self, '_post_measurement_filters', {}).get('measurement_material')
-        if not self.results_filters and not list_active and not has_domain_exclusions and self._printed_filter_state == 'all' and not _has_meas_post:
+        # Phase 95 REQ-6 — LOCAL filter cascade joinpoint (search surface).
+        _local_state_search = getattr(self, '_local_filter_state_search', 'all')
+        _results_for_local = getattr(self, 'last_results', []) or []
+        _local_filtered = self._apply_local_filter(_results_for_local, _local_state_search)
+        _local_filter_active = _local_state_search != 'all'
+        _local_visible_sys_ids = {
+            (r.get('display', {}) or {}).get('id') for r in _local_filtered
+        } if _local_filter_active and not self._local_filter_inactive_chip_visible else None
+        self._show_local_filter_chip('search', self._local_filter_inactive_chip_visible)
+
+        if not self.results_filters and not list_active and not has_domain_exclusions and self._printed_filter_state == 'all' and not _has_meas_post and not _local_filter_active:
             for row in range(self.results_table.rowCount()):
                 self.results_table.setRowHidden(row, False)
             return
@@ -17284,13 +17474,21 @@ class GenizahGUI(QMainWindow):
                             elif mf.get('measurement_material'):
                                 if md.get('material') not in mf['measurement_material']: visible = False
 
+            # F. Phase 95 REQ-6 — LOCAL filter (applied after printed filter per cascade discipline).
+            if visible and _local_visible_sys_ids is not None:
+                item = self.results_table.item(row, self.COL_SYS_ID)
+                row_sys_id = item.text().strip() if item else None
+                if row_sys_id not in _local_visible_sys_ids:
+                    visible = False
+
             self.results_table.setRowHidden(row, not visible)
 
         # Update status with visible/total count when any filter is active
         total = self.results_table.rowCount()
         visible_count = sum(1 for r in range(total) if not self.results_table.isRowHidden(r))
         any_filter = (self.results_filters or list_active or has_domain_exclusions
-                      or self._printed_filter_state != 'all' or _has_meas_post)
+                      or self._printed_filter_state != 'all' or _has_meas_post
+                      or _local_filter_active)
         if any_filter and visible_count < total:
             self.status_label.setText(
                 tr("Showing {} of {} results").format(visible_count, total)
@@ -17501,7 +17699,26 @@ class GenizahGUI(QMainWindow):
 
     def _apply_comp_tree_filters(self):
         root = self.comp_tree.invisibleRootItem()
-        if not self.comp_filters and self._comp_printed_filter_state == 'all':
+
+        # Phase 95 REQ-6 — LOCAL filter cascade joinpoint (composition + parallels surface).
+        _from_parallels = getattr(self, '_comp_results_from_parallels', False)
+        if _from_parallels:
+            _local_state_comp = getattr(self, '_local_filter_state_parallels', 'all')
+            _local_chip_surface = 'parallels'
+        else:
+            _local_state_comp = getattr(self, '_local_filter_state_composition', 'all')
+            _local_chip_surface = 'composition'
+        # Gather all comp_raw_items to determine LOCAL presence for no-op check (D-10 P1).
+        _comp_raw = getattr(self, 'comp_raw_items', []) or []
+        _local_filtered_comp = self._apply_local_filter(_comp_raw, _local_state_comp)
+        _local_filter_comp_active = _local_state_comp != 'all'
+        _local_visible_sys_ids_comp = {
+            (r.get('display', {}) or {}).get('id') or r.get('sys_id', '')
+            for r in _local_filtered_comp
+        } if _local_filter_comp_active and not self._local_filter_inactive_chip_visible else None
+        self._show_local_filter_chip(_local_chip_surface, self._local_filter_inactive_chip_visible)
+
+        if not self.comp_filters and self._comp_printed_filter_state == 'all' and not _local_filter_comp_active:
             def unhide(node):
                 node.setHidden(False)
                 for j in range(node.childCount()):
@@ -17519,7 +17736,7 @@ class GenizahGUI(QMainWindow):
 
             data = node.data(0, Qt.ItemDataRole.UserRole + 1)
             if data:
-                matches = self._comp_data_matches_filters(node, data)
+                matches = self._comp_data_matches_filters(node, data, _local_visible_sys_ids_comp)
                 node_visible = matches or visible_any
             else:
                 node_visible = visible_any
@@ -17530,7 +17747,7 @@ class GenizahGUI(QMainWindow):
         for i in range(root.childCount()):
             visit(root.child(i))
 
-    def _comp_data_matches_filters(self, node, data):
+    def _comp_data_matches_filters(self, node, data, local_visible_sys_ids=None):
         for column, rule in self.comp_filters.items():
             if column == 1:
                 text = data.get("shelfmark", "")
@@ -17557,6 +17774,11 @@ class GenizahGUI(QMainWindow):
             if self._comp_printed_filter_state == 'hide_printed' and is_printed:
                 return False
             elif self._comp_printed_filter_state == 'only_printed' and not is_printed:
+                return False
+        # Phase 95 REQ-6 — LOCAL filter (applied after printed filter per cascade discipline).
+        if local_visible_sys_ids is not None:
+            sid = data.get('sys_id', '')
+            if sid not in local_visible_sys_ids:
                 return False
         return True
 
@@ -23047,6 +23269,7 @@ class GenizahGUI(QMainWindow):
                     'results': getattr(self, 'last_results', [])[:5000],
                     'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
                     'printed_filter': getattr(self, '_printed_filter_state', 'all'),
+                    'local_filter': getattr(self, '_local_filter_state_search', 'all'),
                     'printed_ids': sorted(getattr(self, '_printed_sys_ids', set())),
                     'excluded_sys_ids': sorted(getattr(self, 'excluded_sys_ids', set())),
                     'excluded_shelfmarks': sorted(getattr(self, 'excluded_shelfmarks', set())),
@@ -23067,6 +23290,8 @@ class GenizahGUI(QMainWindow):
                     'filtered_results': getattr(self, 'comp_raw_filtered', [])[:5000],
                     'domain_exclusions': sorted(getattr(self, '_comp_domain_exclusions', set())),
                     'printed_filter': getattr(self, '_comp_printed_filter_state', 'all'),
+                    'local_filter_composition': getattr(self, '_local_filter_state_composition', 'all'),
+                    'local_filter_parallels': getattr(self, '_local_filter_state_parallels', 'all'),
                     'excluded_sys_ids': sorted(getattr(self, 'excluded_sys_ids', set())),
                     'excluded_shelfmarks': sorted(getattr(self, 'excluded_shelfmarks', set())),
                     'sort_mode': getattr(self, 'comp_sort_mode', 'score'),
@@ -23193,6 +23418,9 @@ class GenizahGUI(QMainWindow):
             # Restore exclusion state BEFORE displaying results
             self._domain_exclusions = set(reg.get('domain_exclusions', []))
             self._printed_filter_state = reg.get('printed_filter', 'all')
+            # Phase 95 D-39 — restore LOCAL filter state per surface.
+            self._local_filter_state_search = reg.get('local_filter', 'all')
+            self._update_local_filter_btn_search()
             self._printed_sys_ids = set(reg.get('printed_ids', []))
             self.excluded_sys_ids = set(reg.get('excluded_sys_ids', []))
             self.excluded_shelfmarks = set(reg.get('excluded_shelfmarks', []))
@@ -23253,6 +23481,11 @@ class GenizahGUI(QMainWindow):
 
             self._comp_domain_exclusions = set(comp.get('domain_exclusions', []))
             self._comp_printed_filter_state = comp.get('printed_filter', 'all')
+            # Phase 95 D-39 — restore LOCAL filter states for composition + parallels surfaces.
+            self._local_filter_state_composition = comp.get('local_filter_composition', 'all')
+            self._local_filter_state_parallels = comp.get('local_filter_parallels', 'all')
+            self._update_local_filter_btn_composition()
+            self._update_local_filter_btn_parallels()
             self.comp_sort_mode = comp.get('sort_mode', 'score')
             self.comp_sort_reverse = comp.get('sort_reverse', True)
 
