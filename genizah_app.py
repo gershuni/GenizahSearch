@@ -2795,6 +2795,8 @@ class GenizahGUI(QMainWindow):
         self.comp_col_context = 5
         self.comp_col_ms_context = 6
         self.comp_col_printed = 7  # Dedicated Printed column
+        # Phase 95 D-12 — uniform Src column for LOCAL badge on Composition / Parallels.
+        self.comp_col_src = 8  # New compact column appended after Printed
         self.setWindowTitle(tr(f"Genizah Search Pro V{APP_VERSION}"))
         # Initial size - will be overridden by showMaximized() at startup
         self.setMinimumSize(1200, 700)
@@ -6321,7 +6323,7 @@ class GenizahGUI(QMainWindow):
         inp_w.setLayout(in_l); splitter.addWidget(inp_w)
         
         res_w = QWidget(); rl = QVBoxLayout()
-        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Library"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context"), tr("MS Context"), tr("Printed")])
+        self.comp_tree = QTreeWidget(); self.comp_tree.setHeaderLabels([tr("Score"), tr("Library"), tr("Shelfmark"), tr("Title"), tr("System ID"), tr("Context"), tr("MS Context"), tr("Printed"), tr("Src")])
         self.comp_tree.itemChanged.connect(self.on_comp_tree_item_changed)
         self.comp_tree.itemExpanded.connect(self.on_comp_tree_item_expanded)
         self.comp_tree.itemCollapsed.connect(self.on_comp_tree_item_collapsed)
@@ -6355,6 +6357,9 @@ class GenizahGUI(QMainWindow):
         self.comp_tree.setColumnWidth(self.comp_col_context, int(context_width))
         self.comp_tree.setColumnWidth(self.comp_col_ms_context, int(context_width))
         self.comp_tree.setColumnWidth(self.comp_col_printed, 55)  # Printed column - narrow fixed
+        # Phase 95 D-12 — Src column setup
+        header.setSectionResizeMode(self.comp_col_src, QHeaderView.ResizeMode.Fixed)
+        self.comp_tree.setColumnWidth(self.comp_col_src, 60)  # narrow fixed, mirrors Printed width
         header.setStretchLastSection(False)
 
         self.comp_tree.itemDoubleClicked.connect(self.on_comp_item_double_clicked)
@@ -6364,7 +6369,7 @@ class GenizahGUI(QMainWindow):
         # Use CheckBoxHeader for tree
         self.chk_comp_header = CheckBoxHeader(
             self.comp_tree,
-            filter_columns=[self.comp_col_library, self.comp_col_shelfmark, self.comp_col_title, self.comp_col_context, self.comp_col_ms_context, self.comp_col_printed],
+            filter_columns=[self.comp_col_library, self.comp_col_shelfmark, self.comp_col_title, self.comp_col_context, self.comp_col_ms_context, self.comp_col_printed, self.comp_col_src],
             filter_callback=self._open_comp_filter_dialog,
         )
         self.chk_comp_header.toggled.connect(self.on_comp_header_toggled)
@@ -6377,6 +6382,7 @@ class GenizahGUI(QMainWindow):
         comp_header.setSectionResizeMode(self.comp_col_shelfmark, QHeaderView.ResizeMode.Interactive) # Shelfmark
         comp_header.setSectionResizeMode(self.comp_col_sysid, QHeaderView.ResizeMode.ResizeToContents) # System ID
         comp_header.setSectionResizeMode(self.comp_col_printed, QHeaderView.ResizeMode.Fixed) # Printed
+        comp_header.setSectionResizeMode(self.comp_col_src, QHeaderView.ResizeMode.Fixed)  # Phase 95 D-12 Src
         comp_header.setStretchLastSection(False)
 
         rl.addWidget(self.comp_tree)
@@ -16533,8 +16539,14 @@ class GenizahGUI(QMainWindow):
 
             # Img
             self.results_table.setItem(row_idx, self.COL_IMG, QTableWidgetItem(str(meta.get('img', ''))))
-            # Src
-            self.results_table.setItem(row_idx, self.COL_SRC, QTableWidgetItem(str(meta.get('source', ''))))
+            # Src — Phase 95 D-11: LOCAL source rendered in blue #3498db (symmetric with PGP green).
+            source_val = str(meta.get('source', ''))
+            if source_val == 'LOCAL':
+                src_item = QTableWidgetItem('LOCAL')
+                src_item.setForeground(QColor("#3498db"))
+                self.results_table.setItem(row_idx, self.COL_SRC, src_item)
+            else:
+                self.results_table.setItem(row_idx, self.COL_SRC, QTableWidgetItem(source_val))
             # PGP badge
             if sid and sid in self._pgp_transcription_sys_ids:
                 pgp_item = QTableWidgetItem("PGP")
@@ -16741,7 +16753,12 @@ class GenizahGUI(QMainWindow):
         # Hide Source column if secondary source file (V0.7) is missing or empty
         # If Config.FILE_V7 is missing/empty, it implies we only have one source (V0.8) in index
         has_multiple_sources = os.path.exists(Config.FILE_V7) and os.path.getsize(Config.FILE_V7) > 0
-        self.results_table.setColumnHidden(self.COL_SRC, not has_multiple_sources)
+        # Phase 95 D-11 — show COL_SRC also when LOCAL hits present.
+        has_local = any(
+            (r.get('display', {}) or {}).get('source') == 'LOCAL'
+            for r in (self.last_results or [])
+        )
+        self.results_table.setColumnHidden(self.COL_SRC, not (has_multiple_sources or has_local))
 
         # Initialize domain data (will be populated asynchronously by DomainEnrichmentWorker)
         self._result_domain_map = {}
@@ -20530,6 +20547,13 @@ class GenizahGUI(QMainWindow):
                 make_checkable(ms_node)
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
                 apply_printed_badge(ms_node, sid)
+                # Phase 95 D-11 — Src cell with LOCAL color (composition tree, part node)
+                _src_val = str(ms_item.get('source', '') or (ms_item.get('display', {}) or {}).get('source', ''))
+                if _src_val == 'LOCAL':
+                    ms_node.setText(self.comp_col_src, 'LOCAL')
+                    ms_node.setForeground(self.comp_col_src, QColor("#3498db"))
+                else:
+                    ms_node.setText(self.comp_col_src, _src_val)
 
                 pages = ms_item.get('pages', [])
                 folios = ms_item.get('folios', [])
@@ -20580,6 +20604,13 @@ class GenizahGUI(QMainWindow):
                 make_checkable(ms_node)
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
                 apply_printed_badge(ms_node, sid)
+                # Phase 95 D-11 — Src cell with LOCAL color (composition tree, manuscript node)
+                _src_val = str(ms_item.get('source', '') or (ms_item.get('display', {}) or {}).get('source', ''))
+                if _src_val == 'LOCAL':
+                    ms_node.setText(self.comp_col_src, 'LOCAL')
+                    ms_node.setForeground(self.comp_col_src, QColor("#3498db"))
+                else:
+                    ms_node.setText(self.comp_col_src, _src_val)
 
                 pages = ms_item.get('pages', [])
                 if len(pages) == 1:
@@ -20622,6 +20653,13 @@ class GenizahGUI(QMainWindow):
                 make_checkable(node)
                 node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
                 apply_printed_badge(node, sid)
+                # Phase 95 D-11 — Src cell with LOCAL color (composition tree, fallback node)
+                _src_val = str(ms_item.get('source', '') or (ms_item.get('display', {}) or {}).get('source', ''))
+                if _src_val == 'LOCAL':
+                    node.setText(self.comp_col_src, 'LOCAL')
+                    node.setForeground(self.comp_col_src, QColor("#3498db"))
+                else:
+                    node.setText(self.comp_col_src, _src_val)
                 self._set_comp_node_previews(node, ms_item.get('source_ctx', ''), ms_item.get('text', ''), ms_item.get('highlight_pattern'), defer_widgets=True)
 
             _collect_id(ms_item)
