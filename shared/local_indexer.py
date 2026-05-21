@@ -1269,16 +1269,92 @@ class LocalIndexer:
     # Two-phase commit (D-21)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _is_windows_access_denied(exc: BaseException) -> bool:
+        """Detect Windows ``os error 5`` (ERROR_ACCESS_DENIED) raised by the
+        Tantivy Python binding during writer.commit().
+
+        Tantivy surfaces the OS error inside a ValueError whose message
+        contains ``"An IO error occurred"`` and ``"os error 5"``.  We match
+        on the message rather than the exception type because the binding
+        normalizes platform errors into ValueError.
+        """
+        msg = str(exc) or ""
+        return (
+            "os error 5" in msg
+            or "Access is denied" in msg
+            or "access is denied" in msg
+        )
+
+    def _commit_writer_with_retry(self) -> None:
+        """Commit the Tantivy writer with retry/backoff on Windows os error 5.
+
+        User-reported BLOCKER (Category 2): indexing large folders on Windows
+        intermittently hit ``ValueError: An IO error occurred: 'Access is
+        denied. (os error 5)'`` during ``self._writer.commit()``. The typical
+        Windows causes are:
+          (a) an antivirus / Windows Defender briefly scanning a new segment
+              file just after rename;
+          (b) a reader (e.g. a live SearchEngine.local_searcher) holding a
+              handle the writer needs to atomically rename.
+
+        Retry envelope: up to 3 attempts at 250 ms, 1 s, 2 s.  Only retried
+        on Windows-access-denied; all other exceptions propagate immediately.
+        On final failure, raise ValueError with detailed context (which dir,
+        attempts, the underlying message).
+        """
+        import time as _time
+
+        attempts = 0
+        delays = (0.25, 1.0, 2.0)
+        last_exc = None
+        for delay in (0.0, *delays):
+            if delay > 0:
+                _time.sleep(delay)
+            attempts += 1
+            try:
+                self._writer.commit()
+                if attempts > 1:
+                    logger.info(
+                        "Tantivy writer.commit() succeeded on retry %d (dir=%s)",
+                        attempts, self._index_dir,
+                    )
+                return
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if not self._is_windows_access_denied(exc):
+                    raise
+                logger.warning(
+                    "Tantivy writer.commit() hit Windows access-denied "
+                    "(attempt %d/%d, dir=%s): %s",
+                    attempts, len(delays) + 1, self._index_dir, exc,
+                )
+        # All retries exhausted.
+        raise ValueError(
+            f"Tantivy writer.commit() failed after {attempts} attempts "
+            f"with Windows access-denied error on {self._index_dir!r}. "
+            f"Pending files: {len(self._pending_filepaths)}. "
+            f"Underlying error: {last_exc!r}. "
+            "Common causes: (a) antivirus scanning new segment files, "
+            "(b) another process holding a reader handle on this index. "
+            "Try closing the live SearchEngine reader before commit, or "
+            "exclude the LocalIndex directory from real-time antivirus scanning."
+        )
+
     def _commit_batch(self) -> None:
         """Two-phase commit per D-21.
 
         Phase 1: Tantivy writer.commit() (Tantivy docs are now durable on disk).
         Phase 2: SQLite UPDATE status='committed' for all pending filepaths.
+
+        Category-2 BLOCKER fix: wraps Tantivy commit in retry/backoff so
+        a transient Windows ``os error 5`` (antivirus or reader contention)
+        does not crash the entire indexing batch.
         """
         if not self._pending_filepaths:
             return
-        # Phase 1: Tantivy commit
-        self._writer.commit()
+        # Phase 1: Tantivy commit (with retry for Windows access-denied races).
+        self._commit_writer_with_retry()
         # Phase 2: SQLite mark committed
         placeholders = ",".join("?" * len(self._pending_filepaths))
         self._conn.execute(
