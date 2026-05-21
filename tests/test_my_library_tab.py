@@ -320,3 +320,61 @@ def test_delete_then_search_no_local_hits():
         tab._on_remove_folder_clicked()
 
     mock_searcher.reload_local_indexes.assert_called()
+
+
+def test_refresh_completion_always_shows_status_message():
+    """B2 feedback: _on_worker_finished ALWAYS calls _show_status_message,
+    even when zero files were re-indexed (the zero-work case that previously
+    gave no visible feedback to the user)."""
+    from desktop.my_library_tab import MyLibraryTab
+
+    parent = _make_mock_parent()
+
+    with (
+        mock.patch("desktop.my_library_tab.LocalIndexer") as MockIdx,
+        mock.patch("desktop.my_library_tab.os.makedirs"),
+    ):
+        mock_idx = _make_mock_indexer()
+        MockIdx.return_value = mock_idx
+        tab = MyLibraryTab(parent)
+
+    # Patch _show_status_message to capture calls
+    with mock.patch.object(tab, "_show_status_message") as mock_show:
+        # Zero-work result: nothing was indexed, everything up to date
+        tab._on_worker_finished(
+            {"indexed": 0, "skipped": 5, "errors": 0, "cancelled": False},
+            toast=False,
+        )
+        mock_show.assert_called_once()
+        msg = mock_show.call_args[0][0]
+        # Message must mention "complete" or "up to date" to be useful
+        assert any(kw in msg.lower() for kw in ("complete", "up to date", "refresh")), (
+            f"Status message did not contain expected keyword: {msg!r}"
+        )
+
+
+def test_refresh_completion_message_includes_counts():
+    """B2 feedback: status message includes re-indexed and up-to-date counts."""
+    from desktop.my_library_tab import MyLibraryTab
+
+    parent = _make_mock_parent()
+
+    with (
+        mock.patch("desktop.my_library_tab.LocalIndexer") as MockIdx,
+        mock.patch("desktop.my_library_tab.os.makedirs"),
+    ):
+        mock_idx = _make_mock_indexer()
+        MockIdx.return_value = mock_idx
+        tab = MyLibraryTab(parent)
+
+    with mock.patch.object(tab, "_show_status_message") as mock_show:
+        # Non-zero result: 3 indexed, 7 skipped
+        tab._on_worker_finished(
+            {"indexed": 3, "skipped": 7, "errors": 0, "cancelled": False},
+            toast=False,
+        )
+        mock_show.assert_called_once()
+        msg = mock_show.call_args[0][0]
+        # Both counts should appear in the message
+        assert "3" in msg, f"Indexed count missing from message: {msg!r}"
+        assert "7" in msg, f"Skipped count missing from message: {msg!r}"
