@@ -18498,31 +18498,154 @@ class GenizahGUI(QMainWindow):
         except Exception:
             return None
 
-    def _open_local_browse(self, sys_id: str, res: dict):
-        """Phase 95 D-27 — open a LOCAL hit in Browse panel text-only mode.
+    def _get_local_full_text_for_sys_id(self, sys_id: str) -> str:
+        """Category 3: aggregate all pages of a LOCAL sys_id into a single text.
 
-        Reuses existing Browse machinery. Calls _set_browse_image_pane_visible(False)
-        so the image pane is hidden (I15 resolved) and shows the 'Open file' button.
+        Reads from the SearchEngine.local_searcher (the LOCAL side-index)
+        sorted by page number. Returns "" if the index is unavailable or
+        the sys_id has no docs.
+        """
+        if not self.searcher:
+            return ""
+        local_searcher = getattr(self.searcher, "local_searcher", None)
+        local_index = getattr(self.searcher, "local_index", None)
+        if local_searcher is None or local_index is None:
+            return ""
+        try:
+            # Match any doc whose full_header starts with the sys_id. The
+            # full_header field is stored + indexed with a tokenizer so we
+            # use a prefix-like phrase query.  Limit 5000 pages — sane upper
+            # bound (D-33 says max ~3 doc/page; we pre-cap at 5000).
+            q = local_index.parse_query(sys_id, ["full_header"])
+            res = local_searcher.search(q, 5000)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "_get_local_full_text_for_sys_id: parse_query failed for %s: %s",
+                sys_id, exc,
+            )
+            return ""
+        pages = []
+        for _score, doc_addr in res.hits:
+            try:
+                doc = local_searcher.doc(doc_addr)
+                full_header = doc.get_first("full_header") or ""
+                # Only keep docs that truly belong to this sys_id (prefix match).
+                if not full_header.startswith(f"{sys_id}_LOCAL_P"):
+                    continue
+                content = doc.get_first("content") or ""
+                # Parse page number from "{sys_id}_LOCAL_P{n}_F{file_id}".
+                p_str = full_header.split("_LOCAL_P")[1].split("_F")[0]
+                try:
+                    p_num = int(p_str)
+                except (ValueError, IndexError):
+                    p_num = 0
+                pages.append((p_num, content))
+            except (KeyError, IndexError, TypeError):
+                continue
+        pages.sort(key=lambda x: x[0])
+        return "\n\n".join(text for _p, text in pages if text)
+
+    def _open_local_browse(self, sys_id: str, res: dict):
+        """Category 3 fix — render LOCAL file text in the Browse panel.
+
+        Switched from the Plan 95-08 stub (which routed through the Genizah
+        browse_load machinery that does NOT know how to fetch LOCAL text)
+        to a direct-render path that:
+
+          1. Resolves the canonical filepath via the indexer (D-28).
+          2. Aggregates LOCAL page text from the side-index by sys_id.
+          3. Sets the Browse text widget directly via apply_line_numbered_text.
+          4. Hides the image pane (D-27 text-only mode).
+          5. Shows the "Open file" toolbar button.
+
+        The Genizah-only paths (FL resolver, shelfmark resolver, enrichment)
+        are bypassed entirely — LOCAL files have no manifest / catalog data.
         """
         from shared.local_sys_id import is_local_sys_id as _is_local
         if not _is_local(sys_id):
             return
-        # Look up the filepath for the Open File button (D-28).
+
+        # 1. Filepath lookup (for the Open File button + diagnostics).
         filepath = self._lookup_local_filepath(sys_id)
-        # Route through the existing browse machinery (sets current_browse_sid, populates text).
-        self.open_result_in_browse(res)
-        # Hide image pane — LOCAL files have no images (D-27, I15).
+
+        # 2. Source the text: prefer the search-hit's full_text (already
+        #    populated by _build_local_result_dict) when present; otherwise
+        #    aggregate all pages from the LOCAL side-index.
+        text = ""
+        if isinstance(res, dict):
+            text = res.get("full_text") or res.get("text") or ""
+        if not text:
+            text = self._get_local_full_text_for_sys_id(sys_id)
+        if not text:
+            text = tr(
+                "Indexed LOCAL file — no extracted text available. "
+                "Use 'Open file' to view the original."
+            )
+
+        # 3. Populate the Browse panel state so navigation chrome makes sense.
+        self.current_browse_sid = sys_id
+        self.current_browse_p = None
+        self.current_browse_internal_idx = None
+        self.current_browse_volume_ie = None
+        self.browse_sys_input.setText(sys_id)
+        self.browse_shelf_input.setText(os.path.basename(filepath) if filepath else sys_id)
+        self.browse_fl_input.setText("")
+
+        # 4. Switch tabs.
+        self.tabs.setCurrentWidget(self.browse_tab)
+
+        # 5. Hide the image pane (D-27 — LOCAL has no images).
         self._set_browse_image_pane_visible(False)
-        # Show / populate the Open file button (D-28).
+
+        # 6. Show the Open File button (D-28).
         self._current_local_filepath = filepath
-        self.browse_open_file_btn.setVisible(bool(filepath))
-        self.browse_open_file_btn.setEnabled(bool(filepath))
+        if hasattr(self, "browse_open_file_btn"):
+            self.browse_open_file_btn.setVisible(bool(filepath))
+            self.browse_open_file_btn.setEnabled(bool(filepath))
+
+        # 7. Render the text via the same gutter helper Genizah pages use.
+        try:
+            browse_html = text.replace("\n", "<br>")
+            apply_line_numbered_text(
+                self.browse_text,
+                f"<div dir='rtl'>{browse_html}</div>",
+                source_text=text,
+                is_html=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("_open_local_browse: apply_line_numbered_text failed: %s", exc)
+            # Fallback: plain setText so the user at least sees the content.
+            try:
+                self.browse_text.setPlainText(text)
+            except Exception:
+                pass
+
+        # 8. Update info label so user sees what they are viewing.
+        try:
+            basename = os.path.basename(filepath) if filepath else sys_id
+            self.browse_info_lbl.setText(f"<b>{basename}</b> ({tr('Local file')})")
+        except Exception:
+            pass
 
     def _on_browse_open_file_clicked(self):
-        """Phase 95 D-28 — launch OS default app for the current LOCAL file."""
+        """Phase 95 D-28 — launch OS default app for the current LOCAL file.
+
+        WR-03 defense-in-depth: refuse to launch a file whose extension is
+        not in the LOCAL supported set, even though _lookup_local_filepath
+        only returns paths walked under user-chosen folders with
+        followlinks=False.
+        """
         filepath = getattr(self, '_current_local_filepath', None)
-        if filepath and os.path.exists(filepath):
-            os.startfile(filepath)  # Windows-native
+        if not filepath or not os.path.exists(filepath):
+            return
+        ext = os.path.splitext(filepath)[1].lower()
+        if ext not in {'.docx', '.pdf', '.txt'}:
+            logger.warning(
+                "_on_browse_open_file_clicked: refusing to open file with "
+                "disallowed extension: %s", filepath
+            )
+            return
+        os.startfile(filepath)  # Windows-native
 
     def send_result_to_composition(self, res, source_text=None, title=None):
         if not source_text:

@@ -336,6 +336,21 @@ class ResultDialog(QDialog):
         self._rd_local_filepath = None  # filepath for the current LOCAL result
         action_row.addWidget(self.btn_rd_open_file)
 
+        # Category 3 (user request): "View in Browse" button for LOCAL hits.
+        # Routes the current LOCAL result into the Browse panel so the user
+        # can read the file's text alongside the rest of the Browse tooling.
+        # Mirrors the visibility logic of btn_rd_open_file.
+        self.btn_rd_open_browse = QPushButton(tr("View in Browse"))
+        self.btn_rd_open_browse.setToolTip(
+            tr("Open this LOCAL file in the Browse panel (text-only mode)")
+        )
+        self.btn_rd_open_browse.setStyleSheet(
+            "QPushButton { background-color: #16a085; color: white; border-radius: 4px; padding: 2px 8px; }"
+        )
+        self.btn_rd_open_browse.setVisible(False)
+        self.btn_rd_open_browse.clicked.connect(self._rd_open_in_browse)
+        action_row.addWidget(self.btn_rd_open_browse)
+
         action_row.addStretch()
 
         # --- Second row: Community features (Edit, Version, Comment) ---
@@ -1890,11 +1905,42 @@ class ResultDialog(QDialog):
             QDesktopServices.openUrl(QUrl(url))
 
     def _rd_open_local_file(self):
-        """Phase 95 smoke-fix (E): launch the LOCAL source file in the OS default app."""
+        """Phase 95 smoke-fix (E): launch the LOCAL source file in the OS default app.
+
+        WR-03 defense-in-depth: refuse to launch a file whose extension is
+        not in the LOCAL supported set.
+        """
         import os
         filepath = getattr(self, '_rd_local_filepath', None)
-        if filepath and os.path.exists(filepath):
-            os.startfile(filepath)  # Windows-native
+        if not filepath or not os.path.exists(filepath):
+            return
+        ext = os.path.splitext(filepath)[1].lower()
+        if ext not in {'.docx', '.pdf', '.txt'}:
+            return
+        os.startfile(filepath)  # Windows-native
+
+    def _rd_open_in_browse(self):
+        """Category 3: route the current LOCAL result into the Browse panel.
+
+        Calls the parent app's _open_local_browse helper with the current
+        result data. The Browse panel then renders the LOCAL file's text,
+        hides the image pane, and shows the "Open file" toolbar button.
+        Closes the dialog afterwards so the user lands directly on Browse.
+        """
+        if not self._app or not hasattr(self._app, '_open_local_browse'):
+            return
+        data = self.data
+        if not data:
+            return
+        sys_id = (data.get('display', {}) or {}).get('id', '')
+        if not sys_id:
+            return
+        try:
+            self._app._open_local_browse(sys_id, data)
+        except Exception:
+            return
+        # Close the dialog so the user sees Browse without the modal on top.
+        self.accept()
 
     def _htmlify(self, text):
         if not text: return ""
@@ -1941,22 +1987,31 @@ class ResultDialog(QDialog):
         self.data = data
 
         # Phase 95 smoke-fix (E): show "Open file" button for LOCAL hits only.
+        # Category 3 extension: also show "View in Browse" button alongside.
         try:
             from shared.local_sys_id import is_local_sys_id as _is_local
             _src_id = (data.get('display', {}) or {}).get('id', '')
-            if _src_id and _is_local(_src_id) and self._app:
+            _is_local_hit = bool(_src_id and _is_local(_src_id) and self._app)
+            if _is_local_hit:
                 # Look up filepath from the indexer via parent app helper
                 _fp = None
                 if hasattr(self._app, '_lookup_local_filepath'):
                     _fp = self._app._lookup_local_filepath(_src_id)
                 self._rd_local_filepath = _fp
                 self.btn_rd_open_file.setVisible(bool(_fp))
+                # Category 3: View-in-Browse button visible for ANY LOCAL hit
+                # (does not require the source file to be present on disk —
+                # the Tantivy stored content can render even if the file is
+                # currently unavailable, e.g. on a removable drive).
+                self.btn_rd_open_browse.setVisible(True)
             else:
                 self._rd_local_filepath = None
                 self.btn_rd_open_file.setVisible(False)
+                self.btn_rd_open_browse.setVisible(False)
         except Exception:
             self._rd_local_filepath = None
             self.btn_rd_open_file.setVisible(False)
+            self.btn_rd_open_browse.setVisible(False)
 
         # Nav UI Updates
         self.lbl_res_count.setText(tr("Result {} of {}").format(idx + 1, len(self.all_results)))
