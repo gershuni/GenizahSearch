@@ -2869,7 +2869,7 @@ class GenizahGUI(QMainWindow):
         self._local_filter_state_parallels = 'all'
         self._local_filter_inactive_chip_visible = False
         # Phase 95-08 smoke-fix — corpus scope selector persistence (session JSON, not QSettings)
-        self._search_corpus_scope = 'all'             # 'all' | 'genizah' | 'local'
+        self._search_corpus_scope = 'genizah'          # 'all' | 'genizah' | 'local'
         self._comp_results_from_parallels = False      # track source surface for comp_tree
         self._domain_worker = None
         self._pgp_tags_worker = None
@@ -5575,17 +5575,19 @@ class GenizahGUI(QMainWindow):
         # Determines which index(es) are queried: Genizah-only / Local-only / ALL.
         self.corpus_scope_combo = QComboBox()
         if CURRENT_LANG == 'he':
-            self.corpus_scope_combo.addItem("הכול", "all")
+            # Phase 95-08 UX reorder: Genizah first (default), then Local, then ALL
             self.corpus_scope_combo.addItem("גניזה", "genizah")
             self.corpus_scope_combo.addItem("מקומי", "local")
+            self.corpus_scope_combo.addItem("הכול", "all")
         else:
-            self.corpus_scope_combo.addItem("ALL", "all")
+            # Phase 95-08 UX reorder: Genizah first (default), then Local, then ALL
             self.corpus_scope_combo.addItem("Genizah", "genizah")
             self.corpus_scope_combo.addItem("Local", "local")
+            self.corpus_scope_combo.addItem("ALL", "all")
         self.corpus_scope_combo.setToolTip(tr("Select which corpus to search"))
         self.corpus_scope_combo.setFixedWidth(90)
         # Restore persisted scope from session JSON (set by _restore_session or _on_corpus_scope_changed)
-        _saved_scope = getattr(self, '_search_corpus_scope', 'all')
+        _saved_scope = getattr(self, '_search_corpus_scope', 'genizah')
         _scope_idx = self.corpus_scope_combo.findData(_saved_scope)
         if _scope_idx >= 0:
             self.corpus_scope_combo.setCurrentIndex(_scope_idx)
@@ -16240,7 +16242,7 @@ class GenizahGUI(QMainWindow):
 
     def _on_corpus_scope_changed(self, _index):
         """Phase 95 smoke-fix (item 2): persist the corpus scope selection via session JSON."""
-        scope = self.corpus_scope_combo.currentData() or "all"
+        scope = self.corpus_scope_combo.currentData() or "genizah"
         self._search_corpus_scope = scope
         self._schedule_session_save()
 
@@ -16364,9 +16366,9 @@ class GenizahGUI(QMainWindow):
         else:
             text_position = [None, 'start', 'end', 'line_start', 'line_end'][self.text_position_combo.currentIndex()]
             # Phase 95 smoke-fix (item 2): read corpus scope from pre-search dropdown.
-            _corpus_scope = "all"
+            _corpus_scope = "genizah"
             if hasattr(self, 'corpus_scope_combo'):
-                _corpus_scope = self.corpus_scope_combo.currentData() or "all"
+                _corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
             self.search_thread = SearchThread(self.searcher, query, mode, gap, exclude_words=exclude_words, responsa_options=responsa_options, restrict_sys_ids=compute_effective_restrict(getattr(self, 'pre_search_restrict_sys_ids', None), self.refinement_restrict_sys_ids), text_position=text_position, corpus_scope=_corpus_scope)
 
         self.search_thread.results_signal.connect(self.on_search_finished)
@@ -23413,7 +23415,7 @@ class GenizahGUI(QMainWindow):
                     'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
                     'printed_filter': getattr(self, '_printed_filter_state', 'all'),
                     'local_filter': getattr(self, '_local_filter_state_search', 'all'),
-                    'search_corpus_scope': getattr(self, '_search_corpus_scope', 'all'),
+                    'search_corpus_scope': getattr(self, '_search_corpus_scope', 'genizah'),
                     'printed_ids': sorted(getattr(self, '_printed_sys_ids', set())),
                     'excluded_sys_ids': sorted(getattr(self, 'excluded_sys_ids', set())),
                     'excluded_shelfmarks': sorted(getattr(self, 'excluded_shelfmarks', set())),
@@ -23566,7 +23568,7 @@ class GenizahGUI(QMainWindow):
             self._local_filter_state_search = reg.get('local_filter', 'all')
             self._update_local_filter_btn_search()
             # Phase 95-08 smoke-fix — restore corpus scope selector.
-            self._search_corpus_scope = reg.get('search_corpus_scope', 'all')
+            self._search_corpus_scope = reg.get('search_corpus_scope', 'genizah')
             if hasattr(self, 'corpus_scope_combo'):
                 _idx = self.corpus_scope_combo.findData(self._search_corpus_scope)
                 if _idx >= 0:

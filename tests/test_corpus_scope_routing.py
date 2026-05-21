@@ -96,11 +96,19 @@ def test_corpus_scope_local_returns_local_hits_only():
 # ---------------------------------------------------------------------------
 # corpus_scope='all' — LOCAL index IS consulted (regression guard)
 # ---------------------------------------------------------------------------
+# NOTE on defaults (Phase 95-08 UX reorder):
+#   - SearchEngine.execute_search API default: corpus_scope='all'  (backward compat)
+#   - Desktop UI default (GenizahGUI._search_corpus_scope): 'genizah'
+# These are intentionally different: engine API must remain stable for tests/callers;
+# UI default was changed to Genizah-first per user request.
 
 def test_corpus_scope_all_calls_local_query():
-    """corpus_scope='all' (default): _query_local_index IS called when Genizah
+    """corpus_scope='all' (explicit): _query_local_index IS called when Genizah
     query succeeds. We mock index.parse_query so the Genizah path completes
     and reaches the LOCAL merge block.
+
+    Note: the engine API parameter default is 'all' (backward compat).
+    The desktop UI default was changed to 'genizah' in Phase 95-08.
     """
     engine, mock_searcher, _mock_local = _make_engine_with_mocks()
 
