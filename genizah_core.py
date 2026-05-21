@@ -6610,24 +6610,27 @@ class SearchEngine:
         """Reciprocal Rank Fusion merger (D-08 Codex P0). BM25 scores from two
         independent indexes are NOT comparable; RRF fuses by rank (Cormack/Clarke 2009).
 
-        Tie-break: Genizah first when LOCAL and Genizah hits have identical scores
-        (encoded via secondary sort key 'genizah' in sources → True > False).
+        Tie-break: Genizah first when LOCAL and Genizah hits have identical scores.
+        The tie-break is content-driven (display.source != 'LOCAL' → Genizah) so it
+        is ORDER-INDEPENDENT — passing (local, genizah) vs (genizah, local) gives the
+        same result (W7 requirement).
         """
         rrf: dict = {}
         for rank, hit in enumerate(genizah_hits, start=1):
             uid = hit["uid"]
-            rrf.setdefault(uid, {"hit": hit, "score": 0.0, "sources": set()})
+            rrf.setdefault(uid, {"hit": hit, "score": 0.0})
             rrf[uid]["score"] += 1.0 / (k + rank)
-            rrf[uid]["sources"].add("genizah")
         for rank, hit in enumerate(local_hits, start=1):
             uid = hit["uid"]
-            rrf.setdefault(uid, {"hit": hit, "score": 0.0, "sources": set()})
+            rrf.setdefault(uid, {"hit": hit, "score": 0.0})
             rrf[uid]["score"] += 1.0 / (k + rank)
-            rrf[uid]["sources"].add("local")
-        # Tie-break: Genizah first (True > False at equal score).
+        # Tie-break: Genizah (non-LOCAL) first at equal score.
+        # display.source == 'LOCAL' → local (lower priority on tie).
+        # Any other source (V0.8, V0.7) → Genizah (higher priority on tie).
+        # True > False → non-LOCAL sorts higher at equal score (reverse=True).
         fused = sorted(
             rrf.values(),
-            key=lambda r: (r["score"], "genizah" in r["sources"]),
+            key=lambda r: (r["score"], r["hit"].get("display", {}).get("source") != "LOCAL"),
             reverse=True,
         )
         out = [r["hit"] for r in fused]
@@ -8036,6 +8039,22 @@ class SearchEngine:
 
         LOGGER.debug(f"Regex filtered out: {regex_filtered_count}, Results before dedup: {len(results)}, interrupted: {was_interrupted}")
         deduped = self._deduplicate(results)
+
+        # Phase 95 D-08 (Codex P0): LOCAL hits merge AFTER _deduplicate.
+        # The dedup body at _deduplicate() whitelists V0.8/V0.7 only and would
+        # otherwise DROP LOCAL hits. RRF k=60 used (BM25 IDF from two independent
+        # indexes is not comparable; raw score sort would mis-rank — Codex revision).
+        if getattr(self, "local_searcher", None) is not None:
+            try:
+                local_hits = self._query_local_index(query_str, mode, gap)
+            except Exception as _e:
+                LOGGER.warning(
+                    "LOCAL side-index query failed; main results unaffected: %r", _e
+                )
+                local_hits = []
+            if local_hits:
+                deduped = self._rrf_merge(deduped, local_hits, k=60)
+        # End Phase 95 D-08 LOCAL merge.
 
         # --- Apply Exclusion Filter (NOT Filter) ---
         if exclude_words and deduped:
