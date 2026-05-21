@@ -31,7 +31,27 @@ findings:
   warning: 8
   info: 7
   total: 17
-status: issues_found
+status: fixed
+fixed_at: 2026-05-21T00:00:00Z
+fixed_items:
+  - CR-01
+  - CR-02
+  - WR-01
+  - WR-05
+  - WR-08
+deferred_items:
+  - WR-02
+  - WR-03
+  - WR-04
+  - WR-06
+  - WR-07
+  - IN-01
+  - IN-02
+  - IN-03
+  - IN-04
+  - IN-05
+  - IN-06
+  - IN-07
 ---
 
 # Phase 95: Code Review Report
@@ -318,3 +338,135 @@ Consider refactoring to either (a) move these methods to LabEngine and have Sear
 _Reviewed: 2026-05-21_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+
+---
+
+## Fix Summary (2026-05-21)
+
+This review was processed via a post-review fix loop. The two critical
+findings and three best-effort warnings called out by the orchestrator
+were all addressed; the user-reported Tantivy IOError and the
+user-requested LOCAL Browse feature were folded in.  Each fix is an
+atomic commit prefixed `fix(95):` or `feat(95):`.
+
+### Critical findings
+
+**CR-01 — `SearchEngine._current_lab_weights_hash` AttributeError** —
+FIXED.  `dynamic_rank_map` and `settings` now read via `getattr` with
+safe defaults, so the bare-`SearchEngine` path returns a deterministic
+hash without raising.  Call site in `search_composition_logic` wrapped
+in try/except for D-37 fallback semantics. Two regression tests added in
+`tests/test_local_lab_invalidation.py::TestCR01CurrentLabWeightsHashNoCrash`
+that construct `object.__new__(SearchEngine)` WITHOUT hand-attaching
+attributes (the masking pattern the previous tests used).
+
+**CR-02 — LAB Composition Search LOCAL hook is dead code** — FIXED.
+Wired `LabEngine.__init__` to initialize `local_lab_searcher`,
+`_local_lab_index`, `_lab_local_meta`, `local_lab_searcher_stale`; added
+real `LabEngine._current_lab_weights_hash`, `_check_local_lab_freshness`,
+and `reload_local_lab_index` methods.  `MyLibraryTab` now exposes a
+`lab_engine` property and a `_reload_all_local_indexes()` helper that
+reloads BOTH engines; all four HIGH-1 reload sites route through it.
+Regression tests in `TestCR02LabEngineHasLocalLabHook` (4 assertions).
+
+### Warnings fixed
+
+**WR-01 — `file_id=0` on first index** — FIXED.  `_index_one_file` now
+does `INSERT OR IGNORE` on `local_files` with `status='pending'` BEFORE
+extraction, so AUTOINCREMENT assigns a real `file_id` that
+`_write_page_doc` reads.  `_finish_file` switched from `INSERT OR
+REPLACE` (which would reassign `file_id`, breaking already-written
+`full_header` values) to `UPDATE` the existing row, with an `INSERT`
+fallback.  Regression test
+`tests/test_local_indexer.py::test_file_id_populated_on_first_index`
+parses the `F`-suffix out of the Tantivy stored `full_header` and
+asserts it is non-zero and equals `local_files.file_id`.
+
+**WR-05 — 6.3 MB test fixture in production installer** — FIXED.
+Removed `tests/fixtures/local_indexer/hebrew_sample.pdf` from
+`GenizahSearchPro.spec`'s `datas` tuple.  The packaging smoke test
+(`tests/test_local_pyinstaller_smoke.py`) reads the fixture from the
+source tree, not the bundled EXE, so removing it from `datas` has no
+effect on the test path.
+
+**WR-08 — `rebuild_local_lab_index` dead code (D-38 invalidation never
+fires)** — FIXED.  Added `MyLibraryTab._maybe_rebuild_lab_if_stale()`
+that consults `LabEngine._check_local_lab_freshness` and, if stale,
+calls `SearchEngine.rebuild_local_lab_index` with the Option C
+callbacks. Wired into `_on_worker_finished` (Refresh path) and
+`_on_startup_recovery_completed` (startup path).  Defensive — wrapped in
+try/except so a LAB rebuild failure never blocks normal flow.
+Regression tests in `TestWR08RebuildLabWiring` (3 AST assertions).
+
+### Additional fixes folded in
+
+**Category 2 — User-reported `os error 5` BLOCKER during indexing** —
+FIXED.  Added `LocalIndexer._commit_writer_with_retry` that wraps
+`writer.commit()` in 3 retries with exponential backoff (250 ms / 1 s /
+2 s).  Only retries on the Windows access-denied pattern detected by a
+static helper `_is_windows_access_denied()`; all other exceptions
+propagate immediately.  On final exhaustion the helper raises a
+detailed `ValueError` that names the index directory, retry count,
+pending-file count, underlying cause, and remediation guidance.
+`_commit_batch` routes through the retry helper.  Regression tests in
+`tests/test_local_commit_retry.py` (8 assertions covering detection,
+retry success, retry exhaustion, non-AD propagation, `_commit_batch`
+integration, and timing).
+
+**Category 3 — User-requested LOCAL Browse render** — FIXED.
+`_open_local_browse` reimplemented as a direct-render path that:
+(1) resolves filepath via the indexer, (2) sources text from the
+search-hit `full_text` field or aggregates pages from the LOCAL
+side-index via a new `_get_local_full_text_for_sys_id(sys_id)` helper,
+(3) renders into the Browse text widget via `apply_line_numbered_text`,
+(4) hides the image pane (D-27), (5) shows the existing "Open file"
+button. Bypasses `browse_load` entirely (Genizah-only path).  Entry
+point: `ResultDialog` gained a "View in Browse" button (visible for
+LOCAL hits only). WR-03 defense-in-depth bonus: both file-launch paths
+now reject extensions outside `{.docx, .pdf, .txt}` before
+`os.startfile`. Smoke-level tests in `tests/test_local_browse_panel.py`
+(10 AST assertions).
+
+### Deferred — not in scope for this fix loop
+
+Reviewed and tracked for a future polish pass:
+
+- **WR-02** — `_iterate_supported_files` vs `prescan_count` ceiling
+  semantics (decision needed on whether "5,000 files" means supported
+  or total).
+- **WR-03** — `os.startfile` defense-in-depth (partially addressed:
+  extension guard is now in place for both browse and ResultDialog
+  launch paths; the "verify path still under registered folder"
+  remediation is still TODO).
+- **WR-04** — `datetime.utcnow()` deprecation warning at
+  `shared/local_indexer.py:1330`.
+- **WR-06** — `_iterate_lab_source_rows` opens a second handle (dead
+  code today; needs commit-before-open before LAB rebuild wiring goes
+  hot).
+- **WR-07** — composite-key normalization in `lists_sync.sync_item_to_cloud`.
+- **IN-01** through **IN-07** — code-quality cleanups (LAB/Search
+  duplication, misleading function names, comment drift, Help arrow
+  direction, etc.).
+
+### Test results
+
+After all fixes, the full local-indexer suite passes:
+
+```
+$ pytest tests/test_local_indexer.py tests/test_my_library_tab.py \
+    tests/test_corpus_scope_routing.py tests/test_local_filter_*.py \
+    tests/test_local_post_dedup_merge.py tests/test_local_lab_invalidation.py \
+    tests/test_side_index_merge.py tests/test_local_commit_retry.py \
+    tests/test_local_browse_panel.py -q
+... 103 passed in ~13s
+```
+
+Wider local-indexer suite (incremental, mutex, two-phase, delete-by-uid,
+reload, fallback, namespace leak gates, schema evolution, sys_id):
+
+```
+... 88 passed, 2 xfailed in ~23s
+```
+
+_Fixed: 2026-05-21_
+_Fixer: Claude (post-review fix loop)_
