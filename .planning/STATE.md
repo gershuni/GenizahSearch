@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v5.6.0
-milestone_name: milestone
-status: executing
-stopped_at: Phase 94 context revised — desktop parity + Codex-tightened shared module API
-last_updated: "2026-05-20T08:24:38.292Z"
+milestone: v7.14
+milestone_name: My Library
+status: speccing
+stopped_at: Phase 95 SPEC.md pending — /gsd-spec-phase 95 in progress
+last_updated: "2026-05-20T09:00:00.000Z"
 last_activity: 2026-05-20
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 8
-  completed_plans: 8
-  percent: 100
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State

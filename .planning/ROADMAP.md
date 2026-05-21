@@ -22,8 +22,23 @@
 - **v7.11 CUDL Coverage & Synthetic Inventories** -- Phases 84-86 (shipped 2026-05-12)
 - **v7.12 Multitenant Architecture (Path B)** -- Phases 87-92 + 92.1 + 92.2 + promoted 999.1/999.4 (shipped 2026-05-18)
 - **v7.13 Research-Grade Downloads & PGP Filter** -- Phases 93-94 (ACTIVE; started 2026-05-19; Phase 93 web-only COMPLETE 2026-05-19; Phase 94 web + desktop xlsx COMPLETE 2026-05-21; milestone closeable)
+- **v7.14 My Library** -- Phase 95 (ACTIVE; started 2026-05-20; first-class desktop feature for indexing user-owned .docx/.pdf alongside the Genizah corpus, inspired by Yehuda Seewald's external bolt-on)
 
 ## Phases
+
+## Roadmap v7.14: My Library
+
+### Phase 95: My Library — Local Document Indexing
+
+**Goal:** Desktop users can point GenizahSearch at a folder of `.docx` / `.pdf` files and have those documents indexed into the desktop app's existing Tantivy + libraries.csv search machinery, so personal corpora surface inline in normal search / Composition Search / Parallels results with a clear `LOCAL` badge and a per-search opt-in toggle. Productizes Yehuda Seewald's external prototype (`seewald_addition/`) as a first-class in-app feature — no second installation, no `Program Files` UAC patching, no shared sys_id namespace with NLI / PGP / CUDL data, no web / API / Supabase exposure.
+
+**Depends on:** Nothing — independent feature
+
+**Source CONTEXT:** (to be created by /gsd-discuss-phase 95)
+
+**Plans:** ~3 plans (estimated): (1) local-index builder + namespace + extraction (port Seewald's RTL / single-word-per-line fixes), (2) desktop "My Library" UI tab + settings + toggle wiring into existing search/Composition/Parallels surfaces, (3) namespace isolation guards (no LOCAL in /api/search, no LOCAL in cloud Lists export, no LOCAL in corrections submission).
+
+**UI hint:** yes — new desktop tab + result-list badge.
 
 <details>
 <summary>v7.13 Research-Grade Downloads & PGP Filter (Phases 93-94) -- BOTH PHASES COMPLETE (Phase 93 2026-05-19; Phase 94 2026-05-21; milestone closeable)</summary>
