@@ -4,10 +4,18 @@
 Tests that QMutex in MyLibraryTab serialises Refresh requests so only one
 worker runs at a time and additional requests collapse into a FIFO queue of
 max depth 1.
+
+Also contains the D-threading-fix regression test: LocalIndexer constructed
+on thread A must be fully usable (scan_all / SQLite access) from thread B
+without raising sqlite3.ProgrammingError.  This test does NOT require PyQt6.
 """
 from __future__ import annotations
 
+import os
+import shutil
+import sqlite3
 import sys
+import tempfile
 import threading
 import time
 import unittest.mock as mock
@@ -169,3 +177,147 @@ def test_queued_action_runs_after_worker_finishes():
 
     assert executed, "Queued action should have been executed after worker finished"
     assert tab._queued_action is None, "Queue should be empty after dequeuing"
+
+
+# ---------------------------------------------------------------------------
+# D-threading-fix regression tests (no PyQt6 required)
+# ---------------------------------------------------------------------------
+# These tests verify the fix for the cross-thread sqlite3.ProgrammingError:
+#   "SQLite objects created in a thread can only be used in that same thread."
+#
+# Before the fix: LocalIndexer.__init__ created self._conn on the main thread;
+# any worker thread calling scan_all() would crash with ProgrammingError.
+# After the fix: self._conn is a thread-local property — each thread gets its
+# own sqlite3.Connection opened lazily by init_sqlite().
+
+
+def _make_tmp_indexer():
+    """Create a real LocalIndexer in a temp directory for threading tests."""
+    from shared.local_indexer import LocalIndexer
+
+    tmp = tempfile.mkdtemp(prefix="gsd_thread_test_")
+    index_dir = os.path.join(tmp, "local_index")
+    lab_dir = os.path.join(tmp, "lab_index")
+    db_path = os.path.join(tmp, "local_index.sqlite3")
+    os.makedirs(index_dir, exist_ok=True)
+    os.makedirs(lab_dir, exist_ok=True)
+    indexer = LocalIndexer(
+        index_dir=index_dir,
+        lab_index_dir=lab_dir,
+        db_path=db_path,
+    )
+    return indexer, tmp
+
+
+def test_sqlite_conn_usable_from_worker_thread():
+    """D-threading-fix: SQLite connection must not raise ProgrammingError on worker thread.
+
+    Regression test for:
+        sqlite3.ProgrammingError: SQLite objects created in a thread can only
+        be used in that same thread.
+
+    Protocol:
+    1. Construct LocalIndexer on the main (test) thread.
+    2. Spawn a Python threading.Thread that calls list_folders() — a simple
+       SQLite SELECT — which exercises self._conn on a foreign thread.
+    3. Assert no exception was raised.
+    """
+    indexer, tmp = _make_tmp_indexer()
+    errors = []
+
+    def worker():
+        try:
+            _ = indexer.list_folders()
+        except sqlite3.ProgrammingError as exc:
+            errors.append(exc)
+        except Exception:
+            pass  # Other errors are not the bug we're guarding against
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join(timeout=10)
+
+    indexer.close()
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    assert not errors, (
+        f"sqlite3.ProgrammingError raised on worker thread — "
+        f"thread-local fix not working: {errors}"
+    )
+
+
+def test_scan_all_usable_from_worker_thread():
+    """D-threading-fix: scan_all() (full SQLite write path) must work from worker thread.
+
+    This exercises the complete write path that LocalIndexerWorker.run() takes:
+    scan_all() -> _index_one_file() -> _finish_file() -> self._conn.execute().
+
+    We use an empty folder so no actual files are indexed, but the SQLite
+    path (scan_all queries folders table) is still exercised from the
+    worker thread.
+    """
+    indexer, tmp = _make_tmp_indexer()
+
+    # Register a real (empty) folder so scan_all has something to iterate
+    scan_folder = os.path.join(tmp, "scan_me")
+    os.makedirs(scan_folder, exist_ok=True)
+    indexer.add_folder(scan_folder)
+
+    errors = []
+    result_holder = []
+
+    def worker():
+        try:
+            result = indexer.scan_all(cancel_check=lambda: False)
+            result_holder.append(result)
+        except sqlite3.ProgrammingError as exc:
+            errors.append(("ProgrammingError", exc))
+        except Exception as exc:
+            errors.append(("Other", exc))
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join(timeout=30)
+
+    indexer.close()
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    assert not any(kind == "ProgrammingError" for kind, _ in errors), (
+        f"sqlite3.ProgrammingError from scan_all on worker thread — "
+        f"thread-local fix not working: {errors}"
+    )
+    assert result_holder, "scan_all should have returned a result dict"
+    assert result_holder[0].get("cancelled") is False
+
+
+def test_each_thread_gets_independent_connection():
+    """D-threading-fix: two threads each get their own sqlite3.Connection instance.
+
+    This confirms the thread-local mechanism is actually creating separate
+    connections rather than sharing a single one.
+    """
+    from shared.local_indexer import LocalIndexer
+
+    indexer, tmp = _make_tmp_indexer()
+
+    conn_ids = {}
+
+    def capture_conn(name):
+        # Access _conn from this thread — will create a new connection if needed
+        conn_ids[name] = id(indexer._conn)
+
+    # Main thread connection (already created in __init__)
+    capture_conn("main")
+
+    # Worker thread connection (created lazily on first access)
+    t = threading.Thread(target=capture_conn, args=("worker",))
+    t.start()
+    t.join(timeout=10)
+
+    indexer.close()
+    shutil.rmtree(tmp, ignore_errors=True)
+
+    assert "worker" in conn_ids, "Worker thread did not access _conn"
+    assert conn_ids["main"] != conn_ids["worker"], (
+        "Main thread and worker thread must use different sqlite3.Connection objects"
+    )

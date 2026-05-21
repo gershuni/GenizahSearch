@@ -44,6 +44,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 import time
 import unicodedata
 from typing import Callable, Iterator, Optional
@@ -422,9 +423,30 @@ class LocalIndexer:
         self._progress_cb = progress_cb
         self._file_finished_cb = file_finished_cb
 
-        # SQLite connection
-        self._conn = init_sqlite(db_path)
-        self._conn.row_factory = sqlite3.Row
+        # Thread-local SQLite connections (D-threading-fix).
+        #
+        # Python's sqlite3 module ties each connection to the thread that
+        # created it (check_same_thread=True by default). LocalIndexer is
+        # constructed on the main/GUI thread but scan_all() runs inside
+        # LocalIndexerWorker(QThread) — a different thread. Using a single
+        # shared connection therefore raises:
+        #   sqlite3.ProgrammingError: SQLite objects created in a thread can
+        #   only be used in that same thread.
+        #
+        # Fix: each thread gets its own connection opened lazily via the
+        # _conn property (see below). Do NOT use check_same_thread=False —
+        # that bypasses Python's safety guard and risks corruption when
+        # multiple threads write concurrently. Per-thread connections are
+        # safe here because the QMutex in MyLibraryTab (D-25) ensures only
+        # one thread is writing at any given time.
+        self._thread_local = threading.local()
+
+        # Eagerly open a connection on the constructing thread so that
+        # startup work (init_sqlite + _recover_pending_deletes) runs
+        # immediately without requiring callers to prime the thread-local.
+        _conn = init_sqlite(db_path)
+        _conn.row_factory = sqlite3.Row
+        self._thread_local._conn = _conn
 
         # Tantivy LOCAL side-index
         schema = build_local_schema()
@@ -443,6 +465,31 @@ class LocalIndexer:
         recovered = self._recover_pending_deletes()
         if recovered:
             logger.info("LocalIndexer init: recovered %d pending deletes", recovered)
+
+    # ------------------------------------------------------------------
+    # Thread-local connection property (D-threading-fix)
+    # ------------------------------------------------------------------
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        """Return the SQLite connection for the current thread.
+
+        Creates a new connection (via init_sqlite) the first time any thread
+        accesses this property. The constructing thread pre-populates its slot
+        in __init__ so startup work (init_sqlite tables + _recover_pending_deletes)
+        runs immediately.
+
+        Each thread owns its own sqlite3.Connection. This is safe for concurrent
+        reads from the main/UI thread while the QMutex-serialised worker thread
+        performs writes, because SQLite WAL mode allows one writer + many readers
+        without blocking.
+        """
+        conn = getattr(self._thread_local, "_conn", None)
+        if conn is None:
+            conn = init_sqlite(self._db_path)
+            conn.row_factory = sqlite3.Row
+            self._thread_local._conn = conn
+        return conn
 
     # ------------------------------------------------------------------
     # Folder management
