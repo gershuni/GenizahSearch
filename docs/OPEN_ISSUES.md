@@ -454,6 +454,19 @@ All completed items have been moved to `docs/archive/`:
 
 ---
 
+
+## Deferred to v7.15+ (Phase 95 follow-up backlog)
+
+These items were raised during Phase 95 (My Library) user testing but explicitly
+deferred to a future phase. Promote via `/gsd-add-phase` or `/gsd-plant-seed`.
+
+| # | Item | Description | Priority |
+|---|------|-------------|----------|
+| D-F1 | Folder drill-down with file checkboxes | Clicking a folder in the My Library tab reveals its files with per-file checkboxes (select all/none) to opt each file in or out of the search scope. Needs a tree widget or split-panel UX. | P2 |
+| D-F2 | PDF OCR | Scanned-PDF support via Tesseract or similar. Currently PyMuPDF text extraction skips image-only PDFs (no text layer). | P2 |
+| D-F3 | Side-by-side PDF page rendering | Show the PDF page image next to its extracted text in the Browse panel and ResultDialog, similar to the manuscript image/transcription split view. | P3 |
+| D-F4 | PDF text extraction quality audit | Some PDFs may need a different extraction path: `get_text("dict")` instead of `get_text("blocks")`, OCR fallback, or PyMuPDF version-specific quirks. Needs a sample-corpus audit with representative Hebrew/Aramaic PDFs. | P2 |
+
 ## Related Documents
 
 - `docs/archive/PRE_LAUNCH_CHECKLIST.md` - Detailed test checklist

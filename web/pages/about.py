@@ -484,8 +484,7 @@ def _create_hebrew_content():
             <p style="font-style: italic; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light, #ece4d6);">
                 לזכרו של מורנו ורבנו, פרופ' מנחם כהנא ז"ל.
             </p>
-            <p>יוצר האתר: הלל גרשוני · <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a></p>
-            <p style="font-style: italic; font-size: 0.82rem;">תכונת הספרייה שלי בהשראת אב-טיפוס GenizahLocal של יהודה זיוואלד.</p>
+            <p>יוצר האתר: הלל גרשוני · <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a> · תכונת הספרייה שלי קיבלה השראה מהאב-טיפוס GenizahLocal של יהודה זייבלד.</p>
         </div>
         ''')
 
@@ -674,7 +673,6 @@ def _create_english_content():
             <p style="font-style: italic; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light, #ece4d6);">
                 Dedicated to the memory of our beloved teacher, Prof. Menachem Kahana z"l.
             </p>
-            <p>Site creator: Hillel Gershuni · <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a></p>
-            <p style="font-style: italic; font-size: 0.82rem;">My Library feature inspired by Yehuda Seewald's GenizahLocal prototype.</p>
+            <p>Site creator: Hillel Gershuni · <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a> · The My Library feature was inspired by Yehuda Seewald's GenizahLocal prototype.</p>
         </div>
         ''')

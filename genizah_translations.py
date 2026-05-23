@@ -748,9 +748,7 @@ TRANSLATIONS = {
 
             <h3>מקור הנתונים ותודות</h3>
             <p>תוכנה זו מבוססת על מאגר התעתיקים שנוצר במסגרת <b>פרויקט MiDRASH</b>. אני מודה לראשי הפרויקט – דניאל שטוקל בן עזרא, מרינה רוסטוב, נחום דרשוביץ, אבי שמידמן ויהודית שלנגר – ולצפרה זיו וליצחק גילה מהספרייה הלאומית. תודות רבות גם לשאר חברי הצוות: לואיג'י במבאצ'י, שרווה גוגאוולה, דריה וסיוטינסקי שפירא, משה לביא, אלנה לולי, חיים לפין, נורית עזר, בראת קוראר-ברכאת, בנימין קיסלינג וורד רזיאל קרצ'מר.</p>
-            <p>הנגשת מאגר כה מורכב וערך לציבור היא צעד משמעותי למדע הפתוח, ואני מעריך מאוד את נדיבותם.</p>
-            <h3>הספרייה שלי</h3>
-            <p><em>תכונת הספרייה שלי בהשראת אב-טיפוס GenizahLocal של יהודה זיוואלד.</em></p>
+            <p>הנגשת מאגר כה מורכב וערך לציבור היא צעד משמעותי למדע הפתוח, ואני מעריך מאוד את נדיבותם. תכונת הספרייה שלי קיבלה השראה מהאב-טיפוס GenizahLocal של יהודה זייבלד.</p>
 
             <h3>רישיון</h3>
 
@@ -3206,6 +3204,37 @@ TRANSLATIONS = {
     'from visual similarity': 'מדמיון חזותי',
     # Phase 999.1 (FOLIO-01): tooltip for the per-card image-number chip after the shelfmark
     'Image number': 'מספר תמונה',
+
+    # Phase 95 — MyLibraryTab UI strings (Bug 2 fix)
+    "My Library": "הספרייה שלי",
+    "Indexed folders:": "תיקיות באינדקס:",
+    "File status:": "סטטוס קבצים:",
+    "Add Folder…": "הוסף תיקייה…",
+    "Select folder to index": "בחר תיקייה לאינדקס",
+    "Folder already covered": "תיקייה כבר מכוסה",
+    "Already registered": "כבר רשום",
+    "This folder is already registered.": "תיקייה זו כבר רשומה.",
+    "My Library Error": "שגיאה בספרייה שלי",
+    "Remove folder": "הסר תיקייה",
+    "Remove failed": "ההסרה נכשלה",
+    "Add folder — pre-scan": "הוסף תיקייה — סריקה מוקדמת",
+    "Refresh — pre-scan": "רענן — סריקה מוקדמת",
+    "Filename": "שם קובץ",
+    "Files: {:,}": "קבצים: {:,}",
+    "Total size: {}": "גודל כולל: {}",
+    "Performance may degrade. Do you want to continue?": "הביצועים עלולים להיפגע. האם להמשיך?",
+    "Adding folder '{}' will index {:,} files ({}).": "הוספת תיקייה '{}' תאנדקס {:,} קבצים ({}).",
+    "Refreshing {:d} folder(s) will index {:,} files total ({}).": "רענון {:d} תיקיות יאנדקס {:,} קבצים בסך הכול ({}).",
+    "Folder not found at {} — files remain indexed from last scan.": "תיקייה לא נמצאה ב-{} — הקבצים ממשיכים להיות מאונדקסים מהסריקה האחרונה.",
+    "Cancelled": "בוטל",
+    "Encoding error": "שגיאת קידוד",
+    "No text layer": "אין שכבת טקסט",
+    "Unsupported": "לא נתמך",
+    "Indexed LOCAL file — no extracted text available. Use 'Open file' to view the original.": "קובץ מאונדקס — אין טקסט מחולץ זמין. השתמש ב'פתח קובץ' לצפייה במקור.",
+    "Local file": "קובץ מקומי",
+    "Open file": "פתח קובץ",
+    "Open this file with the default application (LOCAL documents only)": "פתח קובץ זה עם היישום ברירת המחדל (מסמכים מקומיים בלבד)",
+    "Last scan: {} new files indexed, {} up to date": "סריקה אחרונה: {} קבצים חדשים אונדקסו, {} מעודכנים",
 }
 
 # Hebrew library display names (keyed by library_code)
