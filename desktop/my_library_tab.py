@@ -635,12 +635,25 @@ class MyLibraryTab(QWidget):
         self._refresh_folder_list_ui()
 
     def _on_refresh_clicked(self) -> None:
-        """Aggregate ceiling check (W8) then start worker (D-25)."""
+        """Aggregate ceiling check (W8) then start worker (D-25).
+
+        Bug-3 fix: wrapped in try/except so Qt never silently swallows an
+        exception from _check_ceiling_refresh_aggregate (e.g. SQLite or OS
+        error from prescan_count_all), which would make the button appear to
+        do nothing.  On error we log and fall through to start the worker so
+        the user still gets a Refresh attempt.
+        """
         if self._indexer is None:
             return
         # W8 — AGGREGATE ceiling check for Refresh
-        if not self._check_ceiling_refresh_aggregate():
-            return
+        try:
+            if not self._check_ceiling_refresh_aggregate():
+                return
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "MyLibraryTab._on_refresh_clicked: ceiling check failed (%s); "
+                "proceeding with Refresh anyway", exc
+            )
         self._start_worker(toast_on_complete=False)
 
     def _on_cancel_clicked(self) -> None:
