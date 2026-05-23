@@ -456,7 +456,29 @@ class LocalIndexer:
         except Exception:
             # Schema mismatch or missing — create fresh
             self._index = tantivy.Index(schema, path=index_dir)
-        self._writer = self._index.writer(heap_size=15_000_000)
+        # Bug-1 fix: retry writer acquisition with backoff.
+        # On Windows, after a language-switch restart the previous process may
+        # still hold the Tantivy writer lock for a brief moment (the old process
+        # is still exiting when the new process calls __init__).  Three retries
+        # with exponential back-off (250 ms / 1 s / 2 s) cover the typical
+        # process-exit window without blocking the UI for more than ~3 s.
+        _writer_retries = 3
+        _writer_delays = [0.25, 1.0, 2.0]
+        for _attempt in range(_writer_retries + 1):
+            try:
+                self._writer = self._index.writer(heap_size=15_000_000)
+                break
+            except Exception as _exc:  # noqa: BLE001
+                if _attempt < _writer_retries:
+                    logger.warning(
+                        "LocalIndexer: writer lock attempt %d/%d failed (%s); "
+                        "retrying in %.1fs",
+                        _attempt + 1, _writer_retries, _exc,
+                        _writer_delays[_attempt],
+                    )
+                    time.sleep(_writer_delays[_attempt])
+                else:
+                    raise
 
         # Batch tracking for two-phase commit (D-21)
         self._pending_filepaths: list[str] = []

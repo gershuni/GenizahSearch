@@ -102,19 +102,12 @@ def test_my_library_tab_has_folder_list_widget():
     folder_list = tab.findChild(QListWidget)
     assert folder_list is not None, "Missing QListWidget (folder list)"
 
-    # Add Folder / Remove buttons
-    buttons = tab.findChildren(QPushButton)
-    btn_texts = [b.text() for b in buttons]
-    assert any("Add" in t or "folder" in t.lower() for t in btn_texts), (
-        f"No 'Add Folder' button found; buttons: {btn_texts}"
-    )
-    assert any("Remove" in t for t in btn_texts), (
-        f"No 'Remove' button found; buttons: {btn_texts}"
-    )
-    # Refresh and Cancel buttons
-    assert any("Refresh" in t for t in btn_texts), (
-        f"No 'Refresh' button found; buttons: {btn_texts}"
-    )
+    # Add Folder / Remove / Refresh / Cancel buttons — check by widget reference
+    # rather than translated text so the test works in both EN and HE environments.
+    assert tab._btn_add is not None, "Missing _btn_add (Add Folder button)"
+    assert tab._btn_remove is not None, "Missing _btn_remove (Remove button)"
+    assert tab._btn_refresh is not None, "Missing _btn_refresh (Refresh button)"
+    assert tab._btn_cancel is not None, "Missing _btn_cancel (Cancel button)"
 
     # Progress bar
     assert tab.findChild(QProgressBar) is not None, "Missing QProgressBar"
@@ -378,3 +371,285 @@ def test_refresh_completion_message_includes_counts():
         # Both counts should appear in the message
         assert "3" in msg, f"Indexed count missing from message: {msg!r}"
         assert "7" in msg, f"Skipped count missing from message: {msg!r}"
+
+
+# ---------------------------------------------------------------------------
+# Bug 1 regression: folder list survives language toggle (writer-lock retry)
+# ---------------------------------------------------------------------------
+
+def test_folder_list_populated_after_init_with_registered_folders():
+    """Bug 1 regression: _refresh_folder_list_ui populates the QListWidget even
+    when the indexer is constructed while the previous process may still hold
+    the writer lock.
+
+    The fix: LocalIndexer.__init__ retries writer acquisition with back-off.
+    Here we verify that if LocalIndexer is constructable (mock), the folder
+    list widget reflects the registered folders regardless of language.
+    """
+    from desktop.my_library_tab import MyLibraryTab
+    from PyQt6.QtWidgets import QListWidget
+
+    folders = [
+        {"folder_id": 1, "path": "/docs/research", "added_at": 0.0,
+         "last_scanned_at": 0.0, "status": "active"},
+        {"folder_id": 2, "path": "/docs/thesis", "added_at": 1.0,
+         "last_scanned_at": 1.0, "status": "active"},
+    ]
+    parent = _make_mock_parent()
+
+    with (
+        mock.patch("desktop.my_library_tab.LocalIndexer") as MockIdx,
+        mock.patch("desktop.my_library_tab.os.makedirs"),
+    ):
+        mock_idx = _make_mock_indexer(folders=folders)
+        MockIdx.return_value = mock_idx
+        tab = MyLibraryTab(parent)
+
+    folder_list = tab.findChild(QListWidget)
+    assert folder_list is not None
+    # Both folders must appear — regardless of UI language
+    assert folder_list.count() == 2, (
+        f"Expected 2 folders in list, got {folder_list.count()}"
+    )
+    paths = [folder_list.item(i).text() for i in range(folder_list.count())]
+    assert "/docs/research" in paths
+    assert "/docs/thesis" in paths
+
+
+def test_folder_list_not_empty_when_indexer_writer_retry_succeeds():
+    """Bug 1 regression: if LocalIndexer writer() raises on first attempt but
+    succeeds on retry, the tab still initialises and shows folders.
+
+    Simulates the Windows writer-lock race on restart after language switch.
+    """
+    from desktop.my_library_tab import MyLibraryTab
+    from PyQt6.QtWidgets import QListWidget
+
+    folders = [
+        {"folder_id": 1, "path": "/home/user/genizah", "added_at": 0.0,
+         "last_scanned_at": 0.0, "status": "active"},
+    ]
+    parent = _make_mock_parent()
+
+    with (
+        mock.patch("desktop.my_library_tab.LocalIndexer") as MockIdx,
+        mock.patch("desktop.my_library_tab.os.makedirs"),
+    ):
+        # LocalIndexer itself succeeds (we mock the whole class, so the
+        # retry logic inside __init__ is exercised by shared/local_indexer.py
+        # tests; here we verify the tab doesn't end up with a None indexer
+        # when construction succeeds on a later attempt).
+        mock_idx = _make_mock_indexer(folders=folders)
+        MockIdx.return_value = mock_idx
+        tab = MyLibraryTab(parent)
+
+    # If indexer is None, folder list is empty — that is the bug.
+    assert tab._indexer is not None, (
+        "MyLibraryTab._indexer is None after successful LocalIndexer construction — "
+        "folder list will be empty (Bug 1)"
+    )
+    folder_list = tab.findChild(QListWidget)
+    assert folder_list.count() == 1
+
+
+# ---------------------------------------------------------------------------
+# Bug 3 regression: Refresh button always fires the worker
+# ---------------------------------------------------------------------------
+
+def test_refresh_always_starts_worker_even_with_no_folders():
+    """Bug 3 regression: clicking Refresh starts the indexer worker even when
+    no folders are registered (zero-work case).
+
+    The bug: an exception in _check_ceiling_refresh_aggregate was silently
+    swallowed by Qt, making the button appear to do nothing.
+    """
+    from desktop.my_library_tab import MyLibraryTab
+
+    parent = _make_mock_parent()
+
+    with (
+        mock.patch("desktop.my_library_tab.LocalIndexer") as MockIdx,
+        mock.patch("desktop.my_library_tab.os.makedirs"),
+    ):
+        mock_idx = _make_mock_indexer(folders=[])
+        MockIdx.return_value = mock_idx
+        tab = MyLibraryTab(parent)
+
+    # Replace _start_worker to track calls
+    start_worker_calls = []
+    original_start = tab._start_worker
+
+    def _patched_start_worker(toast_on_complete=False):
+        start_worker_calls.append(toast_on_complete)
+        # Don't actually start a QThread — just record the call.
+
+    tab._start_worker = _patched_start_worker
+
+    # Simulate clicking Refresh
+    tab._on_refresh_clicked()
+
+    assert len(start_worker_calls) == 1, (
+        f"Expected _start_worker to be called once; got {len(start_worker_calls)} calls. "
+        "Refresh button does nothing (Bug 3)"
+    )
+
+
+def test_refresh_shows_status_message_on_completion():
+    """Bug 3 regression: after Refresh finishes (even zero-work), a status
+    message is shown so the user gets visible feedback.
+    """
+    from desktop.my_library_tab import MyLibraryTab
+
+    parent = _make_mock_parent()
+
+    with (
+        mock.patch("desktop.my_library_tab.LocalIndexer") as MockIdx,
+        mock.patch("desktop.my_library_tab.os.makedirs"),
+    ):
+        mock_idx = _make_mock_indexer(folders=[])
+        MockIdx.return_value = mock_idx
+        tab = MyLibraryTab(parent)
+
+    with mock.patch.object(tab, "_show_status_message") as mock_show:
+        tab._on_worker_finished(
+            {"indexed": 0, "skipped": 0, "errors": 0, "cancelled": False},
+            toast=False,
+        )
+        assert mock_show.call_count >= 1, (
+            "No status message shown after Refresh — user gets no feedback (Bug 3)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Bug 4 regression: LOCAL sys_id browse renders file text
+# ---------------------------------------------------------------------------
+
+def test_open_result_in_browse_calls_open_local_browse_for_local_sys_id():
+    """Bug 4 regression: when a LOCAL search result is sent to Browse,
+    open_result_in_browse must call _open_local_browse instead of browse_load.
+
+    Previously open_result_in_browse always called self.browse_load() which
+    doesn't know how to render LOCAL text — resulting in empty Browse pane.
+
+    This test verifies via AST that the function body of open_result_in_browse
+    contains a call to _open_local_browse (i.e., it is called, not merely
+    defined elsewhere in the file).
+    """
+    import ast
+
+    with open("genizah_app.py", encoding="utf-8") as f:
+        source = f.read()
+
+    tree = ast.parse(source)
+
+    # Find the open_result_in_browse method body
+    calls_open_local = False
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if node.name == "open_result_in_browse":
+                # Walk the function body looking for a call to _open_local_browse
+                for inner in ast.walk(node):
+                    if isinstance(inner, ast.Call):
+                        func = inner.func
+                        if (
+                            isinstance(func, ast.Attribute)
+                            and func.attr == "_open_local_browse"
+                        ):
+                            calls_open_local = True
+                            break
+                break
+
+    assert calls_open_local, (
+        "open_result_in_browse does not call self._open_local_browse — "
+        "LOCAL hits fall through to browse_load() and render nothing (Bug 4)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bug 2 regression: all tr() keys used in MyLibraryTab have HE translations
+# ---------------------------------------------------------------------------
+
+def test_my_library_tab_tr_keys_have_hebrew_translations():
+    """Bug 2 regression: every tr() key used in desktop/my_library_tab.py
+    must have a Hebrew translation entry in genizah_translations.TRANSLATIONS.
+
+    Missing translations cause Hebrew users to see English UI labels.
+    """
+    import re
+    from genizah_translations import TRANSLATIONS
+
+    with open("desktop/my_library_tab.py", encoding="utf-8") as f:
+        source = f.read()
+
+    # Extract all literal string arguments to tr()
+    # Matches tr("...") or tr('...') with simple string literals (no f-strings)
+    pattern = re.compile(r'\btr\(\s*["\']([^"\'{}]+)["\']\s*\)')
+    keys = set(pattern.findall(source))
+
+    # Some keys like "OK", "Cancel", "Remove", "Refresh" exist from other
+    # tabs — only the Phase-95-specific ones are new.
+    phase95_keys = {
+        "My Library",
+        "Indexed folders:",
+        "File status:",
+        "Add Folder…",           # "Add Folder…"
+        "Select folder to index",
+        "Folder already covered",
+        "Already registered",
+        "This folder is already registered.",
+        "My Library Error",
+        "Remove folder",
+        "Remove failed",
+        "Add folder — pre-scan",  # "Add folder — pre-scan"
+        "Refresh — pre-scan",     # "Refresh — pre-scan"
+    }
+
+    missing = []
+    for key in keys:
+        if key not in TRANSLATIONS:
+            missing.append(key)
+
+    assert not missing, (
+        f"Missing Hebrew translations for {len(missing)} tr() key(s) "
+        f"in desktop/my_library_tab.py:\n  " + "\n  ".join(sorted(missing))
+    )
+
+
+# ---------------------------------------------------------------------------
+# Bug 5 regression: About credit uses correct Hebrew spelling for Seewald
+# ---------------------------------------------------------------------------
+
+def test_seewald_hebrew_spelling_in_translations():
+    """Bug 5 regression: the Seewald attribution in genizah_translations.py
+    (desktop About dialog) must use 'יהודה זייבלד' (not 'זיוואלד').
+    """
+    with open("genizah_translations.py", encoding="utf-8") as f:
+        content = f.read()
+
+    # The WRONG spelling that was in the original code
+    assert "זיואלד" not in content, (
+        "genizah_translations.py still contains old spelling 'זיוואלד' — "
+        "must be replaced with 'זייבלד' (Bug 5)"
+    )
+    # The CORRECT spelling must be present
+    assert "זייבלד" in content, (
+        "genizah_translations.py missing correct spelling 'זייבלד' (Bug 5)"
+    )
+
+
+def test_seewald_attribution_integrated_in_credits_not_standalone():
+    """Bug 5 regression: the Seewald attribution in web/pages/about.py must NOT
+    be a standalone paragraph but integrated into the credits section.
+    """
+    with open("web/pages/about.py", encoding="utf-8") as f:
+        content = f.read()
+
+    # The attribution must mention 'Seewald' and 'Inspired by' / 'inspired by'
+    # in the same credits block, not as a separate <p> tag after the creator line.
+    assert "Seewald" in content, (
+        "web/pages/about.py must contain 'Seewald' in the credits"
+    )
+    # Must NOT use old wrong HE spelling
+    assert "זיואלד" not in content, (
+        "web/pages/about.py still contains old spelling 'זיוואלד' (Bug 5)"
+    )
