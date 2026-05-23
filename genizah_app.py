@@ -2444,14 +2444,12 @@ class SettingsDialog(QDialog):
             Hayim Lapin, Nurit Ezer, Elena Lolli, Berat Kurar Barakat, Sharva Gogawale,
             Moshe Lavee, Vered Raziel Kretzmer, and Daria Vasyutinsky Shapira.</p>
             <p>Making such a complex and valuable dataset freely available to the public is a
-            significant step for Open Science, and I deeply appreciate their generosity.</p>
+            significant step for Open Science, and I deeply appreciate their generosity.
+            The My Library feature was inspired by Yehuda Seewald's GenizahLocal prototype.</p>
 
             <h3>License</h3>
             <p>The underlying dataset is licensed under the Creative Commons Attribution 4.0
             International (<a href='https://creativecommons.org/licenses/by/4.0/'>CC BY 4.0</a>) license.</p>
-
-            <h3>My Library</h3>
-            <p><em>My Library feature inspired by Yehuda Seewald's GenizahLocal prototype.</em></p>
 
             <h3>Citation</h3>
             <p style='background-color: {self._cit_bg}; border: 1px solid {self._cit_border};
@@ -18471,10 +18469,18 @@ class GenizahGUI(QMainWindow):
             self._set_last_browse_field("sys")     # Force sys_id priority
         self.browse_sys_input.setText(sid)
         self.tabs.setCurrentWidget(self.browse_tab)
-        # Phase 95 D-27 — restore image pane for Genizah hits (was hidden for LOCAL hits).
+        # Phase 95 D-27 / Bug-4 fix: LOCAL hits render via _open_local_browse;
+        # Genizah hits restore the image pane and use the normal browse_load path.
         try:
             from shared.local_sys_id import is_local_sys_id as _is_local
-            if not _is_local(sid):
+            if _is_local(sid):
+                # Bug-4: route LOCAL hits through the dedicated renderer that
+                # populates Browse text from the side-index (D-27 + D-28).
+                # browse_load() does not know about LOCAL sys_ids and renders nothing.
+                res_for_local = res if isinstance(res, dict) else {}
+                self._open_local_browse(sid, res_for_local)
+                return
+            else:
                 self._set_browse_image_pane_visible(True)
                 self._current_local_filepath = None
                 if hasattr(self, 'browse_open_file_btn'):
