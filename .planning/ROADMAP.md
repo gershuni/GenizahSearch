@@ -22,7 +22,7 @@
 - **v7.11 CUDL Coverage & Synthetic Inventories** -- Phases 84-86 (shipped 2026-05-12)
 - **v7.12 Multitenant Architecture (Path B)** -- Phases 87-92 + 92.1 + 92.2 + promoted 999.1/999.4 (shipped 2026-05-18)
 - **v7.13 Research-Grade Downloads & PGP Filter** -- Phases 93-94 (ACTIVE; started 2026-05-19; Phase 93 web-only COMPLETE 2026-05-19; Phase 94 web + desktop xlsx COMPLETE 2026-05-21; milestone closeable)
-- **v7.14 My Library** -- Phase 95 (ACTIVE; started 2026-05-20; first-class desktop feature for indexing user-owned .docx/.pdf alongside the Genizah corpus, inspired by Yehuda Seewald's external bolt-on)
+- **v7.14 My Library** -- Phases 95-96 (ACTIVE; started 2026-05-20; Phase 95 shipped 2026-05-24 as v7.14.0; Phase 96 added 2026-05-24 to complete the feature with follow-ups and bug fixes)
 
 ## Phases
 
@@ -51,6 +51,16 @@
 **Wave structure:** 0 (01) -> 1 (3 parallel: 02, 03, 04) -> 2 (05) -> 3 (2 parallel: 06, 07) -> 4 (08) -> 5 (09). Note: 06 bumped to wave 3 to avoid genizah_core.py overlap with 05; 08 bumped to wave 4 to avoid genizah_app.py overlap with 07; 09 bumped to wave 5 because it depends on 08.
 
 **UI hint:** yes — new 7th desktop tab + result-list LOCAL badge + three-state filter button mirroring Phase 93 PGP pattern.
+
+### Phase 96: Completing My Library feature: add features and fix bugs
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 95
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 96 to break down)
 
 <details>
 <summary>v7.13 Research-Grade Downloads & PGP Filter (Phases 93-94) -- BOTH PHASES COMPLETE (Phase 93 2026-05-19; Phase 94 2026-05-21; milestone closeable)</summary>

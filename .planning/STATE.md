@@ -77,6 +77,12 @@ The full `gsd-tools.cjs audit-open` report at close included 96 items. The v7.12
 | 260519-9pk | Re-open P1 web memory leak — investigate secondary leak after export-cap fix | 2026-05-19 | 0a91bc97 | — | [260519-9pk-re-open-p1-web-memory-leak-investigate-s](./quick/260519-9pk-re-open-p1-web-memory-leak-investigate-s/) |
 | 260519-hoi | Ship SEED-002 uid-only export payload (44x per-row reduction) | 2026-05-19 | 2a7440d6 | Verified | [260519-hoi-ship-seed-002-uid-only-export-payload](./quick/260519-hoi-ship-seed-002-uid-only-export-payload/) |
 
+## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 96 added (2026-05-24): Completing My Library feature: add features and fix bugs
+
 ## Session Continuity
 
 Last session: 2026-05-21T04:06:24.909Z
