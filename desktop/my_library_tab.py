@@ -157,11 +157,37 @@ class _UnifiedFileTreeWidget(QTreeWidget):
         )
         self.itemChanged.connect(self._on_item_changed)
 
-    def populate_for_folder(self, folder_path: str):
+    def populate_for_folder(self, folder_path: str, prior_status: dict = None):
         """Rebuild the tree for the given indexed folder. Walks the
         filesystem (so ignored files also appear, letting the user opt
-        them out preemptively before indexer touches them)."""
+        them out preemptively before indexer touches them).
+
+        Phase 96 fix-2: prior_status is an optional dict mapping
+        canonical_filepath -> {'pages': int, 'status': str} loaded from
+        the LocalIndexer DB via get_file_status_for_folder(). When provided,
+        Pages and Status columns are populated immediately so the user can
+        see the results of the last scan without having to wait for a new one.
+        """
         import os
+        # If prior_status was not supplied, try to load it from the indexer.
+        if prior_status is None:
+            try:
+                my_lib = None
+                # Walk up from self._app to find MyLibraryTab (may be parent or app itself)
+                for attr in ('my_library_tab',):
+                    my_lib = getattr(self._app, attr, None)
+                    if my_lib is not None:
+                        break
+                if my_lib is None and hasattr(self._app, '_indexer'):
+                    my_lib = self._app
+                indexer = getattr(my_lib, '_indexer', None) if my_lib else None
+                if indexer is not None:
+                    prior_status = indexer.get_file_status_for_folder(folder_path)
+            except Exception:
+                prior_status = {}
+        if prior_status is None:
+            prior_status = {}
+
         self._suppress_signals = True
         try:
             self.clear()
@@ -174,17 +200,24 @@ class _UnifiedFileTreeWidget(QTreeWidget):
                 | Qt.ItemFlag.ItemIsUserCheckable
                 | Qt.ItemFlag.ItemIsAutoTristate
             )
-            # Recurse into subdirectories
-            self._populate_node(root_item, folder_path, optouts)
+            # Recurse into subdirectories, passing prior_status for column population.
+            self._populate_node(root_item, folder_path, optouts, prior_status)
             self.expandAll()
         finally:
             self._suppress_signals = False
 
-    def _populate_node(self, parent_item, dirpath: str, optouts: set):
-        """Recursively add files and subdirs to parent_item."""
+    def _populate_node(self, parent_item, dirpath: str, optouts: set, prior_status: dict = None):
+        """Recursively add files and subdirs to parent_item.
+
+        Phase 96 fix-2: prior_status (canonical_filepath -> {pages, status})
+        is threaded down so leaves show scan results from the last scan
+        immediately on tab open, not only after a new scan completes.
+        """
         import os
         from shared.local_sys_id import _canonical_filepath
         SUPPORTED = {'.pdf', '.docx', '.txt'}
+        if prior_status is None:
+            prior_status = {}
         try:
             entries = sorted(os.listdir(dirpath))
         except (OSError, PermissionError):
@@ -199,7 +232,7 @@ class _UnifiedFileTreeWidget(QTreeWidget):
                     | Qt.ItemFlag.ItemIsUserCheckable
                     | Qt.ItemFlag.ItemIsAutoTristate
                 )
-                self._populate_node(sub, full, optouts)
+                self._populate_node(sub, full, optouts, prior_status)
         # Add files
         for name in entries:
             full = os.path.join(dirpath, name)
@@ -208,11 +241,40 @@ class _UnifiedFileTreeWidget(QTreeWidget):
             ext = os.path.splitext(name)[1].lower()
             if ext not in SUPPORTED:
                 continue
-            leaf = QTreeWidgetItem(parent_item, [name, '', ''])
+            # Phase 96 fix-2: pre-populate Pages + Status from last scan if known.
+            canonical = _canonical_filepath(full)
+            file_info = prior_status.get(canonical, {})
+            prior_pages = file_info.get('pages', 0)
+            prior_st = file_info.get('status', '')
+            pages_str = str(prior_pages) if prior_pages and prior_pages > 0 else ''
+            # Translate stored status codes to display strings (mirrors update_file_status).
+            if prior_st == 'ok':
+                status_str = tr("OK")
+            elif prior_st == 'cancelled':
+                status_str = tr("Cancelled")
+            elif prior_st == 'no_text_layer':
+                status_str = tr("No text layer")
+            elif prior_st == 'encoding_error':
+                status_str = tr("Encoding error")
+            elif prior_st == 'unsupported':
+                status_str = tr("Unsupported")
+            elif prior_st in ('error',):
+                status_str = tr("Error")
+            else:
+                status_str = ''
+            leaf = QTreeWidgetItem(parent_item, [name, pages_str, status_str])
             leaf.setFlags(leaf.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            # Apply error colour for error-state rows (mirrors update_file_status).
+            if prior_st in ('error', 'encoding_error'):
+                from PyQt6.QtGui import QColor
+                for col in range(3):
+                    leaf.setForeground(col, QColor('#e74c3c'))
+            elif prior_st == 'cancelled':
+                from PyQt6.QtGui import QColor
+                for col in range(3):
+                    leaf.setForeground(col, QColor('#e67e22'))
             # Codex MEDIUM #9 closure: canonicalize at populate time so the
             # value stashed in UserRole matches what _local_file_optouts holds.
-            canonical = _canonical_filepath(full)
             leaf.setData(0, Qt.ItemDataRole.UserRole, canonical)
             self._displayed_paths.add(canonical)
             self._leaf_by_path[canonical] = leaf
@@ -1173,6 +1235,13 @@ class MyLibraryTab(QWidget):
         """Clear and repopulate the folder QListWidget from SQLite state (D-40).
 
         D-40: unavailable folders shown with warning colour (#f39c12) + tooltip.
+
+        Phase 96 fix-1/fix-2: after populating, schedule a deferred auto-select
+        of the first folder (300ms). The 300ms delay ensures _restore_session
+        (fired at 200ms by GenizahGUI.__init__) has already restored
+        _local_file_optouts before populate_for_folder reads them. Without
+        the delay, the tree would open with all files appearing checked (no
+        opt-outs), and a subsequent close would overwrite the real opt-outs.
         """
         if self._indexer is None:
             return
@@ -1190,6 +1259,23 @@ class MyLibraryTab(QWidget):
                     ).format(path)
                 )
             self._folder_list.addItem(item)
+        # Schedule deferred auto-select so opt-outs are restored first.
+        QTimer.singleShot(300, self._auto_select_first_folder)
+
+    def _auto_select_first_folder(self) -> None:
+        """Phase 96 fix-1/fix-2: select first folder in list after session restore.
+
+        Called 300ms after _refresh_folder_list_ui so that _restore_session
+        (200ms) has already populated self._parent_window._local_file_optouts.
+        Selecting the first item triggers _on_folder_selection_changed which
+        calls populate_for_folder — at this point opt-outs are already loaded,
+        so checkboxes reflect the saved state correctly.
+
+        Only auto-selects if no item is currently selected (avoids overriding
+        a user click that happened in the 300ms window).
+        """
+        if self._folder_list.count() > 0 and self._folder_list.currentRow() < 0:
+            self._folder_list.setCurrentRow(0)
 
     # ------------------------------------------------------------------
     # Helpers
