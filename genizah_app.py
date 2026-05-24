@@ -19108,6 +19108,27 @@ class GenizahGUI(QMainWindow):
 
         self._show_local_browse_controls(True)
 
+        # Phase 96 fix-8 (Issue 3): disable Genizah-only community buttons for
+        # LOCAL hits.  These actions (Ktiv, Puzzle, Edit, Comment, Corrections,
+        # Joins, Version) operate on Friedberg/NLI catalog entries and have no
+        # meaning for user-owned LOCAL files. They are re-enabled by the normal
+        # Genizah enrichment callback (_start_browse_enrichment → on_meta_loaded)
+        # when the user navigates to a Genizah manuscript.
+        _local_only_btns = [
+            'btn_b_catalog', 'btn_b_add_to_puzzle', 'btn_b_edit',
+            'btn_b_comment', 'btn_b_view_corrections', 'btn_b_joins',
+            'btn_b_view_comments',
+        ]
+        for _btn_name in _local_only_btns:
+            try:
+                getattr(self, _btn_name).setEnabled(False)
+            except Exception:
+                pass
+        try:
+            self.browse_version_combo.setEnabled(False)
+        except Exception:
+            pass
+
         # Populate Browse panel state (filepath + info label + tab switch).
         filepath = self._lookup_local_filepath(sys_id)
         self.current_browse_sid = sys_id
@@ -24219,6 +24240,12 @@ class GenizahGUI(QMainWindow):
         """Restore search state from saved session on startup."""
         from shared.session_persistence import load_session_state
         self._restoring_session = True
+        # Phase 96 fix-8: track whether notify_session_restored() has been called
+        # so the finally block can fire it exactly once.  It must fire regardless
+        # of early returns (no-data, user-declined, restore_mode='never') so that
+        # MyLibraryTab._auto_select_first_folder always runs and the folder tree
+        # is populated with the correct opt-out checkboxes.
+        _notify_done = False
         try:
             cfg = load_app_config()
             restore_mode = cfg.get('restore_mode', 'ask')
@@ -24242,6 +24269,17 @@ class GenizahGUI(QMainWindow):
             self._local_file_optouts = set(state.get('local_file_optouts', []))
             # Phase 96 NEW-2: restore LOCAL Browse-panel view mode from top-level key.
             self._local_browse_view_mode = state.get('local_browse_view_mode', 'per_page')
+            # Phase 96 fix-8: restore corpus scope BEFORE has_data gate so that
+            # the combo shows the correct value even when there are no search
+            # results (e.g., user only has opt-outs saved, no prior search run).
+            _saved_scope = reg.get('search_corpus_scope', 'genizah')
+            self._search_corpus_scope = _saved_scope
+            if hasattr(self, 'corpus_scope_combo'):
+                _scope_idx = self.corpus_scope_combo.findData(_saved_scope)
+                if _scope_idx >= 0:
+                    self.corpus_scope_combo.blockSignals(True)
+                    self.corpus_scope_combo.setCurrentIndex(_scope_idx)
+                    self.corpus_scope_combo.blockSignals(False)
             has_data = (reg.get('results') or comp.get('results') or comp.get('filtered_results') or comp.get('source_text')
                         or browse.get('sys_id') or browse.get('shelfmark') or browse.get('fl_id')
                         or cat.get('domain') or cat.get('author') or cat.get('work')
@@ -24306,14 +24344,9 @@ class GenizahGUI(QMainWindow):
             # Phase 95 D-39 — restore LOCAL filter state per surface.
             self._local_filter_state_search = reg.get('local_filter', 'all')
             self._update_local_filter_btn_search()
-            # Phase 95-08 smoke-fix — restore corpus scope selector.
-            self._search_corpus_scope = reg.get('search_corpus_scope', 'genizah')
-            if hasattr(self, 'corpus_scope_combo'):
-                _idx = self.corpus_scope_combo.findData(self._search_corpus_scope)
-                if _idx >= 0:
-                    self.corpus_scope_combo.blockSignals(True)
-                    self.corpus_scope_combo.setCurrentIndex(_idx)
-                    self.corpus_scope_combo.blockSignals(False)
+            # Phase 95-08 smoke-fix — corpus scope already restored above the
+            # has_data gate (Phase 96 fix-8) so it applies even when no results.
+            # (No-op here; left as comment to preserve history.)
             self._printed_sys_ids = set(reg.get('printed_ids', []))
             self.excluded_sys_ids = set(reg.get('excluded_sys_ids', []))
             self.excluded_shelfmarks = set(reg.get('excluded_shelfmarks', []))
@@ -24566,16 +24599,20 @@ class GenizahGUI(QMainWindow):
         finally:
             self._restoring_session = False
             self.search_progress.setVisible(False)
-
-        # Phase 96 fix-7 (Codex P1.1): notify MyLibraryTab that opt-outs are
-        # now loaded so it can safely auto-select the first folder and populate
-        # the file tree with correct checkbox states.
-        try:
-            my_lib = getattr(self, 'my_library_tab', None)
-            if my_lib is not None:
-                my_lib.notify_session_restored()
-        except Exception as e:
-            logger.warning("notify_session_restored failed: %s", e)
+            # Phase 96 fix-8 (supersedes fix-7): notify MyLibraryTab
+            # unconditionally in the finally block so that _auto_select_first_folder
+            # fires regardless of early returns (no-data, user-declined, exception).
+            # Before fix-8 this call was AFTER the try/except/finally, so early
+            # returns inside the try block bypassed it — causing the folder tree
+            # to never auto-populate and opt-out checkboxes to appear cleared.
+            if not _notify_done:
+                try:
+                    my_lib = getattr(self, 'my_library_tab', None)
+                    if my_lib is not None:
+                        my_lib.notify_session_restored()
+                    _notify_done = True
+                except Exception as _ne:
+                    logger.warning("notify_session_restored failed: %s", _ne)
 
         # Refresh history dropdowns
         try:
