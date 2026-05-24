@@ -230,11 +230,14 @@ def test_optout_filter_applied_within_both_cascades():
 def test_apply_local_optout_filter_function_exists():
     """Phase 96 D-F1: _apply_local_optout_filter method must exist on the app.
 
-    Skipped until plan 96-05 lands.
+    Phase 96 D-F1 shipped in plan 96-05 (closed 2026-05-24).
+    BLOCKER 5 audit (96-09): skip converted to positive assertion.
     """
     import pytest
     source = GENIZAH_APP_PY.read_text(encoding='utf-8')
     tree = ast.parse(source)
     names = {f.name for f in _iter_function_defs(tree)}
-    if '_apply_local_optout_filter' not in names:
-        pytest.skip("Phase 96 D-F1 not yet implemented (waiting for plan 96-05)")
+    assert '_apply_local_optout_filter' in names, (
+        "Phase 96 D-F1 regression: _apply_local_optout_filter must exist in genizah_app.py "
+        "(shipped by plan 96-05, closed 2026-05-24)"
+    )

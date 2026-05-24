@@ -41,15 +41,15 @@ def test_local_hit_dict_has_highlight_pattern():
     """D-F5: _build_local_result_dict must add 'highlight_pattern' field
     when called with a regex parameter."""
     engine = _make_engine()
-    if not hasattr(engine, "_build_local_result_dict"):
-        pytest.skip("Phase 96 D-F5 not yet implemented (waiting for plan 96-03)")
+    # Phase 96 D-F5 shipped in plan 96-03 (closed 2026-05-24).
+    # BLOCKER 5 audit (96-09): skip converted to positive assertion.
+    assert hasattr(engine, "_build_local_result_dict"), (
+        "Phase 96 D-F5 regression: _build_local_result_dict missing from SearchEngine"
+    )
     # Phase 96 signature change: regex param added.
     regex = re.compile(r"genizah", re.IGNORECASE)
-    try:
-        result = engine._build_local_result_dict(_mock_doc(), 1.0, regex=regex,
-                                                  pattern_str="genizah")
-    except TypeError:
-        pytest.skip("Phase 96 D-F5 signature not yet updated (waiting for plan 96-03)")
+    result = engine._build_local_result_dict(_mock_doc(), 1.0, regex=regex,
+                                              pattern_str="genizah")
     assert "highlight_pattern" in result, (
         "D-F5: LOCAL hit dict must carry 'highlight_pattern' so "
         "ResultDialog can apply highlighting (mirrors Genizah hit shape)"
@@ -60,14 +60,14 @@ def test_local_hit_dict_has_highlight_pattern():
 def test_local_snippet_has_asterisk_markers_when_regex_matches():
     """D-F5: snippet must contain *...* markers when regex matches content."""
     engine = _make_engine()
-    if not hasattr(engine, "_build_local_result_dict"):
-        pytest.skip("Phase 96 D-F5 not yet implemented (waiting for plan 96-03)")
+    # Phase 96 D-F5 shipped in plan 96-03 (closed 2026-05-24).
+    # BLOCKER 5 audit (96-09): skip converted to positive assertion.
+    assert hasattr(engine, "_build_local_result_dict"), (
+        "Phase 96 D-F5 regression: _build_local_result_dict missing from SearchEngine"
+    )
     regex = re.compile(r"genizah", re.IGNORECASE)
-    try:
-        result = engine._build_local_result_dict(_mock_doc(), 1.0, regex=regex,
-                                                  pattern_str="genizah")
-    except TypeError:
-        pytest.skip("Phase 96 D-F5 signature not yet updated (waiting for plan 96-03)")
+    result = engine._build_local_result_dict(_mock_doc(), 1.0, regex=regex,
+                                              pattern_str="genizah")
     assert "*" in result["snippet"], (
         "D-F5: snippet must contain asterisk markers when regex matches"
     )
@@ -90,16 +90,16 @@ def test_regex_non_match_filtered_out():
     reverses.
     """
     engine = _make_engine()
-    if not hasattr(engine, "_build_local_result_dict"):
-        pytest.skip("Phase 96 D-F5 not yet implemented (waiting for plan 96-03)")
+    # Phase 96 D-F5 shipped in plan 96-03 (closed 2026-05-24).
+    # BLOCKER 5 audit (96-09): skip converted to positive assertion.
+    assert hasattr(engine, "_build_local_result_dict"), (
+        "Phase 96 D-F5 regression: _build_local_result_dict missing from SearchEngine"
+    )
     regex = re.compile(r"completely-absent-token", re.IGNORECASE)
 
     # Test A: _build_local_result_dict returns None when regex doesn't match.
-    try:
-        result = engine._build_local_result_dict(_mock_doc(), 1.0, regex=regex,
-                                                  pattern_str="completely-absent-token")
-    except TypeError:
-        pytest.skip("Phase 96 D-F5 signature not yet updated (waiting for plan 96-03)")
+    result = engine._build_local_result_dict(_mock_doc(), 1.0, regex=regex,
+                                              pattern_str="completely-absent-token")
 
     assert result is None, (
         "D-04.1 (Codex HIGH #2 closure): _build_local_result_dict MUST return "
@@ -119,10 +119,9 @@ def test_regex_non_match_filtered_out():
     engine.local_index = MagicMock()
     engine.local_index.parse_query.return_value = MagicMock()
 
-    try:
-        results = engine._query_local_index("genizah", "exact", 0, regex=regex)
-    except TypeError:
-        pytest.skip("Phase 96 D-F5 regex param not yet threaded into _query_local_index (96-03)")
+    # Phase 96 D-F5 shipped in plan 96-03 (closed 2026-05-24).
+    # BLOCKER 5 audit (96-09): skip converted to positive assertion.
+    results = engine._query_local_index("genizah", "exact", 0, regex=regex)
 
     assert results == [], (
         "D-04.1 (Codex HIGH #2 closure): _query_local_index MUST return an "
@@ -152,11 +151,14 @@ def test_d_f5_integration_regex_arrives_at_build_local_result_dict():
     into a loud, observable test failure if 96-03's merge-site rewire
     regresses.
 
-    Skipped until plan 96-03 lands the regex param threading.
+    Phase 96 D-F5 shipped in plan 96-03 (closed 2026-05-24).
+    BLOCKER 5 audit (96-09): skips converted to positive assertions.
     """
     engine = _make_engine()
-    if not hasattr(engine, "_build_local_result_dict"):
-        pytest.skip("Phase 96 D-F5 not yet implemented (waiting for plan 96-03)")
+    # Phase 96 D-F5 shipped in plan 96-03 (closed 2026-05-24).
+    assert hasattr(engine, "_build_local_result_dict"), (
+        "Phase 96 D-F5 regression: _build_local_result_dict missing from SearchEngine"
+    )
 
     captured = {}
     orig = engine._build_local_result_dict
@@ -177,13 +179,8 @@ def test_d_f5_integration_regex_arrives_at_build_local_result_dict():
     engine.local_index.parse_query.return_value = MagicMock()
     engine._build_local_result_dict = _spy
 
-    try:
-        regex = re.compile(r"genizah", re.IGNORECASE)
-        engine._query_local_index("genizah", "exact", 0, regex=regex)
-    except TypeError:
-        pytest.skip("Phase 96 D-F5 regex param not yet threaded into _query_local_index (96-03)")
-    except Exception as e:
-        pytest.skip(f"Engine call path needs adjustment: {e!r}")
+    regex = re.compile(r"genizah", re.IGNORECASE)
+    engine._query_local_index("genizah", "exact", 0, regex=regex)
 
     assert captured.get('regex') is not None, (
         "BLOCKER 4: regex did NOT arrive at _build_local_result_dict — "

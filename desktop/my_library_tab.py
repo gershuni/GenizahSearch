@@ -44,9 +44,6 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QLabel,
     QProgressBar,
-    QSplitter,
-    QTableWidget,
-    QTableWidgetItem,
     QTreeWidget,
     QTreeWidgetItem,
     QFileDialog,
@@ -67,7 +64,7 @@ logger = logging.getLogger(__name__)
 _MAX_FILES_CEILING = 5000
 _MAX_BYTES_CEILING = 2 * 1024 ** 3   # 2 GB
 
-# Column indices for the per-file status QTableWidget
+# Column indices for the unified file tree widget
 _COL_FILENAME = 0
 _COL_PAGES = 1
 _COL_STATUS = 2
@@ -104,21 +101,29 @@ def _prune_optouts_to_disk(optouts: set, on_disk: set) -> set:
 
 
 # ---------------------------------------------------------------------------
-# Phase 96 D-F1: per-file opt-out tree widget (tri-state checkbox UI)
+# Phase 96 D-F1 + Phase 96 polish (96-09 bug #1): unified file tree widget
 # ---------------------------------------------------------------------------
 
-class _OptoutTreeWidget(QTreeWidget):
-    """Phase 96 D-F1: tree of folders + files with tri-state checkboxes.
+class _UnifiedFileTreeWidget(QTreeWidget):
+    """Phase 96 D-F1 + 96-09 UX redesign: single tree widget combining
+    opt-out checkboxes and per-file status/pages columns.
 
-    Shows the contents of the selected indexed folder. Each file is a leaf
-    with a tri-state checkbox (checked = included in search, unchecked =
-    opted out). Folder nodes use Qt's native ItemIsAutoTristate so they
-    show all/some/none state automatically.
+    Replaces the QSplitter[_OptoutTreeWidget | _status_table] layout shipped
+    in plan 96-06. Three columns:
+      - Col 0: Filename (with tri-state opt-out checkbox)
+      - Col 1: Pages
+      - Col 2: Status
 
-    Toggling a checkbox mutates `app._local_file_optouts` (the set
-    shipped by plan 96-04) using a SET-DIFFERENCE/UNION update — paths
-    NOT in the currently displayed tree are LEFT UNTOUCHED (Codex HIGH #1
-    closure 2026-05-24). The session-save + re-filter is debounced.
+    Tri-state folder checkboxes work identically to the old _OptoutTreeWidget.
+    The opt-out SET-DIFFERENCE/UNION algebra (Codex HIGH #1) is preserved.
+
+    Per-file status is updated via update_file_status(filename, pages, status)
+    which is called from LocalIndexerWorker.file_finished signal handler
+    (replacing the old _status_table.insertRow path).
+
+    Bug #2 fix (96-09): flush_pending() force-fires the debounce timer so
+    that pending opt-out changes are committed before app.closeEvent saves
+    the session. Called from GenizahGUI.closeEvent.
     """
 
     # 150ms debounce avoids thrashing the session-save + re-filter pipeline
@@ -133,12 +138,23 @@ class _OptoutTreeWidget(QTreeWidget):
         # form). _commit_changes() uses this as the diff scope so paths
         # belonging to other indexed folders are left untouched.
         self._displayed_paths: set = set()
+        # Map canonical filepath -> QTreeWidgetItem for O(1) status updates.
+        self._leaf_by_path: dict = {}
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(self._DEBOUNCE_MS)
         self._save_timer.timeout.connect(self._commit_changes)
-        self.setHeaderLabel(tr("Folder contents"))
-        self.setColumnCount(1)
+        self.setColumnCount(3)
+        self.setHeaderLabels([tr("Filename"), tr("Pages"), tr("Status")])
+        self.header().setSectionResizeMode(
+            _COL_FILENAME, QHeaderView.ResizeMode.Stretch
+        )
+        self.header().setSectionResizeMode(
+            _COL_PAGES, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.header().setSectionResizeMode(
+            _COL_STATUS, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.itemChanged.connect(self._on_item_changed)
 
     def populate_for_folder(self, folder_path: str):
@@ -150,6 +166,7 @@ class _OptoutTreeWidget(QTreeWidget):
         try:
             self.clear()
             self._displayed_paths = set()
+            self._leaf_by_path = {}
             optouts = getattr(self._app, '_local_file_optouts', set())
             root_item = QTreeWidgetItem(self, [os.path.basename(folder_path) or folder_path])
             root_item.setFlags(
@@ -176,7 +193,7 @@ class _OptoutTreeWidget(QTreeWidget):
         for name in entries:
             full = os.path.join(dirpath, name)
             if os.path.isdir(full):
-                sub = QTreeWidgetItem(parent_item, [name])
+                sub = QTreeWidgetItem(parent_item, [name, '', ''])
                 sub.setFlags(
                     sub.flags()
                     | Qt.ItemFlag.ItemIsUserCheckable
@@ -191,22 +208,113 @@ class _OptoutTreeWidget(QTreeWidget):
             ext = os.path.splitext(name)[1].lower()
             if ext not in SUPPORTED:
                 continue
-            leaf = QTreeWidgetItem(parent_item, [name])
+            leaf = QTreeWidgetItem(parent_item, [name, '', ''])
             leaf.setFlags(leaf.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             # Codex MEDIUM #9 closure: canonicalize at populate time so the
             # value stashed in UserRole matches what _local_file_optouts holds.
             canonical = _canonical_filepath(full)
             leaf.setData(0, Qt.ItemDataRole.UserRole, canonical)
             self._displayed_paths.add(canonical)
+            self._leaf_by_path[canonical] = leaf
             is_opted_out = canonical in optouts
             leaf.setCheckState(
                 0,
                 Qt.CheckState.Unchecked if is_opted_out else Qt.CheckState.Checked,
             )
 
+    def reset_for_scan(self):
+        """Clear Pages/Status columns on all existing leaves before a new scan.
+
+        Called by _start_worker so the tree reflects the upcoming scan state
+        rather than stale data from a previous scan.
+        """
+        self._suppress_signals = True
+        try:
+            self._clear_status_columns_recursive(self.invisibleRootItem())
+        finally:
+            self._suppress_signals = False
+
+    def _clear_status_columns_recursive(self, node):
+        """Recursively blank Pages + Status columns on every node."""
+        for i in range(node.childCount()):
+            child = node.child(i)
+            child.setText(_COL_PAGES, '')
+            child.setText(_COL_STATUS, '')
+            self._clear_status_columns_recursive(child)
+
+    def update_file_status(self, filename: str, pages: int, status: str,
+                            err: str = '') -> None:
+        """Update Pages + Status for the leaf matching `filename`.
+
+        Replaces the old _status_table.insertRow pattern. Looks up the
+        leaf by basename (status updates arrive as bare filenames from the
+        LocalIndexerWorker.file_finished signal). Falls back to a linear
+        search if the basename match is ambiguous.
+
+        Called from MyLibraryTab._on_file_finished (the
+        LocalIndexerWorker.file_finished signal handler).
+        """
+        import os
+        # Translate status code to display string (mirrors old _status_table logic).
+        display_status = status
+        if status == "ok":
+            display_status = tr("OK")
+        elif status == "cancelled":
+            display_status = tr("Cancelled")
+        elif status == "no_text_layer":
+            display_status = tr("No text layer")
+        elif status == "encoding_error":
+            display_status = tr("Encoding error")
+        elif status == "unsupported":
+            display_status = tr("Unsupported")
+
+        pages_str = str(pages) if pages > 0 else '-'
+
+        # Try to find the leaf by basename (quick path).
+        leaf = None
+        for canonical, item in self._leaf_by_path.items():
+            if os.path.basename(canonical) == filename:
+                leaf = item
+                break
+        if leaf is None:
+            # Not in the currently displayed tree — no-op (file may belong
+            # to a different folder not currently selected in the UI).
+            return
+
+        self._suppress_signals = True
+        try:
+            leaf.setText(_COL_PAGES, pages_str)
+            leaf.setText(_COL_STATUS, display_status)
+            if status in ('error', 'encoding_error'):
+                from PyQt6.QtGui import QColor
+                for col in range(3):
+                    leaf.setForeground(col, QColor('#e74c3c'))
+            elif status == 'cancelled':
+                from PyQt6.QtGui import QColor
+                for col in range(3):
+                    leaf.setForeground(col, QColor('#e67e22'))
+        finally:
+            self._suppress_signals = False
+
+    def flush_pending(self):
+        """Phase 96 bug #2 fix: force-fire pending debounce if active.
+
+        Called from GenizahGUI.closeEvent BEFORE _save_session() so that
+        opt-out changes made in the last 150 ms are committed to
+        app._local_file_optouts before the session is serialised to disk.
+        Without this, a QTimer single-shot is silently abandoned when the
+        Qt event loop shuts down, losing the user's pending changes.
+        """
+        if self._save_timer.isActive():
+            self._save_timer.stop()
+            self._commit_changes()
+
     def _on_item_changed(self, item, column):
         """User toggled a checkbox — debounce the commit."""
         if self._suppress_signals:
+            return
+        # Only respond to changes on the checkbox column (col 0).
+        if column != _COL_FILENAME:
             return
         # Restart the debounce timer; multiple rapid changes coalesce.
         self._save_timer.start()
@@ -283,6 +391,11 @@ class _OptoutTreeWidget(QTreeWidget):
             return
         for i in range(node.childCount()):
             self._collect_leaves_by_state(node.child(i), unchecked_out, checked_out)
+
+
+# Keep old name as alias so any external code or tests referencing
+# _OptoutTreeWidget still resolve correctly.
+_OptoutTreeWidget = _UnifiedFileTreeWidget
 
 
 # ---------------------------------------------------------------------------
@@ -540,41 +653,19 @@ class MyLibraryTab(QWidget):
         self._progress_bar.setVisible(False)
         root.addWidget(self._progress_bar)
 
-        # ---- Section 3: per-file status table + opt-out tree (Phase 96 D-F1) ----
-        # RESEARCH §3 Option 1 (minimal-blast-radius): replace the bare
-        # _status_table with a QSplitter(Horizontal) containing
-        # [_optout_tree, _status_table]. Outer QVBoxLayout stays unchanged.
+        # ---- Section 3: unified file tree (Phase 96 D-F1 + 96-09 UX redesign) ----
+        # 96-09 bug #1: replace QSplitter[_OptoutTreeWidget | _status_table] with ONE
+        # unified tree showing Filename (checkbox) | Pages | Status columns.
         root.addWidget(QLabel(tr("File status & opt-outs:")))
-        self._bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        # Left: opt-out tree (NEW in Phase 96)
-        self._optout_tree = _OptoutTreeWidget(self._bottom_splitter, self._parent_window)
-        self._bottom_splitter.addWidget(self._optout_tree)
+        # Single unified tree — replaces both the old opt-out tree and status table.
+        self._unified_tree = _UnifiedFileTreeWidget(self, self._parent_window)
+        # Keep _optout_tree as an alias so any external callers (e.g. _on_worker_finished
+        # prune block) that reference self._optout_tree still work.
+        self._optout_tree = self._unified_tree
+        root.addWidget(self._unified_tree, stretch=2)
 
-        # Right: status table (PRESERVE all existing setup verbatim, only parent changed)
-        self._status_table = QTableWidget(0, 3)
-        self._status_table.setHorizontalHeaderLabels(
-            [tr("Filename"), tr("Pages"), tr("Status")]
-        )
-        self._status_table.horizontalHeader().setSectionResizeMode(
-            _COL_FILENAME, QHeaderView.ResizeMode.Stretch
-        )
-        self._status_table.horizontalHeader().setSectionResizeMode(
-            _COL_PAGES, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self._status_table.horizontalHeader().setSectionResizeMode(
-            _COL_STATUS, QHeaderView.ResizeMode.ResizeToContents
-        )
-        self._status_table.setEditTriggers(
-            QAbstractItemView.EditTrigger.NoEditTriggers
-        )
-        self._bottom_splitter.addWidget(self._status_table)
-
-        # 40/60 initial split — user can drag the handle.
-        self._bottom_splitter.setSizes([400, 600])
-        root.addWidget(self._bottom_splitter, stretch=2)
-
-        # Phase 96 D-F1: when the user picks a folder, repopulate the opt-out tree.
+        # Phase 96 D-F1: when the user picks a folder, repopulate the unified tree.
         # PINNED: selected-path comes from Qt.ItemDataRole.UserRole on the QListWidgetItem
         # (Phase 95 stashes the folder path string here when the folder is added to the list).
         self._folder_list.currentItemChanged.connect(self._on_folder_selection_changed)
@@ -584,19 +675,19 @@ class MyLibraryTab(QWidget):
     # ------------------------------------------------------------------
 
     def _on_folder_selection_changed(self, current, previous):
-        """Phase 96 D-F1: repopulate the opt-out tree when the user selects a folder.
+        """Phase 96 D-F1: repopulate the unified tree when the user selects a folder.
 
         PINNED (96-08-WIRING-NOTES.md §Plan 96-06 wiring):
           - selected-path extraction: item.data(Qt.ItemDataRole.UserRole)
           - DO NOT use item.text() — that is the display label, not the fs path.
         """
-        if not hasattr(self, '_optout_tree'):
+        if not hasattr(self, '_unified_tree'):
             return
         if current is None:
             return
         selected_path = current.data(Qt.ItemDataRole.UserRole)
         if selected_path:
-            self._optout_tree.populate_for_folder(selected_path)
+            self._unified_tree.populate_for_folder(selected_path)
 
     # ------------------------------------------------------------------
     # Indexer initialisation + startup recovery
@@ -670,7 +761,9 @@ class MyLibraryTab(QWidget):
         self._btn_cancel.setEnabled(True)
         self._progress_bar.setVisible(True)
         self._progress_bar.setValue(0)
-        self._status_table.setRowCount(0)
+        # 96-09 bug #1: unified tree replaces _status_table; clear Pages/Status columns.
+        if hasattr(self, '_unified_tree'):
+            self._unified_tree.reset_for_scan()
 
         self._worker = LocalIndexerWorker(self._indexer)
         self._worker.progress_updated.connect(self._on_progress_updated)
@@ -984,47 +1077,18 @@ class MyLibraryTab(QWidget):
     def _on_file_finished(
         self, filename: str, status: str, pages: int, err: str
     ) -> None:
-        """Append a row to the status QTableWidget (D-22 two-stage UX).
+        """Update Pages + Status columns in the unified tree (D-22 two-stage UX).
 
-        D-22: initial status is 'Indexing...' which transitions to 'OK' once
-        the batch commits. We use a simplified model where the worker emits
-        the final status directly (the two-stage display is handled by the
-        worker calling file_finished AFTER _finish_file returns).
+        96-09 bug #1: replaces the old _status_table.insertRow approach.
+        The unified tree already has a leaf for this file (from populate_for_folder).
+        update_file_status finds it by basename and updates columns 1 + 2.
+
+        D-22: the worker emits the final status directly after _finish_file
+        returns, so each leaf is updated once (no two-stage transition needed
+        at the UI level — the simplified model is unchanged).
         """
-        row = self._status_table.rowCount()
-        self._status_table.insertRow(row)
-
-        fn_item = QTableWidgetItem(filename)
-        pages_item = QTableWidgetItem(str(pages) if pages > 0 else "-")
-        pages_item.setTextAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
-
-        display_status = status
-        if status == "ok":
-            display_status = tr("OK")
-        elif status == "cancelled":
-            display_status = tr("Cancelled")
-        elif status == "no_text_layer":
-            display_status = tr("No text layer")
-        elif status == "encoding_error":
-            display_status = tr("Encoding error")
-        elif status == "unsupported":
-            display_status = tr("Unsupported")
-
-        status_item = QTableWidgetItem(display_status)
-
-        if status in ("error", "encoding_error"):
-            for item in (fn_item, pages_item, status_item):
-                item.setForeground(QColor("#e74c3c"))  # red
-        elif status == "cancelled":
-            for item in (fn_item, pages_item, status_item):
-                item.setForeground(QColor("#e67e22"))  # orange
-
-        self._status_table.setItem(row, _COL_FILENAME, fn_item)
-        self._status_table.setItem(row, _COL_PAGES, pages_item)
-        self._status_table.setItem(row, _COL_STATUS, status_item)
-        self._status_table.scrollToBottom()
+        if hasattr(self, '_unified_tree'):
+            self._unified_tree.update_file_status(filename, pages, status, err)
 
     # ------------------------------------------------------------------
     # W8 Ceiling checks — TWO entry points

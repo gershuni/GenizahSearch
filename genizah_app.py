@@ -18642,6 +18642,14 @@ class GenizahGUI(QMainWindow):
                 self._current_local_filepath = None
                 if hasattr(self, 'browse_open_file_btn'):
                     self.browse_open_file_btn.setVisible(False)
+                # Phase 96 bug #5 fix: hide LOCAL-only Browse nav widgets when
+                # opening a Genizah manuscript. Without this, if the user previously
+                # viewed a LOCAL file, the prev/next/toggle/open-file buttons remain
+                # visible and the open-file button still points to the last LOCAL file.
+                try:
+                    self._show_local_browse_controls(False)
+                except Exception:
+                    pass
         except Exception:
             pass
         self.browse_load()
@@ -18735,12 +18743,21 @@ class GenizahGUI(QMainWindow):
 
         # Phase 96 NEW-2 (Codex MEDIUM #5 closure): if the caller passed a clicked
         # hit, honor its p_num as the starting page. Default to 1 if missing.
+        # Phase 96 bug #4 fix: _build_local_result_dict stores p_num as a STRING
+        # (parsed from the full_header "{sys_id}_LOCAL_P{n}_F{file_id}"), so an
+        # isinstance(hit_p, int) check always fails and initial_p stays 1. Accept
+        # both str and int, converting via int() with a fallback guard.
         initial_p = 1
         try:
             if isinstance(res, dict):
                 hit_p = res.get('p_num')
-                if isinstance(hit_p, int) and hit_p >= 1:
-                    initial_p = hit_p
+                if hit_p is not None:
+                    try:
+                        p_int = int(hit_p)
+                        if p_int >= 1:
+                            initial_p = p_int
+                    except (ValueError, TypeError):
+                        pass
         except Exception:
             pass
 
@@ -24368,6 +24385,16 @@ class GenizahGUI(QMainWindow):
             logger.error("Failed to check interrupted search: %s", e)
 
     def closeEvent(self, event):
+        # Phase 96 bug #2 fix: flush pending debounce timer in the unified opt-out
+        # tree BEFORE _save_session() runs. The 150ms QTimer.singleShot is silently
+        # abandoned on Qt event-loop shutdown, so opt-out changes made in the last
+        # 150ms would be lost without this call.
+        try:
+            tree = getattr(getattr(self, 'my_library_tab', None), '_unified_tree', None)
+            if tree is not None and hasattr(tree, 'flush_pending'):
+                tree.flush_pending()
+        except Exception:
+            pass
         # Save session state before closing
         self._save_session()
         # Ensure worker threads are stopped before the window is destroyed
