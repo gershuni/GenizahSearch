@@ -17388,6 +17388,30 @@ class GenizahGUI(QMainWindow):
             kept.append(r)
         return kept
 
+    def _reapply_filters_for_optout_change(self):
+        """Phase 96 D-F1: re-run both cascade joinpoints after the user
+        toggles a file's opt-out checkbox in MyLibraryTab.
+
+        The opt-out set lives at the app level (`self._local_file_optouts`)
+        and is consumed by `_apply_local_optout_filter` at both joinpoints
+        (plan 96-05). When the user toggles a checkbox, the tree widget
+        (plan 96-06) debounces a save and then calls this method to refresh
+        the visible rows.
+
+        Wrapped per-cascade in try/except — a re-filter failure on one tab
+        must not crash the other.
+        """
+        try:
+            if hasattr(self, '_apply_results_table_filters'):
+                self._apply_results_table_filters()
+        except Exception:
+            pass  # don't propagate
+        try:
+            if hasattr(self, '_apply_comp_tree_filters'):
+                self._apply_comp_tree_filters()
+        except Exception:
+            pass
+
     def _toggle_local_filter_search(self):
         """Cycle the LOCAL filter state for the Search surface (D-10 / D-39)."""
         states = ['all', 'only_local', 'no_local']
