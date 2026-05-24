@@ -11,8 +11,6 @@ import pytest
 RESULT_DIALOG_PY = Path(__file__).parent.parent / "desktop" / "result_dialog.py"
 
 
-@pytest.mark.xfail(reason="Plan 96-07 will remove btn_rd_open_browse; this test goes green then.",
-                   strict=True)
 def test_btn_rd_open_browse_removed():
     """NEW-1: btn_rd_open_browse widget + handler + tooltip text are removed
     from desktop/result_dialog.py (redundant with `עיין` Browse button)."""
