@@ -111,17 +111,11 @@ def test_get_local_full_text_returns_aggregated_pages():
 # ResultDialog side
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    reason="Plan 96-07 (NEW-1) will remove btn_rd_open_browse; this assertion "
-           "flips to expecting absence. xfail(strict=True) ensures the flip is detected.",
-    strict=True,
-)
 def test_result_dialog_has_view_in_browse_button():
     """NEW-1 (Phase 96): btn_rd_open_browse is REMOVED -- redundant with `עיין`.
 
-    Once plan 96-07 lands, this xfail becomes xpassed -> strict=True turns
-    that into a failure -> executor flips xfail off and the test goes green
-    as a stable negative assertion.
+    Stable regression guard: asserts the redundant button is absent.
+    If a future PR re-adds btn_rd_open_browse, this test turns red.
     """
     src = _read_source("desktop/result_dialog.py")
     assert "btn_rd_open_browse" not in src, (
@@ -129,23 +123,22 @@ def test_result_dialog_has_view_in_browse_button():
     )
 
 
-@pytest.mark.xfail(
-    reason="Plan 96-07 (NEW-1) will remove the _rd_open_in_browse handler.",
-    strict=True,
-)
 def test_result_dialog_has_open_in_browse_handler():
-    """NEW-1: _rd_open_in_browse handler is REMOVED."""
+    """NEW-1: _rd_open_in_browse handler is REMOVED.
+
+    Stable regression guard: asserts the handler is absent.
+    """
     src = _read_source("desktop/result_dialog.py")
     fn = _find_function(src, "_rd_open_in_browse")
     assert fn is None, "NEW-1: _rd_open_in_browse handler must be removed"
 
 
-@pytest.mark.xfail(
-    reason="Plan 96-07 (NEW-1) will remove the btn_rd_open_browse visibility branches.",
-    strict=True,
-)
 def test_result_dialog_show_view_in_browse_for_local_only():
-    """NEW-1: btn_rd_open_browse visibility code is REMOVED entirely."""
+    """NEW-1: btn_rd_open_browse visibility code is REMOVED entirely.
+
+    Stable regression guard: asserts all setVisible calls for the removed
+    button are absent from result_dialog.py.
+    """
     src = _read_source("desktop/result_dialog.py")
     assert "btn_rd_open_browse.setVisible" not in src, (
         "NEW-1: btn_rd_open_browse visibility setters must be removed"

@@ -3243,6 +3243,9 @@ TRANSLATIONS = {
     "Open file": "פתח קובץ",
     "Open this file with the default application (LOCAL documents only)": "פתח קובץ זה עם היישום ברירת המחדל (מסמכים מקומיים בלבד)",
     "Last scan: {} new files indexed, {} up to date": "סריקה אחרונה: {} קבצים חדשים אונדקסו, {} מעודכנים",
+    # Phase 96 D-F1 — opt-out tree widget UI strings
+    "File status & opt-outs:": "סטטוס קבצים ואפשרויות ביטול:",
+    "Folder contents": "תכולת תיקייה",
 }
 
 # Hebrew library display names (keyed by library_code)

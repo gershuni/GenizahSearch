@@ -653,6 +653,19 @@ class LocalIndexer:
         ).fetchone()
         return row["filepath"] if row else None
 
+    def list_all_filepaths(self) -> list:
+        """Phase 96 D-F1: enumerate every on-disk filepath in the index.
+
+        Used by MyLibraryTab._on_worker_finished to prune stale opt-outs after
+        a rescan completes. Returns canonical filepaths from the local_files
+        SQLite table (preferred over direct _conn access from the tab).
+
+        Per 96-08-WIRING-NOTES.md §LocalIndexer public API: Option (A) —
+        recommended public method over direct _conn access (Option B).
+        """
+        cur = self._conn.execute("SELECT filepath FROM local_files")
+        return [row[0] for row in cur.fetchall()]
+
     def list_folders(self) -> list[dict]:
         """Return all registered folders ordered by added_at (D-15 / D-16).
 
