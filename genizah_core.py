@@ -9310,6 +9310,113 @@ class SearchEngine:
             'volume_ie': active_ie or target_page.get('ie_id'),
         }
 
+    def get_local_browse_page(self, sys_id, p_num=None, next_prev=0,
+                              absolute_index=None, allow_cross=False, volume_ie=None):
+        """Phase 96 NEW-2: LOCAL analog to `get_browse_page` (folio nav for LOCAL files).
+
+        Returns `{uid, p_num, full_header, text, total_pages, current_idx,
+        internal_index, sys_id}` — same shape as `get_browse_page` so
+        ResultDialog can dispatch via a thin `is_local_sys_id` check at
+        desktop/result_dialog.py:load_page and reuse all the existing state-
+        update code.
+
+        Parameters mirror get_browse_page for drop-in dispatch, but LOCAL
+        semantics differ:
+          - allow_cross is IGNORED (D-12: no wrap, no cross-file nav)
+          - volume_ie is IGNORED (LOCAL files have no volume concept)
+          - absolute_index is IGNORED (LOCAL pages are contiguous 1..N —
+            see RESEARCH Assumption A4)
+
+        Returns None when:
+          - sys_id has no LOCAL pages
+          - next_prev would land outside [0, total_pages)
+
+        Note: this method does NOT use Task 1's D-04.1 filter-out semantics.
+        Browse navigation must return ALL pages of the file (user navigated
+        into a specific file and wants to see ALL its pages, regardless of
+        whether the search regex matches each page). Filter-out is search-only.
+        """
+        if self.local_searcher is None or self.local_index is None:
+            return None
+
+        # Cache the sorted page list per sys_id to avoid repeat Tantivy queries
+        # on every nav click. Invalidated by reload_local_indexes().
+        cache = getattr(self, "_local_pages_cache", None)
+        if cache is None:
+            cache = {}
+            self._local_pages_cache = cache
+
+        pages = cache.get(sys_id)
+        if pages is None:
+            try:
+                q = self.local_index.parse_query(sys_id, ["full_header"])
+                res = self.local_searcher.search(q, 5000)
+            except Exception as e:
+                LOGGER.warning(
+                    "get_local_browse_page: parse_query failed for %s: %s", sys_id, e
+                )
+                return None
+            collected = []
+            hits = res.hits if hasattr(res, "hits") else res
+            for _score, doc_addr in hits:
+                try:
+                    doc = self.local_searcher.doc(doc_addr)
+                    full_header = doc.get_first("full_header") or ""
+                    if not full_header.startswith(f"{sys_id}_LOCAL_P"):
+                        continue
+                    content = doc.get_first("content") or ""
+                    uid = doc.get_first("unique_id") or ""
+                    try:
+                        p_str = full_header.split("_LOCAL_P")[1].split("_F")[0]
+                        pn = int(p_str)
+                    except (ValueError, IndexError):
+                        continue
+                    collected.append({
+                        "p_num": pn,
+                        "full_header": full_header,
+                        "text": content,
+                        "uid": uid,
+                    })
+                except (KeyError, IndexError, TypeError):
+                    continue
+            collected.sort(key=lambda x: x["p_num"])
+            pages = collected
+            cache[sys_id] = pages
+
+        if not pages:
+            return None
+
+        # Determine target index.
+        if p_num is None and next_prev == 0:
+            target_idx = 0
+        elif p_num is not None:
+            # Find current p_num in sorted list, then apply offset.
+            try:
+                current_idx = next(
+                    i for i, pg in enumerate(pages) if pg["p_num"] == p_num
+                )
+            except StopIteration:
+                # p_num not found — treat as fresh navigation to page 1
+                current_idx = 0
+            target_idx = current_idx + next_prev
+        else:
+            target_idx = 0 + next_prev
+
+        if target_idx < 0 or target_idx >= len(pages):
+            return None  # D-12: no wrap
+
+        target = pages[target_idx]
+        return {
+            "uid": target["uid"],
+            "p_num": target["p_num"],
+            "full_header": target["full_header"],
+            "text": target["text"],
+            "total_pages": len(pages),
+            "current_idx": target_idx + 1,    # 1-based for UI display
+            "internal_index": target_idx,      # 0-based for logic
+            "sys_id": sys_id,
+        }
+
     def get_browse_page_by_fl(self, fl_id, sys_id=None):
         browse_map = self._load_browse_map()
         if not browse_map: return None
