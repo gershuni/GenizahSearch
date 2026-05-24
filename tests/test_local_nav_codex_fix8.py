@@ -4,8 +4,9 @@
 Covers:
   I1   — Session restore regression: notify_session_restored() is now called
           unconditionally in the finally block, not after try/except/finally.
-          Verified for all early-return paths (no-data, user-declined,
-          restore_mode='never' excluded because opt-outs aren't loaded then).
+          Verified for early-return paths (no-data, user-declined). A separate
+          persistence regression now covers restore_mode='never' because
+          lightweight preferences must still load there.
   I1b  — Corpus scope (Genizah/Local/ALL) is restored BEFORE the has_data
           gate so the combo shows the correct value even when there are no
           search results to display.

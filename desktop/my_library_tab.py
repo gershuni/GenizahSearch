@@ -194,6 +194,11 @@ class _UnifiedFileTreeWidget(QTreeWidget):
             self._displayed_paths = set()
             self._leaf_by_path = {}
             optouts = getattr(self._app, '_local_file_optouts', set())
+            logger.info(
+                "MyLibrary opt-out tree populate: folder=%s restored_optouts=%d",
+                folder_path,
+                len(optouts),
+            )
             root_item = QTreeWidgetItem(self, [os.path.basename(folder_path) or folder_path])
             root_item.setFlags(
                 root_item.flags()
@@ -205,6 +210,11 @@ class _UnifiedFileTreeWidget(QTreeWidget):
             self.expandAll()
         finally:
             self._suppress_signals = False
+        logger.info(
+            "MyLibrary opt-out tree populated: folder=%s displayed_files=%d",
+            folder_path,
+            len(getattr(self, '_displayed_paths', set())),
+        )
 
     def _populate_node(self, parent_item, dirpath: str, optouts: set, prior_status: dict = None):
         """Recursively add files and subdirs to parent_item.
@@ -374,8 +384,11 @@ class _UnifiedFileTreeWidget(QTreeWidget):
         Qt event loop shuts down, losing the user's pending changes.
         """
         if self._save_timer.isActive():
+            logger.info("MyLibrary opt-out flush_pending: committing active debounce")
             self._save_timer.stop()
             self._commit_changes()
+        else:
+            logger.info("MyLibrary opt-out flush_pending: no active debounce")
 
     def _on_item_changed(self, item, column):
         """User toggled a checkbox — debounce the commit."""
@@ -423,10 +436,20 @@ class _UnifiedFileTreeWidget(QTreeWidget):
         # SET-DIFFERENCE/UNION update — scoped to currently displayed paths.
         # Paths NOT in self._displayed_paths (other indexed folders) untouched.
         existing: set = app._local_file_optouts
+        before_count = len(existing)
         # Remove paths that are now checked (user re-enabled them) — scoped.
         existing.difference_update(currently_checked)
         # Add paths that are now unchecked (user opted them out) — scoped.
         existing.update(currently_unchecked)
+        logger.info(
+            "MyLibrary opt-out commit: displayed=%d checked=%d unchecked=%d "
+            "optouts_before=%d optouts_after=%d",
+            len(getattr(self, '_displayed_paths', set())),
+            len(currently_checked),
+            len(currently_unchecked),
+            before_count,
+            len(existing),
+        )
 
         try:
             if hasattr(app, '_save_session'):
@@ -931,6 +954,13 @@ class MyLibraryTab(QWidget):
                     app._local_file_optouts, on_disk
                 )
                 after_count = len(app._local_file_optouts)
+                logger.info(
+                    "MyLibrary opt-out prune after rescan: on_disk=%d "
+                    "optouts_before=%d optouts_after=%d",
+                    len(on_disk),
+                    before_count,
+                    after_count,
+                )
                 if before_count != after_count:
                     try:
                         logger.info(
@@ -1253,7 +1283,13 @@ class MyLibraryTab(QWidget):
         """
         if self._indexer is None:
             return
+        current = self._folder_list.currentItem()
+        previous_path = (
+            current.data(Qt.ItemDataRole.UserRole)
+            if current is not None else None
+        )
         self._folder_list.clear()
+        restore_row = -1
         for folder in self._indexer.list_folders():
             path = folder["path"]
             status = folder.get("status", "active")
@@ -1267,8 +1303,23 @@ class MyLibraryTab(QWidget):
                     ).format(path)
                 )
             self._folder_list.addItem(item)
+            if previous_path and path == previous_path:
+                restore_row = self._folder_list.count() - 1
         # NOTE: do NOT auto-select here.  notify_session_restored() handles that
         # after opt-outs have been loaded from the session JSON.
+        logger.info(
+            "MyLibrary folder list refreshed: folders=%d previous_selection=%s "
+            "restore_row=%d",
+            self._folder_list.count(),
+            previous_path,
+            restore_row,
+        )
+        if restore_row >= 0:
+            self._folder_list.blockSignals(True)
+            self._folder_list.setCurrentRow(restore_row)
+            self._folder_list.blockSignals(False)
+            if hasattr(self, '_unified_tree'):
+                self._unified_tree.populate_for_folder(previous_path)
 
     def notify_session_restored(self) -> None:
         """Called by GenizahGUI._restore_session() (in its finally block) when
@@ -1279,6 +1330,17 @@ class MyLibraryTab(QWidget):
         is guaranteed to run AFTER opt-outs are populated, regardless of how
         long on_startup_finished takes.
         """
+        current = self._folder_list.currentItem()
+        if current is not None:
+            selected_path = current.data(Qt.ItemDataRole.UserRole)
+            logger.info(
+                "MyLibrary notify_session_restored: repopulating selected folder=%s",
+                selected_path,
+            )
+            if selected_path and hasattr(self, '_unified_tree'):
+                self._unified_tree.populate_for_folder(selected_path)
+            return
+        logger.info("MyLibrary notify_session_restored: auto-selecting first folder")
         self._auto_select_first_folder()
 
     def _auto_select_first_folder(self) -> None:

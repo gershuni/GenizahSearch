@@ -5,6 +5,7 @@ Implementation plan: 96-04-PLAN.md (CONTEXT D-08 REVISED 2026-05-24 ->
 session JSON, NOT QSettings -- matches Phase 95 local_filter pattern).
 """
 import pytest
+import types
 
 
 def _build_session_dict(local_file_optouts=None):
@@ -176,3 +177,164 @@ def test_canonical_filepath_windows_variants():
             os.unlink(real_path)
         except OSError:
             pass
+
+
+def test_unified_tree_uncheck_close_reopen_roundtrip(tmp_path):
+    """User scenario: file appears in My Library, user unchecks it, closes the
+    app, and reopens. The real tree widget must write the canonical path to
+    session JSON and redraw that file unchecked on reopen.
+    """
+    import sys
+
+    qt_core = pytest.importorskip("PyQt6.QtCore")
+    qt_widgets = pytest.importorskip("PyQt6.QtWidgets")
+    Qt = qt_core.Qt
+    QApplication = qt_widgets.QApplication
+    QWidget = qt_widgets.QWidget
+
+    from desktop.my_library_tab import _UnifiedFileTreeWidget
+    from shared.local_sys_id import _canonical_filepath
+    from shared.session_persistence import load_session_state, save_session_state
+
+    qt_app = QApplication.instance() or QApplication(sys.argv)
+    assert qt_app is not None
+
+    folder = tmp_path / "library"
+    folder.mkdir()
+    file_path = folder / "scan.pdf"
+    file_path.write_text("sample", encoding="utf-8")
+    canonical = _canonical_filepath(file_path)
+
+    class DummyApp:
+        def __init__(self):
+            self._local_file_optouts = set()
+            self.saved = []
+
+        def _save_session(self):
+            self.saved.append(set(self._local_file_optouts))
+
+        def _reapply_filters_for_optout_change(self):
+            pass
+
+    app1 = DummyApp()
+    parent1 = QWidget()
+    tree1 = _UnifiedFileTreeWidget(parent1, app1)
+    tree1.populate_for_folder(str(folder), prior_status={})
+
+    leaf = tree1.topLevelItem(0).child(0)
+    assert leaf.data(0, Qt.ItemDataRole.UserRole) == canonical
+    leaf.setCheckState(0, Qt.CheckState.Unchecked)
+
+    # closeEvent calls flush_pending before _save_session.
+    tree1.flush_pending()
+    assert canonical in app1._local_file_optouts
+    assert app1.saved[-1] == {canonical}
+
+    session_path = tmp_path / "session.json"
+    save_session_state(
+        {
+            "regular_search": {
+                "search_corpus_scope": "genizah",
+                "results": [],
+            },
+            "composition_search": {"results": [], "filtered_results": []},
+            "local_file_optouts": sorted(app1._local_file_optouts),
+        },
+        path=str(session_path),
+    )
+
+    state = load_session_state(path=str(session_path))
+    app2 = DummyApp()
+    app2._local_file_optouts = set(state["local_file_optouts"])
+    parent2 = QWidget()
+    tree2 = _UnifiedFileTreeWidget(parent2, app2)
+    tree2.populate_for_folder(str(folder), prior_status={})
+
+    reopened_leaf = tree2.topLevelItem(0).child(0)
+    assert reopened_leaf.data(0, Qt.ItemDataRole.UserRole) == canonical
+    assert reopened_leaf.checkState(0) == Qt.CheckState.Unchecked
+
+
+def test_restore_mode_never_still_persists_optouts_and_corpus(monkeypatch):
+    """User scenario: Restore State is set to Never, but lightweight
+    preferences still have to survive close/reopen.
+
+    This is the path older Phase 96 tests skipped, and it is where both the
+    corpus dropdown and opt-out persistence chain broke.
+    """
+    genizah_app = pytest.importorskip("genizah_app")
+    import shared.session_persistence as session_persistence
+
+    saved = {}
+    monkeypatch.setattr(
+        genizah_app,
+        "load_app_config",
+        lambda: {"restore_mode": "never"},
+    )
+    monkeypatch.setattr(
+        session_persistence,
+        "save_session_state",
+        lambda state: saved.setdefault("state", state) or True,
+    )
+
+    path = r"c:\users\h\docs\scan.pdf"
+    save_fake = types.SimpleNamespace(
+        _local_file_optouts={path},
+        _search_corpus_scope="local",
+        _is_browsing_local=lambda: False,
+    )
+
+    genizah_app.GenizahGUI._save_session(save_fake)
+    assert saved["state"]["local_file_optouts"] == [path]
+    assert saved["state"]["regular_search"]["search_corpus_scope"] == "local"
+
+    class ComboStub:
+        def __init__(self):
+            self.values = ["genizah", "local", "all"]
+            self.index = 0
+            self.blocked = False
+
+        def findData(self, value):
+            return self.values.index(value) if value in self.values else -1
+
+        def blockSignals(self, blocked):
+            self.blocked = blocked
+
+        def setCurrentIndex(self, index):
+            self.index = index
+
+        def currentData(self):
+            return self.values[self.index]
+
+    class ProgressStub:
+        def setVisible(self, _visible):
+            pass
+
+    class MyLibraryStub:
+        def __init__(self):
+            self.notified = False
+
+        def notify_session_restored(self):
+            self.notified = True
+
+    restore_fake = types.SimpleNamespace(
+        corpus_scope_combo=ComboStub(),
+        search_progress=ProgressStub(),
+        my_library_tab=MyLibraryStub(),
+    )
+    restore_fake._apply_persistent_session_preferences = types.MethodType(
+        genizah_app.GenizahGUI._apply_persistent_session_preferences,
+        restore_fake,
+    )
+    monkeypatch.setattr(
+        session_persistence,
+        "load_session_state",
+        lambda: saved["state"],
+    )
+
+    genizah_app.GenizahGUI._restore_session(restore_fake)
+
+    assert restore_fake._local_file_optouts == {path}
+    assert restore_fake._search_corpus_scope == "local"
+    assert restore_fake.corpus_scope_combo.currentData() == "local"
+    assert restore_fake.my_library_tab.notified

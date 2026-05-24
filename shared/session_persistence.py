@@ -60,6 +60,17 @@ def save_session_state(state_dict: dict, path: str | None = None) -> bool:
     try:
         state_dict["version"] = SESSION_VERSION
         state_dict["saved_at"] = datetime.now().isoformat()
+        regular = state_dict.get("regular_search", {}) or {}
+        composition = state_dict.get("composition_search", {}) or {}
+        logger.info(
+            "Session persistence save: path=%s scope=%s optouts=%d "
+            "regular_results=%d composition_results=%d",
+            path,
+            regular.get("search_corpus_scope", "genizah"),
+            len(state_dict.get("local_file_optouts", []) or []),
+            len(regular.get("results", []) or []),
+            len(composition.get("results", []) or []),
+        )
 
         # Ensure the parent directory exists
         parent = os.path.dirname(path)
@@ -100,6 +111,7 @@ def load_session_state(path: str | None = None) -> Optional[dict]:
         path = Config.SESSION_FILE
 
     if not os.path.exists(path):
+        logger.info("Session persistence load: no file at path=%s", path)
         return None
 
     try:
@@ -119,6 +131,14 @@ def load_session_state(path: str | None = None) -> Optional[dict]:
             )
             return None
 
+        regular = state.get("regular_search", {}) or {}
+        logger.info(
+            "Session persistence load: path=%s version=%s scope=%s optouts=%d",
+            path,
+            version,
+            regular.get("search_corpus_scope", "genizah"),
+            len(state.get("local_file_optouts", []) or []),
+        )
         return state
 
     except Exception as e:

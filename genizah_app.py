@@ -16307,7 +16307,8 @@ class GenizahGUI(QMainWindow):
         """Phase 95 smoke-fix (item 2): persist the corpus scope selection via session JSON."""
         scope = self.corpus_scope_combo.currentData() or "genizah"
         self._search_corpus_scope = scope
-        self._schedule_session_save()
+        logger.info("Corpus scope changed: scope=%s; saving session immediately", scope)
+        self._save_session()
 
     def toggle_search(self):
         # PGP Tags mode — execute tag search instead of text search
@@ -24128,13 +24129,56 @@ class GenizahGUI(QMainWindow):
     # Session Persistence
     # ------------------------------------------------------------------
 
+    def _apply_persistent_session_preferences(self, state: dict) -> None:
+        """Apply lightweight preferences that must survive even when full
+        search-state restore is disabled.
+
+        `restore_mode` controls whether previous results/navigation are replayed.
+        It must not disable persistent preferences such as LOCAL opt-outs or the
+        corpus dropdown, because those affect new searches after a restart.
+        """
+        reg = state.get('regular_search', {}) if isinstance(state, dict) else {}
+
+        raw_optouts = state.get('local_file_optouts', [])
+        if isinstance(raw_optouts, (list, tuple, set)):
+            self._local_file_optouts = set(raw_optouts)
+        else:
+            logger.warning(
+                "Session preferences: ignoring malformed local_file_optouts type=%s",
+                type(raw_optouts).__name__,
+            )
+            self._local_file_optouts = set()
+
+        self._local_browse_view_mode = state.get('local_browse_view_mode', 'per_page')
+
+        saved_scope = reg.get('search_corpus_scope', 'genizah')
+        if saved_scope not in {'genizah', 'local', 'all'}:
+            logger.warning(
+                "Session preferences: invalid search_corpus_scope=%r; using genizah",
+                saved_scope,
+            )
+            saved_scope = 'genizah'
+        self._search_corpus_scope = saved_scope
+        if hasattr(self, 'corpus_scope_combo'):
+            scope_idx = self.corpus_scope_combo.findData(saved_scope)
+            if scope_idx >= 0:
+                self.corpus_scope_combo.blockSignals(True)
+                self.corpus_scope_combo.setCurrentIndex(scope_idx)
+                self.corpus_scope_combo.blockSignals(False)
+
+        logger.info(
+            "Session preferences applied: scope=%s optouts=%d browse_mode=%s",
+            self._search_corpus_scope,
+            len(getattr(self, '_local_file_optouts', set())),
+            self._local_browse_view_mode,
+        )
+
     def _save_session(self):
         """Save current search state to disk for session persistence."""
         from shared.session_persistence import save_session_state
         try:
             cfg = load_app_config()
-            if cfg.get('restore_mode', 'ask') == 'never':
-                return  # Restore disabled in settings, no need to save
+            restore_mode = cfg.get('restore_mode', 'ask')
 
             from datetime import datetime
             state_dict = {
@@ -24224,6 +24268,12 @@ class GenizahGUI(QMainWindow):
             }
             # Add composition summary text
             state_dict['composition_search']['summary_text'] = getattr(self, 'comp_summary_text', '')
+            logger.info(
+                "Saving session: restore_mode=%s scope=%s optouts=%d",
+                restore_mode,
+                state_dict['regular_search'].get('search_corpus_scope', 'genizah'),
+                len(state_dict.get('local_file_optouts', [])),
+            )
             save_session_state(state_dict)
         except Exception as e:
             logger.error("Failed to save session state: %s", e)
@@ -24234,6 +24284,7 @@ class GenizahGUI(QMainWindow):
             self._session_save_timer = QTimer(self)
             self._session_save_timer.setSingleShot(True)
             self._session_save_timer.timeout.connect(self._save_session)
+        logger.info("Scheduling debounced session save")
         self._session_save_timer.start(500)
 
     def _restore_session(self):
@@ -24250,12 +24301,12 @@ class GenizahGUI(QMainWindow):
             cfg = load_app_config()
             restore_mode = cfg.get('restore_mode', 'ask')
 
-            if restore_mode == 'never':
-                self._restoring_session = False
-                return
-
             state = load_session_state()
             if not state:
+                logger.info(
+                    "Session restore: no session state loaded; restore_mode=%s",
+                    restore_mode,
+                )
                 return
 
             # Check if there's anything meaningful to restore
@@ -24263,23 +24314,17 @@ class GenizahGUI(QMainWindow):
             comp = state.get('composition_search', {})
             browse = state.get('browse_shelfmark', {})
             cat = state.get('browse_catalog', {})
-            # Phase 96 D-F1: restore per-file LOCAL opt-out set from top-level key.
-            # Default `[]` handles pre-Phase-96 session files gracefully.
-            # CROSS-SURFACE: reads from `state` (top level), NOT from `reg` (regular_search).
-            self._local_file_optouts = set(state.get('local_file_optouts', []))
-            # Phase 96 NEW-2: restore LOCAL Browse-panel view mode from top-level key.
-            self._local_browse_view_mode = state.get('local_browse_view_mode', 'per_page')
-            # Phase 96 fix-8: restore corpus scope BEFORE has_data gate so that
-            # the combo shows the correct value even when there are no search
-            # results (e.g., user only has opt-outs saved, no prior search run).
-            _saved_scope = reg.get('search_corpus_scope', 'genizah')
-            self._search_corpus_scope = _saved_scope
-            if hasattr(self, 'corpus_scope_combo'):
-                _scope_idx = self.corpus_scope_combo.findData(_saved_scope)
-                if _scope_idx >= 0:
-                    self.corpus_scope_combo.blockSignals(True)
-                    self.corpus_scope_combo.setCurrentIndex(_scope_idx)
-                    self.corpus_scope_combo.blockSignals(False)
+            self._apply_persistent_session_preferences(state)
+
+            if restore_mode == 'never':
+                logger.info(
+                    "Session restore: restore_mode=never; restored preferences only "
+                    "(scope=%s optouts=%d)",
+                    getattr(self, '_search_corpus_scope', 'genizah'),
+                    len(getattr(self, '_local_file_optouts', set())),
+                )
+                return
+
             has_data = (reg.get('results') or comp.get('results') or comp.get('filtered_results') or comp.get('source_text')
                         or browse.get('sys_id') or browse.get('shelfmark') or browse.get('fl_id')
                         or cat.get('domain') or cat.get('author') or cat.get('work')
@@ -24288,6 +24333,13 @@ class GenizahGUI(QMainWindow):
                         or cat.get('include_undated')
                         # Feature 2 (Phase 96 fix-7): LOCAL Browse state counts as restorable data.
                         or state.get('local_browse_sys_id'))
+            logger.info(
+                "Session restore: restore_mode=%s has_data=%s scope=%s optouts=%d",
+                restore_mode,
+                bool(has_data),
+                getattr(self, '_search_corpus_scope', 'genizah'),
+                len(getattr(self, '_local_file_optouts', set())),
+            )
             if not has_data:
                 return
 
@@ -24646,6 +24698,11 @@ class GenizahGUI(QMainWindow):
         # tree BEFORE _save_session() runs. The 150ms QTimer.singleShot is silently
         # abandoned on Qt event-loop shutdown, so opt-out changes made in the last
         # 150ms would be lost without this call.
+        logger.info(
+            "closeEvent: flushing opt-outs before save (scope=%s optouts=%d)",
+            getattr(self, '_search_corpus_scope', 'genizah'),
+            len(getattr(self, '_local_file_optouts', set())),
+        )
         try:
             tree = getattr(getattr(self, 'my_library_tab', None), '_unified_tree', None)
             if tree is not None and hasattr(tree, 'flush_pending'):
@@ -24653,6 +24710,11 @@ class GenizahGUI(QMainWindow):
         except Exception:
             pass
         # Save session state before closing
+        logger.info(
+            "closeEvent: saving session after opt-out flush (scope=%s optouts=%d)",
+            getattr(self, '_search_corpus_scope', 'genizah'),
+            len(getattr(self, '_local_file_optouts', set())),
+        )
         self._save_session()
         # Ensure worker threads are stopped before the window is destroyed
         try:
