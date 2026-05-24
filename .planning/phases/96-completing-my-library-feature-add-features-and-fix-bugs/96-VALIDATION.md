@@ -39,7 +39,7 @@ created: 2026-05-24
 | Feature | Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|----------|-----------|-------------------|-------------|--------|
 | D-F5 | LOCAL hit dict has `highlight_pattern` + `snippet` carries `*…*` markers when regex matches | unit | `pytest tests/test_local_hit_highlighting.py -x` | ❌ Wave 0 | ⬜ pending |
-| D-F5 | LOCAL hit dict falls back to first-200-chars when regex doesn't match content | unit | `pytest tests/test_local_hit_highlighting.py::test_no_match_fallback -x` | ❌ Wave 0 | ⬜ pending |
+| D-F5 | LOCAL hit dropped from result list when regex doesn't match content (D-04.1 filter-out, not fallback) | unit | `pytest tests/test_local_hit_highlighting.py::test_regex_non_match_filtered_out -x` | ❌ Wave 0 | ⬜ pending |
 | D-F5 | Search-table render shows highlighted span for LOCAL hits | integration (widget) | `pytest tests/test_local_hit_highlighting.py::test_render_pipeline -x` | ❌ Wave 0 | ⬜ pending |
 | D-F5 | ResultDialog render shows highlighted span for LOCAL hits | integration (widget) | `pytest tests/test_local_hit_highlighting.py::test_result_dialog_render -x` | ❌ Wave 0 | ⬜ pending |
 | D-F4 | `extract_pdf_pages` on `single_word_per_line.pdf` triggers fallback + returns paragraph-shaped text | unit | `pytest tests/test_local_pdf_extraction_fallback.py::test_pathological_pdf_uses_fallback -x` | ❌ Wave 0 | ⬜ pending |
