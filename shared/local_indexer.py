@@ -143,6 +143,50 @@ def _join_fragmented_lines(text: str) -> str:  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
+# Phase 96 D-F4: detect pathological one-word-per-line PDF extraction
+# ---------------------------------------------------------------------------
+# This is the LIVE detection used by extract_pdf_pages (NOT dead code, unlike
+# its dead-code cousin _join_fragmented_lines above). We use 0.70 (vs the
+# dead-code's 0.60) per RESEARCH §2 — more conservative threshold preserves
+# documents with legitimate one-word paragraphs (chapter numbers, table cells).
+
+_SINGLE_WORD_RATIO_THRESHOLD = 0.70  # Phase 96 D-F4, RESEARCH §2
+_SINGLE_WORD_MIN_SAMPLE = 5          # below this, do not trigger detection
+
+
+def _detect_single_word_per_line(text: str) -> bool:
+    """Phase 96 D-F4: return True if `text` looks like pathological
+    one-word-per-line output from PyMuPDF's `get_text("blocks")` mode.
+
+    Heuristic:
+      - split on newlines, keep non-empty lines after .strip()
+      - if fewer than 5 non-empty lines: return False (small-sample guard;
+        could be a title page or table cell)
+      - compute single_word_ratio = (# lines with <= 1 word) / (# non-empty lines)
+      - return True iff ratio >= 0.70
+
+    Examples:
+        >>> _detect_single_word_per_line("")
+        False
+        >>> _detect_single_word_per_line("one\\ntwo\\nthree\\nfour\\n")
+        False
+        >>> _detect_single_word_per_line("one\\ntwo\\nthree\\nfour\\nfive\\nsix\\n")
+        True
+        >>> _detect_single_word_per_line("the quick brown fox\\njumps over the\\nlazy dog under\\nthe bright morning\\nsun rises\\nslowly today")
+        False
+    """
+    if not text:
+        return False
+    lines = text.splitlines()
+    non_empty = [ln for ln in lines if ln.strip()]
+    if len(non_empty) < _SINGLE_WORD_MIN_SAMPLE:
+        return False
+    single = sum(1 for ln in non_empty if len(ln.split()) <= 1)
+    ratio = single / len(non_empty)
+    return ratio >= _SINGLE_WORD_RATIO_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
 # Schema builders
 # ---------------------------------------------------------------------------
 
@@ -311,16 +355,41 @@ def extract_pdf_pages(
           file gets status='no_text_layer'.
 
     D-02: RTL helpers are NOT invoked in v1 (dead code).
+
+    Phase 96 D-F4: each page is first extracted via get_text("blocks") (the
+    Phase 95 default which preserves paragraph structure). If the result
+    trips _detect_single_word_per_line (>= 70% single-word lines across >= 5
+    non-empty lines — the pathological case where the PDF was laid out via
+    per-word Tj operators at distinct positions), we re-extract that page via
+    get_text("text", sort=True). The sort=True flag is load-bearing per
+    PyMuPDF docs — it requests spatial sort (top-left to bottom-right) which
+    is the documented remedy for non-sequential content-stream order.
+    The fallback is per-page, not per-document: a document with mostly-good
+    pages and one pathological page recovers only the bad page.
     """
     doc = fitz.open(filepath)
     try:
         title = (doc.metadata or {}).get("title") or os.path.basename(filepath)
         for page_num, page in enumerate(doc, start=1):
+            # Primary: blocks mode preserves paragraph structure
             blocks = page.get_text("blocks")
             text_parts = [b[4].strip() for b in blocks if b[6] == 0 and b[4].strip()]
             text = "\n\n".join(text_parts)
+
+            # Phase 96 D-F4: detect pathological one-word-per-line output
+            # and fall back to get_text("text", sort=True) for THIS PAGE only.
+            if _detect_single_word_per_line(text):
+                try:
+                    fallback_text = page.get_text("text", sort=True)
+                    if fallback_text and fallback_text.strip():
+                        text = fallback_text
+                except Exception:
+                    # If the fallback itself errors, keep the blocks output —
+                    # one-word-per-line is still better than no text at all.
+                    pass
+
             if len(text.strip()) < _EMPTY_PAGE_CHAR_THRESHOLD:
-                continue  # D-06: skip empty pages
+                continue  # D-06: skip empty pages (post-fallback)
             yield page_num, text, title
     finally:
         doc.close()
