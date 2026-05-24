@@ -304,19 +304,20 @@ class _UnifiedFileTreeWidget(QTreeWidget):
             child.setText(_COL_STATUS, '')
             self._clear_status_columns_recursive(child)
 
-    def update_file_status(self, filename: str, pages: int, status: str,
+    def update_file_status(self, filepath: str, pages: int, status: str,
                             err: str = '') -> None:
-        """Update Pages + Status for the leaf matching `filename`.
+        """Update Pages + Status for the leaf matching `filepath`.
 
-        Replaces the old _status_table.insertRow pattern. Looks up the
-        leaf by basename (status updates arrive as bare filenames from the
-        LocalIndexerWorker.file_finished signal). Falls back to a linear
-        search if the basename match is ambiguous.
+        Phase 96 fix-7 (Codex P1.2): `filepath` is now the CANONICAL filepath
+        emitted by LocalIndexer._file_finished_cb (via _canonical_filepath),
+        NOT a bare basename.  _leaf_by_path is keyed by canonical path, so the
+        lookup is an O(1) dict hit — no linear basename scan.  Two folders
+        containing a file with the same name (e.g. scan.pdf) are now updated
+        independently without collision.
 
         Called from MyLibraryTab._on_file_finished (the
         LocalIndexerWorker.file_finished signal handler).
         """
-        import os
         # Translate status code to display string (mirrors old _status_table logic).
         display_status = status
         if status == "ok":
@@ -332,12 +333,17 @@ class _UnifiedFileTreeWidget(QTreeWidget):
 
         pages_str = str(pages) if pages > 0 else '-'
 
-        # Try to find the leaf by basename (quick path).
-        leaf = None
-        for canonical, item in self._leaf_by_path.items():
-            if os.path.basename(canonical) == filename:
-                leaf = item
-                break
+        # Direct canonical-path lookup (O(1)).  Falls back to basename scan
+        # only for legacy callers that may still pass bare filenames.
+        leaf = self._leaf_by_path.get(filepath)
+        if leaf is None:
+            # Fallback: linear basename scan for backward compat with any
+            # caller that still passes a bare filename.
+            import os
+            for canonical, item in self._leaf_by_path.items():
+                if os.path.basename(canonical) == filepath:
+                    leaf = item
+                    break
         if leaf is None:
             # Not in the currently displayed tree — no-op (file may belong
             # to a different folder not currently selected in the UI).
@@ -1137,20 +1143,22 @@ class MyLibraryTab(QWidget):
             self._progress_bar.setValue(0)
 
     def _on_file_finished(
-        self, filename: str, status: str, pages: int, err: str
+        self, filepath: str, status: str, pages: int, err: str
     ) -> None:
         """Update Pages + Status columns in the unified tree (D-22 two-stage UX).
 
-        96-09 bug #1: replaces the old _status_table.insertRow approach.
-        The unified tree already has a leaf for this file (from populate_for_folder).
-        update_file_status finds it by basename and updates columns 1 + 2.
+        Phase 96 fix-7 (Codex P1.2): `filepath` is now a canonical filepath
+        (emitted by LocalIndexer._file_finished_cb via _canonical_filepath),
+        NOT a bare basename.  update_file_status does an O(1) dict lookup so
+        two files with the same basename in different folders are updated
+        independently.
 
         D-22: the worker emits the final status directly after _finish_file
         returns, so each leaf is updated once (no two-stage transition needed
         at the UI level — the simplified model is unchanged).
         """
         if hasattr(self, '_unified_tree'):
-            self._unified_tree.update_file_status(filename, pages, status, err)
+            self._unified_tree.update_file_status(filepath, pages, status, err)
 
     # ------------------------------------------------------------------
     # W8 Ceiling checks — TWO entry points
@@ -1236,12 +1244,12 @@ class MyLibraryTab(QWidget):
 
         D-40: unavailable folders shown with warning colour (#f39c12) + tooltip.
 
-        Phase 96 fix-1/fix-2: after populating, schedule a deferred auto-select
-        of the first folder (300ms). The 300ms delay ensures _restore_session
-        (fired at 200ms by GenizahGUI.__init__) has already restored
-        _local_file_optouts before populate_for_folder reads them. Without
-        the delay, the tree would open with all files appearing checked (no
-        opt-outs), and a subsequent close would overwrite the real opt-outs.
+        Phase 96 fix-7 (Codex P1.1): auto-select is NO LONGER scheduled here.
+        It is deferred until notify_session_restored() is called by GenizahGUI
+        at the end of _restore_session(), guaranteeing opt-outs are loaded
+        before populate_for_folder reads them.  Earlier fix-1/fix-2 relied on
+        a 300ms timer which could still race when on_startup_finished was
+        delayed (e.g. slow I/O on first launch).
         """
         if self._indexer is None:
             return
@@ -1259,20 +1267,30 @@ class MyLibraryTab(QWidget):
                     ).format(path)
                 )
             self._folder_list.addItem(item)
-        # Schedule deferred auto-select so opt-outs are restored first.
-        QTimer.singleShot(300, self._auto_select_first_folder)
+        # NOTE: do NOT auto-select here.  notify_session_restored() handles that
+        # after opt-outs have been loaded from the session JSON.
+
+    def notify_session_restored(self) -> None:
+        """Called by GenizahGUI._restore_session() (in its finally block) when
+        session state — including _local_file_optouts — has been loaded.
+
+        Phase 96 fix-7 (Codex P1.1): replacing the fragile 300ms QTimer
+        with an explicit post-restore callback.  Now _auto_select_first_folder
+        is guaranteed to run AFTER opt-outs are populated, regardless of how
+        long on_startup_finished takes.
+        """
+        self._auto_select_first_folder()
 
     def _auto_select_first_folder(self) -> None:
-        """Phase 96 fix-1/fix-2: select first folder in list after session restore.
+        """Select the first folder in the list (if none is selected).
 
-        Called 300ms after _refresh_folder_list_ui so that _restore_session
-        (200ms) has already populated self._parent_window._local_file_optouts.
         Selecting the first item triggers _on_folder_selection_changed which
-        calls populate_for_folder — at this point opt-outs are already loaded,
-        so checkboxes reflect the saved state correctly.
+        calls populate_for_folder.  At the point this is called (via
+        notify_session_restored), opt-outs are already loaded, so checkboxes
+        reflect the saved state correctly.
 
         Only auto-selects if no item is currently selected (avoids overriding
-        a user click that happened in the 300ms window).
+        a user click that happened before session restore completed).
         """
         if self._folder_list.count() > 0 and self._folder_list.currentRow() < 0:
             self._folder_list.setCurrentRow(0)
