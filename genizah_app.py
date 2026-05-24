@@ -2916,6 +2916,10 @@ class GenizahGUI(QMainWindow):
         # surface (one set shared by Search/Composition/Parallels). Persists via
         # session JSON, NOT QSettings (matches `_local_filter_state_*` pattern).
         self._local_file_optouts: set[str] = set()
+        # Phase 96 NEW-2: Browse-panel View-All / Per-Page mode for LOCAL files.
+        self._local_browse_view_mode = 'per_page'   # 'per_page' | 'all'
+        self._local_browse_current_sys_id = None
+        self._local_browse_current_p_num = None
         self._local_filter_inactive_chip_visible = False
         # Phase 95-08 smoke-fix — corpus scope selector persistence (session JSON, not QSettings)
         self._search_corpus_scope = 'genizah'          # 'all' | 'genizah' | 'local'
@@ -6820,6 +6824,43 @@ class GenizahGUI(QMainWindow):
         self.browse_open_file_btn.setVisible(False)  # shown only when a LOCAL hit is browsed
         self._current_local_filepath: str | None = None
         nav_bar.addWidget(self.browse_open_file_btn)
+
+        # Phase 96 NEW-2: LOCAL-only per-page navigation widgets in Browse panel.
+        # Hidden until a LOCAL sys_id is loaded; shown by _show_local_browse_controls().
+        # W12 closure: these widgets did NOT exist before this plan — created here.
+        self.btn_local_browse_prev = QPushButton(tr("◀ Prev"))
+        self.btn_local_browse_prev.setToolTip(tr("Previous page/chunk in LOCAL file"))
+        self.btn_local_browse_prev.setVisible(False)
+        self.btn_local_browse_prev.clicked.connect(
+            lambda: self._on_local_browse_nav(offset=-1)
+        )
+        nav_bar.addWidget(self.btn_local_browse_prev)
+
+        self.lbl_local_browse_page = QLabel("")
+        self.lbl_local_browse_page.setMinimumWidth(80)
+        self.lbl_local_browse_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lbl_local_browse_page.setVisible(False)
+        nav_bar.addWidget(self.lbl_local_browse_page)
+
+        self.btn_local_browse_next = QPushButton(tr("Next ▶"))
+        self.btn_local_browse_next.setToolTip(tr("Next page/chunk in LOCAL file"))
+        self.btn_local_browse_next.setVisible(False)
+        self.btn_local_browse_next.clicked.connect(
+            lambda: self._on_local_browse_nav(offset=1)
+        )
+        nav_bar.addWidget(self.btn_local_browse_next)
+
+        self.btn_local_browse_view_toggle = QPushButton(
+            tr("הכל") if CURRENT_LANG == 'he' else tr("View All")
+        )
+        self.btn_local_browse_view_toggle.setToolTip(
+            tr("Toggle between Per-Page and View All modes")
+        )
+        self.btn_local_browse_view_toggle.setVisible(False)
+        self.btn_local_browse_view_toggle.clicked.connect(
+            self._toggle_local_browse_view_mode
+        )
+        nav_bar.addWidget(self.btn_local_browse_view_toggle)
 
         nav_bar.addStretch()
         text_layout.addWidget(_make_scrollable_row(nav_bar))
@@ -18678,17 +18719,12 @@ class GenizahGUI(QMainWindow):
         return _aggregate_local_pages_with_separators(pages, is_pdf=is_pdf, lang=lang)
 
     def _open_local_browse(self, sys_id: str, res: dict):
-        """Category 3 fix — render LOCAL file text in the Browse panel.
+        """Phase 95 D-27 + Phase 96 NEW-2 view-mode dispatch.
 
-        Switched from the Plan 95-08 stub (which routed through the Genizah
-        browse_load machinery that does NOT know how to fetch LOCAL text)
-        to a direct-render path that:
-
-          1. Resolves the canonical filepath via the indexer (D-28).
-          2. Aggregates LOCAL page text from the side-index by sys_id.
-          3. Sets the Browse text widget directly via apply_line_numbered_text.
-          4. Hides the image pane (D-27 text-only mode).
-          5. Shows the "Open file" toolbar button.
+        Dispatch to per-page or view-all mode based on self._local_browse_view_mode.
+        The per-page path renders one page at a time via _open_local_browse_page.
+        The view-all path renders the full aggregated text via _get_local_full_text_for_sys_id
+        (which now uses _aggregate_local_pages_with_separators from Task 2a).
 
         The Genizah-only paths (FL resolver, shelfmark resolver, enrichment)
         are bypassed entirely — LOCAL files have no manifest / catalog data.
@@ -18697,24 +18733,35 @@ class GenizahGUI(QMainWindow):
         if not _is_local(sys_id):
             return
 
+        # Phase 96 NEW-2 (Codex MEDIUM #5 closure): if the caller passed a clicked
+        # hit, honor its p_num as the starting page. Default to 1 if missing.
+        initial_p = 1
+        try:
+            if isinstance(res, dict):
+                hit_p = res.get('p_num')
+                if isinstance(hit_p, int) and hit_p >= 1:
+                    initial_p = hit_p
+        except Exception:
+            pass
+
+        view_mode = getattr(self, '_local_browse_view_mode', 'per_page')
+        if view_mode == 'per_page':
+            return self._open_local_browse_page(sys_id, p_num=initial_p, hit_data=res)
+
+        # ---- View-All mode path ----
         # 1. Filepath lookup (for the Open File button + diagnostics).
         filepath = self._lookup_local_filepath(sys_id)
 
-        # 2. Source the text: prefer the search-hit's full_text (already
-        #    populated by _build_local_result_dict) when present; otherwise
-        #    aggregate all pages from the LOCAL side-index.
-        text = ""
-        if isinstance(res, dict):
-            text = res.get("full_text") or res.get("text") or ""
-        if not text:
-            text = self._get_local_full_text_for_sys_id(sys_id)
+        # 2. Aggregate all pages (uses _aggregate_local_pages_with_separators via
+        #    _get_local_full_text_for_sys_id — format+lang-aware separators from Task 2a).
+        text = self._get_local_full_text_for_sys_id(sys_id)
         if not text:
             text = tr(
                 "Indexed LOCAL file — no extracted text available. "
                 "Use 'Open file' to view the original."
             )
 
-        # 3. Populate the Browse panel state so navigation chrome makes sense.
+        # 3. Populate Browse panel state.
         self.current_browse_sid = sys_id
         self.current_browse_p = None
         self.current_browse_internal_idx = None
@@ -18722,6 +18769,12 @@ class GenizahGUI(QMainWindow):
         self.browse_sys_input.setText(sys_id)
         self.browse_shelf_input.setText(os.path.basename(filepath) if filepath else sys_id)
         self.browse_fl_input.setText("")
+
+        # REVISION 2026-05-24 — Codex MEDIUM #6 closure: also set the per-page
+        # state attributes so the toggle round-trip (View-All → Per-Page → View-All)
+        # knows which sys_id/p_num to load.
+        self._local_browse_current_sys_id = sys_id
+        self._local_browse_current_p_num = initial_p
 
         # 4. Switch tabs.
         self.tabs.setCurrentWidget(self.browse_tab)
@@ -18736,8 +18789,11 @@ class GenizahGUI(QMainWindow):
             self.browse_open_file_btn.setEnabled(bool(filepath))
 
         # 7. Render the text via the same gutter helper Genizah pages use.
+        # Codex HIGH #4 closure: HTML-escape raw file content before <br> replace.
+        import html as _html_mod
         try:
-            browse_html = text.replace("\n", "<br>")
+            escaped = _html_mod.escape(text)
+            browse_html = escaped.replace("\n", "<br>")
             apply_line_numbered_text(
                 self.browse_text,
                 f"<div dir='rtl'>{browse_html}</div>",
@@ -18745,17 +18801,25 @@ class GenizahGUI(QMainWindow):
                 is_html=True,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning("_open_local_browse: apply_line_numbered_text failed: %s", exc)
-            # Fallback: plain setText so the user at least sees the content.
+            logger.warning("_open_local_browse (view-all): apply_line_numbered_text failed: %s", exc)
             try:
                 self.browse_text.setPlainText(text)
             except Exception:
                 pass
 
-        # 8. Update info label so user sees what they are viewing.
+        # 8. Update info label.
         try:
             basename = os.path.basename(filepath) if filepath else sys_id
             self.browse_info_lbl.setText(f"<b>{basename}</b> ({tr('Local file')})")
+        except Exception:
+            pass
+
+        # 9. Show LOCAL nav controls; update toggle label to reflect 'all' mode.
+        self._show_local_browse_controls(True)
+        try:
+            self.btn_local_browse_view_toggle.setText(
+                tr("דף") if CURRENT_LANG == 'he' else tr("Per page")
+            )
         except Exception:
             pass
 
@@ -18778,6 +18842,206 @@ class GenizahGUI(QMainWindow):
             )
             return
         os.startfile(filepath)  # Windows-native
+
+    # ------------------------------------------------------------------
+    # Phase 96 NEW-2: LOCAL Browse-panel navigation helpers
+    # ------------------------------------------------------------------
+
+    def _show_local_browse_controls(self, visible: bool) -> None:
+        """Phase 96 NEW-2: toggle visibility of LOCAL-only Browse-panel widgets.
+
+        Called by _open_local_browse_page (per-page mode) and _open_local_browse
+        (view-all mode) when a LOCAL file is loaded. Also called from browse_load
+        when a Genizah manuscript is loaded, to hide LOCAL-only chrome.
+        """
+        for w in (
+            self.btn_local_browse_prev,
+            self.btn_local_browse_next,
+            self.lbl_local_browse_page,
+            self.btn_local_browse_view_toggle,
+        ):
+            try:
+                w.setVisible(visible)
+            except Exception:
+                pass
+
+    def _open_local_browse_page(self, sys_id, p_num=1, hit_data=None):
+        """Phase 96 NEW-2: render ONE LOCAL page at a time in the Browse panel.
+
+        PINNED (96-08-WIRING-NOTES.md):
+          - self.browse_text is the Browse-panel text widget (line 7021).
+          - apply_line_numbered_text is the gutter-preserving render call (W11).
+          - DO NOT use setPlainText / setHtml — they bypass the v7.12.0 gutter.
+
+        REVISION 2026-05-24 — Codex HIGH #4 closure: file content is HTML-escaped
+        via html.escape(text) BEFORE the \\n → <br> replacement. Raw `<`, `&`,
+        `>` in file content cannot inject markup into the Browse panel.
+
+        REVISION 2026-05-24 — Codex MEDIUM #5 closure: caller passes p_num
+        derived from the clicked hit_data — NOT hard-coded to 1.
+
+        REVISION 2026-05-24 — Codex MEDIUM #6 closure: sets
+        _local_browse_current_sys_id and _local_browse_current_p_num so the
+        toggle round-trip works correctly.
+        """
+        import html as _html_mod
+        if not self.searcher:
+            return
+        page_data = self.searcher.get_local_browse_page(
+            sys_id, p_num=p_num, next_prev=0
+        )
+        if not page_data:
+            return
+
+        text = page_data.get('text', '') or ''
+        cur = page_data.get('current_idx', 1)
+        total = page_data.get('total_pages', 1)
+
+        # Detect PDF vs DOCX/TXT for label.
+        is_pdf = False
+        try:
+            fp = self._lookup_local_filepath(sys_id) or ""
+            is_pdf = fp.lower().endswith('.pdf')
+        except Exception:
+            pass
+        if CURRENT_LANG == 'he':
+            unit_word = 'דף' if is_pdf else 'מקטע'
+        else:
+            unit_word = 'page' if is_pdf else 'chunk'
+
+        # Codex HIGH #4 closure: HTML-escape the raw file content BEFORE building
+        # the rendered HTML. `<`, `&`, `>` in user files cannot inject markup.
+        escaped = _html_mod.escape(text)
+        browse_html = escaped.replace("\n", "<br>")
+        try:
+            apply_line_numbered_text(
+                self.browse_text,
+                f"<div dir='rtl'>{browse_html}</div>",
+                source_text=text,
+                is_html=True,
+            )
+        except Exception as exc:
+            logger.warning("_open_local_browse_page: gutter render failed: %s", exc)
+            # Last-resort fallback (no gutter); preferable to crashing.
+            # setPlainText is inherently safe (no HTML interpretation).
+            try:
+                self.browse_text.setPlainText(text)
+            except Exception:
+                pass
+
+        # Codex MEDIUM #6 closure: set state for toggle round-trip in BOTH modes.
+        self._local_browse_current_sys_id = sys_id
+        self._local_browse_current_p_num = page_data.get('p_num')
+
+        # Update LOCAL nav UI labels.
+        try:
+            self.lbl_local_browse_page.setText(f"{unit_word} {cur} / {total}")
+        except Exception:
+            pass
+        try:
+            self.btn_local_browse_prev.setEnabled(cur > 1)
+            self.btn_local_browse_next.setEnabled(cur < total)
+        except Exception:
+            pass
+
+        # Show the LOCAL controls + toggle label reflects 'per_page' mode
+        # (clicking the toggle button will switch to view-all).
+        self._show_local_browse_controls(True)
+        try:
+            self.btn_local_browse_view_toggle.setText(
+                tr("הכל") if CURRENT_LANG == 'he' else tr("View All")
+            )
+        except Exception:
+            pass
+
+        # Populate Browse panel state (filepath + info label + tab switch).
+        filepath = self._lookup_local_filepath(sys_id)
+        self.current_browse_sid = sys_id
+        self.current_browse_p = page_data.get('p_num')
+        self.current_browse_internal_idx = page_data.get('internal_index')
+        self.current_browse_volume_ie = None
+        self.browse_sys_input.setText(sys_id)
+        try:
+            self.browse_shelf_input.setText(os.path.basename(filepath) if filepath else sys_id)
+        except Exception:
+            pass
+        self.browse_fl_input.setText("")
+        self.tabs.setCurrentWidget(self.browse_tab)
+        self._set_browse_image_pane_visible(False)
+        self._current_local_filepath = filepath
+        if hasattr(self, "browse_open_file_btn"):
+            self.browse_open_file_btn.setVisible(bool(filepath))
+            self.browse_open_file_btn.setEnabled(bool(filepath))
+        try:
+            basename = os.path.basename(filepath) if filepath else sys_id
+            import html as _html_mod2
+            self.browse_info_lbl.setText(
+                f"<b>{_html_mod2.escape(basename)}</b> ({tr('Local file')})"
+                f" — {unit_word} {cur}/{total}"
+            )
+        except Exception:
+            pass
+
+    def _on_local_browse_nav(self, offset: int) -> None:
+        """Phase 96 NEW-2: prev/next click handler for LOCAL Browse nav.
+
+        REVISION 2026-05-24 — Codex MEDIUM #7 closure: uses the engine
+        primitive's `next_prev=offset` (which walks the cached sorted page
+        list correctly, handling blank-page skips). The previous `cur + offset`
+        arithmetic broke whenever the indexer dropped a blank page.
+        """
+        sid = self._local_browse_current_sys_id
+        cur = self._local_browse_current_p_num
+        if not sid or cur is None:
+            return
+        if not self.searcher:
+            return
+        # Engine primitive handles wrap (returns None at boundary) AND
+        # blank-page skips (walks the cached sorted page list).
+        page_data = self.searcher.get_local_browse_page(
+            sid, p_num=cur, next_prev=offset
+        )
+        if not page_data:
+            # D-12: no wrap. Disable the offending button.
+            if offset > 0:
+                try:
+                    self.btn_local_browse_next.setEnabled(False)
+                except Exception:
+                    pass
+            elif offset < 0:
+                try:
+                    self.btn_local_browse_prev.setEnabled(False)
+                except Exception:
+                    pass
+            return
+        # We have a target page — open it. _open_local_browse_page does the
+        # render + state update + button enable/disable.
+        self._open_local_browse_page(sid, p_num=page_data.get('p_num'))
+
+    def _toggle_local_browse_view_mode(self) -> None:
+        """Phase 96 NEW-2: flip View-All ↔ Per-Page and re-render.
+
+        REVISION 2026-05-24 — Codex MEDIUM #6 closure: relies on
+        _local_browse_current_sys_id being set in BOTH view modes
+        (_open_local_browse_page sets it in Per-Page mode; _open_local_browse
+        sets it in View-All mode). The toggle reads it to re-trigger the
+        appropriate render path.
+        """
+        current = getattr(self, '_local_browse_view_mode', 'per_page')
+        self._local_browse_view_mode = 'all' if current == 'per_page' else 'per_page'
+        try:
+            self._save_session()
+        except Exception:
+            pass
+        sid = self._local_browse_current_sys_id
+        if sid:
+            # Re-trigger the Browse panel render so the new mode takes effect.
+            # Pass a synthetic hit_data with the current p_num so per-page mode
+            # opens at the right page (Codex MEDIUM #5 + #6 closure interaction).
+            synthetic_hit = {
+                'p_num': getattr(self, '_local_browse_current_p_num', 1) or 1,
+            }
+            self._open_local_browse(sid, synthetic_hit)
 
     def send_result_to_composition(self, res, source_text=None, title=None):
         if not source_text:
@@ -22261,6 +22525,8 @@ class GenizahGUI(QMainWindow):
 
     def browse_load(self):
         if not self.searcher: return
+        # Phase 96 NEW-2: hide LOCAL-only controls when loading a Genizah manuscript.
+        self._show_local_browse_controls(False)
         self.browse_highlight_data = []
         self.browse_highlight_pattern = None
         sid = self.browse_sys_input.text().strip()
@@ -23716,6 +23982,8 @@ class GenizahGUI(QMainWindow):
                 # Top-level placement — DIFFERENT from Phase 95's local_filter (nested in regular_search).
                 # Reason: opt-out is cross-surface (Search + Composition + Parallels), not per-surface.
                 'local_file_optouts': sorted(getattr(self, '_local_file_optouts', set())),
+                # Phase 96 NEW-2: Browse-panel view mode for LOCAL files (top-level, cross-surface).
+                'local_browse_view_mode': getattr(self, '_local_browse_view_mode', 'per_page'),
                 'active_tab': self.tabs.currentIndex() if hasattr(self, 'tabs') else 0,
                 'browse_shelfmark': {
                     'sys_id': self.browse_sys_input.text().strip() if hasattr(self, 'browse_sys_input') else '',
@@ -23775,6 +24043,8 @@ class GenizahGUI(QMainWindow):
             # Default `[]` handles pre-Phase-96 session files gracefully.
             # CROSS-SURFACE: reads from `state` (top level), NOT from `reg` (regular_search).
             self._local_file_optouts = set(state.get('local_file_optouts', []))
+            # Phase 96 NEW-2: restore LOCAL Browse-panel view mode from top-level key.
+            self._local_browse_view_mode = state.get('local_browse_view_mode', 'per_page')
             has_data = (reg.get('results') or comp.get('results') or comp.get('filtered_results') or comp.get('source_text')
                         or browse.get('sys_id') or browse.get('shelfmark') or browse.get('fl_id')
                         or cat.get('domain') or cat.get('author') or cat.get('work')
