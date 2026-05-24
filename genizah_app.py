@@ -22544,6 +22544,13 @@ class GenizahGUI(QMainWindow):
         if not self.searcher: return
         # Phase 96 NEW-2: hide LOCAL-only controls when loading a Genizah manuscript.
         self._show_local_browse_controls(False)
+        # Phase 96 fix-5: also hide the "Open file" button — it is LOCAL-only
+        # chrome that must disappear when any Genizah ms is loaded. Previously
+        # only _show_local_browse_controls was called here, which omits this
+        # button, leaving it visible after viewing a LOCAL file then navigating
+        # to a Genizah ms via the Browse tab inputs or prev/next folio buttons.
+        if hasattr(self, 'browse_open_file_btn'):
+            self.browse_open_file_btn.setVisible(False)
         self.browse_highlight_data = []
         self.browse_highlight_pattern = None
         sid = self.browse_sys_input.text().strip()
