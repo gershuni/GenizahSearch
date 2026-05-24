@@ -18840,6 +18840,25 @@ class GenizahGUI(QMainWindow):
         except Exception:
             pass
 
+        # 10. Phase 96 fix-2 (View-All regression): disable the Genizah "View All"
+        #     button (btn_b_all) for LOCAL files. btn_b_all calls browse_load_all()
+        #     which calls get_full_manuscript(LOCAL_SYS_ID) → returns [] → error
+        #     dialog.  Toggling it off then calls browse_load_page(LOCAL_SYS_ID) →
+        #     "דף לא נמצא" (Page not found).  LOCAL files have their own view-toggle
+        #     (btn_local_browse_view_toggle); the Genizah-level btn_b_all is
+        #     irrelevant and must be hidden from the user.
+        try:
+            if hasattr(self, 'btn_b_all'):
+                self.btn_b_all.setEnabled(False)
+                # Un-check it so toggle_browse_view_all's "else" branch (which
+                # calls browse_load_page) is not triggered when it is re-enabled
+                # later by a Genizah manuscript load.
+                self.btn_b_all.blockSignals(True)
+                self.btn_b_all.setChecked(False)
+                self.btn_b_all.blockSignals(False)
+        except Exception:
+            pass
+
     def _on_browse_open_file_clicked(self):
         """Phase 95 D-28 — launch OS default app for the current LOCAL file.
 
@@ -18968,6 +18987,18 @@ class GenizahGUI(QMainWindow):
             self.btn_local_browse_view_toggle.setText(
                 tr("הכל") if CURRENT_LANG == 'he' else tr("View All")
             )
+        except Exception:
+            pass
+
+        # Phase 96 fix-2: disable Genizah btn_b_all for LOCAL files (same as
+        # the view-all code path above — LOCAL files must not activate the
+        # Genizah browse_load_all() path which shows "דף לא נמצא").
+        try:
+            if hasattr(self, 'btn_b_all'):
+                self.btn_b_all.setEnabled(False)
+                self.btn_b_all.blockSignals(True)
+                self.btn_b_all.setChecked(False)
+                self.btn_b_all.blockSignals(False)
         except Exception:
             pass
 
