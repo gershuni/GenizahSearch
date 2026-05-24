@@ -6678,6 +6678,12 @@ class SearchEngine:
         self.local_lab_searcher_stale = False  # D-38: True when weights_hash mismatch
         self._lab_local_meta = None        # dict from .meta.json, or None
         self._open_local_searcher()
+        # Phase 96 D-F5 (Codex HIGH #3): instrumentation hook — records the
+        # last `regex` passed to _query_local_index so test spies can assert
+        # the merge call site genuinely threads the regex through.
+        # Also used by get_local_browse_page page-list cache.
+        self._last_local_query_regex = None
+        self._local_pages_cache: dict = {}
 
     def _open_local_searcher(self) -> None:
         """Open the LOCAL Tantivy side-index with D-37 corrupt/missing fallback.
@@ -6716,6 +6722,9 @@ class SearchEngine:
         recovery commit. Idempotent + defensive: on any open failure, the searcher
         falls back to None (D-37 semantics).
         """
+        # Phase 96 NEW-2: invalidate page-list cache so get_local_browse_page
+        # returns fresh results after a reindex.
+        self._local_pages_cache = {}
         self._open_local_searcher()
         self.reload_local_lab_index()
 
@@ -6845,13 +6854,32 @@ class SearchEngine:
         W5 Option C callback — wraps lab_index_normalize."""
         return self.lab_index_normalize(content)
 
-    def _query_local_index(self, query_str: str, mode: str, gap: int, limit=None):
+    def _query_local_index(self, query_str: str, mode: str, gap: int,
+                           limit=None, regex=None):
         """Query the LOCAL side-index. Returns [] if local_searcher is None (D-37).
 
         MEDIUM-1 note: this uses a simplified parse_query (not the full Responsa
         expansion pipeline used by the main searcher). The divergence is documented
         as a deferred follow-up — see plan 95-05 <deferred> block.
+
+        Phase 96 D-F5: accept an optional `regex` parameter so each hit dict
+        can carry `highlight_pattern` + asterisk-marker `snippet`, matching
+        the Genizah hit shape. When `regex` is None (legacy callers), hits
+        are returned with raw snippets (back-compat).
+
+        REVISION 2026-05-24 — D-04.1 LOAD-BEARING (Codex HIGH #2): when
+        `regex` is provided AND `_build_local_result_dict` returns None (regex
+        didn't match), the candidate is SKIPPED. Visible LOCAL hits all satisfy
+        the regex — same algebra as Genizah hits (genizah_core.py ~8341 `if hl_c:`).
+
+        REVISION 2026-05-24 — Codex HIGH #3: records the last-passed regex
+        object on `self._last_local_query_regex` so test spies can assert the
+        merge call site genuinely threaded regex (rather than passing None
+        silently). Cleared on each call entry to avoid stale state.
         """
+        # Codex HIGH #3 instrumentation — record what we got passed.
+        self._last_local_query_regex = regex
+
         if self.local_searcher is None or self.local_index is None:
             return []
         try:
@@ -6864,17 +6892,46 @@ class SearchEngine:
             search_limit = limit or Config.SEARCH_LIMIT
             res_obj = self.local_searcher.search(tantivy_q, search_limit)
             hits = res_obj.hits if hasattr(res_obj, "hits") else res_obj
+            pattern_str = regex.pattern if regex is not None else ""
             results = []
             for score, doc_address in hits:
                 doc = self.local_searcher.doc(doc_address)
-                results.append(self._build_local_result_dict(doc, score))
+                hit = self._build_local_result_dict(
+                    doc, score, regex=regex, pattern_str=pattern_str
+                )
+                # D-04.1 filter-out: skip candidates whose regex didn't match.
+                # _build_local_result_dict returns None for those.
+                if hit is None:
+                    continue
+                results.append(hit)
             return results
         except Exception as e:
             LOGGER.warning("LOCAL index query failed: %r", e)
             return []
 
-    def _build_local_result_dict(self, doc, score) -> dict:
-        """Construct a result row from a LOCAL Tantivy doc per D-34 shape."""
+    def _build_local_result_dict(self, doc, score, regex=None, pattern_str=None):
+        """Construct a result row from a LOCAL Tantivy doc per D-34 shape.
+
+        Phase 96 D-F5: when `regex` is provided, populate snippet + raw_file_hl
+        + highlight_pattern so the LOCAL hit shape matches Genizah hits and
+        downstream UI (format_snippet, ResultDialog highlight branch) works
+        without per-source branching. Mirrors genizah_core.py ~8335-8345.
+
+        REVISION 2026-05-24 — D-04.1 LOAD-BEARING (per user CONTEXT update +
+        Codex HIGH #2): when `regex` is provided AND the regex does NOT match
+        `content`, this function returns **None** to signal the caller to FILTER
+        OUT this candidate. This matches the Genizah two-phase model — Tantivy
+        candidates that fail the regex are silently dropped from the result list.
+        No fallback display of unhighlighted content.
+
+        Back-compat: when `regex` is None (legacy callers), the function ALWAYS
+        returns a dict (old shape — snippet = content[:200]).
+
+        Returns:
+            - dict (the hit) when regex matches OR regex is None
+            - None when regex is provided AND regex does NOT match content
+              -> caller MUST skip this candidate (D-04.1)
+        """
         unique_id = doc.get_first("unique_id") or ""
         full_header = doc.get_first("full_header") or ""
         content = doc.get_first("content") or ""
@@ -6889,11 +6946,33 @@ class SearchEngine:
                 # p_num is before the _F suffix
                 p_part = parts[1].split("_F")[0]
                 p_num = p_part
-        snippet = content[:200] if content else ""
+
+        # Phase 96 D-F5: compute snippet via self.highlight when regex provided.
+        # D-04.1: filter-out signal when regex doesn't match (return None).
+        if regex is not None:
+            hl_c = self.highlight(content, regex, for_file=False)
+            if not hl_c:
+                # D-04.1: Tantivy matched but regex didn't.
+                # SILENTLY DROP this candidate by returning None.
+                # _query_local_index will skip it.
+                return None
+            hl_f = self.highlight(content, regex, for_file=True)
+            snippet = hl_c
+            raw_file_hl = hl_f or ""
+            effective_pattern = pattern_str or regex.pattern
+        else:
+            # Back-compat path (no regex passed by caller — old behaviour).
+            # Always returns a dict; no filter-out.
+            snippet = content[:200] if content else ""
+            raw_file_hl = ""
+            effective_pattern = ""
+
         return {
             "uid": unique_id,
             "full_text": content,
             "snippet": snippet,
+            "raw_file_hl": raw_file_hl,
+            "highlight_pattern": effective_pattern,
             "sys_id": sys_id,
             "p_num": p_num,
             "score": float(score),
@@ -7975,7 +8054,15 @@ class SearchEngine:
             if getattr(self, "local_searcher", None) is None:
                 return []
             try:
-                return self._query_local_index(query_str, mode, gap)
+                # Phase 96 D-F5: build regex so LOCAL-only results carry
+                # highlight_pattern + asterisk-marker snippets (same as the
+                # RRF merge path at the bottom of execute_search).
+                _local_terms = [query_str] if mode == 'Regex' else query_str.split()
+                _local_dq = strip_search_diacritics(query_str) if mode != 'Regex' else query_str
+                _local_terms = [_local_dq] if mode == 'Regex' else _local_dq.split()
+                _local_regex = self.build_regex_pattern(_local_terms, mode, gap)
+                return self._query_local_index(query_str, mode, gap,
+                                               regex=_local_regex or None)
             except Exception as _le:
                 LOGGER.warning("LOCAL-only search failed: %r", _le)
                 return []
@@ -8360,7 +8447,7 @@ class SearchEngine:
         # Phase 95 smoke-fix (item 2): skip LOCAL merge when corpus_scope='genizah'.
         if corpus_scope != "genizah" and getattr(self, "local_searcher", None) is not None:
             try:
-                local_hits = self._query_local_index(query_str, mode, gap)
+                local_hits = self._query_local_index(query_str, mode, gap, regex=regex)
             except Exception as _e:
                 LOGGER.warning(
                     "LOCAL side-index query failed; main results unaffected: %r", _e
@@ -9223,6 +9310,112 @@ class SearchEngine:
             'internal_index': new_idx,  # 0-based for logic (NEW)
             'sys_id': sys_id,
             'volume_ie': active_ie or target_page.get('ie_id'),
+        }
+
+    def get_local_browse_page(self, sys_id, p_num=None, next_prev=0,
+                              absolute_index=None, allow_cross=False, volume_ie=None):
+        """Phase 96 NEW-2: LOCAL analog to `get_browse_page` (folio nav for LOCAL files).
+
+        Returns `{uid, p_num, full_header, text, total_pages, current_idx,
+        internal_index, sys_id}` — same shape as `get_browse_page` so
+        ResultDialog can dispatch via a thin `is_local_sys_id` check at
+        desktop/result_dialog.py:load_page and reuse all the existing state-
+        update code.
+
+        Parameters mirror get_browse_page for drop-in dispatch, but LOCAL
+        semantics differ:
+          - allow_cross is IGNORED (D-12: no wrap, no cross-file nav)
+          - volume_ie is IGNORED (LOCAL files have no volume concept)
+          - absolute_index is IGNORED (LOCAL pages are contiguous 1..N)
+
+        Returns None when:
+          - sys_id has no LOCAL pages
+          - next_prev would land outside [0, total_pages)
+
+        Note: this method does NOT use Task 1's D-04.1 filter-out semantics.
+        Browse navigation must return ALL pages of the file (user navigated
+        into a specific file and wants to see ALL its pages, regardless of
+        whether the search regex matches each page). Filter-out is search-only.
+        """
+        if self.local_searcher is None or self.local_index is None:
+            return None
+
+        # Cache the sorted page list per sys_id to avoid repeat Tantivy queries
+        # on every nav click. Invalidated by reload_local_indexes().
+        cache = getattr(self, "_local_pages_cache", None)
+        if cache is None:
+            cache = {}
+            self._local_pages_cache = cache
+
+        pages = cache.get(sys_id)
+        if pages is None:
+            try:
+                q = self.local_index.parse_query(sys_id, ["full_header"])
+                res = self.local_searcher.search(q, 5000)
+            except Exception as e:
+                LOGGER.warning(
+                    "get_local_browse_page: parse_query failed for %s: %s", sys_id, e
+                )
+                return None
+            collected = []
+            hits = res.hits if hasattr(res, "hits") else res
+            for _score, doc_addr in hits:
+                try:
+                    doc = self.local_searcher.doc(doc_addr)
+                    full_header = doc.get_first("full_header") or ""
+                    if not full_header.startswith(f"{sys_id}_LOCAL_P"):
+                        continue
+                    content = doc.get_first("content") or ""
+                    uid = doc.get_first("unique_id") or ""
+                    try:
+                        p_str = full_header.split("_LOCAL_P")[1].split("_F")[0]
+                        pn = int(p_str)
+                    except (ValueError, IndexError):
+                        continue
+                    collected.append({
+                        "p_num": pn,
+                        "full_header": full_header,
+                        "text": content,
+                        "uid": uid,
+                    })
+                except (KeyError, IndexError, TypeError):
+                    continue
+            collected.sort(key=lambda x: x["p_num"])
+            pages = collected
+            cache[sys_id] = pages
+
+        if not pages:
+            return None
+
+        # Determine target index.
+        if p_num is None and next_prev == 0:
+            target_idx = 0
+        elif p_num is not None:
+            # Find current p_num in sorted list, then apply offset.
+            try:
+                current_idx = next(
+                    i for i, pg in enumerate(pages) if pg["p_num"] == int(p_num)
+                )
+            except (StopIteration, ValueError, TypeError):
+                # p_num not found — treat as fresh navigation to page 1
+                current_idx = 0
+            target_idx = current_idx + next_prev
+        else:
+            target_idx = 0 + next_prev
+
+        if target_idx < 0 or target_idx >= len(pages):
+            return None  # D-12: no wrap
+
+        target = pages[target_idx]
+        return {
+            "uid": target["uid"],
+            "p_num": target["p_num"],
+            "full_header": target["full_header"],
+            "text": target["text"],
+            "total_pages": len(pages),
+            "current_idx": target_idx + 1,   # 1-based for UI display
+            "internal_index": target_idx,     # 0-based for logic
+            "sys_id": sys_id,
         }
 
     def get_browse_page_by_fl(self, fl_id, sys_id=None):
