@@ -243,16 +243,22 @@ class ResultDialog(QDialog):
         prev_arrow = "<"
         next_arrow = ">"
 
-        btn_pg_prev = QPushButton(prev_arrow); btn_pg_prev.setFixedWidth(30); btn_pg_prev.setAutoDefault(False); btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
-        self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80); self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
-        btn_pg_next = QPushButton(next_arrow); btn_pg_next.setFixedWidth(30); btn_pg_next.setAutoDefault(False); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
+        # Item 6: full-size nav buttons are instance attributes so load_local_page
+        # can enable/disable them (previously only compact buttons were updated).
+        self.btn_pg_prev = QPushButton(prev_arrow); self.btn_pg_prev.setFixedWidth(30); self.btn_pg_prev.setAutoDefault(False); self.btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
+        # Item 1: replace editingFinished (fires on focus-loss too) with Enter-only
+        # commit via returnPressed. setKeyboardTracking(False) prevents mid-edit
+        # intermediate signals from valueChanged; returnPressed fires only on Enter.
+        self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80); self.spin_page.setKeyboardTracking(False)
+        self.spin_page.lineEdit().returnPressed.connect(self._commit_spin_page_jump)
+        self.btn_pg_next = QPushButton(next_arrow); self.btn_pg_next.setFixedWidth(30); self.btn_pg_next.setAutoDefault(False); self.btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
         self.lbl_total = QLabel("/ ?")
 
         self.lbl_img_label = QLabel("")
         self.lbl_img_label.setStyleSheet("color: #2980b9; font-weight: bold; margin-left: 10px;")
 
-        nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(btn_pg_prev); nav_row.addWidget(self.spin_page);
-        nav_row.addWidget(self.lbl_total); nav_row.addWidget(btn_pg_next); nav_row.addWidget(self.lbl_img_label); nav_row.addStretch()
+        nav_row.addWidget(QLabel(tr("Image:"))); nav_row.addWidget(self.btn_pg_prev); nav_row.addWidget(self.spin_page);
+        nav_row.addWidget(self.lbl_total); nav_row.addWidget(self.btn_pg_next); nav_row.addWidget(self.lbl_img_label); nav_row.addStretch()
 
         action_row = QHBoxLayout()
         self.btn_view_transcription = QPushButton(f"📖 {tr('Browse')}")
@@ -559,20 +565,29 @@ class ResultDialog(QDialog):
         # Footer
         btn_close = QPushButton("Close"); btn_close.clicked.connect(self.close); main_layout.addWidget(btn_close)
 
-        # Phase 96 fix-3 (complete): prevent ANY QPushButton from capturing Enter.
-        # In a QDialog, QPushButton.autoDefault defaults to True, which causes Qt
-        # to activate the "default" button (typically the first visible one —
-        # btn_view_transcription / "Browse") when Enter is pressed anywhere in the
-        # dialog.  Symptom: pressing Enter after typing a page number in spin_page
-        # opened the Browse tab instead of jumping to the typed page.
-        # Iterating via findChildren catches every button (including those added
-        # after the four targeted in the earlier partial fix: btn_res_prev/next,
-        # btn_compact_pg_prev/next), so future buttons added to the dialog are
-        # automatically covered without needing per-button setAutoDefault(False).
-        # spin_page.editingFinished is the sole Enter handler intended for page nav.
+        # Item 3 (Codex): fully suppress all dialog-default button behavior.
+        # setAutoDefault(False) prevents Qt from auto-promoting any button to
+        # "default" when the current default is hidden; setDefault(False) clears
+        # any explicitly-set default. Both are required together — either alone
+        # can still allow Enter propagation to a button in edge cases.
+        # Note: spin_page.lineEdit().returnPressed (Item 1) is the sole Enter
+        # handler intended for page navigation; buttons must NOT intercept it.
         self.setLayout(main_layout)  # must be set before findChildren works
         for _btn in self.findChildren(QPushButton):
             _btn.setAutoDefault(False)
+            _btn.setDefault(False)
+
+    def _commit_spin_page_jump(self):
+        """Item 1 (Codex): Enter-only spin_page commit handler.
+
+        Connected to spin_page.lineEdit().returnPressed so that ONLY an explicit
+        Enter key press triggers a page jump — focus-loss (editingFinished) no
+        longer causes passive jumps when the user clicks elsewhere in the dialog.
+        Reads spin_page.value() and dispatches to load_page(target=...) which
+        routes to load_local_page for LOCAL sys_ids and to get_browse_page for
+        Genizah hits.
+        """
+        self.load_page(target=self.spin_page.value())
 
     def _toggle_compact_mode(self, compact):
         """Toggle between compact and full header mode."""
@@ -2309,16 +2324,30 @@ class ResultDialog(QDialog):
     def load_local_page(self, offset=0, target=None):
         """Phase 96 NEW-2: LOCAL analog to load_page.
 
+        Page identity contract (Codex Item 4):
+          - p_num   : physical page number in the source file (sparse for PDFs —
+                      blank pages are skipped by the indexer; PDFs can have
+                      p_num=1552 with only 1529 indexed pages before it).
+          - current_idx : 0-based ordinal in the SORTED indexed page list.
+                      Dense. Used only for prev/next enabled-state arithmetic.
+
+        The spinbox always shows and accepts p_num (physical page number).
+        current_idx is kept only to evaluate whether prev/next are possible.
+
         Calls SearchEngine.get_local_browse_page (plan 96-03) and applies the
         same state-update code Genizah hits use. The engine primitive returns
-        None at file boundaries — we disable prev/next accordingly (D-12: no wrap).
+        None at file boundaries — we disable prev/next accordingly (D-12: no
+        wrap). Returns None for a p_num not present in the index (Item 5:
+        fall-through on missing page — spinner stays on last valid value).
 
-        REVISION 2026-05-24:
-          - Pinned widget identifiers (BLOCKER 2): self.text_ms, self.btn_compact_pg_{prev,next},
+        PINNED widget identifiers (BLOCKER 2):
+          - self.text_ms, self.btn_compact_pg_{prev,next}, self.btn_pg_{prev,next},
             self.spin_page, self.lbl_total.
-          - Render via apply_line_numbered_text + self._htmlify to preserve v7.12.0 gutter
-            AND HTML-escape file content (W11 + Codex HIGH #4).
-          - Skip cancel_image_thread() — Genizah-image-specific (W9).
+        Render via apply_line_numbered_text + self._htmlify to preserve v7.12.0
+        gutter AND HTML-escape file content (W11 + Codex HIGH #4).
+        Skip cancel_image_thread() — Genizah-image-specific (W9).
+        No setFocus() — Item 2: focus hack removed; Enter-only commit is now
+        handled by _commit_spin_page_jump via returnPressed (Item 1).
         """
         if not self.current_sys_id:
             return
@@ -2339,18 +2368,25 @@ class ResultDialog(QDialog):
             )
 
         if not page_data:
-            # D-12: no wrap. Disable the offending button. PINNED identifiers.
+            # D-12: no wrap at boundaries; also None for unknown p_num (Item 5).
+            # Disable the offending direction button. PINNED identifiers.
             if offset > 0:
-                self.btn_compact_pg_next.setEnabled(False)
+                self._set_local_page_nav_enabled(prev=None, nxt=False)
             elif offset < 0:
-                self.btn_compact_pg_prev.setEnabled(False)
+                self._set_local_page_nav_enabled(prev=False, nxt=None)
+            # target jump to unknown p_num: leave spinner at previous valid value.
             return
 
         # State updates (mirror Genizah load_page state update block).
         self.current_p_num = page_data.get('p_num')
         self.current_internal_idx = page_data.get('internal_index')
         total = page_data.get('total_pages', 0)
+        # current_idx is 1-based ordinal in the sorted page list (dense).
+        # Used ONLY for prev/next enabled state — NOT for spinbox display.
         cur_idx = page_data.get('current_idx', 1)
+        # max_p_num is the highest physical page number in the index — used to
+        # set the spinbox upper bound so the user sees a meaningful range.
+        max_p_num = page_data.get('max_p_num') or max(self.current_p_num or 1, total)
 
         # Prepare text + apply highlight markers (mirror Genizah render path).
         text = page_data.get('text', '') or ''
@@ -2372,7 +2408,7 @@ class ResultDialog(QDialog):
         # self._htmlify HTML-escapes the text (Codex HIGH #4 closure — same
         # escape path the Genizah render uses; raw `<`, `&` in file content
         # cannot inject markup).
-        # PINNED: self.text_ms is the text widget (line 2066, 2258 Genizah path).
+        # PINNED: self.text_ms is the text widget.
         # DO NOT use setHtml — bypasses the gutter helper.
         apply_line_numbered_text(
             self.text_ms,
@@ -2383,31 +2419,39 @@ class ResultDialog(QDialog):
         self._refresh_find_highlights()
         self._scroll_to_first_highlight(self.text_ms, pattern_str)
 
-        # Update spin_page + lbl_total (PINNED).
+        # Item 4: spinbox displays p_num (physical page), NOT cur_idx (ordinal).
+        # Spinbox max is set from max_p_num so the user sees a sensible upper
+        # bound even when pages are sparse (e.g., PDF p_num=1552, total=1529).
         self.spin_page.blockSignals(True)
-        self.spin_page.setValue(cur_idx)
-        self.spin_page.setMaximum(max(total, 1))
+        self.spin_page.setValue(self.current_p_num)
+        self.spin_page.setMaximum(max(max_p_num, self.current_p_num or 1))
         self.spin_page.blockSignals(False)
         self.lbl_total.setText(f"/ {total}")
 
-        # Update prev/next button enabled states (PINNED).
-        self.btn_compact_pg_prev.setEnabled(cur_idx > 1)
-        self.btn_compact_pg_next.setEnabled(cur_idx < total)
+        # Item 4+6: update BOTH full-size and compact prev/next buttons.
+        # cur_idx is the 1-based position in the sorted indexed page list; it is
+        # correct for boundary detection regardless of p_num sparseness.
+        self._set_local_page_nav_enabled(prev=(cur_idx > 1), nxt=(cur_idx < total))
 
         # Sync compact bar page label if present (mirrors Genizah path).
         if hasattr(self, 'lbl_compact_page') and self.compact_bar.isVisible():
-            self.lbl_compact_page.setText(f"{cur_idx} {self.lbl_total.text()}")
+            self.lbl_compact_page.setText(f"{self.current_p_num} {self.lbl_total.text()}")
 
-        # Phase 96 bug #3 fix: set focus on spin_page after loading a LOCAL hit.
-        # Without this the dialog opens with btn_res_prev focused (first button),
-        # and pressing Enter after typing a page number fires Prev Result instead
-        # of spin_page.editingFinished. autoDefault=False (set in __init__) stops
-        # Enter from triggering btn_res_prev when spin_page is focused. Combined
-        # these two changes make the spinner behave intuitively for LOCAL files.
-        try:
-            self.spin_page.setFocus()
-        except Exception:
-            pass
+    def _set_local_page_nav_enabled(self, prev=None, nxt=None):
+        """Item 6 (Codex): shared update path for BOTH full-size and compact nav buttons.
+
+        Calling convention: pass True/False to set, None to leave unchanged.
+        Updates self.btn_pg_prev / self.btn_pg_next (full-size header nav, Item 6)
+        AND self.btn_compact_pg_prev / self.btn_compact_pg_next (compact bar).
+        Having a single helper prevents the compact-only bug where the full-size
+        buttons were never updated in LOCAL state.
+        """
+        if prev is not None:
+            self.btn_pg_prev.setEnabled(prev)
+            self.btn_compact_pg_prev.setEnabled(prev)
+        if nxt is not None:
+            self.btn_pg_next.setEnabled(nxt)
+            self.btn_compact_pg_next.setEnabled(nxt)
 
     def _update_rd_domain_label(self):
         """Update domain info label and printed badge for the current result in ResultDialog."""

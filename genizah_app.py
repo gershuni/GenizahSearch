@@ -6828,7 +6828,11 @@ class GenizahGUI(QMainWindow):
         # Phase 96 NEW-2: LOCAL-only per-page navigation widgets in Browse panel.
         # Hidden until a LOCAL sys_id is loaded; shown by _show_local_browse_controls().
         # W12 closure: these widgets did NOT exist before this plan — created here.
-        self.btn_local_browse_prev = QPushButton(tr("◀ Prev"))
+        # Browse i18n (Codex C): compose from atomic translation keys so that both
+        # the arrow character and the translated word appear correctly in all UI
+        # languages. "◀ Prev" / "Next ▶" were missing from genizah_translations.py;
+        # composing from "Previous" / "Next" (which ARE translated) is safer.
+        self.btn_local_browse_prev = QPushButton(f"◄ {tr('Previous')}")
         self.btn_local_browse_prev.setToolTip(tr("Previous page/chunk in LOCAL file"))
         self.btn_local_browse_prev.setVisible(False)
         self.btn_local_browse_prev.clicked.connect(
@@ -6842,7 +6846,7 @@ class GenizahGUI(QMainWindow):
         self.lbl_local_browse_page.setVisible(False)
         nav_bar.addWidget(self.lbl_local_browse_page)
 
-        self.btn_local_browse_next = QPushButton(tr("Next ▶"))
+        self.btn_local_browse_next = QPushButton(f"{tr('Next')} ►")
         self.btn_local_browse_next.setToolTip(tr("Next page/chunk in LOCAL file"))
         self.btn_local_browse_next.setVisible(False)
         self.btn_local_browse_next.clicked.connect(
@@ -6850,9 +6854,9 @@ class GenizahGUI(QMainWindow):
         )
         nav_bar.addWidget(self.btn_local_browse_next)
 
-        self.btn_local_browse_view_toggle = QPushButton(
-            tr("הכל") if CURRENT_LANG == 'he' else tr("View All")
-        )
+        # Browse i18n (Codex C): use English key "View All" (translates to "הכל")
+        # instead of a raw Hebrew literal so the tr() lookup path is consistent.
+        self.btn_local_browse_view_toggle = QPushButton(tr("View All"))
         self.btn_local_browse_view_toggle.setToolTip(
             tr("Toggle between Per-Page and View All modes")
         )
@@ -18832,11 +18836,11 @@ class GenizahGUI(QMainWindow):
             pass
 
         # 9. Show LOCAL nav controls; update toggle label to reflect 'all' mode.
+        # Browse i18n (Codex C): use English key "Per page" — tr() resolves to
+        # "לדף" in Hebrew mode. No raw Hebrew literal.
         self._show_local_browse_controls(True)
         try:
-            self.btn_local_browse_view_toggle.setText(
-                tr("דף") if CURRENT_LANG == 'he' else tr("Per page")
-            )
+            self.btn_local_browse_view_toggle.setText(tr("Per page"))
         except Exception:
             pass
 
@@ -18934,16 +18938,16 @@ class GenizahGUI(QMainWindow):
         total = page_data.get('total_pages', 1)
 
         # Detect PDF vs DOCX/TXT for label.
+        # Browse i18n (Codex C): use tr() English keys ("Page"/"Chunk") instead
+        # of raw Hebrew literals ('דף'/'מקטע'). Both keys are in the translations
+        # dict; the runtime tr() call returns the right language string at call time.
         is_pdf = False
         try:
             fp = self._lookup_local_filepath(sys_id) or ""
             is_pdf = fp.lower().endswith('.pdf')
         except Exception:
             pass
-        if CURRENT_LANG == 'he':
-            unit_word = 'דף' if is_pdf else 'מקטע'
-        else:
-            unit_word = 'page' if is_pdf else 'chunk'
+        unit_word = tr("Page") if is_pdf else tr("Chunk")
 
         # Codex HIGH #4 closure: HTML-escape the raw file content BEFORE building
         # the rendered HTML. `<`, `&`, `>` in user files cannot inject markup.
@@ -18970,8 +18974,12 @@ class GenizahGUI(QMainWindow):
         self._local_browse_current_p_num = page_data.get('p_num')
 
         # Update LOCAL nav UI labels.
+        # lbl_local_browse_page shows p_num (physical page) not cur (ordinal index).
+        # cur is still used for prev/next boundary detection (correct: it is the
+        # 1-based position in the dense sorted page list, 1=first, total=last).
+        p_num_display = page_data.get('p_num', cur)
         try:
-            self.lbl_local_browse_page.setText(f"{unit_word} {cur} / {total}")
+            self.lbl_local_browse_page.setText(f"{unit_word} {p_num_display} / {total}")
         except Exception:
             pass
         try:
@@ -18982,11 +18990,11 @@ class GenizahGUI(QMainWindow):
 
         # Show the LOCAL controls + toggle label reflects 'per_page' mode
         # (clicking the toggle button will switch to view-all).
+        # Browse i18n (Codex C): use English key "View All" — tr() resolves to
+        # "הכל" in Hebrew mode; no raw Hebrew literal needed.
         self._show_local_browse_controls(True)
         try:
-            self.btn_local_browse_view_toggle.setText(
-                tr("הכל") if CURRENT_LANG == 'he' else tr("View All")
-            )
+            self.btn_local_browse_view_toggle.setText(tr("View All"))
         except Exception:
             pass
 
@@ -19025,7 +19033,7 @@ class GenizahGUI(QMainWindow):
             import html as _html_mod2
             self.browse_info_lbl.setText(
                 f"<b>{_html_mod2.escape(basename)}</b> ({tr('Local file')})"
-                f" — {unit_word} {cur}/{total}"
+                f" — {unit_word} {p_num_display}/{total}"
             )
         except Exception:
             pass
