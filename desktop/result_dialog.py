@@ -1949,8 +1949,22 @@ class ResultDialog(QDialog):
         os.startfile(filepath)  # Windows-native
 
     def _htmlify(self, text):
+        """Convert plain LOCAL file text to safe HTML for QTextBrowser.
+
+        Phase 96 fix-7 (Codex P1.3): HTML-escape raw file content BEFORE
+        applying newline→<br> and *...*→<b> substitutions, matching the
+        Browse panel pattern in _open_local_browse_page.  Raw `<`, `>`, `&`
+        in user files can no longer inject markup into ResultDialog.
+        """
         if not text: return ""
-        t = text.replace("\n", "<br>")
+        import html as _html_mod
+        # 1. Escape raw file content so `<`, `>`, `&` become entities.
+        t = _html_mod.escape(text)
+        # 2. Convert newlines to <br> (safe — content is already escaped).
+        t = t.replace("\n", "<br>")
+        # 3. Apply *...*  → <b> highlighting (markers placed by regex before
+        #    this call; they are unaffected by step 1 because `*` has no HTML
+        #    special meaning and escape() leaves it unchanged).
         t = re.sub(r'\*(.*?)\*', r"<b style='color:red;'>\1</b>", t)
         return f"<div dir='rtl'>{t}</div>"
 

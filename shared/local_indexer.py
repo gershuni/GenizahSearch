@@ -865,9 +865,15 @@ class LocalIndexer:
                     result["errors"] += 1
 
                 if self._file_finished_cb:
-                    self._file_finished_cb(
-                        os.path.basename(filepath), status, pages, ""
-                    )
+                    # Phase 96 fix-7 (Codex P1.2): emit canonical filepath so
+                    # update_file_status can do an exact dict lookup — basename
+                    # alone was ambiguous when two folders contain same filename.
+                    try:
+                        from shared.local_sys_id import _canonical_filepath
+                        cb_path = _canonical_filepath(filepath)
+                    except Exception:
+                        cb_path = filepath
+                    self._file_finished_cb(cb_path, status, pages, "")
 
                 # Batch commit boundary
                 if len(self._pending_filepaths) >= _COMMIT_BATCH_SIZE:
