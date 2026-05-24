@@ -229,7 +229,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: improved Excel downloads and transcription line numbers."))
+        self.lbl_msg.setText(tr("New: My Library — index your own documents and search them alongside the Genizah corpus."))
         self.show()
 
     def on_learn_more(self):
@@ -263,9 +263,9 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("Excel downloads are now a 4-sheet research workbook: Search Results, Manuscripts, Bibliography, and Credits and Info. Includes full text plus links to library viewers and images."),
-            tr("Line numbering in transcriptions: when viewing a manuscript, line numbers appear beside the text. Toggle via the '# Lines' button."),
-            tr("Bug fix: when merging lists between the website and the desktop app, items no longer duplicate in the desktop app. Pre-existing duplicates from past syncs clean up automatically on the next sync."),
+            tr("My Library: new desktop tab that indexes your own .docx, .pdf, and .txt files into a private side-index. Your documents never leave your machine."),
+            tr("Scope your search two ways: pre-search dropdown (Genizah / Local / All) next to the Search button, and post-search filter (Filter Local / Only Local / No Local) on Search, Composition Search, and Parallels."),
+            tr("LOCAL hits show inline with a blue badge. Double-click opens the text with an Open File button. Inspired by Yehuda Seewald's GenizahLocal prototype."),
         ]
         align = 'right' if is_heb else 'left'
         dir_attr = "rtl" if is_heb else "ltr"

@@ -18,7 +18,6 @@ Tests that LocalIndexer._commit_writer_with_retry:
 from __future__ import annotations
 
 import os
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest

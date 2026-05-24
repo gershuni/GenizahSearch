@@ -15,7 +15,7 @@ import pytest
 
 try:
     from PyQt6.QtWidgets import QApplication, QWidget, QMessageBox
-    from PyQt6.QtCore import Qt
+    from PyQt6.QtCore import Qt  # noqa: F401  (imported to verify PyQt6 availability)
 
     _app = QApplication.instance() or QApplication(sys.argv)
     QT_AVAILABLE = True

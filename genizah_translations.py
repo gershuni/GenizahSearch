@@ -3133,6 +3133,13 @@ TRANSLATIONS = {
     'New: Search within results, exclude known manuscripts from search, and Visual Similarity — browse and search similar manuscripts using FJMS visual analysis.': 'חדש: חיפוש בתוך תוצאות, החרגת כתבי יד מוכרים מהחיפוש, ודמיון חזותי - עיון וחיפוש בכתבי יד דומים לפי האלגוריתם החזותי של פרויקט פרידברג',
     'New: Browse different volumes in multi-scan manuscripts — fixes image-to-text mismatch, and Visual Similarity suggestions for discovering related manuscripts.': 'חדש: עיון בכרכים שונים בכתבי יד מרובי סריקות — תיקון התאמת תמונות לתעתוק, והצעות דמיון חזותי לגילוי כתבי יד קשורים.',
     'New: Public Search API — programmatic access to search, browse, and parallels for researchers and AI tools. See the API section in the README.': 'חדש: ממשק API ציבורי — גישה פרוגרמטית לחיפוש, עיון, והקבלות לחוקרים ולכלי AI. ראו את חלק ה-API בקובץ README.',
+    # v7.14.0 What's New (My Library — Local Document Search) — web banner
+    'New feature in desktop app: My Library — index your own .docx / .pdf / .txt files and search them alongside the Genizah corpus': 'חדש בגרסת שולחן העבודה: הספרייה שלי — סרקו קבצי .docx / .pdf / .txt משלכם וחפשו בהם לצד תעתיקי הגניזה',
+    # v7.14.0 What's New — desktop bar + dialog
+    'New: My Library — index your own documents and search them alongside the Genizah corpus.': 'חדש: הספרייה שלי — סרקו את המסמכים שלכם וחפשו בהם לצד תעתיקי הגניזה.',
+    "My Library: new desktop tab that indexes your own .docx, .pdf, and .txt files into a private side-index. Your documents never leave your machine.": 'הספרייה שלי: לשונית חדשה הסורקת קבצי .docx, .pdf ו־.txt משלכם לאינדקס פרטי. המסמכים נשארים אצלכם במחשב.',
+    "Scope your search two ways: pre-search dropdown (Genizah / Local / All) next to the Search button, and post-search filter (Filter Local / Only Local / No Local) on Search, Composition Search, and Parallels.": 'שתי דרכים להגדיר היכן לחפש: תפריט נפתח לצד כפתור החיפוש (גניזה / מקומי / הכול) וכפתור סינון אחרי החיפוש (סנן מקומי / רק מקומי / ללא מקומי) בכרטיסיות החיפוש, הצירופים והמקבילות.',
+    "LOCAL hits show inline with a blue badge. Double-click opens the text with an Open File button. Inspired by Yehuda Seewald's GenizahLocal prototype.": 'תוצאות מקומיות מופיעות עם תג כחול. לחיצה כפולה פותחת את הטקסט עם כפתור "פתח קובץ". בהשראת אב-טיפוס GenizahLocal של יהודה זייבלד.',
     # v7.13.0 What's New (Research-Grade Export & Polish)
     'New: improved Excel downloads, transcription line numbers, PGP filter': 'חדש: הורדות אקסל משופרות, מספור שורות בתעתיקים, סינון לפי PGP',
     # v7.9.2 What's New (PGP data refresh)

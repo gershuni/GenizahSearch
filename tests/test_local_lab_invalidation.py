@@ -609,7 +609,7 @@ class TestCR02LabEngineHasLocalLabHook:
         """LabEngine __init__ must set local_lab_searcher, _local_lab_index,
         _lab_local_meta, local_lab_searcher_stale."""
         try:
-            from genizah_core import LabEngine
+            from genizah_core import LabEngine  # noqa: F401  (imported to verify availability; used via AST inspection below)
         except ImportError:
             pytest.skip("genizah_core not importable")
 

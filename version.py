@@ -1,3 +1,3 @@
 """Centralized version definition for the Genizah Search Pro application."""
 
-APP_VERSION = "7.13.0"
+APP_VERSION = "7.14.0"

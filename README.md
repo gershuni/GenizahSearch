@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.13.0
+# Genizah Search Pro 7.14.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,31 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.13.0?
+## What's New in Version 7.14.0?
+
+### v7.14.0: My Library — Local Document Search
+
+The desktop app adds **My Library**, a new 7th tab that indexes
+folders of your own `.docx`, `.pdf`, and `.txt` documents into a
+separate side-index and surfaces them inline in Search, Composition
+Search, and Parallels alongside the Cairo Genizah corpus. Personal
+corpora stay on your machine — three regression tests pin the
+cloud-write boundaries.
+
+**Scoping a query is now explicit:** a pre-search dropdown next to
+the Search button picks `Genizah` / `Local` / `ALL` (Hebrew
+`גניזה / מקומי / הכול`, default `Genizah`); a post-search 3-state
+button (`Filter Local → Only Local → No Local`) mirrors the existing
+PGP and Printed filters on Search, Composition Search, and
+Parallels. LOCAL hits carry a blue `LOCAL` badge; double-click
+opens the file text in ResultDialog with a blue **Open file**
+button that launches the document with your OS default app.
+
+**Technical notes:** PyMuPDF (`fitz`) is now a desktop dependency
+for PDF extraction (~25 MB installer growth). LOCAL hits merge via
+reciprocal rank fusion (k=60) *after* deduplication. All 28 new UI
+strings translate to Hebrew. Inspired by Yehuda Seewald's
+`GenizahLocal` prototype.
 
 ### v7.13.0: Research-Grade Export & Polish
 
@@ -302,7 +326,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.13.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.14.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

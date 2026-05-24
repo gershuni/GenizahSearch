@@ -6,37 +6,66 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
-### v7.14 — My Library (Phase 95)
+---
 
-Desktop-only first-class feature: index your own `.docx` / `.pdf` / `.txt`
-files into a separate Tantivy side-index that surfaces inline in normal
-Search, Composition Search, and Parallels results with a clear `LOCAL` badge
-and a three-state filter (`All` / `Only Local` / `No Local`). Personal corpora
-never leave the device: three regression tests pin the cloud-write boundaries
-(`/api/search` serializer, `lists_sync.sync_item_to_cloud`, corrections
-submit).
+## [7.14.0] - My Library: Local Document Search - 2026-05-24
 
-New tab: **My Library** (7th tab, desktop). Multi-folder management; per-file
-status panel; cancellation responsive mid-file; 5,000 files / 2 GB scale
-ceiling with pre-scan dialog. Auto-rescan at app start.
+### v7.14.0 — My Library (Phase 95)
 
-PyMuPDF (`fitz`) is now a desktop dependency for PDF extraction. Installer
-size grows by ~25 MB. The `GenizahSearchPro.spec` now includes
-`collect_all('pymupdf')` and a Hebrew PDF fixture for packaging smoke.
-Headless `--self-test-pymupdf` CLI flag validates PyMuPDF binary bundling
-without launching the Qt event loop.
+Desktop adds **My Library** — a 7th tab that indexes your own
+`.docx` / `.pdf` / `.txt` folders into a separate Tantivy
+side-index merged inline into Search, Composition Search, and
+Parallels with a blue `LOCAL` badge. Personal corpora never leave
+the device: three regression tests pin the cloud-write boundaries
+(API search, lists sync, corrections submit — gates at the TOP of
+each function per Codex D-30 P0).
 
-`shared/export_dossier.py` row builders gain `skip_local` kwarg: desktop
-exports include LOCAL rows; web exports exclude them (defense-in-depth).
-Static AST guard `tests/test_web_library_options_no_local.py` pins the
-web LIBRARY_CODES invariant (no LOCAL entry in web library-filter dropdowns).
+### New Features (desktop)
 
-Help page (web + desktop) and About dialog (both apps) updated with My Library
-section (bilingual EN + HE), D-33 cleartext-on-disk disclosure, and D-32
-Seewald attribution.
+- **My Library tab** with multi-folder management, per-file status,
+  mid-scan cancel, and a 5,000-file / 2 GB pre-scan ceiling
+- **Pre-search corpus dropdown** (`Genizah` / `Local` / `ALL`,
+  default `Genizah`) next to the Search button
+- **Post-search 3-state LOCAL filter** on Search, Composition, and
+  Parallels surfaces
+- **Double-click LOCAL hit** → `ResultDialog` with text + blue
+  **Open file** button (`os.startfile`); Browse tab also supports
+  LOCAL text via "View in Browse"
+- LOCAL `Library` column shows `parent/folder`; `Shelfmark` column
+  shows the filename
 
-Inspired by Yehuda Seewald's external GenizahLocal prototype. Credit in About
-+ Help.
+### Improvements
+
+- RRF k=60 merge *after* `_deduplicate()` (Codex D-08 P0) — LOCAL is
+  never silently dropped
+- Per-thread SQLite via `threading.local()` (no
+  `check_same_thread=False`)
+- Tantivy writer retry with exponential backoff on Windows `os error 5`
+- D-37 corrupt-index fallback (search continues Genizah-only on LOCAL
+  index open failure)
+- 28 new Hebrew translations for MyLibraryTab UI strings
+
+### Documentation & Packaging
+
+- Help (web + desktop) + About (both) gain bilingual My Library
+  section with D-33 cleartext-on-disk disclosure
+- About credits Yehuda Seewald's `GenizahLocal` prototype in the
+  contributors paragraph (EN + HE; HE spelling: יהודה זייבלד)
+- PyMuPDF (`fitz`) added as desktop dep (~25 MB installer growth);
+  `collect_all('pymupdf')` in `.spec` + `--self-test-pymupdf` smoke
+- `shared/export_dossier.py` `skip_local` kwarg: desktop xlsx
+  includes LOCAL, web xlsx excludes
+- Static AST guard `tests/test_web_library_options_no_local.py`
+  pins web LIBRARY_CODES invariant
+
+### Deferred to v7.15+ (`docs/OPEN_ISSUES.md`)
+
+D-F1 folder drill-down with file checkboxes · D-F2 PDF OCR ·
+D-F3 side-by-side PDF page rendering · D-F4 PDF extraction quality
+audit (one-word-per-line manifestation) · D-F5 LOCAL search-term
+highlighting
+
+Inspired by Yehuda Seewald's external GenizahLocal prototype. (both)
 
 ---
 

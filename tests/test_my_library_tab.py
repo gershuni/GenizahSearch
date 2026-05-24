@@ -8,7 +8,6 @@ display are skipped with pytest.mark.skip / DISPLAY guard.
 from __future__ import annotations
 
 import sys
-import types
 import unittest.mock as mock
 
 import pytest
@@ -84,7 +83,6 @@ def test_my_library_tab_has_folder_list_widget():
     from desktop.my_library_tab import MyLibraryTab
     from PyQt6.QtWidgets import (
         QListWidget,
-        QPushButton,
         QProgressBar,
         QTableWidget,
     )
@@ -136,7 +134,6 @@ def test_task2_genizah_app_registration():
 
     AST-level check (no import of genizah_app which would trigger heavy startup).
     """
-    import ast
 
     with open("genizah_app.py", encoding="utf-8") as f:
         source = f.read()
@@ -181,7 +178,6 @@ def test_reload_local_indexes_called_after_worker_finished():
 def test_reload_local_indexes_called_after_remove_folder():
     """HIGH-1: _on_remove_folder_clicked calls search_engine.reload_local_indexes()."""
     from desktop.my_library_tab import MyLibraryTab
-    from PyQt6.QtCore import Qt
 
     mock_searcher = mock.MagicMock()
     parent = _make_mock_parent(searcher=mock_searcher)

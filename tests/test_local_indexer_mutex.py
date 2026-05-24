@@ -24,7 +24,7 @@ import pytest
 
 try:
     from PyQt6.QtWidgets import QApplication, QWidget
-    from PyQt6.QtCore import QMutex
+    from PyQt6.QtCore import QMutex  # noqa: F401  (imported to verify PyQt6 availability)
 
     _app = QApplication.instance() or QApplication(sys.argv)
     QT_AVAILABLE = True
@@ -89,7 +89,6 @@ def test_concurrent_refresh_no_interleave():
     - A second Refresh while worker is running is queued (not dropped silently)
     - A third Refresh collapses into the queue (max depth 1)
     """
-    from desktop.my_library_tab import MyLibraryTab
 
     mock_idx = _make_mock_indexer()
     tab = _make_tab(mock_idx)
@@ -296,7 +295,6 @@ def test_each_thread_gets_independent_connection():
     This confirms the thread-local mechanism is actually creating separate
     connections rather than sharing a single one.
     """
-    from shared.local_indexer import LocalIndexer
 
     indexer, tmp = _make_tmp_indexer()
 
