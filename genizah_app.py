@@ -18757,18 +18757,51 @@ class GenizahGUI(QMainWindow):
         # 1. Filepath lookup (for the Open File button + diagnostics).
         filepath = self._lookup_local_filepath(sys_id)
 
-        # 2. Aggregate all pages (uses _aggregate_local_pages_with_separators via
-        #    _get_local_full_text_for_sys_id — format+lang-aware separators from Task 2a).
-        # Phase 96 polish (Item 3): also keep the raw page list so the gutter can
-        # restart line numbers at 1 per page and skip separator lines.
+        # 2. Gather raw pages (sorted by p_num).
+        # Phase 96 polish fix6: keep the raw list separate from the aggregated text
+        # so we can build per-page <p> blocks for the gutter per-page restart fix.
         _raw_pages = self._get_local_pages_for_sys_id(sys_id)
-        text = self._get_local_full_text_for_sys_id(sys_id)
-        if not text:
-            text = tr(
-                "Indexed LOCAL file — no extracted text available. "
-                "Use 'Open file' to view the original."
-            )
-            _raw_pages = []  # no pages to pass when showing placeholder
+
+        # Fix 2 (iter-6): large-file guard — aggregating > 200 pages on the main
+        # thread freezes the UI.  Show a warning dialog and let the user choose to
+        # proceed with the first 200 pages or cancel back to per-page mode.
+        _VIEW_ALL_PAGE_CAP = 200
+        if len(_raw_pages) > _VIEW_ALL_PAGE_CAP:
+            total_pages = len(_raw_pages)
+            msg = tr("This file has {n} pages. Viewing all at once may freeze the window.").format(n=total_pages)
+            detail = tr("Show first {cap} pages").format(cap=_VIEW_ALL_PAGE_CAP)
+            from PyQt6.QtWidgets import QMessageBox
+            mb = QMessageBox(self)
+            mb.setWindowTitle(tr("Large file"))
+            mb.setText(msg)
+            mb.setIcon(QMessageBox.Icon.Warning)
+            btn_first = mb.addButton(detail, QMessageBox.ButtonRole.AcceptRole)
+            btn_cancel = mb.addButton(tr("Cancel"), QMessageBox.ButtonRole.RejectRole)
+            mb.setDefaultButton(btn_first)
+            mb.exec()
+            if mb.clickedButton() == btn_cancel:
+                # User cancelled — flip back to per-page mode and render page 1.
+                self._local_browse_view_mode = 'per_page'
+                try:
+                    if hasattr(self, 'btn_b_all'):
+                        self.btn_b_all.setText(tr("View All"))
+                        self.btn_b_all.blockSignals(True)
+                        self.btn_b_all.setChecked(False)
+                        self.btn_b_all.blockSignals(False)
+                except Exception:
+                    pass
+                return self._open_local_browse_page(sys_id, p_num=initial_p, hit_data=res)
+            # User chose "Show first N pages".
+            _raw_pages = _raw_pages[:_VIEW_ALL_PAGE_CAP]
+
+        # Determine label type (PDF → "page", DOCX/TXT → "chunk").
+        is_pdf = False
+        try:
+            fp = self._lookup_local_filepath(sys_id) or ""
+            is_pdf = fp.lower().endswith('.pdf')
+        except Exception:
+            pass
+        lang = CURRENT_LANG if CURRENT_LANG in ('he', 'en') else 'en'
 
         # 3. Populate Browse panel state.
         self.current_browse_sid = sys_id
@@ -18798,30 +18831,76 @@ class GenizahGUI(QMainWindow):
             self.browse_open_file_btn.setEnabled(bool(filepath))
 
         # 7. Render the text via the same gutter helper Genizah pages use.
-        # Codex HIGH #4 closure: HTML-escape raw file content before <br> replace.
-        # Phase 96 polish (Item 3): pass pages= so the gutter enters per-page mode:
-        #   - line numbers restart at 1 at the start of each page/chunk
-        #   - separator lines ("— page N —") are tagged userState=-1 → no number
+        # Fix 1 (iter-6): per-page line restart — root cause of the previous
+        # failure: rendering the whole text as one <div dir='rtl'>...<br>...</div>
+        # produced a SINGLE QTextBlock.  _mark_blocks_for_pages tried to match
+        # individual page texts against that one block (which contains everything),
+        # so every block got userState=-1 (separator) and NO lines were numbered.
+        #
+        # Fix: build the HTML with one <p>...</p> per page using <br> within each
+        # page for intra-page line breaks.  Qt renders each <p> as a separate
+        # QTextBlock, so _mark_blocks_for_pages can match page N's block against
+        # norm_pages[N] and the separator lines also become their own blocks
+        # (tagged -1 → no number).
         import html as _html_mod
         try:
-            escaped = _html_mod.escape(text)
-            browse_html = escaped.replace("\n", "<br>")
-            # pages= expects a list of raw text strings (one per page/chunk).
-            # _raw_pages is [(p_num, text), ...]; pass the text-only list when
-            # there are multiple pages so the gutter does per-page restart.
-            # For a single page or fallback placeholder, omit pages= (legacy mode).
-            _page_texts = [t for _, t in _raw_pages if t] if len(_raw_pages) > 1 else None
-            apply_line_numbered_text(
-                self.browse_text,
-                f"<div dir='rtl'>{browse_html}</div>",
-                source_text=text,
-                pages=_page_texts,
-                is_html=True,
-            )
+            if _raw_pages:
+                if lang == 'he':
+                    sep_label = 'דף' if is_pdf else 'מקטע'
+                else:
+                    sep_label = 'page' if is_pdf else 'chunk'
+
+                # Build one <p> per page (intra-page newlines → <br>).
+                # Insert a <p>— page/chunk N —</p> separator between pages.
+                # Collect the raw page texts in the same order for the gutter.
+                _page_texts = []
+                html_parts = []
+                for idx, (p_num, page_text) in enumerate(_raw_pages):
+                    if not page_text:
+                        continue
+                    if html_parts:
+                        # Separator block between pages.
+                        sep_escaped = _html_mod.escape(f"— {sep_label} {p_num} —")
+                        html_parts.append(f"<p>{sep_escaped}</p>")
+                    page_escaped = _html_mod.escape(page_text).replace("\n", "<br>")
+                    html_parts.append(f"<p>{page_escaped}</p>")
+                    _page_texts.append(page_text)
+
+                browse_html = "".join(html_parts)
+                # pages= list drives per-page mode in the gutter painter:
+                #   - blocks matching a page text → state = page index (restart line no.)
+                #   - separator blocks → state = -1 (no number)
+                # Only pass pages= when there are multiple pages; single-page files
+                # use legacy continuous-numbering mode.
+                pages_arg = _page_texts if len(_page_texts) > 1 else None
+                apply_line_numbered_text(
+                    self.browse_text,
+                    f"<div dir='rtl'>{browse_html}</div>",
+                    source_text=None,
+                    pages=pages_arg,
+                    is_html=True,
+                )
+            else:
+                # No extracted text — show placeholder in legacy mode.
+                placeholder = tr(
+                    "Indexed LOCAL file — no extracted text available. "
+                    "Use 'Open file' to view the original."
+                )
+                apply_line_numbered_text(
+                    self.browse_text,
+                    f"<div dir='rtl'>{_html_mod.escape(placeholder)}</div>",
+                    source_text=placeholder,
+                    pages=None,
+                    is_html=True,
+                )
         except Exception as exc:  # noqa: BLE001
             logger.warning("_open_local_browse (view-all): apply_line_numbered_text failed: %s", exc)
             try:
-                self.browse_text.setPlainText(text)
+                fallback_text = "\n\n".join(t for _, t in _raw_pages if t) or tr(
+                    "Indexed LOCAL file — no extracted text available. "
+                    "Use 'Open file' to view the original."
+                )
+                self.browse_text.setPlainText(fallback_text)
             except Exception:
                 pass
 
