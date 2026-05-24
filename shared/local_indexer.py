@@ -143,6 +143,50 @@ def _join_fragmented_lines(text: str) -> str:  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
+# Phase 96 D-F4: detect pathological one-word-per-line PDF extraction
+# ---------------------------------------------------------------------------
+# This is the LIVE detection used by extract_pdf_pages (NOT dead code, unlike
+# its dead-code cousin _join_fragmented_lines above). We use 0.70 (vs the
+# dead-code's 0.60) per RESEARCH §2 — more conservative threshold preserves
+# documents with legitimate one-word paragraphs (chapter numbers, table cells).
+
+_SINGLE_WORD_RATIO_THRESHOLD = 0.70  # Phase 96 D-F4, RESEARCH §2
+_SINGLE_WORD_MIN_SAMPLE = 5          # below this, do not trigger detection
+
+
+def _detect_single_word_per_line(text: str) -> bool:
+    """Phase 96 D-F4: return True if `text` looks like pathological
+    one-word-per-line output from PyMuPDF's `get_text("blocks")` mode.
+
+    Heuristic:
+      - split on newlines, keep non-empty lines after .strip()
+      - if fewer than 5 non-empty lines: return False (small-sample guard;
+        could be a title page or table cell)
+      - compute single_word_ratio = (# lines with <= 1 word) / (# non-empty lines)
+      - return True iff ratio >= 0.70
+
+    Examples:
+        >>> _detect_single_word_per_line("")
+        False
+        >>> _detect_single_word_per_line("one\\ntwo\\nthree\\nfour\\n")
+        False
+        >>> _detect_single_word_per_line("one\\ntwo\\nthree\\nfour\\nfive\\nsix\\n")
+        True
+        >>> _detect_single_word_per_line("the quick brown fox\\njumps over the\\nlazy dog under\\nthe bright morning\\nsun rises\\nslowly today")
+        False
+    """
+    if not text:
+        return False
+    lines = text.splitlines()
+    non_empty = [ln for ln in lines if ln.strip()]
+    if len(non_empty) < _SINGLE_WORD_MIN_SAMPLE:
+        return False
+    single = sum(1 for ln in non_empty if len(ln.split()) <= 1)
+    ratio = single / len(non_empty)
+    return ratio >= _SINGLE_WORD_RATIO_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
 # Schema builders
 # ---------------------------------------------------------------------------
 
