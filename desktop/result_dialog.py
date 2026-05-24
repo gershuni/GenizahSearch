@@ -213,6 +213,11 @@ class ResultDialog(QDialog):
         meta_col = QVBoxLayout(); meta_col.setAlignment(Qt.AlignmentFlag.AlignTop); meta_col.setSpacing(4)
         
         self.lbl_shelf = QLabel(); self.lbl_shelf.setFont(QFont("Arial", 16, QFont.Weight.Bold)); self.lbl_shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # Phase 96 polish: file-path label shown ONLY for LOCAL hits (folder / filename).
+        self.lbl_local_file_path = QLabel()
+        self.lbl_local_file_path.setStyleSheet("font-size: 11px; color: #2980b9; font-style: italic;")
+        self.lbl_local_file_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.lbl_local_file_path.setVisible(False)
         self.lbl_title = QLabel(); self.lbl_title.setFont(QFont("Arial", 14)); self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft); self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         # Controls Row
@@ -451,7 +456,7 @@ class ResultDialog(QDialog):
         self.txt_extended_info.setOpenLinks(False)
         self.txt_extended_info.anchorClicked.connect(self._on_rd_ext_link_clicked)
 
-        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row)
+        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_local_file_path); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row)
 
         # Thumbnail (kept as hidden dummy for compatibility with existing methods)
         self.lbl_thumb = QLabel()
@@ -2004,7 +2009,34 @@ class ResultDialog(QDialog):
                 self.btn_rd_open_file.setVisible(False)
         except Exception:
             self._rd_local_filepath = None
+            _is_local_hit = False
             self.btn_rd_open_file.setVisible(False)
+
+        # Phase 96 polish (Item 1): show LOCAL file path prominently under shelfmark.
+        # Uses hit['display']['shelfmark'] which _build_local_result_dict sets to the
+        # canonical filepath for LOCAL hits. Falls back to _rd_local_filepath.
+        try:
+            if _is_local_hit:
+                _display = data.get('display', {}) or {}
+                _local_path = (
+                    _display.get('shelfmark') or
+                    getattr(self, '_rd_local_filepath', None) or
+                    ''
+                )
+                if _local_path:
+                    import os as _os
+                    _folder = _os.path.basename(_os.path.dirname(_local_path))
+                    _fname = _os.path.basename(_local_path)
+                    _path_text = f"{_folder}/{_fname}" if _folder else _fname
+                    self.lbl_local_file_path.setText(_path_text)
+                    self.lbl_local_file_path.setToolTip(_local_path)
+                    self.lbl_local_file_path.setVisible(True)
+                else:
+                    self.lbl_local_file_path.setVisible(False)
+            else:
+                self.lbl_local_file_path.setVisible(False)
+        except Exception:
+            self.lbl_local_file_path.setVisible(False)
 
         # Nav UI Updates
         self.lbl_res_count.setText(tr("Result {} of {}").format(idx + 1, len(self.all_results)))
