@@ -17515,13 +17515,17 @@ class GenizahGUI(QMainWindow):
         _local_state_search = getattr(self, '_local_filter_state_search', 'all')
         _results_for_local = getattr(self, 'last_results', []) or []
         _local_filtered = self._apply_local_filter(_results_for_local, _local_state_search)
+        # Phase 96 D-F1: drop user-opted-out LOCAL files from the cascade.
+        _local_filtered = self._apply_local_optout_filter(_local_filtered)
         _local_filter_active = _local_state_search != 'all'
+        # Phase 96 D-F1: visible-set must also be computed if opt-outs may have hidden hits.
+        _optout_active = bool(getattr(self, '_local_file_optouts', set()))
         _local_visible_sys_ids = {
             (r.get('display', {}) or {}).get('id') for r in _local_filtered
-        } if _local_filter_active and not self._local_filter_inactive_chip_visible else None
+        } if (_local_filter_active or _optout_active) and not self._local_filter_inactive_chip_visible else None
         self._show_local_filter_chip('search', self._local_filter_inactive_chip_visible)
 
-        if not self.results_filters and not list_active and not has_domain_exclusions and self._printed_filter_state == 'all' and not _has_meas_post and not _local_filter_active:
+        if not self.results_filters and not list_active and not has_domain_exclusions and self._printed_filter_state == 'all' and not _has_meas_post and not _local_filter_active and not _optout_active:
             for row in range(self.results_table.rowCount()):
                 self.results_table.setRowHidden(row, False)
             return
@@ -17848,14 +17852,18 @@ class GenizahGUI(QMainWindow):
         # Gather all comp_raw_items to determine LOCAL presence for no-op check (D-10 P1).
         _comp_raw = getattr(self, 'comp_raw_items', []) or []
         _local_filtered_comp = self._apply_local_filter(_comp_raw, _local_state_comp)
+        # Phase 96 D-F1: drop user-opted-out LOCAL files from the cascade.
+        _local_filtered_comp = self._apply_local_optout_filter(_local_filtered_comp)
         _local_filter_comp_active = _local_state_comp != 'all'
+        # Phase 96 D-F1: visible-set must also be computed if opt-outs may have hidden hits.
+        _optout_active_comp = bool(getattr(self, '_local_file_optouts', set()))
         _local_visible_sys_ids_comp = {
             (r.get('display', {}) or {}).get('id') or r.get('sys_id', '')
             for r in _local_filtered_comp
-        } if _local_filter_comp_active and not self._local_filter_inactive_chip_visible else None
+        } if (_local_filter_comp_active or _optout_active_comp) and not self._local_filter_inactive_chip_visible else None
         self._show_local_filter_chip(_local_chip_surface, self._local_filter_inactive_chip_visible)
 
-        if not self.comp_filters and self._comp_printed_filter_state == 'all' and not _local_filter_comp_active:
+        if not self.comp_filters and self._comp_printed_filter_state == 'all' and not _local_filter_comp_active and not _optout_active_comp:
             def unhide(node):
                 node.setHidden(False)
                 for j in range(node.childCount()):
