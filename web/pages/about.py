@@ -473,6 +473,7 @@ def _create_hebrew_content():
                 (דניאל שטוקל בן עזרא, אבי שמידמן, נחום דרשוביץ, יהודית אולשובי-שלנגר וצוות הפרויקט).
                 תודה לפרופ' משה קופל ו<a href="https://dicta.org.il/" target="_blank">דיקטה</a> על התמיכה,
                 ולאבי שמידמן, ג'וש גדליה, אלישע רוזנצווייג, אפרים מאירי, אלעזר גרשוני, איתי קגן, אלנתן חן ועדיאל ברויאר.
+                חיפוש בקבצים מקומיים (תכונת "הספרייה שלי") קיבל השראה מהאב-טיפוס GenizahLocal של יהודה זייבלד.
             </p>
             <p>
                 קישורים:
@@ -484,7 +485,7 @@ def _create_hebrew_content():
             <p style="font-style: italic; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light, #ece4d6);">
                 לזכרו של מורנו ורבנו, פרופ' מנחם כהנא ז"ל.
             </p>
-            <p>יוצר האתר: הלל גרשוני · <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a> · תכונת הספרייה שלי קיבלה השראה מהאב-טיפוס GenizahLocal של יהודה זייבלד.</p>
+            <p>יוצר האתר: הלל גרשוני · <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a></p>
         </div>
         ''')
 
@@ -662,6 +663,7 @@ def _create_english_content():
                 (Daniel Stökl Ben Ezra, Avi Shmidman, Nachum Dershowitz, Judith Olszowy-Schlanger, and team).
                 Thanks to Prof. Moshe Koppel and <a href="https://dicta.org.il/" target="_blank">Dicta</a> for their support,
                 and to Avi Shmidman, Josh Guedalia, Elisha Rosenzweig, Ephraim Meiri, Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer.
+                Searching in local files ("My Library" feature) was inspired by Yehuda Seewald GenizahLocal prototype.
             </p>
             <p>
                 Links:
@@ -673,6 +675,6 @@ def _create_english_content():
             <p style="font-style: italic; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light, #ece4d6);">
                 Dedicated to the memory of our beloved teacher, Prof. Menachem Kahana z"l.
             </p>
-            <p>Site creator: Hillel Gershuni · <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a> · The My Library feature was inspired by Yehuda Seewald's GenizahLocal prototype.</p>
+            <p>Site creator: Hillel Gershuni · <a href="mailto:gershuni@gmail.com">gershuni@gmail.com</a></p>
         </div>
         ''')

@@ -2434,6 +2434,7 @@ class SettingsDialog(QDialog):
             <p>Thanks also to Avi Shmidman, Josh Guedalia, Elisha Rosenzweig, Ephraim Meiri,
             Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer
             for their advice and support.</p>
+            <p>Searching in local files ("My Library" feature) was inspired by Yehuda Seewald GenizahLocal prototype.</p>
 
             <h3>Data Source &amp; Acknowledgments</h3>
             <p>This software is built on the transcription dataset produced by the <b>MiDRASH Project</b>.
@@ -2444,8 +2445,7 @@ class SettingsDialog(QDialog):
             Hayim Lapin, Nurit Ezer, Elena Lolli, Berat Kurar Barakat, Sharva Gogawale,
             Moshe Lavee, Vered Raziel Kretzmer, and Daria Vasyutinsky Shapira.</p>
             <p>Making such a complex and valuable dataset freely available to the public is a
-            significant step for Open Science, and I deeply appreciate their generosity.
-            The My Library feature was inspired by Yehuda Seewald's GenizahLocal prototype.</p>
+            significant step for Open Science, and I deeply appreciate their generosity.</p>
 
             <h3>License</h3>
             <p>The underlying dataset is licensed under the Creative Commons Attribution 4.0

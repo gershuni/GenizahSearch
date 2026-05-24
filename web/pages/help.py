@@ -1278,7 +1278,7 @@ def _create_hebrew_content():
 **אזהרת שינוי שם מחשב:** אם תשנו את שם המחשב שלכם, מטמון ה-SQLite מתבטל
 והסריקה הבאה מחלצת מחדש את כל הקבצים. זה נדיר; מתועד לצורך שלמות.
 
-*תכונת הספרייה שלי בהשראת אב-טיפוס GenizahLocal של יהודה זיוואלד.*
+*תכונת הספרייה שלי בהשראת אב-טיפוס GenizahLocal של יהודה זייבלד.*
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Contact ===
