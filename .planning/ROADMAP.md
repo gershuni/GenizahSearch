@@ -54,13 +54,45 @@
 
 ### Phase 96: Completing My Library feature: add features and fix bugs
 
-**Goal:** [To be planned]
-**Requirements**: TBD
-**Depends on:** Phase 95
-**Plans:** 0 plans
+**Goal:** Take Phase 95 (My Library) from "shipped MVP" (v7.14.0 public release, 2026-05-24) to "feature-complete" by closing the P1 highlight regression (D-F5), the confirmed PDF-extraction bug (D-F4), and adding the per-file opt-in/out drill-down feature (D-F1). Also remove the redundant `צפה בדפדוף` button (NEW-1) and add next/prev navigation + "View All" (הכל) for LOCAL hits in both ResultDialog and the Browse panel (NEW-2). Phase 95 invariants (RRF POST-dedup, three cloud-write gates at TOP, web LIBRARY_CODES `[]`, multitenant `[]`) preserved throughout.
+
+**Scope items (D-XX/NEW-X from CONTEXT.md — Phase 96 has no REQ-IDs):**
+- D-F5 — LOCAL highlight P1 regression (plan 96-03; engine-side via `_build_local_result_dict` normalization, Option A from RESEARCH §1)
+- D-F4 — PDF one-word-per-line extraction bug (plan 96-02; detect-then-fallback in `extract_pdf_pages`)
+- D-F1 — Per-file opt-in/out drill-down (plans 96-04 persistence + 96-05 cascade + 96-06 tree widget UI)
+- NEW-1 — Remove redundant `צפה בדפדוף` button (plan 96-07)
+- NEW-2 — Next/prev + View-All for LOCAL (plan 96-03 engine primitive + plan 96-08 UI wiring)
+- NEW-3 — Freestyle polish bucket (plan 96-09 — capped per CONTEXT D-15)
+
+**Deferred to v7.15+:** D-F2 (PDF OCR) and D-F3 (side-by-side PDF page rendering) — explicitly out per CONTEXT D-01.
+
+**Depends on:** Phase 95 (shipped)
+
+**Source CONTEXT:** `.planning/phases/96-completing-my-library-feature-add-features-and-fix-bugs/96-CONTEXT.md` (15 locked decisions; D-08 REVISED 2026-05-24 from QSettings → session JSON)
+**Source RESEARCH:** `.planning/phases/96-completing-my-library-feature-add-features-and-fix-bugs/96-RESEARCH.md`
+**Source PATTERNS:** `.planning/phases/96-completing-my-library-feature-add-features-and-fix-bugs/96-PATTERNS.md`
+**Source VALIDATION:** `.planning/phases/96-completing-my-library-feature-add-features-and-fix-bugs/96-VALIDATION.md`
+
+**Plans:** 9 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 96 to break down)
+- [ ] 96-01-PLAN.md — Wave 0: D-F4 pathological PDF fixture + 6 new skeleton test files + cascade AST extension + NEW-1 xfail(strict=True) flips on existing test_local_browse_panel.py tests
+- [ ] 96-02-PLAN.md — Wave 1: D-F4 detect-then-fallback in `shared/local_indexer.py::extract_pdf_pages` (0.70 single-word-ratio threshold, `get_text("text", sort=True)` fallback)
+- [ ] 96-03-PLAN.md — Wave 1: D-F5 normalize LOCAL hit dict shape in `genizah_core.py::_build_local_result_dict` (Option A) + NEW-2 engine primitive `SearchEngine.get_local_browse_page` with per-sys_id cache
+- [ ] 96-04-PLAN.md — Wave 1: D-F1 persistence layer — `genizah_app.py` `_local_file_optouts` attribute + session-JSON save/restore (top-level cross-surface key) + `desktop/my_library_tab.py::_prune_optouts_to_disk` pure helper
+- [ ] 96-05-PLAN.md — Wave 2: D-F1 cascade — `genizah_app.py::_apply_local_optout_filter` + wiring at BOTH cascade joinpoints (`_apply_results_table_filters` and `_apply_comp_tree_filters`) with `_local_filter_active` OR'd with opt-out activity
+- [ ] 96-06-PLAN.md — Wave 3: D-F1 tree widget UI — `desktop/my_library_tab.py::_OptoutTreeWidget` with Qt-native tri-state + bottom-panel `QSplitter(Horizontal)` containing [tree, status_table] (RESEARCH §3 Option 1) + 150ms debounce + rescan-prune wiring + `genizah_app.py::_reapply_filters_for_optout_change`
+- [ ] 96-07-PLAN.md — Wave 3: NEW-1 button removal — delete `btn_rd_open_browse` declaration + `_rd_open_in_browse` handler + visibility branches from `desktop/result_dialog.py`; flip 4 xfail(strict=True) decorators to stable regression guards
+- [ ] 96-08-PLAN.md — Wave 4: NEW-2 UI wiring — `desktop/result_dialog.py::load_local_page` sibling with `is_local_sys_id` dispatch + `genizah_app.py::_aggregate_local_pages_with_separators` (page/chunk separators, EN + HE) + Browse panel View-All / Per-Page toggle persisted in session JSON
+- [ ] 96-09-PLAN.md — Wave 5: NEW-3 freestyle polish + docs (close D-F1/D-F4/D-F5 in OPEN_ISSUES.md; CHANGELOG.md + CLAUDE.md "Recently Changed"; optional version bump v7.14.1 / v7.15.0; pre-release pre-flight ruff + check_docs + full pytest)
+
+**Wave structure:** 0 (01) → 1 (3 parallel: 02 [local_indexer.py], 03 [genizah_core.py], 04 [genizah_app.py + my_library_tab.py]) → 2 (05 [genizah_app.py — cascade]) → 3 (2 parallel: 06 [my_library_tab.py — tree widget], 07 [result_dialog.py — button removal]) → 4 (08 [result_dialog.py + genizah_app.py — NEW-2 UI]) → 5 (09 [docs + polish]).
+
+**File ownership notes:** 96-04 and 96-06 both touch `desktop/my_library_tab.py` — 96-04 ships the pure helper (Wave 1), 96-06 wires the tree widget UI (Wave 3). 96-04 and 96-05 both touch `genizah_app.py` — 96-04 ships persistence (Wave 1), 96-05 ships cascade (Wave 2). 96-07 and 96-08 both touch `desktop/result_dialog.py` — 96-07 deletes the redundant button (Wave 3), 96-08 adds `load_local_page` dispatch (Wave 4). 96-05 and 96-08 both touch `genizah_app.py` — 96-05 ships cascade (Wave 2), 96-08 ships View-All helper + Browse toggle (Wave 4).
+
+**Checkpoints:** Wave 3 (plan 96-06 D-F1 tree widget UI) and Wave 4 (plan 96-08 NEW-2 navigation UI) require human-verify (visual / RTL / Qt-themed rendering concerns). Wave 5 (plan 96-09) has a decision checkpoint for the version-bump strategy.
+
+**UI hint:** yes — new horizontal splitter in MyLibraryTab bottom panel + tri-state checkboxes + new View-All/Per-Page toggle button in Browse panel + removed redundant button in ResultDialog.
 
 <details>
 <summary>v7.13 Research-Grade Downloads & PGP Filter (Phases 93-94) -- BOTH PHASES COMPLETE (Phase 93 2026-05-19; Phase 94 2026-05-21; milestone closeable)</summary>
@@ -295,4 +327,4 @@ Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Pha
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-21 — v7.13 milestone CLOSEABLE. Phase 93 (PGP filter on `/search`, web only) COMPLETE 2026-05-19; Phase 94 (Research-Grade Export Metadata, web + desktop xlsx) COMPLETE 2026-05-21 after a 4-wave implementation + 6 rounds of smoke-verification patches Hillel approved on the same day. 14/14 requirements satisfied across both phases (5 PGP-FILTER + 9 EXPORT-META). Milestone closeout (`deploy.sh`, version bump, `[7.13.0]` CHANGELOG section, git tag, desktop GitHub Release) is a separate ritual — not performed in this commit. v7.12 multitenant invariants carry forward unchanged (zero raw `app.storage.user` access under `web/`; allowlist `[]`).*
+*Last updated: 2026-05-24 — Phase 96 PLANNED (9 plans across 6 waves). Closes v7.14 milestone: D-F5 LOCAL highlight P1 fix, D-F4 PDF extraction detect-then-fallback, D-F1 per-file opt-out tree with session-JSON persistence, NEW-1 redundant button removal, NEW-2 LOCAL navigation primitive + View-All separator. D-F2 (OCR) + D-F3 (side-by-side PDF) explicitly deferred to v7.15+. Phase 95 invariants (RRF POST-dedup, 3 cloud-write gates at TOP, web LIBRARY_CODES `[]`, multitenant `[]`) preserved.*
