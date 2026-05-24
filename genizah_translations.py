@@ -303,6 +303,8 @@ TRANSLATIONS = {
     "< Prev": "< הקודם ",
     "Next >": "הבא >",
     "View All": "הכל",
+    "Per page": "לדף",
+    "Chunk": "מקטע",
     "Browse by List": "עיין לפי רשימה",
     "Lists are not available.": "רשימות אינן זמינות.",
     "No items in this list.": "אין פריטים ברשימה זו",

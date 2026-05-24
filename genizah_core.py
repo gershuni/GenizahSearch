@@ -9325,22 +9325,37 @@ class SearchEngine:
                               absolute_index=None, allow_cross=False, volume_ie=None):
         """Phase 96 NEW-2: LOCAL analog to `get_browse_page` (folio nav for LOCAL files).
 
+        Page identity contract (Codex Item 4 / tech-debt D):
+          p_num       — physical page number in the source file.  For PDFs this is
+                        the real PDF page number; blank/empty pages are skipped by
+                        the indexer so the set of p_nums is SPARSE (not contiguous).
+                        Example: a 1,600-page PDF with 71 blank pages has indexed
+                        p_nums like {1, 2, …, 1529, 1552, …} — NOT 1..1529.
+          current_idx — 0-based ordinal in the SORTED indexed page list (dense).
+                        Used for prev/next boundary detection only.  The UI spinbox
+                        must display p_num, not current_idx.
+
         Returns `{uid, p_num, full_header, text, total_pages, current_idx,
-        internal_index, sys_id}` — same shape as `get_browse_page` so
-        ResultDialog can dispatch via a thin `is_local_sys_id` check at
-        desktop/result_dialog.py:load_page and reuse all the existing state-
-        update code.
+        internal_index, max_p_num, sys_id}` — same shape as `get_browse_page`
+        plus `max_p_num` so the caller can set a meaningful spinbox upper bound
+        for sparse files.
+
+        Canonical img read order (tech-debt D): prefer hit['display']['img']
+        over hit['img'] for Genizah hits; for LOCAL hits use p_num directly
+        (see _build_local_result_dict which writes p_num into display['img']).
 
         Parameters mirror get_browse_page for drop-in dispatch, but LOCAL
         semantics differ:
           - allow_cross is IGNORED (D-12: no wrap, no cross-file nav)
           - volume_ie is IGNORED (LOCAL files have no volume concept)
-          - absolute_index is IGNORED (LOCAL pages are contiguous 1..N —
-            see RESEARCH Assumption A4)
+          - absolute_index is IGNORED (p_num + current position in sorted page
+            list is the authoritative navigation state for LOCAL files)
 
         Returns None when:
-          - sys_id has no LOCAL pages
-          - next_prev would land outside [0, total_pages)
+          - sys_id has no LOCAL pages in the index
+          - target p_num is not found in the sorted page list (Item 5: no
+            silent fallback to page 1 — let the caller preserve its current state)
+          - next_prev would land outside [0, total_pages) (D-12: no wrap)
 
         Note: this method does NOT use Task 1's D-04.1 filter-out semantics.
         Browse navigation must return ALL pages of the file (user navigated
@@ -9397,24 +9412,33 @@ class SearchEngine:
         if not pages:
             return None
 
+        # max_p_num: the highest physical page number in the sorted list.
+        # For sparse PDFs this is the real last-page number (e.g. 1600), NOT
+        # len(pages) (e.g. 1529). Used by the caller to set spinbox maximum.
+        max_p_num = pages[-1]["p_num"]
+
         # Determine target index.
         if p_num is None and next_prev == 0:
             target_idx = 0
         elif p_num is not None:
-            # Find current p_num in sorted list, then apply offset.
-            try:
-                current_idx = next(
-                    i for i, pg in enumerate(pages) if pg["p_num"] == p_num
+            # Find the current p_num in the sorted page list, then apply offset.
+            # Item 5: if p_num is not in the list, return None — do NOT silently
+            # fall back to page 1.  The UI caller keeps its existing spinner value.
+            found_idx = next(
+                (i for i, pg in enumerate(pages) if pg["p_num"] == p_num), None
+            )
+            if found_idx is None:
+                LOGGER.debug(
+                    "get_local_browse_page: p_num=%s not in index for %s — returning None",
+                    p_num, sys_id,
                 )
-            except StopIteration:
-                # p_num not found — treat as fresh navigation to page 1
-                current_idx = 0
-            target_idx = current_idx + next_prev
+                return None
+            target_idx = found_idx + next_prev
         else:
             target_idx = 0 + next_prev
 
         if target_idx < 0 or target_idx >= len(pages):
-            return None  # D-12: no wrap
+            return None  # D-12: no wrap at boundaries
 
         target = pages[target_idx]
         return {
@@ -9423,8 +9447,9 @@ class SearchEngine:
             "full_header": target["full_header"],
             "text": target["text"],
             "total_pages": len(pages),
-            "current_idx": target_idx + 1,    # 1-based for UI display
-            "internal_index": target_idx,      # 0-based for logic
+            "current_idx": target_idx + 1,    # 1-based ordinal (UI display)
+            "internal_index": target_idx,      # 0-based ordinal (boundary logic)
+            "max_p_num": max_p_num,            # highest physical page number
             "sys_id": sys_id,
         }
 
