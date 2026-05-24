@@ -22696,6 +22696,15 @@ class GenizahGUI(QMainWindow):
         fl_id = self.browse_fl_input.text().strip()
         if not sid and not fl_id and not shelf_query: return
 
+        # Phase 96 fix-7 (Codex P1.4): clear current_browse_sid at entry so
+        # any early return (shelfmark not found, FL not found, etc.) leaves
+        # _is_browsing_local() returning False.  Without this, buttons that
+        # dispatch based on _is_browsing_local() could keep firing LOCAL paths
+        # even after the user navigates away from a LOCAL file to a Genizah
+        # manuscript that fails to resolve.  The real sid is set only after
+        # successful resolution below.
+        self.current_browse_sid = None
+
         # Reset UI (skip when reading desk is active to preserve stacked view)
         if not self.browse_reading_desk_active:
             self.browse_text.setText(tr("Loading metadata..."))
@@ -23931,6 +23940,17 @@ class GenizahGUI(QMainWindow):
                 self.text_position_combo.setCurrentIndex(params['text_position'])
             if 'variant_preset' in params:
                 self._current_variant_preset = params['variant_preset']
+            # Feature 1 (Phase 96 fix-7): restore corpus scope dropdown so
+            # history re-use searches the same corpus as the original run.
+            if 'corpus_scope' in params:
+                scope = params['corpus_scope']
+                self._search_corpus_scope = scope
+                if hasattr(self, 'corpus_scope_combo'):
+                    _idx = self.corpus_scope_combo.findData(scope)
+                    if _idx >= 0:
+                        self.corpus_scope_combo.blockSignals(True)
+                        self.corpus_scope_combo.setCurrentIndex(_idx)
+                        self.corpus_scope_combo.blockSignals(False)
             # Restore pre-search filters
             psf = entry.get('pre_search_filters', {})
             self.pre_search_filters = psf
@@ -24019,6 +24039,10 @@ class GenizahGUI(QMainWindow):
                 'gap': int(self.gap_input.text()) if self.gap_input.text().isdigit() else 0,
                 'text_position': self.text_position_combo.currentIndex(),
                 'variant_preset': getattr(self, '_current_variant_preset', 70),
+                # Feature 1 (Phase 96 fix-7): capture corpus scope so history
+                # re-use restores the dropdown to the same value as when the
+                # search was originally run.
+                'corpus_scope': getattr(self, '_search_corpus_scope', 'genizah'),
             },
             'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
             'state': {
@@ -24146,6 +24170,17 @@ class GenizahGUI(QMainWindow):
                 'local_file_optouts': sorted(getattr(self, '_local_file_optouts', set())),
                 # Phase 96 NEW-2: Browse-panel view mode for LOCAL files (top-level, cross-surface).
                 'local_browse_view_mode': getattr(self, '_local_browse_view_mode', 'per_page'),
+                # Feature 2 (Phase 96 fix-7): persist active LOCAL Browse identity so
+                # the Browse tab reopens at the same LOCAL file and page on next launch.
+                # Only saved when the Browse panel is currently showing a LOCAL file.
+                'local_browse_sys_id': (
+                    getattr(self, '_local_browse_current_sys_id', None)
+                    if self._is_browsing_local() else None
+                ),
+                'local_browse_p_num': (
+                    getattr(self, '_local_browse_current_p_num', None)
+                    if self._is_browsing_local() else None
+                ),
                 'active_tab': self.tabs.currentIndex() if hasattr(self, 'tabs') else 0,
                 'browse_shelfmark': {
                     'sys_id': self.browse_sys_input.text().strip() if hasattr(self, 'browse_sys_input') else '',
@@ -24212,7 +24247,9 @@ class GenizahGUI(QMainWindow):
                         or cat.get('domain') or cat.get('author') or cat.get('work')
                         or cat.get('date_from') or cat.get('date_to')
                         or cat.get('text_all') or cat.get('text_any') or cat.get('text_not')
-                        or cat.get('include_undated'))
+                        or cat.get('include_undated')
+                        # Feature 2 (Phase 96 fix-7): LOCAL Browse state counts as restorable data.
+                        or state.get('local_browse_sys_id'))
             if not has_data:
                 return
 
@@ -24485,6 +24522,34 @@ class GenizahGUI(QMainWindow):
             if active_tab_idx is not None and 0 <= active_tab_idx < self.tabs.count():
                 self.tabs.setCurrentIndex(active_tab_idx)
 
+            # Feature 2 (Phase 96 fix-7): restore LOCAL Browse identity so the
+            # Browse tab reopens at the same LOCAL file and page as last time.
+            local_browse_sid = state.get('local_browse_sys_id')
+            local_browse_p = state.get('local_browse_p_num')
+            if local_browse_sid:
+                def _restore_local_browse(sid=local_browse_sid, p=local_browse_p):
+                    try:
+                        from shared.local_sys_id import is_local_sys_id as _is_local
+                        if not _is_local(sid):
+                            return
+                        # Verify the file still exists in the index.
+                        if not self.searcher:
+                            return
+                        page_data = self.searcher.get_local_browse_page(
+                            sid, p_num=p or 1, next_prev=0
+                        )
+                        if not page_data:
+                            # File no longer indexed — silently skip.
+                            return
+                        # Restore Browse panel state.
+                        self._local_browse_current_sys_id = sid
+                        self._local_browse_current_p_num = page_data.get('p_num', p or 1)
+                        self._show_local_browse_controls(True)
+                        self._open_local_browse_page(sid, p_num=p or 1)
+                    except Exception as exc:
+                        logger.warning("_restore_local_browse failed: %s", exc)
+                QTimer.singleShot(400, _restore_local_browse)
+
             # Hide restore progress bar and show "Session restored" in statusbar
             self.search_progress.setVisible(False)
             saved_at = state.get('saved_at', '')
@@ -24501,6 +24566,16 @@ class GenizahGUI(QMainWindow):
         finally:
             self._restoring_session = False
             self.search_progress.setVisible(False)
+
+        # Phase 96 fix-7 (Codex P1.1): notify MyLibraryTab that opt-outs are
+        # now loaded so it can safely auto-select the first folder and populate
+        # the file tree with correct checkbox states.
+        try:
+            my_lib = getattr(self, 'my_library_tab', None)
+            if my_lib is not None:
+                my_lib.notify_session_restored()
+        except Exception as e:
+            logger.warning("notify_session_restored failed: %s", e)
 
         # Refresh history dropdowns
         try:
