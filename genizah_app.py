@@ -17348,6 +17348,46 @@ class GenizahGUI(QMainWindow):
             return [r for r in results if (r.get('display', {}) or {}).get('source') != 'LOCAL']
         return results
 
+    def _apply_local_optout_filter(self, results):
+        """Phase 96 D-F1: drop LOCAL hits whose canonical filepath is in
+        `self._local_file_optouts`. Non-LOCAL hits pass through unchanged.
+
+        Composes additionally on top of `_apply_local_filter` at both cascade
+        joinpoints. Silent (no chip) — opt-out is a user-set preference, not
+        a transient UI state.
+
+        Fast no-op path when opt-out set is empty.
+
+        Per CONTEXT D-10: filter applied at query time, not index-build time —
+        files stay indexed; this filter just excludes them from results.
+        """
+        optouts = getattr(self, '_local_file_optouts', None)
+        if not optouts:
+            return results
+        kept = []
+        for r in results:
+            disp = r.get('display', {}) or {}
+            if disp.get('source') != 'LOCAL':
+                kept.append(r)
+                continue
+            sid = disp.get('id') or r.get('sys_id', '')
+            if not sid:
+                # Malformed LOCAL hit — keep it; we have nothing to compare.
+                kept.append(r)
+                continue
+            try:
+                fp = self._lookup_local_filepath(sid)
+            except Exception:
+                fp = None
+            if fp is None:
+                # Lookup failed (transient indexer state) — keep the hit defensively.
+                kept.append(r)
+                continue
+            if fp in optouts:
+                continue  # dropped by user opt-out
+            kept.append(r)
+        return kept
+
     def _toggle_local_filter_search(self):
         """Cycle the LOCAL filter state for the Search surface (D-10 / D-39)."""
         states = ['all', 'only_local', 'no_local']
