@@ -32,6 +32,7 @@ from PyQt6.QtCore import (
     QMutex,
     QThread,
     QSettings,
+    QTimer,
     pyqtSignal,
 )
 from PyQt6.QtWidgets import (
@@ -43,8 +44,11 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QLabel,
     QProgressBar,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QFileDialog,
     QMessageBox,
     QHeaderView,
@@ -97,6 +101,188 @@ def _prune_optouts_to_disk(optouts: set, on_disk: set) -> set:
     if not on_disk:
         return set()
     return optouts & on_disk
+
+
+# ---------------------------------------------------------------------------
+# Phase 96 D-F1: per-file opt-out tree widget (tri-state checkbox UI)
+# ---------------------------------------------------------------------------
+
+class _OptoutTreeWidget(QTreeWidget):
+    """Phase 96 D-F1: tree of folders + files with tri-state checkboxes.
+
+    Shows the contents of the selected indexed folder. Each file is a leaf
+    with a tri-state checkbox (checked = included in search, unchecked =
+    opted out). Folder nodes use Qt's native ItemIsAutoTristate so they
+    show all/some/none state automatically.
+
+    Toggling a checkbox mutates `app._local_file_optouts` (the set
+    shipped by plan 96-04) using a SET-DIFFERENCE/UNION update — paths
+    NOT in the currently displayed tree are LEFT UNTOUCHED (Codex HIGH #1
+    closure 2026-05-24). The session-save + re-filter is debounced.
+    """
+
+    # 150ms debounce avoids thrashing the session-save + re-filter pipeline
+    # when the user rapidly toggles multiple checkboxes (e.g., "uncheck all").
+    _DEBOUNCE_MS = 150
+
+    def __init__(self, parent, app):
+        super().__init__(parent)
+        self._app = app
+        self._suppress_signals = False
+        # Track the set of paths CURRENTLY DISPLAYED in the tree (canonical
+        # form). _commit_changes() uses this as the diff scope so paths
+        # belonging to other indexed folders are left untouched.
+        self._displayed_paths: set = set()
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(self._DEBOUNCE_MS)
+        self._save_timer.timeout.connect(self._commit_changes)
+        self.setHeaderLabel(tr("Folder contents"))
+        self.setColumnCount(1)
+        self.itemChanged.connect(self._on_item_changed)
+
+    def populate_for_folder(self, folder_path: str):
+        """Rebuild the tree for the given indexed folder. Walks the
+        filesystem (so ignored files also appear, letting the user opt
+        them out preemptively before indexer touches them)."""
+        import os
+        self._suppress_signals = True
+        try:
+            self.clear()
+            self._displayed_paths = set()
+            optouts = getattr(self._app, '_local_file_optouts', set())
+            root_item = QTreeWidgetItem(self, [os.path.basename(folder_path) or folder_path])
+            root_item.setFlags(
+                root_item.flags()
+                | Qt.ItemFlag.ItemIsUserCheckable
+                | Qt.ItemFlag.ItemIsAutoTristate
+            )
+            # Recurse into subdirectories
+            self._populate_node(root_item, folder_path, optouts)
+            self.expandAll()
+        finally:
+            self._suppress_signals = False
+
+    def _populate_node(self, parent_item, dirpath: str, optouts: set):
+        """Recursively add files and subdirs to parent_item."""
+        import os
+        from shared.local_sys_id import _canonical_filepath
+        SUPPORTED = {'.pdf', '.docx', '.txt'}
+        try:
+            entries = sorted(os.listdir(dirpath))
+        except (OSError, PermissionError):
+            return
+        # Add subdirs first
+        for name in entries:
+            full = os.path.join(dirpath, name)
+            if os.path.isdir(full):
+                sub = QTreeWidgetItem(parent_item, [name])
+                sub.setFlags(
+                    sub.flags()
+                    | Qt.ItemFlag.ItemIsUserCheckable
+                    | Qt.ItemFlag.ItemIsAutoTristate
+                )
+                self._populate_node(sub, full, optouts)
+        # Add files
+        for name in entries:
+            full = os.path.join(dirpath, name)
+            if not os.path.isfile(full):
+                continue
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in SUPPORTED:
+                continue
+            leaf = QTreeWidgetItem(parent_item, [name])
+            leaf.setFlags(leaf.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            # Codex MEDIUM #9 closure: canonicalize at populate time so the
+            # value stashed in UserRole matches what _local_file_optouts holds.
+            canonical = _canonical_filepath(full)
+            leaf.setData(0, Qt.ItemDataRole.UserRole, canonical)
+            self._displayed_paths.add(canonical)
+            is_opted_out = canonical in optouts
+            leaf.setCheckState(
+                0,
+                Qt.CheckState.Unchecked if is_opted_out else Qt.CheckState.Checked,
+            )
+
+    def _on_item_changed(self, item, column):
+        """User toggled a checkbox — debounce the commit."""
+        if self._suppress_signals:
+            return
+        # Restart the debounce timer; multiple rapid changes coalesce.
+        self._save_timer.start()
+
+    def _commit_changes(self):
+        """Debounce fired — perform SET-DIFFERENCE/UNION update, persist, re-filter.
+
+        REVISION 2026-05-24 — Codex HIGH #1 closure (load-bearing):
+        previously this method cleared the global set and rebuilt from the
+        currently displayed tree only — that ERASED opt-outs in folders not
+        currently visible. The new flow:
+
+          1. Walk the currently displayed tree leaves and partition them into
+             `currently_unchecked` (opted-out by the user, paths to ADD to
+             the global set) and `currently_checked` (paths to REMOVE from
+             the global set).
+          2. Apply DIFFERENCE then UNION on the global set, scoped to the
+             currently displayed paths only. Paths not in self._displayed_paths
+             (i.e., from other indexed folders) are LEFT UNTOUCHED.
+
+        This makes "toggle folder B erases folder A's opt-outs" structurally
+        impossible. Regression test: tests/test_local_optout_persistence.py
+        ::test_folder_a_optout_survives_folder_b_toggle (added by Plan 96-01).
+        """
+        currently_unchecked: set = set()
+        currently_checked: set = set()
+        for i in range(self.topLevelItemCount()):
+            self._collect_leaves_by_state(
+                self.topLevelItem(i),
+                currently_unchecked,
+                currently_checked,
+            )
+
+        app = self._app
+        if not hasattr(app, '_local_file_optouts'):
+            app._local_file_optouts = set()
+
+        # SET-DIFFERENCE/UNION update — scoped to currently displayed paths.
+        # Paths NOT in self._displayed_paths (other indexed folders) untouched.
+        existing: set = app._local_file_optouts
+        # Remove paths that are now checked (user re-enabled them) — scoped.
+        existing.difference_update(currently_checked)
+        # Add paths that are now unchecked (user opted them out) — scoped.
+        existing.update(currently_unchecked)
+
+        try:
+            if hasattr(app, '_save_session'):
+                app._save_session()
+        except Exception:
+            pass  # session-save is best-effort
+        try:
+            if hasattr(app, '_reapply_filters_for_optout_change'):
+                app._reapply_filters_for_optout_change()
+        except Exception:
+            pass
+
+    def _collect_leaves_by_state(self, node, unchecked_out, checked_out):
+        """Recursively gather LEAF nodes' canonical paths by check state.
+
+        Two output sets so _commit_changes() can perform diff/union scoped
+        to the currently displayed tree.
+        """
+        if node.childCount() == 0:
+            data = node.data(0, Qt.ItemDataRole.UserRole)
+            if not data:
+                return
+            state = node.checkState(0)
+            if state == Qt.CheckState.Unchecked:
+                unchecked_out.add(data)
+            elif state == Qt.CheckState.Checked:
+                checked_out.add(data)
+            # PartiallyChecked is a folder-level state, not seen on leaves;
+            # we drop it defensively.
+            return
+        for i in range(node.childCount()):
+            self._collect_leaves_by_state(node.child(i), unchecked_out, checked_out)
 
 
 # ---------------------------------------------------------------------------
@@ -354,8 +540,18 @@ class MyLibraryTab(QWidget):
         self._progress_bar.setVisible(False)
         root.addWidget(self._progress_bar)
 
-        # ---- Section 3: per-file status table ----
-        root.addWidget(QLabel(tr("File status:")))
+        # ---- Section 3: per-file status table + opt-out tree (Phase 96 D-F1) ----
+        # RESEARCH §3 Option 1 (minimal-blast-radius): replace the bare
+        # _status_table with a QSplitter(Horizontal) containing
+        # [_optout_tree, _status_table]. Outer QVBoxLayout stays unchanged.
+        root.addWidget(QLabel(tr("File status & opt-outs:")))
+        self._bottom_splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left: opt-out tree (NEW in Phase 96)
+        self._optout_tree = _OptoutTreeWidget(self._bottom_splitter, self._parent_window)
+        self._bottom_splitter.addWidget(self._optout_tree)
+
+        # Right: status table (PRESERVE all existing setup verbatim, only parent changed)
         self._status_table = QTableWidget(0, 3)
         self._status_table.setHorizontalHeaderLabels(
             [tr("Filename"), tr("Pages"), tr("Status")]
@@ -372,7 +568,35 @@ class MyLibraryTab(QWidget):
         self._status_table.setEditTriggers(
             QAbstractItemView.EditTrigger.NoEditTriggers
         )
-        root.addWidget(self._status_table, stretch=2)
+        self._bottom_splitter.addWidget(self._status_table)
+
+        # 40/60 initial split — user can drag the handle.
+        self._bottom_splitter.setSizes([400, 600])
+        root.addWidget(self._bottom_splitter, stretch=2)
+
+        # Phase 96 D-F1: when the user picks a folder, repopulate the opt-out tree.
+        # PINNED: selected-path comes from Qt.ItemDataRole.UserRole on the QListWidgetItem
+        # (Phase 95 stashes the folder path string here when the folder is added to the list).
+        self._folder_list.currentItemChanged.connect(self._on_folder_selection_changed)
+
+    # ------------------------------------------------------------------
+    # Phase 96 D-F1: folder selection handler (tree repopulation)
+    # ------------------------------------------------------------------
+
+    def _on_folder_selection_changed(self, current, previous):
+        """Phase 96 D-F1: repopulate the opt-out tree when the user selects a folder.
+
+        PINNED (96-08-WIRING-NOTES.md §Plan 96-06 wiring):
+          - selected-path extraction: item.data(Qt.ItemDataRole.UserRole)
+          - DO NOT use item.text() — that is the display label, not the fs path.
+        """
+        if not hasattr(self, '_optout_tree'):
+            return
+        if current is None:
+            return
+        selected_path = current.data(Qt.ItemDataRole.UserRole)
+        if selected_path:
+            self._optout_tree.populate_for_folder(selected_path)
 
     # ------------------------------------------------------------------
     # Indexer initialisation + startup recovery
@@ -512,6 +736,61 @@ class MyLibraryTab(QWidget):
         # (Manual Refresh already shows the status table rows as visual confirmation.)
         if toast and indexed > 0:
             self._show_refresh_summary_label(indexed, skipped, errors)
+
+        # Phase 96 D-F1 D-09: drop opt-out entries for files no longer on disk.
+        # PINNED (96-08-WIRING-NOTES.md §Plan 96-06 wiring):
+        #   scan-complete callback = _on_worker_finished (Phase 95 actual name)
+        #   indexer attribute on tab = self._indexer
+        try:
+            app = self._parent_window
+            on_disk = set()
+            indexer = getattr(self, '_indexer', None)
+            if indexer is not None:
+                if hasattr(indexer, 'list_all_filepaths'):
+                    on_disk = set(indexer.list_all_filepaths())
+                else:
+                    # Fallback: query SQLite local_files table directly.
+                    try:
+                        conn = getattr(indexer, '_conn', None)
+                        if conn is not None:
+                            cur = conn.execute("SELECT filepath FROM local_files")
+                            on_disk = {row[0] for row in cur.fetchall()}
+                    except Exception as exc:
+                        try:
+                            logger.debug(
+                                "Phase 96 prune fallback: SELECT filepath FROM local_files "
+                                "failed: %s", exc,
+                            )
+                        except Exception:
+                            pass
+                        on_disk = set()
+            if app is not None and hasattr(app, '_local_file_optouts'):
+                before_count = len(app._local_file_optouts)
+                app._local_file_optouts = _prune_optouts_to_disk(
+                    app._local_file_optouts, on_disk
+                )
+                after_count = len(app._local_file_optouts)
+                if before_count != after_count:
+                    try:
+                        logger.info(
+                            "Phase 96 D-F1: pruned %d opt-out entries "
+                            "(was %d, now %d) after rescan — likely due to "
+                            "file removal or drive remap.",
+                            before_count - after_count, before_count, after_count,
+                        )
+                    except Exception:
+                        pass
+                if hasattr(app, '_save_session'):
+                    try:
+                        app._save_session()
+                    except Exception:
+                        pass
+        except Exception as exc:
+            # Never let prune failure crash the scan-finished UI flow.
+            try:
+                logger.warning("Phase 96 D-F1 prune-on-rescan failed: %s", exc)
+            except Exception:
+                pass
 
         # Process any queued action
         if self._queued_action is not None:
