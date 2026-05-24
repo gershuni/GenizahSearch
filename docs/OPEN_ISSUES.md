@@ -465,7 +465,8 @@ deferred to a future phase. Promote via `/gsd-add-phase` or `/gsd-plant-seed`.
 | D-F1 | Folder drill-down with file checkboxes | Clicking a folder in the My Library tab reveals its files with per-file checkboxes (select all/none) to opt each file in or out of the search scope. Needs a tree widget or split-panel UX. | P2 |
 | D-F2 | PDF OCR | Scanned-PDF support via Tesseract or similar. Currently PyMuPDF text extraction skips image-only PDFs (no text layer). | P2 |
 | D-F3 | Side-by-side PDF page rendering | Show the PDF page image next to its extracted text in the Browse panel and ResultDialog, similar to the manuscript image/transcription split view. | P3 |
-| D-F4 | PDF text extraction quality audit | Some PDFs may need a different extraction path: `get_text("dict")` instead of `get_text("blocks")`, OCR fallback, or PyMuPDF version-specific quirks. Needs a sample-corpus audit with representative Hebrew/Aramaic PDFs. | P2 |
+| D-F4 | PDF text extraction quality audit | Some PDFs may need a different extraction path: `get_text("dict")` instead of `get_text("blocks")`, OCR fallback, or PyMuPDF version-specific quirks. Needs a sample-corpus audit with representative Hebrew/Aramaic PDFs. **Confirmed manifestation (2026-05-24 user smoke):** certain PDFs extract with a line break after every word (one-word-per-line output). Test fixture `tests/fixtures/local_indexer/single_word_per_line.pdf` already exists for regression. | P2 |
+| D-F5 | Search-term highlighting broken for LOCAL hits | Search-term highlighting in the main search results table and in `ResultDialog` does not fire for LOCAL hits. Genizah-corpus highlighting still works. Likely the highlight pipeline keys on a field present only in V0.8/V0.7 hit dicts, not in the LOCAL hit dict shape from `_build_local_result_dict`. Needs a per-source highlight branch or a normalized hit shape. | P1 |
 
 ## Related Documents
 
