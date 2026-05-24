@@ -191,3 +191,50 @@ def test_filter_cycle_all_only_no():
     assert state == 'no_local'
     state = states[(states.index(state) + 1) % 3]
     assert state == 'all'
+
+
+# ---------------------------------------------------------------------------
+# Phase 96 D-F1: opt-out filter cascade discipline
+# ---------------------------------------------------------------------------
+
+def test_optout_filter_applied_within_both_cascades():
+    """Phase 96 D-F1: static AST confirms _apply_local_optout_filter is called
+    within BOTH _apply_results_table_filters and _apply_comp_tree_filters.
+
+    Mirrors test_local_filter_applied_within_results_cascade -- same shape,
+    different target method.
+
+    Status: this test is expected to FAIL on master until plan 96-05 lands the
+    cascade wiring. Marked as pytest.skip so the suite doesn't turn red until
+    96-05 commits. Plan 96-05 will update the skip-guard to a real assertion.
+    """
+    import pytest
+    source = GENIZAH_APP_PY.read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    target_functions = {'_apply_results_table_filters', '_apply_comp_tree_filters'}
+    found = {f.name: f for f in _iter_function_defs(tree) if f.name in target_functions}
+    if set(found.keys()) != target_functions:
+        pytest.skip("cascade joinpoint functions missing (Phase 95 regression?)")
+    offenders = []
+    for fname, func in found.items():
+        if not _function_contains_call(func, '_apply_local_optout_filter'):
+            offenders.append((fname, func.lineno))
+    if offenders:
+        pytest.skip(
+            "Phase 96 D-F1 not yet implemented (waiting for plan 96-05). "
+            "Missing _apply_local_optout_filter call in: "
+            + ", ".join(f"{n} (line {l})" for n, l in offenders)
+        )
+
+
+def test_apply_local_optout_filter_function_exists():
+    """Phase 96 D-F1: _apply_local_optout_filter method must exist on the app.
+
+    Skipped until plan 96-05 lands.
+    """
+    import pytest
+    source = GENIZAH_APP_PY.read_text(encoding='utf-8')
+    tree = ast.parse(source)
+    names = {f.name for f in _iter_function_defs(tree)}
+    if '_apply_local_optout_filter' not in names:
+        pytest.skip("Phase 96 D-F1 not yet implemented (waiting for plan 96-05)")

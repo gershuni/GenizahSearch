@@ -111,39 +111,44 @@ def test_get_local_full_text_returns_aggregated_pages():
 # ResultDialog side
 # ---------------------------------------------------------------------------
 
+@pytest.mark.xfail(
+    reason="Plan 96-07 (NEW-1) will remove btn_rd_open_browse; this assertion "
+           "flips to expecting absence. xfail(strict=True) ensures the flip is detected.",
+    strict=True,
+)
 def test_result_dialog_has_view_in_browse_button():
-    """ResultDialog must declare btn_rd_open_browse and bind it to a handler."""
+    """NEW-1 (Phase 96): btn_rd_open_browse is REMOVED -- redundant with `עיין`.
+
+    Once plan 96-07 lands, this xfail becomes xpassed -> strict=True turns
+    that into a failure -> executor flips xfail off and the test goes green
+    as a stable negative assertion.
+    """
     src = _read_source("desktop/result_dialog.py")
-    assert "btn_rd_open_browse" in src, (
-        "Category 3: ResultDialog must declare btn_rd_open_browse"
-    )
-    assert "View in Browse" in src, (
-        "Category 3: ResultDialog must label the button 'View in Browse'"
+    assert "btn_rd_open_browse" not in src, (
+        "NEW-1: btn_rd_open_browse must be removed (redundant with `עיין` Browse)"
     )
 
 
+@pytest.mark.xfail(
+    reason="Plan 96-07 (NEW-1) will remove the _rd_open_in_browse handler.",
+    strict=True,
+)
 def test_result_dialog_has_open_in_browse_handler():
-    """_rd_open_in_browse must exist + call parent _open_local_browse."""
+    """NEW-1: _rd_open_in_browse handler is REMOVED."""
     src = _read_source("desktop/result_dialog.py")
     fn = _find_function(src, "_rd_open_in_browse")
-    assert fn is not None, "Category 3: _rd_open_in_browse handler required"
-    fn_src = ast.get_source_segment(src, fn) or ""
-    assert "_open_local_browse" in fn_src, (
-        "Category 3: _rd_open_in_browse must invoke parent app's _open_local_browse"
-    )
+    assert fn is None, "NEW-1: _rd_open_in_browse handler must be removed"
 
 
+@pytest.mark.xfail(
+    reason="Plan 96-07 (NEW-1) will remove the btn_rd_open_browse visibility branches.",
+    strict=True,
+)
 def test_result_dialog_show_view_in_browse_for_local_only():
-    """btn_rd_open_browse visibility must be tied to is_local_sys_id check."""
+    """NEW-1: btn_rd_open_browse visibility code is REMOVED entirely."""
     src = _read_source("desktop/result_dialog.py")
-    # The visibility setter for btn_rd_open_browse must appear at least once
-    # in a branch that also references is_local_sys_id.
-    assert "btn_rd_open_browse.setVisible(True)" in src or (
-        "btn_rd_open_browse.setVisible(\n" in src
-        and "True" in src
-    )
-    assert "btn_rd_open_browse.setVisible(False)" in src, (
-        "Category 3: btn_rd_open_browse must be hidden for non-LOCAL results"
+    assert "btn_rd_open_browse.setVisible" not in src, (
+        "NEW-1: btn_rd_open_browse visibility setters must be removed"
     )
 
 
