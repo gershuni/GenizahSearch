@@ -555,10 +555,24 @@ class ResultDialog(QDialog):
         self.main_splitter.setSizes([650, 650])
 
         main_layout.addWidget(self.main_splitter, 1)
-        
+
         # Footer
         btn_close = QPushButton("Close"); btn_close.clicked.connect(self.close); main_layout.addWidget(btn_close)
-        self.setLayout(main_layout)
+
+        # Phase 96 fix-3 (complete): prevent ANY QPushButton from capturing Enter.
+        # In a QDialog, QPushButton.autoDefault defaults to True, which causes Qt
+        # to activate the "default" button (typically the first visible one —
+        # btn_view_transcription / "Browse") when Enter is pressed anywhere in the
+        # dialog.  Symptom: pressing Enter after typing a page number in spin_page
+        # opened the Browse tab instead of jumping to the typed page.
+        # Iterating via findChildren catches every button (including those added
+        # after the four targeted in the earlier partial fix: btn_res_prev/next,
+        # btn_compact_pg_prev/next), so future buttons added to the dialog are
+        # automatically covered without needing per-button setAutoDefault(False).
+        # spin_page.editingFinished is the sole Enter handler intended for page nav.
+        self.setLayout(main_layout)  # must be set before findChildren works
+        for _btn in self.findChildren(QPushButton):
+            _btn.setAutoDefault(False)
 
     def _toggle_compact_mode(self, compact):
         """Toggle between compact and full header mode."""

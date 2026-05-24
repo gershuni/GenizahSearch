@@ -6985,6 +6985,12 @@ class SearchEngine:
                 "source": "LOCAL",
                 "library_code": "LOCAL",
                 "shelfmark": shelfmark,
+                # Phase 96 fix-3 (Img column): search results render the Img
+                # column from meta.get('img') where meta = res['display'].
+                # Genizah hits populate 'img' inside the display dict via
+                # get_display_data().  LOCAL hits must mirror this so the Img
+                # column shows the page/chunk number instead of a blank cell.
+                "img": p_num,
             },
             "full_header": full_header,
         }
