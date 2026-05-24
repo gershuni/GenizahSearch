@@ -2122,6 +2122,15 @@ class ResultDialog(QDialog):
 
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
+        # Phase 96 NEW-2 dispatch: LOCAL hits use a separate primitive
+        # (get_local_browse_page vs get_browse_page). Branch BEFORE
+        # cancel_image_thread() because LOCAL has no IIIF image to cancel.
+        try:
+            from shared.local_sys_id import is_local_sys_id as _is_local
+            if _is_local(self.current_sys_id):
+                return self.load_local_page(offset=offset, target=target)
+        except ImportError:
+            pass  # Fall through to Genizah path on import failure (defensive)
         self.cancel_image_thread()
         
         # Determine strict navigation source
@@ -2259,6 +2268,98 @@ class ResultDialog(QDialog):
 
         # Update Domain info + start enrichment (AFTER reset so buttons aren't wiped)
         self._update_rd_domain_label()
+
+    def load_local_page(self, offset=0, target=None):
+        """Phase 96 NEW-2: LOCAL analog to load_page.
+
+        Calls SearchEngine.get_local_browse_page (plan 96-03) and applies the
+        same state-update code Genizah hits use. The engine primitive returns
+        None at file boundaries — we disable prev/next accordingly (D-12: no wrap).
+
+        REVISION 2026-05-24:
+          - Pinned widget identifiers (BLOCKER 2): self.text_ms, self.btn_compact_pg_{prev,next},
+            self.spin_page, self.lbl_total.
+          - Render via apply_line_numbered_text + self._htmlify to preserve v7.12.0 gutter
+            AND HTML-escape file content (W11 + Codex HIGH #4).
+          - Skip cancel_image_thread() — Genizah-image-specific (W9).
+        """
+        if not self.current_sys_id:
+            return
+
+        # Fetch the page dict from the engine primitive (plan 96-03).
+        if target is not None:
+            try:
+                p = int(target)
+            except (ValueError, TypeError):
+                p = 1
+            page_data = self.searcher.get_local_browse_page(
+                self.current_sys_id, p_num=p, next_prev=0
+            )
+        else:
+            p_arg = int(self.current_p_num) if self.current_p_num is not None else None
+            page_data = self.searcher.get_local_browse_page(
+                self.current_sys_id, p_num=p_arg, next_prev=offset
+            )
+
+        if not page_data:
+            # D-12: no wrap. Disable the offending button. PINNED identifiers.
+            if offset > 0:
+                self.btn_compact_pg_next.setEnabled(False)
+            elif offset < 0:
+                self.btn_compact_pg_prev.setEnabled(False)
+            return
+
+        # State updates (mirror Genizah load_page state update block).
+        self.current_p_num = page_data.get('p_num')
+        self.current_internal_idx = page_data.get('internal_index')
+        total = page_data.get('total_pages', 0)
+        cur_idx = page_data.get('current_idx', 1)
+
+        # Prepare text + apply highlight markers (mirror Genizah render path).
+        text = page_data.get('text', '') or ''
+        pattern_str = page_data.get('highlight_pattern', '')
+        if not pattern_str and self.data:
+            pattern_str = self.data.get('highlight_pattern', '')
+        if pattern_str:
+            try:
+                import re as _re
+                flags = _re.IGNORECASE
+                if '\\n' in pattern_str or pattern_str.startswith('^') or '^\\' in pattern_str:
+                    flags |= _re.MULTILINE
+                regex = _re.compile(pattern_str, flags)
+                text = regex.sub(r'*\g<0>*', text)
+            except Exception:
+                pass
+
+        # Render via apply_line_numbered_text — preserves v7.12.0 gutter (W11).
+        # self._htmlify HTML-escapes the text (Codex HIGH #4 closure — same
+        # escape path the Genizah render uses; raw `<`, `&` in file content
+        # cannot inject markup).
+        # PINNED: self.text_ms is the text widget (line 2066, 2258 Genizah path).
+        # DO NOT use setHtml — bypasses the gutter helper.
+        apply_line_numbered_text(
+            self.text_ms,
+            self._htmlify(text),
+            source_text=text,
+            is_html=True,
+        )
+        self._refresh_find_highlights()
+        self._scroll_to_first_highlight(self.text_ms, pattern_str)
+
+        # Update spin_page + lbl_total (PINNED).
+        self.spin_page.blockSignals(True)
+        self.spin_page.setValue(cur_idx)
+        self.spin_page.setMaximum(max(total, 1))
+        self.spin_page.blockSignals(False)
+        self.lbl_total.setText(f"/ {total}")
+
+        # Update prev/next button enabled states (PINNED).
+        self.btn_compact_pg_prev.setEnabled(cur_idx > 1)
+        self.btn_compact_pg_next.setEnabled(cur_idx < total)
+
+        # Sync compact bar page label if present (mirrors Genizah path).
+        if hasattr(self, 'lbl_compact_page') and self.compact_bar.isVisible():
+            self.lbl_compact_page.setText(f"{cur_idx} {self.lbl_total.text()}")
 
     def _update_rd_domain_label(self):
         """Update domain info label and printed badge for the current result in ResultDialog."""
