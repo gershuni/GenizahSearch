@@ -6767,8 +6767,8 @@ class GenizahGUI(QMainWindow):
 
         # Navigation Bar (Above Text)
         nav_bar = QHBoxLayout()
-        self.btn_b_prev = QPushButton(tr("< Prev")); self.btn_b_prev.clicked.connect(lambda: self.browse_navigate(-1))
-        self.btn_b_next = QPushButton(tr("Next >")); self.btn_b_next.clicked.connect(lambda: self.browse_navigate(1))
+        self.btn_b_prev = QPushButton(tr("< Prev")); self.btn_b_prev.clicked.connect(lambda: self._browse_prev_next(-1))
+        self.btn_b_next = QPushButton(tr("Next >")); self.btn_b_next.clicked.connect(lambda: self._browse_prev_next(1))
         self.btn_b_prev.setEnabled(False); self.btn_b_next.setEnabled(False)
 
         # Page Combo
@@ -6825,46 +6825,10 @@ class GenizahGUI(QMainWindow):
         self._current_local_filepath: str | None = None
         nav_bar.addWidget(self.browse_open_file_btn)
 
-        # Phase 96 NEW-2: LOCAL-only per-page navigation widgets in Browse panel.
-        # Hidden until a LOCAL sys_id is loaded; shown by _show_local_browse_controls().
-        # W12 closure: these widgets did NOT exist before this plan — created here.
-        # Browse i18n (Codex C): compose from atomic translation keys so that both
-        # the arrow character and the translated word appear correctly in all UI
-        # languages. "◀ Prev" / "Next ▶" were missing from genizah_translations.py;
-        # composing from "Previous" / "Next" (which ARE translated) is safer.
-        self.btn_local_browse_prev = QPushButton(f"◄ {tr('Previous')}")
-        self.btn_local_browse_prev.setToolTip(tr("Previous page/chunk in LOCAL file"))
-        self.btn_local_browse_prev.setVisible(False)
-        self.btn_local_browse_prev.clicked.connect(
-            lambda: self._on_local_browse_nav(offset=-1)
-        )
-        nav_bar.addWidget(self.btn_local_browse_prev)
-
-        self.lbl_local_browse_page = QLabel("")
-        self.lbl_local_browse_page.setMinimumWidth(80)
-        self.lbl_local_browse_page.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.lbl_local_browse_page.setVisible(False)
-        nav_bar.addWidget(self.lbl_local_browse_page)
-
-        self.btn_local_browse_next = QPushButton(f"{tr('Next')} ►")
-        self.btn_local_browse_next.setToolTip(tr("Next page/chunk in LOCAL file"))
-        self.btn_local_browse_next.setVisible(False)
-        self.btn_local_browse_next.clicked.connect(
-            lambda: self._on_local_browse_nav(offset=1)
-        )
-        nav_bar.addWidget(self.btn_local_browse_next)
-
-        # Browse i18n (Codex C): use English key "View All" (translates to "הכל")
-        # instead of a raw Hebrew literal so the tr() lookup path is consistent.
-        self.btn_local_browse_view_toggle = QPushButton(tr("View All"))
-        self.btn_local_browse_view_toggle.setToolTip(
-            tr("Toggle between Per-Page and View All modes")
-        )
-        self.btn_local_browse_view_toggle.setVisible(False)
-        self.btn_local_browse_view_toggle.clicked.connect(
-            self._toggle_local_browse_view_mode
-        )
-        nav_bar.addWidget(self.btn_local_browse_view_toggle)
+        # Phase 96 polish (Item 2): btn_local_browse_prev/next/view_toggle and
+        # lbl_local_browse_page removed. btn_b_prev/btn_b_next/btn_b_all now
+        # dispatch to LOCAL nav when a LOCAL sys_id is loaded (via _browse_prev_next
+        # and toggle_browse_view_all). lbl_browse_page_count shows LOCAL page info.
 
         nav_bar.addStretch()
         text_layout.addWidget(_make_scrollable_row(nav_bar))
@@ -10175,6 +10139,11 @@ class GenizahGUI(QMainWindow):
         self._browse_rd_render()
 
     def toggle_browse_view_all(self, checked):
+        # Phase 96 polish (Item 2): LOCAL files use _toggle_local_browse_view_mode;
+        # Genizah manuscripts use the original browse_load_all / browse_load_page path.
+        if self._is_browsing_local():
+            self._toggle_local_browse_view_mode()
+            return
         if checked:
             self.browse_viewer.setVisible(False)
             self.btn_b_toggle_img.setEnabled(False)
@@ -18835,30 +18804,17 @@ class GenizahGUI(QMainWindow):
         except Exception:
             pass
 
-        # 9. Show LOCAL nav controls; update toggle label to reflect 'all' mode.
-        # Browse i18n (Codex C): use English key "Per page" — tr() resolves to
-        # "לדף" in Hebrew mode. No raw Hebrew literal.
+        # 9. Show LOCAL nav controls (Item 2: _show_local_browse_controls now
+        #    manages shared widgets). btn_b_all shows "Per page" label to signal
+        #    the user can click back to per-page mode.
         self._show_local_browse_controls(True)
         try:
-            self.btn_local_browse_view_toggle.setText(tr("Per page"))
-        except Exception:
-            pass
-
-        # 10. Phase 96 fix-2 (View-All regression): disable the Genizah "View All"
-        #     button (btn_b_all) for LOCAL files. btn_b_all calls browse_load_all()
-        #     which calls get_full_manuscript(LOCAL_SYS_ID) → returns [] → error
-        #     dialog.  Toggling it off then calls browse_load_page(LOCAL_SYS_ID) →
-        #     "דף לא נמצא" (Page not found).  LOCAL files have their own view-toggle
-        #     (btn_local_browse_view_toggle); the Genizah-level btn_b_all is
-        #     irrelevant and must be hidden from the user.
-        try:
             if hasattr(self, 'btn_b_all'):
-                self.btn_b_all.setEnabled(False)
-                # Un-check it so toggle_browse_view_all's "else" branch (which
-                # calls browse_load_page) is not triggered when it is re-enabled
-                # later by a Genizah manuscript load.
+                # Label btn_b_all as "Per page" so the user can click back.
+                self.btn_b_all.setText(tr("Per page"))
+                self.btn_b_all.setEnabled(True)
                 self.btn_b_all.blockSignals(True)
-                self.btn_b_all.setChecked(False)
+                self.btn_b_all.setChecked(True)   # checked = "view-all is active"
                 self.btn_b_all.blockSignals(False)
         except Exception:
             pass
@@ -18885,23 +18841,63 @@ class GenizahGUI(QMainWindow):
 
     # ------------------------------------------------------------------
     # Phase 96 NEW-2: LOCAL Browse-panel navigation helpers
+    # Phase 96 polish (Item 2): btn_local_browse_* widgets removed.
+    # btn_b_prev / btn_b_next / btn_b_all are reused for LOCAL nav via
+    # _browse_prev_next() dispatch. lbl_browse_page_count shows LOCAL page info.
     # ------------------------------------------------------------------
 
-    def _show_local_browse_controls(self, visible: bool) -> None:
-        """Phase 96 NEW-2: toggle visibility of LOCAL-only Browse-panel widgets.
+    def _is_browsing_local(self) -> bool:
+        """Return True when the Browse panel currently shows a LOCAL file."""
+        sid = getattr(self, 'current_browse_sid', None)
+        if not sid:
+            return False
+        try:
+            from shared.local_sys_id import is_local_sys_id as _is_local
+            return bool(_is_local(sid))
+        except Exception:
+            return False
 
-        Called by _open_local_browse_page (per-page mode) and _open_local_browse
-        (view-all mode) when a LOCAL file is loaded. Also called from browse_load
-        when a Genizah manuscript is loaded, to hide LOCAL-only chrome.
+    def _browse_prev_next(self, offset: int) -> None:
+        """Unified prev/next handler for Browse panel.
+
+        Dispatches to LOCAL nav when a LOCAL file is loaded, otherwise
+        to the Genizah browse_navigate path.
         """
-        for w in (
-            self.btn_local_browse_prev,
-            self.btn_local_browse_next,
-            self.lbl_local_browse_page,
-            self.btn_local_browse_view_toggle,
-        ):
+        if self._is_browsing_local():
+            self._on_local_browse_nav(offset=offset)
+        else:
+            self.browse_navigate(offset)
+
+    def _show_local_browse_controls(self, visible: bool) -> None:
+        """Phase 96 NEW-2: update Browse-panel controls for LOCAL vs Genizah mode.
+
+        Phase 96 polish (Item 2): the four dedicated btn_local_browse_* widgets
+        were removed. This method now manages shared controls instead:
+          - lbl_browse_page_count: show LOCAL page info when visible=True,
+            clear when visible=False.
+          - btn_b_prev / btn_b_next: enabled by _open_local_browse_page when
+            visible=True; disabled by browse_load when visible=False.
+          - btn_b_all: enabled/disabled in each call site (unchanged).
+        Called by _open_local_browse_page and _open_local_browse (visible=True)
+        and by browse_load / _open_local_browse_from_result (visible=False).
+        """
+        if not visible:
+            # Returning to Genizah mode — clear the LOCAL page label so
+            # the regular Genizah folio/page-count labels take over.
             try:
-                w.setVisible(visible)
+                self.lbl_browse_page_count.setText("")
+                self.lbl_browse_page_count.setVisible(False)
+            except Exception:
+                pass
+            try:
+                self.btn_b_prev.setEnabled(False)
+                self.btn_b_next.setEnabled(False)
+            except Exception:
+                pass
+            # Restore btn_b_all label to "View All" for Genizah manuscripts.
+            try:
+                if hasattr(self, 'btn_b_all'):
+                    self.btn_b_all.setText(tr("View All"))
             except Exception:
                 pass
 
@@ -18973,42 +18969,37 @@ class GenizahGUI(QMainWindow):
         self._local_browse_current_sys_id = sys_id
         self._local_browse_current_p_num = page_data.get('p_num')
 
-        # Update LOCAL nav UI labels.
-        # lbl_local_browse_page shows p_num (physical page) not cur (ordinal index).
+        # Update LOCAL nav UI labels (Item 2: reuse shared widgets).
+        # lbl_browse_page_count shows p_num (physical page) not cur (ordinal index).
         # cur is still used for prev/next boundary detection (correct: it is the
         # 1-based position in the dense sorted page list, 1=first, total=last).
         p_num_display = page_data.get('p_num', cur)
         try:
-            self.lbl_local_browse_page.setText(f"{unit_word} {p_num_display} / {total}")
+            self.lbl_browse_page_count.setText(f"{unit_word} {p_num_display} / {total}")
+            self.lbl_browse_page_count.setVisible(True)
         except Exception:
             pass
+        # Reuse btn_b_prev / btn_b_next for LOCAL boundary control.
         try:
-            self.btn_local_browse_prev.setEnabled(cur > 1)
-            self.btn_local_browse_next.setEnabled(cur < total)
+            self.btn_b_prev.setEnabled(cur > 1)
+            self.btn_b_next.setEnabled(cur < total)
         except Exception:
             pass
 
-        # Show the LOCAL controls + toggle label reflects 'per_page' mode
-        # (clicking the toggle button will switch to view-all).
-        # Browse i18n (Codex C): use English key "View All" — tr() resolves to
-        # "הכל" in Hebrew mode; no raw Hebrew literal needed.
-        self._show_local_browse_controls(True)
-        try:
-            self.btn_local_browse_view_toggle.setText(tr("View All"))
-        except Exception:
-            pass
-
-        # Phase 96 fix-2: disable Genizah btn_b_all for LOCAL files (same as
-        # the view-all code path above — LOCAL files must not activate the
-        # Genizah browse_load_all() path which shows "דף לא נמצא").
+        # btn_b_all: enable it so the user can switch to view-all via the
+        # shared button. Its click handler (toggle_browse_view_all) dispatches
+        # to _toggle_local_browse_view_mode when LOCAL is loaded.
+        # Uncheck first so toggle_browse_view_all enters the "checked" branch.
         try:
             if hasattr(self, 'btn_b_all'):
-                self.btn_b_all.setEnabled(False)
+                self.btn_b_all.setEnabled(True)
                 self.btn_b_all.blockSignals(True)
                 self.btn_b_all.setChecked(False)
                 self.btn_b_all.blockSignals(False)
         except Exception:
             pass
+
+        self._show_local_browse_controls(True)
 
         # Populate Browse panel state (filepath + info label + tab switch).
         filepath = self._lookup_local_filepath(sys_id)
@@ -19058,15 +19049,16 @@ class GenizahGUI(QMainWindow):
             sid, p_num=cur, next_prev=offset
         )
         if not page_data:
-            # D-12: no wrap. Disable the offending button.
+            # D-12: no wrap. Disable the offending shared button.
+            # Item 2: btn_local_browse_next/prev removed; use btn_b_next/prev.
             if offset > 0:
                 try:
-                    self.btn_local_browse_next.setEnabled(False)
+                    self.btn_b_next.setEnabled(False)
                 except Exception:
                     pass
             elif offset < 0:
                 try:
-                    self.btn_local_browse_prev.setEnabled(False)
+                    self.btn_b_prev.setEnabled(False)
                 except Exception:
                     pass
             return
