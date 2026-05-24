@@ -2052,11 +2052,40 @@ class ResultDialog(QDialog):
         except Exception:
             self.lbl_local_file_path.setVisible(False)
 
+        # Phase 96 fix-8 (Issue 3): disable Genizah-only community buttons for
+        # LOCAL hits.  These actions have no meaning for user-owned LOCAL files
+        # (no Friedberg/NLI catalog entries, no community corrections/comments).
+        # They are re-enabled when a non-LOCAL result is shown (see else branch).
+        try:
+            _genizah_only_btns = [
+                'btn_img',           # "Go to Ktiv"
+                'btn_add_to_puzzle', # Fragment Puzzle
+                'btn_rd_edit',       # Edit (corrections)
+                'btn_comment',       # Comment
+                'btn_view_corrections',  # View Corrections
+                'btn_joins',         # Joins
+            ]
+            if _is_local_hit:
+                for _bn in _genizah_only_btns:
+                    _btn = getattr(self, _bn, None)
+                    if _btn is not None:
+                        _btn.setEnabled(False)
+                if hasattr(self, 'rd_version_combo'):
+                    self.rd_version_combo.setEnabled(False)
+            else:
+                for _bn in _genizah_only_btns:
+                    _btn = getattr(self, _bn, None)
+                    if _btn is not None:
+                        _btn.setEnabled(True)
+                # rd_version_combo re-enable is handled by enrichment callback
+        except Exception:
+            pass
+
         # Nav UI Updates
         self.lbl_res_count.setText(tr("Result {} of {}").format(idx + 1, len(self.all_results)))
         self.btn_res_prev.setEnabled(idx > 0)
         self.btn_res_next.setEnabled(idx < len(self.all_results) - 1)
-        
+
         # Parse Meta
         ids = self.meta_mgr.parse_full_id_components(data.get('raw_header', ''))
         prev_sys_id = self.current_sys_id
