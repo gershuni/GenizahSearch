@@ -57,12 +57,11 @@ def test_rescan_preserves_survivors_drops_removed():
     preserved; entries for files no longer present are dropped.
 
     NOTE: this test exercises the Phase 96 helper `_prune_optouts_to_disk`
-    that 96-04 introduces. Skipped until that helper exists.
+    shipped in plan 96-04 (closed 2026-05-24). Skip converted to direct
+    import per BLOCKER 5 audit in plan 96-09.
     """
-    try:
-        from desktop.my_library_tab import _prune_optouts_to_disk
-    except ImportError:
-        pytest.skip("Phase 96 D-F1 prune helper not yet implemented (96-04)")
+    # Phase 96 D-F1 shipped in plan 96-04 (closed 2026-05-24).
+    from desktop.my_library_tab import _prune_optouts_to_disk
     optouts = {
         r"c:\users\h\genizah\file1.pdf",
         r"c:\users\h\genizah\removed.pdf",

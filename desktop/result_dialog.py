@@ -86,6 +86,13 @@ class ResultDialog(QDialog):
         # --- Top Bar (Result Nav) ---
         top_bar = QHBoxLayout()
         self.btn_res_prev = QPushButton(tr("◀ Prev Result")); self.btn_res_prev.clicked.connect(lambda: self.navigate_results(-1))
+        # Phase 96 bug #3 fix: prevent btn_res_prev from capturing Enter keypress.
+        # QPushButton in a QDialog defaults to autoDefault=True, which means pressing
+        # Enter activates the focused button. When the user types a page number into
+        # spin_page and presses Enter, the focused button (Prev Result) fires instead
+        # of spin_page.editingFinished. Setting autoDefault=False on both nav buttons
+        # ensures Enter inside spin_page only triggers the spinbox's own signal.
+        self.btn_res_prev.setAutoDefault(False)
         self.lbl_res_count = QLabel(); self.lbl_res_count.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.btn_compact_toggle = QPushButton("⏶")
         self.btn_compact_toggle.setToolTip(tr("Compact"))
@@ -94,6 +101,7 @@ class ResultDialog(QDialog):
         self.btn_compact_toggle.setFixedWidth(36)
         self.btn_compact_toggle.clicked.connect(lambda checked: self._toggle_compact_mode(checked))
         self.btn_res_next = QPushButton(tr("Next Result ▶")); self.btn_res_next.clicked.connect(lambda: self.navigate_results(1))
+        self.btn_res_next.setAutoDefault(False)
         top_bar.addWidget(self.btn_res_prev); top_bar.addWidget(self.lbl_res_count, 1); top_bar.addWidget(self.btn_compact_toggle); top_bar.addWidget(self.btn_res_next)
         main_layout.addLayout(top_bar)
         main_layout.addWidget(QSplitter(Qt.Orientation.Horizontal))
@@ -2360,6 +2368,17 @@ class ResultDialog(QDialog):
         # Sync compact bar page label if present (mirrors Genizah path).
         if hasattr(self, 'lbl_compact_page') and self.compact_bar.isVisible():
             self.lbl_compact_page.setText(f"{cur_idx} {self.lbl_total.text()}")
+
+        # Phase 96 bug #3 fix: set focus on spin_page after loading a LOCAL hit.
+        # Without this the dialog opens with btn_res_prev focused (first button),
+        # and pressing Enter after typing a page number fires Prev Result instead
+        # of spin_page.editingFinished. autoDefault=False (set in __init__) stops
+        # Enter from triggering btn_res_prev when spin_page is focused. Combined
+        # these two changes make the spinner behave intuitively for LOCAL files.
+        try:
+            self.spin_page.setFocus()
+        except Exception:
+            pass
 
     def _update_rd_domain_label(self):
         """Update domain info label and printed badge for the current result in ResultDialog."""

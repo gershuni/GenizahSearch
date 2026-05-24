@@ -45,8 +45,11 @@ def _make_engine_with_local_pages(sys_id="97000000010001", pages=None):
 def test_next_page():
     """NEW-2: get_local_browse_page(sys_id, p_num=1, next_prev=1) returns page 2."""
     engine, sid = _make_engine_with_local_pages()
-    if not hasattr(engine, "get_local_browse_page"):
-        pytest.skip("Phase 96 NEW-2 primitive not yet implemented (waiting for 96-03)")
+    # Phase 96 NEW-2 shipped in plan 96-03 (closed 2026-05-24).
+    # BLOCKER 5 audit (96-09): skip converted to positive assertion.
+    assert hasattr(engine, "get_local_browse_page"), (
+        "Phase 96 NEW-2 regression: get_local_browse_page missing from SearchEngine"
+    )
     res = engine.get_local_browse_page(sid, p_num=1, next_prev=1)
     assert res is not None
     assert res["p_num"] == 2
@@ -57,8 +60,11 @@ def test_no_wrap_at_boundary():
     """NEW-2 D-12: get_local_browse_page returns None at end-of-file
     (no wrap, buttons disabled)."""
     engine, sid = _make_engine_with_local_pages()
-    if not hasattr(engine, "get_local_browse_page"):
-        pytest.skip("Phase 96 NEW-2 primitive not yet implemented (waiting for 96-03)")
+    # Phase 96 NEW-2 shipped in plan 96-03 (closed 2026-05-24).
+    # BLOCKER 5 audit (96-09): skip converted to positive assertion.
+    assert hasattr(engine, "get_local_browse_page"), (
+        "Phase 96 NEW-2 regression: get_local_browse_page missing from SearchEngine"
+    )
     res_end = engine.get_local_browse_page(sid, p_num=3, next_prev=1)
     res_start = engine.get_local_browse_page(sid, p_num=1, next_prev=-1)
     assert res_end is None, "no wrap at end"
@@ -67,11 +73,9 @@ def test_no_wrap_at_boundary():
 
 def test_view_all_separators():
     """NEW-2 D-14: View-All aggregates all pages with '-- page N --' separators."""
-    try:
-        # 96-08 introduces this helper either on engine or in genizah_app.
-        from genizah_app import _aggregate_local_pages_with_separators as agg
-    except ImportError:
-        pytest.skip("Phase 96 NEW-2 View-All helper not yet implemented (96-08)")
+    # Phase 96 NEW-2 View-All helper shipped in plan 96-08 (closed 2026-05-24).
+    # BLOCKER 5 audit (96-09): skip converted to direct import.
+    from genizah_app import _aggregate_local_pages_with_separators as agg
     out = agg([(1, "alpha"), (2, "beta"), (3, "gamma")], is_pdf=True)
     assert "alpha" in out and "beta" in out and "gamma" in out
     # Separator format from PATTERNS / RESEARCH §4
@@ -80,10 +84,9 @@ def test_view_all_separators():
 
 def test_format_aware_label():
     """NEW-2 D-12: PDF gets 'page' label, DOCX/TXT gets 'chunk' label."""
-    try:
-        from genizah_app import _aggregate_local_pages_with_separators as agg
-    except ImportError:
-        pytest.skip("Phase 96 NEW-2 View-All helper not yet implemented (96-08)")
+    # Phase 96 NEW-2 View-All helper shipped in plan 96-08 (closed 2026-05-24).
+    # BLOCKER 5 audit (96-09): skip converted to direct import.
+    from genizah_app import _aggregate_local_pages_with_separators as agg
     pdf_out = agg([(1, "a"), (2, "b")], is_pdf=True)
     chunk_out = agg([(1, "a"), (2, "b")], is_pdf=False)
     assert "page" in pdf_out.lower()
