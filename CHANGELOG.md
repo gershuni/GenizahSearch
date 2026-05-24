@@ -8,6 +8,45 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [vNEXT] - My Library Phase 96 Polish - 2026-05-24
+
+### v7.14.x / v7.15.0 — My Library Phase 96 Polish (Phase 96)
+
+Desktop My Library improvements shipped after v7.14.0 UAT rounds.
+
+### Bug Fixes (desktop)
+
+- **UX redesign**: Replaced QSplitter + separate opt-out tree + status
+  table with a single unified `_UnifiedFileTreeWidget` (3 columns:
+  Filename checkbox / Pages / Status). Per-file opt-out checkboxes and
+  indexing status now live in one coherent view.
+- **P2 persistence race**: Opt-outs now survive close+reopen — added
+  `flush_pending()` call in `closeEvent` before `_save_session()`,
+  flushing the 150 ms debounce timer synchronously.
+- **P1 Enter focus**: `ResultDialog` nav buttons now have
+  `autoDefault=False`; `spin_page` receives focus after a LOCAL result
+  loads, so Enter jumps pages instead of firing Prev Result.
+- **P1 Browse at page 1**: `_open_local_browse()` now coerces `p_num`
+  to `int` (was stored as string from header parsing), so a hit on page
+  7 opens Browse at page 7.
+- **P2 LOCAL widget leak**: LOCAL Browse nav widgets are now hidden
+  when loading a non-LOCAL (Genizah) manuscript in Browse.
+- **BLOCKER-5**: Converted 10 stale `pytest.skip("Phase 96 … not yet
+  implemented")` markers to positive assertions across 4 test files
+  (`test_local_filter_cascade`, `test_local_hit_highlighting`,
+  `test_local_nav_page_chunk`, `test_local_optout_persistence`).
+
+### Previously deferred items now closed
+
+D-F1 folder drill-down with file checkboxes ✅ (plan 96-04/05/06) ·
+D-F4 PDF one-word-per-line extraction ✅ (plan 96-02) ·
+D-F5 LOCAL search-term highlighting ✅ (plan 96-03)
+
+D-F2 PDF OCR · D-F3 side-by-side PDF page rendering remain open
+for v7.15+. (desktop)
+
+---
+
 ## [7.14.0] - My Library: Local Document Search - 2026-05-24
 
 ### v7.14.0 — My Library (Phase 95)
