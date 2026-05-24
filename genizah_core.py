@@ -6974,6 +6974,11 @@ class SearchEngine:
             "highlight_pattern": effective_pattern,
             "sys_id": sys_id,
             "p_num": p_num,
+            # Phase 96 fix-4: populate 'img' with p_num (page/chunk number).
+            # Genizah hits use 'img' for the folio page number; LOCAL hits must
+            # mirror this so ResultDialog.load_result and _open_local_browse can
+            # both open at the correct page (not always page 1).
+            "img": p_num,
             "score": float(score),
             "display": {
                 "id": sys_id,

@@ -54,6 +54,8 @@ def _make_mock_indexer(folders=None):
         "pending_deletes_recovered": 0,
         "pending_inserts_recovered": 0,
     }
+    # Phase 96 fix-1/fix-2: new method returns prior scan status for the tree.
+    m.get_file_status_for_folder.return_value = {}
     return m
 
 
@@ -79,12 +81,18 @@ def test_my_library_tab_has_required_classes():
 
 def test_my_library_tab_has_folder_list_widget():
     """REQ-8 + D-16: My Library tab has QListWidget, Add/Remove, progress bar,
-    Refresh button, and per-file status QTableWidget with 3 columns."""
+    Refresh button, and a unified QTreeWidget (3 columns: Filename|Pages|Status).
+
+    Phase 96 bug #1 fix: the old per-file status QTableWidget was replaced by
+    _UnifiedFileTreeWidget (a QTreeWidget subclass) that merges opt-out
+    checkboxes with Pages + Status columns into a single tree. The test is
+    updated to assert a QTreeWidget with 3 columns instead of a QTableWidget.
+    """
     from desktop.my_library_tab import MyLibraryTab
     from PyQt6.QtWidgets import (
         QListWidget,
         QProgressBar,
-        QTableWidget,
+        QTreeWidget,
     )
 
     parent = _make_mock_parent()
@@ -110,11 +118,12 @@ def test_my_library_tab_has_folder_list_widget():
     # Progress bar
     assert tab.findChild(QProgressBar) is not None, "Missing QProgressBar"
 
-    # Status QTableWidget with 3 columns (Filename | Pages | Status)
-    table = tab.findChild(QTableWidget)
-    assert table is not None, "Missing QTableWidget"
-    assert table.columnCount() == 3, (
-        f"Expected 3 columns, got {table.columnCount()}"
+    # Phase 96 bug #1: unified QTreeWidget replaces old QTableWidget.
+    # Three columns: Filename (with tri-state checkbox) | Pages | Status.
+    tree = tab.findChild(QTreeWidget)
+    assert tree is not None, "Missing QTreeWidget (unified file tree)"
+    assert tree.columnCount() == 3, (
+        f"Expected 3 columns in unified tree, got {tree.columnCount()}"
     )
 
 

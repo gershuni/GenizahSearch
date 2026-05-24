@@ -666,6 +666,36 @@ class LocalIndexer:
         cur = self._conn.execute("SELECT filepath FROM local_files")
         return [row[0] for row in cur.fetchall()]
 
+    def get_file_status_for_folder(self, folder_path: str) -> dict:
+        """Phase 96 fix-2: return prior scan status for all files in folder_path.
+
+        Called by _UnifiedFileTreeWidget.populate_for_folder so that Pages and
+        Status columns are populated immediately on tab open (not only after a
+        new scan). Without this, the tree opens with all status columns empty,
+        which made the previous QSplitter+status_table look the same.
+
+        Returns a dict mapping canonical filepath -> {'pages': int, 'status': str}
+        for every file that has been indexed for this folder. Files not yet
+        indexed (pending) are absent from the dict.
+        """
+        from shared.local_sys_id import _canonical_filepath
+        canonical = _canonical_filepath(folder_path)
+        row = self._conn.execute(
+            "SELECT folder_id FROM folders WHERE path = ?", (canonical,)
+        ).fetchone()
+        if row is None:
+            return {}
+        folder_id = row["folder_id"]
+        rows = self._conn.execute(
+            "SELECT filepath, page_count, extraction_status "
+            "FROM local_files WHERE folder_id = ? AND pending_delete = 0",
+            (folder_id,),
+        ).fetchall()
+        return {
+            r["filepath"]: {"pages": r["page_count"], "status": r["extraction_status"]}
+            for r in rows
+        }
+
     def list_folders(self) -> list[dict]:
         """Return all registered folders ordered by added_at (D-15 / D-16).
 

@@ -125,6 +125,7 @@ class ResultDialog(QDialog):
         compact_layout.addWidget(QLabel(tr("Image:")))
         self.btn_compact_pg_prev = QPushButton("<")
         self.btn_compact_pg_prev.setFixedWidth(25)
+        self.btn_compact_pg_prev.setAutoDefault(False)  # Phase 96 fix-3: prevent Enter interception
         self.btn_compact_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
         compact_layout.addWidget(self.btn_compact_pg_prev)
 
@@ -135,6 +136,7 @@ class ResultDialog(QDialog):
 
         self.btn_compact_pg_next = QPushButton(">")
         self.btn_compact_pg_next.setFixedWidth(25)
+        self.btn_compact_pg_next.setAutoDefault(False)  # Phase 96 fix-3: prevent Enter interception
         self.btn_compact_pg_next.clicked.connect(lambda: self.load_page(offset=1))
         compact_layout.addWidget(self.btn_compact_pg_next)
 
@@ -241,9 +243,9 @@ class ResultDialog(QDialog):
         prev_arrow = "<"
         next_arrow = ">"
 
-        btn_pg_prev = QPushButton(prev_arrow); btn_pg_prev.setFixedWidth(30); btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
+        btn_pg_prev = QPushButton(prev_arrow); btn_pg_prev.setFixedWidth(30); btn_pg_prev.setAutoDefault(False); btn_pg_prev.clicked.connect(lambda: self.load_page(offset=-1))
         self.spin_page = QSpinBox(); self.spin_page.setRange(1, 9999); self.spin_page.setFixedWidth(80); self.spin_page.editingFinished.connect(lambda: self.load_page(target=self.spin_page.value()))
-        btn_pg_next = QPushButton(next_arrow); btn_pg_next.setFixedWidth(30); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
+        btn_pg_next = QPushButton(next_arrow); btn_pg_next.setFixedWidth(30); btn_pg_next.setAutoDefault(False); btn_pg_next.clicked.connect(lambda: self.load_page(offset=1))
         self.lbl_total = QLabel("/ ?")
 
         self.lbl_img_label = QLabel("")
@@ -1990,6 +1992,19 @@ class ResultDialog(QDialog):
         self.current_fl_id = ids.get('fl_id')
         try: p = int(ids['p_num'])
         except (ValueError, TypeError, KeyError): p = 1
+        # Phase 96 fix-4: for LOCAL hits, raw_header is empty so ids['p_num']
+        # is always None → p stays 1. Use 'img' or 'p_num' from the result
+        # dict directly (both hold the page/chunk number for LOCAL hits).
+        try:
+            from shared.local_sys_id import is_local_sys_id as _is_local
+            if _is_local(self.current_sys_id):
+                local_p = data.get('img') or data.get('p_num')
+                if local_p is not None:
+                    p_try = int(local_p)
+                    if p_try >= 1:
+                        p = p_try
+        except Exception:
+            pass
 
         # Extract volume_ie from result header for multi-IE manuscripts (Phase 60)
         ie_from_header = ids.get('ie_id')
