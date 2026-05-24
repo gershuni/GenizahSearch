@@ -104,6 +104,45 @@ from corrections_ui import (
 
 logger = get_logger(__name__)
 
+# ---------------------------------------------------------------------------
+# Phase 96 NEW-2 D-14: View-All separator helper (LOCAL Browse panel)
+# ---------------------------------------------------------------------------
+
+def _aggregate_local_pages_with_separators(pages, is_pdf: bool, lang: str = 'en') -> str:
+    """Phase 96 NEW-2 D-14: aggregate page texts with labeled separators.
+
+    Pages must be a list of (p_num: int, text: str) tuples — same shape
+    `_get_local_full_text_for_sys_id` already builds. is_pdf chooses
+    'page' vs 'chunk' label. lang='he' switches to Hebrew labels
+    ('דף' / 'מקטע').
+
+    Returns a string suitable for assignment to a QTextBrowser/QTextEdit
+    (typically `self.browse_text` via apply_line_numbered_text).
+
+    Examples:
+        >>> _aggregate_local_pages_with_separators([(1, "first"), (2, "second")], is_pdf=True)
+        'first\\n\\n— page 2 —\\n\\nsecond'
+        >>> _aggregate_local_pages_with_separators([(1, "first"), (2, "second")], is_pdf=False)
+        'first\\n\\n— chunk 2 —\\n\\nsecond'
+        >>> _aggregate_local_pages_with_separators([(1, "first")], is_pdf=True)
+        'first'
+    """
+    if not pages:
+        return ""
+    if lang == 'he':
+        label = 'דף' if is_pdf else 'מקטע'
+    else:
+        label = 'page' if is_pdf else 'chunk'
+    parts = []
+    for p_num, text in pages:
+        if not text:
+            continue
+        if parts:
+            parts.append(f"\n\n— {label} {p_num} —\n\n")
+        parts.append(text)
+    return "".join(parts)
+
+
 # Global exception handler to log crashes to file
 def _setup_crash_handler():
     import traceback
@@ -18626,7 +18665,17 @@ class GenizahGUI(QMainWindow):
             except (KeyError, IndexError, TypeError):
                 continue
         pages.sort(key=lambda x: x[0])
-        return "\n\n".join(text for _p, text in pages if text)
+        # Phase 96 NEW-2: format-aware separators (PDF→page, DOCX/TXT→chunk).
+        is_pdf = False
+        try:
+            fp = self._lookup_local_filepath(sys_id) or ""
+            is_pdf = fp.lower().endswith('.pdf')
+        except Exception:
+            pass
+        # PINNED (96-08-WIRING-NOTES.md): use module-level CURRENT_LANG —
+        # NOT self.lang or self._current_ui_lang (these do not exist).
+        lang = CURRENT_LANG if CURRENT_LANG in ('he', 'en') else 'en'
+        return _aggregate_local_pages_with_separators(pages, is_pdf=is_pdf, lang=lang)
 
     def _open_local_browse(self, sys_id: str, res: dict):
         """Category 3 fix — render LOCAL file text in the Browse panel.
