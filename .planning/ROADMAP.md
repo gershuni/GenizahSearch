@@ -37,7 +37,7 @@
 **Source CONTEXT:** `.planning/phases/95-my-library/95-CONTEXT.md` (46 locked decisions, post-Codex critique; AUTHORITATIVE)
 **Source SPEC:** `.planning/phases/95-my-library/95-SPEC.md` (10 requirements + 22 acceptance criteria — AUTHORITATIVE)
 
-**Plans:** 9 plans across 5 waves:
+**Plans:** 9/9 plans complete
 - [ ] 95-01-PLAN.md — Wave 0: 26 red-stub tests + requirements.txt pymupdf pin + GenizahSearchPro.spec collect_all(pymupdf) + D-44 Hebrew fixture + conftest fixtures
 - [ ] 95-02-PLAN.md — Wave 1: shared/local_sys_id.py + parse_header_smart/parse_full_id_components generalization (Codex D-13 P0) + LIBRARY_CODES extension + Config.LOCAL_*_DIR
 - [ ] 95-03-PLAN.md — Wave 1: shared/local_indexer.py core (PyMuPDF + python-docx + TXT + RTL helpers as dead code + LOCAL Tantivy schema with tokenizer_name="raw" on unique_id + SQLite cache + two-phase commit + delete-by-uid + folder overlap detection + unavailable-folder handling)
