@@ -24,11 +24,21 @@ Send an agent (subagent_type=Explore) to verify the code is ready:
 **Checks:**
 - `git status` — working tree clean? Uncommitted changes?
 - `python -m pytest tests/ --tb=short -q` — all tests pass?
-- `python scripts/check_docs.py` — documentation health OK?
+- **`python -m ruff check .` — explicit ruff pass** (per project memory: v7.12.0 CI failed on F401 unused imports; pre-flight must run ruff as its own line item, not implied by pytest)
+- `python scripts/check_docs.py` — documentation health OK? (NOTE: on Windows console may fail with UnicodeEncodeError on emoji — that's environment-only, not a blocker)
+- **`requirements.txt` vs `requirements-lock.txt` consistency** — every runtime dep in `requirements.txt` must have a matching pin in `requirements-lock.txt`. CI installs from the lock file, so a `requirements.txt` addition that's not lock-pinned breaks CI on the release commit. Diff check:
+  ```bash
+  # Extract package names (lowercase) from both files and compare
+  comm -23 \
+    <(grep -v '^#' requirements.txt | sed 's/[<>=!].*//' | tr '[:upper:]' '[:lower:]' | sort -u) \
+    <(grep -v '^#' requirements-lock.txt | sed 's/==.*//' | tr '[:upper:]' '[:lower:]' | sort -u)
+  ```
+  If anything prints, those packages are in `requirements.txt` but absent from the lock file — block the release until they're added to `requirements-lock.txt`. (Phase 95 / v7.14.0 hit this: pymupdf was in `requirements.txt` but missing from the lock, so CI failed post-push.)
 - No `TODO(release)` or `FIXME(urgent)` markers in recently changed files
 - `OPEN_ISSUES.md` — any critical/blocking issues still open?
 - Grep for `print(` debug statements in recently committed code (last 5 commits)
 - Version consistency: `version.py`, `CompileScriptGenizah.iss`, `version_info.txt`, `README.md` all match current version (not yet bumped)
+- **`tests/test_release_artifacts.py` `_TARGET_VERSION`** — per project memory, `bump_version.py` does NOT update this constant. Check its current value matches the pre-bump version; you'll need to bump it manually in Phase 3.
 
 **Report** findings to the user. If there are blockers, stop and ask how to proceed. If there are warnings, list them and ask for confirmation to continue.
 
@@ -100,6 +110,7 @@ Present this checklist BEFORE building or deploying. Adapt it based on what was 
 RELEASE CHECKLIST — vX.Y.Z
 ==============================
 [ ] Version bumped in all files (version.py, .iss, version_info.txt, README)
+[ ] tests/test_release_artifacts.py _TARGET_VERSION manually bumped (bump_version.py misses it)
 [ ] CHANGELOG.md has new section with correct date
 [ ] README.md "What's New" updated (or N/A)
 [ ] CLAUDE.md "Recently Changed" updated
@@ -108,6 +119,8 @@ RELEASE CHECKLIST — vX.Y.Z
 [ ] Help pages updated (or N/A)
 [ ] OPEN_ISSUES.md up to date
 [ ] All tests passing
+[ ] ruff explicit pass (python -m ruff check .)
+[ ] requirements.txt ↔ requirements-lock.txt diff is empty (CI uses the lock file; missing deps break CI)
 [ ] No uncommitted changes (besides release changes)
 [ ] Translations present for new UI strings
 
@@ -189,6 +202,21 @@ After user confirms:
    git push origin master-main --tags
    ```
 
+3.5. **REQUIRED — Watch CI on the release commit.** Never assume CI will pass just because the local pytest run passed. CI installs from `requirements-lock.txt` (not `requirements.txt`), runs on Ubuntu-latest with Python 3.11, and exercises a different subset of the suite. The local test run can be green while CI fails to even collect tests (the v7.14.0 release hit exactly this: 8 collection errors on `ModuleNotFoundError: No module named 'fitz'` because `pymupdf` was missing from the lock file).
+
+   ```bash
+   # Find the latest CI run for the release commit
+   gh run list --branch master-main --limit 3
+   # Once you know the run ID, watch until it finishes
+   gh run watch <run-id>  # blocks until completion, streams logs
+   ```
+
+   Alternatively, use the Monitor tool with a polling `gh run view` loop until the run reaches `completed` status.
+
+   **If CI passes:** continue to step 4 (deploy web).
+
+   **If CI fails:** STOP. Do NOT deploy to production with a red CI run on the release commit. Read the failure logs (`gh run view <id> --log-failed`), diagnose root cause, push a hotfix commit, and re-watch CI. Only proceed to deploy once CI is green. (For the v7.14.0 incident the user accepted that web+desktop were already deployed and live, but the right default is to gate deploy on CI — not parallel.)
+
 4. **Deploy web** (if web or both):
    - Run: `ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com "cd /home/ubuntu/GenizahSearch && ./deploy.sh"`
    - Verify service restarted successfully
@@ -219,6 +247,7 @@ After user confirms:
 ## Phase 8: Wrap Up
 
 - Summarize what was released
+- **Final CI confirmation:** run `gh run list --branch master-main --limit 3` and confirm the latest run (release commit + any hotfixes) is `completed success`. If still in-progress, set a Monitor and don't declare the release done until it lands green.
 - List any deferred items or known issues for next release
 - Remind about any follow-up tasks (e.g., "announce to users", "monitor error tracking")
 
