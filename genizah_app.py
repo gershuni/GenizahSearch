@@ -18642,32 +18642,32 @@ class GenizahGUI(QMainWindow):
         except Exception:
             return None
 
-    def _get_local_full_text_for_sys_id(self, sys_id: str) -> str:
-        """Category 3: aggregate all pages of a LOCAL sys_id into a single text.
+    def _get_local_pages_for_sys_id(self, sys_id: str) -> list:
+        """Return sorted [(p_num, text), ...] for all indexed pages of a LOCAL sys_id.
 
-        Reads from the SearchEngine.local_searcher (the LOCAL side-index)
-        sorted by page number. Returns "" if the index is unavailable or
-        the sys_id has no docs.
+        Phase 96 polish (Item 3): extracted from _get_local_full_text_for_sys_id so
+        the view-all render can pass the raw page list to apply_line_numbered_text
+        via pages= for per-page line-number restart.
+
+        Returns [] if the index is unavailable or the sys_id has no docs.
         """
         if not self.searcher:
-            return ""
+            return []
         local_searcher = getattr(self.searcher, "local_searcher", None)
         local_index = getattr(self.searcher, "local_index", None)
         if local_searcher is None or local_index is None:
-            return ""
+            return []
         try:
-            # Match any doc whose full_header starts with the sys_id. The
-            # full_header field is stored + indexed with a tokenizer so we
-            # use a prefix-like phrase query.  Limit 5000 pages — sane upper
-            # bound (D-33 says max ~3 doc/page; we pre-cap at 5000).
+            # Match any doc whose full_header starts with the sys_id.
+            # Limit 5000 pages — sane upper bound (D-33).
             q = local_index.parse_query(sys_id, ["full_header"])
             res = local_searcher.search(q, 5000)
         except Exception as exc:  # noqa: BLE001
             logger.warning(
-                "_get_local_full_text_for_sys_id: parse_query failed for %s: %s",
+                "_get_local_pages_for_sys_id: parse_query failed for %s: %s",
                 sys_id, exc,
             )
-            return ""
+            return []
         pages = []
         for _score, doc_addr in res.hits:
             try:
@@ -18687,6 +18687,21 @@ class GenizahGUI(QMainWindow):
             except (KeyError, IndexError, TypeError):
                 continue
         pages.sort(key=lambda x: x[0])
+        return pages
+
+    def _get_local_full_text_for_sys_id(self, sys_id: str) -> str:
+        """Category 3: aggregate all pages of a LOCAL sys_id into a single text.
+
+        Reads from the SearchEngine.local_searcher (the LOCAL side-index)
+        sorted by page number. Returns "" if the index is unavailable or
+        the sys_id has no docs.
+
+        Phase 96 polish (Item 3): delegates page retrieval to
+        _get_local_pages_for_sys_id so the raw page list is reusable.
+        """
+        pages = self._get_local_pages_for_sys_id(sys_id)
+        if not pages:
+            return ""
         # Phase 96 NEW-2: format-aware separators (PDF→page, DOCX/TXT→chunk).
         is_pdf = False
         try:
@@ -18744,12 +18759,16 @@ class GenizahGUI(QMainWindow):
 
         # 2. Aggregate all pages (uses _aggregate_local_pages_with_separators via
         #    _get_local_full_text_for_sys_id — format+lang-aware separators from Task 2a).
+        # Phase 96 polish (Item 3): also keep the raw page list so the gutter can
+        # restart line numbers at 1 per page and skip separator lines.
+        _raw_pages = self._get_local_pages_for_sys_id(sys_id)
         text = self._get_local_full_text_for_sys_id(sys_id)
         if not text:
             text = tr(
                 "Indexed LOCAL file — no extracted text available. "
                 "Use 'Open file' to view the original."
             )
+            _raw_pages = []  # no pages to pass when showing placeholder
 
         # 3. Populate Browse panel state.
         self.current_browse_sid = sys_id
@@ -18780,14 +18799,23 @@ class GenizahGUI(QMainWindow):
 
         # 7. Render the text via the same gutter helper Genizah pages use.
         # Codex HIGH #4 closure: HTML-escape raw file content before <br> replace.
+        # Phase 96 polish (Item 3): pass pages= so the gutter enters per-page mode:
+        #   - line numbers restart at 1 at the start of each page/chunk
+        #   - separator lines ("— page N —") are tagged userState=-1 → no number
         import html as _html_mod
         try:
             escaped = _html_mod.escape(text)
             browse_html = escaped.replace("\n", "<br>")
+            # pages= expects a list of raw text strings (one per page/chunk).
+            # _raw_pages is [(p_num, text), ...]; pass the text-only list when
+            # there are multiple pages so the gutter does per-page restart.
+            # For a single page or fallback placeholder, omit pages= (legacy mode).
+            _page_texts = [t for _, t in _raw_pages if t] if len(_raw_pages) > 1 else None
             apply_line_numbered_text(
                 self.browse_text,
                 f"<div dir='rtl'>{browse_html}</div>",
                 source_text=text,
+                pages=_page_texts,
                 is_html=True,
             )
         except Exception as exc:  # noqa: BLE001
