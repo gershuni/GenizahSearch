@@ -70,6 +70,36 @@ _COL_STATUS = 2
 
 
 # ---------------------------------------------------------------------------
+# Phase 96 D-F1 (D-09): rescan-preserves-opt-out-state helper
+# ---------------------------------------------------------------------------
+
+def _prune_optouts_to_disk(optouts: set, on_disk: set) -> set:
+    """Phase 96 D-F1 D-09: filter the opt-out set to entries still on disk.
+
+    Called after a rescan completes — drops entries for files that have
+    been removed (or renamed) since the last scan. Surviving entries are
+    preserved untouched.
+
+    Pure function (no I/O, no side effects) — keep it that way so it can
+    be exercised by tests/test_local_optout_persistence.py without any
+    Qt or filesystem fixtures.
+
+    Examples:
+        >>> _prune_optouts_to_disk(set(), set())
+        set()
+        >>> _prune_optouts_to_disk({'/a', '/b'}, {'/a'})
+        {'/a'}
+        >>> _prune_optouts_to_disk({'/a'}, set())
+        set()
+    """
+    if not optouts:
+        return set()
+    if not on_disk:
+        return set()
+    return optouts & on_disk
+
+
+# ---------------------------------------------------------------------------
 # LocalIndexerWorker  (D-23 / D-24 / D-25)
 # ---------------------------------------------------------------------------
 

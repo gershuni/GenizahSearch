@@ -2872,6 +2872,11 @@ class GenizahGUI(QMainWindow):
         self._local_filter_state_search = 'all'       # 'all' | 'only_local' | 'no_local'
         self._local_filter_state_composition = 'all'
         self._local_filter_state_parallels = 'all'
+        # Phase 96 D-F1 (D-08 REVISED 2026-05-24): per-file LOCAL opt-out set —
+        # canonical filepaths excluded from search results at query time. Cross-
+        # surface (one set shared by Search/Composition/Parallels). Persists via
+        # session JSON, NOT QSettings (matches `_local_filter_state_*` pattern).
+        self._local_file_optouts: set[str] = set()
         self._local_filter_inactive_chip_visible = False
         # Phase 95-08 smoke-fix — corpus scope selector persistence (session JSON, not QSettings)
         self._search_corpus_scope = 'genizah'          # 'all' | 'genizah' | 'local'
@@ -23586,6 +23591,10 @@ class GenizahGUI(QMainWindow):
                 'pre_search_filters': getattr(self, 'pre_search_filters', {}),
                 'post_measurement_filters': getattr(self, '_post_measurement_filters', {}),
                 'word_excluded_sys_ids': sorted(getattr(self, 'word_excluded_sys_ids', set())),
+                # Phase 96 D-F1: per-file LOCAL opt-out paths (cross-surface, single source of truth).
+                # Top-level placement — DIFFERENT from Phase 95's local_filter (nested in regular_search).
+                # Reason: opt-out is cross-surface (Search + Composition + Parallels), not per-surface.
+                'local_file_optouts': sorted(getattr(self, '_local_file_optouts', set())),
                 'active_tab': self.tabs.currentIndex() if hasattr(self, 'tabs') else 0,
                 'browse_shelfmark': {
                     'sys_id': self.browse_sys_input.text().strip() if hasattr(self, 'browse_sys_input') else '',
@@ -23641,6 +23650,10 @@ class GenizahGUI(QMainWindow):
             comp = state.get('composition_search', {})
             browse = state.get('browse_shelfmark', {})
             cat = state.get('browse_catalog', {})
+            # Phase 96 D-F1: restore per-file LOCAL opt-out set from top-level key.
+            # Default `[]` handles pre-Phase-96 session files gracefully.
+            # CROSS-SURFACE: reads from `state` (top level), NOT from `reg` (regular_search).
+            self._local_file_optouts = set(state.get('local_file_optouts', []))
             has_data = (reg.get('results') or comp.get('results') or comp.get('filtered_results') or comp.get('source_text')
                         or browse.get('sys_id') or browse.get('shelfmark') or browse.get('fl_id')
                         or cat.get('domain') or cat.get('author') or cat.get('work')
