@@ -83,6 +83,7 @@ The full `gsd-tools.cjs audit-open` report at close included 96 items. The v7.12
 
 - Phase 96 added (2026-05-24): Completing My Library feature: add features and fix bugs
 - Phase 97 added (2026-05-25): More LOCAL features
+- Phase 98 added (2026-05-25): NLI Resilience — circuit-breaker and bounded-timeout hardening for all NLI/IIIF code paths
 
 ## Session Continuity
 

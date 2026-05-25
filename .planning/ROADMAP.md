@@ -339,6 +339,16 @@ Plans:
 - [ ] 97-05-PLAN.md — Wave E: phase-aware ETA + scan_run_id (mutated-rows-only per RESEARCH Issue #4) + FolderWalkWorker QThread + View All 500-cap incremental render
 - [ ] 97-06-PLAN.md — Wave F: network drive semantics + file-change-during-index + supported-extension row policy + chunk_locator per format + bilingual EN+HE privacy disclosure + 4 invariant CI guards
 
+### Phase 98: NLI Resilience — circuit-breaker and bounded-timeout hardening for all NLI/IIIF code paths
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 97
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 98 to break down)
+
 ---
 
 *Roadmap created: 2026-02-09*
