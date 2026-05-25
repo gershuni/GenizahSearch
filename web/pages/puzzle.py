@@ -16,6 +16,15 @@ from nicegui import ui, app, run
 from web.translations import tr, get_language
 from web.state import state
 
+# Phase 98 D-21: shared NLI circuit breaker for puzzle folio resolution.
+from shared.nli_circuit_breaker import (
+    is_open as _nli_circuit_is_open,
+    record_failure as _nli_record_failure,
+    record_success as _nli_record_success,
+    NLI_CONNECT_TIMEOUT,
+    NLI_IIIF_READ_TIMEOUT,
+)
+
 logger = logging.getLogger(__name__)
 
 # Fabric.js CDN (v6.4.3 stable)
@@ -1985,30 +1994,59 @@ def _resolve_folios(sys_id: str) -> list:
         logger.warning(f"_resolve_folios enrich_metadata for {sys_id}: {e}")
 
     # NLI path: try IIIF manifest for NLI-hosted manuscripts
-    try:
-        url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{sys_id}-1/manifest"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        resp = _requests.get(url, headers=headers, timeout=15)
-        if resp.status_code == 200:
-            data = resp.json()
-            fl_ids = []
-            if 'sequences' in data and data['sequences']:
-                for canvas in data['sequences'][0].get('canvases', []):
-                    images = canvas.get('images', [])
-                    if images:
-                        resource = images[0].get('resource', {})
-                        service = resource.get('service', {})
-                        service_id = service.get('@id', '')
-                        m = _re.search(r'/FL(\d+)', service_id)
-                        if m:
-                            fl_ids.append(m.group(1))
-            if fl_ids:
-                return [
-                    {'fl_id': fid, 'label': f'{(i // 2) + 1}{"r" if i % 2 == 0 else "v"}'}
-                    for i, fid in enumerate(fl_ids)
-                ]
-    except Exception as e:
-        logger.error(f"NLI manifest fetch failed for {sys_id}: {e}")
+    # Phase 98 D-21: guarded by shared NLI circuit breaker; bounded timeout.
+    # When the breaker is OPEN we skip the NLI fetch entirely and fall through
+    # to the images_ext fallback below (still a useful downstream path).
+    if not _nli_circuit_is_open():
+        try:
+            url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{sys_id}-1/manifest"
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+            # Phase 98 D-21: env-driven (connect, read) tuple — 5s default for JSON manifest.
+            # NLI_IIIF_READ_TIMEOUT (not NLI_IMAGE_READ_TIMEOUT) because the response is JSON.
+            resp = _requests.get(
+                url,
+                headers=headers,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_IIIF_READ_TIMEOUT),
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                fl_ids = []
+                if 'sequences' in data and data['sequences']:
+                    for canvas in data['sequences'][0].get('canvases', []):
+                        images = canvas.get('images', [])
+                        if images:
+                            resource = images[0].get('resource', {})
+                            service = resource.get('service', {})
+                            service_id = service.get('@id', '')
+                            m = _re.search(r'/FL(\d+)', service_id)
+                            if m:
+                                fl_ids.append(m.group(1))
+                if fl_ids:
+                    _nli_record_success(path='puzzle_resolve_folios')
+                    return [
+                        {'fl_id': fid, 'label': f'{(i // 2) + 1}{"r" if i % 2 == 0 else "v"}'}
+                        for i, fid in enumerate(fl_ids)
+                    ]
+                # 200 but no fl_ids -> fall through to images_ext fallback (D-07: no breaker increment)
+            elif resp.status_code == 429:
+                _nli_record_failure(failure_type='429', path='puzzle_resolve_folios')
+                logger.warning(f"NLI manifest 429 for {sys_id}")
+            elif 500 <= resp.status_code < 600:
+                _nli_record_failure(failure_type='5xx', path='puzzle_resolve_folios')
+                logger.warning(f"NLI manifest {resp.status_code} for {sys_id}")
+            # 404 / other -> fall through to images_ext fallback (D-07: no breaker increment)
+        except _requests.exceptions.Timeout as e:
+            logger.error(f"NLI manifest timeout for {sys_id}: {e}")
+            _nli_record_failure(failure_type='timeout', path='puzzle_resolve_folios')
+        except _requests.exceptions.ConnectionError as e:
+            logger.error(f"NLI manifest connection error for {sys_id}: {e}")
+            _nli_record_failure(failure_type='connection_error', path='puzzle_resolve_folios')
+        except Exception as e:
+            # Catch-all for JSON decode / data structure errors. These are code-level
+            # issues (malformed NLI response, schema drift), NOT upstream outages —
+            # do NOT trip the breaker (T-98-04-06 mitigation).
+            logger.error(f"NLI manifest parse failed for {sys_id}: {e}")
+    # else: breaker open -> skip NLI fetch entirely, fall through to images_ext fallback
 
     # Last fallback: images_ext without external_provider (shouldn't normally happen)
     if meta_data:
