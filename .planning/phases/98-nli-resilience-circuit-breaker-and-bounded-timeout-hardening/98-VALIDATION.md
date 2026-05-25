@@ -97,7 +97,18 @@ All other tests are correctness checks for individual decisions, not invariant p
 
 - **PostHog event symmetry:** every `nli_breaker_opened` must eventually have a matching `nli_breaker_closed`. Asymmetry suggests a stuck breaker.
 - **Journal pattern:** `Failed to fetch FL IDs` ≤ 3 times per 60s window per sys_id (down from 1/request pre-fix).
-- **PostHog drop counter:** `web/api_hardening.get_dropped_event_count()` stays at 0 during normal operation. Growth = PostHog queue saturation.
+- **PostHog drop counters — TWO queues to monitor (Codex REVIEW Issue 5, Option A):**
+  - `web/api_hardening.get_dropped_event_count()` — drops from the `search_api_request` event queue (Phase 78 server-side capture; ALL `/api/*` endpoint instrumentation flows through this).
+  - `shared/posthog_server.get_dropped_event_count()` — drops from the breaker telemetry queue (Phase 98 Plan 01; ALL `nli_breaker_opened` / `nli_breaker_closed` events flow through this).
+  - **Both should stay at 0 during normal operation.** Growth in EITHER counter = the corresponding PostHog queue is saturating.
+  - **Why two queues?** Plan 98-01 explicitly does NOT modify `web/api_hardening.py` to avoid breaking 5 existing test monkeypatches on `web.api_hardening._event_queue` (the source code comment at `web/api_hardening.py:653-656` confirms the test seam is intentional). The shared module `shared/posthog_server.py` is a clean factor-out so the breaker (in `shared/`) does not depend on `web/`. Future cleanup could delegate `web/api_hardening` to `shared/posthog_server` — out of scope for Phase 98.
+  - **Operator check at deploy time:** verify both via `curl https://genizahsearch.com/api/internal/health` (if such endpoint exists) OR via a one-off Python REPL on the production host:
+    ```python
+    >>> from web.api_hardening import get_dropped_event_count as web_drops
+    >>> from shared.posthog_server import get_dropped_event_count as breaker_drops
+    >>> web_drops(), breaker_drops()
+    (0, 0)  # expected
+    ```
 
 ---
 
