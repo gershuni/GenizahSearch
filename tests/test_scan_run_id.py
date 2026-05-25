@@ -17,7 +17,6 @@ import sqlite3
 import time
 import uuid
 
-import pytest
 import tantivy
 
 from shared.local_indexer import LocalIndexer, build_local_schema

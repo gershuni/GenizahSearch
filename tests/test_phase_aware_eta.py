@@ -7,9 +7,6 @@ Tests:
   T-E-1b  test_compose_overall_eta_is_sum — compose_overall_eta() returns the
            SUM of per-phase ETAs (sequential phases, Codex MEDIUM #5 resolution).
 """
-import time
-
-
 def _make_eta():
     from shared.local_indexer import _PhaseAwareETA
     return _PhaseAwareETA()

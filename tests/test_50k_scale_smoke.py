@@ -11,7 +11,6 @@ status='committed' in processed_files.
 Memory check: RSS stays under 4 GB (generous — real limit depends on host).
 """
 import os
-import sys
 import time
 
 import pytest
