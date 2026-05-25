@@ -6,6 +6,58 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Phase 98 — NLI Resilience (internal; 2026-05-25)
+
+Internal closeout — not yet a user-facing release.
+
+**Resilience hardening for NLI/IIIF code paths.** All 10 NLI fetch sites
+guarded by a new shared circuit breaker (`shared/nli_circuit_breaker.py`)
+that trips after 3 consecutive failures and short-circuits further calls
+for 60s. Per-call timeouts dropped from 15-30s to 3-5s via 6 new env knobs
+(`NLI_CIRCUIT_THRESHOLD=3`, `NLI_CIRCUIT_WINDOW=60`, `NLI_CONNECT_TIMEOUT=3`,
+`NLI_IIIF_READ_TIMEOUT=5`, `NLI_MARC_READ_TIMEOUT=3`,
+`NLI_IMAGE_READ_TIMEOUT=5`). `NLI_SEMAPHORE_TIMEOUT` default dropped 20→1.
+PostHog telemetry on breaker open/close via factored
+`shared/posthog_server.py`.
+
+Worst-case per-request blocking budget: 45s → ~9s. After 3 consecutive
+failures the breaker stays open for 60s and subsequent NLI fetches return
+empty in microseconds (negative-cache short-circuit). The Nyquist test in
+`tests/test_nli_circuit_breaker.py::TestNliCircuitBreakerConcurrency`
+proves 20 saturating threads complete in <10s wall time.
+
+Wired into all 10 NLI fetch sites: 4 in `web/api.py`
+(`fetch_fl_ids_from_nli`, `nli_image`, `_fetch_nli_image_bytes`,
+`proxy_image` — host-conditional for non-NLI), 3 in puzzle
+(`PuzzleImageService._fetch_iiif_image`, `_fetch_direct_url`
+host-conditional, `web/pages/puzzle.py::_resolve_folios`), 4 in
+`genizah_core.py` (`fetch_iiif_manifest`, `fetch_marc_data` migrated +
+new wirings at `_fetch_single_worker`, `_fetch_fl_ids`); legacy
+class-attribute breaker REMOVED (RESEARCH Pitfall 5).
+
+**Origin:** 2026-05-25 production hang — see
+`docs/INCIDENT-2026-05-25-nli-iiif-hang.md` +
+`docs/INCIDENT-2026-05-25-CODEX-CRITIQUE.md`. Closes the Minimum Ship
+Patch from the Codex critique.
+
+**Deferred (out of scope):** Async refactor to `httpx.AsyncClient`,
+event-loop watchdog, multi-worker uvicorn (CONTEXT D-05).
+
+**Production canary verification:**
+`curl -w "%{time_total}\n" https://genizahsearch.com/api/fl_ids/990001458630205171`
+10× in sequence. Expected: first 1-3 calls slow (1-5s), remaining < 0.1s.
+Journal pattern `Failed to fetch FL IDs` should appear at most 3 times
+per 60s window per sys_id.
+
+134/134 Phase 98 tests pass across 6 test files
+(`test_posthog_server.py`, `test_nli_circuit_breaker.py`,
+`test_api_nli_breaker_integration.py`,
+`test_puzzle_nli_breaker_integration.py`,
+`test_genizah_core_nli_breaker_migration.py`,
+`test_nli_breaker_cross_module_invariants.py`).
+
+(both web + desktop — desktop releases next milestone)
+
 ---
 
 ## [vNEXT] - Phase 97 Wave F Gap Closure - 2026-05-25

@@ -360,15 +360,15 @@ Plans:
 **Source RESEARCH:** `.planning/phases/98-nli-resilience-circuit-breaker-and-bounded-timeout-hardening/98-RESEARCH.md` (HIGH confidence)
 **Source VALIDATION:** `.planning/phases/98-nli-resilience-circuit-breaker-and-bounded-timeout-hardening/98-VALIDATION.md`
 
-**Plans:** 2/6 plans executed
+**Plans:** 6/6 plans executed (canary pending production verify)
 
 Plans:
 - [x] 98-01-PLAN.md — Wave 1: shared/posthog_server.py (factored telemetry helper — Option (a) per RESEARCH); fire-and-forget queue+daemon idiom factored out of web/api_hardening.py
 - [x] 98-02-PLAN.md — Wave 2: shared/nli_circuit_breaker.py (module-level singleton, threading.Lock, time.monotonic); tests/test_nli_circuit_breaker.py (Nyquist-critical D-26 + D-27 lock correctness + AST guards); tests/conftest.py autouse fixture
-- [ ] 98-03-PLAN.md — Wave 3: web/api.py (5 call sites D-11..D-18) — drop NLI_SEMAPHORE_TIMEOUT 20→1; wire fetch_fl_ids_from_nli with pre+post semaphore guards; nli_image / _fetch_nli_image_bytes / proxy_image (NLI-host-conditional)
-- [ ] 98-04-PLAN.md — Wave 3 parallel: shared/puzzle_image_service.py (_fetch_iiif_image unconditional + _fetch_direct_url host-conditional); web/pages/puzzle.py::_resolve_folios; D-19, D-20, D-21
-- [ ] 98-05-PLAN.md — Wave 3 parallel: genizah_core.py — migrate fetch_iiif_manifest + fetch_marc_data off class-attribute breaker; wire 2 new sites _fetch_single_worker (D-22) + _fetch_fl_ids (D-23); REMOVE legacy class-attribute breaker per RESEARCH Pitfall 5
-- [ ] 98-06-PLAN.md — Wave 4: cross-module invariant tests; CLAUDE.md env var docs; docs/OPEN_ISSUES.md closeout; .planning/ROADMAP.md self-update; CHANGELOG.md entry; production canary checkpoint (human-verify)
+- [x] 98-03-PLAN.md — Wave 3: web/api.py (5 call sites D-11..D-18) — drop NLI_SEMAPHORE_TIMEOUT 20→1; wire fetch_fl_ids_from_nli with pre+post semaphore guards; nli_image / _fetch_nli_image_bytes / proxy_image (NLI-host-conditional)
+- [x] 98-04-PLAN.md — Wave 3 parallel: shared/puzzle_image_service.py (_fetch_iiif_image unconditional + _fetch_direct_url host-conditional); web/pages/puzzle.py::_resolve_folios; D-19, D-20, D-21
+- [x] 98-05-PLAN.md — Wave 3 parallel: genizah_core.py — migrate fetch_iiif_manifest + fetch_marc_data off class-attribute breaker; wire 2 new sites _fetch_single_worker (D-22) + _fetch_fl_ids (D-23); REMOVE legacy class-attribute breaker per RESEARCH Pitfall 5
+- [x] 98-06-PLAN.md — Wave 4: cross-module invariant tests; CLAUDE.md env var docs; docs/OPEN_ISSUES.md closeout; .planning/ROADMAP.md self-update; CHANGELOG.md entry; production canary checkpoint (human-verify)
 
 **Wave structure:** 1 (98-01 posthog_server) → 2 (98-02 breaker module + tests) → 3 (3 parallel: 98-03 [web/api.py], 98-04 [puzzle], 98-05 [genizah_core.py]) → 4 (98-06 cross-module integration + docs + canary).
 
