@@ -15,3 +15,4 @@ Pillow==12.1.1
 numpy==2.4.3
 objgraph==3.6.2
 zstandard>=0.22,<1.0   # Phase 97 R-03 (cached_text compression for LOCAL indexer)
+defusedxml>=0.7,<1.0   # Phase 97 F-02 — XML-bomb defense for openpyxl/lxml
