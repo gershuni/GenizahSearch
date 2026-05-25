@@ -246,3 +246,109 @@ def test_v1_to_v2_uses_begin_immediate_and_rollback_on_failure(tmp_path, monkeyp
     monkeypatch.setattr(_mig_mod, "_alter_safe", original)
     version = conn.execute("PRAGMA user_version").fetchone()[0]
     assert version == 1, f"Expected user_version=1 after rollback, got {version}"
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 Wave D — folder counter aggregation tests (C-04 + LD-9)
+# ---------------------------------------------------------------------------
+
+def test_folder_counters_updated_in_scan_all(tmp_path, monkeypatch):
+    """C-04 + LD-9 — folder counter columns updated after scan_all completes.
+
+    Synthesise a folder with 5 small supported files + 2 oversized files
+    (monkeypatched _MAX_FILE_SIZE = 4 bytes so any file > 4 bytes is oversized).
+    After scan_all: folders.indexed_count == 5, folders.oversized_count == 2.
+
+    This test is RED until _commit_batch calls _refresh_folder_counters_for
+    (Phase 97 Wave D GREEN implementation).
+    """
+    import shared.local_indexer as _li_mod
+
+    folder = tmp_path / "docs"
+    folder.mkdir()
+    # 5 supported small files (well under 4 bytes so they get indexed)
+    for i in range(5):
+        (folder / f"f{i}.txt").write_text("hi", encoding="utf-8")
+    # 2 oversized files — monkeypatched _MAX_FILE_SIZE makes them "oversized"
+    monkeypatch.setattr(_li_mod, "_MAX_FILE_SIZE", 4)
+    (folder / "big1.txt").write_text("this is way more than 4 bytes", encoding="utf-8")
+    (folder / "big2.txt").write_text("also way more than 4 bytes", encoding="utf-8")
+
+    from shared.local_indexer import LocalIndexer
+    indexer = LocalIndexer(
+        index_dir=str(tmp_path / "idx"),
+        lab_index_dir=str(tmp_path / "lab"),
+        db_path=str(tmp_path / "db.sqlite3"),
+    )
+    indexer.add_folder(str(folder))
+    indexer.scan_all()
+
+    # Use the canonical path (indexer normalises via _canonical_filepath — lowercased on Windows).
+    from shared.local_sys_id import _canonical_filepath
+    canonical_folder = _canonical_filepath(str(folder))
+    row = indexer._conn.execute(
+        "SELECT indexed_count, oversized_count FROM folders WHERE path = ?",
+        (canonical_folder,),
+    ).fetchone()
+    assert row is not None, (
+        f"folders row not found after scan_all (queried canonical={canonical_folder!r})"
+    )
+    assert row["indexed_count"] == 5, (
+        f"Expected indexed_count=5, got {row['indexed_count']}"
+    )
+    assert row["oversized_count"] == 2, (
+        f"Expected oversized_count=2, got {row['oversized_count']}"
+    )
+
+
+def test_folder_counter_aggregation_uses_folder_id_not_like_prefix(tmp_path):
+    """C-04 + LD-9 — folder counters must not cross-contaminate via LIKE prefix.
+
+    Regression guard against Codex MEDIUM #3: using
+    ``WHERE filepath LIKE folder_path || '%'`` would match both ``/foo`` and
+    ``/foobar`` when aggregating ``/foo``.
+
+    Two folders: ``foo`` (1 file) and ``foobar`` (2 files).
+    After scan_all: foo.indexed_count == 1, foobar.indexed_count == 2.
+    A LIKE-prefix implementation would incorrectly count 3 for foo.
+    """
+    from shared.local_indexer import LocalIndexer
+
+    foo = tmp_path / "foo"
+    foobar = tmp_path / "foobar"
+    foo.mkdir()
+    foobar.mkdir()
+    (foo / "f.txt").write_text("foo content", encoding="utf-8")
+    (foobar / "g.txt").write_text("foobar content", encoding="utf-8")
+    (foobar / "h.txt").write_text("foobar content 2", encoding="utf-8")
+
+    indexer = LocalIndexer(
+        index_dir=str(tmp_path / "idx"),
+        lab_index_dir=str(tmp_path / "lab"),
+        db_path=str(tmp_path / "db.sqlite3"),
+    )
+    indexer.add_folder(str(foo))
+    indexer.add_folder(str(foobar))
+    indexer.scan_all()
+
+    # Use canonical paths — indexer normalises via _canonical_filepath (lowercased on Windows).
+    from shared.local_sys_id import _canonical_filepath
+    canonical_foo = _canonical_filepath(str(foo))
+    canonical_foobar = _canonical_filepath(str(foobar))
+    foo_row = indexer._conn.execute(
+        "SELECT indexed_count FROM folders WHERE path = ?", (canonical_foo,)
+    ).fetchone()
+    foobar_row = indexer._conn.execute(
+        "SELECT indexed_count FROM folders WHERE path = ?", (canonical_foobar,)
+    ).fetchone()
+
+    assert foo_row is not None, "foo folders row not found"
+    assert foobar_row is not None, "foobar folders row not found"
+    # Bug-detection: a LIKE prefix would count foobar files in foo's tally (3 instead of 1)
+    assert foo_row["indexed_count"] == 1, (
+        f"Expected foo.indexed_count=1, got {foo_row['indexed_count']} "
+        "(LIKE-prefix bug would return 3)"
+    )
+    assert foobar_row["indexed_count"] == 2, (
+        f"Expected foobar.indexed_count=2, got {foobar_row['indexed_count']}"
+    )

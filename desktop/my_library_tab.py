@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from typing import Optional
 
 from PyQt6.QtCore import (
@@ -44,6 +45,7 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QLabel,
     QProgressBar,
+    QProgressDialog,
     QTreeWidget,
     QTreeWidgetItem,
     QFileDialog,
@@ -61,8 +63,11 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants (D-26 + D-41)
 # ---------------------------------------------------------------------------
-_MAX_FILES_CEILING = 5000
-_MAX_BYTES_CEILING = 2 * 1024 ** 3   # 2 GB
+# Phase 97 C-01 — soft warning thresholds (was Phase 95 hard-stop at 5K/2GB).
+# Codex P0 sequencing: constant only lifted AFTER Wave A (R-03 cache + R-02
+# atomic rebuild + D-NEW-1 migration) and Wave B (C-05 oversized/zip-bomb) land.
+_MAX_FILES_CEILING = 50_000
+_MAX_BYTES_CEILING = 50 * 1024 ** 3   # 50 GB
 
 # Column indices for the unified file tree widget
 _COL_FILENAME = 0
@@ -541,6 +546,44 @@ class LocalIndexerWorker(QThread):
 
 
 # ---------------------------------------------------------------------------
+# PrescanWorker (Phase 97 C-03 — folder walk off the UI thread)
+# ---------------------------------------------------------------------------
+
+class PrescanWorker(QThread):
+    """Phase 97 C-03 — runs LocalIndexer.prescan_count() off the UI thread.
+
+    Emits finished_signal(file_count, total_bytes) on success, or
+    error_signal(error_str) on failure.  The UI thread must NOT block waiting
+    for this worker — wire finished_signal to a slot that continues the
+    ceiling-check flow and shows the QProgressDialog with Cancel.
+    """
+
+    finished_signal = pyqtSignal(int, int)  # file_count, total_bytes
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, indexer: LocalIndexer, folder_path: str) -> None:
+        super().__init__()
+        self._indexer = indexer
+        self._folder_path = folder_path
+        self._cancel = False
+
+    def cancel(self) -> None:
+        """Cooperative cancel — threads the flag into prescan_count's os.walk loop."""
+        self._cancel = True
+
+    def run(self) -> None:
+        try:
+            file_count, total_bytes = self._indexer.prescan_count(
+                self._folder_path,
+                cancel_check=lambda: self._cancel,
+            )
+            self.finished_signal.emit(file_count, total_bytes)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("PrescanWorker: unhandled error")
+            self.error_signal.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
 # MyLibraryTab
 # ---------------------------------------------------------------------------
 
@@ -777,6 +820,48 @@ class MyLibraryTab(QWidget):
         # (Phase 95 stashes the folder path string here when the folder is added to the list).
         self._folder_list.currentItemChanged.connect(self._on_folder_selection_changed)
 
+        # ---- Section 4: disk indicator (Phase 97 C-06) ----
+        self._disk_label = QLabel(tr("Index size: — / — free"))
+        self._disk_label.setStyleSheet("color: #888; font-size: 11px;")
+        root.addWidget(self._disk_label)
+
+        # Periodic disk-indicator refresh: every 30 s while the tab is visible.
+        self._disk_timer = QTimer(self)
+        self._disk_timer.setInterval(30_000)  # 30 seconds
+        self._disk_timer.timeout.connect(self._update_disk_indicator)
+        self._disk_timer.start()
+
+    # ------------------------------------------------------------------
+    # Phase 97 C-06: disk indicator with merge headroom
+    # ------------------------------------------------------------------
+
+    def _update_disk_indicator(self) -> None:
+        """Phase 97 C-06 — live disk indicator with Tantivy merge-headroom warning.
+
+        Warning fires when (free - 2 × index_size) < 1 GB.
+        Wired to: showEvent, LocalIndexerWorker.finished_signal, QTimer (30s).
+        """
+        if self._indexer is None:
+            return
+        try:
+            index_size = self._indexer.estimate_index_size()
+            usage = shutil.disk_usage(Config.LOCAL_INDEX_DIR)
+            # Reserve 2× current index size as Tantivy merge scratch.
+            headroom = usage.free - 2 * index_size
+            label_text = tr("Index size: {} / {} free").format(
+                self._human_bytes(index_size), self._human_bytes(usage.free)
+            )
+            if headroom < 1024 ** 3:  # < 1 GB headroom
+                label_text += "  " + tr("⚠ low merge headroom")
+            self._disk_label.setText(label_text)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("_update_disk_indicator: %s", exc)
+
+    def showEvent(self, event) -> None:  # noqa: N802
+        """Update disk indicator when tab becomes visible (Phase 97 C-06)."""
+        super().showEvent(event)
+        self._update_disk_indicator()
+
     # ------------------------------------------------------------------
     # Phase 96 D-F1: folder selection handler (tree repopulation)
     # ------------------------------------------------------------------
@@ -972,6 +1057,9 @@ class MyLibraryTab(QWidget):
         # CR-02: also reload LabEngine LOCAL LAB searcher so LAB-mode
         # Composition Search sees newly indexed LOCAL files.
         self._reload_all_local_indexes()
+
+        # Phase 97 C-06: refresh disk indicator after indexing batch completes.
+        self._update_disk_indicator()
 
         # WR-08: if the LAB index is stale (D-38 weights_hash mismatch),
         # rebuild it now while we are already on the post-Refresh code
@@ -1282,12 +1370,62 @@ class MyLibraryTab(QWidget):
     def _check_ceiling_single_folder(self, folder_path: str) -> bool:
         """W8: SINGLE-folder ceiling check for Add Folder (D-26 + D-41).
 
+        Phase 97 C-03: pre-scan walk runs in PrescanWorker QThread so the UI
+        stays responsive during the os.walk on large trees.  A QProgressDialog
+        with Cancel button is shown while the worker runs.
+
         Thresholds apply to the candidate folder alone (not aggregate).
         Returns True if scan should proceed, False if user cancelled.
         """
         if self._indexer is None:
             return True
-        file_count, total_bytes = self._indexer.prescan_count(folder_path)
+
+        # Phase 97 C-03: run prescan in a worker thread; block UI event loop
+        # via QProgressDialog (not a raw thread join) so the Cancel button works.
+        result_holder: list = []   # [file_count, total_bytes] or [] on cancel/error
+        error_holder: list = []    # [error_str] on worker error
+
+        worker = PrescanWorker(self._indexer, folder_path)
+        progress_dlg = QProgressDialog(
+            tr("Scanning folder — please wait…"),
+            tr("Cancel"),
+            0, 0,   # indeterminate
+            self,
+        )
+        progress_dlg.setWindowTitle(tr("Add folder — pre-scan"))
+        progress_dlg.setMinimumDuration(0)
+        progress_dlg.setValue(0)
+
+        def _on_finished(fc: int, tb: int) -> None:
+            result_holder.append((fc, tb))
+            progress_dlg.accept()
+
+        def _on_error(err: str) -> None:
+            error_holder.append(err)
+            progress_dlg.reject()
+
+        def _on_cancelled() -> None:
+            worker.cancel()
+
+        worker.finished_signal.connect(_on_finished)
+        worker.error_signal.connect(_on_error)
+        progress_dlg.canceled.connect(_on_cancelled)
+        worker.finished.connect(worker.deleteLater)
+
+        worker.start()
+        progress_dlg.exec()   # blocks UI event loop; Cancel fires _on_cancelled
+
+        if not result_holder:
+            # User cancelled or worker errored — abort add
+            if error_holder:
+                logger.warning("PrescanWorker error: %s", error_holder[0])
+            return False
+
+        file_count, total_bytes = result_holder[0]
+        if file_count < 0:
+            # Worker was cancelled mid-walk (cancel_check returned True)
+            return False
+
         if file_count > _MAX_FILES_CEILING or total_bytes > _MAX_BYTES_CEILING:
             return self._show_ceiling_confirm_dialog(
                 file_count,
