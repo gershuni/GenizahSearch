@@ -148,7 +148,30 @@ SEARCH_API_BROWSE_TEXT_CAP=4000       # default char cap for transcription text;
 # Skill-side (cairo-genizah-research skill consumer)
 GENIZAH_API_BASE=https://genizahsearch.com    # overrides --base-url CLI flag (env wins)
 GENIZAH_SKILL_REQ_PER_MIN=24                  # skill self-throttle, leaves 6 rpm headroom under server's 30 rpm
+
+# Phase 98 NLI Resilience env knobs (added 2026-05-25)
+NLI_CIRCUIT_THRESHOLD=3               # Consecutive failures to trip the shared circuit breaker
+NLI_CIRCUIT_WINDOW=60                 # Seconds the breaker stays open before auto-recovery probes
+NLI_CONNECT_TIMEOUT=3                 # Connection timeout (seconds) for all NLI/IIIF/Rosetta fetches
+NLI_IIIF_READ_TIMEOUT=5               # Read timeout (seconds) for IIIF manifest JSON fetches
+NLI_MARC_READ_TIMEOUT=3               # Read timeout (seconds) for MARC bib XML fetches
+NLI_IMAGE_READ_TIMEOUT=5              # Read timeout (seconds) for NLI image-bytes fetches
+
+# Existing NLI knob — Phase 98 changed default from 20 -> 1:
+NLI_SEMAPHORE_TIMEOUT=1               # Max seconds to wait for a slot in the 8-slot NLI semaphore
+                                       # (was 20 pre-Phase-98; waiting >1s burns threadpool workers)
+
+# (Other existing NLI knobs unchanged: NLI_CACHE_TTL, NLI_FAIL_CACHE_TTL, NLI_MAX_CONCURRENT_FETCHES)
 ```
+
+**Operational note (Phase 98 — two PostHog drop counters):** Phase 98 ships with TWO PostHog
+queues — `web/api_hardening.py` keeps its existing queue (for `search_api_request` events) and
+the new `shared/posthog_server.py` queue handles breaker telemetry (`nli_breaker_opened` /
+`nli_breaker_closed`). At deploy time, monitor BOTH `web.api_hardening.get_dropped_event_count()`
+AND `shared.posthog_server.get_dropped_event_count()` — growth in EITHER signals queue saturation.
+The two-queue split is intentional (REVIEWS Issue 5 Option A): refactoring `web/api_hardening`'s
+queue would break 5 existing test monkeypatches that target `web.api_hardening._event_queue`
+directly. A future cleanup plan can unify.
 
 ## Testing
 
@@ -220,6 +243,7 @@ Fix any reported issues before committing.
 
 For full release history see `CHANGELOG.md`. Most recent:
 
+- **Phase 98 — NLI Resilience (2026-05-25)** — internal infrastructure milestone, no user-visible change. Shared module `shared/nli_circuit_breaker.py` with module-level singleton (`time.monotonic`, `threading.Lock`) replaces the buggy class-attribute breaker that used `time.time` and was scoped to `MetadataManager` only. Wired into all 10 NLI fetch sites: 4 in `web/api.py` (`fetch_fl_ids_from_nli`, `nli_image`, `_fetch_nli_image_bytes`, `proxy_image` — D-host-conditional), 3 in puzzle (`PuzzleImageService._fetch_iiif_image`, `_fetch_direct_url` host-conditional, `web/pages/puzzle.py::_resolve_folios`), 4 in `genizah_core.py` (`fetch_iiif_manifest`, `fetch_marc_data` migrated + new wirings at `_fetch_single_worker`, `_fetch_fl_ids`); legacy class-attribute breaker REMOVED (RESEARCH Pitfall 5). 6 new env knobs (`NLI_CIRCUIT_THRESHOLD` / `NLI_CIRCUIT_WINDOW` / `NLI_CONNECT_TIMEOUT` / `NLI_IIIF_READ_TIMEOUT` / `NLI_MARC_READ_TIMEOUT` / `NLI_IMAGE_READ_TIMEOUT` — see "Environment Variables" section for defaults); `NLI_SEMAPHORE_TIMEOUT` default dropped 20→1 (D-10). PostHog telemetry on breaker open/close via factored `shared/posthog_server.py` queue+daemon (Option (a) — `shared/` no longer depends on `web/`). Worst-case per-request blocking budget dropped from 45s to ~9s; after 3 consecutive failures the breaker trips for 60s and subsequent NLI fetches return empty in microseconds. Codex REVIEWS Issue 3 closed via fallback-boundary rechecks (MARC, Rosetta, FL-ID iteration, retry loop). Origin: 2026-05-25 production hang where Starlette threadpool saturated on synchronous `requests.get(timeout=15)` calls to `iiif.nli.org.il`; SIGTERM hung 90s and SIGKILL required. Closes `docs/INCIDENT-2026-05-25-nli-iiif-hang.md` per `docs/INCIDENT-2026-05-25-CODEX-CRITIQUE.md` Minimum Ship Patch. Deferred: async refactor to httpx, event-loop watchdog, multi-worker uvicorn (CONTEXT D-05). Verification: `curl -w "%{time_total}\n" https://genizahsearch.com/api/fl_ids/990001458630205171` 10× in sequence — first 1-3 slow, rest <0.1s. (web)
 - **Phase 96 — My Library Polish (2026-05-24)** — internal closeout of Phase 96 (9 plans). D-F1/D-F4/D-F5 closed. UAT bugs fixed: unified `_UnifiedFileTreeWidget` (3-column tree replaces QSplitter+separate table), opt-out persistence race fixed (`flush_pending()` in `closeEvent`), Enter-key focus fixed (`autoDefault=False` + `setFocus` on spin_page), Browse opens at correct page (p_num str→int coercion), LOCAL nav widgets hidden on Genizah manuscript load. BLOCKER-5: 10 stale `pytest.skip` markers converted to positive assertions. D-F2 (OCR) + D-F3 (side-by-side PDF) remain open for v7.15+. (desktop)
 - **v7.14.0 — My Library: Local Document Search (2026-05-24)** — public release of v7.14 milestone (Phase 95). Desktop-only 7th tab indexes user folders of `.docx` / `.pdf` / `.txt` into a separate Tantivy side-index merged into Search/Composition/Parallels via RRF k=60 *after* `_deduplicate()` (Codex D-08 P0). New pre-search corpus dropdown `Genizah` / `Local` / `ALL` (default `Genizah`); existing 3-state `Filter Local` button cycles post-search. Cloud-write gates pinned at TOP of `shared/search_serializer.py`, `corrections_client.py`, `lists_sync.{sync_item_to_cloud, sync_list_to_cloud}` (Codex D-30 P0). PyMuPDF added as desktop dep + `collect_all('pymupdf')` + `--self-test-pymupdf` CLI. Per-thread SQLite via `threading.local()`; Tantivy commit retry on Windows `os error 5`. LOCAL Library column = `parent/folder`, Shelfmark = filename. About + Help bilingual (EN + HE) with Seewald attribution (HE: יהודה זייבלד). 2532 tests passing. 5 items deferred to v7.15+ in OPEN_ISSUES.md (D-F1..D-F5). (both)
 - **v7.14 Phase 95 — My Library CLOSED (2026-05-21)** — internal milestone. First-class desktop indexer for .docx/.pdf/.txt. New `MyLibraryTab` (7th tab), side-index merged via RRF k=60 (Codex D-08 P0 — POST-dedup merge), three-state LOCAL filter mirroring Phase 93 PGP pattern, three cloud-write regression tests (lists_sync gate at TOP of `sync_item_to_cloud` per Codex D-30 P0). PyMuPDF dep + `GenizahSearchPro.spec` `collect_all('pymupdf')` + `--self-test-pymupdf` headless CLI flag. `shared/export_dossier.py` `skip_local` kwarg (web excludes LOCAL, desktop includes LOCAL). Static AST guard `tests/test_web_library_options_no_local.py` pins LIBRARY_CODES web invariant. Help + About updated EN + HE with D-33 cleartext disclosure + D-32 Seewald attribution. 10/10 REQ-IDs satisfied. (desktop)
