@@ -45,6 +45,20 @@ import weakref  # Phase 97 R-01: weakref for MyLibraryTab gate
 
 from genizah_translations import TRANSLATIONS, LIBRARY_CODES_HE
 
+# Phase 98 D-03 + D-22 + D-23: shared NLI circuit breaker (replaces the
+# class-attribute breaker that used to live on MetadataManager). Module-level
+# import (parallel to the stdlib/requests block above) so the migration is
+# grep-visible and so the aliased names match the original class-method
+# call sites verbatim.
+from shared.nli_circuit_breaker import (
+    is_open as _nli_circuit_is_open,
+    record_failure as _nli_record_failure,
+    record_success as _nli_record_success,
+    NLI_CONNECT_TIMEOUT,
+    NLI_IIIF_READ_TIMEOUT,
+    NLI_MARC_READ_TIMEOUT,
+)
+
 # Import unified variant pairs (generated from V0.7 vs V0.8 HTR comparison)
 # Sorted by frequency - use top N pairs based on slider setting
 try:
@@ -3924,41 +3938,18 @@ class MetadataManager:
     # requested manuscript in process memory for the lifetime of the service.
     _iiif_manifest_cache = OrderedDict()
     _IIIF_MANIFEST_CACHE_MAX = max(0, int(os.environ.get('IIIF_MANIFEST_CACHE_MAX_ENTRIES', '5000')))
-    # 260421 follow-up (L81 lag): per-sys_id negative cache + global
-    # circuit breaker for NLI. The negative cache prevents re-trying the
-    # SAME failed sys_id within TTL; the circuit breaker trips after 3
-    # consecutive failures across ANY sys_id and skips NLI entirely for
-    # CIRCUIT_WINDOW seconds, so navigating through a batch of JTS
-    # manuscripts doesn't re-burn the timeout on each one when NLI's
-    # host is down.
+    # 260421 follow-up (L81 lag) — Phase 98 migration: per-sys_id negative
+    # cache lives HERE (per-(sys_id, suffix) for IIIF, per-sys_id for MARC),
+    # but the global "NLI is down" circuit breaker has MOVED to
+    # shared/nli_circuit_breaker.py (a module-level singleton — single source
+    # of truth across web/api.py, shared/puzzle_image_service.py, and
+    # genizah_core.py). The 404 / parse-error paths populate the per-sys_id
+    # caches here; the timeout / 5xx / 429 / connection-error paths call
+    # _nli_record_failure from the shared module.
     _iiif_manifest_fail_cache: dict = OrderedDict()  # {(sys_id, suffix): timestamp}
     _marc_fail_cache: dict = OrderedDict()  # {sys_id: timestamp}
     _NLI_FAIL_TTL = 60  # seconds
     _NLI_FAIL_CACHE_MAX = max(0, int(os.environ.get('NLI_FAIL_CACHE_MAX_ENTRIES', '20000')))
-    _nli_consecutive_failures = 0
-    _nli_circuit_open_until = 0.0
-    _NLI_CIRCUIT_THRESHOLD = 3
-    _NLI_CIRCUIT_WINDOW = 60  # seconds
-
-    @classmethod
-    def _nli_circuit_is_open(cls) -> bool:
-        """True when the circuit breaker has tripped and NLI should be skipped."""
-        import time
-        return time.time() < cls._nli_circuit_open_until
-
-    @classmethod
-    def _nli_record_failure(cls) -> None:
-        """Count an NLI failure. Trips the circuit when threshold reached."""
-        import time
-        cls._nli_consecutive_failures += 1
-        if cls._nli_consecutive_failures >= cls._NLI_CIRCUIT_THRESHOLD:
-            cls._nli_circuit_open_until = time.time() + cls._NLI_CIRCUIT_WINDOW
-
-    @classmethod
-    def _nli_record_success(cls) -> None:
-        """Reset the failure counter after a successful NLI call."""
-        cls._nli_consecutive_failures = 0
-        cls._nli_circuit_open_until = 0.0
 
     @staticmethod
     def _bounded_cache_get(cache: dict, key):
@@ -4033,9 +4024,10 @@ class MetadataManager:
         if cached_manifest is not None:
             return cached_manifest
 
-        # Circuit breaker: if NLI has been failing consistently, skip
-        # entirely without burning another timeout on this sys_id.
-        if self._nli_circuit_is_open():
+        # Phase 98 D-03 + D-13: shared NLI circuit breaker. If NLI has been
+        # failing consistently across ANY call site, skip entirely without
+        # burning another timeout on this sys_id.
+        if _nli_circuit_is_open():
             return {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
 
         # Negative cache: if this sys_id recently timed out, return empty
@@ -4053,7 +4045,12 @@ class MetadataManager:
         result = {'physical_desc': '', 'canvas_map': {}, 'attribution': ''}
         try:
             session = self._make_session()
-            resp = session.get(url, headers=headers, timeout=5, verify=True)
+            resp = session.get(
+                url,
+                headers=headers,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_IIIF_READ_TIMEOUT),
+                verify=True,
+            )
             if resp.status_code == 200:
                 data = resp.json()
 
@@ -4083,19 +4080,40 @@ class MetadataManager:
                                 fl_digits = fl_match.group(1)
                                 result['canvas_map'][fl_digits] = label
 
-            self._bounded_cache_set(
-                self._iiif_manifest_cache,
-                cache_key,
-                result,
-                self._IIIF_MANIFEST_CACHE_MAX,
-            )
-            self._iiif_manifest_fail_cache.pop(cache_key, None)
-            self._nli_record_success()
+                self._bounded_cache_set(
+                    self._iiif_manifest_cache,
+                    cache_key,
+                    result,
+                    self._IIIF_MANIFEST_CACHE_MAX,
+                )
+                self._iiif_manifest_fail_cache.pop(cache_key, None)
+                _nli_record_success(path='fetch_iiif_manifest')
+                return result
+            elif resp.status_code == 429:
+                _nli_record_failure(failure_type='429', path='fetch_iiif_manifest')
+                LOGGER.warning(f"IIIF 429 for {system_id} (suffix={suffix})")
+            elif 500 <= resp.status_code < 600:
+                _nli_record_failure(failure_type='5xx', path='fetch_iiif_manifest')
+                LOGGER.warning(f"IIIF {resp.status_code} for {system_id} (suffix={suffix})")
+            # 404 / other 4xx -> per-sys_id negative cache only (D-07);
+            # do NOT increment the breaker.
+            self._timestamp_cache_set(self._iiif_manifest_fail_cache, cache_key, time.time())
+            return result
+        except requests.exceptions.Timeout as e:
+            LOGGER.warning(f"IIIF fetch timeout for {system_id} (suffix={suffix}): {e}")
+            self._timestamp_cache_set(self._iiif_manifest_fail_cache, cache_key, time.time())
+            _nli_record_failure(failure_type='timeout', path='fetch_iiif_manifest')
+            return result
+        except requests.exceptions.ConnectionError as e:
+            LOGGER.warning(f"IIIF fetch connection error for {system_id} (suffix={suffix}): {e}")
+            self._timestamp_cache_set(self._iiif_manifest_fail_cache, cache_key, time.time())
+            _nli_record_failure(failure_type='connection_error', path='fetch_iiif_manifest')
             return result
         except Exception as e:
-            LOGGER.warning(f"IIIF fetch failed for {system_id} (suffix={suffix}): {e}")
+            # Parse errors / data structure issues — code-level, not upstream.
+            # Per-sys_id negative cache only; do NOT trip the breaker (D-07).
+            LOGGER.warning(f"IIIF parse failed for {system_id} (suffix={suffix}): {e}")
             self._timestamp_cache_set(self._iiif_manifest_fail_cache, cache_key, time.time())
-            self._nli_record_failure()
             return result
 
     def fetch_marc_data(self, system_id):
@@ -4127,11 +4145,12 @@ class MetadataManager:
         url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
         headers = Config.HTTP_HEADERS
 
-        # 260421 follow-up (L81 lag): circuit breaker + per-sys_id negative
-        # cache so failed MARC fetches don't re-burn timeout on every
-        # navigation. Circuit breaker trips across ALL sys_ids after 3
-        # consecutive failures so a dead NLI host doesn't gate navigation.
-        if self._nli_circuit_is_open():
+        # Phase 98 D-03 + D-13: shared NLI circuit breaker + per-sys_id
+        # negative cache (complementary layers). Breaker trips across ALL
+        # sys_ids after THRESHOLD consecutive failures so a dead NLI host
+        # doesn't gate navigation; per-sys_id cache prevents re-trying the
+        # SAME failed sys_id within TTL even when the breaker is closed.
+        if _nli_circuit_is_open():
             return result
         fail_ts = self._timestamp_cache_recent(
             self._marc_fail_cache, system_id, self._NLI_FAIL_TTL, time.time()
@@ -4141,7 +4160,11 @@ class MetadataManager:
 
         try:
             session = self._make_session()
-            resp = session.get(url, headers=headers, timeout=5)
+            resp = session.get(
+                url,
+                headers=headers,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_MARC_READ_TIMEOUT),
+            )
             if resp.status_code == 200:
                 # Remove namespaces to simplify parsing
                 xml_content = re.sub(r'\sxmlns="[^"]+"', '', resp.text, count=1)
@@ -4239,13 +4262,34 @@ class MetadataManager:
                         val = get_sub('a')
                         if val: result['attribution'] = val
 
-            self._marc_fail_cache.pop(system_id, None)
-            self._nli_record_success()
+                self._marc_fail_cache.pop(system_id, None)
+                _nli_record_success(path='fetch_marc_data')
+                return result
+            elif resp.status_code == 429:
+                _nli_record_failure(failure_type='429', path='fetch_marc_data')
+                LOGGER.warning(f"MARC 429 for {system_id}")
+            elif 500 <= resp.status_code < 600:
+                _nli_record_failure(failure_type='5xx', path='fetch_marc_data')
+                LOGGER.warning(f"MARC {resp.status_code} for {system_id}")
+            # 404 / other 4xx -> per-sys_id negative cache only (D-07);
+            # do NOT increment the breaker.
+            self._timestamp_cache_set(self._marc_fail_cache, system_id, time.time())
+            return result
+        except requests.exceptions.Timeout as e:
+            LOGGER.warning(f"MARC fetch timeout for {system_id}: {e}")
+            self._timestamp_cache_set(self._marc_fail_cache, system_id, time.time())
+            _nli_record_failure(failure_type='timeout', path='fetch_marc_data')
+            return result
+        except requests.exceptions.ConnectionError as e:
+            LOGGER.warning(f"MARC fetch connection error for {system_id}: {e}")
+            self._timestamp_cache_set(self._marc_fail_cache, system_id, time.time())
+            _nli_record_failure(failure_type='connection_error', path='fetch_marc_data')
             return result
         except Exception as e:
-            LOGGER.warning(f"MARC fetch failed for {system_id}: {e}")
+            # XML parse errors / data structure issues — code-level, not upstream.
+            # Per-sys_id negative cache only; do NOT trip the breaker (D-07).
+            LOGGER.warning(f"MARC parse failed for {system_id}: {e}")
             self._timestamp_cache_set(self._marc_fail_cache, system_id, time.time())
-            self._nli_record_failure()
             return result
 
     def enrich_metadata(self, system_id, suffix=1):
@@ -4638,22 +4682,40 @@ class MetadataManager:
         meta = {'shelfmark': 'Unknown', 'title': '', 'desc': '', 'fl_ids': [], 'thumb_url': None, 'thumb_checked': False}
         if is_synthetic_sys_id(system_id):
             return meta
+
+        # Phase 98 D-22: shared NLI circuit breaker guard. Without this, the
+        # retry loop below (2 attempts * (10s + 1s sleep) = up to 22s of
+        # blocking) re-burns on every navigation when NLI is degraded.
+        # `is_synthetic_sys_id` check is intentionally BEFORE this so synthetic
+        # sys_ids do not consume breaker logic (Phase 85 D-14 invariant).
+        if _nli_circuit_is_open():
+            return system_id, meta
+
         url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
-        
+
         headers = Config.HTTP_HEADERS
-        
-        import time 
+
+        import time
 
         for attempt in range(2):
+            # Phase 98 Codex REVIEW Issue 3: per-iteration breaker recheck.
+            # If the first attempt tripped the breaker, the second retry
+            # must short-circuit immediately rather than burn another timeout.
+            if _nli_circuit_is_open():
+                break
             try:
                 time.sleep(0.3)
                 session = self._make_session()
-                resp = session.get(url, headers=headers, timeout=10)
-                
+                resp = session.get(
+                    url,
+                    headers=headers,
+                    timeout=(NLI_CONNECT_TIMEOUT, NLI_MARC_READ_TIMEOUT),
+                )
+
                 if resp.status_code == 200:
                     try:
                         root = ET.fromstring(resp.content)
-                        
+
                         # --- 1. Extract Representative FL (907 $d) ---
                         # This is the "Cover Image" or main representative FL
                         rep_fl = None
@@ -4663,8 +4725,8 @@ class MetadataManager:
                                 clean_fl = sf.text.strip()
                                 if clean_fl.startswith("FL"):
                                     rep_fl = clean_fl
-                                    break 
-                        
+                                    break
+
                         # --- 2. Extract Standard Metadata ---
                         c_942 = None; c_907 = None; c_090 = None; c_avd = None
                         fl_ids = self._extract_fl_ids(root) # Backup list
@@ -4677,7 +4739,7 @@ class MetadataManager:
 
                             if tag == '942':
                                 val = get_val('z')
-                                if val: 
+                                if val:
                                     if not c_942: c_942 = val
                                     elif val.isdigit(): pass
                                     else: c_942 = val
@@ -4698,7 +4760,7 @@ class MetadataManager:
                         if final: meta['shelfmark'] = final
 
                         meta['fl_ids'] = fl_ids
-                        
+
                         # --- 3. Set Thumbnail URL ---
                         # PRIORITIZE the Representative FL found in 907 $d
                         if rep_fl:
@@ -4706,18 +4768,35 @@ class MetadataManager:
                         else:
                              # Only if missing, fallback to the list
                              meta['thumb_url'] = self._resolve_thumbnail(fl_ids)
-                             
+
                         meta['thumb_checked'] = True
+                        _nli_record_success(path='_fetch_single_worker')
                         return system_id, meta
 
                     except ET.ParseError:
+                        # Parse error — code-level, not upstream. Bail out of
+                        # the retry loop without incrementing the breaker (D-07).
                         break
-                elif resp.status_code >= 500:
+                elif resp.status_code == 429:
+                    _nli_record_failure(failure_type='429', path='_fetch_single_worker')
+                    time.sleep(1)
+                elif 500 <= resp.status_code < 600:
+                    _nli_record_failure(failure_type='5xx', path='_fetch_single_worker')
                     time.sleep(1)
                 else:
+                    # 404 / other 4xx — break out, do not touch the breaker.
                     break
+            except requests.exceptions.Timeout:
+                _nli_record_failure(failure_type='timeout', path='_fetch_single_worker')
+                time.sleep(1)
+            except requests.exceptions.ConnectionError:
+                _nli_record_failure(failure_type='connection_error', path='_fetch_single_worker')
+                time.sleep(1)
             except Exception:
-                time.sleep(1)  # Transient failure; retry after delay
+                # Non-network error (DNS lookup quirks, etc.) — preserve
+                # existing retry-with-sleep behavior but do NOT touch the
+                # breaker (D-07).
+                time.sleep(1)
 
         return system_id, meta
 
@@ -4766,16 +4845,42 @@ class MetadataManager:
         from shared.synthetic_sys_id import is_synthetic_sys_id
         if is_synthetic_sys_id(system_id):
             return []
+
+        # Phase 98 D-23: shared NLI circuit breaker guard. `is_synthetic_sys_id`
+        # check is intentionally BEFORE this so synthetic sys_ids do not consume
+        # breaker logic (Phase 85 D-14 invariant).
+        if _nli_circuit_is_open():
+            return []
+
         url = f"{Config.NLI_IIIF_BASE}/marc/bib/{system_id}"
         headers = Config.HTTP_HEADERS
         try:
             session = self._make_session()
-            resp = session.get(url, headers=headers, timeout=5, allow_redirects=True)
+            resp = session.get(
+                url,
+                headers=headers,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_MARC_READ_TIMEOUT),
+                allow_redirects=True,
+            )
             if resp.status_code == 200:
                 root = ET.fromstring(resp.content)
+                _nli_record_success(path='_fetch_fl_ids')
                 return self._extract_fl_ids(root)
+            elif resp.status_code == 429:
+                _nli_record_failure(failure_type='429', path='_fetch_fl_ids')
+            elif 500 <= resp.status_code < 600:
+                _nli_record_failure(failure_type='5xx', path='_fetch_fl_ids')
+            # 404 / other 4xx -> just return [] without touching the breaker (D-07).
+        except requests.exceptions.Timeout as e:
+            LOGGER.debug('Metadata batch fetch timeout: %s', e)
+            _nli_record_failure(failure_type='timeout', path='_fetch_fl_ids')
+            return []
+        except requests.exceptions.ConnectionError as e:
+            LOGGER.debug('Metadata batch fetch connection error: %s', e)
+            _nli_record_failure(failure_type='connection_error', path='_fetch_fl_ids')
+            return []
         except Exception as e:
-            LOGGER.debug('Metadata batch fetch failed: %s', e)
+            LOGGER.debug('Metadata batch fetch failed (non-network): %s', e)
             return []
         return []
 
