@@ -4,8 +4,8 @@ milestone: v7.14
 milestone_name: My Library
 status: executing
 stopped_at: Phase 97 context gathered (capacity + recovery + 3 formats; Codex P0+P1 folded)
-last_updated: "2026-05-25T08:42:52.373Z"
-last_activity: 2026-05-25 -- Phase 97 planning complete
+last_updated: "2026-05-25T08:45:32.418Z"
+last_activity: 2026-05-25 -- Phase 97 execution started
 progress:
   total_phases: 3
   completed_phases: 2
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-19)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 96 — completing-my-library-feature-add-features-and-fix-bugs
+**Current focus:** Phase 97 — more-local-features
 
 ## Current Position
 
-Phase: 96
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-25 -- Phase 97 planning complete
+Phase: 97 (more-local-features) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 97
+Last activity: 2026-05-25 -- Phase 97 execution started
 
 Progress: [          ] v7.13 0% (0/14 reqs, 0/5 plans, 0/2 phases)
 
