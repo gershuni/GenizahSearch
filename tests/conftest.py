@@ -147,3 +147,35 @@ def mock_supabase_client():
 def local_indexer_fixtures_dir():
     """Path to tests/fixtures/local_indexer/."""
     return os.path.join(os.path.dirname(__file__), "fixtures", "local_indexer")
+
+
+# ---------------------------------------------------------------------------
+# Phase 98 (Plan 02 Wave 2): autouse fixture for NLI circuit breaker state reset.
+#
+# Module-level state in shared/nli_circuit_breaker.py persists across test
+# functions in the same pytest process. Without this fixture, test A that
+# trips the breaker would pollute test B (and CI green local → red on rerun).
+#
+# See 98-RESEARCH.md Pitfall 6 for the full rationale.
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _reset_nli_breaker_state():
+    """Reset shared.nli_circuit_breaker module state before EACH test.
+
+    Runs project-wide because the breaker is imported transitively by web/api.py,
+    genizah_core.py, shared/puzzle_image_service.py — any test touching those
+    paths could inadvertently leave state behind.
+    """
+    try:
+        from shared.nli_circuit_breaker import _reset_for_tests
+        _reset_for_tests()
+    except ImportError:
+        pass  # Defensive: if the module is removed/renamed, don't break the suite
+    yield
+    # After the test, reset again so the next test starts clean even if THIS
+    # test left state behind (e.g., on assertion failure mid-test).
+    try:
+        from shared.nli_circuit_breaker import _reset_for_tests
+        _reset_for_tests()
+    except ImportError:
+        pass
