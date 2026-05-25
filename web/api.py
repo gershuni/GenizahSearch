@@ -369,6 +369,15 @@ def _save_nli_persistent_cache(
             pass
         return False
 
+# Phase 98 Plan 03 test seam: closure-encapsulated helpers (fetch_fl_ids_from_nli,
+# _fetch_nli_image_bytes, etc.) live inside init_api_routes(). Tests need to
+# call them directly without going through TestClient. After init_api_routes()
+# runs, the seam below points at the registered closures. Production code never
+# reads this dict; it exists purely so tests/test_api_nli_breaker_integration.py
+# can monkey-patch and call the breaker-guarded NLI fetch path.
+_api_test_seam: dict = {}
+
+
 def init_api_routes(app_override=None):
     """Register API routes for image proxy and exports.
 
@@ -992,6 +1001,13 @@ def init_api_routes(app_override=None):
                 return (got[0], got[1], fl_id)
 
         return None
+
+    # Phase 98 Plan 03 test seam: expose closure-encapsulated NLI helpers so
+    # tests/test_api_nli_breaker_integration.py can call them directly without
+    # going through TestClient (and without monkey-patching the registered
+    # FastAPI route). Production code never reads this dict.
+    _api_test_seam['fetch_fl_ids_from_nli'] = fetch_fl_ids_from_nli
+    _api_test_seam['_fetch_nli_image_bytes'] = _fetch_nli_image_bytes
 
     @target_app.get('/api/nli_image_by_sysid/{sys_id}')
     def nli_image_by_sysid(sys_id: str, page: int = 0, width: int = 2000, suffix: int = 1):
