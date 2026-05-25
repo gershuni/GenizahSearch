@@ -19,6 +19,19 @@ from shared.synthetic_sys_id import is_synthetic_sys_id
 from urllib.parse import urlparse
 from web.crawler_visibility import ARCHIVE_DISALLOWED_PATHS, ARCHIVE_USER_AGENT_TOKENS
 
+# Phase 98 Plan 03: shared NLI circuit breaker + env-driven timeouts.
+# Replaces the class-attribute breaker that was in genizah_core.py:3940-3961
+# (removed in Plan 98-05).
+from shared.nli_circuit_breaker import (
+    is_open as _nli_circuit_is_open,
+    record_failure as _nli_record_failure,
+    record_success as _nli_record_success,
+    NLI_CONNECT_TIMEOUT,
+    NLI_IIIF_READ_TIMEOUT,
+    NLI_MARC_READ_TIMEOUT,
+    NLI_IMAGE_READ_TIMEOUT,
+)
+
 logger = logging.getLogger(__name__)
 
 # NOTE: Backend API routes removed - now using Supabase directly
@@ -30,7 +43,10 @@ NLI_FAIL_CACHE_TTL = 60  # negative-cache failures for 60s to avoid hammering NL
 NLI_DISK_CACHE_TTL = int(os.environ.get('NLI_DISK_CACHE_TTL', str(30 * 24 * 60 * 60)))  # 30 days
 IMAGE_CACHE_TTL = int(os.environ.get('IMAGE_CACHE_TTL', '600'))  # 10 minutes default
 NLI_MAX_CONCURRENT_FETCHES = max(1, int(os.environ.get('NLI_MAX_CONCURRENT_FETCHES', '8')))
-NLI_SEMAPHORE_TIMEOUT = int(os.environ.get('NLI_SEMAPHORE_TIMEOUT', '20'))
+# Phase 98 D-10: default dropped 20 → 1. Waiting >1s on a semaphore burns
+# Starlette threadpool workers doing nothing useful. Env override preserved
+# for emergencies.
+NLI_SEMAPHORE_TIMEOUT = int(os.environ.get('NLI_SEMAPHORE_TIMEOUT', '1'))
 NLI_PERSISTENT_CACHE_FILE = os.path.join(Config.INDEX_DIR, 'nli_fl_ids_cache.json')
 IMAGE_CACHE_MAX_BYTES = max(0, int(os.environ.get('IMAGE_CACHE_MAX_BYTES', str(256 * 1024 * 1024))))
 IMAGE_CACHE_MAX_ENTRIES = max(0, int(os.environ.get('IMAGE_CACHE_MAX_ENTRIES', '512')))
@@ -353,6 +369,15 @@ def _save_nli_persistent_cache(
             pass
         return False
 
+# Phase 98 Plan 03 test seam: closure-encapsulated helpers (fetch_fl_ids_from_nli,
+# _fetch_nli_image_bytes, etc.) live inside init_api_routes(). Tests need to
+# call them directly without going through TestClient. After init_api_routes()
+# runs, the seam below points at the registered closures. Production code never
+# reads this dict; it exists purely so tests/test_api_nli_breaker_integration.py
+# can monkey-patch and call the breaker-guarded NLI fetch path.
+_api_test_seam: dict = {}
+
+
 def init_api_routes(app_override=None):
     """Register API routes for image proxy and exports.
 
@@ -644,12 +669,24 @@ def init_api_routes(app_override=None):
             elif cache_age < NLI_CACHE_TTL:
                 return cached_val
 
+        # Phase 98 D-11: circuit check BEFORE semaphore acquisition. If NLI is
+        # known-degraded, return [] immediately — do not even attempt to acquire
+        # the semaphore (which itself blocks up to NLI_SEMAPHORE_TIMEOUT seconds).
+        if _nli_circuit_is_open():
+            return []
+
         # Acquire semaphore to cap concurrent NLI requests
         acquired = _nli_semaphore.acquire(timeout=NLI_SEMAPHORE_TIMEOUT)
         if not acquired:
             logger.warning(f"NLI semaphore timeout for {cache_key} — too many concurrent fetches")
             return []
         try:
+            # Phase 98 D-12: defensive re-check AFTER semaphore acquire. Another
+            # thread may have tripped the breaker while we were waiting. The
+            # try/finally ensures the semaphore slot is released even on this
+            # short-circuit path (RESEARCH Pitfall 3 — semaphore leak).
+            if _nli_circuit_is_open():
+                return []
             return _fetch_fl_ids_network(system_id, suffix)
         finally:
             _nli_semaphore.release()
@@ -677,7 +714,12 @@ def init_api_routes(app_override=None):
         # Use IIIF manifest endpoint - this has ALL page images, unlike MARC which only has 1
         url = f"https://iiif.nli.org.il/IIIFv21/DOCID/PNX_MANUSCRIPTS{system_id}-{suffix}/manifest"
         try:
-            resp = _nli_session.get(url, timeout=15, verify=True)
+            # Phase 98 D-14: env-driven (connect, read) tuple replaces hard-coded timeout=15.
+            resp = _nli_session.get(
+                url,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_IIIF_READ_TIMEOUT),
+                verify=True,
+            )
             if resp.status_code == 200:
                 data = resp.json()
                 fl_ids = []
@@ -702,15 +744,40 @@ def init_api_routes(app_override=None):
                         _prune_nli_memory_cache_locked(_time.time())
                     _persist_positive_cache_snapshot()
                     logger.info(f"Resolved {len(fl_ids)} FL IDs for {cache_key} from network IIIF manifest")
+                    # Phase 98 D-06/D-08: real success — close the breaker.
+                    _nli_record_success(path='fetch_fl_ids_from_nli')
                     return fl_ids
-        except Exception as e:
+                # 200 with empty fl_ids → per-sys_id negative cache below; do NOT
+                # trip the breaker (D-07).
+            elif resp.status_code == 429:
+                # Phase 98 D-06: 429 (rate-limited) counts as a breaker failure.
+                _nli_record_failure(failure_type='429', path='fetch_fl_ids_from_nli')
+                logger.warning(f"NLI 429 for {cache_key}")
+            elif 500 <= resp.status_code < 600:
+                # Phase 98 D-06: 5xx response is a breaker failure even though
+                # no exception was raised (RESEARCH Pitfall 7).
+                _nli_record_failure(failure_type='5xx', path='fetch_fl_ids_from_nli')
+                logger.warning(f"NLI {resp.status_code} for {cache_key}")
+            # 404 / other 4xx / non-200 with no fl_ids → negative cache only, no breaker (D-07).
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
             logger.error(f"Failed to fetch FL IDs from IIIF manifest for {cache_key}: {e}")
+            failure_type = 'timeout' if isinstance(e, requests.exceptions.Timeout) else 'connection_error'
+            _nli_record_failure(failure_type=failure_type, path='fetch_fl_ids_from_nli')
 
-        # Fallback to MARC API (only has 1 FL ID typically) — only for suffix 1
-        if suffix == 1:
+        # Fallback to MARC API (only has 1 FL ID typically) — only for suffix 1.
+        # Phase 98 Codex REVIEW Issue 3: re-check the breaker BEFORE attempting
+        # MARC. The preceding IIIF failure may have just tripped the breaker;
+        # without this recheck, the worst-case blocking budget doubles (IIIF
+        # timeout + MARC timeout). Cheap (lock-protected int read).
+        if suffix == 1 and not _nli_circuit_is_open():
             try:
                 marc_url = f"https://iiif.nli.org.il/IIIFv21/marc/bib/{system_id}"
-                resp = _nli_session.get(marc_url, timeout=10, verify=True)
+                # Phase 98 D-15: env-driven (connect, read) tuple replaces hard-coded timeout=10.
+                resp = _nli_session.get(
+                    marc_url,
+                    timeout=(NLI_CONNECT_TIMEOUT, NLI_MARC_READ_TIMEOUT),
+                    verify=True,
+                )
                 if resp.status_code == 200:
                     fl_ids = re.findall(r'FL(\d+)', resp.text)
                     seen = set()
@@ -726,9 +793,19 @@ def init_api_routes(app_override=None):
                             _prune_nli_memory_cache_locked(_time.time())
                         _persist_positive_cache_snapshot()
                         logger.info(f"Cached {len(unique_fl_ids)} FL IDs from MARC for {system_id}")
+                        # Phase 98 D-06/D-08: MARC fallback succeeded.
+                        _nli_record_success(path='fetch_fl_ids_from_nli')
                         return unique_fl_ids
-            except Exception as e:
+                elif resp.status_code == 429:
+                    _nli_record_failure(failure_type='429', path='fetch_fl_ids_from_nli')
+                    logger.warning(f"NLI MARC 429 for {system_id}")
+                elif 500 <= resp.status_code < 600:
+                    _nli_record_failure(failure_type='5xx', path='fetch_fl_ids_from_nli')
+                    logger.warning(f"NLI MARC {resp.status_code} for {system_id}")
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 logger.error(f"MARC fallback also failed for {system_id}: {e}")
+                failure_type = 'timeout' if isinstance(e, requests.exceptions.Timeout) else 'connection_error'
+                _nli_record_failure(failure_type=failure_type, path='fetch_fl_ids_from_nli')
 
         # Both attempts failed — negative-cache to avoid immediate retry
         with _nli_cache_lock:
@@ -760,6 +837,10 @@ def init_api_routes(app_override=None):
         if not digits:
             return Response(content="Invalid FL ID", status_code=400)
 
+        # Phase 98 D-16: circuit check FIRST. If NLI is down, return 404 immediately.
+        if _nli_circuit_is_open():
+            return Response(content="Image not found", status_code=404)
+
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Referer': 'https://www.nli.org.il/',
@@ -768,30 +849,67 @@ def init_api_routes(app_override=None):
         # Try IIIF first (works for valid FL IDs, returns real images)
         iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/2000,/0/default.jpg"
         try:
-            resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
+            # Phase 98 D-16: bounded image timeout
+            resp = requests.get(
+                iiif_url,
+                headers=headers,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
+                verify=True,
+            )
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 # Verify it's not a tiny placeholder (real images are > 5KB)
                 if len(resp.content) > 5000:
+                    _nli_record_success(path='nli_image')
                     return Response(
                         content=resp.content,
                         media_type=resp.headers.get('Content-Type', 'image/jpeg')
                     )
-        except Exception as e:
-            logger.error(f"IIIF failed for FL{digits}: {e}")
+            elif resp.status_code == 429:
+                _nli_record_failure(failure_type='429', path='nli_image')
+            elif 500 <= resp.status_code < 600:
+                _nli_record_failure(failure_type='5xx', path='nli_image')
+            # 404 / other → fall through to Rosetta
+        except requests.exceptions.Timeout as e:
+            logger.error(f"IIIF timeout for FL{digits}: {e}")
+            _nli_record_failure(failure_type='timeout', path='nli_image')
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"IIIF connection error for FL{digits}: {e}")
+            _nli_record_failure(failure_type='connection_error', path='nli_image')
 
-        # Fallback to Rosetta - but filter out the "no image" placeholder
+        # Fallback to Rosetta - but filter out the "no image" placeholder.
+        # Phase 98 Codex REVIEW Issue 3: re-check the breaker BEFORE Rosetta.
+        # IIIF may have just tripped the breaker; without this recheck we would
+        # immediately burn another image-read timeout against Rosetta even
+        # though D-16 says to guard both. Cheap (lock-protected int read).
+        if _nli_circuit_is_open():
+            return Response(content="Image not found", status_code=404)
         rosetta_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{digits}"
         try:
-            resp = requests.get(rosetta_url, headers=headers, timeout=15, verify=True)
+            # Phase 98 D-16: bounded image timeout
+            resp = requests.get(
+                rosetta_url,
+                headers=headers,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
+                verify=True,
+            )
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 # The "no image" placeholder is ~1615 bytes, real images are larger
                 if len(resp.content) > 2000:
+                    _nli_record_success(path='nli_image')
                     return Response(
                         content=resp.content,
                         media_type=resp.headers.get('Content-Type', 'image/png')
                     )
-        except Exception as e:
-            logger.error(f"Rosetta failed for FL{digits}: {e}")
+            elif resp.status_code == 429:
+                _nli_record_failure(failure_type='429', path='nli_image')
+            elif 500 <= resp.status_code < 600:
+                _nli_record_failure(failure_type='5xx', path='nli_image')
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Rosetta timeout for FL{digits}: {e}")
+            _nli_record_failure(failure_type='timeout', path='nli_image')
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Rosetta connection error for FL{digits}: {e}")
+            _nli_record_failure(failure_type='connection_error', path='nli_image')
 
         return Response(content="Image not found", status_code=404)
 
@@ -819,6 +937,13 @@ def init_api_routes(app_override=None):
             content, content_type, fl_id = entry
             return (content, content_type, fl_id)
 
+        # Phase 98 D-17: circuit check BEFORE the FL-id iteration loop. Without
+        # this guard, a 20-element fl_ids list would multiply per-call blocking
+        # time by ~20 when NLI is down. Returning None now is preferable to
+        # spending 20 * 5s = 100 seconds discovering NLI is unreachable.
+        if _nli_circuit_is_open():
+            return None
+
         fl_ids = fetch_fl_ids_from_nli(sys_id, suffix=suffix)
         if not fl_ids:
             return None
@@ -829,14 +954,36 @@ def init_api_routes(app_override=None):
         }
 
         def _try_fl(fl_id):
+            # Phase 98 Codex REVIEW Issue 3: recheck breaker on EVERY iteration.
+            # The earlier breaker check at the top of _fetch_nli_image_bytes only
+            # covers the initial entry. With a cached FL-id list (often 20+ entries),
+            # the fallback loop below could iterate all FL IDs even after one
+            # of them tripped the breaker mid-loop. Cheap (lock-protected int read).
+            if _nli_circuit_is_open():
+                return None
             iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/{width},/0/default.jpg"
             try:
-                resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
+                # Phase 98 D-17: bounded image timeout
+                resp = requests.get(
+                    iiif_url,
+                    headers=headers,
+                    timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
+                    verify=True,
+                )
                 min_size = 1000 if width < 500 else 5000  # Thumbnails are smaller
                 ct = resp.headers.get('Content-Type', '')
                 if resp.status_code == 200 and 'image' in ct and len(resp.content) > min_size:
+                    _nli_record_success(path='_fetch_nli_image_bytes')
                     return (resp.content, ct or 'image/jpeg')
-            except Exception:
+                elif resp.status_code == 429:
+                    _nli_record_failure(failure_type='429', path='_fetch_nli_image_bytes')
+                elif 500 <= resp.status_code < 600:
+                    _nli_record_failure(failure_type='5xx', path='_fetch_nli_image_bytes')
+            except requests.exceptions.Timeout:
+                _nli_record_failure(failure_type='timeout', path='_fetch_nli_image_bytes')
+                return None
+            except requests.exceptions.ConnectionError:
+                _nli_record_failure(failure_type='connection_error', path='_fetch_nli_image_bytes')
                 return None
             return None
 
@@ -854,6 +1001,13 @@ def init_api_routes(app_override=None):
                 return (got[0], got[1], fl_id)
 
         return None
+
+    # Phase 98 Plan 03 test seam: expose closure-encapsulated NLI helpers so
+    # tests/test_api_nli_breaker_integration.py can call them directly without
+    # going through TestClient (and without monkey-patching the registered
+    # FastAPI route). Production code never reads this dict.
+    _api_test_seam['fetch_fl_ids_from_nli'] = fetch_fl_ids_from_nli
+    _api_test_seam['_fetch_nli_image_bytes'] = _fetch_nli_image_bytes
 
     @target_app.get('/api/nli_image_by_sysid/{sys_id}')
     def nli_image_by_sysid(sys_id: str, page: int = 0, width: int = 2000, suffix: int = 1):
@@ -1983,6 +2137,13 @@ def init_api_routes(app_override=None):
         except Exception:
             return Response(content="Invalid URL format", status_code=400)  # Request processing failed; return error response
 
+        # Phase 98 D-18: circuit check ONLY for NLI / Rosetta hosts. Cambridge,
+        # Manchester, Oxford etc. do not share the NLI failure mode.
+        nli_hosts = ('iiif.nli.org.il', 'rosetta.nli.org.il')
+        is_nli_host = parsed.netloc in nli_hosts
+        if is_nli_host and _nli_circuit_is_open():
+            return Response(content="Image not found", status_code=503)
+
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Referer': 'https://www.nli.org.il/',
@@ -1990,19 +2151,36 @@ def init_api_routes(app_override=None):
         }
 
         try:
-            # Fetch the image with timeout
-            resp = requests.get(url, headers=headers, timeout=15, verify=True)
+            # Phase 98 D-18: bounded image timeout for NLI hosts; existing 15s
+            # retained for non-NLI hosts (Cambridge etc. have different latency
+            # profiles and have not exhibited the threadpool-saturation pattern).
+            timeout = (NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT) if is_nli_host else 15
+            resp = requests.get(url, headers=headers, timeout=timeout, verify=True)
             if resp.status_code == 200:
+                if is_nli_host:
+                    _nli_record_success(path='proxy_image')
                 return Response(
                     content=resp.content,
                     media_type=resp.headers.get('Content-Type', 'image/jpeg')
                 )
             else:
                 logger.info(f"Proxy got status {resp.status_code} for URL: {url}")
+                if is_nli_host:
+                    if resp.status_code == 429:
+                        _nli_record_failure(failure_type='429', path='proxy_image')
+                    elif 500 <= resp.status_code < 600:
+                        _nli_record_failure(failure_type='5xx', path='proxy_image')
                 return Response(status_code=resp.status_code)
         except requests.Timeout:
             logger.error(f"Proxy timeout for URL: {url}")
+            if is_nli_host:
+                _nli_record_failure(failure_type='timeout', path='proxy_image')
             return Response(content="Request timeout", status_code=504)
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Proxy connection error for {url}: {e}")
+            if is_nli_host:
+                _nli_record_failure(failure_type='connection_error', path='proxy_image')
+            return Response(status_code=502)
         except Exception as e:
             logger.error(f"Proxy error for {url}: {e}")
             return Response(status_code=500)
