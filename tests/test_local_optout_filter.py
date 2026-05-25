@@ -6,7 +6,6 @@ Implementation plan: 96-05-PLAN.md
 REVISION 2026-05-24 -- W10: added three explicit cascade-interaction tests
 covering Phase 95 `_local_filter_inactive_chip_visible` state transitions.
 """
-import pytest
 
 
 class _Stub:

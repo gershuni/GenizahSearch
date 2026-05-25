@@ -233,7 +233,6 @@ def test_apply_local_optout_filter_function_exists():
     Phase 96 D-F1 shipped in plan 96-05 (closed 2026-05-24).
     BLOCKER 5 audit (96-09): skip converted to positive assertion.
     """
-    import pytest
     source = GENIZAH_APP_PY.read_text(encoding='utf-8')
     tree = ast.parse(source)
     names = {f.name for f in _iter_function_defs(tree)}
