@@ -1405,6 +1405,11 @@ class LocalIndexer:
                     and (cached_row["mtime_ns"] or 0) == mtime_ns
                     and (cached_row["size"] or 0) == fsize
                 ):
+                    # Phase 97 U-02 (RESEARCH Issue #4 LOCK): scan_run_id NOT set on cache-hit skip.
+                    # The cached_row keeps its prior scan_run_id (possibly NULL for legacy rows or
+                    # some prior committed UUID). Setting it here would cause discard_run(current_run)
+                    # to wrongly delete previously committed rows that this run merely visited.
+                    # Pinned by tests/test_scan_run_id.py::test_no_run_id_on_skipped.
                     result["skipped"] += 1
                     continue
 
@@ -2704,6 +2709,135 @@ class LocalIndexer:
             "SELECT scan_run_id FROM scan_runs WHERE status = 'running'"
         ).fetchall()
         return [r["scan_run_id"] for r in rows]
+
+    def discard_run(self, run_id: str) -> dict:
+        """Phase 97 U-02 + LD-7 — remove all docs/rows from this scan_run.
+
+        Returns dict of counts removed per source.
+
+        Protocol per ADVICE LD-7:
+          1) rollback uncommitted writer state (writer.rollback() or fallback)
+          2) writer.delete_documents("scan_run_id", run_id) + commit
+          3) ONE SQLite transaction:
+             DELETE local_pages / local_files / processed_files for this run
+             UPDATE scan_runs SET status='discarded'
+          4) refresh folder counters for affected paths
+          5) reopen writer/index handles (rollback may have invalidated them)
+
+        Pinned by tests/test_scan_run_id.py.
+        """
+        import sqlite3 as _sqlite3
+        counts: dict = {
+            "tantivy_rolled_back": False,
+            "local_pages": 0,
+            "local_files": 0,
+            "processed_files": 0,
+        }
+
+        # --- Step 1: rollback uncommitted writer state ---
+        if self._writer is not None:
+            try:
+                self._writer.rollback()
+                counts["tantivy_rolled_back"] = True
+                # rollback() invalidates the writer — null it so Step 2 opens a fresh one
+                self._writer = None
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Phase 97 LD-7: writer.rollback() not available or failed: %r "
+                    "— falling back to commit-then-delete",
+                    exc,
+                )
+                try:
+                    self._commit_writer_with_retry()
+                except Exception:
+                    logger.exception(
+                        "Phase 97 LD-7: fallback commit failed; proceeding with delete-by-term"
+                    )
+                # Null writer so Step 5 reopens a fresh handle
+                self._writer = None
+
+        # --- Step 2: delete committed docs by term + commit ---
+        # Open a fresh writer for the delete-by-term operation (needed whether we
+        # rolled back or committed in Step 1, since both invalidate the old writer).
+        try:
+            _del_writer = self._index.writer(heap_size=15_000_000)
+            _del_writer.delete_documents("scan_run_id", run_id)
+            _del_writer.commit()
+        except Exception:
+            logger.exception("Phase 97 LD-7: delete_documents/commit failed for run %s", run_id)
+
+        # --- Step 3: single SQLite transaction for all related row deletions ---
+        # Collect affected filepaths first so we can refresh counters after.
+        affected_rows = self._conn.execute(
+            "SELECT filepath FROM processed_files WHERE scan_run_id = ?", (run_id,)
+        ).fetchall()
+        affected_paths = [r["filepath"] if isinstance(r, dict) else r[0] for r in affected_rows]
+
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            cur = self._conn.execute(
+                "DELETE FROM local_pages WHERE sys_id IN ("
+                "  SELECT sys_id FROM processed_files WHERE scan_run_id = ?"
+                ")",
+                (run_id,),
+            )
+            counts["local_pages"] = cur.rowcount
+            cur = self._conn.execute(
+                "DELETE FROM local_files WHERE sys_id IN ("
+                "  SELECT sys_id FROM processed_files WHERE scan_run_id = ?"
+                ")",
+                (run_id,),
+            )
+            counts["local_files"] = cur.rowcount
+            cur = self._conn.execute(
+                "DELETE FROM processed_files WHERE scan_run_id = ?", (run_id,)
+            )
+            counts["processed_files"] = cur.rowcount
+            import time as _time
+            self._conn.execute(
+                "UPDATE scan_runs SET status = 'discarded', ended_at = ? "
+                "WHERE scan_run_id = ?",
+                (_time.time(), run_id),
+            )
+            self._conn.execute("COMMIT")
+        except Exception:
+            try:
+                self._conn.execute("ROLLBACK")
+            except _sqlite3.OperationalError:
+                pass
+            raise
+
+        # --- Step 4: refresh folder counters for affected folders ---
+        if affected_paths:
+            try:
+                self._refresh_folder_counters_for(affected_paths)
+                self._conn.commit()
+            except Exception:
+                logger.exception("Phase 97 LD-7: _refresh_folder_counters_for failed after discard")
+
+        # --- Step 5: reopen writer/index handles (rollback may have invalidated) ---
+        try:
+            self._writer = self._index.writer(heap_size=15_000_000)
+        except Exception:
+            logger.exception("Phase 97 LD-7: writer reopen failed after discard")
+
+        logger.info("Phase 97 LD-7 discard_run scan_run_id=%s counts=%s", run_id, counts)
+        if self._current_scan_run_id == run_id:
+            self._current_scan_run_id = None
+        return counts
+
+    def keep_run(self, run_id: str) -> None:
+        """Phase 97 U-02 — explicit final commit + mark scan_run completed.
+
+        Called when the user chooses 'Keep partial' from the Cancel modal.
+        """
+        if self._writer is not None:
+            try:
+                self._commit_writer_with_retry()
+            except Exception:
+                logger.exception("Phase 97 U-02: keep_run commit failed for run %s", run_id)
+        self._end_scan_run(run_id, "completed")
+        logger.info("Phase 97 U-02 keep_run scan_run_id=%s preserved", run_id)
 
     # ------------------------------------------------------------------
     # LOCAL LAB side-index builder (D-09 + D-38 + HIGH-4 + W5 Option C)

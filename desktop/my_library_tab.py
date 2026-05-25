@@ -953,21 +953,27 @@ class MyLibraryTab(QWidget):
         clicked = mb.clickedButton()
         run_id = running_runs[0]  # most recent interrupted run
         if clicked is btn_restart:
-            # Wave E will implement discard_run; for now mark as canceled.
+            # Phase 97 Wave E: discard_run() removes all four row sources (LD-7).
+            # Previously a Wave A stub that only called _end_scan_run("canceled").
             try:
-                self._indexer._end_scan_run(run_id, "canceled")
+                self._indexer.discard_run(run_id)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("_show_recovery_modal: _end_scan_run(restart) failed: %s", exc)
+                logger.warning("_show_recovery_modal: discard_run(restart) failed: %s", exc)
+                try:
+                    self._indexer._end_scan_run(run_id, "canceled")
+                except Exception:
+                    pass
         elif clicked is btn_skip:
+            # Skip: leave partial data in place but mark run as canceled so
+            # recovery probe doesn't trigger again on next start.
             try:
                 self._indexer._end_scan_run(run_id, "canceled")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("_show_recovery_modal: _end_scan_run(skip) failed: %s", exc)
         else:
-            # Resume — Wave E will implement actual resume logic; mark canceled
-            # for now so recovery probe doesn't trigger again on next start.
+            # Resume — full resume logic deferred; mark completed so gate lifts.
             try:
-                self._indexer._end_scan_run(run_id, "canceled")
+                self._indexer._end_scan_run(run_id, "completed")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("_show_recovery_modal: _end_scan_run(resume) failed: %s", exc)
         self.is_searchable = True
@@ -1330,10 +1336,67 @@ class MyLibraryTab(QWidget):
         self._start_worker(toast_on_complete=False)
 
     def _on_cancel_clicked(self) -> None:
-        """Cooperative cancel (D-24): signal the worker to stop."""
-        if self._worker is not None:
-            self._worker.cancel()
+        """Phase 97 U-02 — 3-button Cancel modal: Discard / Keep partial / Resume indexing.
+
+        Replaces the old cooperative-cancel-only approach (D-24) with a discard/keep
+        choice backed by discard_run() / keep_run() so the user can cleanly remove
+        partial-run data (LD-7) or preserve it for future resume.
+        """
+        if self._worker is None or not self._worker.isRunning():
+            self._btn_cancel.setEnabled(False)
+            return
+
+        run_id = self._indexer._current_scan_run_id if self._indexer is not None else None
+
+        mb = QMessageBox(self)
+        mb.setIcon(QMessageBox.Icon.Question)
+        if CURRENT_LANG == "he":
+            mb.setWindowTitle("ביטול אינדוקס")
+            mb.setText(
+                "האם לבטל את כל מה שאונדק בריצה הזאת, לשמור את הספרייה החלקית ולעצור, "
+                "או להמשיך את האינדוקס?"
+            )
+            btn_discard = mb.addButton("בטל הכל", QMessageBox.ButtonRole.DestructiveRole)
+            btn_keep = mb.addButton("שמור חלקי", QMessageBox.ButtonRole.AcceptRole)
+            btn_resume = mb.addButton("המשך אינדוקס", QMessageBox.ButtonRole.RejectRole)
+        else:
+            mb.setWindowTitle("Cancel indexing")
+            mb.setText(
+                "Discard everything indexed in this run, or keep partial library and stop?"
+            )
+            btn_discard = mb.addButton("Discard", QMessageBox.ButtonRole.DestructiveRole)
+            btn_keep = mb.addButton("Keep partial", QMessageBox.ButtonRole.AcceptRole)
+            btn_resume = mb.addButton("Resume indexing", QMessageBox.ButtonRole.RejectRole)
+        mb.setDefaultButton(btn_resume)
+        mb.exec()
+        clicked = mb.clickedButton()
+
+        if clicked is btn_resume:
+            # User cancelled the cancellation — leave worker running
+            return
+
+        # Stop the worker
+        self._worker.cancel()
+        self._worker.wait(5000)
         self._btn_cancel.setEnabled(False)
+
+        if self._indexer is not None and run_id:
+            if clicked is btn_discard:
+                try:
+                    self._indexer.discard_run(run_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("_on_cancel_clicked: discard_run failed: %s", exc)
+            else:
+                # Keep partial
+                try:
+                    self._indexer.keep_run(run_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("_on_cancel_clicked: keep_run failed: %s", exc)
+
+        try:
+            self._refresh_folder_list_ui()
+        except Exception:
+            pass
 
     def _on_progress_updated(
         self, current: int, total: int, filename: str

@@ -14,6 +14,7 @@ Tests:
 """
 import os
 import sqlite3
+import time
 import uuid
 
 import pytest
@@ -35,13 +36,12 @@ def _make_indexer(tmp_path):
     return LocalIndexer(idx_dir, lab_dir, db_path)
 
 
-def _write_doc_to_tantivy(writer, schema, run_id: str, uid: str, content: str) -> None:
-    """Write a single doc with given scan_run_id and commit."""
+def _add_doc_via_writer(indexer, run_id: str, uid: str, content: str) -> None:
+    """Add a single doc to the indexer's own writer (no external writer opened)."""
     doc = tantivy.Document()
     doc.add_text("unique_id", uid)
     doc.add_text("scan_run_id", run_id)
     doc.add_text("content", content)
-    # Fill in required fields with empty/default values
     for field_name in ("content_head", "content_tail", "line_starts", "line_ends"):
         try:
             doc.add_text(field_name, "")
@@ -52,30 +52,30 @@ def _write_doc_to_tantivy(writer, schema, run_id: str, uid: str, content: str) -
             doc.add_text(field_name, "")
         except Exception:
             pass
-    writer.add_document(doc)
+    indexer._writer.add_document(doc)
 
 
 def _populate_sql_for_run(conn: sqlite3.Connection, run_id: str, sys_ids: list) -> None:
     """Insert test rows into processed_files + local_files + local_pages for given run."""
-    import time as _time
     for sys_id in sys_ids:
         fp = f"/fake/{sys_id}.txt"
         conn.execute(
             "INSERT OR REPLACE INTO processed_files "
             "(filepath, mtime, mtime_ns, size, sys_id, status, scan_run_id) "
             "VALUES (?, ?, ?, ?, ?, 'pending', ?)",
-            (fp, _time.time(), 0, 100, sys_id, run_id),
+            (fp, time.time(), 0, 100, sys_id, run_id),
         )
         conn.execute(
             "INSERT OR REPLACE INTO local_files "
-            "(sys_id, filepath, folder_id, file_size, extraction_status) "
-            "VALUES (?, ?, 0, 100, 'ok')",
-            (sys_id, fp),
+            "(sys_id, filepath, folder_id, original_filename, file_extension, "
+            " file_size_bytes, extraction_status, last_indexed_at) "
+            "VALUES (?, ?, 0, 'fake.txt', '.txt', 100, 'ok', ?)",
+            (sys_id, fp, time.time()),
         )
         conn.execute(
             "INSERT OR REPLACE INTO local_pages "
-            "(uid, sys_id, p_num, text_length) "
-            "VALUES (?, ?, 1, 10)",
+            "(uid, sys_id, page_num) "
+            "VALUES (?, ?, 1)",
             (f"LOCAL_{sys_id}_P1", sys_id),
         )
     conn.commit()
@@ -101,60 +101,51 @@ def test_discard_removes_all_four_row_sources(tmp_path):
     """
     indexer = _make_indexer(tmp_path)
     try:
-        schema = build_local_schema()
-
-        # --- Populate run_A (committed to Tantivy) ---
+        # --- Populate run_A (committed to Tantivy via indexer's own writer) ---
         run_a = "run_id_A_" + uuid.uuid4().hex
         sys_ids_a = ["970000000011111111", "970000000022222222"]
 
-        # Write run_A docs to Tantivy and commit
-        writer = indexer._index.writer(heap_size=32 * 1024 * 1024)
         for sid in sys_ids_a:
-            _write_doc_to_tantivy(writer, schema, run_a, f"LOCAL_{sid}_P1", f"content A {sid}")
-        writer.commit()
+            _add_doc_via_writer(indexer, run_a, f"LOCAL_{sid}_P1", f"content A {sid}")
+        indexer._writer.commit()  # commit run_A docs
 
         # Insert scan_runs row for run_A (completed)
-        import time as _t
         indexer._conn.execute(
             "INSERT INTO scan_runs (scan_run_id, started_at, status) VALUES (?, ?, 'completed')",
-            (run_a, _t.time()),
+            (run_a, time.time()),
         )
-
         # Populate SQL rows for run_A
         _populate_sql_for_run(indexer._conn, run_a, sys_ids_a)
 
-        # --- Populate run_B (mid-run: written but not committed = simulate partial run) ---
+        # --- Populate run_B (mid-run: written and committed to Tantivy + SQLite) ---
         run_b = "run_id_B_" + uuid.uuid4().hex
         sys_ids_b = ["970000000033333333", "970000000044444444", "970000000055555555"]
 
-        # Write run_B docs to the writer (NOT yet committed)
-        writer2 = indexer._index.writer(heap_size=32 * 1024 * 1024)
         for sid in sys_ids_b:
-            _write_doc_to_tantivy(writer2, schema, run_b, f"LOCAL_{sid}_P1", f"content B {sid}")
-        writer2.commit()  # commit so they're searchable, simulating a mid-run batch commit
+            _add_doc_via_writer(indexer, run_b, f"LOCAL_{sid}_P1", f"content B {sid}")
+        indexer._writer.commit()  # commit run_B docs (simulating a mid-run batch commit)
 
         # Insert scan_runs row for run_B (still running)
         indexer._conn.execute(
             "INSERT INTO scan_runs (scan_run_id, started_at, status) VALUES (?, ?, 'running')",
-            (run_b, _t.time()),
+            (run_b, time.time()),
         )
-
         # Populate SQL rows for run_B
         _populate_sql_for_run(indexer._conn, run_b, sys_ids_b)
 
-        # Store run_b as current so discard_run can find the writer
+        # Store run_b as current
         indexer._current_scan_run_id = run_b
-        indexer._writer = indexer._index.writer(heap_size=32 * 1024 * 1024)
 
         # --- Execute discard_run(run_B) ---
         counts = indexer.discard_run(run_b)
 
-        # Assert (a): Tantivy has only run_A docs
+        # Assert (a): Tantivy has 0 run_B docs
+        # Use the indexer's own index (writer was reopened by discard_run).
+        # Use Index.parse_query (tantivy-py 0.25.1 API — no QueryParser class).
+        schema = build_local_schema()
         reload_idx = tantivy.Index(schema, path=str(tmp_path / "idx"))
         searcher = reload_idx.searcher()
-        # Use query_parser to find docs by scan_run_id
-        qp = tantivy.QueryParser.for_index(reload_idx, ["scan_run_id"])
-        query_b = qp.parse_query(run_b)
+        query_b = reload_idx.parse_query(run_b, ["scan_run_id"])
         hits_b = searcher.search(query_b, 100).hits
         assert len(hits_b) == 0, (
             f"Expected 0 run_B Tantivy docs after discard, got {len(hits_b)}"
@@ -184,7 +175,7 @@ def test_discard_removes_all_four_row_sources(tmp_path):
         status = indexer._conn.execute(
             "SELECT status FROM scan_runs WHERE scan_run_id = ?", (run_b,)
         ).fetchone()
-        assert status is not None, f"scan_runs row for run_B not found"
+        assert status is not None, "scan_runs row for run_B not found"
         assert status[0] == "discarded", f"Expected status='discarded', got '{status[0]}'"
 
         # Bonus: run_A SQL rows must still be intact
@@ -226,25 +217,22 @@ def test_no_run_id_on_skipped(tmp_path):
         prior_run_id = "PRIOR_RUN_ID_SENTINEL"
         # Get actual mtime_ns from the file on disk (same as what indexer stored)
         actual_mtime_ns = os.stat(fp).st_mtime_ns
+
+        from shared.local_sys_id import _canonical_filepath
+        canonical_fp = _canonical_filepath(fp)
+
         indexer._conn.execute(
             "UPDATE processed_files SET scan_run_id = ?, mtime_ns = ?, status = 'committed' "
             "WHERE filepath = ?",
-            (prior_run_id, actual_mtime_ns, fp.lower() if os.name == "nt" else fp),
+            (prior_run_id, actual_mtime_ns, canonical_fp),
         )
         indexer._conn.commit()
 
         # Verify we set it correctly
         stored = indexer._conn.execute(
             "SELECT scan_run_id, mtime_ns FROM processed_files WHERE filepath = ?",
-            (fp.lower() if os.name == "nt" else fp,),
+            (canonical_fp,),
         ).fetchone()
-        # If Windows path casing issue, try canonical form
-        if stored is None:
-            from shared.local_sys_id import _canonical_filepath
-            stored = indexer._conn.execute(
-                "SELECT scan_run_id, mtime_ns FROM processed_files WHERE filepath = ?",
-                (_canonical_filepath(fp),),
-            ).fetchone()
         assert stored is not None, "processed_files row not found after UPDATE"
         assert stored[0] == prior_run_id, f"Setup failed: expected PRIOR, got {stored[0]}"
 
@@ -252,8 +240,6 @@ def test_no_run_id_on_skipped(tmp_path):
         indexer.scan_all()  # second scan
 
         # The scan_run_id must still be 'PRIOR' (not overwritten with new run UUID)
-        from shared.local_sys_id import _canonical_filepath
-        canonical_fp = _canonical_filepath(fp)
         row = indexer._conn.execute(
             "SELECT scan_run_id FROM processed_files WHERE filepath = ?",
             (canonical_fp,),
@@ -282,10 +268,9 @@ def test_keep_run_commits_and_preserves_audit(tmp_path):
     try:
         # Create a scan_runs row in 'running' state
         run_id = "keep_run_test_" + uuid.uuid4().hex
-        import time as _t
         indexer._conn.execute(
             "INSERT INTO scan_runs (scan_run_id, started_at, status) VALUES (?, ?, 'running')",
-            (run_id, _t.time()),
+            (run_id, time.time()),
         )
         # Create a processed_files row for this run
         sys_id = "970000000099999999"
@@ -297,9 +282,6 @@ def test_keep_run_commits_and_preserves_audit(tmp_path):
         )
         indexer._conn.commit()
 
-        # Ensure the writer is open (keep_run needs it to commit)
-        if indexer._writer is None:
-            indexer._writer = indexer._index.writer(heap_size=32 * 1024 * 1024)
         indexer._current_scan_run_id = run_id
 
         # Call keep_run
@@ -337,34 +319,20 @@ def test_discard_handles_uncommitted_writer_state(tmp_path):
     indexer = _make_indexer(tmp_path)
     try:
         run_id = "uncommitted_test_" + uuid.uuid4().hex
-        schema = build_local_schema()
 
         # Register the run in scan_runs
-        import time as _t
         indexer._conn.execute(
             "INSERT INTO scan_runs (scan_run_id, started_at, status) VALUES (?, ?, 'running')",
-            (run_id, _t.time()),
+            (run_id, time.time()),
         )
         indexer._conn.commit()
 
-        # Open writer and add docs WITHOUT committing
-        indexer._writer = indexer._index.writer(heap_size=32 * 1024 * 1024)
+        # Add some uncommitted docs via the indexer's writer (NO commit before discard)
         indexer._current_scan_run_id = run_id
-
-        # Add some uncommitted docs
         for i in range(3):
             sid = f"9700000000{i:08d}"
-            doc = tantivy.Document()
-            doc.add_text("unique_id", f"LOCAL_{sid}_P1")
-            doc.add_text("scan_run_id", run_id)
-            doc.add_text("content", f"uncommitted content {i}")
-            for f in ("content_head", "content_tail", "line_starts", "line_ends",
-                      "source", "full_header", "shelfmark", "scope", "boundaries", "chunk_locator"):
-                try:
-                    doc.add_text(f, "")
-                except Exception:
-                    pass
-            indexer._writer.add_document(doc)
+            _add_doc_via_writer(indexer, run_id, f"LOCAL_{sid}_P1", f"uncommitted content {i}")
+        # Deliberately do NOT call writer.commit() here
 
         # Call discard_run (docs are in writer buffer, not committed)
         counts = indexer.discard_run(run_id)
@@ -372,9 +340,11 @@ def test_discard_handles_uncommitted_writer_state(tmp_path):
         # Assert: either rollback was invoked OR fallback worked
         assert isinstance(counts, dict), "discard_run must return a dict of counts"
         rollback_attempted = counts.get("tantivy_rolled_back", False)
+
         # We accept either rollback=True OR the docs being absent (commit-then-delete)
         if not rollback_attempted:
             # Fallback path: commit-then-delete — verify docs are gone
+            schema = build_local_schema()
             reload_idx = tantivy.Index(schema, path=str(tmp_path / "idx"))
             searcher = reload_idx.searcher()
             qp = tantivy.QueryParser.for_index(reload_idx, ["scan_run_id"])
@@ -383,7 +353,6 @@ def test_discard_handles_uncommitted_writer_state(tmp_path):
             assert len(hits) == 0, (
                 f"After discard_run (fallback path), expected 0 docs with run_id, got {len(hits)}"
             )
-        # If rollback succeeded, the docs were never committed — nothing more to verify
 
         # scan_runs.status must be 'discarded'
         status = indexer._conn.execute(
