@@ -16,6 +16,9 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 # at runtime (95-RESEARCH.md Pitfall #5).
 tmp_ret = collect_all('pymupdf')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+# Phase 97 R-03 — zstandard C-extension for cached_text compression.
+tmp_ret = collect_all('zstandard')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(

@@ -216,7 +216,54 @@ def build_local_schema() -> tantivy.Schema:
     builder.add_text_field("shelfmark", stored=True)
     builder.add_text_field("scope", stored=True)
     builder.add_text_field("boundaries", stored=True)
+    # Phase 97 LD-1 — two new fields defined once here; Waves E/F populate, do NOT add more.
+    # U-02: raw tokenizer REQUIRED so writer.delete_documents("scan_run_id", run_id)
+    # matches; default tokenizer would tokenize the UUID and never hit a Term lookup.
+    builder.add_text_field("scan_run_id", stored=True, tokenizer_name="raw")
+    # D-NEW-5: human-readable per-chunk display string; stored only, no search.
+    builder.add_text_field("chunk_locator", stored=True)
     return builder.build()
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 LD-1: schema marker helpers (detect schema drift, trigger rebuild)
+# ---------------------------------------------------------------------------
+
+def _compute_schema_marker(schema_fn=None) -> str:
+    """Return a short hex hash of build_local_schema source.
+
+    When build_local_schema() changes (new fields added), the marker changes
+    and triggers atomic rebuild so old on-disk indexes with wrong field sets
+    are replaced rather than silently opened with a mismatched schema.
+
+    Uses inspect.getsource for simplicity — acceptable because the schema
+    function body is stable between minor commits and any meaningful field
+    change bumps the marker as intended.
+    """
+    import hashlib
+    import inspect
+    fn = schema_fn if schema_fn is not None else build_local_schema
+    src = inspect.getsource(fn)
+    return hashlib.sha256(src.encode("utf-8")).hexdigest()[:16]
+
+
+def _read_schema_marker(index_dir: str) -> str | None:
+    """Read the .schema_version marker from index_dir; returns None if absent."""
+    p = os.path.join(index_dir, ".schema_version")
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def _write_schema_marker(index_dir: str, marker: str) -> None:
+    """Write .schema_version marker file alongside the index dir."""
+    os.makedirs(index_dir, exist_ok=True)
+    with open(os.path.join(index_dir, ".schema_version"), "w", encoding="utf-8") as f:
+        f.write(marker)
 
 
 def build_local_lab_schema() -> tantivy.Schema:
@@ -241,17 +288,48 @@ def build_local_lab_schema() -> tantivy.Schema:
 
 
 # ---------------------------------------------------------------------------
+# Phase 97 R-03: zstd cached_text compression helpers
+# ---------------------------------------------------------------------------
+
+_ZSTD_LEVEL = 3  # Phase 97 R-03 — balance per RESEARCH benchmark (3-5 typical)
+
+
+def compress_cached_text(text: str) -> tuple[bytes, int]:
+    """Compress text with zstd for storage in local_pages.cached_text.
+
+    Returns (zstd_compressed_bytes, uncompressed_len_in_bytes).
+    zstandard must be importable (pinned in requirements.txt as of Phase 97).
+    """
+    import zstandard
+    payload = text.encode("utf-8")
+    compressed = zstandard.ZstdCompressor(level=_ZSTD_LEVEL).compress(payload)
+    return compressed, len(payload)
+
+
+def decompress_cached_text(blob: bytes) -> str:
+    """Decompress zstd-compressed bytes back to text string."""
+    import zstandard
+    return zstandard.ZstdDecompressor().decompress(blob).decode("utf-8")
+
+
+# ---------------------------------------------------------------------------
 # SQLite schema init (D-35)
 # ---------------------------------------------------------------------------
 
 def init_sqlite(db_path: str) -> sqlite3.Connection:
-    """Create tables per D-35 and return an open connection.
+    """Create tables per D-35 (Phase 95 baseline) + Phase 97 columns and return an open connection.
 
     Tables:
-      - folders: registered source folders with status tracking
-      - processed_files: narrow mtime-cache; status for two-phase commit
-      - local_pages: per-page UID tracking for delete-by-uid (D-20)
+      - folders: registered source folders with status tracking (+ Phase 97 counter cols)
+      - processed_files: narrow mtime-cache; status for two-phase commit (+ scan_run_id, mtime_ns)
+      - local_pages: per-page UID tracking + Phase 97 cached_text + chunk_locator
       - local_files: rich metadata for Browse panel + per-file status panel
+      - scan_runs: Phase 97 R-01 lifecycle table (replaces _pending_cleanup sentinel)
+      - pending_dir_cleanup: Phase 97 R-02 GC table for .old-<ts> rebuild dirs
+
+    Phase 97 LD-2: Fresh installs get the FULL Phase 97 schema directly (user_version=2).
+    Pre-existing Phase 95 DBs at user_version=0 are migrated by local_indexer_migrations.run()
+    called in LocalIndexer.__init__ immediately after init_sqlite().
     """
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")  # Pitfall #6 mitigation
@@ -261,19 +339,31 @@ def init_sqlite(db_path: str) -> sqlite3.Connection:
             path             TEXT    UNIQUE NOT NULL,
             added_at         REAL,
             last_scanned_at  REAL,
-            status           TEXT    NOT NULL DEFAULT 'active'
+            status           TEXT    NOT NULL DEFAULT 'active',
+            indexed_count    INTEGER NOT NULL DEFAULT 0,
+            error_count      INTEGER NOT NULL DEFAULT 0,
+            pending_count    INTEGER NOT NULL DEFAULT 0,
+            oversized_count  INTEGER NOT NULL DEFAULT 0,
+            last_aggregate_at REAL
         );
         CREATE TABLE IF NOT EXISTS processed_files (
-            filepath  TEXT    PRIMARY KEY,
-            mtime     REAL,
-            size      INTEGER,
-            sys_id    TEXT,
-            status    TEXT    NOT NULL DEFAULT 'committed'
+            filepath     TEXT    PRIMARY KEY,
+            mtime        REAL,
+            size         INTEGER,
+            sys_id       TEXT,
+            status       TEXT    NOT NULL DEFAULT 'committed',
+            scan_run_id  TEXT,
+            mtime_ns     INTEGER
         );
         CREATE TABLE IF NOT EXISTS local_pages (
-            sys_id    TEXT    NOT NULL,
-            uid       TEXT    NOT NULL,
-            page_num  INTEGER NOT NULL,
+            sys_id                      TEXT    NOT NULL,
+            uid                         TEXT    NOT NULL,
+            page_num                    INTEGER NOT NULL,
+            cached_text                 BLOB,
+            cached_text_codec           TEXT    NOT NULL DEFAULT 'zstd',
+            cached_text_uncompressed_len INTEGER,
+            extraction_format_version   INTEGER NOT NULL DEFAULT 1,
+            chunk_locator               TEXT,
             PRIMARY KEY (sys_id, page_num)
         );
         CREATE TABLE IF NOT EXISTS local_files (
@@ -292,8 +382,28 @@ def init_sqlite(db_path: str) -> sqlite3.Connection:
             error_msg         TEXT,
             pending_delete    INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS scan_runs (
+            scan_run_id  TEXT PRIMARY KEY,
+            started_at   REAL NOT NULL,
+            ended_at     REAL,
+            status       TEXT NOT NULL CHECK (status IN ('running', 'completed', 'canceled', 'discarded'))
+        );
+        CREATE TABLE IF NOT EXISTS pending_dir_cleanup (
+            path        TEXT PRIMARY KEY,
+            kind        TEXT NOT NULL,
+            created_at  REAL NOT NULL DEFAULT (strftime('%s','now'))
+        );
     """)
     conn.commit()
+    # Phase 97 LD-2: stamp target user_version on fresh (empty) DBs so they
+    # skip the migration ladder on first open.
+    # Pre-existing Phase 95 DBs already have data so this guard yields False
+    # for them — LocalIndexer.__init__ will call migrations.run(conn) for those.
+    existing_files = conn.execute("SELECT COUNT(*) FROM processed_files").fetchone()[0]
+    if existing_files == 0:
+        conn.execute("PRAGMA user_version = 2")
+        conn.commit()
+    # else: leave user_version at 0; LocalIndexer.__init__ calls migrations.run(conn).
     return conn
 
 
@@ -517,14 +627,75 @@ class LocalIndexer:
         _conn.row_factory = sqlite3.Row
         self._thread_local._conn = _conn
 
+        # Phase 97 LD-2: run idempotent migration ladder (0->1->2).
+        # Called here, before any Tantivy work, so the schema additions
+        # (cached_text, scan_run_id, chunk_locator, etc.) are present for
+        # _write_page_doc in the same session.
+        from shared.local_indexer_migrations import run as _run_migrations
+        _run_migrations(self._thread_local._conn)  # Phase 97 D-NEW-1 ladder
+
+        # Phase 97 LD-3 (Wave E placeholder): scan_run_id defaults to None
+        # until _begin_scan_run sets it (Task 4).
+        self._current_scan_run_id: str | None = None
+
         # Tantivy LOCAL side-index
         schema = build_local_schema()
         os.makedirs(index_dir, exist_ok=True)
-        try:
-            self._index = tantivy.Index.open(index_dir)
-        except Exception:
-            # Schema mismatch or missing — create fresh
+
+        # Determine if this is a fresh dir (no meta.json = normal first-run),
+        # a schema-mismatch (marker file present but hash changed), or a
+        # genuine corruption (open raises on an existing index).
+        _meta_exists = os.path.isfile(os.path.join(index_dir, "meta.json"))
+        _schema_mismatch = False
+        if _meta_exists:
+            expected_marker = _compute_schema_marker(build_local_schema)
+            actual_marker = _read_schema_marker(index_dir)
+            if actual_marker is not None and actual_marker != expected_marker:
+                _schema_mismatch = True
+
+        if not _meta_exists:
+            # Fresh directory — create index from scratch (normal first-run)
             self._index = tantivy.Index(schema, path=index_dir)
+            _write_schema_marker(index_dir, _compute_schema_marker(build_local_schema))
+        else:
+            # Existing index — open and check for corruption/schema mismatch
+            _needs_rebuild = _schema_mismatch
+            _open_exc_captured = None
+            if not _needs_rebuild:
+                try:
+                    self._index = tantivy.Index.open(index_dir)
+                except Exception as _open_exc:
+                    logger.warning(
+                        "LOCAL Tantivy index open failed: %r — attempting atomic rebuild",
+                        _open_exc,
+                    )
+                    _needs_rebuild = True
+                    _open_exc_captured = _open_exc
+
+            if _needs_rebuild:
+                if _schema_mismatch:
+                    logger.warning(
+                        "LOCAL schema marker mismatch — attempting atomic rebuild"
+                    )
+                import uuid as _uuid
+                _recovery_run_id = _uuid.uuid4().hex
+                try:
+                    # Initialize _index to a fresh empty one so rebuild_main_index_atomic
+                    # can check committed rows via _conn (which is ready at this point)
+                    self._index = tantivy.Index(schema, path=index_dir)
+                    self.rebuild_main_index_atomic(
+                        _recovery_run_id,
+                        close_searcher_cb=lambda: None,
+                        reload_searcher_cb=lambda: None,
+                    )
+                    # Reopen after rebuild
+                    self._index = tantivy.Index(build_local_schema(), path=index_dir)
+                except Exception as _rebuild_exc:
+                    logger.error("LOCAL atomic rebuild failed: %r", _rebuild_exc)
+                    raise RuntimeError(
+                        "LOCAL index corrupt and rebuild from cached_text failed. "
+                        "Use 'Reset My Library' in Advanced settings to delete the cache and rescan."
+                    ) from _rebuild_exc
         # Bug-1 fix: retry writer acquisition with backoff.
         # On Windows, after a language-switch restart the previous process may
         # still hold the Tantivy writer lock for a brief moment (the old process
@@ -1227,6 +1398,7 @@ class LocalIndexer:
         text: str,
         title: str,
         folder_id: int,
+        chunk_locator: str = "",
     ) -> str:
         """Write one Tantivy doc for a page and record in local_pages. Returns uid.
 
@@ -1234,6 +1406,15 @@ class LocalIndexer:
         status='pending' BEFORE extraction, so file_id is populated on
         first index too. The `else 0` branch is kept as a defensive
         fallback only — under normal flow file_id is always non-zero here.
+
+        Phase 97 LD-3 (LOAD-BEARING per Codex HIGH #2): also writes
+        cached_text (zstd-compressed), cached_text_codec, cached_text_uncompressed_len,
+        extraction_format_version, and chunk_locator into local_pages in the same
+        write. scan_run_id from self._current_scan_run_id (set by _begin_scan_run
+        in Task 4; defaults to "" for Wave A compatibility).
+
+        Existing callers (PDF/DOCX/TXT extractors) pass chunk_locator="" by default;
+        Wave F D-NEW-5 will pass real locator strings.
         """
         # Get file_id from local_files (pre-inserted by _index_one_file).
         file_row = self._conn.execute(
@@ -1253,6 +1434,7 @@ class LocalIndexer:
         head = " ".join(words[:50]) if words else ""
         tail = " ".join(words[-50:]) if words else ""
 
+        # Phase 97 LD-1: Tantivy doc now includes scan_run_id + chunk_locator
         doc = tantivy.Document(
             unique_id=[uid],
             content=[text],
@@ -1265,13 +1447,21 @@ class LocalIndexer:
             shelfmark=[basename],
             scope=["page"],
             boundaries=[""],
+            # Phase 97 LD-1: empty string when scan_run_id is None (Wave A; Wave E populates)
+            scan_run_id=[self._current_scan_run_id or ""],
+            chunk_locator=[chunk_locator or ""],
         )
         self._writer.add_document(doc)
 
-        # Track page UID in SQLite
+        # Phase 97 LD-3: compress text and write ALL Phase 97 columns in the SINGLE
+        # canonical Tantivy write site (Codex HIGH #2 / ADVICE LD-3).
+        cached_bytes, uncompressed_len = compress_cached_text(text)
         self._conn.execute(
-            "INSERT OR REPLACE INTO local_pages (sys_id, uid, page_num) VALUES (?, ?, ?)",
-            (sys_id, uid, page_num),
+            "INSERT OR REPLACE INTO local_pages "
+            "(sys_id, uid, page_num, cached_text, cached_text_codec, "
+            " cached_text_uncompressed_len, extraction_format_version, chunk_locator) "
+            "VALUES (?, ?, ?, ?, 'zstd', ?, 1, ?)",
+            (sys_id, uid, page_num, cached_bytes, uncompressed_len, chunk_locator or ""),
         )
         self._conn.commit()
         return uid
@@ -1504,6 +1694,258 @@ class LocalIndexer:
         )
         self._conn.commit()
         self._pending_filepaths.clear()
+
+    # ------------------------------------------------------------------
+    # Phase 97 R-02: Atomic rebuild helpers (LD-4 / LD-5)
+    # ------------------------------------------------------------------
+
+    def _retry_windows_rename(self, src: str, dst: str) -> None:
+        """Rename src->dst with Windows-access-denied retry (same shape as _commit_writer_with_retry)."""
+        import time as _time
+        delays = (0.0, 0.25, 1.0, 2.0)
+        last_exc = None
+        for delay in delays:
+            if delay > 0:
+                _time.sleep(delay)
+            try:
+                os.rename(src, dst)
+                return
+            except OSError as exc:
+                last_exc = exc
+                if not self._is_windows_access_denied(exc):
+                    raise
+        raise OSError(
+            f"Atomic rename {src!r} -> {dst!r} failed after retries: {last_exc!r}"
+        )
+
+    def _close_internal_writer_index(self) -> None:
+        """Close LocalIndexer's own _writer + _index handles before os.rename (LD-5)."""
+        try:
+            if self._writer is not None:
+                try:
+                    self._writer.rollback()
+                except Exception:
+                    pass
+                self._writer = None
+        except Exception:
+            self._writer = None
+        self._index = None
+
+    def _reopen_internal_writer_index(self) -> None:
+        """Reopen _writer + _index after atomic swap so LocalIndexer can continue."""
+        self._index = tantivy.Index(build_local_schema(), path=self._index_dir)
+        self._writer = self._index.writer(heap_size=256 * 1024 * 1024)
+
+    def _reextract_one_page_or_skip(self, filepath: str, page_num: int) -> str:
+        """Best-effort re-extract a single page from source file; return "" on failure."""
+        try:
+            ext = os.path.splitext(filepath)[1].lower()
+            if ext == ".pdf":
+                for pn, txt, _t in extract_pdf_pages(filepath):
+                    if pn == page_num:
+                        return txt
+            elif ext == ".docx":
+                for pn, txt, _t in extract_docx_pages(filepath):
+                    if pn == page_num:
+                        return txt
+            elif ext == ".txt":
+                for pn, txt, _t in extract_txt(filepath):
+                    if pn == page_num:
+                        return txt
+        except Exception:
+            return ""
+        return ""
+
+    def rebuild_main_index_atomic(
+        self,
+        scan_run_id: str,
+        close_searcher_cb: Callable[[], None],
+        reload_searcher_cb: Callable[[], None],
+    ) -> None:
+        """Phase 97 R-02 — atomic temp-dir swap with full 7-handle closure.
+
+        7-step protocol (RESEARCH Issue #3 + Codex HIGH #4 + ADVICE LD-4/LD-5):
+          1. Build fresh index in <dir>.rebuild-<scan_run_id>/ from cached_text rows
+             (fallback to source re-extract for NULL-cached_text rows).
+          2. Validate via fresh_index.searcher().
+          3. Close ALL 7 handles (external searcher CB + internal writer/index).
+          4. os.rename(live -> <dir>.old-<ts>) with Windows retry.
+          5. os.rename(rebuild -> live) with Windows retry; rollback on failure.
+          6. Reload all searchers (engine + internal).
+          7. Schedule .old- cleanup via pending_dir_cleanup INSERT.
+        """
+        import shutil
+        import time as _time
+
+        rebuild_dir = f"{self._index_dir}.rebuild-{scan_run_id}"
+        old_dir = f"{self._index_dir}.old-{int(_time.time())}"
+
+        # --- Step 1: build fresh index from cached_text ---
+        if os.path.isdir(rebuild_dir):
+            shutil.rmtree(rebuild_dir, ignore_errors=True)
+        os.makedirs(rebuild_dir, exist_ok=True)
+        fresh_schema = build_local_schema()
+        fresh_index = tantivy.Index(fresh_schema, path=rebuild_dir)
+        fresh_writer = fresh_index.writer(heap_size=256 * 1024 * 1024)
+        docs_written = 0
+        try:
+            for row in self._conn.execute("""
+                SELECT lp.sys_id, lp.uid, lp.page_num,
+                       lp.cached_text, lp.cached_text_codec, lp.chunk_locator,
+                       lf.original_filename, lf.file_id,
+                       pf.scan_run_id AS pf_scan_run_id,
+                       pf.filepath
+                FROM local_pages lp
+                INNER JOIN processed_files pf ON pf.sys_id = lp.sys_id
+                INNER JOIN local_files lf ON lf.sys_id = lp.sys_id
+                WHERE pf.status = 'committed'
+                ORDER BY lp.sys_id, lp.page_num
+            """):
+                if row["cached_text"] is not None:
+                    if row["cached_text_codec"] == "zstd":
+                        text = decompress_cached_text(row["cached_text"])
+                    else:
+                        text = row["cached_text"].decode("utf-8", errors="replace")
+                else:
+                    # Legacy fallback: re-extract from source file (pre-Phase-97 rows)
+                    fp = row["filepath"]
+                    if not fp:
+                        continue
+                    text = self._reextract_one_page_or_skip(fp, row["page_num"])
+                    if not text:
+                        continue
+
+                full_header = _make_full_header(row["sys_id"], row["page_num"], row["file_id"])
+                words = text.split()
+                head = " ".join(words[:50]) if words else ""
+                tail = " ".join(words[-50:]) if words else ""
+                doc = tantivy.Document(
+                    unique_id=[row["uid"]],
+                    content=[text],
+                    content_head=[head],
+                    content_tail=[tail],
+                    line_starts=[""],
+                    line_ends=[""],
+                    source=["LOCAL"],
+                    full_header=[full_header],
+                    shelfmark=[row["original_filename"]],
+                    scope=["page"],
+                    boundaries=[""],
+                    scan_run_id=[row["pf_scan_run_id"] or ""],
+                    chunk_locator=[row["chunk_locator"] or ""],
+                )
+                fresh_writer.add_document(doc)
+                docs_written += 1
+
+            fresh_writer.commit()
+            fresh_writer.wait_merging_threads()
+
+            # --- Step 2: validate ---
+            _validation_searcher = fresh_index.searcher()
+            del _validation_searcher
+            del fresh_writer
+            del fresh_index
+
+        except Exception:
+            shutil.rmtree(rebuild_dir, ignore_errors=True)
+            raise
+
+        if docs_written == 0:
+            # No committed rows at all — this is an error: we refuse to swap in an
+            # empty index when SQLite says there should be data (prevent silent data loss)
+            # UNLESS there genuinely are no committed rows.
+            committed_count = self._conn.execute(
+                "SELECT COUNT(*) FROM processed_files WHERE status = 'committed'"
+            ).fetchone()[0]
+            if committed_count > 0:
+                shutil.rmtree(rebuild_dir, ignore_errors=True)
+                raise RuntimeError(
+                    f"Rebuild produced 0 docs but SQLite has {committed_count} committed rows. "
+                    "All cached_text is NULL and source files are missing. "
+                    "Use 'Reset My Library' in Advanced settings to delete the cache and rescan."
+                )
+
+        # --- Step 3: close ALL 7 handles (LD-5) ---
+        close_searcher_cb()               # closes engine: local_searcher, local_index,
+                                          #   local_lab_searcher, _local_lab_index
+        self._close_internal_writer_index()  # closes LocalIndexer._writer + _index
+
+        # --- Steps 4+5: rename live -> .old, rebuild -> live ---
+        try:
+            self._retry_windows_rename(self._index_dir, old_dir)
+        except OSError:
+            # Could not move live aside — reopen handles and re-raise
+            self._reopen_internal_writer_index()
+            reload_searcher_cb()
+            raise
+
+        try:
+            self._retry_windows_rename(rebuild_dir, self._index_dir)
+        except OSError:
+            # Rollback: restore old as live
+            try:
+                self._retry_windows_rename(old_dir, self._index_dir)
+            except OSError:
+                logger.error(
+                    "CRITICAL: both rename steps failed during atomic rebuild; "
+                    "old index at %s may be unreachable", old_dir,
+                )
+            self._reopen_internal_writer_index()
+            reload_searcher_cb()
+            raise
+
+        # --- Step 6: reload ---
+        self._reopen_internal_writer_index()
+        reload_searcher_cb()
+
+        # --- Step 7: write schema marker + schedule .old- cleanup ---
+        _write_schema_marker(self._index_dir, _compute_schema_marker(build_local_schema))
+        self._conn.execute(
+            "INSERT OR REPLACE INTO pending_dir_cleanup (path, kind, created_at) "
+            "VALUES (?, 'rebuild_old', strftime('%s','now'))",
+            (old_dir,),
+        )
+        self._conn.commit()
+        logger.info(
+            "Phase 97 R-02: atomic rebuild complete (%d docs, old dir scheduled for GC: %s)",
+            docs_written, old_dir,
+        )
+
+    def rebuild_lab_index_atomic(
+        self,
+        scan_run_id: str,
+        close_cb: Callable[[], None],
+        reload_cb: Callable[[], None],
+    ) -> None:
+        """Mirror of rebuild_main_index_atomic for LOCAL_LAB_INDEX_DIR.
+
+        LAB index is derivable (D-09) — for Wave A this delegates to the
+        caller's reload_cb which will call rebuild_lab_index() from genizah_core.
+        Full implementation follows in Wave D/E.
+        """
+        # LAB index is always derivable from the main index; Wave A stub
+        # simply closes + schedules a reload via the callback.
+        close_cb()
+        reload_cb()
+
+    def clean_pending_rebuild_dirs(self) -> None:
+        """Delete .old-<ts> rebuild directories recorded in pending_dir_cleanup."""
+        import shutil
+        rows = self._conn.execute(
+            "SELECT path FROM pending_dir_cleanup WHERE kind = 'rebuild_old'"
+        ).fetchall()
+        for r in rows:
+            try:
+                shutil.rmtree(r["path"], ignore_errors=True)
+                self._conn.execute(
+                    "DELETE FROM pending_dir_cleanup WHERE path = ?", (r["path"],)
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Phase 97: clean_pending_rebuild_dirs: remove %r failed: %r",
+                    r["path"], exc,
+                )
+        self._conn.commit()
 
     # ------------------------------------------------------------------
     # LOCAL LAB side-index builder (D-09 + D-38 + HIGH-4 + W5 Option C)
