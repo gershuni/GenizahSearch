@@ -83,34 +83,33 @@ class TestFetchIiifManifestGuard:
     def test_fetch_iiif_manifest_real_alma_attempts_call(self):
         """Regression: real Alma sys_id still attempts the network call (will
         either succeed or fail through circuit breaker / negative cache, but
-        should NOT short-circuit via the synthetic early-return)."""
-        import time as _t
+        should NOT short-circuit via the synthetic early-return).
 
+        Phase 98 D-03: the breaker has moved from a class-attribute on
+        MetadataManager to a module-level singleton in
+        shared.nli_circuit_breaker. Trip it via record_failure().
+        """
         from genizah_core import MetadataManager
+        import shared.nli_circuit_breaker as br
 
         mm = MetadataManager.__new__(MetadataManager)
         mm._iiif_manifest_cache = {}
         mm._iiif_manifest_fail_cache = {}
 
-        # Force the class-level circuit breaker open so we don't actually
+        # Force the shared circuit breaker open so we don't actually
         # network-call in the test; this exercises the next-layer guard rather
-        # than the synthetic guard. _nli_circuit_open_until is a CLASS
-        # attribute (modified via classmethod cls.) — must be set on the class.
-        original_open_until = MetadataManager._nli_circuit_open_until
-        original_failures = MetadataManager._nli_consecutive_failures
-        try:
-            MetadataManager._nli_circuit_open_until = _t.time() + 60.0
-            MetadataManager._nli_consecutive_failures = 99
+        # than the synthetic guard. The autouse fixture in tests/conftest.py
+        # resets the breaker state after the test.
+        for _ in range(br.NLI_CIRCUIT_THRESHOLD):
+            br.record_failure('timeout', 'test_preload')
+        assert br.is_open()
 
-            with patch.object(MetadataManager, "_make_session") as mock_session:
-                result = mm.fetch_iiif_manifest(REAL_ALMA_ID)
-            # We're past the synthetic guard; result is the circuit-breaker
-            # fallback. We should NOT have triggered a real network call.
-            mock_session.assert_not_called()
-            assert isinstance(result, dict)
-        finally:
-            MetadataManager._nli_circuit_open_until = original_open_until
-            MetadataManager._nli_consecutive_failures = original_failures
+        with patch.object(MetadataManager, "_make_session") as mock_session:
+            result = mm.fetch_iiif_manifest(REAL_ALMA_ID)
+        # We're past the synthetic guard; result is the circuit-breaker
+        # fallback. We should NOT have triggered a real network call.
+        mock_session.assert_not_called()
+        assert isinstance(result, dict)
 
 
 class TestFetchMarcDataGuard:
