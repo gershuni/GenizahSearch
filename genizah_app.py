@@ -2966,6 +2966,15 @@ class GenizahGUI(QMainWindow):
         # Puzzle window singleton (Phase 48)
         self._puzzle_window = None
 
+        # Phase 96 fix-10: guard against any _save_session() call that fires
+        # during the startup window (between __init__ and _restore_session()
+        # completing).  If _save_session() wrote during this window it would
+        # overwrite the valid on-disk session with empty results, making
+        # has_data=False on the very next restore attempt — silently preventing
+        # the 'ask' prompt from appearing and erasing persisted opt-outs.
+        # _restore_session() resets this to False in its finally block.
+        self._restoring_session = True
+
         self.init_ui()
 
         # Step 2: Start heavy initialization in background
@@ -24176,6 +24185,17 @@ class GenizahGUI(QMainWindow):
     def _save_session(self):
         """Save current search state to disk for session persistence."""
         from shared.session_persistence import save_session_state
+        # Phase 96 fix-10: do NOT overwrite the on-disk session during the
+        # startup window (before _restore_session() has read the file) or
+        # while a restore is in progress.  Without this guard any background
+        # event (rescan completion, combo signal, debounce timer) that calls
+        # _save_session() between __init__ and _restore_session() finishing
+        # would overwrite the valid session with empty results, making
+        # has_data=False on the very next restart — silently preventing the
+        # 'ask' prompt and erasing persisted opt-outs.
+        if getattr(self, '_restoring_session', False):
+            logger.debug("_save_session: skipped (restore in progress)")
+            return
         try:
             cfg = load_app_config()
             restore_mode = cfg.get('restore_mode', 'ask')
