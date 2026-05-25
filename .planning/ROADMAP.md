@@ -324,6 +324,16 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Phase 94 (research-grade exports) on 2026-05-19. No active backlog entries remain at this milestone boundary.
 
+### Phase 97: More LOCAL features
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 96
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 97 to break down)
+
 ---
 
 *Roadmap created: 2026-02-09*
