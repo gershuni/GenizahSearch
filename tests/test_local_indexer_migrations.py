@@ -31,7 +31,6 @@ def _make_fresh_db(tmp_path):
 
 def _make_v0_db_with_data(tmp_path):
     """Create a DB that mimics Phase 95: user_version=0, tables exist, has data."""
-    from shared.local_indexer import init_sqlite
     db_path = str(tmp_path / "db_v0.sqlite3")
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -96,7 +95,6 @@ def test_fresh_db_stamps_target_version(tmp_path):
     The fresh-DB stamp in init_sqlite bypasses the ladder since there is no
     pre-existing data.
     """
-    from shared.local_indexer import init_sqlite
     from shared.local_indexer_migrations import _LATEST_VERSION, run
 
     conn, _ = _make_fresh_db(tmp_path)

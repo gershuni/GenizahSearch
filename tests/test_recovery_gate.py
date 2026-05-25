@@ -10,10 +10,7 @@ Tests:
 from __future__ import annotations
 
 import os
-import sqlite3
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 
 def _make_bare_indexer(tmp_path):

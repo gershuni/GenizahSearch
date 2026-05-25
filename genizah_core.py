@@ -1589,7 +1589,10 @@ class LabEngine:
         # Results merged into results_map so Part 3 handles them uniformly.
         # Guard: _check_local_lab_freshness is defined on SearchEngine (not LabEngine).
         _freshness_fn = getattr(self, "_check_local_lab_freshness", None)
-        if not was_interrupted and callable(_freshness_fn) and _freshness_fn():
+        # Phase 97 R-01: skip LOCAL LAB search if is_searchable gate is closed.
+        _lab_tab = self._my_library_tab_ref() if getattr(self, "_my_library_tab_ref", None) is not None else None
+        _lab_is_searchable = getattr(_lab_tab, "is_searchable", True) if _lab_tab is not None else True
+        if not was_interrupted and _lab_is_searchable and callable(_freshness_fn) and _freshness_fn():
             try:
                 local_lab_index = getattr(self, "_local_lab_index", None)
                 local_lab_searcher = self.local_lab_searcher
@@ -6959,6 +6962,13 @@ class SearchEngine:
         # Codex HIGH #3 instrumentation — record what we got passed.
         self._last_local_query_regex = regex
 
+        # Phase 97 R-01 is_searchable gate — FIRST executable check.
+        # Returns [] while MyLibraryTab recovery modal is unresolved.
+        # Default-True if weakref is dead (engine running standalone / CLI / tests).
+        tab = self._my_library_tab_ref() if self._my_library_tab_ref is not None else None
+        if tab is not None and not getattr(tab, "is_searchable", True):
+            return []
+
         if self.local_searcher is None or self.local_index is None:
             return []
         try:
@@ -8795,7 +8805,10 @@ class SearchEngine:
                 _lab_fresh_exc,
             )
             _lab_fresh = False
-        if not was_cancelled and _lab_fresh:
+        # Phase 97 R-01: skip LOCAL LAB composition search if is_searchable gate closed.
+        _scl_tab = self._my_library_tab_ref() if getattr(self, "_my_library_tab_ref", None) is not None else None
+        _scl_is_searchable = getattr(_scl_tab, "is_searchable", True) if _scl_tab is not None else True
+        if not was_cancelled and _lab_fresh and _scl_is_searchable:
             try:
                 _local_lab_index_scl = getattr(self, "_local_lab_index", None)
                 _local_lab_searcher_scl = self.local_lab_searcher

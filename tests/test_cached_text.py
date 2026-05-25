@@ -2,8 +2,6 @@
 """Phase 97 R-03: zstd cached_text compression/decompression round-trip tests."""
 from __future__ import annotations
 
-import pytest
-
 
 def test_compress_roundtrip_hebrew_english():
     """compress_cached_text + decompress_cached_text round-trips Hebrew+English text."""

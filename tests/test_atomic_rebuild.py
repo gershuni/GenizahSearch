@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from unittest.mock import MagicMock, patch, call
 
 import pytest
 
@@ -32,8 +31,7 @@ def test_write_page_doc_populates_cached_text(tmp_path):
     """_write_page_doc writes non-NULL cached_text + correct codec + uncompressed_len
     + extraction_format_version + chunk_locator into local_pages.
     """
-    import sqlite3
-    from shared.local_indexer import LocalIndexer, decompress_cached_text
+    from shared.local_indexer import decompress_cached_text
 
     indexer, db_path, index_dir, lab_dir = _make_bare_indexer(tmp_path)
 
@@ -88,8 +86,7 @@ def test_write_page_doc_populates_cached_text(tmp_path):
 def test_close_all_handles_before_rename(tmp_path):
     """All 7 handles closed (set None) BEFORE first os.rename call in rebuild."""
     import uuid
-    from unittest.mock import MagicMock, patch, call
-    from shared.local_indexer import LocalIndexer
+    from unittest.mock import MagicMock, patch
 
     indexer, db_path, index_dir, lab_dir = _make_bare_indexer(tmp_path)
 
@@ -165,8 +162,7 @@ def test_close_all_handles_before_rename(tmp_path):
 def test_corrupt_index_recovery_from_cached_text(tmp_path):
     """Corrupt the live index; LocalIndexer init triggers atomic rebuild; result is searchable."""
     import os
-    import uuid
-    from shared.local_indexer import LocalIndexer, compress_cached_text
+    from shared.local_indexer import LocalIndexer
 
     index_dir = str(tmp_path / "idx")
     lab_dir = str(tmp_path / "lab")
@@ -221,7 +217,6 @@ def test_corrupt_index_recovery_from_cached_text(tmp_path):
 
 def test_old_dir_cleanup_via_pending_dir_cleanup(tmp_path):
     """After rebuild, pending_dir_cleanup has a row; clean_pending_rebuild_dirs removes it."""
-    import uuid
     from shared.local_indexer import LocalIndexer
 
     index_dir = str(tmp_path / "idx")
@@ -269,9 +264,7 @@ def test_old_dir_cleanup_via_pending_dir_cleanup(tmp_path):
 def test_rebuild_failure_raises_does_not_silent_fresh_empty(tmp_path):
     """When cached_text is NULL and source files missing, RuntimeError with 'Reset My Library'."""
     import os
-    import sqlite3
-    from shared.local_indexer import LocalIndexer, init_sqlite
-    from shared.local_indexer_migrations import run as run_migrations
+    from shared.local_indexer import LocalIndexer
 
     index_dir = str(tmp_path / "idx")
     lab_dir = str(tmp_path / "lab")

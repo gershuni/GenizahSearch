@@ -925,7 +925,27 @@ class LocalIndexer:
         """Scan all registered folders; return summary dict.
 
         Returns: {"indexed": N, "skipped": N, "errors": N, "cancelled": bool}
+
+        Phase 97 LD-6: inserts a scan_runs row with status='running' at start;
+        updates to 'completed' at clean exit or 'canceled' on cancellation.
+        Exceptions (crashes) leave the row at 'running' so start_recovery_probe()
+        detects it on next startup.
         """
+        # Phase 97 LD-6: begin scan_run lifecycle tracking.
+        run_id = self._begin_scan_run()
+        try:
+            result = self._scan_all_impl(cancel_check)
+        except Exception:
+            # Leave status='running' so recovery probe fires on next startup.
+            raise
+        if result.get("cancelled"):
+            self._end_scan_run(run_id, "canceled")
+        else:
+            self._end_scan_run(run_id, "completed")
+        return result
+
+    def _scan_all_impl(self, cancel_check: Callable[[], bool] = lambda: False) -> dict:
+        """Internal implementation of scan_all (split out for scan_run lifecycle wrapper)."""
         result = {"indexed": 0, "skipped": 0, "errors": 0, "cancelled": False}
         folders = self._conn.execute(
             "SELECT folder_id, path, status FROM folders"
@@ -1680,19 +1700,35 @@ class LocalIndexer:
         Category-2 BLOCKER fix: wraps Tantivy commit in retry/backoff so
         a transient Windows ``os error 5`` (antivirus or reader contention)
         does not crash the entire indexing batch.
+
+        Phase 97 R-04 + LD-8: Phase 2 wrapped in PRAGMA synchronous=FULL +
+        BEGIN IMMEDIATE + ROLLBACK on failure to ensure the durability bracket
+        survives power loss between the Tantivy commit and the SQLite UPDATE.
         """
         if not self._pending_filepaths:
             return
         # Phase 1: Tantivy commit (with retry for Windows access-denied races).
         self._commit_writer_with_retry()
-        # Phase 2: SQLite mark committed
-        placeholders = ",".join("?" * len(self._pending_filepaths))
-        self._conn.execute(
-            f"UPDATE processed_files SET status = 'committed' "  # noqa: S608
-            f"WHERE filepath IN ({placeholders})",
-            self._pending_filepaths,
-        )
-        self._conn.commit()
+        # Phase 97 R-04 + LD-8: durability bracket with ROLLBACK on failure.
+        self._conn.execute("PRAGMA synchronous = FULL")
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            placeholders = ",".join("?" * len(self._pending_filepaths))
+            self._conn.execute(
+                f"UPDATE processed_files SET status = 'committed' "  # noqa: S608
+                f"WHERE filepath IN ({placeholders})",
+                self._pending_filepaths,
+            )
+            self._conn.execute("COMMIT")
+        except Exception:
+            # LD-8: ROLLBACK before restoring synchronous=NORMAL.
+            try:
+                self._conn.execute("ROLLBACK")
+            except sqlite3.OperationalError:
+                pass  # already rolled back (no active transaction)
+            raise
+        finally:
+            self._conn.execute("PRAGMA synchronous = NORMAL")
         self._pending_filepaths.clear()
 
     # ------------------------------------------------------------------
@@ -1946,6 +1982,60 @@ class LocalIndexer:
                     r["path"], exc,
                 )
         self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # Phase 97 LD-6: scan_runs lifecycle helpers
+    # ------------------------------------------------------------------
+
+    def _begin_scan_run(self) -> str:
+        """Insert a scan_runs row with status='running'; return the new scan_run_id.
+
+        Called at the start of scan_all so that an interrupted run is detectable
+        via start_recovery_probe() on next startup (replaces _pending_cleanup sentinel).
+        """
+        import uuid as _uuid
+        import time as _time
+        run_id = _uuid.uuid4().hex
+        self._conn.execute(
+            "INSERT INTO scan_runs (scan_run_id, started_at, status) VALUES (?, ?, 'running')",
+            (run_id, _time.time()),
+        )
+        self._conn.commit()
+        self._current_scan_run_id = run_id
+        logger.info("Phase 97 LD-6: scan_run begin scan_run_id=%s", run_id)
+        return run_id
+
+    def _end_scan_run(self, scan_run_id: str, status: str = "completed") -> None:
+        """Update scan_runs SET status=?, ended_at=NOW() for the given scan_run_id.
+
+        Valid status values: 'completed', 'canceled', 'discarded'.
+        Clears self._current_scan_run_id if this run matches.
+        """
+        import time as _time
+        assert status in ("completed", "canceled", "discarded"), status
+        self._conn.execute(
+            "UPDATE scan_runs SET ended_at = ?, status = ? WHERE scan_run_id = ?",
+            (_time.time(), status, scan_run_id),
+        )
+        self._conn.commit()
+        logger.info("Phase 97 LD-6: scan_run end scan_run_id=%s status=%s", scan_run_id, status)
+        if self._current_scan_run_id == scan_run_id:
+            self._current_scan_run_id = None
+
+    def start_recovery_probe(self) -> list:
+        """Phase 97 R-01: return scan_run_ids with status='running'.
+
+        Called from MyLibraryTab.__init__ after migrations; an interrupted run
+        (crash / power loss between Tantivy commit and SQLite COMMIT) leaves a
+        row with status='running'. MyLibraryTab shows the 3-button recovery modal
+        when this returns a non-empty list.
+
+        Returns: list of scan_run_id strings (str, not Row objects).
+        """
+        rows = self._conn.execute(
+            "SELECT scan_run_id FROM scan_runs WHERE status = 'running'"
+        ).fetchall()
+        return [r["scan_run_id"] for r in rows]
 
     # ------------------------------------------------------------------
     # LOCAL LAB side-index builder (D-09 + D-38 + HIGH-4 + W5 Option C)
