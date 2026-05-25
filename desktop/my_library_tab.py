@@ -248,6 +248,7 @@ class _UnifiedFileTreeWidget(QTreeWidget):
             prior_st = file_info.get('status', '')
             pages_str = str(prior_pages) if prior_pages and prior_pages > 0 else ''
             # Translate stored status codes to display strings (mirrors update_file_status).
+            # Phase 97 C-05: reads from local_files.extraction_status (LD-9 UI source of truth).
             if prior_st == 'ok':
                 status_str = tr("OK")
             elif prior_st == 'cancelled':
@@ -258,6 +259,13 @@ class _UnifiedFileTreeWidget(QTreeWidget):
                 status_str = tr("Encoding error")
             elif prior_st == 'unsupported':
                 status_str = tr("Unsupported")
+            elif prior_st == 'oversized':
+                # Phase 97 C-05 — file > 100 MB hard skip (LD-9)
+                # local_files.extraction_status is the UI source of truth per LD-9.
+                status_str = "גדול מדי (>100 מ\"ב)" if CURRENT_LANG == 'he' else tr("Too large (>100 MB)")
+            elif prior_st == 'zip_bomb_suspected':
+                # Phase 97 C-05 — zip-container uncompressed size > 500 MB (LD-9)
+                status_str = "ארכיון חשוד" if CURRENT_LANG == 'he' else tr("Suspicious archive")
             elif prior_st in ('error',):
                 status_str = tr("Error")
             else:
@@ -269,6 +277,11 @@ class _UnifiedFileTreeWidget(QTreeWidget):
                 from PyQt6.QtGui import QColor
                 for col in range(3):
                     leaf.setForeground(col, QColor('#e74c3c'))
+            elif prior_st in ('oversized', 'zip_bomb_suspected'):
+                # Phase 97 C-05 — orange warning colour (same as cancelled/warning states)
+                from PyQt6.QtGui import QColor
+                for col in range(3):
+                    leaf.setForeground(col, QColor('#e67e22'))
             elif prior_st == 'cancelled':
                 from PyQt6.QtGui import QColor
                 for col in range(3):
@@ -319,6 +332,7 @@ class _UnifiedFileTreeWidget(QTreeWidget):
         LocalIndexerWorker.file_finished signal handler).
         """
         # Translate status code to display string (mirrors old _status_table logic).
+        # Phase 97 C-05: reads from local_files.extraction_status (LD-9 UI source of truth).
         display_status = status
         if status == "ok":
             display_status = tr("OK")
@@ -330,6 +344,12 @@ class _UnifiedFileTreeWidget(QTreeWidget):
             display_status = tr("Encoding error")
         elif status == "unsupported":
             display_status = tr("Unsupported")
+        elif status == "oversized":
+            # Phase 97 C-05 — file > 100 MB hard skip (LD-9)
+            display_status = "גדול מדי (>100 מ\"ב)" if CURRENT_LANG == 'he' else tr("Too large (>100 MB)")
+        elif status == "zip_bomb_suspected":
+            # Phase 97 C-05 — zip-container uncompressed size > 500 MB (LD-9)
+            display_status = "ארכיון חשוד" if CURRENT_LANG == 'he' else tr("Suspicious archive")
 
         pages_str = str(pages) if pages > 0 else '-'
 
@@ -357,7 +377,8 @@ class _UnifiedFileTreeWidget(QTreeWidget):
                 from PyQt6.QtGui import QColor
                 for col in range(3):
                     leaf.setForeground(col, QColor('#e74c3c'))
-            elif status == 'cancelled':
+            elif status in ('oversized', 'zip_bomb_suspected', 'cancelled'):
+                # Phase 97 C-05 — orange warning colour for size/zip-bomb skips (LD-9)
                 from PyQt6.QtGui import QColor
                 for col in range(3):
                     leaf.setForeground(col, QColor('#e67e22'))
