@@ -68,10 +68,99 @@ _SUPPORTED_EXTENSIONS = {".docx", ".pdf", ".txt"}
 _DOCX_CHUNK_PARAGRAPHS = 20            # D-04
 _SCANNED_PDF_CHAR_THRESHOLD = 50       # D-05
 _EMPTY_PAGE_CHAR_THRESHOLD = 10        # D-06
-_COMMIT_BATCH_SIZE = 25                # D-21
+_COMMIT_BATCH_SIZE = 25                # D-21 — Phase 95 dead-code per D-02 preservation;
+                                       # Phase 95 D-21 — superseded by Phase 97 _CommitTriggers below.
+                                       # Kept as dead-code constant per D-02 preservation.
 _MAX_COLLISION_RETRIES = 4             # D-19
 _UNIQUE_ID_PREFIX = "LOCAL"            # D-34
 _DEFAULT_TXT_ENCODING = "utf-8-sig"    # D-07 starting policy
+
+# ---------------------------------------------------------------------------
+# Phase 97 C-02 / C-05 constants + commit trigger + zip-bomb helpers
+# ---------------------------------------------------------------------------
+# Phase 97 C-02 — heap-sampling branch DROPPED per RESEARCH Issue #1
+# (tantivy-py 0.25.1 has no writer.get_memory_usage()); the heap_size= arg
+# to index.writer() is a memory ceiling, not a commit trigger.
+# TODO(tantivy >= 0.26): add a heap-size trigger when get_memory_usage() exists.
+
+# Phase 97 C-05 size/zip-bomb constants
+_MAX_FILE_SIZE = 100 * 1024 * 1024            # raw 100 MB hard skip
+_MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024   # zip-container 500 MB
+_MAX_CELLS_PER_SHEET = 100_000                # 100K cells (consumed by Wave C XLSX extractor)
+_MAX_CHARS_PER_CHUNK = 1_000_000              # 1 MB per chunk (consumed by Wave C extractors)
+
+
+class XlsxZipBombSuspected(Exception):
+    """Phase 97 C-05 — raised by _check_zip_bomb or XLSX extractor when limits exceeded."""
+
+
+class _CommitTriggers:
+    """Phase 97 C-02 — byte/count/time commit triggers.
+
+    Fires when ANY of the following is reached:
+      - Source bytes in this batch >= 200 MB (BYTES_THRESHOLD)
+      - Files processed in this batch >= 100 (FILES_THRESHOLD)
+      - Seconds elapsed since last commit >= 60 (SECONDS_THRESHOLD)
+
+    Heap-sampling path DROPPED per RESEARCH Issue #1: tantivy-py 0.25.1 has
+    no writer.get_memory_usage() method. The heap_size= arg to index.writer()
+    is a memory ceiling, not a commit trigger.
+    TODO(tantivy >= 0.26): add heap trigger when get_memory_usage() exists.
+    """
+
+    BYTES_THRESHOLD = 200 * 1024 * 1024  # 200 MB
+    FILES_THRESHOLD = 100
+    SECONDS_THRESHOLD = 60.0
+
+    def __init__(self) -> None:
+        self._batch_bytes = 0
+        self._batch_files = 0
+        self._batch_start = time.monotonic()
+
+    def record_file(self, source_size: int) -> None:
+        """Record that one file of source_size bytes was processed."""
+        self._batch_bytes += int(source_size or 0)
+        self._batch_files += 1
+
+    def should_commit(self) -> bool:
+        """Return True if any commit threshold has been crossed."""
+        return (
+            self._batch_bytes >= self.BYTES_THRESHOLD
+            or self._batch_files >= self.FILES_THRESHOLD
+            or (time.monotonic() - self._batch_start) >= self.SECONDS_THRESHOLD
+        )
+
+    def reset(self) -> None:
+        """Reset all counters after a commit."""
+        self._batch_bytes = 0
+        self._batch_files = 0
+        self._batch_start = time.monotonic()
+
+
+def _check_zip_bomb(filepath: str) -> str | None:
+    """Phase 97 C-05 — pre-check zip-container files for uncompressed-size bombs.
+
+    Iterates zipfile.ZipInfo.file_size records and sums uncompressed sizes.
+    Returns a reason string if the total exceeds _MAX_UNCOMPRESSED_BYTES (500 MB),
+    or if the file is not a valid zip container. Returns None if safe.
+
+    Apply ONLY to .docx / .xlsx — PDF/TXT/CSV/HTML use raw-size cap only.
+    This check runs BEFORE handing the file to openpyxl/python-docx, so a
+    maliciously crafted zip claiming 600 MB uncompressed is rejected in < 1 ms
+    without allocating any decompression memory (Codex MEDIUM #1).
+    """
+    import zipfile as _zipfile
+    try:
+        with _zipfile.ZipFile(filepath, "r") as zf:
+            total_uncompressed = sum(info.file_size for info in zf.infolist())
+            if total_uncompressed > _MAX_UNCOMPRESSED_BYTES:
+                return (
+                    f"uncompressed size {total_uncompressed} "
+                    f"exceeds limit {_MAX_UNCOMPRESSED_BYTES}"
+                )
+    except _zipfile.BadZipFile:
+        return "not a valid zip-container file"
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -723,6 +812,9 @@ class LocalIndexer:
         # Batch tracking for two-phase commit (D-21)
         self._pending_filepaths: list[str] = []
 
+        # Phase 97 C-02 — byte/count/time commit trigger (supersedes fixed 25-file batch)
+        self._commit_triggers = _CommitTriggers()
+
         # HIGH-3 review fix: run pending-delete recovery at init
         recovered = self._recover_pending_deletes()
         if recovered:
@@ -987,11 +1079,11 @@ class LocalIndexer:
                 result["cancelled"] = True
                 break
 
-            # Get cached files for this folder
+            # Get cached files for this folder (D-NEW-8: include mtime_ns for exact comparison)
             cached = {
                 row["filepath"]: row
                 for row in self._conn.execute(
-                    "SELECT pf.filepath, pf.mtime, pf.size, pf.sys_id, pf.status "
+                    "SELECT pf.filepath, pf.mtime, pf.mtime_ns, pf.size, pf.sys_id, pf.status "
                     "FROM processed_files pf "
                     "JOIN local_files lf ON pf.sys_id = lf.sys_id "
                     "WHERE lf.folder_id = ?",
@@ -1023,17 +1115,23 @@ class LocalIndexer:
                 try:
                     stat = os.stat(filepath)
                     mtime = stat.st_mtime
+                    mtime_ns = stat.st_mtime_ns   # D-NEW-8: nanosecond precision
                     fsize = stat.st_size
                 except OSError as exc:
                     logger.warning("scan_all: stat failed for %s: %s", filepath, exc)
                     result["errors"] += 1
                     continue
 
-                # Check if unchanged
+                # D-NEW-8: cache-hit comparison uses integer mtime_ns (exact) instead of
+                # float mtime with 0.01s tolerance. Legacy Phase 95 rows have mtime_ns=NULL;
+                # (cached_row["mtime_ns"] or 0) evaluates to 0 for NULL, which is never
+                # equal to any real mtime_ns (which is always > 0 for real files since epoch).
+                # This correctly forces a cache miss for all Phase 95 legacy rows on first
+                # Phase 97 scan, allowing mtime_ns to be populated.
                 if (
                     cached_row is not None
                     and cached_row["status"] == "committed"
-                    and abs((cached_row["mtime"] or 0) - mtime) < 0.01
+                    and (cached_row["mtime_ns"] or 0) == mtime_ns
                     and (cached_row["size"] or 0) == fsize
                 ):
                     result["skipped"] += 1
@@ -1043,6 +1141,72 @@ class LocalIndexer:
                 # (not for cache hits) — matches D-23 "per file being processed" semantics
                 if self._progress_cb:
                     self._progress_cb(idx, total_files, os.path.basename(filepath))
+
+                # Phase 97 C-05 raw-size hard skip (LD-9 — write to BOTH tables)
+                if fsize > _MAX_FILE_SIZE:
+                    now = time.time()
+                    sys_id_for_status = generate_local_sys_id(_canonical_filepath(filepath))
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO processed_files "
+                        "(filepath, mtime, mtime_ns, size, sys_id, status, scan_run_id) "
+                        "VALUES (?, ?, ?, ?, ?, 'oversized', ?)",
+                        (filepath, mtime, mtime_ns, fsize, sys_id_for_status,
+                         self._current_scan_run_id),
+                    )
+                    # LD-9: also write local_files.extraction_status so the UI tree shows it.
+                    self._upsert_local_files_status(
+                        sys_id_for_status, filepath, folder_id, "oversized", fsize, now
+                    )
+                    self._conn.commit()
+                    if self._file_finished_cb:
+                        try:
+                            cb_path = _canonical_filepath(filepath)
+                        except Exception:
+                            cb_path = filepath
+                        self._file_finished_cb(cb_path, "oversized", 0, "")
+                    result["oversized"] = result.get("oversized", 0) + 1
+                    # Phase 97 C-02 — record for commit trigger even on skip
+                    self._commit_triggers.record_file(fsize)
+                    if self._commit_triggers.should_commit():
+                        self._commit_batch()
+                        self._commit_triggers.reset()
+                    continue
+
+                # Phase 97 C-05 zip-bomb defense — only for zip-container formats
+                ext_lower = os.path.splitext(filepath)[1].lower()
+                if ext_lower in (".docx", ".xlsx"):
+                    bomb_reason = _check_zip_bomb(filepath)
+                    if bomb_reason:
+                        now = time.time()
+                        sys_id_for_bomb = generate_local_sys_id(_canonical_filepath(filepath))
+                        self._conn.execute(
+                            "INSERT OR REPLACE INTO processed_files "
+                            "(filepath, mtime, mtime_ns, size, sys_id, status, scan_run_id) "
+                            "VALUES (?, ?, ?, ?, ?, 'zip_bomb_suspected', ?)",
+                            (filepath, mtime, mtime_ns, fsize, sys_id_for_bomb,
+                             self._current_scan_run_id),
+                        )
+                        # LD-9: also write local_files.extraction_status
+                        self._upsert_local_files_status(
+                            sys_id_for_bomb, filepath, folder_id,
+                            "zip_bomb_suspected", fsize, now, error_msg=bomb_reason,
+                        )
+                        self._conn.commit()
+                        logger.warning(
+                            "Phase 97 C-05: skipping %s — %s", filepath, bomb_reason
+                        )
+                        if self._file_finished_cb:
+                            try:
+                                cb_path = _canonical_filepath(filepath)
+                            except Exception:
+                                cb_path = filepath
+                            self._file_finished_cb(cb_path, "zip_bomb_suspected", 0, bomb_reason)
+                        result["zip_bomb_suspected"] = result.get("zip_bomb_suspected", 0) + 1
+                        self._commit_triggers.record_file(fsize)
+                        if self._commit_triggers.should_commit():
+                            self._commit_batch()
+                            self._commit_triggers.reset()
+                        continue
 
                 # Need to index (new or modified)
                 if cached_row is not None and cached_row["sys_id"]:
@@ -1066,9 +1230,12 @@ class LocalIndexer:
                         cb_path = filepath
                     self._file_finished_cb(cb_path, status, pages, "")
 
-                # Batch commit boundary
-                if len(self._pending_filepaths) >= _COMMIT_BATCH_SIZE:
+                # Phase 97 C-02 — byte/count/time trigger (supersedes Phase 95 D-21 fixed
+                # 25-file batch). _COMMIT_BATCH_SIZE is kept as dead-code constant per D-02.
+                self._commit_triggers.record_file(fsize)
+                if self._commit_triggers.should_commit():
                     self._commit_batch()
+                    self._commit_triggers.reset()
 
         # Final commit
         if not result["cancelled"] and self._pending_filepaths:
@@ -1264,8 +1431,10 @@ class LocalIndexer:
             return ("error", 0)
 
         try:
-            file_size = os.path.getsize(canonical)
-            mtime = os.path.getmtime(canonical)
+            _stat = os.stat(canonical)
+            file_size = _stat.st_size
+            mtime = _stat.st_mtime
+            mtime_ns = _stat.st_mtime_ns   # D-NEW-8: nanosecond precision
         except OSError as exc:
             logger.warning("_index_one_file: cannot stat %s: %s", canonical, exc)
             return ("error", 0)
@@ -1273,12 +1442,14 @@ class LocalIndexer:
         basename = os.path.basename(canonical)
 
         # Mark as pending BEFORE extraction (two-phase commit step 1)
+        # D-NEW-8: write mtime_ns alongside mtime so cache-hit check can use int comparison.
         self._conn.execute(
             """
-            INSERT OR REPLACE INTO processed_files (filepath, mtime, size, sys_id, status)
-            VALUES (?, ?, ?, ?, 'pending')
+            INSERT OR REPLACE INTO processed_files
+                (filepath, mtime, mtime_ns, size, sys_id, status, scan_run_id)
+            VALUES (?, ?, ?, ?, ?, 'pending', ?)
             """,
-            (canonical, mtime, file_size, sys_id),
+            (canonical, mtime, mtime_ns, file_size, sys_id, self._current_scan_run_id),
         )
         self._conn.commit()
 
@@ -1410,6 +1581,46 @@ class LocalIndexer:
         # Track for batch commit
         self._pending_filepaths.append(filepath)
         return (extraction_status, page_count)
+
+    def _upsert_local_files_status(
+        self,
+        sys_id: str,
+        filepath: str,
+        folder_id: int,
+        extraction_status: str,
+        file_size: int,
+        now: float,
+        error_msg: Optional[str] = None,
+    ) -> None:
+        """Phase 97 LD-9 — write extraction_status to local_files (UI source of truth).
+
+        For statuses set BEFORE _index_one_file's pre-INSERT runs (oversized,
+        zip_bomb_suspected), we UPSERT via INSERT ... ON CONFLICT(sys_id) DO UPDATE.
+        This ensures the UI tree (which reads local_files.extraction_status) shows
+        the correct status even when _finish_file is never reached.
+
+        LD-9 rationale: Wave D folder counter aggregation reads local_files.extraction_status.
+        Writing only processed_files.status leaves the UI blind to these states.
+        """
+        basename = os.path.basename(filepath)
+        ext = os.path.splitext(filepath)[1].lower()
+        self._conn.execute(
+            """
+            INSERT INTO local_files (
+                sys_id, filepath, folder_id, display_title,
+                original_filename, file_extension, page_count,
+                file_size_bytes, extraction_status, last_indexed_at,
+                sha256_full, error_msg, pending_delete
+            ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NULL, ?, 0)
+            ON CONFLICT(sys_id) DO UPDATE SET
+                extraction_status = excluded.extraction_status,
+                error_msg = excluded.error_msg,
+                file_size_bytes = excluded.file_size_bytes,
+                last_indexed_at = excluded.last_indexed_at
+            """,
+            (sys_id, filepath, folder_id, basename, basename, ext,
+             file_size, extraction_status, now, error_msg),
+        )
 
     def _write_page_doc(
         self,

@@ -13,7 +13,6 @@ from __future__ import annotations
 import zipfile
 from types import SimpleNamespace
 
-import pytest
 
 from shared.local_indexer import _check_zip_bomb, _MAX_UNCOMPRESSED_BYTES
 

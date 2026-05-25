@@ -13,7 +13,6 @@ from __future__ import annotations
 import ast
 import pathlib
 
-import pytest
 
 from shared.local_indexer import _CommitTriggers
 

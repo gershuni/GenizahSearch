@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import sqlite3
-import time
 
 import pytest
 
@@ -70,16 +69,23 @@ def test_cache_hit_uses_mtime_ns(tmp_path):
     assert result2["skipped"] >= 1, f"Expected cache hit on second scan, got {result2}"
     assert result2["indexed"] == 0, f"Expected 0 re-indexed on second scan, got {result2}"
 
-    # Advance mtime_ns by exactly 1 nanosecond
+    # Advance mtime_ns by 1000 ns (1 microsecond) — NTFS has 100ns precision,
+    # so +1ns gets rounded to the same 100ns interval. Use +1000ns (1us) to
+    # guarantee the filesystem records a distinct value.
     stat_before = os.stat(fpath)
     new_atime_ns = stat_before.st_atime_ns
-    new_mtime_ns = stat_before.st_mtime_ns + 1
+    new_mtime_ns = stat_before.st_mtime_ns + 1_000  # +1 microsecond
     os.utime(fpath, ns=(new_atime_ns, new_mtime_ns))
 
     stat_after = os.stat(fpath)
-    assert stat_after.st_mtime_ns == new_mtime_ns, (
-        "os.utime ns precision not honored by filesystem — test may be unreliable on FAT32"
-    )
+    # Verify the filesystem actually recorded a different mtime_ns.
+    # If the filesystem cannot represent the new value (e.g. FAT32 with 2s resolution),
+    # the test skips — we can only test the D-NEW-8 logic on a capable filesystem.
+    if stat_after.st_mtime_ns == stat_before.st_mtime_ns:
+        pytest.skip(
+            "Filesystem cannot represent sub-second mtime precision — "
+            "D-NEW-8 mtime_ns test requires NTFS/ext4/APFS"
+        )
 
     # Third scan — mtime_ns changed, so the file must be re-extracted
     indexer3 = LocalIndexer(index_dir, lab_dir, db_path)
@@ -89,14 +95,17 @@ def test_cache_hit_uses_mtime_ns(tmp_path):
         indexer3.close()
 
     assert result3["indexed"] >= 1, (
-        f"Expected re-extraction after mtime_ns+1, but got: {result3}. "
+        f"Expected re-extraction after mtime_ns changed by 1us, but got: {result3}. "
         "Cache-hit check must use integer mtime_ns, not float mtime with 0.01s tolerance."
     )
     assert result3["skipped"] == 0, (
-        f"Expected 0 skipped (mtime_ns changed by 1 ns), but got: {result3}"
+        f"Expected 0 skipped (mtime_ns changed by 1us), but got: {result3}"
     )
 
-    # Verify mtime_ns is now populated in processed_files
+    # Verify mtime_ns is now populated in processed_files with the actual filesystem value.
+    # Use stat_after.st_mtime_ns (not new_mtime_ns) because the filesystem may round
+    # the requested value to its precision granularity (NTFS: 100ns).
+    actual_mtime_ns = stat_after.st_mtime_ns
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     row = conn.execute(
@@ -105,8 +114,9 @@ def test_cache_hit_uses_mtime_ns(tmp_path):
     ).fetchone()
     conn.close()
     assert row is not None, "processed_files row not found after third scan"
-    assert row["mtime_ns"] == new_mtime_ns, (
-        f"mtime_ns in processed_files should be {new_mtime_ns}, got {row['mtime_ns']}"
+    assert row["mtime_ns"] == actual_mtime_ns, (
+        f"mtime_ns in processed_files should match filesystem value {actual_mtime_ns}, "
+        f"got {row['mtime_ns']}"
     )
 
 
