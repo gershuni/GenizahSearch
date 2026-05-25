@@ -41,6 +41,7 @@ from functools import lru_cache
 import itertools
 import json
 import html
+import weakref  # Phase 97 R-01: weakref for MyLibraryTab gate
 
 from genizah_translations import TRANSLATIONS, LIBRARY_CODES_HE
 
@@ -6681,36 +6682,115 @@ class SearchEngine:
         self._last_local_query_regex = None
         # Phase 96 NEW-2: per-sys_id page-list cache for get_local_browse_page.
         self._local_pages_cache = {}
+        # Phase 97 R-01: weakref to MyLibraryTab for is_searchable gate.
+        # Default True when no tab attached (e.g. standalone CLI / tests).
+        self._my_library_tab_ref: weakref.ref | None = None
+        # Phase 97 R-02: error from last atomic rebuild attempt; surfaced in UI banner.
+        self._local_open_error: str | None = None
         self._open_local_searcher()
 
-    def _open_local_searcher(self) -> None:
-        """Open the LOCAL Tantivy side-index with D-37 corrupt/missing fallback.
+    def attach_my_library_tab(self, tab) -> None:
+        """Phase 97 R-01: attach a weakref to the MyLibraryTab for is_searchable gate.
 
-        Sets self.local_index + self.local_searcher (both None on any open
-        failure — D-37).  Called at __init__ and by reload_local_indexes().
+        Called from MyLibraryTab.__init__ after engine reference is available.
+        The gate at _query_local_index checks is_searchable via this weakref.
+        Default-True when weakref is dead (engine running standalone / tests).
+        """
+        self._my_library_tab_ref = weakref.ref(tab)
+
+    def close_local_searcher(self) -> None:
+        """Phase 97 R-02 LD-5: close BOTH main + LAB searcher + index handles.
+
+        Called BEFORE os.rename in rebuild_main_index_atomic to prevent
+        Windows os error 5 (Access denied) from an open reader handle.
+        Closes the FULL handle graph:
+          local_searcher, local_index, local_lab_searcher, _local_lab_index
+        (note underscore prefix on _local_lab_index — verified at genizah_core.py:6745).
+        """
+        self.local_searcher = None
+        self.local_index = None
+        self.local_lab_searcher = None
+        self._local_lab_index = None  # exact attribute name (line 6745)
+
+    def close_local_lab_searcher(self) -> None:
+        """Phase 97 R-02 LD-5 (LAB-only variant used by rebuild_lab_index_atomic)."""
+        self.local_lab_searcher = None
+        self._local_lab_index = None
+
+    def _open_local_searcher(self) -> None:
+        """Phase 97 R-02: open LOCAL side-index with atomic-rebuild recovery.
+
+        Replaces D-37 silent None fallback per Codex HIGH #3 and ADVICE LD-4.
+        On Index.open exception OR schema-mismatch, attempts atomic rebuild from
+        cached_text via LocalIndexer. On rebuild failure, logs + sets both to None
+        AND records error in self._local_open_error for UI banner consumption.
+        Does NOT silently create a fresh empty index on corruption.
         """
         self.local_index = None
         self.local_searcher = None
+        self._local_open_error = None
+
+        if not os.path.isdir(Config.LOCAL_INDEX_DIR):
+            LOGGER.info(
+                "LOCAL side-index dir not present (no scan yet?): %s",
+                Config.LOCAL_INDEX_DIR,
+            )
+            return
+
+        from shared.local_indexer import (
+            build_local_schema,
+            LocalIndexer,
+            _compute_schema_marker,
+            _read_schema_marker,
+        )
+
+        # Check schema marker
+        expected_marker = _compute_schema_marker(build_local_schema)
+        actual_marker = _read_schema_marker(Config.LOCAL_INDEX_DIR)
+        schema_mismatch = (actual_marker is not None and actual_marker != expected_marker)
+
         try:
-            if os.path.isdir(Config.LOCAL_INDEX_DIR):
-                from shared.local_indexer import build_local_schema
-                schema = build_local_schema()
-                local_index = tantivy.Index(schema, path=Config.LOCAL_INDEX_DIR)
-                self.local_index = local_index
-                self.local_searcher = local_index.searcher()
-                LOGGER.info("LOCAL side-index opened: %s", Config.LOCAL_INDEX_DIR)
-            else:
+            schema = build_local_schema()
+            local_index = tantivy.Index(schema, path=Config.LOCAL_INDEX_DIR)
+            if schema_mismatch:
+                raise RuntimeError(
+                    f"Schema marker mismatch (actual={actual_marker!r}, "
+                    f"expected={expected_marker!r})"
+                )
+            self.local_index = local_index
+            self.local_searcher = local_index.searcher()
+            LOGGER.info("LOCAL side-index opened: %s", Config.LOCAL_INDEX_DIR)
+        except Exception as open_exc:
+            LOGGER.warning(
+                "LOCAL index open/schema-check failed: %r — attempting atomic rebuild",
+                open_exc,
+            )
+            try:
+                import uuid as _uuid
+                db_path = os.path.join(Config.LOCAL_INDEX_DIR, "local_index.sqlite3")
+                indexer = LocalIndexer(
+                    index_dir=Config.LOCAL_INDEX_DIR,
+                    lab_index_dir=Config.LOCAL_LAB_INDEX_DIR,
+                    db_path=db_path,
+                )
+                indexer.rebuild_main_index_atomic(
+                    scan_run_id=_uuid.uuid4().hex,
+                    close_searcher_cb=self.close_local_searcher,
+                    reload_searcher_cb=lambda: None,  # reload below
+                )
+                schema2 = build_local_schema()
+                local_index2 = tantivy.Index(schema2, path=Config.LOCAL_INDEX_DIR)
+                self.local_index = local_index2
+                self.local_searcher = local_index2.searcher()
                 LOGGER.info(
-                    "LOCAL side-index dir not present (no scan yet?): %s",
+                    "LOCAL side-index: atomic rebuild succeeded, reopened: %s",
                     Config.LOCAL_INDEX_DIR,
                 )
-        except Exception as e:
-            # D-37 — fall back to Genizah-only; surface in UI via banner (Plan 07).
-            LOGGER.warning(
-                "LOCAL index unavailable, main search continues without LOCAL hits: %r", e
-            )
-            self.local_index = None
-            self.local_searcher = None
+            except Exception as rebuild_exc:
+                LOGGER.error("LOCAL atomic rebuild failed: %r", rebuild_exc)
+                self._local_open_error = str(rebuild_exc)
+                self.local_index = None
+                self.local_searcher = None
 
     def reload_local_indexes(self) -> None:
         """HIGH-1 review fix: reopen LOCAL Tantivy searchers (main + LAB) so newly
