@@ -54,7 +54,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QColor
 
 from shared.local_indexer import LocalIndexer
-from genizah_core import Config, tr
+from genizah_core import Config, tr, CURRENT_LANG
 
 logger = logging.getLogger(__name__)
 
@@ -535,6 +535,10 @@ class MyLibraryTab(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
 
+        # Phase 97 R-01: LOCAL search is gated until recovery probe resolves.
+        # Set False here; flipped True after _init_indexer + recovery probe below.
+        self.is_searchable: bool = False
+
         # HIGH-1: stash reference to the SearchEngine so the four reload call
         # sites can call self.search_engine.reload_local_indexes().
         # The parent GenizahGUI exposes the searcher via self.searcher which is
@@ -560,6 +564,20 @@ class MyLibraryTab(QWidget):
 
         # Initialise the indexer and run startup recovery
         self._init_indexer()
+
+        # Phase 97 R-01: run recovery probe after indexer init.
+        if self._indexer is not None:
+            try:
+                running_runs = self._indexer.start_recovery_probe()
+                if not running_runs:
+                    self.is_searchable = True
+                else:
+                    self._show_recovery_modal(running_runs)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("MyLibraryTab: start_recovery_probe failed: %s", exc)
+                self.is_searchable = True  # fail-open so search still works
+        else:
+            self.is_searchable = True  # no indexer = no gate needed
 
         # D-25: silent background rescan at startup
         self._auto_rescan_on_startup()
@@ -796,6 +814,75 @@ class MyLibraryTab(QWidget):
 
         # Populate folder list UI
         self._refresh_folder_list_ui()
+
+    def _show_recovery_modal(self, running_runs: list) -> None:
+        """Phase 97 R-01 — 3-button Resume/Restart/Skip recovery modal.
+
+        Displayed when start_recovery_probe() returns non-empty (a previous
+        scan was interrupted by crash/power-loss).  Flips is_searchable=True
+        in all branches so LOCAL search is unblocked after user decision.
+
+        Wave E (plan 97-05) will refine Resume/Restart to actually resume or
+        discard the interrupted run; for Wave A the gate-flip is load-bearing.
+        """
+        mb = QMessageBox(self)
+        mb.setIcon(QMessageBox.Icon.Warning)
+        if CURRENT_LANG == "he":
+            mb.setWindowTitle("התאוששות מאינדוקס שהופסק")
+            mb.setText(
+                "האינדוקס הקודם הופסק — להמשיך, להתחיל מחדש או לדלג?"
+            )
+            btn_resume = mb.addButton("המשך", QMessageBox.ButtonRole.AcceptRole)
+            btn_restart = mb.addButton("התחל מחדש", QMessageBox.ButtonRole.DestructiveRole)
+            btn_skip = mb.addButton("דלג", QMessageBox.ButtonRole.RejectRole)
+        else:
+            mb.setWindowTitle("Recover interrupted indexing")
+            mb.setText(
+                "Previous indexing was interrupted — Resume / Restart / Skip?"
+            )
+            btn_resume = mb.addButton("Resume", QMessageBox.ButtonRole.AcceptRole)
+            btn_restart = mb.addButton("Restart", QMessageBox.ButtonRole.DestructiveRole)
+            btn_skip = mb.addButton("Skip", QMessageBox.ButtonRole.RejectRole)
+        mb.exec()
+        clicked = mb.clickedButton()
+        run_id = running_runs[0]  # most recent interrupted run
+        if clicked is btn_restart:
+            # Wave E will implement discard_run; for now mark as canceled.
+            try:
+                self._indexer._end_scan_run(run_id, "canceled")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("_show_recovery_modal: _end_scan_run(restart) failed: %s", exc)
+        elif clicked is btn_skip:
+            try:
+                self._indexer._end_scan_run(run_id, "canceled")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("_show_recovery_modal: _end_scan_run(skip) failed: %s", exc)
+        else:
+            # Resume — Wave E will implement actual resume logic; mark canceled
+            # for now so recovery probe doesn't trigger again on next start.
+            try:
+                self._indexer._end_scan_run(run_id, "canceled")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("_show_recovery_modal: _end_scan_run(resume) failed: %s", exc)
+        self.is_searchable = True
+
+    def closeEvent(self, event) -> None:
+        """Phase 97 LD-6: clean-shutdown sweep — mark any still-running scan_runs
+        as completed so they don't trigger recovery modal on next startup.
+        Called BEFORE the parent GenizahGUI.closeEvent flushes pending opt-outs.
+        """
+        try:
+            if self._indexer is not None and self._indexer._conn is not None:
+                import time as _time
+                self._indexer._conn.execute(
+                    "UPDATE scan_runs SET status = 'completed', ended_at = ? "
+                    "WHERE status = 'running'",
+                    (_time.time(),),
+                )
+                self._indexer._conn.commit()
+        except Exception:  # noqa: BLE001
+            logger.exception("Phase 97 LD-6: scan_runs clean-shutdown sweep failed")
+        super().closeEvent(event)
 
     def _auto_rescan_on_startup(self) -> None:
         """D-25: silent background rescan; non-modal toast on completion."""

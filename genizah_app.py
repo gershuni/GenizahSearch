@@ -2998,6 +2998,15 @@ class GenizahGUI(QMainWindow):
             self.searcher = searcher
             self.indexer = indexer
 
+            # Phase 97 R-01: wire is_searchable gate from SearchEngine -> MyLibraryTab.
+            # attach_my_library_tab stores a weakref so _query_local_index can check
+            # is_searchable before consulting the LOCAL Tantivy side-index.
+            if searcher is not None and hasattr(self, 'my_library_tab'):
+                try:
+                    searcher.attach_my_library_tab(self.my_library_tab)
+                except Exception as _e:
+                    logger.warning("on_startup_finished: attach_my_library_tab failed: %s", _e)
+
             # Init Lists Manager
             self.lists_mgr = ListsManager(self.meta_mgr)
 
