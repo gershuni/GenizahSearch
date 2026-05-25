@@ -4,14 +4,14 @@ milestone: v7.14
 milestone_name: My Library
 status: executing
 stopped_at: Phase 97 context gathered (capacity + recovery + 3 formats; Codex P0+P1 folded)
-last_updated: "2026-05-25T13:40:59.594Z"
-last_activity: 2026-05-25 -- Phase 98 planning complete
+last_updated: "2026-05-25T14:05:14.000Z"
+last_activity: 2026-05-25 -- Phase 98 execution started
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 30
-  completed_plans: 22
-  percent: 73
+  completed_plans: 23
+  percent: 77
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-19)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 97 — more-local-features
+**Current focus:** Phase 98 — NLI Resilience
 
 ## Current Position
 
-Phase: 97 (more-local-features) — EXECUTING
+Phase: 98 (NLI Resilience) — EXECUTING
 Plan: 1 of 6
-Status: Ready to execute
-Last activity: 2026-05-25 -- Phase 98 planning complete
+Status: Executing Phase 98
+Last activity: 2026-05-25 -- Phase 98 execution started
 
 Progress: [          ] v7.13 0% (0/14 reqs, 0/5 plans, 0/2 phases)
 

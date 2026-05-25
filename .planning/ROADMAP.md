@@ -329,7 +329,7 @@ Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Pha
 **Goal:** Make My Library usable at the scale Seewald'''s prototype already serves (13K files / 43 GB, target ceiling 50K / 50 GB) by adding crash-recovery semantics, durable text cache, and atomic Tantivy rebuild — and extend the file-format set with three light textual formats (.html / .xlsx / .csv). Does NOT add reading-experience features (OCR, side-by-side PDF) and does NOT touch web LOCAL exposure.
 **Requirements**: D-NEW-1, R-03, R-02, R-04, R-01, C-02, C-05, D-NEW-8, F-01, F-02, F-03, F-04, F-05, F-06, C-01, C-03, C-04, C-06, U-01, U-02, U-03, U-04, D-NEW-2, D-NEW-3, D-NEW-4, D-NEW-5, D-NEW-6, D-NEW-7
 **Depends on:** Phase 96
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans complete
 
 Plans:
 - [x] 97-01-PLAN.md — Wave A: SQLite migration v1->v2 + cached_text (zstd) + atomic Tantivy rebuild + WAL+FULL durability bracket + recovery UX gate
@@ -337,7 +337,7 @@ Plans:
 - [x] 97-03-PLAN.md — Wave C: HTML (lxml.html, NOT BeautifulSoup) + XLSX (openpyxl streaming) + CSV extractors with encoding chains; F-06 RTL-metadata-only invariant
 - [x] 97-04-PLAN.md — Wave D: ceiling 50K/50GB soft warning + pre-scan worker thread + persisted folder counters + disk indicator with merge headroom
 - [x] 97-05-PLAN.md — Wave E: phase-aware ETA + scan_run_id (mutated-rows-only per RESEARCH Issue #4) + FolderWalkWorker QThread + View All 500-cap incremental render
-- [ ] 97-06-PLAN.md — Wave F: network drive semantics + file-change-during-index + supported-extension row policy + chunk_locator per format + bilingual EN+HE privacy disclosure + 4 invariant CI guards
+- [x] 97-06-PLAN.md — Wave F: network drive semantics + file-change-during-index + supported-extension row policy + chunk_locator per format + bilingual EN+HE privacy disclosure + 4 invariant CI guards
 
 ### Phase 98: NLI Resilience — circuit-breaker and bounded-timeout hardening for all NLI/IIIF code paths
 
@@ -360,11 +360,11 @@ Plans:
 **Source RESEARCH:** `.planning/phases/98-nli-resilience-circuit-breaker-and-bounded-timeout-hardening/98-RESEARCH.md` (HIGH confidence)
 **Source VALIDATION:** `.planning/phases/98-nli-resilience-circuit-breaker-and-bounded-timeout-hardening/98-VALIDATION.md`
 
-**Plans:** 0/6 plans executed
+**Plans:** 2/6 plans executed
 
 Plans:
-- [ ] 98-01-PLAN.md — Wave 1: shared/posthog_server.py (factored telemetry helper — Option (a) per RESEARCH); fire-and-forget queue+daemon idiom factored out of web/api_hardening.py
-- [ ] 98-02-PLAN.md — Wave 2: shared/nli_circuit_breaker.py (module-level singleton, threading.Lock, time.monotonic); tests/test_nli_circuit_breaker.py (Nyquist-critical D-26 + D-27 lock correctness + AST guards); tests/conftest.py autouse fixture
+- [x] 98-01-PLAN.md — Wave 1: shared/posthog_server.py (factored telemetry helper — Option (a) per RESEARCH); fire-and-forget queue+daemon idiom factored out of web/api_hardening.py
+- [x] 98-02-PLAN.md — Wave 2: shared/nli_circuit_breaker.py (module-level singleton, threading.Lock, time.monotonic); tests/test_nli_circuit_breaker.py (Nyquist-critical D-26 + D-27 lock correctness + AST guards); tests/conftest.py autouse fixture
 - [ ] 98-03-PLAN.md — Wave 3: web/api.py (5 call sites D-11..D-18) — drop NLI_SEMAPHORE_TIMEOUT 20→1; wire fetch_fl_ids_from_nli with pre+post semaphore guards; nli_image / _fetch_nli_image_bytes / proxy_image (NLI-host-conditional)
 - [ ] 98-04-PLAN.md — Wave 3 parallel: shared/puzzle_image_service.py (_fetch_iiif_image unconditional + _fetch_direct_url host-conditional); web/pages/puzzle.py::_resolve_folios; D-19, D-20, D-21
 - [ ] 98-05-PLAN.md — Wave 3 parallel: genizah_core.py — migrate fetch_iiif_manifest + fetch_marc_data off class-attribute breaker; wire 2 new sites _fetch_single_worker (D-22) + _fetch_fl_ids (D-23); REMOVE legacy class-attribute breaker per RESEARCH Pitfall 5
