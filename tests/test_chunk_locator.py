@@ -10,11 +10,7 @@ string to _write_page_doc, and that the locators follow the documented patterns:
   - XLSX: '<sheet>!R<n>:R<m>' (e.g. 'Synopsis!R1:R500')
   - CSV: 'rows N-M' (e.g. 'rows 1-200')
 """
-import io
 import os
-import sqlite3
-import struct
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -140,7 +136,7 @@ def test_docx_locator_format(tmp_path):
     except ImportError:
         pytest.skip("python-docx not installed")
 
-    from shared.local_indexer import LocalIndexer, _DOCX_CHUNK_PARAGRAPHS
+    from shared.local_indexer import LocalIndexer
 
     index_dir = str(tmp_path / "idx")
     lab_dir = str(tmp_path / "lab")
