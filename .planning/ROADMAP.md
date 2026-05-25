@@ -326,15 +326,20 @@ Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Pha
 
 ### Phase 97: More LOCAL features
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Make My Library usable at the scale Seewald'''s prototype already serves (13K files / 43 GB, target ceiling 50K / 50 GB) by adding crash-recovery semantics, durable text cache, and atomic Tantivy rebuild — and extend the file-format set with three light textual formats (.html / .xlsx / .csv). Does NOT add reading-experience features (OCR, side-by-side PDF) and does NOT touch web LOCAL exposure.
+**Requirements**: D-NEW-1, R-03, R-02, R-04, R-01, C-02, C-05, D-NEW-8, F-01, F-02, F-03, F-04, F-05, F-06, C-01, C-03, C-04, C-06, U-01, U-02, U-03, U-04, D-NEW-2, D-NEW-3, D-NEW-4, D-NEW-5, D-NEW-6, D-NEW-7
 **Depends on:** Phase 96
-**Plans:** 0 plans
+**Plans:** 6 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 97 to break down)
+- [ ] 97-01-PLAN.md — Wave A: SQLite migration v1->v2 + cached_text (zstd) + atomic Tantivy rebuild + WAL+FULL durability bracket + recovery UX gate
+- [ ] 97-02-PLAN.md — Wave B: byte/count/time commit policy (NO heap-sampling per RESEARCH Issue #1) + 100 MB raw cap + zip-bomb defense for .docx/.xlsx + mtime_ns incremental audit
+- [ ] 97-03-PLAN.md — Wave C: HTML (lxml.html, NOT BeautifulSoup) + XLSX (openpyxl streaming) + CSV extractors with encoding chains; F-06 RTL-metadata-only invariant
+- [ ] 97-04-PLAN.md — Wave D: ceiling 50K/50GB soft warning + pre-scan worker thread + persisted folder counters + disk indicator with merge headroom
+- [ ] 97-05-PLAN.md — Wave E: phase-aware ETA + scan_run_id (mutated-rows-only per RESEARCH Issue #4) + FolderWalkWorker QThread + View All 500-cap incremental render
+- [ ] 97-06-PLAN.md — Wave F: network drive semantics + file-change-during-index + supported-extension row policy + chunk_locator per format + bilingual EN+HE privacy disclosure + 4 invariant CI guards
 
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-24 — Phase 96 PLANNED (9 plans across 6 waves). Closes v7.14 milestone: D-F5 LOCAL highlight P1 fix, D-F4 PDF extraction detect-then-fallback, D-F1 per-file opt-out tree with session-JSON persistence, NEW-1 redundant button removal, NEW-2 LOCAL navigation primitive + View-All separator. D-F2 (OCR) + D-F3 (side-by-side PDF) explicitly deferred to v7.15+. Phase 95 invariants (RRF POST-dedup, 3 cloud-write gates at TOP, web LIBRARY_CODES `[]`, multitenant `[]`) preserved.*
+*Last updated: 2026-05-25 — Phase 97 PLANNED (6 plans across 6 waves). Recovery foundation lands BEFORE ceiling lift (Codex P0 sequencing). 4 RESEARCH plan-time issues encoded: tantivy-py 0.25.1 commit policy is bytes/count/time only (no heap-sampling); lxml.html substitutes for BeautifulSoup (no new dep); R-02 atomic swap closes SearchEngine reader before os.rename (Windows os error 5 fix); scan_run_id is written ONLY on rows mutated this run (not cache-hit skips). Phase 96 PLANNED (9 plans across 6 waves). Closes v7.14 milestone: D-F5 LOCAL highlight P1 fix, D-F4 PDF extraction detect-then-fallback, D-F1 per-file opt-out tree with session-JSON persistence, NEW-1 redundant button removal, NEW-2 LOCAL navigation primitive + View-All separator. D-F2 (OCR) + D-F3 (side-by-side PDF) explicitly deferred to v7.15+. Phase 95 invariants (RRF POST-dedup, 3 cloud-write gates at TOP, web LIBRARY_CODES `[]`, multitenant `[]`) preserved.*
