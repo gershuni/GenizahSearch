@@ -9,7 +9,8 @@ Tests verify:
 import os
 import sqlite3
 import tempfile
-from unittest.mock import MagicMock, patch, call
+import time
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -42,38 +43,33 @@ def _make_indexer_with_file(tmp_path, content="Phase 97 test content for changed
 def test_changed_during_index_requeues(tmp_path):
     """D-NEW-3: file whose mtime_ns changes between pre-extract and post-extract
     gets status='changed_during_index' and is re-queued (retry 1/3).
+
+    Strategy: wrap _index_one_file to actually modify the file during 'extraction',
+    so the real os.stat detects a genuine mtime change. No os.stat mocking needed.
     """
     indexer, filepath, db_path = _make_indexer_with_file(tmp_path)
 
-    # Track os.stat call count to distinguish pre-extract vs post-extract calls
-    stat_call_count = [0]
-    real_stat = os.stat
-    PRE_MTIME_NS = 1_000_000_000
-    POST_MTIME_NS = 2_000_000_000  # changed!
-    SIZE = 100
+    original_index_one_file = indexer._index_one_file
 
-    def fake_stat(path, *args, **kwargs):
-        result = real_stat(path, *args, **kwargs)
-        # Only intercept the target filepath
-        if path == filepath or (isinstance(path, (str, bytes)) and str(path).endswith("testfile.txt")):
-            stat_call_count[0] += 1
-            mock_stat = MagicMock()
-            if stat_call_count[0] == 1:
-                # Pre-extraction stat
-                mock_stat.st_mtime = PRE_MTIME_NS / 1e9
-                mock_stat.st_mtime_ns = PRE_MTIME_NS
-                mock_stat.st_size = SIZE
-            else:
-                # Post-extraction stat — file changed!
-                mock_stat.st_mtime = POST_MTIME_NS / 1e9
-                mock_stat.st_mtime_ns = POST_MTIME_NS
-                mock_stat.st_size = SIZE
-            return mock_stat
+    def slow_index_one_file(fp, folder_id, cancel_check):
+        """Simulate file modification happening during extraction."""
+        result = original_index_one_file(fp, folder_id, cancel_check)
+        # Touch the file AFTER extraction to simulate external modification.
+        # We need a mtime that differs from the pre-stat. Sleep briefly so the
+        # OS clock advances (Windows has 100ns resolution — on slow CI just set
+        # mtime explicitly via os.utime with a forced offset).
+        try:
+            current_stat = os.stat(fp)
+            new_mtime = current_stat.st_mtime + 10.0  # +10 seconds
+            os.utime(fp, (new_mtime, new_mtime))
+        except OSError:
+            pass
         return result
 
+    indexer._index_one_file = slow_index_one_file
+
     try:
-        with patch("shared.local_indexer.os.stat", side_effect=fake_stat):
-            indexer.scan_all()
+        indexer.scan_all()
     finally:
         indexer.close()
 
@@ -92,50 +88,45 @@ def test_changed_during_index_requeues(tmp_path):
 
 
 def test_changed_during_index_gives_up_after_3_retries(tmp_path):
-    """D-NEW-3: on the 4th attempt (retries dict has value 3), do NOT re-queue; log warning."""
+    """D-NEW-3: on the 4th attempt (retries dict has value 3), do NOT re-queue.
+
+    Strategy: wrap _index_one_file to (a) pre-seed retries=3 and (b) touch file
+    so D-NEW-3 fires. With retries=3 already set, the give-up branch runs and
+    the file is NOT added to _re_queue.
+    """
     indexer, filepath, db_path = _make_indexer_with_file(tmp_path)
 
-    stat_call_count = [0]
-    real_stat = os.stat
-    PRE_MTIME_NS = 1_000_000_000
-    POST_MTIME_NS = 2_000_000_000
-    SIZE = 100
+    original_index_one_file = indexer._index_one_file
+    re_queue_lengths = []  # capture _re_queue length after give-up
 
-    def fake_stat(path, *args, **kwargs):
-        result = real_stat(path, *args, **kwargs)
-        if str(path).endswith("testfile.txt"):
-            stat_call_count[0] += 1
-            mock_stat = MagicMock()
-            # Always report changed (alternating mtime_ns to simulate persistent change)
-            if stat_call_count[0] % 2 == 1:
-                mock_stat.st_mtime = PRE_MTIME_NS / 1e9
-                mock_stat.st_mtime_ns = PRE_MTIME_NS
-            else:
-                mock_stat.st_mtime = POST_MTIME_NS / 1e9
-                mock_stat.st_mtime_ns = POST_MTIME_NS
-            mock_stat.st_size = SIZE
-            return mock_stat
+    def index_with_retry_inject(fp, fid, cc):
+        # Pre-seed retries to 3 so the give-up branch triggers
+        indexer._scan_run_retries[fp] = 3
+        result = original_index_one_file(fp, fid, cc)
+        # Touch the file to trigger D-NEW-3 detection
+        try:
+            current_stat = os.stat(fp)
+            os.utime(fp, (current_stat.st_mtime + 10.0, current_stat.st_mtime + 10.0))
+        except OSError:
+            pass
         return result
 
+    indexer._index_one_file = index_with_retry_inject
+
     try:
-        # Pre-seed the retry counter to 3 (max) so the next attempt gives up
-        with patch("shared.local_indexer.os.stat", side_effect=fake_stat):
-            # Inject the retry counter AFTER _scan_all_impl initializes it
-            # by patching the _scan_run_retries at the right moment
-            original_scan = indexer._scan_all_impl
-
-            def patched_scan(*args, **kwargs):
-                # Pre-seed retries dict for our test file to max (3)
-                indexer._scan_run_retries[filepath] = 3
-                return original_scan(*args, **kwargs)
-
-            with patch.object(indexer, "_scan_all_impl", side_effect=patched_scan):
-                indexer.scan_all()
+        indexer.scan_all()
+        # After scan_all, _re_queue should NOT contain filepath (give-up, not re-queued)
+        re_queue_lengths.append(len(getattr(indexer, "_re_queue", [])))
     finally:
         indexer.close()
 
-    # At retry count 3, the file should be marked 'changed_during_index' but NOT re-queued
-    # (the re_queue list should be empty or the file should not appear again)
+    # The file must NOT have been re-queued (give-up at retries >= 3)
+    assert re_queue_lengths, "scan_all must have run"
+    assert re_queue_lengths[0] == 0, (
+        f"Phase 97 D-NEW-3: expected _re_queue to be empty after give-up "
+        f"(retries=3), but got {re_queue_lengths[0]} entries"
+    )
+
     conn = sqlite3.connect(db_path)
     row = conn.execute(
         "SELECT status FROM processed_files WHERE filepath LIKE ?",
@@ -143,16 +134,9 @@ def test_changed_during_index_gives_up_after_3_retries(tmp_path):
     ).fetchone()
     conn.close()
 
-    # The file may be 'changed_during_index' (written when give-up happens)
-    # but crucially no further re-queue should have happened — we verify by
-    # checking that the file is NOT re-indexed after the give-up limit.
-    # The key assertion: status is NOT 'committed' (the file was not cleanly indexed)
-    # When we give up, we log a warning and do NOT mark 'committed'.
     assert row is not None, "processed_files row must exist"
-    # Status should reflect that the file changed but was given up on
-    # (either 'changed_during_index' or 'committed' if by some reason
-    #  the extractor actually ran on the first stat-call pair where both PRE_MTIME_NS==1G)
-    # The test passes if the file was correctly not re-queued beyond max retries
+    # Status is either committed (extraction succeeded before give-up) or
+    # changed_during_index (D-NEW-3 insert ran). Either is acceptable.
     assert row[0] in ("changed_during_index", "committed", "ok"), (
-        f"Status should be 'changed_during_index' or some final status, got '{row[0]}'"
+        f"Phase 97 D-NEW-3: unexpected status '{row[0]}'"
     )

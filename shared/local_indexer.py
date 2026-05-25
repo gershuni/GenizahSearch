@@ -38,6 +38,7 @@ the file is marked extraction_status='encoding_error'.
 from __future__ import annotations
 
 import datetime
+import errno
 import hashlib
 import json
 import logging
@@ -77,6 +78,12 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 _SUPPORTED_EXTENSIONS = {".docx", ".pdf", ".txt", ".html", ".xlsx", ".csv"}
+# Phase 97 D-NEW-4 — error statuses that keep a row even for unsupported extensions
+_ERROR_STATUSES_KEPT = {
+    "oversized", "error", "encoding_error",
+    "changed_during_index", "zip_bomb_suspected",
+    "unreachable", "timeout",
+}
 _DOCX_CHUNK_PARAGRAPHS = 20            # D-04
 _SCANNED_PDF_CHAR_THRESHOLD = 50       # D-05
 _EMPTY_PAGE_CHAR_THRESHOLD = 10        # D-06
@@ -977,6 +984,41 @@ def extract_csv_pages(filepath: str) -> Iterator[tuple[int, str, str, str]]:
 
 
 # ---------------------------------------------------------------------------
+# Phase 97 D-NEW-2 — folder reachability helper (module-level, called from scan_all)
+# ---------------------------------------------------------------------------
+
+def _check_folder_reachable(folder_path: str, max_retries: int = 3) -> tuple[bool, str]:
+    """Phase 97 D-NEW-2: errno-discriminated reachability check with retry/backoff.
+
+    Returns (reachable: bool, status_label: str).
+    status_label is one of {'active', 'unreachable', 'timeout'}.
+
+    ENOENT / EACCES -> non-retryable 'unreachable' (no sleep).
+    ETIMEDOUT / EAGAIN -> retry up to max_retries times with 2.0s backoff,
+                          then 'timeout' if all attempts fail.
+    Any other OSError is re-raised unchanged.
+    """
+    for attempt in range(max_retries):
+        try:
+            if os.path.isdir(folder_path):
+                return True, "active"
+            # os.path.isdir returned False without raising — folder does not exist
+            return False, "unreachable"
+        except OSError as exc:
+            if exc.errno in (errno.ETIMEDOUT, errno.EAGAIN):
+                # Transient network timeout — retry with 2s backoff
+                if attempt < max_retries - 1:
+                    time.sleep(2.0)
+                    continue
+                return False, "timeout"
+            if exc.errno in (errno.ENOENT, errno.EACCES):
+                # Non-retryable (missing or permission denied)
+                return False, "unreachable"
+            raise
+    return False, "timeout"
+
+
+# ---------------------------------------------------------------------------
 # LocalIndexer class
 # ---------------------------------------------------------------------------
 
@@ -1308,8 +1350,9 @@ class LocalIndexer:
     def prescan_count_all(self) -> tuple[int, int]:
         """W8: aggregate prescan across all registered, available folders.
 
-        Iterates every registered folder; folders with status='unavailable' OR
-        whose path is not a directory (D-40) are excluded from the sum.
+        Iterates every registered folder; folders with status in
+        ('unavailable', 'unreachable', 'timeout') OR whose path is not a
+        directory (D-40) are excluded from the sum.
         Used by MyLibraryTab Refresh per D-16 multi-folder support.
         The aggregate is the input to the D-26/D-41 ceiling-check dialog —
         thresholds apply to the AGGREGATE, not per-folder.
@@ -1320,7 +1363,8 @@ class LocalIndexer:
         total_bytes = 0
         for folder in self.list_folders():
             path = folder["path"]
-            if folder.get("status") == "unavailable":
+            # Phase 97 D-NEW-2 / LD-9: skip-set includes Phase 95 'unavailable' + new 'unreachable'/'timeout'.
+            if folder["status"] in ("unavailable", "unreachable", "timeout"):
                 continue
             if not os.path.isdir(path):
                 continue  # treat as unavailable
@@ -1363,6 +1407,11 @@ class LocalIndexer:
     def _scan_all_impl(self, cancel_check: Callable[[], bool] = lambda: False) -> dict:
         """Internal implementation of scan_all (split out for scan_run lifecycle wrapper)."""
         result = {"indexed": 0, "skipped": 0, "errors": 0, "cancelled": False}
+        # Phase 97 D-NEW-3: per-scan retry counter + re-queue list (allocated fresh per scan_run).
+        # _scan_run_retries[filepath] = number of times this file was marked 'changed_during_index'
+        # during this scan_run. Max 3 retries; 4th attempt gives up.
+        self._scan_run_retries: dict[str, int] = {}
+        self._re_queue: list[str] = []
         folders = self._conn.execute(
             "SELECT folder_id, path, status FROM folders"
         ).fetchall()
@@ -1375,14 +1424,27 @@ class LocalIndexer:
             folder_path = folder["path"]
             folder_id = folder["folder_id"]
 
-            # D-40: check folder availability
-            if not os.path.isdir(folder_path):
+            # Phase 97 D-NEW-2 — errno-discriminated reachability check + retry.
+            # D-40 extended: ENOENT/EACCES -> 'unreachable' (non-retryable);
+            # ETIMEDOUT/EAGAIN -> 'timeout' (3-retry × 2s backoff).
+            # Phase 97 D-NEW-2 / LD-9: skip-set includes Phase 95 'unavailable' + new 'unreachable'/'timeout'.
+            # Pre-check: if already marked 'unreachable'/'timeout', skip _check_folder_reachable
+            # on auto-rescan (user must manually Refresh to retry unreachable folders).
+            if folder["status"] in ("unavailable", "unreachable", "timeout"):
+                # Already known unreachable — skip without re-probing on auto-rescan.
+                # User can trigger a manual Refresh to retry.
+                continue
+            reachable, status_label = _check_folder_reachable(folder_path)
+            if not reachable:
                 self._conn.execute(
-                    "UPDATE folders SET status = 'unavailable' WHERE folder_id = ?",
-                    (folder_id,),
+                    "UPDATE folders SET status = ? WHERE folder_id = ?",
+                    (status_label, folder_id),
                 )
                 self._conn.commit()
-                logger.info("Folder '%s' unavailable — preserving existing rows", folder_path)
+                logger.info(
+                    "Phase 97 D-NEW-2: folder '%s' status=%s — preserving existing rows",
+                    folder_path, status_label,
+                )
                 continue
 
             # Mark folder as active + update last_scanned_at
@@ -1542,7 +1604,67 @@ class LocalIndexer:
                     # Modified: delete old docs first (D-36)
                     self._delete_file(cached_row["sys_id"], filepath)
 
+                # Phase 97 D-NEW-3: record pre-extraction stat for TOCTOU detection.
+                # Take a fresh stat IMMEDIATELY before extraction to minimise the window.
+                _pre_mtime_ns = mtime_ns
+                _pre_size = fsize
+                try:
+                    _pre_stat = os.stat(filepath)
+                    _pre_mtime_ns = _pre_stat.st_mtime_ns
+                    _pre_size = _pre_stat.st_size
+                except OSError:
+                    pass  # use values from earlier stat if re-stat fails
+
                 status, pages = self._index_one_file(filepath, folder_id, cancel_check)
+
+                # Phase 97 D-NEW-3: post-extraction stat — detect file changed during indexing.
+                _changed_during_index = False
+                try:
+                    post_stat = os.stat(filepath)
+                    if (post_stat.st_mtime_ns != _pre_mtime_ns or post_stat.st_size != _pre_size):
+                        # File changed during indexing — re-queue (max 3 retries per scan_run)
+                        retries = self._scan_run_retries.get(filepath, 0)
+                        if retries < 3:
+                            self._scan_run_retries[filepath] = retries + 1
+                            self._re_queue.append(filepath)
+                            self._conn.execute(
+                                "INSERT OR REPLACE INTO processed_files "
+                                "(filepath, mtime, mtime_ns, size, sys_id, status, scan_run_id) "
+                                "VALUES (?, ?, ?, ?, "
+                                "(SELECT sys_id FROM processed_files WHERE filepath = ?), "
+                                "'changed_during_index', ?)",
+                                (filepath, mtime, mtime_ns, fsize, filepath,
+                                 self._current_scan_run_id),
+                            )
+                            self._conn.commit()
+                            logger.info(
+                                "Phase 97 D-NEW-3: %s changed during index (retry %d/3)",
+                                filepath, retries + 1,
+                            )
+                            _changed_during_index = True
+                        else:
+                            logger.warning(
+                                "Phase 97 D-NEW-3: %s changed during index 3× — giving up",
+                                filepath,
+                            )
+                except OSError:
+                    pass  # post-stat failure is non-fatal — proceed with indexed status
+
+                if _changed_during_index:
+                    # Remove from pending so _commit_batch won't overwrite 'changed_during_index'
+                    # with 'committed'. The Tantivy doc for this file may be partial, but it
+                    # will be re-indexed on the next scan_run (re-queued above).
+                    try:
+                        canonical_fp = _canonical_filepath(filepath)
+                        if canonical_fp in self._pending_filepaths:
+                            self._pending_filepaths.remove(canonical_fp)
+                        if filepath in self._pending_filepaths:
+                            self._pending_filepaths.remove(filepath)
+                    except (ValueError, AttributeError):
+                        pass
+                    result["errors"] += 1
+                    continue  # skip _commit_batch + _file_finished_cb for this file
+
                 if status in ("ok", "no_text_layer", "encoding_error", "unsupported"):
                     result["indexed"] += 1
                 else:

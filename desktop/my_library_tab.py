@@ -1590,10 +1590,11 @@ class MyLibraryTab(QWidget):
             return True
         total_files, total_bytes = self._indexer.prescan_count_all()
         if total_files > _MAX_FILES_CEILING or total_bytes > _MAX_BYTES_CEILING:
+            # Phase 97 D-NEW-2 / LD-9: skip-set includes Phase 95 'unavailable' + new 'unreachable'/'timeout'.
             folder_count = sum(
                 1
                 for f in self._indexer.list_folders()
-                if f.get("status") != "unavailable"
+                if f.get("status") not in ("unavailable", "unreachable", "timeout")
             )
             return self._show_ceiling_confirm_dialog(
                 total_files,
@@ -1659,7 +1660,8 @@ class MyLibraryTab(QWidget):
             status = folder.get("status", "active")
             item = QListWidgetItem(path)
             item.setData(Qt.ItemDataRole.UserRole, path)
-            if status == "unavailable":
+            # Phase 97 D-NEW-2 / LD-9: skip-set includes Phase 95 'unavailable' + new 'unreachable'/'timeout'.
+            if status in ("unavailable", "unreachable", "timeout"):
                 item.setForeground(QColor("#f39c12"))
                 item.setToolTip(
                     tr(
