@@ -16,10 +16,20 @@ import os
 import re
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import requests
 
 from shared.background_removal import remove_background, DEFAULT_THRESHOLD
+
+# Phase 98 D-19 + D-20: shared NLI circuit breaker for puzzle IIIF fetches.
+from shared.nli_circuit_breaker import (
+    is_open as _nli_circuit_is_open,
+    record_failure as _nli_record_failure,
+    record_success as _nli_record_success,
+    NLI_CONNECT_TIMEOUT,
+    NLI_IMAGE_READ_TIMEOUT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -159,23 +169,57 @@ class PuzzleImageService:
 
         Constructs the full IIIF Image API URL if the given URL is a canvas base URL,
         or uses it directly if it already contains '/full/'.
+
+        Phase 98 D-20: NLI / Rosetta URLs are guarded by the shared circuit breaker
+        and use a bounded timeout. Non-NLI hosts (Cambridge, Manchester, Oxford, etc.)
+        retain the existing 30s timeout — they have legitimate slower response times
+        for large IIIF tiles and have not exhibited the threadpool-saturation pattern.
         """
         if '/full/' in image_url:
             url = image_url  # Already a complete image URL
         else:
             url = f"{image_url}/full/{size},/0/default.jpg"
 
+        # Phase 98 D-20: host-conditional breaker scoping. urlparse is evaluated
+        # AFTER URL construction so a caller cannot smuggle a different host past
+        # the check via the '/full/' short-circuit (T-98-04-03).
+        parsed = urlparse(url)
+        is_nli_host = parsed.netloc in ('iiif.nli.org.il', 'rosetta.nli.org.il')
+
+        if is_nli_host and _nli_circuit_is_open():
+            return None
+
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         }
         try:
-            resp = requests.get(url, headers=headers, timeout=30)
+            # NLI: bounded env-driven timeout. Non-NLI: existing 30s preserved.
+            timeout = (NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT) if is_nli_host else 30
+            resp = requests.get(url, headers=headers, timeout=timeout)
             if resp.status_code == 200 and len(resp.content) > 100:
                 logger.info(f"Direct IIIF fetch OK for {image_url[:80]}")
+                if is_nli_host:
+                    _nli_record_success(path='puzzle_fetch_direct_url')
                 return resp.content
             else:
                 logger.warning(f"Direct IIIF fetch non-200 for {image_url[:80]}: status={resp.status_code}")
+                if is_nli_host:
+                    if resp.status_code == 429:
+                        _nli_record_failure(failure_type='429', path='puzzle_fetch_direct_url')
+                    elif 500 <= resp.status_code < 600:
+                        _nli_record_failure(failure_type='5xx', path='puzzle_fetch_direct_url')
+        except requests.exceptions.Timeout as e:
+            logger.warning(f"Direct IIIF timeout for {image_url[:80]}: {e}")
+            if is_nli_host:
+                _nli_record_failure(failure_type='timeout', path='puzzle_fetch_direct_url')
+        except requests.exceptions.ConnectionError as e:
+            logger.warning(f"Direct IIIF connection error for {image_url[:80]}: {e}")
+            if is_nli_host:
+                _nli_record_failure(failure_type='connection_error', path='puzzle_fetch_direct_url')
         except Exception as e:
+            # Catch-all for malformed URLs / unexpected errors — preserve existing
+            # observability without affecting the breaker (non-NLI hosts may emit
+            # provider-specific exceptions that should not trip the NLI breaker).
             logger.warning(f"Direct IIIF fetch failed for {image_url[:80]}: {e}")
         return None
 
@@ -237,9 +281,16 @@ class PuzzleImageService:
         NOTE: Does NOT include Rosetta thumbnail fallback. Rosetta returns tiny
         low-quality thumbnails that look bad in the puzzle. Better to return None
         and let the caller's fallback chain (extension, helper, proxy) handle it.
+
+        Phase 98 D-19: guarded by shared NLI circuit breaker; bounded timeout
+        replaces hard-coded 30s.
         """
         digits = re.sub(r"\D", "", str(fl_id))
         if not digits:
+            return None
+
+        # Phase 98 D-19: short-circuit if NLI is known-degraded.
+        if _nli_circuit_is_open():
             return None
 
         url = f"{NLI_IIIF_BASE}/FL{digits}/full/{size},/0/default.jpg"
@@ -249,15 +300,33 @@ class PuzzleImageService:
         }
 
         try:
-            resp = requests.get(url, headers=headers, timeout=30)
+            # Phase 98 D-19: env-driven (connect, read) tuple replaces hard-coded timeout=30.
+            resp = requests.get(
+                url,
+                headers=headers,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
+            )
             if resp.status_code == 200 and len(resp.content) > 100:
                 logger.info(f"IIIF fetch OK for {fl_id}")
+                _nli_record_success(path='puzzle_fetch_iiif_image')
                 return resp.content
+            elif resp.status_code == 429:
+                _nli_record_failure(failure_type='429', path='puzzle_fetch_iiif_image')
+                logger.warning(f"IIIF 429 for {fl_id}")
+            elif 500 <= resp.status_code < 600:
+                _nli_record_failure(failure_type='5xx', path='puzzle_fetch_iiif_image')
+                logger.warning(f"IIIF {resp.status_code} for {fl_id}")
             else:
-                logger.warning(f"IIIF fetch non-200 or empty for {fl_id}: "
-                               f"status={resp.status_code}, size={len(resp.content)}")
-        except Exception as e:
-            logger.warning(f"IIIF fetch failed for {fl_id}: {e}")
+                logger.warning(
+                    f"IIIF fetch non-200 or empty for {fl_id}: "
+                    f"status={resp.status_code}, size={len(resp.content)}"
+                )
+        except requests.exceptions.Timeout as e:
+            logger.warning(f"IIIF timeout for {fl_id}: {e}")
+            _nli_record_failure(failure_type='timeout', path='puzzle_fetch_iiif_image')
+        except requests.exceptions.ConnectionError as e:
+            logger.warning(f"IIIF connection error for {fl_id}: {e}")
+            _nli_record_failure(failure_type='connection_error', path='puzzle_fetch_iiif_image')
 
         return None
 
