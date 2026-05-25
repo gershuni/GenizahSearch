@@ -341,15 +341,40 @@ Plans:
 
 ### Phase 98: NLI Resilience — circuit-breaker and bounded-timeout hardening for all NLI/IIIF code paths
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Prevent any single NLI/IIIF upstream slowdown from hanging `genizah-web`. Bound the per-request blocking budget on every NLI-touching code path via (a) a shared circuit breaker (`shared/nli_circuit_breaker.py`) that short-circuits requests when NLI is degraded and (b) shorter env-configurable read timeouts. The 2026-05-25 production outage (7 minutes unresponsive, SIGTERM hung 90s, SIGKILL required) is the trigger and the regression test.
+
+**Scope items (D-XX from CONTEXT.md — Phase 98 has no REQ-IDs; the 28 locked decisions D-01..D-28 are the spec):**
+- D-01..D-09 — Shared breaker module (single global key, module-level singleton, threading.Lock, time.monotonic, env-driven knobs)
+- D-10 — Drop `NLI_SEMAPHORE_TIMEOUT` default from 20 → 1
+- D-11/D-12 — Circuit check before AND after semaphore acquisition in `web/api.py::fetch_fl_ids_from_nli`
+- D-13..D-23 — Wire breaker into all 10 NLI fetch sites (5 in web/api.py, 3 in puzzle, 2 wired + 2 migrated in genizah_core.py)
+- D-24/D-25 — PostHog telemetry on open/close (server-side, fire-and-forget, never raises)
+- D-26/D-27 — Concurrency test (20 threads vs hanging session must complete <10s); lock-correctness test (N=50 simultaneous record_failure → consecutive_failures == 50)
+- D-28 — Telemetry emission test
+
+**Out of scope (explicitly):** Async refactor to httpx, event-loop watchdog, multi-worker uvicorn (per CONTEXT.md `<deferred>`).
+
 **Depends on:** Phase 97
-**Plans:** 0 plans
+
+**Source CONTEXT:** `.planning/phases/98-nli-resilience-circuit-breaker-and-bounded-timeout-hardening/98-CONTEXT.md` (28 locked decisions)
+**Source RESEARCH:** `.planning/phases/98-nli-resilience-circuit-breaker-and-bounded-timeout-hardening/98-RESEARCH.md` (HIGH confidence)
+**Source VALIDATION:** `.planning/phases/98-nli-resilience-circuit-breaker-and-bounded-timeout-hardening/98-VALIDATION.md`
+
+**Plans:** 0/6 plans executed
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 98 to break down)
+- [ ] 98-01-PLAN.md — Wave 1: shared/posthog_server.py (factored telemetry helper — Option (a) per RESEARCH); fire-and-forget queue+daemon idiom factored out of web/api_hardening.py
+- [ ] 98-02-PLAN.md — Wave 2: shared/nli_circuit_breaker.py (module-level singleton, threading.Lock, time.monotonic); tests/test_nli_circuit_breaker.py (Nyquist-critical D-26 + D-27 lock correctness + AST guards); tests/conftest.py autouse fixture
+- [ ] 98-03-PLAN.md — Wave 3: web/api.py (5 call sites D-11..D-18) — drop NLI_SEMAPHORE_TIMEOUT 20→1; wire fetch_fl_ids_from_nli with pre+post semaphore guards; nli_image / _fetch_nli_image_bytes / proxy_image (NLI-host-conditional)
+- [ ] 98-04-PLAN.md — Wave 3 parallel: shared/puzzle_image_service.py (_fetch_iiif_image unconditional + _fetch_direct_url host-conditional); web/pages/puzzle.py::_resolve_folios; D-19, D-20, D-21
+- [ ] 98-05-PLAN.md — Wave 3 parallel: genizah_core.py — migrate fetch_iiif_manifest + fetch_marc_data off class-attribute breaker; wire 2 new sites _fetch_single_worker (D-22) + _fetch_fl_ids (D-23); REMOVE legacy class-attribute breaker per RESEARCH Pitfall 5
+- [ ] 98-06-PLAN.md — Wave 4: cross-module invariant tests; CLAUDE.md env var docs; docs/OPEN_ISSUES.md closeout; .planning/ROADMAP.md self-update; CHANGELOG.md entry; production canary checkpoint (human-verify)
+
+**Wave structure:** 1 (98-01 posthog_server) → 2 (98-02 breaker module + tests) → 3 (3 parallel: 98-03 [web/api.py], 98-04 [puzzle], 98-05 [genizah_core.py]) → 4 (98-06 cross-module integration + docs + canary).
+
+**UI hint:** no — pure resilience infrastructure, no user-facing changes.
 
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-25 — Phase 97 PLANNED (6 plans across 6 waves). Recovery foundation lands BEFORE ceiling lift (Codex P0 sequencing). 4 RESEARCH plan-time issues encoded: tantivy-py 0.25.1 commit policy is bytes/count/time only (no heap-sampling); lxml.html substitutes for BeautifulSoup (no new dep); R-02 atomic swap closes SearchEngine reader before os.rename (Windows os error 5 fix); scan_run_id is written ONLY on rows mutated this run (not cache-hit skips). Phase 96 PLANNED (9 plans across 6 waves). Closes v7.14 milestone: D-F5 LOCAL highlight P1 fix, D-F4 PDF extraction detect-then-fallback, D-F1 per-file opt-out tree with session-JSON persistence, NEW-1 redundant button removal, NEW-2 LOCAL navigation primitive + View-All separator. D-F2 (OCR) + D-F3 (side-by-side PDF) explicitly deferred to v7.15+. Phase 95 invariants (RRF POST-dedup, 3 cloud-write gates at TOP, web LIBRARY_CODES `[]`, multitenant `[]`) preserved.*
+*Last updated: 2026-05-25 — Phase 98 PLANNED (6 plans across 4 waves). Incident-driven; closes 2026-05-25 NLI hang per docs/INCIDENT-2026-05-25-CODEX-CRITIQUE.md. Shared `shared/nli_circuit_breaker.py` (module-level singleton, time.monotonic, threading.Lock) wired into all 10 NLI fetch sites; 6 new env knobs; NLI_SEMAPHORE_TIMEOUT default dropped 20→1; PostHog telemetry via factored `shared/posthog_server.py` (Option (a) — shared/ no longer depends on web/). Phase 97 PLANNED (6 plans across 6 waves). Recovery foundation lands BEFORE ceiling lift (Codex P0 sequencing). 4 RESEARCH plan-time issues encoded: tantivy-py 0.25.1 commit policy is bytes/count/time only (no heap-sampling); lxml.html substitutes for BeautifulSoup (no new dep); R-02 atomic swap closes SearchEngine reader before os.rename (Windows os error 5 fix); scan_run_id is written ONLY on rows mutated this run (not cache-hit skips). Phase 96 PLANNED (9 plans across 6 waves). Closes v7.14 milestone: D-F5 LOCAL highlight P1 fix, D-F4 PDF extraction detect-then-fallback, D-F1 per-file opt-out tree with session-JSON persistence, NEW-1 redundant button removal, NEW-2 LOCAL navigation primitive + View-All separator. D-F2 (OCR) + D-F3 (side-by-side PDF) explicitly deferred to v7.15+. Phase 95 invariants (RRF POST-dedup, 3 cloud-write gates at TOP, web LIBRARY_CODES `[]`, multitenant `[]`) preserved.*
