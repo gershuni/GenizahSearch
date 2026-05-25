@@ -1089,32 +1089,32 @@ def test_cloud_write_gates_at_top():
 | A7 | Phase 95-deployed v7.14.0 user DBs have no schema corruption (PRAGMA integrity_check passes) | D-NEW-1 | If integrity_check fails on existing users' DBs at upgrade, the migration surfaces "Reset My Library" — destroys their library. Mitigation: provide an export tool for the file list + opt-out set BEFORE reset, in the same dialog. ASSUMED based on no field reports of corruption since v7.14.0 release 2026-05-24 (1 day ago — small sample). |
 | A8 | Network drives raise OSError with `errno` set (not bare raises or different exception types) on Windows / macOS / Linux | D-NEW-2 | If a platform raises a non-standard exception, the discriminator misclassifies. Mitigation: wrap in broader except OSError + log raw `repr(exc)` for diagnostics. ASSUMED based on Python os module docs but not verified per-platform in research. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should existing Phase 95 user DBs trigger a one-time rebuild after migration to populate `cached_text`?**
    - What we know: Migration adds `cached_text BLOB NULL`; existing rows have NULL. R-02 rebuild path falls back to source re-extraction for NULL rows.
    - What's unclear: At 13K files, the first rebuild after upgrade would do source re-extraction for ALL of them — slow. Could the migration trigger a background "cache populate" pass that doesn't block the user?
-   - Recommendation: Plan should NOT add a background cache-populate pass in Phase 97 — it's an optimization. Document that the FIRST rebuild after upgrade is slow but subsequent rebuilds are fast. Add a TODO for v7.16+ to background-populate on idle.
+   - RESOLVED: Plan should NOT add a background cache-populate pass in Phase 97 — it's an optimization. Document that the FIRST rebuild after upgrade is slow but subsequent rebuilds are fast. Add a TODO for v7.16+ to background-populate on idle.
 
 2. **What's the exact behavior when user clicks "Reset My Library" (integrity_check failure path)?**
    - What we know: CONTEXT D-NEW-1 says "require manual intervention via a dedicated 'Reset My Library' button in advanced settings."
    - What's unclear: Does reset wipe Tantivy AND SQLite, or just SQLite? Does it preserve folder list (in SQLite, which is being reset)? Does it preserve the opt-out set (in session JSON, separately)?
-   - Recommendation: Lock in plan: Reset = (a) delete `LOCAL_INDEX_DIR/local_index.sqlite3`, (b) delete `LOCAL_INDEX_DIR/*.seg` and Tantivy meta files, (c) PRESERVE folder list by re-prompting on next MyLibraryTab open ("Re-add your folders"), (d) PRESERVE opt-out set in session JSON. After Reset → Refresh → re-extracts everything. This is a recovery-of-last-resort path; preserve the user's choices about WHICH folders to index even if the cache is gone.
+   - RESOLVED: Lock in plan: Reset = (a) delete `LOCAL_INDEX_DIR/local_index.sqlite3`, (b) delete `LOCAL_INDEX_DIR/*.seg` and Tantivy meta files, (c) PRESERVE folder list by re-prompting on next MyLibraryTab open ("Re-add your folders"), (d) PRESERVE opt-out set in session JSON. After Reset → Refresh → re-extracts everything. This is a recovery-of-last-resort path; preserve the user's choices about WHICH folders to index even if the cache is gone.
 
 3. **U-02 Discard semantics — does it work across multiple in-flight scans?**
    - What we know: CONTEXT U-02 says Cancel → Discard removes `scan_run_id`-tagged docs.
    - What's unclear: If user cancels scan A while scan B is queued (Phase 95 D-25 mutex queue, max depth 1), does B inherit A's `scan_run_id` or get its own? Per the queue depth-1 design, A's cancel releases the mutex and B starts — B should generate a NEW `scan_run_id`. Verify in plan.
-   - Recommendation: Plan must spell out: each new acquire of the mutex generates a fresh `scan_run_id`. The queued-action lambda captures the function reference, not the run_id; the run_id is generated inside the worker on start.
+   - RESOLVED: Plan must spell out: each new acquire of the mutex generates a fresh `scan_run_id`. The queued-action lambda captures the function reference, not the run_id; the run_id is generated inside the worker on start.
 
 4. **Does the LOCAL Lab index also need atomic rebuild, or just the main LOCAL index?**
    - What we know: CONTEXT R-02 says "same protocol for `LOCAL_LAB_INDEX_DIR`."
    - What's unclear: LAB has its own invalidation contract (Phase 95 D-38 weights_hash). If LAB rebuilds whenever LAB weights change, do we also need atomic semantics there?
-   - Recommendation: Yes. Atomic LAB rebuild reuses the same protocol but invoked from `build_lab_side_index()`. Plan-internal consistency check: LAB rebuild on a corrupted LAB cache must be atomic; otherwise a power loss mid-LAB-rebuild leaves Composition Search broken.
+   - RESOLVED: Yes. Atomic LAB rebuild reuses the same protocol but invoked from `build_lab_side_index()`. Plan-internal consistency check: LAB rebuild on a corrupted LAB cache must be atomic; otherwise a power loss mid-LAB-rebuild leaves Composition Search broken.
 
 5. **For F-01 "sparse" fallback, do we need to handle nested headings (h3/h4)?**
    - What we know: CONTEXT F-01 specifies h1/h2 chunking with 20-paragraph fallback.
    - What's unclear: A document with h2 → h3 → h3 → h3 → h2 → h3 pattern has h2 boundaries that capture entire sections including all child h3s. Is that the intent (large sections), or should we also split at h3 within a parent h2?
-   - Recommendation: Phase 97 ships h1/h2 only per CONTEXT. If smoke tests reveal h2-sections are too large (multi-thousand-line sections), planner can extend the heuristic to "h1/h2/h3" — deferred to plan-internal discretion. Document in F-01 plan.
+   - RESOLVED: Phase 97 ships h1/h2 only per CONTEXT. If smoke tests reveal h2-sections are too large (multi-thousand-line sections), planner can extend the heuristic to "h1/h2/h3" — deferred to plan-internal discretion. Document in F-01 plan.
 
 ## Environment Availability
 
@@ -1348,13 +1348,13 @@ def test_cloud_write_gates_at_top():
 | Validation Architecture | HIGH | 22 new test files + 5 fixtures gap explicit; existing pytest framework |
 | Security | MEDIUM-HIGH | STRIDE coverage complete; defusedxml integration semantics need execute-phase verification |
 
-### Open Questions
+### Open Questions (RESOLVED)
 
-1. Should existing v7.14.0 user DBs trigger background cache-populate after migration? (Recommendation: NO for Phase 97; document slow-first-rebuild; defer to v7.16+.)
-2. What does "Reset My Library" preserve? (Recommendation: preserve folder list re-prompt + opt-out set in session JSON; wipe SQLite + Tantivy.)
-3. Does each new mutex acquire generate a fresh `scan_run_id`? (Recommendation: YES; planner pins in plan.)
-4. LOCAL Lab also needs atomic rebuild? (Recommendation: YES; same protocol from `build_lab_side_index`.)
-5. F-01 "sparse" extends to h3/h4? (Recommendation: ship h1/h2 only this phase per CONTEXT; defer further heuristics.)
+1. Should existing v7.14.0 user DBs trigger background cache-populate after migration? (RESOLVED: NO for Phase 97; document slow-first-rebuild; defer to v7.16+.)
+2. What does "Reset My Library" preserve? (RESOLVED: preserve folder list re-prompt + opt-out set in session JSON; wipe SQLite + Tantivy.)
+3. Does each new mutex acquire generate a fresh `scan_run_id`? (RESOLVED: YES; planner pins in plan.)
+4. LOCAL Lab also needs atomic rebuild? (RESOLVED: YES; same protocol from `build_lab_side_index`.)
+5. F-01 "sparse" extends to h3/h4? (RESOLVED: ship h1/h2 only this phase per CONTEXT; defer further heuristics.)
 
 ### Ready for Planning
 
