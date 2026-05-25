@@ -283,11 +283,16 @@ def test_folder_counters_updated_in_scan_all(tmp_path, monkeypatch):
     indexer.add_folder(str(folder))
     indexer.scan_all()
 
+    # Use the canonical path (indexer normalises via _canonical_filepath — lowercased on Windows).
+    from shared.local_sys_id import _canonical_filepath
+    canonical_folder = _canonical_filepath(str(folder))
     row = indexer._conn.execute(
         "SELECT indexed_count, oversized_count FROM folders WHERE path = ?",
-        (str(folder),),
+        (canonical_folder,),
     ).fetchone()
-    assert row is not None, "folders row not found after scan_all"
+    assert row is not None, (
+        f"folders row not found after scan_all (queried canonical={canonical_folder!r})"
+    )
     assert row["indexed_count"] == 5, (
         f"Expected indexed_count=5, got {row['indexed_count']}"
     )
@@ -326,11 +331,15 @@ def test_folder_counter_aggregation_uses_folder_id_not_like_prefix(tmp_path):
     indexer.add_folder(str(foobar))
     indexer.scan_all()
 
+    # Use canonical paths — indexer normalises via _canonical_filepath (lowercased on Windows).
+    from shared.local_sys_id import _canonical_filepath
+    canonical_foo = _canonical_filepath(str(foo))
+    canonical_foobar = _canonical_filepath(str(foobar))
     foo_row = indexer._conn.execute(
-        "SELECT indexed_count FROM folders WHERE path = ?", (str(foo),)
+        "SELECT indexed_count FROM folders WHERE path = ?", (canonical_foo,)
     ).fetchone()
     foobar_row = indexer._conn.execute(
-        "SELECT indexed_count FROM folders WHERE path = ?", (str(foobar),)
+        "SELECT indexed_count FROM folders WHERE path = ?", (canonical_foobar,)
     ).fetchone()
 
     assert foo_row is not None, "foo folders row not found"

@@ -1494,8 +1494,12 @@ class LocalIndexer:
                     # Phase 96 fix-7 (Codex P1.2): emit canonical filepath so
                     # update_file_status can do an exact dict lookup — basename
                     # alone was ambiguous when two folders contain same filename.
+                    # [Rule 1 fix] Removed local `from shared.local_sys_id import
+                    # _canonical_filepath` — it's a module-level import (line 71).
+                    # The local import caused UnboundLocalError at the earlier
+                    # usage on the oversized/zip-bomb branch (Python hoists local
+                    # variable assignment to the function scope top).
                     try:
-                        from shared.local_sys_id import _canonical_filepath
                         cb_path = _canonical_filepath(filepath)
                     except Exception:
                         cb_path = filepath
@@ -1514,12 +1518,23 @@ class LocalIndexer:
 
         return result
 
-    def prescan_count(self, folder_path: str) -> tuple[int, int]:
-        """Fast count of supported files + total bytes for D-26 ceiling dialog."""
+    def prescan_count(
+        self,
+        folder_path: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> tuple[int, int]:
+        """Fast count of supported files + total bytes for D-26 ceiling dialog.
+
+        Phase 97 C-03: accepts optional cancel_check callable so PrescanWorker
+        can abort the os.walk mid-scan when the user presses Cancel.
+        Returns (-1, -1) when cancelled.
+        """
         file_count = 0
         total_bytes = 0
         try:
             for dirpath, _dirs, files in os.walk(folder_path, followlinks=False):
+                if cancel_check is not None and cancel_check():
+                    return -1, -1
                 try:
                     for fname in files:
                         ext = os.path.splitext(fname)[1].lower()
@@ -1535,6 +1550,25 @@ class LocalIndexer:
         except OSError as exc:
             logger.warning("prescan_count: OSError walking %s: %s", folder_path, exc)
         return file_count, total_bytes
+
+    def estimate_index_size(self) -> int:
+        """Phase 97 C-06 — sum sizes of all files under index dir.
+
+        Used by MyLibraryTab._update_disk_indicator() to compute the current
+        LOCAL Tantivy index footprint for the merge-headroom warning.
+        Recursively sums Tantivy segment files + SQLite sidecar.
+        """
+        total = 0
+        try:
+            for root, _dirs, files in os.walk(self._index_dir):
+                for name in files:
+                    try:
+                        total += os.path.getsize(os.path.join(root, name))
+                    except OSError:
+                        continue
+        except OSError:
+            pass
+        return total
 
     # ------------------------------------------------------------------
     # Startup recovery
@@ -2300,6 +2334,10 @@ class LocalIndexer:
                 f"WHERE filepath IN ({placeholders})",
                 self._pending_filepaths,
             )
+            # Phase 97 C-04 + LD-9: refresh folder counters from local_files
+            # INSIDE this same BEGIN IMMEDIATE transaction so counter update
+            # and status='committed' UPDATE are atomic.
+            self._refresh_folder_counters_for(list(self._pending_filepaths))
             self._conn.execute("COMMIT")
         except Exception:
             # LD-8: ROLLBACK before restoring synchronous=NORMAL.
@@ -2311,6 +2349,55 @@ class LocalIndexer:
         finally:
             self._conn.execute("PRAGMA synchronous = NORMAL")
         self._pending_filepaths.clear()
+
+    def _refresh_folder_counters_for(self, filepaths: list) -> None:
+        """Phase 97 C-04 + LD-9 — recompute aggregate counts for folders touched
+        by this batch. Uses local_files.folder_id + local_files.extraction_status
+        (UI source of truth per LD-9) — NOT processed_files.status + path LIKE prefix.
+
+        Codex MEDIUM #3 fix: ``LIKE 'C:\\foo%'`` would match ``C:\\foobar``.
+        The replacement query JOINs local_files ON folders.folder_id (the
+        relational key) and aggregates extraction_status directly.
+
+        Must be called INSIDE an active BEGIN IMMEDIATE transaction
+        (enforced by _commit_batch caller context).
+        """
+        if not filepaths:
+            return
+        placeholders = ",".join("?" * len(filepaths))
+        self._conn.execute(
+            f"""
+            UPDATE folders SET
+                indexed_count = (
+                    SELECT COUNT(*) FROM local_files
+                    WHERE local_files.folder_id = folders.folder_id
+                      AND local_files.extraction_status IN ('ok', 'committed')
+                ),
+                error_count = (
+                    SELECT COUNT(*) FROM local_files
+                    WHERE local_files.folder_id = folders.folder_id
+                      AND local_files.extraction_status IN (
+                          'error', 'encoding_error', 'changed_during_index', 'no_text_layer'
+                      )
+                ),
+                pending_count = (
+                    SELECT COUNT(*) FROM local_files
+                    WHERE local_files.folder_id = folders.folder_id
+                      AND local_files.extraction_status = 'pending'
+                ),
+                oversized_count = (
+                    SELECT COUNT(*) FROM local_files
+                    WHERE local_files.folder_id = folders.folder_id
+                      AND local_files.extraction_status IN ('oversized', 'zip_bomb_suspected')
+                ),
+                last_aggregate_at = strftime('%s', 'now')
+            WHERE folder_id IN (
+                SELECT DISTINCT local_files.folder_id FROM local_files
+                WHERE local_files.filepath IN ({placeholders})
+            )
+            """,  # noqa: S608
+            filepaths,
+        )
 
     # ------------------------------------------------------------------
     # Phase 97 R-02: Atomic rebuild helpers (LD-4 / LD-5)
