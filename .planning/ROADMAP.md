@@ -84,7 +84,7 @@ Plans:
 - [x] 96-06-PLAN.md — Wave 3: D-F1 tree widget UI — `desktop/my_library_tab.py::_OptoutTreeWidget` with Qt-native tri-state + bottom-panel `QSplitter(Horizontal)` containing [tree, status_table] (RESEARCH §3 Option 1) + 150ms debounce + rescan-prune wiring + `genizah_app.py::_reapply_filters_for_optout_change`
 - [x] 96-07-PLAN.md — Wave 3: NEW-1 button removal — delete `btn_rd_open_browse` declaration + `_rd_open_in_browse` handler + visibility branches from `desktop/result_dialog.py`; flip 4 xfail(strict=True) decorators to stable regression guards
 - [x] 96-08-PLAN.md — Wave 4: NEW-2 UI wiring — `desktop/result_dialog.py::load_local_page` sibling with `is_local_sys_id` dispatch + `genizah_app.py::_aggregate_local_pages_with_separators` (page/chunk separators, EN + HE) + Browse panel View-All / Per-Page toggle persisted in session JSON
-- [ ] 96-09-PLAN.md — Wave 5: NEW-3 freestyle polish + docs (close D-F1/D-F4/D-F5 in OPEN_ISSUES.md; CHANGELOG.md + CLAUDE.md "Recently Changed"; optional version bump v7.14.1 / v7.15.0; pre-release pre-flight ruff + check_docs + full pytest)
+- [x] 96-09-PLAN.md — Wave 5: NEW-3 freestyle polish + docs (close D-F1/D-F4/D-F5 in OPEN_ISSUES.md; CHANGELOG.md + CLAUDE.md "Recently Changed"; optional version bump v7.14.1 / v7.15.0; pre-release pre-flight ruff + check_docs + full pytest)
 
 **Wave structure:** 0 (01) → 1 (3 parallel: 02 [local_indexer.py], 03 [genizah_core.py], 04 [genizah_app.py + my_library_tab.py]) → 2 (05 [genizah_app.py — cascade]) → 3 (2 parallel: 06 [my_library_tab.py — tree widget], 07 [result_dialog.py — button removal]) → 4 (08 [result_dialog.py + genizah_app.py — NEW-2 UI]) → 5 (09 [docs + polish]).
 
