@@ -103,7 +103,12 @@ def test_notify_session_restored_not_after_try_block():
 
 def test_corpus_scope_restored_before_has_data_gate():
     """search_corpus_scope must be restored from session JSON BEFORE the
-    has_data early-return so it applies even when there are no search results."""
+    has_data early-return so it applies even when there are no search results.
+
+    Post iter-9 refactor (Codex): the assignment lives in
+    `_apply_persistent_session_preferences` helper, called from `_restore_session`
+    BEFORE the has_data gate. Verify the call order.
+    """
     src = _load_genizah_app_src()
     if src is None:
         pytest.skip("genizah_app not importable")
@@ -113,19 +118,25 @@ def test_corpus_scope_restored_before_has_data_gate():
 
     fn_src = ast.unparse(fn)
 
-    # Verify corpus scope is set before has_data check
-    # We look for _search_corpus_scope assignment and has_data assignment order.
-    corpus_pos = fn_src.find('_search_corpus_scope')
+    apply_pos = fn_src.find('_apply_persistent_session_preferences')
     has_data_pos = fn_src.find('has_data =')
 
-    assert corpus_pos != -1, (
-        "_search_corpus_scope not found in _restore_session body — "
-        "corpus scope restoration missing"
+    assert apply_pos != -1, (
+        "_apply_persistent_session_preferences call not found in _restore_session — "
+        "corpus scope + opt-outs restoration helper missing"
     )
     assert has_data_pos != -1, "has_data assignment not found in _restore_session"
-    assert corpus_pos < has_data_pos, (
-        "_search_corpus_scope must be assigned BEFORE the has_data gate "
-        "(fix-8: corpus scope must restore even when no search results exist)"
+    assert apply_pos < has_data_pos, (
+        "_apply_persistent_session_preferences must be called BEFORE the has_data gate "
+        "(corpus scope + opt-outs must restore even when no search results exist)"
+    )
+
+    # And verify the helper actually assigns _search_corpus_scope.
+    helper = _parse_function(src, '_apply_persistent_session_preferences')
+    assert helper is not None, "_apply_persistent_session_preferences helper missing"
+    helper_src = ast.unparse(helper)
+    assert '_search_corpus_scope' in helper_src, (
+        "_search_corpus_scope assignment missing from _apply_persistent_session_preferences"
     )
 
 
@@ -246,7 +257,12 @@ def test_empty_optouts_roundtrip():
 
 def test_restore_session_loads_optouts_before_has_data():
     """_local_file_optouts must be assigned from state BEFORE the has_data
-    early-return check so opt-outs survive even with no search results."""
+    early-return check so opt-outs survive even with no search results.
+
+    Post iter-9 refactor: the assignment lives in
+    `_apply_persistent_session_preferences` helper; verify the helper is called
+    before the has_data gate AND the helper assigns _local_file_optouts.
+    """
     src = _load_genizah_app_src()
     if src is None:
         pytest.skip("genizah_app not importable")
@@ -255,14 +271,23 @@ def test_restore_session_loads_optouts_before_has_data():
     assert fn is not None, "_restore_session not found"
 
     fn_src = ast.unparse(fn)
-    optout_pos = fn_src.find('_local_file_optouts')
+    apply_pos = fn_src.find('_apply_persistent_session_preferences')
     has_data_pos = fn_src.find('has_data =')
 
-    assert optout_pos != -1, "_local_file_optouts not assigned in _restore_session"
+    assert apply_pos != -1, (
+        "_apply_persistent_session_preferences call missing from _restore_session"
+    )
     assert has_data_pos != -1, "has_data gate not found in _restore_session"
-    assert optout_pos < has_data_pos, (
-        "_local_file_optouts must be assigned BEFORE the has_data early-return "
-        "gate (fix-8: opt-outs must load even when there is nothing else to restore)"
+    assert apply_pos < has_data_pos, (
+        "_apply_persistent_session_preferences must be called BEFORE the has_data "
+        "early-return gate (opt-outs must load even when there is nothing else to restore)"
+    )
+
+    helper = _parse_function(src, '_apply_persistent_session_preferences')
+    assert helper is not None, "_apply_persistent_session_preferences helper missing"
+    helper_src = ast.unparse(helper)
+    assert '_local_file_optouts' in helper_src, (
+        "_local_file_optouts assignment missing from _apply_persistent_session_preferences"
     )
 
 
