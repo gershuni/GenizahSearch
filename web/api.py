@@ -828,6 +828,10 @@ def init_api_routes(app_override=None):
         if not digits:
             return Response(content="Invalid FL ID", status_code=400)
 
+        # Phase 98 D-16: circuit check FIRST. If NLI is down, return 404 immediately.
+        if _nli_circuit_is_open():
+            return Response(content="Image not found", status_code=404)
+
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Referer': 'https://www.nli.org.il/',
@@ -836,30 +840,67 @@ def init_api_routes(app_override=None):
         # Try IIIF first (works for valid FL IDs, returns real images)
         iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{digits}/full/2000,/0/default.jpg"
         try:
-            resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
+            # Phase 98 D-16: bounded image timeout
+            resp = requests.get(
+                iiif_url,
+                headers=headers,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
+                verify=True,
+            )
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 # Verify it's not a tiny placeholder (real images are > 5KB)
                 if len(resp.content) > 5000:
+                    _nli_record_success(path='nli_image')
                     return Response(
                         content=resp.content,
                         media_type=resp.headers.get('Content-Type', 'image/jpeg')
                     )
-        except Exception as e:
-            logger.error(f"IIIF failed for FL{digits}: {e}")
+            elif resp.status_code == 429:
+                _nli_record_failure(failure_type='429', path='nli_image')
+            elif 500 <= resp.status_code < 600:
+                _nli_record_failure(failure_type='5xx', path='nli_image')
+            # 404 / other → fall through to Rosetta
+        except requests.exceptions.Timeout as e:
+            logger.error(f"IIIF timeout for FL{digits}: {e}")
+            _nli_record_failure(failure_type='timeout', path='nli_image')
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"IIIF connection error for FL{digits}: {e}")
+            _nli_record_failure(failure_type='connection_error', path='nli_image')
 
-        # Fallback to Rosetta - but filter out the "no image" placeholder
+        # Fallback to Rosetta - but filter out the "no image" placeholder.
+        # Phase 98 Codex REVIEW Issue 3: re-check the breaker BEFORE Rosetta.
+        # IIIF may have just tripped the breaker; without this recheck we would
+        # immediately burn another image-read timeout against Rosetta even
+        # though D-16 says to guard both. Cheap (lock-protected int read).
+        if _nli_circuit_is_open():
+            return Response(content="Image not found", status_code=404)
         rosetta_url = f"https://rosetta.nli.org.il/delivery/DeliveryManagerServlet?dps_func=thumbnail&dps_pid=FL{digits}"
         try:
-            resp = requests.get(rosetta_url, headers=headers, timeout=15, verify=True)
+            # Phase 98 D-16: bounded image timeout
+            resp = requests.get(
+                rosetta_url,
+                headers=headers,
+                timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
+                verify=True,
+            )
             if resp.status_code == 200 and 'image' in resp.headers.get('Content-Type', ''):
                 # The "no image" placeholder is ~1615 bytes, real images are larger
                 if len(resp.content) > 2000:
+                    _nli_record_success(path='nli_image')
                     return Response(
                         content=resp.content,
                         media_type=resp.headers.get('Content-Type', 'image/png')
                     )
-        except Exception as e:
-            logger.error(f"Rosetta failed for FL{digits}: {e}")
+            elif resp.status_code == 429:
+                _nli_record_failure(failure_type='429', path='nli_image')
+            elif 500 <= resp.status_code < 600:
+                _nli_record_failure(failure_type='5xx', path='nli_image')
+        except requests.exceptions.Timeout as e:
+            logger.error(f"Rosetta timeout for FL{digits}: {e}")
+            _nli_record_failure(failure_type='timeout', path='nli_image')
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Rosetta connection error for FL{digits}: {e}")
+            _nli_record_failure(failure_type='connection_error', path='nli_image')
 
         return Response(content="Image not found", status_code=404)
 
@@ -887,6 +928,13 @@ def init_api_routes(app_override=None):
             content, content_type, fl_id = entry
             return (content, content_type, fl_id)
 
+        # Phase 98 D-17: circuit check BEFORE the FL-id iteration loop. Without
+        # this guard, a 20-element fl_ids list would multiply per-call blocking
+        # time by ~20 when NLI is down. Returning None now is preferable to
+        # spending 20 * 5s = 100 seconds discovering NLI is unreachable.
+        if _nli_circuit_is_open():
+            return None
+
         fl_ids = fetch_fl_ids_from_nli(sys_id, suffix=suffix)
         if not fl_ids:
             return None
@@ -897,14 +945,36 @@ def init_api_routes(app_override=None):
         }
 
         def _try_fl(fl_id):
+            # Phase 98 Codex REVIEW Issue 3: recheck breaker on EVERY iteration.
+            # The earlier breaker check at the top of _fetch_nli_image_bytes only
+            # covers the initial entry. With a cached FL-id list (often 20+ entries),
+            # the fallback loop below could iterate all FL IDs even after one
+            # of them tripped the breaker mid-loop. Cheap (lock-protected int read).
+            if _nli_circuit_is_open():
+                return None
             iiif_url = f"https://iiif.nli.org.il/IIIFv21/FL{fl_id}/full/{width},/0/default.jpg"
             try:
-                resp = requests.get(iiif_url, headers=headers, timeout=15, verify=True)
+                # Phase 98 D-17: bounded image timeout
+                resp = requests.get(
+                    iiif_url,
+                    headers=headers,
+                    timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
+                    verify=True,
+                )
                 min_size = 1000 if width < 500 else 5000  # Thumbnails are smaller
                 ct = resp.headers.get('Content-Type', '')
                 if resp.status_code == 200 and 'image' in ct and len(resp.content) > min_size:
+                    _nli_record_success(path='_fetch_nli_image_bytes')
                     return (resp.content, ct or 'image/jpeg')
-            except Exception:
+                elif resp.status_code == 429:
+                    _nli_record_failure(failure_type='429', path='_fetch_nli_image_bytes')
+                elif 500 <= resp.status_code < 600:
+                    _nli_record_failure(failure_type='5xx', path='_fetch_nli_image_bytes')
+            except requests.exceptions.Timeout:
+                _nli_record_failure(failure_type='timeout', path='_fetch_nli_image_bytes')
+                return None
+            except requests.exceptions.ConnectionError:
+                _nli_record_failure(failure_type='connection_error', path='_fetch_nli_image_bytes')
                 return None
             return None
 
@@ -2051,6 +2121,13 @@ def init_api_routes(app_override=None):
         except Exception:
             return Response(content="Invalid URL format", status_code=400)  # Request processing failed; return error response
 
+        # Phase 98 D-18: circuit check ONLY for NLI / Rosetta hosts. Cambridge,
+        # Manchester, Oxford etc. do not share the NLI failure mode.
+        nli_hosts = ('iiif.nli.org.il', 'rosetta.nli.org.il')
+        is_nli_host = parsed.netloc in nli_hosts
+        if is_nli_host and _nli_circuit_is_open():
+            return Response(content="Image not found", status_code=503)
+
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Referer': 'https://www.nli.org.il/',
@@ -2058,19 +2135,36 @@ def init_api_routes(app_override=None):
         }
 
         try:
-            # Fetch the image with timeout
-            resp = requests.get(url, headers=headers, timeout=15, verify=True)
+            # Phase 98 D-18: bounded image timeout for NLI hosts; existing 15s
+            # retained for non-NLI hosts (Cambridge etc. have different latency
+            # profiles and have not exhibited the threadpool-saturation pattern).
+            timeout = (NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT) if is_nli_host else 15
+            resp = requests.get(url, headers=headers, timeout=timeout, verify=True)
             if resp.status_code == 200:
+                if is_nli_host:
+                    _nli_record_success(path='proxy_image')
                 return Response(
                     content=resp.content,
                     media_type=resp.headers.get('Content-Type', 'image/jpeg')
                 )
             else:
                 logger.info(f"Proxy got status {resp.status_code} for URL: {url}")
+                if is_nli_host:
+                    if resp.status_code == 429:
+                        _nli_record_failure(failure_type='429', path='proxy_image')
+                    elif 500 <= resp.status_code < 600:
+                        _nli_record_failure(failure_type='5xx', path='proxy_image')
                 return Response(status_code=resp.status_code)
         except requests.Timeout:
             logger.error(f"Proxy timeout for URL: {url}")
+            if is_nli_host:
+                _nli_record_failure(failure_type='timeout', path='proxy_image')
             return Response(content="Request timeout", status_code=504)
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"Proxy connection error for {url}: {e}")
+            if is_nli_host:
+                _nli_record_failure(failure_type='connection_error', path='proxy_image')
+            return Response(status_code=502)
         except Exception as e:
             logger.error(f"Proxy error for {url}: {e}")
             return Response(status_code=500)
