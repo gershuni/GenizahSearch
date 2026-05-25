@@ -23,8 +23,10 @@ def test_per_200_row_chunking(tmp_path):
     """500-row CSV should yield 3 chunks with locators 'rows 1-200', 'rows 201-400', 'rows 401-500'."""
     from shared.local_indexer import extract_csv_pages
 
-    # Create 500-row CSV with UTF-8-BOM
-    lines = ["a,b,c"]
+    # Create exactly 500 rows (no header) with UTF-8-BOM.
+    # F-04: no header-row assumption, so a header would count as row 1.
+    # To get clean locators 1-200/201-400/401-500 we use exactly 500 data rows.
+    lines = []
     for i in range(1, 501):
         lines.append(f"val{i}a,val{i}b,val{i}c")
     content = "\n".join(lines) + "\n"
@@ -117,7 +119,6 @@ def test_encoding_total_failure_raises(tmp_path):
     #
     # The real test: patch _CSV_ENCODINGS to a set of encodings that all fail.
     import unittest.mock as mock
-    from shared.local_indexer import _CSV_ENCODINGS
 
     # Write bytes that cause UnicodeDecodeError with utf-8-sig (invalid continuation)
     # We need bytes that fail ALL encodings in _CSV_ENCODINGS.

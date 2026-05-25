@@ -9,10 +9,7 @@ Tests:
 """
 from __future__ import annotations
 
-import os
 import pathlib
-
-import pytest
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "local_indexer"
 

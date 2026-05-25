@@ -49,6 +49,18 @@ import time
 import unicodedata
 from typing import Callable, Iterator, Optional
 
+# Phase 97 F-02 — neutralize XML-bomb / XXE primitives before openpyxl loads.
+# defuse_stdlib() patches xml.etree.ElementTree and friends. Best-effort:
+# if defusedxml is somehow missing in a dev install, log a warning and proceed.
+try:
+    import defusedxml
+    defusedxml.defuse_stdlib()
+except ImportError:
+    import logging as _logging
+    _logging.getLogger(__name__).warning(
+        "Phase 97: defusedxml not installed; XML-bomb defense degraded"
+    )
+
 import fitz  # PyMuPDF - D-01
 from docx import Document as _DocxDoc  # python-docx - D-04
 import tantivy
@@ -64,7 +76,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-_SUPPORTED_EXTENSIONS = {".docx", ".pdf", ".txt"}
+_SUPPORTED_EXTENSIONS = {".docx", ".pdf", ".txt", ".html", ".xlsx", ".csv"}
 _DOCX_CHUNK_PARAGRAPHS = 20            # D-04
 _SCANNED_PDF_CHAR_THRESHOLD = 50       # D-05
 _EMPTY_PAGE_CHAR_THRESHOLD = 10        # D-06
@@ -88,6 +100,9 @@ _MAX_FILE_SIZE = 100 * 1024 * 1024            # raw 100 MB hard skip
 _MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024   # zip-container 500 MB
 _MAX_CELLS_PER_SHEET = 100_000                # 100K cells (consumed by Wave C XLSX extractor)
 _MAX_CHARS_PER_CHUNK = 1_000_000              # 1 MB per chunk (consumed by Wave C extractors)
+_XLSX_ROW_WINDOW = 500                        # F-02: rows per Tantivy chunk in XLSX extractor
+_CSV_ROW_WINDOW = 200                         # F-03: rows per Tantivy chunk in CSV extractor
+_CSV_ENCODINGS = ("utf-8-sig", "cp1255", "utf-16-le")  # F-05: encoding chain for CSV
 
 
 class XlsxZipBombSuspected(Exception):
@@ -650,6 +665,262 @@ def extract_txt(filepath: str) -> Iterator[tuple[int, str, str]]:
                 f"utf-8 error: {utf8_err}; cp1255 error: {cp1255_err}"
             ) from cp1255_err
     yield (1, text, os.path.basename(filepath))
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 F-01: HTML encoding detection helper
+# ---------------------------------------------------------------------------
+
+def _detect_html_encoding(raw_bytes: bytes) -> str:
+    """F-01 encoding chain: <meta charset> -> utf-8 byte-sniff -> cp1255 fallback.
+
+    Reads up to 1 KB of ASCII chars to find a <meta charset> declaration.
+    If not found, tries strict UTF-8 decode on the first 4 KB.
+    Falls back to cp1255 (legacy Windows Hebrew) if UTF-8 also fails.
+    """
+    head = raw_bytes[:1024].decode("ascii", errors="ignore").lower()
+    m = re.search(r'<meta[^>]+charset\s*=\s*["\']?([\w-]+)', head)
+    if m:
+        return m.group(1).strip()
+    try:
+        raw_bytes[:4096].decode("utf-8", errors="strict")
+        return "utf-8"
+    except UnicodeDecodeError:
+        pass
+    return "cp1255"
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 F-01: HTML extractor (lxml.html, NOT BeautifulSoup)
+# ---------------------------------------------------------------------------
+
+def extract_html_pages(filepath: str) -> Iterator[tuple[int, str, str, str, bool]]:
+    """Phase 97 F-01. Yields (chunk_num, text, title, chunk_locator, is_rtl).
+    F-06: NO _fix_rtl_* calls — lxml.html returns logical-order strings already.
+
+    Chunking strategy:
+      - Semantic: chunk at h1/h2 boundaries when len(headings) >= 3 AND
+        avg paragraphs-per-heading >= 5.
+      - Fallback: 20-paragraph windows when sparse.
+
+    Encoding chain: <meta charset> -> utf-8 byte-sniff -> cp1255.
+    is_rtl: True when <html dir="rtl"> or <body dir="rtl">.
+    """
+    import lxml.html
+
+    with open(filepath, "rb") as f:
+        raw = f.read()
+
+    encoding = _detect_html_encoding(raw)
+    try:
+        text = raw.decode(encoding, errors="replace")
+    except LookupError:
+        text = raw.decode("cp1255", errors="replace")
+
+    tree = lxml.html.fromstring(text)
+
+    # Strip script and style content before chunking
+    for tag in tree.iter("script", "style"):
+        parent = tag.getparent()
+        if parent is not None:
+            parent.remove(tag)
+
+    # Extract title from <title> element
+    title_elem = tree.find(".//title")
+    doc_title = (
+        (title_elem.text_content() or os.path.basename(filepath)).strip()
+        if title_elem is not None
+        else os.path.basename(filepath)
+    )
+
+    # Detect RTL from html or body dir attribute
+    html_dir = tree.get("dir", "") or ""
+    body_elem = tree.find(".//body")
+    body_dir = (body_elem.get("dir", "") or "") if body_elem is not None else ""
+    is_rtl = html_dir.lower() == "rtl" or body_dir.lower() == "rtl"
+
+    headings = list(tree.iter("h1", "h2"))
+    paragraphs = list(tree.iter("p"))
+    avg_inter = (len(paragraphs) / max(len(headings), 1)) if headings else 0
+    use_semantic = len(headings) >= 3 and avg_inter >= 5
+
+    if use_semantic:
+        for chunk_num, h in enumerate(headings, start=1):
+            heading_text = (h.text_content() or "").strip()
+            buf = [heading_text] if heading_text else []
+            sib = h.getnext()
+            while sib is not None and sib.tag not in ("h1", "h2"):
+                content = sib.text_content() or ""
+                if content.strip():
+                    buf.append(content)
+                sib = sib.getnext()
+            chunk_text = "\n".join(s.strip() for s in buf if s.strip())
+            if not chunk_text:
+                continue
+            if len(chunk_text) > _MAX_CHARS_PER_CHUNK:
+                chunk_text = chunk_text[:_MAX_CHARS_PER_CHUNK]
+            locator_heading = heading_text[:40] if heading_text else f"section {chunk_num}"
+            yield chunk_num, chunk_text, doc_title, f"§ {locator_heading}", is_rtl
+    else:
+        chunk_num = 0
+        for start in range(0, max(len(paragraphs), 1), 20):
+            chunk_paras = paragraphs[start: start + 20]
+            texts = [
+                (p.text_content() or "").strip()
+                for p in chunk_paras
+                if (p.text_content() or "").strip()
+            ]
+            chunk_text = "\n".join(texts)
+            if not chunk_text:
+                continue
+            if len(chunk_text) > _MAX_CHARS_PER_CHUNK:
+                chunk_text = chunk_text[:_MAX_CHARS_PER_CHUNK]
+            chunk_num += 1
+            end = min(start + 20, len(paragraphs))
+            yield chunk_num, chunk_text, doc_title, f"¶ {start + 1}-{end}", is_rtl
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 F-02: XLSX extractor (openpyxl streaming + zip-bomb pre-check)
+# ---------------------------------------------------------------------------
+
+def extract_xlsx_pages(filepath: str) -> Iterator[tuple[int, str, str, str, bool]]:
+    """Phase 97 F-02. Yields (chunk_num, text, title, chunk_locator, is_rtl).
+    F-06: NO _fix_rtl_* calls — openpyxl returns logical-order strings already.
+
+    Pre-check: _check_zip_bomb() rejects bombs before openpyxl opens the file.
+    Chunking: one Tantivy doc per (sheet, _XLSX_ROW_WINDOW) window.
+    is_rtl: True when sheetView.rightToLeft is set on the sheet.
+    F-04: uniform row text as 'cell1 | cell2 | cell3 | ...' (no header assumption).
+    """
+    from openpyxl import load_workbook
+
+    bomb_reason = _check_zip_bomb(filepath)
+    if bomb_reason:
+        raise XlsxZipBombSuspected(bomb_reason)
+
+    title = os.path.basename(filepath)
+
+    # Pre-read RTL metadata from a non-streaming open (read_only=True worksheets
+    # lack sheet_view in openpyxl; metadata-only open is fast — no cell data loaded).
+    rtl_map: dict[str, bool] = {}
+    try:
+        wb_meta = load_workbook(filepath, read_only=False, data_only=True)
+        try:
+            for sn in wb_meta.sheetnames:
+                ws_meta = wb_meta[sn]
+                sv = getattr(ws_meta, "sheet_view", None)
+                rtl_map[sn] = bool(getattr(sv, "rightToLeft", False)) if sv is not None else False
+        finally:
+            wb_meta.close()
+    except Exception:
+        pass  # If metadata read fails, is_rtl stays False for all sheets
+
+    wb = load_workbook(filepath, read_only=True, data_only=True)
+    try:
+        chunk_num = 0
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            is_rtl = rtl_map.get(sheet_name, False)
+            rows_in_window: list[str] = []
+            cells_seen = 0
+            window_start_row = 1
+            for row_num, row in enumerate(ws.iter_rows(values_only=True), start=1):
+                cell_strs = [str(c) if c is not None else "" for c in row]
+                cells_seen += len(cell_strs)
+                if cells_seen > _MAX_CELLS_PER_SHEET:
+                    raise XlsxZipBombSuspected(
+                        f"cells_seen {cells_seen} exceeds _MAX_CELLS_PER_SHEET "
+                        f"{_MAX_CELLS_PER_SHEET} in sheet {sheet_name!r}"
+                    )
+                line = " | ".join(cell_strs)
+                if line.strip():
+                    rows_in_window.append(line)
+                if (row_num - window_start_row + 1) >= _XLSX_ROW_WINDOW:
+                    chunk_num += 1
+                    chunk_text = "\n".join(rows_in_window)
+                    if len(chunk_text) > _MAX_CHARS_PER_CHUNK:
+                        chunk_text = chunk_text[:_MAX_CHARS_PER_CHUNK]
+                    locator = f"{sheet_name}!R{window_start_row}:R{row_num}"
+                    yield chunk_num, chunk_text, title, locator, is_rtl
+                    rows_in_window = []
+                    window_start_row = row_num + 1
+            # Flush trailing partial window
+            if rows_in_window:
+                chunk_num += 1
+                last_row = window_start_row + len(rows_in_window) - 1
+                chunk_text = "\n".join(rows_in_window)
+                if len(chunk_text) > _MAX_CHARS_PER_CHUNK:
+                    chunk_text = chunk_text[:_MAX_CHARS_PER_CHUNK]
+                locator = f"{sheet_name}!R{window_start_row}:R{last_row}"
+                yield chunk_num, chunk_text, title, locator, is_rtl
+    finally:
+        wb.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 97 F-03 + F-05: CSV extractor (csv.Sniffer + encoding chain)
+# ---------------------------------------------------------------------------
+
+def extract_csv_pages(filepath: str) -> Iterator[tuple[int, str, str, str]]:
+    """Phase 97 F-03 + F-05. Yields (chunk_num, text, title, chunk_locator).
+    F-06: NO _fix_rtl_* calls — csv.reader returns logical-order strings already.
+
+    Encoding chain: utf-8-sig -> cp1255 -> utf-16-le.
+    Delimiter detection: csv.Sniffer over first 4 KB; fallback to csv.excel.
+    Chunking: one Tantivy doc per _CSV_ROW_WINDOW (200) rows.
+    F-04: uniform row text as 'cell1 | cell2 | cell3 | ...' (no header assumption).
+    Total decode failure raises EncodingError.
+    """
+    import csv as _csv
+
+    title = os.path.basename(filepath)
+    chosen_encoding = None
+    sample_text = None
+
+    for enc in _CSV_ENCODINGS:
+        try:
+            with open(filepath, "r", encoding=enc, newline="") as f:
+                sample_text = f.read(4096)
+            chosen_encoding = enc
+            break
+        except UnicodeDecodeError:
+            continue
+
+    if chosen_encoding is None:
+        raise EncodingError(
+            f"CSV decode failed across all encodings {_CSV_ENCODINGS}: {filepath}"
+        )
+
+    try:
+        dialect = _csv.Sniffer().sniff(sample_text, delimiters=",;\t")
+    except _csv.Error:
+        dialect = _csv.excel  # fallback to comma-delimited
+
+    rows_in_window: list[str] = []
+    window_start = 1
+    chunk_num = 0
+    row_num = 0  # track last row number for trailing-flush locator
+
+    with open(filepath, "r", encoding=chosen_encoding, newline="") as f:
+        reader = _csv.reader(f, dialect=dialect)
+        for row_num, row in enumerate(reader, start=1):
+            cell_strs = [str(c) if c is not None else "" for c in row]
+            line = " | ".join(cell_strs)
+            if line.strip():
+                rows_in_window.append(line)
+            if (row_num - window_start + 1) >= _CSV_ROW_WINDOW:
+                chunk_num += 1
+                chunk_text = "\n".join(rows_in_window)
+                yield chunk_num, chunk_text, title, f"rows {window_start}-{row_num}"
+                rows_in_window = []
+                window_start = row_num + 1
+
+    # Flush trailing partial window — use row_num (last row seen) for the locator
+    if rows_in_window:
+        chunk_num += 1
+        chunk_text = "\n".join(rows_in_window)
+        yield chunk_num, chunk_text, title, f"rows {window_start}-{row_num}"
 
 
 # ---------------------------------------------------------------------------
@@ -1502,6 +1773,22 @@ class LocalIndexer:
                 pages_written, extraction_status, display_title = self._extract_and_write_txt(
                     sys_id, canonical, folder_id
                 )
+            elif ext == ".html":
+                pages_written, extraction_status, display_title = self._extract_and_write_html(
+                    sys_id, canonical, folder_id, cancel_check
+                )
+            elif ext == ".xlsx":
+                pages_written, extraction_status, display_title = self._extract_and_write_xlsx(
+                    sys_id, canonical, folder_id, cancel_check
+                )
+            elif ext == ".csv":
+                pages_written, extraction_status, display_title = self._extract_and_write_csv(
+                    sys_id, canonical, folder_id, cancel_check
+                )
+        except XlsxZipBombSuspected as exc:
+            extraction_status = "zip_bomb_suspected"
+            error_msg = str(exc)
+            logger.warning("_index_one_file: zip_bomb_suspected for %s: %s", canonical, exc)
         except EncodingError as exc:
             extraction_status = "encoding_error"
             error_msg = str(exc)
@@ -1761,6 +2048,89 @@ class LocalIndexer:
             pages_written += 1
 
         return (pages_written, "ok", display_title)
+
+    def _extract_and_write_html(
+        self,
+        sys_id: str,
+        filepath: str,
+        folder_id: int,
+        cancel_check: Callable[[], bool],
+    ) -> tuple[int, str, str]:
+        """Phase 97 F-01: Extract HTML chunks and write Tantivy docs.
+
+        Yields (chunk_num, text, title, locator, is_rtl) from extract_html_pages.
+        is_rtl is logged at DEBUG level (stored in-memory only for Phase 97;
+        Wave F D-NEW-5 can persist as a column if needed downstream).
+        Returns (pages_written, status, title).
+        """
+        pages_written = 0
+        display_title = os.path.basename(filepath)
+
+        for chunk_num, text, title, locator, is_rtl in extract_html_pages(filepath):
+            if cancel_check():
+                self._rollback_partial(sys_id)
+                return (pages_written, "cancelled", display_title)
+            display_title = title
+            self._write_page_doc(sys_id, chunk_num, text, title, folder_id, chunk_locator=locator)
+            pages_written += 1
+            logger.debug(
+                "Phase 97 F-06 is_rtl=%s for sys_id=%s chunk=%d", is_rtl, sys_id, chunk_num
+            )
+
+        return (pages_written, "ok" if pages_written > 0 else "no_text_layer", display_title)
+
+    def _extract_and_write_xlsx(
+        self,
+        sys_id: str,
+        filepath: str,
+        folder_id: int,
+        cancel_check: Callable[[], bool],
+    ) -> tuple[int, str, str]:
+        """Phase 97 F-02: Extract XLSX chunks and write Tantivy docs.
+
+        XlsxZipBombSuspected propagates to _index_one_file's except clause (LD-9 dual write).
+        Returns (pages_written, status, title).
+        """
+        pages_written = 0
+        display_title = os.path.basename(filepath)
+
+        for chunk_num, text, title, locator, is_rtl in extract_xlsx_pages(filepath):
+            if cancel_check():
+                self._rollback_partial(sys_id)
+                return (pages_written, "cancelled", display_title)
+            display_title = title
+            self._write_page_doc(sys_id, chunk_num, text, title, folder_id, chunk_locator=locator)
+            pages_written += 1
+            logger.debug(
+                "Phase 97 F-06 is_rtl=%s for sys_id=%s chunk=%d", is_rtl, sys_id, chunk_num
+            )
+
+        return (pages_written, "ok" if pages_written > 0 else "no_text_layer", display_title)
+
+    def _extract_and_write_csv(
+        self,
+        sys_id: str,
+        filepath: str,
+        folder_id: int,
+        cancel_check: Callable[[], bool],
+    ) -> tuple[int, str, str]:
+        """Phase 97 F-03 + F-05: Extract CSV chunks and write Tantivy docs.
+
+        EncodingError propagates to _index_one_file's except clause (LD-9 dual write).
+        Returns (pages_written, status, title).
+        """
+        pages_written = 0
+        display_title = os.path.basename(filepath)
+
+        for chunk_num, text, title, locator in extract_csv_pages(filepath):
+            if cancel_check():
+                self._rollback_partial(sys_id)
+                return (pages_written, "cancelled", display_title)
+            display_title = title
+            self._write_page_doc(sys_id, chunk_num, text, title, folder_id, chunk_locator=locator)
+            pages_written += 1
+
+        return (pages_written, "ok" if pages_written > 0 else "no_text_layer", display_title)
 
     def _rollback_partial(self, sys_id: str) -> None:
         """Roll back partial page docs for a file that was cancelled mid-extraction."""
