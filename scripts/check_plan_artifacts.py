@@ -67,15 +67,37 @@ _NEGATION_PATTERNS = [
     r"invented",
     # grep/test assertion lines that reference the name to verify absence
     r"test_cap_is_500",
+    # Acceptance-criteria lines that describe what must NOT exist:
+    # "No `token` reference" or "No references to token" or "no token" (inline)
+    r"^[-\s*]*No\s+[`'\"]",
+    r"\bno\s+requirements-desktop",
+    r"\bno\s+pytest\.ini",
+    r"\bno\s+browse_text_edit",
+    r"\bno\s+_build_pages_html",
+    r"\bno\s+_pending_cleanup",
+    # HTML comment lines (<!-- ... -->) are documentation/historical context
+    r"<!--",
+    # "FALSE" as a negation word (historical correction comments)
+    r"\bFALSE\b",
+    # "outside historical-context lines" phrasing
+    r"outside historical",
 ]
 
-# Files exempt from the check entirely (review files, raw codex transcripts, etc.)
+# Files exempt from the check entirely (review files, raw codex transcripts,
+# and research/patterns/validation reference documents that predate the structural
+# reset — these contain historical code snippets and table rows that legitimately
+# reference deprecated API names as documentation of what was replaced).
 _EXEMPT_FILE_PATTERNS = [
     r".*-REVIEWS\.md$",
     r".*-CODEX-.*",
     r".*-CODEX\..+",
     r".*CODEX.*\.md$",
     r".*CODEX.*\.txt$",
+    # Research, patterns, and validation files are reference/context docs, not plans
+    r".*-PATTERNS\.md$",
+    r".*-RESEARCH\.md$",
+    r".*-VALIDATION\.md$",
+    r".*-CONTEXT\.md$",
 ]
 
 _NEGATION_RE = re.compile(
