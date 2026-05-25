@@ -109,6 +109,59 @@ class XlsxZipBombSuspected(Exception):
     """Phase 97 C-05 — raised by _check_zip_bomb or XLSX extractor when limits exceeded."""
 
 
+class _PhaseAwareETA:
+    """Phase 97 U-01 — separate EWMA smoothing for 4 sub-phases.
+
+    compose_overall_eta returns sum() of remaining-phase ETAs because phases
+    are sequential (walk -> extract -> commit -> rebuild). Codex MEDIUM #5
+    resolved: test and code agree on sum composition.
+    """
+
+    PHASES = ("walking", "extracting", "committing", "rebuilding_lab")
+    ALPHA = 0.2  # EWMA weight for new samples
+
+    def __init__(self) -> None:
+        import time as _time
+        self._bytes_per_sec: dict = {p: 0.0 for p in self.PHASES}
+        self._remaining_bytes: dict = {p: 0 for p in self.PHASES}
+        self._last_sample: dict = {p: _time.monotonic() for p in self.PHASES}
+
+    def record(self, phase: str, bytes_done: int) -> None:
+        """Feed a new bytes_done observation into the EWMA for the given phase."""
+        import time as _time
+        now = _time.monotonic()
+        dt = max(now - self._last_sample[phase], 1e-6)
+        rate = bytes_done / dt
+        self._bytes_per_sec[phase] = (
+            self.ALPHA * rate + (1 - self.ALPHA) * self._bytes_per_sec[phase]
+        )
+        self._last_sample[phase] = now
+
+    def set_remaining(self, phase: str, bytes_remaining: int) -> None:
+        """Set the estimated remaining bytes for a phase."""
+        self._remaining_bytes[phase] = bytes_remaining
+
+    def phase_eta_seconds(self, phase: str) -> float:
+        """Return ETA in seconds for a single phase."""
+        rate = self._bytes_per_sec[phase]
+        if rate <= 0:
+            return float("inf") if self._remaining_bytes[phase] > 0 else 0.0
+        return self._remaining_bytes[phase] / rate
+
+    def compose_overall_eta(self) -> float:
+        """Sequential composition — sum of remaining phase ETAs (Codex MEDIUM #5 fix).
+
+        Returns the sum of per-phase ETAs for all phases that still have
+        remaining bytes. Returns 0.0 when no bytes remain.
+        """
+        etas = [
+            self.phase_eta_seconds(p)
+            for p in self.PHASES
+            if self._remaining_bytes[p] > 0
+        ]
+        return sum(etas) if etas else 0.0
+
+
 class _CommitTriggers:
     """Phase 97 C-02 — byte/count/time commit triggers.
 

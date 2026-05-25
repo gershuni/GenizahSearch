@@ -51,6 +51,22 @@ _NEGATION_PATTERNS = [
     # Script definition context (list of tokens to check)
     r"FORBIDDEN_TOKENS",
     r"\bcheck_plan_artifacts\b",
+    # Grep/assertion context: "returns 0 matches" / "forbid X" / "0 occurrences"
+    r"returns 0 matches",
+    r"\bforbid\b",
+    r"0 occurrences",
+    r"must not appear",
+    r"guard\b",
+    r"\banti-bypass\b",
+    # Test-name references (e.g., test_no_invented_build_pages_html)
+    r"test_no_invented",
+    r"test_no_widget",
+    # Config key context: pytest.ini_options is a toml key, not a file reference
+    r"ini_options",
+    # "invented" context: referencing the name only to assert it must not appear
+    r"invented",
+    # grep/test assertion lines that reference the name to verify absence
+    r"test_cap_is_500",
 ]
 
 # Files exempt from the check entirely (review files, raw codex transcripts, etc.)

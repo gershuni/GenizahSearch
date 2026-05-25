@@ -584,6 +584,84 @@ class PrescanWorker(QThread):
 
 
 # ---------------------------------------------------------------------------
+# FolderWalkWorker (Phase 97 U-03 — filesystem walk off the UI thread)
+# ---------------------------------------------------------------------------
+
+class FolderWalkWorker(QThread):
+    """Phase 97 U-03 — filesystem walk off the UI thread.
+
+    Emits batched (filepath, mtime_ns, size) records throttled to
+    BATCH_SIZE files OR BATCH_TIMEOUT seconds so the UI stays responsive.
+
+    CRITICAL: NO QWidget mutation in this thread (T-97E-02 / AST guard
+    test_folder_walk_worker.py::test_no_widget_mutation pins this invariant).
+    Only pyqtSignal emissions — the UI-thread slot handles all widget updates.
+    """
+
+    batch_emitted = pyqtSignal(list)      # list of (filepath, mtime_ns, size) tuples
+    finished_signal = pyqtSignal(int, int)  # total_files, total_bytes
+    error_signal = pyqtSignal(str)
+
+    BATCH_SIZE = 100    # emit after this many files
+    BATCH_TIMEOUT = 0.5  # or after this many seconds
+
+    def __init__(self, folder_paths: list) -> None:
+        super().__init__()
+        self._folder_paths = folder_paths
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        """Request cooperative cancellation."""
+        self._cancel_requested = True
+
+    def run(self) -> None:
+        """Walk folders and emit batched file-metadata records.
+
+        This method must NOT mutate any QWidget — it only emits signals.
+        The UI-thread slot connected to batch_emitted handles all widget updates.
+        AST guard: test_folder_walk_worker.py::test_no_widget_mutation.
+        """
+        import os as _os
+        import time as _time
+        batch: list = []
+        last_emit = _time.monotonic()
+        total_files = 0
+        total_bytes = 0
+        try:
+            for folder in self._folder_paths:
+                if self._cancel_requested:
+                    break
+                for root, dirs, files in _os.walk(folder, followlinks=False):
+                    if self._cancel_requested:
+                        break
+                    for name in files:
+                        if self._cancel_requested:
+                            break
+                        fp = _os.path.join(root, name)
+                        try:
+                            stat = _os.stat(fp)
+                        except OSError:
+                            continue
+                        batch.append((fp, stat.st_mtime_ns, stat.st_size))
+                        total_files += 1
+                        total_bytes += stat.st_size
+                        now = _time.monotonic()
+                        if (
+                            len(batch) >= self.BATCH_SIZE
+                            or (now - last_emit) >= self.BATCH_TIMEOUT
+                        ):
+                            self.batch_emitted.emit(batch)
+                            batch = []
+                            last_emit = now
+            if batch:
+                self.batch_emitted.emit(batch)
+            self.finished_signal.emit(total_files, total_bytes)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("FolderWalkWorker: unhandled error")
+            self.error_signal.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
 # MyLibraryTab
 # ---------------------------------------------------------------------------
 

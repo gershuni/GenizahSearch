@@ -18780,10 +18780,10 @@ class GenizahGUI(QMainWindow):
         # so we can build per-page <p> blocks for the gutter per-page restart fix.
         _raw_pages = self._get_local_pages_for_sys_id(sys_id)
 
-        # Fix 2 (iter-6): large-file guard — aggregating > 200 pages on the main
-        # thread freezes the UI.  Show a warning dialog and let the user choose to
-        # proceed with the first 200 pages or cancel back to per-page mode.
-        _VIEW_ALL_PAGE_CAP = 200
+        # Fix 2 (iter-6 + Phase 97 U-04): large-file guard — raised from 200 → 500.
+        # Incremental rendering (QTimer.singleShot batches) keeps the event loop
+        # responsive at 500 pages so the UI no longer freezes (T-97E-05).
+        _VIEW_ALL_PAGE_CAP = 500
         if len(_raw_pages) > _VIEW_ALL_PAGE_CAP:
             total_pages = len(_raw_pages)
             msg = tr("This file has {n} pages. Viewing all at once may freeze the window.").format(n=total_pages)
@@ -18849,17 +18849,15 @@ class GenizahGUI(QMainWindow):
             self.browse_open_file_btn.setEnabled(bool(filepath))
 
         # 7. Render the text via the same gutter helper Genizah pages use.
-        # Fix 1 (iter-6): per-page line restart — root cause of the previous
-        # failure: rendering the whole text as one <div dir='rtl'>...<br>...</div>
-        # produced a SINGLE QTextBlock.  _mark_blocks_for_pages tried to match
-        # individual page texts against that one block (which contains everything),
-        # so every block got userState=-1 (separator) and NO lines were numbered.
+        # Fix 1 (iter-6): per-page line restart — see earlier comment block.
+        # Phase 97 U-04 (LD-10): incremental render keeps the event loop responsive.
+        # First 50 pages render synchronously; remaining batches are appended via
+        # QTimer.singleShot(0, self._append_next_view_all_batch) so the UI stays
+        # interactive during large-file rendering.
         #
-        # Fix: build the HTML with one <p>...</p> per page using <br> within each
-        # page for intra-page line breaks.  Qt renders each <p> as a separate
-        # QTextBlock, so _mark_blocks_for_pages can match page N's block against
-        # norm_pages[N] and the separator lines also become their own blocks
-        # (tagged -1 → no number).
+        # LD-10 LOCK: every batch (initial + appended) calls apply_line_numbered_text
+        # with the ACCUMULATED page list — bypassing it would break line numbering.
+        # Real widget: self.browse_text. Real render helper: apply_line_numbered_text.
         import html as _html_mod
         try:
             if _raw_pages:
@@ -18868,36 +18866,29 @@ class GenizahGUI(QMainWindow):
                 else:
                     sep_label = 'page' if is_pdf else 'chunk'
 
-                # Build one <p> per page (intra-page newlines → <br>).
-                # Insert a <p>— page/chunk N —</p> separator between pages.
-                # Collect the raw page texts in the same order for the gutter.
-                _page_texts = []
-                html_parts = []
-                for idx, (p_num, page_text) in enumerate(_raw_pages):
-                    if not page_text:
-                        continue
-                    if html_parts:
-                        # Separator block between pages.
-                        sep_escaped = _html_mod.escape(f"— {sep_label} {p_num} —")
-                        html_parts.append(f"<p>{sep_escaped}</p>")
-                    page_escaped = _html_mod.escape(page_text).replace("\n", "<br>")
-                    html_parts.append(f"<p>{page_escaped}</p>")
-                    _page_texts.append(page_text)
+                # Phase 97 U-04: split into initial batch + remaining.
+                _VIEW_ALL_INITIAL_BATCH = 50
+                first_batch = _raw_pages[:_VIEW_ALL_INITIAL_BATCH]
+                remaining = _raw_pages[_VIEW_ALL_INITIAL_BATCH:]
 
-                browse_html = "".join(html_parts)
-                # pages= list drives per-page mode in the gutter painter:
-                #   - blocks matching a page text → state = page index (restart line no.)
-                #   - separator blocks → state = -1 (no number)
-                # Only pass pages= when there are multiple pages; single-page files
-                # use legacy continuous-numbering mode.
-                pages_arg = _page_texts if len(_page_texts) > 1 else None
-                apply_line_numbered_text(
-                    self.browse_text,
-                    f"<div dir='rtl'>{browse_html}</div>",
-                    source_text=None,
-                    pages=pages_arg,
-                    is_html=True,
-                )
+                # Store render state so _append_next_view_all_batch can continue.
+                self._view_all_render_state = {
+                    "sys_id": sys_id,
+                    "is_pdf": is_pdf,
+                    "lang": lang,
+                    "sep_label": sep_label,
+                    "accumulated": list(first_batch),
+                    "remaining": list(remaining),
+                }
+
+                # Render the initial batch synchronously.
+                self._render_view_all_batch(list(first_batch))
+
+                # Schedule remaining batches via QTimer so the event loop processes
+                # between each batch (T-97E-05 — keeps UI responsive).
+                if remaining:
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(0, self._append_next_view_all_batch)
             else:
                 # No extracted text — show placeholder in legacy mode.
                 placeholder = tr(
@@ -18943,6 +18934,63 @@ class GenizahGUI(QMainWindow):
                 self.btn_b_all.blockSignals(False)
         except Exception:
             pass
+
+    def _render_view_all_batch(self, pages_so_far: list) -> None:
+        """Phase 97 U-04 — re-render the accumulated page list via apply_line_numbered_text.
+
+        LD-10 LOCK: apply_line_numbered_text owns the line-gutter painter + page-block
+        marking (via the pages= kwarg).  Every incremental batch calls this helper with
+        the FULL accumulated list so line numbering stays correct.
+
+        DO NOT bypass apply_line_numbered_text (e.g., do NOT call setText/setHtml
+        directly) — that would break line numbers and page-block marking.
+
+        Real widget: self.browse_text. Real helper: apply_line_numbered_text.
+        """
+        import html as _html_mod
+        state = getattr(self, "_view_all_render_state", {})
+        sep_label = state.get("sep_label", "page")
+        html_parts: list = []
+        _page_texts: list = []
+        for _idx, (p_num, page_text) in enumerate(pages_so_far):
+            if not page_text:
+                continue
+            if html_parts:
+                sep_escaped = _html_mod.escape(f"— {sep_label} {p_num} —")
+                html_parts.append(f"<p>{sep_escaped}</p>")
+            page_escaped = _html_mod.escape(page_text).replace("\n", "<br>")
+            html_parts.append(f"<p>{page_escaped}</p>")
+            _page_texts.append(page_text)
+        browse_html = "".join(html_parts)
+        pages_arg = _page_texts if len(_page_texts) > 1 else None
+        try:
+            apply_line_numbered_text(
+                self.browse_text,
+                f"<div dir='rtl'>{browse_html}</div>",
+                source_text=None,
+                pages=pages_arg,
+                is_html=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("_render_view_all_batch: apply_line_numbered_text failed: %s", exc)
+
+    def _append_next_view_all_batch(self) -> None:
+        """Phase 97 U-04 — schedule the next 50-page batch via QTimer.singleShot(0, ...).
+
+        Called recursively (via QTimer) until all pages in _view_all_render_state['remaining']
+        have been rendered.  Each call re-renders the FULL accumulated page list via
+        _render_view_all_batch (LD-10 — preserves line gutter + page-block marking).
+        """
+        from PyQt6.QtCore import QTimer
+        state = getattr(self, "_view_all_render_state", None)
+        if not state or not state.get("remaining"):
+            return
+        batch = state["remaining"][:50]
+        state["remaining"] = state["remaining"][50:]
+        state["accumulated"].extend(batch)
+        self._render_view_all_batch(state["accumulated"])
+        if state["remaining"]:
+            QTimer.singleShot(0, self._append_next_view_all_batch)
 
     def _on_browse_open_file_clicked(self):
         """Phase 95 D-28 — launch OS default app for the current LOCAL file.

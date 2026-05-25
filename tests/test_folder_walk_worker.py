@@ -37,13 +37,21 @@ def test_batched_signal(tmp_path):
             f.write(f"content {i}")
 
     received_batches = []
+    finished_counts = []
 
     worker = FolderWalkWorker([folder])
-    worker.batch_emitted.connect(lambda batch: received_batches.append(batch))
-
-    # Run synchronously in the test process (QThread.run in-process)
-    finished_counts = []
-    worker.finished_signal.connect(lambda fc, fb: finished_counts.append((fc, fb)))
+    # Use DirectConnection so signals are delivered immediately in the worker thread
+    # rather than being queued to the main thread's event loop (which isn't running
+    # in a test context).
+    from PyQt6.QtCore import Qt
+    worker.batch_emitted.connect(
+        lambda batch: received_batches.append(batch),
+        Qt.ConnectionType.DirectConnection,
+    )
+    worker.finished_signal.connect(
+        lambda fc, fb: finished_counts.append((fc, fb)),
+        Qt.ConnectionType.DirectConnection,
+    )
     worker.start()
     worker.wait(10_000)  # 10s timeout
 
