@@ -42,6 +42,31 @@ _pin_root_scripts_namespace()
 
 
 # ---------------------------------------------------------------------------
+# Phase 97 Wave E (Plan 97-05): --run-scale flag for @pytest.mark.scale tests.
+# Scale tests synthesise large corpora (50K+ files) and are excluded by default.
+# Enable with:  pytest tests/test_50k_scale_smoke.py --run-scale -x
+# ---------------------------------------------------------------------------
+def pytest_addoption(parser):
+    group = parser.getgroup("scale")
+    group.addoption(
+        "--run-scale",
+        action="store_true",
+        default=False,
+        help="run @pytest.mark.scale tests (requires large synthesised corpora)",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--run-scale"):
+        return  # run everything including scale tests
+    import pytest as _pytest
+    skip_scale = _pytest.mark.skip(reason="scale test; use --run-scale to enable")
+    for item in items:
+        if "scale" in item.keywords:
+            item.add_marker(skip_scale)
+
+
+# ---------------------------------------------------------------------------
 # Skill import bridge: skills/cairo-genizah-research/ (hyphens in dir name)
 # is not directly importable as `skills.cairo_genizah_research`. Register it
 # as a package under the underscore name so test imports work without renaming
