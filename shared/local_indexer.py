@@ -2217,7 +2217,11 @@ class LocalIndexer:
                 return (pages_written, "cancelled", display_title)
             display_title = title
             total_chars += len(text)
-            self._write_page_doc(sys_id, page_num, text, title, folder_id)
+            # Phase 97 D-NEW-5: PDF locator — "p. N" (1-based page number).
+            self._write_page_doc(
+                sys_id, page_num, text, title, folder_id,
+                chunk_locator=f"p. {page_num}",
+            )
             pages_written += 1
 
         if total_chars < _SCANNED_PDF_CHAR_THRESHOLD and pages_written == 0:
@@ -2241,7 +2245,13 @@ class LocalIndexer:
                 self._rollback_partial(sys_id)
                 return (pages_written, "cancelled", display_title)
             display_title = title
-            self._write_page_doc(sys_id, chunk_num, text, title, folder_id)
+            # Phase 97 D-NEW-5: DOCX locator — "paragraphs N-M" (1-based, _DOCX_CHUNK_PARAGRAPHS window).
+            _para_start = (chunk_num - 1) * _DOCX_CHUNK_PARAGRAPHS + 1
+            _para_end = chunk_num * _DOCX_CHUNK_PARAGRAPHS
+            self._write_page_doc(
+                sys_id, chunk_num, text, title, folder_id,
+                chunk_locator=f"paragraphs {_para_start}-{_para_end}",
+            )
             pages_written += 1
 
         return (pages_written, "ok", display_title)

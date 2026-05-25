@@ -7025,6 +7025,9 @@ class SearchEngine:
         full_header = doc.get_first("full_header") or ""
         content = doc.get_first("content") or ""
         shelfmark = doc.get_first("shelfmark") or ""
+        # Phase 97 D-NEW-5: chunk_locator — location string set by extractor
+        # (e.g. "p. 3" for PDF, "paragraphs 1-20" for DOCX, "§ Introduction" for HTML).
+        chunk_locator = doc.get_first("chunk_locator") or ""
         # Parse sys_id + p_num from full_header (format: {sys_id}_LOCAL_P{page}_F{file_id})
         sys_id = ""
         p_num = "1"
@@ -7070,6 +7073,8 @@ class SearchEngine:
             # both open at the correct page (not always page 1).
             "img": p_num,
             "score": float(score),
+            # Phase 97 D-NEW-5: chunk_locator for human-readable position in source file.
+            "chunk_locator": chunk_locator,
             "display": {
                 "id": sys_id,
                 "source": "LOCAL",

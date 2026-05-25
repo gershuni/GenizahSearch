@@ -2042,6 +2042,11 @@ class ResultDialog(QDialog):
                     _folder = _os.path.basename(_os.path.dirname(_local_path))
                     _fname = _os.path.basename(_local_path)
                     _path_text = f"{_folder}/{_fname}" if _folder else _fname
+                    # Phase 97 D-NEW-5: append chunk_locator to the file path label
+                    # so users see e.g. "MyFolder/doc.pdf — p. 3" in the hit header.
+                    _chunk_loc = data.get("chunk_locator", "") or ""
+                    if _chunk_loc:
+                        _path_text = f"{_path_text} — {_chunk_loc}"
                     self.lbl_local_file_path.setText(_path_text)
                     self.lbl_local_file_path.setToolTip(_local_path)
                     self.lbl_local_file_path.setVisible(True)

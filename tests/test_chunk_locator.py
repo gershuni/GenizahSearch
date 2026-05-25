@@ -194,23 +194,30 @@ def test_docx_locator_format(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_html_semantic_locator_format(tmp_path):
-    """D-NEW-5 / Wave C contract: HTML semantic chunk under 'פרק א' yields locator '§ פרק א'."""
+    """D-NEW-5 / Wave C contract: HTML semantic chunk under 'פרק א' yields locator '§ פרק א'.
+
+    Semantic mode triggers when len(headings) >= 3 AND avg paragraphs-per-heading >= 5.
+    Test uses 3 headings x 5 paragraphs each = avg 5 (at boundary for trigger).
+    """
     from shared.local_indexer import extract_html_pages
 
-    html_content = """<!DOCTYPE html>
-<html><head><title>Test Document</title></head>
-<body>
-<h1>פרק א</h1>
-<p>תוכן ראשון בפרק א. This is paragraph 1.</p>
-<p>תוכן שני בפרק א. This is paragraph 2.</p>
-<p>תוכן שלישי בפרק א. This is paragraph 3.</p>
-<h1>פרק ב</h1>
-<p>תוכן בפרק ב. This is paragraph 4.</p>
-<p>תוכן נוסף בפרק ב. This is paragraph 5.</p>
-<h1>פרק ג</h1>
-<p>תוכן בפרק ג. This is paragraph 6.</p>
-<p>תוכן נוסף בפרק ג. This is paragraph 7.</p>
-</body></html>"""
+    # Build paragraphs per section: 5 per heading to meet avg_inter >= 5 threshold
+    def section(heading, n):
+        paras = "\n".join(
+            f"<p>תוכן {i} תחת {heading}. Paragraph {i} content.</p>"
+            for i in range(1, n + 1)
+        )
+        return f"<h1>{heading}</h1>\n{paras}"
+
+    html_content = (
+        "<!DOCTYPE html>\n<html><head><title>Test Document</title></head>\n<body>\n"
+        + section("פרק א", 5)
+        + "\n"
+        + section("פרק ב", 5)
+        + "\n"
+        + section("פרק ג", 5)
+        + "\n</body></html>"
+    )
 
     html_path = tmp_path / "test_semantic.html"
     html_path.write_text(html_content, encoding="utf-8")
