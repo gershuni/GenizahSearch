@@ -8,6 +8,29 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [vNEXT] - Phase 97 Wave F Gap Closure - 2026-05-25
+
+### Phase 97 Wave F — My Library Gap Closure (desktop)
+
+- **D-NEW-2 Network drive semantics**: `_check_folder_reachable` with
+  errno-discriminated retry — `ETIMEDOUT`/`EAGAIN` → 3× retry with 2s backoff
+  → `status='timeout'`; `ENOENT`/`EACCES` → `status='unreachable'`. All
+  auto-rescan skip-sets updated to `('unavailable', 'unreachable', 'timeout')`.
+- **D-NEW-3 TOCTOU detection**: Pre+post `os.stat` bracket around
+  `_index_one_file`. On mtime_ns or size mismatch → `status='changed_during_index'`,
+  re-queued for next scan (max 3 retries per scan_run).
+- **D-NEW-4 Extension gate**: `_SUPPORTED_EXTENSIONS` check at INSERT site
+  prevents new unsupported-format rows from entering the index.
+- **D-NEW-5 chunk_locator per format**: PDF pages now carry `'p. N'` locator;
+  DOCX chunks carry `'paragraphs N-M'`. Result dialog LOCAL hit header shows
+  `folder/file.pdf — p. 3` format.
+- **D-NEW-6 Privacy disclosure**: Bilingual EN+HE disclosure for the zstd
+  cleartext cache added to Help page and About dialog.
+- **D-NEW-7 AST CI guards**: 4 fail-fast tests covering cloud-write gates,
+  web `LIBRARY_CODES` allowlist, `is_local_sys_id`, and RRF merge order.
+
+---
+
 ## [vNEXT] - My Library Phase 96 Polish - 2026-05-24
 
 ### v7.14.x / v7.15.0 — My Library Phase 96 Polish (Phase 96)

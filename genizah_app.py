@@ -2474,6 +2474,12 @@ class SettingsDialog(QDialog):
             Elazar Gershuni, Itai Kagan, Elnatan Chen, and Adiel Breuer
             for their advice and support.</p>
             <p>Searching in local files ("My Library" feature) was inspired by Yehuda Seewald GenizahLocal prototype.</p>
+            <h3>Local Index Cache Privacy</h3>
+            <p>Your indexed document text is stored in <code>local_index.sqlite3</code> inside your LOCAL index folder.
+            The text is compressed with <b>zstd</b> (compression, not encryption).
+            This cached data is <b>never uploaded</b> to GenizahSearch servers.
+            For at-rest encryption, use OS-level disk encryption (BitLocker / FileVault).
+            (ל"מ: לא מוצפן — zstd היא דחיסה בלבד, לא הצפנה; הנתונים אינם מועלים לשרת.)</p>
 
             <h3>Data Source &amp; Acknowledgments</h3>
             <p>This software is built on the transcription dataset produced by the <b>MiDRASH Project</b>.

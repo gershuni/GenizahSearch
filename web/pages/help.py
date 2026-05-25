@@ -658,8 +658,10 @@ GenizahSearch's servers. Three boundaries enforce this:
 - The Lists cloud sync aborts entirely if any list item is LOCAL.
 - The corrections submission rejects LOCAL document IDs with a clear error.
 
-Your indexed text is stored on disk in cleartext inside the local index — it is
-never uploaded to GenizahSearch's servers. Use OS-level disk encryption
+Your indexed text is stored on disk inside `local_index.sqlite3` (located inside
+the LOCAL index folder). The text is compressed with **zstd** for space savings —
+zstd is compression, not encryption; the stored text is cleartext and is
+**never uploaded** to GenizahSearch's servers. Use OS-level disk encryption
 (BitLocker / FileVault) if you need at-rest encryption.
 
 **Three-state filter:** Each result surface (Search, Composition Search, Parallels)
@@ -1269,7 +1271,9 @@ def _create_hebrew_content():
 - סנכרון ענן של רשימות מבוטל לחלוטין אם כל פריט ברשימה הוא LOCAL.
 - הגשת תיקונים דוחה מזהי מסמך LOCAL עם שגיאה ברורה.
 
-הטקסט המאונדקס נשמר בקובץ אינדקס מקומי בטקסט גלוי — הוא לעולם לא מועלה לשרתי GenizahSearch.
+הטקסט המאונדקס נשמר בקובץ `local_index.sqlite3` בתיקיית האינדקס המקומי.
+הטקסט דחוס באמצעות **zstd** לחיסכון במקום — zstd הוא דחיסה, לא הצפנה; הטקסט המאוחסן אינו מוצפן (לא מוצפן)
+והוא לעולם לא מועלה לשרתי GenizahSearch.
 השתמש בהצפנת דיסק ברמת מערכת ההפעלה (BitLocker / FileVault) אם נדרשת הצפנה במנוחה.
 
 **סינון תלת-מצבי:** כל משטח תוצאות (חיפוש, חיפוש חיבורים, מקבילות) כולל כפתור סינון
