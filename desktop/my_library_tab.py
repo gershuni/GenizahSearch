@@ -932,6 +932,13 @@ class MyLibraryTab(QWidget):
         # the attribute always exists even on init failure paths.
         self._skip_startup_rescan_once: bool = False
 
+        # Phase 97.3 R97.3-A (D-12) — in-memory prior_status cache so the
+        # folder-click code path never issues a fresh local_files DB query.
+        # Structure: {folder_path: {canonical_filepath: {"pages": int, "status": str}}}
+        # Invalidated + reloaded BEFORE _refresh_folder_list_ui in worker
+        # finish/error/reset/folder-add/folder-remove paths.
+        self._prior_status_cache: dict = {}
+
         # Build UI first (so widgets exist before _init_indexer may log)
         self._build_ui()
 
@@ -1244,6 +1251,10 @@ class MyLibraryTab(QWidget):
         # BEFORE startup_recovery ran, so it has a stale snapshot).
         self._on_startup_recovery_completed()
 
+        # Phase 97.3 R97.3-A (D-12): populate prior_status cache at startup so
+        # the FIRST folder click already hits the cache, not the DB.
+        self._invalidate_prior_status_cache()
+
         # Populate folder list UI
         self._refresh_folder_list_ui()
 
@@ -1430,6 +1441,10 @@ class MyLibraryTab(QWidget):
         # Release mutex AFTER reload
         self._indexer_mutex.unlock()
 
+        # Phase 97.3 R97.3-A (D-12, D-19): cache must be reloaded BEFORE
+        # _refresh_folder_list_ui (which calls populate_for_folder).
+        self._invalidate_prior_status_cache()
+
         # Refresh folder list (status may have changed, e.g. unavailable)
         self._refresh_folder_list_ui()
 
@@ -1550,6 +1565,9 @@ class MyLibraryTab(QWidget):
         # Phase 97.2 R97.2-E — re-enable Reset after worker errored
         # (start_recovery_probe will gate this if orphan rows persist).
         self._update_reset_button_state()
+        # Phase 97.3 R97.3-A (D-12): error path also invalidates the cache so
+        # any subsequent folder click reflects the latest DB state.
+        self._invalidate_prior_status_cache()
         QMessageBox.warning(
             self,
             tr("My Library Error"),
@@ -1765,6 +1783,11 @@ class MyLibraryTab(QWidget):
                 self._show_status_message(ok_msg)
             else:
                 QMessageBox.information(self, title, ok_msg)
+            # Phase 97.3 R97.3-A (D-12): cache cleared on full reset.
+            try:
+                self._invalidate_prior_status_cache()
+            except Exception:
+                logger.exception("_perform_reset: _invalidate_prior_status_cache failed (continuing)")
             # Repopulate UI — these helpers may or may not exist; tolerate either.
             if hasattr(self, "_refresh_folder_list_ui"):
                 try:
@@ -1863,6 +1886,9 @@ class MyLibraryTab(QWidget):
             )
             return
 
+        # Phase 97.3 R97.3-A (D-12): new folder added — reload cache so the
+        # next folder selection reads correct prior_status.
+        self._invalidate_prior_status_cache()
         self._refresh_folder_list_ui()
         # Kick off a scan for the newly added folder
         self._start_worker(toast_on_complete=False)
@@ -1910,6 +1936,8 @@ class MyLibraryTab(QWidget):
         # CR-02: also reload LabEngine LOCAL LAB searcher (REQ-6).
         self._reload_all_local_indexes()
 
+        # Phase 97.3 R97.3-A (D-12): folder removed — drop its cache entry.
+        self._invalidate_prior_status_cache()
         self._refresh_folder_list_ui()
 
     def _on_refresh_clicked(self) -> None:
@@ -2060,6 +2088,11 @@ class MyLibraryTab(QWidget):
                     logger.warning(
                         "_on_cancel_finished_drain: %s_run failed: %s", action, exc
                     )
+        # Phase 97.3 R97.3-A (D-12, Codex Critique #3 MEDIUM site 6):
+        # cancel-drain also repopulates the tree via _refresh_folder_list_ui,
+        # so prior_status cache must be reloaded first or the tree shows
+        # pre-cancel status (now-stale).
+        self._invalidate_prior_status_cache()
         try:
             self._refresh_folder_list_ui()
         except Exception:
@@ -2285,6 +2318,36 @@ class MyLibraryTab(QWidget):
             self._folder_list.blockSignals(False)
             if hasattr(self, '_unified_tree'):
                 self._unified_tree.populate_for_folder(previous_path)
+
+    def _invalidate_prior_status_cache(self) -> None:
+        """Phase 97.3 R97.3-A (D-12, D-19) — clear cache, then reload from DB.
+
+        MUST be called BEFORE _refresh_folder_list_ui in the worker
+        finish/error/reset/folder-add/folder-remove code paths. Codex
+        Critique #2 v7.14 blocker: late clearing leaves stale prior_status
+        visible in the post-scan tree because _refresh_folder_list_ui calls
+        populate_for_folder() which reads the cache.
+        """
+        self._prior_status_cache = {}
+        if self._indexer is None:
+            return
+        try:
+            folders = self._indexer.list_folders()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("_invalidate_prior_status_cache: list_folders failed: %s", exc)
+            return
+        for folder in folders:
+            path = folder.get("path")
+            if not path:
+                continue
+            try:
+                self._prior_status_cache[path] = self._indexer.get_file_status_for_folder(path) or {}
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "_invalidate_prior_status_cache: get_file_status_for_folder(%s) failed: %s",
+                    path, exc,
+                )
+                self._prior_status_cache[path] = {}
 
     def notify_session_restored(self) -> None:
         """Called by GenizahGUI._restore_session() (in its finally block) when
