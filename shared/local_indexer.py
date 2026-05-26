@@ -3066,6 +3066,18 @@ class LocalIndexer:
                 pass
             gc.collect()
 
+        # R97.2-H (Bug C3): short-circuit BEFORE the SQLite transaction if
+        # the Tantivy delete failed. Without this, step 3 would delete the
+        # SQLite rows while the Tantivy docs remain — an orphaned-docs state
+        # that subsequent searches cannot recover from. Raising here
+        # preserves both sides: SQLite rows + scan_runs.status untouched.
+        if not _tantivy_delete_ok:
+            raise LocalIndexerError(
+                "discard_run aborted: Tantivy delete failed in step 2 — "
+                "SQLite rows preserved to prevent orphaned-docs state. "
+                "Use 'Reset My Library' if the index is corrupt."
+            )
+
         # --- Step 3: single SQLite transaction for all related row deletions ---
         # Collect affected filepaths first so we can refresh counters after.
         affected_rows = self._conn.execute(
