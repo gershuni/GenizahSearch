@@ -216,10 +216,26 @@ def test_unified_tree_uncheck_close_reopen_roundtrip(tmp_path):
         def _reapply_filters_for_optout_change(self):
             pass
 
+    def _wait_for_async_populate(tree, timeout_s=10.0):
+        """Phase 97.3: populate_for_folder is now async via FolderWalkWorker.
+
+        Spins QApplication.processEvents() until the worker exits and the
+        finished slot drains (which sets tree._tree_worker = None).
+        """
+        import time as _t
+        deadline = _t.monotonic() + timeout_s
+        while _t.monotonic() < deadline:
+            QApplication.processEvents()
+            if getattr(tree, "_tree_worker", None) is None:
+                return True
+            _t.sleep(0.01)
+        return False
+
     app1 = DummyApp()
     parent1 = QWidget()
     tree1 = _UnifiedFileTreeWidget(parent1, app1)
     tree1.populate_for_folder(str(folder), prior_status={})
+    assert _wait_for_async_populate(tree1), "Phase 97.3 async worker should finish"
 
     leaf = tree1.topLevelItem(0).child(0)
     assert leaf.data(0, Qt.ItemDataRole.UserRole) == canonical
@@ -249,6 +265,7 @@ def test_unified_tree_uncheck_close_reopen_roundtrip(tmp_path):
     parent2 = QWidget()
     tree2 = _UnifiedFileTreeWidget(parent2, app2)
     tree2.populate_for_folder(str(folder), prior_status={})
+    assert _wait_for_async_populate(tree2), "Phase 97.3 async worker should finish"
 
     reopened_leaf = tree2.topLevelItem(0).child(0)
     assert reopened_leaf.data(0, Qt.ItemDataRole.UserRole) == canonical
