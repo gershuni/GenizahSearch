@@ -52,6 +52,10 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QHeaderView,
     QAbstractItemView,
+    # Phase 97.2 R97.2-E — Reset My Library typed-confirm dialog
+    QDialog,
+    QLineEdit,
+    QApplication,
 )
 from PyQt6.QtGui import QColor
 
@@ -724,6 +728,10 @@ class MyLibraryTab(QWidget):
         # D-25: silent background rescan at startup
         self._auto_rescan_on_startup()
 
+        # Phase 97.2 R97.2-E — initial Reset button state after recovery probe.
+        # Constructor-end call site #1 of 3 (REVIEWS Codex MEDIUM proactive).
+        self._update_reset_button_state()
+
     # ------------------------------------------------------------------
     # Property: search_engine (deferred — may be None before startup finishes)
     # ------------------------------------------------------------------
@@ -873,6 +881,19 @@ class MyLibraryTab(QWidget):
         refresh_row.addWidget(self._btn_refresh)
         refresh_row.addWidget(self._btn_cancel)
         refresh_row.addStretch()
+        # Phase 97.2 R97.2-E — Reset My Library destructive action (right end).
+        # Button starts DISABLED (REVIEWS Codex MEDIUM proactive button state);
+        # _update_reset_button_state() enables/disables based on
+        # (a) self._worker.isRunning() AND (b) start_recovery_probe() result.
+        self._btn_reset = QPushButton(tr("Reset My Library"))
+        self._btn_reset.setStyleSheet(
+            "QPushButton { color: #c0392b; font-weight: bold; } "
+            "QPushButton:disabled { color: #888; font-weight: normal; }"
+        )
+        self._btn_reset.setEnabled(False)
+        self._btn_reset.setToolTip(tr("Stop or resolve the active scan first"))
+        self._btn_reset.clicked.connect(self._on_reset_clicked)
+        refresh_row.addWidget(self._btn_reset)
         root.addLayout(refresh_row)
 
         self._progress_bar = QProgressBar()
@@ -1118,6 +1139,8 @@ class MyLibraryTab(QWidget):
         )
         self._worker.error_signal.connect(self._on_worker_error)
         self._worker.start()
+        # Phase 97.2 R97.2-E — Reset must be disabled while a scan runs.
+        self._update_reset_button_state()
 
     def _on_worker_finished(self, result: dict, toast: bool) -> None:
         """Worker completed: unlock mutex, reload indexes, always show summary (HIGH-1 + D-25).
@@ -1135,6 +1158,9 @@ class MyLibraryTab(QWidget):
         self._btn_remove.setEnabled(True)
         self._btn_cancel.setEnabled(False)
         self._worker = None
+        # Phase 97.2 R97.2-E — re-enable Reset now that scan is done (subject
+        # to the start_recovery_probe re-check inside _update_reset_button_state).
+        self._update_reset_button_state()
 
         # HIGH-1 review fix: reload BEFORE toast so by the time the user
         # dismisses the toast, search already picks up the new content.
@@ -1270,6 +1296,9 @@ class MyLibraryTab(QWidget):
         self._btn_cancel.setEnabled(False)
         self._worker = None
         self._indexer_mutex.unlock()
+        # Phase 97.2 R97.2-E — re-enable Reset after worker errored
+        # (start_recovery_probe will gate this if orphan rows persist).
+        self._update_reset_button_state()
         QMessageBox.warning(
             self,
             tr("My Library Error"),
@@ -1280,6 +1309,230 @@ class MyLibraryTab(QWidget):
             action = self._queued_action
             self._queued_action = None
             action()
+
+    # ------------------------------------------------------------------
+    # Phase 97.2 R97.2-E — Reset My Library destructive recovery action
+    # ------------------------------------------------------------------
+
+    def _update_reset_button_state(self) -> None:
+        """Phase 97.2 REVIEWS Codex MEDIUM — proactively enable/disable Reset.
+
+        Called from:
+          - constructor end (after recovery-probe runs)
+          - _start_worker (scan begins)
+          - _on_worker_finished / _on_worker_error (scan ends)
+
+        Conditions for ENABLED:
+          (a) self._worker is None OR not self._worker.isRunning()
+          AND
+          (b) self._indexer.start_recovery_probe() returns empty list
+              (no orphan scan_runs rows with status='running')
+        """
+        if not hasattr(self, "_btn_reset") or self._btn_reset is None:
+            return
+        worker_idle = self._worker is None or not self._worker.isRunning()
+        if not worker_idle:
+            self._btn_reset.setEnabled(False)
+            self._btn_reset.setToolTip(
+                tr("Stop or resolve the active scan first")
+                + " / "
+                + "עצור או פתור את הסריקה הפעילה תחילה"
+            )
+            return
+        # Worker is idle — check for orphan scan_runs.
+        running: list = []
+        if self._indexer is not None:
+            try:
+                running = self._indexer.start_recovery_probe() or []
+            except Exception:
+                # If probe fails, keep button disabled (conservative).
+                running = ["__probe_failed__"]
+        if running:
+            self._btn_reset.setEnabled(False)
+            self._btn_reset.setToolTip(
+                tr("Stop or resolve the active scan first")
+                + " / "
+                + "עצור או פתור את הסריקה הפעילה תחילה"
+            )
+            return
+        # All-clear: enable + reassuring tooltip (Gemini LOW — reassure that
+        # source files and Genizah corpus are preserved).
+        self._btn_reset.setEnabled(True)
+        en_tip = (
+            "Reset deletes LOCAL/LAB index data only. "
+            "Source files and Genizah corpus are preserved."
+        )
+        he_tip = (
+            "האיפוס מוחק רק את נתוני האינדקס המקומי. "
+            "קבצי המקור וקורפוס הגניזה נשמרים."
+        )
+        self._btn_reset.setToolTip(en_tip + " / " + he_tip)
+
+    def _on_reset_clicked(self) -> None:
+        """Phase 97.2 R97.2-E — re-check guards then open two-step confirm dialog.
+
+        The button SHOULD already be disabled when guards fail (see
+        _update_reset_button_state) — this on-click check is defense-in-depth
+        in case the user clicks during a state transition where the helper has
+        not been called yet.
+        """
+        # Defense-in-depth re-check (the helper should have disabled the button
+        # already, but state transitions may race a click).
+        self._update_reset_button_state()
+        if not self._btn_reset.isEnabled():
+            # Helper already updated tooltip — surface the disabled reason via
+            # a brief informational popup ONLY if the user explicitly clicked
+            # the disabled button (Qt does not normally fire clicked on a
+            # disabled button, so this branch is mostly unreachable; kept for
+            # safety).
+            QMessageBox.information(
+                self,
+                tr("Reset My Library"),
+                tr("Stop or resolve the active scan first"),
+            )
+            return
+        self._show_reset_confirm_dialog()
+
+    def _show_reset_confirm_dialog(self) -> None:
+        """Phase 97.2 D-04 — two-step typed confirm.
+
+        Reset button enabled only when QLineEdit text is 'RESET' (EN) or
+        'אפס' (HE). Both accepted regardless of CURRENT_LANG so a HE-locale
+        user can type RESET if their keyboard is in English at that moment,
+        and vice versa.
+        """
+        dlg = QDialog(self)
+        if CURRENT_LANG == "he":
+            dlg.setWindowTitle("אפס ספריה שלי")
+            header = "אזהרה: פעולה זו תמחק את כל המידע של 'ספריה שלי'"
+            explain = (
+                "ההגדרה תתאפס לחלוטין. קבצי המקור שלך לא יושפעו. "
+                "הקלד אפס כדי להפעיל את כפתור האיפוס."
+            )
+            placeholder = "הקלד אפס"
+            btn_cancel_text = "ביטול"
+            btn_reset_text = "אפס"
+        else:
+            dlg.setWindowTitle("Reset My Library")
+            header = "WARNING: this will erase all 'My Library' index data"
+            explain = (
+                "Your source files will not be affected. "
+                "Type RESET to enable the reset button."
+            )
+            placeholder = "Type RESET"
+            btn_cancel_text = "Cancel"
+            btn_reset_text = "Reset"
+
+        layout = QVBoxLayout(dlg)
+        layout.addWidget(QLabel(header))
+        explain_lbl = QLabel(explain)
+        explain_lbl.setWordWrap(True)
+        layout.addWidget(explain_lbl)
+
+        line = QLineEdit()
+        line.setPlaceholderText(placeholder)
+        layout.addWidget(line)
+
+        btn_row = QHBoxLayout()
+        btn_cancel = QPushButton(btn_cancel_text)
+        btn_reset = QPushButton(btn_reset_text)
+        btn_reset.setEnabled(False)
+        btn_reset.setStyleSheet(
+            "QPushButton:enabled { color: #c0392b; font-weight: bold; }"
+        )
+        btn_row.addWidget(btn_cancel)
+        btn_row.addStretch()
+        btn_row.addWidget(btn_reset)
+        layout.addLayout(btn_row)
+
+        def _on_text_changed(txt: str) -> None:
+            v = txt.strip().upper()
+            # Accept both EN ("RESET") and HE ("אפס") regardless of CURRENT_LANG.
+            btn_reset.setEnabled(v == "RESET" or v == "אפס")
+
+        line.textChanged.connect(_on_text_changed)
+        btn_cancel.clicked.connect(dlg.reject)
+        btn_reset.clicked.connect(dlg.accept)
+        # Cancel is the safe default — user MUST explicitly tab+click Reset.
+        btn_cancel.setDefault(True)
+        btn_cancel.setAutoDefault(True)
+        btn_reset.setAutoDefault(False)
+
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._perform_reset()
+
+    def _perform_reset(self) -> None:
+        """Phase 97.2 R97.2-E — invoke reset_my_library with progress dialog.
+
+        Runs on UI thread per CONTEXT D-05 cost table (sub-second total: the
+        rename-aside is atomic at the FS level; reinit __init__ takes
+        10-100ms; deferred-GC INSERT is <1ms). The slow rmtree fallback
+        path only fires if pending_dir_cleanup INSERT fails — at that point
+        UX considerations matter less than the recovery itself.
+        """
+        from shared.local_indexer import LocalIndexerError
+        if self._indexer is None:
+            return
+        label = "מאפס…" if CURRENT_LANG == "he" else "Resetting…"
+        title = "אפס ספריה שלי" if CURRENT_LANG == "he" else "Reset My Library"
+        dlg = QProgressDialog(label, "", 0, 0, self)
+        dlg.setWindowTitle(title)
+        dlg.setCancelButton(None)
+        dlg.setWindowModality(Qt.WindowModality.NonModal)
+        dlg.setMinimumDuration(0)
+        dlg.show()
+        QApplication.processEvents()
+        try:
+            engine = self._parent_window.engine if self._parent_window and hasattr(self._parent_window, "engine") else None
+            if engine is None:
+                # Fall back to the search_engine property (Phase 97 R-01 path).
+                engine = self.search_engine
+            close_cb = engine.close_local_searcher if engine is not None else (lambda: None)
+            reload_cb = engine.reload_local_indexes if engine is not None else (lambda: None)
+            self._indexer.reset_my_library(close_cb, reload_cb)
+            dlg.close()
+            ok_msg = "איפוס ספריה הושלם" if CURRENT_LANG == "he" else "Library reset complete"
+            # Status bar surface (mirror existing _show_status_message pattern).
+            if hasattr(self, "_show_status_message"):
+                self._show_status_message(ok_msg)
+            else:
+                QMessageBox.information(self, title, ok_msg)
+            # Repopulate UI — these helpers may or may not exist; tolerate either.
+            if hasattr(self, "_refresh_folder_list_ui"):
+                try:
+                    self._refresh_folder_list_ui()
+                except Exception:
+                    logger.exception("_perform_reset: _refresh_folder_list_ui failed (continuing)")
+            if hasattr(self, "_unified_tree") and hasattr(self._unified_tree, "reset_for_scan"):
+                try:
+                    self._unified_tree.reset_for_scan()
+                except Exception:
+                    logger.exception("_perform_reset: _unified_tree.reset_for_scan failed (continuing)")
+            # Refresh disk indicator + Reset button state now that the index
+            # is empty.
+            try:
+                self._update_disk_indicator()
+            except Exception:
+                pass
+            self._update_reset_button_state()
+        except LocalIndexerError as exc:
+            dlg.close()
+            err_msg = (
+                f"האיפוס נכשל: {exc}\nאנא הפעל מחדש את האפליקציה."
+                if CURRENT_LANG == "he"
+                else f"Reset failed: {exc}\nPlease restart the app."
+            )
+            QMessageBox.critical(self, title, err_msg)
+            self._update_reset_button_state()
+        except Exception as exc:  # noqa: BLE001
+            dlg.close()
+            err_msg = (
+                f"האיפוס נכשל: {exc}\nאנא הפעל מחדש את האפליקציה."
+                if CURRENT_LANG == "he"
+                else f"Reset failed: {exc}\nPlease restart the app."
+            )
+            QMessageBox.critical(self, title, err_msg)
+            self._update_reset_button_state()
 
     # ------------------------------------------------------------------
     # HIGH-1 reload call sites
@@ -1519,6 +1772,9 @@ class MyLibraryTab(QWidget):
             self._refresh_folder_list_ui()
         except Exception:
             pass
+        # Phase 97.2 R97.2-E — discard_run/keep_run flips scan_runs.status off
+        # 'running', so the Reset button can now potentially re-enable.
+        self._update_reset_button_state()
 
     def _on_cancel_finished_drain_error(self, _err: str) -> None:
         """Worker errored while draining the cancel — still run discard/keep."""
