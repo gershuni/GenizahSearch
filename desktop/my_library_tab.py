@@ -1661,8 +1661,11 @@ class MyLibraryTab(QWidget):
         worker_running = self._worker is not None and self._worker.isRunning()
         if worker_running:
             self._btn_reset.setEnabled(False)
+            # Always-bilingual tooltip (matches the enabled-tooltip pattern below):
+            # do NOT wrap the English half in tr(), or on a Hebrew-locale machine
+            # it collapses to "Hebrew / Hebrew" instead of showing both languages.
             self._btn_reset.setToolTip(
-                tr("Stop or resolve the active scan first")
+                "Stop or resolve the active scan first"
                 + " / "
                 + "עצור או פתור את הסריקה הפעילה תחילה"
             )
