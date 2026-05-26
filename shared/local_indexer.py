@@ -2982,12 +2982,79 @@ class LocalIndexer:
         # --- Step 2: delete committed docs by term + commit ---
         # Open a fresh writer for the delete-by-term operation (needed whether we
         # rolled back or committed in Step 1, since both invalidate the old writer).
+        #
+        # R97.2-C: detect Phase 95 schema (no scan_run_id field) and fall back
+        # to a per-uid delete loop. Phase 95 installs do not have the
+        # scan_run_id field, so delete_documents("scan_run_id", run_id) raises
+        # ValueError("Field 'scan_run_id' is not defined"). We probe by trying
+        # the field-based delete first; on the "Field ... is not defined"
+        # ValueError (the literal Phase 95 signal), we fall back to per-uid.
+        #
+        # NOTE: tantivy-py 0.25.1's tantivy.Schema does NOT expose
+        # field_names() / get_field_names(), so the PATTERNS.md preferred
+        # schema-introspection branch is unavailable in this installation.
+        # The plan's PATTERNS.md / Task 7 action explicitly authorize this
+        # try/except probe fallback ("Field-name introspection fallback (if
+        # needed): wrap delete_documents in try/except ValueError as e: if
+        # 'scan_run_id' in str(e): ...").
+        #
+        # REVIEWS Codex HIGH #3: per-uid failures MUST NOT log-and-continue —
+        # they would leave a partially-deleted Tantivy state and the outer
+        # transaction would still commit, reintroducing R97.2-H orphan-doc
+        # risk. Any per-uid failure raises LocalIndexerError, leaves
+        # _tantivy_delete_ok = False, and (via Task 10's short-circuit)
+        # prevents the SQLite delete from running.
+        _tantivy_delete_ok = False
         try:
             _del_writer = self._index.writer(heap_size=15_000_000)
-            _del_writer.delete_documents("scan_run_id", run_id)
+            _phase_95_fallback_needed = False
+            try:
+                _del_writer.delete_documents("scan_run_id", run_id)
+            except Exception as _delete_exc:
+                # Phase 95 fallback signal: "Field 'scan_run_id' is not defined".
+                # We also handle the generic case where the field probe raises;
+                # any error here triggers the per-uid fallback path. Per-uid
+                # failures inside the fallback still fail-loud (HIGH #3).
+                if "scan_run_id" in str(_delete_exc):
+                    _phase_95_fallback_needed = True
+                else:
+                    # Unrelated failure — surface via outer except.
+                    raise
+            if _phase_95_fallback_needed:
+                # Phase 95 fallback — per-uid delete loop (analog of
+                # _delete_file :2407-2415).
+                uid_rows = self._conn.execute(
+                    "SELECT lp.uid FROM local_pages lp "
+                    "INNER JOIN processed_files pf ON pf.sys_id = lp.sys_id "
+                    "WHERE pf.scan_run_id = ?",
+                    (run_id,),
+                ).fetchall()
+                for uid_row in uid_rows:
+                    try:
+                        _del_writer.delete_documents("unique_id", uid_row["uid"])
+                    except Exception as _per_uid_exc:
+                        # REVIEWS Codex HIGH #3: fail-loud per uid. Raise
+                        # LocalIndexerError so Task 10's short-circuit
+                        # prevents the SQLite delete (orphan-doc prevention).
+                        _tantivy_delete_ok = False
+                        raise LocalIndexerError(
+                            f"discard_run aborted: per-uid Tantivy delete failed at "
+                            f"uid={uid_row['uid']!r} — SQLite rows preserved to prevent "
+                            f"orphaned-docs state. Use 'Reset My Library' if the index "
+                            f"is corrupt."
+                        ) from _per_uid_exc
             _del_writer.commit()
+            _tantivy_delete_ok = True
+        except LocalIndexerError:
+            # Re-raise without converting — the per-uid fail-loud path above
+            # already set _tantivy_delete_ok = False and the outer wrapper
+            # expects this signal.
+            raise
         except Exception:
-            logger.exception("Phase 97 LD-7: delete_documents/commit failed for run %s", run_id)
+            logger.exception(
+                "Phase 97 LD-7: delete_documents/commit failed for run %s", run_id
+            )
+            _tantivy_delete_ok = False
 
         # --- Step 3: single SQLite transaction for all related row deletions ---
         # Collect affected filepaths first so we can refresh counters after.

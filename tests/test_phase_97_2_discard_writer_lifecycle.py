@@ -1,15 +1,21 @@
 # -*- coding: utf-8 -*-
 """Phase 97.2 R97.2-C + R97.2-G — discard_run writer lifecycle.
 
-(a) On Phase 95 schema (no scan_run_id field) discard_run uses the schema-
-    introspection branch to fall back to per-uid deletion via
-    SELECT uid FROM local_pages JOIN processed_files.
+(a) On Phase 95 schema (no scan_run_id field) discard_run falls back to
+    per-uid deletion via SELECT uid FROM local_pages JOIN processed_files.
+    PATTERNS.md authorizes a try/except ValueError PROBE pattern because
+    tantivy-py 0.25.1's Schema does NOT expose field_names() —
+    delete_documents("scan_run_id", run_id) raises ValueError("Field
+    'scan_run_id' is not defined") on Phase 95, and the implementation
+    catches that to trigger the per-uid loop.
 (b) After step 2 commit/except, _del_writer is explicitly nulled + gc.collect()
     before step 5 reopens self._writer.
 
 REVISED per REVIEWS.md Codex HIGH #2 + MEDIUM: the Phase 95 fallback test must
-exercise the schema-introspection branch (`if "scan_run_id" in field_names:`)
-deterministically, AND must spy on the per-uid loop to confirm it executes.
+exercise the probe-fallback branch deterministically AND must spy on the
+per-uid loop to confirm it executes (originally drafted as schema-introspection
+but switched to probe-based when tantivy-py 0.25.1's Schema was confirmed to
+lack field_names()).
 """
 import gc
 import os
@@ -27,11 +33,19 @@ from tests.test_scan_run_id import (  # noqa: E402
 # ----- Wrapper-seam shims (REVIEWS Codex MEDIUM — readonly Rust extension) -----
 
 class _DelWriterShim:
-    """Proxy around a real IndexWriter. Delegates all methods; counts the
-    delete_documents calls so the test can verify the per-uid loop executed.
-    Use when monkeypatch.setattr on the writer raises AttributeError: readonly
-    attribute (newer tantivy-py exposes delete_documents as a readonly Rust
-    extension method).
+    """Proxy around a real IndexWriter. Simulates the Phase 95 schema signal —
+    delete_documents("scan_run_id", ...) raises a ValueError that contains
+    "scan_run_id" in its message (matching the actual tantivy "Field
+    'scan_run_id' is not defined" error). All other field deletes are
+    delegated to the real writer (and counted for the per-uid spy).
+
+    NOTE (post-Task-7 implementation reality): tantivy-py 0.25.1's
+    tantivy.Schema does NOT expose field_names() / get_field_names(), so the
+    Phase 95 schema-detection in discard_run uses the PATTERNS.md-authorized
+    try/except ValueError PROBE pattern (try delete_documents on the field
+    name first; if it raises with "scan_run_id" in the message, fall back to
+    per-uid). This shim makes the probe deterministic: scan_run_id → raise,
+    unique_id → delegate-and-count.
     """
 
     def __init__(self, real):
@@ -40,6 +54,11 @@ class _DelWriterShim:
 
     def delete_documents(self, field, value):
         self.delete_calls.append((field, value))
+        if field == "scan_run_id":
+            # Simulate Phase 95 schema signal — matches PATTERNS.md fallback
+            # contract (any ValueError whose message contains "scan_run_id"
+            # triggers the per-uid path).
+            raise ValueError("Field 'scan_run_id' is not defined")
         return self._real.delete_documents(field, value)
 
     def commit(self):
@@ -52,22 +71,10 @@ class _DelWriterShim:
         return self._real.wait_merging_threads()
 
 
-class _SchemaShim:
-    """Proxy around a real Schema. Overrides field_names() to omit scan_run_id,
-    simulating a Phase 95 index. Use when monkeypatch.setattr on the real Rust
-    Schema object raises AttributeError: readonly attribute.
-    """
-
-    def __init__(self, real):
-        self._real = real
-
-    def field_names(self):
-        return [f for f in self._real.field_names() if f != "scan_run_id"]
-
-
 class _IndexShim:
-    """Proxy around a real Index. Returns a _SchemaShim from .schema and a
-    _DelWriterShim from .writer().
+    """Proxy around a real Index. Returns a _DelWriterShim from .writer() so
+    that the post-Task-7 probe-based Phase-95 fallback in discard_run
+    deterministically takes the per-uid branch.
 
     REVIEWS Rev-2 HIGH #2: discard_run's step-5 reopen calls .writer() AGAIN
     after step-2's per-uid loop. A naive `self.last_del_writer = ...` would
@@ -86,7 +93,10 @@ class _IndexShim:
 
     @property
     def schema(self):
-        return _SchemaShim(self._real.schema)
+        # Defer to the real schema. The probe-based fallback in discard_run
+        # does NOT call schema.field_names() (which tantivy-py 0.25.1 lacks);
+        # it relies on _DelWriterShim raising a ValueError instead.
+        return self._real.schema
 
     def writer(self, **kwargs):
         real_writer = self._real.writer(**kwargs)
@@ -117,12 +127,16 @@ class _IndexShim:
 # ----- Tests -----
 
 def test_discard_run_fallback_on_phase_95_schema(tmp_path):
-    """Case (a) — REVIEWS.md Codex HIGH #2: deterministic schema-introspection branch.
+    """Case (a) — REVIEWS.md Codex HIGH #2: deterministic Phase 95 fallback exercised.
 
-    Patches the index via _IndexShim so `index.schema.field_names()` returns a
-    list WITHOUT 'scan_run_id'. discard_run's `if "scan_run_id" in field_names:`
-    check enters the per-uid loop deterministically (not via try/except).
-    Spies on the per-uid loop to confirm it executed.
+    Patches the index's .writer() to return a _DelWriterShim whose
+    delete_documents("scan_run_id", ...) raises a ValueError matching the
+    actual tantivy "Field 'scan_run_id' is not defined" signal. This forces
+    the post-Task-7 probe-based fallback (PATTERNS.md try/except ValueError
+    path — used because tantivy-py 0.25.1's tantivy.Schema lacks
+    field_names() / get_field_names()) to enter the per-uid loop
+    deterministically. Spies on the per-uid loop via all_delete_calls to
+    confirm it executed.
     """
     indexer = _make_indexer(tmp_path)
     try:
@@ -142,22 +156,23 @@ def test_discard_run_fallback_on_phase_95_schema(tmp_path):
         indexer._close_internal_writer_index()
         gc.collect()
 
-        # Re-open via shim so schema.field_names() omits "scan_run_id".
+        # Re-open via shim so .writer() returns a _DelWriterShim that simulates
+        # the Phase 95 "scan_run_id field not defined" signal. Leave
+        # indexer._writer = None so discard_run's step 2 is the FIRST writer
+        # acquisition on this shim (otherwise pre-acquiring here would hold
+        # the lock and discard_run's step-2 writer() call would LockBusy).
         import tantivy
         from shared.local_indexer import build_local_schema
         real_index = tantivy.Index(build_local_schema(), path=indexer._index_dir)
         shim = _IndexShim(real_index)
         indexer._index = shim
-        # Re-acquire the indexer's working writer via the shim
-        indexer._writer = shim.writer(heap_size=15_000_000)
+        # NOTE: discard_run step 1 calls self._writer.rollback() iff
+        # self._writer is not None. Leaving it None skips that path.
 
-        # Sanity-check the shim is doing its job
-        assert "scan_run_id" not in shim.schema.field_names(), (
-            "shim must hide scan_run_id from field_names()"
-        )
-
-        # Call discard_run — POST-FIX (R97.2-C): per-uid fallback enters via
-        # schema-introspection branch.
+        # Call discard_run — POST-FIX (R97.2-C): try delete_documents on
+        # "scan_run_id" -> _DelWriterShim raises ValueError("Field
+        # 'scan_run_id' is not defined") -> probe-based fallback enters the
+        # per-uid loop.
         indexer.discard_run("run_b")
 
         # Per-uid spy assertion (REVIEWS Codex HIGH #2 + Rev-2 HIGH #2):
