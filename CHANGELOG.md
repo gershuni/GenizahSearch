@@ -6,6 +6,98 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Phase 97.2 — LOCAL Recovery Cascade Fix + Reset My Library (internal; 2026-05-26)
+
+Internal closeout — not yet a user-facing release. Bundles the 97.1 MAX_PATH +
+non-blocking cancel hotfix (commit `2e1b846e`, 2026-05-25) with the 97.2 8-bug
+recovery cascade fix and the new "Reset My Library" / "אפס ספריה שלי" toolbar
+action in the desktop My Library tab.
+
+**Trigger:** 2026-05-26 cascade on the first post-97.1 run. User stopped a scan
+of a 100K-file Dropbox folder mid-run, restarted the app, clicked "Remove
+folder" — console emitted `Schema error -> LockBusy x3 -> 'Field scan_run_id is
+not defined' -> 'NoneType has no delete_documents'`. Codex critique identified
+the missing `.schema_version` marker check (Bug 6 / R97.2-F) as the actual root
+cause: Phase 95 installs have `meta.json` but no `.schema_version`, so the
+existing `actual_marker is not None and actual_marker != expected_marker` guard
+failed to trip the rebuild path on upgrade.
+
+**8 fixes landed in `shared/local_indexer.py` + `genizah_core.py`:**
+- R97.2-F (Bug 6) — schema-marker absence triggers rebuild in BOTH files
+- R97.2-A (Bug A) — redundant `tantivy.Index(...)` reopen deleted at
+  `local_indexer.py:1147`; temp-indexer in `genizah_core.py:6878-6896` now
+  explicitly closes via `_close_internal_writer_index()` in `try/finally`
+- R97.2-B (Bug B) — explicit `fresh_writer = None; fresh_index = None;
+  gc.collect()` at `:2745-2748` replaces `del` (Windows: `del` is weak,
+  Rust drop is delayed, `os.rename` then races a live lock file)
+- R97.2-C (Bug C) — `discard_run` step 2 introspects schema for
+  `scan_run_id` field; on absence (Phase 95 schema) falls back to per-uid
+  `delete_documents("unique_id", uid)` loop joined from
+  `local_pages × processed_files WHERE scan_run_id=?`
+- R97.2-G (Bug C2) — explicit `_del_writer = None; gc.collect()` in
+  `discard_run` step 2 `finally:` before step 5 reopens `self._writer`
+- R97.2-H (Bug C3) — `discard_run` raises `LocalIndexerError` BEFORE the
+  SQLite delete transaction when Tantivy delete fails; prevents
+  orphaned-docs state (SQLite empty, Tantivy still has the rows)
+- R97.2-D (Bug D) — new `LocalIndexerError(RuntimeError)` exception class
+  + new `_ensure_writer()` helper (fail-loud: raises on schema mismatch
+  or LockBusy, NO silent retry past `__init__`'s 3-attempt loop); wired
+  at `_delete_file`, `remove_folder`, `_recover_pending_deletes` call
+  sites
+- R97.2-E (Reset My Library) — new
+  `LocalIndexer.reset_my_library(close_searcher_cb, reload_searcher_cb)`
+  7-step protocol (close handles -> 7 path-safety pre-checks (basenames
+  must equal `LocalIndex`/`LocalLabIndex`, parents match, not root, etc.;
+  raise `LocalIndexerError` before any filesystem mutation) -> rename-aside
+  LOCAL to `.reset-quarantine-<ts>` -> rename-aside LAB with **rollback of
+  LOCAL on failure** -> recreate empty dirs -> schedule deferred cleanup
+  via `pending_dir_cleanup` (Phase 97 R-02 infrastructure; falls back to
+  best-effort `shutil.rmtree(ignore_errors=True)` only if the SQLite INSERT
+  fails) -> `__init__` reinit triggers migration ladder -> reload searcher).
+  New toolbar button in `desktop/my_library_tab.py` with destructive red
+  styling, bilingual EN/HE strings, proactive active-scan guard
+  (`_update_reset_button_state()` toggles `setEnabled` + tooltip on worker
+  lifecycle signals), and a custom `QDialog` two-step typed confirm
+  (`RESET` / `אפס` both accepted regardless of `CURRENT_LANG`). Enabled-state
+  tooltip explicitly reassures that source files and the Genizah corpus
+  are preserved.
+
+**97.1 work bundled in this entry:**
+- MAX_PATH long-path prefix (commit `2e1b846e`) — Windows-only handling
+  of paths > 260 chars via the `\\\\?\\` prefix
+- Non-blocking cancel + per-file cancel check — addressed UI freeze and
+  `WinError 3` storm during cancel on large folders
+
+**Reset scope:** LOCAL_INDEX_DIR + LOCAL_LAB_INDEX_DIR only. pgp.db,
+fjms_enrichment.db, nli_crossref.db, libraries.csv, Genizah_Index/ are NEVER
+touched by Reset. Source files (user's own .txt/.docx/.pdf) are NEVER touched.
+
+**5 RED tests (each landed RED before its fix):**
+- `tests/test_phase_97_2_schema_marker_absence.py` (R97.2-F)
+- `tests/test_phase_97_2_writer_handle_leak.py` (R97.2-A + R97.2-B)
+- `tests/test_phase_97_2_discard_writer_lifecycle.py` (R97.2-C + R97.2-G)
+- `tests/test_phase_97_2_sqlite_vs_tantivy_consistency.py` (R97.2-H)
+- `tests/test_phase_97_2_reset_my_library_full_cycle.py` (R97.2-E)
+
+**Origin trace:**
+`.planning/phases/97.2-recovery-cascade-lockbusy/97.2-CODEX-CRITIQUE.md` +
+`97.2-CODEX-BRIEF.md`. CONTEXT D-02 adopted Codex's expanded 5->8 bug list.
+
+**Deferred (out of scope):**
+- Centralized `try_open_or_rebuild()` helper (Codex recommended; deferred
+  to a future refactor phase per CONTEXT D-01).
+- Defensive stale-lockfile cleanup (Codex recommended conservatively;
+  deferred per CONTEXT D-06 — Bug A fix removes the actual lock-leak
+  vector).
+
+**Verification:**
+- `pytest tests -k phase_97_2 -x` — all 5 new tests pass
+- `pytest tests/test_phase_97_invariants.py tests/test_scan_run_id.py -x` — no regression
+- `pytest tests/test_phase_87_no_raw_storage_access.py -x` — web multitenant invariant unaffected
+- `python -m ruff check .` — clean
+
+(desktop — LOCAL is desktop-only per Phase 95 invariant; web LIBRARY_CODES `[]` unaffected)
+
 ### Phase 98 — NLI Resilience (internal; 2026-05-25)
 
 Internal closeout — not yet a user-facing release.
