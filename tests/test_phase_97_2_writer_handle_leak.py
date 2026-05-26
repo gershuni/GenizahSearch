@@ -31,6 +31,17 @@ def test_rebuild_does_not_leak_writer_lock(tmp_path):
             "UPDATE processed_files SET status='committed' WHERE scan_run_id=?",
             ("run_x",),
         )
+        # Populate cached_text so rebuild_main_index_atomic can write a doc
+        # without needing to re-extract from source (the synthetic /fake path
+        # doesn't exist on disk). Use cached_text_codec='plain' so the bytes
+        # are decoded as UTF-8 (NOT decompressed via zstd). The uid in SQLite
+        # is "LOCAL_<sys_id>_P1" per _populate_sql_for_run, NOT "LOCAL_X_P1"
+        # which was the Tantivy-side uid we wrote via _add_doc_via_writer.
+        indexer._conn.execute(
+            "UPDATE local_pages SET cached_text=?, cached_text_codec='plain' "
+            "WHERE sys_id=?",
+            (b"hello", "970000000099999999"),
+        )
         indexer._conn.commit()
 
         indexer.rebuild_main_index_atomic(
