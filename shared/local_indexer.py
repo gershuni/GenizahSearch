@@ -1289,7 +1289,7 @@ class LocalIndexer:
             count += 1
         # Commit Tantivy
         try:
-            self._writer.commit()
+            self._ensure_writer().commit()
         except Exception as exc:
             logger.warning("remove_folder: Tantivy commit failed: %s", exc)
         # Delete folder row
@@ -1849,9 +1849,9 @@ class LocalIndexer:
             ).fetchall()
             for uid_row in uid_rows:
                 uid = uid_row["uid"]
-                self._writer.delete_documents("unique_id", uid)
+                self._ensure_writer().delete_documents("unique_id", uid)
             try:
-                self._writer.commit()
+                self._ensure_writer().commit()
             except Exception as exc:
                 logger.warning(
                     "_recover_pending_deletes: Tantivy commit failed for sys_id=%s: %s",
@@ -2436,9 +2436,9 @@ class LocalIndexer:
         ).fetchall()
         for uid_row in uid_rows:
             uid = uid_row["uid"]
-            self._writer.delete_documents("unique_id", uid)
+            self._ensure_writer().delete_documents("unique_id", uid)
         try:
-            self._writer.commit()
+            self._ensure_writer().commit()
         except Exception as exc:
             logger.warning(
                 "_delete_file: Tantivy commit failed for sys_id=%s: %s", sys_id, exc
@@ -2662,6 +2662,50 @@ class LocalIndexer:
         """Reopen _writer + _index after atomic swap so LocalIndexer can continue."""
         self._index = tantivy.Index(build_local_schema(), path=self._index_dir)
         self._writer = self._index.writer(heap_size=256 * 1024 * 1024)
+
+    def _ensure_writer(self):
+        """Phase 97.2 R97.2-D — fail-loud writer acquisition guard.
+
+        REVIEWS Codex HIGH #4: explicitly fail-loud-only. NO lazy reopen of
+        self._index when it is None. Reasoning: a silent reopen path here
+        would re-introduce the "log + continue + reopen" anti-pattern that
+        CONTEXT D-07 specifically prohibits ("fail-loud by design"). The
+        __init__'s 3-attempt retry loop owns the initial acquisition; this
+        helper is a STEADY-STATE guard, not a recovery path.
+
+        Returns the live self._writer or attempts a single acquisition.
+        Raises LocalIndexerError on:
+          - self._index is None (impossible if __init__ succeeded; if
+            observed, the indexer is in a corrupt state that only Reset My
+            Library / app restart can recover)
+          - schema marker mismatch (mid-session schema drift)
+          - LockBusy (after __init__'s 3-attempt loop already exhausted)
+        UI catches and offers Reset My Library CTA.
+        """
+        if self._writer is not None:
+            return self._writer
+        # REVIEWS Codex HIGH #4: fail-loud on missing index handle. Do NOT
+        # silently reopen — this is a steady-state guard, not a recovery
+        # path.
+        if self._index is None:
+            raise LocalIndexerError(
+                "LOCAL index handle is gone — restart the app or use Reset My Library"
+            )
+        # Defensive marker recheck: if schema drift snuck in mid-session,
+        # fail loud.
+        expected = _compute_schema_marker(build_local_schema)
+        actual = _read_schema_marker(self._index_dir)
+        if actual != expected:
+            raise LocalIndexerError(
+                "LOCAL index schema marker mismatch — Reset My Library required"
+            )
+        try:
+            self._writer = self._index.writer(heap_size=15_000_000)
+        except Exception as exc:
+            raise LocalIndexerError(
+                "Could not acquire writer lock — restart the app or use Reset My Library"
+            ) from exc
+        return self._writer
 
     def _reextract_one_page_or_skip(self, filepath: str, page_num: int) -> str:
         """Best-effort re-extract a single page from source file; return "" on failure."""
