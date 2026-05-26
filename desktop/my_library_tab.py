@@ -59,7 +59,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QColor
 
-from shared.local_indexer import LocalIndexer
+from shared.local_indexer import LocalIndexer, _SUPPORTED_EXTENSIONS
 from genizah_core import Config, tr, CURRENT_LANG
 
 logger = logging.getLogger(__name__)
@@ -592,61 +592,148 @@ class PrescanWorker(QThread):
 # ---------------------------------------------------------------------------
 
 class FolderWalkWorker(QThread):
-    """Phase 97 U-03 — filesystem walk off the UI thread.
+    """Phase 97 U-03 + Phase 97.3 R97.3-A — off-thread filesystem walk.
 
-    Emits batched (filepath, mtime_ns, size) records throttled to
-    BATCH_SIZE files OR BATCH_TIMEOUT seconds so the UI stays responsive.
+    Phase 97.3 (D-01 + D-02 + D-17):
+      - Emits 4-tuple (filepath, canonical, mtime_ns, size) + token int.
+      - Pre-filters by _SUPPORTED_EXTENSIONS imported from shared.local_indexer
+        (single source of truth — closes R97.3-N).
+      - Drops unsupported files BEFORE os.stat() and BEFORE _canonical_filepath()
+        so unsupported subtrees pay zero Path.resolve tax (D-14 acceptance).
+      - All three signals (batch_emitted, finished_signal, error_signal) carry
+        the token; UI slot drops payloads whose token != current widget token
+        (stale-worker guard — D-13 / D-17).
 
-    CRITICAL: NO QWidget mutation in this thread (T-97E-02 / AST guard
-    test_folder_walk_worker.py::test_no_widget_mutation pins this invariant).
-    Only pyqtSignal emissions — the UI-thread slot handles all widget updates.
+    CRITICAL: NO QWidget mutation in this thread (test_no_widget_mutation
+    AST guard pins this invariant). Only pyqtSignal emissions.
+
+    Per-file failure policy (D-16): supported-file os.stat / canonicalization
+    errors and inaccessible subdirs are caught and logged at WARNING; only
+    _cancel_requested aborts the walk.
     """
 
-    batch_emitted = pyqtSignal(list)      # list of (filepath, mtime_ns, size) tuples
-    finished_signal = pyqtSignal(int, int)  # total_files, total_bytes
-    error_signal = pyqtSignal(str)
+    # 4-tuple list + token int (D-01 + D-17)
+    batch_emitted = pyqtSignal(list, int)        # list of (filepath, canonical, mtime_ns, size); token
+    finished_signal = pyqtSignal(int, int, int)  # total_files, total_bytes, token
+    error_signal = pyqtSignal(str, int)          # message; token
 
     BATCH_SIZE = 100    # emit after this many files
     BATCH_TIMEOUT = 0.5  # or after this many seconds
 
-    def __init__(self, folder_paths: list) -> None:
+    def __init__(self, folder_paths: list, token: int = 0) -> None:
         super().__init__()
         self._folder_paths = folder_paths
         self._cancel_requested = False
+        self._token = int(token)
+
+    @property
+    def token(self) -> int:
+        """Generation token captured at construction (D-03 + D-17)."""
+        return self._token
 
     def cancel(self) -> None:
         """Request cooperative cancellation."""
         self._cancel_requested = True
 
     def run(self) -> None:
-        """Walk folders and emit batched file-metadata records.
+        """Walk folders and emit batched supported-file records.
 
         This method must NOT mutate any QWidget — it only emits signals.
-        The UI-thread slot connected to batch_emitted handles all widget updates.
         AST guard: test_folder_walk_worker.py::test_no_widget_mutation.
         """
         import os as _os
         import time as _time
+        # D-02: import canonicalizer lazily to keep test monkeypatching simple.
+        from shared.local_sys_id import _canonical_filepath
+
         batch: list = []
         last_emit = _time.monotonic()
         total_files = 0
         total_bytes = 0
+        token = self._token
+
+        # Codex Critique #3 MEDIUM fix — D-16 skip+log+continue policy must
+        # cover scandir errors during os.walk too, not just per-file stat /
+        # canonicalize errors. Without onerror=, os.walk silently swallows
+        # PermissionError / OSError on inaccessible subdirs.
+        def _walk_onerror(exc: OSError) -> None:
+            logger.warning(
+                "FolderWalkWorker: os.walk failed for %s: %s",
+                getattr(exc, "filename", "?"), exc,
+            )
+
+        # D-15 Rule 2 deviation — Windows junctions (FILE_ATTRIBUTE_REPARSE_POINT)
+        # are NOT detected by os.path.islink() on Python 3.11, so the literal
+        # `followlinks=False` keyword does not stop os.walk from recursing into
+        # them. We must explicitly prune reparse-point dirs from `dirs` inside
+        # the walk loop. POSIX symlinks ARE caught by followlinks=False as
+        # documented. This closes the must_haves invariant "Clicking a folder
+        # containing a Windows junction does NOT recurse into the junction
+        # target" which the plan's literal `followlinks=False` alone cannot
+        # satisfy on Windows.
+        _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+        def _is_reparse_point(path: str) -> bool:
+            try:
+                st = _os.stat(path, follow_symlinks=False)
+            except OSError:
+                return False
+            attrs = getattr(st, "st_file_attributes", 0)
+            return bool(attrs & _FILE_ATTRIBUTE_REPARSE_POINT)
+
         try:
             for folder in self._folder_paths:
                 if self._cancel_requested:
                     break
-                for root, dirs, files in _os.walk(folder, followlinks=False):
+                # D-15: followlinks=False prevents recursion into POSIX symlinks.
+                # D-16: onerror logs inaccessible subdirs at WARNING (don't abort).
+                for root, dirs, files in _os.walk(
+                    folder, followlinks=False, onerror=_walk_onerror,
+                ):
                     if self._cancel_requested:
                         break
+                    # D-15 — Prune Windows reparse-point (junction) dirs in place
+                    # so os.walk does not descend into them on the next iteration.
+                    # In-place mutation of `dirs` is the documented os.walk hook.
+                    pruned = [
+                        d for d in dirs
+                        if not _is_reparse_point(_os.path.join(root, d))
+                    ]
+                    if len(pruned) != len(dirs):
+                        for d in dirs:
+                            if d not in pruned:
+                                logger.warning(
+                                    "FolderWalkWorker: pruning reparse-point "
+                                    "(junction/symlink) dir %s",
+                                    _os.path.join(root, d),
+                                )
+                        dirs[:] = pruned
                     for name in files:
                         if self._cancel_requested:
                             break
+                        # D-02: extension pre-filter — DROP before stat/canonical.
+                        ext = _os.path.splitext(name)[1].lower()
+                        if ext not in _SUPPORTED_EXTENSIONS:
+                            continue
                         fp = _os.path.join(root, name)
                         try:
                             stat = _os.stat(fp)
-                        except OSError:
+                        except OSError as exc:
+                            # D-16: skip + log + continue
+                            logger.warning(
+                                "FolderWalkWorker: stat failed for %s: %s", fp, exc
+                            )
                             continue
-                        batch.append((fp, stat.st_mtime_ns, stat.st_size))
+                        try:
+                            canonical = _canonical_filepath(fp)
+                        except (OSError, ValueError) as exc:
+                            # D-16: skip + log + continue
+                            logger.warning(
+                                "FolderWalkWorker: canonicalize failed for %s: %s",
+                                fp, exc,
+                            )
+                            continue
+                        batch.append((fp, canonical, stat.st_mtime_ns, stat.st_size))
                         total_files += 1
                         total_bytes += stat.st_size
                         now = _time.monotonic()
@@ -654,15 +741,15 @@ class FolderWalkWorker(QThread):
                             len(batch) >= self.BATCH_SIZE
                             or (now - last_emit) >= self.BATCH_TIMEOUT
                         ):
-                            self.batch_emitted.emit(batch)
+                            self.batch_emitted.emit(batch, token)
                             batch = []
                             last_emit = now
             if batch:
-                self.batch_emitted.emit(batch)
-            self.finished_signal.emit(total_files, total_bytes)
+                self.batch_emitted.emit(batch, token)
+            self.finished_signal.emit(total_files, total_bytes, token)
         except Exception as exc:  # noqa: BLE001
             logger.exception("FolderWalkWorker: unhandled error")
-            self.error_signal.emit(str(exc))
+            self.error_signal.emit(str(exc), token)
 
 
 # ---------------------------------------------------------------------------
