@@ -171,3 +171,35 @@ Items intentionally not implemented in Phase 97 per CONTEXT `<deferred>` section
 
 _Verified: 2026-05-25T18:00:00Z_
 _Verifier: Claude (gsd-verifier)_
+
+---
+
+## 2026-05-26 Hotfix Note — Phase 97.1 + Phase 97.2 Cascade Closure
+
+Phase 97 verification completed on its own date with a known set of P0 cascade
+items deferred. Two follow-up phases retroactively closed those items:
+
+### Phase 97.1 (commit `2e1b846e`, 2026-05-25)
+- MAX_PATH long-path prefix (`\\\\?\\` on Windows for paths > 260 chars)
+- Non-blocking cancel + per-file cancel check (resolves UI freeze + `WinError 3`
+  storm during cancel on large folders)
+
+### Phase 97.2 (2026-05-26)
+8-bug recovery cascade fix + new "Reset My Library" / "אפס ספריה שלי" toolbar
+action. See `.planning/phases/97.2-recovery-cascade-lockbusy/` for full
+documentation. Closes the Phase 97 P0 cascade items where startup +
+upgrade-from-Phase-95 + post-cancel discard combined to leave the LOCAL index
+in a permanently-broken state. New tests:
+
+- `tests/test_phase_97_2_schema_marker_absence.py` (R97.2-F — Phase 95
+  upgrade trigger; the literal root cause)
+- `tests/test_phase_97_2_writer_handle_leak.py` (R97.2-A + R97.2-B)
+- `tests/test_phase_97_2_discard_writer_lifecycle.py` (R97.2-C + R97.2-G)
+- `tests/test_phase_97_2_sqlite_vs_tantivy_consistency.py` (R97.2-H)
+- `tests/test_phase_97_2_reset_my_library_full_cycle.py` (R97.2-E)
+
+**Phase 97 verification status (post-97.2):** the P0 cascade items originally
+flagged for follow-up are now closed retroactively. Phase 97 invariants
+(`tests/test_phase_97_invariants.py`, `tests/test_scan_run_id.py`) remain
+green. Phase 87 web multitenant invariant
+(`tests/test_phase_87_no_raw_storage_access.py`) remains green.
