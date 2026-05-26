@@ -3251,6 +3251,12 @@ TRANSLATIONS = {
     # Phase 96 D-F1 — opt-out tree widget UI strings
     "File status & opt-outs:": "סטטוס קבצים ואפשרויות ביטול:",
     "Folder contents": "תכולת תיקייה",
+    # Phase 97.2 R97.2-E — Reset My Library bilingual strings (registered
+    # for tr() callers; the confirm dialog body uses inline EN/HE branching
+    # per CURRENT_LANG since the QLineEdit accepts both literal tokens).
+    "Reset My Library": "אפס ספריה שלי",
+    "Stop or resolve the active scan first": "עצור או פתור את הסריקה הפעילה תחילה",
+    "Delete all LOCAL index data and start fresh": "מחק את כל המידע של ספריה שלי והתחל מחדש",
 }
 
 # Hebrew library display names (keyed by library_code)
