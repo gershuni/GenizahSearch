@@ -705,6 +705,12 @@ class MyLibraryTab(QWidget):
         # QSettings for non-portable UI prefs only (D-15)
         self._settings = QSettings("Dicta", "GenizahSearchPro")
 
+        # Phase 97.3 R97.3-D (D-09): one-shot flag — set by _show_recovery_modal
+        # Skip branch, read-and-cleared by _auto_rescan_on_startup on first call.
+        # Initialised here BEFORE _build_ui / _init_indexer / recovery probe so
+        # the attribute always exists even on init failure paths.
+        self._skip_startup_rescan_once: bool = False
+
         # Build UI first (so widgets exist before _init_indexer may log)
         self._build_ui()
 
@@ -1069,6 +1075,18 @@ class MyLibraryTab(QWidget):
                 self._indexer._end_scan_run(run_id, "canceled")
             except Exception as exc:  # noqa: BLE001
                 logger.warning("_show_recovery_modal: _end_scan_run(skip) failed: %s", exc)
+            # Phase 97.3 R97.3-D (D-09): suppress same-launch auto-rescan.
+            self._skip_startup_rescan_once = True
+            # Phase 97.3 R97.3-D (D-08): bilingual auto-fading status-bar message (5s).
+            try:
+                if self._parent_window is not None and hasattr(self._parent_window, "statusBar"):
+                    self._parent_window.statusBar().showMessage(
+                        "Recovery skipped. Use Refresh to rescan. / "
+                        "ההתאוששות דולגה. לחץ Refresh לסריקה מחדש.",
+                        5000,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Phase 97.3 D-08 status message failed: %s", exc)
         else:
             # Resume — full resume logic deferred; mark completed so gate lifts.
             try:
@@ -1096,7 +1114,19 @@ class MyLibraryTab(QWidget):
         super().closeEvent(event)
 
     def _auto_rescan_on_startup(self) -> None:
-        """D-25: silent background rescan; non-modal toast on completion."""
+        """D-25: silent background rescan; non-modal toast on completion.
+
+        Phase 97.3 R97.3-D (D-09): if the user clicked Skip on the recovery
+        modal earlier in this constructor sequence, the one-shot
+        _skip_startup_rescan_once flag will be True. Consume the flag (so a
+        subsequent manual Refresh works normally) and return early. The D-08
+        status message was already surfaced by the Skip branch — we do not
+        repeat it here.
+        """
+        # Phase 97.3 R97.3-D (D-09): consume one-shot flag.
+        if getattr(self, "_skip_startup_rescan_once", False):
+            self._skip_startup_rescan_once = False
+            return
         if self._indexer is None:
             return
         # Only rescan if there are registered folders
