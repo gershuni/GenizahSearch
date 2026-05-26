@@ -381,11 +381,21 @@ Note: Phase 97.1 was the inline `/gsd-fast` hotfix (commit `2e1b846e`) for the f
 
 **Depends on:** Phase 97.2 (shipped 2026-05-26, 25 commits, all 8/8 R97.2-* requirements MET).
 
-**Plans:** TBD (spec → discuss → plan)
+**Plans:** 4 plans planned (0/4 complete; execute via /gsd-execute-phase 97.3)
+
+Plans:
+- [ ] 97.3-01-reset-guard-and-mupdf-suppression-PLAN.md — Wave 1: R97.3-B (reset-guard simplification per D-10) + R97.3-C (MuPDF stderr suppression per D-11)
+- [ ] 97.3-02-skip-no-auto-rescan-PLAN.md — Wave 1: R97.3-D (one-shot _skip_startup_rescan_once flag + bilingual status-bar message per D-08 + D-09)
+- [ ] 97.3-03-tree-worker-refactor-PLAN.md — Wave 2: R97.3-A + R97.3-E + R97.3-N (workerized tree population via FolderWalkWorker 4-tuple+token+pre-filter per D-01..D-05+D-12+D-16..D-22; status_updated signal + indeterminate progress bar per D-06+D-07+D-21; single source of truth for supported extensions per D-02)
+- [ ] 97.3-04-docs-closeout-PLAN.md — Wave 3: CHANGELOG [Unreleased] entry + CLAUDE.md Recently Changed one-liner + docs/OPEN_ISSUES.md status flips + ROADMAP self-update + STATE.md timestamp; no version bump
+
+**Wave structure:** 1 (01 [reset guard + mupdf]) → 2 (02 [skip flag]) → 3 (03 [tree refactor + cache + status + extensions]) → 4 (04 [docs closeout]). Plans 01/02/03 all touch desktop/my_library_tab.py so they are serialized; wave numbers reflect strict ordering not parallelism. Risk-locality intent preserved: Wave 1+2 are low-risk hotfixes mergeable independently, Wave 3 is the high-blast-radius tree refactor, Wave 4 is docs-only.
 
 **Source:**
 - `.planning/debug/post-97.2-uat-bugs-codex-brief.md` (orchestrator brief to Codex)
 - `.planning/debug/post-97.2-uat-bugs-codex-critique.md` (Codex full analysis + code recommendations)
+- `.planning/phases/97.3-my-library-uat-stability/97.3-CODEX-CRITIQUE.md` (Area 1 sub-decision critique — revised Option B)
+- `.planning/phases/97.3-my-library-uat-stability/97.3-CODEX-CRITIQUE-2.md` (full decision-set critique — D-11 broad-exception + D-12 cache ordering + D-16..D-22 + inverted wave order for risk locality)
 
 ### Phase 98: NLI Resilience — circuit-breaker and bounded-timeout hardening for all NLI/IIIF code paths
 
