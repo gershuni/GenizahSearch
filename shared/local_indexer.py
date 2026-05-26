@@ -3055,6 +3055,16 @@ class LocalIndexer:
                 "Phase 97 LD-7: delete_documents/commit failed for run %s", run_id
             )
             _tantivy_delete_ok = False
+        finally:
+            # R97.2-G (Bug C2): force Rust-side drop of _del_writer BEFORE
+            # step 5 reopens self._writer. Without this, step 5's
+            # _index.writer(...) call races against this same writer's
+            # still-held lock file -> LockBusy.
+            try:
+                _del_writer = None  # noqa: F841 (intentional explicit clearance)
+            except UnboundLocalError:
+                pass
+            gc.collect()
 
         # --- Step 3: single SQLite transaction for all related row deletions ---
         # Collect affected filepaths first so we can refresh counters after.
