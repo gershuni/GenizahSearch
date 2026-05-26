@@ -339,6 +339,28 @@ Plans:
 - [x] 97-05-PLAN.md — Wave E: phase-aware ETA + scan_run_id (mutated-rows-only per RESEARCH Issue #4) + FolderWalkWorker QThread + View All 500-cap incremental render
 - [x] 97-06-PLAN.md — Wave F: network drive semantics + file-change-during-index + supported-extension row policy + chunk_locator per format + bilingual EN+HE privacy disclosure + 4 invariant CI guards
 
+### Phase 97.2: Recovery Cascade — startup LockBusy + None-writer guards + Reset My Library (INSERTED)
+
+**Goal:** Fix 5 interacting Phase 97 bugs (A-E) that leave the LOCAL index in a permanently-broken state when atomic rebuild fails at startup, and provide a "Reset My Library" recovery UX. Triggered 2026-05-26: user quit mid-scan, restarted, hit cascade `Schema error` → `LockBusy ×3` → `Field 'scan_run_id' is not defined` → `'NoneType' object has no attribute 'delete_documents'`.
+
+**Requirements:**
+- R97.2-A — Remove redundant `tantivy.Index(schema, path=...)` reopen at `shared/local_indexer.py:1147` and `genizah_core.py:6890` (the rebuild's step 6 already reopened both `_index` and `_writer`; the second reopen leaks the writer lock).
+- R97.2-B — Ensure `.tantivy-writer.lock` is not carried into the live index_dir by `rebuild_main_index_atomic`'s os.rename (Windows-side handle retention after `del fresh_writer`).
+- R97.2-C — Schema-version guard in `discard_run` before `delete_documents("scan_run_id", ...)`: detect Phase 95 schema and fall back to per-uid deletion.
+- R97.2-D — `self._writer is None` guards (with lazy reopen) in `_delete_file`, `discard_run` step 2/5, `keep_run`, `_close_internal_writer_index`.
+- R97.2-E — Implement "Reset My Library" in MyLibraryTab Advanced (close handles → delete LocalIndex + LocalLabIndex + SQLite → recreate empty → reinitialize LocalIndexer). Bilingual EN+HE. Wire to the existing error-message references at `local_indexer.py:1152` and `:2766`.
+
+**Depends on:** Phase 97 (closed) + Phase 97.1 inline hotfix (commit `2e1b846e`, freeze + WinError 3 — distinct cascade tracked in `.planning/debug/phase-97-freeze-winerror-3.md`).
+
+**Plans:** TBD (2 waves, 3 plans suggested)
+
+Plans:
+- [ ] 97.2-01-PLAN.md — Wave 1: code fixes for bugs A-D in `shared/local_indexer.py` + `genizah_core.py`; RED tests first (stale-lockfile fixture, rebuild-then-reopen invariant, discard_run-on-pre-Phase-97-schema fixture, None-writer guards).
+- [ ] 97.2-02-PLAN.md — Wave 2a (parallel): "Reset My Library" UX in `desktop/my_library_tab.py` + `reset_my_library()` atomic teardown helper in `shared/local_indexer.py`. Bilingual confirm dialog.
+- [ ] 97.2-03-PLAN.md — Wave 2b (parallel): docs — CHANGELOG entry (combines 97.1 + 97.2), update `97-VERIFICATION.md` hotfix note, CLAUDE.md "Recently Changed", OPEN_ISSUES.md (add 97.2; bump P1 counts).
+
+Note: Phase 97.1 was the inline `/gsd-fast` hotfix (commit `2e1b846e`) for the freeze + WinError 3 storm. That hotfix was NOT registered as a tracked phase; 97.2 starts the formal decimal sequence.
+
 ### Phase 98: NLI Resilience — circuit-breaker and bounded-timeout hardening for all NLI/IIIF code paths
 
 **Goal:** Prevent any single NLI/IIIF upstream slowdown from hanging `genizah-web`. Bound the per-request blocking budget on every NLI-touching code path via (a) a shared circuit breaker (`shared/nli_circuit_breaker.py`) that short-circuits requests when NLI is degraded and (b) shorter env-configurable read timeouts. The 2026-05-25 production outage (7 minutes unresponsive, SIGTERM hung 90s, SIGKILL required) is the trigger and the regression test.

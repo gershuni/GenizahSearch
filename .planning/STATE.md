@@ -84,6 +84,7 @@ The full `gsd-tools.cjs audit-open` report at close included 96 items. The v7.12
 - Phase 96 added (2026-05-24): Completing My Library feature: add features and fix bugs
 - Phase 97 added (2026-05-25): More LOCAL features
 - Phase 98 added (2026-05-25): NLI Resilience — circuit-breaker and bounded-timeout hardening for all NLI/IIIF code paths
+- Phase 97.2 inserted after Phase 97 (2026-05-26, URGENT): Recovery cascade hotfix — fix 5 interacting Phase 97 bugs (redundant tantivy.Index reopen leaking writer lock; stale `.tantivy-writer.lock` carried through os.rename; `discard_run` field-name failure on stale Phase 95 schema; missing `self._writer is None` guards; "Reset My Library" UX never implemented despite being referenced in 2 error messages). Triggered by user repro on a 100K-file Dropbox tree quit mid-scan. Phase 97.1 was the prior inline `/gsd-fast` hotfix for the freeze + WinError 3 storm (commit `2e1b846e`) and was never registered as a tracked phase.
 
 ## Session Continuity
 
