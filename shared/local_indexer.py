@@ -247,6 +247,14 @@ class EncodingError(Exception):
     pass
 
 
+class LocalIndexerError(RuntimeError):
+    """Phase 97.2 R97.2-D / R97.2-H — raised when discard_run aborts due to
+    Tantivy failure, or when a writer cannot be acquired (schema mismatch /
+    LockBusy). UI catches and offers a Reset My Library CTA.
+    """
+    pass
+
+
 # ---------------------------------------------------------------------------
 # RTL helpers - DEAD CODE per D-02.
 # Ported VERBATIM from seewald_addition/genizah_make_index.py:67-105.
