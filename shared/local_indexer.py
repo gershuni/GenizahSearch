@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import datetime
 import errno
+import gc
 import hashlib
 import json
 import logging
@@ -1096,6 +1097,13 @@ class LocalIndexer:
         # Tantivy LOCAL side-index
         schema = build_local_schema()
         os.makedirs(index_dir, exist_ok=True)
+
+        # R97.2-A: pre-initialize _writer = None so the post-rebuild gate
+        # `if self._writer is None:` below can check it. rebuild_main_index_atomic
+        # may populate self._writer via _reopen_internal_writer_index() — in
+        # that case the gate skips the retry loop. Without this attribute
+        # initialization, the gate raises AttributeError on first __init__.
+        self._writer = None
 
         # Determine if this is a fresh dir (no meta.json = normal first-run),
         # a schema-mismatch (marker file present but hash changed), or a
@@ -2753,9 +2761,14 @@ class LocalIndexer:
 
             # --- Step 2: validate ---
             _validation_searcher = fresh_index.searcher()
-            del _validation_searcher
-            del fresh_writer
-            del fresh_index
+            # R97.2-B: explicit null + gc.collect() forces immediate Rust-side
+            # drop of writer + index BEFORE os.rename below. `del` is "weak" on
+            # Windows because Python GC may delay the Rust drop, causing
+            # os.rename to race against a still-held lock file.
+            _validation_searcher = None
+            fresh_writer = None
+            fresh_index = None
+            gc.collect()
 
         except Exception:
             shutil.rmtree(rebuild_dir, ignore_errors=True)
