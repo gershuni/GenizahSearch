@@ -6855,7 +6855,7 @@ class SearchEngine:
         # Check schema marker
         expected_marker = _compute_schema_marker(build_local_schema)
         actual_marker = _read_schema_marker(Config.LOCAL_INDEX_DIR)
-        schema_mismatch = (actual_marker is not None and actual_marker != expected_marker)
+        schema_mismatch = (actual_marker != expected_marker)
 
         try:
             schema = build_local_schema()

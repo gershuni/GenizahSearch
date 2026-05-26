@@ -1105,7 +1105,7 @@ class LocalIndexer:
         if _meta_exists:
             expected_marker = _compute_schema_marker(build_local_schema)
             actual_marker = _read_schema_marker(index_dir)
-            if actual_marker is not None and actual_marker != expected_marker:
+            if actual_marker != expected_marker:
                 _schema_mismatch = True
 
         if not _meta_exists:
