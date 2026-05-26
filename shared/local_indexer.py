@@ -1143,8 +1143,11 @@ class LocalIndexer:
                         close_searcher_cb=lambda: None,
                         reload_searcher_cb=lambda: None,
                     )
-                    # Reopen after rebuild
-                    self._index = tantivy.Index(build_local_schema(), path=index_dir)
+                    # R97.2-A: NO redundant tantivy.Index(...) reopen here.
+                    # rebuild_main_index_atomic already calls
+                    # _reopen_internal_writer_index() at :2799 which sets BOTH
+                    # self._index and self._writer. A second reopen would leak
+                    # the writer lock (LockBusy in the 2026-05-26 cascade).
                 except Exception as _rebuild_exc:
                     logger.error("LOCAL atomic rebuild failed: %r", _rebuild_exc)
                     raise RuntimeError(
@@ -1157,23 +1160,30 @@ class LocalIndexer:
         # is still exiting when the new process calls __init__).  Three retries
         # with exponential back-off (250 ms / 1 s / 2 s) cover the typical
         # process-exit window without blocking the UI for more than ~3 s.
-        _writer_retries = 3
-        _writer_delays = [0.25, 1.0, 2.0]
-        for _attempt in range(_writer_retries + 1):
-            try:
-                self._writer = self._index.writer(heap_size=15_000_000)
-                break
-            except Exception as _exc:  # noqa: BLE001
-                if _attempt < _writer_retries:
-                    logger.warning(
-                        "LocalIndexer: writer lock attempt %d/%d failed (%s); "
-                        "retrying in %.1fs",
-                        _attempt + 1, _writer_retries, _exc,
-                        _writer_delays[_attempt],
-                    )
-                    time.sleep(_writer_delays[_attempt])
-                else:
-                    raise
+        #
+        # R97.2-A: gate the retry loop on `self._writer is None` so it skips
+        # when rebuild_main_index_atomic already populated self._writer via
+        # _reopen_internal_writer_index(). Without the gate this loop would
+        # try to acquire a second writer on top of the rebuild's writer ->
+        # LockBusy (the literal LockBusy in the 2026-05-26 cascade).
+        if self._writer is None:
+            _writer_retries = 3
+            _writer_delays = [0.25, 1.0, 2.0]
+            for _attempt in range(_writer_retries + 1):
+                try:
+                    self._writer = self._index.writer(heap_size=15_000_000)
+                    break
+                except Exception as _exc:  # noqa: BLE001
+                    if _attempt < _writer_retries:
+                        logger.warning(
+                            "LocalIndexer: writer lock attempt %d/%d failed (%s); "
+                            "retrying in %.1fs",
+                            _attempt + 1, _writer_retries, _exc,
+                            _writer_delays[_attempt],
+                        )
+                        time.sleep(_writer_delays[_attempt])
+                    else:
+                        raise
 
         # Batch tracking for two-phase commit (D-21)
         self._pending_filepaths: list[str] = []

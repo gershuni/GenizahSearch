@@ -6881,11 +6881,22 @@ class SearchEngine:
                     lab_index_dir=Config.LOCAL_LAB_INDEX_DIR,
                     db_path=db_path,
                 )
-                indexer.rebuild_main_index_atomic(
-                    scan_run_id=_uuid.uuid4().hex,
-                    close_searcher_cb=self.close_local_searcher,
-                    reload_searcher_cb=lambda: None,  # reload below
-                )
+                try:
+                    indexer.rebuild_main_index_atomic(
+                        scan_run_id=_uuid.uuid4().hex,
+                        close_searcher_cb=self.close_local_searcher,
+                        reload_searcher_cb=lambda: None,  # reload below
+                    )
+                finally:
+                    # D-01: explicitly close temp indexer's writer + index
+                    # handles before opening the live searcher below. Without
+                    # this, the temp indexer's still-live writer holds the
+                    # lock and blocks any future writer acquisition on
+                    # LOCAL_INDEX_DIR.
+                    try:
+                        indexer._close_internal_writer_index()
+                    except Exception:
+                        LOGGER.exception("temp indexer close failed (continuing)")
                 schema2 = build_local_schema()
                 local_index2 = tantivy.Index(schema2, path=Config.LOCAL_INDEX_DIR)
                 self.local_index = local_index2
