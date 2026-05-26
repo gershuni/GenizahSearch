@@ -19,12 +19,18 @@ def _make_indexer_canonical(tmp_path):
     The Phase 97 _make_indexer in tests/test_scan_run_id.py uses 'idx'/'lab' basenames,
     which would fail Task 2's path-safety pre-check (REVIEWS Rev-2 HIGH #1).
     Do NOT change the Phase 97 helper — define a local one here.
+
+    Production places the SQLite DB INSIDE the LocalIndex dir (see
+    desktop/my_library_tab.py::_init_indexer at db_path = os.path.join(
+    Config.LOCAL_INDEX_DIR, "local_index.sqlite3")). The reset_my_library
+    rename-aside carries the DB with it. We mirror that here so the test
+    exercises the production teardown path.
     """
     idx_dir = str(tmp_path / "LocalIndex")
     lab_dir = str(tmp_path / "LocalLabIndex")
-    db_path = str(tmp_path / "db.sqlite3")
     os.makedirs(idx_dir)
     os.makedirs(lab_dir)
+    db_path = str(os.path.join(idx_dir, "local_index.sqlite3"))
     return LocalIndexer(idx_dir, lab_dir, db_path)
 
 

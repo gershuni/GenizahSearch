@@ -3196,6 +3196,239 @@ class LocalIndexer:
         logger.info("Phase 97 U-02 keep_run scan_run_id=%s preserved", run_id)
 
     # ------------------------------------------------------------------
+    # Phase 97.2 R97.2-E — Reset My Library (atomic LOCAL teardown)
+    # ------------------------------------------------------------------
+
+    def reset_my_library(
+        self,
+        close_searcher_cb,
+        reload_searcher_cb,
+    ) -> dict:
+        """Phase 97.2 R97.2-E — atomic LOCAL teardown + recreate + migrate.
+
+        7-step protocol (REVIEWS update — added Step 1.5 path-safety per Codex HIGH #5;
+        Step 2 LAB rename failure rolls back LOCAL per Codex HIGH #6; Step 6 defers
+        rmtree to post-reinit `pending_dir_cleanup` table per Codex MEDIUM):
+          1.   Close all live handles (engine searcher + writer/index + SQLite conn).
+          1.5. PATH-SAFETY pre-checks (REVIEWS Codex HIGH #5) — abort BEFORE any
+               filesystem mutation if any check fails.
+          2.   Atomic rename LOCAL + LAB -> .reset-quarantine-<ts>. LAB rename
+               failure ROLLS BACK the LOCAL rename (Codex HIGH #6).
+          3.   Recreate empty directories.
+          4.   (Reserved — cleanup is scheduled in Step 6 after reinit.)
+          5.   Reinit via __init__ — triggers migration ladder on fresh DB.
+          6.   Schedule quarantine cleanup via `pending_dir_cleanup` (deferred
+               GC at next startup) OR best-effort `shutil.rmtree` if the table
+               INSERT fails (REVIEWS Codex MEDIUM — deferred path preferred).
+          7.   Reload searcher.
+
+        Args:
+          close_searcher_cb: callable() that releases SearchEngine's searcher
+            handles (typically engine.close_local_searcher).
+          reload_searcher_cb: callable() that re-opens SearchEngine's searcher
+            on the now-empty LOCAL index (typically engine.reload_local_indexes).
+
+        Returns dict {quarantined: [paths], reinit_ok: bool, cleanup_strategy: str}.
+
+        Raises LocalIndexerError on path-safety failure, irrecoverable rename
+        failure, or LAB-rename-rollback failure.
+        """
+        import shutil
+        import time as _time
+        ts = int(_time.time())
+        counts: dict = {
+            "quarantined": [],
+            "reinit_ok": False,
+            "cleanup_strategy": "deferred",
+        }
+
+        # --- Step 1: close all live handles ---
+        try:
+            close_searcher_cb()
+        except Exception:
+            logger.exception(
+                "reset_my_library: close_searcher_cb failed (continuing)"
+            )
+        self._close_internal_writer_index()
+        try:
+            conn = getattr(self._thread_local, "_conn", None)
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    logger.exception(
+                        "reset_my_library: SQLite close failed (continuing)"
+                    )
+                self._thread_local._conn = None
+        except Exception:
+            logger.exception(
+                "reset_my_library: thread_local access failed (continuing)"
+            )
+        # Gemini LOW: gc.collect() right after SQLite close so the file handle
+        # is released before the Step 2 rename-aside.
+        gc.collect()
+
+        # --- Step 1.5: REVIEWS Codex HIGH #5 — path-safety pre-checks ---
+        # Resolve to absolute paths and verify ALL invariants BEFORE any
+        # filesystem mutation. If any check fails, raise BEFORE renaming.
+        local_dir = os.path.abspath(self._index_dir)
+        lab_dir = os.path.abspath(self._lab_index_dir)
+
+        def _path_check(cond: bool, reason: str) -> None:
+            if not cond:
+                raise LocalIndexerError(
+                    f"reset_my_library: path safety check failed: {reason}"
+                )
+
+        _path_check(
+            local_dir != lab_dir,
+            f"local == lab ({local_dir!r})",
+        )
+        _path_check(
+            local_dir != os.path.abspath(os.sep),
+            f"local is filesystem root ({local_dir!r})",
+        )
+        _path_check(
+            not (len(local_dir) <= 3 and local_dir.endswith((":\\", ":/", ":"))),
+            f"local is a drive root ({local_dir!r})",
+        )
+        _path_check(
+            os.path.basename(local_dir) == "LocalIndex",
+            f"local basename must be 'LocalIndex' (got {os.path.basename(local_dir)!r})",
+        )
+        _path_check(
+            os.path.basename(lab_dir) == "LocalLabIndex",
+            f"lab basename must be 'LocalLabIndex' (got {os.path.basename(lab_dir)!r})",
+        )
+        _path_check(
+            os.path.exists(local_dir),
+            f"local does not exist ({local_dir!r}) — unexpected; reset expects an index dir",
+        )
+        _path_check(
+            os.path.dirname(local_dir) == os.path.dirname(lab_dir),
+            f"local and lab parents differ (cannot atomic-rename across volumes): "
+            f"{os.path.dirname(local_dir)!r} vs {os.path.dirname(lab_dir)!r}",
+        )
+
+        # --- Step 2: atomic rename aside (REVIEWS Codex HIGH #6 — LAB rollback) ---
+        quarantine_main = f"{local_dir}.reset-quarantine-{ts}"
+        quarantine_lab = f"{lab_dir}.reset-quarantine-{ts}"
+
+        # Step 2a: rename LOCAL. Fatal on failure.
+        local_renamed = False
+        try:
+            self._retry_windows_rename(local_dir, quarantine_main)
+            counts["quarantined"].append(quarantine_main)
+            local_renamed = True
+        except OSError as exc:
+            logger.exception("reset_my_library: LOCAL rename failed")
+            raise LocalIndexerError(
+                f"Reset failed: could not move LOCAL index aside ({exc}). "
+                "Restart the app and retry."
+            ) from exc
+
+        # Step 2b: rename LAB ONLY IF IT EXISTS. On failure, ROLL BACK LOCAL rename.
+        lab_exists = os.path.isdir(lab_dir)
+        if lab_exists:
+            try:
+                self._retry_windows_rename(lab_dir, quarantine_lab)
+                counts["quarantined"].append(quarantine_lab)
+            except OSError as exc:
+                # REVIEWS Codex HIGH #6: LAB rename failed -> roll back the LOCAL
+                # rename to preserve the original state, then raise.
+                logger.exception(
+                    "reset_my_library: LAB rename failed — rolling back LOCAL rename"
+                )
+                if local_renamed:
+                    try:
+                        self._retry_windows_rename(quarantine_main, local_dir)
+                        counts["quarantined"].remove(quarantine_main)
+                    except OSError:
+                        # Both ways failed — abort hard. User must restart the app
+                        # to recover from this state.
+                        logger.exception(
+                            "reset_my_library: LOCAL rollback ALSO failed — "
+                            "filesystem is in an inconsistent state"
+                        )
+                        raise LocalIndexerError(
+                            "Reset failed catastrophically: LAB rename failed AND "
+                            "LOCAL rollback failed. LOCAL is now at "
+                            f"{quarantine_main!r}. Restart the app immediately."
+                        ) from exc
+                raise LocalIndexerError(
+                    f"Reset failed: LAB rename failed ({exc}); LOCAL was rolled "
+                    "back. Try again or restart the app."
+                ) from exc
+        # else: LAB did not exist — skip Step 2b silently.
+
+        # --- Step 3: recreate empty dirs ---
+        os.makedirs(local_dir, exist_ok=True)
+        os.makedirs(lab_dir, exist_ok=True)
+
+        # --- Step 4: (reserved) cleanup scheduling happens in Step 6 after reinit ---
+        # REVIEWS Codex MEDIUM: defer rmtree off the UI thread by using the
+        # existing pending_dir_cleanup table (the next normal startup performs
+        # the GC). The reinit in Step 5 creates a fresh SQLite where the rows
+        # can be recorded — we MUST reinit before scheduling.
+
+        # --- Step 5: reinit via __init__ (triggers _run_migrations ladder) ---
+        self.__init__(self._index_dir, self._lab_index_dir, self._db_path)
+        counts["reinit_ok"] = True
+
+        # --- Step 6: schedule quarantine cleanup ---
+        # Prefer pending_dir_cleanup table (Phase 97 R-02 infrastructure).
+        # Fall back to best-effort shutil.rmtree if the table is absent or
+        # the INSERT fails. NOTE: the real table schema is
+        # (path TEXT PRIMARY KEY, kind TEXT NOT NULL, created_at REAL); we
+        # tag reset rows with kind='reset_quarantine' so a future GC pass
+        # can distinguish them from 'rebuild_old' rows.
+        scheduled = False
+        try:
+            for qdir in list(counts["quarantined"]):
+                # Real schema: (path, kind, created_at). The plan snippet
+                # showed (path, scheduled_at) — adapted to real table.
+                self._thread_local._conn.execute(
+                    "INSERT OR REPLACE INTO pending_dir_cleanup "
+                    "(path, kind, created_at) "
+                    "VALUES (?, 'reset_quarantine', ?)",
+                    (qdir, float(ts)),
+                )
+            self._thread_local._conn.commit()
+            scheduled = True
+            counts["cleanup_strategy"] = "deferred-via-pending-dir-cleanup"
+        except Exception:
+            logger.exception(
+                "reset_my_library: could not schedule quarantine cleanup via "
+                "pending_dir_cleanup — falling back to immediate shutil.rmtree"
+            )
+
+        if not scheduled:
+            # Fallback path — REVIEWS Codex MEDIUM acknowledged this is slow on
+            # huge libraries; the UI layer SHOULD run this fallback in a
+            # QThread, NOT on the UI thread. The deferred path above is the
+            # preferred branch; this only executes if pending_dir_cleanup is
+            # missing or the INSERT failed for another reason.
+            counts["cleanup_strategy"] = "immediate-rmtree-fallback"
+            for qdir in counts["quarantined"]:
+                try:
+                    shutil.rmtree(qdir, ignore_errors=True)
+                except Exception:
+                    logger.exception("reset_my_library: rmtree %s failed", qdir)
+
+        # --- Step 7: reload searcher ---
+        try:
+            reload_searcher_cb()
+        except Exception:
+            logger.exception(
+                "reset_my_library: reload_searcher_cb failed (continuing)"
+            )
+
+        logger.info(
+            "Phase 97.2 R97.2-E reset_my_library complete: %s", counts
+        )
+        return counts
+
+    # ------------------------------------------------------------------
     # LOCAL LAB side-index builder (D-09 + D-38 + HIGH-4 + W5 Option C)
     # ------------------------------------------------------------------
 
