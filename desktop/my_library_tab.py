@@ -1315,23 +1315,25 @@ class MyLibraryTab(QWidget):
     # ------------------------------------------------------------------
 
     def _update_reset_button_state(self) -> None:
-        """Phase 97.2 REVIEWS Codex MEDIUM — proactively enable/disable Reset.
+        """Phase 97.3 R97.3-B (D-10) — single-condition guard.
+
+        Enabled WHEN no worker is actively running. Disabled WHILE a worker
+        runs. The start_recovery_probe() check was REMOVED — orphan
+        scan_runs rows are precisely what Reset is supposed to clean up, and
+        LocalIndexer.reset_my_library()'s own 7-step protocol (path-safety
+        pre-check + handle-close + retry-rename + LAB-rollback + fail-loud +
+        deferred-GC) is the load-bearing safety. The UI guard does not
+        duplicate it.
 
         Called from:
           - constructor end (after recovery-probe runs)
           - _start_worker (scan begins)
           - _on_worker_finished / _on_worker_error (scan ends)
-
-        Conditions for ENABLED:
-          (a) self._worker is None OR not self._worker.isRunning()
-          AND
-          (b) self._indexer.start_recovery_probe() returns empty list
-              (no orphan scan_runs rows with status='running')
         """
         if not hasattr(self, "_btn_reset") or self._btn_reset is None:
             return
-        worker_idle = self._worker is None or not self._worker.isRunning()
-        if not worker_idle:
+        worker_running = self._worker is not None and self._worker.isRunning()
+        if worker_running:
             self._btn_reset.setEnabled(False)
             self._btn_reset.setToolTip(
                 tr("Stop or resolve the active scan first")
@@ -1339,24 +1341,8 @@ class MyLibraryTab(QWidget):
                 + "עצור או פתור את הסריקה הפעילה תחילה"
             )
             return
-        # Worker is idle — check for orphan scan_runs.
-        running: list = []
-        if self._indexer is not None:
-            try:
-                running = self._indexer.start_recovery_probe() or []
-            except Exception:
-                # If probe fails, keep button disabled (conservative).
-                running = ["__probe_failed__"]
-        if running:
-            self._btn_reset.setEnabled(False)
-            self._btn_reset.setToolTip(
-                tr("Stop or resolve the active scan first")
-                + " / "
-                + "עצור או פתור את הסריקה הפעילה תחילה"
-            )
-            return
-        # All-clear: enable + reassuring tooltip (Gemini LOW — reassure that
-        # source files and Genizah corpus are preserved).
+        # Worker idle — enable with reassuring bilingual tooltip.
+        # Phase 97.2 invariant: source files and Genizah corpus are preserved.
         self._btn_reset.setEnabled(True)
         en_tip = (
             "Reset deletes LOCAL/LAB index data only. "

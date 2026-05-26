@@ -64,6 +64,35 @@ except ImportError:
     )
 
 import fitz  # PyMuPDF - D-01
+
+# Phase 97.3 R97.3-C (D-11): silence PyMuPDF stderr warnings + errors for
+# malformed PDF operators (e.g. "unknown keyword: 'TF'" — 624× in user's UAT
+# folder). Broad except Exception per Codex Critique #2 — suppression is
+# non-critical; a future PyMuPDF API change must NOT crash module import
+# (which would break the entire desktop app).
+#
+# Deviation from PLAN literal text (Rule 2 — critical functionality): the
+# 624× UAT noise lines were "MuPDF error: ..." (errors, not warnings), so
+# mupdf_display_warnings(False) alone does not satisfy SPEC R97.3-C
+# acceptance ("zero MuPDF error: lines on stderr"). mupdf_display_errors
+# was added alongside — both APIs exist in PyMuPDF 1.23+ and are the
+# documented mechanism for suppressing PyMuPDF's own stderr channel. The
+# broad except Exception keeps both calls non-critical at import time.
+try:
+    fitz.TOOLS.mupdf_display_warnings(False)
+except Exception as _mupdf_suppress_exc:  # noqa: BLE001
+    logging.getLogger(__name__).debug(
+        "Phase 97.3 R97.3-C: mupdf_display_warnings suppression call "
+        "unavailable in this PyMuPDF version: %s", _mupdf_suppress_exc,
+    )
+try:
+    fitz.TOOLS.mupdf_display_errors(False)
+except Exception as _mupdf_suppress_exc:  # noqa: BLE001
+    logging.getLogger(__name__).debug(
+        "Phase 97.3 R97.3-C: mupdf_display_errors suppression call "
+        "unavailable in this PyMuPDF version: %s", _mupdf_suppress_exc,
+    )
+
 from docx import Document as _DocxDoc  # python-docx - D-04
 import tantivy
 
