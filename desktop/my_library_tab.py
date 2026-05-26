@@ -1419,6 +1419,15 @@ class MyLibraryTab(QWidget):
         Replaces the old cooperative-cancel-only approach (D-24) with a discard/keep
         choice backed by discard_run() / keep_run() so the user can cleanly remove
         partial-run data (LD-7) or preserve it for future resume.
+
+        Phase 97.1: non-blocking cancel. The prior implementation called
+        ``self._worker.wait(5000)`` on the UI thread, freezing the window for up
+        to 5 s when the scan was mid-``os.walk`` of a 100K-file tree. Worse, it
+        then called ``discard_run`` unconditionally — racing the Tantivy writer
+        against the still-running scan thread. The new flow defers
+        discard/keep to the worker's ``finished_signal``, so by the time we
+        touch the writer the scan thread has exited.
+        Debug session: `.planning/debug/phase-97-freeze-winerror-3.md`.
         """
         if self._worker is None or not self._worker.isRunning():
             self._btn_cancel.setEnabled(False)
@@ -1453,28 +1462,77 @@ class MyLibraryTab(QWidget):
             # User cancelled the cancellation — leave worker running
             return
 
-        # Stop the worker
-        self._worker.cancel()
-        self._worker.wait(5000)
+        # Remember which post-cancel action the user picked; the deferred slot
+        # below will execute it after the worker emits finished_signal.
+        action = "discard" if clicked is btn_discard else "keep"
+        self._pending_cancel_action = (action, run_id)
         self._btn_cancel.setEnabled(False)
 
-        if self._indexer is not None and run_id:
-            if clicked is btn_discard:
-                try:
-                    self._indexer.discard_run(run_id)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("_on_cancel_clicked: discard_run failed: %s", exc)
-            else:
-                # Keep partial
-                try:
-                    self._indexer.keep_run(run_id)
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("_on_cancel_clicked: keep_run failed: %s", exc)
+        # Signal cooperative cancel into the scan loop and surface a
+        # non-modal "Stopping…" progress dialog so the user sees the app is
+        # still alive while the worker drains.
+        self._worker.cancel()
+        if CURRENT_LANG == "he":
+            label = "מבטל…"
+            title = "ביטול אינדוקס"
+        else:
+            label = "Stopping…"
+            title = "Cancel indexing"
+        stop_dlg = QProgressDialog(label, "", 0, 0, self)
+        stop_dlg.setWindowTitle(title)
+        stop_dlg.setCancelButton(None)  # user can't cancel the cancel
+        stop_dlg.setWindowModality(Qt.WindowModality.NonModal)
+        stop_dlg.setMinimumDuration(0)
+        stop_dlg.show()
+        self._stopping_dialog = stop_dlg
 
+        # Hook the worker's existing finished_signal — the deferred slot
+        # closes the progress dialog and runs discard_run/keep_run on the UI
+        # thread AFTER the scan thread has exited (FIX-3 invariant: no
+        # cross-thread Tantivy writer race).
+        self._worker.finished_signal.connect(self._on_cancel_finished_drain)
+        self._worker.error_signal.connect(self._on_cancel_finished_drain_error)
+
+    def _on_cancel_finished_drain(self, _result: dict) -> None:
+        """Phase 97.1 — runs after worker.finished_signal post-cancel.
+
+        Tantivy writer is only safe to touch from the UI thread once the scan
+        thread has exited; this slot is the rendezvous point. Debug session:
+        `.planning/debug/phase-97-freeze-winerror-3.md`.
+        """
+        self._close_stopping_dialog()
+        action_run = getattr(self, "_pending_cancel_action", None)
+        self._pending_cancel_action = None
+        if action_run is not None and self._indexer is not None:
+            action, run_id = action_run
+            if run_id:
+                try:
+                    if action == "discard":
+                        self._indexer.discard_run(run_id)
+                    else:
+                        self._indexer.keep_run(run_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "_on_cancel_finished_drain: %s_run failed: %s", action, exc
+                    )
         try:
             self._refresh_folder_list_ui()
         except Exception:
             pass
+
+    def _on_cancel_finished_drain_error(self, _err: str) -> None:
+        """Worker errored while draining the cancel — still run discard/keep."""
+        self._on_cancel_finished_drain({})
+
+    def _close_stopping_dialog(self) -> None:
+        dlg = getattr(self, "_stopping_dialog", None)
+        if dlg is not None:
+            try:
+                dlg.reset()
+                dlg.close()
+            except Exception:
+                pass
+            self._stopping_dialog = None
 
     def _on_progress_updated(
         self, current: int, total: int, filename: str

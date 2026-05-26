@@ -32,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import os
 import socket
+import sys
 from pathlib import Path
 from typing import Union
 
@@ -39,6 +40,14 @@ _LOCAL_PREFIX = "97"
 _MACHINE_PAD = 8
 _HASH_PAD = 8
 _TOTAL_LENGTH = 2 + _MACHINE_PAD + _HASH_PAD  # 18
+
+# Phase 97.1 — Windows long-path support. Apply `\\?\` prefix when the resolved
+# absolute path exceeds 248 chars (safe margin under MAX_PATH=260, since the
+# downstream filesystem may append a few chars internally). Without this prefix,
+# `os.stat`/`GetFileAttributesEx` returns ERROR_PATH_NOT_FOUND for files that
+# `os.walk`/`FindFirstFile` enumerated successfully. Debug: phase-97-freeze-winerror-3.
+_WIN_LONG_PATH_THRESHOLD = 248
+_WIN_LONG_PATH_PREFIX = "\\\\?\\"
 
 
 def is_local_sys_id(s: object) -> bool:
@@ -76,6 +85,12 @@ def _canonical_filepath(p: Union[str, Path]) -> str:
     Resolves symlinks/junctions (strict=False so missing files still normalize),
     normalizes case (Windows: lowercase drive letter + path), normalizes separators.
 
+    Phase 97.1: On Windows, applies the `\\\\?\\` long-path prefix when the resolved
+    absolute path exceeds 248 chars. This is required so os.stat / open / openpyxl /
+    pymupdf can reach files whose paths exceed MAX_PATH=260. Without it, those APIs
+    fail with [WinError 3] for paths that os.walk enumerated fine.
+    Debug session: `.planning/debug/phase-97-freeze-winerror-3.md`.
+
     Examples (Windows):
         >>> # All three return the same string:
         >>> # _canonical_filepath("C:/Users/x/Foo.PDF")
@@ -83,7 +98,18 @@ def _canonical_filepath(p: Union[str, Path]) -> str:
         >>> # _canonical_filepath("C:\\\\USERS\\\\x\\\\FOO.PDF")
     """
     resolved = Path(p).resolve(strict=False)
-    return os.path.normcase(str(resolved))
+    canonical = os.path.normcase(str(resolved))
+    # Phase 97.1: long-path prefix (Windows only, absolute paths only, no double-prefix).
+    # `\\?\` paths require backslashes and must be absolute — `resolve()` already
+    # normalized both, so it is safe to prepend here.
+    if (
+        sys.platform == "win32"
+        and len(canonical) > _WIN_LONG_PATH_THRESHOLD
+        and not canonical.startswith(_WIN_LONG_PATH_PREFIX)
+        and os.path.isabs(canonical)
+    ):
+        canonical = _WIN_LONG_PATH_PREFIX + canonical
+    return canonical
 
 
 def _machine_id() -> str:

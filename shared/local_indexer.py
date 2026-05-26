@@ -1864,10 +1864,17 @@ class LocalIndexer:
                     return
                 try:
                     for fname in files:
+                        # Phase 97.1: per-file cancel check (was per-directory only).
+                        # For directories with hundreds of files, the prior
+                        # outer-only check meant cancel latency was one full
+                        # directory of file processing. See debug session
+                        # `.planning/debug/phase-97-freeze-winerror-3.md`.
+                        if cancel_check():
+                            return
                         fpath = os.path.join(dirpath, fname)
                         canonical = _canonical_filepath(fpath)
                         try:
-                            fsize = os.path.getsize(fpath)
+                            fsize = os.path.getsize(canonical)
                         except OSError:
                             fsize = 0
                         yield canonical, fsize
