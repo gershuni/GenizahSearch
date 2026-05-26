@@ -6,6 +6,30 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ## [Unreleased]
 
+### Phase 97.3 — My Library UAT Stability (2026-05-26 — internal hotfix, no version bump)
+
+Closes the six post-Phase-97.2 UAT defects reported 2026-05-26 against the desktop My Library tab. Internal hotfix on the v7.14 chain (97.1 → 97.2 → 97.3); no public release, no GitHub tag.
+
+**R97.3-A — UI-thread freeze on folder selection (Bug A).** Replaced the synchronous recursive walk in `_UnifiedFileTreeWidget._populate_node` with an async tree-worker design. `FolderWalkWorker` (Phase 97 U-03, previously unwired) now powers the tree fill: it walks with `os.walk(folder, followlinks=False)`, pre-filters by `_SUPPORTED_EXTENSIONS` imported from `shared/local_indexer.py` (single source of truth — also closes R97.3-N), runs `_canonical_filepath` inside the worker thread, and emits 4-tuples `(filepath, canonical, mtime_ns, size)` plus a monotonic generation token. All three worker signals (`batch_emitted`, `finished_signal`, `error_signal`) carry the token; stale payloads from a cancelled or superseded worker are dropped at the UI slot. `_UnifiedFileTreeWidget` gained `_tree_token`, `_tree_worker`, `_cancel_existing_tree_worker`, `_ensure_dir_node`, `_on_tree_batch`/`_on_tree_finished`/`_on_tree_error` slots. Tree now starts collapsed (no `expandAll()` — D-04). Cancel mid-populate clears the tree entirely (D-05).
+
+**R97.3-A — `prior_status` cache (Codex Critique #2 v7.14 blocker).** Added `MyLibraryTab._prior_status_cache` populated at `_init_indexer` and `_invalidate_prior_status_cache()` called BEFORE `_refresh_folder_list_ui` in `_on_worker_finished`, `_on_worker_error`, `_perform_reset`, folder-add, and folder-remove (D-12 ordering invariant — late clearing would leave the post-scan tree showing pre-scan status because `_refresh_folder_list_ui` calls `populate_for_folder` at line 1995 which reads the cache). The click path now never issues a `local_files` DB query.
+
+**R97.3-B — Reset button accessible after a crash (Bug B).** Simplified `_update_reset_button_state` to a single condition: enabled when `self._worker is None or not self._worker.isRunning()`. The Phase-97.2 `start_recovery_probe()` check is gone — orphan `scan_runs.status='running'` rows are exactly what Reset is supposed to clean up. `LocalIndexer.reset_my_library()`'s own 7-step protocol (path-safety pre-check + handle-close + retry-rename + LAB-rollback + fail-loud + deferred-GC) remains the load-bearing safety; the UI guard does not duplicate it. Phase 97.2 `test_reset_my_library_full_cycle` and `test_reset_my_library_lab_rename_failure_rolls_back_local` still GREEN.
+
+**R97.3-C — MuPDF stderr noise silenced (Bug C).** `shared/local_indexer.py` calls `fitz.TOOLS.mupdf_display_warnings(False)` at module import, wrapped in `try/except Exception` with `logger.debug` fallback (broad exception per Codex Critique #2 — a future PyMuPDF API change must not crash module import). User's smoke folder went from 624× "MuPDF error: ... unknown keyword: 'TF'" stderr lines to zero.
+
+**R97.3-D — Recovery-Skip suppresses same-launch auto-rescan (Bug D).** New one-shot `_skip_startup_rescan_once: bool` flag on `MyLibraryTab`. Initialised `False` before the recovery-modal call path. Set `True` in the Skip branch of `_show_recovery_modal`. Read-and-cleared at the entry of `_auto_rescan_on_startup`. Resume and Restart branches do NOT set the flag (both intentionally trigger a fresh scan). D-25 silent rescan on the no-modal path is unchanged. Bilingual status-bar message ("Recovery skipped. Use Refresh to rescan. / ההתאוששות דולגה. לחץ Refresh לסריקה מחדש.") auto-fades after 5 seconds.
+
+**R97.3-E — "Discovering files…" status during scan enumeration (Bug E).** `LocalIndexerWorker` emits new `status_updated(str)` signal with bilingual "Discovering files… / מאתר קבצים…" before `scan_all` enters its enumeration loop. `_start_worker` puts `QProgressBar` in indeterminate (busy) mode via `setRange(0, 0)`. First `progress_updated` signal flips back to determinate `setRange(0, 100)` and clears the status message. Finish/cancel/error all reset the range to `(0, 100)` so a future scan does not inherit busy state (D-21).
+
+**R97.3-N — UI tree shows the full supported-extensions set (Bug N3).** The UI-side `SUPPORTED = {'.pdf', '.docx', '.txt'}` literal at `desktop/my_library_tab.py:227` is DELETED. `FolderWalkWorker` imports `_SUPPORTED_EXTENSIONS = {".docx", ".pdf", ".txt", ".html", ".xlsx", ".csv"}` from `shared/local_indexer.py:81` (single source of truth). `.html`/`.xlsx`/`.csv` now appear in the opt-out tree; mixed-case (`.PDF`, `.Pdf`) is normalized via `.lower()`.
+
+**Tests added.** Seven new test files covering D-13 (token guard), D-14 (no canonicalize of unsupported), D-15 (no junction recurse via `mklink /J`), D-19 (cache invalidation ordering), D-20 (tri-state preservation across async populate), D-21 (progress range round-trips), D-22 (100ms responsiveness via `time.perf_counter()` + `QTimer.singleShot(0, marker)` + `QApplication.processEvents()`). Existing `tests/test_folder_walk_worker.py` extended for the 4-tuple + token signal shape.
+
+**Codex review trail.** `97.3-CODEX-CRITIQUE.md` (Area 1 sub-decisions — revised Option B + worker pre-filter; flagged the `prior_status` preload risk) and `97.3-CODEX-CRITIQUE-2.md` (full decision-set — surfaced D-11 broad-exception, D-12 cache ordering, D-16..D-22 + the inverted wave order for risk locality) both addressed before plan execution.
+
+**No version bump.** `version.py`, `version_info.txt`, `CompileScriptGenizah.iss`, `README.md`, `tests/test_release_artifacts.py` UNTOUCHED. Phase 97.3 rides the v7.14 internal-hotfix chain (97.1 → 97.2 → 97.3); the next user-facing release that bundles all three is a separate decision.
+
 ### Phase 97.2 — LOCAL Recovery Cascade Fix + Reset My Library (internal; 2026-05-26)
 
 Internal closeout — not yet a user-facing release. Bundles the 97.1 MAX_PATH +
