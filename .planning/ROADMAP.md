@@ -381,13 +381,13 @@ Note: Phase 97.1 was the inline `/gsd-fast` hotfix (commit `2e1b846e`) for the f
 
 **Depends on:** Phase 97.2 (shipped 2026-05-26, 25 commits, all 8/8 R97.2-* requirements MET).
 
-**Plans:** 4 plans planned (0/4 complete; execute via /gsd-execute-phase 97.3)
+**Plans:** 4/4 plans complete
 
 Plans:
-- [ ] 97.3-01-reset-guard-and-mupdf-suppression-PLAN.md — Wave 1: R97.3-B (reset-guard simplification per D-10) + R97.3-C (MuPDF stderr suppression per D-11)
-- [ ] 97.3-02-skip-no-auto-rescan-PLAN.md — Wave 1: R97.3-D (one-shot _skip_startup_rescan_once flag + bilingual status-bar message per D-08 + D-09)
-- [ ] 97.3-03-tree-worker-refactor-PLAN.md — Wave 2: R97.3-A + R97.3-E + R97.3-N (workerized tree population via FolderWalkWorker 4-tuple+token+pre-filter per D-01..D-05+D-12+D-16..D-22; status_updated signal + indeterminate progress bar per D-06+D-07+D-21; single source of truth for supported extensions per D-02)
-- [ ] 97.3-04-docs-closeout-PLAN.md — Wave 3: CHANGELOG [Unreleased] entry + CLAUDE.md Recently Changed one-liner + docs/OPEN_ISSUES.md status flips + ROADMAP self-update + STATE.md timestamp; no version bump
+- [x] 97.3-01-reset-guard-and-mupdf-suppression-PLAN.md — Wave 1: R97.3-B (`_update_reset_button_state` simplified to worker_running guard) + R97.3-C (`fitz.TOOLS.mupdf_display_warnings(False)` at module import, broad except Exception)
+- [x] 97.3-02-skip-no-auto-rescan-PLAN.md — Wave 1: R97.3-D (one-shot `_skip_startup_rescan_once` flag + bilingual 5s status-bar message in Skip branch; `_auto_rescan_on_startup` reads-and-clears the flag)
+- [x] 97.3-03-tree-worker-refactor-PLAN.md — Wave 2: R97.3-A (workerized tree population via `FolderWalkWorker` 4-tuple + token + `_SUPPORTED_EXTENSIONS` pre-filter + D-16 skip+log+continue) + R97.3-A `prior_status` cache (D-12 invalidate-before-refresh at 5 sites — Codex Critique #2 v7.14 blocker) + R97.3-E (`status_updated` signal + indeterminate progress bar) + R97.3-N (single source of truth — UI literal deleted)
+- [x] 97.3-04-docs-closeout-PLAN.md — Wave 3: CHANGELOG [Unreleased] Phase 97.3 entry + CLAUDE.md "Recently Changed" one-liner + docs/OPEN_ISSUES.md status flips + ROADMAP self-update + STATE.md timestamp
 
 **Wave structure:** 1 (01 [reset guard + mupdf]) → 2 (02 [skip flag]) → 3 (03 [tree refactor + cache + status + extensions]) → 4 (04 [docs closeout]). Plans 01/02/03 all touch desktop/my_library_tab.py so they are serialized; wave numbers reflect strict ordering not parallelism. Risk-locality intent preserved: Wave 1+2 are low-risk hotfixes mergeable independently, Wave 3 is the high-blast-radius tree refactor, Wave 4 is docs-only.
 
