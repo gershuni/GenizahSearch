@@ -79,18 +79,28 @@ def _make_tree(parent_app=None):
 
 
 def _wait_for_tree_worker(tree, timeout_ms=10_000):
-    """Wait for tree._tree_worker.finished_signal via QSignalSpy."""
-    from PyQt6.QtTest import QSignalSpy
+    """Wait for tree._tree_worker to finish + slot drain.
+
+    Strategy: spin processing events until tree._tree_worker becomes None
+    (which happens via _release_finished_worker AFTER finished_signal drains
+    on the UI thread) OR the worker is no longer running.
+    """
     worker = getattr(tree, "_tree_worker", None)
     if worker is None:
-        return False
-    spy = QSignalSpy(worker.finished_signal)
-    # Process events while we wait so signals can drain
+        return True  # nothing to wait for
     deadline = time.monotonic() + (timeout_ms / 1000.0)
-    while time.monotonic() < deadline and len(spy) == 0:
+    while time.monotonic() < deadline:
         QApplication.processEvents()
+        # Slot _release_finished_worker sets _tree_worker = None after the
+        # worker exits and the finished_signal slot runs on the UI thread.
+        if getattr(tree, "_tree_worker", None) is None:
+            return True
+        if not worker.isRunning():
+            # Worker finished but slot may not have drained yet — keep
+            # processing events until _tree_worker becomes None.
+            pass
         time.sleep(0.01)
-    return len(spy) > 0
+    return getattr(tree, "_tree_worker", None) is None
 
 
 def _walk_leaves(tree):

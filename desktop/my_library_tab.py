@@ -652,6 +652,8 @@ class LocalIndexerWorker(QThread):
     file_finished = pyqtSignal(str, str, int, str)
     finished_signal = pyqtSignal(dict)
     error_signal = pyqtSignal(str)
+    # Phase 97.3 R97.3-E (D-07) — phase status text (bilingual).
+    status_updated = pyqtSignal(str)
 
     def __init__(self, indexer: LocalIndexer) -> None:
         super().__init__()
@@ -673,6 +675,12 @@ class LocalIndexerWorker(QThread):
 
             self._indexer._progress_cb = _on_progress
             self._indexer._file_finished_cb = _on_file_done
+
+            # Phase 97.3 R97.3-E (D-07): emit "Discovering files…" BEFORE scan_all
+            # enters its enumeration loop. Emitting at the QThread wrapper layer
+            # (not via an indexer callback) keeps scan_all untouched and ensures
+            # the message shows immediately on worker start.
+            self.status_updated.emit("Discovering files… / מאתר קבצים…")
 
             result = self._indexer.scan_all(
                 cancel_check=lambda: self._cancel_requested
@@ -1387,8 +1395,19 @@ class MyLibraryTab(QWidget):
         self._btn_add.setEnabled(False)
         self._btn_remove.setEnabled(False)
         self._btn_cancel.setEnabled(True)
+        # Phase 97.3 R97.3-E (D-06): indeterminate "busy" mode during enumeration.
+        # Reset to determinate (0, 100) on first progress_updated signal.
         self._progress_bar.setVisible(True)
+        self._progress_bar.setRange(0, 0)   # busy mode
         self._progress_bar.setValue(0)
+        # Phase 97.3 R97.3-E (D-07): bilingual status via parent statusBar.
+        try:
+            if self._parent_window is not None and hasattr(self._parent_window, "statusBar"):
+                self._parent_window.statusBar().showMessage(
+                    "Discovering files… / מאתר קבצים…", 0,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Phase 97.3 D-07 status message failed: %s", exc)
         # 96-09 bug #1: unified tree replaces _status_table; clear Pages/Status columns.
         if hasattr(self, '_unified_tree'):
             self._unified_tree.reset_for_scan()
@@ -1396,6 +1415,8 @@ class MyLibraryTab(QWidget):
         self._worker = LocalIndexerWorker(self._indexer)
         self._worker.progress_updated.connect(self._on_progress_updated)
         self._worker.file_finished.connect(self._on_file_finished)
+        # Phase 97.3 R97.3-E (D-07): forward worker phase text to status bar.
+        self._worker.status_updated.connect(self._on_worker_status_updated)
         self._worker.finished_signal.connect(
             lambda result: self._on_worker_finished(result, toast_on_complete)
         )
@@ -1412,6 +1433,9 @@ class MyLibraryTab(QWidget):
         progress bar hits 100% momentarily before being hidden so the user can
         see completion even when the status table remains empty.
         """
+        # Phase 97.3 R97.3-E (D-21): reset range so a future scan does not
+        # inherit busy state.
+        self._progress_bar.setRange(0, 100)
         # B2: briefly show 100% so the bar visually completes before disappearing
         self._progress_bar.setValue(100)
         self._progress_bar.setVisible(False)
@@ -1555,6 +1579,8 @@ class MyLibraryTab(QWidget):
 
     def _on_worker_error(self, msg: str) -> None:
         """Worker raised an unhandled error."""
+        # Phase 97.3 R97.3-E (D-21): reset range so a future scan starts clean.
+        self._progress_bar.setRange(0, 100)
         self._progress_bar.setVisible(False)
         self._btn_refresh.setEnabled(True)
         self._btn_add.setEnabled(True)
@@ -2073,6 +2099,13 @@ class MyLibraryTab(QWidget):
         thread has exited; this slot is the rendezvous point. Debug session:
         `.planning/debug/phase-97-freeze-winerror-3.md`.
         """
+        # Phase 97.3 R97.3-E (D-21): reset progress bar range so a future
+        # scan starts clean (otherwise the next scan inherits busy state if
+        # cancel fired during enumeration phase).
+        try:
+            self._progress_bar.setRange(0, 100)
+        except Exception:
+            pass
         self._close_stopping_dialog()
         action_run = getattr(self, "_pending_cancel_action", None)
         self._pending_cancel_action = None
@@ -2118,12 +2151,33 @@ class MyLibraryTab(QWidget):
     def _on_progress_updated(
         self, current: int, total: int, filename: str
     ) -> None:
-        """Update progress bar from worker signal."""
+        """Update progress bar from worker signal.
+
+        Phase 97.3 R97.3-E (D-21): first progress signal flips the bar
+        from busy (0,0) to determinate (0,100).
+        """
+        # D-21: ensure determinate mode on first progress update.
+        if self._progress_bar.maximum() == 0:
+            self._progress_bar.setRange(0, 100)
+            # Clear the "Discovering files…" status now that real progress runs.
+            try:
+                if self._parent_window is not None and hasattr(self._parent_window, "statusBar"):
+                    self._parent_window.statusBar().clearMessage()
+            except Exception:
+                pass
         if total > 0:
             pct = int(current * 100 / total)
             self._progress_bar.setValue(pct)
         else:
             self._progress_bar.setValue(0)
+
+    def _on_worker_status_updated(self, text: str) -> None:
+        """Phase 97.3 R97.3-E (D-07): route worker phase text to status bar."""
+        try:
+            if self._parent_window is not None and hasattr(self._parent_window, "statusBar"):
+                self._parent_window.statusBar().showMessage(text, 0)
+        except Exception:
+            pass
 
     def _on_file_finished(
         self, filepath: str, status: str, pages: int, err: str
