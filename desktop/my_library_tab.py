@@ -59,7 +59,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QColor
 
-from shared.local_indexer import LocalIndexer
+from shared.local_indexer import LocalIndexer, _SUPPORTED_EXTENSIONS
 from genizah_core import Config, tr, CURRENT_LANG
 
 logger = logging.getLogger(__name__)
@@ -149,6 +149,27 @@ class _UnifiedFileTreeWidget(QTreeWidget):
         self._displayed_paths: set = set()
         # Map canonical filepath -> QTreeWidgetItem for O(1) status updates.
         self._leaf_by_path: dict = {}
+        # Phase 97.3 R97.3-A: async tree-worker state
+        # Monotonic generation token — incremented on every populate_for_folder.
+        # Workers stamp this at construction; stale batches/signals are dropped.
+        self._tree_token: int = 0
+        # Distinct from MyLibraryTab._worker (indexing). Lifetime: created on
+        # populate_for_folder, finished.connect(deleteLater).
+        self._tree_worker: Optional["FolderWalkWorker"] = None
+        # Phase 97.3 R97.3-A (Codex Critique #3 HIGH fix): retention list for
+        # canceled tree-workers. Setting self._tree_worker = None as the SOLE
+        # Python reference to a still-running QThread is undefined behavior in
+        # PyQt6 even with finished.connect(deleteLater). Retired workers stay
+        # in this list until their finished_signal fires; the slot then pops
+        # them out. Bounded by the cancel-rate; typically 0-2 entries.
+        self._retired_tree_workers: list = []
+        # Cache the folder path + parent items so batch slot can build subdir
+        # nodes incrementally without re-walking.
+        self._tree_folder_path: Optional[str] = None
+        # canonical_dirpath -> QTreeWidgetItem (for incremental subdir node creation)
+        self._dir_nodes: dict = {}
+        # Prior-status dict for the current populate (resolved at start)
+        self._current_prior_status: dict = {}
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(self._DEBOUNCE_MS)
@@ -167,144 +188,257 @@ class _UnifiedFileTreeWidget(QTreeWidget):
         self.itemChanged.connect(self._on_item_changed)
 
     def populate_for_folder(self, folder_path: str, prior_status: dict = None):
-        """Rebuild the tree for the given indexed folder. Walks the
-        filesystem (so ignored files also appear, letting the user opt
-        them out preemptively before indexer touches them).
+        """Phase 97.3 R97.3-A — async tree population off the UI thread.
 
-        Phase 96 fix-2: prior_status is an optional dict mapping
-        canonical_filepath -> {'pages': int, 'status': str} loaded from
-        the LocalIndexer DB via get_file_status_for_folder(). When provided,
-        Pages and Status columns are populated immediately so the user can
-        see the results of the last scan without having to wait for a new one.
+        Replaces the Phase 96 synchronous _populate_node recursion. Walks
+        the filesystem in a FolderWalkWorker (QThread), drops unsupported
+        files BEFORE _canonical_filepath (D-02), and updates the tree
+        incrementally via batch_emitted → _on_tree_batch slot.
+
+        Tree starts collapsed (D-04 — never expandAll). User expands subtrees
+        manually.
+
+        prior_status (optional): canonical_filepath -> {'pages': int, 'status': str}
+        from the cached LocalIndexer state. When omitted, the MyLibraryTab's
+        _prior_status_cache (D-12) supplies values without a DB lookup on the
+        click path.
         """
         import os
-        # If prior_status was not supplied, try to load it from the indexer.
-        if prior_status is None:
-            try:
-                my_lib = None
-                # Walk up from self._app to find MyLibraryTab (may be parent or app itself)
-                for attr in ('my_library_tab',):
-                    my_lib = getattr(self._app, attr, None)
-                    if my_lib is not None:
-                        break
-                if my_lib is None and hasattr(self._app, '_indexer'):
-                    my_lib = self._app
-                indexer = getattr(my_lib, '_indexer', None) if my_lib else None
-                if indexer is not None:
-                    prior_status = indexer.get_file_status_for_folder(folder_path)
-            except Exception:
-                prior_status = {}
-        if prior_status is None:
-            prior_status = {}
+        # D-03 + D-17: increment token FIRST so any in-flight stale batches
+        # from a previous worker are dropped on arrival.
+        self._tree_token += 1
+        current_token = self._tree_token
+
+        # D-05: cancel any in-flight worker + clear the tree entirely (no
+        # partial-results state machine).
+        self._cancel_existing_tree_worker()
 
         self._suppress_signals = True
         try:
             self.clear()
             self._displayed_paths = set()
             self._leaf_by_path = {}
-            optouts = getattr(self._app, '_local_file_optouts', set())
-            root_item = QTreeWidgetItem(self, [os.path.basename(folder_path) or folder_path])
+            self._dir_nodes = {}
+            self._tree_folder_path = folder_path
+
+            # Build the root node now so the user sees immediate feedback
+            # (folder name shown collapsed; children fill in as batches arrive).
+            root_label = os.path.basename(folder_path) or folder_path
+            root_item = QTreeWidgetItem(self, [root_label, '', ''])
             root_item.setFlags(
                 root_item.flags()
                 | Qt.ItemFlag.ItemIsUserCheckable
                 | Qt.ItemFlag.ItemIsAutoTristate
             )
-            # Recurse into subdirectories, passing prior_status for column population.
-            self._populate_node(root_item, folder_path, optouts, prior_status)
-            self.expandAll()
+            root_item.setData(0, Qt.ItemDataRole.UserRole, folder_path)
+            # Store the canonical folder path so subdir keys can be relative.
+            self._dir_nodes[os.path.normcase(os.path.normpath(folder_path))] = root_item
         finally:
             self._suppress_signals = False
 
-    def _populate_node(self, parent_item, dirpath: str, optouts: set, prior_status: dict = None):
-        """Recursively add files and subdirs to parent_item.
+        # Resolve prior_status: explicit kwarg > tab cache > empty dict
+        # (D-12 — never issue a fresh DB query on the click path).
+        if prior_status is None:
+            tab = getattr(self._app, "my_library_tab", None) or self._app
+            cache = getattr(tab, "_prior_status_cache", None)
+            prior_status = (cache or {}).get(folder_path, {}) if isinstance(cache, dict) else {}
+        self._current_prior_status = prior_status or {}
 
-        Phase 96 fix-2: prior_status (canonical_filepath -> {pages, status})
-        is threaded down so leaves show scan results from the last scan
-        immediately on tab open, not only after a new scan completes.
+        # Launch the worker (D-01).
+        try:
+            self._tree_worker = FolderWalkWorker([folder_path], token=current_token)
+            self._tree_worker.batch_emitted.connect(self._on_tree_batch)
+            self._tree_worker.finished_signal.connect(self._on_tree_finished)
+            self._tree_worker.error_signal.connect(self._on_tree_error)
+            # D-18: cleanup Qt resources when the thread exits.
+            self._tree_worker.finished.connect(self._tree_worker.deleteLater)
+            self._tree_worker.start()
+            # Phase 97.3 R97.3-A (Codex Critique #3 HIGH fix) — notify the tab
+            # so it enables _btn_cancel for tree-population cancel.
+            try:
+                tab = getattr(self._app, "my_library_tab", None) or self._app
+                if hasattr(tab, "_on_tree_population_started"):
+                    tab._on_tree_population_started()
+            except Exception:  # noqa: BLE001
+                pass
+        except Exception:  # noqa: BLE001
+            logger.exception("populate_for_folder: launching FolderWalkWorker failed")
+            self._tree_worker = None
+
+    # ------------------------------------------------------------------
+    # Phase 97.3 R97.3-A — async tree-worker helpers
+    # ------------------------------------------------------------------
+
+    def _cancel_existing_tree_worker(self) -> None:
+        """D-05 + D-18 + Codex Critique #3 HIGH fix: cancel + RETAIN until finished.
+
+        The prior draft set ``self._tree_worker = None`` immediately after
+        ``.cancel()``, dropping the last Python reference to a still-running
+        QThread. PyQt6's ``finished.connect(deleteLater)`` keeps Qt alive but
+        losing the Python ref is undefined behavior. The retention pattern:
+        move the prev worker into ``self._retired_tree_workers``; the worker's
+        ``finished_signal`` slot (``_on_tree_finished`` / ``_on_tree_error``)
+        removes it from the list AFTER the thread has exited. The current
+        ``_tree_worker`` slot is freed for a new walker.
+        """
+        prev = self._tree_worker
+        if prev is None:
+            return
+        try:
+            prev.cancel()
+        except Exception:
+            pass
+        # Disconnect the BATCH slot (so stale batches don't waste UI cycles)
+        # but KEEP finished_signal / error_signal connected — they're how we
+        # know to pop prev from _retired_tree_workers after it exits.
+        try:
+            prev.batch_emitted.disconnect(self._on_tree_batch)
+        except (TypeError, RuntimeError):
+            pass
+        # finished_signal / error_signal STAY CONNECTED. Token guard inside
+        # those slots will short-circuit any stale state mutation; their only
+        # remaining job is to release `prev` from _retired_tree_workers.
+        self._retired_tree_workers.append(prev)
+        self._tree_worker = None
+
+    def _ensure_dir_node(self, canonical_dirpath: str) -> "QTreeWidgetItem":
+        """Walk up from canonical_dirpath creating intermediate folder nodes.
+
+        Returns the QTreeWidgetItem for the directory. Uses self._dir_nodes
+        as a memo so repeat lookups are O(1).
         """
         import os
-        from shared.local_sys_id import _canonical_filepath
-        SUPPORTED = {'.pdf', '.docx', '.txt'}
-        if prior_status is None:
-            prior_status = {}
-        try:
-            entries = sorted(os.listdir(dirpath))
-        except (OSError, PermissionError):
+        key = os.path.normcase(os.path.normpath(canonical_dirpath))
+        cached = self._dir_nodes.get(key)
+        if cached is not None:
+            return cached
+        # Recurse up. The root key was inserted in populate_for_folder.
+        parent_path = os.path.dirname(canonical_dirpath)
+        if parent_path == canonical_dirpath or not parent_path:
+            # Reached filesystem root without hitting the known root node —
+            # fall back to the invisible root.
+            return self.invisibleRootItem()
+        parent_node = self._ensure_dir_node(parent_path)
+        name = os.path.basename(canonical_dirpath)
+        node = QTreeWidgetItem(parent_node, [name, '', ''])
+        node.setFlags(
+            node.flags()
+            | Qt.ItemFlag.ItemIsUserCheckable
+            | Qt.ItemFlag.ItemIsAutoTristate
+        )
+        node.setData(0, Qt.ItemDataRole.UserRole, canonical_dirpath)
+        self._dir_nodes[key] = node
+        return node
+
+    def _build_leaf_item_status(self, prior_st: str, prior_pages: int) -> tuple:
+        """Translate stored status codes to display strings + color tag.
+
+        Returns (pages_str, status_str, color_hex_or_None). Preserves the
+        bilingual EN/HE mapping from the pre-Phase-97.3 _populate_node body.
+        """
+        pages_str = str(prior_pages) if prior_pages and prior_pages > 0 else ''
+        if prior_st == 'ok':
+            return pages_str, tr("OK"), None
+        if prior_st == 'cancelled':
+            return pages_str, tr("Cancelled"), '#e67e22'
+        if prior_st == 'no_text_layer':
+            return pages_str, tr("No text layer"), None
+        if prior_st == 'encoding_error':
+            return pages_str, tr("Encoding error"), '#e74c3c'
+        if prior_st == 'unsupported':
+            return pages_str, tr("Unsupported"), None
+        if prior_st == 'oversized':
+            label = "גדול מדי (>100 מ\"ב)" if CURRENT_LANG == 'he' else tr("Too large (>100 MB)")
+            return pages_str, label, '#e67e22'
+        if prior_st == 'zip_bomb_suspected':
+            label = "ארכיון חשוד" if CURRENT_LANG == 'he' else tr("Suspicious archive")
+            return pages_str, label, '#e67e22'
+        if prior_st == 'error':
+            return pages_str, tr("Error"), '#e74c3c'
+        return pages_str, '', None
+
+    def _on_tree_batch(self, batch: list, token: int) -> None:
+        """Worker emitted a batch — apply to tree IF token matches current.
+
+        D-13 + D-17: stale batches are dropped. Each item is a 4-tuple
+        (filepath, canonical, mtime_ns, size). Builds intermediate dir nodes
+        on demand via _ensure_dir_node so the tree shape mirrors the
+        filesystem.
+        """
+        if token != self._tree_token:
             return
-        # Add subdirs first
-        for name in entries:
-            full = os.path.join(dirpath, name)
-            if os.path.isdir(full):
-                sub = QTreeWidgetItem(parent_item, [name, '', ''])
-                sub.setFlags(
-                    sub.flags()
-                    | Qt.ItemFlag.ItemIsUserCheckable
-                    | Qt.ItemFlag.ItemIsAutoTristate
+        import os
+        optouts = getattr(self._app, '_local_file_optouts', set()) or set()
+        prior_status = getattr(self, '_current_prior_status', {}) or {}
+        self._suppress_signals = True
+        try:
+            for filepath, canonical, _mtime_ns, _size in batch:
+                # Determine parent dir node.
+                parent_dirpath = os.path.dirname(filepath)
+                parent_node = self._ensure_dir_node(parent_dirpath)
+                name = os.path.basename(filepath)
+                file_info = prior_status.get(canonical, {}) if isinstance(prior_status, dict) else {}
+                prior_pages = file_info.get('pages', 0)
+                prior_st = file_info.get('status', '')
+                pages_str, status_str, color = self._build_leaf_item_status(
+                    prior_st, prior_pages,
                 )
-                self._populate_node(sub, full, optouts, prior_status)
-        # Add files
-        for name in entries:
-            full = os.path.join(dirpath, name)
-            if not os.path.isfile(full):
-                continue
-            ext = os.path.splitext(name)[1].lower()
-            if ext not in SUPPORTED:
-                continue
-            # Phase 96 fix-2: pre-populate Pages + Status from last scan if known.
-            canonical = _canonical_filepath(full)
-            file_info = prior_status.get(canonical, {})
-            prior_pages = file_info.get('pages', 0)
-            prior_st = file_info.get('status', '')
-            pages_str = str(prior_pages) if prior_pages and prior_pages > 0 else ''
-            # Translate stored status codes to display strings (mirrors update_file_status).
-            # Phase 97 C-05: reads from local_files.extraction_status (LD-9 UI source of truth).
-            if prior_st == 'ok':
-                status_str = tr("OK")
-            elif prior_st == 'cancelled':
-                status_str = tr("Cancelled")
-            elif prior_st == 'no_text_layer':
-                status_str = tr("No text layer")
-            elif prior_st == 'encoding_error':
-                status_str = tr("Encoding error")
-            elif prior_st == 'unsupported':
-                status_str = tr("Unsupported")
-            elif prior_st == 'oversized':
-                # Phase 97 C-05 — file > 100 MB hard skip (LD-9)
-                # local_files.extraction_status is the UI source of truth per LD-9.
-                status_str = "גדול מדי (>100 מ\"ב)" if CURRENT_LANG == 'he' else tr("Too large (>100 MB)")
-            elif prior_st == 'zip_bomb_suspected':
-                # Phase 97 C-05 — zip-container uncompressed size > 500 MB (LD-9)
-                status_str = "ארכיון חשוד" if CURRENT_LANG == 'he' else tr("Suspicious archive")
-            elif prior_st in ('error',):
-                status_str = tr("Error")
-            else:
-                status_str = ''
-            leaf = QTreeWidgetItem(parent_item, [name, pages_str, status_str])
-            leaf.setFlags(leaf.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            # Apply error colour for error-state rows (mirrors update_file_status).
-            if prior_st in ('error', 'encoding_error'):
-                from PyQt6.QtGui import QColor
-                for col in range(3):
-                    leaf.setForeground(col, QColor('#e74c3c'))
-            elif prior_st in ('oversized', 'zip_bomb_suspected'):
-                # Phase 97 C-05 — orange warning colour (same as cancelled/warning states)
-                from PyQt6.QtGui import QColor
-                for col in range(3):
-                    leaf.setForeground(col, QColor('#e67e22'))
-            elif prior_st == 'cancelled':
-                from PyQt6.QtGui import QColor
-                for col in range(3):
-                    leaf.setForeground(col, QColor('#e67e22'))
-            # Codex MEDIUM #9 closure: canonicalize at populate time so the
-            # value stashed in UserRole matches what _local_file_optouts holds.
-            leaf.setData(0, Qt.ItemDataRole.UserRole, canonical)
-            self._displayed_paths.add(canonical)
-            self._leaf_by_path[canonical] = leaf
-            is_opted_out = canonical in optouts
-            leaf.setCheckState(
-                0,
-                Qt.CheckState.Unchecked if is_opted_out else Qt.CheckState.Checked,
-            )
+                leaf = QTreeWidgetItem(parent_node, [name, pages_str, status_str])
+                leaf.setFlags(leaf.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                if color is not None:
+                    qc = QColor(color)
+                    for col in range(3):
+                        leaf.setForeground(col, qc)
+                leaf.setData(0, Qt.ItemDataRole.UserRole, canonical)
+                self._displayed_paths.add(canonical)
+                self._leaf_by_path[canonical] = leaf
+                is_opted_out = canonical in optouts
+                leaf.setCheckState(
+                    0,
+                    Qt.CheckState.Unchecked if is_opted_out else Qt.CheckState.Checked,
+                )
+        finally:
+            self._suppress_signals = False
+
+    def _release_finished_worker(self, sender) -> None:
+        """Codex Critique #3 HIGH fix: pop the just-finished worker from the
+        retention list AND clear ``_tree_worker`` if it's the current one.
+
+        Called from ``_on_tree_finished`` / ``_on_tree_error`` for BOTH current
+        and retired workers — the token guard short-circuits state mutation,
+        but the worker reference still needs to be released so the retention
+        list does not grow unboundedly.
+        """
+        try:
+            if sender in self._retired_tree_workers:
+                self._retired_tree_workers.remove(sender)
+        except (ValueError, RuntimeError):
+            pass
+        if self._tree_worker is sender:
+            self._tree_worker = None
+        # Notify the tab so it disables _btn_cancel for tree-population (if no
+        # scan worker is also running).
+        try:
+            tab = getattr(self._app, "my_library_tab", None) or self._app
+            if hasattr(tab, "_on_tree_population_ended"):
+                tab._on_tree_population_ended()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_tree_finished(self, total_files: int, total_bytes: int, token: int) -> None:
+        """Worker finished — release the handle.
+
+        Token-guard: stale ``finished_signal`` from a superseded worker does NOT
+        mutate widget state, but it STILL releases the worker reference (D-17 +
+        Codex Critique #3 HIGH retention fix).
+        """
+        # D-04: do NOT call self.expandAll(). User expands manually.
+        self._release_finished_worker(self.sender())
+
+    def _on_tree_error(self, msg: str, token: int) -> None:
+        """Worker errored — log and release handle."""
+        logger.warning("FolderWalkWorker error: %s", msg)
+        self._release_finished_worker(self.sender())
 
     def reset_for_scan(self):
         """Clear Pages/Status columns on all existing leaves before a new scan.
@@ -518,6 +652,8 @@ class LocalIndexerWorker(QThread):
     file_finished = pyqtSignal(str, str, int, str)
     finished_signal = pyqtSignal(dict)
     error_signal = pyqtSignal(str)
+    # Phase 97.3 R97.3-E (D-07) — phase status text (bilingual).
+    status_updated = pyqtSignal(str)
 
     def __init__(self, indexer: LocalIndexer) -> None:
         super().__init__()
@@ -539,6 +675,12 @@ class LocalIndexerWorker(QThread):
 
             self._indexer._progress_cb = _on_progress
             self._indexer._file_finished_cb = _on_file_done
+
+            # Phase 97.3 R97.3-E (D-07): emit "Discovering files…" BEFORE scan_all
+            # enters its enumeration loop. Emitting at the QThread wrapper layer
+            # (not via an indexer callback) keeps scan_all untouched and ensures
+            # the message shows immediately on worker start.
+            self.status_updated.emit("Discovering files… / מאתר קבצים…")
 
             result = self._indexer.scan_all(
                 cancel_check=lambda: self._cancel_requested
@@ -592,61 +734,148 @@ class PrescanWorker(QThread):
 # ---------------------------------------------------------------------------
 
 class FolderWalkWorker(QThread):
-    """Phase 97 U-03 — filesystem walk off the UI thread.
+    """Phase 97 U-03 + Phase 97.3 R97.3-A — off-thread filesystem walk.
 
-    Emits batched (filepath, mtime_ns, size) records throttled to
-    BATCH_SIZE files OR BATCH_TIMEOUT seconds so the UI stays responsive.
+    Phase 97.3 (D-01 + D-02 + D-17):
+      - Emits 4-tuple (filepath, canonical, mtime_ns, size) + token int.
+      - Pre-filters by _SUPPORTED_EXTENSIONS imported from shared.local_indexer
+        (single source of truth — closes R97.3-N).
+      - Drops unsupported files BEFORE os.stat() and BEFORE _canonical_filepath()
+        so unsupported subtrees pay zero Path.resolve tax (D-14 acceptance).
+      - All three signals (batch_emitted, finished_signal, error_signal) carry
+        the token; UI slot drops payloads whose token != current widget token
+        (stale-worker guard — D-13 / D-17).
 
-    CRITICAL: NO QWidget mutation in this thread (T-97E-02 / AST guard
-    test_folder_walk_worker.py::test_no_widget_mutation pins this invariant).
-    Only pyqtSignal emissions — the UI-thread slot handles all widget updates.
+    CRITICAL: NO QWidget mutation in this thread (test_no_widget_mutation
+    AST guard pins this invariant). Only pyqtSignal emissions.
+
+    Per-file failure policy (D-16): supported-file os.stat / canonicalization
+    errors and inaccessible subdirs are caught and logged at WARNING; only
+    _cancel_requested aborts the walk.
     """
 
-    batch_emitted = pyqtSignal(list)      # list of (filepath, mtime_ns, size) tuples
-    finished_signal = pyqtSignal(int, int)  # total_files, total_bytes
-    error_signal = pyqtSignal(str)
+    # 4-tuple list + token int (D-01 + D-17)
+    batch_emitted = pyqtSignal(list, int)        # list of (filepath, canonical, mtime_ns, size); token
+    finished_signal = pyqtSignal(int, int, int)  # total_files, total_bytes, token
+    error_signal = pyqtSignal(str, int)          # message; token
 
     BATCH_SIZE = 100    # emit after this many files
     BATCH_TIMEOUT = 0.5  # or after this many seconds
 
-    def __init__(self, folder_paths: list) -> None:
+    def __init__(self, folder_paths: list, token: int = 0) -> None:
         super().__init__()
         self._folder_paths = folder_paths
         self._cancel_requested = False
+        self._token = int(token)
+
+    @property
+    def token(self) -> int:
+        """Generation token captured at construction (D-03 + D-17)."""
+        return self._token
 
     def cancel(self) -> None:
         """Request cooperative cancellation."""
         self._cancel_requested = True
 
     def run(self) -> None:
-        """Walk folders and emit batched file-metadata records.
+        """Walk folders and emit batched supported-file records.
 
         This method must NOT mutate any QWidget — it only emits signals.
-        The UI-thread slot connected to batch_emitted handles all widget updates.
         AST guard: test_folder_walk_worker.py::test_no_widget_mutation.
         """
         import os as _os
         import time as _time
+        # D-02: import canonicalizer lazily to keep test monkeypatching simple.
+        from shared.local_sys_id import _canonical_filepath
+
         batch: list = []
         last_emit = _time.monotonic()
         total_files = 0
         total_bytes = 0
+        token = self._token
+
+        # Codex Critique #3 MEDIUM fix — D-16 skip+log+continue policy must
+        # cover scandir errors during os.walk too, not just per-file stat /
+        # canonicalize errors. Without onerror=, os.walk silently swallows
+        # PermissionError / OSError on inaccessible subdirs.
+        def _walk_onerror(exc: OSError) -> None:
+            logger.warning(
+                "FolderWalkWorker: os.walk failed for %s: %s",
+                getattr(exc, "filename", "?"), exc,
+            )
+
+        # D-15 Rule 2 deviation — Windows junctions (FILE_ATTRIBUTE_REPARSE_POINT)
+        # are NOT detected by os.path.islink() on Python 3.11, so the literal
+        # `followlinks=False` keyword does not stop os.walk from recursing into
+        # them. We must explicitly prune reparse-point dirs from `dirs` inside
+        # the walk loop. POSIX symlinks ARE caught by followlinks=False as
+        # documented. This closes the must_haves invariant "Clicking a folder
+        # containing a Windows junction does NOT recurse into the junction
+        # target" which the plan's literal `followlinks=False` alone cannot
+        # satisfy on Windows.
+        _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+
+        def _is_reparse_point(path: str) -> bool:
+            try:
+                st = _os.stat(path, follow_symlinks=False)
+            except OSError:
+                return False
+            attrs = getattr(st, "st_file_attributes", 0)
+            return bool(attrs & _FILE_ATTRIBUTE_REPARSE_POINT)
+
         try:
             for folder in self._folder_paths:
                 if self._cancel_requested:
                     break
-                for root, dirs, files in _os.walk(folder, followlinks=False):
+                # D-15: followlinks=False prevents recursion into POSIX symlinks.
+                # D-16: onerror logs inaccessible subdirs at WARNING (don't abort).
+                for root, dirs, files in _os.walk(
+                    folder, followlinks=False, onerror=_walk_onerror,
+                ):
                     if self._cancel_requested:
                         break
+                    # D-15 — Prune Windows reparse-point (junction) dirs in place
+                    # so os.walk does not descend into them on the next iteration.
+                    # In-place mutation of `dirs` is the documented os.walk hook.
+                    pruned = [
+                        d for d in dirs
+                        if not _is_reparse_point(_os.path.join(root, d))
+                    ]
+                    if len(pruned) != len(dirs):
+                        for d in dirs:
+                            if d not in pruned:
+                                logger.warning(
+                                    "FolderWalkWorker: pruning reparse-point "
+                                    "(junction/symlink) dir %s",
+                                    _os.path.join(root, d),
+                                )
+                        dirs[:] = pruned
                     for name in files:
                         if self._cancel_requested:
                             break
+                        # D-02: extension pre-filter — DROP before stat/canonical.
+                        ext = _os.path.splitext(name)[1].lower()
+                        if ext not in _SUPPORTED_EXTENSIONS:
+                            continue
                         fp = _os.path.join(root, name)
                         try:
                             stat = _os.stat(fp)
-                        except OSError:
+                        except OSError as exc:
+                            # D-16: skip + log + continue
+                            logger.warning(
+                                "FolderWalkWorker: stat failed for %s: %s", fp, exc
+                            )
                             continue
-                        batch.append((fp, stat.st_mtime_ns, stat.st_size))
+                        try:
+                            canonical = _canonical_filepath(fp)
+                        except (OSError, ValueError) as exc:
+                            # D-16: skip + log + continue
+                            logger.warning(
+                                "FolderWalkWorker: canonicalize failed for %s: %s",
+                                fp, exc,
+                            )
+                            continue
+                        batch.append((fp, canonical, stat.st_mtime_ns, stat.st_size))
                         total_files += 1
                         total_bytes += stat.st_size
                         now = _time.monotonic()
@@ -654,15 +883,15 @@ class FolderWalkWorker(QThread):
                             len(batch) >= self.BATCH_SIZE
                             or (now - last_emit) >= self.BATCH_TIMEOUT
                         ):
-                            self.batch_emitted.emit(batch)
+                            self.batch_emitted.emit(batch, token)
                             batch = []
                             last_emit = now
             if batch:
-                self.batch_emitted.emit(batch)
-            self.finished_signal.emit(total_files, total_bytes)
+                self.batch_emitted.emit(batch, token)
+            self.finished_signal.emit(total_files, total_bytes, token)
         except Exception as exc:  # noqa: BLE001
             logger.exception("FolderWalkWorker: unhandled error")
-            self.error_signal.emit(str(exc))
+            self.error_signal.emit(str(exc), token)
 
 
 # ---------------------------------------------------------------------------
@@ -710,6 +939,13 @@ class MyLibraryTab(QWidget):
         # Initialised here BEFORE _build_ui / _init_indexer / recovery probe so
         # the attribute always exists even on init failure paths.
         self._skip_startup_rescan_once: bool = False
+
+        # Phase 97.3 R97.3-A (D-12) — in-memory prior_status cache so the
+        # folder-click code path never issues a fresh local_files DB query.
+        # Structure: {folder_path: {canonical_filepath: {"pages": int, "status": str}}}
+        # Invalidated + reloaded BEFORE _refresh_folder_list_ui in worker
+        # finish/error/reset/folder-add/folder-remove paths.
+        self._prior_status_cache: dict = {}
 
         # Build UI first (so widgets exist before _init_indexer may log)
         self._build_ui()
@@ -1023,6 +1259,10 @@ class MyLibraryTab(QWidget):
         # BEFORE startup_recovery ran, so it has a stale snapshot).
         self._on_startup_recovery_completed()
 
+        # Phase 97.3 R97.3-A (D-12): populate prior_status cache at startup so
+        # the FIRST folder click already hits the cache, not the DB.
+        self._invalidate_prior_status_cache()
+
         # Populate folder list UI
         self._refresh_folder_list_ui()
 
@@ -1155,8 +1395,19 @@ class MyLibraryTab(QWidget):
         self._btn_add.setEnabled(False)
         self._btn_remove.setEnabled(False)
         self._btn_cancel.setEnabled(True)
+        # Phase 97.3 R97.3-E (D-06): indeterminate "busy" mode during enumeration.
+        # Reset to determinate (0, 100) on first progress_updated signal.
         self._progress_bar.setVisible(True)
+        self._progress_bar.setRange(0, 0)   # busy mode
         self._progress_bar.setValue(0)
+        # Phase 97.3 R97.3-E (D-07): bilingual status via parent statusBar.
+        try:
+            if self._parent_window is not None and hasattr(self._parent_window, "statusBar"):
+                self._parent_window.statusBar().showMessage(
+                    "Discovering files… / מאתר קבצים…", 0,
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("Phase 97.3 D-07 status message failed: %s", exc)
         # 96-09 bug #1: unified tree replaces _status_table; clear Pages/Status columns.
         if hasattr(self, '_unified_tree'):
             self._unified_tree.reset_for_scan()
@@ -1164,6 +1415,8 @@ class MyLibraryTab(QWidget):
         self._worker = LocalIndexerWorker(self._indexer)
         self._worker.progress_updated.connect(self._on_progress_updated)
         self._worker.file_finished.connect(self._on_file_finished)
+        # Phase 97.3 R97.3-E (D-07): forward worker phase text to status bar.
+        self._worker.status_updated.connect(self._on_worker_status_updated)
         self._worker.finished_signal.connect(
             lambda result: self._on_worker_finished(result, toast_on_complete)
         )
@@ -1180,6 +1433,9 @@ class MyLibraryTab(QWidget):
         progress bar hits 100% momentarily before being hidden so the user can
         see completion even when the status table remains empty.
         """
+        # Phase 97.3 R97.3-E (D-21): reset range so a future scan does not
+        # inherit busy state.
+        self._progress_bar.setRange(0, 100)
         # B2: briefly show 100% so the bar visually completes before disappearing
         self._progress_bar.setValue(100)
         self._progress_bar.setVisible(False)
@@ -1208,6 +1464,10 @@ class MyLibraryTab(QWidget):
 
         # Release mutex AFTER reload
         self._indexer_mutex.unlock()
+
+        # Phase 97.3 R97.3-A (D-12, D-19): cache must be reloaded BEFORE
+        # _refresh_folder_list_ui (which calls populate_for_folder).
+        self._invalidate_prior_status_cache()
 
         # Refresh folder list (status may have changed, e.g. unavailable)
         self._refresh_folder_list_ui()
@@ -1319,6 +1579,8 @@ class MyLibraryTab(QWidget):
 
     def _on_worker_error(self, msg: str) -> None:
         """Worker raised an unhandled error."""
+        # Phase 97.3 R97.3-E (D-21): reset range so a future scan starts clean.
+        self._progress_bar.setRange(0, 100)
         self._progress_bar.setVisible(False)
         self._btn_refresh.setEnabled(True)
         self._btn_add.setEnabled(True)
@@ -1329,6 +1591,9 @@ class MyLibraryTab(QWidget):
         # Phase 97.2 R97.2-E — re-enable Reset after worker errored
         # (start_recovery_probe will gate this if orphan rows persist).
         self._update_reset_button_state()
+        # Phase 97.3 R97.3-A (D-12): error path also invalidates the cache so
+        # any subsequent folder click reflects the latest DB state.
+        self._invalidate_prior_status_cache()
         QMessageBox.warning(
             self,
             tr("My Library Error"),
@@ -1339,6 +1604,37 @@ class MyLibraryTab(QWidget):
             action = self._queued_action
             self._queued_action = None
             action()
+
+    # ------------------------------------------------------------------
+    # Phase 97.3 R97.3-A (Codex Critique #3 HIGH fix) — Cancel-button wiring
+    # for tree-population.
+    # ------------------------------------------------------------------
+
+    def _on_tree_population_started(self) -> None:
+        """Enable Cancel button so user can abort tree-population.
+
+        Called by ``_UnifiedFileTreeWidget.populate_for_folder`` when a worker
+        is launched. Idempotent: if ``_btn_cancel`` is already enabled (e.g.
+        scan running), the call is a no-op.
+        """
+        try:
+            if hasattr(self, "_btn_cancel") and self._btn_cancel is not None:
+                self._btn_cancel.setEnabled(True)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_tree_population_ended(self) -> None:
+        """Disable Cancel button when tree-population finishes AND no scan
+        worker is running.
+
+        Called by ``_UnifiedFileTreeWidget._release_finished_worker``.
+        """
+        try:
+            if not (self._worker is not None and self._worker.isRunning()):
+                if hasattr(self, "_btn_cancel") and self._btn_cancel is not None:
+                    self._btn_cancel.setEnabled(False)
+        except Exception:  # noqa: BLE001
+            pass
 
     # ------------------------------------------------------------------
     # Phase 97.2 R97.2-E — Reset My Library destructive recovery action
@@ -1513,6 +1809,11 @@ class MyLibraryTab(QWidget):
                 self._show_status_message(ok_msg)
             else:
                 QMessageBox.information(self, title, ok_msg)
+            # Phase 97.3 R97.3-A (D-12): cache cleared on full reset.
+            try:
+                self._invalidate_prior_status_cache()
+            except Exception:
+                logger.exception("_perform_reset: _invalidate_prior_status_cache failed (continuing)")
             # Repopulate UI — these helpers may or may not exist; tolerate either.
             if hasattr(self, "_refresh_folder_list_ui"):
                 try:
@@ -1611,6 +1912,9 @@ class MyLibraryTab(QWidget):
             )
             return
 
+        # Phase 97.3 R97.3-A (D-12): new folder added — reload cache so the
+        # next folder selection reads correct prior_status.
+        self._invalidate_prior_status_cache()
         self._refresh_folder_list_ui()
         # Kick off a scan for the newly added folder
         self._start_worker(toast_on_complete=False)
@@ -1658,6 +1962,8 @@ class MyLibraryTab(QWidget):
         # CR-02: also reload LabEngine LOCAL LAB searcher (REQ-6).
         self._reload_all_local_indexes()
 
+        # Phase 97.3 R97.3-A (D-12): folder removed — drop its cache entry.
+        self._invalidate_prior_status_cache()
         self._refresh_folder_list_ui()
 
     def _on_refresh_clicked(self) -> None:
@@ -1698,9 +2004,33 @@ class MyLibraryTab(QWidget):
         touch the writer the scan thread has exited.
         Debug session: `.planning/debug/phase-97-freeze-winerror-3.md`.
         """
-        if self._worker is None or not self._worker.isRunning():
+        # Phase 97.3 R97.3-A (Codex Critique #3 HIGH fix) — context-aware cancel.
+        # Priority: scan worker > tree-population worker > nothing.
+        scan_running = self._worker is not None and self._worker.isRunning()
+        tree_worker = getattr(self._unified_tree, "_tree_worker", None)
+        tree_running = (
+            tree_worker is not None
+            and hasattr(tree_worker, "isRunning")
+            and tree_worker.isRunning()
+        )
+        if not scan_running and tree_running:
+            # Tree-population only — simple cancel, no scan Discard/Keep modal.
+            try:
+                self._unified_tree._cancel_existing_tree_worker()
+                # Clear the tree so user sees the cancel took effect (D-05 invariant).
+                self._unified_tree.clear()
+                self._unified_tree._displayed_paths = set()
+                self._unified_tree._leaf_by_path = {}
+                self._unified_tree._dir_nodes = {}
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("_on_cancel_clicked: tree cancel failed: %s", exc)
+            # _on_tree_population_ended will disable _btn_cancel via the
+            # finished_signal slot once the worker actually exits.
+            return
+        if not scan_running:
             self._btn_cancel.setEnabled(False)
             return
+        # Else: scan running — fall through to existing 3-button modal.
 
         run_id = self._indexer._current_scan_run_id if self._indexer is not None else None
 
@@ -1769,6 +2099,13 @@ class MyLibraryTab(QWidget):
         thread has exited; this slot is the rendezvous point. Debug session:
         `.planning/debug/phase-97-freeze-winerror-3.md`.
         """
+        # Phase 97.3 R97.3-E (D-21): reset progress bar range so a future
+        # scan starts clean (otherwise the next scan inherits busy state if
+        # cancel fired during enumeration phase).
+        try:
+            self._progress_bar.setRange(0, 100)
+        except Exception:
+            pass
         self._close_stopping_dialog()
         action_run = getattr(self, "_pending_cancel_action", None)
         self._pending_cancel_action = None
@@ -1784,6 +2121,11 @@ class MyLibraryTab(QWidget):
                     logger.warning(
                         "_on_cancel_finished_drain: %s_run failed: %s", action, exc
                     )
+        # Phase 97.3 R97.3-A (D-12, Codex Critique #3 MEDIUM site 6):
+        # cancel-drain also repopulates the tree via _refresh_folder_list_ui,
+        # so prior_status cache must be reloaded first or the tree shows
+        # pre-cancel status (now-stale).
+        self._invalidate_prior_status_cache()
         try:
             self._refresh_folder_list_ui()
         except Exception:
@@ -1809,12 +2151,33 @@ class MyLibraryTab(QWidget):
     def _on_progress_updated(
         self, current: int, total: int, filename: str
     ) -> None:
-        """Update progress bar from worker signal."""
+        """Update progress bar from worker signal.
+
+        Phase 97.3 R97.3-E (D-21): first progress signal flips the bar
+        from busy (0,0) to determinate (0,100).
+        """
+        # D-21: ensure determinate mode on first progress update.
+        if self._progress_bar.maximum() == 0:
+            self._progress_bar.setRange(0, 100)
+            # Clear the "Discovering files…" status now that real progress runs.
+            try:
+                if self._parent_window is not None and hasattr(self._parent_window, "statusBar"):
+                    self._parent_window.statusBar().clearMessage()
+            except Exception:
+                pass
         if total > 0:
             pct = int(current * 100 / total)
             self._progress_bar.setValue(pct)
         else:
             self._progress_bar.setValue(0)
+
+    def _on_worker_status_updated(self, text: str) -> None:
+        """Phase 97.3 R97.3-E (D-07): route worker phase text to status bar."""
+        try:
+            if self._parent_window is not None and hasattr(self._parent_window, "statusBar"):
+                self._parent_window.statusBar().showMessage(text, 0)
+        except Exception:
+            pass
 
     def _on_file_finished(
         self, filepath: str, status: str, pages: int, err: str
@@ -2009,6 +2372,36 @@ class MyLibraryTab(QWidget):
             self._folder_list.blockSignals(False)
             if hasattr(self, '_unified_tree'):
                 self._unified_tree.populate_for_folder(previous_path)
+
+    def _invalidate_prior_status_cache(self) -> None:
+        """Phase 97.3 R97.3-A (D-12, D-19) — clear cache, then reload from DB.
+
+        MUST be called BEFORE _refresh_folder_list_ui in the worker
+        finish/error/reset/folder-add/folder-remove code paths. Codex
+        Critique #2 v7.14 blocker: late clearing leaves stale prior_status
+        visible in the post-scan tree because _refresh_folder_list_ui calls
+        populate_for_folder() which reads the cache.
+        """
+        self._prior_status_cache = {}
+        if self._indexer is None:
+            return
+        try:
+            folders = self._indexer.list_folders()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("_invalidate_prior_status_cache: list_folders failed: %s", exc)
+            return
+        for folder in folders:
+            path = folder.get("path")
+            if not path:
+                continue
+            try:
+                self._prior_status_cache[path] = self._indexer.get_file_status_for_folder(path) or {}
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "_invalidate_prior_status_cache: get_file_status_for_folder(%s) failed: %s",
+                    path, exc,
+                )
+                self._prior_status_cache[path] = {}
 
     def notify_session_restored(self) -> None:
         """Called by GenizahGUI._restore_session() (in its finally block) when
