@@ -361,6 +361,32 @@ Plans:
 
 Note: Phase 97.1 was the inline `/gsd-fast` hotfix (commit `2e1b846e`) for the freeze + WinError 3 storm. That hotfix was NOT registered as a tracked phase; 97.2 starts the formal decimal sequence.
 
+### Phase 97.3: My Library UAT Stability (INSERTED)
+
+**Goal:** Close the four post-ship UAT defects reported 2026-05-26 against Phase 97.2's "Reset My Library" + recovery-cascade work. Make the desktop My Library tab usable on mega-folders (no main-thread freeze), make Reset accessible exactly when users need it (after a crash), and make recovery-Skip behave like Skip instead of silently re-launching the broken scan. Source: `.planning/debug/post-97.2-uat-bugs-codex-critique.md` (full Codex root-cause analysis).
+
+**Scope (proposed — locks in SPEC.md):**
+- Bug A — UI-thread sync recursive walk in `_populate_node` freezes app on mega folders (pre-existing from Phase 96 D-F1, surfaced by post-97.2 UAT)
+- Bug B — `_update_reset_button_state` disables Reset on orphan `scan_runs` rows (Phase 97.2 UX hole — orphans are precisely what Reset cleans up)
+- Bug D — Recovery-Skip immediately triggers `_auto_rescan_on_startup` on the same broken folders
+- Bug E — "Discovering files…" status during `scan_all()` enumeration phase (user sees 0% indefinitely)
+- Bug C (optional) — `fitz.TOOLS.mupdf_display_warnings(False)` to silence MuPDF stderr noise (624× "TF" keyword)
+- N3 (optional) — UI tree extension parity (`.html`/`.xlsx`/`.csv` invisible vs indexer `_SUPPORTED_EXTENSIONS`)
+
+**Deferred (Codex near-misses, not in user's repro):**
+- N1 — `prescan_count_all()` synchronous on UI thread (separate code path)
+- N2 — `_show_recovery_modal` multi-orphan ordering (edge case)
+
+**Hard scoping constraint (user-stated):** "I prefer workable more limited release over another phase with more bugs." Spec locks the minimum that fixes the four UAT-reproduced failures + any TRULY free adjacent fix; everything else defers.
+
+**Depends on:** Phase 97.2 (shipped 2026-05-26, 25 commits, all 8/8 R97.2-* requirements MET).
+
+**Plans:** TBD (spec → discuss → plan)
+
+**Source:**
+- `.planning/debug/post-97.2-uat-bugs-codex-brief.md` (orchestrator brief to Codex)
+- `.planning/debug/post-97.2-uat-bugs-codex-critique.md` (Codex full analysis + code recommendations)
+
 ### Phase 98: NLI Resilience — circuit-breaker and bounded-timeout hardening for all NLI/IIIF code paths
 
 **Goal:** Prevent any single NLI/IIIF upstream slowdown from hanging `genizah-web`. Bound the per-request blocking budget on every NLI-touching code path via (a) a shared circuit breaker (`shared/nli_circuit_breaker.py`) that short-circuits requests when NLI is degraded and (b) shorter env-configurable read timeouts. The 2026-05-25 production outage (7 minutes unresponsive, SIGTERM hung 90s, SIGKILL required) is the trigger and the regression test.
