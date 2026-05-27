@@ -7012,7 +7012,7 @@ class SearchEngine:
         self.local_lab_searcher_stale = False
         return True
 
-    def rebuild_local_lab_index(self, local_indexer) -> None:
+    def rebuild_local_lab_index(self, local_indexer, lab_engine=None) -> None:
         """Trigger LOCAL LAB rebuild via LocalIndexer, passing fingerprint helpers
         as callbacks (W5 — Option C LOCKED). Called from MyLibraryTab Refresh
         (Plan 07) and Tools→Rebuild LAB (per D-38).
@@ -7020,10 +7020,29 @@ class SearchEngine:
         The three bound-method callbacks (_compute_fingerprint_dyn,
         _compute_fingerprint_static, _normalize_text) are thin wrappers around
         the existing text_to_fingerprint / lab_index_normalize helpers in this class.
+
+        The LAB weights (``dynamic_rank_map`` + ``settings``) live on
+        :class:`LabEngine`, NOT on :class:`SearchEngine` (same split CR-01 fixed
+        for ``_current_lab_weights_hash``). The caller passes the live LabEngine
+        as ``lab_engine`` so the weights — and therefore the build-time
+        fingerprints and the ``weights_hash`` written into ``.meta.json`` —
+        match what the LabEngine freshness check recomputes. Falling back to
+        ``self`` with ``getattr`` defaults keeps a plain SearchEngine from
+        raising ``AttributeError``; sourcing weights from ``self`` (None map)
+        would make the freshness check see a different hash and judge the index
+        perpetually stale.
         """
+        weights_source = lab_engine if lab_engine is not None else self
+        dyn_map = getattr(weights_source, "dynamic_rank_map", None)
+        settings = getattr(weights_source, "settings", None)
+        # Normalize identically to LabEngine._current_lab_weights_hash so the
+        # weights_hash written here matches the freshness check exactly.
         lab_weights = {
-            "dynamic_rank_map": self.dynamic_rank_map,
-            "use_dynamic_weights": getattr(self.settings, "use_dynamic_weights", False),
+            "dynamic_rank_map": dyn_map if dyn_map else None,
+            "use_dynamic_weights": (
+                getattr(settings, "use_dynamic_weights", False)
+                if settings is not None else False
+            ),
         }
         local_indexer.build_lab_side_index(
             lab_weights=lab_weights,
@@ -7031,7 +7050,7 @@ class SearchEngine:
             fingerprint_static_fn=self._compute_fingerprint_static,
             normalize_text_fn=self._normalize_text,
             lab_schema_version=1,
-            dynamic_rank_map=self.dynamic_rank_map,
+            dynamic_rank_map=dyn_map,
         )
         # Reload so newly built index is visible in live session
         self.reload_local_lab_index()

@@ -59,7 +59,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QColor
 
-from shared.local_indexer import LocalIndexer, _SUPPORTED_EXTENSIONS
+from shared.local_indexer import LocalIndexer, _SUPPORTED_EXTENSIONS, is_office_temp_file
 from genizah_core import Config, tr, CURRENT_LANG
 
 logger = logging.getLogger(__name__)
@@ -853,6 +853,11 @@ class FolderWalkWorker(QThread):
                     for name in files:
                         if self._cancel_requested:
                             break
+                        # Office/LibreOffice lock files (~$foo.docx) are transient
+                        # non-documents — drop before any stat/extension work so
+                        # they never appear in the opt-out tree.
+                        if is_office_temp_file(name):
+                            continue
                         # D-02: extension pre-filter — DROP before stat/canonical.
                         # _SUPPORTED_EXTENSIONS is the DELIBERATE R97.3-N opt-out
                         # surface (single source of truth) and intentionally
@@ -1078,7 +1083,9 @@ class MyLibraryTab(QWidget):
                 "WR-08: LAB index stale (weights_hash mismatch) — triggering rebuild"
             )
             try:
-                search.rebuild_local_lab_index(self._indexer)
+                # LAB weights live on the LabEngine — pass it so the rebuilt
+                # index's weights_hash matches the freshness check (else stale loop).
+                search.rebuild_local_lab_index(self._indexer, lab_engine=lab)
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "MyLibraryTab._maybe_rebuild_lab_if_stale: "

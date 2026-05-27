@@ -18379,14 +18379,27 @@ class GenizahGUI(QMainWindow):
         sorted_results = self._collect_sorted_results()
         if not sorted_results:
             sorted_results = [res]
+        # Locate the clicked result. Prefer an EXACT match — same object or same
+        # per-page uid (unique per result). Only fall back to the manuscript/file
+        # id, and take the FIRST such row. A file's pages all share one display
+        # id, so the old loop (no break on the id branch) landed on the LAST
+        # same-id row: every result of a file opened at that file's last
+        # position and the counter ran backwards by file ("500 of 500",
+        # "486 of 500", ...). See bug report 2026-05-27.
+        res_uid = res.get('uid')
+        res_id = (res.get('display') or {}).get('id')
         target_index = 0
+        matched = False
         for idx, candidate in enumerate(sorted_results):
-            if candidate is res:
+            if candidate is res or (res_uid and candidate.get('uid') == res_uid):
                 target_index = idx
+                matched = True
                 break
-            cand_id = candidate.get('display', {}).get('id')
-            if cand_id and cand_id == res.get('display', {}).get('id'):
-                target_index = idx
+        if not matched and res_id:
+            for idx, candidate in enumerate(sorted_results):
+                if (candidate.get('display') or {}).get('id') == res_id:
+                    target_index = idx
+                    break
         ResultDialog(self, sorted_results, target_index, self.meta_mgr, self.searcher).exec()
 
     def open_result_in_browse_from_table(self, res):

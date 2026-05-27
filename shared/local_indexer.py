@@ -108,6 +108,20 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 _SUPPORTED_EXTENSIONS = {".docx", ".pdf", ".txt", ".html", ".xlsx", ".csv"}
+
+
+def is_office_temp_file(filename: str) -> bool:
+    """True for MS Office / LibreOffice lock & owner files (e.g. ``~$report.docx``).
+
+    These are transient files Word/Excel/PowerPoint create while a document is
+    open. They are NOT real documents and not valid zip containers, so they
+    would otherwise be logged as ``zip_bomb_suspected`` ("not a valid
+    zip-container file") and shown forever in the opt-out tree. Skipped during
+    enumeration so they never reach indexing, status tables, or the tree.
+    """
+    return os.path.basename(filename).startswith("~$")
+
+
 # Phase 97 D-NEW-4 — error statuses that keep a row even for unsupported extensions
 _ERROR_STATUSES_KEPT = {
     "oversized", "error", "encoding_error",
@@ -1772,6 +1786,8 @@ class LocalIndexer:
                     return -1, -1
                 try:
                     for fname in files:
+                        if is_office_temp_file(fname):
+                            continue
                         ext = os.path.splitext(fname)[1].lower()
                         if ext in _SUPPORTED_EXTENSIONS:
                             fpath = os.path.join(dirpath, fname)
@@ -1926,6 +1942,8 @@ class LocalIndexer:
                         # `.planning/debug/phase-97-freeze-winerror-3.md`.
                         if cancel_check():
                             return
+                        if is_office_temp_file(fname):
+                            continue
                         fpath = os.path.join(dirpath, fname)
                         canonical = _canonical_filepath(fpath)
                         try:
