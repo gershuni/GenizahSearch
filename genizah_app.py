@@ -18359,19 +18359,22 @@ class GenizahGUI(QMainWindow):
         row = self.results_table.currentRow()
         if row < 0: return
 
-        sorted_results = self._collect_sorted_results()
-        if not sorted_results:
+        # currentRow() indexes the FULL table, but _collect_sorted_results() drops
+        # hidden (filtered) rows — using row as an index into that list opens the
+        # wrong result when any earlier row is hidden. Read the clicked row's own
+        # result dict and delegate to the uid-locator so this path stays consistent
+        # with the 👁 "View result" button (both resolve position by uid).
+        item = self.results_table.item(row, self.COL_SYS_ID)
+        res = item.data(Qt.ItemDataRole.UserRole) if item else None
+        if not res:
             return
-        if row >= len(sorted_results):
-            row = 0
-        res = sorted_results[row]
         # Phase 95 smoke-fix (E): LOCAL double-click → ResultDialog (shows text).
         # The Browse panel path was removed because Browse does not render file text
         # correctly for LOCAL hits. ResultDialog already renders full_text which is
         # populated for LOCAL hits by _build_local_result_dict. The "Open file"
         # button is injected into ResultDialog by _inject_open_file_btn_into_rd()
         # so the user can still launch the source file from there.
-        ResultDialog(self, sorted_results, row, self.meta_mgr, self.searcher).exec()
+        self.show_full_text_for_result(res)
 
     def show_full_text_for_result(self, res):
         if not res:

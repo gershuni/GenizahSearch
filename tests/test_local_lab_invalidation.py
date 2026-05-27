@@ -317,6 +317,53 @@ class TestBuildLabSideIndex:
         finally:
             indexer.close()
 
+    def test_lab_rebuild_is_replace_not_append(self, tmp_path):
+        """Codex 2026-05-27 HIGH: build_lab_side_index reuses the LAB dir, so a
+        rebuild must CLEAR existing docs first (delete_all_documents) — not append.
+        Without that, each rebuild duplicates every page (and keeps deleted pages)
+        while writing a 'fresh' weights_hash. Assert the LAB Tantivy doc count
+        equals the page count after a second rebuild, not twice it.
+        """
+        try:
+            import tantivy  # noqa
+        except ImportError:
+            pytest.skip("tantivy not available")
+        from shared.local_indexer import build_local_lab_schema
+
+        indexer, index_dir, lab_index_dir, db_path = _make_local_indexer(str(tmp_path))
+        try:
+            folder_path, txt_path, sys_id = _index_small_txt(indexer, str(tmp_path))
+            assert sys_id is not None
+
+            fp_dyn, fp_static, normalize = _make_dummy_callbacks()
+            lab_weights = {"v": 1}
+
+            n_pages = indexer._conn.execute(
+                "SELECT COUNT(*) AS c FROM local_pages"
+            ).fetchone()["c"]
+            assert n_pages > 0
+
+            def _lab_doc_count() -> int:
+                lab_index = tantivy.Index(build_local_lab_schema(), path=lab_index_dir)
+                lab_index.reload()
+                return lab_index.searcher().num_docs
+
+            for _ in range(2):
+                indexer.build_lab_side_index(
+                    lab_weights=lab_weights,
+                    fingerprint_dyn_fn=fp_dyn,
+                    fingerprint_static_fn=fp_static,
+                    normalize_text_fn=normalize,
+                    lab_schema_version=1,
+                )
+
+            assert _lab_doc_count() == n_pages, (
+                "LAB rebuild must replace, not append — doc count should equal "
+                "page count after repeated rebuilds"
+            )
+        finally:
+            indexer.close()
+
     def test_read_lab_meta_returns_none_when_missing(self, tmp_path):
         """read_lab_meta returns None when .meta.json does not exist."""
         from shared.local_indexer import LocalIndexer

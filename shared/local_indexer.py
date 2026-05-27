@@ -3535,6 +3535,13 @@ class LocalIndexer:
             pass
 
         writer = lab_index.writer(heap_size=50_000_000)
+        # True rebuild, not append: the LAB dir is reused across rebuilds
+        # (tantivy.Index reuse=True). Without clearing first, a rebuild after a
+        # weight change or a page deletion would leave stale fingerprint_dyn docs
+        # (and removed pages) beside the new rows, yet write a "fresh" weights_hash
+        # — duplicate/ghost LAB hits. delete_all_documents() + the add loop commit
+        # as one transaction, so only the current rows survive.
+        writer.delete_all_documents()
 
         rows_written = 0
         for sys_id, uid, page_num, file_id, content in self._iterate_lab_source_rows():
