@@ -1,12 +1,20 @@
 # -*- coding: utf-8 -*-
-"""Phase 99 — Wave 0 test contract for desktop/pdf_page_renderer.py.
+"""Phase 99 — test contract for desktop/pdf_page_renderer.py.
 
-Covers: PDFIMG-01 (render), PDFIMG-02 (LRU + no-disk-cache), PDFIMG-06
-(failure classification), and D-03 token-echo contract.
+Wave 0 tests (Plans 01 — synchronous, no QThread):
+  Covers: PDFIMG-01 (render), PDFIMG-02 (LRU + no-disk-cache), PDFIMG-06
+  (failure classification).
 
-These tests call render functions and LRU directly — NO QThread spun here.
-Mirror approach: tests/test_local_pdf_extraction_fallback.py calls
-extract_pdf_pages() directly without spinning a QThread.
+Wave 1 tests (Plan 02 — PdfRenderWorker signal wiring, D-03 token echo):
+  Covers: D-03 token echo via real signal emissions, PDFIMG-06 no-crash
+  (failure routing to render_failed), loop continuity across bad renders,
+  enqueue-after-stop drop. Uses _handle_request synchronous call idiom or
+  real QThread with DirectConnection (pytest-qt-FREE — mirrors
+  test_folder_walk_worker.py).
+
+These tests call render functions and LRU directly for synchronous tests,
+and use worker._handle_request() for signal-emission tests (the thread
+assertion lives in run(), not _handle_request, so direct calls work).
 
 If any fixture PDF is missing, run:
     python scripts/generate_pdf_render_fixtures.py
@@ -14,7 +22,9 @@ If any fixture PDF is missing, run:
 import gc
 import os
 import shutil
+import sys
 import tempfile
+import threading
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -470,35 +480,204 @@ def test_failures_logged(caplog):
 
 
 # ---------------------------------------------------------------------------
-# D-03: token echo contract (stub for Plan 02's signal wiring)
+# D-03: token echo contract (upgraded by Plan 02 with real signal-emission asserts)
 # ---------------------------------------------------------------------------
 
-def test_token_echoed_in_signals():
-    """Verify the PdfRenderFailure enum exposes all 8 members with the exact
-    string values from D-04 (the token/signal contract is completed by Plan 02
-    which adds the real QThread signal-echo assertions).
+def _require_pyqt():
+    """Ensure QApplication exists; pytest.skip if PyQt6 not available.
 
-    Comment for Plan 02's executor: upgrade this test to assert that the
-    PdfRenderWorker's render_succeeded / render_failed signals echo the
-    (token, sys_id, page_num) tuple provided to enqueue(), proving stale
-    results can be discarded by the UI controller.
+    Mirrors tests/test_folder_walk_worker.py:149-155 — the in-repo precedent
+    for testing QThread workers without pytest-qt.
     """
-    m = _import_renderer()
+    try:
+        from PyQt6.QtWidgets import QApplication  # noqa: F401
+    except ImportError:
+        pytest.skip("PyQt6 not available in this environment")
+    from PyQt6.QtWidgets import QApplication
+    return QApplication.instance() or QApplication(sys.argv[:1])
 
-    expected_values = {
-        "missing-file",
-        "not-pdf",
-        "encrypted",
-        "corrupt",
-        "page-out-of-range",
-        "render-error",
-        "timeout",
-        "cancelled",
-    }
-    actual_values = {e.value for e in m.PdfRenderFailure}
-    assert actual_values == expected_values, (
-        f"PdfRenderFailure enum mismatch.\n"
-        f"  Expected: {sorted(expected_values)}\n"
-        f"  Got:      {sorted(actual_values)}"
+
+def test_token_echoed_in_signals():
+    """UPGRADED from Plan 01 stub: verify (token, sys_id, page_num) are echoed
+    verbatim in render_succeeded when _handle_request is called synchronously.
+
+    Uses Qt.ConnectionType.DirectConnection so the slot fires inline on the
+    calling thread — pytest-qt-FREE (mirrors test_folder_walk_worker.py idiom).
+
+    D-03 latest-wins: the Phase 100 controller compares the echoed token
+    against its current counter; a stale result (old token) is discarded.
+    """
+    _require_pyqt()
+    from PyQt6.QtCore import Qt
+
+    m = _import_renderer()
+    worker = m.PdfRenderWorker()
+
+    # Capture args from render_succeeded via DirectConnection (inline in caller thread)
+    succeeded_args = []
+    worker.render_succeeded.connect(
+        lambda tok, sid, pn, img: succeeded_args.append((tok, sid, pn, img)),
+        Qt.ConnectionType.DirectConnection,
     )
-    assert len(list(m.PdfRenderFailure)) == 8
+    failed_args = []
+    worker.render_failed.connect(
+        lambda tok, sid, pn, reason, detail: failed_args.append((tok, sid, pn, reason, detail)),
+        Qt.ConnectionType.DirectConnection,
+    )
+
+    # Call _handle_request DIRECTLY (thread assertion is in run(), not here)
+    worker._handle_request((7, "S1", 2, MULTIPAGE_PDF))
+
+    assert len(succeeded_args) == 1, (
+        f"Expected 1 render_succeeded emission; got {len(succeeded_args)}"
+    )
+    assert len(failed_args) == 0, (
+        f"render_failed should NOT fire for a valid render; got {failed_args}"
+    )
+
+    tok, sid, pn, img = succeeded_args[0]
+    assert tok == 7,    f"Token must be echoed verbatim; expected 7, got {tok}"
+    assert sid == "S1", f"sys_id must be echoed verbatim; expected 'S1', got {sid!r}"
+    assert pn == 2,     f"page_num must be echoed verbatim; expected 2, got {pn}"
+    assert img is not None and not img.isNull(), "render_succeeded image must be non-null"
+
+
+# ---------------------------------------------------------------------------
+# Plan 02 additions — worker signal tests (pytest-qt-FREE)
+# ---------------------------------------------------------------------------
+
+def test_worker_failure_routes_to_render_failed():
+    """A missing-file render request emits render_failed with the token echoed,
+    reason=MISSING_FILE, non-empty detail; render_succeeded must NOT fire.
+
+    Uses synchronous _handle_request call (thread assertion in run() only).
+    Pins PDFIMG-06 failure routing contract via PdfRenderWorker.
+    """
+    _require_pyqt()
+    from PyQt6.QtCore import Qt
+
+    m = _import_renderer()
+    worker = m.PdfRenderWorker()
+
+    succeeded_args = []
+    failed_args = []
+    worker.render_succeeded.connect(
+        lambda tok, sid, pn, img: succeeded_args.append((tok, sid, pn, img)),
+        Qt.ConnectionType.DirectConnection,
+    )
+    worker.render_failed.connect(
+        lambda tok, sid, pn, reason, detail: failed_args.append((tok, sid, pn, reason, detail)),
+        Qt.ConnectionType.DirectConnection,
+    )
+
+    # Missing file — will classify as MISSING_FILE in render_via_lru
+    worker._handle_request((42, "SYS_X", 1, "/nonexistent/totally_missing.pdf"))
+
+    assert len(failed_args) == 1, (
+        f"Expected 1 render_failed emission; got {len(failed_args)}"
+    )
+    assert len(succeeded_args) == 0, (
+        "render_succeeded must NOT fire for a missing file"
+    )
+
+    tok, sid, pn, reason, detail = failed_args[0]
+    assert tok == 42,                  f"Token echoed; expected 42, got {tok}"
+    assert sid == "SYS_X",             f"sys_id echoed; expected 'SYS_X', got {sid!r}"
+    assert pn == 1,                    f"page_num echoed; expected 1, got {pn}"
+    assert reason == m.PdfRenderFailure.MISSING_FILE, (
+        f"Expected MISSING_FILE, got {reason!r}"
+    )
+    assert detail, "detail must be non-empty"
+
+
+def test_worker_survives_bad_render_and_serves_next():
+    """PDFIMG-06 no-crash + D-03 loop-continuity proof.
+
+    Enqueues a corrupt-PDF request THEN a valid multipage request on the SAME
+    worker. Uses a REAL QThread (to prove the run loop does not die after an
+    error) with DirectConnection + threading.Event for deterministic completion.
+
+    Asserts:
+      - first emission is render_failed with a failure reason (corrupt)
+      - second emission is render_succeeded with a non-null QImage
+      - the run loop survived the bad render and processed the next request
+    """
+    _require_pyqt()
+    from PyQt6.QtCore import Qt
+
+    m = _import_renderer()
+    worker = m.PdfRenderWorker()
+
+    emissions = []
+    done_event = threading.Event()
+
+    def _on_succeeded(tok, sid, pn, img):
+        emissions.append(("succeeded", tok, sid, pn, img))
+        if len(emissions) >= 2:
+            done_event.set()
+
+    def _on_failed(tok, sid, pn, reason, detail):
+        emissions.append(("failed", tok, sid, pn, reason, detail))
+        if len(emissions) >= 2:
+            done_event.set()
+
+    worker.render_succeeded.connect(_on_succeeded, Qt.ConnectionType.DirectConnection)
+    worker.render_failed.connect(_on_failed, Qt.ConnectionType.DirectConnection)
+
+    worker.start()
+    try:
+        # Enqueue corrupt PDF (will fail) then a valid multipage PDF
+        worker.enqueue(1, "BAD", 1, CORRUPT_PDF)
+        worker.enqueue(2, "GOOD", 1, MULTIPAGE_PDF)
+
+        # Wait up to 5s for both emissions
+        done_event.wait(5.0)
+    finally:
+        worker.stop(timeout_ms=5000)
+
+    assert len(emissions) == 2, (
+        f"Expected exactly 2 emissions (1 failed + 1 succeeded); got {len(emissions)}: "
+        f"{emissions}"
+    )
+
+    first = emissions[0]
+    assert first[0] == "failed", (
+        f"First emission must be render_failed for the corrupt PDF; got {first[0]!r}"
+    )
+    # reason should be CORRUPT (corrupt_sample.pdf has a bad body)
+    assert first[4] in (
+        m.PdfRenderFailure.CORRUPT, m.PdfRenderFailure.RENDER_ERROR
+    ), f"Expected CORRUPT or RENDER_ERROR for corrupt PDF; got {first[4]!r}"
+
+    second = emissions[1]
+    assert second[0] == "succeeded", (
+        f"Second emission must be render_succeeded for the valid PDF; got {second[0]!r}. "
+        "This proves the run loop survived the bad render (PDFIMG-06 no-crash)."
+    )
+    img = second[4]
+    assert img is not None and not img.isNull(), (
+        "Second emission QImage must be non-null (valid render of multipage_sample.pdf)"
+    )
+
+
+def test_enqueue_after_stop_dropped():
+    """enqueue() after stop() must drop the request (return False) and not queue
+    work that can never emit a result. Pins REVIEW item 4 (Codex MEDIUM).
+
+    The thread never needs to be started — stop() sets _stopping immediately,
+    so enqueue() observes the flag and returns False.
+    """
+    _require_pyqt()
+
+    m = _import_renderer()
+    worker = m.PdfRenderWorker()
+
+    # stop() without ever starting sets _stopping and puts _STOP in queue
+    # (wait(5000) immediately returns True since thread was never started)
+    worker.stop(timeout_ms=100)
+
+    # enqueue after stop must return False and drop the request
+    result = worker.enqueue(1, "S", 1, MULTIPAGE_PDF)
+    assert result is False, (
+        f"enqueue() after stop() must return False; got {result!r}"
+    )
