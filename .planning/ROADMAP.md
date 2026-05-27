@@ -48,7 +48,7 @@
 
 Plans:
 - [x] 99-01-PLAN.md (Wave 1) — Render core: PdfRenderFailure enum, DocLRU, single-page render+copy, Wave 0 tests + fixtures
-- [ ] 99-02-PLAN.md (Wave 2) — PdfRenderWorker: long-lived queue-driven QThread, tokenized signals, no-crash envelope, clean shutdown
+- [x] 99-02-PLAN.md (Wave 2) — PdfRenderWorker: long-lived queue-driven QThread, tokenized signals, no-crash envelope, clean shutdown
 
 #### Phase 100: LOCAL PDF Image in ResultDialog + Browse
 **Goal**: Researchers see the actual scanned/typeset PDF page next to the extracted text for LOCAL hits, in both the desktop ResultDialog and the desktop Browse panel, with the image staying in sync as they navigate — while non-PDF LOCAL files remain cleanly text-only.
@@ -307,7 +307,7 @@ v7.15 phases execute in numeric order: 99 → 100
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 99. PDF Page Renderer | v7.15 | 1/2 | In Progress|  |
+| 99. PDF Page Renderer | v7.15 | 2/2 | Complete   | 2026-05-27 |
 | 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 0/TBD | Not started | - |
 
 ## Backlog
