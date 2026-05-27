@@ -552,7 +552,13 @@ class ResultDialog(QDialog):
         ext_layout = QVBoxLayout(self.external_pane); ext_layout.setContentsMargins(0,0,0,0)
 
         self.lbl_ext_attr = QLabel(tr("External Viewer"))
-        self.lbl_ext_attr.setStyleSheet("font-weight: bold; padding: 5px; background: #ecf0f1;")
+        # Phase 100 UAT: palette-aware header so the bar adapts to dark mode
+        # (previously hardcoded light #ecf0f1, which read as a white bar in dark theme).
+        _ext_dark = self.palette().color(QPalette.ColorRole.Window).lightness() < 128
+        if _ext_dark:
+            self.lbl_ext_attr.setStyleSheet("font-weight: bold; padding: 5px; background: #3a3f44; color: #ecf0f1;")
+        else:
+            self.lbl_ext_attr.setStyleSheet("font-weight: bold; padding: 5px; background: #ecf0f1; color: #2c3e50;")
         self.lbl_ext_attr.setWordWrap(True)
 
         self.txt_ext_meta = QTextBrowser()
@@ -3283,6 +3289,13 @@ class ResultDialog(QDialog):
         self.external_pane.setVisible(True)
         self.btn_toggle_image.setVisible(True)
         self.btn_toggle_image.setChecked(True)
+        # Phase 100 UAT: a LOCAL PDF has no external metadata, so collapse the
+        # empty meta box (it otherwise leaves a blank gap between the header and
+        # the rendered page). Mirrors the Genizah image path which hides it too.
+        # Header stays visible (now dark-mode aware) to label the pane.
+        self.lbl_ext_attr.setVisible(True)
+        self.txt_ext_meta.setHtml("")
+        self.txt_ext_meta.setVisible(False)
         controller.request(
             self._pdf_scope,
             sys_id,
