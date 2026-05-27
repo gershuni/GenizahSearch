@@ -43,11 +43,12 @@
   2. Rendering happens on a background worker mirroring the existing `ImageLoaderThread` QThread pattern, so the UI never blocks while a page renders.
   3. Repeated renders reuse a bounded LRU of open `fitz.Document` handles; no rendered page image is written to disk and only the currently displayed page(s) are held in memory.
   4. A missing file, corrupt/encrypted PDF, out-of-range page, or render exception returns a graceful failure result (placeholder signal + log entry) rather than raising into the UI.
-**Plans**: TBD
+**Plans**: 2 plans (2 waves)
 **UI hint**: yes
 
 Plans:
-- [ ] 99-01: TBD (renderer/worker)
+- [ ] 99-01-PLAN.md (Wave 1) — Render core: PdfRenderFailure enum, DocLRU, single-page render+copy, Wave 0 tests + fixtures
+- [ ] 99-02-PLAN.md (Wave 2) — PdfRenderWorker: long-lived queue-driven QThread, tokenized signals, no-crash envelope, clean shutdown
 
 #### Phase 100: LOCAL PDF Image in ResultDialog + Browse
 **Goal**: Researchers see the actual scanned/typeset PDF page next to the extracted text for LOCAL hits, in both the desktop ResultDialog and the desktop Browse panel, with the image staying in sync as they navigate — while non-PDF LOCAL files remain cleanly text-only.
