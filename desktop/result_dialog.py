@@ -2033,6 +2033,16 @@ class ResultDialog(QDialog):
             _is_local_hit = False
             self.btn_rd_open_file.setVisible(False)
 
+        # Phase 100 (REVIEWS HIGH-2/HIGH-3): if the newly-shown result is NOT a LOCAL PDF
+        # (non-LOCAL, or LOCAL non-PDF), cancel any in-flight render for this dialog's scope
+        # and hide the pane. LOCAL PDF results are rendered by load_local_page's trigger; we
+        # do NOT request here (avoids duplicate-on-open). cancel (not discard_scope) — the
+        # dialog scope is still live and may be re-requested when navigating back to a LOCAL PDF.
+        _ctrl = self._pdf_controller()
+        _is_local_pdf = bool(_is_local_hit) and _ctrl is not None and _ctrl.is_pdf(getattr(self, '_rd_local_filepath', None))
+        if not _is_local_pdf:
+            self._cancel_local_pdf_image()
+
         # Phase 96 polish (Item 1): show LOCAL file path prominently under shelfmark.
         # Uses hit['display']['shelfmark'] which _build_local_result_dict sets to the
         # canonical filepath for LOCAL hits. Falls back to _rd_local_filepath.
@@ -2523,6 +2533,13 @@ class ResultDialog(QDialog):
         # Sync compact bar page label if present (mirrors Genizah path).
         if hasattr(self, 'lbl_compact_page') and self.compact_bar.isVisible():
             self.lbl_compact_page.setText(f"{self.current_p_num} {self.lbl_total.text()}")
+
+        # Phase 100 (PDFIMG-03 / D-06): render the LOCAL page image for the now-shown page.
+        # This is the SINGLE render trigger (REVIEWS HIGH-3): both initial open and
+        # prev/next RESULT reach here via load_result_by_index -> load_page -> load_local_page,
+        # and within-document prev/next PAGE also lands here. Placed on the success path so the
+        # early-return at boundary/unknown pages does NOT request a render.
+        self._render_local_pdf_image()
 
     def _set_local_page_nav_enabled(self, prev=None, nxt=None):
         """Item 6 (Codex): shared update path for BOTH full-size and compact nav buttons.
@@ -3209,6 +3226,19 @@ class ResultDialog(QDialog):
             # Stop manuscript viewer image threads
             if getattr(self, 'ms_viewer', None):
                 self.ms_viewer.stop_threads()
+
+            # Phase 100 (REVIEWS HIGH-2 + R2-2 + R2-3): fully discard this dialog's transient
+            # render scope so a late worker result cannot write into the closed dialog's ms_viewer,
+            # the retained callbacks (closing over this dialog + viewer) are released, AND the
+            # scope's debounce/watchdog QTimer dict entries are removed (not just stopped — they
+            # would otherwise accumulate one pair per opened PDF dialog for the app session).
+            # Idempotent with the finished-signal handler (_on_pdf_dialog_finished).
+            try:
+                ctrl = self._pdf_controller()
+                if ctrl is not None:
+                    ctrl.discard_scope(self._pdf_scope)
+            except Exception:  # noqa: BLE001
+                pass
 
         finally:
             super().closeEvent(event)
