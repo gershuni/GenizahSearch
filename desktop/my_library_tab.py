@@ -704,7 +704,10 @@ class PrescanWorker(QThread):
     ceiling-check flow and shows the QProgressDialog with Cancel.
     """
 
-    finished_signal = pyqtSignal(int, int)  # file_count, total_bytes
+    # qlonglong (64-bit): total_bytes overflows a 32-bit C++ int for folders
+    # larger than ~2 GB, which would truncate the byte count and break the
+    # _MAX_BYTES_CEILING check across the queued cross-thread connection.
+    finished_signal = pyqtSignal('qlonglong', 'qlonglong')  # file_count, total_bytes
     error_signal = pyqtSignal(str)
 
     def __init__(self, indexer: LocalIndexer, folder_path: str) -> None:
