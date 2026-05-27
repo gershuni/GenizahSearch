@@ -50,6 +50,13 @@ class ResultDialog(QDialog):
         super().__init__(parent)
         self._app = parent
 
+        # Phase 100 (REVIEWS HIGH-1): per-dialog controller scope so this dialog's
+        # PDF render state is isolated from Browse's on the shared PdfImageController.
+        self._pdf_scope = id(self)
+        # Phase 100 (REVIEWS-R2-2): guarantee scope teardown on EVERY dialog-finish
+        # path (accept/reject/done/Esc) — closeEvent alone misses reject/accept/done.
+        self.finished.connect(self._on_pdf_dialog_finished)
+
         self.all_results = all_results
         self.current_result_idx = current_index
         self.meta_mgr = meta_mgr
@@ -3205,6 +3212,84 @@ class ResultDialog(QDialog):
 
         finally:
             super().closeEvent(event)
+
+    # ------------------------------------------------------------------
+    # Phase 100 (PDFIMG-03/05): LOCAL PDF image rendering helpers
+    # ------------------------------------------------------------------
+
+    def _pdf_controller(self):
+        """Return the shared PdfImageController from the parent app, or None."""
+        app = getattr(self, '_app', None)
+        return getattr(app, '_pdf_image_controller', None) if app else None
+
+    def _is_current_hit_local(self) -> bool:
+        """Return True iff the current hit is a LOCAL indexed result."""
+        try:
+            from shared.local_sys_id import is_local_sys_id as _is_local
+            return bool(
+                self.current_sys_id
+                and _is_local(self.current_sys_id)
+                and getattr(self, '_app', None)
+            )
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _render_local_pdf_image(self):
+        """Phase 100 (PDFIMG-03/05): if the current hit is a LOCAL PDF, reveal the
+        external pane and request a render of the current page.
+
+        Called from load_local_page's SUCCESS path only (single source of truth
+        for the shown LOCAL page — REVIEWS HIGH-3 de-dup). Does NOT cancel;
+        non-PDF/non-LOCAL cancellation is handled by load_result_by_index +
+        dialog teardown.
+        """
+        controller = self._pdf_controller()
+        fp = getattr(self, '_rd_local_filepath', None)
+        if controller is None or not self._is_current_hit_local() or not controller.is_pdf(fp):
+            return  # non-LOCAL or non-PDF LOCAL: nothing to render (cancel handled elsewhere)
+        sys_id = self.current_sys_id
+        page_num = self.current_p_num or 1
+        # Reveal the pane (D-08) and keep the toggle usable for PDFs.
+        self.external_pane.setVisible(True)
+        self.btn_toggle_image.setVisible(True)
+        self.btn_toggle_image.setChecked(True)
+        controller.request(
+            self._pdf_scope,
+            sys_id,
+            page_num,
+            fp,
+            on_image=lambda img: self.ms_viewer.display_image(img),
+            on_placeholder=lambda text: self.ms_viewer.scroll_area.set_status_message(text),
+        )
+
+    def _cancel_local_pdf_image(self):
+        """Phase 100 (REVIEWS HIGH-2): invalidate any in-flight render for THIS dialog
+        so a late success cannot write a stale image into ms_viewer, and hide the pane.
+
+        Uses cancel (not discard_scope) because the dialog scope is still live and
+        may be re-requested when the user navigates back to a LOCAL PDF result.
+        """
+        controller = self._pdf_controller()
+        if controller is not None:
+            controller.cancel(self._pdf_scope, silent=True)
+        try:
+            self.external_pane.setVisible(False)
+            self.btn_toggle_image.setVisible(False)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_pdf_dialog_finished(self, _result):
+        """Phase 100 (REVIEWS-R2-2/R2-3): on any dialog termination (accept/reject/done/Esc),
+        fully discard this dialog's transient render scope so a late worker result cannot
+        write into the closed dialog's ms_viewer AND the scope's debounce/watchdog QTimer
+        dict entries are removed (not just stopped). Idempotent with the closeEvent discard.
+        """
+        controller = self._pdf_controller()
+        if controller is not None:
+            try:
+                controller.discard_scope(self._pdf_scope)
+            except Exception:  # noqa: BLE001
+                pass
 
     def open_catalog(self):
         # Phase 85 D-06: synthetic sys_ids skip the NLI catalog page (no Alma record)
