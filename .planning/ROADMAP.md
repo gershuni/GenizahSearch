@@ -31,7 +31,7 @@
 
 **Milestone Goal:** Show the source PDF *page image* alongside extracted text for LOCAL ("My Library") results in the desktop app, closing deferred item D-F3. Desktop-only — web "My Library" does not exist, so the dual-app maintenance rule does not apply. The work splits in two: a shared on-demand PDF page renderer + off-thread worker (with graceful failure handling), then wiring that renderer into the two desktop surfaces that show LOCAL hits (`ResultDialog` + Browse panel). Rendering is lazy and ephemeral — the 10K×500-page corpus is never bulk-rendered, and no rendered page image is ever written to disk. Non-PDF LOCAL files stay text-only.
 
-- [ ] **Phase 99: PDF Page Renderer** - Shared on-demand PyMuPDF page renderer + off-thread worker + graceful failure handling
+- [x] **Phase 99: PDF Page Renderer** - Shared on-demand PyMuPDF page renderer + off-thread worker + graceful failure handling (completed 2026-05-27)
 - [ ] **Phase 100: LOCAL PDF Image in ResultDialog + Browse** - Wire the renderer into both desktop surfaces; non-PDF files stay text-only
 
 #### Phase 99: PDF Page Renderer
@@ -307,7 +307,7 @@ v7.15 phases execute in numeric order: 99 → 100
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 99. PDF Page Renderer | v7.15 | 2/2 | Complete   | 2026-05-27 |
+| 99. PDF Page Renderer | v7.15 | 2/2 | Complete    | 2026-05-27 |
 | 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 0/TBD | Not started | - |
 
 ## Backlog
