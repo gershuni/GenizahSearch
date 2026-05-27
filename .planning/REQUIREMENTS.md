@@ -31,9 +31,9 @@
 
 | Requirement | Phase |
 |-------------|-------|
-| PDFIMG-01 | _(filled by roadmap)_ |
-| PDFIMG-02 | _(filled by roadmap)_ |
-| PDFIMG-03 | _(filled by roadmap)_ |
-| PDFIMG-04 | _(filled by roadmap)_ |
-| PDFIMG-05 | _(filled by roadmap)_ |
-| PDFIMG-06 | _(filled by roadmap)_ |
+| PDFIMG-01 | Phase 99 |
+| PDFIMG-02 | Phase 99 |
+| PDFIMG-03 | Phase 100 |
+| PDFIMG-04 | Phase 100 |
+| PDFIMG-05 | Phase 100 |
+| PDFIMG-06 | Phase 99 |

@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v7.15
 milestone_name: My Library Visual
-status: defining_requirements
-stopped_at: v7.15 started — requirements defined, roadmap next
+status: roadmap_complete
+stopped_at: v7.15 roadmap created — ready to plan Phase 99
 last_updated: "2026-05-27T00:00:00.000Z"
-last_activity: 2026-05-27 -- v7.15 My Library Visual started via /gsd-new-milestone (PROJECT.md + REQUIREMENTS.md written; 6 PDFIMG-* reqs; desktop PDF page image rendering, closing D-F3)
+last_activity: 2026-05-27 -- v7.15 roadmap created via /gsd-roadmap (2 phases 99/100; 6/6 PDFIMG-* reqs mapped; desktop PDF page image rendering for LOCAL results, closing D-F3)
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -25,32 +25,40 @@ See: .planning/PROJECT.md (updated 2026-05-27)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Not started (roadmap complete)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-05-27 -- Milestone v7.15 started
+Status: Roadmap complete — ready to plan Phase 99
+Last activity: 2026-05-27 -- v7.15 roadmap created
 
-Progress: [          ] v7.15 0% (roadmap pending)
+Progress: [          ] v7.15 0% (0/2 phases)
 
 ## Phase Plan Estimates
 
 | Phase | Name | Reqs | Plan slots (est) | Scope | CONTEXT.md status |
 |-------|------|------|------------------|-------|-------------------|
-| 93    | PGP Filter on `/search` | 5 | 1 | web only | LOCKED (`.planning/phases/93-filtering-by-pgp/93-CONTEXT.md`) |
-| 94    | Research-Grade Export Metadata | 9 | 4 | web + desktop xlsx (JSON + state plumbing web-only) | LOCKED, BROADENED 2026-05-17, FURTHER EXPANDED 2026-05-19 with desktop parity (`.planning/phases/94-adding-pgp-to-downloaded-data/94-CONTEXT.md`); CONTEXT.md needs refresh OR planner incorporates EXPORT-META-09 directly; prior `94-01-PLAN.SUPERSEDED.md` SUPERSEDED |
+| 99    | PDF Page Renderer | 3 (PDFIMG-01/02/06) | 1-2 | desktop only | not started |
+| 100   | LOCAL PDF Image in ResultDialog + Browse | 3 (PDFIMG-03/04/05) | 2 | desktop only | not started |
 
-**Total:** 14 requirements, 5 plan slots (estimated), 2 phases.
+**Total:** 6 requirements, ~3-4 plan slots (estimated), 2 phases. Both phases carry a UI hint (`yes`) — desktop PyQt6 surfaces.
 
-Phase 93 and Phase 94 are independent (neither depends on the other) and can ship in parallel.
+Phase 100 depends on Phase 99 (the renderer/worker must exist before the two UI surfaces can be wired). Execute 99 → 100.
 
-## Promoted Backlog (this milestone)
+## Requirement Coverage
 
-| Phase | Source slug | Name | Requirements |
-|-------|-------------|------|--------------|
-| 93    | 999.2-filtering-by-pgp | PGP filter on /search | PGP-FILTER-01..05 |
-| 94    | 999.3-adding-pgp-to-downloaded-data | Research-grade xlsx + JSON metadata | EXPORT-META-01..08 |
+6/6 PDFIMG-* requirements mapped (100%, no orphans):
+- Phase 99 (renderer/worker + graceful failure): PDFIMG-01, PDFIMG-02, PDFIMG-06
+- Phase 100 (ResultDialog + Browse wiring + text-only gating): PDFIMG-03, PDFIMG-04, PDFIMG-05
 
-`/gsd-review-backlog` (2026-05-19) renamed the phase directories (`999.2-*` → `93-filtering-by-pgp` and `999.3-*` → `94-adding-pgp-to-downloaded-data`) and updated frontmatter `phase:` fields in all 5 plan files. Internal historical references to "999.2" / "999.3" inside plan bodies are preserved as-is for git-history continuity.
+## Key Constraints (from PROJECT.md)
+
+- **Desktop-only** — web "My Library" does not exist; no web parity required.
+- **Lazy/on-demand rendering** — never bulk-render the 10K×500-page corpus; render the currently viewed page only.
+- **No on-disk image cache** — rendered page images are ephemeral; bounded LRU of open `fitz.Document` handles only.
+- **Reuse the existing `ImageLoaderThread` QThread pattern** for the off-UI-thread worker.
+- `sys_id` + `page_num` already flow to the UI; filepath via `get_filepath(sys_id)`; `fitz` page index = `page_num - 1`.
+- Non-PDF LOCAL files (`.docx`/`.html`/`.xlsx`/`.csv`/`.txt`) stay text-only (extension-gated).
+- Render failures degrade gracefully (placeholder + log) — no UI hang, no crash.
+- **D-F2 (PDF OCR)** explicitly deferred — possible follow-up phase later.
 
 ## Deferred Items
 
@@ -65,21 +73,7 @@ Items acknowledged and deferred at the v7.13 + v7.14 milestone close on 2026-05-
 | Pending todos | 5 | Largest: server-side search with email notification; NLI MARC crawl; unified metadata text search. |
 | Unimplemented seeds | 1 | SEED-001 server-side IIIF image cache (dormant; blocked on NLI TOS). |
 
-The v7.13/v7.14-specific items are all substantively closed by the shipped releases; only status-flag bookkeeping and the long historical backlog (predating v7.12) were deferred. Recommend a `/gsd-cleanup` pass before the next milestone.
-
----
-
-### Prior deferral — v7.12 milestone close on 2026-05-18:
-
-| Category | Count | Notes |
-|----------|-------|-------|
-| Debug sessions | 38 | Historical accumulation predating v7.12; spans many prior milestones |
-| Verification gaps | 2 | `88-VERIFICATION.md` + `92.1-VERIFICATION.md` flagged `human_needed`; SWEEP-05 smoke run 2 PASS (2026-05-18) substantively closes both; status flag flip deferred |
-| Quick tasks | 50 | Historical backlog (oldest from 2026-02); use `/gsd-cleanup` to triage between milestones |
-| Pending todos | 5 | Largest: server-side search with email notification; NLI MARC crawl; unified metadata text search |
-| Unimplemented seeds | 1 | SEED-001 server-side IIIF image cache (dormant; blocked on NLI TOS) |
-
-The full `gsd-tools.cjs audit-open` report at close included 96 items. The v7.12-specific items (the 2 verification gaps + the `app-storage-user-assertion-sweep` debug session) are all substantively closed by the milestone work; only the status-flag bookkeeping was deferred to avoid blocking the close commit.
+The v7.13/v7.14-specific items are all substantively closed by the shipped releases; only status-flag bookkeeping and the long historical backlog (predating v7.12) were deferred. Recommend a `/gsd-cleanup` pass before/during this milestone.
 
 ## Recently Closed Milestones
 
@@ -89,30 +83,15 @@ The full `gsd-tools.cjs audit-open` report at close included 96 items. The v7.12
 
 > Note (2026-05-27): v7.13 and v7.14 both shipped as app releases earlier but the GSD close ritual was skipped at the time; both were reconciled together on 2026-05-27 (MILESTONES.md entries, archives, REQUIREMENTS.md deletion).
 
-## Quick Tasks Completed
-
-| # | Description | Date | Commit | Status | Directory |
-|---|-------------|------|--------|--------|-----------|
-| 260519-9pk | Re-open P1 web memory leak — investigate secondary leak after export-cap fix | 2026-05-19 | 0a91bc97 | — | [260519-9pk-re-open-p1-web-memory-leak-investigate-s](./quick/260519-9pk-re-open-p1-web-memory-leak-investigate-s/) |
-| 260519-hoi | Ship SEED-002 uid-only export payload (44x per-row reduction) | 2026-05-19 | 2a7440d6 | Verified | [260519-hoi-ship-seed-002-uid-only-export-payload](./quick/260519-hoi-ship-seed-002-uid-only-export-payload/) |
-
 ## Accumulated Context
 
 ### Roadmap Evolution
 
-- Phase 96 added (2026-05-24): Completing My Library feature: add features and fix bugs
-- Phase 97 added (2026-05-25): More LOCAL features
-- Phase 98 added (2026-05-25): NLI Resilience — circuit-breaker and bounded-timeout hardening for all NLI/IIIF code paths
-- Phase 97.2 inserted after Phase 97 (2026-05-26, URGENT): Recovery cascade hotfix — fix 5 interacting Phase 97 bugs (redundant tantivy.Index reopen leaking writer lock; stale `.tantivy-writer.lock` carried through os.rename; `discard_run` field-name failure on stale Phase 95 schema; missing `self._writer is None` guards; "Reset My Library" UX never implemented despite being referenced in 2 error messages). Triggered by user repro on a 100K-file Dropbox tree quit mid-scan. Phase 97.1 was the prior inline `/gsd-fast` hotfix for the freeze + WinError 3 storm (commit `2e1b846e`) and was never registered as a tracked phase.
+- v7.15 roadmap created (2026-05-27): 2 phases — Phase 99 (PDF Page Renderer: shared on-demand PyMuPDF renderer + off-thread worker + graceful failure handling; PDFIMG-01/02/06) and Phase 100 (LOCAL PDF Image in ResultDialog + Browse: wire renderer into both desktop surfaces, non-PDF files stay text-only; PDFIMG-03/04/05). Numbering continues from v7.14's last phase 98. Closes deferred item D-F3.
 
 ## Session Continuity
 
-Last session: 2026-05-26T15:02:14.462Z
-Stopped at: Phase 97.3 context gathered
-Resume file: .planning/phases/97.3-my-library-uat-stability/97.3-CONTEXT.md
-Next step: `/gsd-review-backlog` (2026-05-19) already renamed the directories. Now:
-
-- `/gsd-plan-phase 93` — Phase 93 CONTEXT.md is ready, prior `93-01-PLAN.md` (originally `999.2-01-PLAN.md`) is a valid baseline, web only.
-- `/gsd-discuss-phase 94 --revise` first to refresh CONTEXT.md with the desktop-parity scope (or planner incorporates EXPORT-META-09 directly from REQUIREMENTS.md), then `/gsd-plan-phase 94`. Prior Plan 1 (now `94-01-PLAN.SUPERSEDED.md`) is SUPERSEDED — re-plan from scratch covering web + desktop xlsx + web-only JSON.
-
-Phases independent — order is human's choice.
+Last session: 2026-05-27T00:00:00.000Z
+Stopped at: v7.15 roadmap created
+Resume file: .planning/ROADMAP.md
+Next step: `/gsd-plan-phase 99` — plan the shared PDF page renderer + off-thread worker. Phase 100 depends on Phase 99, so execute in order 99 → 100.

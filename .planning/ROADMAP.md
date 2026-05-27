@@ -23,8 +23,46 @@
 - **v7.12 Multitenant Architecture (Path B)** -- Phases 87-92 + 92.1 + 92.2 + promoted 999.1/999.4 (shipped 2026-05-18)
 - **v7.13 Research-Grade Downloads & PGP Filter** -- Phases 93-94 (shipped 2026-05-21)
 - **v7.14 My Library — Local Document Search** -- Phases 95-98 (shipped 2026-05-24; closed 2026-05-27)
+- 🚧 **v7.15 My Library Visual** -- Phases 99-100 (in progress)
 
 ## Phases
+
+### 🚧 v7.15 My Library Visual (In Progress)
+
+**Milestone Goal:** Show the source PDF *page image* alongside extracted text for LOCAL ("My Library") results in the desktop app, closing deferred item D-F3. Desktop-only — web "My Library" does not exist, so the dual-app maintenance rule does not apply. The work splits in two: a shared on-demand PDF page renderer + off-thread worker (with graceful failure handling), then wiring that renderer into the two desktop surfaces that show LOCAL hits (`ResultDialog` + Browse panel). Rendering is lazy and ephemeral — the 10K×500-page corpus is never bulk-rendered, and no rendered page image is ever written to disk. Non-PDF LOCAL files stay text-only.
+
+- [ ] **Phase 99: PDF Page Renderer** - Shared on-demand PyMuPDF page renderer + off-thread worker + graceful failure handling
+- [ ] **Phase 100: LOCAL PDF Image in ResultDialog + Browse** - Wire the renderer into both desktop surfaces; non-PDF files stay text-only
+
+#### Phase 99: PDF Page Renderer
+**Goal**: A single PDF page can be rendered to a QImage on demand, off the UI thread, without ever loading or bulk-rendering the corpus — and any render failure degrades gracefully instead of hanging or crashing the app.
+**Depends on**: Phase 98 (last v7.14 phase); builds on the v7.14 `local_indexer.py` + PyMuPDF dependency
+**Requirements**: PDFIMG-01, PDFIMG-02, PDFIMG-06
+**Success Criteria** (what must be TRUE):
+  1. Given a PDF filepath (from `get_filepath(sys_id)`) and a 1-based `page_num`, the renderer returns the QImage for exactly that page (`fitz` page index = `page_num - 1`), without loading the rest of the document.
+  2. Rendering happens on a background worker mirroring the existing `ImageLoaderThread` QThread pattern, so the UI never blocks while a page renders.
+  3. Repeated renders reuse a bounded LRU of open `fitz.Document` handles; no rendered page image is written to disk and only the currently displayed page(s) are held in memory.
+  4. A missing file, corrupt/encrypted PDF, out-of-range page, or render exception returns a graceful failure result (placeholder signal + log entry) rather than raising into the UI.
+**Plans**: TBD
+**UI hint**: yes
+
+Plans:
+- [ ] 99-01: TBD (renderer/worker)
+
+#### Phase 100: LOCAL PDF Image in ResultDialog + Browse
+**Goal**: Researchers see the actual scanned/typeset PDF page next to the extracted text for LOCAL hits, in both the desktop ResultDialog and the desktop Browse panel, with the image staying in sync as they navigate — while non-PDF LOCAL files remain cleanly text-only.
+**Depends on**: Phase 99
+**Requirements**: PDFIMG-03, PDFIMG-04, PDFIMG-05
+**Success Criteria** (what must be TRUE):
+  1. Opening a LOCAL PDF search result in `ResultDialog` shows the rendered page image alongside the highlighted extracted text; moving prev/next between results re-renders the image for the newly shown hit.
+  2. Opening a LOCAL PDF result in the Browse panel reveals the (previously hidden) image pane showing the rendered page; prev/next *page* navigation updates the image to the matching page in sync with the text.
+  3. Opening a non-PDF LOCAL file (`.docx`/`.html`/`.xlsx`/`.csv`/`.txt`) in either surface keeps the view text-only — the image pane stays hidden, gated on file extension, with no render attempt.
+  4. A LOCAL PDF that fails to render shows a visible placeholder in the image pane (per Phase 99) without freezing or crashing either surface.
+**Plans**: TBD
+**UI hint**: yes
+
+Plans:
+- [ ] 100-01: TBD (ResultDialog + Browse wiring)
 
 <details>
 <summary>✅ v7.14 My Library — Local Document Search (Phases 95-98) — SHIPPED 2026-05-24, closed 2026-05-27</summary>
@@ -261,6 +299,16 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 </details>
 
+## Progress
+
+**Execution Order:**
+v7.15 phases execute in numeric order: 99 → 100
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 99. PDF Page Renderer | v7.15 | 0/TBD | Not started | - |
+| 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 0/TBD | Not started | - |
+
 ## Backlog
 
 Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Phase 94 (research-grade exports) on 2026-05-19. No active backlog entries remain at this milestone boundary.
@@ -268,4 +316,4 @@ Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Pha
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-27 — v7.13 + v7.14 milestones CLOSED via retroactive `/gsd-complete-milestone` reconciliation. Both shipped as app releases earlier (v7.13.0 2026-05-21; v7.14.0 2026-05-24) but the GSD close ritual (MILESTONES.md entry + REQUIREMENTS.md archival) had been skipped. v7.13 = Phases 93-94 (PGP filter + research-grade exports). v7.14 = Phases 95-98 (My Library local document search + Phase 98 NLI resilience). Archives: `.planning/milestones/v7.13-ROADMAP.md` / `v7.13-REQUIREMENTS.md` / `v7.14-ROADMAP.md`. Live `REQUIREMENTS.md` deleted (fresh for next milestone).*
+*Last updated: 2026-05-27 — v7.15 My Library Visual roadmap created (`/gsd-roadmap`). 2 phases (99 PDF Page Renderer + 100 LOCAL PDF Image in ResultDialog + Browse), 6/6 PDFIMG-* requirements mapped. Desktop-only milestone closing deferred item D-F3 (side-by-side PDF). Numbering continues from v7.14's last phase 98. v7.13 + v7.14 milestones remain CLOSED (shipped v7.13.0 2026-05-21; v7.14.0 2026-05-24; reconciled 2026-05-27). Archives: `.planning/milestones/v7.13-ROADMAP.md` / `v7.13-REQUIREMENTS.md` / `v7.14-ROADMAP.md`.*
