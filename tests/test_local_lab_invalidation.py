@@ -318,11 +318,13 @@ class TestBuildLabSideIndex:
             indexer.close()
 
     def test_lab_rebuild_is_replace_not_append(self, tmp_path):
-        """Codex 2026-05-27 HIGH: build_lab_side_index reuses the LAB dir, so a
-        rebuild must CLEAR existing docs first (delete_all_documents) — not append.
-        Without that, each rebuild duplicates every page (and keeps deleted pages)
-        while writing a 'fresh' weights_hash. Assert the LAB Tantivy doc count
-        equals the page count after a second rebuild, not twice it.
+        """Codex 2026-05-27: build_lab_side_index reuses the LAB dir, so a rebuild
+        must CLEAR existing docs first (delete_all_documents) — not append.
+
+        Covers all three halves of the original finding:
+          1. repeated rebuilds don't duplicate (doc count == page count, not 2x);
+          2. surviving LAB unique_ids are EXACTLY the current local_pages uids;
+          3. after _delete_file + rebuild, the deleted page is gone from LAB.
         """
         try:
             import tantivy  # noqa
@@ -338,17 +340,32 @@ class TestBuildLabSideIndex:
             fp_dyn, fp_static, normalize = _make_dummy_callbacks()
             lab_weights = {"v": 1}
 
-            n_pages = indexer._conn.execute(
-                "SELECT COUNT(*) AS c FROM local_pages"
-            ).fetchone()["c"]
-            assert n_pages > 0
+            def _page_uids() -> set:
+                return {
+                    r["uid"]
+                    for r in indexer._conn.execute("SELECT uid FROM local_pages").fetchall()
+                }
 
             def _lab_doc_count() -> int:
                 lab_index = tantivy.Index(build_local_lab_schema(), path=lab_index_dir)
                 lab_index.reload()
                 return lab_index.searcher().num_docs
 
-            for _ in range(2):
+            def _lab_has_uid(uid: str) -> bool:
+                lab_index = tantivy.Index(build_local_lab_schema(), path=lab_index_dir)
+                try:
+                    lab_index.register_tokenizer(
+                        "raw",
+                        tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.raw()).build(),
+                    )
+                except Exception:
+                    pass
+                lab_index.reload()
+                searcher = lab_index.searcher()
+                q = lab_index.parse_query(uid, ["unique_id"])
+                return len(searcher.search(q, limit=1).hits) > 0
+
+            def _rebuild():
                 indexer.build_lab_side_index(
                     lab_weights=lab_weights,
                     fingerprint_dyn_fn=fp_dyn,
@@ -357,10 +374,84 @@ class TestBuildLabSideIndex:
                     lab_schema_version=1,
                 )
 
-            assert _lab_doc_count() == n_pages, (
+            expected_uids = _page_uids()
+            assert len(expected_uids) > 0
+
+            # (1) Two rebuilds must not duplicate.
+            _rebuild()
+            _rebuild()
+            assert _lab_doc_count() == len(expected_uids), (
                 "LAB rebuild must replace, not append — doc count should equal "
                 "page count after repeated rebuilds"
             )
+            # (2) Survivors are exactly the current page uids.
+            for uid in expected_uids:
+                assert _lab_has_uid(uid), f"current page uid {uid} missing from LAB"
+
+            # (3) Delete the file, rebuild — its pages must vanish from LAB.
+            deleted_uids = _page_uids()
+            indexer._delete_file(sys_id, txt_path)
+            assert _page_uids() == set(), "_delete_file should clear local_pages"
+            _rebuild()
+            assert _lab_doc_count() == 0, "deleted pages must not remain searchable in LAB"
+            for uid in deleted_uids:
+                assert not _lab_has_uid(uid), f"deleted uid {uid} still in LAB after rebuild"
+        finally:
+            indexer.close()
+
+    def test_lab_rebuild_aborts_on_empty_source_preserves_index(self, tmp_path):
+        """Codex 2026-05-27 MEDIUM: delete_all_documents() queues a wipe, so if the
+        main LOCAL source can't be read (_iterate_lab_source_rows yields nothing)
+        while pages still exist, committing would publish an EMPTY index stamped
+        'fresh'. The guard must roll back and leave the prior index + .meta.json
+        intact so the next rebuild retries.
+        """
+        try:
+            import tantivy  # noqa
+        except ImportError:
+            pytest.skip("tantivy not available")
+        from shared.local_indexer import build_local_lab_schema
+
+        indexer, index_dir, lab_index_dir, db_path = _make_local_indexer(str(tmp_path))
+        try:
+            folder_path, txt_path, sys_id = _index_small_txt(indexer, str(tmp_path))
+            assert sys_id is not None
+            fp_dyn, fp_static, normalize = _make_dummy_callbacks()
+
+            def _rebuild():
+                indexer.build_lab_side_index(
+                    lab_weights={"v": 1},
+                    fingerprint_dyn_fn=fp_dyn,
+                    fingerprint_static_fn=fp_static,
+                    normalize_text_fn=normalize,
+                    lab_schema_version=1,
+                )
+
+            def _lab_doc_count() -> int:
+                lab_index = tantivy.Index(build_local_lab_schema(), path=lab_index_dir)
+                lab_index.reload()
+                return lab_index.searcher().num_docs
+
+            # Good rebuild first — LAB populated, .meta.json written.
+            _rebuild()
+            good_count = _lab_doc_count()
+            assert good_count > 0
+            meta_path = os.path.join(lab_index_dir, ".meta.json")
+            with open(meta_path, encoding="utf-8") as f:
+                meta_before = f.read()
+
+            # Simulate the main LOCAL source becoming unreadable: yield nothing
+            # while local_pages (pending_delete=0) still has rows.
+            indexer._iterate_lab_source_rows = lambda: iter(())
+            _rebuild()
+
+            assert _lab_doc_count() == good_count, (
+                "empty-source rebuild must NOT wipe the prior LAB index"
+            )
+            with open(meta_path, encoding="utf-8") as f:
+                assert f.read() == meta_before, (
+                    ".meta.json must be left intact when the rebuild aborts"
+                )
         finally:
             indexer.close()
 

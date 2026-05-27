@@ -3568,6 +3568,33 @@ class LocalIndexer:
                     "build_lab_side_index: failed to write uid %s: %r — skipping", uid, exc
                 )
 
+        # Partial-publish guard: delete_all_documents() above already queued a wipe.
+        # If the main LOCAL Tantivy source could not be opened/read,
+        # _iterate_lab_source_rows() returns early (yields nothing), so committing
+        # now would publish an EMPTY LAB index and stamp it "fresh" in .meta.json —
+        # the freshness check would then pass over a wiped index. Only the
+        # zero-rows-but-pages-exist case is catastrophic; a few skipped rows above
+        # is tolerated best-effort. Roll back so the prior index + .meta.json stay
+        # intact, and let the next rebuild retry.
+        expected_rows = self._conn.execute(
+            "SELECT COUNT(*) FROM local_pages lp "
+            "JOIN local_files lf ON lf.sys_id = lp.sys_id "
+            "WHERE lf.pending_delete = 0"
+        ).fetchone()[0]
+        if rows_written == 0 and expected_rows > 0:
+            try:
+                writer.rollback()
+            except Exception:
+                logger.exception(
+                    "build_lab_side_index: rollback failed after empty rebuild"
+                )
+            logger.error(
+                "build_lab_side_index: aborted — 0 rows written but %d pages expected "
+                "(main LOCAL source unreadable?); prior LAB index + .meta.json left intact",
+                expected_rows,
+            )
+            return
+
         writer.commit()
         writer.wait_merging_threads()
 
