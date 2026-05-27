@@ -9,12 +9,18 @@
 <user_constraints>
 ## User Constraints (from CONTEXT.md)
 
+> **⚠ POST-RESEARCH OVERRIDE (2026-05-27) — supersedes D-01/D-02/D-05 below.**
+> This research itself disproved the original D-01/D-02 approach. The user confirmed the corrected decisions. The PACKAGING / API instructions for `python-bidi` later in this document (Standard Stack, PyInstaller spec addition, lines ~84–103) are **VOID** — they were written before the override and MUST NOT be followed. Authoritative resolution:
+> - **D-01 → OVERRIDDEN:** Use **per-line word-token reversal** (`' '.join(line.split()[::-1])`), NOT `python-bidi`/`get_display`. See Summary + Pitfall 1.
+> - **D-02 → VOIDED:** **Do NOT add `python-bidi`** to `requirements.txt` or `GenizahSearchPro.spec`. The fix is pure Python; the existing `_rtl_ratio` handles detection. No packaging change.
+> - **D-05 → REINTERPRETED:** Apply only inside the `sort=True` fallback branch, gated on `_rtl_ratio > 0.4` (no-op on LTR). Do NOT touch the `get_text("blocks")` path. See Pitfall 2.
+
 ### Locked Decisions
-- **D-01:** Use `python-bidi` to recover reading order (chosen over x-coordinate span reordering and dead-code `_fix_rtl_line` reversal).
-- **D-02:** `python-bidi==0.6.7` already in `requirements-lock.txt`; add to `requirements.txt`; wire into `GenizahSearchPro.spec` via `collect_all('bidi')`.
-- **D-03:** Fix lives in `shared/local_indexer.py::extract_pdf_pages` (single chokepoint for both search index and displayed transcription).
+- **~~D-01~~ (OVERRIDDEN — see box above):** ~~Use `python-bidi` to recover reading order.~~ → **word-token reversal**.
+- **~~D-02~~ (VOIDED — see box above):** ~~add python-bidi to requirements.txt + GenizahSearchPro.spec.~~ → **no python-bidi, no packaging change**.
+- **D-03:** Fix lives in `shared/local_indexer.py::extract_pdf_pages` (single chokepoint for both search index and displayed transcription) — STILL VALID, in the sort=True branch.
 - **D-04:** Auto-reindex via version bump — bump extractor/index schema version so existing LOCAL libraries are detected as stale and re-indexed on next launch. Reuse existing rebuild paths. Do NOT bulk-render or re-render images.
-- **D-05:** Apply the bidi reorder unconditionally to every extracted line (correct bidi pass is a no-op on pure-LTR text).
+- **D-05 (REINTERPRETED — see box above):** Apply word-token reversal only inside the `sort=True` fallback branch, gated on `_rtl_ratio > 0.4` (a true no-op on pure-LTR text). The `get_text("blocks")` path is left untouched.
 - **D-06:** Verify with a real Hebrew PDF excerpt (user/Hillel will provide). Commit as fixture. Add copyright/provenance note.
 - **D-07 (WR-01):** Compute `filepath` once and derive `is_pdf` from it in `_open_local_browse_page`. See 100-REVIEW.md for exact patch.
 - **D-08 (WR-02):** Add regression test asserting `PdfImageController._pending` is empty immediately after `discard_scope`.
@@ -488,19 +494,17 @@ The real Hebrew PDF fixture (D-06) requires Hillel to provide a 1–2 page excer
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does the blocks-mode path ALSO need RTL fix for other PDF types?**
-   - What we know: `hebrew_sample.pdf` (Ligature OCR) has correct blocks-mode order. Our synthetic test shows blocks mode CAN give wrong order for PDFs that insert text LTR.
-   - What's unclear: Does the user's Phase 100 UAT book use blocks mode or sort=True fallback? If it uses blocks mode (multi-word per block, no single-word-per-line trigger), the fix would not help.
-   - Recommendation: The user's specific book likely uses the sort=True path (Ligature OCR-style one-word-per-line). Confirm by checking if `_detect_single_word_per_line` fires on the UAT book. If needed, the fix can be extended to the blocks path as well, but this risks breaking other PDFs.
+   - **RESOLVED (per Assumption A1, accepted):** The fix is scoped to the `sort=True` fallback branch ONLY. The reported failure is one-word-per-line (Ligature OCR-style) PDFs that trigger `_detect_single_word_per_line` → `sort=True`. The `get_text("blocks")` path already returns correct RTL order and MUST NOT be modified (Pitfall 2 — reordering it breaks correctly-ordered PDFs). If a future blocks-mode RTL book surfaces, it is a separate follow-up, explicitly OUT OF SCOPE for Phase 101.
+   - What we know: `hebrew_sample.pdf` (Ligature OCR) has correct blocks-mode order; the synthetic test shows blocks mode can give wrong order only for atypical LTR-inserted PDFs, which the deferred follow-up would cover.
 
 2. **Phase 100 UAT book: which exact PDF exhibits the bug?**
-   - What we know: OPEN_ISSUES.md row says "some Hebrew/RTL books."
-   - Recommendation: The real Hebrew fixture (D-06) Hillel provides will clarify this. The fixture should be processed through both paths to confirm which one the fix addresses.
+   - **RESOLVED:** Not required to plan or verify this phase. The phase is verifiable now via a synthetic word-order assertion + LTR no-op test (both independent of the inbound asset). The exact UAT PDF is identified when Hillel commits the D-06 real-Hebrew fixture; the skip-if-absent placeholder test activates automatically at that point. No blocker.
 
 3. **`_fix_sort_true_rtl_page` naming: should it be a module-level function or inline in `extract_pdf_pages`?**
-   - Claude's Discretion. Recommendation: module-level function (enables unit testing in isolation, following the `_detect_single_word_per_line` pattern).
+   - **RESOLVED (Claude's Discretion):** module-level function (enables isolated unit testing, mirrors the `_detect_single_word_per_line` pattern).
 
 ---
 
