@@ -7360,6 +7360,14 @@ class GenizahGUI(QMainWindow):
     def _start_browse_enrichment(self, sid, is_part=False):
         """Centralized enrichment launch — disconnects stale worker, bumps generation counter,
         clears Part state when entering non-Part context, resets stale UI state."""
+        # Phase 100 (REVIEWS-R2-4): entering a Genizah (non-LOCAL) manuscript in Browse —
+        # release any in-flight LOCAL-PDF render's retained 'browse' callbacks promptly
+        # (the sid/page guards already prevent a stale DISPLAY; this just stops holding the
+        # callbacks until the render naturally terminates). This funnel is the single entry
+        # for all Genizah-browse loads and is NOT on the LOCAL _open_local_browse_page path.
+        controller = getattr(self, '_pdf_image_controller', None)
+        if controller is not None:
+            controller.cancel("browse", silent=True)
         self._browse_enrich_gen += 1
         # Clear Part state when loading a non-Part manuscript to prevent stale Oxford context
         if not is_part:
@@ -19238,7 +19246,34 @@ class GenizahGUI(QMainWindow):
             pass
         self.browse_fl_input.setText("")
         self.tabs.setCurrentWidget(self.browse_tab)
-        self._set_browse_image_pane_visible(False)
+        # Phase 100 (PDFIMG-04/05 / D-08): reveal the image pane + render for LOCAL PDF;
+        # cancel the 'browse' render scope + keep the pane hidden for any non-PDF LOCAL file.
+        controller = getattr(self, '_pdf_image_controller', None)
+        if is_pdf and controller is not None and bool(filepath):
+            self._set_browse_image_pane_visible(True)
+            page_num = self.current_browse_p or 1
+            controller.request(
+                "browse",
+                sys_id,
+                page_num,
+                filepath,
+                on_image=lambda img, _sid=sys_id, _pnum=page_num: (
+                    self.browse_viewer.display_image(img)
+                    if (getattr(self, 'current_browse_sid', None) == _sid
+                        and getattr(self, 'current_browse_p', None) == _pnum) else None
+                ),
+                on_placeholder=lambda text, _sid=sys_id, _pnum=page_num: (
+                    self.browse_viewer.scroll_area.set_status_message(text)
+                    if (getattr(self, 'current_browse_sid', None) == _sid
+                        and getattr(self, 'current_browse_p', None) == _pnum) else None
+                ),
+            )
+        else:
+            # Non-PDF LOCAL (or controller unavailable): invalidate any in-flight PDF render
+            # for the browse scope (REVIEWS HIGH-2) so a stale image can't land here, then hide.
+            if controller is not None:
+                controller.cancel("browse", silent=True)
+            self._set_browse_image_pane_visible(False)
         self._current_local_filepath = filepath
         if hasattr(self, "browse_open_file_btn"):
             self.browse_open_file_btn.setVisible(bool(filepath))
