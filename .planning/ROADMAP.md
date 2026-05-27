@@ -33,7 +33,8 @@
 
 - [x] **Phase 99: PDF Page Renderer** - Shared on-demand PyMuPDF page renderer + off-thread worker + graceful failure handling
  (completed 2026-05-27)
-- [x] **Phase 100: LOCAL PDF Image in ResultDialog + Browse** - Wire the renderer into both desktop surfaces; non-PDF files stay text-only (completed 2026-05-27)
+- [x] **Phase 100: LOCAL PDF Image in ResultDialog + Browse** - Wire the renderer into both desktop surfaces; non-PDF files stay text-only
+ (completed 2026-05-27)
 
 #### Phase 99: PDF Page Renderer
 **Goal**: A single PDF page can be rendered to a QImage on demand, off the UI thread, without ever loading or bulk-rendering the corpus — and any render failure degrades gracefully instead of hanging or crashing the app.
@@ -321,7 +322,7 @@ Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Pha
 
 **Goal:** Clear the remnant issues blocking a clean v7.15 release. Primary: fix RTL/bidi word-order reversal in LOCAL PDF text extraction so Hebrew/Judeo-Arabic PDF transcriptions read in correct reading order (each line currently shows last-word-first). Secondary: close the Phase 100 code-review remnants and a pre-existing test-isolation flake.
 
-**Requirements**: TBD (run /gsd-plan-phase 101)
+**Requirements**: D-01/D-03/D-05 (RTL word-order fix), D-04 (auto-reindex via extractor-version bump), D-06 (real Hebrew fixture — inbound asset, skip-if-absent), D-07 (WR-01 single lookup), D-08 (WR-02 regression test), D-09 (batch-order flake fix) — tracked via CONTEXT.md decision IDs (no formal REQ-IDs for this pre-release polish phase)
 **Depends on:** Phase 100
 
 **Scope (remnant items):**
@@ -330,10 +331,11 @@ Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Pha
 3. **Code review WR-02** — add a regression test asserting `PdfImageController._pending` is empty immediately after `discard_scope` (callback-retention guard).
 4. **Test-isolation flake** — `tests/test_local_indexer.py::test_txt_undecodable_marked_encoding_error` passes in isolation but fails in batch ordering (global-state pollution from a sibling test). Phase 100 did not touch this file; pre-existing.
 
-**Plans:** 0 plans
+**Plans:** 2 plans (1 wave — independent file ownership)
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 101 to break down)
+- [ ] 101-01-PLAN.md (Wave 1) — RTL word-order fix in extract_pdf_pages sort=True fallback + extractor-version auto-reindex + Wave 0 RTL/version tests + F-06 AST guard update + D-09 flake fix + fixture provenance README
+- [ ] 101-02-PLAN.md (Wave 1) — WR-01 single-lookup _open_local_browse_page + WR-02 discard_scope regression test + OPEN_ISSUES.md bookkeeping
 
 ---
 
