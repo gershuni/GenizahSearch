@@ -854,6 +854,15 @@ class FolderWalkWorker(QThread):
                         if self._cancel_requested:
                             break
                         # D-02: extension pre-filter — DROP before stat/canonical.
+                        # _SUPPORTED_EXTENSIONS is the DELIBERATE R97.3-N opt-out
+                        # surface (single source of truth) and intentionally
+                        # broader than the indexer's extraction set: it also lists
+                        # .html/.xlsx/.csv. NOT all of these have an extraction
+                        # codepath in LocalIndexer.scan_all yet (.pdf/.docx/.txt
+                        # do); rows for the others may show an empty/unsupported
+                        # Status until extraction lands. This is expected — do NOT
+                        # narrow this filter back to the old 3-extension literal
+                        # (that would revert R97.3-N). See WR-02 (Phase 97.3 review).
                         ext = _os.path.splitext(name)[1].lower()
                         if ext not in _SUPPORTED_EXTENSIONS:
                             continue
