@@ -64,7 +64,7 @@ Plans:
 **UI hint**: yes
 
 Plans:
-- [ ] 100-01-PLAN.md (Wave 1) — Shared PdfImageController (token + latest-wins + 150ms debounce + ~8s watchdog + extension gate + per-reason localized placeholder map) + GenizahGUI worker ownership/shutdown + unit tests
+- [x] 100-01-PLAN.md (Wave 1) — Shared PdfImageController (token + latest-wins + 150ms debounce + ~8s watchdog + extension gate + per-reason localized placeholder map) + GenizahGUI worker ownership/shutdown + unit tests
 - [ ] 100-02-PLAN.md (Wave 2) — ResultDialog wiring: reveal external pane + render LOCAL PDF page in sync with prev/next result and within-document page nav (PDFIMG-03/05)
 - [ ] 100-03-PLAN.md (Wave 2) — Browse wiring: gate image pane on .pdf in _open_local_browse_page + render page in sync with prev/next page nav (PDFIMG-04/05)
 
@@ -311,7 +311,7 @@ v7.15 phases execute in numeric order: 99 → 100
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 99. PDF Page Renderer | v7.15 | 2/2 | Complete    | 2026-05-27 |
-| 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 0/TBD | Not started | - |
+| 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 1/3 | In Progress|  |
 
 ## Backlog
 
