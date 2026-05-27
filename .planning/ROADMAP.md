@@ -317,6 +317,24 @@ v7.15 phases execute in numeric order: 99 → 100
 
 Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Phase 94 (research-grade exports) on 2026-05-19. No active backlog entries remain at this milestone boundary.
 
+### Phase 101: LOCAL PDF text extraction RTL fix and Phase 100 remnant cleanup
+
+**Goal:** Clear the remnant issues blocking a clean v7.15 release. Primary: fix RTL/bidi word-order reversal in LOCAL PDF text extraction so Hebrew/Judeo-Arabic PDF transcriptions read in correct reading order (each line currently shows last-word-first). Secondary: close the Phase 100 code-review remnants and a pre-existing test-isolation flake.
+
+**Requirements**: TBD (run /gsd-plan-phase 101)
+**Depends on:** Phase 100
+
+**Scope (remnant items):**
+1. **RTL PDF text extraction** (P3, `docs/OPEN_ISSUES.md`; surfaced in Phase 100 UAT) — LOCAL PDF text extraction reverses word order per line on some RTL books. Likely PyMuPDF `get_text` returning glyph runs in visual order without bidi reordering. Fix: bidi-aware reorder of extracted lines (e.g. `python-bidi`) or x-coordinate-aware span reordering for RTL pages. Affects search indexing quality for LOCAL Hebrew PDFs (image rendering is unaffected — only the text layer).
+2. **Code review WR-01** (`genizah_app.py::_open_local_browse_page`) — Browse panel computes `is_pdf` from one `_lookup_local_filepath` call but re-looks-up `filepath` separately; if the two diverge the image pane reveals empty. Fix: compute `filepath` once, derive `is_pdf` from it.
+3. **Code review WR-02** — add a regression test asserting `PdfImageController._pending` is empty immediately after `discard_scope` (callback-retention guard).
+4. **Test-isolation flake** — `tests/test_local_indexer.py::test_txt_undecodable_marked_encoding_error` passes in isolation but fails in batch ordering (global-state pollution from a sibling test). Phase 100 did not touch this file; pre-existing.
+
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 101 to break down)
+
 ---
 
 *Roadmap created: 2026-02-09*

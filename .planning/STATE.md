@@ -89,6 +89,7 @@ The v7.13/v7.14-specific items are all substantively closed by the shipped relea
 ### Roadmap Evolution
 
 - v7.15 roadmap created (2026-05-27): 2 phases — Phase 99 (PDF Page Renderer: shared on-demand PyMuPDF renderer + off-thread worker + graceful failure handling; PDFIMG-01/02/06) and Phase 100 (LOCAL PDF Image in ResultDialog + Browse: wire renderer into both desktop surfaces, non-PDF files stay text-only; PDFIMG-03/04/05). Numbering continues from v7.14's last phase 98. Closes deferred item D-F3.
+- Phase 101 added (2026-05-27): LOCAL PDF text extraction RTL fix + Phase 100 remnant cleanup — pre-release polish for v7.15. Scope: (1) RTL/bidi word-order reversal in LOCAL PDF text extraction (P3, OPEN_ISSUES.md, surfaced in Phase 100 UAT); (2) code-review WR-01 Browse double-lookup empty-pane; (3) WR-02 regression test for `_pending` after `discard_scope`; (4) test-isolation flake `test_txt_undecodable_marked_encoding_error`. Added after Phase 100 closed; user wants remnants cleared before release.
 
 ## Session Continuity
 
