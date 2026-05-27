@@ -31,7 +31,8 @@
 
 **Milestone Goal:** Show the source PDF *page image* alongside extracted text for LOCAL ("My Library") results in the desktop app, closing deferred item D-F3. Desktop-only — web "My Library" does not exist, so the dual-app maintenance rule does not apply. The work splits in two: a shared on-demand PDF page renderer + off-thread worker (with graceful failure handling), then wiring that renderer into the two desktop surfaces that show LOCAL hits (`ResultDialog` + Browse panel). Rendering is lazy and ephemeral — the 10K×500-page corpus is never bulk-rendered, and no rendered page image is ever written to disk. Non-PDF LOCAL files stay text-only.
 
-- [x] **Phase 99: PDF Page Renderer** - Shared on-demand PyMuPDF page renderer + off-thread worker + graceful failure handling (completed 2026-05-27)
+- [x] **Phase 99: PDF Page Renderer** - Shared on-demand PyMuPDF page renderer + off-thread worker + graceful failure handling
+ (completed 2026-05-27)
 - [ ] **Phase 100: LOCAL PDF Image in ResultDialog + Browse** - Wire the renderer into both desktop surfaces; non-PDF files stay text-only
 
 #### Phase 99: PDF Page Renderer
@@ -59,11 +60,13 @@ Plans:
   2. Opening a LOCAL PDF result in the Browse panel reveals the (previously hidden) image pane showing the rendered page; prev/next *page* navigation updates the image to the matching page in sync with the text.
   3. Opening a non-PDF LOCAL file (`.docx`/`.html`/`.xlsx`/`.csv`/`.txt`) in either surface keeps the view text-only — the image pane stays hidden, gated on file extension, with no render attempt.
   4. A LOCAL PDF that fails to render shows a visible placeholder in the image pane (per Phase 99) without freezing or crashing either surface.
-**Plans**: TBD
+**Plans**: 3 plans (2 waves)
 **UI hint**: yes
 
 Plans:
-- [ ] 100-01: TBD (ResultDialog + Browse wiring)
+- [ ] 100-01-PLAN.md (Wave 1) — Shared PdfImageController (token + latest-wins + 150ms debounce + ~8s watchdog + extension gate + per-reason localized placeholder map) + GenizahGUI worker ownership/shutdown + unit tests
+- [ ] 100-02-PLAN.md (Wave 2) — ResultDialog wiring: reveal external pane + render LOCAL PDF page in sync with prev/next result and within-document page nav (PDFIMG-03/05)
+- [ ] 100-03-PLAN.md (Wave 2) — Browse wiring: gate image pane on .pdf in _open_local_browse_page + render page in sync with prev/next page nav (PDFIMG-04/05)
 
 <details>
 <summary>✅ v7.14 My Library — Local Document Search (Phases 95-98) — SHIPPED 2026-05-24, closed 2026-05-27</summary>
