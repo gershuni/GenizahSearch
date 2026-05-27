@@ -21,18 +21,26 @@ Clarifies HOW to implement these four items. New capabilities (OCR for image-onl
 ## Implementation Decisions
 
 ### RTL Fix Technique
-- **D-01:** Use **`python-bidi`** to recover reading order — apply the Unicode Bidi Algorithm to extracted PDF lines. Chosen over x-coordinate span reordering (hand-rolls bidi, fragile on mixed/word-internal cases) and over the dead-code `_fix_rtl_line` string-reversal helper (reverses *characters*, which corrupts words when letters are already correctly ordered — the reported case).
-- **D-02:** `python-bidi==0.6.7` is already in `requirements-lock.txt` and importable in dev. It must be (a) added to `requirements.txt` and (b) wired into desktop packaging — `GenizahSearchPro.spec` currently does NOT list it. python-bidi 0.6.x is a Rust/maturin package; the spec needs `collect_all('bidi')` (or an explicit hiddenimport + binary collection). Verify the built EXE imports and runs the reorder.
-- **D-03:** Fix lives in the **shared extraction path** (`shared/local_indexer.py::extract_pdf_pages`). Both the search index and the displayed transcription read the same stored text, so a single extraction-layer fix corrects both surfaces.
-- **Research note:** The reported failure is word-order reversal with letters apparently correct. The researcher must confirm the exact direction handling (visual→logical vs logical→visual) so the bidi call produces logical reading order for indexing/display — do NOT assume; verify against the real sample.
+
+> **⚠ DECISION OVERRIDE (2026-05-27, post-research — these supersede the original D-01/D-02/D-05 text below).**
+> Research empirically proved `python-bidi`'s `get_display` is a logical→visual transform that reverses *characters* (corrupts already-correct Hebrew letters: `שלם`→`מלש`). The actual bug is **word-order** reversal introduced by PyMuPDF's `get_text("text", sort=True)` fallback (sorts words by ascending x = LTR visual order). User confirmed the corrected approach:
+> - **D-01 (OVERRIDDEN):** Use **per-line word-token reversal** — `' '.join(line.split()[::-1])` — NOT `python-bidi`. Letters within each word stay in correct logical Unicode order; only word tokens are reversed.
+> - **D-02 (VOIDED):** **Do NOT add `python-bidi`.** It is unused under the word-reversal approach; the existing `_rtl_ratio` helper handles RTL detection. No `requirements.txt` change, no `GenizahSearchPro.spec` `collect_all('bidi')`, no Rust `.pyd` packaging.
+> - **D-05 (REINTERPRETED):** Apply the reversal **only inside the `sort=True` fallback branch** (`if _detect_single_word_per_line(text):`), gated on `_rtl_ratio > 0.4`. Do NOT touch the primary `get_text("blocks")` path — it already returns correct RTL order, and applying reversal there would break correctly-ordered professional RTL PDFs. The `_rtl_ratio > 0.4` gate is a true no-op on pure-LTR/numeric lines, satisfying D-05's "no fragile threshold" intent.
+> See `101-RESEARCH.md` "The RTL Failure Mechanism" + Pitfalls 1–2 for the empirical basis.
+
+- **~~D-01~~ (OVERRIDDEN — see box above):** ~~Use `python-bidi` to recover reading order.~~
+- **~~D-02~~ (VOIDED — see box above):** ~~Add python-bidi to requirements.txt + GenizahSearchPro.spec.~~
+- **D-03:** Fix lives in the **shared extraction path** (`shared/local_indexer.py::extract_pdf_pages`). Both the search index and the displayed transcription read the same stored text, so a single extraction-layer fix corrects both surfaces. **(STILL VALID — the word-reversal fix lands in this chokepoint, specifically in the sort=True fallback branch.)**
+- **Research note (RESOLVED):** Failure confirmed as word-order reversal via PyMuPDF `sort=True`; letters are already correct logical Unicode. Word-token reversal restores reading order. See `101-RESEARCH.md`.
 
 ### Backfill of Already-Indexed PDFs
 - **D-04:** **Auto-reindex via version bump.** Bump the extractor/index schema version so existing LOCAL libraries are detected as stale and re-indexed automatically on next launch, reusing the existing recovery/rebuild machinery (`.meta.json` freshness markers + recovery probe). User does nothing; reversed text self-corrects.
 - **Research note:** Confirm the exact staleness-detection hook — whether there is an extractor-version constant that, when bumped, forces reindex, or whether this requires touching the `.meta.json` schema-version / recovery-scan logic. Reuse existing rebuild paths; do not bulk-render or re-render images (text-layer reindex only).
 
 ### RTL Detection Gate
-- **D-05:** Apply the bidi reorder **unconditionally** to every extracted line. A correct Unicode Bidi pass is a no-op on pure-LTR text, so no fragile RTL-ratio threshold is introduced.
-- **Research note:** Before locking unconditional application, empirically confirm `python-bidi` is a true no-op on pure-LTR/numeric/mixed lines. The existing one-word-per-line LTR fixtures (`tests/fixtures/local_indexer/single_word_per_line.pdf`) serve as an LTR regression guard. If a regression is found, fall back to gating on the existing `_rtl_ratio` helper (threshold 0.4).
+- **D-05 (REINTERPRETED — see override box under "RTL Fix Technique"):** Apply word-token reversal only inside the `sort=True` fallback branch, gated on `_rtl_ratio > 0.4` (a true no-op on pure-LTR/numeric/mixed-LTR lines). The original "unconditionally to every line" wording is superseded: research showed the primary `get_text("blocks")` path is already correct and must not be reordered. D-05's *intent* (no fragile threshold for correct output) holds — pure-RTL always passes the gate, pure-LTR never does.
+- **Research note (RESOLVED):** `_rtl_ratio` empirically confirmed a no-op on LTR/numeric/empty lines. `tests/fixtures/local_indexer/single_word_per_line.pdf` serves as the LTR regression guard.
 
 ### RTL Verification Fixture
 - **D-06:** Verify with a **real Hebrew PDF excerpt** from the actual book that surfaced the bug in Phase 100 UAT. **The user (Hillel) will provide a small excerpt** — this is a prerequisite the planner/executor needs before the RTL test can be finalized. Commit a 1–2 page excerpt as the fixture (mirroring the `single_word_per_line.pdf` pattern); the test asserts extracted text matches known-correct reading order. Add a copyright/provenance note in the fixture README or test docstring.
