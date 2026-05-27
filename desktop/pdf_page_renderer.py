@@ -1,6 +1,11 @@
-"""Phase 99 — PDF page renderer core: PdfRenderFailure enum, DocLRU, render functions.
+"""Phase 99 — PDF page renderer core: PdfRenderFailure enum, DocLRU, render functions,
+and PdfRenderWorker (off-thread queue-driven render worker).
 
-This module provides the SYNCHRONOUSLY-TESTABLE render core for PDFIMG-01/02/06:
+This module provides the SYNCHRONOUSLY-TESTABLE render core for PDFIMG-01/02/06
+plus the off-thread worker for PDFIMG-02 (D-09 single-owner single dedicated render
+thread):
+
+Render core (Plan 01 — synchronously testable, no QThread):
   - PdfRenderFailure enum (D-04): all 8 classified failure reasons.
   - PdfRenderError exception (D-04): typed error carrying reason + detail.
   - _log_and_raise (REVIEW item 1): single logging chokepoint — logs EXACTLY ONCE
@@ -11,19 +16,39 @@ This module provides the SYNCHRONOUSLY-TESTABLE render core for PDFIMG-01/02/06:
     .close()'d on eviction and on shutdown; best-effort (swallows close errors).
   - render_page (D-01/D-01b/D-04a): renders a single page to a memory-safe copied
     QImage; validates page bounds BEFORE any render call.
-  - render_via_lru: convenience entry point for worker (Plan 02) and tests.
+  - render_via_lru: convenience entry point for worker and tests.
+
+Off-thread worker (Plan 02 — PDFIMG-02 off-thread half):
+  - PdfRenderWorker(QThread): long-lived queue-driven render loop. The SINGLE thread
+    that ever touches fitz/DocLRU (D-09a single-owner discipline). Exposes D-07
+    tokenized signals (render_succeeded / render_failed) so the Phase 100 controller
+    can discard stale results with a latest-wins token comparison (D-03).
+  - _handle_request: per-request no-crash envelope — extracted into its own method
+    so unit tests can call it SYNCHRONOUSLY without spinning the thread (REVIEW item 1
+    Codex HIGH). Thread assertion lives in run(), NOT here.
+  - stop(): cooperative shutdown only — NO terminate() (D-05: force-killing the fitz
+    C call is unsafe). DocLRU.close_all() runs ONLY in run()'s finally on the render
+    thread (single-owner; never from the caller thread).
+
+NOT in this module (Phase 100 scope):
+  - Generation-token COUNTER: owned by the Phase 100 UI controller; the worker only
+    echoes the token passed into enqueue(). A bounded/coalescing enqueue is also a
+    Phase 100 concern (REVIEW item 4 Codex MEDIUM).
+  - ~8s QTimer watchdog + TIMEOUT PdfRenderFailure reason: Phase 100 UI-controller
+    concern (D-05/D-07). This worker never emits TIMEOUT and never force-kills the C
+    call; if the render wedges, the loop drains once the C call returns and the
+    process reaps the thread if still wedged on exit.
 
 DESKTOP-ONLY — no shared/ split (D-08): web has no My Library.
-
-Phase 100 wires the QThread worker, display, and timeout watchdog.
-D-03 token-echo: the Plan 02 worker accepts token per request and echoes it in
-  render_succeeded / render_failed signals so stale results are discardable.
 """
 import enum
 import logging
 import os
+import queue
 from collections import OrderedDict
 from typing import NoReturn
+
+from PyQt6.QtCore import QThread, pyqtSignal
 
 import fitz  # PyMuPDF — D-01; already a desktop dep via Phase 95
 
@@ -301,3 +326,197 @@ def render_via_lru(lru: DocLRU, filepath: str, page_num: int) -> QImage:
     """
     doc = lru.get(filepath)
     return render_page(doc, page_num)
+
+
+# ---------------------------------------------------------------------------
+# Sentinel used to unblock the blocking queue.get() in run()
+# ---------------------------------------------------------------------------
+
+_STOP = object()
+
+
+# ---------------------------------------------------------------------------
+# PdfRenderWorker — off-thread queue-driven render worker (PDFIMG-02 / D-09a)
+# ---------------------------------------------------------------------------
+
+class PdfRenderWorker(QThread):
+    """Long-lived, queue-driven render worker.
+
+    Owns the DocLRU and is the SINGLE thread that ever touches fitz (D-09
+    option (a) — single dedicated render thread).
+
+    Signal contract (D-07 tokenized signals):
+      render_succeeded(token, sys_id, page_num, QImage)   — successful render
+      render_failed(token, sys_id, page_num, reason, detail) — any failure
+
+    The enum slot uses `object` (NOT `PdfRenderFailure`) because PyMuPDF
+    enums are not Qt metatypes registered with QMetaType; `object` accepts
+    any Python object across a queued cross-thread signal connection.
+
+    Token discipline (D-03 latest-wins):
+      The generation-token COUNTER lives in the Phase 100 UI controller.
+      The worker only ECHOES the token passed into enqueue() — it does not
+      generate, increment, or compare tokens. The Phase 100 controller
+      compares the echoed token against its own counter and discards stale
+      results. A bounded/coalescing enqueue is also a Phase 100 concern
+      (REVIEW item 4 Codex MEDIUM). The internal queue is intentionally
+      UNBOUNDED for Phase 99: latest-wins token echo protects what is
+      DISPLAYED, not the render backlog.
+
+    Shutdown discipline (D-05 / D-06):
+      stop() is cooperative: sets _stopping, pushes the _STOP sentinel, and
+      wait()s. It does NOT call terminate() — force-killing a thread mid-fitz
+      C call is unsafe (D-05). If the thread does not exit within timeout_ms
+      (meaning a render C call is wedged), stop() logs a warning and returns;
+      the thread will drain on its own once the C call returns and the process
+      reaps it on exit. DocLRU.close_all() runs ONLY in run()'s finally on
+      the render thread — never from the caller thread (single-owner rule).
+    """
+
+    # D-07 tokenized signals.  `object` for the enum slot because PdfRenderFailure
+    # is not a Qt metatype (REVIEW item 1 Codex HIGH in 99-PATTERNS.md Analog 1).
+    render_succeeded = pyqtSignal(int, str, int, QImage)        # token, sys_id, page_num, image
+    render_failed    = pyqtSignal(int, str, int, object, str)   # token, sys_id, page_num, PdfRenderFailure, detail  # noqa: E501
+
+    def __init__(self, maxsize: int = 4) -> None:
+        super().__init__()
+        self._lru = DocLRU(maxsize)
+        self._queue: queue.Queue = queue.Queue()
+        self._stopping = False
+
+    # ------------------------------------------------------------------
+    # Public enqueue API (called from the UI thread by Phase 100 controller)
+    # ------------------------------------------------------------------
+
+    def enqueue(self, token: int, sys_id: str, page_num: int, filepath: str) -> bool:
+        """Enqueue a render request.
+
+        Returns True if the request was queued, False if the worker is stopping
+        (REVIEW item 4 Codex MEDIUM — defined behavior after stop: drop + log;
+        never silently queue work that can never emit a result).
+
+        The token is generated by the Phase 100 controller and echoed verbatim
+        in both result signals so stale results can be discarded. Do NOT call
+        this method after stop() — the request will be dropped.
+        """
+        if self._stopping:
+            logger.debug(
+                "PdfRenderWorker.enqueue after stop — dropping token=%s sys_id=%s",
+                token, sys_id,
+            )
+            return False
+        self._queue.put((token, sys_id, page_num, filepath))
+        return True
+
+    # ------------------------------------------------------------------
+    # Per-request render + emit (REVIEW item 1 Codex HIGH — extracted so
+    # unit tests can call it SYNCHRONOUSLY without spinning the thread or
+    # tripping the thread assertion which lives in run() only).
+    # ------------------------------------------------------------------
+
+    def _handle_request(self, item) -> None:  # noqa: ANN001
+        """Handle a single render request.
+
+        This method NEVER raises (PDFIMG-06 no-crash envelope — mirror
+        LocalIndexerWorker.run). The outer run() loop that calls it therefore
+        cannot die due to a bad render. There is intentionally NO thread
+        assertion here — it lives in run() so unit tests can call
+        _handle_request directly on the main thread.
+        """
+        token, sys_id, page_num, filepath = item
+        try:
+            img = render_via_lru(self._lru, filepath, page_num)
+            self.render_succeeded.emit(token, sys_id, page_num, img)
+        except PdfRenderError as e:
+            # Plan 01's _log_and_raise already logged once; just emit.
+            self.render_failed.emit(token, sys_id, page_num, e.reason, e.detail)
+        except Exception as exc:  # noqa: BLE001 — no-crash contract; thread must survive
+            logger.exception(
+                "PdfRenderWorker: unexpected render error token=%s sys_id=%s",
+                token, sys_id,
+            )
+            self.render_failed.emit(
+                token, sys_id, page_num, PdfRenderFailure.RENDER_ERROR, str(exc)
+            )
+
+    # ------------------------------------------------------------------
+    # run() — the long-lived queue loop (single-owner fitz/LRU discipline)
+    # ------------------------------------------------------------------
+
+    def run(self) -> None:
+        """Long-lived blocking queue loop.
+
+        Single-owner discipline: ALL fitz access (the LRU + render) happens on
+        THIS thread. The thread assertion AND DocLRU.close_all() teardown both
+        live here — NOT in stop() (which runs on the caller thread — REVIEW
+        item 2 Codex HIGH).
+
+        The loop blocks on queue.get() until a request or the _STOP sentinel
+        arrives. Items already in the queue AHEAD of _STOP are drained FIFO
+        first; only items enqueued AFTER stop() are dropped by the enqueue
+        guard. This is the intended behavior.
+        """
+        self._assert_worker_thread()        # single-owner guard — render thread only
+        try:
+            while True:
+                item = self._queue.get()    # blocks until work or the _STOP sentinel
+                if item is _STOP:
+                    break
+                self._handle_request(item)
+        finally:
+            self._lru.close_all()           # D-06: all docs closed ON the render thread
+
+    # ------------------------------------------------------------------
+    # Cooperative shutdown — NO terminate(), NO caller-thread LRU access
+    # (REVIEW item 2 Codex HIGH; D-05)
+    # ------------------------------------------------------------------
+
+    def stop(self, timeout_ms: int = 5000) -> None:
+        """Request cooperative shutdown.
+
+        Sets the stop flag (so enqueue() drops new requests), pushes the _STOP
+        sentinel to unblock the blocking queue.get(), then wait()s up to
+        timeout_ms for the thread to exit.
+
+        If the thread does not exit within timeout_ms (a wedged fitz C call
+        cannot be safely force-killed — D-05), logs a warning and returns.
+        The thread will drain on its own once the C call returns; the process
+        reaps it on exit if still wedged.
+
+        IMPORTANT: This method deliberately does NOT call self._lru.close_all().
+        That would access fitz from the caller thread, violating the single-owner
+        rule (D-09a). DocLRU teardown runs ONLY in run()'s finally on the render
+        thread.
+        """
+        self._stopping = True
+        self._queue.put(_STOP)              # unblock the blocking get()
+        if not self.wait(timeout_ms):
+            # A wedged C call cannot be safely killed (D-05). Log and let the
+            # thread drain: it will hit _STOP and close the LRU in run()'s
+            # finally once the in-flight render returns; process exit reaps it
+            # if still wedged. UI is never blocked (work is off-thread).
+            logger.warning(
+                "PdfRenderWorker did not stop within %dms; leaving it to drain "
+                "(wedged C call cannot be force-killed per D-05)",
+                timeout_ms,
+            )
+        # Deliberately NO self._lru.close_all() here — that would touch fitz off
+        # the render thread (single-owner violation). run()'s finally owns LRU
+        # teardown.
+
+    # ------------------------------------------------------------------
+    # Single-owner thread assertion (RESEARCH Pitfall 3 / Open Question 2)
+    # ------------------------------------------------------------------
+
+    def _assert_worker_thread(self) -> None:
+        """Assert that we are executing on the render thread (not the UI thread).
+
+        Called ONCE at the top of run() to guard against future contributors
+        accidentally calling render/LRU code from a different thread. NOT called
+        in _handle_request (would break synchronous unit tests) or in stop()
+        / enqueue() (which correctly run on the caller thread).
+        """
+        assert QThread.currentThread() is self, (  # noqa: S101
+            "fitz/LRU touched off the render thread — single-owner discipline "
+            "violated (D-09a / T-99-04)"
+        )
