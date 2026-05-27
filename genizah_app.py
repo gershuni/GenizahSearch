@@ -24771,6 +24771,15 @@ class GenizahGUI(QMainWindow):
                 tree.flush_pending()
         except Exception:
             pass
+        # LD-6 clean-shutdown sweep: mark any still-running scan_runs completed so
+        # the recovery modal does not pop up next launch. MyLibraryTab is a child
+        # widget and never receives its own closeEvent, so the parent must call it.
+        try:
+            mlt = getattr(self, 'my_library_tab', None)
+            if mlt is not None and hasattr(mlt, 'sweep_running_scan_runs'):
+                mlt.sweep_running_scan_runs()
+        except Exception:
+            pass
         # Save session state before closing
         logger.debug(
             "closeEvent: saving session after opt-out flush (scope=%s optouts=%d)",

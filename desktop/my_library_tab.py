@@ -1312,25 +1312,32 @@ class MyLibraryTab(QWidget):
             btn_skip = mb.addButton("Skip", QMessageBox.ButtonRole.RejectRole)
         mb.exec()
         clicked = mb.clickedButton()
-        run_id = running_runs[0]  # most recent interrupted run
+        # Apply the decision to EVERY interrupted run, not just the most recent.
+        # start_recovery_probe() returns all status='running' rows; resolving only
+        # the first one left the rest 'running', so the modal reappeared on the
+        # next launch (orphans accumulate from hard kills / crashes — e.g. the
+        # 2026-05-25 NLI-hang SIGKILL — and the clean-shutdown sweep had been dead
+        # code). Clearing them all here makes one decision a clean slate. The probe
+        # runs before _auto_rescan_on_startup, so no live scan is in flight.
         if clicked is btn_restart:
             # Phase 97 Wave E: discard_run() removes all four row sources (LD-7).
-            # Previously a Wave A stub that only called _end_scan_run("canceled").
-            try:
-                self._indexer.discard_run(run_id)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("_show_recovery_modal: discard_run(restart) failed: %s", exc)
+            for run_id in running_runs:
+                try:
+                    self._indexer.discard_run(run_id)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("_show_recovery_modal: discard_run(restart) failed for %s: %s", run_id, exc)
+                    try:
+                        self._indexer._end_scan_run(run_id, "canceled")
+                    except Exception:
+                        pass
+        elif clicked is btn_skip:
+            # Skip: leave partial data in place but mark runs as canceled so the
+            # recovery probe doesn't trigger again on next start.
+            for run_id in running_runs:
                 try:
                     self._indexer._end_scan_run(run_id, "canceled")
-                except Exception:
-                    pass
-        elif clicked is btn_skip:
-            # Skip: leave partial data in place but mark run as canceled so
-            # recovery probe doesn't trigger again on next start.
-            try:
-                self._indexer._end_scan_run(run_id, "canceled")
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("_show_recovery_modal: _end_scan_run(skip) failed: %s", exc)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("_show_recovery_modal: _end_scan_run(skip) failed for %s: %s", run_id, exc)
             # Phase 97.3 R97.3-D (D-09): suppress same-launch auto-rescan.
             self._skip_startup_rescan_once = True
             # Phase 97.3 R97.3-D (D-08): bilingual auto-fading status-bar message (5s).
@@ -1345,16 +1352,21 @@ class MyLibraryTab(QWidget):
                 logger.debug("Phase 97.3 D-08 status message failed: %s", exc)
         else:
             # Resume — full resume logic deferred; mark completed so gate lifts.
-            try:
-                self._indexer._end_scan_run(run_id, "completed")
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("_show_recovery_modal: _end_scan_run(resume) failed: %s", exc)
+            for run_id in running_runs:
+                try:
+                    self._indexer._end_scan_run(run_id, "completed")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("_show_recovery_modal: _end_scan_run(resume) failed for %s: %s", run_id, exc)
         self.is_searchable = True
 
-    def closeEvent(self, event) -> None:
+    def sweep_running_scan_runs(self) -> None:
         """Phase 97 LD-6: clean-shutdown sweep — mark any still-running scan_runs
-        as completed so they don't trigger recovery modal on next startup.
-        Called BEFORE the parent GenizahGUI.closeEvent flushes pending opt-outs.
+        as completed so they don't trigger the recovery modal on next startup.
+
+        MUST be called from GenizahGUI.closeEvent: MyLibraryTab is a child widget,
+        not a top-level window, so Qt never delivers closeEvent to it on app exit
+        — relying on self.closeEvent left the sweep as dead code and let orphan
+        'running' rows accumulate across hard exits.
         """
         try:
             if self._indexer is not None and self._indexer._conn is not None:
@@ -1367,6 +1379,13 @@ class MyLibraryTab(QWidget):
                 self._indexer._conn.commit()
         except Exception:  # noqa: BLE001
             logger.exception("Phase 97 LD-6: scan_runs clean-shutdown sweep failed")
+
+    def closeEvent(self, event) -> None:
+        """Defensive: if this tab is ever shown as a top-level window, still sweep.
+        On normal app exit GenizahGUI.closeEvent calls sweep_running_scan_runs()
+        directly because Qt does not deliver closeEvent to child widgets.
+        """
+        self.sweep_running_scan_runs()
         super().closeEvent(event)
 
     def _auto_rescan_on_startup(self) -> None:
