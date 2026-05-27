@@ -21,17 +21,24 @@ pytestmark = pytest.mark.skipif(
 
 
 def _make_long_path(tmp_dir: str, target_chars: int) -> str:
-    """Build a directory + filename combination that exceeds target_chars."""
-    # Fill segment ~50 chars, mixing Latin + Hebrew so the test covers
+    """Build a directory + filename combination that exceeds target_chars.
+
+    The loop accounts for the trailing filename + separator so the FINAL path
+    length is guaranteed to exceed target_chars regardless of how long the base
+    tmp_dir is. (The previous coarse `target_chars - 80` margin landed at exactly
+    260 chars under the longer base paths xdist hands out — e.g.
+    .../popen-gwN/... — failing the >260 sanity assertion.)
+    """
+    # Fill segment ~45 chars, mixing Latin + Hebrew so the test covers
     # Unicode normalisation paths the production paths exercise.
     seg = "longpath_שלום_" + "a" * 30   # ~45 chars
+    fname = "f_" + "b" * 60 + ".pdf"   # ~65 chars
     cur = tmp_dir
-    while len(cur) < target_chars - 80:
+    while len(cur) + 1 + len(fname) <= target_chars:
         cur = os.path.join(cur, seg)
         # Use abspath rather than makedirs in the long form — we'll
         # makedirs(exist_ok=True) below once.
     os.makedirs(cur, exist_ok=True)
-    fname = "f_" + "b" * 60 + ".pdf"   # ~65 chars
     return os.path.join(cur, fname)
 
 
