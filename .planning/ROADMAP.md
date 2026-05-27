@@ -33,7 +33,7 @@
 
 - [x] **Phase 99: PDF Page Renderer** - Shared on-demand PyMuPDF page renderer + off-thread worker + graceful failure handling
  (completed 2026-05-27)
-- [ ] **Phase 100: LOCAL PDF Image in ResultDialog + Browse** - Wire the renderer into both desktop surfaces; non-PDF files stay text-only
+- [x] **Phase 100: LOCAL PDF Image in ResultDialog + Browse** - Wire the renderer into both desktop surfaces; non-PDF files stay text-only (completed 2026-05-27)
 
 #### Phase 99: PDF Page Renderer
 **Goal**: A single PDF page can be rendered to a QImage on demand, off the UI thread, without ever loading or bulk-rendering the corpus — and any render failure degrades gracefully instead of hanging or crashing the app.
@@ -311,7 +311,7 @@ v7.15 phases execute in numeric order: 99 → 100
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 99. PDF Page Renderer | v7.15 | 2/2 | Complete    | 2026-05-27 |
-| 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 3/3 | Complete   | 2026-05-27 |
+| 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 3/3 | Complete    | 2026-05-27 |
 
 ## Backlog
 

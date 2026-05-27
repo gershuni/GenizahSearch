@@ -1,7 +1,8 @@
 ---
 phase: 100-local-pdf-image-in-resultdialog-browse
 verified: 2026-05-27T00:00:00Z
-status: human_needed
+status: passed
+human_uat_result: passed 2026-05-27 (all 7 scenarios; 2 cosmetic fixes applied in commit 8e77d80f; 1 RTL PDF-text caveat deferred to OPEN_ISSUES.md)
 score: 4/4 must-haves verified
 overrides_applied: 0
 human_verification:
