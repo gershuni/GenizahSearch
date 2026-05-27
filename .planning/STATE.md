@@ -1,11 +1,11 @@
 ---
 gsd_state_version: 1.0
-milestone: v7.14
-milestone_name: My Library
-status: planning
-stopped_at: Phase 97.3 closed (VERIFIED COMPLETE)
-last_updated: "2026-05-26T19:29:15.104Z"
-last_activity: 2026-05-26 -- Phase 97.3 closed (4/4 plans, 6/6 R97.3-* requirements MET, 7 new test files + locale-tooltip source fix)
+milestone: none
+milestone_name: (planning next after v7.14)
+status: milestone_complete
+stopped_at: v7.13 + v7.14 milestones CLOSED (retroactive reconciliation)
+last_updated: "2026-05-27T00:00:00.000Z"
+last_activity: 2026-05-27 -- v7.13 + v7.14 milestones closed via /gsd-complete-milestone (MILESTONES.md entries added, v7.13-REQUIREMENTS.md + v7.14-ROADMAP.md archived, REQUIREMENTS.md deleted, ROADMAP/PROJECT/RETROSPECTIVE updated)
 progress:
   total_phases: 6
   completed_phases: 6
@@ -18,19 +18,19 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-19)
+See: .planning/PROJECT.md (updated 2026-05-27)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 98 — NLI Resilience (shipped 2026-05-25); Phase 97.2 hotfix complete 2026-05-26
+**Current focus:** No active milestone — run `/gsd-new-milestone` to scope the next one.
 
 ## Current Position
 
-Phase: 98
-Plan: Not started
-Status: Phase 97.3 closeout shipped — see .planning/phases/97.3-my-library-uat-stability/97.3-04-SUMMARY.md
-Last activity: 2026-05-26 -- Phase 97.3 closed (4/4 plans, 6/6 R97.3-* requirements MET)
+Phase: none (between milestones)
+Plan: n/a
+Status: v7.13 + v7.14 both closed 2026-05-27. Latest shipped work: v7.14.0 (My Library) + Phase 98 NLI resilience.
+Last activity: 2026-05-27 -- v7.13 + v7.14 milestones closed via /gsd-complete-milestone reconciliation
 
-Progress: [          ] v7.13 0% (0/14 reqs, 0/5 plans, 0/2 phases)
+Progress: [██████████] v7.14 100% (6/6 phases, 37/37 plans) — CLOSED
 
 ## Phase Plan Estimates
 
@@ -54,7 +54,22 @@ Phase 93 and Phase 94 are independent (neither depends on the other) and can shi
 
 ## Deferred Items
 
-Items acknowledged and deferred at v7.12 milestone close on 2026-05-18:
+Items acknowledged and deferred at the v7.13 + v7.14 milestone close on 2026-05-27 (`gsd-tools.cjs audit-open` reported 104 items):
+
+| Category | Count | Notes |
+|----------|-------|-------|
+| Debug sessions | 40 | Historical accumulation predating v7.13 (mostly diagnosed-not-closed); spans many prior milestones. Includes 2 post-97.2 UAT brief/critique entries (work already shipped). |
+| UAT gaps | 3 phases | Phase 95 (3 pending scenarios), Phase 96 96-06/96-08 (0 pending — effectively done). My Library shipped as v7.14.0; scenarios substantively exercised in live use. |
+| Verification gaps | 2 | Phase 95 + Phase 97 `human_needed` flags. Substantively closed by the shipped v7.14.0 release + 97.x hotfix chain; status flag not flipped. |
+| Quick tasks | 53 | Historical backlog (oldest from 2026-02). Use `/gsd-cleanup` to triage between milestones. |
+| Pending todos | 5 | Largest: server-side search with email notification; NLI MARC crawl; unified metadata text search. |
+| Unimplemented seeds | 1 | SEED-001 server-side IIIF image cache (dormant; blocked on NLI TOS). |
+
+The v7.13/v7.14-specific items are all substantively closed by the shipped releases; only status-flag bookkeeping and the long historical backlog (predating v7.12) were deferred. Recommend a `/gsd-cleanup` pass before the next milestone.
+
+---
+
+### Prior deferral — v7.12 milestone close on 2026-05-18:
 
 | Category | Count | Notes |
 |----------|-------|-------|
@@ -68,7 +83,11 @@ The full `gsd-tools.cjs audit-open` report at close included 96 items. The v7.12
 
 ## Recently Closed Milestones
 
+- **v7.14 My Library — Local Document Search** — shipped 2026-05-24 (v7.14.0), closed 2026-05-27; 6 phases (95, 96, 97, 97.2/97.3 inserted, 98); 37 plans. Desktop local document search + Phase 98 NLI resilience. See `.planning/milestones/v7.14-ROADMAP.md`.
+- **v7.13 Research-Grade Downloads & PGP Filter** — shipped 2026-05-21 (v7.13.0), closed 2026-05-27; 2 phases (93, 94); 5 plans; 14/14 requirements. See `.planning/milestones/v7.13-ROADMAP.md` / `v7.13-REQUIREMENTS.md`.
 - **v7.12 Multitenant Architecture (Path B)** — shipped 2026-05-18; 10 phases (87-92 + 92.1/92.2 inserted + 999.1/999.4 promoted); 28 plans; 49/49 requirements satisfied. See `.planning/milestones/v7.12-ROADMAP.md`.
+
+> Note (2026-05-27): v7.13 and v7.14 both shipped as app releases earlier but the GSD close ritual was skipped at the time; both were reconciled together on 2026-05-27 (MILESTONES.md entries, archives, REQUIREMENTS.md deletion).
 
 ## Quick Tasks Completed
 

@@ -8,27 +8,19 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v7.13 Research-Grade Downloads & PGP Filter
+## Current Milestone: (none active — planning next after v7.14)
 
-**Goal:** Surface PGP coverage at the result-set level on `/search` and upgrade downloaded xlsx artifacts into citation-grade dossiers so a downloaded file stands alone as a scholarly source.
+v7.13 (Research-Grade Downloads & PGP Filter) and v7.14 (My Library — Local Document Search) both shipped and were closed 2026-05-27 via a retroactive `/gsd-complete-milestone` reconciliation. No milestone is currently active. Run `/gsd-new-milestone` to scope the next one.
 
-**Target features:**
-- Post-search 3-state PGP filter on `/search` toolbar (`All` / `Has PGP` / `No PGP`) with active-filter chip, persisted via `web/safe_storage.py` chokepoint. **Web only** — desktop already exposes the same signal via a sortable `COL_PGP` badge column at `genizah_app.py:5599-5634` (promoted backlog 999.2).
-- Multi-sheet xlsx downloads on BOTH web AND desktop: main sheet gains `Has PGP` / `Is Printed` / `Domains` / `IIIF Manifest` (soft) columns; NEW `Manuscripts` sub-sheet (one row per unique `sys_id` with PGP + NLI + catalog + library viewer + GenizahSearch URL); NEW `Bibliography` sub-sheet (one row per FJMS bib entry, joinable by `System ID`). Web JSON also gains 3 additive per-item flags (`has_pgp`, `is_printed`, `domains`); desktop has no JSON export. English-only, no transcription text. Web and desktop share `shared/export_dossier.py` helpers so workbook structure is identical (promoted backlog 999.3 + 2026-05-19 desktop-parity scope expansion).
+## Current State (v7.14 My Library shipped + closed 2026-05-27)
 
-**Scope guardrails:**
-- Phase 93 web only (desktop already covered by existing column sort).
-- Phase 94 xlsx on both apps via shared helpers; JSON and state-plumbing portions web-only by construction.
-- All per-user persistence MUST go through `web/safe_storage.py` (Phase 87 multitenant invariant).
-- `printed_ids` must plumb through `web/export_state.set_search_export(...)` on web so the export pipeline can read it alongside `transcription_sys_ids`. Desktop reads `_printed_sys_ids` and `_pgp_transcription_sys_ids` directly at the export call site.
-- JSON envelope schema_version stays 1 (additive changes only per Phase 83 stability commitment).
+**Shipped + closed:** v7.14 My Library — Local Document Search (public release 2026-05-24; closed 2026-05-27)
+- 6 phases (95, 96, 97, 97.2 INSERTED, 97.3 INSERTED, 98), 37 plans. Desktop "My Library" tab indexes user folders (`.docx`/`.pdf`/`.txt`/`.html`/`.xlsx`/`.csv`) into a separate Tantivy side-index merged into Search / Composition / Parallels via RRF k=60 POST-dedup; `LOCAL` badge + corpus selector; three cloud-write gates keep personal corpora off the cloud.
+- Hardened across an internal hotfix chain: Phase 97 (scale to 13K files / 43 GB + `.html`/`.xlsx`/`.csv` + atomic rebuild + crash recovery), Phase 97.2 INSERTED (recovery cascade + Reset My Library), Phase 97.3 INSERTED (mega-folder UI-thread stability).
+- Phase 98 (web infra): shared NLI circuit breaker wired into all 10 NLI/IIIF fetch sites; worst-case per-request blocking 45s → ~9s; closes the 2026-05-25 production hang. Tagged `v7.14.0` (both apps). See `.planning/milestones/v7.14-ROADMAP.md`.
 
-## Current State (v7.13 milestone CLOSEABLE — Phase 93 + Phase 94 both shipped)
-
-**In-flight:** v7.13 Research-Grade Downloads & PGP Filter — Phase 93 complete 2026-05-19; Phase 94 complete 2026-05-21; milestone closeout (`deploy.sh` / version bump 7.13.0 / git tag / desktop GitHub Release) pending as a separate ritual.
-
-**Phase 94 (Research-Grade Export Metadata, web + desktop xlsx) shipped 2026-05-21:** 4-wave implementation + 6 rounds of smoke-verification UX patches Hillel approved same day. Final workbook: 4-sheet bilingual xlsx (`Search Results` + `Manuscripts` + `Bibliography` + `Credits and Info`) on both web and desktop via shared `shared/export_dossier.py` helpers. Web JSON gains 3 additive per-item flags (`has_pgp` / `is_printed` / `domains`) with envelope `schema_version` unchanged; desktop has no JSON export. CONTEXT D-04 REVERSED 2026-05-20 for the row-content layer only. Cross-parity invariant pinned by `tests/test_export_xlsx_cross_parity.py`. All 9 EXPORT-META-01..09 reqs satisfied.
-- Phase 93 (PGP filter on `/search`, web-only): post-search 3-state filter button (`Filter PGP` / `Has PGP` / `No PGP`) mirroring the `printed_filter` pattern, with strict cascade discipline across 6 render branches, session persistence via the Phase 87 `safe_storage` chokepoint, and a static AST guard test (`tests/test_pgp_filter_cascade.py`) preventing cascade-drift regressions. 4/5 PGP-FILTER reqs satisfied; PGP-FILTER-03 (chip) superseded by user smoke direction (colored button label already conveys state). Hebrew translations: `סנן PGP` / `PGP בלבד` / `ללא PGP` / `סנן לפי כיסוי PGP`.
+**Shipped + closed:** v7.13 Research-Grade Downloads & PGP Filter (2026-05-21; closed 2026-05-27)
+- 2 phases (93 web-only 3-state PGP filter; 94 web + desktop 4-sheet bilingual research-grade xlsx + web JSON flags), 5 plans, 14/14 requirements. Tagged `v7.13.0` (both apps). See `.planning/milestones/v7.13-ROADMAP.md`.
 
 **Shipped:** v7.12 Multitenant Architecture (Path B) (2026-05-18)
 - 10 phases (87-92 + 92.1/92.2 inserted + 999.1/999.4 promoted backlog), 28 plans, 49/49 requirements satisfied
@@ -277,6 +269,9 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - ✓ `IIIF Manifest` column DEFERRED per D-13 soft scope: header present on main sheet but cells empty on both apps; Library Viewer URL on Manuscripts sub-sheet provides sys_id-scoped reachability instead -- v7.13 (EXPORT-META-08)
 - ✓ Desktop xlsx search-results export rewired to emit the same 4-sheet bilingual workbook as web via `shared/export_dossier.py`; new module-level pure-function `_build_search_results_xlsx_bytes(...)` at `genizah_app.py:2473` (Qt-free, offline-testable); cross-parity invariant pinned by `tests/test_export_xlsx_cross_parity.py`; CSV / TXT / DOCX branches at `genizah_app.py:18294+` unchanged -- v7.13 (EXPORT-META-09)
 
+- ✓ My Library — desktop local document search: 7th tab indexes user folders of `.docx`/`.pdf`/`.txt`/`.html`/`.xlsx`/`.csv` into a separate Tantivy side-index merged into Search / Composition / Parallels via RRF k=60 POST-dedup, with a `LOCAL` badge, corpus selector (`Genizah`/`Local`/`ALL`), three-state LOCAL filter, per-file opt-out tree, and three cloud-write gates that keep personal corpora entirely off the cloud (web/API/Supabase). Scaled to 13K files / 43 GB with atomic Tantivy rebuild + zstd text cache + crash recovery + Reset My Library. -- v7.14 (Phases 95-97.3)
+- ✓ NLI Resilience — shared circuit breaker (`shared/nli_circuit_breaker.py`) wired into all 10 NLI/IIIF fetch sites with bounded env-configurable timeouts; worst-case per-request blocking dropped 45s → ~9s; PostHog breaker telemetry via factored `shared/posthog_server.py`. Closes the 2026-05-25 production hang. -- v7.14 (Phase 98)
+
 ### Active
 
 *(v7.13 Research-Grade Downloads & PGP Filter requirements moved to Validated 2026-05-21 after Phase 94 closeout — see entries above with `-- v7.13` annotation. 14/14 requirements satisfied across both phases (Phase 93 PGP filter shipped 2026-05-19 + Phase 94 export metadata shipped 2026-05-21). Milestone closeout (`deploy.sh` / version bump 7.13.0 / git tag / desktop GitHub Release) pending as a separate ritual.)*
@@ -389,6 +384,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Note (2026-05-26): The "Current State" section above predates the v7.14 "My Library" chain (Phases 95, 96, 97, 97.2, 97.3) and the Phase 98 NLI-resilience work — see CHANGELOG.md / CLAUDE.md "Recently Changed" for the authoritative current state. Phase 97.3 (My Library UAT Stability) closed 2026-05-26: 4/4 plans, 6/6 R97.3-* requirements MET (UI-thread freeze, Reset-after-crash, recovery-Skip rescan, stuck-at-0%, MuPDF stderr noise, tree extension parity), 7 new test files + a locale-tooltip source fix. Internal hotfix on the v7.14 chain, no version bump.*
-
-*Last updated: 2026-05-21 — Phase 94 (Research-Grade Export Metadata, web + desktop xlsx) COMPLETE. All 9 EXPORT-META-01..09 requirements satisfied after Hillel approved smoke verification 2026-05-21 across 6 rounds of UX patches (bilingual headers + source-language metadata, sheet rename + 4th Credits-and-Info sheet, label realignment + Creator credit + link rename, clickable Manuscripts URLs, per-sys_id Domains dedupe, Image/Page int coercion). v7.13 milestone now closeable (Phase 93 already complete 2026-05-19; Phase 94 complete 2026-05-21; 14/14 requirements). Milestone closeout (`deploy.sh` / version bump 7.13.0 / `[7.13.0]` CHANGELOG section / git tag / desktop GitHub Release) pending as separate ritual. Earlier 2026-05-19: Phase 93 (PGP filter on `/search`) COMPLETE — 4/5 PGP-FILTER reqs satisfied directly; PGP-FILTER-03 (chip) marked Superseded after user smoke feedback removed the chip in favor of self-conveying button label. Multitenant invariants from v7.12 carry forward (zero raw `app.storage.user` access under `web/`, enforced by `tests/test_no_raw_storage_access.py`; allowlist `[]`). Phase 93 added 1 CI guard (`tests/test_pgp_filter_cascade.py` static AST scanner); Phase 94 added 1 CI guard (`tests/test_export_xlsx_cross_parity.py` cross-app parity at `lang='en'`) + 7 smoke-round regression test files. Final test count: 2316 passed / 20 skipped / 2 xfailed. Ruff clean.*
+*Last updated: 2026-05-27 — v7.13 + v7.14 milestones CLOSED via retroactive `/gsd-complete-milestone` reconciliation (both shipped as app releases earlier — v7.13.0 2026-05-21, v7.14.0 2026-05-24 — but the GSD close ritual had been skipped). v7.13 requirements archived to `.planning/milestones/v7.13-REQUIREMENTS.md`; v7.14 recorded in `.planning/milestones/v7.14-ROADMAP.md`; MILESTONES.md gained both entries; the live `REQUIREMENTS.md` was deleted (fresh for the next milestone). For authoritative current behavior see CHANGELOG.md / CLAUDE.md "Recently Changed".*

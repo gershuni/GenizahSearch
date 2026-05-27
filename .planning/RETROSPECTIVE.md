@@ -189,6 +189,85 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 ---
 
+## Milestone: v7.13 — Research-Grade Downloads & PGP Filter
+
+**Shipped:** 2026-05-21 (closed retroactively 2026-05-27)
+**Phases:** 2 (93, 94) | **Plans:** 5
+**Git:** 102 commits (v7.12.0..v7.13.0) | **Wall clock:** 3 days (2026-05-19 → 2026-05-21)
+**Requirements:** 14/14 satisfied (5 PGP-FILTER + 9 EXPORT-META; PGP-FILTER-03 superseded)
+
+### What Was Built
+- Web-only post-search 3-state PGP filter on `/search` (`Filter PGP`/`Has PGP`/`No PGP`), persisted via the Phase 87 `safe_storage` chokepoint
+- 4-sheet bilingual research-grade xlsx workbook on BOTH apps (`Search Results` + `Manuscripts` + `Bibliography` + `Credits and Info`) via shared `shared/export_dossier.py` helpers
+- Web JSON gains 3 additive per-item flags (`has_pgp`/`is_printed`/`domains`) with envelope `schema_version` unchanged
+
+### What Worked
+- **Promote-from-backlog discipline** — both phases came from 999.2/999.3 with locked CONTEXT, so planning was fast
+- **Shared dossier module across web + desktop** — `shared/export_dossier.py` made the workbook structurally identical on both apps; cross-parity pinned by `tests/test_export_xlsx_cross_parity.py`
+- **Same-day smoke-verification rounds** — Hillel approved 6 rounds of UX patches in-session, far faster than async review cycles
+- **Mirroring an existing pattern** — the PGP filter cloned the proven `printed_filter` 3-state idiom with an AST cascade guard
+
+### What Was Inefficient
+- **CONTEXT D-04 reversed mid-flight (2026-05-20)** for the bilingual row-content layer — the English-only decision was overturned once smoke testing showed Hebrew users needed Hebrew sheets; better to have discussed bilingual scope upfront
+- **Desktop-parity scope (EXPORT-META-09) added after the original backlog plan** — the SUPERSEDED `94-01-PLAN` had to be re-planned from scratch
+- **The milestone close ritual was skipped entirely** — `/release` tagged v7.13.0 but MILESTONES.md + requirements archival never ran; reconciled 6 days later
+
+### Patterns Established
+- **Shared export-dossier helpers** as the single source of workbook structure for both apps
+- **Bilingual export** — `lang='he'` produces Hebrew sheet titles/headers/metadata with English fallback; `lang='en'` the reverse
+- **Soft-scope columns** — D-13 `IIIF Manifest` shipped header-only, then lifted post-closeout (Phase 94.1) once a zero-network proxy-URL approach was found
+
+### Key Lessons
+1. **Decide bilingual vs single-language export scope before building** — the D-04 reversal re-touched the whole row-content layer
+2. **Run the milestone-close ritual at release time, not weeks later** — skipping it left REQUIREMENTS.md stranded on v7.13 and no MILESTONES entry until the v7.14 reconciliation
+
+---
+
+## Milestone: v7.14 — My Library (Local Document Search)
+
+**Shipped:** 2026-05-24 (public v7.14.0); closed 2026-05-27
+**Phases:** 6 (95, 96, 97, 97.2 INSERTED, 97.3 INSERTED, 98) | **Plans:** 37
+**Git:** 355 commits (v7.13.0..HEAD, incl. bundled data) | **Wall clock:** 7 days (2026-05-21 → 2026-05-27)
+
+### What Was Built
+- Desktop "My Library" 7th tab indexing user folders (`.docx`/`.pdf`/`.txt`/`.html`/`.xlsx`/`.csv`) into a separate Tantivy side-index merged into Search/Composition/Parallels via RRF k=60 POST-dedup
+- Three cloud-write gates at the TOP of serializer/corrections/lists-sync — personal corpora never reach web/API/Supabase
+- Scale to 13K files / 43 GB: SQLite v1→v2 + zstd `cached_text` + atomic Tantivy rebuild (WAL+FULL) + crash recovery + Reset My Library
+- Phase 98 (web infra): shared NLI circuit breaker across all 10 NLI/IIIF fetch sites; 45s → ~9s worst-case blocking
+
+### What Worked
+- **Codex P0 sequencing** — recovery foundation (atomic rebuild + durable cache) landed in Phase 97 Wave A *before* the 50K/50GB ceiling lift; the order paid off when 97.2's startup cascade hit
+- **Three cloud-write gates at function TOP (Codex D-30)** — fail-closed against accidental cloud exposure; structurally simple to audit
+- **RRF k=60 POST-`_deduplicate()` (Codex D-08)** — LOCAL hits dedup correctly against the Genizah corpus instead of double-counting
+- **Decimal sub-phase insertions (97.2, 97.3)** — the now-proven pattern from v7.12 handled two emergency UAT cascades cleanly with their own plans + Codex critiques
+- **"Workable limited release over another phase with more bugs"** — the user's explicit scoping constraint kept 97.3 tight (fix the 4 UAT-reproduced failures + truly-free adjacent fixes, defer the rest)
+- **Replace-not-augment for the NLI breaker** — Phase 98 deleted the buggy `time.time` class-attribute breaker rather than layering on it
+
+### What Was Inefficient
+- **Three post-ship hotfix cascades (97, 97.2, 97.3) after v7.14.0** — the MVP shipped, then a 100K-file Dropbox repro surfaced a 5-bug startup cascade, then post-97.2 UAT surfaced a mega-folder UI-thread freeze. My Library's real-world scale (mega folders, mid-scan quits, network drives) wasn't exercised before the public release
+- **UI-thread sync recursive walk** (Phase 96 D-F1) froze the app on mega folders — a latent defect that only surfaced under post-97.2 UAT; should have been workerized when the opt-out tree was first built
+- **Recovery-modal recurrence** required a second fix (`1859b8ac`+`528906e4`) after the first 97.2 attempt — the clean-shutdown sweep lived in a child widget's `closeEvent` that never fires on app exit
+- **Milestone-close ritual skipped again** — same as v7.13; both reconciled together on 2026-05-27
+
+### Patterns Established
+- **Namespace-isolated synthetic sys_ids for LOCAL** — separate from the "starts with 99" NLI/PGP/CUDL synthetic space; LOCAL never collides
+- **Cloud-write gate at function TOP** — the gate is the first statement, before any client acquisition, so it cannot be bypassed by a later code path
+- **Atomic Tantivy rebuild with durability bracket** — close reader → rebuild to temp → `os.rename` → reopen; WAL+FULL around the SQLite mutation; guards against the Windows handle-retention `os error 5`
+- **`shared/posthog_server.py` factored so `shared/` no longer imports `web/`** — telemetry queue+daemon reusable by both layers
+- **Detect-then-fallback extraction** — PDF one-word-per-line detection (0.70 single-word-ratio threshold) → `get_text("text", sort=True)` fallback
+
+### Key Lessons
+1. **Exercise real-world scale before the public release, not after.** Three hotfix cascades (97/97.2/97.3) all traced to mega-folder / mid-scan-quit / network-drive conditions that the MVP never tested. A pre-release run against Seewald's actual 13K-file / 43 GB tree would have caught the freeze and the recovery cascade.
+2. **`closeEvent` on a child widget is dead code on app exit.** The clean-shutdown sweep must live on the top-level window (`GenizahGUI.closeEvent`), not a tab widget — child widgets never receive `closeEvent` when the app is killed.
+3. **Sequence recovery/durability foundations before scale lifts.** Codex's P0 ordering (recovery in Phase 97 Wave A before the ceiling lift) was the single decision that made the 97.2 cascade fixable rather than data-losing.
+4. **Run the close ritual at `/release` time.** Two milestones in a row shipped without it; the drift (REQUIREMENTS.md stranded on v7.13, no MILESTONES entries, ROADMAP phases misfiled under Backlog) compounded until a single reconciliation pass was needed.
+
+### Cost Observations
+- Model mix: opus (planner + executor); Codex CLI for cross-AI critique at every sub-decision
+- Notable: highest plan count to date for a single milestone (37), driven by the 9+9 plans of Phases 95+96 plus two emergency decimal sub-phases and a parallel web-resilience phase. The My Library chain (95→97.3) is one feature hardened over 5 phases — the cost of productizing an external prototype to real scale.
+
+---
+
 ## Cross-Milestone Trends
 
 | Milestone | Phases | Plans | Days | Plans/Day | Key Theme |
@@ -206,6 +285,8 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 | v7.8 | 4 | 9 | 1 | 9.0 | Structural foundation / CI |
 | v7.10 | 8 | 37 | 9 | 4.1 | Public Search API + reference Skill |
 | v7.12 | 10 | 28 | 6 | 4.7 | Multitenant architecture (Path B) |
+| v7.13 | 2 | 5 | 3 | 1.7 | Research-grade exports + PGP filter |
+| v7.14 | 6 | 37 | 7 | 5.3 | My Library local document search |
 
 **Observations:**
 - v6.5.0 had the lowest plans/day ratio — reflects the large batch translation work (multi-day server jobs) and bug-fix tail

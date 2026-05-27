@@ -1,5 +1,52 @@
 # Project Milestones: GenizahSearch
 
+## v7.14 My Library — Local Document Search (Shipped: 2026-05-24; closed 2026-05-27)
+
+**Phases completed:** 6 phases (95, 96, 97, 97.2 INSERTED, 97.3 INSERTED, 98), 37 plans
+**Git range:** `v7.13.0` → `8ad0e69d` (355 commits across the v7.14 cycle, incl. bundled data assets)
+**Scope:** Python + tests across the desktop My Library subsystem (`shared/local_indexer.py`, `desktop/my_library_tab.py`, `genizah_core.py` LOCAL merge) plus the web-side Phase 98 NLI resilience module (`shared/nli_circuit_breaker.py`, `shared/posthog_server.py`)
+**Timeline:** 2026-05-21 → 2026-05-27 (7 days wall clock; public v7.14.0 release 2026-05-24, internal hotfix chain 97/97.2/97.3 + Phase 98 NLI resilience through 2026-05-27)
+**App releases:** v7.14.0 (2026-05-24, both apps), tagged `v7.14.0`
+
+**Delivered:** Productized Yehuda Seewald's external prototype into a first-class desktop "My Library" tab (7th tab) that indexes user folders of `.docx`/`.pdf`/`.txt`/`.html`/`.xlsx`/`.csv` into a separate Tantivy side-index merged into Search / Composition / Parallels results via RRF (k=60, POST-dedup) with a `LOCAL` badge and a three-state filter. Personal corpora NEVER leak to the cloud — three cloud-write gates pinned at the TOP of the serializer / corrections / lists-sync paths, enforced by regression tests. The milestone then hardened the feature through three post-ship cascades (PDF extraction, recovery semantics, mega-folder UI stability) and shipped a parallel web resilience milestone (Phase 98) that prevents any single NLI/IIIF upstream slowdown from hanging `genizah-web`.
+
+**Key accomplishments:**
+
+- **Phase 95 — My Library MVP (9 plans, shipped v7.14.0):** Desktop 7th tab indexes `.docx`/`.pdf`/`.txt` into a SEPARATE Tantivy side-index, merged into Search/Composition/Parallels via RRF k=60 *after* `_deduplicate()` (Codex D-08 P0). Namespace-isolated synthetic sys_ids, never colliding with NLI/PGP/CUDL. Three cloud-write gates pinned at the TOP of `shared/search_serializer.py`, `corrections_client.py`, `lists_sync.{sync_item_to_cloud, sync_list_to_cloud}` (Codex D-30 P0). PyMuPDF dep + `collect_all('pymupdf')` + `--self-test-pymupdf` CLI. Per-thread SQLite via `threading.local()`; Tantivy commit retry on Windows `os error 5`. Pre-search corpus dropdown `Genizah`/`Local`/`ALL` + 3-state `Filter Local` button. Bilingual About/Help with Seewald attribution (יהודה זייבלד). Static AST guard `tests/test_web_library_options_no_local.py` pins the web LIBRARY_CODES invariant (`[]`).
+- **Phase 96 — Completing My Library (9 plans):** Closed the P1 LOCAL highlight regression (engine-side `_build_local_result_dict` normalization), the PDF one-word-per-line extraction bug (detect-then-fallback in `extract_pdf_pages`, 0.70 single-word-ratio threshold), and added the per-file opt-in/out drill-down tree (`_OptoutTreeWidget`, Qt-native tri-state, session-JSON persistence). Removed the redundant `צפה בדפדוף` button; added next/prev + View-All navigation for LOCAL hits in ResultDialog and the Browse panel. D-F2 (OCR) + D-F3 (side-by-side PDF) explicitly deferred to v7.15+.
+- **Phase 97 — More LOCAL features (6 plans):** Scaled My Library to Seewald's prototype size (13K files / 43 GB; ceiling 50K/50GB) via SQLite v1→v2 migration + zstd `cached_text` + atomic Tantivy rebuild (WAL+FULL durability bracket) + recovery UX gate. Added `.html` (lxml.html, not BeautifulSoup), `.xlsx` (openpyxl streaming), `.csv` extractors with encoding chains; 100 MB raw cap + zip-bomb defense; mtime_ns incremental audit; byte/count/time commit policy; phase-aware ETA + `scan_run_id` (mutated-rows-only) + `FolderWalkWorker` QThread + View-All 500-cap incremental render; network-drive semantics; bilingual privacy disclosure; 4 invariant CI guards.
+- **Phase 97.2 INSERTED — Recovery Cascade (3 plans):** Fixed 5 interacting Phase 97 bugs that left the LOCAL index permanently broken when atomic rebuild failed at startup (redundant `tantivy.Index` reopen leaking the writer lock; stale `.tantivy-writer.lock` carried through `os.rename`; `discard_run` schema-version mismatch; missing `self._writer is None` guards) and implemented "Reset My Library" recovery UX (close handles → delete LocalIndex + LocalLabIndex + SQLite → recreate empty). 8/8 R97.2-* requirements MET; 25 commits.
+- **Phase 97.3 INSERTED — UAT Stability (4 plans):** Closed six post-Phase-97.2 UAT defects: workerized tree population via `FolderWalkWorker` (closes UI-thread freeze on mega folders), Reset-button guard simplified to `worker_running` only (orphan `scan_runs.running` rows no longer block Reset), one-shot `_skip_startup_rescan_once` flag (Skip no longer re-launches the broken scan), indeterminate→determinate progress bar with `status_updated` signal, `fitz.TOOLS.mupdf_display_warnings(False)` to silence 624× stderr noise, and UI tree extension parity (`.html`/`.xlsx`/`.csv` now visible). 6/6 R97.3-* requirements MET; 7 new test files. Followed by a recovery-modal recurrence fix (`1859b8ac`+`528906e4`) and a post-UAT Codex review follow-up (`fb5cbdb8`).
+- **Phase 98 — NLI Resilience (6 plans, web infra):** Shared `shared/nli_circuit_breaker.py` (module-level singleton, `time.monotonic`, `threading.Lock`) wired into all 10 NLI fetch sites, replacing the buggy class-attribute breaker. 6 new env knobs; `NLI_SEMAPHORE_TIMEOUT` default dropped 20→1. PostHog telemetry on breaker open/close via factored `shared/posthog_server.py` (Option (a) — `shared/` no longer depends on `web/`). Worst-case per-request blocking budget dropped 45s → ~9s; after 3 consecutive failures the breaker trips for 60s. Closes the 2026-05-25 production hang (Starlette threadpool saturation on synchronous `requests.get` to `iiif.nli.org.il`). Production canary PASSED 2026-05-25. Async refactor to httpx, event-loop watchdog, and multi-worker uvicorn explicitly deferred.
+
+**Known deferred items at close:** 104 stale audit items (40 debug sessions, 53 quick tasks, 5 todos, 1 seed, plus Phase 95/96 partial UAT + Phase 95/97 `human_needed` verification flags). The v7.14-specific items are substantively closed by the shipped v7.14.0 release + the 97.x hotfix chain; only status-flag bookkeeping and the long historical backlog (predating v7.12) were deferred. See STATE.md Deferred Items. Recommend a `/gsd-cleanup` pass between milestones.
+
+**Tag posture:** `v7.14.0` already created by `/release` 2026-05-24 (both apps). No additional tag created at close — this was a retroactive bookkeeping reconciliation.
+
+---
+
+## v7.13 Research-Grade Downloads & PGP Filter (Shipped: 2026-05-21; closed 2026-05-27)
+
+**Phases completed:** 2 phases (93, 94), 5 plans
+**Git range:** `v7.12.0` → `v7.13.0` (102 commits)
+**Scope:** 209 files changed across the v7.13 tag range (large delta reflects planning-doc + data churn alongside web/desktop export code)
+**Timeline:** 2026-05-19 → 2026-05-21 (3 days wall clock)
+**Requirements:** 14/14 satisfied (5 PGP-FILTER + 9 EXPORT-META; PGP-FILTER-03 superseded by user smoke direction)
+**App releases:** v7.13.0 (2026-05-21, both apps), tagged `v7.13.0`
+
+**Delivered:** Surfaced PGP coverage at the result-set level on `/search` (web) and upgraded downloaded xlsx artifacts into citation-grade dossiers so a downloaded file stands alone as a scholarly source. Both phases were promoted from the backlog (999.2 + 999.3).
+
+**Key accomplishments:**
+
+- **Phase 93 — PGP Filter on `/search` (1 plan, web-only):** Post-search 3-state filter button (`Filter PGP` / `Has PGP` / `No PGP`) mirroring the `printed_filter` pattern, persisted via the Phase 87 `web/safe_storage.py` chokepoint. Strict cascade discipline across 6 render branches pinned by a static AST guard (`tests/test_pgp_filter_cascade.py`). 4/5 PGP-FILTER reqs satisfied directly; PGP-FILTER-03 (chip) superseded after user smoke feedback (colored button label already conveys state). Hebrew: `סנן PGP` / `PGP בלבד` / `ללא PGP`. Desktop already exposed the same signal via a sortable `COL_PGP` badge column, so no desktop parity was required.
+- **Phase 94 — Research-Grade Export Metadata (4 waves, web + desktop xlsx):** 4-sheet bilingual xlsx workbook (`Search Results` + `Manuscripts` + `Bibliography` + `Credits and Info`) on both apps via shared `shared/export_dossier.py` helpers. Main sheet gains `Has PGP`/`Is Printed`/`Domains` columns; `Manuscripts` sub-sheet has one row per unique sys_id with PGP + NLI + catalog + library-viewer + GenizahSearch URLs (clickable hyperlinks); `Bibliography` sub-sheet has one row per FJMS bib entry. Web JSON gains 3 additive per-item flags (`has_pgp`/`is_printed`/`domains`) with envelope `schema_version` unchanged. Cross-parity invariant pinned by `tests/test_export_xlsx_cross_parity.py`. CONTEXT D-04 REVERSED 2026-05-20 for the row-content layer only (bilingual headers + source-language metadata). Refined across 6 rounds of smoke-verification patches approved by Hillel same-day. Phase 94.1 post-closeout patch (commit `e01bfd14`) lifted D-13 and populated the renamed `Image URL` column with per-folio GenizahSearch proxy URLs.
+
+**Known deferred items at close:** Captured under the v7.14 close (shared historical backlog). v7.13-specific follow-ups (pre-search PGP filter, parallels-page filter, desktop PGP filter parity, Hebrew metadata export mode) are recorded in the archived `v7.13-REQUIREMENTS.md` "Future Requirements" section.
+
+**Tag posture:** `v7.13.0` already created by `/release` 2026-05-21 (both apps). No additional tag created at close — retroactive bookkeeping reconciliation.
+
+---
+
 ## v7.12 Multitenant Architecture (Path B) (Shipped: 2026-05-18)
 
 **Phases completed:** 10 phases (87, 88, 89, 90, 91, 92, 92.1 INSERTED, 92.2 INSERTED, 999.1 promoted, 999.4 promoted), 28 plans

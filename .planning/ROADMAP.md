@@ -21,78 +21,19 @@
 - **v7.10 Search API** -- Phases 77-83 (shipped 2026-05-05)
 - **v7.11 CUDL Coverage & Synthetic Inventories** -- Phases 84-86 (shipped 2026-05-12)
 - **v7.12 Multitenant Architecture (Path B)** -- Phases 87-92 + 92.1 + 92.2 + promoted 999.1/999.4 (shipped 2026-05-18)
-- **v7.13 Research-Grade Downloads & PGP Filter** -- Phases 93-94 (ACTIVE; started 2026-05-19; Phase 93 web-only COMPLETE 2026-05-19; Phase 94 web + desktop xlsx COMPLETE 2026-05-21; milestone closeable)
-- **v7.14 My Library** -- Phases 95-96 (ACTIVE; started 2026-05-20; Phase 95 shipped 2026-05-24 as v7.14.0; Phase 96 added 2026-05-24 to complete the feature with follow-ups and bug fixes)
+- **v7.13 Research-Grade Downloads & PGP Filter** -- Phases 93-94 (shipped 2026-05-21)
+- **v7.14 My Library — Local Document Search** -- Phases 95-98 (shipped 2026-05-24; closed 2026-05-27)
 
 ## Phases
 
-## Roadmap v7.14: My Library
+<details>
+<summary>✅ v7.14 My Library — Local Document Search (Phases 95-98) — SHIPPED 2026-05-24, closed 2026-05-27</summary>
 
-### Phase 95: My Library — Local Document Indexing
+See: .planning/milestones/v7.14-ROADMAP.md
 
-**Goal:** Desktop users can point GenizahSearch at folders of `.docx` / `.pdf` / `.txt` files and have those documents indexed into a SEPARATE Tantivy side-index merged into normal search / Composition Search / Parallels results with a clear `LOCAL` badge and a three-state filter button. Personal corpora NEVER leak to the cloud — three regression tests pin the cloud-write boundaries (`/api/search`, `lists_sync.sync_item_to_cloud`, corrections submit). Productizes Yehuda Seewald's external prototype (`seewald_addition/`) as a first-class in-app feature — no second installation, no `Program Files` UAC patching, no shared sys_id namespace collision, no web / API / Supabase exposure.
+6 phases (95, 96, 97, 97.2 INSERTED, 97.3 INSERTED, 98), 37 plans. Desktop-first "My Library" tab indexing user folders of `.docx`/`.pdf`/`.txt`/`.html`/`.xlsx`/`.csv` into a separate Tantivy side-index merged into Search/Composition/Parallels via RRF k=60 POST-dedup, with a `LOCAL` badge, a corpus selector, and three cloud-write gates keeping personal corpora off the cloud. Public v7.14.0 release 2026-05-24 (Phase 95 MVP + Phase 96 completion). Internal hotfix chain through 2026-05-27: Phase 97 (scale to 13K files / 43 GB + `.html`/`.xlsx`/`.csv` + atomic rebuild + crash recovery), Phase 97.2 INSERTED (recovery cascade + Reset My Library), Phase 97.3 INSERTED (mega-folder UI-thread stability). Phase 98 (web infra) added a shared NLI circuit breaker wired into all 10 NLI/IIIF fetch sites, dropping worst-case per-request blocking 45s → ~9s (closes the 2026-05-25 production hang). v7.12 multitenant invariants preserved (zero raw `app.storage.user` under `web/`; LOCAL never reaches web/API/Supabase).
 
-**Depends on:** Nothing — independent feature
-
-**Source CONTEXT:** `.planning/phases/95-my-library/95-CONTEXT.md` (46 locked decisions, post-Codex critique; AUTHORITATIVE)
-**Source SPEC:** `.planning/phases/95-my-library/95-SPEC.md` (10 requirements + 22 acceptance criteria — AUTHORITATIVE)
-
-**Plans:** 9/9 plans complete
-- [ ] 95-01-PLAN.md — Wave 0: 26 red-stub tests + requirements.txt pymupdf pin + GenizahSearchPro.spec collect_all(pymupdf) + D-44 Hebrew fixture + conftest fixtures
-- [ ] 95-02-PLAN.md — Wave 1: shared/local_sys_id.py + parse_header_smart/parse_full_id_components generalization (Codex D-13 P0) + LIBRARY_CODES extension + Config.LOCAL_*_DIR
-- [ ] 95-03-PLAN.md — Wave 1: shared/local_indexer.py core (PyMuPDF + python-docx + TXT + RTL helpers as dead code + LOCAL Tantivy schema with tokenizer_name="raw" on unique_id + SQLite cache + two-phase commit + delete-by-uid + folder overlap detection + unavailable-folder handling)
-- [ ] 95-04-PLAN.md — Wave 1: Three cloud-write gates — shared/search_serializer.py + corrections_client.py + lists_sync.py (Codex D-30 P0 — gate at TOP of sync_item_to_cloud BEFORE _get_client())
-- [ ] 95-05-PLAN.md — Wave 2: Main search merger via RRF k=60 POST-_deduplicate (Codex D-08 P0) + D-37 corrupt-index fallback
-- [ ] 95-06-PLAN.md — Wave 2: LOCAL LAB side-index + weights_hash invalidation contract (D-09 + D-38); custom fingerprint scoring preserved
-- [ ] 95-07-PLAN.md — Wave 3: desktop/my_library_tab.py (MyLibraryTab as 7th tab — Pitfall #4) + LocalIndexerWorker QThread + QMutex serialization (D-25) + mid-file cancellation (D-24 Codex P1) + pre-scan ceiling dialog (D-26 + D-41)
-- [ ] 95-08-PLAN.md — Wave 3: COL_SRC LOCAL badge in blue (D-11) + three-state LOCAL filter on Search/Composition/Parallels (REQ-6 + D-10 + D-39) + D-10 P1 no-op chip + LOCAL hit click -> Browse panel text-only + Open file (D-27 + D-28)
-- [ ] 95-09-PLAN.md — Wave 4: Help + About docs (D-31 + D-32 + D-33 cleartext disclosure, EN + HE both apps) + export_dossier skip_local kwarg (D-45) + web LIBRARY_CODES static AST guard (D-46) + PyInstaller packaging smoke (D-43 @pytest.mark.packaging) + OPEN_ISSUES/CHANGELOG/CLAUDE.md bookkeeping
-
-**Wave structure:** 0 (01) -> 1 (3 parallel: 02, 03, 04) -> 2 (05) -> 3 (2 parallel: 06, 07) -> 4 (08) -> 5 (09). Note: 06 bumped to wave 3 to avoid genizah_core.py overlap with 05; 08 bumped to wave 4 to avoid genizah_app.py overlap with 07; 09 bumped to wave 5 because it depends on 08.
-
-**UI hint:** yes — new 7th desktop tab + result-list LOCAL badge + three-state filter button mirroring Phase 93 PGP pattern.
-
-### Phase 96: Completing My Library feature: add features and fix bugs
-
-**Goal:** Take Phase 95 (My Library) from "shipped MVP" (v7.14.0 public release, 2026-05-24) to "feature-complete" by closing the P1 highlight regression (D-F5), the confirmed PDF-extraction bug (D-F4), and adding the per-file opt-in/out drill-down feature (D-F1). Also remove the redundant `צפה בדפדוף` button (NEW-1) and add next/prev navigation + "View All" (הכל) for LOCAL hits in both ResultDialog and the Browse panel (NEW-2). Phase 95 invariants (RRF POST-dedup, three cloud-write gates at TOP, web LIBRARY_CODES `[]`, multitenant `[]`) preserved throughout.
-
-**Scope items (D-XX/NEW-X from CONTEXT.md — Phase 96 has no REQ-IDs):**
-- D-F5 — LOCAL highlight P1 regression (plan 96-03; engine-side via `_build_local_result_dict` normalization, Option A from RESEARCH §1)
-- D-F4 — PDF one-word-per-line extraction bug (plan 96-02; detect-then-fallback in `extract_pdf_pages`)
-- D-F1 — Per-file opt-in/out drill-down (plans 96-04 persistence + 96-05 cascade + 96-06 tree widget UI)
-- NEW-1 — Remove redundant `צפה בדפדוף` button (plan 96-07)
-- NEW-2 — Next/prev + View-All for LOCAL (plan 96-03 engine primitive + plan 96-08 UI wiring)
-- NEW-3 — Freestyle polish bucket (plan 96-09 — capped per CONTEXT D-15)
-
-**Deferred to v7.15+:** D-F2 (PDF OCR) and D-F3 (side-by-side PDF page rendering) — explicitly out per CONTEXT D-01.
-
-**Depends on:** Phase 95 (shipped)
-
-**Source CONTEXT:** `.planning/phases/96-completing-my-library-feature-add-features-and-fix-bugs/96-CONTEXT.md` (15 locked decisions; D-08 REVISED 2026-05-24 from QSettings → session JSON)
-**Source RESEARCH:** `.planning/phases/96-completing-my-library-feature-add-features-and-fix-bugs/96-RESEARCH.md`
-**Source PATTERNS:** `.planning/phases/96-completing-my-library-feature-add-features-and-fix-bugs/96-PATTERNS.md`
-**Source VALIDATION:** `.planning/phases/96-completing-my-library-feature-add-features-and-fix-bugs/96-VALIDATION.md`
-
-**Plans:** 9/9 plans complete
-
-Plans:
-- [x] 96-01-PLAN.md — Wave 0: D-F4 pathological PDF fixture + 6 new skeleton test files + cascade AST extension + NEW-1 xfail(strict=True) flips on existing test_local_browse_panel.py tests
-- [x] 96-02-PLAN.md — Wave 1: D-F4 detect-then-fallback in `shared/local_indexer.py::extract_pdf_pages` (0.70 single-word-ratio threshold, `get_text("text", sort=True)` fallback)
-- [x] 96-03-PLAN.md — Wave 1: D-F5 normalize LOCAL hit dict shape in `genizah_core.py::_build_local_result_dict` (Option A) + NEW-2 engine primitive `SearchEngine.get_local_browse_page` with per-sys_id cache
-- [x] 96-04-PLAN.md — Wave 1: D-F1 persistence layer — `genizah_app.py` `_local_file_optouts` attribute + session-JSON save/restore (top-level cross-surface key) + `desktop/my_library_tab.py::_prune_optouts_to_disk` pure helper
-- [x] 96-05-PLAN.md — Wave 2: D-F1 cascade — `genizah_app.py::_apply_local_optout_filter` + wiring at BOTH cascade joinpoints (`_apply_results_table_filters` and `_apply_comp_tree_filters`) with `_local_filter_active` OR'd with opt-out activity
-- [x] 96-06-PLAN.md — Wave 3: D-F1 tree widget UI — `desktop/my_library_tab.py::_OptoutTreeWidget` with Qt-native tri-state + bottom-panel `QSplitter(Horizontal)` containing [tree, status_table] (RESEARCH §3 Option 1) + 150ms debounce + rescan-prune wiring + `genizah_app.py::_reapply_filters_for_optout_change`
-- [x] 96-07-PLAN.md — Wave 3: NEW-1 button removal — delete `btn_rd_open_browse` declaration + `_rd_open_in_browse` handler + visibility branches from `desktop/result_dialog.py`; flip 4 xfail(strict=True) decorators to stable regression guards
-- [x] 96-08-PLAN.md — Wave 4: NEW-2 UI wiring — `desktop/result_dialog.py::load_local_page` sibling with `is_local_sys_id` dispatch + `genizah_app.py::_aggregate_local_pages_with_separators` (page/chunk separators, EN + HE) + Browse panel View-All / Per-Page toggle persisted in session JSON
-- [x] 96-09-PLAN.md — Wave 5: NEW-3 freestyle polish + docs (close D-F1/D-F4/D-F5 in OPEN_ISSUES.md; CHANGELOG.md + CLAUDE.md "Recently Changed"; optional version bump v7.14.1 / v7.15.0; pre-release pre-flight ruff + check_docs + full pytest)
-
-**Wave structure:** 0 (01) → 1 (3 parallel: 02 [local_indexer.py], 03 [genizah_core.py], 04 [genizah_app.py + my_library_tab.py]) → 2 (05 [genizah_app.py — cascade]) → 3 (2 parallel: 06 [my_library_tab.py — tree widget], 07 [result_dialog.py — button removal]) → 4 (08 [result_dialog.py + genizah_app.py — NEW-2 UI]) → 5 (09 [docs + polish]).
-
-**File ownership notes:** 96-04 and 96-06 both touch `desktop/my_library_tab.py` — 96-04 ships the pure helper (Wave 1), 96-06 wires the tree widget UI (Wave 3). 96-04 and 96-05 both touch `genizah_app.py` — 96-04 ships persistence (Wave 1), 96-05 ships cascade (Wave 2). 96-07 and 96-08 both touch `desktop/result_dialog.py` — 96-07 deletes the redundant button (Wave 3), 96-08 adds `load_local_page` dispatch (Wave 4). 96-05 and 96-08 both touch `genizah_app.py` — 96-05 ships cascade (Wave 2), 96-08 ships View-All helper + Browse toggle (Wave 4).
-
-**Checkpoints:** Wave 3 (plan 96-06 D-F1 tree widget UI) and Wave 4 (plan 96-08 NEW-2 navigation UI) require human-verify (visual / RTL / Qt-themed rendering concerns). Wave 5 (plan 96-09) has a decision checkpoint for the version-bump strategy.
-
-**UI hint:** yes — new horizontal splitter in MyLibraryTab bottom panel + tri-state checkboxes + new View-All/Per-Page toggle button in Browse panel + removed redundant button in ResultDialog.
+</details>
 
 <details>
 <summary>v7.13 Research-Grade Downloads & PGP Filter (Phases 93-94) -- BOTH PHASES COMPLETE (Phase 93 2026-05-19; Phase 94 2026-05-21; milestone closeable)</summary>
@@ -324,115 +265,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Phase 94 (research-grade exports) on 2026-05-19. No active backlog entries remain at this milestone boundary.
 
-### Phase 97: More LOCAL features
-
-**Goal:** Make My Library usable at the scale Seewald'''s prototype already serves (13K files / 43 GB, target ceiling 50K / 50 GB) by adding crash-recovery semantics, durable text cache, and atomic Tantivy rebuild — and extend the file-format set with three light textual formats (.html / .xlsx / .csv). Does NOT add reading-experience features (OCR, side-by-side PDF) and does NOT touch web LOCAL exposure.
-**Requirements**: D-NEW-1, R-03, R-02, R-04, R-01, C-02, C-05, D-NEW-8, F-01, F-02, F-03, F-04, F-05, F-06, C-01, C-03, C-04, C-06, U-01, U-02, U-03, U-04, D-NEW-2, D-NEW-3, D-NEW-4, D-NEW-5, D-NEW-6, D-NEW-7
-**Depends on:** Phase 96
-**Plans:** 6/6 plans complete
-
-Plans:
-- [x] 97-01-PLAN.md — Wave A: SQLite migration v1->v2 + cached_text (zstd) + atomic Tantivy rebuild + WAL+FULL durability bracket + recovery UX gate
-- [x] 97-02-PLAN.md — Wave B: byte/count/time commit policy (NO heap-sampling per RESEARCH Issue #1) + 100 MB raw cap + zip-bomb defense for .docx/.xlsx + mtime_ns incremental audit
-- [x] 97-03-PLAN.md — Wave C: HTML (lxml.html, NOT BeautifulSoup) + XLSX (openpyxl streaming) + CSV extractors with encoding chains; F-06 RTL-metadata-only invariant
-- [x] 97-04-PLAN.md — Wave D: ceiling 50K/50GB soft warning + pre-scan worker thread + persisted folder counters + disk indicator with merge headroom
-- [x] 97-05-PLAN.md — Wave E: phase-aware ETA + scan_run_id (mutated-rows-only per RESEARCH Issue #4) + FolderWalkWorker QThread + View All 500-cap incremental render
-- [x] 97-06-PLAN.md — Wave F: network drive semantics + file-change-during-index + supported-extension row policy + chunk_locator per format + bilingual EN+HE privacy disclosure + 4 invariant CI guards
-
-### Phase 97.2: Recovery Cascade — startup LockBusy + None-writer guards + Reset My Library (INSERTED)
-
-**Goal:** Fix 5 interacting Phase 97 bugs (A-E) that leave the LOCAL index in a permanently-broken state when atomic rebuild fails at startup, and provide a "Reset My Library" recovery UX. Triggered 2026-05-26: user quit mid-scan, restarted, hit cascade `Schema error` → `LockBusy ×3` → `Field 'scan_run_id' is not defined` → `'NoneType' object has no attribute 'delete_documents'`.
-
-**Requirements:**
-- R97.2-A — Remove redundant `tantivy.Index(schema, path=...)` reopen at `shared/local_indexer.py:1147` and `genizah_core.py:6890` (the rebuild's step 6 already reopened both `_index` and `_writer`; the second reopen leaks the writer lock).
-- R97.2-B — Ensure `.tantivy-writer.lock` is not carried into the live index_dir by `rebuild_main_index_atomic`'s os.rename (Windows-side handle retention after `del fresh_writer`).
-- R97.2-C — Schema-version guard in `discard_run` before `delete_documents("scan_run_id", ...)`: detect Phase 95 schema and fall back to per-uid deletion.
-- R97.2-D — `self._writer is None` guards (with lazy reopen) in `_delete_file`, `discard_run` step 2/5, `keep_run`, `_close_internal_writer_index`.
-- R97.2-E — Implement "Reset My Library" in MyLibraryTab Advanced (close handles → delete LocalIndex + LocalLabIndex + SQLite → recreate empty → reinitialize LocalIndexer). Bilingual EN+HE. Wire to the existing error-message references at `local_indexer.py:1152` and `:2766`.
-
-**Depends on:** Phase 97 (closed) + Phase 97.1 inline hotfix (commit `2e1b846e`, freeze + WinError 3 — distinct cascade tracked in `.planning/debug/phase-97-freeze-winerror-3.md`).
-
-**Plans:** TBD (2 waves, 3 plans suggested)
-
-Plans:
-- [ ] 97.2-01-PLAN.md — Wave 1: code fixes for bugs A-D in `shared/local_indexer.py` + `genizah_core.py`; RED tests first (stale-lockfile fixture, rebuild-then-reopen invariant, discard_run-on-pre-Phase-97-schema fixture, None-writer guards).
-- [ ] 97.2-02-PLAN.md — Wave 2a (parallel): "Reset My Library" UX in `desktop/my_library_tab.py` + `reset_my_library()` atomic teardown helper in `shared/local_indexer.py`. Bilingual confirm dialog.
-- [ ] 97.2-03-PLAN.md — Wave 2b (parallel): docs — CHANGELOG entry (combines 97.1 + 97.2), update `97-VERIFICATION.md` hotfix note, CLAUDE.md "Recently Changed", OPEN_ISSUES.md (add 97.2; bump P1 counts).
-
-Note: Phase 97.1 was the inline `/gsd-fast` hotfix (commit `2e1b846e`) for the freeze + WinError 3 storm. That hotfix was NOT registered as a tracked phase; 97.2 starts the formal decimal sequence.
-
-### Phase 97.3: My Library UAT Stability (INSERTED)
-
-**Goal:** Close the four post-ship UAT defects reported 2026-05-26 against Phase 97.2's "Reset My Library" + recovery-cascade work. Make the desktop My Library tab usable on mega-folders (no main-thread freeze), make Reset accessible exactly when users need it (after a crash), and make recovery-Skip behave like Skip instead of silently re-launching the broken scan. Source: `.planning/debug/post-97.2-uat-bugs-codex-critique.md` (full Codex root-cause analysis).
-
-**Scope (proposed — locks in SPEC.md):**
-- Bug A — UI-thread sync recursive walk in `_populate_node` freezes app on mega folders (pre-existing from Phase 96 D-F1, surfaced by post-97.2 UAT)
-- Bug B — `_update_reset_button_state` disables Reset on orphan `scan_runs` rows (Phase 97.2 UX hole — orphans are precisely what Reset cleans up)
-- Bug D — Recovery-Skip immediately triggers `_auto_rescan_on_startup` on the same broken folders
-- Bug E — "Discovering files…" status during `scan_all()` enumeration phase (user sees 0% indefinitely)
-- Bug C (optional) — `fitz.TOOLS.mupdf_display_warnings(False)` to silence MuPDF stderr noise (624× "TF" keyword)
-- N3 (optional) — UI tree extension parity (`.html`/`.xlsx`/`.csv` invisible vs indexer `_SUPPORTED_EXTENSIONS`)
-
-**Deferred (Codex near-misses, not in user's repro):**
-- N1 — `prescan_count_all()` synchronous on UI thread (separate code path)
-- N2 — `_show_recovery_modal` multi-orphan ordering (edge case)
-
-**Hard scoping constraint (user-stated):** "I prefer workable more limited release over another phase with more bugs." Spec locks the minimum that fixes the four UAT-reproduced failures + any TRULY free adjacent fix; everything else defers.
-
-**Depends on:** Phase 97.2 (shipped 2026-05-26, 25 commits, all 8/8 R97.2-* requirements MET).
-
-**Plans:** 4/4 plans complete
-
-Plans:
-- [x] 97.3-01-reset-guard-and-mupdf-suppression-PLAN.md — Wave 1: R97.3-B (`_update_reset_button_state` simplified to worker_running guard) + R97.3-C (`fitz.TOOLS.mupdf_display_warnings(False)` at module import, broad except Exception)
-- [x] 97.3-02-skip-no-auto-rescan-PLAN.md — Wave 1: R97.3-D (one-shot `_skip_startup_rescan_once` flag + bilingual 5s status-bar message in Skip branch; `_auto_rescan_on_startup` reads-and-clears the flag)
-- [x] 97.3-03-tree-worker-refactor-PLAN.md — Wave 2: R97.3-A (workerized tree population via `FolderWalkWorker` 4-tuple + token + `_SUPPORTED_EXTENSIONS` pre-filter + D-16 skip+log+continue) + R97.3-A `prior_status` cache (D-12 invalidate-before-refresh at 5 sites — Codex Critique #2 v7.14 blocker) + R97.3-E (`status_updated` signal + indeterminate progress bar) + R97.3-N (single source of truth — UI literal deleted)
-- [x] 97.3-04-docs-closeout-PLAN.md — Wave 3: CHANGELOG [Unreleased] Phase 97.3 entry + CLAUDE.md "Recently Changed" one-liner + docs/OPEN_ISSUES.md status flips + ROADMAP self-update + STATE.md timestamp
-
-**Wave structure:** 1 (01 [reset guard + mupdf]) → 2 (02 [skip flag]) → 3 (03 [tree refactor + cache + status + extensions]) → 4 (04 [docs closeout]). Plans 01/02/03 all touch desktop/my_library_tab.py so they are serialized; wave numbers reflect strict ordering not parallelism. Risk-locality intent preserved: Wave 1+2 are low-risk hotfixes mergeable independently, Wave 3 is the high-blast-radius tree refactor, Wave 4 is docs-only.
-
-**Source:**
-- `.planning/debug/post-97.2-uat-bugs-codex-brief.md` (orchestrator brief to Codex)
-- `.planning/debug/post-97.2-uat-bugs-codex-critique.md` (Codex full analysis + code recommendations)
-- `.planning/phases/97.3-my-library-uat-stability/97.3-CODEX-CRITIQUE.md` (Area 1 sub-decision critique — revised Option B)
-- `.planning/phases/97.3-my-library-uat-stability/97.3-CODEX-CRITIQUE-2.md` (full decision-set critique — D-11 broad-exception + D-12 cache ordering + D-16..D-22 + inverted wave order for risk locality)
-
-### Phase 98: NLI Resilience — circuit-breaker and bounded-timeout hardening for all NLI/IIIF code paths
-
-**Goal:** Prevent any single NLI/IIIF upstream slowdown from hanging `genizah-web`. Bound the per-request blocking budget on every NLI-touching code path via (a) a shared circuit breaker (`shared/nli_circuit_breaker.py`) that short-circuits requests when NLI is degraded and (b) shorter env-configurable read timeouts. The 2026-05-25 production outage (7 minutes unresponsive, SIGTERM hung 90s, SIGKILL required) is the trigger and the regression test.
-
-**Scope items (D-XX from CONTEXT.md — Phase 98 has no REQ-IDs; the 28 locked decisions D-01..D-28 are the spec):**
-- D-01..D-09 — Shared breaker module (single global key, module-level singleton, threading.Lock, time.monotonic, env-driven knobs)
-- D-10 — Drop `NLI_SEMAPHORE_TIMEOUT` default from 20 → 1
-- D-11/D-12 — Circuit check before AND after semaphore acquisition in `web/api.py::fetch_fl_ids_from_nli`
-- D-13..D-23 — Wire breaker into all 10 NLI fetch sites (5 in web/api.py, 3 in puzzle, 2 wired + 2 migrated in genizah_core.py)
-- D-24/D-25 — PostHog telemetry on open/close (server-side, fire-and-forget, never raises)
-- D-26/D-27 — Concurrency test (20 threads vs hanging session must complete <10s); lock-correctness test (N=50 simultaneous record_failure → consecutive_failures == 50)
-- D-28 — Telemetry emission test
-
-**Out of scope (explicitly):** Async refactor to httpx, event-loop watchdog, multi-worker uvicorn (per CONTEXT.md `<deferred>`).
-
-**Depends on:** Phase 97
-
-**Source CONTEXT:** `.planning/phases/98-nli-resilience-circuit-breaker-and-bounded-timeout-hardening/98-CONTEXT.md` (28 locked decisions)
-**Source RESEARCH:** `.planning/phases/98-nli-resilience-circuit-breaker-and-bounded-timeout-hardening/98-RESEARCH.md` (HIGH confidence)
-**Source VALIDATION:** `.planning/phases/98-nli-resilience-circuit-breaker-and-bounded-timeout-hardening/98-VALIDATION.md`
-
-**Plans:** 6/6 plans complete
-
-Plans:
-- [x] 98-01-PLAN.md — Wave 1: shared/posthog_server.py (factored telemetry helper — Option (a) per RESEARCH); fire-and-forget queue+daemon idiom factored out of web/api_hardening.py
-- [x] 98-02-PLAN.md — Wave 2: shared/nli_circuit_breaker.py (module-level singleton, threading.Lock, time.monotonic); tests/test_nli_circuit_breaker.py (Nyquist-critical D-26 + D-27 lock correctness + AST guards); tests/conftest.py autouse fixture
-- [x] 98-03-PLAN.md — Wave 3: web/api.py (5 call sites D-11..D-18) — drop NLI_SEMAPHORE_TIMEOUT 20→1; wire fetch_fl_ids_from_nli with pre+post semaphore guards; nli_image / _fetch_nli_image_bytes / proxy_image (NLI-host-conditional)
-- [x] 98-04-PLAN.md — Wave 3 parallel: shared/puzzle_image_service.py (_fetch_iiif_image unconditional + _fetch_direct_url host-conditional); web/pages/puzzle.py::_resolve_folios; D-19, D-20, D-21
-- [x] 98-05-PLAN.md — Wave 3 parallel: genizah_core.py — migrate fetch_iiif_manifest + fetch_marc_data off class-attribute breaker; wire 2 new sites _fetch_single_worker (D-22) + _fetch_fl_ids (D-23); REMOVE legacy class-attribute breaker per RESEARCH Pitfall 5
-- [x] 98-06-PLAN.md — Wave 4: cross-module invariant tests; CLAUDE.md env var docs; docs/OPEN_ISSUES.md closeout; .planning/ROADMAP.md self-update; CHANGELOG.md entry; production canary checkpoint (human-verify — ✅ PASSED 2026-05-25)
-
-**Wave structure:** 1 (98-01 posthog_server) → 2 (98-02 breaker module + tests) → 3 (3 parallel: 98-03 [web/api.py], 98-04 [puzzle], 98-05 [genizah_core.py]) → 4 (98-06 cross-module integration + docs + canary).
-
-**UI hint:** no — pure resilience infrastructure, no user-facing changes.
-
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-25 — Phase 98 PLANNED (6 plans across 4 waves). Incident-driven; closes 2026-05-25 NLI hang per docs/INCIDENT-2026-05-25-CODEX-CRITIQUE.md. Shared `shared/nli_circuit_breaker.py` (module-level singleton, time.monotonic, threading.Lock) wired into all 10 NLI fetch sites; 6 new env knobs; NLI_SEMAPHORE_TIMEOUT default dropped 20→1; PostHog telemetry via factored `shared/posthog_server.py` (Option (a) — shared/ no longer depends on web/). Phase 97 PLANNED (6 plans across 6 waves). Recovery foundation lands BEFORE ceiling lift (Codex P0 sequencing). 4 RESEARCH plan-time issues encoded: tantivy-py 0.25.1 commit policy is bytes/count/time only (no heap-sampling); lxml.html substitutes for BeautifulSoup (no new dep); R-02 atomic swap closes SearchEngine reader before os.rename (Windows os error 5 fix); scan_run_id is written ONLY on rows mutated this run (not cache-hit skips). Phase 96 PLANNED (9 plans across 6 waves). Closes v7.14 milestone: D-F5 LOCAL highlight P1 fix, D-F4 PDF extraction detect-then-fallback, D-F1 per-file opt-out tree with session-JSON persistence, NEW-1 redundant button removal, NEW-2 LOCAL navigation primitive + View-All separator. D-F2 (OCR) + D-F3 (side-by-side PDF) explicitly deferred to v7.15+. Phase 95 invariants (RRF POST-dedup, 3 cloud-write gates at TOP, web LIBRARY_CODES `[]`, multitenant `[]`) preserved.*
+*Last updated: 2026-05-27 — v7.13 + v7.14 milestones CLOSED via retroactive `/gsd-complete-milestone` reconciliation. Both shipped as app releases earlier (v7.13.0 2026-05-21; v7.14.0 2026-05-24) but the GSD close ritual (MILESTONES.md entry + REQUIREMENTS.md archival) had been skipped. v7.13 = Phases 93-94 (PGP filter + research-grade exports). v7.14 = Phases 95-98 (My Library local document search + Phase 98 NLI resilience). Archives: `.planning/milestones/v7.13-ROADMAP.md` / `v7.13-REQUIREMENTS.md` / `v7.14-ROADMAP.md`. Live `REQUIREMENTS.md` deleted (fresh for next milestone).*
