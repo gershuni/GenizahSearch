@@ -2,102 +2,84 @@
 phase: 100
 reviewers: [codex]
 reviewed_at: 2026-05-27
+review_round: 2
 plans_reviewed: [100-01-PLAN.md, 100-02-PLAN.md, 100-03-PLAN.md]
 ---
 
-# Cross-AI Plan Review — Phase 100
+# Cross-AI Plan Review — Phase 100 (Round 2)
+
+> Round 2. The round-1 review (single shared controller is the HIGH flaw) drove a replan to
+> per-surface scoped controller state + `cancel()` + de-dup. This round verifies those fixes
+> and hunts for NEW issues introduced by the per-scope architecture. Round-1 REVIEWS content is
+> preserved in git history (commit prior to `58da463a`).
 
 ## Codex Review
 
 **Summary**
 
-The plans cover the intended feature path and reuse Phase 99 well, but Plan 100-01's single shared `PdfImageController` is not safe as written. It implements "latest wins" globally across Browse and ResultDialog, while the product needs "latest wins per visible surface." There are also stale-render invalidation gaps when leaving a PDF view, especially in ResultDialog.
+The per-scope controller revision is architecturally sound for HIGH-1: Browse and ResultDialog no longer share one pending token/state slot, and the ResultDialog single-trigger reasoning matches the actual LOCAL call chain. There is one NEW high-severity timer subtlety: an old in-flight request's watchdog can fire after a newer same-scope request has replaced `_awaiting_token`, causing a false TIMEOUT for the new request.
 
-**Strengths**
+**Round-1 Fix Verification**
 
-- Reuses the Phase 99 worker cleanly: one app-level `PdfRenderWorker`, no extra fitz access in UI code.
-- Good separation of rendering policy into a thin controller: debounce, tokening, watchdog, placeholders.
-- Extension gate is intentionally simple and mostly correct: `.PDF` works, fake `.pdf` falls through to worker `NOT_PDF`.
-- Qt thread model is broadly sound: controller lives on the GUI thread, worker emits `QImage`, and `display_image()` converts to `QPixmap` on the GUI thread.
-- Browse hooks the right path: `_open_local_browse_page` is the per-page local Browse point of truth.
+| Item | Status | Note |
+|---|---|---|
+| HIGH-1 shared controller state | RESOLVED | Per-scope `_awaiting_token`, `_pending`, debounce/watchdog timers fix cross-surface stranding. |
+| HIGH-2 cancellation leaving PDF | PARTIAL | Controller cancel is good; ResultDialog should also cover `finished/reject/done`, and Browse non-LOCAL (Genizah) transitions do not explicitly cancel `"browse"`. |
+| HIGH-3 duplicate initial ResultDialog render | RESOLVED | Actual chain is `load_result_by_index -> load_page -> load_local_page`; one trigger in `load_local_page` is correct. |
+| MEDIUM-4 retained callbacks | RESOLVED | Terminal success/failure/timeout/cancel clear `_pending`; caveat only when cancel is actually reached. |
+| MEDIUM-5 Browse page guard | RESOLVED | Lambdas guard both `current_browse_sid` and `current_browse_p`. |
+| MEDIUM-6 `fp.lower()` None crash | RESOLVED | Controller `is_pdf()` is None-safe; Browse keeps `or ""` plus `bool(filepath)`. |
+| MEDIUM-7 unbounded FIFO backlog | PARTIAL | Debounce fixes sub-150ms bursts; sustained >150ms navigation can still enqueue stale renders, accepted as residual. |
+| LOW-8 heavy `_lang()` import | RESOLVED | Lazy import from `genizah_core`, not `genizah_app`. |
+| LOW-9 line drift | RESOLVED | Plans use semantic anchors and disjoint edit areas. |
 
-**Concerns**
+**NEW Concerns**
 
-- **HIGH — Plan 100-01: one shared controller state causes cross-surface interference.**
-  A single `_awaiting_token`, `_pending`, debounce timer, and watchdog means a Browse render in flight is invalidated when ResultDialog requests a render, and vice versa. That can leave the older surface stuck on "Loading…" or silently never updated. D-05 requires one code path, not one global request slot.
+- **HIGH — Old watchdog can invalidate a newer same-scope request (latest-wins violation).**
+  `request()` overwrites `_awaiting_token[scope]` but does NOT stop/re-guard the existing watchdog. Timeline: token 1 enqueued, its watchdog due at 8000ms; at ~7990ms token 2 is requested and enters debounce; token 1's watchdog fires and `_on_watchdog(scope)` reads the CURRENT `_awaiting_token[scope]` — now token 2 — then clears token 2 and shows TIMEOUT. This strands the latest page on a false timeout. The watchdog must be guarded by the token it was armed for.
 
-- **HIGH — Plan 100-01 / 100-02: stale PDF requests are not cancelled when navigating to non-PDF or non-local content.**
-  `request()` returns `None` for non-PDF but does not invalidate an older PDF token. Plan 100-02 hides the pane for non-PDF but does not cancel the previous render, and its callbacks do not recheck `current_sys_id/current_p_num`. A late PDF success can write into `ms_viewer` after the dialog has moved to a `.docx`, `.txt`, or Genizah result.
+- **MEDIUM — ResultDialog close coverage may miss reject/accept/done/Esc paths.**
+  Plan 02 cancels in `closeEvent`, but a QDialog can finish through `reject()`, `accept()`, `done()`, or Esc without a `closeEvent` depending on Qt behavior. The requirement says "closing/rejecting". Connect the `finished` signal (or override `done()`) so scope cleanup is guaranteed on every termination path.
 
-- **HIGH — Plan 100-02: likely duplicate render requests on opening a LOCAL result.**
-  `load_result_by_index()` calls `load_page(target=p)`, which dispatches LOCAL hits to `load_local_page()`. If `_maybe_render_local_pdf_image()` is added at the end of both methods, initial LOCAL PDF open will request twice. Debounce may mask it, but token churn and duplicate "Loading…" callbacks are avoidable.
+- **LOW/MEDIUM — Per-dialog timer dict entries accumulate.**
+  `cancel()` stops timers but leaves `_debounce_timers[id(dialog)]` and `_watchdog_timers[id(dialog)]` populated for the whole app session. Not a stale-callback leak (the timer lambdas capture only the integer scope), but an unbounded small QObject leak over many opened PDF dialogs. Also note `id(self)` can be reused after a dialog is GC'd, so a stale timer entry could be inherited by a new object reusing that id — a `discard_scope` that removes the dict entries closes both.
 
-- **MEDIUM — Plan 100-01: `_pending` retains UI callbacks after terminal states.**
-  Success/failure stop the watchdog but do not clear `_pending` or `_awaiting_token`. Because callbacks close over dialog/viewer objects, the app-level controller can retain a closed ResultDialog until another request overwrites `_pending`.
+- **LOW — Browse non-LOCAL navigation relies on guards, not cancellation.**
+  Plan 03 cancels only for non-PDF LOCAL files. Moving from a LOCAL PDF to a Genizah manuscript is caught by the sid/page guards (no stale display), but the controller still retains the `"browse"` callbacks until the in-flight render succeeds or times out.
 
-- **MEDIUM — Plan 100-01: one watchdog timer is only correct for one logical consumer.**
-  After timeout, the next request works because it sets a fresh token. Dropping the late result is intentional. But with Browse and ResultDialog both active, a single watchdog cannot track both outstanding UI promises.
-
-- **MEDIUM — Plan 100-03: Browse callback only checks `current_browse_sid`, not page.**
-  Tokening should prevent stale same-document page renders, but the defense-in-depth guard should capture and compare both `sys_id` and `page_num` against `current_browse_sid/current_browse_p`.
-
-- **MEDIUM — Plan 100-01 / 100-03: rapid navigation can build a stale FIFO render backlog.**
-  The Phase 99 worker queue is unbounded and FIFO. A 150ms debounce helps only for faster-than-150ms changes; page changes every 200ms can enqueue many stale renders, delaying the current page image.
-
-- **MEDIUM — Plan 100-02: `fp.lower().endswith('.pdf')` can crash if `fp` is `None`.**
-  The plan should consistently call `controller.is_pdf(fp)` or guard with `bool(fp)`.
-
-- **LOW — Plan 100-01: `_lang()` importing `genizah_app` is heavier than needed.**
-  `CURRENT_LANG` originates in `genizah_core`; importing from there avoids a heavy lazy import in controller-only tests.
-
-- **LOW — Wave ordering: 100-01 and 100-03 both edit `genizah_app.py`.**
-  The edits are logically separate, but line-anchor drift is likely in a 25K-line file. Use semantic anchors and integrate serially after 100-01 lands.
+- **No concern:** `_scope_for_token` linear scan is correct with a single global monotonic counter — duplicate tokens cannot occur in normal UI-thread use. Clearing scope state BEFORE calling `on_image` is the right re-entrancy order.
 
 **Suggestions**
 
-- Change Plan 100-01 to either:
-  - one controller object with per-surface scoped state, e.g. `request(scope, ...)`, `cancel(scope)`, per-scope debounce/watchdog timers, and a global token counter; or
-  - separate controller instances per surface sharing one worker plus a shared/global token allocator.
-- Add explicit invalidation APIs:
-  - `cancel(scope, silent=True)` for non-PDF, non-local, dialog close, and Browse leaving LOCAL PDF.
-  - Clear `_pending`, callbacks, and `_awaiting_token` on success, failure, timeout, and cancel.
-- Route worker results by token to stored request state, and validate `sys_id` plus `page_num` before invoking callbacks.
-- In ResultDialog, avoid duplicate calls: let `load_local_page()` trigger PDF rendering for LOCAL page state changes, and have `load_result_by_index()` only clear/cancel when the new result is not LOCAL PDF.
-- Add tests for the actual risky cases:
-  - Browse request in flight, then ResultDialog request: both surfaces should behave independently.
-  - PDF request, then non-PDF navigation before debounce fires: no enqueue and no late callback.
-  - PDF request, then Genizah navigation before success: no stale PDF display.
-  - Success/failure/timeout clears retained callbacks.
-  - Same `sys_id`, different page: stale page image is discarded.
+1. Add a per-scope watchdog-token guard: store `_watchdog_token[scope]`; in `request()` stop/clear the scope's watchdog before replacing state; set the guard token in `_fire_pending()`; have `_on_watchdog()` no-op unless the guarded token still equals `_awaiting_token[scope]`.
+2. Add a test: "new request arrives just before old watchdog fires" (the HIGH race).
+3. Add `discard_scope(scope)` (or `cancel(scope, discard_timers=True)`) for transient dialog scopes: stop, `deleteLater()`, and remove the `_debounce_timers`/`_watchdog_timers` entries. Call it from ResultDialog teardown.
+4. Connect `ResultDialog.finished` to idempotent scope cleanup, or override `done()` and clean up before `super().done(result)`.
+5. Consider cancelling `"browse"` when entering non-LOCAL (Genizah) Browse paths, not only non-PDF LOCAL.
 
-**Risk Assessment: HIGH**
+**Risk Assessment: MEDIUM**
 
-As written, the feature likely works in simple single-surface happy paths, but the shared controller state and missing cancellation are central correctness issues. They can produce stale images, stuck loading placeholders, and retained dialog objects. The architecture is salvageable: keep the single shared worker, but make controller request state scoped per consumer and add explicit cancellation/invalidation.
+The main architecture is now correct, but the old-watchdog/new-token race is a real latest-wins violation. It is narrow timing-wise but can produce a false timeout and a dropped render for the current page. Once the guarded watchdog token and dialog `finished` cleanup are added, this drops to LOW.
 
 ---
 
 ## Consensus Summary
 
-Single reviewer (Codex) this pass. Synthesized priorities:
-
-### Agreed Strengths
-- Clean reuse of the shipped Phase 99 worker (one app-level worker, no fitz in UI code).
-- Thin controller correctly isolates rendering policy (debounce / token / watchdog / placeholder).
-- Qt thread model is sound; extension gate is acceptably simple.
+Single reviewer (Codex), round 2. The round-1 architectural flaw (shared single-token controller) is **RESOLVED** by the per-scope rewrite. Four new/residual items remain, in priority order:
 
 ### Top Concerns (priority order)
-1. **HIGH — Shared single-token controller is the architectural flaw.** One `_awaiting_token` / `_pending` / debounce / watchdog is shared by BOTH surfaces. When both are live (a ResultDialog opened over Browse, which is a real scenario), one surface's request supersedes the other's `_awaiting_token`, stranding it on "Loading…" forever. The plan-checker's own "Minor Observations" assumed "only one surface is navigated at a time" — Codex disputes that assumption. **Fix:** per-surface scoped request state (`request(scope, ...)` / `cancel(scope)` with per-scope timers) sharing one global token counter + one worker.
-2. **HIGH — No cancellation when leaving a PDF view.** Navigating from a PDF to a non-PDF / Genizah / closed dialog does not invalidate the in-flight token, so a late success writes a stale image into the viewer. **Fix:** explicit `cancel(scope, silent=True)` on non-PDF nav, dialog close, and Browse leaving LOCAL PDF; clear `_pending`/`_awaiting_token` on every terminal state.
-3. **HIGH — Duplicate render on initial ResultDialog open.** `load_result_by_index()` → `load_page()` → `load_local_page()`, so adding the trigger at the end of BOTH methods double-requests. **Fix:** trigger only from `load_local_page()` for page-state changes; have `load_result_by_index()` only cancel when the new result is not a LOCAL PDF.
-4. **MEDIUM — Memory retention:** terminal states don't clear `_pending`, so the app-level controller retains a closed ResultDialog (and its callbacks/viewer) until the next request.
-5. **MEDIUM — Browse guard should compare page too** (`sys_id` + `page_num`), not just `current_browse_sid`.
-6. **MEDIUM — `fp.lower()` NoneType crash risk** in Plan 100-02's `is_pdf` inline check — use `controller.is_pdf(fp)` / `bool(fp)` guard.
-7. **MEDIUM — unbounded FIFO worker backlog** under sustained sub-debounce navigation (page every ~200ms).
-8. **LOW — `_lang()`** could import `CURRENT_LANG` from `genizah_core` rather than `genizah_app`.
-9. **LOW — wave ordering** 100-01 + 100-03 both edit `genizah_app.py` (25K lines) — line-anchor drift; integrate serially with semantic anchors.
+1. **HIGH — Watchdog/new-token race.** `request()` replaces `_awaiting_token[scope]` without re-guarding the prior watchdog; the old watchdog fires and times out the NEW token. **Fix:** per-scope `_watchdog_token` guard — the watchdog only acts if its armed token is still the awaited one; stop the scope's watchdog in `request()` before overwriting state. Add the "new request just before old watchdog" test.
+2. **MEDIUM — Dialog cleanup not guaranteed on all close paths.** Use `ResultDialog.finished` / override `done()` rather than only `closeEvent`, so reject/accept/Esc all tear down the scope.
+3. **LOW/MEDIUM — Per-dialog timer entries accumulate** in `_debounce_timers`/`_watchdog_timers` keyed by `id(dialog)` for the app session (small QObject leak; `id()` reuse risk). **Fix:** a `discard_scope(scope)` that removes the dict entries + `deleteLater()` the timers, called from dialog teardown.
+4. **LOW — Browse retains `"browse"` callbacks** when moving from a LOCAL PDF to a Genizah manuscript (guards prevent stale display, but no cancel). Consider cancelling `"browse"` on non-LOCAL Browse transitions too.
+
+### Agreed Strengths
+- Per-scope state correctly isolates Browse from ResultDialog (HIGH-1 fixed).
+- De-dup reasoning matches the real `load_result_by_index → load_page → load_local_page` chain (HIGH-3 fixed).
+- `_scope_for_token` + single global counter is correct; success-before-callback ordering is the right re-entrancy choice.
 
 ### Divergent Views
-None (single reviewer). Note: Codex's #1/#2 directly contradict the internal plan-checker's "Minor Observations (no action required)" which accepted the single shared controller. This disagreement is the key decision for the user.
+None (single reviewer).
 
 ### Recommended next step
-`/gsd-plan-phase 100 --reviews` to replan 100-01's controller as per-surface-scoped (keeping one shared worker), add `cancel()` + terminal-state cleanup, de-duplicate the ResultDialog trigger, and add the cross-surface/cancellation tests Codex named.
+`/gsd-plan-phase 100 --reviews` to fold in the watchdog-token guard (HIGH), guaranteed dialog-`finished` cleanup (MEDIUM), and `discard_scope` timer-entry removal (LOW/MEDIUM) — plus the "new request before old watchdog" test.
