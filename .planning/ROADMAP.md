@@ -47,7 +47,7 @@
 **UI hint**: yes
 
 Plans:
-- [ ] 99-01-PLAN.md (Wave 1) — Render core: PdfRenderFailure enum, DocLRU, single-page render+copy, Wave 0 tests + fixtures
+- [x] 99-01-PLAN.md (Wave 1) — Render core: PdfRenderFailure enum, DocLRU, single-page render+copy, Wave 0 tests + fixtures
 - [ ] 99-02-PLAN.md (Wave 2) — PdfRenderWorker: long-lived queue-driven QThread, tokenized signals, no-crash envelope, clean shutdown
 
 #### Phase 100: LOCAL PDF Image in ResultDialog + Browse
@@ -307,7 +307,7 @@ v7.15 phases execute in numeric order: 99 → 100
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 99. PDF Page Renderer | v7.15 | 0/TBD | Not started | - |
+| 99. PDF Page Renderer | v7.15 | 1/2 | In Progress|  |
 | 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 0/TBD | Not started | - |
 
 ## Backlog
