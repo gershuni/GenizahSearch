@@ -1625,12 +1625,26 @@ class MyLibraryTab(QWidget):
 
     def _on_tree_population_ended(self) -> None:
         """Disable Cancel button when tree-population finishes AND no scan
-        worker is running.
+        worker is running AND no NEWER tree-worker is still active.
 
         Called by ``_UnifiedFileTreeWidget._release_finished_worker``.
+
+        WR-01 (Phase 97.3 review) — a stale ``finished_signal`` from a
+        superseded tree-worker must NOT disable Cancel while a newer
+        tree-worker (created during rapid folder-switching) is still walking
+        the filesystem. Short-circuit on BOTH the scan worker (``self._worker``)
+        AND the current tree worker (``self._unified_tree._tree_worker``).
         """
         try:
-            if not (self._worker is not None and self._worker.isRunning()):
+            # Don't disable while a NEWER tree worker is still active.
+            tree_worker = getattr(self._unified_tree, "_tree_worker", None)
+            tree_still_running = (
+                tree_worker is not None
+                and hasattr(tree_worker, "isRunning")
+                and tree_worker.isRunning()
+            )
+            scan_running = self._worker is not None and self._worker.isRunning()
+            if not scan_running and not tree_still_running:
                 if hasattr(self, "_btn_cancel") and self._btn_cancel is not None:
                     self._btn_cancel.setEnabled(False)
         except Exception:  # noqa: BLE001
