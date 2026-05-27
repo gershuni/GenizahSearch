@@ -286,12 +286,12 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 ### Active
 
 **v7.15 My Library Visual (PDF page image rendering for LOCAL results — desktop):**
-- [ ] **PDFIMG-01**: A shared on-demand renderer produces a single PDF page image (QImage) from a filepath + 1-based page number without loading the rest of the document
-- [ ] **PDFIMG-02**: Rendering runs off the UI thread via a worker, backed by a bounded LRU of open `fitz.Document` handles and no on-disk image cache
+- [x] **PDFIMG-01**: A shared on-demand renderer produces a single PDF page image (QImage) from a filepath + 1-based page number without loading the rest of the document — Validated in Phase 99
+- [x] **PDFIMG-02**: Rendering runs off the UI thread via a worker, backed by a bounded LRU of open `fitz.Document` handles and no on-disk image cache — Validated in Phase 99
 - [ ] **PDFIMG-03**: In ResultDialog, a LOCAL PDF hit shows its rendered page image alongside the extracted text; navigating between results updates the image
 - [ ] **PDFIMG-04**: In the Browse panel, opening a LOCAL PDF result shows the rendered page image in the (previously hidden) image pane; prev/next page navigation updates the image to the matching page
 - [ ] **PDFIMG-05**: Non-PDF LOCAL files (`.docx`/`.html`/`.xlsx`/`.csv`/`.txt`) remain text-only — the image pane stays hidden, gated on file extension
-- [ ] **PDFIMG-06**: Render failures (missing file, corrupt/encrypted PDF, page out of range) degrade gracefully to a user-visible placeholder and a log entry — no UI hang or crash
+- [~] **PDFIMG-06**: Render failures (missing file, corrupt/encrypted PDF, page out of range) degrade gracefully to a user-visible placeholder and a log entry — no UI hang or crash — Renderer half validated in Phase 99 (classified `PdfRenderFailure` + single-log chokepoint + no-crash worker envelope); user-visible placeholder wired in Phase 100
 
 ### Out of Scope
 
@@ -401,6 +401,6 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-27 — v7.15 My Library Visual milestone started (`/gsd-new-milestone`); PROJECT.md gained the Current Milestone section + 6 Active PDFIMG-* requirements (desktop PDF page image rendering for LOCAL results, closing deferred D-F3).*
+*Last updated: 2026-05-27 — Phase 99 (PDF Page Renderer) complete: `desktop/pdf_page_renderer.py` ships the on-demand single-page PyMuPDF→QImage render core, bounded `DocLRU`, classified `PdfRenderFailure`, and off-thread `PdfRenderWorker(QThread)` with tokenized signals (19 tests, verifier 9/9). PDFIMG-01/02 validated; PDFIMG-06 renderer half validated (UI placeholder → Phase 100). Next: Phase 100 wires the renderer into ResultDialog + Browse.*
 
 *Prior: 2026-05-27 — v7.13 + v7.14 milestones CLOSED via retroactive `/gsd-complete-milestone` reconciliation (both shipped as app releases earlier — v7.13.0 2026-05-21, v7.14.0 2026-05-24 — but the GSD close ritual had been skipped). v7.13 requirements archived to `.planning/milestones/v7.13-REQUIREMENTS.md`; v7.14 recorded in `.planning/milestones/v7.14-ROADMAP.md`; MILESTONES.md gained both entries; the live `REQUIREMENTS.md` was deleted (fresh for the next milestone). For authoritative current behavior see CHANGELOG.md / CLAUDE.md "Recently Changed".*
