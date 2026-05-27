@@ -54,6 +54,12 @@ def _make_mock_indexer(folders=None):
         "pending_deletes_recovered": 0,
         "pending_inserts_recovered": 0,
     }
+    # Phase 97 R-01: MyLibraryTab.__init__ calls start_recovery_probe() and, if it
+    # returns a non-empty list, shows a MODAL recovery dialog (mb.exec()) that
+    # blocks forever headless and pops a real dialog on a display. A bare
+    # MagicMock returns a truthy auto-mock here, so this MUST be stubbed to [] —
+    # otherwise every tab-construction test hangs / interrupts the user.
+    m.start_recovery_probe.return_value = []
     # Phase 96 fix-1/fix-2: new method returns prior scan status for the tree.
     m.get_file_status_for_folder.return_value = {}
     return m
