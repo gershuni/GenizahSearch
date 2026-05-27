@@ -34,6 +34,17 @@ def _make_engine_no_local():
     return engine
 
 
+def _write_marker(index_dir: str) -> None:
+    """Write the .schema_version marker so SearchEngine opens the index without
+    triggering the Phase 97.2 schema-mismatch rebuild path (which, on Windows,
+    fails to rename a still-open index dir). Production always writes this marker
+    via LocalIndexer; the manual test builds must do the same."""
+    from shared.local_indexer import (
+        build_local_schema, _compute_schema_marker, _write_schema_marker,
+    )
+    _write_schema_marker(index_dir, _compute_schema_marker(build_local_schema))
+
+
 def _build_local_index(index_dir: str, docs: list[dict]) -> None:
     """Build a minimal LOCAL Tantivy index with the given docs for testing."""
     from shared.local_indexer import build_local_schema
@@ -57,6 +68,7 @@ def _build_local_index(index_dir: str, docs: list[dict]) -> None:
     writer.commit()
     del writer
     del index
+    _write_marker(index_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +92,7 @@ def test_reload_local_indexes_picks_up_new_docs_without_restart(tmp_path):
     writer.commit()
     del writer
     del empty_index
+    _write_marker(index_dir)
 
     # Open engine against the empty index
     with patch.object(genizah_core.Config, "LOCAL_INDEX_DIR", index_dir):

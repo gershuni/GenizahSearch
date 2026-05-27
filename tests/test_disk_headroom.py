@@ -101,9 +101,14 @@ def test_warning_below_threshold():
     with mock.patch("shutil.disk_usage", return_value=fake_usage):
         tab._update_disk_indicator()
 
+    # Locale-agnostic: the warning is rendered via tr("⚠ low merge headroom"),
+    # which resolves to Hebrew when CURRENT_LANG=he. Compare against the
+    # translated string rather than the English literal.
+    from genizah_core import tr
+    warning = tr("⚠ low merge headroom")
     label_text = tab._disk_label.text()
-    assert "low merge headroom" in label_text or "headroom" in label_text.lower(), (
-        f"Expected low-headroom warning in label text; got: {label_text!r}"
+    assert warning in label_text, (
+        f"Expected low-headroom warning {warning!r} in label text; got: {label_text!r}"
     )
 
 
@@ -133,7 +138,9 @@ def test_no_warning_above_threshold():
     with mock.patch("shutil.disk_usage", return_value=fake_usage):
         tab._update_disk_indicator()
 
+    from genizah_core import tr
+    warning = tr("⚠ low merge headroom")
     label_text = tab._disk_label.text()
-    assert "low merge headroom" not in label_text, (
+    assert warning not in label_text, (
         f"Expected NO low-headroom warning when headroom >= 1 GB; got: {label_text!r}"
     )

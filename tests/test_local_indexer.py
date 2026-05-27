@@ -137,7 +137,11 @@ def test_rtl_helpers_ported():
 # ---------------------------------------------------------------------------
 
 def test_supported_file_types_docx_pdf_txt(tmp_path, local_indexer_fixtures_dir):
-    """REQ-1: indexer accepts .docx, .pdf, .txt; unsupported .html gets status='unsupported'."""
+    """REQ-1: indexer accepts .docx, .pdf, .txt; an unsupported extension gets status='unsupported'.
+
+    NB: .html/.xlsx/.csv became SUPPORTED in Phase 97.3 (R97.3-N), so this test
+    uses .rtf as the genuinely-unsupported example.
+    """
     index_dir = str(tmp_path / "idx")
     lab_dir = str(tmp_path / "lab")
     db_path = str(tmp_path / "test.sqlite3")
@@ -149,10 +153,14 @@ def test_supported_file_types_docx_pdf_txt(tmp_path, local_indexer_fixtures_dir)
     os.makedirs(folder)
 
     # Copy fixtures
-    for fname in ["sample.docx", "sample.txt", "unsupported.html"]:
+    for fname in ["sample.docx", "sample.txt"]:
         src = os.path.join(local_indexer_fixtures_dir, fname)
         if os.path.exists(src):
             shutil.copy(src, folder)
+
+    # An unsupported extension (.rtf) — created inline.
+    with open(os.path.join(folder, "unsupported.rtf"), "w", encoding="utf-8") as f:
+        f.write("{\\rtf1 unsupported}")
 
     # Copy the hebrew PDF as well
     pdf_src = os.path.join(local_indexer_fixtures_dir, "hebrew_sample.pdf")
@@ -171,20 +179,23 @@ def test_supported_file_types_docx_pdf_txt(tmp_path, local_indexer_fixtures_dir)
     rows = conn.execute("SELECT * FROM local_files").fetchall()
     conn.close()
 
-    # Check counts: at least pdf + txt + docx + html = 4 rows
+    # Check counts: at least pdf + txt + docx + rtf = 4 rows
     assert len(rows) >= 1, "Expected at least 1 file indexed"
 
-    # Check that .html got status='unsupported'
+    # Check that .rtf (unsupported) got status='unsupported'
     # local_files columns: file_id(0) sys_id(1) filepath(2) folder_id(3) display_title(4)
     # original_filename(5) file_extension(6) page_count(7) file_size_bytes(8)
     # extraction_status(9) last_indexed_at(10) sha256_full(11) error_msg(12) pending_delete(13)
-    html_row = [r for r in rows if r[2].endswith(".html")]
-    assert len(html_row) == 1, "Expected 1 html file row"
-    assert html_row[0][9] == "unsupported", f"Expected status='unsupported', got '{html_row[0][9]}'"
+    rtf_row = [r for r in rows if r[2].endswith(".rtf")]
+    assert len(rtf_row) == 1, "Expected 1 rtf file row"
+    assert rtf_row[0][9] == "unsupported", f"Expected status='unsupported', got '{rtf_row[0][9]}'"
 
 
 def test_unsupported_extension_status(tmp_path, local_indexer_fixtures_dir):
-    """D-05 / REQ-1: unsupported extension (e.g. .html) gets status='unsupported'."""
+    """D-05 / REQ-1: unsupported extension (e.g. .rtf) gets status='unsupported'.
+
+    NB: .html/.xlsx/.csv became SUPPORTED in Phase 97.3 (R97.3-N); use .rtf here.
+    """
     index_dir = str(tmp_path / "idx")
     lab_dir = str(tmp_path / "lab")
     db_path = str(tmp_path / "test.sqlite3")
@@ -194,13 +205,9 @@ def test_unsupported_extension_status(tmp_path, local_indexer_fixtures_dir):
     folder = str(tmp_path / "docs")
     os.makedirs(folder)
 
-    html_src = os.path.join(local_indexer_fixtures_dir, "unsupported.html")
-    if os.path.exists(html_src):
-        shutil.copy(html_src, folder)
-    else:
-        # Create inline
-        with open(os.path.join(folder, "test.html"), "w") as f:
-            f.write("<html><body>test</body></html>")
+    # Create inline unsupported file (.rtf).
+    with open(os.path.join(folder, "test.rtf"), "w", encoding="utf-8") as f:
+        f.write("{\\rtf1 unsupported}")
 
     indexer = LocalIndexer(index_dir, lab_dir, db_path)
     try:

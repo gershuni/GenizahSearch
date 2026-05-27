@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Phase 95 D-40: unavailable folder behavior at app startup.
+"""Phase 95 D-40 / Phase 97 D-NEW-2: unreachable folder behavior at app startup.
 
 When os.path.isdir(folder.path) is False at auto-rescan:
-- folders.status updated to 'unavailable'
+- folders.status updated to 'unreachable' (Phase 97 D-NEW-2 errno-discriminated
+  reachability check; superseded the Phase 95 'unavailable' label for a missing
+  folder — ENOENT now maps to 'unreachable')
 - Existing local_files rows are PRESERVED (not deleted)
 - Existing Tantivy docs remain searchable
 """
@@ -59,12 +61,12 @@ def test_unavailable_folder_marked_status_unavailable(tmp_path):
     finally:
         indexer2.close()
 
-    # Check folders.status = 'unavailable'
+    # Check folders.status = 'unreachable' (Phase 97 D-NEW-2: ENOENT -> 'unreachable')
     conn = sqlite3.connect(db_path)
     folder_row = conn.execute("SELECT status FROM folders WHERE path LIKE ?", (f"%my_docs%",)).fetchone()
     assert folder_row is not None, "Folder row should exist in folders table"
-    assert folder_row[0] == "unavailable", (
-        f"Expected folder status='unavailable', got '{folder_row[0]}'"
+    assert folder_row[0] == "unreachable", (
+        f"Expected folder status='unreachable', got '{folder_row[0]}'"
     )
 
     # local_files rows must be PRESERVED (D-40: do not purge on unavailability)

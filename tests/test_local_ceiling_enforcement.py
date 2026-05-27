@@ -52,6 +52,11 @@ def _make_mock_indexer(folders=None, prescan_single=None, prescan_all=None):
         "pending_deletes_recovered": 0,
         "pending_inserts_recovered": 0,
     }
+    # Phase 97 R-01: MyLibraryTab.__init__ calls start_recovery_probe() and, if it
+    # returns a non-empty list, shows a MODAL recovery dialog (mb.exec()) that
+    # blocks forever headless. A bare MagicMock returns a truthy auto-mock, so this
+    # MUST be stubbed to [] — otherwise every tab-construction test hangs.
+    m.start_recovery_probe.return_value = []
     return m
 
 
@@ -76,8 +81,11 @@ def _make_tab(mock_idx):
 # ---------------------------------------------------------------------------
 
 def test_prescan_warning_above_5000_files():
-    """REQ-10 + D-26: Add Folder path shows dialog when prescan > 5000 files."""
-    mock_idx = _make_mock_indexer(prescan_single=(5001, 1_000_000_000))
+    """REQ-10 + D-26: Add Folder path shows dialog when prescan exceeds the file ceiling.
+
+    Ceiling is _MAX_FILES_CEILING = 50,000 (raised from the original 5,000).
+    """
+    mock_idx = _make_mock_indexer(prescan_single=(50_001, 1_000_000_000))
     tab = _make_tab(mock_idx)
 
     called_with = {}
@@ -92,14 +100,17 @@ def test_prescan_warning_above_5000_files():
 
     assert not result, "Should return False when user cancels"
     assert "question" in str(fake_question)  # called
-    assert "5,001" in called_with.get("text", ""), (
-        f"Dialog text should contain formatted file count '5,001'; got: {called_with.get('text')}"
+    assert "50,001" in called_with.get("text", ""), (
+        f"Dialog text should contain formatted file count '50,001'; got: {called_with.get('text')}"
     )
 
 
 def test_prescan_warning_above_2gb():
-    """REQ-10 + D-41: Add Folder path shows dialog when prescan > 2 GB."""
-    mock_idx = _make_mock_indexer(prescan_single=(100, 2_500_000_000))
+    """REQ-10 + D-41: Add Folder path shows dialog when prescan exceeds the byte ceiling.
+
+    Ceiling is _MAX_BYTES_CEILING = 50 GiB (raised from the original 2 GB).
+    """
+    mock_idx = _make_mock_indexer(prescan_single=(100, 60_000_000_000))
     tab = _make_tab(mock_idx)
 
     called_with = {}
@@ -114,8 +125,8 @@ def test_prescan_warning_above_2gb():
 
     assert not result, "Should return False when user cancels"
     text = called_with.get("text", "")
-    assert "2.5 GB" in text or "2,500" in text, (
-        f"Dialog text should contain '2.5 GB' or '2,500'; got: {text}"
+    assert "60.0 GB" in text, (
+        f"Dialog text should contain '60.0 GB'; got: {text}"
     )
 
 
@@ -134,8 +145,11 @@ def test_no_dialog_below_ceiling_single_folder():
 
 
 def test_user_confirms_proceeds():
-    """D-26: when user clicks Yes on ceiling dialog, scan proceeds (returns True)."""
-    mock_idx = _make_mock_indexer(prescan_single=(6000, 3_000_000_000))
+    """D-26: when user clicks Yes on ceiling dialog, scan proceeds (returns True).
+
+    Values must exceed _MAX_FILES_CEILING (50,000) so the dialog actually fires.
+    """
+    mock_idx = _make_mock_indexer(prescan_single=(60_000, 3_000_000_000))
     tab = _make_tab(mock_idx)
 
     with mock.patch(
@@ -155,7 +169,9 @@ def test_refresh_aggregates_prescan_across_all_folders():
     """W8: Refresh uses prescan_count_all() which aggregates across folders.
 
     Sub-test A: aggregate (3000 files, 1.5 GB) is under threshold → no dialog.
-    Sub-test B: aggregate (6000 files, 2.5 GB) is over threshold → dialog shown.
+    Sub-test B: aggregate (60,000 files, 2.5 GB) is over threshold → dialog shown.
+
+    Ceiling is _MAX_FILES_CEILING = 50,000 / _MAX_BYTES_CEILING = 50 GiB.
     """
     # --- Sub-test A: under threshold ---
     folders_3 = [
@@ -165,7 +181,7 @@ def test_refresh_aggregates_prescan_across_all_folders():
     ]
     mock_idx_a = _make_mock_indexer(
         folders=folders_3,
-        prescan_all=(3000, 1_500_000_000),  # under 5000 files and under 2 GB
+        prescan_all=(3000, 1_500_000_000),  # under 50,000 files and under 50 GiB
     )
     tab_a = _make_tab(mock_idx_a)
 
@@ -178,7 +194,7 @@ def test_refresh_aggregates_prescan_across_all_folders():
     # --- Sub-test B: over threshold ---
     mock_idx_b = _make_mock_indexer(
         folders=folders_3,
-        prescan_all=(6000, 2_500_000_000),  # over 5000 files AND over 2 GB
+        prescan_all=(60_000, 2_500_000_000),  # over 50,000 files
     )
     tab_b = _make_tab(mock_idx_b)
 
@@ -196,7 +212,7 @@ def test_refresh_aggregates_prescan_across_all_folders():
 
     assert not result_b, "Over threshold: should show dialog (user cancels)"
     text = called_with.get("text", "")
-    assert "6,000" in text or "6000" in text, (
+    assert "60,000" in text or "60000" in text, (
         f"Dialog text should include aggregate file count; got: {text}"
     )
     assert "2.5 GB" in text or "2,500" in text, (
@@ -251,15 +267,15 @@ def test_refresh_aggregate_excludes_unavailable_folders():
 
 
 def test_aggregate_both_thresholds_checked():
-    """W8: aggregate ceiling triggers on file_count > 5000 even if bytes < 2 GB."""
+    """W8: aggregate ceiling triggers on file_count > 50,000 even if bytes are small."""
     folders_1 = [
         {"folder_id": 1, "path": "/f1", "added_at": 0.0,
          "last_scanned_at": 0.0, "status": "active"},
     ]
-    # File count triggers (> 5000), bytes does not (< 2 GB)
+    # File count triggers (> 50,000), bytes does not (well under 50 GiB)
     mock_idx = _make_mock_indexer(
         folders=folders_1,
-        prescan_all=(5001, 500_000_000),
+        prescan_all=(50_001, 500_000_000),
     )
     tab = _make_tab(mock_idx)
 
@@ -274,21 +290,20 @@ def test_aggregate_both_thresholds_checked():
     ):
         result = tab._check_ceiling_refresh_aggregate()
 
-    assert not result, "Should show dialog when file_count > 5000"
+    assert not result, "Should show dialog when file_count > 50,000"
     assert called, "QMessageBox.question must have been called"
 
 
 def test_aggregate_bytes_threshold_triggers():
-    """W8: aggregate ceiling triggers on total_bytes > 2 GB even if count < 5000."""
+    """W8: aggregate ceiling triggers on total_bytes > 50 GiB even if count is small."""
     folders_1 = [
         {"folder_id": 1, "path": "/f1", "added_at": 0.0,
          "last_scanned_at": 0.0, "status": "active"},
     ]
-    # Bytes triggers (> 2 GiB = 2,147,483,648), count does not (< 5000)
-    # Use 2.2 GiB = 2_362_232_012 bytes to safely exceed the threshold
+    # Bytes triggers (> 50 GiB = 53,687,091,200), count does not (< 50,000)
     mock_idx = _make_mock_indexer(
         folders=folders_1,
-        prescan_all=(100, 2 * 1024 ** 3 + 1),
+        prescan_all=(100, 60_000_000_000),
     )
     tab = _make_tab(mock_idx)
 

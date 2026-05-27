@@ -62,6 +62,11 @@ def _make_mock_indexer(folders=None, scan_delay=0.0):
         "pending_deletes_recovered": 0,
         "pending_inserts_recovered": 0,
     }
+    # Phase 97 R-01: MyLibraryTab.__init__ calls start_recovery_probe() and, if it
+    # returns a non-empty list, shows a MODAL recovery dialog (mb.exec()) that
+    # blocks forever headless. A bare MagicMock returns a truthy auto-mock, so this
+    # MUST be stubbed to [] — otherwise every tab-construction test hangs.
+    m.start_recovery_probe.return_value = []
     return m
 
 
