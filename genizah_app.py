@@ -72,6 +72,8 @@ from desktop.viewers import ZoomableScrollArea, FullscreenImageWindow, Manuscrip
 from desktop.puzzle import PuzzleFragmentItem, PuzzleCanvasView, PuzzleExportThread, PuzzlePublishThread, PuzzleCanvasWindow  # noqa: F401
 from desktop.vs_cache import DesktopVSCache, VSFetchThread, VSDownloadThread  # noqa: F401
 from desktop.my_library_tab import MyLibraryTab  # Phase 95 — 7th tab
+from desktop.pdf_page_renderer import PdfRenderWorker  # Phase 100 D-07
+from desktop.pdf_image_controller import PdfImageController  # Phase 100 D-07b
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -7126,6 +7128,12 @@ class GenizahGUI(QMainWindow):
         
         # Right: Image Viewer
         self.browse_viewer = ManuscriptViewerWidget()
+
+        # Phase 100 D-07: single shared on-demand PDF page render worker (4-doc LRU),
+        # reused by ResultDialog + Browse. Started here, stopped in closeEvent (D-07a).
+        self._pdf_render_worker = PdfRenderWorker(maxsize=4)
+        self._pdf_render_worker.start()
+        self._pdf_image_controller = PdfImageController(self._pdf_render_worker)
 
         self.browse_splitter.addWidget(self.browse_lists_panel)
         self.browse_splitter.addWidget(text_widget)
@@ -24813,6 +24821,13 @@ class GenizahGUI(QMainWindow):
                 if self.group_thread.isRunning():
                     self.group_thread.terminate()
                     self.group_thread.wait()
+
+            # Phase 100 D-07a: stop the shared PDF render worker cooperatively (no terminate()).
+            try:
+                if getattr(self, '_pdf_render_worker', None) is not None:
+                    self._pdf_render_worker.stop()
+            except Exception:
+                logger.warning("PdfRenderWorker stop() raised during closeEvent", exc_info=True)
 
             # Stop browse tab viewer image threads
             if getattr(self, 'browse_viewer', None):
