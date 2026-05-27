@@ -8,9 +8,20 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: (none active — planning next after v7.14)
+## Current Milestone: v7.15 My Library Visual
 
-v7.13 (Research-Grade Downloads & PGP Filter) and v7.14 (My Library — Local Document Search) both shipped and were closed 2026-05-27 via a retroactive `/gsd-complete-milestone` reconciliation. No milestone is currently active. Run `/gsd-new-milestone` to scope the next one.
+**Goal:** Show the source PDF *page image* alongside extracted text for LOCAL ("My Library") results in the desktop app — closing deferred item D-F3.
+
+**Target features:**
+- Shared on-demand PyMuPDF page renderer (`fitz` → QImage), single page at a time, off the UI thread, with a bounded LRU of open documents and no on-disk image cache
+- PDF page image shown in the desktop **ResultDialog** for LOCAL hits (currently text-only), updating on result navigation
+- PDF page image shown in the desktop **Browse** panel for LOCAL hits (image pane currently hidden), tracking prev/next page navigation
+- Non-PDF LOCAL files (`.docx`/`.html`/`.xlsx`/`.csv`/`.txt`) stay text-only; corrupt/encrypted/missing PDFs degrade gracefully
+
+**Key context:**
+- **Desktop-only** — web "My Library" does not exist, so the dual-app maintenance rule does not apply to this milestone.
+- **Scale is a non-issue:** rendering is lazy/on-demand per viewed page; the 10K×500-page corpus is never pre-rendered. `sys_id`+`page_num` already flow to the UI; filepath via `get_filepath(sys_id)`. Reuses the proven `ImageLoaderThread` QThread pattern.
+- **D-F2 (PDF OCR for image-only scanned PDFs)** explicitly deferred — possible follow-up phase within this milestone later.
 
 ## Current State (v7.14 My Library shipped + closed 2026-05-27)
 
@@ -274,7 +285,13 @@ v7.13 (Research-Grade Downloads & PGP Filter) and v7.14 (My Library — Local Do
 
 ### Active
 
-*(v7.13 Research-Grade Downloads & PGP Filter requirements moved to Validated 2026-05-21 after Phase 94 closeout — see entries above with `-- v7.13` annotation. 14/14 requirements satisfied across both phases (Phase 93 PGP filter shipped 2026-05-19 + Phase 94 export metadata shipped 2026-05-21). Milestone closeout (`deploy.sh` / version bump 7.13.0 / git tag / desktop GitHub Release) pending as a separate ritual.)*
+**v7.15 My Library Visual (PDF page image rendering for LOCAL results — desktop):**
+- [ ] **PDFIMG-01**: A shared on-demand renderer produces a single PDF page image (QImage) from a filepath + 1-based page number without loading the rest of the document
+- [ ] **PDFIMG-02**: Rendering runs off the UI thread via a worker, backed by a bounded LRU of open `fitz.Document` handles and no on-disk image cache
+- [ ] **PDFIMG-03**: In ResultDialog, a LOCAL PDF hit shows its rendered page image alongside the extracted text; navigating between results updates the image
+- [ ] **PDFIMG-04**: In the Browse panel, opening a LOCAL PDF result shows the rendered page image in the (previously hidden) image pane; prev/next page navigation updates the image to the matching page
+- [ ] **PDFIMG-05**: Non-PDF LOCAL files (`.docx`/`.html`/`.xlsx`/`.csv`/`.txt`) remain text-only — the image pane stays hidden, gated on file extension
+- [ ] **PDFIMG-06**: Render failures (missing file, corrupt/encrypted PDF, page out of range) degrade gracefully to a user-visible placeholder and a log entry — no UI hang or crash
 
 ### Out of Scope
 
@@ -384,4 +401,6 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-27 — v7.13 + v7.14 milestones CLOSED via retroactive `/gsd-complete-milestone` reconciliation (both shipped as app releases earlier — v7.13.0 2026-05-21, v7.14.0 2026-05-24 — but the GSD close ritual had been skipped). v7.13 requirements archived to `.planning/milestones/v7.13-REQUIREMENTS.md`; v7.14 recorded in `.planning/milestones/v7.14-ROADMAP.md`; MILESTONES.md gained both entries; the live `REQUIREMENTS.md` was deleted (fresh for the next milestone). For authoritative current behavior see CHANGELOG.md / CLAUDE.md "Recently Changed".*
+*Last updated: 2026-05-27 — v7.15 My Library Visual milestone started (`/gsd-new-milestone`); PROJECT.md gained the Current Milestone section + 6 Active PDFIMG-* requirements (desktop PDF page image rendering for LOCAL results, closing deferred D-F3).*
+
+*Prior: 2026-05-27 — v7.13 + v7.14 milestones CLOSED via retroactive `/gsd-complete-milestone` reconciliation (both shipped as app releases earlier — v7.13.0 2026-05-21, v7.14.0 2026-05-24 — but the GSD close ritual had been skipped). v7.13 requirements archived to `.planning/milestones/v7.13-REQUIREMENTS.md`; v7.14 recorded in `.planning/milestones/v7.14-ROADMAP.md`; MILESTONES.md gained both entries; the live `REQUIREMENTS.md` was deleted (fresh for the next milestone). For authoritative current behavior see CHANGELOG.md / CLAUDE.md "Recently Changed".*

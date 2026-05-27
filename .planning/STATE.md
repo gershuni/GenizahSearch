@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: none
-milestone_name: (planning next after v7.14)
-status: milestone_complete
-stopped_at: v7.13 + v7.14 milestones CLOSED (retroactive reconciliation)
+milestone: v7.15
+milestone_name: My Library Visual
+status: defining_requirements
+stopped_at: v7.15 started — requirements defined, roadmap next
 last_updated: "2026-05-27T00:00:00.000Z"
-last_activity: 2026-05-27 -- v7.13 + v7.14 milestones closed via /gsd-complete-milestone (MILESTONES.md entries added, v7.13-REQUIREMENTS.md + v7.14-ROADMAP.md archived, REQUIREMENTS.md deleted, ROADMAP/PROJECT/RETROSPECTIVE updated)
+last_activity: 2026-05-27 -- v7.15 My Library Visual started via /gsd-new-milestone (PROJECT.md + REQUIREMENTS.md written; 6 PDFIMG-* reqs; desktop PDF page image rendering, closing D-F3)
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 37
-  completed_plans: 37
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-27)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** No active milestone — run `/gsd-new-milestone` to scope the next one.
+**Current focus:** v7.15 My Library Visual — desktop PDF page image rendering for LOCAL results (closes D-F3).
 
 ## Current Position
 
-Phase: none (between milestones)
-Plan: n/a
-Status: v7.13 + v7.14 both closed 2026-05-27. Latest shipped work: v7.14.0 (My Library) + Phase 98 NLI resilience.
-Last activity: 2026-05-27 -- v7.13 + v7.14 milestones closed via /gsd-complete-milestone reconciliation
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-05-27 -- Milestone v7.15 started
 
-Progress: [██████████] v7.14 100% (6/6 phases, 37/37 plans) — CLOSED
+Progress: [          ] v7.15 0% (roadmap pending)
 
 ## Phase Plan Estimates
 
