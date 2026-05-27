@@ -138,26 +138,27 @@ def test_doc_lru_evict_and_close():
     of a third doc; close_all() closes remaining docs and empties the cache.
     """
     m = _import_renderer()
-    import fitz
+
+    # Use three valid PDF paths (no encrypted/corrupt — those raise on open)
+    pdf1 = MULTIPAGE_PDF
+    pdf2 = os.path.join(FIXTURES_DIR, "clean_sample.pdf")
+    pdf3 = os.path.join(FIXTURES_DIR, "single_word_per_line.pdf")
 
     lru = m.DocLRU(maxsize=2)
 
-    # Open 3 distinct fixture paths by inserting them in order
-    lru.get(MULTIPAGE_PDF)
-    lru.get(ENCRYPTED_PDF)  # maxsize reached — no eviction yet (len==2)
-    # Insert third: MULTIPAGE_PDF was LRU; ENCRYPTED_PDF was MRU
-    # Actually we need a 3rd distinct path: use CORRUPT_PDF
-    # But corrupt raises — we need a valid third PDF.
-    # Use clean_sample.pdf (existing fixture).
-    clean_pdf = os.path.join(FIXTURES_DIR, "clean_sample.pdf")
-    lru.get(clean_pdf)  # evicts oldest (MULTIPAGE_PDF)
-
+    # Insert first two — fills the cache to capacity (no eviction yet)
+    lru.get(pdf1)
+    lru.get(pdf2)
     assert len(lru._cache) == 2
 
-    # MULTIPAGE_PDF must have been evicted; it is no longer in cache
-    assert MULTIPAGE_PDF not in lru._cache
-    # The two remaining should be ENCRYPTED_PDF and clean_pdf
-    assert ENCRYPTED_PDF in lru._cache or clean_pdf in lru._cache
+    # Insert third — evicts the oldest (pdf1, which was least recently used)
+    lru.get(pdf3)
+    assert len(lru._cache) == 2
+
+    # pdf1 must have been evicted; pdf2 and pdf3 remain
+    assert pdf1 not in lru._cache
+    assert pdf2 in lru._cache
+    assert pdf3 in lru._cache
 
     # close_all() must empty the cache and close remaining docs
     lru.close_all()
@@ -187,9 +188,9 @@ def test_lru_eviction_survives_close_error():
     bad_doc = lru._cache[path]
     bad_doc.close = MagicMock(side_effect=RuntimeError("close exploded"))
 
-    # Triggering eviction (insert a second doc) must NOT raise
-    clean_pdf = os.path.join(FIXTURES_DIR, "clean_sample.pdf")
-    lru.get(clean_pdf)  # evicts path; best-effort close swallows RuntimeError
+    # Triggering eviction (insert a second valid doc) must NOT raise
+    pdf2 = os.path.join(FIXTURES_DIR, "clean_sample.pdf")
+    lru.get(pdf2)  # evicts path; best-effort close swallows RuntimeError
 
     # Cache must be consistent (evicted entry removed)
     assert path not in lru._cache
@@ -280,7 +281,6 @@ def test_uppercase_pdf_not_misclassified(tmp_path):
     and must render successfully (suffix check uses .lower() — REVIEW item 5
     Codex MEDIUM, mirrors test_mixed_case_extensions_normalized precedent).
     """
-    import fitz
     m = _import_renderer()
 
     upper_path = str(tmp_path / "page_sample.PDF")
@@ -393,6 +393,10 @@ def test_failures_logged(caplog):
     REVIEW item 1).
 
     Tests MISSING_FILE, NOT_PDF, ENCRYPTED, CORRUPT, PAGE_OUT_OF_RANGE.
+
+    Note: genizah_core.get_logger() prepends 'genizah.' to the module name, so
+    the actual logger name is 'genizah.desktop.pdf_page_renderer'. We capture
+    at root level (logger="") to catch all records regardless of logger name.
     """
     import logging
     import fitz
@@ -420,39 +424,49 @@ def test_failures_logged(caplog):
         ),
     ]
 
-    for fn, expected_reason in cases:
-        caplog.clear()
-        with caplog.at_level(logging.WARNING, logger="desktop.pdf_page_renderer"):
-            with pytest.raises(m.PdfRenderError):
-                fn()
-        reason_value = expected_reason.value
-        matching = [
-            r for r in caplog.records
-            if reason_value in r.getMessage()
-        ]
-        assert len(matching) == 1, (
-            f"Expected exactly 1 log record containing '{reason_value}'; "
-            f"got {len(matching)}. Records: {[r.getMessage() for r in caplog.records]}"
-        )
+    # genizah_core.get_logger() returns a child of the 'genizah' logger which
+    # has propagate=False. caplog only captures records that propagate to the
+    # root logger by default. We must add caplog's handler directly to the
+    # 'genizah' logger to capture its output.
+    genizah_logger = logging.getLogger("genizah")
+    genizah_logger.addHandler(caplog.handler)
 
-    # PAGE_OUT_OF_RANGE via render_page
-    doc = fitz.open(MULTIPAGE_PDF)
     try:
-        caplog.clear()
-        with caplog.at_level(logging.WARNING, logger="desktop.pdf_page_renderer"):
-            with pytest.raises(m.PdfRenderError):
-                m.render_page(doc, page_num=999)
-        reason_value = m.PdfRenderFailure.PAGE_OUT_OF_RANGE.value
-        matching = [
-            r for r in caplog.records
-            if reason_value in r.getMessage()
-        ]
-        assert len(matching) == 1, (
-            f"Expected exactly 1 log record for PAGE_OUT_OF_RANGE; "
-            f"got {len(matching)}."
-        )
+        for fn, expected_reason in cases:
+            caplog.clear()
+            with caplog.at_level(logging.WARNING, logger="genizah"):
+                with pytest.raises(m.PdfRenderError):
+                    fn()
+            reason_value = expected_reason.value
+            matching = [
+                r for r in caplog.records
+                if reason_value in r.getMessage()
+            ]
+            assert len(matching) == 1, (
+                f"Expected exactly 1 log record containing '{reason_value}'; "
+                f"got {len(matching)}. Records: {[r.getMessage() for r in caplog.records]}"
+            )
+
+        # PAGE_OUT_OF_RANGE via render_page
+        doc = fitz.open(MULTIPAGE_PDF)
+        try:
+            caplog.clear()
+            with caplog.at_level(logging.WARNING, logger="genizah"):
+                with pytest.raises(m.PdfRenderError):
+                    m.render_page(doc, page_num=999)
+            reason_value = m.PdfRenderFailure.PAGE_OUT_OF_RANGE.value
+            matching = [
+                r for r in caplog.records
+                if reason_value in r.getMessage()
+            ]
+            assert len(matching) == 1, (
+                f"Expected exactly 1 log record for PAGE_OUT_OF_RANGE; "
+                f"got {len(matching)}."
+            )
+        finally:
+            doc.close()
     finally:
-        doc.close()
+        genizah_logger.removeHandler(caplog.handler)
 
 
 # ---------------------------------------------------------------------------
