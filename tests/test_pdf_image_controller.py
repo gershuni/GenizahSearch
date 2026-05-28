@@ -547,3 +547,30 @@ def test_failure_maps_to_localized_placeholder_via_signal(monkeypatch):
     assert any("not found" in p.lower() for p in ph), (
         f"Expected 'not found' placeholder; got {ph}"
     )
+
+
+def test_discard_scope_clears_pending():
+    """WR-02 (D-08, REVISED per REVIEWS round 2 Codex MEDIUM #8): _pending[scope]
+    has NO entry immediately after discard_scope. Use `not in` rather than
+    `.get(scope) is None` so the test fails if the dict retains `{scope: None}`
+    -- the documented contract is key absence, not None-valued key.
+
+    Regression guard for 100-REVIEW.md WR-02: if _pending retains the scope key
+    after discard_scope, a late render_succeeded could land on a closed dialog.
+    """
+    app, worker = _make_fake_worker()
+    ctrl = _make_controller(worker, debounce_ms=0)
+
+    token = ctrl.request("dialog", "LOCAL_test", 1, _FAKE_PDF,
+                         lambda img: None, lambda txt: None)
+    assert token is not None, "request should not be gated out for a .pdf path"
+    assert "dialog" in ctrl._pending, "request should populate _pending synchronously"
+
+    ctrl.discard_scope("dialog")
+    assert "dialog" not in ctrl._pending, (
+        "WR-02: _pending must have NO entry for the scope after discard_scope "
+        "(key absence, not None-valued key -- REVIEWS round 2 Codex MEDIUM #8)"
+    )
+
+    # Idempotent: a second discard_scope must not raise.
+    ctrl.discard_scope("dialog")
