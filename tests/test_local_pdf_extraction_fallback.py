@@ -467,6 +467,128 @@ def test_extract_pdf_pages_blocks_path_untouched(monkeypatch):
     )
 
 
+# ---------------------------------------------------------------------------
+# Phase 101 follow-up (2026-05-28): intra-block newline collapse tests
+# ---------------------------------------------------------------------------
+# Bug origin: Hillel's UAT 2026-05-28 — PyMuPDF blocks output of a Hebrew
+# scholarly book put individual characters/commas/quote marks on their own
+# '\n'-delimited lines INSIDE a single block, producing fragmented prose like:
+#   הכרעת רבי העומדת במרכז ה
+#   סוגיא
+#   ,
+#   הינה הכרעה
+# Decision: collapse ALL intra-block '\n' to space. Block boundaries (joined
+# upstream as '\n\n') still mark true paragraph breaks.
+
+
+def _import_collapse_helper():
+    from shared.local_indexer import _collapse_intra_block_newlines
+    return _collapse_intra_block_newlines
+
+
+def test_collapse_intra_block_newlines_single_line_unchanged():
+    fn = _import_collapse_helper()
+    assert fn("hello world") == "hello world"
+    assert fn("שלום עליכם") == "שלום עליכם"
+
+
+def test_collapse_intra_block_newlines_empty():
+    fn = _import_collapse_helper()
+    assert fn("") == ""
+    assert fn("   \n  \n  ") == ""
+
+
+def test_collapse_intra_block_newlines_strips_outer_whitespace():
+    fn = _import_collapse_helper()
+    assert fn("  hello  ") == "hello"
+    assert fn("\nhello\n") == "hello"
+
+
+def test_collapse_intra_block_newlines_collapses_internal_newlines():
+    """Hillel UAT 2026-05-28: fragmented Hebrew bidi output joins back to prose."""
+    fn = _import_collapse_helper()
+    fragmented = (
+        "הכרעת רבי העומדת במרכז ה\n"
+        "סוגיא\n"
+        ",\n"
+        "הינה הכרעה"
+    )
+    expected = "הכרעת רבי העומדת במרכז ה סוגיא , הינה הכרעה"
+    assert fn(fragmented) == expected
+
+
+def test_collapse_intra_block_newlines_collapses_runs_of_whitespace_around_newline():
+    fn = _import_collapse_helper()
+    # Trailing spaces before '\n' and leading spaces after must collapse to one space.
+    assert fn("foo  \n  bar") == "foo bar"
+    assert fn("foo\n\nbar") == "foo bar"
+
+
+def test_collapse_intra_block_newlines_no_sentence_boundary_preserved():
+    """Per Hillel: 'Join is better than divide' — sentence-final punctuation
+    inside a block does NOT preserve the break. Block boundaries (set by
+    PyMuPDF) are the only paragraph signal."""
+    fn = _import_collapse_helper()
+    assert fn("First sentence.\nSecond sentence.") == "First sentence. Second sentence."
+
+
+class _MultilineBlocksFakePage:
+    """Variant of _FakePdfPage where get_text('blocks') returns blocks whose
+    text bodies contain internal '\\n'. Used to test the intra-block collapse."""
+
+    def __init__(self, block_bodies):
+        self._block_bodies = list(block_bodies)
+        self.number = 0
+
+    def get_text(self, mode, sort=False, **_kwargs):
+        if mode == "blocks":
+            return [
+                (0.0, float(i), 100.0, float(i + 1), body, i, 0)
+                for i, body in enumerate(self._block_bodies)
+                if body.strip()
+            ]
+        if mode == "text" and sort:
+            return ""
+        return ""
+
+
+def _install_multiline_fake(monkeypatch, page):
+    import shared.local_indexer as li_mod
+    doc = _FakePdfDocument(page)
+    monkeypatch.setattr(li_mod.fitz, "open", lambda *a, **kw: doc, raising=True)
+
+
+def test_extract_pdf_pages_collapses_intra_block_newlines(monkeypatch):
+    """End-to-end: a block containing the fragmented Hebrew bidi output
+    becomes one continuous paragraph; block boundaries still produce '\\n\\n'."""
+    _, _, extract_pdf_pages = _import_phase101_helpers()
+    block_1 = (
+        "הכרעת רבי העומדת במרכז ה\n"
+        "סוגיא\n"
+        ",\n"
+        "הינה הכרעה"
+    )
+    block_2 = (
+        "לעומת זאת\n"
+        ",\n"
+        "נראה שמרכז ה\n"
+        "סוגיא"
+    )
+    page = _MultilineBlocksFakePage([block_1, block_2])
+    _install_multiline_fake(monkeypatch, page)
+
+    pages = list(extract_pdf_pages("/fake/path.pdf"))
+    assert len(pages) == 1
+    _page_num, text, _title = pages[0]
+    assert "\n\n" in text, "block boundary marker must survive"
+    paras = text.split("\n\n")
+    assert len(paras) == 2
+    assert "\n" not in paras[0], f"paragraph 1 must have no internal newlines: {paras[0]!r}"
+    assert "\n" not in paras[1], f"paragraph 2 must have no internal newlines: {paras[1]!r}"
+    assert paras[0] == "הכרעת רבי העומדת במרכז ה סוגיא , הינה הכרעה"
+    assert paras[1] == "לעומת זאת , נראה שמרכז ה סוגיא"
+
+
 # ----- D-06 real fixture ---------------------------------------------------
 
 def test_sort_true_rtl_real_hebrew_fixture():

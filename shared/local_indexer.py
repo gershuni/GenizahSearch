@@ -440,6 +440,35 @@ def _fix_sort_true_rtl_page(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phase 101 follow-up (2026-05-28): intra-block newline collapse for PyMuPDF
+# blocks output.
+# ---------------------------------------------------------------------------
+# PyMuPDF get_text("blocks") returns blocks that roughly correspond to logical
+# paragraphs, but '\n' inside each block is the source PDF's column-wrap layout
+# artifact — and on RTL Hebrew text the bidi engine is even worse, putting
+# individual characters / commas / quote marks on their own line within a
+# block. Hillel's UAT (2026-05-28) showed a single Hebrew paragraph extracted
+# as ~30 short fragment-per-line entries. Inter-block boundaries already mark
+# true paragraph breaks via the '\n\n' join in extract_pdf_pages, so we can
+# safely collapse ALL intra-block newlines to a single space.
+#
+# Guidance per Hillel: "Join is better than divide if any problem exists" —
+# when in doubt about whether a break is meaningful, join.
+
+def _collapse_intra_block_newlines(block_text: str) -> str:
+    """Collapse all internal '\\n' (and surrounding whitespace) within a single
+    PyMuPDF block to a single space. Strips leading/trailing whitespace.
+    Empty/whitespace-only blocks return ''.
+    """
+    stripped = block_text.strip()
+    if not stripped:
+        return ''
+    if '\n' not in stripped:
+        return stripped
+    return re.sub(r'\s*\n\s*', ' ', stripped)
+
+
+# ---------------------------------------------------------------------------
 # Phase 96 D-F4: detect pathological one-word-per-line PDF extraction
 # ---------------------------------------------------------------------------
 # This is the LIVE detection used by extract_pdf_pages (NOT dead code, unlike
@@ -792,7 +821,18 @@ def extract_pdf_pages(
         for page_num, page in enumerate(doc, start=1):
             # Primary: blocks mode preserves paragraph structure
             blocks = page.get_text("blocks")
-            text_parts = [b[4].strip() for b in blocks if b[6] == 0 and b[4].strip()]
+            # Phase 101 follow-up (2026-05-28): collapse intra-block '\n' to
+            # a single space. PyMuPDF blocks ≈ paragraphs, and on RTL Hebrew
+            # the bidi engine fragments characters/punctuation onto their own
+            # lines within a block. Block boundaries below ('\n\n' join) still
+            # mark true paragraph breaks. Per Hillel: "Join is better than
+            # divide if any problem exists".
+            text_parts = [
+                _collapse_intra_block_newlines(b[4])
+                for b in blocks
+                if b[6] == 0 and b[4].strip()
+            ]
+            text_parts = [p for p in text_parts if p]
             text = "\n\n".join(text_parts)
 
             # Phase 96 D-F4: detect pathological one-word-per-line output
