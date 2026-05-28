@@ -59,6 +59,10 @@ if sys.platform.startswith("linux"):
         "test_local_optout_persistence.py",
         "test_recovery_scan_runs_cleanup.py",
         "test_disk_headroom.py",
+        # Phase 100 added PdfImageController + PdfRenderWorker QThread; same
+        # offscreen-Qt cleanup race as the Phase 97.3 desktop tests above.
+        "test_pdf_image_controller.py",
+        "test_pdf_page_renderer.py",
     ])
 
 
