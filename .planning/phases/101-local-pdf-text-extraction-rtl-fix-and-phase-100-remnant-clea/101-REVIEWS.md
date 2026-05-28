@@ -1,308 +1,191 @@
 ---
 phase: 101
-reviewers: [codex, claude]
-reviewed_at: 2026-05-28T02:31:14Z
+reviewers: [gemini, codex]
+reviewed_at: 2026-05-28T03:43:28Z
 plans_reviewed: [101-01-PLAN.md, 101-02-PLAN.md]
 notes: |
-  Gemini was selected but its API returned "invalid content after all retries" on
-  this prompt (full error in _tmp/gsd-review-gemini-101.err). Per the user's pre-
-  authorized fallback ("If Codex unavailable, send to Claude also"), Claude was
-  invoked as the Gemini substitute. Both Codex and Claude produced substantive,
-  independent reviews.
+  Second review round following plan revision (commit 1c7e2e4b). Both Gemini
+  and Codex returned successfully. Claude skipped per workflow self-skip rule
+  (this review was invoked from inside Claude Code).
 ---
 
-# Cross-AI Plan Review — Phase 101
+# Cross-AI Plan Review — Phase 101 (Round 2)
+
+## Gemini Review
+
+The implementation plans for **Phase 101** are of high technical quality, particularly the adoption of the **S-1 directional-run reversal** algorithm, which correctly handles mixed-script lines (e.g., Hebrew text containing Latin shelfmarks) that blunt reversal would corrupt. The strategy for self-healing existing libraries via an atomic extractor-version bump is robust and well-integrated into the existing recovery machinery.
+
+However, there are two critical flaws in the verification and cleanup logic that risk either failing the build or failing to resolve the target flake.
+
+### 1. Summary
+A surgical and well-researched plan that correctly identifies the `sort=True` fallback as the root cause of the RTL bug. The "directional-run" fix is a significant improvement over simple word-order reversal. The self-correction via `_CURRENT_EXTRACTOR_VERSION` is elegant. However, the AST guard for WR-01 is incompatible with the proposed code change, and the D-09 flake fix is ineffective against the project's import style.
+
+### 2. Strengths
+*   **High-Fidelity RTL Fix:** The S-1 algorithm (Task 2a) is sophisticated; by grouping tokens into runs and only reversing the sequence of runs, it correctly preserves the internal order of Latin sigla (like `T-S 12.123`) which would be broken by a simple `[::-1]` reversal.
+*   **Atomic Self-Healing:** Using `BEGIN IMMEDIATE` inside `LocalIndexer.__init__` (Task 2d) to mark PDFs for re-indexing ensures that the upgrade is crash-safe and consistent across concurrent application launches.
+*   **Narrowed Scope:** Precisely targeting the `sort=True` fallback avoids re-reversing correctly ordered "blocks" mode PDFs, preventing broad regressions.
+*   **AST Invariants:** The extension of the F-06 AST guard to the new helpers (Plan 01 Task 1) is a strong defensive measure against accidental reuse in structured extractors.
+
+### 3. Concerns
+*   **HIGH: Plan 02 Task 1 AST Guard Failure.** The uniqueness check for `filepath` assignments (`assert assigns == 1`) will fail. The proposed implementation uses a `try/except` block:
+    ```python
+    try:
+        filepath = self._lookup_local_filepath(sys_id)
+    except Exception:
+        filepath = None
+    ```
+    This results in **two** assignment nodes in the AST for the name `filepath`. The current script in the plan counts all assignments and will raise an error, blocking execution.
+*   **HIGH: Plan 01 Task 3 D-09 Fix Ineffectiveness.** The `importlib.reload` fixture in `conftest.py` will not solve the test flake. The test file `tests/test_local_indexer.py` uses `from shared.local_indexer import LocalIndexer`. This binds the local name `LocalIndexer` to a specific class object at import time. When `reload` is called, a **new** class object is created in the module, but the name in the test file's namespace still points to the **old** class object. The "identity divergence" between `OldClass` and `NewClass` (referenced in `101-RESEARCH.md`) will persist.
+*   **MEDIUM: WR-01 AST Guard Blind Spots.** The uniqueness guard for WR-01 (Plan 02 Task 1) only checks for standard `ast.Assign` and `ast.AugAssign`. It will miss regressions that use the **walrus operator** (`filepath := ...`), **tuple unpacking** (`filepath, _ = ...`), or **type-annotated assignments** (`filepath: str = ...`).
+*   **LOW: SQL Logging and Transaction.** In Plan 01 Task 2d, the `pdf_rows_pending_count` is queried outside the transaction. While safe from writers due to `BEGIN IMMEDIATE`, it counts the *total* number of pending PDFs in the system, which may include files already pending from an interrupted scan, making the log message "X committed PDF files marked for re-scan" potentially inaccurate.
+
+### 4. Suggestions
+*   **Fix WR-01 AST Guard:** Update the script to allow exactly one assignment in the `try` block and one in the `except` block, or simplify the assignment to a single line using a ternary or `getattr` fallback to satisfy the `assigns == 1` constraint.
+*   **Fix D-09 Flake:** Abandon the `conftest` reload fixture. Instead, follow the "Simpler alternative" in `101-RESEARCH.md` and use a **local import** inside `test_txt_undecodable_marked_encoding_error`. This is the only guaranteed way to ensure the test uses the latest objects after a module reload.
+*   **Improve SQL Accuracy:** In `LocalIndexer.__init__`, use `cur.rowcount` from the `UPDATE` execution to get the exact number of rows modified, and move the log line inside the `with self._conn:` block for consistency.
+*   **Strengthen AST Guard:** Update the uniqueness script to check for `ast.NamedExpr` and `ast.AnnAssign` to ensure no alternative assignment styles can bypass the guard.
+
+### 5. Risk Assessment
+**MEDIUM.** The core RTL fix and re-indexing logic are solid (LOW risk), but the Plan 02 Task 1 AST guard will almost certainly break the build as written (HIGH risk to execution flow), and the D-09 fix is unlikely to stop the flake. Correcting these two items before execution is required.
+
+---
 
 ## Codex Review
 
 **Summary**
 
-The two plans are well scoped and mostly aligned with the Phase 101 goals. The strongest parts are the decision to avoid `python-bidi`, limit the RTL fix to the `sort=True` fallback, and use an extractor-version marker to self-heal existing local PDF indexes. Main risks are around edge cases in blunt token reversal, the extractor-version SQL updating more rows than the stated requirement, and tests that may validate the helper without proving `extract_pdf_pages` uses it in the intended branch.
+The revised plans are close, but I would not execute them as-is. There are several remaining correctness holes: the specified S-1 helper does not satisfy its own pure-RTL tests, the branch-integration tests are currently no-op scaffolds, the extractor-version "atomic" marker story is not actually atomic, and the D-09 conftest reload fixture likely does not fix the stale imported-name failure it is meant to fix.
 
 **Strengths**
 
-- The plan correctly follows the research override: no `python-bidi`, no character reversal, no dependency/spec churn.
-- Scoping the reversal only to the `sort=True` fallback is the right safety boundary. It avoids breaking professional RTL PDFs where `get_text("blocks")` already works.
-- The extractor-version bump is a pragmatic migration mechanism for user-owned local indexes.
-- WR-01 is a real cleanup: one lookup removes the known divergence between `is_pdf` and the actual image-pane path.
-- The validation matrix covers unit behavior, real fixture behavior, reindex behavior, UI cleanup regression, and the known batch-order flake.
-- Extending F-06 to block the new PDF-specific RTL helpers from HTML/XLSX/CSV extractors is reasonable if the invariant is framed narrowly.
+- The phase scope is well-contained and correctly keeps the RTL fix in `shared/local_indexer.py::extract_pdf_pages`.
+- The `status = 'committed'` filter for version-bump reindexing is the right default and matches the live `processed_files.status` / `local_files.file_extension` schema.
+- Leaving the `get_text("blocks")` path untouched is correct and important.
+- Plan 02's WR-01 goal is sound: derive `is_pdf` and the image-pane request from the same resolved filepath.
+- The docs-date handling correctly uses `2026-05-28`.
 
 **Concerns**
 
-- **HIGH:** Plan 01's extractor-version SQL does not match D-04. D-04 says mark committed PDF rows pending, but the proposed SQL updates all matching PDF rows in `processed_files`, including possible `error`, `failed`, `skipped`, or already-`pending` rows. That could revive known-bad PDFs repeatedly.
+- **HIGH — S-1 algorithm contradicts required behavior.** In `101-01-PLAN.md:607-651`, `_fix_sort_true_rtl_line` groups consecutive RTL tokens into one run, then reverses only the run sequence. For a pure Hebrew line, there is one RTL run, so output is unchanged. That fails the plan's own required behavior at `101-01-PLAN.md:582-583` and `:232-238`, where pure-RTL tokens must reverse. Fix either by making RTL tokens singleton runs while grouping non-RTL runs, or by reversing tokens inside RTL runs while preserving non-RTL run order.
 
-- **MEDIUM:** The RTL helper tests appear to focus on `_fix_sort_true_rtl_page` directly. That proves the helper, but not that `extract_pdf_pages` calls it only inside the `_detect_single_word_per_line` / `sort=True` fallback. A skipped real fixture would leave the integration path weakly covered.
+- **HIGH — Branch-integration tests are no-op scaffolds.** `101-01-PLAN.md:349-387` defines tests with docstrings and comments only. Those tests will pass without proving the fallback branch calls `_fix_sort_true_rtl_page` or that the blocks path is untouched.
 
-- **MEDIUM:** Pure `line.split()[::-1]` is sound for mostly homogeneous RTL lines, but fragile for mixed RTL/LTR runs. Latin shelfmarks, manuscript sigla, URLs, dates, page refs, and embedded English phrases may have their internal LTR order reversed after whole-line token reversal.
+- **HIGH — D-09 conftest fixture likely does not fix stale aliases.** `101-01-PLAN.md:839-848` reloads `shared.local_indexer`, but `tests/test_local_indexer.py` already has module-level aliases (`EncodingError`, `extract_txt`, `LocalIndexer`). Reloading the module does not rebind those aliases. Old `extract_txt` can resolve the new `EncodingError` from the reloaded module globals, while `pytest.raises(EncodingError)` still expects the old class. The fixture should rebind `request.module.EncodingError`, `request.module.extract_txt`, `request.module.LocalIndexer`, etc., after reload.
 
-- **MEDIUM:** `_rtl_ratio(line) > 0.4` may false-negative realistic Judeo-Arabic/Hebrew lines with many digits, Latin sigla, punctuation, or short Hebrew fragments. It may also false-positive mostly LTR metadata lines containing enough Hebrew names.
+- **HIGH — Plan 02 WR-01 assignment guard conflicts with the proposed code.** `101-02-PLAN.md:136-140` assigns `filepath` in the `try` and again in the `except`, but the AST guard at `:164-170` requires exactly one `filepath` assignment. This will fail immediately.
 
-- **LOW/MEDIUM:** `line.split()` normalizes whitespace: it strips leading/trailing whitespace and collapses multiple spaces/tabs. That may be acceptable for extracted transcription text, but the plan should treat it as an intentional tradeoff.
+- **MEDIUM — extractor-version marker is not truly atomic with SQLite.** `101-01-PLAN.md:729-739` writes `.extractor_version` inside a SQLite transaction, but filesystem writes are not rolled back with SQLite. A crash after marker write but before SQLite commit can leave the marker current while committed PDFs were not marked pending. Safer pattern: perform the SQL update in `BEGIN IMMEDIATE`, commit, then write the marker; a crash before marker write only causes an idempotent repeat next launch. Best pattern: store extractor version in SQLite if true atomicity is required.
 
-- **LOW/MEDIUM:** WR-01 is probably behaviorally better, but not exactly equivalent. If the early lookup fails, the new code propagates `filepath=None` downstream, whereas the old second lookup might theoretically have succeeded later. This is likely fine, but downstream `filepath` consumers need a manual guard check.
+- **MEDIUM — version-bump log count is semantically wrong.** `101-01-PLAN.md:740-753` re-counts all pending PDFs after the update, but the log says "committed PDF files marked for re-scan." If one PDF was already pending, the count is inflated. Use `cur.rowcount` from the `UPDATE`.
 
-- **LOW:** The AST single-lookup guard is useful but brittle. It finds the first function named `_open_local_browse_page` and counts attribute calls by name. It does not prove the call is on `self`, and it does not prove there is no later `filepath` reassignment.
+- **MEDIUM — LTR no-op boundary tests are not boundary tests.** `101-01-PLAN.md:291-318` uses ratios around `0.1` and `0.67`, not values near `0.4`. These will not catch subtle `_rtl_ratio` or threshold drift.
 
-- **LOW:** The D-09 local import fix is likely sufficient for the named test, but only if every relevant reference inside that test uses the freshly imported names and no helper invoked by the test still closes over stale module-level bindings.
+- **MEDIUM — WR-02 test does not prove key removal.** `101-02-PLAN.md:209-211` and `:227` assert `ctrl._pending.get("dialog") is None`. That passes if the dict retains `"dialog": None`. The requirement says `_pending` has no entry; assert `"dialog" not in ctrl._pending`.
 
-- **LOW:** The F-06 guard is good only if documented as "do not reuse PDF `sort=True` RTL helpers in structured extractors." If described as "HTML/XLSX/CSV must never do RTL handling," it could become an overbroad future constraint.
+- **MEDIUM — WR-01 AST guard misses several reassignment forms.** `101-02-PLAN.md:164` catches simple `Assign` and `AugAssign`, but not `AnnAssign`, tuple unpacking, `NamedExpr` / walrus, `for filepath in ...`, or `except ... as filepath`.
+
+- **LOW — F-06 positive assertion is weak and slightly overconstraining.** `101-01-PLAN.md:507-528` allows empty callers, so it does not positively prove `extract_pdf_pages` calls the helper. The "only called by extract_pdf_pages or themselves" rationale is acceptable for this release, but may be maintenance-heavy for future PDF-only helpers.
+
+- **LOW — `xfail(strict=False)` undercuts the "signal to re-review" intent.** `101-01-PLAN.md:326-344` says XPASS should signal re-review, but `strict=False` will keep CI green. Use `strict=True` if XPASS should force attention.
+
+- **LOW — Plan 02 summary-file dependency is brittle.** `101-02-PLAN.md:250-254` blocks docs updates on `101-01-SUMMARY.md`. Better to check the actual implementation/test evidence, or require both the summary and a code/test guard.
 
 **Suggestions**
 
-- Fix the extractor-version update to honor D-04:
-
-```sql
-UPDATE processed_files
-SET status = 'pending'
-WHERE status = 'committed'
-  AND sys_id IN (
-      SELECT sys_id
-      FROM local_files
-      WHERE LOWER(COALESCE(file_extension, '')) = '.pdf'
-  )
-```
-
-- Add at least one non-skipped integration test proving `extract_pdf_pages` applies the helper in the fallback branch. A monkeypatched/fake `fitz.open` page is enough: primary text triggers `_detect_single_word_per_line`, fallback text returns reversed RTL words, output is corrected.
-
-- Add a companion integration test proving the primary `get_text("blocks")` path is untouched for already-correct RTL text.
-
-- Add mixed-content test cases before expanding the algorithm. Good candidates: Hebrew plus manuscript sigla, Hebrew plus page numbers, Hebrew with parentheses/colon, and Judeo-Arabic with Latin catalog references. If those fail but are common in UAT material, consider a run-preserving reversal rather than reversing every token blindly.
-
-- In the helper docstring, explicitly state that whitespace normalization is intentional:
-
-```python
-"""Reverse visual-order word tokens from PyMuPDF sort=True RTL fallback.
-
-This intentionally normalizes intra-line whitespace because this path repairs
-reading order for extracted plain text, not layout fidelity.
-"""
-```
-
-- Strengthen the WR-01 verification script to assert uniqueness more carefully: find all functions named `_open_local_browse_page`, fail if there is not exactly one, then count `_lookup_local_filepath` calls within that function.
-
-- For D-09, consider using a module local import instead of shadowing three names:
-
-```python
-import importlib
-local_indexer = importlib.import_module("shared.local_indexer")
-```
-
-Then use `local_indexer.LocalIndexer`, `local_indexer.EncodingError`, and `local_indexer.extract_txt`. This makes the reload dependency explicit and avoids `F811`.
-
-- For `docs/OPEN_ISSUES.md`, use the actual landing date rather than hardcoding `2026-05-27` unless that is intentionally the issue-resolution date.
+- Replace the S-1 helper body with an implementation that reverses RTL word order while preserving non-RTL token groups, then update the prose so "within-run preserved" applies to non-RTL runs or singleton RTL runs.
+- Replace the two branch-integration scaffolds with concrete fake `fitz.open` / document / page classes and hard assertions.
+- Change the D-09 fixture to reload and then rebind imported names on `request.module`; also audit other module-level `from shared.local_indexer import ...` tests.
+- Fix WR-01 code or guard: either use a temp variable and exactly one `filepath = _resolved_filepath`, or relax the guard to allow the exception fallback assignment.
+- Use `cur.rowcount` for the extractor-version log and write the marker after the DB commit unless the marker moves into SQLite.
+- Elevate `python -m ruff check .` to explicit acceptance criteria in both plans. Since Plan 02 edits docs, keep `python scripts/check_docs.py` as a hard gate there.
 
 **Risk Assessment**
 
-Overall risk: **MEDIUM**.
-
-The plans are directionally strong and should achieve the Phase 101 goals if implemented carefully. The main release risk is not architectural; it is precision. The extractor-version update needs the committed-status filter, and the RTL test set needs to prove branch integration plus mixed-content behavior. With those tightened, the residual risk is mostly acceptable text-extraction edge cases rather than broad regression risk.
-
----
-
-## Claude Review
-
-### 1. Summary
-
-The two plans form a tight, well-scoped pre-release polish package. The TDD discipline (Wave 0 RED tests → Wave 1 GREEN implementation), the explicit override of `python-bidi` in favor of pure-Python word-token reversal, the auto-reindex via extractor-version bump, and the `depends_on: ["01"]` sequencing of the OPEN_ISSUES.md flip are all sound architectural choices. The biggest residual risk is **semantic correctness of the word-token reversal on mixed RTL/LTR lines** — `' '.join(line.split()[::-1])` is bidi-naïve and will visibly mis-order embedded LTR runs (English sigla, numbers, dates) when `_rtl_ratio > 0.4`. The D-09 flake fix is also narrower than the underlying problem warrants, and a few edge cases around the extractor-version marker and WR-01 exception-flow semantics deserve a closer look.
-
-### 2. Strengths
-
-- **Override discipline.** D-01/D-02 reversal post-research (with `python-bidi` decisively voided) is documented with the *why*, not just the *what*. This will save the next reviewer.
-- **Surgical scoping.** Restricting the fix to the `sort=True` fallback branch (D-05) avoids breaking professional RTL PDFs that already arrive in correct order via `get_text("blocks")`. Pitfall 2 internalized.
-- **Auto-reindex mechanism.** `.extractor_version` marker + `WHERE LOWER(file_extension)='.pdf'` filter is the right granularity — non-PDF rows are untouched, and the user gets the fix automatically on next launch without manual rescan.
-- **TDD RED-state explicitly named.** Acceptance criterion explicitly says "tests fail RED only because the implementation does not yet exist (ImportError) — that is the expected TDD RED state." Removes a class of plan-checker confusion.
-- **F-06 AST guard extension.** Pinning the new helper names out of HTML/XLSX/CSV extractors at string level is the same correct pattern Phase 95 D-02 used for the dead-code helpers.
-- **AST verification for WR-01.** Hard-counting `_lookup_local_filepath` calls inside the function is much stronger than a comment-based convention.
-- **Sequencing guard belt-and-suspenders.** `depends_on: ["01"]` + an explicit `101-01-SUMMARY.md` existence check before flipping the OPEN_ISSUES row. Good defensive bookkeeping.
-
-### 3. Concerns
-
-#### HIGH
-
-- **C-1 (HIGH) — Mixed RTL/LTR lines silently mangled.** `' '.join(line.split()[::-1])` reverses *every* token, including embedded LTR runs that PyMuPDF emitted in their correct visual sub-order. Real cases this breaks:
-  - `"T-S 12.123 ספר התורה"` (Hebrew title with Cambridge shelfmark): ratio ≈ 0.45–0.55, gate triggers, output becomes `"התורה ספר 12.123 T-S"` — the shelfmark is now split into two non-adjacent tokens and the Hebrew is correct, but the shelfmark is broken.
-  - `"פרק 5 עמוד 42"`: ratio triggers, becomes `"42 עמוד 5 פרק"`. The Unicode bidi algorithm would keep `5` next to `פרק` (logical adjacency). With pure token reversal, the numbers stay adjacent to the *wrong* Hebrew word.
-  - **Judeo-Arabic with Latin sigla** (Joins data, PGP references) is the canonical mixed case.
-
-  The narrow `sort=True` fallback scoping mitigates blast radius but does not eliminate it — Ligature-OCR-style PDFs that triggered the fallback in the first place can still contain inline numbers and sigla. **Worth either (a) acknowledging this in CONTEXT/RESEARCH as a known residual and listing in OPEN_ISSUES, or (b) implementing a slightly smarter reversal that keeps consecutive LTR runs intact** (split into runs by directional category, reverse only the run sequence, keep within-run order).
-
-- **C-2 (HIGH) — WR-01 exception-flow semantics shift.** The original code likely has this shape:
-  ```python
-  try:
-      fp = self._lookup_local_filepath(sys_id)
-      is_pdf = fp.lower().endswith('.pdf')
-  except Exception:
-      pass
-  ```
-  If the lookup raised, **`is_pdf` was never bound** — meaning a `NameError` was the original "behavior" downstream, OR `is_pdf` retained a value from an enclosing scope. The new code unconditionally sets `is_pdf = False` on exception. That is *more* correct, but the plan should explicitly verify that no downstream `if is_pdf:` branch in the function was relying on the variable being undefined (which would skip the branch via `UnboundLocalError`-caught-by-outer-handler vs. cleanly evaluate as `False`).
-
-  Recommend: add a one-line check in Step 3 of Task 1 that confirms `is_pdf` was previously set in *every* code path of the function, OR that the exception handler at line ~19151 has no companion outer `try` swallowing `NameError`.
-
-#### MEDIUM
-
-- **C-3 (MEDIUM) — Extractor-version marker on fresh install.** Plan doesn't specify what `_read_extractor_version(index_dir)` returns when the file is absent (fresh install, brand new My Library tab). If it returns `None` or `""`, then `None != "2"` triggers a no-op UPDATE on an empty `processed_files` table — harmless but worth verifying. If it raises (e.g., `FileNotFoundError` from `open()`), the init fails. The mirrored `_read_schema_marker` pattern likely handles this; please confirm in Plan 01 Task 2c that the helper has the same `try/except FileNotFoundError: return None` shape and write the marker unconditionally at end of init even if no update ran.
-
-- **C-4 (MEDIUM) — Concurrent re-launch race on the UPDATE.** Phase 97.2 had recurring "running" rows from hard-kill SIGKILLs. If two desktop processes launch concurrently after a version bump (rare but possible), both will run the same UPDATE and both will write the marker. SQLite serializes the UPDATE, but the second process might write the marker *after* the first started extracting. Probably benign (the extraction itself is idempotent), but worth adding `BEGIN IMMEDIATE`/explicit transaction around `UPDATE + write_marker` so the second process either sees the new marker or blocks on the lock. Lightweight change.
-
-- **C-5 (MEDIUM) — D-09 flake fix is per-test, not per-file.** Plan 01 Task 3 adds a local import to *one* test (`test_txt_undecodable_marked_encoding_error`). But the root cause is that `importlib.reload(shared.local_indexer)` in `test_mupdf_warnings_suppressed.py` invalidates module-level bindings for the *entire* `tests/test_local_indexer.py` module. If pytest collection order ever places another test from `test_local_indexer.py` *after* a reload-test, it will exhibit the same symptom and the local-import fix won't help it. Two safer options:
-  1. Move the module-level imports inside every test function in `test_local_indexer.py` (verbose but rigorous).
-  2. Add a `conftest.py`-level autouse fixture that re-imports `shared.local_indexer` for the duration of each test in `test_local_indexer.py`.
-  3. Fix the *cause* in `test_mupdf_warnings_suppressed.py` by restoring `sys.modules['shared.local_indexer']` to the original after the test (teardown).
-
-  Option 3 is cleanest but the plan deliberately excludes touching `test_mupdf_warnings_suppressed.py`. Option 2 (autouse fixture) is the smallest robust change and worth recommending over the current per-test local-import.
-
-- **C-6 (MEDIUM) — `line.split()` whitespace normalization.** `line.split()` (no argument) collapses runs of whitespace and strips leading/trailing. After `' '.join(...)`, single-space-delimited output replaces tabs and double-spaces. PyMuPDF `sort=True` output is unlikely to contain meaningful tab structure, but transcriptions that had double-spaced columns or aligned poetry (piyyut) could lose visual layout. Consider documenting this as an intentional trade-off in a comment, or use a regex-based tokenizer that preserves the original separator widths.
-
-- **C-7 (MEDIUM) — `_rtl_ratio > 0.4` gate on borderline lines.** A line like `"page 3 / עמ' 5"` could land near 0.3 (denominator includes digits and slashes). A bilingual heading `"Genesis בראשית"` lands near 0.5. The threshold inherited from existing code is fine as a default, but the plan doesn't include a test case at the threshold boundary. Recommend adding two boundary cases to `test_sort_true_ltr_noop` and `test_sort_true_rtl_word_order_fixed`: `~0.39` and `~0.41` ratio lines.
-
-#### LOW
-
-- **C-8 (LOW) — `_fix_sort_true_rtl_page` joining with `'\n'`.** If the input used `'\r\n'` or `'\r'` line terminators, the rejoin loses them. PyMuPDF's `get_text("text")` is documented to use `\n` on all platforms, so practically a non-issue — worth a one-line comment confirming.
-
-- **C-9 (LOW) — AST guard for WR-01 robustness.** The guard catches `self._lookup_local_filepath()` via `ast.Attribute(attr='_lookup_local_filepath')`. It does NOT catch:
-  - `getattr(self, '_lookup_local_filepath')()` (dynamic dispatch)
-  - Indirect calls through a helper method that itself calls `_lookup_local_filepath`
-  - Walrus inside an expression (`if (fp := self._lookup_local_filepath(s)):`) — actually IS caught by `ast.walk` since walrus is an `ast.NamedExpr` wrapping the Call ✓
-
-  None of these are likely failure modes in the current codebase, but if the plan's authors are committing to "single lookup" as an invariant, the verify block should grep for `_lookup_local_filepath` textually across `genizah_app.py::_open_local_browse_page` slice as a belt-and-suspenders check, in addition to the AST count.
-
-- **C-10 (LOW) — Empty line behavior.** `_rtl_ratio("")` is presumably 0 (no RTL chars / total chars = 0/0 → defined as 0 per existing primitive). Worth confirming the function returns 0 (not raise ZeroDivisionError) and adding `""` to the `test_sort_true_ltr_noop` case list. Plan already includes `""` ✓ — confirm `_rtl_ratio("")` semantics in the test docstring.
-
-- **C-11 (LOW) — `_pdf_count` log line.** Plan 01 Task 2d says to "log `_pdf_count`". Naming nit: clearer as `pdf_rows_pending_count` so future log-grepping doesn't collide with desktop's `_pdf_count` UI counter (if one exists).
-
-### 4. Suggestions
-
-- **S-1.** Add a `_fix_sort_true_rtl_line` variant that respects directional runs (sketch):
-  ```python
-  def _fix_sort_true_rtl_line(line: str) -> str:
-      if _rtl_ratio(line) <= 0.4:
-          return line
-      # Group consecutive tokens by predominant directionality, reverse the
-      # group sequence, but keep tokens within a same-direction run in order.
-      tokens = line.split()
-      runs, current, current_is_rtl = [], [], None
-      for tok in tokens:
-          tok_is_rtl = _rtl_ratio(tok) > 0.4
-          if current_is_rtl is None or tok_is_rtl == current_is_rtl:
-              current.append(tok); current_is_rtl = tok_is_rtl
-          else:
-              runs.append((current_is_rtl, current))
-              current, current_is_rtl = [tok], tok_is_rtl
-      if current:
-          runs.append((current_is_rtl, current))
-      # Reverse run order (visual→logical for outer direction); keep within-run order.
-      return ' '.join(tok for _, run in reversed(runs) for tok in run)
-  ```
-  This preserves shelfmarks (`T-S 12.123`) and numeric runs in their natural sub-order while still flipping the dominant Hebrew word order. Adds ~15 lines of code and one extra test case but resolves C-1 cleanly. If the team prefers the simpler implementation, document the residual in OPEN_ISSUES explicitly.
-
-- **S-2.** Replace Plan 01 Task 3 (D-09) with a `conftest.py` autouse fixture scoped to `tests/test_local_indexer.py`:
-  ```python
-  @pytest.fixture(autouse=True)
-  def _refresh_local_indexer_module():
-      import importlib, shared.local_indexer
-      importlib.reload(shared.local_indexer)
-      yield
-  ```
-  This makes the file order-independent under all pytest collection sequences, not just the one currently observed.
-
-- **S-3.** Add explicit verification in Plan 01 Task 2d that on a *fresh install* (no `.extractor_version` file, empty `processed_files`), the init writes the marker and does not crash. New test case: `test_extractor_version_fresh_install_writes_marker`.
-
-- **S-4.** Wrap the version-bump UPDATE in `BEGIN IMMEDIATE`:
-  ```python
-  with self._conn:  # implicit transaction
-      self._conn.execute("BEGIN IMMEDIATE")
-      self._conn.execute("UPDATE processed_files SET status='pending' ...")
-      _write_extractor_version(index_dir, _CURRENT_EXTRACTOR_VERSION)
-  ```
-  Eliminates C-4 with one extra line.
-
-- **S-5.** In WR-01 Step 1, explicitly trace `is_pdf` reachability after the consolidation:
-  ```
-  # Before edit: confirm there is no codepath in _open_local_browse_page where
-  # `is_pdf` is referenced but unbound (e.g., the old except-pass-no-assign branch).
-  # After edit: is_pdf is set on every branch (try-success or except).
-  ```
-  Add this as a `<verify>` step before the AST count, not after.
-
-- **S-6.** Plan 02 Task 2 (`test_discard_scope_clears_pending`): the comment in the test body says "interface contract confirmed in Plan 02's `<interfaces>` block". Consider promoting that contract into a one-line docstring on `PdfImageController.request()` itself if it isn't already, since the test is now load-bearing on that synchronous behavior.
-
-- **S-7.** Extend F-06 AST guard with a positive assertion too — not just that HTML/XLSX/CSV *don't* call the helpers, but that the new helpers are *only* called from `extract_pdf_pages`. Catches accidental future cross-wiring:
-  ```python
-  callers = {fn.name for fn in ast.walk(tree)
-             if isinstance(fn, ast.FunctionDef)
-             and any(_calls(fn, '_fix_sort_true_rtl_page'))}
-  assert callers <= {'extract_pdf_pages', '_fix_sort_true_rtl_page'}
-  ```
-
-- **S-8.** Add to Plan 01 Task 1a a fixture-line for a *mixed RTL/LTR* test case (even if it's a known-limitation case for the simple implementation): `test_sort_true_rtl_mixed_shelfmark_known_limitation` with a `pytest.xfail` reason citing C-1. This makes the residual explicit and lets the team upgrade S-1 later without scrambling.
-
-### 5. Risk Assessment
-
-**Overall risk: MEDIUM (lower bound LOW if S-1 is adopted; upper bound MEDIUM-HIGH if mixed-direction lines are common in the real Hebrew fixture).**
-
-Justification:
-- The fix is correctly scoped to a fallback branch that already represents degraded extraction, so the blast radius of any per-line reversal regression is bounded to PDFs that *were already extracting in single-word-per-line mode*. Professional RTL PDFs using the `blocks` path are not at risk.
-- The auto-reindex mechanism is well-designed, mirrors an established pattern (`_read_schema_marker`), and degrades safely on missing marker or empty DB.
-- The WR-01 / WR-02 / D-09 cleanups are small, well-isolated, and reviewed.
-- The single open risk concentration is **C-1 (mixed RTL/LTR mishandling)** + **C-5 (flake fix scope)**: both are correctness rather than safety issues, and both have clean mitigations (S-1, S-2). If the real Hebrew fixture in D-06 is pure-Hebrew prose, C-1's blast radius is zero; if it includes shelfmarks/folio numbers/inline sigla (likely, given the corpus), C-1 will produce visibly wrong text that users will report within the v7.15 release window.
-
-**Recommendation:** Adopt S-1 (directional-run reversal) OR explicitly document C-1 as a known-limitation in OPEN_ISSUES.md with a follow-up phase planted, AND adopt S-2 (autouse fixture for the flake). With those two changes, the plan becomes a clean LOW-risk pre-release polish phase.
-
----
-
-## Gemini Review
-
-*Skipped — Gemini API returned "invalid content after all retries" (model-routing failure). Claude was invoked as the user-pre-authorized fallback. Full Gemini error stack in `_tmp/gsd-review-gemini-101.err`.*
+**HIGH** until the S-1 algorithm/test mismatch, D-09 fixture flaw, no-op branch tests, and WR-01 assignment contradiction are corrected. The intended production changes are not inherently broad, but the current plans can produce green-looking execution while missing the core RTL fix and the batch-order flake.
 
 ---
 
 ## Consensus Summary
 
-Both reviewers rated the plan **MEDIUM overall risk** and agreed the architectural direction is sound. The disagreement is on **how much pre-execution work is warranted vs. landing-then-following-up**.
-
 ### Agreed Strengths
 
-- Override of `python-bidi` for pure-Python word-token reversal is the right call.
-- Scoping the fix to the `sort=True` fallback only (leaving `get_text("blocks")` untouched) is a correct safety boundary.
-- The `.extractor_version` marker + PDF-only WHERE filter is a pragmatic, low-risk auto-reindex mechanism.
-- The WR-01 single-lookup AST guard is stronger than a comment-based convention.
-- TDD discipline (Wave 0 RED → Wave 1 GREEN) and the F-06 invariant extension reflect mature plan hygiene.
-- The `depends_on: ["01"]` + `101-01-SUMMARY.md` existence check for the OPEN_ISSUES flip is well-considered sequencing.
+Both reviewers independently flagged the same positives:
 
-### Agreed Concerns (raised by both reviewers — highest priority)
+- The phase scope is tight and correctly chokepoints the RTL fix in `shared/local_indexer.py::extract_pdf_pages` (D-03).
+- Leaving the primary `get_text("blocks")` path untouched is the correct safety boundary.
+- The `AND status = 'committed' AND LOWER(COALESCE(file_extension, '')) = '.pdf'` filter on the version-bump UPDATE is the right default — error/failed/skipped rows are not revived.
+- The `BEGIN IMMEDIATE` transaction wrapping for the version-bump SQL is the right primitive for concurrent launches.
+- The decision to avoid `python-bidi` / character reversal is sound and well-defended.
 
-| Severity | Concern | Codex framing | Claude framing |
-|----------|---------|---------------|----------------|
-| **HIGH (consensus)** | **Mixed RTL/LTR lines silently mishandled by blunt token reversal.** Embedded shelfmarks (`T-S 12.123`), folio numbers, Latin sigla, page references, and Judeo-Arabic with Latin catalog references will have their internal LTR sub-order destroyed when the line's overall `_rtl_ratio > 0.4`. | MEDIUM — "fragile for mixed RTL/LTR runs" | HIGH C-1 — concrete failing examples |
-| **HIGH (consensus)** | **WR-01 changes exception-flow semantics.** The new code unconditionally sets `filepath=None`/`is_pdf=False` on lookup failure; the old code's `try/except: pass` left variables possibly unbound. Plan should explicitly verify downstream `is_pdf` / `filepath` consumers don't rely on the old behavior. | LOW/MEDIUM — "not exactly equivalent" | HIGH C-2 — recommends one-line reachability check |
-| **MEDIUM (consensus)** | **`_rtl_ratio > 0.4` gate has unverified borderline behavior.** No tests at `~0.39`/`~0.41`; bilingual headings, lines with many digits/sigla can flip the gate either way. | MEDIUM — "may false-negative … may false-positive" | MEDIUM C-7 — recommends boundary-case tests |
-| **MEDIUM (consensus)** | **D-09 flake fix is narrower than root cause.** Local-import-in-one-test patches only the named symptom; the underlying module-reload pollution affects every test in `test_local_indexer.py` under unfavorable collection orders. | LOW — "only if every reference uses freshly imported names" | MEDIUM C-5 — recommends conftest autouse fixture instead |
-| **MEDIUM (consensus)** | **`line.split()` whitespace normalization is a silent behavior change.** Tabs, double-spaces, leading/trailing whitespace are lost; piyyut/aligned-column layouts could degrade. Worth documenting as intentional or replacing with a separator-preserving tokenizer. | LOW/MEDIUM — "should treat as intentional tradeoff" | MEDIUM C-6 — recommends docstring + consider regex tokenizer |
-| **MEDIUM (consensus)** | **Tests don't prove `extract_pdf_pages` integration.** Helper unit tests + a skip-if-absent real fixture leave the branch wiring weakly covered. Recommend a monkeypatched `fitz.open` integration test. | MEDIUM — explicit | (implicit in Claude's broader validation framing) |
-| **LOW (consensus)** | **WR-01 AST guard is brittle.** Only catches `ast.Attribute(attr=...)` calls; misses `getattr` dynamic dispatch, doesn't verify the call is on `self`, doesn't enforce "no other `filepath =` reassignment". A textual grep belt-and-suspenders would help. | LOW — "useful but brittle" | LOW C-9 — same root, slightly different mitigation |
-| **LOW (consensus)** | **F-06 invariant framing.** The negative-only "HTML/XLSX/CSV must not call these helpers" should be paired with a positive-only "helpers called only from `extract_pdf_pages`" assertion, and the invariant rationale should be documented narrowly. | LOW — "could become overbroad future constraint" | LOW S-7 — concrete positive-assertion sketch |
+### Agreed Concerns (BLOCKING — both reviewers flagged at HIGH/MEDIUM)
 
-### Divergent Views (worth investigating)
+These four issues are called out independently by **both** Gemini and Codex and should be treated as must-fix before execution:
 
-- **Extractor-version SQL `status='committed'` filter (Codex HIGH, Claude silent).** Codex flags that the proposed UPDATE will flip `error`/`failed`/`skipped`/already-`pending` rows back to `pending` and revive known-bad PDFs each launch. The PLAN explicitly says "marks committed PDFs (and only PDFs) as 'pending'" in success criteria — so the SQL needs `AND status = 'committed'` to match the spec. **This is the most actionable single-line fix to the plan.** Claude did not raise it.
+1. **HIGH — Plan 02 WR-01 AST guard is contradictory with the proposed code.**
+   The `try / except Exception` block at `101-02-PLAN.md:136-140` produces TWO `filepath = ...` assignments. The AST reachability guard at `101-02-PLAN.md:164-170` asserts exactly ONE. Execution will fail at the verify step. Two remediation options:
+   - **Code change:** Use a temp `_resolved` variable inside the try/except and have exactly one `filepath = _resolved` assignment after.
+   - **Guard relaxation:** Count assignments only OUTSIDE try/except handlers, OR allow up to 2 if one is in an `ExceptHandler` body.
+   Either is fine; the plan must pick one and update both sides in lock-step.
 
-- **Fresh-install + concurrent-launch on extractor-version (Claude MEDIUM C-3 + C-4, Codex silent).** Claude flags that `_read_extractor_version` semantics on missing file and concurrent-launch races on the UPDATE + marker write are unspecified. Lightweight mitigations (try/except FileNotFoundError → None; `BEGIN IMMEDIATE` around UPDATE + marker write). Codex did not raise these.
+2. **HIGH — D-09 conftest reload fixture does not fix stale imported-name aliases.**
+   `tests/test_local_indexer.py` uses `from shared.local_indexer import LocalIndexer, EncodingError, extract_txt` at module level. `importlib.reload(shared.local_indexer)` rebinds the module's own globals but does NOT rebind the names in the importing test module's namespace. Codex's specific hazard scenario: old `extract_txt` (still holding the pre-reload `EncodingError` from `shared.local_indexer.__dict__`) can raise the NEW `EncodingError`, while `pytest.raises(EncodingError)` in the test still references the OLD class. Result: a `DID NOT RAISE` failure that this fixture cannot prevent.
+   Three remediation options (ranked by reviewer preference):
+   - **Codex's preferred:** Inside the autouse fixture, after `importlib.reload`, rebind the names on `request.module` (e.g. `request.module.LocalIndexer = shared.local_indexer.LocalIndexer`, same for `EncodingError`, `extract_txt`). This keeps the fix at the conftest level (USER-DEC-3) and is robust to any module that re-imports those names.
+   - **Gemini's preferred (and the `101-RESEARCH.md` "Simpler alternative"):** Local import inside `test_txt_undecodable_marked_encoding_error`. This abandons USER-DEC-3 (conftest-level fix).
+   - **Hybrid:** Conftest fixture that rebinds the three known aliases, plus an AST guard that asserts no NEW `from shared.local_indexer import` lands in test files without being added to the rebind list.
+   USER-DEC-3 explicitly locks the conftest-level fix, so option (i) is the path of least resistance and preserves the user's decision — but the plan body must spell out the rebind step.
 
-- **Mixed RTL/LTR severity (Claude HIGH C-1, Codex MEDIUM).** Both agree on the failure mode and direction; they disagree on whether it's a release blocker. Claude provides concrete failing examples from the GenizahSearch corpus (shelfmarks, folio numbers) and argues the residual is likely to produce user-visible regressions in v7.15. Codex frames it as an acceptable edge case to address with mixed-content test cases first.
+3. **MEDIUM — Log count semantics in the extractor-version bump.**
+   `pdf_rows_pending_count = ... SELECT COUNT(*) ... WHERE status = 'pending' ...` re-queries AFTER the UPDATE and counts all pending PDF rows. If even one PDF was already in `status='pending'` before the bump (a likely state after an interrupted scan), the log line "N committed PDF files marked for re-scan" overstates by however many were already pending. The fix both reviewers suggest is identical: use `cur = self._conn.execute(UPDATE...); pdf_rows_pending_count = cur.rowcount` and inline it inside the `with` block. The plan currently mentions this as an "alternatively you may" — promote it to the required form.
 
-- **D-09 fix mechanism.** Codex prefers `importlib.import_module("shared.local_indexer")` + dotted access (explicit, no `F811`). Claude prefers a `conftest.py` autouse fixture scoped to the file (more rigorous against future collection orders). Both are improvements over the current per-test local-import.
+4. **MEDIUM — WR-01 AST guard misses non-standard assignment forms.**
+   Both reviewers flagged the same gaps: `AnnAssign` (`filepath: str = ...`), `NamedExpr` / walrus (`filepath := ...`), tuple unpacking (`filepath, _ = ...`), and Codex adds `for filepath in ...` and `except ... as filepath`. The guard should iterate all of `ast.Assign`, `ast.AugAssign`, `ast.AnnAssign`, `ast.NamedExpr`, plus look at `ast.For.target`, `ast.ExceptHandler.name`, and unpacking inside `ast.Tuple` / `ast.List` targets.
 
-### Actionable Top 3 (consensus rank)
+### Codex-Only Concerns Worth Acting On (Gemini did not catch these)
 
-1. **Tighten the extractor-version SQL.** Add `AND status = 'committed'` to the UPDATE (Codex HIGH). One-line fix. Matches the plan's own success criterion.
-2. **Decide on mixed RTL/LTR handling before execution.** Either adopt the directional-run reversal in Claude S-1, or explicitly document the residual in `docs/OPEN_ISSUES.md` and add an xfail/limitation test (Claude S-8) so it's tracked. Both reviewers flag this as the highest correctness risk.
-3. **Broaden the D-09 fix.** Replace the per-test local import with either Codex's `importlib.import_module` pattern or Claude's `conftest.py` autouse fixture — both reviewers consider the per-test patch insufficient against future test-order changes.
+5. **HIGH — S-1 algorithm contradicts its own pure-RTL test.**
+   This is the most important catch in this round, **and Gemini missed it**. The implementation at `101-01-PLAN.md:607-651` groups consecutive same-direction tokens into runs, then reverses only the run sequence. For pure-RTL `"האישי בארכיונו עיור בעקבות"`, all four tokens form ONE run; reversed-run-list of a single run yields the same list; within-run order is preserved → **output equals input**. But `test_sort_true_rtl_pure_hebrew_word_order_fixed` (Task 1 acceptance) asserts `fixed.split() == list(reversed(wrong.split()))`. The test will FAIL against the spec'd helper.
+   Two remediation options:
+   - **(A) Reverse-within-RTL-runs:** Inside each RTL run, also reverse the token list before joining. This handles pure-RTL correctly AND preserves embedded LTR sub-order in mixed lines. Pseudocode: `return ' '.join(tok for is_rtl, run in reversed(runs) for tok in (run[::-1] if is_rtl else run))`.
+   - **(B) Singleton-RTL runs:** Treat each RTL token as its own run while grouping non-RTL tokens. This also reverses pure-RTL correctly but is harder to reason about for digit-interleaved cases.
+   The mixed-script tests (`test_sort_true_rtl_directional_runs_preserve_shelfmarks`, `test_sort_true_rtl_digits_run_with_hebrew`) happen to pass under the current implementation only because the runs alternate. **Recommend Option A** as the minimal, semantically clear fix; verify by re-deriving the expected output of all four behavioral tests.
 
-Secondary (worth doing): integration test that exercises the `extract_pdf_pages` `sort=True` branch via monkeypatched `fitz.open` (Codex); boundary tests at `_rtl_ratio` ≈ 0.39/0.41 (Claude C-7); WR-01 reachability check before the AST count (Claude S-5); positive-assertion in F-06 guard (Claude S-7).
+6. **HIGH — REV-2a branch-integration tests are scaffold-only.**
+   `test_extract_pdf_pages_applies_rtl_fix_in_sort_true_fallback` and `test_extract_pdf_pages_blocks_path_untouched` (Task 1, `101-01-PLAN.md:349-387`) have docstrings + comments but no actual assertions or fake-fixture code. They will collect and "pass" trivially, providing zero coverage of the branch-routing contract the rest of the round-1 review specifically demanded. Plan must inline the concrete `FakeFitz` / `FakeDoc` / `FakePage` scaffolding (or specify a `monkeypatch.setattr` pattern against the live `fitz` import in `shared.local_indexer`) and hard `assert text == ...` lines.
 
-To incorporate this feedback into planning:
+7. **MEDIUM — Extractor-version marker filesystem-write is OUTSIDE the SQLite transaction.**
+   Even with `BEGIN IMMEDIATE`, a crash between `_write_extractor_version` and the implicit `with self._conn:` COMMIT can split state. Codex's safer ordering: COMMIT first, write marker after. This makes a crash before the marker write an idempotent repeat next launch (UPDATE runs again, matches zero rows because everything is already `pending`, marker re-written). Plan should reorder.
 
-```bash
-/gsd-plan-phase 101 --reviews
-```
+8. **MEDIUM — WR-02 test uses `.get(key) is None`, which passes even if the dict retains `{"dialog": None}`.**
+   Code change is one-line at `101-02-PLAN.md:209-211`: `assert "dialog" not in ctrl._pending` instead of `assert ctrl._pending.get("dialog") is None`. This actually pins key absence as the regression-prevention contract claims.
+
+9. **MEDIUM — Boundary tests for `_rtl_ratio > 0.4` use ratios of 0.1 and 0.67, not values near 0.4.**
+   `test_sort_true_rtl_boundary_below_threshold_noop` and `test_sort_true_rtl_boundary_above_threshold_reverses` don't actually test the boundary. To catch threshold drift, pick candidate strings whose `_rtl_ratio` evaluates within ±0.05 of 0.4 (e.g. 0.38 below, 0.42 above). Add an assertion documenting the computed ratio so future maintainers see the proximity.
+
+10. **LOW — `xfail(strict=False)` on `test_sort_true_rtl_pathological_mixed_script` undercuts its stated intent.**
+    The docstring says XPASS should signal re-review, but `strict=False` lets CI go green when XPASS happens. Either set `strict=True` (XPASS becomes a failure forcing review) or remove the test entirely and document the limitation in a code comment instead.
+
+11. **LOW — Plan 02 Task 3 summary-file existence gate is brittle.**
+    `101-02-PLAN.md:250-254` blocks the OPEN_ISSUES.md flip on `101-01-SUMMARY.md` existing. If a partial / failed Plan 01 run produces the summary anyway (e.g. via `<output>` block), the gate would let Plan 02 mark the bug fixed. Either check the live test pass status (run a tiny pytest invocation as part of Task 3) or strengthen the gate to require BOTH the summary AND a specific assertion (e.g. `grep "_fix_sort_true_rtl_page" shared/local_indexer.py`).
+
+### Gemini-Only Concerns Worth Acting On
+
+12. **LOW — F-06 positive AST assertion allows empty `callers` set** (Codex also touched on this).
+    `test_sort_true_rtl_helpers_only_called_from_extract_pdf_pages` (Task 1, Plan 01) computes `callers <= allowed`. If the helper isn't called anywhere, `callers = set()`, which is `<= allowed`. The test passes whether the wiring exists or not. Tighten by requiring `extract_pdf_pages in callers` (positively prove wiring) AND `callers <= allowed` (negatively prove no rogue callers).
+
+### Cross-Reviewer Pre-Release Gate Reminder
+
+Both reviewers (Codex explicitly, Gemini implicitly via "Risk Assessment") agree the plans should **elevate `python -m ruff check .` to an explicit acceptance criterion**. Project memory (`feedback_pre_release_must_run_ruff.md`) notes a v7.12.0 CI failure caused by exactly this gap (18 F401 errors missed by a pre-flight that only ran pytest + check_docs). Plan 01 currently lists ruff only under `<verification>`; promote to `<acceptance_criteria>` on Task 2 (or add a Task 4) and Plan 02 Task 3.
+
+### Divergent Views
+
+There are no direct disagreements between Gemini and Codex on the substantive findings. Where they differ is **coverage**:
+
+- Gemini focused on the two issues most visible from static reading of the plan: the WR-01 AST contradiction and the D-09 reload semantic.
+- Codex went deeper, catching the S-1 algorithm/test contradiction (which would silently ship a no-op for pure-RTL lines — the primary use case), the no-op branch-integration tests, the FS-marker / SQLite atomicity gap, and the `.get() is None` test assertion bug.
+
+The S-1 algorithm/test contradiction (#5) is the single most important finding of this round and would have made it through execution unnoticed had Gemini reviewed alone. Treat Codex's deep-correctness pass as load-bearing for this re-plan.
+
+### Recommended Next Step
+
+Run `/gsd-plan-phase 101 --reviews` and address, at minimum, items #1–#6 (the consensus HIGH/MEDIUM blockers plus the two Codex-only HIGH items). Items #7–#12 are worth folding in opportunistically but do not block execution.
