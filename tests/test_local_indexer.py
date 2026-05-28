@@ -433,3 +433,119 @@ def test_file_id_populated_on_first_index(tmp_path, local_indexer_fixtures_dir):
             )
             found_real_file_id = True
     assert found_real_file_id, "No Tantivy hits exposed a parseable full_header"
+
+
+# ---------------------------------------------------------------------------
+# Phase 101 D-04 (USER-DEC-2): extractor-version bump tests
+# ---------------------------------------------------------------------------
+
+def test_extractor_version_bumps_only_committed_pdfs(tmp_path):
+    """USER-DEC-2 / Codex HIGH: AND status='committed' filter — error/failed/
+    skipped/already-pending PDF rows are NOT touched by the version bump;
+    non-PDF rows are also untouched.
+    """
+    from shared.local_indexer import LocalIndexer, _CURRENT_EXTRACTOR_VERSION
+
+    index_dir = str(tmp_path / "idx")
+    lab_dir = str(tmp_path / "lab")
+    db_path = str(tmp_path / "test.sqlite3")
+    os.makedirs(index_dir, exist_ok=True)
+    os.makedirs(lab_dir, exist_ok=True)
+
+    # First init seeds schema, .extractor_version, and DB tables.
+    indexer = LocalIndexer(index_dir, lab_dir, db_path)
+    indexer.close()
+
+    # Seed FIVE rows: committed PDF, error PDF, failed PDF, pending PDF,
+    # committed TXT. Match the live CREATE TABLE columns in init_sqlite():
+    #   local_files: file_id (autoincrement), sys_id, filepath, folder_id,
+    #     display_title, original_filename, file_extension, page_count,
+    #     file_size_bytes, extraction_status, last_indexed_at, sha256_full,
+    #     error_msg, pending_delete
+    #   processed_files: filepath (PK), mtime, size, sys_id, status,
+    #     scan_run_id, mtime_ns
+    conn = sqlite3.connect(db_path)
+    # Seed one folder row (folder_id NOT NULL in local_files).
+    conn.execute(
+        "INSERT INTO folders (path, added_at, status) VALUES (?, ?, 'active')",
+        ("/fake/folder", 0.0),
+    )
+    folder_id = conn.execute("SELECT folder_id FROM folders").fetchone()[0]
+
+    committed_pdf_sys_id = "97000000000000001"
+    error_pdf_sys_id = "97000000000000002"
+    failed_pdf_sys_id = "97000000000000003"
+    pending_pdf_sys_id = "97000000000000004"
+    committed_txt_sys_id = "97000000000000005"
+
+    def _insert(sys_id, filepath, ext, status):
+        conn.execute(
+            "INSERT INTO local_files (sys_id, filepath, folder_id, "
+            "display_title, original_filename, file_extension, "
+            "file_size_bytes, extraction_status, last_indexed_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (sys_id, filepath, folder_id, os.path.basename(filepath),
+             os.path.basename(filepath), ext, 0, "committed", 0.0),
+        )
+        conn.execute(
+            "INSERT INTO processed_files (filepath, mtime, size, sys_id, status) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (filepath, 0.0, 0, sys_id, status),
+        )
+
+    _insert(committed_pdf_sys_id, "/fake/folder/a.pdf", ".pdf", "committed")
+    _insert(error_pdf_sys_id,     "/fake/folder/b.pdf", ".pdf", "error")
+    _insert(failed_pdf_sys_id,    "/fake/folder/c.pdf", ".pdf", "failed")
+    _insert(pending_pdf_sys_id,   "/fake/folder/d.pdf", ".pdf", "pending")
+    _insert(committed_txt_sys_id, "/fake/folder/e.txt", ".txt", "committed")
+    conn.commit()
+    conn.close()
+
+    # Force stale extractor version.
+    with open(os.path.join(index_dir, ".extractor_version"), "w", encoding="utf-8") as f:
+        f.write("0")
+
+    indexer2 = LocalIndexer(index_dir, lab_dir, db_path)
+    indexer2.close()
+
+    conn = sqlite3.connect(db_path)
+    def status_of(sid):
+        return conn.execute(
+            "SELECT status FROM processed_files WHERE sys_id = ?", (sid,)
+        ).fetchone()[0]
+
+    # ONLY the committed PDF flipped to 'pending'.
+    assert status_of(committed_pdf_sys_id) == "pending"
+    # Error/failed/already-pending PDF rows untouched (NOT revived).
+    assert status_of(error_pdf_sys_id) == "error"
+    assert status_of(failed_pdf_sys_id) == "failed"
+    assert status_of(pending_pdf_sys_id) == "pending"   # was already pending, stays pending
+    # Non-PDF committed row untouched.
+    assert status_of(committed_txt_sys_id) == "committed"
+    conn.close()
+
+    # Marker was bumped to the current version.
+    marker_path = os.path.join(index_dir, ".extractor_version")
+    with open(marker_path, "r", encoding="utf-8") as f:
+        assert f.read().strip() == _CURRENT_EXTRACTOR_VERSION
+
+
+def test_extractor_version_fresh_install_writes_marker(tmp_path):
+    """Claude S-3 / C-3: fresh install (no .extractor_version, empty
+    processed_files) writes the marker on first init without crashing.
+    """
+    from shared.local_indexer import LocalIndexer, _CURRENT_EXTRACTOR_VERSION
+
+    index_dir = str(tmp_path / "idx")
+    lab_dir = str(tmp_path / "lab")
+    db_path = str(tmp_path / "test.sqlite3")
+    os.makedirs(index_dir, exist_ok=True)
+    os.makedirs(lab_dir, exist_ok=True)
+
+    indexer = LocalIndexer(index_dir, lab_dir, db_path)
+    indexer.close()
+
+    marker_path = os.path.join(index_dir, ".extractor_version")
+    assert os.path.isfile(marker_path), "fresh install must write .extractor_version"
+    with open(marker_path, "r", encoding="utf-8") as f:
+        assert f.read().strip() == _CURRENT_EXTRACTOR_VERSION

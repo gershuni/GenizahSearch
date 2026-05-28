@@ -11,8 +11,6 @@ import tantivy
 from shared.local_indexer import (
     LocalIndexer,
     build_local_schema,
-    _compute_schema_marker,
-    _read_schema_marker,
 )
 
 

@@ -303,6 +303,9 @@ class LocalIndexerError(RuntimeError):
 # Ported VERBATIM from seewald_addition/genizah_make_index.py:67-105.
 # These helpers are NEVER invoked in v1 runtime. They exist as a
 # regression-prevention contract for a future pdfplumber/pypdf fallback path.
+# NOTE: the LIVE Phase 101 RTL fix for PyMuPDF sort=True output lives in
+# _fix_sort_true_rtl_line / _fix_sort_true_rtl_page below — those use
+# DIRECTIONAL-RUN reversal, NOT the char-reversal these dead helpers do.
 # ---------------------------------------------------------------------------
 
 def _rtl_ratio(text: str) -> float:  # pragma: no cover
@@ -356,6 +359,84 @@ def _join_fragmented_lines(text: str) -> str:  # pragma: no cover
     if current:
         paragraphs.append(" ".join(current))
     return "\n\n".join(paragraphs)
+
+
+# ---------------------------------------------------------------------------
+# Phase 101: sort=True RTL word-order fix (LIVE — not dead code).
+# The dead-code _fix_rtl_* helpers above char-reverse pdfplumber output; the
+# live PDF path instead reverses WORD-TOKEN RUN ORDER for PyMuPDF sort=True
+# output (USER-DEC-1 / S-1: directional-run reversal).
+# ---------------------------------------------------------------------------
+
+def _fix_sort_true_rtl_line(line: str) -> str:
+    """Reverse word-token RUN ORDER for sort=True RTL fallback output (S-1, REVISED).
+
+    PyMuPDF get_text('text', sort=True) sorts words by ascending x-coordinate
+    (LTR visual order), which reverses Hebrew/Arabic reading order. This helper
+    groups consecutive tokens by predominant directionality (RTL vs non-RTL via
+    per-token _rtl_ratio > 0.4), then:
+      1. Reverses the SEQUENCE of runs (so a trailing-Hebrew → leading-Hebrew flip
+         happens at the line level).
+      2. Reverses tokens INSIDE each RTL run (so pure-RTL lines — which collapse
+         to a single RTL run — actually flip word order; this is the case Codex
+         REVIEWS round 2 HIGH #5 surfaced).
+      3. PRESERVES the internal order of non-RTL runs, so shelfmarks like
+         'T-S 12.123', folio numbers, inline Latin sigla, and date references
+         stay adjacent in their natural left-to-right sub-order.
+
+    Letters within each word are already in correct logical Unicode order and
+    must NOT be reversed (we reverse TOKENS, not characters).
+
+    No-op on lines with _rtl_ratio <= 0.4 (LTR/numeric/empty/mixed-LTR).
+
+    Whitespace normalization is intentional (REV-2e). Tokenizing via
+    line.split() collapses runs of whitespace and strips leading/trailing
+    whitespace; the resulting text uses single-space delimiters. This repairs
+    reading order for extracted plain text (which feeds search indexing), not
+    layout fidelity. PDFs with tab-separated columns or aligned poetry are
+    uncommon in the sort=True fallback branch (which is itself triggered only
+    by single-word-per-line pathological output), so this trade-off is
+    acceptable.
+    """
+    if _rtl_ratio(line) <= 0.4:
+        return line
+    tokens = line.split()
+    if len(tokens) <= 1:
+        return line
+    runs: list[tuple[bool, list[str]]] = []
+    current: list[str] = []
+    current_is_rtl: bool | None = None
+    for tok in tokens:
+        tok_is_rtl = _rtl_ratio(tok) > 0.4
+        if current_is_rtl is None or tok_is_rtl == current_is_rtl:
+            current.append(tok)
+            current_is_rtl = tok_is_rtl
+        else:
+            runs.append((current_is_rtl, current))
+            current = [tok]
+            current_is_rtl = tok_is_rtl
+    if current:
+        runs.append((current_is_rtl, current))
+    # Reverse the SEQUENCE of runs; within each RTL run also reverse tokens
+    # (so pure-RTL → single run → token reversal still flips word order).
+    # Non-RTL runs preserve internal order so embedded Latin shelfmarks /
+    # folio numbers / digit groups stay adjacent.
+    return ' '.join(
+        tok
+        for is_rtl, run in reversed(runs)
+        for tok in (list(reversed(run)) if is_rtl else run)
+    )
+
+
+def _fix_sort_true_rtl_page(text: str) -> str:
+    """Apply _fix_sort_true_rtl_line (directional-run reversal) to each line.
+
+    Joins per-line results with '\\n'. PyMuPDF get_text('text', sort=True)
+    always emits '\\n' line terminators on all platforms, so the join is
+    round-trip safe (REV-2f).
+    """
+    # REV-2f: '\n' is the canonical PyMuPDF line terminator — safe across OS.
+    return '\n'.join(_fix_sort_true_rtl_line(ln) for ln in text.splitlines())
 
 
 # ---------------------------------------------------------------------------
@@ -480,6 +561,39 @@ def _write_schema_marker(index_dir: str, marker: str) -> None:
     os.makedirs(index_dir, exist_ok=True)
     with open(os.path.join(index_dir, ".schema_version"), "w", encoding="utf-8") as f:
         f.write(marker)
+
+
+# ---------------------------------------------------------------------------
+# Phase 101 D-04: extractor version marker (detect extraction-logic changes,
+# trigger PDF re-scan — separate from schema_marker which tracks field changes).
+# ---------------------------------------------------------------------------
+_CURRENT_EXTRACTOR_VERSION = "2"   # Bump when PDF extraction logic changes.
+                                    # Phase 101: word-order RTL fix.
+_EXTRACTOR_VERSION_FILE = ".extractor_version"
+
+
+def _read_extractor_version(index_dir: str) -> str | None:
+    """Read the .extractor_version marker from index_dir.
+
+    Returns None if the file is absent (FileNotFoundError → None via the
+    os.path.isfile guard; missing-file path is the fresh-install case) or
+    if reading fails (defensive OSError catch).
+    """
+    p = os.path.join(index_dir, _EXTRACTOR_VERSION_FILE)
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def _write_extractor_version(index_dir: str, version: str) -> None:
+    """Write the .extractor_version marker file alongside the index dir."""
+    os.makedirs(index_dir, exist_ok=True)
+    with open(os.path.join(index_dir, _EXTRACTOR_VERSION_FILE), "w", encoding="utf-8") as f:
+        f.write(version)
 
 
 def build_local_lab_schema() -> tantivy.Schema:
@@ -708,7 +822,11 @@ def extract_pdf_pages(
                 try:
                     fallback_text = page.get_text("text", sort=True)
                     if fallback_text and fallback_text.strip():
-                        text = fallback_text
+                        # Phase 101 RTL fix (S-1 directional-run reversal):
+                        # sort=True gives LTR visual order, which reverses
+                        # Hebrew/Arabic reading order. Apply per-line
+                        # directional-run reversal for RTL-majority lines.
+                        text = _fix_sort_true_rtl_page(fallback_text)
                 except Exception:
                     # If the fallback itself errors, keep the blocks output —
                     # one-word-per-line is still better than no text at all.
@@ -1249,6 +1367,49 @@ class LocalIndexer:
 
         # Phase 97 C-02 — byte/count/time commit trigger (supersedes fixed 25-file batch)
         self._commit_triggers = _CommitTriggers()
+
+        # Phase 101 D-04 (USER-DEC-2 / Codex HIGH; revised per REVIEWS round 2
+        # MEDIUM #3 + #7): extractor version check — mark COMMITTED PDF rows
+        # for re-scan when extraction logic changes (e.g., RTL word-order fix).
+        # The AND status = 'committed' filter prevents reviving error/failed/
+        # skipped/already-pending rows. BEGIN IMMEDIATE serializes concurrent
+        # launches. COALESCE defends against NULL extensions.
+        #
+        # ROUND-2 #3: pdf_rows_pending_count is taken from cur.rowcount, the
+        # number of rows ACTUALLY flipped by THIS UPDATE — NOT a post-UPDATE
+        # SELECT COUNT(*) which would inflate the count when any PDF was
+        # already pending from an interrupted scan.
+        #
+        # ROUND-2 #7: the .extractor_version marker is written AFTER the
+        # SQLite transaction commits. Filesystem writes do not roll back with
+        # SQLite, so writing the marker inside `with self._conn:` would risk
+        # a stale-marker / unmarked-rows split if the process crashed between
+        # the FS write and the implicit COMMIT. Commit-first / marker-after
+        # means a crash before the marker write yields an idempotent repeat
+        # next launch (UPDATE re-runs, matches zero rows, marker re-written).
+        _actual_extractor_ver = _read_extractor_version(index_dir)
+        if _actual_extractor_ver != _CURRENT_EXTRACTOR_VERSION:
+            with self._conn:  # commits on exit / rolls back on exception
+                self._conn.execute("BEGIN IMMEDIATE")
+                cur = self._conn.execute(
+                    "UPDATE processed_files SET status = 'pending' "
+                    "WHERE status = 'committed' "
+                    "  AND sys_id IN ("
+                    "    SELECT sys_id FROM local_files "
+                    "    WHERE LOWER(COALESCE(file_extension, '')) = '.pdf'"
+                    "  )"
+                )
+                # rowcount captures exactly the rows this UPDATE flipped.
+                pdf_rows_pending_count = cur.rowcount
+            # Marker write AFTER the SQLite commit (round-2 #7). If the
+            # process dies here, the next launch's mismatch path re-runs
+            # the (now-idempotent) UPDATE and re-attempts the marker write.
+            _write_extractor_version(index_dir, _CURRENT_EXTRACTOR_VERSION)
+            logger.info(
+                "Phase 101: extractor version bumped to %s — %d committed PDF files marked for re-scan",
+                _CURRENT_EXTRACTOR_VERSION,
+                pdf_rows_pending_count,
+            )
 
         # HIGH-3 review fix: run pending-delete recovery at init
         recovered = self._recover_pending_deletes()

@@ -179,3 +179,46 @@ def _reset_nli_breaker_state():
         _reset_for_tests()
     except ImportError:
         pass
+
+
+# ---------------------------------------------------------------------------
+# Phase 101 D-09 (USER-DEC-3, REVISED per REVIEWS round 2 HIGH #2):
+# autouse fixture insulating tests/test_local_indexer.py from importlib.reload
+# pollution by sibling tests (test_mupdf_warnings_suppressed.py reloads
+# shared.local_indexer in 3 of its tests).
+#
+# THE STALE-ALIAS HAZARD: tests/test_local_indexer.py has module-level aliases:
+#   from shared.local_indexer import LocalIndexer, EncodingError, extract_txt
+# After a sibling test reloads shared.local_indexer, the module's __dict__ is
+# rebuilt with NEW class/function objects, but the names in
+# test_local_indexer.py's namespace still point to the OLD objects. The
+# specific failure mode (Codex round-2): old `extract_txt` (closed over old
+# globals) raises the NEW EncodingError, while `pytest.raises(EncodingError)`
+# at the test site still references the OLD class -- so pytest sees "DID NOT
+# RAISE expected exception".
+#
+# THE FIX IS TWO STEPS -- reloading the module is NOT ENOUGH:
+#   1. importlib.reload(shared.local_indexer)
+#   2. Rebind the imported names in the test module's namespace to the
+#      freshly-reloaded objects via request.module.<name>.
+#
+# Scoped to tests/test_local_indexer.py by request.node.fspath check so the
+# rest of the suite is unaffected.
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _refresh_local_indexer_for_local_indexer_tests(request):
+    """D-09 fix: reload shared.local_indexer AND rebind its imported aliases
+    in the test module's namespace before each test in tests/test_local_indexer.py.
+    """
+    if 'test_local_indexer.py' in str(request.node.fspath):
+        import importlib
+        import shared.local_indexer
+        importlib.reload(shared.local_indexer)
+        # Rebind the names test_local_indexer.py imports at module level so
+        # `pytest.raises(EncodingError)` etc. reference the SAME objects the
+        # reloaded module's functions now raise / construct.
+        _imported_names = ('LocalIndexer', 'EncodingError', 'extract_txt')
+        for _name in _imported_names:
+            if hasattr(shared.local_indexer, _name) and hasattr(request.module, _name):
+                setattr(request.module, _name, getattr(shared.local_indexer, _name))
+    yield

@@ -13,7 +13,6 @@ inside _on_cancel_clicked, only inside the deferred finished-signal slot.
 Debug session: `.planning/debug/phase-97-freeze-winerror-3.md`.
 """
 import ast
-import os
 import pathlib
 
 

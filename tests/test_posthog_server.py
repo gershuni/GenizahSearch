@@ -9,7 +9,6 @@ thread will try to POST but POSTHOG_API_KEY is empty in test environment,
 so requests are skipped silently (per drain loop body).
 """
 
-import os
 import pathlib
 import queue
 import threading
