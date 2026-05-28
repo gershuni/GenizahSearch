@@ -1,16 +1,32 @@
 ---
 phase: 101-local-pdf-text-extraction-rtl-fix-and-phase-100-remnant-clea
 plan: 01
-status: complete
+status: complete-with-rollback
 completed: 2026-05-28
+rolled_back: 2026-05-28
 requirements:
   - D-01
   - D-03
-  - D-04
   - D-05
   - D-06
   - D-09
+deferred:
+  - D-04
 ---
+
+> **POST-UAT ROLLBACK (2026-05-28):** D-04 (auto-self-heal on launch via
+> `_CURRENT_EXTRACTOR_VERSION` marker + bulk UPDATE in `LocalIndexer.__init__`)
+> was rolled back same day after Hillel's UAT exposed that the mechanism
+> weaponizes `startup_recovery()` Pass B (synchronous UI-thread re-extraction)
+> on a 12,513-PDF library — app launch froze, killed after 60s. SQL one-shot
+> restored Hillel's DB (12,513 PDF rows pending → committed; backup at
+> `local_index.sqlite3.phase101-bumped.bak`); the extractor-version code path
+> + 2 corresponding tests were removed (commit `c771afd2`). The RTL fix in
+> `extract_pdf_pages` is intact for all new scans. Existing libraries need
+> manual Reset My Library + re-scan via `LocalIndexerWorker` background
+> thread. Details: `docs/OPEN_ISSUES.md` row "Phase 101 D-04 rollback".
+> Sections below describe what was BUILT; the rollback removed only the
+> extractor-version pieces and kept the RTL helpers + tests intact.
 
 ## Plan 101-01 — LOCAL PDF RTL text-extraction fix + extractor-version self-heal + D-09 conftest fix
 
