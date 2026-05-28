@@ -1431,13 +1431,52 @@ class LocalIndexer:
         ).fetchall()
         count = 0
         for f in files:
-            self._delete_file(f["sys_id"], f["filepath"])
+            # commit=False: defer the Tantivy commit until ALL deletes are queued,
+            # then do ONE retry-protected commit below. Per-file commits on a
+            # bulk delete fight with the live LOCAL searcher's handle on Windows
+            # (os error 5) — used to log hundreds of warnings + freeze the UI.
+            self._delete_file(f["sys_id"], f["filepath"], commit=False)
             count += 1
-        # Commit Tantivy
-        try:
-            self._ensure_writer().commit()
-        except Exception as exc:
-            logger.warning("remove_folder: Tantivy commit failed: %s", exc)
+        # Single retry-protected commit for the entire batch.
+        commit_succeeded = False
+        if files:
+            self._ensure_writer()
+            try:
+                self._commit_writer_with_retry()
+                commit_succeeded = True
+            except Exception as exc:
+                logger.warning(
+                    "remove_folder: Tantivy commit failed after retries: %s — "
+                    "pending_delete rows will be retried by _recover_pending_deletes "
+                    "on next launch", exc,
+                )
+        # Step 3 batched cleanup (only if Tantivy commit succeeded). We do this
+        # inline rather than calling _recover_pending_deletes() because that
+        # helper commits per-row, re-introducing the contention we just avoided.
+        if commit_succeeded:
+            try:
+                self._conn.execute(
+                    "DELETE FROM local_pages WHERE sys_id IN ("
+                    "  SELECT sys_id FROM local_files WHERE folder_id = ?"
+                    ")",
+                    (folder_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM processed_files WHERE sys_id IN ("
+                    "  SELECT sys_id FROM local_files WHERE folder_id = ?"
+                    ")",
+                    (folder_id,),
+                )
+                self._conn.execute(
+                    "DELETE FROM local_files WHERE folder_id = ?", (folder_id,)
+                )
+                self._conn.commit()
+            except Exception as exc:
+                logger.warning(
+                    "remove_folder: SQLite batch cleanup failed: %s — recovery "
+                    "will complete on next launch via _recover_pending_deletes",
+                    exc,
+                )
         # Delete folder row
         self._conn.execute("DELETE FROM folders WHERE folder_id = ?", (folder_id,))
         self._conn.commit()
@@ -2563,32 +2602,48 @@ class LocalIndexer:
     # Delete (HIGH-3 three-step crash-safe protocol)
     # ------------------------------------------------------------------
 
-    def _delete_file(self, sys_id: str, filepath: str) -> None:
+    def _delete_file(self, sys_id: str, filepath: str, *, commit: bool = True) -> None:
         """Crash-safe three-step delete (HIGH-3 review fix).
 
         Step 1: Mark pending_delete=1 in SQLite (durable; recovery picks this up).
-        Step 2: Tantivy delete-by-uid + commit.
-        Step 3: SQLite final cleanup.
+        Step 2: Tantivy delete-by-uid + commit (if commit=True).
+        Step 3: SQLite final cleanup (only when the Tantivy commit actually ran).
 
         If crash between step 1 and step 2: _recover_pending_deletes() replays steps 2-3.
         If crash between step 2 and step 3: _recover_pending_deletes() re-runs step 2
                                              (idempotent) then step 3.
+
+        Set commit=False when bulk-deleting (e.g. folder removal) — the caller
+        owns one final retry-protected commit + a single _recover_pending_deletes()
+        sweep to do Step 3 for the whole batch. This prevents N per-file Tantivy
+        commits from fighting with the live LOCAL searcher on Windows
+        (os error 5 — ERROR_ACCESS_DENIED), which on a folder of hundreds of
+        files used to hang the UI for minutes with one warning per file.
         """
-        # Step 1: Mark pending_delete
+        # Step 1: Mark pending_delete (durable; survives across launches)
         self._conn.execute(
             "UPDATE local_files SET pending_delete = 1 WHERE sys_id = ?", (sys_id,)
         )
         self._conn.commit()
 
-        # Step 2: Tantivy delete-by-uid
+        # Step 2: Tantivy delete-by-uid (queue)
         uid_rows = self._conn.execute(
             "SELECT uid FROM local_pages WHERE sys_id = ?", (sys_id,)
         ).fetchall()
+        self._ensure_writer()  # populate self._writer for _commit_writer_with_retry
         for uid_row in uid_rows:
             uid = uid_row["uid"]
-            self._ensure_writer().delete_documents("unique_id", uid)
+            self._writer.delete_documents("unique_id", uid)
+
+        if not commit:
+            # Caller owns the batched commit + Step 3 sweep via _recover_pending_deletes
+            return
+
         try:
-            self._ensure_writer().commit()
+            # Use the retry helper (250ms / 1s / 2s backoff) so transient Windows
+            # access-denied errors from live-reader contention don't fail the
+            # per-file path (single-file delete from scan_all / index_one_file).
+            self._commit_writer_with_retry()
         except Exception as exc:
             logger.warning(
                 "_delete_file: Tantivy commit failed for sys_id=%s: %s", sys_id, exc
