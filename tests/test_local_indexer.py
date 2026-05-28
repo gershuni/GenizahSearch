@@ -444,3 +444,92 @@ def test_file_id_populated_on_first_index(tmp_path, local_indexer_fixtures_dir):
 # with the production code. RTL fix in extract_pdf_pages is unaffected;
 # existing libraries need manual Reset + re-scan to pick it up.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# 2026-05-28 — Re-index All button (manual D-04 successor).
+# Backs the My Library "Re-index All" UI button. Flips only 'committed' rows
+# to 'pending' so the next scan_all() re-extracts them via the background
+# worker (no startup_recovery freeze). Other statuses left untouched.
+# ---------------------------------------------------------------------------
+
+
+def _make_bare_indexer_local(tmp_path):
+    from shared.local_indexer import LocalIndexer
+    index_dir = str(tmp_path / "idx")
+    lab_dir = str(tmp_path / "lab")
+    db_path = str(tmp_path / "test.sqlite3")
+    os.makedirs(index_dir, exist_ok=True)
+    os.makedirs(lab_dir, exist_ok=True)
+    return LocalIndexer(index_dir, lab_dir, db_path)
+
+
+def test_mark_all_pending_for_reindex_flips_only_committed(tmp_path):
+    """Only rows with status='committed' get flipped to 'pending'.
+    Other statuses ('error', 'oversized', 'encoding_error', 'no_text_layer',
+    'pending', 'zip_bomb_suspected', 'unsupported') are left untouched.
+    """
+    indexer = _make_bare_indexer_local(tmp_path)
+    rows = [
+        ("/fake/a.pdf",      "committed"),
+        ("/fake/b.pdf",      "committed"),
+        ("/fake/c.pdf",      "committed"),
+        ("/fake/d.docx",     "error"),
+        ("/fake/e.txt",      "encoding_error"),
+        ("/fake/f.pdf",      "oversized"),
+        ("/fake/g.docx",     "zip_bomb_suspected"),
+        ("/fake/h.html",     "no_text_layer"),
+        ("/fake/i.pdf",      "pending"),
+        ("/fake/j.bin",      "unsupported"),
+    ]
+    for path, status in rows:
+        indexer._conn.execute(
+            "INSERT INTO processed_files (filepath, status) VALUES (?, ?)",
+            (path, status),
+        )
+    indexer._conn.commit()
+
+    affected = indexer.mark_all_pending_for_reindex()
+    assert affected == 3, f"only the 3 committed rows should flip; got {affected}"
+
+    status_by_path = {
+        row[0]: row[1]
+        for row in indexer._conn.execute(
+            "SELECT filepath, status FROM processed_files"
+        ).fetchall()
+    }
+    assert status_by_path["/fake/a.pdf"] == "pending"
+    assert status_by_path["/fake/b.pdf"] == "pending"
+    assert status_by_path["/fake/c.pdf"] == "pending"
+    assert status_by_path["/fake/d.docx"] == "error"
+    assert status_by_path["/fake/e.txt"] == "encoding_error"
+    assert status_by_path["/fake/f.pdf"] == "oversized"
+    assert status_by_path["/fake/g.docx"] == "zip_bomb_suspected"
+    assert status_by_path["/fake/h.html"] == "no_text_layer"
+    assert status_by_path["/fake/i.pdf"] == "pending"  # was already pending
+    assert status_by_path["/fake/j.bin"] == "unsupported"
+
+
+def test_mark_all_pending_for_reindex_empty_library(tmp_path):
+    """Returns 0 when the library has no committed rows."""
+    indexer = _make_bare_indexer_local(tmp_path)
+    assert indexer.mark_all_pending_for_reindex() == 0
+    # Still 0 even after inserting non-committed rows
+    indexer._conn.execute(
+        "INSERT INTO processed_files (filepath, status) VALUES (?, ?)",
+        ("/fake/a.pdf", "error"),
+    )
+    indexer._conn.commit()
+    assert indexer.mark_all_pending_for_reindex() == 0
+
+
+def test_mark_all_pending_for_reindex_is_idempotent(tmp_path):
+    """Calling twice in a row: first flips N rows, second flips 0 (all already pending)."""
+    indexer = _make_bare_indexer_local(tmp_path)
+    indexer._conn.execute(
+        "INSERT INTO processed_files (filepath, status) VALUES (?, ?)",
+        ("/fake/a.pdf", "committed"),
+    )
+    indexer._conn.commit()
+    assert indexer.mark_all_pending_for_reindex() == 1
+    assert indexer.mark_all_pending_for_reindex() == 0

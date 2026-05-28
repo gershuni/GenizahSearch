@@ -1141,6 +1141,14 @@ class MyLibraryTab(QWidget):
         self._btn_cancel.clicked.connect(self._on_cancel_clicked)
         refresh_row.addWidget(self._btn_refresh)
         refresh_row.addWidget(self._btn_cancel)
+        # 2026-05-28 — Re-index All: force re-extraction of every committed
+        # file. Goes through the normal background worker so progress + cancel
+        # work the same as Refresh. Used to pick up extractor improvements
+        # (RTL fix, intra-block newline collapse) without a full Reset.
+        self._btn_reindex_all = QPushButton(tr("Re-index All"))
+        self._btn_reindex_all.setToolTip(tr("Force re-extraction of every indexed file"))
+        self._btn_reindex_all.clicked.connect(self._on_reindex_all_clicked)
+        refresh_row.addWidget(self._btn_reindex_all)
         refresh_row.addStretch()
         # Phase 97.2 R97.2-E — Reset My Library destructive action (right end).
         # Button starts DISABLED (REVIEWS Codex MEDIUM proactive button state);
@@ -1432,6 +1440,7 @@ class MyLibraryTab(QWidget):
         self._btn_refresh.setEnabled(False)
         self._btn_add.setEnabled(False)
         self._btn_remove.setEnabled(False)
+        self._btn_reindex_all.setEnabled(False)
         self._btn_cancel.setEnabled(True)
         # Phase 97.3 R97.3-E (D-06): indeterminate "busy" mode during enumeration.
         # Reset to determinate (0, 100) on first progress_updated signal.
@@ -1480,6 +1489,7 @@ class MyLibraryTab(QWidget):
         self._btn_refresh.setEnabled(True)
         self._btn_add.setEnabled(True)
         self._btn_remove.setEnabled(True)
+        self._btn_reindex_all.setEnabled(True)
         self._btn_cancel.setEnabled(False)
         self._worker = None
         # Phase 97.2 R97.2-E — re-enable Reset now that scan is done (subject
@@ -1623,6 +1633,7 @@ class MyLibraryTab(QWidget):
         self._btn_refresh.setEnabled(True)
         self._btn_add.setEnabled(True)
         self._btn_remove.setEnabled(True)
+        self._btn_reindex_all.setEnabled(True)
         self._btn_cancel.setEnabled(False)
         self._worker = None
         self._indexer_mutex.unlock()
@@ -2038,6 +2049,53 @@ class MyLibraryTab(QWidget):
                 "MyLibraryTab._on_refresh_clicked: ceiling check failed (%s); "
                 "proceeding with Refresh anyway", exc
             )
+        self._start_worker(toast_on_complete=False)
+
+    def _on_reindex_all_clicked(self) -> None:
+        """Force-re-extract every committed file via the background worker.
+
+        Flips all processed_files rows with status='committed' to 'pending'
+        (so they miss scan_all's cache-hit branch and get re-extracted), then
+        kicks off the normal worker. Cancellable + progress-tracked like
+        any Refresh.
+
+        Critical: does NOT run synchronously and does NOT touch
+        startup_recovery — Phase 101 D-04 rollback established that flipping
+        12K rows on the UI thread freezes app launch for hours. Here the
+        re-extraction happens on the worker QThread.
+        """
+        if self._indexer is None:
+            return
+        try:
+            mb = QMessageBox(self)
+            mb.setIcon(QMessageBox.Icon.Question)
+            mb.setWindowTitle(tr("Confirm re-index"))
+            mb.setText(tr(
+                "Re-extract all indexed files? This may take a while on large libraries."
+            ))
+            mb.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            mb.setDefaultButton(QMessageBox.StandardButton.No)
+            if mb.exec() != QMessageBox.StandardButton.Yes:
+                return
+            affected = self._indexer.mark_all_pending_for_reindex()
+            if affected == 0:
+                QMessageBox.information(
+                    self,
+                    tr("Confirm re-index"),
+                    tr("Nothing to re-index"),
+                )
+                return
+            logger.info(
+                "MyLibraryTab._on_reindex_all_clicked: flipped %d committed rows to pending",
+                affected,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception(
+                "MyLibraryTab._on_reindex_all_clicked: flip-to-pending failed: %s", exc
+            )
+            return
         self._start_worker(toast_on_complete=False)
 
     def _on_cancel_clicked(self) -> None:

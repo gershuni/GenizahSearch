@@ -3263,6 +3263,15 @@ TRANSLATIONS = {
     "Reset My Library": "אפס ספריה שלי",
     "Stop or resolve the active scan first": "עצור או פתור את הסריקה הפעילה תחילה",
     "Delete all LOCAL index data and start fresh": "מחק את כל המידע של ספריה שלי והתחל מחדש",
+    # 2026-05-28 — "Re-index All" forces re-extraction of every committed file
+    # to pick up extractor improvements (e.g. RTL word-order + intra-block
+    # newline collapse fixes shipped in Phase 101). Goes through the normal
+    # background worker so it stays cancellable and progress-tracked.
+    "Re-index All": "אנדקס מחדש הכל",
+    "Re-extract all indexed files? This may take a while on large libraries.": "לאנדקס מחדש את כל הקבצים? פעולה זו עלולה לקחת זמן רב בספריות גדולות.",
+    "Confirm re-index": "אישור אינדוקס מחדש",
+    "Nothing to re-index": "אין מה לאנדקס מחדש",
+    "Force re-extraction of every indexed file": "כפה אינדוקס מחדש של כל הקבצים",
 }
 
 # Hebrew library display names (keyed by library_code)

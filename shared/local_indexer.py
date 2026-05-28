@@ -1629,6 +1629,38 @@ class LocalIndexer:
         return [r["path"] for r in rows]
 
     # ------------------------------------------------------------------
+    # 2026-05-28 — force-re-extract: flip committed rows to 'pending' so the
+    # next scan_all() re-runs extraction. Used by the My Library "Re-index
+    # All" button to recover existing libraries after extractor improvements
+    # (RTL word-order, intra-block newline collapse, etc.).
+    #
+    # Important: this writes to SQLite only. The actual re-extraction MUST
+    # happen via the background LocalIndexerWorker (scan_all on a QThread) —
+    # NOT via startup_recovery() on the UI thread (cf. Phase 101 D-04
+    # rollback: 12K rows in Pass B froze app launch for hours).
+    # ------------------------------------------------------------------
+
+    def mark_all_pending_for_reindex(self) -> int:
+        """Flip every 'committed' row in processed_files to 'pending'.
+
+        Other statuses ('error', 'oversized', 'zip_bomb_suspected',
+        'encoding_error', 'no_text_layer', 'unsupported', 'pending') are left
+        untouched — they have their own lifecycle and re-extracting them now
+        would either fail again or fight the file-size/zip-bomb guards.
+
+        Returns the number of rows flipped. Caller should follow up with a
+        normal scan_all() run via the worker; rows in 'pending' miss the
+        cache-hit branch in scan_all() and get re-extracted.
+        """
+        cur = self._conn.execute(
+            "UPDATE processed_files SET status = 'pending' "
+            "WHERE status = 'committed'"
+        )
+        affected = cur.rowcount
+        self._conn.commit()
+        return affected
+
+    # ------------------------------------------------------------------
     # Scan
     # ------------------------------------------------------------------
 
