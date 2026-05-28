@@ -3647,6 +3647,15 @@ class LocalIndexer:
         writer.delete_all_documents()
 
         rows_written = 0
+        # Defensive: a broken callback (e.g. AttributeError on every row) used
+        # to spam ~1.9M log lines on a 12K-PDF library and freeze the UI's
+        # stderr handler. Bail out after a small fixed number of consecutive
+        # failures, log ONCE with the failure type, and let the existing
+        # `rows_written == 0 and expected_rows > 0` rollback fire below so
+        # the prior LAB index + .meta.json stay intact.
+        _FAILURE_BAIL_THRESHOLD = 5
+        consecutive_failures = 0
+        first_failure_exc = None
         for sys_id, uid, page_num, file_id, content in self._iterate_lab_source_rows():
             try:
                 fingerprint_dyn = fingerprint_dyn_fn(content, dynamic_rank_map)
@@ -3666,10 +3675,24 @@ class LocalIndexer:
                 )
                 writer.add_document(doc)
                 rows_written += 1
+                consecutive_failures = 0
             except Exception as exc:
-                logger.warning(
-                    "build_lab_side_index: failed to write uid %s: %r — skipping", uid, exc
-                )
+                if first_failure_exc is None:
+                    first_failure_exc = exc
+                consecutive_failures += 1
+                if consecutive_failures <= _FAILURE_BAIL_THRESHOLD:
+                    logger.warning(
+                        "build_lab_side_index: failed to write uid %s: %r — skipping",
+                        uid, exc,
+                    )
+                if consecutive_failures >= _FAILURE_BAIL_THRESHOLD and rows_written == 0:
+                    logger.error(
+                        "build_lab_side_index: %d consecutive row failures with 0 successes "
+                        "(first exception: %r) — bailing to avoid log spam; LAB rebuild aborted "
+                        "and prior LAB index will be left intact",
+                        consecutive_failures, first_failure_exc,
+                    )
+                    break
 
         # Partial-publish guard: delete_all_documents() above already queued a wipe.
         # If the main LOCAL Tantivy source could not be opened/read,
