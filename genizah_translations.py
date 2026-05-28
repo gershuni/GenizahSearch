@@ -3229,6 +3229,7 @@ TRANSLATIONS = {
     "This folder is already registered.": "תיקייה זו כבר רשומה.",
     "My Library Error": "שגיאה בספרייה שלי",
     "Remove folder": "הסר תיקייה",
+    "Remove '{}' from My Library?\n\nAll indexed files from this folder will be removed from search results.": "להסיר את '{}' מהספרייה שלי?\n\nכל הקבצים שאינדוקסו בתיקייה זו יוסרו מתוצאות החיפוש.",
     "Remove failed": "ההסרה נכשלה",
     "Add folder — pre-scan": "הוסף תיקייה — סריקה מוקדמת",
     "Refresh — pre-scan": "רענן — סריקה מוקדמת",

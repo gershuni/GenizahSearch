@@ -1989,10 +1989,7 @@ class MyLibraryTab(QWidget):
         reply = QMessageBox.question(
             self,
             tr("Remove folder"),
-            tr(
-                f"Remove '{folder_path}' from My Library?\n\n"
-                "All indexed files from this folder will be removed from search results."
-            ),
+            tr("Remove '{}' from My Library?\n\nAll indexed files from this folder will be removed from search results.").format(folder_path),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
