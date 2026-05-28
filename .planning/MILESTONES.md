@@ -1,5 +1,21 @@
 # Project Milestones: GenizahSearch
 
+## v7.15 My Library Visual (Shipped: 2026-05-28)
+
+**Phases completed:** 3 phases (99, 100, 101), 7 plans, 8 tasks
+**Scope:** Desktop-only; PDFs only (other LOCAL formats stay text-only)
+**Timeline:** 2026-05-27 → 2026-05-28 (2 days)
+
+**Key accomplishments:**
+
+- **Phase 99: PDF Page Renderer** — Shared on-demand PyMuPDF page renderer in `desktop/pdf_image_controller.py` with bounded LRU of open `fitz.Document` handles, off-thread `ImageLoaderThread`-style worker, and graceful failure (placeholder + log on missing/corrupt/out-of-range/encrypted PDFs). No on-disk image cache; only currently-displayed pages live in memory.
+- **Phase 100: LOCAL PDF Image in ResultDialog + Browse** — Wired the renderer into both desktop surfaces. `ResultDialog` shows the rendered page image next to extracted text and re-renders on prev/next result. Browse panel shows the image in the previously-hidden image pane and syncs prev/next page with the text. Non-PDF LOCAL files (`.docx`/`.html`/`.xlsx`/`.csv`/`.txt`) stay text-only — image pane gated on file extension.
+- **Phase 101: Pre-release polish** — Wave 1 fixed LOCAL PDF RTL/bidi word-order reversal via S-1 directional-run reversal helpers in `shared/local_indexer.py::extract_pdf_pages` (gated on `_rtl_ratio > 0.4`; embedded Latin shelfmarks like `T-S 12.123` stay adjacent). D-04 auto-self-heal-on-launch ROLLED BACK post-UAT — froze 12K-PDF library; existing libraries need manual recovery. Wave 2 closed Phase 100 review remnants (WR-01 single-lookup collapse, WR-02 discard_scope test). UAT-driven follow-ons: LAB rebuild 5-failure bail + pre-flight callback probe; remove-folder batched commit + retry (was triggering ERROR_ACCESS_DENIED storm on Windows); i18n leak in remove-folder dialog; intra-block newline collapse in PDF extraction (joined bidi-fragmented Hebrew paragraphs into continuous prose); new "Re-index All" button in My Library tab to force re-extraction via the background worker (recovers existing libraries after the RTL + reflow fixes).
+
+**Known deferred items at close:** 100 historical backlog items (40 debug sessions, 53 quick tasks, 5 todos, 1 UAT gap, 1 unimplemented seed) — same set as the v7.14 close. NEW deferred: D-F12 (regular Search ~constant 8s wall-clock investigation) logged in `docs/OPEN_ISSUES.md` as v7.16+ work.
+
+---
+
 ## v7.14 My Library — Local Document Search (Shipped: 2026-05-24; closed 2026-05-27)
 
 **Phases completed:** 6 phases (95, 96, 97, 97.2 INSERTED, 97.3 INSERTED, 98), 37 plans

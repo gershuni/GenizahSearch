@@ -8,20 +8,15 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v7.15 My Library Visual
+## Current State (v7.15 My Library Visual shipped + closed 2026-05-28)
 
-**Goal:** Show the source PDF *page image* alongside extracted text for LOCAL ("My Library") results in the desktop app — closing deferred item D-F3.
-
-**Target features:**
-- Shared on-demand PyMuPDF page renderer (`fitz` → QImage), single page at a time, off the UI thread, with a bounded LRU of open documents and no on-disk image cache
-- PDF page image shown in the desktop **ResultDialog** for LOCAL hits (currently text-only), updating on result navigation
-- PDF page image shown in the desktop **Browse** panel for LOCAL hits (image pane currently hidden), tracking prev/next page navigation
-- Non-PDF LOCAL files (`.docx`/`.html`/`.xlsx`/`.csv`/`.txt`) stay text-only; corrupt/encrypted/missing PDFs degrade gracefully
-
-**Key context:**
-- **Desktop-only** — web "My Library" does not exist, so the dual-app maintenance rule does not apply to this milestone.
-- **Scale is a non-issue:** rendering is lazy/on-demand per viewed page; the 10K×500-page corpus is never pre-rendered. `sys_id`+`page_num` already flow to the UI; filepath via `get_filepath(sys_id)`. Reuses the proven `ImageLoaderThread` QThread pattern.
-- **D-F2 (PDF OCR for image-only scanned PDFs)** explicitly deferred — possible follow-up phase within this milestone later.
+**Shipped + closed:** v7.15 My Library Visual (closed 2026-05-28)
+- 3 phases (99 PDF Page Renderer + 100 LOCAL PDF Image in ResultDialog + Browse + 101 RTL/reflow polish), 7 plans, 6/6 PDFIMG-* requirements. Desktop-only — web "My Library" does not exist.
+- **Phase 99:** Shared on-demand `desktop/pdf_image_controller.py` renderer + `PdfRenderWorker` long-lived QThread; bounded LRU of open `fitz.Document` handles; no on-disk image cache; render failures (missing/corrupt/encrypted/out-of-range) return graceful placeholder + log entry instead of UI hang.
+- **Phase 100:** Wired the renderer into both desktop surfaces. `ResultDialog` shows the rendered page image alongside extracted text and re-renders on result navigation. Browse panel reveals the previously-hidden image pane and syncs prev/next page with the text. Non-PDF LOCAL files (`.docx`/`.html`/`.xlsx`/`.csv`/`.txt`) stay text-only — image pane gated on file extension. `PdfImageController` does token + latest-wins + 150ms debounce + 8s watchdog.
+- **Phase 101 (pre-release polish):** S-1 directional-run RTL/bidi word-order reversal in `shared/local_indexer.py::extract_pdf_pages` (gated on `_rtl_ratio > 0.4`; Latin shelfmarks like `T-S 12.123` stay adjacent). D-04 auto-self-heal ROLLED BACK post-UAT (12K-PDF library froze launch). UAT-driven follow-ons: intra-block newline collapse (joined bidi-fragmented Hebrew paragraphs into continuous prose); LAB rebuild 5-failure bail + pre-flight callback probe (silenced 1.9M-warning log storm + 10s freeze); remove-folder batched commit + retry (closed Windows ERROR_ACCESS_DENIED storm); i18n leak in remove-folder dialog; new **"Re-index All"** button to force re-extraction via the background worker (recovers existing libraries after the RTL + reflow fixes).
+- **D-F12 deferred (new):** Regular Search ~constant 8s wall-clock investigation — profile-first approach planned for v7.16+.
+- Tagged `v7.15.0` via `/release` (deferred to release pipeline).
 
 ## Current State (v7.14 My Library shipped + closed 2026-05-27)
 
@@ -401,6 +396,6 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-27 — Phase 99 (PDF Page Renderer) complete: `desktop/pdf_page_renderer.py` ships the on-demand single-page PyMuPDF→QImage render core, bounded `DocLRU`, classified `PdfRenderFailure`, and off-thread `PdfRenderWorker(QThread)` with tokenized signals (19 tests, verifier 9/9). PDFIMG-01/02 validated; PDFIMG-06 renderer half validated (UI placeholder → Phase 100). Next: Phase 100 wires the renderer into ResultDialog + Browse.*
+*Last updated: 2026-05-28 — v7.15 milestone CLOSED (3 phases, 7 plans, 6/6 PDFIMG-* requirements). PDF page image rendering wired into ResultDialog + Browse (Phases 99-100) plus pre-release polish (Phase 101: RTL fix, intra-block newline collapse, LAB/remove-folder Windows fixes, "Re-index All" button). Next: `/release` skill ships v7.15.0 (web + desktop), then `/gsd-new-milestone` for v7.16 (likely target: regular Search performance investigation per D-F12).*
 
 *Prior: 2026-05-27 — v7.13 + v7.14 milestones CLOSED via retroactive `/gsd-complete-milestone` reconciliation (both shipped as app releases earlier — v7.13.0 2026-05-21, v7.14.0 2026-05-24 — but the GSD close ritual had been skipped). v7.13 requirements archived to `.planning/milestones/v7.13-REQUIREMENTS.md`; v7.14 recorded in `.planning/milestones/v7.14-ROADMAP.md`; MILESTONES.md gained both entries; the live `REQUIREMENTS.md` was deleted (fresh for the next milestone). For authoritative current behavior see CHANGELOG.md / CLAUDE.md "Recently Changed".*
