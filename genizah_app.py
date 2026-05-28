@@ -19148,12 +19148,18 @@ class GenizahGUI(QMainWindow):
         # Browse i18n (Codex C): use tr() English keys ("Page"/"Chunk") instead
         # of raw Hebrew literals ('דף'/'מקטע'). Both keys are in the translations
         # dict; the runtime tr() call returns the right language string at call time.
-        is_pdf = False
+        # WR-01 (D-07, REVIEWS round 2 BLOCKER #1): single _lookup_local_filepath
+        # call AND single `filepath =` assignment — derive is_pdf from the same
+        # filepath the pane reveal + controller.request use, so the two decisions
+        # can never diverge (see 100-REVIEW.md WR-01). The temp `_resolved` keeps
+        # exception handling local while the AST reachability guard counts
+        # exactly one `filepath = ...` Assign.
         try:
-            fp = self._lookup_local_filepath(sys_id) or ""
-            is_pdf = fp.lower().endswith('.pdf')
+            _resolved = self._lookup_local_filepath(sys_id)
         except Exception:
-            pass
+            _resolved = None
+        filepath = _resolved
+        is_pdf = bool(filepath) and filepath.lower().endswith('.pdf')
         unit_word = tr("Page") if is_pdf else tr("Chunk")
 
         # Codex HIGH #4 closure: HTML-escape the raw file content BEFORE building
@@ -19234,7 +19240,7 @@ class GenizahGUI(QMainWindow):
             pass
 
         # Populate Browse panel state (filepath + info label + tab switch).
-        filepath = self._lookup_local_filepath(sys_id)
+        # WR-01: filepath was resolved once at method top — reuse it; no second lookup.
         self.current_browse_sid = sys_id
         self.current_browse_p = page_data.get('p_num')
         self.current_browse_internal_idx = page_data.get('internal_index')
