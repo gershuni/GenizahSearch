@@ -9,11 +9,19 @@ desktop/my_library_tab.py (_update_disk_indicator + _disk_label).
 """
 from __future__ import annotations
 
+import os
 import sys
 import unittest.mock as mock
 
 import pytest
 
+
+# Headless Qt: when no display server is available (e.g. CI on Linux without
+# Xvfb), Qt aborts with SIGABRT on QApplication() construction. Force the
+# offscreen platform plugin before importing QApplication. Mirrors the pattern
+# in tests/test_line_numbers_desktop.py.
+if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 try:
     from PyQt6.QtWidgets import QApplication, QWidget

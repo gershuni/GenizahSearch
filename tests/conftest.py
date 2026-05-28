@@ -1,5 +1,6 @@
 """Test configuration for ensuring project modules are importable."""
 
+import os
 import sys
 import types
 from pathlib import Path
@@ -10,6 +11,23 @@ ROOT_PATH = str(ROOT_DIR)
 
 if ROOT_PATH not in sys.path:
     sys.path.insert(0, ROOT_PATH)
+
+
+# ---------------------------------------------------------------------------
+# Headless Qt for CI on Linux without an X server.
+#
+# Many test files import QApplication at module top to instantiate widgets
+# under test. Without an offscreen platform plugin, QApplication() aborts
+# with SIGABRT during pytest collection on Ubuntu CI — which kills the entire
+# test session before any test runs.
+#
+# Setting QT_QPA_PLATFORM=offscreen here (in conftest, which loads before
+# any test file) guarantees every Qt-importing test gets the headless
+# platform. setdefault() means local dev machines with $DISPLAY still use
+# their native plugin, and a user-set QT_QPA_PLATFORM is respected.
+# ---------------------------------------------------------------------------
+if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 # ---------------------------------------------------------------------------
