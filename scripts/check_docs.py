@@ -179,15 +179,21 @@ def check_broken_links() -> list:
             if not link_path:
                 continue
 
-            # Resolve relative path
-            if link_path.startswith('/'):
-                target = ROOT_DIR / link_path.lstrip('/')
+            # Strip trailing line-number suffix used by `file:N` / `file:N-M`
+            # code references (e.g. `web/api.py:680`, `genizah_core.py:3940-3961`).
+            # The link points at a real file; the suffix is editor-jump metadata.
+            line_ref_path = re.sub(r':\d+(?:-\d+)?$', '', link_path)
+
+            # Try BOTH resolution strategies: docs-relative AND project-root-relative.
+            # Many doc references use project-root-relative paths (e.g.
+            # `[web/api.py](web/api.py)` from inside docs/) instead of `../web/api.py`.
+            # A link is "broken" only if NEITHER candidate exists.
+            if line_ref_path.startswith('/'):
+                candidates = [ROOT_DIR / line_ref_path.lstrip('/')]
             else:
-                target = md_dir / link_path
+                candidates = [md_dir / line_ref_path, ROOT_DIR / line_ref_path]
 
-            target = target.resolve()
-
-            if not target.exists():
+            if not any(c.resolve().exists() for c in candidates):
                 issues.append(f"{relative_path}: Broken link to '{link_path}'")
 
     return issues

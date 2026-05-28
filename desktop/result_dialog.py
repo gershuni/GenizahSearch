@@ -220,11 +220,6 @@ class ResultDialog(QDialog):
         meta_col = QVBoxLayout(); meta_col.setAlignment(Qt.AlignmentFlag.AlignTop); meta_col.setSpacing(4)
         
         self.lbl_shelf = QLabel(); self.lbl_shelf.setFont(QFont("Arial", 16, QFont.Weight.Bold)); self.lbl_shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        # Phase 96 polish: file-path label shown ONLY for LOCAL hits (folder / filename).
-        self.lbl_local_file_path = QLabel()
-        self.lbl_local_file_path.setStyleSheet("font-size: 11px; color: #2980b9; font-style: italic;")
-        self.lbl_local_file_path.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.lbl_local_file_path.setVisible(False)
         self.lbl_title = QLabel(); self.lbl_title.setFont(QFont("Arial", 14)); self.lbl_title.setAlignment(Qt.AlignmentFlag.AlignLeft); self.lbl_title.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
         # Controls Row
@@ -463,7 +458,7 @@ class ResultDialog(QDialog):
         self.txt_extended_info.setOpenLinks(False)
         self.txt_extended_info.anchorClicked.connect(self._on_rd_ext_link_clicked)
 
-        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_local_file_path); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row)
+        meta_col.addWidget(self.lbl_shelf); meta_col.addWidget(self.lbl_title); meta_col.addLayout(info_row); meta_col.addLayout(nav_row); meta_col.addLayout(action_row); meta_col.addLayout(community_row)
 
         # Thumbnail (kept as hidden dummy for compatibility with existing methods)
         self.lbl_thumb = QLabel()
@@ -2049,9 +2044,11 @@ class ResultDialog(QDialog):
         if not _is_local_pdf:
             self._cancel_local_pdf_image()
 
-        # Phase 96 polish (Item 1): show LOCAL file path prominently under shelfmark.
-        # Uses hit['display']['shelfmark'] which _build_local_result_dict sets to the
-        # canonical filepath for LOCAL hits. Falls back to _rd_local_filepath.
+        # v7.15.0 bug fix: LOCAL hits populate the SAME lbl_shelf + lbl_title that
+        # Genizah hits use (via apply_metadata), so navigating LOCAL ↔ Genizah cannot
+        # leak stale values from the prior result type. Filename → lbl_shelf; the
+        # parent/folder path → lbl_title; chunk_locator (e.g. "p. 3") appended to
+        # title for page context.
         try:
             if _is_local_hit:
                 _display = data.get('display', {}) or {}
@@ -2062,23 +2059,29 @@ class ResultDialog(QDialog):
                 )
                 if _local_path:
                     import os as _os
-                    _folder = _os.path.basename(_os.path.dirname(_local_path))
                     _fname = _os.path.basename(_local_path)
-                    _path_text = f"{_folder}/{_fname}" if _folder else _fname
-                    # Phase 97 D-NEW-5: append chunk_locator to the file path label
-                    # so users see e.g. "MyFolder/doc.pdf — p. 3" in the hit header.
+                    _dir = _os.path.dirname(_local_path)
+                    _folder = _os.path.basename(_dir)
+                    _parent = _os.path.basename(_os.path.dirname(_dir))
+                    if _parent:
+                        _local_title = f"{_parent}/{_folder}"
+                    else:
+                        _local_title = _folder or ''
                     _chunk_loc = data.get("chunk_locator", "") or ""
                     if _chunk_loc:
-                        _path_text = f"{_path_text} — {_chunk_loc}"
-                    self.lbl_local_file_path.setText(_path_text)
-                    self.lbl_local_file_path.setToolTip(_local_path)
-                    self.lbl_local_file_path.setVisible(True)
+                        _local_title = f"{_local_title} — {_chunk_loc}" if _local_title else _chunk_loc
+                    self.lbl_shelf.setText(_fname)
+                    self.lbl_shelf.setToolTip(_local_path)
+                    _set_label_with_tooltip(self.lbl_title, _local_title)
+                    if hasattr(self, 'lbl_compact_shelf'):
+                        self.lbl_compact_shelf.setText(_fname)
                 else:
-                    self.lbl_local_file_path.setVisible(False)
-            else:
-                self.lbl_local_file_path.setVisible(False)
+                    self.lbl_shelf.setText('')
+                    self.lbl_title.setText('')
+                    if hasattr(self, 'lbl_compact_shelf'):
+                        self.lbl_compact_shelf.setText('')
         except Exception:
-            self.lbl_local_file_path.setVisible(False)
+            pass
 
         # Phase 96 fix-8 (Issue 3): disable Genizah-only community buttons for
         # LOCAL hits.  These actions have no meaning for user-owned LOCAL files
