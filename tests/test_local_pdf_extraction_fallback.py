@@ -169,3 +169,315 @@ def test_good_pdf_does_not_invoke_fallback_mode():
         f"The detection heuristic is over-triggering. "
         f"All invocations: {invoked_calls}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 101: sort=True RTL word-order fix tests (Wave 0 RED)
+# ---------------------------------------------------------------------------
+
+HEBREW_RTL_FIXTURE_PDF = os.path.join(FIXTURES_DIR, "hebrew_rtl_fixture.pdf")
+
+
+def _import_phase101_helpers():
+    from shared.local_indexer import (
+        _fix_sort_true_rtl_line,
+        _fix_sort_true_rtl_page,
+        extract_pdf_pages,
+    )
+    return _fix_sort_true_rtl_line, _fix_sort_true_rtl_page, extract_pdf_pages
+
+
+# ----- USER-DEC-1 (S-1 directional-run reversal) ---------------------------
+
+def test_sort_true_rtl_pure_hebrew_word_order_fixed():
+    """D-01/D-03: pure-RTL line (single RTL run) reverses ALL word tokens."""
+    _, fix_page, _ = _import_phase101_helpers()
+    wrong = "האישי בארכיונו עיור בעקבות"
+    fixed = fix_page(wrong)
+    assert fixed.split() == list(reversed(wrong.split())), (
+        f"Pure-RTL line: tokens must reverse; got {fixed.split()!r}"
+    )
+    # Letters within each word stay in correct logical order (NOT char-reversed)
+    assert "בעקבות" in fixed.split()
+
+
+def test_sort_true_rtl_directional_runs_preserve_shelfmarks():
+    """USER-DEC-1 / S-1: directional-run reversal keeps Latin shelfmarks adjacent.
+
+    Input as sort=True would emit it (LTR visual order):
+    'האישי T-S 12.123 בארכיונו' — three runs: [Hebrew], [Latin shelfmark],
+    [Hebrew]. Run sequence reverses; within-run order preserved.
+    """
+    _, fix_page, _ = _import_phase101_helpers()
+    inp = "האישי T-S 12.123 בארכיונו"
+    out = fix_page(inp)
+    toks = out.split()
+    # T-S and 12.123 must remain adjacent (within-run order preserved).
+    assert toks.index("T-S") + 1 == toks.index("12.123"), (
+        f"S-1: T-S must stay adjacent to 12.123 in {toks!r}"
+    )
+    # Run sequence reversed: the trailing Hebrew word now precedes the Latin run.
+    assert toks.index("בארכיונו") < toks.index("T-S"), (
+        f"S-1: trailing RTL run must come before LTR run in {toks!r}"
+    )
+
+
+def test_sort_true_rtl_digits_run_with_hebrew():
+    """S-1: digit tokens form non-RTL singleton runs between Hebrew tokens.
+
+    Input runs: [פרק][5][עמוד][42] = [R, L, R, L]. Reversed run sequence
+    yields [42, עמוד, 5, פרק] (each run is one token so within-run order
+    is trivially preserved).
+    """
+    _, fix_page, _ = _import_phase101_helpers()
+    inp = "פרק 5 עמוד 42"
+    out = fix_page(inp)
+    assert out.split() == ["42", "עמוד", "5", "פרק"], (
+        f"S-1 digit interleave: got {out.split()!r}"
+    )
+
+
+def test_sort_true_ltr_noop():
+    """D-05: _fix_sort_true_rtl_page is a no-op on pure-LTR/numeric/empty text."""
+    _, fix_page, _ = _import_phase101_helpers()
+    assert fix_page("hello world\nfoo bar baz") == "hello world\nfoo bar baz"
+    assert fix_page("1234 5678") == "1234 5678"
+    assert fix_page("") == ""
+    assert fix_page("page 3 of 10") == "page 3 of 10"
+
+
+# ----- Claude C-7 (boundary _rtl_ratio cases) ------------------------------
+
+def test_sort_true_rtl_boundary_below_threshold_noop():
+    """C-7 (TIGHTENED per REVIEWS round 2 Codex MEDIUM #9): _rtl_ratio JUST
+    BELOW 0.4 must no-op. The candidate is tuned so its computed ratio is
+    within ±0.05 of the 0.4 threshold so future drift in _rtl_ratio's
+    numerator/denominator semantics actually catches the threshold gate.
+    """
+    from shared.local_indexer import _rtl_ratio
+    _, fix_page, _ = _import_phase101_helpers()
+    # 3 RTL letters / 8 alpha letters = 0.375 — just below the 0.4 gate.
+    # Executor: if _rtl_ratio's tokenization changes, retune so 0.35 < r < 0.40.
+    candidate = "abcde שלם"  # alpha chars: a,b,c,d,e + ש,ל,ם = 8; RTL = 3
+    ratio = _rtl_ratio(candidate)
+    assert 0.35 < ratio < 0.40, (
+        f"Boundary test prerequisite: _rtl_ratio({candidate!r}) must be in "
+        f"(0.35, 0.40) to actually test threshold proximity; got {ratio}. "
+        f"Retune the candidate."
+    )
+    assert fix_page(candidate) == candidate, (
+        f"C-7 below-threshold: {ratio:.3f} <= 0.4 must no-op; got transformed output"
+    )
+
+
+def test_sort_true_rtl_boundary_above_threshold_reverses():
+    """C-7 (TIGHTENED per REVIEWS round 2 Codex MEDIUM #9): _rtl_ratio JUST
+    ABOVE 0.4 triggers directional-run reversal. Candidate tuned to be within
+    ±0.05 of the 0.4 threshold so the gate proximity is actually exercised.
+    """
+    from shared.local_indexer import _rtl_ratio
+    _, fix_page, _ = _import_phase101_helpers()
+    # 4 RTL letters / 9 alpha letters ≈ 0.444 — just above the 0.4 gate.
+    candidate = "abcde שלום"  # alpha: a,b,c,d,e + ש,ל,ו,ם = 9; RTL = 4
+    ratio = _rtl_ratio(candidate)
+    assert 0.40 < ratio < 0.50, (
+        f"Boundary test prerequisite: _rtl_ratio({candidate!r}) must be in "
+        f"(0.40, 0.50) to actually test threshold proximity; got {ratio}. "
+        f"Retune the candidate."
+    )
+    out = fix_page(candidate)
+    assert out != candidate, (
+        f"C-7 above-threshold: {ratio:.3f} > 0.4 must transform; got passthrough {out!r}"
+    )
+
+
+# ----- Claude S-8 (xfail residual-edge-case guard) -------------------------
+
+@pytest.mark.xfail(
+    strict=True,   # REVIEWS round 2 Codex LOW #10: strict=True so an XPASS
+                   # actually fails CI and forces the re-review the docstring
+                   # describes. strict=False let CI go green on accidental fix.
+    reason=(
+        "S-8: documents the residual edge case where the directional-run "
+        "algorithm still has imperfect output for pathological mixed scripts "
+        "with attached punctuation. XPASS = the S-1 algorithm has expanded "
+        "to handle this case — STRICT failure forces re-review (was strict=False)."
+    ),
+)
+def test_sort_true_rtl_pathological_mixed_script():
+    """S-8: pathological mixed-script case kept as a known-limitation marker."""
+    _, fix_page, _ = _import_phase101_helpers()
+    # Parens/brackets attached to words are a known limitation of pure token-
+    # based directional-run reversal (the full Unicode Bidi Algorithm handles
+    # them via paired bracket pairs). The expected output below is the "ideal"
+    # algorithm-perfect form which directional-run reversal does NOT produce.
+    inp = "(שלום) text [42]"
+    out = fix_page(inp)
+    assert out == "[42] text (שלום)"
+
+
+# ----- REV-2a (branch-integration tests for extract_pdf_pages) -------------
+
+class _FakePdfPage:
+    """Minimal fitz.Page surrogate for REV-2a branch-integration tests."""
+
+    def __init__(self, blocks_text: str, sort_true_text: str):
+        self._blocks_text = blocks_text
+        self._sort_true_text = sort_true_text
+        # Real fitz.Page exposes .number; extract_pdf_pages uses it.
+        self.number = 0
+
+    def get_text(self, mode, sort=False, **_kwargs):
+        # Mirror live API shape from shared/local_indexer.py ~lines 695-721:
+        # primary call is get_text("blocks"); fallback is get_text("text", sort=True).
+        if mode == "blocks":
+            # Real PyMuPDF blocks mode returns a list of tuples
+            # (x0, y0, x1, y1, text, block_no, block_type). The production
+            # code keeps only blocks where b[6] == 0 (text blocks) and reads
+            # b[4]. Synthesize one block per line of the configured text so
+            # extract_pdf_pages reconstructs the input verbatim.
+            return [
+                (0.0, float(i), 100.0, float(i + 1), line, i, 0)
+                for i, line in enumerate(self._blocks_text.splitlines())
+                if line.strip()
+            ]
+        if mode == "text" and sort:
+            return self._sort_true_text
+        # extract_pdf_pages may also call get_text("dict") or similar; return
+        # empty so any other branch is a controlled no-op.
+        return ""
+
+
+class _FakePdfDocument:
+    def __init__(self, page: _FakePdfPage):
+        self._page = page
+        # extract_pdf_pages uses len(doc) and indexing / iteration.
+        self.page_count = 1
+        self.metadata = {}  # mirrors fitz.Document.metadata
+
+    def __len__(self):
+        return 1
+
+    def __iter__(self):
+        yield self._page
+
+    def __getitem__(self, idx):
+        if idx != 0:
+            raise IndexError(idx)
+        return self._page
+
+    def load_page(self, idx):
+        return self[idx]
+
+    def close(self):
+        pass
+
+
+def _install_fake_fitz(monkeypatch, page: _FakePdfPage):
+    """Replace shared.local_indexer.fitz.open with a stub returning our fake doc.
+
+    The executor MUST read shared/local_indexer.py top-of-file to see how fitz
+    is imported (likely `import fitz` or `import pymupdf as fitz`). Whichever
+    name extract_pdf_pages uses, monkeypatch the .open attribute on that name
+    inside the shared.local_indexer namespace so production code sees the fake.
+    """
+    import shared.local_indexer as li_mod
+    doc = _FakePdfDocument(page)
+    # Patch the `fitz` module reference inside shared.local_indexer's namespace.
+    # `setattr(li_mod.fitz, 'open', ...)` is safer than replacing the whole
+    # module since other names (TOOLS, etc.) remain reachable.
+    monkeypatch.setattr(li_mod.fitz, "open", lambda *a, **kw: doc, raising=True)
+
+
+def test_extract_pdf_pages_applies_rtl_fix_in_sort_true_fallback(monkeypatch):
+    """REV-2a (Codex MEDIUM, round-2 HIGH #6): proves extract_pdf_pages CALLS
+    _fix_sort_true_rtl_page in the sort=True fallback branch.
+
+    Builds a fake fitz.Document/Page where:
+      - get_text('blocks') returns single-word-per-line text (triggers
+        _detect_single_word_per_line >= 0.70 → fallback)
+      - get_text('text', sort=True) returns a known RTL line in reversed
+        (LTR-visual) word order
+    Then iterates extract_pdf_pages and asserts the emitted text is reversed
+    back to logical order — proving the helper ran in the fallback branch.
+    """
+    _, _, extract_pdf_pages = _import_phase101_helpers()
+    # Single-word-per-line text triggers the fallback gate (ratio == 1.0).
+    blocks_text = "\n".join(["שלום", "עליכם", "חברים", "טובים", "אחים"])
+    # sort=True LTR-visual order (what PyMuPDF returns for an RTL page).
+    # The directional-run reversal should flip this to logical reading order.
+    sort_true_text = "האישי בארכיונו עיור בעקבות"
+    expected_after_fix = "בעקבות עיור בארכיונו האישי"
+
+    page = _FakePdfPage(blocks_text=blocks_text, sort_true_text=sort_true_text)
+    _install_fake_fitz(monkeypatch, page)
+
+    pages = list(extract_pdf_pages("/fake/path.pdf"))
+    assert len(pages) == 1, f"expected 1 page, got {len(pages)}"
+    _page_num, text, _title = pages[0]
+    # Hard assertion: the emitted text is the directional-run-reversed form,
+    # NOT the raw sort=True fixture. This proves _fix_sort_true_rtl_page ran.
+    assert text.strip() == expected_after_fix, (
+        f"REV-2a: fallback branch must apply _fix_sort_true_rtl_page; "
+        f"got {text.strip()!r}, expected {expected_after_fix!r}"
+    )
+    assert text.strip() != sort_true_text, (
+        "REV-2a: emitted text must DIFFER from the raw sort=True fixture"
+    )
+
+
+def test_extract_pdf_pages_blocks_path_untouched(monkeypatch):
+    """REV-2a companion (round-2 HIGH #6): proves the primary blocks path is
+    NOT re-reversed when get_text('blocks') already returns correctly-ordered
+    multi-word lines.
+    """
+    _, _, extract_pdf_pages = _import_phase101_helpers()
+    # Multi-word-per-line RTL text from a professional-OCR PDF — the
+    # _detect_single_word_per_line gate (ratio >= 0.70) does NOT fire, so the
+    # sort=True fallback is skipped and the blocks text passes through.
+    blocks_text = (
+        "בעקבות עיור בארכיונו האישי\n"
+        "שלום עליכם חברים טובים\n"
+        "אחים יקרים מאוד\n"
+        "ועוד שורה ארוכה\n"
+        "וגם שורה אחרונה כאן"
+    )
+    # If extract_pdf_pages WRONGLY routes through the fallback, this would
+    # apply directional-run reversal and corrupt the already-correct text.
+    sort_true_text = "TRAP — this branch should not run"
+
+    page = _FakePdfPage(blocks_text=blocks_text, sort_true_text=sort_true_text)
+    _install_fake_fitz(monkeypatch, page)
+
+    pages = list(extract_pdf_pages("/fake/path.pdf"))
+    assert len(pages) == 1
+    _page_num, text, _title = pages[0]
+    # Hard assertion: emitted text must NOT contain the TRAP sentinel.
+    assert "TRAP" not in text, (
+        "REV-2a: sort=True fallback must NOT run when blocks gives multi-word lines"
+    )
+    # The blocks path emits text_parts joined by "\n\n" (one block per line of
+    # the input), so the rebuilt text contains all original tokens — assert
+    # token-level identity via set comparison (whitespace shape may differ).
+    in_toks = set(blocks_text.split())
+    out_toks = set(text.split())
+    assert in_toks == out_toks, (
+        f"REV-2a: blocks-path output must preserve token set; "
+        f"missing={in_toks - out_toks!r}, extra={out_toks - in_toks!r}"
+    )
+
+
+# ----- D-06 real fixture ---------------------------------------------------
+
+def test_sort_true_rtl_real_hebrew_fixture():
+    """D-06: Real Hebrew PDF (Phase 100 UAT book excerpt) extracts in correct
+    word order. Skips until the inbound fixture is committed (Hillel provides
+    excerpt). Provenance: tests/fixtures/local_indexer/README.md.
+    """
+    _, _, extract_pdf_pages = _import_phase101_helpers()
+    if not os.path.exists(HEBREW_RTL_FIXTURE_PDF):
+        pytest.skip("hebrew_rtl_fixture.pdf not yet committed (inbound asset from user)")
+    pages = list(extract_pdf_pages(HEBREW_RTL_FIXTURE_PDF))
+    assert len(pages) >= 1
+    _page_num, text, _title = pages[0]
+    assert text.strip(), "Fixture PDF must yield non-empty text"
