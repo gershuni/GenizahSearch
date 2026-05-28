@@ -11,18 +11,22 @@ All notable changes to Genizah Search Pro will be documented in this file.
 - **PDF page image in My Library (desktop)** — When viewing a LOCAL PDF search result, the actual scanned/typeset PDF page is now shown alongside the extracted text in both the ResultDialog and the Browse panel. Navigation (prev/next result, prev/next page) keeps the image in sync with the text. Non-PDF LOCAL files (`.docx`/`.html`/`.xlsx`/`.csv`/`.txt`) remain text-only by design.
 - **Re-index All button (desktop)** — New button in the My Library tab that forces re-extraction of every committed file via the background worker. Use it to pick up extractor improvements (such as the RTL and reflow fixes in this release) without losing your library or opt-out preferences.
 
+### Scalability & Indexing Reliability
+
+- **Indexes large folders without UI freezes (desktop)** — Folder enumeration runs on a background worker (responsive within 100ms), tree population is async, and the progress bar shows indeterminate "Discovering files…" status while enumerating, then switches to determinate progress during indexing. Previously, large folder selections could freeze the UI for minutes.
+- **Resume interrupted indexing (desktop)** — If indexing is interrupted (app crash, hard kill, system reboot, power loss), the next launch detects the orphaned scan and offers three choices: **Resume**, **Restart**, or **Skip**. Resume picks up where it left off via the new `scan_runs` lifecycle table — no more starting over from zero.
+- **Reset My Library button (desktop)** — Two-step typed-confirm destructive action (accepts `RESET` or `אפס`) that performs a 7-step atomic teardown of the LOCAL index. Use when the index is in an unrecoverable state and a clean start is the fastest path forward.
+
 ### Improvements
 
 - **Hebrew PDF text quality (desktop)** — Two extractor fixes dramatically improve LOCAL search of Hebrew scholarly books:
   - **Word-order RTL fix** — On PDFs whose content stream emits words in left-to-right visual order, Hebrew sentences were previously indexed last-word-first. Word tokens are now reversed via directional-run analysis; embedded Latin shelfmarks like `T-S 12.123` stay adjacent.
   - **Intra-block reflow** — PyMuPDF's bidi engine sometimes splits Hebrew paragraphs into one-fragment-per-line output (characters, commas, even quotation marks on their own line). LOCAL PDF extraction now collapses these intra-paragraph line breaks into continuous prose. Paragraph boundaries from PyMuPDF are still preserved.
-- **PDF page rendering architecture (desktop)** — Page images are rendered lazily and on-demand via a shared `PdfRenderWorker` background thread, backed by a bounded LRU of open document handles. No on-disk image cache; only currently-viewed pages live in memory, so the 10K×500-page corpus is never bulk-rendered.
+- **PDF page rendering architecture (desktop)** — Page images are rendered lazily and on-demand via a shared `PdfRenderWorker` background thread, backed by a bounded LRU of open document handles. No on-disk image cache; only currently-viewed pages live in memory, so the corpus is never bulk-rendered.
 
 ### Bug Fixes
 
-- **My Library — remove-folder UI freeze on Windows (desktop)** — Removing a folder used to fire one Tantivy commit per file, each fighting the live searcher's reader handle and producing an `ERROR_ACCESS_DENIED` warning storm plus minutes of UI freeze. `remove_folder` now batches into a single retry-protected commit.
-- **My Library — LAB rebuild log spam + 10s freeze (desktop)** — When the LAB index normalize callback was misconfigured, `build_lab_side_index` would log a warning per row (millions of warnings on large libraries) and freeze the stderr handler. Added a pre-flight callback probe + a 5-consecutive-failure bail.
-- **My Library — Remove-folder dialog translation (desktop)** — The "Remove from My Library?" confirmation dialog interpolated the folder path into the translation lookup key, so the Hebrew translation could never match. Fixed to use `.format()` placeholders.
+- **LOCAL/Genizah header field leak in ResultDialog (desktop)** — In ALL search mode, navigating prev/next between LOCAL and Genizah results would leak the prior result's library/shelfmark/title into the new one. LOCAL hits now populate the same `lbl_shelf` + `lbl_title` widgets Genizah hits use, so navigation cannot carry stale values.
 - **Graceful PDF render failures (desktop)** — Missing files, corrupt/encrypted PDFs, out-of-range pages, and render exceptions now show a placeholder with a logged error instead of hanging the UI.
 
 ### Internal

@@ -12,21 +12,25 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ### v7.15.0: PDF Page Image in My Library
 
-When you open a LOCAL PDF in **My Library**, you now see the actual PDF
-page next to its extracted text — in both the ResultDialog and the Browse
-panel. Prev/next navigation keeps the image and text in sync. Rendering
-is on-demand and lazy; nothing is bulk-rendered or cached to disk.
+The headline: when you open a LOCAL PDF in **My Library**, you now see
+the actual PDF page next to its extracted text — in both the
+ResultDialog and the Browse panel. Prev/next navigation keeps the image
+and text in sync.
 
-- View the scanned/typeset PDF page alongside extracted text in My Library
-- Hebrew PDF text quality fix — word order is now correct, and paragraphs
-  no longer fragment into one-word lines
-- New **Re-index All** button in My Library to force re-extraction
-  without losing your library
-- Render failures (corrupt/missing/encrypted PDF) now show a placeholder
-  instead of hanging the UI
-- Bug fixes: remove-folder on Windows is no longer slow + spammy, LAB
-  rebuild log storms eliminated, remove-folder Hebrew translation now
-  actually translates
+- **PDF page image alongside extracted text** in My Library
+  (ResultDialog + Browse panel)
+- **Indexes large folders without UI freezes** — folder enumeration is
+  workerized; UI stays responsive
+- **Resume interrupted indexing** — on next launch, choose Resume,
+  Restart, or Skip when the previous scan was killed
+- **Reset My Library** — two-step typed-confirm destructive button for
+  when a clean start is faster than recovery
+- **Re-index All** button to apply extractor improvements without
+  losing your library or opt-out preferences
+- **Hebrew PDF text quality** — word-order RTL fix + intra-paragraph
+  reflow collapse
+- **Graceful PDF render failures** — corrupt/missing/encrypted PDFs
+  show a placeholder instead of hanging
 
 ### v7.14.0: My Library — Local Document Search
 
