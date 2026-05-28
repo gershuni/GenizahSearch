@@ -563,37 +563,16 @@ def _write_schema_marker(index_dir: str, marker: str) -> None:
         f.write(marker)
 
 
-# ---------------------------------------------------------------------------
-# Phase 101 D-04: extractor version marker (detect extraction-logic changes,
-# trigger PDF re-scan — separate from schema_marker which tracks field changes).
-# ---------------------------------------------------------------------------
-_CURRENT_EXTRACTOR_VERSION = "2"   # Bump when PDF extraction logic changes.
-                                    # Phase 101: word-order RTL fix.
-_EXTRACTOR_VERSION_FILE = ".extractor_version"
-
-
-def _read_extractor_version(index_dir: str) -> str | None:
-    """Read the .extractor_version marker from index_dir.
-
-    Returns None if the file is absent (FileNotFoundError → None via the
-    os.path.isfile guard; missing-file path is the fresh-install case) or
-    if reading fails (defensive OSError catch).
-    """
-    p = os.path.join(index_dir, _EXTRACTOR_VERSION_FILE)
-    if not os.path.isfile(p):
-        return None
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            return f.read().strip() or None
-    except OSError:
-        return None
-
-
-def _write_extractor_version(index_dir: str, version: str) -> None:
-    """Write the .extractor_version marker file alongside the index dir."""
-    os.makedirs(index_dir, exist_ok=True)
-    with open(os.path.join(index_dir, _EXTRACTOR_VERSION_FILE), "w", encoding="utf-8") as f:
-        f.write(version)
+# Phase 101 D-04 ROLLED BACK 2026-05-28 post-UAT: the extractor-version marker
+# + auto-flip-on-init mechanism (formerly _CURRENT_EXTRACTOR_VERSION /
+# _read_extractor_version / _write_extractor_version + UPDATE block in
+# LocalIndexer.__init__) was removed because it weaponized the synchronous
+# startup_recovery() Pass B re-extraction path — a 12K-PDF library froze app
+# launch for hours. The RTL fix in extract_pdf_pages still applies to all new
+# scans; existing LOCAL libraries need a manual Reset My Library + re-scan to
+# pick up the fix. A proper "auto-self-heal via background worker" lands in a
+# future phase (D-04 deferred). See docs/OPEN_ISSUES.md row "Phase 101 D-04
+# rollback" for the recovery procedure.
 
 
 def build_local_lab_schema() -> tantivy.Schema:
@@ -1368,48 +1347,11 @@ class LocalIndexer:
         # Phase 97 C-02 — byte/count/time commit trigger (supersedes fixed 25-file batch)
         self._commit_triggers = _CommitTriggers()
 
-        # Phase 101 D-04 (USER-DEC-2 / Codex HIGH; revised per REVIEWS round 2
-        # MEDIUM #3 + #7): extractor version check — mark COMMITTED PDF rows
-        # for re-scan when extraction logic changes (e.g., RTL word-order fix).
-        # The AND status = 'committed' filter prevents reviving error/failed/
-        # skipped/already-pending rows. BEGIN IMMEDIATE serializes concurrent
-        # launches. COALESCE defends against NULL extensions.
-        #
-        # ROUND-2 #3: pdf_rows_pending_count is taken from cur.rowcount, the
-        # number of rows ACTUALLY flipped by THIS UPDATE — NOT a post-UPDATE
-        # SELECT COUNT(*) which would inflate the count when any PDF was
-        # already pending from an interrupted scan.
-        #
-        # ROUND-2 #7: the .extractor_version marker is written AFTER the
-        # SQLite transaction commits. Filesystem writes do not roll back with
-        # SQLite, so writing the marker inside `with self._conn:` would risk
-        # a stale-marker / unmarked-rows split if the process crashed between
-        # the FS write and the implicit COMMIT. Commit-first / marker-after
-        # means a crash before the marker write yields an idempotent repeat
-        # next launch (UPDATE re-runs, matches zero rows, marker re-written).
-        _actual_extractor_ver = _read_extractor_version(index_dir)
-        if _actual_extractor_ver != _CURRENT_EXTRACTOR_VERSION:
-            with self._conn:  # commits on exit / rolls back on exception
-                self._conn.execute("BEGIN IMMEDIATE")
-                cur = self._conn.execute(
-                    "UPDATE processed_files SET status = 'pending' "
-                    "WHERE status = 'committed' "
-                    "  AND sys_id IN ("
-                    "    SELECT sys_id FROM local_files "
-                    "    WHERE LOWER(COALESCE(file_extension, '')) = '.pdf'"
-                    "  )"
-                )
-                # rowcount captures exactly the rows this UPDATE flipped.
-                pdf_rows_pending_count = cur.rowcount
-            # Marker write AFTER the SQLite commit (round-2 #7). If the
-            # process dies here, the next launch's mismatch path re-runs
-            # the (now-idempotent) UPDATE and re-attempts the marker write.
-            _write_extractor_version(index_dir, _CURRENT_EXTRACTOR_VERSION)
-            logger.info(
-                "Phase 101: extractor version bumped to %s — %d committed PDF files marked for re-scan",
-                _CURRENT_EXTRACTOR_VERSION,
-                pdf_rows_pending_count,
-            )
+        # Phase 101 D-04 ROLLED BACK 2026-05-28 post-UAT — the extractor-version
+        # auto-flip-on-init that lived here weaponized startup_recovery() Pass B
+        # (synchronous UI-thread re-extraction) on existing libraries with many
+        # PDFs. Removed entirely. New scans still get the RTL fix from
+        # extract_pdf_pages; existing libraries need manual Reset + re-scan.
 
         # HIGH-3 review fix: run pending-delete recovery at init
         recovered = self._recover_pending_deletes()
