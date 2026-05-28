@@ -2067,9 +2067,8 @@ class ResultDialog(QDialog):
                         _local_title = f"{_parent}/{_folder}"
                     else:
                         _local_title = _folder or ''
-                    _chunk_loc = data.get("chunk_locator", "") or ""
-                    if _chunk_loc:
-                        _local_title = f"{_local_title} — {_chunk_loc}" if _local_title else _chunk_loc
+                    # Page number lives in the spinbox; do NOT append chunk_locator
+                    # to the title (would duplicate the page info).
                     self.lbl_shelf.setText(_fname)
                     self.lbl_shelf.setToolTip(_local_path)
                     _set_label_with_tooltip(self.lbl_title, _local_title)
@@ -3292,11 +3291,11 @@ class ResultDialog(QDialog):
         self.external_pane.setVisible(True)
         self.btn_toggle_image.setVisible(True)
         self.btn_toggle_image.setChecked(True)
-        # Phase 100 UAT: a LOCAL PDF has no external metadata, so collapse the
-        # empty meta box (it otherwise leaves a blank gap between the header and
-        # the rendered page). Mirrors the Genizah image path which hides it too.
-        # Header stays visible (now dark-mode aware) to label the pane.
-        self.lbl_ext_attr.setVisible(True)
+        # v7.15.0 UAT: hide the "External Viewer" header label (matches the
+        # Genizah image path at line 2939). The page image speaks for itself;
+        # the redundant header was the only thing distinguishing the LOCAL
+        # PDF pane from the Genizah image pane.
+        self.lbl_ext_attr.setVisible(False)
         self.txt_ext_meta.setHtml("")
         self.txt_ext_meta.setVisible(False)
         controller.request(
