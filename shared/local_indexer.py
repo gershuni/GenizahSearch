@@ -3618,6 +3618,26 @@ class LocalIndexer:
             lab_schema_version: int (bump when LAB schema changes to invalidate).
             dynamic_rank_map: dict | None (forwarded to fingerprint_dyn_fn).
         """
+        # Pre-flight: probe each callback ONCE with a tiny safe input. If any
+        # raises, abort BEFORE opening the writer / touching the LAB dir / running
+        # delete_all_documents. This avoids a ~10s freeze on real LAB sizes when
+        # the callbacks are broken (e.g. SearchEngine.lab_index_normalize missing
+        # — pre-existing Phase 97.3 deferred Finding 2). The full row-loop still
+        # has the 5-consecutive-failure bail as a fallback for callbacks that
+        # fail only on specific inputs.
+        try:
+            normalize_text_fn("")
+            fingerprint_static_fn("")
+            fingerprint_dyn_fn("", dynamic_rank_map)
+        except Exception as exc:
+            logger.error(
+                "build_lab_side_index: pre-flight callback probe failed (%r) — "
+                "aborting LAB rebuild before opening writer; prior LAB index + "
+                ".meta.json left intact",
+                exc,
+            )
+            return
+
         os.makedirs(self._lab_index_dir, exist_ok=True)
         schema = build_local_lab_schema()
         lab_index = tantivy.Index(schema, path=self._lab_index_dir)
