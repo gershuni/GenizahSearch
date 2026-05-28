@@ -2424,6 +2424,11 @@ TRANSLATIONS = {
 
     # --- What's New notifications ---
     "New Features!": "תכונות חדשות!",
+    "v7.15: PDF page images and Hebrew text fixes in My Library (desktop)": "גרסה 7.15: תמונות עמודי PDF ותיקוני טקסט עברית ב\"הספרייה שלי\" (אפליקציית שולחן עבודה)",
+    "v7.15: PDF page images in My Library, Hebrew text fixes, and a new Re-index All button": "גרסה 7.15: תמונות עמודי PDF ב\"הספרייה שלי\", תיקוני טקסט עברית, וכפתור 'אנדקס מחדש הכל'",
+    "PDF page image in My Library: a LOCAL PDF search result now shows the original PDF page alongside the extracted text. Navigation between results and pages syncs the image automatically.": "תמונות עמודי PDF ב\"הספרייה שלי\" — תוצאת חיפוש בקובץ PDF מקומי מציגה כעת את עמוד ה-PDF המקורי לצד הטקסט שחולץ. הניווט בין תוצאות ובין עמודים מסנכרן את התמונה אוטומטית.",
+    "Hebrew text extraction quality: two bugs that hurt search in Hebrew books are fixed — left-to-right word order is now correct, and fragmented text (single word or punctuation per line) joins back into continuous paragraphs.": "שיפור איכות חילוץ טקסט עברי — תוקנו שני באגים שפגעו בחיפוש בספרים עבריים: סדר מילים שמאל-לימין הפך לעברית, וקטעי טקסט מקוטעים (מילה או סימן פיסוק לשורה) מתאחדים שוב לפסקאות רציפות.",
+    "To apply the fixes to an existing library, click \"Re-index All\" in the My Library tab.": "כדי להחיל את התיקונים על ספרייה קיימת, לחצו על \"אנדקס מחדש הכל\" בלשונית \"הספרייה שלי\".",
     "Catalog Browse: browse manuscripts by domain hierarchy, author, or work title with combined filtering and free text search":
         "עיון לפי זיהוי: עיון בכתבי יד לפי היררכיית תחומים, מחבר או כותרת יצירה עם סינון משולב וחיפוש טקסט חופשי",
     "Cross-links: domain and author labels on browse pages link directly to catalog browse filtered by that value":

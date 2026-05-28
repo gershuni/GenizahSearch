@@ -270,7 +270,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: My Library — index your own documents and search them alongside the Genizah corpus."))
+        self.lbl_msg.setText(tr("v7.15: PDF page images in My Library, Hebrew text fixes, and a new Re-index All button"))
         self.show()
 
     def on_learn_more(self):
@@ -304,10 +304,10 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("My Library: new desktop tab that indexes your own .docx, .pdf, and .txt files into a private side-index. Your documents never leave your machine."),
-            tr("Scope your search two ways: pre-search dropdown (Genizah / Local / All) next to the Search button, and post-search filter (Filter Local / Only Local / No Local) on Search, Composition Search, and Parallels."),
-            tr("LOCAL hits show inline with a blue badge. Double-click opens the text with an Open File button. Inspired by Yehuda Seewald's GenizahLocal prototype."),
+            tr("PDF page image in My Library: a LOCAL PDF search result now shows the original PDF page alongside the extracted text. Navigation between results and pages syncs the image automatically."),
+            tr("Hebrew text extraction quality: two bugs that hurt search in Hebrew books are fixed \u2014 left-to-right word order is now correct, and fragmented text (single word or punctuation per line) joins back into continuous paragraphs."),
         ]
+        call_to_action = tr("To apply the fixes to an existing library, click \"Re-index All\" in the My Library tab.")
         align = 'right' if is_heb else 'left'
         dir_attr = "rtl" if is_heb else "ltr"
         lines = ''.join(
@@ -315,10 +315,15 @@ class WhatsNewDialog(QDialog):
             f"<b>\u2022 {item}</b></p>"
             for item in items
         )
+        cta_html = (
+            f"<p dir='{dir_attr}' align='{align}' "
+            f"style='margin: 16px 0 0 0; text-align: {align}; color: #065f46;'>"
+            f"{call_to_action}</p>"
+        )
         features_html = (
             f"<div dir='{dir_attr}' align='{align}' "
             f"style='font-size: 14px; line-height: 1.8; text-align: {align};'>"
-            f"{lines}</div>"
+            f"{lines}{cta_html}</div>"
         )
 
         features_label = QLabel(features_html)

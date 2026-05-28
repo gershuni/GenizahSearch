@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.14.0
+# Genizah Search Pro 7.15.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,25 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.14.0?
+## What's New in Version 7.15.0?
+
+### v7.15.0: PDF Page Image in My Library
+
+When you open a LOCAL PDF in **My Library**, you now see the actual PDF
+page next to its extracted text — in both the ResultDialog and the Browse
+panel. Prev/next navigation keeps the image and text in sync. Rendering
+is on-demand and lazy; nothing is bulk-rendered or cached to disk.
+
+- View the scanned/typeset PDF page alongside extracted text in My Library
+- Hebrew PDF text quality fix — word order is now correct, and paragraphs
+  no longer fragment into one-word lines
+- New **Re-index All** button in My Library to force re-extraction
+  without losing your library
+- Render failures (corrupt/missing/encrypted PDF) now show a placeholder
+  instead of hanging the UI
+- Bug fixes: remove-folder on Windows is no longer slow + spammy, LAB
+  rebuild log storms eliminated, remove-folder Hebrew translation now
+  actually translates
 
 ### v7.14.0: My Library — Local Document Search
 
@@ -326,7 +344,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.14.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.15.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
