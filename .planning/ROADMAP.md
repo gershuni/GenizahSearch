@@ -331,11 +331,11 @@ Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Pha
 3. **Code review WR-02** — add a regression test asserting `PdfImageController._pending` is empty immediately after `discard_scope` (callback-retention guard).
 4. **Test-isolation flake** — `tests/test_local_indexer.py::test_txt_undecodable_marked_encoding_error` passes in isolation but fails in batch ordering (global-state pollution from a sibling test). Phase 100 did not touch this file; pre-existing.
 
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 - [x] 101-01-PLAN.md (Wave 1) — RTL word-order fix in extract_pdf_pages sort=True fallback + extractor-version auto-reindex + Wave 0 RTL/version tests + F-06 AST guard update + D-09 flake fix + fixture provenance README
-- [ ] 101-02-PLAN.md (Wave 1) — WR-01 single-lookup _open_local_browse_page + WR-02 discard_scope regression test + OPEN_ISSUES.md bookkeeping
+- [x] 101-02-PLAN.md (Wave 1) — WR-01 single-lookup _open_local_browse_page + WR-02 discard_scope regression test + OPEN_ISSUES.md bookkeeping
 
 ---
 
