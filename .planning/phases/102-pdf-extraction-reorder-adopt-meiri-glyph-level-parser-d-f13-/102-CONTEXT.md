@@ -85,8 +85,23 @@ content; clean/modern/Latin PDFs that work today must not degrade.
     already indexed nikud-bearing content today, so this is no regression.)
   - **Nikud still matters DURING extraction:** combining marks are excluded from the D-04 gap math
     (so a mark between two consonants can't be misread as a word boundary). Nikud is therefore
-    carried through the glyph stream / de-space / reorder and only stripped from the FINAL emitted
-    text at `_write_page_doc`. The strip is the LAST transform.
+    carried through the glyph stream / de-space / reorder and only stripped at the END.
+  - **D-06 SCOPE — PDF ONLY (user 2026-05-29, round-2 review M4):** the nikud strip applies to
+    **PDF-extracted pages ONLY**, NOT to other LOCAL formats. Rationale: a PDF page renders its
+    **image** alongside the extracted text (v7.15), so the viewer still sees the nikud even though
+    the searchable/extracted text is consonantal — whereas DOCX/TXT/HTML/XLSX/CSV have no image
+    fallback. Making non-PDF display show nikud while keeping search working would require the
+    harder content/cached_text divergence + `genizah_core` read-path rewrite (round-1 HIGH-1) — NOT
+    easier — so per the user ("if incorporating nikud is easier we will do it; if not, filter from
+    PDFs") we filter PDFs only. **Implementation:** apply `strip_nikud` as the LAST transform inside
+    the **PDF extraction path** (e.g. at the tail of `extract_pdf_pages` per page, or in
+    `_extract_and_write_pdf` before it calls `_write_page_doc`) — do **NOT** strip inside the shared
+    `_write_page_doc` (it serves all formats). `_write_page_doc` stays format-agnostic and still
+    writes the same text to `content` and `cached_text` (which is already-stripped for PDF, untouched
+    for other formats). This keeps existing DOCX/TXT/HTML/XLSX/CSV behavior unchanged (no scope creep
+    in a PDF-extraction phase) and resolves the round-2 L1 import-coupling note (lazy-import
+    `strip_nikud` at the PDF call site). The rebuild path (`rebuild_main_index_atomic`) re-reads
+    per-row `cached_text`, so it stays consistent per-format automatically.
 
 ### Corrupt-encoding detection (F-G / D-F16)
 - **D-07:** Detect via a **codepoint-garbage ratio** on the extracted text — NOT ToUnicode

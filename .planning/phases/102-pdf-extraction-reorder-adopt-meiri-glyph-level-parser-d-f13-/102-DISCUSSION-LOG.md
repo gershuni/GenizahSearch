@@ -128,3 +128,21 @@ Remaining review items still in force for the planner: corrupt-detect-BEFORE-wri
 glyph-order + span/font/original_order metadata contract (HIGH-4/5), update
 tests/test_local_pdf_extraction_fallback.py (MED-6), init_sqlite stamp 2→3 (MED-7), migration
 1→2 prune-protection test (MED-8).
+
+---
+
+## Round-2 review patch turn (2026-05-29)
+
+Codex round-2 re-review (102-REVIEWS.md): verdict HIGH → MEDIUM, "minor-patch-then-execute". All
+round-1 HIGH blockers RESOLVED. 5 MEDIUM + 1 LOW follow-ups.
+
+**M4 scope decision (user, paraphrased):** PDF pages render an image so the viewer sees nikud even
+with consonantal extracted text; other LOCAL formats have no image. Incorporating displayed nikud
+(divergence + read-path rewrite) is NOT easier than stripping, so → **strip nikud for PDF ONLY**,
+leave DOCX/TXT/HTML/XLSX/CSV unchanged. Strip at the PDF extraction path tail (not shared
+_write_page_doc). Recorded in CONTEXT.md D-06 "SCOPE — PDF ONLY".
+
+Remaining patches for the planner: M1 (add tests/test_format_rtl_invariant.py +
+tests/test_phase_97_2_reset_my_library_full_cycle.py update), M2 (group lines per rawdict block then
+join blocks), M3 (intra-word RTL letter order — descending-x within RTL word units + visual-LTR-word
+fixture), M5 (cancel check + _rollback_partial in the write loop), L1 (lazy-import strip_nikud).
