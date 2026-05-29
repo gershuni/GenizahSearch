@@ -64,11 +64,15 @@ content; clean/modern/Latin PDFs that work today must not degrade.
 ### Nikud (vocalized text) — RE-REVISED 2026-05-29 (user: "No need to display nikkud")
 - **D-06 (FINAL):** **Strip nikud once for BOTH index and display.** The user confirmed nikud
   does NOT need to be displayed for LOCAL PDF hits, so there is no reason to retain a
-  nikud-bearing copy. Apply `genizah_core.strip_nikud` once at the single write site
-  (`_write_page_doc`) so the Tantivy `content` field AND `local_pages.cached_text` both store
-  the consonantal text (they stay EQUAL, exactly as today — just stripped). Bump
-  `extraction_format_version` so re-indexed pages are identifiable. Reuse
-  `genizah_core.strip_nikud`.
+  nikud-bearing copy. Apply `genizah_core.strip_nikud` once as the last transform so the Tantivy
+  `content` field AND `local_pages.cached_text` both store the consonantal text (they stay EQUAL,
+  exactly as today — just stripped). Bump `extraction_format_version` so re-indexed pages are
+  identifiable. Reuse `genizah_core.strip_nikud`.
+  - **⚠ SUPERSEDING REFINEMENT — see the "D-06 SCOPE — PDF ONLY" block below.** The strip is NOT
+    applied inside the shared `_write_page_doc` (that site serves all LOCAL formats); it is applied
+    in the **PDF extraction path** so only PDF pages are stripped. The "single write site" wording
+    here is superseded by the SCOPE block — `_write_page_doc` keeps ONLY the
+    `extraction_format_version` bump.
   - **Why this supersedes the prior "keep nikud in cached_text / diverge content" pick:** Codex
     confirmed (REVIEWS.md HIGH-1) that LOCAL result display (`genizah_core.py:7166`) and page
     browse (`:9631`/`:9641`) BOTH read the Tantivy `content` field for the user-visible `text` —
