@@ -47,17 +47,44 @@ Move to "Completed Issues" section at bottom with date
 | Category | Open | Fixed/Implemented | Total |
 |----------|------|-------------------|-------|
 | P1 Critical Bugs | 1 | 9 | 10 |
-| P2 Medium Bugs | 20 | 79 | 99 |
-| P3 Low Priority | 4 | 5 | 9 |
+| P2 Medium Bugs | 23 | 82 | 105 |
+| P3 Low Priority | 5 | 5 | 10 |
 | Documentation Issues | 0 | 8 | 8 |
 | Documentation Gaps | 0 | 4 | 4 |
 | Code Quality Debt | 6 | 7 | 13 |
 | Untested Areas | 5 | 3 | 8 |
 | Implemented Plans | 0 | 5 | 5 |
 | Archive Candidates | 0 | 4 | 4 |
-| **Total** | **36** | **124** | **160** |
+| **Total** | **40** | **127** | **167** |
 
 > **Note (2026-05-17):** The `/lists` rendering slowness entry below was quantitatively a BLOCKER (36s page load, >40s never-resolves on post-create navigation per 2026-05-17 evening UAT Test 1+2). **Closed by Phase 92.2 lists-performance-investigation 2026-05-17** with measured 19.3x mean / 21.1x max wall-clock speedup (38.5s → 2.0s mean; 45.8s → 2.2s max) and 26x reduction in per-render `create_client()` builds — HARD GATE passed by 2.3x margin. Pre/post evidence: `.planning/phases/92.2-lists-performance-investigation/92.2-01-BASELINE.json` and `92.2-02-POSTFIX.json`.
+
+---
+
+## 2026-05-29 Audit Follow-up (fan-out codebase audit + Codex review)
+
+A multi-agent audit (35 adversarially-verified findings) surfaced several silent/crash-class
+bugs not previously tracked. Fixes landed on branch `audit-followup-2026-05-29` (commit
+`3c6c62d3`), Codex-reviewed, with 6 regression tests in `tests/test_audit_followup_2026_05_29.py`.
+The verbose pre-2026-05-29 "Last Updated" header log is archived at
+`docs/archive/OPEN_ISSUES_HEADER_LOG_pre-2026-05-29.md`.
+
+### Fixed (2026-05-29)
+
+| Issue | File | Status |
+|-------|------|--------|
+| `sync_to_cloud` reported `success=True` + inflated `items_pushed` while silently swallowing failed cloud inserts/updates (false success / masked data loss) | `lists_sync.py` | ✅ Fixed (2026-05-29) — counts only persisted items, tracks `items_failed`, downgrades success on partial failure; zero-row updates (stale `cloud_id`/RLS) no longer counted as pushed (insert + update paths) |
+| `_fetch_single_worker` returned a bare dict for synthetic sys_ids instead of the `(system_id, meta)` 2-tuple every caller unpacks → `ValueError: too many values to unpack` | `genizah_core.py:4683` | ✅ Fixed (2026-05-29) — returns the 2-tuple |
+| `PuzzleService.save_document`/`delete_document` left a dirty transaction on failure (the next successful commit flushed the partial writes, desyncing `join_document_fragments`); the shared cross-thread connection had unlocked reads | `shared/puzzle_service.py` | ✅ Fixed (2026-05-29) — `rollback()` on failure + reads serialized on the write lock |
+
+### Open (logged 2026-05-29, deferred)
+
+| Issue | File | Severity | Notes |
+|-------|------|----------|-------|
+| Non-NLI image/manifest fetches lack a circuit breaker — `cambridge_image`/`manchester_image`/`jts_image` use `timeout=30`, `fetch_external_iiif_data` uses single-float `timeout=5` (~10s) — reproducing the 2026-05-25 NLI threadpool-saturation class against CUDL/Figgy if those hosts degrade | `web/api.py:1191/1259/1316`, `genizah_core.py:4626` | P2 Med | ❌ Open. Deliberate prior scoping (D-18/D-20). **Design decision before fixing:** the breaker is a single global key, so tripping it on a CUDL failure would also blank NLI for 60s (cross-host coupling); a per-host breaker needs the singleton refactored to keyed state; shortening the 30s timeout risks breaking legitimately-slow large IIIF tiles. |
+| Neither PostHog drop counter (`web.api_hardening.get_dropped_event_count()` / `shared.posthog_server.get_dropped_event_count()`) is exposed by any HTTP route, so the CLAUDE.md "monitor BOTH at deploy" directive requires a prod REPL | `web/api_hardening.py:531`, `shared/posthog_server.py:54` | P2 Med | ❌ Open. Surface both on a `/_internal/*` health endpoint next to `/_internal/memstat`. |
+| `sync_to_cloud` matches existing cloud items by `sys_id` only (not `(sys_id, fl_id)` like the `sync_from_cloud` direction); two folio-specific local items sharing a `sys_id` can collide and be counted as one successful update | `lists_sync.py:624-655` | P2 Med | ❌ Open (Codex review 2026-05-29). Touches the insert-vs-update decision — verify against multi-folio lists before changing. |
+| `sync_to_cloud` batch insert assigns local `cloud_id`s by response row order (PostgREST ordering is not a hard contract) | `lists_sync.py:658-674` | P3 Low | ❌ Open (Codex review 2026-05-29). Success count is already conservative; map returned rows by `(list_id, sys_id, fl_id)` for robustness. |
 
 ---
 
