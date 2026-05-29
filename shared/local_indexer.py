@@ -513,6 +513,131 @@ def _detect_single_word_per_line(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Phase 102 D-07: corrupt-encoding detector (codepoint-garbage ratio).
+# Conservative — requires strong evidence on sufficient text.
+# ---------------------------------------------------------------------------
+
+def _detect_corrupt_encoding(text: str) -> bool:
+    """Return True if `text` shows strong evidence of a broken cmap (D-07).
+
+    Counts codepoints that are definitively garbage (U+FFFD, Private Use Area,
+    Unicode noncharacters, illegal C0/C1 controls) and codepoints that are
+    word-like (letters, digits, whitespace).  Flags ONLY with strong evidence
+    so legitimate Arabic, Greek, Hebrew presentation forms, math, bidi marks,
+    and broad punctuation are NOT misidentified.
+
+    Conservative thresholds (Codex MED-7):
+      - Length guard: if len(text) < 100, return False (need enough evidence).
+      - Flag if garbage_ratio > 0.05, OR (wordlike_ratio < 0.40 AND
+        garbage_ratio > 0.02).
+    """
+    if len(text) < 100:
+        return False
+
+    garbage = 0
+    wordlike = 0
+    for ch in text:
+        cp = ord(ch)
+
+        # Allowlisted ranges — do NOT count as garbage even if unusual:
+        #   Arabic: 0x0600-0x06FF, Arabic Supplement 0x0750-0x077F
+        if 0x0600 <= cp <= 0x06FF or 0x0750 <= cp <= 0x077F:
+            if ch.isalpha():
+                wordlike += 1
+            continue
+        #   Greek: 0x0370-0x03FF
+        if 0x0370 <= cp <= 0x03FF:
+            if ch.isalpha():
+                wordlike += 1
+            continue
+        #   Hebrew presentation forms (Heb A-B): 0xFB1D-0xFB4F
+        if 0xFB1D <= cp <= 0xFB4F:
+            wordlike += 1
+            continue
+        #   Bidi marks: LRM, RLM, LRE/RLE/PDF/LRO/RLO, LRI/RLI/FSI/PDI
+        if cp in (0x200E, 0x200F) or 0x202A <= cp <= 0x202E or 0x2066 <= cp <= 0x2069:
+            continue
+        #   Broad Unicode punctuation categories (Pc, Pd, Pe, Pf, Pi, Po, Ps)
+        cat = unicodedata.category(ch)
+        if cat.startswith("P"):
+            continue
+        #   Common math operators (Sm category) — allow
+        if cat == "Sm":
+            continue
+
+        # Garbage codepoints:
+        #   U+FFFD replacement character
+        if cp == 0xFFFD:
+            garbage += 1
+            continue
+        #   Private Use Area (BMP PUA, Plane 15, Plane 16)
+        if 0xE000 <= cp <= 0xF8FF:
+            garbage += 1
+            continue
+        if 0xF0000 <= cp <= 0xFFFFD or 0x100000 <= cp <= 0x10FFFD:
+            garbage += 1
+            continue
+        #   Unicode noncharacters (0xFDD0-0xFDEF, and any U+nFFFE/U+nFFFF)
+        if 0xFDD0 <= cp <= 0xFDEF or (cp & 0xFFFE) == 0xFFFE:
+            garbage += 1
+            continue
+        #   Illegal C0/C1 controls (excluding \t \n \r which are legitimate)
+        if (cp < 0x20 and ch not in "\t\n\r") or (0x80 <= cp <= 0x9F):
+            garbage += 1
+            continue
+
+        # Word-like: letters, digits, whitespace
+        if ch.isalpha() or ch.isdigit() or ch.isspace():
+            wordlike += 1
+
+    total = len(text)
+    garbage_ratio = garbage / total
+    wordlike_ratio = wordlike / total
+
+    return garbage_ratio > 0.05 or (wordlike_ratio < 0.40 and garbage_ratio > 0.02)
+
+
+# ---------------------------------------------------------------------------
+# Phase 102 D-09: cheap multi-column-suspected detector (detect + log only).
+# ---------------------------------------------------------------------------
+
+def _detect_multicolumn_suspected(page_lines_x: list[tuple[float, float]]) -> bool:
+    """Return True if the page's x-bbox distribution looks strongly bimodal (D-09).
+
+    Input: list of (line_min_x, line_max_x) bbox pairs for all text lines on a page.
+    Heuristic: split lines by whether their start (min_x) is left or right of the
+    page midpoint; if BOTH clusters each contain >= 25% of lines and there is a
+    clear horizontal gutter between the right edge of the left cluster and the
+    left edge of the right cluster, return True.
+
+    This is a cheap single-pass detector — it only drives a log marker, never reflow.
+    Returns False for a single-column or empty page.
+    """
+    if len(page_lines_x) < 4:
+        return False
+
+    all_min_x = [mn for mn, _ in page_lines_x]
+    all_max_x = [mx for _, mx in page_lines_x]
+    if not all_min_x:
+        return False
+
+    page_mid = (min(all_min_x) + max(all_max_x)) / 2.0
+
+    left_lines = [(mn, mx) for mn, mx in page_lines_x if mn < page_mid]
+    right_lines = [(mn, mx) for mn, mx in page_lines_x if mn >= page_mid]
+
+    total = len(page_lines_x)
+    if len(left_lines) < total * 0.25 or len(right_lines) < total * 0.25:
+        return False
+
+    # Check for a clear gutter: the rightmost edge of left-column lines
+    # should not overlap with the leftmost start-x of right-column lines.
+    left_max_x = max(mx for _, mx in left_lines)
+    right_start_x = min(mn for mn, _ in right_lines)
+    return right_start_x > left_max_x
+
+
+# ---------------------------------------------------------------------------
 # Schema builders
 # ---------------------------------------------------------------------------
 
