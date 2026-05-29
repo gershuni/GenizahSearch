@@ -325,7 +325,7 @@ Plans:
 - [ ] 102-02-PLAN.md (Wave 2) — extract_pdf_pages rawdict rewrite (D-01/D-11) + LTR-damage guard (D-03) + corrupt-encoding (D-07) + multi-column-suspected (D-09) detectors
 - [ ] 102-03-PLAN.md (Wave 3) — D-06 content(stripped)/cached_text(nikud) divergence + extraction_format_version 1->2 + corrupt_encoding wired into 3 in-file status surfaces
 - [ ] 102-04-PLAN.md (Wave 1) — D-08 surface 4 desktop tree label/color + migration 2->3 (corrupt_encoding kept, NO auto-flip per D-10)
-- [ ] 102-05-PLAN.md (Wave 4) — end-to-end fixtures (letter-spaced, RTL header, corrupt-encoding, LTR no-regression) + e2e extract/index/query tests covering F-A..F-G + D-06
+- [ ] 102-05-PLAN.md (Wave 4) — end-to-end fixtures (letter-spaced, RTL header, corrupt-encoding, LTR no-regression) + e2e extract/index/query tests covering F-A..F-G + D-06 + OPEN_ISSUES.md bookkeeping (D-F13 fixed, D-F14/D-F16 addressed)
 
 ---
 
