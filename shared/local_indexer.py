@@ -96,10 +96,28 @@ except Exception as _mupdf_suppress_exc:  # noqa: BLE001
 from docx import Document as _DocxDoc  # python-docx - D-04
 import tantivy
 
+# Phase 102 D-11: disable image data in rawdict to keep memory bounded.
+# TEXTFLAGS_RAWDICT includes TEXT_PRESERVE_IMAGES by default (~4.5× baseline);
+# clearing that bit drops to ~1.68×. If TEXTFLAGS_RAWDICT is absent in the
+# installed build (unlikely — PyMuPDF >= 1.18), fall back to TEXTFLAGS_DICT.
+try:
+    _RAWDICT_FLAGS: int = fitz.TEXTFLAGS_RAWDICT & ~fitz.TEXT_PRESERVE_IMAGES
+except AttributeError:
+    _RAWDICT_FLAGS = fitz.TEXT_PRESERVE_IMAGES ^ fitz.TEXT_PRESERVE_IMAGES  # no-op fallback
+
 from shared.local_sys_id import (
     is_local_sys_id,  # noqa: F401
     generate_local_sys_id,
     _canonical_filepath,
+)
+from shared.local_indexer_rtl import (
+    rtl_ratio,
+    group_lines_by_baseline,
+    despace_line_to_word_units,
+    line_text_from_word_units,
+    reorder_word_units_rtl,
+    fix_visual_brackets_rtl,
+    normalize_punctuation_spacing,
 )
 
 logger = logging.getLogger(__name__)
@@ -914,74 +932,269 @@ def _make_full_header(sys_id: str, page_num: int, file_id: int) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Phase 102 D-03: LTR-damage guard (token-count / Jaccard comparison).
+# ---------------------------------------------------------------------------
+
+def _ltr_damage_guard(rawdict_text: str, blocks_text: str) -> str:
+    """Return blocks_text if rawdict lost or scrambled too much content (D-03).
+
+    For low-Hebrew/LTR pages: compare rawdict reconstructed output against the
+    old blocks extraction via token-count ratio and Jaccard similarity on the
+    token set. Fall back to blocks_text for that page if rawdict:
+      - is empty (no reconstructed text), OR
+      - has token count < 70% of blocks_text token count, OR
+      - has Jaccard(token-set) < 0.5 while the page is low-Hebrew
+        (rtl_ratio(blocks_text) <= 0.4) — a sign rawdict scrambled LTR content.
+
+    For RTL/Hebrew pages (rtl_ratio > 0.4): only fall back on empty output;
+    blocks may have scrambled RTL content so we trust rawdict.
+    """
+    rawdict_stripped = rawdict_text.strip()
+    blocks_stripped = blocks_text.strip()
+
+    # Always fall back if rawdict produced nothing.
+    if not rawdict_stripped:
+        return blocks_stripped
+
+    rawdict_tokens = rawdict_stripped.split()
+    blocks_tokens = blocks_stripped.split()
+
+    if not blocks_tokens:
+        # blocks also empty — prefer rawdict (may still have something)
+        return rawdict_stripped
+
+    page_is_rtl = rtl_ratio(blocks_stripped) > 0.4
+
+    # Token-count check: if rawdict lost >30% of blocks tokens, something is wrong.
+    count_ratio = len(rawdict_tokens) / max(len(blocks_tokens), 1)
+    if count_ratio < 0.70:
+        logger.debug(
+            "_ltr_damage_guard: rawdict token-count ratio %.2f < 0.70 — "
+            "falling back to blocks", count_ratio
+        )
+        return blocks_stripped
+
+    # Jaccard similarity on token sets (only enforce on LTR pages).
+    if not page_is_rtl:
+        rawdict_set = set(rawdict_tokens)
+        blocks_set = set(blocks_tokens)
+        union = rawdict_set | blocks_set
+        intersection = rawdict_set & blocks_set
+        jaccard = len(intersection) / len(union) if union else 1.0
+        if jaccard < 0.5:
+            logger.debug(
+                "_ltr_damage_guard: Jaccard %.2f < 0.50 on LTR page — "
+                "falling back to blocks", jaccard
+            )
+            return blocks_stripped
+
+    return rawdict_stripped
+
+
+# ---------------------------------------------------------------------------
 # Per-format extractors
 # ---------------------------------------------------------------------------
 
 def extract_pdf_pages(
     filepath: str,
+    page_flags: "dict | None" = None,
 ) -> Iterator[tuple[int, str, str]]:
-    """Extract text page-by-page using PyMuPDF (D-01 / D-03).
+    """Extract text page-by-page using PyMuPDF rawdict (Phase 102 D-01..D-11).
 
-    Yields (page_num, text, title) - D-03 one-doc-per-page model.
+    Yields the frozen (page_num, text, title) 3-tuple. The optional
+    ``page_flags`` out-param receives per-page detection results when supplied:
+        page_flags[page_num] = {"corrupt": bool, "multicolumn": bool}
+    This allows Plan 03 to buffer pages and make the file-level corrupt
+    decision BEFORE any _write_page_doc call (HIGH-2 detect-before-write).
+    Callers that omit page_flags see the unchanged positional 3-tuple.
 
-    D-06: pages with < 10 chars after strip are skipped silently.
-    D-05: caller must check total chars across all yielded pages; if < 50,
-          file gets status='no_text_layer'.
+    The yielded ``text`` is NIKUD-BEARING (D-06 FINAL). The single nikud-strip
+    site is Plan 03's _write_page_doc, applied to ALL LOCAL formats uniformly.
+    There is NO strip_nikud call in this function.
 
-    D-02: RTL helpers are NOT invoked in v1 (dead code).
+    Pipeline per page (D-01 through D-11):
+      1. get_text("rawdict", flags=_RAWDICT_FLAGS) — image data disabled (D-11).
+      2. _attach_nikud_page() — re-attach detached nikud BEFORE metric math.
+      3. PER-BLOCK iteration (M2): iterate blk["type"]==0 blocks, call
+         group_lines_by_baseline per block (baseline/font-size grouping, D-02).
+      4. RICHER GLYPH FLATTEN (HIGH-4/HIGH-5): flatten spans preserving original
+         rawdict reading order, annotating each glyph with span_id/original_order
+         + carrying font/size from the originating span. NO up-front x-sort.
+      5. Classify each row RTL vs LTR via rtl_ratio(). LTR rows: emit rawdict
+         text unchanged (D-01 pass-through). RTL rows: despace -> reorder ->
+         bracket-fix -> punctuation-normalize (D-04/D-05 pipeline).
+      6. Join block's rows with "\\n", blocks with "\\n\\n" (M2 block separation).
+      7. D-03 LTR-damage guard: compare rawdict_text vs blocks fallback per page.
+      8. Record corrupt + multicolumn flags into page_flags if supplied (HIGH-2).
+      9. D-09 multicolumn log. Skip empty pages. Yield (page_num, text, title).
 
-    Phase 96 D-F4: each page is first extracted via get_text("blocks") (the
-    Phase 95 default which preserves paragraph structure). If the result
-    trips _detect_single_word_per_line (>= 70% single-word lines across >= 5
-    non-empty lines — the pathological case where the PDF was laid out via
-    per-word Tj operators at distinct positions), we re-extract that page via
-    get_text("text", sort=True). The sort=True flag is load-bearing per
-    PyMuPDF docs — it requests spatial sort (top-left to bottom-right) which
-    is the documented remedy for non-sequential content-stream order.
-    The fallback is per-page, not per-document: a document with mostly-good
-    pages and one pathological page recovers only the bad page.
+    The old blocks path (_extract_blocks_text) survives ONLY as the D-03
+    comparison/fallback net. _fix_sort_true_rtl_page is no longer the primary
+    path; it may still be called inside the blocks fallback net (not removed).
     """
     doc = fitz.open(filepath)
     try:
         title = (doc.metadata or {}).get("title") or os.path.basename(filepath)
         for page_num, page in enumerate(doc, start=1):
-            # Primary: blocks mode preserves paragraph structure
-            blocks = page.get_text("blocks")
-            # Phase 101 follow-up (2026-05-28): collapse intra-block '\n' to
-            # a single space. PyMuPDF blocks ≈ paragraphs, and on RTL Hebrew
-            # the bidi engine fragments characters/punctuation onto their own
-            # lines within a block. Block boundaries below ('\n\n' join) still
-            # mark true paragraph breaks. Per Hillel: "Join is better than
-            # divide if any problem exists".
-            text_parts = [
-                _collapse_intra_block_newlines(b[4])
-                for b in blocks
-                if b[6] == 0 and b[4].strip()
-            ]
-            text_parts = [p for p in text_parts if p]
-            text = "\n\n".join(text_parts)
+            try:
+                final_text = _extract_one_page_rawdict(page, filepath, page_num)
+            except Exception:
+                logger.exception(
+                    "extract_pdf_pages: error on page %d of %s — skipping",
+                    page_num, filepath,
+                )
+                continue
 
-            # Phase 96 D-F4: detect pathological one-word-per-line output
-            # and fall back to get_text("text", sort=True) for THIS PAGE only.
-            if _detect_single_word_per_line(text):
+            if len(final_text.strip()) < _EMPTY_PAGE_CHAR_THRESHOLD:
+                continue  # D-06: skip empty pages
+
+            # Detect-before-write flags (HIGH-2).
+            if page_flags is not None:
+                # Collect per-line x-bbox data for multicolumn detection.
                 try:
-                    fallback_text = page.get_text("text", sort=True)
-                    if fallback_text and fallback_text.strip():
-                        # Phase 101 RTL fix (S-1 directional-run reversal):
-                        # sort=True gives LTR visual order, which reverses
-                        # Hebrew/Arabic reading order. Apply per-line
-                        # directional-run reversal for RTL-majority lines.
-                        text = _fix_sort_true_rtl_page(fallback_text)
+                    raw_d = page.get_text("rawdict", flags=_RAWDICT_FLAGS)
+                    line_x_ranges: list[tuple[float, float]] = []
+                    for blk in raw_d.get("blocks", []):
+                        if blk.get("type") != 0:
+                            continue
+                        for ln in blk.get("lines", []):
+                            bb = ln.get("bbox")
+                            if bb:
+                                line_x_ranges.append((bb[0], bb[2]))
                 except Exception:
-                    # If the fallback itself errors, keep the blocks output —
-                    # one-word-per-line is still better than no text at all.
-                    pass
+                    line_x_ranges = []
 
-            if len(text.strip()) < _EMPTY_PAGE_CHAR_THRESHOLD:
-                continue  # D-06: skip empty pages (post-fallback)
-            yield page_num, text, title
+                page_flags[page_num] = {
+                    "corrupt": _detect_corrupt_encoding(final_text),
+                    "multicolumn": _detect_multicolumn_suspected(line_x_ranges),
+                }
+                if page_flags[page_num]["multicolumn"]:
+                    logger.info(
+                        "multi-column suspected in %s page %d", filepath, page_num
+                    )
+
+            yield page_num, final_text, title
     finally:
         doc.close()
+
+
+def _extract_blocks_text(page) -> str:
+    """Extract text via old blocks path (kept as the D-03 fallback net only).
+
+    This was the Phase 95/96/101 primary path. Phase 102 keeps it alive
+    exclusively as the comparison baseline for _ltr_damage_guard (D-03).
+    """
+    try:
+        blocks = page.get_text("blocks")
+        text_parts = [
+            _collapse_intra_block_newlines(b[4])
+            for b in blocks
+            if b[6] == 0 and b[4].strip()
+        ]
+        text_parts = [p for p in text_parts if p]
+        text = "\n\n".join(text_parts)
+
+        # Apply sort=True fallback for single-word-per-line pages (Phase 96 D-F4).
+        if _detect_single_word_per_line(text):
+            try:
+                fallback_text = page.get_text("text", sort=True)
+                if fallback_text and fallback_text.strip():
+                    text = _fix_sort_true_rtl_page(fallback_text)
+            except Exception:
+                pass
+        return text
+    except Exception:
+        return ""
+
+
+def _extract_one_page_rawdict(page, filepath: str, page_num: int) -> str:
+    """Inner per-page rawdict extraction pipeline (D-01..D-09, Phase 102).
+
+    Returns the nikud-bearing reconstructed page text. Raises on unrecoverable
+    errors (caught by the caller extract_pdf_pages per-page try/except).
+    """
+    # Step 1: rawdict with image data disabled (D-11).
+    page_dict = page.get_text("rawdict", flags=_RAWDICT_FLAGS)
+
+    # Step 2: re-attach detached nikud BEFORE any metric math.
+    try:
+        from ephraim_meiri_pdf_converter.pdf_to_docx import _attach_nikud_page
+        _attach_nikud_page(page_dict)
+    except Exception:
+        pass  # Module may not always be present; metric math still works.
+
+    # Step 3+4+5+6: PER-BLOCK iteration (M2), richer glyph flatten, RTL pipeline.
+    block_texts: list[str] = []
+    span_counter = 0  # monotonic span_id counter across the whole page
+
+    for blk in page_dict.get("blocks", []):
+        if blk.get("type") != 0:
+            continue  # skip image blocks
+
+        block_lines = blk.get("lines", [])
+        if not block_lines:
+            continue
+
+        # D-02: group lines by baseline/font-size (per-block, NOT globally).
+        row_groups = group_lines_by_baseline(block_lines)
+
+        row_texts: list[str] = []
+        glyph_order = 0  # monotonic original_order within the block
+
+        for row_line_dicts in row_groups:
+            # Flatten all glyphs from this row's spans, preserving rawdict order.
+            # Annotate each glyph with span_id + original_order + font/size (HIGH-4/HIGH-5).
+            glyphs: list[dict] = []
+            for line_dict in row_line_dicts:
+                for sp in line_dict.get("spans", []):
+                    sp_font = sp.get("font", "")
+                    sp_size = sp.get("size", 0.0)
+                    sp_id = span_counter
+                    span_counter += 1
+                    for ch in sp.get("chars", []):
+                        glyphs.append({
+                            "c": ch.get("c", ""),
+                            "bbox": list(ch.get("bbox", [0.0, 0.0, 0.0, 0.0])),
+                            "font": sp_font,
+                            "size": sp_size,
+                            "span_id": sp_id,
+                            "original_order": glyph_order,
+                        })
+                        glyph_order += 1
+
+            if not glyphs:
+                continue
+
+            # Step 5: classify RTL vs LTR.
+            line_text_raw = "".join(g["c"] for g in glyphs)
+            row_rtl = rtl_ratio(line_text_raw) > 0.4
+
+            if not row_rtl:
+                # LTR/numeric: emit rawdict natural text unchanged (D-01 pass-through).
+                ltr_text = line_text_raw.strip()
+                if ltr_text:
+                    row_texts.append(ltr_text)
+            else:
+                # RTL pipeline: de-space -> reorder -> bracket-fix -> punct-normalize.
+                units = despace_line_to_word_units(glyphs)           # D-04/D-05/M3
+                units = reorder_word_units_rtl(units, line_text_raw)  # adapted Meiri
+                row_line = line_text_from_word_units(units)
+                row_line = fix_visual_brackets_rtl(row_line)           # F-C
+                row_line = normalize_punctuation_spacing(row_line)      # F-B
+                if row_line.strip():
+                    row_texts.append(row_line)
+
+        if row_texts:
+            block_texts.append("\n".join(row_texts))
+
+    # M2: join blocks with "\n\n" to preserve block/paragraph boundaries.
+    rawdict_text = "\n\n".join(t for t in block_texts if t.strip())
+
+    # Step 7: D-03 LTR-damage guard — compare against old blocks path per-page.
+    blocks_text = _extract_blocks_text(page)
+    final_text = _ltr_damage_guard(rawdict_text, blocks_text)
+
+    return final_text
 
 
 def extract_docx_pages(
