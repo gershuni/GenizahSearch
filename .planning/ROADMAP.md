@@ -318,14 +318,14 @@ Closes **D-F13**; reframes **D-F14** (adopt Meiri's reorder *core*, RTL-gated �
 **Scope:** Desktop-only (My Library), text-layer PDFs. **Out of scope:** OCR for image-only scans (D-F2 — deferred as an optional opt-in extension, seeded; a large share of the real library is image-only but common users won't need OCR and off-the-shelf pre-OCR exists); P3 View All renderer cleanups (D-F8/D-F10/D-F7).
 **Verification:** Regression fixtures for each failure mode — letter-spaced page (אוצר הגאונים-style), letter-spaced+reversed line, RTL header, AND an LTR/Latin PDF that must NOT regress; existing `tests/fixtures/local_indexer/single_word_per_line.pdf` guard still passes.
 **Note:** First piece of v7.16 work, appended after shipped v7.15 (Phases 99-101).
-**Plans:** 4/5 plans executed
+**Plans:** 5/5 plans complete
 
 Plans:
 - [x] 102-01-PLAN.md (Wave 1) — RTL helpers: baseline line-grouping, RTL classify, adaptive 1.8x-median de-space (word-unit bbox-unions), Meiri reorder core, bracket/punctuation fix + glyph-trace fixtures
 - [x] 102-02-PLAN.md (Wave 2) — extract_pdf_pages rawdict rewrite (D-01/D-11) + LTR-damage guard (D-03) + corrupt-encoding (D-07) + multi-column-suspected (D-09) detectors
 - [x] 102-03-PLAN.md (Wave 3) — D-06 strip nikud once in _write_page_doc for ALL LOCAL formats (content == cached_text, both consonantal — NO divergence; un-vocalized search matches vocalized text) + extraction_format_version 1->2 + buffer-then-decide corrupt flow + corrupt_encoding wired into 3 in-file status surfaces. Non-PDF nikud DISPLAY deferred (SEED-004).
 - [x] 102-04-PLAN.md (Wave 1) — D-08 surface 4 desktop tree label/color + migration 2->3 (corrupt_encoding kept, NO auto-flip per D-10)
-- [ ] 102-05-PLAN.md (Wave 4) — end-to-end fixtures (letter-spaced, RTL header, corrupt-encoding, LTR no-regression) + e2e extract/index/query tests covering F-A..F-G + D-06 + OPEN_ISSUES.md bookkeeping (D-F13 fixed, D-F14/D-F16 addressed)
+- [x] 102-05-PLAN.md (Wave 4) — end-to-end fixtures (letter-spaced, RTL header, corrupt-encoding, LTR no-regression) + e2e extract/index/query tests covering F-A..F-G + D-06 + OPEN_ISSUES.md bookkeeping (D-F13 fixed, D-F14/D-F16 addressed)
 
 ---
 
