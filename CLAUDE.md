@@ -28,7 +28,9 @@ Web App (NiceGUI) ──────────────┐
 Desktop App (PyQt6) ────────────┘
 ```
 
-The FastAPI backend was removed in January 2026. All read-only reference data is now served from local SQLite sidecars. Supabase is retained only for community features (auth, corrections, lists, comments).
+The **standalone** backend service (the separate `genizah-backend` process on port 8000, with its own database and routers) was removed in January 2026. All read-only reference data is now served from local SQLite sidecars. Supabase is retained only for community features (auth, corrections, lists, comments).
+
+> **Note:** FastAPI itself is still live and load-bearing — NiceGUI's `app` *is* a FastAPI instance, and `/api/*` routes (image proxies, exports, and the public Search API) are registered as FastAPI routes (`web/api.py::init_api_routes`) plus a dedicated `FastAPI()` sub-app mounted at `/api` in `web/main.py`. "Removed" refers only to the standalone backend process, not the framework.
 
 ## Key Files
 
@@ -234,8 +236,7 @@ Fix any reported issues before committing.
 
 ### Outdated Terms to Avoid
 
-- `FastAPI` / `backend server` - Removed in Jan 2026
-- `genizah-backend` service - No longer exists
+- standalone `backend server` / `genizah-backend` service - Removed in Jan 2026 (NOTE: FastAPI the framework is still live — it serves `/api/*`; only the separate backend process was removed)
 - `DATABASE_URL` - Replaced by `SUPABASE_URL`
 - `port 8000` - Backend port no longer used
 

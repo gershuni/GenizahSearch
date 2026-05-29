@@ -172,18 +172,20 @@ class PuzzleService:
             ensure_ascii=False
         )
 
-        # Preserve existing thumbnail when not explicitly provided
-        if thumbnail_b64 is None:
-            try:
-                existing = self._conn.execute(
-                    "SELECT thumbnail_b64 FROM join_documents WHERE id = ?", (doc.id,)
-                ).fetchone()
-                thumbnail_b64 = existing['thumbnail_b64'] if existing else ''
-            except Exception:
-                thumbnail_b64 = ''  # Thumbnail extraction failed; use empty string
-
         with self._write_lock:
             try:
+                # Preserve existing thumbnail when not explicitly provided.
+                # Done inside the lock so the read shares the single connection
+                # safely and is part of the same transaction we may roll back.
+                if thumbnail_b64 is None:
+                    try:
+                        existing = self._conn.execute(
+                            "SELECT thumbnail_b64 FROM join_documents WHERE id = ?", (doc.id,)
+                        ).fetchone()
+                        thumbnail_b64 = existing['thumbnail_b64'] if existing else ''
+                    except Exception:
+                        thumbnail_b64 = ''  # Thumbnail extraction failed; use empty string
+
                 self._conn.execute(
                     """INSERT OR REPLACE INTO join_documents
                        (id, title, notes, join_type, fragments_json, thumbnail_b64, created_at, updated_at)
@@ -204,6 +206,15 @@ class PuzzleService:
                 self._conn.commit()
                 return doc.id
             except Exception as e:
+                # Roll back the partial transaction. Without this the dirty
+                # writes (doc row + DELETE + partial fragment inserts) would sit
+                # pending on the long-lived connection and get flushed by the
+                # NEXT successful commit, desyncing join_document_fragments from
+                # fragments_json (audit 2026-05-29).
+                try:
+                    self._conn.rollback()
+                except Exception:
+                    pass
                 logger.error("PuzzleService.save_document failed: %s", e)
                 return None
 
@@ -218,9 +229,13 @@ class PuzzleService:
             return None
 
         try:
-            row = self._conn.execute(
-                "SELECT * FROM join_documents WHERE id = ?", (doc_id,)
-            ).fetchone()
+            # Serialize on the shared connection: all web requests share one
+            # sqlite3.Connection (check_same_thread=False), so reads must not
+            # run concurrently with a write+commit on another thread.
+            with self._write_lock:
+                row = self._conn.execute(
+                    "SELECT * FROM join_documents WHERE id = ?", (doc_id,)
+                ).fetchone()
             if row is None:
                 return None
 
@@ -251,10 +266,11 @@ class PuzzleService:
             return []
 
         try:
-            rows = self._conn.execute(
-                "SELECT id, title, join_type, fragments_json, thumbnail_b64, updated_at "
-                "FROM join_documents ORDER BY updated_at DESC"
-            ).fetchall()
+            with self._write_lock:  # serialize on the shared connection
+                rows = self._conn.execute(
+                    "SELECT id, title, join_type, fragments_json, thumbnail_b64, updated_at "
+                    "FROM join_documents ORDER BY updated_at DESC"
+                ).fetchall()
             results = []
             for r in rows:
                 d = dict(r)
@@ -293,6 +309,10 @@ class PuzzleService:
                 self._conn.commit()
                 return cursor.rowcount > 0
             except Exception as e:
+                try:
+                    self._conn.rollback()
+                except Exception:
+                    pass
                 logger.error("PuzzleService.delete_document failed: %s", e)
                 return False
 
@@ -311,18 +331,19 @@ class PuzzleService:
             return []
 
         try:
-            if fl_id is not None:
-                rows = self._conn.execute(
-                    "SELECT DISTINCT doc_id FROM join_document_fragments WHERE fl_id = ?",
-                    (fl_id,)
-                ).fetchall()
-            elif sys_id is not None:
-                rows = self._conn.execute(
-                    "SELECT DISTINCT doc_id FROM join_document_fragments WHERE sys_id = ?",
-                    (sys_id,)
-                ).fetchall()
-            else:
-                return []
+            with self._write_lock:  # serialize on the shared connection
+                if fl_id is not None:
+                    rows = self._conn.execute(
+                        "SELECT DISTINCT doc_id FROM join_document_fragments WHERE fl_id = ?",
+                        (fl_id,)
+                    ).fetchall()
+                elif sys_id is not None:
+                    rows = self._conn.execute(
+                        "SELECT DISTINCT doc_id FROM join_document_fragments WHERE sys_id = ?",
+                        (sys_id,)
+                    ).fetchall()
+                else:
+                    return []
             return [r[0] for r in rows]
         except Exception as e:
             logger.error("PuzzleService.list_documents_for_fragment failed: %s", e)

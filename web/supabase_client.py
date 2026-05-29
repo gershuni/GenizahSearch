@@ -8,7 +8,9 @@ This module provides the Supabase client and helper functions for:
 - Lists and items CRUD operations
 - Corrections, comments, discoveries, and joins
 
-Replaces the FastAPI backend for data operations.
+Replaces the former standalone `genizah-backend` data service (removed Jan
+2026) for data operations — NOT FastAPI the framework, which still serves
+the in-process `/api/*` routes.
 """
 
 import asyncio as _asyncio_memo
@@ -359,9 +361,9 @@ def get_user_client() -> Client:
     Phase 90 (D-05, D-12) request-scoped strategy:
       1. Read tokens via safe_user_get('auth_session') -- routes through the
          Phase 87 chokepoint (replaces the old captured-handle pattern
-         `storage = _app.storage.user` at the previous line 128 which is
-         unsafe per Codex round-4 CRITICAL-1: FilePersistentDict can be
-         GC'd mid-flight when prune_user_storage fires).
+         `storage = _app.storage.user`, since removed, which was unsafe per
+         Codex round-4 CRITICAL-1: FilePersistentDict can be GC'd mid-flight
+         when prune_user_storage fires).
       2. No tokens -> return the anonymous module singleton get_client()
          (existing fallback semantics preserved).
       3. Proactively check `_access_token_near_expiry(access_token)`; if

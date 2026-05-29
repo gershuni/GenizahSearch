@@ -482,6 +482,7 @@ class ListsCloudSync:
             'success': False,
             'lists_pushed': 0,
             'items_pushed': 0,
+            'items_failed': 0,
             'error': None
         }
 
@@ -655,37 +656,76 @@ class ListsCloudSync:
                         items_to_insert.append((item_payload, item_data))
 
                 # 3. Batch insert new items
+                # Count only items that actually persisted cloud-side; a
+                # swallowed insert error must NOT be reported as a success
+                # (otherwise the user sees "Uploaded N items" while items were
+                # silently dropped — see OPEN_ISSUES audit 2026-05-29).
+                inserted_ok = 0
                 if items_to_insert:
                     insert_payloads = [p for p, _ in items_to_insert]
                     try:
                         response = client.table('list_items').insert(insert_payloads).execute()
-                        if response.data:
-                            for i, row in enumerate(response.data):
-                                if i < len(items_to_insert):
-                                    items_to_insert[i][1]['cloud_id'] = row['id']
+                        for i, row in enumerate(response.data or []):
+                            if i < len(items_to_insert):
+                                items_to_insert[i][1]['cloud_id'] = row['id']
+                                inserted_ok += 1
                     except Exception as e:
                         logger.warning(f"Batch insert failed, falling back to individual: {e}")
+                        inserted_ok = 0
                         for payload, item_data in items_to_insert:
                             try:
                                 response = client.table('list_items').insert(payload).execute()
                                 if response.data:
                                     item_data['cloud_id'] = response.data[0]['id']
-                            except Exception:
-                                pass
+                                    inserted_ok += 1
+                                else:
+                                    logger.warning(
+                                        f"list_items insert returned no data for sys_id={payload.get('sys_id')}"
+                                    )
+                            except Exception as item_err:
+                                logger.warning(
+                                    f"list_items insert failed for sys_id={payload.get('sys_id')}: {item_err}"
+                                )
 
                 # 4. Update existing items (still individual but fewer calls)
+                updated_ok = 0
                 for item_cloud_id, payload, item_data in items_to_update:
                     try:
-                        client.table('list_items').update(payload).eq('id', item_cloud_id).execute()
-                        item_data['cloud_id'] = item_cloud_id
-                    except Exception:
-                        pass  # Ignore update errors
+                        response = client.table('list_items').update(payload).eq(
+                            'id', item_cloud_id
+                        ).execute()
+                        # PostgREST returns the updated rows; an empty result
+                        # means no row matched (stale cloud_id, deleted, or
+                        # RLS-filtered). Do NOT report that as a successful push.
+                        if response.data:
+                            item_data['cloud_id'] = item_cloud_id
+                            updated_ok += 1
+                        else:
+                            logger.warning(
+                                f"list_items update matched no row for id={item_cloud_id} "
+                                f"(stale cloud_id or RLS); not counting as pushed"
+                            )
+                    except Exception as item_err:
+                        logger.warning(f"list_items update failed for id={item_cloud_id}: {item_err}")
 
-                result['items_pushed'] += len(items_to_insert) + len(items_to_update)
+                result['items_pushed'] += inserted_ok + updated_ok
+                result['items_failed'] += (
+                    (len(items_to_insert) - inserted_ok)
+                    + (len(items_to_update) - updated_ok)
+                )
 
             self.lists_manager.save()
             self._last_sync = time.time()
-            result['success'] = True
+            # Only claim success if every item persisted. Partial failures are
+            # surfaced so the caller shows a warning instead of a false "done".
+            if result['items_failed']:
+                result['success'] = False
+                result['error'] = (
+                    f"Uploaded {result['items_pushed']} item(s), but "
+                    f"{result['items_failed']} failed to upload to the cloud."
+                )
+            else:
+                result['success'] = True
 
         except Exception as e:
             logger.error(f"Error syncing to cloud: {e}")

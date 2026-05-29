@@ -4681,7 +4681,12 @@ class MetadataManager:
         from shared.synthetic_sys_id import is_synthetic_sys_id
         meta = {'shelfmark': 'Unknown', 'title': '', 'desc': '', 'fl_ids': [], 'thumb_url': None, 'thumb_checked': False}
         if is_synthetic_sys_id(system_id):
-            return meta
+            # Must return the (system_id, meta) 2-tuple like every other path —
+            # callers unpack it (`_, meta = ...` at fetch_nli_data; `sid, meta =
+            # future.result()` in batch_fetch_shelfmarks). Returning a bare dict
+            # raised "ValueError: too many values to unpack" for any synthetic
+            # sys_id absent from both nli_cache and csv_bank (audit 2026-05-29).
+            return system_id, meta
 
         # Phase 98 D-22: shared NLI circuit breaker guard. Without this, the
         # retry loop below (2 attempts * (10s + 1s sleep) = up to 22s of
