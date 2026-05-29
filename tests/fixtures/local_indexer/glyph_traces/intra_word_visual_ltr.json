@@ -1,0 +1,156 @@
+{
+  "description": "Codex M3: a SINGLE RTL word 'שלום' whose glyphs were emitted in VISUAL-LTR order — logically-first consonant ש at the LARGEST center-x, logically-last ם at the SMALLEST. The descending-center-x intra-unit sort recovers correct R->L order 'שלום' (NOT the ascending-x 'םולש'). No word boundary inside the word. Line 2 is a nikud variant: the holam (U+05B9) over ו must stay attached to ו after the descending-x letter ordering.",
+  "expected_despaced": "שלום",
+  "expected_reordered": "שלום",
+  "lines": [
+    {
+      "bbox": [
+        296.5,
+        40.0,
+        327.5,
+        52.0
+      ],
+      "spans": [
+        {
+          "font": "David",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "ם",
+              "bbox": [
+                296.5,
+                40.0,
+                303.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 0
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                304.5,
+                40.0,
+                311.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 1
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                312.5,
+                40.0,
+                319.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 2
+            },
+            {
+              "c": "ש",
+              "bbox": [
+                320.5,
+                40.0,
+                327.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 3
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "bbox": [
+        296.5,
+        66.0,
+        327.5,
+        78.0
+      ],
+      "spans": [
+        {
+          "font": "David",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "ם",
+              "bbox": [
+                296.5,
+                66.0,
+                303.5,
+                78.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 0
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                304.5,
+                66.0,
+                311.5,
+                78.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 1
+            },
+            {
+              "c": "ֹ",
+              "bbox": [
+                306.5,
+                66.0,
+                309.5,
+                78.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 2
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                312.5,
+                66.0,
+                319.5,
+                78.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 3
+            },
+            {
+              "c": "ש",
+              "bbox": [
+                320.5,
+                66.0,
+                327.5,
+                78.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 4
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

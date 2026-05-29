@@ -1,0 +1,133 @@
+{
+  "description": "Codex MED-6 under-split: word gap (~9pt) dips below the 1.8x hard threshold (intra ~6pt). The hysteresis MID break splits it because it is corroborated by an embedded space glyph AND a span_id boundary (ספר=span0, תורה=span1).",
+  "expected_despaced": "ספר תורה",
+  "expected_reordered": "ספר תורה",
+  "lines": [
+    {
+      "bbox": [
+        317.5,
+        40.0,
+        363.5,
+        52.0
+      ],
+      "spans": [
+        {
+          "font": "David",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "ס",
+              "bbox": [
+                356.5,
+                40.0,
+                363.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 0
+            },
+            {
+              "c": "פ",
+              "bbox": [
+                350.5,
+                40.0,
+                357.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 1
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                344.5,
+                40.0,
+                351.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 2
+            },
+            {
+              "c": " ",
+              "bbox": [
+                341.0,
+                40.0,
+                345.0,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 3
+            }
+          ]
+        },
+        {
+          "font": "FrankRuehl",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "ת",
+              "bbox": [
+                335.5,
+                40.0,
+                342.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 4
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                329.5,
+                40.0,
+                336.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 5
+            },
+            {
+              "c": "ר",
+              "bbox": [
+                323.5,
+                40.0,
+                330.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 6
+            },
+            {
+              "c": "ה",
+              "bbox": [
+                317.5,
+                40.0,
+                324.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 7
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

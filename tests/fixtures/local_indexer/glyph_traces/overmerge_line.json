@@ -1,0 +1,178 @@
+{
+  "description": "Codex MED-6 over-merge (spike residual). Word gaps (~9pt) are below the 1.8x hard threshold; the split is driven by the span_id/font boundary (HIGH-5), NOT the 1.8x threshold. Must NOT collapse to 'ישנואצליוסף'.",
+  "expected_despaced": "ישנו אצל יוסף",
+  "expected_reordered": "ישנו אצל יוסף",
+  "lines": [
+    {
+      "bbox": [
+        310.5,
+        40.0,
+        383.5,
+        52.0
+      ],
+      "spans": [
+        {
+          "font": "David",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "י",
+              "bbox": [
+                376.5,
+                40.0,
+                383.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 0
+            },
+            {
+              "c": "ש",
+              "bbox": [
+                370.5,
+                40.0,
+                377.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 1
+            },
+            {
+              "c": "נ",
+              "bbox": [
+                364.5,
+                40.0,
+                371.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 2
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                358.5,
+                40.0,
+                365.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 0,
+              "original_order": 3
+            }
+          ]
+        },
+        {
+          "font": "FrankRuehl",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "א",
+              "bbox": [
+                349.5,
+                40.0,
+                356.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 4
+            },
+            {
+              "c": "צ",
+              "bbox": [
+                343.5,
+                40.0,
+                350.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 5
+            },
+            {
+              "c": "ל",
+              "bbox": [
+                337.5,
+                40.0,
+                344.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 1,
+              "original_order": 6
+            }
+          ]
+        },
+        {
+          "font": "David",
+          "size": 11.0,
+          "chars": [
+            {
+              "c": "י",
+              "bbox": [
+                328.5,
+                40.0,
+                335.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 2,
+              "original_order": 7
+            },
+            {
+              "c": "ו",
+              "bbox": [
+                322.5,
+                40.0,
+                329.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 2,
+              "original_order": 8
+            },
+            {
+              "c": "ס",
+              "bbox": [
+                316.5,
+                40.0,
+                323.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 2,
+              "original_order": 9
+            },
+            {
+              "c": "ף",
+              "bbox": [
+                310.5,
+                40.0,
+                317.5,
+                52.0
+              ],
+              "font": "David",
+              "size": 11.0,
+              "span_id": 2,
+              "original_order": 10
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
