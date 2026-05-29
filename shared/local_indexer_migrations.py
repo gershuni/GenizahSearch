@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Phase 97 D-NEW-1: SQLite migration ladder for the LOCAL indexer database.
+"""Phase 97 D-NEW-1 + Phase 102: SQLite migration ladder for the LOCAL indexer database.
 
 Migrates local_index.sqlite3 from user_version=0 (Phase 95 baseline + fresh
-installs) to user_version=2 (Phase 97 target schema) via an idempotent ladder.
+installs) to user_version=3 (Phase 102 target schema) via an idempotent ladder.
 
 Migration summary:
   0 -> 1: Baseline stamp — Phase 95 tables already exist via init_sqlite;
@@ -16,6 +16,10 @@ Migration summary:
            - NEW TABLE: scan_runs (replaces _pending_cleanup sentinel anti-pattern)
            - NEW TABLE: pending_dir_cleanup (GC for .old-<ts> rebuild dirs)
            - D-NEW-4 prune: delete unsupported-extension rows with NULL/unset status
+  2 -> 3: Phase 102 stamp — no DDL change; registers corrupt_encoding as a kept
+           status (already in _KEPT_STATUSES) and bumps user_version so pre-Phase-102
+           rows (extraction_format_version=1) stay identifiable for the manual
+           'Re-index All' recovery (D-10 — NO auto-flip / mass re-index).
 
 THREAT:
   T-97A-01 — PRAGMA integrity_check BEFORE migration; raises RuntimeError on != "ok"
@@ -30,7 +34,7 @@ import sqlite3
 
 logger = logging.getLogger(__name__)
 
-_LATEST_VERSION = 2
+_LATEST_VERSION = 3
 
 # Supported file extensions — D-NEW-4: rows for other extensions with NULL/unset
 # status are pruned in the 1->2 migration to prevent SQLite bloat at 100K+ trees.
@@ -48,6 +52,7 @@ _KEPT_STATUSES = (
     "oversized",
     "error",
     "encoding_error",
+    "corrupt_encoding",
     "changed_during_index",
     "zip_bomb_suspected",
     "unreachable",
@@ -146,10 +151,21 @@ def _migrate_1_to_2(conn: sqlite3.Connection) -> None:
         )
 
 
+def _migrate_2_to_3(conn: sqlite3.Connection) -> None:
+    """2 -> 3: Phase 102 stamp. No DDL change — registers corrupt_encoding as a
+    kept status (already in _KEPT_STATUSES) and bumps user_version so pre-Phase-102
+    rows (extraction_format_version=1) stay identifiable for the manual
+    'Re-index All' recovery (D-10 — NO auto-flip / mass re-index)."""
+    logger.info("Phase 102 migration 2->3: stamping rawdict-extractor schema (no-op DDL)")
+    # Intentionally no DDL: the existing extraction_format_version column carries the
+    # per-row 1 vs 2 distinction written by _write_page_doc; no auto re-flip here.
+
+
 # Registry: {current_version: migration_function}
 _MIGRATIONS: dict[int, object] = {
     0: _migrate_0_to_1,
     1: _migrate_1_to_2,
+    2: _migrate_2_to_3,
 }
 
 
