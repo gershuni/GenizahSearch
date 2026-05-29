@@ -55,7 +55,47 @@ Outputs:
 - **(C) No clear win** → abandon Phase 102; patch D-F13 narrowly in
   `_fix_sort_true_rtl_line` instead.
 
-## Results — VERDICT: PARTIAL (reframes Phase 102)
+## CORRECTION (after Hillel's expert review of the diff batch)
+
+The metric-only comparison (Finding 1 below) was **reorder-blind** — char/token counts
+cannot see word reordering. On a reorder-visible text diff + Hillel's reading, the true
+picture is:
+
+- **Neither extractor is universally better.** Meiri wins in קדמוניות/Yosipon
+  (mixed-direction, digits, parens, footnote order). CURRENT wins in places too —
+  e.g. ירחי משוח מלחמה: `אופנים . האחד – הוא דן באותו פסוק שקודמו דן בו ,120 "ויצא
+  איש הביניים ממחנות פלשתים גלית"` is correct in CURRENT, Meiri makes it worse.
+- **Reading-order reversal IS a real bug** (Shilat headers + lines) — my original
+  "reading order already correct" was wrong; it was only true for the Yosipon pages I
+  happened to read.
+
+### Shared failure modes both extractors exhibit (Phase 102 target list)
+
+- **F-A — reference/footnote number misplacement:** the note/ref number lands at the
+  start or middle of a line instead of its correct position (digit-run reordering both
+  get wrong in different ways).
+- **F-B — punctuation spacing:** a space is inserted before punctuation
+  (`אופנים .` should be `אופנים.`).
+- **F-C — reversed parentheses:** opening/closing parens come out mirrored. (NOTE: my
+  Meiri port omitted `_fix_visual_brackets`; re-test with it wired in before judging
+  Meiri on this axis.)
+- **F-D — letter-spacing fragmentation:** `מ ל ח מ ת` → single-letter tokens (neither
+  fixes; rawdict adaptive de-spacing prototyped, works).
+- **F-E — letter-spaced AND order-reversed lines:** `היה ב ל ש ו ן ... מ ה נ ה` should
+  be `מהנה היה בלשון ערבי` (neither fixes; needs de-space BEFORE reorder).
+- **F-F — running-header reversal:** `תיכון אבן` should be `אבן תיכון` (in scope).
+
+### Open work for the spike
+
+Hillel: "we should inspect more sorts of PDFs to find other rendering issues." Current
+corpus is 5 books (mostly clean-text typeset Hebrew). Still unprobed: OCR/image-only
+scans (D-F2), vocalized/nikud text, multi-column journals, Judeo-Arabic, manuscript
+transcriptions. Spike 002 / continued 001 should broaden the corpus and complete the
+failure-mode catalog before the phase plan locks.
+
+---
+
+## Results — VERDICT: PARTIAL (reframes Phase 102) — see CORRECTION above, supersedes Findings 1-2
 
 Ran on 5 real PDFs (Yosipon/Kadmoniyot 1944 Bialik, Igrot ha-Rambam–Shilat, Yarhei
 Mashuach Milchama, Dead Sea Scrolls Reader 4, Shemot Rabbah–Shanan), 6 sampled pages each.
