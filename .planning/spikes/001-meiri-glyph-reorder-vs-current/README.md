@@ -1,0 +1,112 @@
+---
+spike: 001
+name: meiri-glyph-reorder-vs-current
+validates: "Given Hillel's real problem PDFs, when extracted with Meiri's glyph-level rawdict reorder core vs. the current blocks+S-1 stack, then Meiri produces measurably better Hebrew reading order (intact words, no reversed letter-spaced emphasis, no bidi fragmentation)"
+verdict: PARTIAL
+related: []
+tags: [pdf, rtl, hebrew, extraction, phase-102, d-f13, d-f14]
+---
+
+# Spike 001: Meiri Glyph-Level Reorder vs. Current Extractor
+
+## What This Validates
+
+**Given** 3–5 of Hillel's real problem PDFs (≥1 with Hebrew letter-spaced emphasis
+like `מ ש נ ה  ת ו ר ה`, ≥1 bidi-fragmented Hebrew paragraph, optionally ≥1 OCR'd
+image-only PDF),
+**when** each is extracted by (a) the current production path
+`shared.local_indexer.extract_pdf_pages` and (b) a minimal plain-text wrapper around
+Meiri's real reorder functions (`_normalize_span_dir` + `_span_text` +
+`_attach_nikud_page`) over `get_text("rawdict")`,
+**then** we can judge whether Meiri produces **better** Hebrew reading order —
+intact words, no reversed letter-order on emphasized words, fewer single-letter
+fragments — and whether `rawdict` per-glyph bbox is usable on OCR'd PDFs.
+
+## How to Run
+
+From the project root `C:\Genizahsearch`:
+
+```bash
+python .planning/spikes/001-meiri-glyph-reorder-vs-current/compare_extractors.py \
+    "C:\path\to\problem1.pdf" "C:\path\to\problem2.pdf" "C:\path\to\problem3.pdf"
+```
+
+Outputs:
+- A per-page quantitative table to stdout (chars, Hebrew tokens, single-Hebrew-letter
+  tokens, mean Hebrew word length) for CURRENT vs MEIRI.
+- Full side-by-side text per PDF written to `out/<pdfname>.txt` for human reading.
+
+## What to Expect
+
+- **CURRENT** on a letter-spaced-emphasis PDF should show the bug: emphasized words
+  with reversed letter order and/or many single-Hebrew-letter tokens.
+- **MEIRI** should reconstruct those words (lower `single_heb_letter_tokens`, higher
+  `mean_heb_word_len`) and read in correct RTL order.
+- On a clean Hebrew PDF both should look similar (sanity check — no regression).
+- On an OCR'd PDF, MEIRI may degrade (rawdict gives per-line/word bbox, not per-glyph) —
+  this is the signal for whether OCR (D-F2) can ever share this path.
+
+## Decision This Drives
+
+- **(A) Meiri wins cleanly** → adopt the reorder core wholesale in Phase 102;
+  D-F13 likely resolves for free.
+- **(B) Wins on text PDFs but rawdict unusable on OCR** → keep clean-PDF path only;
+  OCR (D-F2) stays out of scope.
+- **(C) No clear win** → abandon Phase 102; patch D-F13 narrowly in
+  `_fix_sort_true_rtl_line` instead.
+
+## Results — VERDICT: PARTIAL (reframes Phase 102)
+
+Ran on 5 real PDFs (Yosipon/Kadmoniyot 1944 Bialik, Igrot ha-Rambam–Shilat, Yarhei
+Mashuach Milchama, Dead Sea Scrolls Reader 4, Shemot Rabbah–Shanan), 6 sampled pages each.
+
+### Finding 1 — Meiri's reorder core does NOT beat the current extractor
+
+CURRENT vs MEIRI metrics were **identical** on every page (char counts within ~0.5%,
+single-letter-token counts and mean Hebrew word length effectively equal). The literal
+D-F14 bet — "adopt Meiri's `_normalize_span_dir` wholesale and the PDFs get better" — is
+**INVALIDATED**. The reorder core changes nothing on these files.
+
+### Finding 2 — The real bug is letter-spacing, not reading-order reversal
+
+Reading order is **already correct** in the current output. Example (Yosipon p.73):
+`מ ל ח מ ת כ ו ש ש ל משה` reads correctly RTL — it's just that every letter of the
+justified/emphasized words is space-separated, so each letter becomes its own token.
+On the worst pages **>88% of Hebrew tokens are single letters** (p.73: 1341/1520;
+Shemot Rabbah p.161: 593/905). This is the D-F13 bug at full-book scale, in old
+justified Hebrew typesetting (1944 Bialik, Shanan). Modern PDFs (Shilat) are clean —
+the bug is edition-specific, not universal.
+
+### Finding 3 — A rawdict glyph-gap re-collapse fixes it; needs a per-line adaptive threshold
+
+Inter-glyph center gaps on letter-spaced lines are **bimodal**: intra-word ~1.7–4.0,
+word boundaries ~6.9–8.2. A **global** threshold fails because justification varies the
+spacing per line. A **per-line adaptive** threshold (word-break = gap > 1.8× the line's
+median gap, ignoring embedded space glyphs and re-deriving spacing from bboxes)
+reconstructs real words:
+- `מ ל ח מ ת כ ו ש ש ל משה` → `מלחמת כוש של משה`
+- `בידו א ת ה ע י ד ב ת נ א י ש ת י נ ש א לו` → `בידו את העיד בתנאי שתינשא לו`
+
+Residual over-merging (`ישנו אצל יוסף` → `ישנואצליוסף`) where a word-gap dips under the
+threshold — tunable via bimodal/Otsu split or using the PDF's embedded space-glyph
+positions as hints. Even unrefined, it converts ~1300 junk single-letter tokens into
+mostly searchable words.
+
+**This fix REQUIRES `rawdict` glyph bboxes — the current `get_text("blocks")` path
+structurally cannot do it.** So moving to a rawdict-based extractor is the right
+architectural direction — just with a *letter-spacing re-collapse* algorithm, NOT
+Meiri's segment-reorder function.
+
+### Finding 4 — OCR/D-F2 probe inconclusive
+
+The Dead Sea Scrolls Reader has a text layer (mostly English; 0 Hebrew tokens on most
+sampled pages), so it is NOT an image-only PDF and did not exercise the OCR path.
+rawdict-on-OCR remains unprobed; D-F2 stays out of scope and unvalidated.
+
+### Decision
+
+Neither (A) adopt-Meiri-wholesale nor (C) abandon. The spike surfaced a **third path**:
+re-scope Phase 102 around a **rawdict-based adaptive letter-spacing re-collapse**
+extractor (fixes D-F13 *and* the pervasive whole-book fragmentation in one algorithm;
+reading-order reversal is a non-issue on these PDFs). The ROADMAP Phase 102 goal —
+currently centered on adopting `_normalize_span_dir` — needs rewriting accordingly.
