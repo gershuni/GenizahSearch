@@ -733,13 +733,14 @@ def init_sqlite(db_path: str) -> sqlite3.Connection:
         );
     """)
     conn.commit()
-    # Phase 97 LD-2: stamp target user_version on fresh (empty) DBs so they
-    # skip the migration ladder on first open.
+    # Phase 97 LD-2 (updated Phase 102): stamp target user_version on fresh (empty) DBs
+    # so they skip the migration ladder on first open.
     # Pre-existing Phase 95 DBs already have data so this guard yields False
     # for them — LocalIndexer.__init__ will call migrations.run(conn) for those.
+    # Phase 102 bumped _LATEST_VERSION from 2 → 3; this literal matches.
     existing_files = conn.execute("SELECT COUNT(*) FROM processed_files").fetchone()[0]
     if existing_files == 0:
-        conn.execute("PRAGMA user_version = 2")
+        conn.execute("PRAGMA user_version = 3")
         conn.commit()
     # else: leave user_version at 0; LocalIndexer.__init__ calls migrations.run(conn).
     return conn

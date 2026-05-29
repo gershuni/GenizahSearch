@@ -3,7 +3,8 @@
 
 RED gate: reset_my_library() does not yet exist. After implementation:
   (a) LOCAL + LAB dirs are emptied (no Tantivy files lingering)
-  (b) SQLite at PRAGMA user_version=2 (migration ladder ran on fresh DB)
+  (b) SQLite at PRAGMA user_version=3 (migration ladder ran on fresh DB;
+      Phase 102 bumped _LATEST_VERSION to 3 — updated from original assertion of 2)
   (c) Fresh add_folder + scan_all round-trips a new file end-to-end
 """
 import os
@@ -66,9 +67,9 @@ def test_reset_my_library_full_cycle(tmp_path):
             f"local_files must be empty after reset, got {n_after}"
         )
 
-        # Assert (b): user_version=2 (migration ladder ran on fresh DB)
+        # Assert (b): user_version=3 (Phase 102 bumped _LATEST_VERSION to 3; migration ladder ran on fresh DB)
         v = indexer._conn.execute("PRAGMA user_version").fetchone()[0]
-        assert v == 2, f"PRAGMA user_version must be 2 after reset, got {v}"
+        assert v == 3, f"PRAGMA user_version must be 3 after reset, got {v}"
 
         # Assert (c): fresh scan works end-to-end
         fp2 = os.path.join(folder, "after.txt")
