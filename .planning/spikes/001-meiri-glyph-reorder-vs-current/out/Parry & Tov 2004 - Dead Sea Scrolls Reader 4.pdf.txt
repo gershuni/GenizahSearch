@@ -1,0 +1,522 @@
+===== Parry & Tov 2004 - Dead Sea Scrolls Reader 4.pdf =====
+
+
+----- page 25 -----
+[metrics] CURRENT {'chars': 2408, 'tokens': 445, 'heb_tokens': 0, 'single_heb_letter_tokens': 0, 'mean_heb_word_len': 0.0}
+[metrics] MEIRI   {'chars': 2411, 'tokens': 446, 'heb_tokens': 0, 'single_heb_letter_tokens': 0, 'mean_heb_word_len': 0.0}
+
+--- CURRENT ---
+5
+
+7. after the release; Si[gn of Gamul in the fourth; Sign of     ]Shekaniah in the release; Sign 8. [of Ga]mul in the third; [Si]gn of [Shekaniah in the sixth; Sign of Ga]mul in the second; Sign 9. of Shekaniah [in the fi]fth; Sign [of Gamul after    ] the release. Sign of Shekaniah 10. in the fourth; Sign of Gamul [in the release; Sign    ] of Shekaniah in the third; Sign of Gamul 11. in the sixth; Sign of Shek[aniah in the second; Sign     ]of Gamul in the fifth; Sign of Shekaniah 12. after the release (which is the) [concluding] s[ign of the jubilee. Signs of the fou]rth
+
+jubilee (are) 17 signs, 13. o[f the]se in (the years of) the release 2 signs. [(Sign of) Gamul    ] in the fourth year; Sign of Shekaniah 14. [in the re]lease; Sign of Gamul in the [third; Sign of Shekaniah in the sixth; Sign of Gamul] 15. in the second; Sign of Shekaniah in the fif[th; Sign of Gamul after the release; Sign of Shekaniah] 16. in the fourth; Sign of [Ga]mul in the [release; Sign of Shekaniah in the third; Sign of Gamul] 17. in the six[th; Si]gn of She[kaniah in the second; Sign of Gamul in the fifth; Sign of Shekaniah] 18. [after the] release; Sign of Ga[mul in the fourth; Sign of Shekaniah in the release (which is) the concluding sign of the] 19. [fif]th [jubilee] in Jeshebab. [Signs of the fifth jubilee (are) 16 signs, of these in (the years of the) release] Col. VI (Frgs. 5, 6, 7 i, 8) 1. [3 signs. (Sign of) Gamul in the third year; Sign of Shekaniah in the sixth; Sign] 2. [of Gamul in the] second; Si[gn] of Shekaniah in the [fifth; Si]gn of Gam[ul after the rel]ease; 3. [Sig]n of Shekaniah in the fourth; Sign of Gamul in the [rel]ease; [Sign of Shekaniah] in the third; 4. Sign of Gamul in the sixth; [Si]gn of Shekaniah in the [second;     Sign] of Gamul 5. in the f[if]th; Sign of Shekaniah after [the] re[lease;    ] Sign 6. of Gamul in the [fo]urth; Sign of Shekaniah in the rel[ease; Sign of Gamul     in the] third; 7. Sign [of Shekaniah in the si]xth (which is the) concluding sign [of the sixth j]u[bilee. Signs] 8. (of the) [sixth] jubilee [(are) 1]6 [signs] of which in (the years of the) [release (are)] 2 [s]igns. [vacat?] 9. the fi[fth vacat?] in the jubi[lee         ] 10. and to the jubi[lee. (sign of) Gamul in the second year, Sign of Shekaniah in the fifth; Sign of Gamul after] 11. the relea[se; Sign of Shekaniah in the four]th; Sign of Gam[ul in the] relea[se];
+
+4Q319
+
+--- MEIRI ---
+5
+
+7. after the release; Si[gn of Gamul in the fourth; Sign of     ]Shekaniah in the release; Sign 8. [of Ga]mul in the third; [Si]gn of [Shekaniah in the sixth; Sign of Ga]mul in the second; Sign ; Sign [of Gamul after    ] the release. Sign of Shekaniah [in the fi]fthof Shekaniah 9. 10. in the fourth; Sign of Gamul [in the release; Sign    ] of Shekaniah in the third; Sign of Gamul 11. in the sixth; Sign of Shek[aniah in the second; Sign     ]of Gamul in the fifth; Sign of Shekaniah 12. after the release (which is the) [concluding] s[ign of the jubilee. Signs of the fou]rth
+
+(are) 17 signs, jubilee . [(Sign of) Gamul    ] in the fourth year; signso[f the]se in (the years of) the release 2 13. Sign of Shekaniah 14. [in the re]lease; Sign of Gamul in the [third; Sign of Shekaniah in the sixth; Sign of Gamul] 15. in the second; Sign of Shekaniah in the fif[th; Sign of Gamul after the release; Sign of Shekaniah] 16. in the fourth; Sign of [Ga]mul in the [release; Sign of Shekaniah in the third; Sign of Gamul] 17. in the six[th; Si]gn of She[kaniah in the second; Sign of Gamul in the fifth; Sign of Shekaniah] 18. [after the] release; Sign of Ga[mul in the fourth; Sign of Shekaniah in the release (which is) the concluding sign of the] 19. [fif]th [jubilee] in Jeshebab. [Signs of the fifth jubilee (are) 16 signs, of these in (the years of the) release] Col. VI (Frgs. 5, 6, 7 i, 8) 1. [3 signs. (Sign of) Gamul in the third year; Sign of Shekaniah in the sixth; Sign] 2. [of Gamul in the] second; Si[gn] of Shekaniah in the [fifth; Si]gn of Gam[ul after the rel]ease; 3. [Sig]n of Shekaniah in the fourth; Sign of Gamul in the [rel]ease; [Sign of Shekaniah] in the third; 4. Sign of Gamul in the sixth; [Si]gn of Shekaniah in the [second;     Sign] of Gamul 5. in the f[if]th; Sign of Shekaniah after [the] re[lease;    ] Sign 6. of Gamul in the [fo]urth; Sign of Shekaniah in the rel[ease; Sign of Gamul     in the] third; [of the sixth  sign Sign [of Shekaniah in the si]xth (which is the) concluding 7. j]u[bilee. Signs] 8. (of the) [sixth] jubilee [(are) 1]6 [signs] of which in (the years of the) [release (are)] 2 ?]  vacat[s]igns. [ 9. ?] in the jubi[lee         ] vacatthe fi[fth 10. and to the jubi[lee. (sign of) Gamul in the second year, Sign of Shekaniah in the fifth; Sign of Gamul after] 11. the relea[se; Sign of Shekaniah in the four]th; Sign of Gam[ul in the] relea[se];
+
+3194Q
+
+----- page 79 -----
+[metrics] CURRENT {'chars': 1980, 'tokens': 391, 'heb_tokens': 0, 'single_heb_letter_tokens': 0, 'mean_heb_word_len': 0.0}
+[metrics] MEIRI   {'chars': 1983, 'tokens': 391, 'heb_tokens': 0, 'single_heb_letter_tokens': 0, 'mean_heb_word_len': 0.0}
+
+--- CURRENT ---
+59
+
+2. VARIOUS CALENDRICAL TEXTS 4Q317 (4QcryptA Lunisolar Calendar) trans. M. Wise, M. Abegg, and E. Cook Frg. 1a Col. i 18. [  ] 19. [  And thus the moon enter]s the day 20. [  And thus the moon enters ]the day 21. [  And thus the moon enters the d]ay 22. [  And thus the moon enters the] day 23. [  And thus the moon enters the da]y 24. [  And thus the moon enters the ]day 25. [  And thus the moon enters the ]day 26. [  And thus the moon enter]s the day 27. [  And thus the moon e]nters the day 28. [  And thus the moon enter]s the day 29. [  And thus the moon ent]ers the day 30. [  And thus the moon ente]rs the day 31. [  And thus the moon enter]s the day 32. [  fou]rteen parts 33. [  and thus the moon e]nters (the night) [
+
+Frgs. 1 + 1a Col. ii 1. [On the fourth of the month, eleve]n parts [are obscured. And thus the moon enters the day.] 2. [On the f]ifth of the month, [tw]elve [parts are obscured.] 3. And thus [the moon enters the day. On the sixth of the month,] 4. thir[teen] parts are obscured. [And thus the moon enters the day.] 5. On the seventh of the month, [fourteen parts] are obscur[ed. And thus] 6. the moon enters the day. vacat 7. On the eighth of the month, the moon [rules all the day in the midst] 8. of the sky [fourteen-and-one-half (?) parts being obscured. And when the sun sets,] its light [ceases] 9. to be obscured, [and thus the moon begins to be revealed] 10. on the first day of the week (the eighth of the month). vacat [On the ninth of the month,] 11. on[e] part [is revealed. And thus the moon enters the night.] 12. On the tenth of the month, [two parts are revealed. And thus the moon enters] 13. the night. vacat On the ele[venth of the month, three parts are revealed.] 14. And thus the moon enters the night. vacat 15. On the twelfth of the month, [four parts are revealed. And thus] 16. the moon enters the night. vacat On the t[hirteenth of the month,] 17. five parts are revealed. And thus the moon enter[s the night.]
+
+4Q317
+
+--- MEIRI ---
+59
+
+EXTS TALENDRICAL CARIOUS2. V (4QcryptA Lunisolar Calendar) trans. M. Wise, M. Abegg, 317 4Q and E. Cook Frg. 1a Col. i 18. [  ] 19. [  And thus the moon enter]s the day 20. [  And thus the moon enters ]the day 21. [  And thus the moon enters the d]ay 22. [  And thus the moon enters the] day 23. [  And thus the moon enters the da]y 24. [  And thus the moon enters the ]day 25. [  And thus the moon enters the ]day 26. [  And thus the moon enter]s the day 27. [  And thus the moon e]nters the day 28. [  And thus the moon enter]s the day 29. [  And thus the moon ent]ers the day 30. [  And thus the moon ente]rs the day 31. [  And thus the moon enter]s the day 32. [  fou]rteen parts 33. [  and thus the moon e]nters (the night) [
+
+Frgs. 1 + 1a Col. ii 1. [On the fourth of the month, eleve]n parts [are obscured. And thus the moon enters the day.] 2. [On the f]ifth of the month, [tw]elve [parts are obscured.] 3. And thus [the moon enters the day. On the sixth of the month,] 4. thir[teen] parts are obscured. [And thus the moon enters the day.] 5. On the seventh of the month, [fourteen parts] are obscur[ed. And thus] vacat6. the moon enters the day. 7. On the eighth of the month, the moon [rules all the day in the midst] And when the sun sets,] its light [ceases] [fourteen-and-one-half (?) parts being obscured. 8. of the sky 9. to be obscured, [and thus the moon begins to be revealed] [On the ninth of the vacat  10. on the first day of the week (the eighth of the month). month,] 11. on[e] part [is revealed. And thus the moon enters the night.] 12. On the tenth of the month, [two parts are revealed. And thus the moon enters] On the ele[venth of the month, three parts are revealed.] vacat  13. the night. vacat 14. And thus the moon enters the night. 15. On the twelfth of the month, [four parts are revealed. And thus] On the t[hirteenth of the month,] vacat  16. the moon enters the night. 17. five parts are revealed. And thus the moon enter[s the night.]
+
+3174Q
+
+----- page 132 -----
+[metrics] CURRENT {'chars': 1202, 'tokens': 391, 'heb_tokens': 94, 'single_heb_letter_tokens': 43, 'mean_heb_word_len': 2.11}
+[metrics] MEIRI   {'chars': 1134, 'tokens': 351, 'heb_tokens': 93, 'single_heb_letter_tokens': 42, 'mean_heb_word_len': 2.13}
+
+--- CURRENT ---
+112
+
+Frg. 11 (formerly 5)
+
+1 ] [ °° [
+
+2 ] [ ֵכי אל מ ֵ° ] [
+
+3 ] [ °° ֵצדקוֵ א ֵ  ֵ° ] [
+
+4 ] [  [  כו ] ל ל אנֵ ֵ ] [
+
+Frg. 18 top margin
+
+1 ] [ מה כיא ] [
+
+2 ] [   ל ] [
+
+Frg. 5
+
+1 ]      אויל [ יֵ לֵ בִ ֵ  ֵ ִ ] [
+
+2 לִ לִ ו נוסד ומ ִ ִ ] ה [
+
+3 עִ ולם תשובת ִ ] כמה [
+
+4 ] ע [ ל רבִ כמה ו ִ כול ] [
+
+5 ] ישמדו [ כֵול א ֵ ] וילי [
+
+Frg. 6
+
+1 ] [ ל וֿפיכמ ֿ ] ה [
+
+2 ] [  כו לֵ חוקי אִ ֵ       ִ ] ל [
+
+3 ] [ וֵאל ֵ   ° ] [
+
+Frg. 7
+
+1 ] [ לֵ נוֿ וֿל ֵ  ֿ  ֿ ] [
+
+2 ] כ [ ול חיֿ וזול ֿ ] ת [
+
+Frg. 8
+
+1 ] [ °°° ] [
+
+2 ] [ ֵ ֵ ה° ] [
+
+3 ] [ ֵ  ֵ פש° ] [
+
+Frg. 9
+
+1 ] [ °°°° ] [
+
+2 ] [   ל ] [
+
+Frg. 10
+
+1 ] [    אב° ] [
+
+2 [      ] °  ע ° ] [
+
+Frg. 12 Frg. 13
+
+1 ° ] [
+
+2 ֵקרא שמִ ם ב ִ   ֵ ] [
+
+3 ֵוכן תעשה ֵ ] [
+
+4 ֵהאמת ר ֵ ] [
+
+5 הרוח ] [
+
+6 °  ֵ ֵ  כֵוֵל ]  [ ל ] [
+
+Frg. 14
+
+1 [             ] ֵ ֵ   ל°° ] [
+
+2 [            ] °° ֿדֵ עו ֵ   ֿ° ] [
+
+3 [       ] עֵ מֵ הֵ התהלך ב ֵ ֵ ֵ        °° ] [
+
+4 [    ] ֿשֵ מות פִ רש אל ליֿו ֵ     ִ        ֿ ֿ ] [
+
+5 [  ] ֵבֵיֵגֵוֵן ֵ ֵ ֵ ֵ ֵ ]  [° ] [
+
+Frg. 15
+
+1 ° ] [
+
+2 לכל ] [
+
+3 ] [
+
+4 בר° ] [
+
+5 ֵלֵ ] [
+
+Frg. 16
+
+1 [ ° וֿ כיא ֿ     ° ] [
+
+2 [  כנפיהן משא ] [
+
+3 [ ° ה °°°° ] [
+
+Frg. 17
+
+1 [ ° ֵ  ֿ ֵ איֿש ] [
+
+2 [  ]  לא [
+
+A. SAPIENTIAL INSTRUCTIONS
+
+--- MEIRI ---
+112
+
+Frg. 11 (formerly 5)
+
+] [ °° [ 1
+
+] [ כי ֵאל מֵ ° ] [ 2
+
+] [ °° צדקֵוֵ ֵ אֵ ° ] [ 3
+
+] ל ]  [  [  כו ל אנֵֵ ] [ 4
+
+Frg. 18 top margin
+
+] [ מה כיא ] [ 1
+
+] [   ל ] [ 2
+
+Frg. 5
+
+]      אויל [ ֵֵי לֵֵ בִִ ] [ 1
+
+לִִ לִִ ו נוסד ומ ] ה [ 2
+
+ִִ ולםע תשובת ] כמה [ 3
+
+] ע [ ל רבִִ כמה ו ]    כול [ 4
+
+] ישמדו [ כֵֵול א ] וילי [ 5
+
+Frg. 6
+
+] [ ל וֿֿפיכמ ] ה [ 1
+
+] [  כו ֵֵל חוקי אִִ ] ל [ 2
+
+] [ וֵֵאל ° ] [ 3
+
+Frg. 7
+
+] [ לֵֵ נֿוֿ ֿֿלו ] [ 1
+
+] כ [ ול חיֿֿ וזול ] ת [ 2
+
+Frg. 8
+
+] [ °°° ] [ 1
+
+] [ הֵֵ   ° ] [ 2
+
+] [ פשֵ ֵ  ° ] [ 3
+
+Frg. 9
+
+] [ °°°° ] [ 1
+
+] [   ל ] [ 2
+
+Frg. 10
+
+] [    אב° ] [ 1
+
+[      ] °  ע ° ] [ 2
+
+Frg. 13 Frg. 12
+
+° ] [ 1
+
+קרא ֵשמִִ ם בֵ ] [ 2
+
+וכן ֵתעשהֵ ] [ 3
+
+האמת ֵ רֵ ] [ 4
+
+הרוח ] [ 5
+
+°     כֵֵֵוֵל ]  [ ל ] [ 6
+
+Frg. 14
+
+[             ] ֵֵל      °° ] [ 1
+
+[            ] °° דֵֵ ֿעוֿ ° ] [ 2
+
+[       ] עֵֵ מֵֵ הֵֵ התהלך ב °° ] [ 3
+
+[    ] פִִ רששֵֵ מות ֿ אל ליֿֿֿו ] [ 4
+
+[  ] בֵֵֵיֵֵגֵֵוֵֵןֵ ]  [° ] [ 5
+
+Frg. 15
+
+° ] [ 1
+
+לכל ] [ 2
+
+] [ 3
+
+בר° ] [ 4
+
+ֵלֵ ] [ 5
+
+Frg. 16
+
+[ ° וֿֿ כיא ° ] [ 1
+
+[  כנפיהן משא ] [ 2
+
+[ ° ה °°°° ] [ 3
+
+Frg. 17
+
+[ ° אֿי ֿשֵֵ ] [ 1
+
+[  ]  לא [ 2
+
+NSTRUCTIONS IAPIENTIALA. S
+
+----- page 186 -----
+[metrics] CURRENT {'chars': 973, 'tokens': 313, 'heb_tokens': 75, 'single_heb_letter_tokens': 31, 'mean_heb_word_len': 2.31}
+[metrics] MEIRI   {'chars': 879, 'tokens': 262, 'heb_tokens': 75, 'single_heb_letter_tokens': 31, 'mean_heb_word_len': 2.31}
+
+--- CURRENT ---
+166
+
+Frg. 187
+
+1 ] [ ° ִ ] ִ ם [
+
+2 ] [ ֵםִ וֿחִ ש ִ  ֿ ִ ֵ ] ב [
+
+3 ] [ המ° ] [ Frg. 188
+
+1 ] [ °° ֵקֵ ] [
+
+2 ] [ מֵ וֿת הוד ֵ ֿ ] [
+
+3 ] ב [ בֵוֿאכה למנוֿחֵ ֵ ֿ        ֿ ֵ תו ] [
+
+4 ] [ ° ֵם הש ֵ ] [
+
+5 ] [ ֵאבוֿת כיא נחִ מִ ד ה ֿ        ִ ִ   ֵ וא ] [
+
+6 ] מע [ שֵ יֿ ברית לוא ידרשוִ ֵ ֿ               ִ ] [
+
+7 ] [   פִ ןִ ישוֿגו בדברי ִ ִ    ֿ ] קודש [
+
+8 ] [ ° ֵ   ֵ אתה ] ובֵנִיכה ֵ ִ [ Frg. 189
+
+1 ] פ [ ןֵ יֿשפִ ֵ  ֿ  ִ ] [
+
+2 ] [ בֵל יבין ֵ ] [ Frg. 190
+
+1 ] [ ° [   ]
+
+2 ] גלה אוז [ נֵיֿכה ברז ֵ ֿ
+
+3 ] נהיה [    נהי וֿת עולם ֿ
+
+4 ] [ ל ]       [
+
+Frg. 191
+
+1 ] [ ֵ  ֵחד° ] [
+
+2 [       ] ֿמִ רפאו ִ    ֿ ] [
+
+Frg. 194
+
+1 ] [ יֵליֿ א ֵ  ֿ ] [
+
+2 ] [ ִ ] ִ  ִ לִ כ [
+
+Frg. 193
+
+1 ] [ ֵוֿ בינֵה ֿ    ֵ ֵ ] [
+
+2 ] [ ]  ל [
+
+Frg. 192
+
+1 ] [ תֵה לוא ֵ ] [
+
+2 ] [ וֵגבורת ֵ ] [
+
+Frg. 195
+
+1 ] [   ]  הב [
+
+2 [       ] ֵ  ֿ  הֵ וֿמ ] [
+
+Frg. 196
+
+1 ] ה [ תֵהֵ לִ כִ הִ ֵ ֵ ִ ִ ִ ] [
+
+2 ] [   וֿכוֿל ש ֿ  ֿ ] [
+
+3 ] [ ֵם לע ֵ ] [
+
+4 ] [ °° ] [
+
+A. SAPIENTIAL INSTRUCTIONS
+
+--- MEIRI ---
+166
+
+Frg. 187
+
+] [ ° םִִ ] [ 1
+
+] [ םִִ ֵֿֿחִִ שֵו ] ב [ 2
+
+] [ המ° ] [ 3 Frg. 188
+
+] [ °° קֵֵ ] [ 1
+
+] [ ֵֵ ומ ֿֿת הוד ] [ 2
+
+] ב [ בֵֵֿוֿאכה למנֿוֿחֵֵ ]תו [ 3
+
+] [ ° ם ֵהשֵ ] [ 4
+
+] [ כיאאבֿוֿת ֵ נחִִ מִִ ד הֵ ]  וא [ 5
+
+] מע [ שֵֵ יֿֿ ברית לוא ידרשוִִ ] [ 6
+
+] [   פִִ ןִִ ישוֿֿגו בדברי ] [ קודש 7
+
+] [ ° אתהֵ ֵ ] [ ובִֵֵנִיכה 8 Frg. 189
+
+] פ [ ןֵֵ ֿֿשפי ִִ ] [ 1
+
+] [ בֵֵל יבין ] [ 2 Frg. 190
+
+] [ ° [   ] 1
+
+] גלה אוז [ ֵֿנֵיֿכה ברז 2
+
+] נהיה נהי [ ֿֿתו עולם 3
+
+] [ ל ]       [ 4
+
+Frg. 191
+
+] [ חדֵֵ  ° ] [ 1
+
+[       ] מִִ רפאוֿֿ ] [ 2
+
+Frg. 194
+
+] [ ֵֵליי ֿֿ א ] [ 1
+
+] [ לִִ ִ  ]   כִ [ 2
+
+Frg. 193
+
+] [ וֿֿ ֵביֵנֵהֵ ] [ 1
+
+] [ ל   ] [ 2
+
+Frg. 192
+
+] [ תֵֵה לוא ] [ 1
+
+] [ ֵֵגבורתו ] [ 2
+
+Frg. 195
+
+] [   ]  הב [ 1
+
+[       ] הֵֵ     וֿֿמ ] [ 2
+
+Frg. 196
+
+] ה [ תֵֵהֵֵ לִִ כִִ הִִ ] [ 1
+
+] [   ֿֿכֿו וֿל ש ] [ 2
+
+] [ ם ֵלעֵ ] [ 3
+
+] [ °° ] [ 4
+
+NSTRUCTIONS IAPIENTIALA. S
+
+----- page 239 -----
+[metrics] CURRENT {'chars': 720, 'tokens': 142, 'heb_tokens': 0, 'single_heb_letter_tokens': 0, 'mean_heb_word_len': 0.0}
+[metrics] MEIRI   {'chars': 716, 'tokens': 143, 'heb_tokens': 0, 'single_heb_letter_tokens': 0, 'mean_heb_word_len': 0.0}
+
+--- CURRENT ---
+219
+
+Frg. 52
+
+3. man   [ 4. in the furnace[ Frg. 53
+
+1. ]abominations[ 2. ]in His holiness   [ 3. ]   among you    [ 4. ]   and there is no name for the peri[od 5. ]judgement for [He is] righteous[ 6. ]His [m]ight and the power[ of 7. ] to God to exact vengeance[ 8. ] and a dispute against the strong   [ 9. G]od, and in the heavens is [His] dwelling[ 10. ]      vacat[ 11. ]your [     ] I will announce[ 12. ]him (?) with the king[ Frg. 54 2. ]   persecuted and robbed by   [ 3. ]   for loving∬kindness[ 4. ] in all       to[
+
+Frg. 55
+
+1. ] holiness     [ 2. ]the righteous [judge]ments[ 3. ]      for      [ 4. ]which they chose   [
+
+Frg. 51
+
+1. ]messenger[s of
+
+Frg. 48
+
+1. al]l who pas[s 2. ]and in every   [
+
+4Q299
+
+--- MEIRI ---
+219
+
+Frg. 52
+
+3. man   [ 4. in the furnace[ Frg. 53
+
+1. ]abominations[ 2. ]in His holiness   [ 3. ]   among you    [ 4. ]   and there is no name for the peri[od 5. ]judgement for [He is] righteous[ 6. ]His [m]ight and the power[ of 7. ] to God to exact vengeance[ 8. ] and a dispute against the strong   [ 9. G]od, and in the heavens is [His] dwelling[ 10. [ vacat] 11. ]your [     ] I will announce[ 12. ]him (?) with the king[ Frg. 54 2. ]   persecuted and robbed by   [ kindness[ ∬]   for loving 3. 4. ] in all       to[
+
+Frg. 55
+
+1. ] holiness     [ 2. ]the righteous [judge]ments[ 3. ]      for      [ 4. ]which they chose   [
+
+Frg. 51
+
+1. ]messenger[s of
+
+Frg. 48
+
+1. al]l who pas[s 2. ]and in every   [
+
+2994Q
+
+----- page 293 -----
+[metrics] CURRENT {'chars': 3202, 'tokens': 520, 'heb_tokens': 0, 'single_heb_letter_tokens': 0, 'mean_heb_word_len': 0.0}
+[metrics] MEIRI   {'chars': 3202, 'tokens': 519, 'heb_tokens': 0, 'single_heb_letter_tokens': 0, 'mean_heb_word_len': 0.0}
+
+--- CURRENT ---
+273
+
+3. of God. This spirit engenders humility, patience, abundant compassion, perpetual goodness, insight, understanding, and powerful wisdom resonating to each 4. of God’s deeds, sustained by His constant faithfulness. It engenders a spirit knowl- edgeable in every plan of action, zealous for the laws of righteousness, holy 5. in its thoughts and steadfast in purpose. This spirit encourages plenteous compassion upon all who hold fast to truth, and glorious purity combined with visceral hatred of impurity in its every guise. It results in humble deportment 6. allied with a general discernment, concealing the truth, that is, the mysteries of knowledge. vacat To these ends is the earthly counsel of the spirit to those whose nature yearns for truth. Through a gracious visitation all who walk in this spirit will know healing, 7. bountiful peace, long life and multiple progeny, followed by eternal blessings and perpetual joy through life everlasting. They will receive a crown of glory 8. with a robe of honour, resplendent forever and ever. vacat 9. vacat The operations of the spirit of falsehood result in greed, neglect of righteous deeds, wickedness, lying, pride and haughtiness, cruel deceit and fraud, 10. massive hypocrisy, a want of self-control and abundant foolishness, a zeal for arrogance, abominable deeds fashioned by whorish desire, lechery in its filthy manifestation, 11. a reviling tongue, blind eyes, deaf ears, stiff neck and hard heart-to the end of walking in all the ways of darkness and evil cunning. The judgement 12. of all who walk in such ways will be multiple afflictions at the hand of all the angels of perdition, everlasting damnation in the wrath of God’s furious vengeance, never- ending terror and reproach 13. for all eternity, with a shameful extinction in the fire of Hell’s outer darkness. For all their eras, generation by generation, they will know doleful sorrow, bitter evil and dark happenstance, until 14. their utter destruction with neither remnant nor rescue. vacat 15. vacat The character and fate of all humankind reside with these spirits. All the hosts of humanity, generation by generation, are heirs to these spiritual divisions, walking according to their ways; the outworking of every 16. deed inheres in these divisions according to each person’s spiritual heritage, whether great or small, for every age of eternity. God has appointed these spirits as equals until the 17. last age, and set an everlasting enmity between their divisions. False deeds are thus an abomination to the truth, whereas all the ways of truth are for perversity equally a disgrace. Fierce 18. dispute attends every point of decision, for they can never agree. In his mysterious insight and glorious wisdom God has countenanced an era in which perversity triumphs, but at the time appointed 19. for visitation He shall destroy such forever. Then shall truth come forth in victory upon the earth. Sullied by wicked ways while perversity rules, at 20. the time of the appointed judgement truth shall be decreed. By His truth God shall then purify all human deeds, and refine some of humanity so as to extinguish every perverse spirit from the inward parts
+
+1QS
+
+--- MEIRI ---
+273
+
+3. of God. This spirit engenders humility, patience, abundant compassion, perpetual goodness, insight, understanding, and powerful wisdom resonating to each 4. of God’s deeds, sustained by His constant faithfulness. It engenders a spirit knowl- edgeable in every plan of action, zealous for the laws of righteousness, holy 5. in its thoughts and steadfast in purpose. This spirit encourages plenteous compassion upon all who hold fast to truth, and glorious purity combined with visceral hatred of impurity in its every guise. It results in humble deportment 6. allied with a general discernment, concealing the truth, that is, the mysteries of To these ends is the earthly counsel of the spirit to those whose vacat knowledge. nature yearns for truth. Through a gracious visitation all who walk in this spirit will know healing, 7. bountiful peace, long life and multiple progeny, followed by eternal blessings and perpetual joy through life everlasting. They will receive a crown of glory vacat8. with a robe of honour, resplendent forever and ever. The operations of the spirit of falsehood result in greed, neglect of righteous vacat 9. deeds, wickedness, lying, pride and haughtiness, cruel deceit and fraud, 10. massive hypocrisy, a want of self-control and abundant foolishness, a zeal for arrogance, abominable deeds fashioned by whorish desire, lechery in its filthy manifestation, 11. a reviling tongue, blind eyes, deaf ears, stiff neck and hard heart-to the end of walking in all the ways of darkness and evil cunning. The judgement 12. of all who walk in such ways will be multiple afflictions at the hand of all the angels of perdition, everlasting damnation in the wrath of God’s furious vengeance, never- ending terror and reproach 13. for all eternity, with a shameful extinction in the fire of Hell’s outer darkness. For all their eras, generation by generation, they will know doleful sorrow, bitter evil and dark happenstance, until vacat 14. their utter destruction with neither remnant nor rescue. The character and fate of all humankind reside with these spirits. All the hosts vacat  15. of humanity, generation by generation, are heirs to these spiritual divisions, walking according to their ways; the outworking of every 16. deed inheres in these divisions according to each person’s spiritual heritage, whether great or small, for every age of eternity. God has appointed these spirits as equals until the 17. last age, and set an everlasting enmity between their divisions. False deeds are thus an abomination to the truth, whereas all the ways of truth are for perversity equally a disgrace. Fierce 18. dispute attends every point of decision, for they can never agree. In his mysterious insight and glorious wisdom God has countenanced an era in which perversity triumphs, but at the time appointed 19. for visitation He shall destroy such forever. Then shall truth come forth in victory upon the earth. Sullied by wicked ways while perversity rules, at 20. the time of the appointed judgement truth shall be decreed. By His truth God shall then purify all human deeds, and refine some of humanity so as to extinguish every perverse spirit from the inward parts
+
+1QS
