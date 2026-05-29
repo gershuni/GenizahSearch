@@ -1,151 +1,126 @@
 ---
 phase: 102
+round: 2
 reviewers: [codex]
-reviewed_at: 2026-05-29T10:20:08Z
+reviewed_at: 2026-05-29T14:40:00Z
 plans_reviewed: [102-01-PLAN.md, 102-02-PLAN.md, 102-03-PLAN.md, 102-04-PLAN.md, 102-05-PLAN.md]
-verdict: HIGH risk — do not execute as-is; replan recommended
+verdict: MEDIUM risk — minor-patch-then-execute (all round-1 HIGH blockers resolved)
+supersedes: 102-REVIEWS-round1.md
 ---
 
-# Cross-AI Plan Review — Phase 102
+# Cross-AI Plan Review — Phase 102 (Round 2 / re-review)
 
 > Reviewer: **Codex** (`codex exec`, default model, read the live codebase + installed PyMuPDF).
-> Single-reviewer run (`--codex`). We run inside Claude Code, so the `claude` CLI was skipped for
-> independence. Codex's sandbox could not run `pytest` (its venv launchers failed — environmental,
-> not a plan defect; see Concern about broken Python env).
+> Single-reviewer run (`--codex`); `claude` CLI skipped for independence (we run inside Claude Code).
+> This is a RE-REVIEW of the plans AFTER they were revised in `--reviews` mode against the round-1
+> findings (archived in `102-REVIEWS-round1.md`). Codex's task: verify each round-1 finding is now
+> resolved and catch any new drift introduced by the revisions. Codex's Python launcher still failed
+> in its sandbox (environmental — our own toolchain runs pytest fine), so it verified PyMuPDF and
+> code claims by reading installed package files + live source.
 
 ## Codex Review
 
 **Summary**
 
-The plan set is close on symbol names and most line references, but Codex would not execute it as-is.
-The highest-risk drift is architectural: D-06 assumes `cached_text` drives display/browse, but live
-LOCAL search and browse read the stored Tantivy `content` field. Also, the proposed `corrupt_encoding`
-flow detects corruption only after pages have already been written to Tantivy, so it can still index
-garbage.
+Verdict: **MEDIUM risk, minor-patch-then-execute**. The revised plans resolve the original HIGH
+blockers in substance: D-06 is now coherent under the new "strip nikud for display too" decision,
+corrupt PDFs are buffered and classified before writes, and the glyph metadata contract is much
+stronger. I would not replan the phase again, but I would patch a few plan gaps before execution,
+mostly around existing tests, block-boundary preservation, and one subtle RTL letter-order
+ambiguity.
+
+**Round-1 Findings Resolution**
+
+| Round-1 finding | Status | Evidence |
+|---|---:|---|
+| PyMuPDF rawdict flags valid | RESOLVED | PyMuPDF `1.27.2.3`; `TEXTFLAGS_RAWDICT = TEXTFLAGS_DICT` and `TEXT_PRESERVE_IMAGES` exist. Plan 02 uses `_RAWDICT_FLAGS = fitz.TEXTFLAGS_RAWDICT & ~fitz.TEXT_PRESERVE_IMAGES`. |
+| `_attach_nikud_page` exists | RESOLVED | Live `pdf_to_docx.py:791`; Plan 02 calls it before metrics. |
+| D-06 display assumption was false | RESOLVED | New design intentionally strips both `content` and `cached_text`; no display lookup change needed. Live display still reads Tantivy `content` at `genizah_core.py:7166`/`:9631` — now consonantal by design. |
+| Corrupt pages written before classification | RESOLVED | Plan 02 exposes `page_flags` before write; Plan 03 buffers pages and returns `corrupt_encoding` before `_write_page_doc`, with zero-write tests. |
+| Atomic rebuild would reintroduce nikud | RESOLVED | With stripped `cached_text`, live rebuild path `:3054`→`:3072` reindexes stripped text. Plan 03 also allows defensive `strip_nikud`. |
+| Fresh DB stamp left at user_version 2 | RESOLVED | Plan 04 bumps `_LATEST_VERSION` and `init_sqlite` stamp to 3, with tests. |
+| Existing fallback tests would break | RESOLVED (named file) | Plan 02 updates `tests/test_local_pdf_extraction_fallback.py` to rawdict-primary. See new concern for an additional uncovered AST test. |
+| Missing D-08 status surfaces | RESOLVED | Plan 03 covers in-file surfaces; Plan 04 covers desktop static/live UI + migration `_KEPT_STATUSES`. |
+| `strip_nikud` broader behavior | RESOLVED/ACKNOWLEDGED | Live pattern `[֑-׏]` at `genizah_core.py:157`; Plan 03 notes it strips nikud + cantillation. |
+| Glyph-order contract underspecified | **PARTIALLY RESOLVED** | Plans preserve `original_order` and forbid destructive x-sort. Remaining ambiguity: intra-word letter order if rawdict emits per-letter Hebrew in visual LTR order. |
+| De-space lacked span/font metadata | RESOLVED | Rich glyph contract includes `font`, `size`, `span_id`, `original_order`; hysteresis uses `span_id/font`. |
+| Block/paragraph boundary risk | **PARTIALLY RESOLVED** | Plan 02 claims block separation but still groups `all_line_dicts` globally. Needs per-block grouping. |
+| Migration test did not exercise 1→2 prune | RESOLVED | Plan 04 seeds `corrupt_encoding` before the 1→2 prune and asserts survival. |
+| Python env broken in Codex sandbox | UNCHANGED (not a plan defect) | Verified PyMuPDF by installed package files instead. |
+
+**New Concerns**
+
+- **MEDIUM (M1):** Additional existing tests will fail and are not named in the plans.
+  `tests/test_format_rtl_invariant.py:88-111` asserts `_fix_sort_true_rtl_page` is called from
+  `extract_pdf_pages` in the sort=True branch; Phase 102 removes that branch as primary behavior.
+  Also `tests/test_phase_97_2_reset_my_library_full_cycle.py:69-71` asserts `user_version == 2`;
+  Plan 04 only mentions `tests/test_local_indexer_migrations.py`.
+
+- **MEDIUM (M2):** Plan 02's block preservation is contradictory. It says collect all page lines and
+  group globally (`102-02:179`), then join "blocks" with `\n\n` (`:189`). Patch to group lines **per
+  original rawdict block**, then join blocks.
+
+- **MEDIUM (M3):** RTL de-space may preserve reversed letters inside a word if rawdict emits
+  letter-spaced Hebrew glyphs in visual LTR order. Plan 01 builds word text by `original_order`,
+  while reorder only moves whole word units. Add a fixture where a single Hebrew word's glyphs are
+  emitted left-to-right and require correct consonant order, or specify that RTL word units order
+  their letters by descending x when needed.
+
+- **MEDIUM (M4):** D-06 strip at `_write_page_doc` affects **all** LOCAL formats, not just PDFs. Live
+  `_write_page_doc` is shared by PDF, DOCX, TXT, HTML, XLSX, CSV. Either explicitly accept "all LOCAL
+  display is consonantal" or gate stripping by file extension/status and test the chosen behavior.
+  **(Scope decision — needs the user, see Recommended Action.)**
+
+- **MEDIUM (M5):** Buffer-then-decide drops cancellation during the final write loop. Plan 03 checks
+  `cancel_check()` while buffering but not while writing. Add a cancel check in the write loop with
+  `_rollback_partial(sys_id)` if cancellation happens after any write.
+
+- **LOW (L1):** Plan 03 adds `from genizah_core import strip_nikud` at module import time, but
+  `shared/local_indexer.py` is currently Qt-free/shared and has no `genizah_core` import. Prefer a
+  small shared normalization helper or a lazy import in `_write_page_doc`/rebuild to avoid tightening
+  module coupling.
 
 **Plan↔Code Drift**
 
-- **PyMuPDF rawdict flags: OK.** `.venv` has PyMuPDF `1.27.2.3`; source confirms `TEXT_PRESERVE_IMAGES`,
-  `TEXTFLAGS_DICT`, and `TEXTFLAGS_RAWDICT` exist, and `Page.get_text(..., flags=...)` is accepted via
-  `pymupdf/utils.py:459-553`. `TEXTFLAGS_RAWDICT = TEXTFLAGS_DICT` at `pymupdf/__init__.py:17631-17639`.
-  Fix: prefer `fitz.TEXTFLAGS_RAWDICT & ~fitz.TEXT_PRESERVE_IMAGES` for clarity, though the plan's
-  `TEXTFLAGS_DICT` expression is valid.
-
-- **`_attach_nikud_page`: OK.** It exists with the assumed callable shape:
-  `ephraim_meiri_pdf_converter/pdf_to_docx.py:791` defines
-  `def _attach_nikud_page(page_dict: dict, x_tol: float = 4.0, y_tol: float = 6.0) -> None`.
-
-- **D-06 display-text assumption is FALSE in live code.** Plan 03 says `cached_text` retains nikud for
-  display/page browsing, but live LOCAL result/browse paths use Tantivy stored `content`:
-  `genizah_core.py:7166` reads `content` for LOCAL results, and `genizah_core.py:9631` reads `content`
-  for `get_local_browse_page`. If `_write_page_doc` changes `content=[strip_nikud(text)]`, display/browse
-  will show stripped text unless more code changes are planned. Fix: either add a stored display field to
-  the LOCAL Tantivy schema, or make LOCAL result/browse load `local_pages.cached_text` by UID.
-
-- **Corrupt PDFs would still be indexed.** Live `_extract_and_write_pdf` writes each page inside the loop
-  at `shared/local_indexer.py:2507`, calling `_write_page_doc` at lines `2515-2518`. Plan 03 only checks
-  majority-corrupt after the loop, so garbage pages are already in Tantivy/local_pages. Fix: do not write
-  corrupt pages, or buffer/first-pass pages and only write after file-level classification; if majority
-  corrupt, rollback partial writes and return `pages_written=0, status='corrupt_encoding'`.
-
-- **D-06 also misses atomic rebuild.** `rebuild_main_index_atomic` decompresses `cached_text` and writes
-  it back to Tantivy as `content=[text]` at `shared/local_indexer.py:3052` and `:3072`. After a rebuild,
-  vocalized cached text would be indexed with nikud again. Fix: apply `strip_nikud` there too, and derive
-  `content_head/tail` from the stripped copy.
-
-- **Fresh DB migration stamp drift.** Plan 04 bumps `_LATEST_VERSION` to 3, but `init_sqlite` still stamps
-  fresh DBs as `PRAGMA user_version = 2` at `shared/local_indexer.py:736`. Existing migration tests expect
-  fresh DBs to equal `_LATEST_VERSION`. Fix: update `init_sqlite` comments and stamp to 3, plus tests
-  currently asserting version 2.
-
-- **Existing fallback tests will break.** `tests/test_local_pdf_extraction_fallback.py` asserts the primary
-  path calls `get_text("blocks")` and that sort fallback behavior is live. Phase 102 intentionally replaces
-  that with rawdict primary. Fix: update this existing test module in Plan 02, not only add new tests.
-
-- **D-08 status surfaces: mostly accurate, exact live locations are:**
-  - `_ERROR_STATUSES_KEPT`: `shared/local_indexer.py:126`
-  - scan classification tuple: `shared/local_indexer.py:1951`, currently includes `"encoding_error"`
-  - folder `error_count` SQL: `shared/local_indexer.py:2876`, status list at `2879-2881`
-  - tree static label: `desktop/my_library_tab.py:333`
-  - **live-update label/color also need updates at `desktop/my_library_tab.py:486` and `:519`** (NOT in the plan)
-  - migration `_KEPT_STATUSES`: `shared/local_indexer_migrations.py:47` (NOT in the plan)
-
-- **`strip_nikud`: OK, but note behavior.** It exists at `genizah_core.py:199`; pattern is `[֑-׏]`
-  at line `157`, which strips MORE than just U+05B0..U+05C7 vowel marks (includes cantillation/te'amim and
-  more). Relevant to the D-04 "exclude nikud from gap math" range, which uses a narrower 0x05B0-0x05C7.
-
-**Concerns**
-
-- **HIGH:** Plan 01/02 glyph-order contract is underspecified. Plan 02 says flatten glyphs "in x order";
-  Meiri's `_normalize_span_dir` relies on original rawdict char order plus x-direction jumps. Sorting
-  glyphs up front can destroy the very signal needed for segment detection and can reverse RTL word letters.
-
-- **HIGH:** `despace_line_to_word_units(line_glyphs: list[dict])` lacks span/font metadata, but the
-  algorithm requires font/span-boundary hints. Either pass richer glyph records or annotate glyphs while
-  flattening spans.
-
-- **MEDIUM:** Plan 02 groups all page lines by baseline, which risks losing block/paragraph boundaries.
-  Current extractor preserves block separation via `"\n\n"`.
-
-- **MEDIUM:** Plan 04's proposed migration test inserts `corrupt_encoding` after running migrations, then
-  re-runs no-op migration. That does not prove `_KEPT_STATUSES` protects rows during the 1→2 prune. Seed
-  before 1→2 or assert `_KEPT_STATUSES` directly.
-
-- **MEDIUM:** The local Python environments in Codex's sandbox are broken (`python`, `py`, `.venv`, and
-  `venv` launchers fail), so the plan's `python -m pytest ...` verification was not executable in that
-  sandbox. (Environmental, not a plan defect — our own toolchain runs pytest fine.)
-
-**Suggestions**
-
-1. Add a small design patch before execution for D-06 display: decide between `content_index + content_display`
-   fields vs SQLite cached-text lookup for display/browse.
-2. Change corrupt flow so detection happens before `_write_page_doc`, or rollback partial writes before
-   returning `corrupt_encoding`.
-3. Update `rebuild_main_index_atomic` with the same stripped-index/display-text split.
-4. Make Plan 02 update `tests/test_local_pdf_extraction_fallback.py`.
-5. Define a richer internal glyph unit: `{c, bbox, font, size, span_id, original_order}`.
+Most cited live line references are accurate: `extract_pdf_pages` at `shared/local_indexer.py:794`,
+`_write_page_doc` at `:2420`, `_extract_and_write_pdf` at `:2495`, rebuild content write at `:3072`,
+migration `_LATEST_VERSION` at `shared/local_indexer_migrations.py:33`, desktop status sites at
+`desktop/my_library_tab.py:333`/`:486`/`:519`. The main drift is missing affected tests
+(`test_format_rtl_invariant.py`, `test_phase_97_2_reset_my_library_full_cycle.py`) that still encode
+old Phase 101/97.2 assumptions and are not covered by the revised plan set.
 
 **Risk Assessment**
 
-**HIGH** until the D-06 display/rebuild path and corrupt-indexing flow are fixed. The low-level references
-are mostly sound, but the current plans can silently strip display text and still index corrupt garbage,
-which are direct violations of the phase goals.
+Overall: **MEDIUM**. The original HIGH-risk architectural defects are resolved well enough to proceed
+after small plan edits. Recommendation: **minor-patch-then-execute**, not execute-as-is and not
+replan-again. Patch the five medium concerns into the relevant plans, then the phase is safe to run.
 
 ---
 
 ## Consensus Summary
 
-Single reviewer (Codex), so "consensus" = Codex's findings. The review is unusually high-value because
-Codex read the live source and the installed PyMuPDF, catching drift the internal `gsd-plan-checker`
-(which reasons from the plans + cited refs) structurally cannot.
+Single reviewer (Codex). Round-2 verdict is a clear improvement over round-1 (HIGH → MEDIUM): every
+round-1 HIGH/MED blocker is confirmed RESOLVED against live code. No remaining HIGH items. The
+phase is safe to execute after a light patch pass.
 
-### Confirmed sound (no action)
-- PyMuPDF `TEXTFLAGS_*` / `TEXT_PRESERVE_IMAGES` flag names and `get_text(flags=...)` (D-11) — valid.
-- `_attach_nikud_page` exists with the assumed signature.
-- `strip_nikud` exists at `genizah_core.py:199` (note: its `[֑-׏]` range is broader than the
-  D-04 nikud-gap-math range — intentional for index normalization, but worth a conscious note).
+### Confirmed resolved (round-1 → round-2)
+All 14 round-1 findings RESOLVED, except two now downgraded to PARTIAL (glyph intra-word letter
+order; per-block line grouping) — both addressed by the new MEDIUM patches below.
 
-### Agreed Concerns (highest priority — must address before execution)
-1. **[HIGH / blocker-class] D-06 display path is wrong.** LOCAL result + browse read Tantivy `content`
-   (`genizah_core.py:7166`, `:9631`), not `cached_text`. Stripping `content` makes the user-visible LOCAL
-   text consonantal-only — the exact regression D-06 was reversed (Codex HIGH-2) to avoid. The plan needs a
-   display field or a cached_text-by-UID display lookup. **This invalidates the core premise of Plan 03.**
-2. **[HIGH / blocker-class] Corrupt pages indexed before classification.** `_extract_and_write_pdf` writes
-   per-page in the loop; majority-corrupt is checked only after. Garbage lands in the index. Needs
-   detect-before-write or rollback-on-corrupt.
-3. **[HIGH] D-06 atomic-rebuild gap.** `rebuild_main_index_atomic` (`:3052`, `:3072`) re-indexes cached_text
-   as `content` — nikud reappears post-rebuild. Same strip must apply there. Plan 03 missed this site.
-4. **[HIGH] Glyph-order contract conflict.** "Flatten in x order" (Plan 02) destroys the original-order +
-   x-jump signal Meiri's reorder depends on, and can reverse RTL letters. The de-space/reorder glyph
-   contract (Plan 01↔02) must preserve original order + carry span/font/order metadata.
-5. **[HIGH] de-space lacks span/font metadata** that its own hysteresis (D-04 mid-gap corroboration)
-   requires. Glyph records need `{c, bbox, font, size, span_id, original_order}`.
-6. **[MEDIUM] Missing edit sites:** existing `tests/test_local_pdf_extraction_fallback.py` (asserts blocks
-   primary) will break and must be updated in Plan 02; two more D-08 status surfaces (`my_library_tab.py:486`,
-   `:519`) and the migration `_KEPT_STATUSES` (`local_indexer_migrations.py:47`) aren't covered.
-7. **[MEDIUM] init_sqlite stamp** still writes `user_version = 2` (`:736`) — Plan 04's 3-bump leaves fresh
-   DBs + version tests inconsistent.
-8. **[MEDIUM] Plan 04 migration test** doesn't actually exercise the 1→2 prune-protection it claims.
+### Agreed Concerns (round-2 — patch before execution)
+1. **M1 — uncovered legacy tests:** add `tests/test_format_rtl_invariant.py` and
+   `tests/test_phase_97_2_reset_my_library_full_cycle.py` to the relevant plan(s) and update their
+   stale assertions (`_fix_sort_true_rtl_page` primary call; `user_version == 2`).
+2. **M2 — per-block grouping:** Plan 02 must group lines per original rawdict block, then join blocks
+   with `\n\n` (resolves the global-grouping vs block-join contradiction).
+3. **M3 — intra-word RTL letter order:** add a visual-LTR-glyph Hebrew-word fixture + specify
+   descending-x letter ordering within RTL word units (Plan 01).
+4. **M4 — D-06 strip scope (NEEDS USER DECISION):** `_write_page_doc` is shared by ALL LOCAL formats.
+   Decide: strip nikud for all LOCAL formats, or gate to PDF only.
+5. **M5 — cancellation in write loop:** add cancel check + `_rollback_partial(sys_id)` to Plan 03's
+   buffer-then-decide write loop.
+6. **L1 — import coupling:** lazy-import `strip_nikud` in `shared/local_indexer.py` (keep the shared
+   module Qt-/genizah_core-free at import time).
 
 ### Divergent Views
 None (single reviewer).
@@ -154,14 +129,14 @@ None (single reviewer).
 
 ## Recommended Action
 
-The two HIGH items #1 (D-06 display reads `content`) and #2 (corrupt pages written before classification)
-are correctness defects that defeat stated phase goals — they should be fixed before execution, not during.
-Items #4/#5 (glyph-order + metadata contract) sharpen Plan 01↔02 and reduce execution risk.
+The phase is **MEDIUM risk — minor-patch-then-execute**. One concern (M4) is a scope decision only
+the user can make; the other five (M1, M2, M3, M5, L1) are mechanical patches with clear fixes.
 
-Incorporate into the plans:
+After resolving M4, incorporate all patches via:
 
 ```
 /gsd-plan-phase 102 --reviews
 ```
 
-This re-runs the planner in reviews mode against this REVIEWS.md, then re-verifies via gsd-plan-checker.
+This re-runs the planner in reviews mode against this round-2 REVIEWS.md, then re-verifies via
+gsd-plan-checker. (Round-1 review preserved at `102-REVIEWS-round1.md`.)
