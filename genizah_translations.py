@@ -3252,6 +3252,7 @@ TRANSLATIONS = {
     "Folder not found at {} — files remain indexed from last scan.": "תיקייה לא נמצאה ב-{} — הקבצים ממשיכים להיות מאונדקסים מהסריקה האחרונה.",
     "Cancelled": "בוטל",
     "Encoding error": "שגיאת קידוד",
+    "Corrupt encoding": "קידוד פגום",
     "No text layer": "אין שכבת טקסט",
     "Unsupported": "לא נתמך",
     "Indexed LOCAL file — no extracted text available. Use 'Open file' to view the original.": "קובץ מאונדקס — אין טקסט מחולץ זמין. השתמש ב'פתח קובץ' לצפייה במקור.",
