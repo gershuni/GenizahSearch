@@ -28,17 +28,14 @@ D-08 surfaces:
 These tests FAIL until the implementation is updated (TDD RED).
 """
 import os
-import re
 import sqlite3
 import time
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
 
-import pytest
 
 from shared.local_indexer import (
     LocalIndexer,
     _ERROR_STATUSES_KEPT,
-    decompress_cached_text,
 )
 from shared.local_sys_id import _canonical_filepath
 

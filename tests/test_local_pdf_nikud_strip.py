@@ -24,7 +24,6 @@ import os
 import re
 import sqlite3
 
-import pytest
 
 from shared.local_indexer import LocalIndexer, decompress_cached_text
 from shared.local_sys_id import _canonical_filepath
