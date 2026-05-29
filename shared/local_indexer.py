@@ -2794,15 +2794,24 @@ class LocalIndexer:
                 "SELECT filepath FROM processed_files WHERE sys_id = ?", (sys_id,)
             ).fetchone()["filepath"]
         )
-        # Build content_head / content_tail for snippet generation
-        words = text.split()
+        # D-06 FINAL (Phase 102 Plan 03): strip nikud ONCE at this shared write site for
+        # ALL LOCAL formats (PDF, DOCX, TXT, HTML, XLSX, CSV). The lazy import (function-
+        # local) keeps shared/local_indexer.py free of a module-top genizah_core import
+        # (L1 — round-2 requirement). Plan 02 extract_pdf_pages now yields NIKUD-BEARING
+        # text; the strip is here, applied uniformly to every format. content == cached_text
+        # == stripped (no divergence). SEED-004 defers nikud display for non-PDF formats.
+        from genizah_core import strip_nikud  # noqa: PLC0415 — intentional lazy import (L1)
+        stripped = strip_nikud(text)
+
+        # Build content_head / content_tail for snippet generation (derived from stripped)
+        words = stripped.split()
         head = " ".join(words[:50]) if words else ""
         tail = " ".join(words[-50:]) if words else ""
 
         # Phase 97 LD-1: Tantivy doc now includes scan_run_id + chunk_locator
         doc = tantivy.Document(
             unique_id=[uid],
-            content=[text],
+            content=[stripped],
             content_head=[head],
             content_tail=[tail],
             line_starts=[""],
@@ -2820,12 +2829,14 @@ class LocalIndexer:
 
         # Phase 97 LD-3: compress text and write ALL Phase 97 columns in the SINGLE
         # canonical Tantivy write site (Codex HIGH #2 / ADVICE LD-3).
-        cached_bytes, uncompressed_len = compress_cached_text(text)
+        # D-06 FINAL: compress the STRIPPED text — cached_text == content == stripped.
+        # extraction_format_version bumped 1→2 to signal all-format-stripped rows.
+        cached_bytes, uncompressed_len = compress_cached_text(stripped)
         self._conn.execute(
             "INSERT OR REPLACE INTO local_pages "
             "(sys_id, uid, page_num, cached_text, cached_text_codec, "
             " cached_text_uncompressed_len, extraction_format_version, chunk_locator) "
-            "VALUES (?, ?, ?, ?, 'zstd', ?, 1, ?)",
+            "VALUES (?, ?, ?, ?, 'zstd', ?, 2, ?)",
             (sys_id, uid, page_num, cached_bytes, uncompressed_len, chunk_locator or ""),
         )
         self._conn.commit()
