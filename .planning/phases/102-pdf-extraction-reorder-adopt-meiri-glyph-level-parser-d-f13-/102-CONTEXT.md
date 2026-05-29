@@ -109,6 +109,9 @@ content; clean/modern/Latin PDFs that work today must not degrade.
   `_ERROR_STATUSES_KEPT` (`shared/local_indexer.py:125`), scan success/error classification
   (`:1951`), folder counter aggregation (`:2868`), and tree label/color mapping
   (`desktop/my_library_tab.py:333` `_build_leaf_item_status`). Otherwise it counts/displays wrong.
+  NOTE (Codex round-3): the pre-existing `encoding_error` status STAYS in the indexed bucket at
+  `:1951` (it is a legacy status, not a CONTEXT decision); only the NEW `corrupt_encoding` routes to
+  the error bucket.
 
 ### Scope boundaries
 - **D-09:** Multi-column layouts (Talmud, dictionaries) are **deferred** — out of scope for
@@ -126,7 +129,8 @@ content; clean/modern/Latin PDFs that work today must not degrade.
   excluded — material for a 12K-PDF re-index.
 
 ### Claude's Discretion
-- F-B punctuation spacing (no space before punctuation) normalization details.
+- F-B punctuation spacing (no space before punctuation) normalization details — include Hebrew
+  sof-pasuq (U+05C3) / maqaf (U+05BE) coverage, not ASCII-only (Codex round-3 LOW).
 - F-C reversed-parens fix — adopt/adapt Meiri's `_fix_visual_brackets` (`pdf_to_docx.py:653`).
 - F-F running-header word reversal — falls out of the RTL reorder core.
 - `extraction_format_version` bump bookkeeping + rebuild-path handling for the new format.
@@ -159,8 +163,11 @@ content; clean/modern/Latin PDFs that work today must not degrade.
 - `_fix_sort_true_rtl_line` / `_fix_sort_true_rtl_page` (`:371` / `:431`) — Phase 101 S-1
   per-line directional-run reversal (the RTL-gating idea to carry forward / supersede).
 - `_collapse_intra_block_newlines` (`:458`), `_detect_single_word_per_line` (`:483`).
-- `_write_page_doc` (`:2420`) — **the content-vs-cached_text split site for D-06**; writes
-  Tantivy `content` (`:2466`) and `cached_text` (`:2484`).
+- `_write_page_doc` (`:2420`) — **the single shared write site for D-06 (strips ONCE for all
+  formats)**; writes Tantivy `content` (`:2466`) and `cached_text` (`:2484`).
+- `_index_one_file` (`:2177`) — pre-inserts `processed_files` (`:2225`) + `local_files` (`:2243`)
+  BEFORE extraction; `_rollback_partial` (`:2653`) deletes both for a sys_id; `_commit_batch`
+  (`:2809`) flips pending → committed (the buffer-phase-cancel rollback dependency, Codex round-3).
 - `compress_cached_text` (`:635`), `_ERROR_STATUSES_KEPT` (`:125`), scan classification
   (`:1951`), folder counter aggregation (`:2868`) — D-08 wiring.
 - `shared/local_indexer_migrations.py` — `extraction_format_version` column / bump site.
@@ -173,7 +180,8 @@ content; clean/modern/Latin PDFs that work today must not degrade.
 
 ### Search normalization (reuse, don't reinvent)
 - `genizah_core.py`: `strip_nikud` (`:199`), `strip_search_diacritics` (`:6302`) — used
-  query-side and in the regex filter phase; reuse for the D-06 index-side stripping.
+  query-side and in the regex filter phase; reuse `strip_nikud` for the D-06 index-side stripping
+  (applied to BOTH content and cached_text at `_write_page_doc`).
 
 ### UI status surface
 - `desktop/my_library_tab.py`: `_build_leaf_item_status` (`:333`) — D-08 `corrupt_encoding`
@@ -197,15 +205,21 @@ content; clean/modern/Latin PDFs that work today must not degrade.
 - **Meiri `_normalize_span_dir` + helpers** — the reorder core to adapt (RTL-gated), plus
   `_regroup_lines` (line grouping) and `_attach_nikud_page` (nikud handling reference).
 - **`genizah_core.strip_nikud` / `strip_search_diacritics`** — already strip nikud at search
-  time; reuse for the D-06 index-side normalized copy (don't write a new stripper).
-- **`compress_cached_text` / zstd `cached_text` plumbing** — D-06 keeps original text here.
+  time; reuse `strip_nikud` for the D-06 index-side normalized copy (don't write a new stripper).
+- **`compress_cached_text` / zstd `cached_text` plumbing** — under D-06 FINAL, `cached_text`
+  stores the STRIPPED text (equal to `content`), not the original nikud-bearing text. Keep the
+  zstd plumbing as-is; just pass the stripped value.
 - **Existing `extraction_status` machinery** — D-08 adds one value across the same surfaces.
 
 ### Established Patterns
-- `_write_page_doc` currently writes the **same** `text` to Tantivy `content` AND
-  `cached_text`; D-06 deliberately diverges them. This is the load-bearing change.
+- `_write_page_doc` currently writes the **same** `text` to Tantivy `content` AND `cached_text`;
+  under D-06 FINAL it KEEPS them the SAME — both receive the STRIPPED value (content == cached_text
+  == stripped, NO divergence). The load-bearing change is the single strip-once at this site for all
+  formats + the `extraction_format_version` 1→2 bump. (An earlier draft proposed diverging the two
+  fields; D-06 FINAL reversed that — see D-06 above.)
 - Status values flow through 4 surfaces (kept-set, scan classification, folder counters, tree
-  label/color) — adding `corrupt_encoding` means touching all 4 (Codex HIGH-4).
+  label/color) — adding `corrupt_encoding` means touching all 4 (Codex HIGH-4). The pre-existing
+  `encoding_error` stays indexed (Codex round-3).
 - Bulk re-extraction is background-worker-only (`LocalIndexerWorker`); NEVER `__init__`/UI
   thread (Phase 101 D-04 rollback).
 
@@ -225,7 +239,7 @@ content; clean/modern/Latin PDFs that work today must not degrade.
 - **Strip nikud once at the single write site (`_write_page_doc`), as the LAST transform** —
   D-06 (FINAL) keeps `content` and `cached_text` EQUAL and stripped (no divergence, no display
   field, no `genizah_core` read-path change). Nikud is retained only through the de-space/reorder
-  glyph math and dropped from the final string. (User 2026-05-29: nikud need not be displayed.)
+  glyph math and dropped from the final persisted string. (User 2026-05-29: nikud need not be displayed.)
 - Verification must include a **letter-spaced fixture (אוצר הגאונים-style)**, a
   **letter-spaced + order-reversed line**, an **RTL running header**, a **corrupt-encoding
   file (Israeli_Vilna_shabbat-style)**, AND an **LTR/Latin no-regression case**. Add **both

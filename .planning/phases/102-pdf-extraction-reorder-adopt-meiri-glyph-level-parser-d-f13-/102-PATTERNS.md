@@ -4,6 +4,13 @@
 **Files analyzed:** 6 (4 modified, 1 migration bump, 1 UI status surface)
 **Analogs found:** 6 / 6
 
+> **D-06 FINAL note (2026-05-29, supersedes any earlier "divergence" wording below):** nikud is
+> stripped ONCE at the single shared write site `_write_page_doc`, for ALL LOCAL formats, and the
+> SAME stripped value is written to BOTH the Tantivy `content` field AND `local_pages.cached_text`
+> (content == cached_text == stripped — NO divergence). `extract_pdf_pages` yields NIKUD-BEARING text;
+> the strip is NOT in the PDF path. Any sentence in this doc that says "content strips while cached_text
+> keeps nikud" or "deliberately diverges" is OBSOLETE and has been corrected inline.
+
 ---
 
 ## File Classification
@@ -12,7 +19,7 @@
 |-------------------|------|-----------|----------------|---------------|
 | `shared/local_indexer.py::extract_pdf_pages` (rewrite) | utility / transform | glyph-I/O → transform → yield | `ephraim_meiri_pdf_converter/pdf_to_docx.py::meiri_extract_page_text` (spike wrapper) | exact role-match |
 | `shared/local_indexer.py::_rtl_line_classify` + de-space helpers (new) | utility | transform | `shared/local_indexer.py::_fix_sort_true_rtl_line` (Phase 101) | role-match (RTL gating pattern) |
-| `shared/local_indexer.py::_write_page_doc` (D-06 diverge) | utility / CRUD | request-response | `shared/local_indexer.py::_write_page_doc` itself (current) | exact |
+| `shared/local_indexer.py::_write_page_doc` (D-06 all-format strip) | utility / CRUD | request-response | `shared/local_indexer.py::_write_page_doc` itself (current) | exact |
 | `shared/local_indexer.py` — status wiring (D-08) | config / CRUD | — | `shared/local_indexer.py::_ERROR_STATUSES_KEPT` + folder counter SQL | exact |
 | `shared/local_indexer_migrations.py` (version bump) | migration | CRUD | `shared/local_indexer_migrations.py::_migrate_1_to_2` | exact |
 | `desktop/my_library_tab.py::_build_leaf_item_status` (D-08) | component / UI | request-response | same function, existing `encoding_error` branch | exact |
@@ -102,6 +109,11 @@ if total_chars < _SCANNED_PDF_CHAR_THRESHOLD and pages_written == 0:
     return (0, "no_text_layer", display_title)
 ```
 
+> **Plan 03 rewrites this caller** to buffer-then-decide (HIGH-2) with `_rollback_partial(sys_id)` on
+> BOTH a buffer-phase cancel (the caller `_index_one_file` pre-inserts processed_files/local_files rows
+> at :2225/:2243 BEFORE extraction, so a buffer cancel must roll them back too — Codex round-3 HIGH)
+> AND a write-loop cancel (M5).
+
 **New pipeline the rewrite must implement (D-01 through D-11):**
 
 1. `page.get_text("rawdict", flags=TEXT_FLAGS_NO_IMAGES)` (D-01 + D-11)
@@ -112,8 +124,8 @@ if total_chars < _SCANNED_PDF_CHAR_THRESHOLD and pages_written == 0:
 6. For RTL lines: reorder segments via adapted `_normalize_span_dir` (Meiri `pdf_to_docx.py:691`) applied to word-unit groupings
 7. Apply `_fix_visual_brackets` (Meiri `pdf_to_docx.py:653`) for F-C (RTL-gated)
 8. D-03 LTR-damage guard: compare rawdict output against `blocks` fallback (token-count / Jaccard) per page; fall back to `blocks` for that page if rawdict loses
-9. D-07 corrupt-encoding detection: codepoint-garbage ratio on the full-page text string
-10. Emit `(page_num, display_text, title)` where `display_text` retains nikud (D-06)
+9. D-07 corrupt-encoding detection: codepoint-garbage ratio on the full-page text string (exposed via page_flags out-param — Plan 02 detects, Plan 03 decides file-level)
+10. Emit `(page_num, text, title)` where `text` is **NIKUD-BEARING** (D-06 FINAL — the strip is NOT here; it happens once in Plan 03's `_write_page_doc` for ALL formats)
 
 ---
 
@@ -279,7 +291,7 @@ Copy `_BRACKET_PAIRS`, `_MIRROR_OF`, `_CLOSERS`, `_BRACKETS` verbatim. The funct
 
 ---
 
-### `shared/local_indexer.py::_write_page_doc` — D-06 content/cached_text divergence
+### `shared/local_indexer.py::_write_page_doc` — D-06 FINAL all-format strip (content == cached_text == stripped)
 
 **Current function** (lines 2420–2493) — the load-bearing single write site. Both `content` and `cached_text` currently receive the same `text`:
 
@@ -311,9 +323,29 @@ def _write_page_doc(
     )
 ```
 
-**D-06 change:** The caller (`extract_pdf_pages`) yields `display_text` (with nikud). `_write_page_doc` (or its caller `_extract_and_write_pdf`) must produce two strings:
-- `index_text = strip_nikud(display_text)` — written to `content=[index_text]`
-- `cached_bytes = compress_cached_text(display_text)` — stores nikud-bearing text
+**D-06 FINAL change (strip ONCE for ALL formats — content == cached_text == stripped, NO divergence):**
+`extract_pdf_pages` yields NIKUD-BEARING `text`; the DOCX/TXT/HTML/XLSX/CSV extractors also feed
+nikud-bearing text. `_write_page_doc` strips ONCE near the top and writes the SAME stripped value to
+BOTH fields:
+
+```python
+# Function-local LAZY import (L1 — keep shared module free of a module-top genizah_core import):
+from genizah_core import strip_nikud
+stripped = strip_nikud(text)                          # ONCE, near the top
+# content=[stripped]            <- was content=[text] (:2466)
+# words = stripped.split()       <- was text.split()   (:2459) — head/tail from stripped
+# cached_bytes, _ = compress_cached_text(stripped)     <- was compress_cached_text(text) (:2484)
+# extraction_format_version literal 1 -> 2 in the INSERT VALUES tuple (:2489)
+# RESULT: content == cached_text == stripped. NO divergence. Applies to EVERY format.
+```
+
+> **OBSOLETE (do NOT implement):** an earlier draft of this section proposed
+> `content=strip_nikud(display_text)` while `cached_text` kept nikud (a deliberate divergence). That
+> is REVERSED by D-06 FINAL (2026-05-29): there is NO divergence and NO separate display field — both
+> fields receive the SAME stripped value. The reason: the LOCAL `content` field uses the `whitespace`
+> tokenizer with no diacritic folding and the query is not nikud-stripped, so un-vocalized search of
+> EVERY format requires a stripped index; and the user chose "strip everywhere, no nikud display"
+> (nikud display for non-PDF is DEFERRED as SEED-004).
 
 **Reuse pattern for stripping** — `genizah_core.strip_nikud` (line 199):
 
@@ -326,9 +358,15 @@ def strip_nikud(text: str) -> str:
     return NIKUD_PATTERN.sub('', text)
 ```
 
-Import: `from genizah_core import strip_nikud` (already importable — genizah_core is a top-level module).
+Import: **lazy / function-local** `from genizah_core import strip_nikud` INSIDE `_write_page_doc`
+(round-2 L1 — keep `shared/local_indexer.py` free of a module-top `genizah_core` import).
 
-**`extraction_format_version` bump:** The hardcoded `1` on line 2489 must become `2` (or the current constant) to flag pages extracted by the new rawdict pipeline. See migration section below.
+**`extraction_format_version` bump:** The hardcoded `1` on line 2489 must become `2` to flag pages extracted by the new rawdict pipeline. See migration section below.
+
+**Rebuild path (auto-consistent):** `rebuild_main_index_atomic` (:3052/:3072) re-reads the stripped
+`cached_text` per row → stripped `content`; nikud cannot reappear for any format. An optional
+defensive idempotent `strip_nikud` there (all-format) to normalize legacy pre-Phase-102 rows is
+allowed (non-load-bearing) — fine under all-format strip.
 
 ---
 
@@ -349,22 +387,32 @@ _ERROR_STATUSES_KEPT = {
 **Surface 2 — scan classification** (line 1951): The `if status in (...)` branch that increments `result["indexed"]` vs `result["errors"]`:
 
 ```python
-# current (line 1951):
+# current LIVE (line 1951) — encoding_error is a PRE-EXISTING indexed status:
 if status in ("ok", "no_text_layer", "encoding_error", "unsupported"):
     result["indexed"] += 1
 else:
     result["errors"] += 1
 ```
 
-Add `"corrupt_encoding"` to the error-counted group (it is a future-OCR candidate, not successfully indexed):
+**The ONLY change for Phase 102 here: do NOT touch the tuple. Leave `encoding_error` in the indexed
+bucket exactly as today.** `corrupt_encoding` is simply NOT added to that tuple, so it falls through to
+the `else` (errors) branch automatically — counted as a future-OCR error, not indexed:
 
 ```python
-if status in ("ok", "no_text_layer", "unsupported"):
+# Phase 102: tuple UNCHANGED (encoding_error STAYS indexed — it is a legacy status, not a CONTEXT
+# decision; reclassifying it would be an untested behavior change). The NEW corrupt_encoding is just
+# not a member → it lands in the else (errors) branch.
+if status in ("ok", "no_text_layer", "encoding_error", "unsupported"):
     result["indexed"] += 1
-# "encoding_error" and "corrupt_encoding" go to errors (unfixable without OCR)
 else:
+    # corrupt_encoding (unfixable without OCR) → errors, unlike legacy encoding_error which indexes
     result["errors"] += 1
 ```
+
+> **CORRECTION (Codex round-3):** an earlier draft of this section showed `encoding_error` being MOVED
+> OUT of the indexed tuple into the errors group. That is WRONG and is NOT what Plan 03 does. Plan 03
+> keeps `encoding_error` INDEXED (the tuple is unchanged) and only ensures `corrupt_encoding` is absent
+> from the tuple so it routes to errors. Do not reclassify `encoding_error`.
 
 **Surface 3 — folder counter aggregation SQL** (lines 2868–2900): The `error_count` subquery currently enumerates specific status codes. Add `'corrupt_encoding'`:
 
@@ -381,7 +429,7 @@ error_count = (
 
 **Surface 4 — tree label/color** — see `desktop/my_library_tab.py` section below.
 
-Also: `_migrate_1_to_2` at `shared/local_indexer_migrations.py:47–58` lists `_KEPT_STATUSES` which filters which rows survive the D-NEW-4 prune — `'corrupt_encoding'` must appear there too (see migration section).
+Also: `_KEPT_STATUSES` at `shared/local_indexer_migrations.py:47–58` filters which rows survive the D-NEW-4 prune — `'corrupt_encoding'` must appear there too (see migration section).
 
 ---
 
@@ -410,7 +458,7 @@ _MIGRATIONS: dict[int, object] = {
 **`_migrate_2_to_3` pattern to implement:**
 - `_KEPT_STATUSES` (lines 47–58): add `'corrupt_encoding'` to the tuple
 - No new columns needed (existing `extraction_format_version` column carries value 2 going forward)
-- The migration itself is a no-op DDL change — but bumps `user_version` to 3 so existing rows with `extraction_format_version=1` are identifiable as pre-Phase-102 for "Re-index All" recovery
+- The migration itself is a no-op DDL change — but bumps `user_version` to 3 so existing rows with `extraction_format_version=1` are identifiable as pre-Phase-102 for "Re-index All" recovery (D-10 — NO auto-flip)
 
 **`_alter_safe` helper** (lines 61–68) — reuse verbatim for any new column additions:
 
@@ -502,28 +550,40 @@ has_rtl = any(c.get("c") and 0x0590 <= ord(c["c"]) <= 0x07BF for c in chars)
 _is_hebrew_letter = bool(ch) and 0x05D0 <= ord(ch) <= 0x05EA
 # Nikud combining marks (exclude from gap math — D-06):
 _is_nikud_cp = 0x05B0 <= cp <= 0x05C7   # pdf_to_docx.py:787-788
+# Hebrew punctuation (F-B normalize target): maqaf ־ U+05BE, sof pasuq ׃ U+05C3
 ```
 
-### Nikud stripping for index field
+### Nikud stripping for the index field (D-06 FINAL — applied to BOTH content AND cached_text)
 **Source:** `genizah_core.py:157,199–206`
-**Apply to:** `_write_page_doc` content field (D-06)
+**Apply to:** `_write_page_doc` — strip ONCE near the top and write the SAME stripped value to BOTH the
+Tantivy `content` field AND `cached_text` (content == cached_text == stripped; NO divergence; all formats).
+Lazy-import inside the function (L1).
 
 ```python
-NIKUD_PATTERN = re.compile(r'[֑-׏]')
-index_text = NIKUD_PATTERN.sub('', display_text)   # or: strip_nikud(display_text)
+from genizah_core import strip_nikud      # function-local lazy import (L1)
+stripped = strip_nikud(text)              # NIKUD_PATTERN = re.compile(r'[֑-׏]')
+# content=[stripped]  AND  compress_cached_text(stripped)  -> both fields get `stripped`
 ```
 
-### zstd cached_text write (unchanged)
+> Earlier wording here ("`index_text = strip(display_text)` written to content, while cached_text keeps
+> nikud-bearing display_text") is OBSOLETE — D-06 FINAL strips both. The strip is at `_write_page_doc`,
+> NOT in `extract_pdf_pages` (which yields nikud-bearing text).
+
+### zstd cached_text write — D-06 FINAL: pass the STRIPPED text
 **Source:** `shared/local_indexer.py:635–644`, `2484–2491`
-**Apply to:** `_write_page_doc` cached_text write — keep exactly, just pass `display_text` (nikud-bearing)
+**Apply to:** `_write_page_doc` cached_text write — keep the zstd plumbing exactly, but pass the SAME
+`stripped` value used for `content` (content == cached_text == stripped):
 
 ```python
-cached_bytes, uncompressed_len = compress_cached_text(display_text)
+cached_bytes, uncompressed_len = compress_cached_text(stripped)   # NOT the nikud-bearing text
 ```
+
+> Earlier wording ("pass `display_text` (nikud-bearing)") is OBSOLETE — under D-06 FINAL cached_text
+> stores the STRIPPED text, equal to content.
 
 ### Error status propagation (4 surfaces)
-**Source:** `shared/local_indexer.py:126–130` (`_ERROR_STATUSES_KEPT`), `1951–1954` (scan classification), `2868–2900` (folder counter SQL), `desktop/my_library_tab.py:333–358` (`_build_leaf_item_status`)
-**Apply to:** `corrupt_encoding` — must appear in ALL 4 surfaces or it counts/displays wrong (Codex HIGH-4)
+**Source:** `shared/local_indexer.py:126–130` (`_ERROR_STATUSES_KEPT`), `1951–1954` (scan classification — tuple UNCHANGED, encoding_error STAYS indexed), `2868–2900` (folder counter SQL), `desktop/my_library_tab.py:333–358` (`_build_leaf_item_status`)
+**Apply to:** `corrupt_encoding` — must appear in ALL 4 surfaces or it counts/displays wrong (Codex HIGH-4). `encoding_error` is NOT touched (stays indexed).
 
 ---
 
@@ -553,10 +613,13 @@ All line numbers confirmed against live files (2026-05-29):
 | `_rtl_ratio` | `shared/local_indexer.py:311` (currently dead code) |
 | `compress_cached_text` | `shared/local_indexer.py:635` |
 | `extract_pdf_pages` | `shared/local_indexer.py:794` |
+| `_index_one_file` pre-inserts | `shared/local_indexer.py:2177` (processed_files :2225, local_files :2243) |
 | `_write_page_doc` | `shared/local_indexer.py:2420` |
 | Tantivy `content=[text]` | `shared/local_indexer.py:2466` |
 | `compress_cached_text(text)` call | `shared/local_indexer.py:2484` |
 | `_extract_and_write_pdf` | `shared/local_indexer.py:2495` |
+| `_rollback_partial` (deletes local_pages :2669 + processed_files :2670) | `shared/local_indexer.py:2653` |
+| `_commit_batch` | `shared/local_indexer.py:2809` |
 | scan classification | `shared/local_indexer.py:1951` |
 | folder counter SQL | `shared/local_indexer.py:2868` |
 | `_normalize_span_dir` | `ephraim_meiri_pdf_converter/pdf_to_docx.py:691` |
@@ -580,4 +643,4 @@ All line numbers confirmed against live files (2026-05-29):
 
 **Analog search scope:** `shared/`, `ephraim_meiri_pdf_converter/`, `desktop/`, `genizah_core.py`, `shared/local_indexer_migrations.py`
 **Files scanned:** 7 source files + spike directory
-**Pattern extraction date:** 2026-05-29
+**Pattern extraction date:** 2026-05-29 (D-06 FINAL + Codex round-3 corrections folded in 2026-05-29)
