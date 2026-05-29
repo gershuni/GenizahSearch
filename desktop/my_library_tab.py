@@ -345,6 +345,8 @@ class _UnifiedFileTreeWidget(QTreeWidget):
             return pages_str, tr("No text layer"), None
         if prior_st == 'encoding_error':
             return pages_str, tr("Encoding error"), '#e74c3c'
+        if prior_st == 'corrupt_encoding':
+            return pages_str, tr("Corrupt encoding"), '#e74c3c'
         if prior_st == 'unsupported':
             return pages_str, tr("Unsupported"), None
         if prior_st == 'oversized':
@@ -485,6 +487,8 @@ class _UnifiedFileTreeWidget(QTreeWidget):
             display_status = tr("No text layer")
         elif status == "encoding_error":
             display_status = tr("Encoding error")
+        elif status == "corrupt_encoding":
+            display_status = tr("Corrupt encoding")
         elif status == "unsupported":
             display_status = tr("Unsupported")
         elif status == "oversized":
@@ -516,7 +520,7 @@ class _UnifiedFileTreeWidget(QTreeWidget):
         try:
             leaf.setText(_COL_PAGES, pages_str)
             leaf.setText(_COL_STATUS, display_status)
-            if status in ('error', 'encoding_error'):
+            if status in ('error', 'encoding_error', 'corrupt_encoding'):
                 from PyQt6.QtGui import QColor
                 for col in range(3):
                     leaf.setForeground(col, QColor('#e74c3c'))
