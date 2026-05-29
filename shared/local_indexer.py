@@ -141,10 +141,13 @@ def is_office_temp_file(filename: str) -> bool:
 
 
 # Phase 97 D-NEW-4 — error statuses that keep a row even for unsupported extensions
+# Phase 102 Plan 03: added 'corrupt_encoding' (D-08 surface 1 — future-OCR candidate).
+# NOTE: 'encoding_error' (TXT decode failure) is a DISTINCT legacy status — it is still
+# classified as 'indexed' in surface 2 scan classification (pre-existing behavior preserved).
 _ERROR_STATUSES_KEPT = {
     "oversized", "error", "encoding_error",
     "changed_during_index", "zip_bomb_suspected",
-    "unreachable", "timeout",
+    "unreachable", "timeout", "corrupt_encoding",
 }
 _DOCX_CHUNK_PARAGRAPHS = 20            # D-04
 _SCANNED_PDF_CHAR_THRESHOLD = 50       # D-05
@@ -2287,6 +2290,11 @@ class LocalIndexer:
                     result["errors"] += 1
                     continue  # skip _commit_batch + _file_finished_cb for this file
 
+                # D-08 (Phase 102 Plan 03): 'corrupt_encoding' is NOT added to this
+                # tuple — it falls through to the else branch and counts as an error
+                # (future-OCR candidate, unfixable without OCR).
+                # 'encoding_error' is a PRE-EXISTING legacy status (TXT decode failure)
+                # that deliberately remains in the indexed bucket — do NOT reclassify.
                 if status in ("ok", "no_text_layer", "encoding_error", "unsupported"):
                     result["indexed"] += 1
                 else:
@@ -2849,17 +2857,64 @@ class LocalIndexer:
         folder_id: int,
         cancel_check: Callable[[], bool],
     ) -> tuple[int, str, str]:
-        """Extract PDF pages and write Tantivy docs. Returns (pages_written, status, title)."""
-        pages_written = 0
-        total_chars = 0
+        """Extract PDF pages and write Tantivy docs. Returns (pages_written, status, title).
+
+        Phase 102 Plan 03 HIGH-2 / HIGH (Codex round-3) / M5 — buffer-then-decide:
+
+        1. BUFFER phase: accumulate yielded pages into a list while checking
+           page_flags for per-page corruption flags.  Cancellation DURING buffering
+           (HIGH — Codex round-3) calls self._rollback_partial(sys_id) to clean up
+           the processed_files AND local_files rows that _index_one_file pre-inserted
+           BEFORE this function was called.  Without that rollback, _commit_batch
+           would later flip the pending processed_files row to 'committed' → an
+           inconsistent committed-but-empty cancelled PDF.
+
+        2. FILE-LEVEL CORRUPT DECISION (D-07 conservative ≥50% threshold): if ≥50%
+           of yielded pages are flagged corrupt, return (0, 'corrupt_encoding', title)
+           WITHOUT calling _write_page_doc — HIGH-2 detect-before-write fix.  The
+           pre-inserted pending rows are left for the caller's _finish_file / status-
+           finalize path (NOT cancelled — no rollback here).
+
+        3. WRITE phase: write buffered pages one by one.  Cancellation INSIDE the
+           write loop (M5) calls self._rollback_partial(sys_id) and returns
+           'cancelled' so no partial rows remain.
+        """
         display_title = os.path.basename(filepath)
 
-        for page_num, text, title in extract_pdf_pages(filepath):
+        # --- Step 1: BUFFER (check cancellation; collect page_flags for corrupt decision) ---
+        page_flags: dict = {}
+        buffered: list[tuple[int, str, str]] = []
+        for page_num, text, title in extract_pdf_pages(filepath, page_flags=page_flags):
             if cancel_check():
-                # Rollback partial pages
+                # HIGH (Codex round-3): _index_one_file pre-inserted a 'pending'
+                # processed_files row AND a local_files row for sys_id BEFORE this
+                # function was called.  No page has been written during buffering, but
+                # those rows persist and _commit_batch would later flip the pending row
+                # to committed → committed-but-empty cancelled PDF.  Roll them back.
+                self._rollback_partial(sys_id)
+                return (0, "cancelled", display_title)
+            display_title = title
+            buffered.append((page_num, text, title))
+
+        # --- Step 2: FILE-LEVEL CORRUPT DECISION (D-07 ≥50% threshold) ---
+        if buffered:
+            corrupt_count = sum(
+                1 for p in buffered if page_flags.get(p[0], {}).get("corrupt", False)
+            )
+            if corrupt_count >= len(buffered) * 0.5:
+                # ≥50% of yielded pages are corrupt.  Do NOT write any pages.
+                # Return corrupt_encoding; pre-inserted pending rows are finalized
+                # by the caller via the normal status-update path (NOT a cancel).
+                return (0, "corrupt_encoding", display_title)
+
+        # --- Step 3: WRITE phase (M5 — check cancel before each write) ---
+        pages_written = 0
+        total_chars = 0
+        for page_num, text, title in buffered:
+            if cancel_check():
+                # M5: pages may already have been written; roll them back.
                 self._rollback_partial(sys_id)
                 return (pages_written, "cancelled", display_title)
-            display_title = title
             total_chars += len(text)
             # Phase 97 D-NEW-5: PDF locator — "p. N" (1-based page number).
             self._write_page_doc(
@@ -3001,7 +3056,18 @@ class LocalIndexer:
         return (pages_written, "ok" if pages_written > 0 else "no_text_layer", display_title)
 
     def _rollback_partial(self, sys_id: str) -> None:
-        """Roll back partial page docs for a file that was cancelled mid-extraction."""
+        """Roll back partial page docs for a file that was cancelled mid-extraction.
+
+        Phase 102 Plan 03 HIGH (Codex round-3): also deletes local_files rows for
+        sys_id so that a buffer-phase cancel (before any _write_page_doc call) leaves
+        NO pre-inserted rows behind.  _index_one_file pre-inserts both processed_files
+        (:status='pending') AND local_files BEFORE calling _extract_and_write_pdf; a
+        buffer-phase cancel that does NOT clean up local_files would leave an orphan
+        that _commit_batch later flips to 'committed' → committed-but-empty cancelled PDF.
+
+        This method is idempotent (DELETE WHERE sys_id = ?) and safe with zero pages
+        written (uid_rows will be empty; DELETE statements on absent rows are no-ops).
+        """
         # Remove any local_pages rows added so far for this sys_id
         uid_rows = self._conn.execute(
             "SELECT uid FROM local_pages WHERE sys_id = ?", (sys_id,)
@@ -3018,6 +3084,9 @@ class LocalIndexer:
             pass
         self._conn.execute("DELETE FROM local_pages WHERE sys_id = ?", (sys_id,))
         self._conn.execute("DELETE FROM processed_files WHERE sys_id = ?", (sys_id,))
+        # Phase 102 Plan 03 HIGH (Codex round-3): delete local_files row so the pre-
+        # inserted row from _index_one_file does not persist after a cancel rollback.
+        self._conn.execute("DELETE FROM local_files WHERE sys_id = ?", (sys_id,))
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -3227,7 +3296,8 @@ class LocalIndexer:
                     SELECT COUNT(*) FROM local_files
                     WHERE local_files.folder_id = folders.folder_id
                       AND local_files.extraction_status IN (
-                          'error', 'encoding_error', 'changed_during_index', 'no_text_layer'
+                          'error', 'encoding_error', 'changed_during_index', 'no_text_layer',
+                          'corrupt_encoding'
                       )
                 ),
                 pending_count = (
