@@ -318,10 +318,14 @@ Closes **D-F13**; reframes **D-F14** (adopt Meiri's reorder *core*, RTL-gated �
 **Scope:** Desktop-only (My Library), text-layer PDFs. **Out of scope:** OCR for image-only scans (D-F2 — deferred as an optional opt-in extension, seeded; a large share of the real library is image-only but common users won't need OCR and off-the-shelf pre-OCR exists); P3 View All renderer cleanups (D-F8/D-F10/D-F7).
 **Verification:** Regression fixtures for each failure mode — letter-spaced page (אוצר הגאונים-style), letter-spaced+reversed line, RTL header, AND an LTR/Latin PDF that must NOT regress; existing `tests/fixtures/local_indexer/single_word_per_line.pdf` guard still passes.
 **Note:** First piece of v7.16 work, appended after shipped v7.15 (Phases 99-101).
-**Plans:** 0 plans
+**Plans:** 5 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 102 to break down)
+- [ ] 102-01-PLAN.md (Wave 1) — RTL helpers: baseline line-grouping, RTL classify, adaptive 1.8x-median de-space (word-unit bbox-unions), Meiri reorder core, bracket/punctuation fix + glyph-trace fixtures
+- [ ] 102-02-PLAN.md (Wave 2) — extract_pdf_pages rawdict rewrite (D-01/D-11) + LTR-damage guard (D-03) + corrupt-encoding (D-07) + multi-column-suspected (D-09) detectors
+- [ ] 102-03-PLAN.md (Wave 3) — D-06 content(stripped)/cached_text(nikud) divergence + extraction_format_version 1->2 + corrupt_encoding wired into 3 in-file status surfaces
+- [ ] 102-04-PLAN.md (Wave 1) — D-08 surface 4 desktop tree label/color + migration 2->3 (corrupt_encoding kept, NO auto-flip per D-10)
+- [ ] 102-05-PLAN.md (Wave 4) — end-to-end fixtures (letter-spaced, RTL header, corrupt-encoding, LTR no-regression) + e2e extract/index/query tests covering F-A..F-G + D-06
 
 ---
 
