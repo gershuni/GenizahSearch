@@ -107,3 +107,24 @@ extraction_format_version bookkeeping, Unicode presentation-form/ligature normal
 ## Deferred Ideas
 Multi-column reconstruction (detect-only this phase), OCR (D-F2 / SEED-003), Otsu/bimodal
 split (only if hysteresis insufficient).
+
+---
+
+## --reviews replan turn (2026-05-29)
+
+Codex cross-AI review (102-REVIEWS.md, verdict HIGH) confirmed against live code by the
+orchestrator: D-06 display path reads Tantivy `content` (genizah_core.py:7166 results, :9631/:9641
+browse), and `rebuild_main_index_atomic` (:3052/:3072) re-indexes `cached_text` into `content`.
+
+**Decision (user, verbatim): "No need to display nikkud."**
+
+Effect: D-06 RE-REVISED to its FINAL form — strip nikud ONCE at `_write_page_doc` (the last
+transform) so `content` == `cached_text` == consonantal. No content/cached_text divergence, no
+second Tantivy display field, no by-UID display lookup, no genizah_core read-path change. The
+HIGH-3 rebuild gap is auto-resolved (cached_text is already stripped, so rebuilt content stays
+stripped). Nikud is still carried through de-space/reorder for D-04 gap math, then dropped.
+
+Remaining review items still in force for the planner: corrupt-detect-BEFORE-write (HIGH-2),
+glyph-order + span/font/original_order metadata contract (HIGH-4/5), update
+tests/test_local_pdf_extraction_fallback.py (MED-6), init_sqlite stamp 2→3 (MED-7), migration
+1→2 prune-protection test (MED-8).

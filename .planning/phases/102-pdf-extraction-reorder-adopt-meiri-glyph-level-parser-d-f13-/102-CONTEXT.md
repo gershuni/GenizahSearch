@@ -61,15 +61,32 @@ content; clean/modern/Latin PDFs that work today must not degrade.
   original glyphs → drop nikud for metrics → infer word units via bbox unions →
   reorder units/segments (RTL-gated) → emit plain string.
 
-### Nikud (vocalized text) — REVISED per Codex HIGH-2
-- **D-06:** **Keep original nikud-bearing text** in `local_pages.cached_text` (drives result
-  display, page browsing, index rebuild) and **index a nikud-STRIPPED copy** in the Tantivy
-  `content` field (so un-vocalized queries still match). This diverges `content` from
-  `cached_text` in `_write_page_doc` (today they're the same `text`) and requires an
-  `extraction_format_version` bump. Reuse `genizah_core.strip_nikud`. *(Reverses the earlier
-  strip-at-extraction pick, which was irreversible and would have made all display
-  consonantal-only.)* Nikud combining marks are also excluded from the D-04 gap math (so a
-  mark between two consonants can't be misread as a word boundary).
+### Nikud (vocalized text) — RE-REVISED 2026-05-29 (user: "No need to display nikkud")
+- **D-06 (FINAL):** **Strip nikud once for BOTH index and display.** The user confirmed nikud
+  does NOT need to be displayed for LOCAL PDF hits, so there is no reason to retain a
+  nikud-bearing copy. Apply `genizah_core.strip_nikud` once at the single write site
+  (`_write_page_doc`) so the Tantivy `content` field AND `local_pages.cached_text` both store
+  the consonantal text (they stay EQUAL, exactly as today — just stripped). Bump
+  `extraction_format_version` so re-indexed pages are identifiable. Reuse
+  `genizah_core.strip_nikud`.
+  - **Why this supersedes the prior "keep nikud in cached_text / diverge content" pick:** Codex
+    confirmed (REVIEWS.md HIGH-1) that LOCAL result display (`genizah_core.py:7166`) and page
+    browse (`:9631`/`:9641`) BOTH read the Tantivy `content` field for the user-visible `text` —
+    NOT `cached_text`. The diverge-content plan would therefore have stripped the user-visible
+    text anyway. Since the user does not need displayed nikud, the clean resolution is: no
+    divergence, no second Tantivy field, no by-UID display lookup, no `genizah_core` read-path
+    change.
+  - **Rebuild path is automatically consistent (REVIEWS.md HIGH-3 resolved):** `rebuild_main_index_atomic`
+    (`shared/local_indexer.py:3052`/`:3072`) re-indexes `cached_text` into `content`. Because the
+    new extractor writes a STRIPPED `cached_text`, the rebuilt `content` stays stripped — no nikud
+    reappears. (Optional defensive `strip_nikud` in the rebuild path covers legacy pre-Phase-102
+    rows whose `cached_text` still carries nikud until the user runs "Re-index All" per D-10 — the
+    planner may add it as a cheap idempotent safeguard; it is NOT load-bearing since legacy rows
+    already indexed nikud-bearing content today, so this is no regression.)
+  - **Nikud still matters DURING extraction:** combining marks are excluded from the D-04 gap math
+    (so a mark between two consonants can't be misread as a word boundary). Nikud is therefore
+    carried through the glyph stream / de-space / reorder and only stripped from the FINAL emitted
+    text at `_write_page_doc`. The strip is the LAST transform.
 
 ### Corrupt-encoding detection (F-G / D-F16)
 - **D-07:** Detect via a **codepoint-garbage ratio** on the extracted text — NOT ToUnicode
@@ -196,8 +213,10 @@ content; clean/modern/Latin PDFs that work today must not degrade.
 
 - **"De-space before reorder, via bbox-union word units, never synthetic spaces"** is the
   precise sequencing the planner must honor (Codex HIGH-3) — it's the subtle correctness trap.
-- **Separate display text (with nikud) from index text (stripped)** is the architectural
-  spine of D-06 — the rest of nikud handling follows from it.
+- **Strip nikud once at the single write site (`_write_page_doc`), as the LAST transform** —
+  D-06 (FINAL) keeps `content` and `cached_text` EQUAL and stripped (no divergence, no display
+  field, no `genizah_core` read-path change). Nikud is retained only through the de-space/reorder
+  glyph math and dropped from the final string. (User 2026-05-29: nikud need not be displayed.)
 - Verification must include a **letter-spaced fixture (אוצר הגאונים-style)**, a
   **letter-spaced + order-reversed line**, an **RTL running header**, a **corrupt-encoding
   file (Israeli_Vilna_shabbat-style)**, AND an **LTR/Latin no-regression case**. Add **both
