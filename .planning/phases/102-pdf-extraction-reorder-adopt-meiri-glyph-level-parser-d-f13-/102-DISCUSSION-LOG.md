@@ -146,3 +146,25 @@ Remaining patches for the planner: M1 (add tests/test_format_rtl_invariant.py +
 tests/test_phase_97_2_reset_my_library_full_cycle.py update), M2 (group lines per rawdict block then
 join blocks), M3 (intra-word RTL letter order — descending-x within RTL word units + visual-LTR-word
 fixture), M5 (cancel check + _rollback_partial in the write loop), L1 (lazy-import strip_nikud).
+
+---
+
+## Nikud findability turn (2026-05-29)
+
+User asked: will "אמר" find "אָמַר" in DOCX etc.? Investigation (Explore agent, verified in live
+code): NO under the M4 PDF-only design — LOCAL `content` uses the `whitespace` tokenizer (no
+diacritic folding, shared/local_indexer.py:535), the query isn't nikud-stripped, and
+`strip_search_diacritics` preserves nikud. So vocalized non-PDF docs are unfindable by un-vocalized
+queries unless the INDEX is stripped. → un-vocalized search REQUIRES a stripped index for ALL
+formats, not just PDF.
+
+User weighed: full divergence (stripped index + nikud display via content_display field or
+cached_text lookup — genizah_core has NO SQLite handle at the display sites, so cached_text lookup
+is the heavier path) vs. simplicity. **Decision: start simple — strip nikud everywhere (index +
+display, all formats), NO nikud display for now; log the non-PDF nikud-display enhancement as
+deferred `SEED-004`.**
+
+Effect: D-06 FINAL = strip once at the shared `_write_page_doc` (all formats), content == cached_text
+== stripped, lazy-import strip_nikud (L1). REVERTS round-2 M4 (no PDF-path strip in
+extract_pdf_pages). Keeps round-2 patches M1/M2/M3/M5. Recorded in CONTEXT.md D-06 FINAL +
+DEFERRED SEED-004.

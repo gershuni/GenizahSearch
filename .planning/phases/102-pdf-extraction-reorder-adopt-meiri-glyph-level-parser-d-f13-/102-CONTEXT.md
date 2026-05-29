@@ -61,51 +61,41 @@ content; clean/modern/Latin PDFs that work today must not degrade.
   original glyphs → drop nikud for metrics → infer word units via bbox unions →
   reorder units/segments (RTL-gated) → emit plain string.
 
-### Nikud (vocalized text) — RE-REVISED 2026-05-29 (user: "No need to display nikkud")
-- **D-06 (FINAL):** **Strip nikud once for BOTH index and display.** The user confirmed nikud
-  does NOT need to be displayed for LOCAL PDF hits, so there is no reason to retain a
-  nikud-bearing copy. Apply `genizah_core.strip_nikud` once as the last transform so the Tantivy
-  `content` field AND `local_pages.cached_text` both store the consonantal text (they stay EQUAL,
-  exactly as today — just stripped). Bump `extraction_format_version` so re-indexed pages are
-  identifiable. Reuse `genizah_core.strip_nikud`.
-  - **⚠ SUPERSEDING REFINEMENT — see the "D-06 SCOPE — PDF ONLY" block below.** The strip is NOT
-    applied inside the shared `_write_page_doc` (that site serves all LOCAL formats); it is applied
-    in the **PDF extraction path** so only PDF pages are stripped. The "single write site" wording
-    here is superseded by the SCOPE block — `_write_page_doc` keeps ONLY the
-    `extraction_format_version` bump.
-  - **Why this supersedes the prior "keep nikud in cached_text / diverge content" pick:** Codex
-    confirmed (REVIEWS.md HIGH-1) that LOCAL result display (`genizah_core.py:7166`) and page
-    browse (`:9631`/`:9641`) BOTH read the Tantivy `content` field for the user-visible `text` —
-    NOT `cached_text`. The diverge-content plan would therefore have stripped the user-visible
-    text anyway. Since the user does not need displayed nikud, the clean resolution is: no
-    divergence, no second Tantivy field, no by-UID display lookup, no `genizah_core` read-path
-    change.
-  - **Rebuild path is automatically consistent (REVIEWS.md HIGH-3 resolved):** `rebuild_main_index_atomic`
-    (`shared/local_indexer.py:3052`/`:3072`) re-indexes `cached_text` into `content`. Because the
-    new extractor writes a STRIPPED `cached_text`, the rebuilt `content` stays stripped — no nikud
-    reappears. (Optional defensive `strip_nikud` in the rebuild path covers legacy pre-Phase-102
-    rows whose `cached_text` still carries nikud until the user runs "Re-index All" per D-10 — the
-    planner may add it as a cheap idempotent safeguard; it is NOT load-bearing since legacy rows
-    already indexed nikud-bearing content today, so this is no regression.)
-  - **Nikud still matters DURING extraction:** combining marks are excluded from the D-04 gap math
-    (so a mark between two consonants can't be misread as a word boundary). Nikud is therefore
-    carried through the glyph stream / de-space / reorder and only stripped at the END.
-  - **D-06 SCOPE — PDF ONLY (user 2026-05-29, round-2 review M4):** the nikud strip applies to
-    **PDF-extracted pages ONLY**, NOT to other LOCAL formats. Rationale: a PDF page renders its
-    **image** alongside the extracted text (v7.15), so the viewer still sees the nikud even though
-    the searchable/extracted text is consonantal — whereas DOCX/TXT/HTML/XLSX/CSV have no image
-    fallback. Making non-PDF display show nikud while keeping search working would require the
-    harder content/cached_text divergence + `genizah_core` read-path rewrite (round-1 HIGH-1) — NOT
-    easier — so per the user ("if incorporating nikud is easier we will do it; if not, filter from
-    PDFs") we filter PDFs only. **Implementation:** apply `strip_nikud` as the LAST transform inside
-    the **PDF extraction path** (e.g. at the tail of `extract_pdf_pages` per page, or in
-    `_extract_and_write_pdf` before it calls `_write_page_doc`) — do **NOT** strip inside the shared
-    `_write_page_doc` (it serves all formats). `_write_page_doc` stays format-agnostic and still
-    writes the same text to `content` and `cached_text` (which is already-stripped for PDF, untouched
-    for other formats). This keeps existing DOCX/TXT/HTML/XLSX/CSV behavior unchanged (no scope creep
-    in a PDF-extraction phase) and resolves the round-2 L1 import-coupling note (lazy-import
-    `strip_nikud` at the PDF call site). The rebuild path (`rebuild_main_index_atomic`) re-reads
-    per-row `cached_text`, so it stays consistent per-format automatically.
+### Nikud (vocalized text) — FINAL 2026-05-29 (strip everywhere; nikud display DEFERRED)
+- **D-06 (FINAL — supersedes all earlier nikud framings in this file):** **Strip nikud once for
+  ALL LOCAL formats, for BOTH index and display.** Decision history: (1) round-1 picked
+  content/cached_text *divergence*; (2) user said "no need to display nikkud" → strip-once; (3)
+  round-2 M4 narrowed the strip to PDF-only; (4) investigation then PROVED that un-vocalized search
+  REQUIRES a stripped index for **every** format (see "Why strip is mandatory" below), so PDF-only
+  would leave vocalized DOCX/TXT/HTML **unfindable**; (5) user weighed full divergence (searchable +
+  nikud display) vs. simplicity and chose: **start simple — strip everywhere now, no nikud display,
+  log the nikud-display enhancement as DEFERRED.**
+- **Implementation:** apply `genizah_core.strip_nikud` once at the **single shared write site
+  `_write_page_doc`** (which serves PDF, DOCX, TXT, HTML, XLSX, CSV) as the value written to BOTH
+  the Tantivy `content` field AND `local_pages.cached_text`. They stay EQUAL — exactly as today —
+  just stripped. Bump `extraction_format_version` 1→2. **Lazy-import** `strip_nikud` inside
+  `_write_page_doc` (keep `shared/local_indexer.py` free of a module-top `genizah_core` import —
+  round-2 L1). NO divergence, NO second Tantivy field, NO `genizah_core` read-path change, NO
+  cached_text-by-uid lookup. PDF text still carries nikud THROUGH de-space/reorder (D-04 gap math);
+  the strip is simply the value `_write_page_doc` persists, applied to all formats uniformly.
+  → **REVERTS round-2 M4** (no PDF-path strip in `extract_pdf_pages`; `extract_pdf_pages` yields
+  nikud-bearing reconstructed text and `_write_page_doc` does the strip for all formats).
+- **Why strip is mandatory for search (the decisive finding, verified in live code):** the LOCAL
+  Tantivy `content` field uses the **`whitespace` tokenizer** (`shared/local_indexer.py:535`) — no
+  diacritic folding; `שלוֹם`-style tokens keep their vowel marks. The query is NOT nikud-stripped,
+  and `strip_search_diacritics` (`genizah_core.py:6302`) deliberately PRESERVES nikud. So an
+  un-vocalized query token (`אמר`) can never retrieve a vocalized indexed token (`אָמַר`) — Tantivy
+  returns zero candidates and the regex phase (whose mark-tolerance excludes nikud `0x05B0-0x05C7`)
+  never runs. The ONLY way `אמר` finds `אָמַר` is a **nikud-stripped index**. (The main Genizah
+  corpus avoids this because its text is already un-vocalized.)
+- **Rebuild path:** `rebuild_main_index_atomic` (`shared/local_indexer.py:3052`/`:3072`) re-indexes
+  `cached_text` into `content`. Because the new extractor writes a STRIPPED `cached_text`, the
+  rebuilt `content` stays stripped automatically — no change strictly required. Optionally add a
+  defensive `strip_nikud` there to also normalize legacy pre-Phase-102 rows on rebuild (cheap,
+  idempotent, all-format; non-load-bearing).
+- **Display consequence (accepted):** all LOCAL display becomes consonantal. For PDF this is
+  invisible to the user (the page **image** rendered alongside still shows the vowels, v7.15). For
+  DOCX/TXT/HTML the extracted-text panel shows consonantal text — accepted for now (see DEFERRED).
 
 ### Corrupt-encoding detection (F-G / D-F16)
 - **D-07:** Detect via a **codepoint-garbage ratio** on the extracted text — NOT ToUnicode
@@ -254,6 +244,14 @@ content; clean/modern/Latin PDFs that work today must not degrade.
   of the real library is image-only and currently unsearchable, but OCR is heavy and most
   users won't need it. `corrupt_encoding` (D-08) files are future OCR consumers.
 - **Otsu/bimodal gap split** — only if D-04 hysteresis proves insufficient on fixtures.
+- **Nikud DISPLAY for non-PDF LOCAL formats (`SEED-004`, deferred 2026-05-29):** Phase 102 strips
+  nikud from the LOCAL index AND display for all formats so un-vocalized search works (D-06 FINAL).
+  PDF hides this (page image shows vowels); DOCX/TXT/HTML show consonantal extracted text. If users
+  find consonantal non-PDF display unhelpful, restore nikud display via a stored-only Tantivy
+  `content_display` field (nikud) alongside the stripped `content` (search) — read it at the two
+  display sites (`genizah_core.py:7166`, `:9631`). Cost: larger LOCAL index. (The cached_text-by-uid
+  variant is heavier — `genizah_core`'s search/browse hold no SQLite connection.) Start simple now;
+  revisit only if shown useful. Logged in `docs/OPEN_ISSUES.md`.
 
 ### Reviewed Todos (not folded)
 The 6 todos `todo.match-phase` surfaced (corrections-service migration, Reading-Desk UX,
