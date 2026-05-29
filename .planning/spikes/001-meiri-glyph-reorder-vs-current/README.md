@@ -95,7 +95,52 @@ failure-mode catalog before the phase plan locks.
 
 ---
 
-## Results — VERDICT: PARTIAL (reframes Phase 102) — see CORRECTION above, supersedes Findings 1-2
+## FINAL SYNTHESIS (after corpus profiling + visual review)
+
+### Corpus reality (profile_corpus.py — 1 PDF/folder across all 30 folders of ~18K PDFs)
+
+- **A large share of the real library is IMAGE-ONLY scans** (no text layer): תפילה (siddur),
+  מדרש (Albeck), ערוך, פילון, מילון בן יהודה, אנציקלופדיות, בית שני, תרגומים, ספריה, and
+  more. The current My Library indexer indexes **nothing** for these.
+- **Letter-spacing fragmentation is rampant** in text-layer Hebrew scholarship:
+  ראשונים/אוצר-הגאונים 0.46, רמבם 0.21, ספרי-מחקר 0.15 (single-Heb-letter-token ratio).
+- **Nikud** (vocalized) and **2-column** layouts (Talmud, dictionaries, Geniza books) common.
+
+### Full failure-mode catalog (F-A … F-G)
+
+| ID | Failure | Fixed by current? | Fixed by Meiri? | Phase 102? |
+|----|---------|-------------------|-----------------|------------|
+| F-A | ref/footnote number misplaced (line start/mid) | no | partial | yes |
+| F-B | space before punctuation (`אופנים .`) | no | no | yes |
+| F-C | reversed parentheses | no | partial (`_fix_visual_brackets`) | yes |
+| F-D | letter-spacing → single-letter tokens | no | no | yes (adaptive de-space) |
+| F-E | letter-spaced AND order-reversed line | no | no | yes (de-space BEFORE reorder) |
+| F-F | running-header word reversal | no | **yes** | yes |
+| F-G | **corrupt text-layer encoding** (e.g. Israeli_Vilna_shabbat_part_2.pdf — bad/missing ToUnicode cmap; bytes are garbage) | no | no (unfixable by reorder) | detect + flag/skip; OCR is the only real fix |
+
+### Key directional findings
+
+- **Meiri's reorder is Hebrew/RTL-specific.** On Latin/LTR PDFs (NW Semitic Dictionary)
+  CURRENT is better — Meiri's reordering HURTS LTR. Phase 102 must **gate reorder to RTL
+  content per line/block and not regress LTR PDFs.**
+- **"Most times Meiri is better"** (Hillel) on Hebrew → adopt the RTL reorder core.
+- Neither tool fixes letter-spacing (F-D/F-E) — the adaptive per-line gap de-collapse
+  prototyped here (1.8× median gap, ignore embedded space glyphs) is the missing piece.
+
+### DECISIONS (Hillel, this spike)
+
+1. **Phase 102 = RTL-gated text-layer extraction rewrite** on rawdict: Meiri-style segment
+   reorder (RTL-gated) + adaptive letter-spacing de-collapse + bracket/punctuation
+   normalization + header reversal handling + corrupt-encoding (F-G) detection. Closes
+   D-F13, reframes D-F14 (adopt reorder *core*, not wholesale). **No LTR regression.**
+2. **OCR (D-F2) = deferred OPTIONAL extension**, seeded (not in Phase 102): opt-in,
+   on-demand, separate install, common users unaffected; off-the-shelf pre-OCR is the
+   power-user escape hatch. Build only on demand. F-G corrupt-encoding files are a future
+   OCR consumer.
+
+---
+
+## Results — VERDICT: PARTIAL (reframes Phase 102) — see FINAL SYNTHESIS + CORRECTION above, supersedes Findings 1-2
 
 Ran on 5 real PDFs (Yosipon/Kadmoniyot 1944 Bialik, Igrot ha-Rambam–Shilat, Yarhei
 Mashuach Milchama, Dead Sea Scrolls Reader 4, Shemot Rabbah–Shanan), 6 sampled pages each.

@@ -50,6 +50,13 @@ NEW deferred item from v7.15 UAT: D-F12 (regular Search ~constant 8s wall-clock 
 - **v7.13 Research-Grade Downloads & PGP Filter** — shipped 2026-05-21 (v7.13.0), closed 2026-05-27; 2 phases (93, 94); 5 plans; 14/14 requirements.
 - **v7.12 Multitenant Architecture (Path B)** — shipped 2026-05-18; 10 phases; 28 plans; 49/49 requirements.
 
+## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 102 added (2026-05-29): PDF Extraction Reorder — adopt Meiri glyph-level parser (closes D-F13 letter-spaced emphasis + D-F14 rawdict reorder). First piece of v7.16 work; appended to the roadmap after the shipped v7.15 (Phases 99-101) per user choice of a single inserted phase rather than a full new milestone. Not yet planned.
+- Phase 102 RE-SCOPED (2026-05-29) after Spike 001 (`.planning/spikes/001-meiri-glyph-reorder-vs-current/`, verdict PARTIAL): now "LOCAL PDF Text-Layer Extraction Rewrite (RTL-gated reorder + letter-spacing de-collapse)". Spike findings: (1) Meiri's reorder helps Hebrew order/headers/brackets but NOT letter-spacing, and HURTS Latin → must be RTL-gated, no LTR regression; (2) the dominant text-layer bug is letter-spacing fragmentation (אוצר הגאונים 46%), fixable via rawdict per-line adaptive gap de-collapse (prototyped); (3) a LARGE share of the real library is image-only scans → OCR (D-F2) deferred as optional opt-in extension `SEED-003`; (4) new failure mode D-F16 corrupt text-layer encoding (Vilna Shabbat) → detect+flag in 102. Catalog F-A..F-G in spike README. Still not planned — next: discuss/plan Phase 102.
+
 ## Session Continuity
 
 Last session: 2026-05-28T15:00:00.000Z

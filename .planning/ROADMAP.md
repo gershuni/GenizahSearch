@@ -304,6 +304,25 @@ Plans:
 - [x] 101-01-PLAN.md (Wave 1) — RTL word-order fix in extract_pdf_pages sort=True fallback + extractor-version auto-reindex + Wave 0 RTL/version tests + F-06 AST guard update + D-09 flake fix + fixture provenance README
 - [x] 101-02-PLAN.md (Wave 1) — WR-01 single-lookup _open_local_browse_page + WR-02 discard_scope regression test + OPEN_ISSUES.md bookkeeping
 
+### Phase 102: LOCAL PDF Text-Layer Extraction Rewrite (RTL-gated reorder + letter-spacing de-collapse)
+
+**Goal:** Rewrite the LOCAL PDF text-layer extractor in `shared/local_indexer.py` onto a `page.get_text("rawdict")` (per-glyph bbox) foundation that produces clean, searchable plain text for the Tantivy indexer. Validated against real corpus by Spike 001 (`.planning/spikes/001-meiri-glyph-reorder-vs-current/`). The rewrite must address the failure-mode catalog the spike found (F-A..F-G):
+- **RTL-gated segment reorder** adapted from Ephraim Meiri's `ephraim_meiri_pdf_converter/pdf_to_docx.py::_normalize_span_dir` + `_regroup_lines` + `_fix_visual_brackets` — fixes word/segment order, headers (F-F), digit/ref placement (F-A), reversed parens (F-C). **CRITICAL: gate reorder to RTL/Hebrew content only** — Meiri's reorder HURTS Latin/LTR text (spike: NW Semitic Dictionary was better in the current extractor), so LTR lines/blocks must stay on the current/non-reordered path. **No LTR regression.**
+- **Adaptive per-line letter-spacing de-collapse** (F-D/F-E) — the spike's biggest finding: justified Hebrew typesetting (e.g. אוצר הגאונים 46% single-letter tokens, רמבם 21%) shatters words into single letters; neither current nor Meiri fixes it. Re-derive word spacing from glyph bboxes using a per-line adaptive threshold (~1.8× median inter-glyph gap), ignoring embedded space glyphs. Must run BEFORE reorder so de-spaced words can be reordered (F-E). Prototyped working in the spike.
+- **Punctuation normalization** (F-B) — no space before punctuation.
+- **Corrupt-encoding detection** (F-G) — detect garbage text layers (bad/missing ToUnicode cmap, e.g. `Israeli_Vilna_shabbat_part_2.pdf`) and flag/skip rather than indexing garbage (these are future OCR consumers).
+
+Closes **D-F13**; reframes **D-F14** (adopt Meiri's reorder *core*, RTL-gated — NOT wholesale, NOT DOCX pipeline).
+**Requirements**: D-F13, D-F14, + spike failure modes F-A..F-G (catalog in Spike 001 README)
+**Depends on:** Phase 101 · **Evidence:** Spike 001 (verdict PARTIAL — reshaped this phase)
+**Scope:** Desktop-only (My Library), text-layer PDFs. **Out of scope:** OCR for image-only scans (D-F2 — deferred as an optional opt-in extension, seeded; a large share of the real library is image-only but common users won't need OCR and off-the-shelf pre-OCR exists); P3 View All renderer cleanups (D-F8/D-F10/D-F7).
+**Verification:** Regression fixtures for each failure mode — letter-spaced page (אוצר הגאונים-style), letter-spaced+reversed line, RTL header, AND an LTR/Latin PDF that must NOT regress; existing `tests/fixtures/local_indexer/single_word_per_line.pdf` guard still passes.
+**Note:** First piece of v7.16 work, appended after shipped v7.15 (Phases 99-101).
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 102 to break down)
+
 ---
 
 *Roadmap created: 2026-02-09*
