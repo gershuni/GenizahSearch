@@ -1,5 +1,5 @@
 {
-  "description": "Codex MED-6 under-split: word gap (~9pt) dips below the 1.8x hard threshold (intra ~6pt). The hysteresis MID break splits it because it is corroborated by an embedded space glyph AND a span_id boundary (ספר=span0, תורה=span1).",
+  "description": "Two RTL words (ספר / תורה) in separate spans with a realistic word gap (~10pt edge, ~0.9*em) and an embedded space glyph that is now IGNORED for boundary detection. Splits purely by the edge-gap rule (2026-05-31).",
   "expected_despaced": "ספר תורה",
   "expected_reordered": "ספר תורה",
   "lines": [
@@ -7,7 +7,7 @@
       "bbox": [
         317.5,
         40.0,
-        363.5,
+        371.5,
         52.0
       ],
       "spans": [
@@ -18,9 +18,9 @@
             {
               "c": "ס",
               "bbox": [
-                356.5,
+                364.5,
                 40.0,
-                363.5,
+                371.5,
                 52.0
               ],
               "font": "David",
@@ -31,9 +31,9 @@
             {
               "c": "פ",
               "bbox": [
-                350.5,
+                358.5,
                 40.0,
-                357.5,
+                365.5,
                 52.0
               ],
               "font": "David",
@@ -44,9 +44,9 @@
             {
               "c": "ר",
               "bbox": [
-                344.5,
+                352.5,
                 40.0,
-                351.5,
+                359.5,
                 52.0
               ],
               "font": "David",
@@ -57,9 +57,9 @@
             {
               "c": " ",
               "bbox": [
-                341.0,
+                349.0,
                 40.0,
-                345.0,
+                353.0,
                 52.0
               ],
               "font": "David",

@@ -181,11 +181,11 @@ def test_write_page_doc_docx_simulated_strip(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# (c) extraction_format_version stored == 2
+# (c) extraction_format_version stored == 3
 # ---------------------------------------------------------------------------
 
-def test_write_page_doc_extraction_format_version_is_2(tmp_path):
-    """extraction_format_version stored in local_pages must be 2 (bumped from 1)."""
+def test_write_page_doc_extraction_format_version_is_3(tmp_path):
+    """extraction_format_version stored in local_pages must be 3 (2026-05-31 bump)."""
     indexer, db_path = _make_indexer(tmp_path)
     sys_id = "TEST-VER-001"
     folder = str(tmp_path / "docs")
@@ -201,8 +201,8 @@ def test_write_page_doc_extraction_format_version_is_2(tmp_path):
         conn.close()
 
         assert row is not None, "No local_pages row"
-        assert row[0] == 2, (
-            f"extraction_format_version should be 2 (D-06 FINAL bump), got {row[0]}"
+        assert row[0] == 3, (
+            f"extraction_format_version should be 3 (edge-gap + Mn de-space), got {row[0]}"
         )
     finally:
         indexer.close()

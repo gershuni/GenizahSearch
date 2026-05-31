@@ -1,5 +1,5 @@
 {
-  "description": "Codex MED-6 over-merge (spike residual). Word gaps (~9pt) are below the 1.8x hard threshold; the split is driven by the span_id/font boundary (HIGH-5), NOT the 1.8x threshold. Must NOT collapse to 'ישנואצליוסף'.",
+  "description": "Three RTL words in SEPARATE rawdict spans with realistic word spacing (~10pt edge gap, ~0.9*em). De-space splits them by the EDGE-GAP rule, NOT by the span boundary (span/font is no longer a corroboration signal — 2026-05-31 revision). Must NOT collapse to the spike-residual over-merge 'ישנואצליוסף'.",
   "expected_despaced": "ישנו אצל יוסף",
   "expected_reordered": "ישנו אצל יוסף",
   "lines": [
@@ -7,7 +7,7 @@
       "bbox": [
         310.5,
         40.0,
-        383.5,
+        399.5,
         52.0
       ],
       "spans": [
@@ -18,9 +18,9 @@
             {
               "c": "י",
               "bbox": [
-                376.5,
+                392.5,
                 40.0,
-                383.5,
+                399.5,
                 52.0
               ],
               "font": "David",
@@ -31,9 +31,9 @@
             {
               "c": "ש",
               "bbox": [
-                370.5,
+                386.5,
                 40.0,
-                377.5,
+                393.5,
                 52.0
               ],
               "font": "David",
@@ -44,9 +44,9 @@
             {
               "c": "נ",
               "bbox": [
-                364.5,
+                380.5,
                 40.0,
-                371.5,
+                387.5,
                 52.0
               ],
               "font": "David",
@@ -57,9 +57,9 @@
             {
               "c": "ו",
               "bbox": [
-                358.5,
+                374.5,
                 40.0,
-                365.5,
+                381.5,
                 52.0
               ],
               "font": "David",
@@ -76,9 +76,9 @@
             {
               "c": "א",
               "bbox": [
-                349.5,
+                357.5,
                 40.0,
-                356.5,
+                364.5,
                 52.0
               ],
               "font": "David",
@@ -89,9 +89,9 @@
             {
               "c": "צ",
               "bbox": [
-                343.5,
+                351.5,
                 40.0,
-                350.5,
+                358.5,
                 52.0
               ],
               "font": "David",
@@ -102,9 +102,9 @@
             {
               "c": "ל",
               "bbox": [
-                337.5,
+                345.5,
                 40.0,
-                344.5,
+                352.5,
                 52.0
               ],
               "font": "David",

@@ -147,3 +147,51 @@ def test_update_failure_rolls_back(tmp_path):
     sync_mode = real_conn.execute("PRAGMA synchronous").fetchone()[0]
     # synchronous=NORMAL = 1, FULL = 2
     assert sync_mode != 2, f"synchronous should be NORMAL (1) after finally block, got {sync_mode}"
+
+
+# ---------------------------------------------------------------------------
+# startup_recovery reextract_pending deferral (2026-05-31) — the desktop launch
+# path must NOT synchronously re-extract a bulk pending backlog on the UI thread
+# (froze launch when an interrupted "Re-index All" left many pending rows).
+# ---------------------------------------------------------------------------
+def test_startup_recovery_defers_pending_when_reextract_false(tmp_path):
+    indexer, folder, filepath, db_path, index_dir, lab_dir = _make_indexer_with_file(tmp_path)
+    indexer.scan_all()
+    indexer._conn.execute(
+        "UPDATE processed_files SET status='pending' WHERE status='committed'"
+    )
+    indexer._conn.commit()
+    pending_before = indexer._conn.execute(
+        "SELECT COUNT(*) FROM processed_files WHERE status='pending'"
+    ).fetchone()[0]
+    assert pending_before >= 1
+
+    result = indexer.startup_recovery(reextract_pending=False)
+
+    # Pass B skipped: nothing re-extracted, rows reported deferred and left pending.
+    assert result["pending_inserts_recovered"] == 0
+    assert result["pending_inserts_deferred"] == pending_before
+    still_pending = indexer._conn.execute(
+        "SELECT COUNT(*) FROM processed_files WHERE status='pending'"
+    ).fetchone()[0]
+    assert still_pending == pending_before
+    indexer.close()
+
+
+def test_startup_recovery_reextracts_pending_by_default(tmp_path):
+    indexer, folder, filepath, db_path, index_dir, lab_dir = _make_indexer_with_file(tmp_path)
+    indexer.scan_all()
+    indexer._conn.execute(
+        "UPDATE processed_files SET status='pending' WHERE status='committed'"
+    )
+    indexer._conn.commit()
+
+    result = indexer.startup_recovery()  # default reextract_pending=True
+
+    assert result["pending_inserts_recovered"] >= 1
+    assert result.get("pending_inserts_deferred", 0) == 0
+    committed_after = indexer._conn.execute(
+        "SELECT COUNT(*) FROM processed_files WHERE status='committed'"
+    ).fetchone()[0]
+    assert committed_after >= 1
+    indexer.close()

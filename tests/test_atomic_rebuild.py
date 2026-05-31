@@ -75,7 +75,7 @@ def test_write_page_doc_populates_cached_text(tmp_path):
     assert row["cached_text"] is not None, "cached_text should be non-NULL"
     assert row["cached_text_codec"] == "zstd"
     assert row["cached_text_uncompressed_len"] == len(text.encode("utf-8"))
-    assert row["extraction_format_version"] == 2  # Phase 102 D-06: bumped 1->2 (all-format nikud strip)
+    assert row["extraction_format_version"] == 3  # 2026-05-31: bumped 2->3 (edge-gap + Mn de-space)
     assert row["chunk_locator"] == chunk_locator
 
     # Verify round-trip

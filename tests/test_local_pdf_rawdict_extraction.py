@@ -513,3 +513,36 @@ class TestExtractPdfPagesRawdictPrimary:
         assert isinstance(pages, list), "extract_pdf_pages must return an iterable"
         # Verify the fixture is indeed multi-page in the PDF itself.
         assert pdf_page_count >= 2, f"multipage_sample.pdf must have >= 2 PDF pages, got {pdf_page_count}"
+
+
+# ---------------------------------------------------------------------------
+# _ltr_damage_guard — RTL trust regression (2026-05-31)
+# ---------------------------------------------------------------------------
+class TestLtrDamageGuardRtlTrust:
+    """Guard the fix where the edge-gap de-space (correctly merging letter-spaced
+    shards into whole words) produces FEWER tokens than the shattered blocks
+    fallback. On RTL pages the guard must trust rawdict, not revert to blocks —
+    otherwise the de-space improvement is silently thrown away (regression that
+    indexed אוצר הגאונים at 73% single-letter tokens)."""
+
+    def _guard(self):
+        from shared.local_indexer import _ltr_damage_guard
+        return _ltr_damage_guard
+
+    def test_rtl_page_keeps_rawdict_even_with_far_fewer_tokens(self):
+        guard = self._guard()
+        # rawdict merged shards -> 3 whole words; blocks shattered -> 11 letters.
+        rawdict = "פירוש המשנה הקדמות"
+        blocks = "פ י ר ו ש ה מ ש נ ה ה ק ד מ ו ת"
+        assert guard(rawdict, blocks) == rawdict
+
+    def test_rtl_page_empty_rawdict_still_falls_back(self):
+        guard = self._guard()
+        assert guard("", "טקסט עברי כלשהו") == "טקסט עברי כלשהו"
+
+    def test_ltr_page_falls_back_when_rawdict_loses_tokens(self):
+        guard = self._guard()
+        # LTR page: rawdict dropped most tokens -> count_ratio < 0.70 -> blocks.
+        rawdict = "Northwest"
+        blocks = "Northwest Semitic Dictionary of inscriptions"
+        assert guard(rawdict, blocks) == blocks

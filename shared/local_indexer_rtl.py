@@ -29,22 +29,42 @@ import re
 import statistics
 import unicodedata
 
-# ---------------------------------------------------------------------------
-# Hebrew range constants (PATTERNS.md "Shared Patterns").
-# ---------------------------------------------------------------------------
-_HEBREW_BLOCK_LO = 0x0590  # RTL gate: full Hebrew block incl. nikud
-_HEBREW_BLOCK_HI = 0x07BF
-_NIKUD_LO = 0x05B0  # combining marks — EXCLUDE from gap math (D-04/D-06)
-_NIKUD_HI = 0x05C7
+# De-space threshold (2026-05-31 revision — edge-gap, NOT center-gap-vs-median).
+# A word boundary is the inter-glyph WHITESPACE (edge-to-edge: next.x0 - prev.x1)
+# exceeding this fraction of the font size. The corpus is bimodal in edge-gap /
+# font-size space: intra-word + letter-spacing tracking clusters <= ~0.2*em,
+# word spaces sit at ~0.6-1.3*em, with a stable valley at ~0.4-0.5*em (verified
+# across 90 books / 300K+ inter-glyph gaps). 0.45 sits in that valley — safely
+# below the word-space floor (~0.53*em, p5) yet well above letter-spacing. The
+# OLD metric (center-x to center-x vs 1.8x per-line median) conflated letter
+# WIDTH with spacing, so wide letters (מ/ש/ה) were shattered off justified words
+# and the median drifted inside letter-spaced runs; edge-gap is width-invariant.
+#
+# PER-LINE OTSU VALLEY (2026-05-31, second iteration). A single global fraction
+# cannot separate every book: word-spaces are ~0.3*em in tightly-set modern
+# books (Ravitzky), ~0.7*em in normal books, while letter-spaced HEADINGS track
+# letters at ~0.5*em — these overlap, so any fixed threshold either MERGES tight
+# words or SHATTERS headings. But within a single line the intra-gap and word-gap
+# clusters are always cleanly bimodal; only the valley LOCATION moves. So the
+# threshold is found per line by 1-D Otsu (the value minimizing within-cluster
+# variance of the normalized edge gaps), clipped + bounded:
+#   * outlier clip: gaps above _GAP_OUTLIER_CAP (column breaks) are pinned to the
+#     cap so they always split but don't drag the valley up.
+#   * spread guard: if the line's gaps span < _GAP_MIN_SPREAD it is unimodal
+#     (one word, or a uniformly letter-spaced single word) -> no internal split.
+#   * the valley is bounded to [_GAP_MIN_FRACTION, _GAP_MAX_FRACTION] of the font
+#     size so noise can't split letters and a real word-space always splits.
+_GAP_OUTLIER_CAP = 1.2      # x font size — clip column-break/figure gaps
+_GAP_MIN_SPREAD = 0.12      # x font size — below this the line is one cluster
+_GAP_MIN_FRACTION = 0.12    # x font size — valley floor (intra noise never splits)
+_GAP_MAX_FRACTION = 1.10    # x font size — valley ceiling (big gaps always split)
 
-# Hebrew punctuation (F-B normalize targets): maqaf U+05BE, sof pasuq U+05C3.
-_HEBREW_MAQAF = "־"      # ־
-_HEBREW_SOF_PASUQ = "׃"  # ׃
-
-# De-space thresholds (D-04 hysteresis — NO Otsu, that is deferred).
-_HARD_GAP_MULT = 1.8   # gap > 1.8 x median -> always a word boundary
-_MID_GAP_MULT = 1.15   # 1.15x < gap <= 1.8x -> break only if corroborated
-_LONG_TOKEN_LETTERS = 12  # abnormal-long accumulating unit -> corroboration hint
+# Secondary boundary signal (2026-05-31 b): use a *clean* embedded space glyph as
+# a word boundary when the Otsu edge-gap test can't see the word-space (zero-WIDTH
+# space glyphs in tightly-set headings/citations). Gated locally so letter-spacing
+# (a space between EVERY letter) is NOT mistaken for word-spaces. Kill-switch for
+# A/B measurement and emergency revert; production default is ON.
+_SPACE_BOUNDARY_ENABLED = True
 
 # Reorder (adapted from Meiri _normalize_span_dir).
 MAX_BACKWARD_JUMP = 15.0
@@ -55,8 +75,6 @@ _MIRROR_OF = {o: c for o, c in _BRACKET_PAIRS}
 _MIRROR_OF.update({c: o for o, c in _BRACKET_PAIRS})
 _CLOSERS = {c for _, c in _BRACKET_PAIRS}
 _BRACKETS = set(_MIRROR_OF.keys())
-
-_PUNCT = set(".,;:!?)\"'" + _HEBREW_MAQAF + _HEBREW_SOF_PASUQ)
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +94,18 @@ def rtl_ratio(text: str) -> float:
 
 
 def _is_nikud(cp: int) -> bool:
-    return _NIKUD_LO <= cp <= _NIKUD_HI
+    """True for Hebrew combining marks — nikud points AND cantillation te'amim.
+
+    Uses the Unicode general category ``Mn`` (Mark, nonspacing) instead of the
+    old fixed range 0x05B0-0x05C7. That range was wrong in both directions: it
+    INCLUDED the spacing punctuation maqaf (U+05BE, ``Pd``), paseq (U+05C0),
+    sof-pasuq (U+05C3) and nun-hafukha (U+05C6) — which must read as base glyphs
+    (treating the maqaf as a vowel mark corrupted ranges like ``סב־סג``) — and
+    EXCLUDED the cantillation te'amim at 0x0591-0x05AF (``Mn``), which let
+    accents pollute the gap math on vocalized/biblical text. ``Mn`` classifies
+    all of them correctly (2026-05-31 de-space revision).
+    """
+    return unicodedata.category(chr(cp)) == "Mn"
 
 
 def _center_x(glyph: dict) -> float:
@@ -186,6 +215,38 @@ def group_lines_by_baseline(raw_lines: list[dict]) -> list[list[dict]]:
 # ---------------------------------------------------------------------------
 # D-04 / D-05 / M3: adaptive de-space -> word-unit bbox-unions.
 # ---------------------------------------------------------------------------
+def _word_gap_fraction(norm_gaps: list[float]) -> float:
+    """Per-line word-boundary threshold as a fraction of the font size.
+
+    ``norm_gaps`` are consecutive base-glyph EDGE gaps already divided by the
+    leading glyph's font size. Returns the fraction F such that an edge gap >
+    F * font_size is a word boundary. Found by 1-D Otsu on the gaps (clipped +
+    bounded — see the _GAP_* constants). Lines whose gaps are too uniform to be
+    bimodal (one word, or a single uniformly letter-spaced word) return
+    _GAP_MAX_FRACTION, i.e. effectively "do not split internally".
+    """
+    if not norm_gaps:
+        return _GAP_MAX_FRACTION
+    vals = sorted(min(max(g, 0.0), _GAP_OUTLIER_CAP) for g in norm_gaps)
+    n = len(vals)
+    if n < 2 or (vals[-1] - vals[0]) < _GAP_MIN_SPREAD:
+        return _GAP_MAX_FRACTION  # unimodal: no intra/inter split on this line
+    # 1-D Otsu: pick the split maximizing between-cluster variance.
+    prefix = [0.0] * (n + 1)
+    for i, v in enumerate(vals):
+        prefix[i + 1] = prefix[i] + v
+    best_thr, best_var = _GAP_MAX_FRACTION, -1.0
+    for k in range(1, n):
+        w0, w1 = k, n - k
+        mean0 = prefix[k] / w0
+        mean1 = (prefix[n] - prefix[k]) / w1
+        between = w0 * w1 * (mean1 - mean0) ** 2
+        if between > best_var:
+            best_var = between
+            best_thr = (vals[k - 1] + vals[k]) / 2.0
+    return min(max(best_thr, _GAP_MIN_FRACTION), _GAP_MAX_FRACTION)
+
+
 def _ltr_word_units(line_glyphs: list[dict]) -> list[dict]:
     """LTR pass-through: split on whitespace glyphs, preserve emission order.
 
@@ -216,6 +277,17 @@ def _ltr_word_units(line_glyphs: list[dict]) -> list[dict]:
     return units
 
 
+def _is_ltr_base(glyph: dict) -> bool:
+    """True for a glyph that reads LEFT-to-right: digits, Latin, and the numeric
+    separators that ride inside a number/Latin token (so ``1977`` / ``194-212`` /
+    ``p20`` reverse as one block, not per-digit). Bidi classes L (Latin),
+    EN (European digit), ES/ET/CS (numeric +-, %, ,.: separators)."""
+    c = _glyph_char(glyph)
+    if not c:
+        return False
+    return unicodedata.bidirectional(c[0]) in ("L", "EN", "ES", "ET", "CS")
+
+
 def _order_unit_text_rtl(members: list[dict]) -> str:
     """Build a word unit's text in correct R->L consonant order (M3).
 
@@ -224,6 +296,13 @@ def _order_unit_text_rtl(members: list[dict]) -> str:
     belongs to the nearest base by center-x; emitted immediately AFTER its base).
     A word whose glyphs were emitted visual-LTR (logically-first consonant at the
     HIGHEST center-x, logically-last at the lowest) thus reads correctly.
+
+    Embedded LEFT-to-right runs (digits / Latin — e.g. a year ``1977`` or a page
+    range ``194-212`` fused into the unit) are then flipped back to ascending
+    center-x: the standard bidi "reverse embedded level run" step. Without it the
+    blanket descending sort reverses numbers (``1977`` -> ``7791``). A run must
+    contain at least one digit/Latin glyph to flip (lone neutral separators stay
+    in their RTL slot).
     """
     bases = [g for g in members if not _is_nikud_glyph(g)]
     marks = [g for g in members if _is_nikud_glyph(g)]
@@ -239,6 +318,25 @@ def _order_unit_text_rtl(members: list[dict]) -> str:
 
     # M3: order base consonants by DESCENDING center-x (right-to-left reading).
     bases_rtl = sorted(bases, key=_center_x, reverse=True)
+
+    # Re-flip maximal LTR runs (digits/Latin) back to ascending so embedded
+    # numbers read correctly (1977 must not become 7791). A run only flips if it
+    # carries a real digit/Latin glyph, not just separators.
+    n = len(bases_rtl)
+    i = 0
+    while i < n:
+        if _is_ltr_base(bases_rtl[i]):
+            j = i
+            while j + 1 < n and _is_ltr_base(bases_rtl[j + 1]):
+                j += 1
+            run = bases_rtl[i:j + 1]
+            if any(unicodedata.bidirectional(_glyph_char(g)[0]) in ("L", "EN")
+                   for g in run if _glyph_char(g)):
+                bases_rtl[i:j + 1] = list(reversed(run))
+            i = j + 1
+        else:
+            i += 1
+
     out: list[str] = []
     for b in bases_rtl:
         out.append(_glyph_char(b))
@@ -247,33 +345,55 @@ def _order_unit_text_rtl(members: list[dict]) -> str:
     return "".join(out)
 
 
+def _is_space_glyph(glyph: dict) -> bool:
+    """True for an emitted whitespace glyph (a boundary HINT, not real text)."""
+    c = _glyph_char(glyph)
+    return bool(c) and c.strip() == ""
+
+
 def despace_line_to_word_units(line_glyphs: list[dict]) -> list[dict]:
-    """Adaptive letter-spacing de-collapse -> word-unit bbox-unions (D-04/D-05/M3).
+    """Letter-spacing de-collapse -> word-unit bbox-unions (D-04/D-05/M3).
 
     Consumes the richer glyph record. Does NOT sort glyphs by x up front (that
     destroys original_order and can reverse RTL letters). For an RTL line:
 
-      1. metric glyphs = glyphs EXCLUDING nikud (a mark between two consonants
-         must not read as a boundary — D-04/D-06).
-      2. gaps measured on center-x of consecutive metric glyphs (ascending x).
-      3. HARD break: gap > 1.8 x median_gap.
-         MID break: 1.15x < gap <= 1.8x, but only if corroborated by an embedded
-         space glyph, punctuation, a span_id/font boundary (HIGH-5), or an
-         abnormally long accumulating unit.
-      4. each word unit's text is built by DESCENDING center-x (M3), nikud kept
+      1. nikud combining marks (Unicode ``Mn``) ride along inside their base's
+         accumulating unit but are excluded from the gap math (a mark between
+         two consonants must not read as a boundary — D-04/D-06).
+      2. the primary boundary signal is EDGE-TO-EDGE whitespace between
+         consecutive base glyphs in ascending-x order (next.x0 - prev.x1), NOT
+         center-to-center. Center distance conflated letter width with spacing
+         and shattered wide letters off justified words (2026-05-31 revision).
+      3. word boundary when edge_gap > gap_fraction * font_size, where
+         gap_fraction is the per-line Otsu valley of the normalized edge gaps
+         (see _word_gap_fraction) — it adapts to each line's own intra/inter
+         bimodal spacing.
+      4. SECONDARY boundary signal = an embedded space GLYPH (U+0020) that is a
+         *clean* word-space (2026-05-31 b). Some PDFs encode the inter-word space
+         as a zero-WIDTH space glyph (the gap collapses to ~0 em, so the Otsu gap
+         test in (3) cannot see it — e.g. tightly-set headings/citations where
+         `פרנץ רוזנצווייג ושמואל` renders as one run). The space glyph IS reliable
+         there. But it cannot be used unconditionally: justified Hebrew encodes
+         letter-spacing as a literal space between EVERY letter, so a space marks
+         letter-spacing as often as a word break. The two are told apart LOCALLY:
+         a real word-space has NO space glyph at either immediately-adjacent
+         inter-base position, whereas a letter-spaced space always does (its
+         neighbours are spaced too). So a space glyph forces a boundary ONLY when
+         neither adjacent inter-base position also carries a space. This is purely
+         additive — a line with no space glyphs splits exactly as it did on (3).
+      5. each word unit's text is built by DESCENDING center-x (M3), nikud kept
          on its base; bbox = union of members; original_order = min of members.
 
     Units are returned sorted by ascending original_order (rawdict emission
     order) so the downstream reorder (reorder_word_units_rtl) can re-segment by
     original_order + x-jumps. Synthetic zero-bbox space glyphs are NEVER created
-    (Codex HIGH-3 / D-05): pure-space glyphs are dropped from text and used only
-    as boundary hints.
+    (Codex HIGH-3 / D-05): pure-space glyphs are dropped from the unit text and
+    serve only as the corroborating boundary hint described in point 4.
     """
     text = "".join(_glyph_char(g) for g in line_glyphs)
     if rtl_ratio(text) <= 0.4:
         return _ltr_word_units(line_glyphs)
 
-    space_glyphs = [g for g in line_glyphs if _glyph_char(g) == " "]
     content = [g for g in line_glyphs if _glyph_char(g).strip() != ""]
     if len(content) < 2:
         if not content:
@@ -284,61 +404,83 @@ def despace_line_to_word_units(line_glyphs: list[dict]) -> list[dict]:
             "original_order": min(g.get("original_order", 0) for g in content),
         }]
 
-    # Visual sequence (ascending center-x) for boundary detection. Nikud rides
-    # along inside its base's accumulating unit but is excluded from gap math.
-    ordered = sorted(content, key=_center_x)
-    metric = [g for g in ordered if not _is_nikud_glyph(g)]
-    base_centers = [_center_x(g) for g in metric]
-    base_gaps = [base_centers[i + 1] - base_centers[i]
-                 for i in range(len(base_centers) - 1)]
-    if not base_gaps:
+    # Visual sequence (ascending center-x) of ALL glyphs, so embedded space
+    # glyphs can be read as inter-base boundary hints (point 4) while nikud rides
+    # along inside its base's unit and is excluded from the gap math.
+    vis_all = sorted(line_glyphs, key=_center_x)
+
+    # Pass 1: base-glyph sequence + a parallel space_before[] flag (a space glyph
+    # sits between base i-1 and base i). Nikud and empty glyphs are skipped here.
+    bases_seq: list[dict] = []
+    space_before: list[bool] = []
+    pending_space = False
+    for g in vis_all:
+        if _is_nikud_glyph(g):
+            continue
+        if _is_space_glyph(g):
+            pending_space = True
+            continue
+        if not _glyph_char(g):
+            continue
+        bases_seq.append(g)
+        space_before.append(pending_space)
+        pending_space = False
+
+    if len(bases_seq) < 2:
         return [{
             "text": _order_unit_text_rtl(content),
             "bbox": _bbox_union(content),
             "original_order": min(g.get("original_order", 0) for g in content),
         }]
-    median_gap = statistics.median(base_gaps)
-    hard = _HARD_GAP_MULT * median_gap
-    mid = _MID_GAP_MULT * median_gap
 
-    def _space_between(lo: float, hi: float) -> bool:
-        return any(lo < _center_x(s) < hi for s in space_glyphs)
+    # Per-line word-gap threshold via 1-D Otsu on the base-glyph EDGE gaps (each
+    # normalized by the leading glyph's font size). This adapts to the line's own
+    # bimodal intra/inter spacing — tight modern books (~0.3*em word-spaces),
+    # normal books (~0.7*em) and letter-spaced headings (~0.5*em tracking, words
+    # >0.9*em) each get a valley in the right place where a fixed fraction cannot.
+    norm_gaps = [
+        (bases_seq[i + 1]["bbox"][0] - bases_seq[i]["bbox"][2])
+        / (_glyph_size(bases_seq[i]) or _glyph_size(bases_seq[i + 1]) or 1.0)
+        for i in range(len(bases_seq) - 1)
+    ]
+    gap_fraction = _word_gap_fraction(norm_gaps)
 
-    def _base_letter_count(unit: list[dict]) -> int:
-        return sum(1 for g in unit if not _is_nikud_glyph(g)
-                   and _HEBREW_BLOCK_LO <= ord(_glyph_char(g)[0]) <= _HEBREW_BLOCK_HI)
+    # Boundary decision per inter-base position i (1 .. len-1): the Otsu edge-gap
+    # test OR a clean word-space glyph (point 4). space_before[i] is the space
+    # between base i-1 and base i; its left/right neighbours are positions i-1 and
+    # i+1 (a leading space at index 0 is not an inter-base position).
+    n = len(bases_seq)
+    boundary = [False] * n
+    for i in range(1, n):
+        edge_gap = bases_seq[i]["bbox"][0] - bases_seq[i - 1]["bbox"][2]
+        font_size = _glyph_size(bases_seq[i - 1]) or _glyph_size(bases_seq[i]) or 1.0
+        gap_boundary = edge_gap > gap_fraction * font_size
+        sp_left = space_before[i - 1] if i - 1 >= 1 else False
+        sp_right = space_before[i + 1] if i + 1 < n else False
+        clean_space = (
+            _SPACE_BOUNDARY_ENABLED
+            and space_before[i]
+            and not (sp_left or sp_right)
+        )
+        boundary[i] = gap_boundary or clean_space
 
+    # Pass 2: walk visual order, splitting bases at boundary positions; nikud
+    # rides into the current unit (re-attached to its base by _order_unit_text_rtl).
     units_visual: list[list[dict]] = []
     current: list[dict] = []
-    prev_base: dict | None = None
-    for g in ordered:
+    base_idx = -1
+    for g in vis_all:
+        if _is_space_glyph(g) or not _glyph_char(g):
+            continue
         if _is_nikud_glyph(g):
             current.append(g)
             continue
-        if prev_base is None:
-            current.append(g)
-            prev_base = g
-            continue
-        gap = _center_x(g) - _center_x(prev_base)
-        boundary = False
-        if gap > hard:
-            boundary = True
-        elif gap > mid:
-            corroborated = (
-                _space_between(_center_x(prev_base), _center_x(g))
-                or _glyph_char(prev_base) in _PUNCT
-                or _glyph_char(g) in _PUNCT
-                or g.get("span_id") != prev_base.get("span_id")
-                or g.get("font") != prev_base.get("font")
-                or _base_letter_count(current) > _LONG_TOKEN_LETTERS
-            )
-            boundary = corroborated
-        if boundary:
+        base_idx += 1
+        if base_idx >= 1 and boundary[base_idx] and current:
             units_visual.append(current)
             current = [g]
         else:
             current.append(g)
-        prev_base = g
     if current:
         units_visual.append(current)
 

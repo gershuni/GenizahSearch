@@ -968,28 +968,39 @@ def _ltr_damage_guard(rawdict_text: str, blocks_text: str) -> str:
 
     page_is_rtl = rtl_ratio(blocks_stripped) > 0.4
 
-    # Token-count check: if rawdict lost >30% of blocks tokens, something is wrong.
+    # RTL/Hebrew pages: trust rawdict beyond the empty-check above. The blocks
+    # path SHATTERS justified/letter-spaced Hebrew into single letters, so it
+    # legitimately has MORE tokens than the (correctly de-spaced) rawdict output.
+    # A token-count or Jaccard comparison would therefore wrongly flag the GOOD
+    # rawdict text as "damaged" and revert to the shattered blocks text — which
+    # is exactly what regressed after the 2026-05-31 edge-gap de-space made
+    # rawdict merge shards into whole words (count_ratio dropped below 0.70).
+    # The count/Jaccard heuristics only make sense for LTR content (HIGH-? D-03).
+    if page_is_rtl:
+        return rawdict_stripped
+
+    # LTR pages only — token-count check: if rawdict lost >30% of blocks tokens,
+    # the rawdict reconstruction scrambled or dropped LTR content.
     count_ratio = len(rawdict_tokens) / max(len(blocks_tokens), 1)
     if count_ratio < 0.70:
         logger.debug(
-            "_ltr_damage_guard: rawdict token-count ratio %.2f < 0.70 — "
-            "falling back to blocks", count_ratio
+            "_ltr_damage_guard: rawdict token-count ratio %.2f < 0.70 on LTR "
+            "page — falling back to blocks", count_ratio
         )
         return blocks_stripped
 
-    # Jaccard similarity on token sets (only enforce on LTR pages).
-    if not page_is_rtl:
-        rawdict_set = set(rawdict_tokens)
-        blocks_set = set(blocks_tokens)
-        union = rawdict_set | blocks_set
-        intersection = rawdict_set & blocks_set
-        jaccard = len(intersection) / len(union) if union else 1.0
-        if jaccard < 0.5:
-            logger.debug(
-                "_ltr_damage_guard: Jaccard %.2f < 0.50 on LTR page — "
-                "falling back to blocks", jaccard
-            )
-            return blocks_stripped
+    # LTR pages only — Jaccard similarity on token sets.
+    rawdict_set = set(rawdict_tokens)
+    blocks_set = set(blocks_tokens)
+    union = rawdict_set | blocks_set
+    intersection = rawdict_set & blocks_set
+    jaccard = len(intersection) / len(union) if union else 1.0
+    if jaccard < 0.5:
+        logger.debug(
+            "_ltr_damage_guard: Jaccard %.2f < 0.50 on LTR page — falling back "
+            "to blocks", jaccard
+        )
+        return blocks_stripped
 
     return rawdict_stripped
 
@@ -2386,18 +2397,48 @@ class LocalIndexer:
     # Startup recovery
     # ------------------------------------------------------------------
 
-    def startup_recovery(self) -> dict:
+    def startup_recovery(self, reextract_pending: bool = True) -> dict:
         """Two-pass startup recovery (D-21 + HIGH-3 review fix).
 
         Pass A (HIGH-3): recover any crash-interrupted deletes (_recover_pending_deletes).
         Pass B (D-21): re-extract files with status='pending'.
 
-        Returns: {'pending_deletes_recovered': N, 'pending_inserts_recovered': M}
+        ``reextract_pending`` (2026-05-31): when False, SKIP Pass B's synchronous
+        re-extraction and leave the pending rows for the caller's background
+        worker to process. Pass B re-extracts every pending PDF inline — fine for
+        the handful left by a crash-interrupted single scan, but catastrophic
+        when a bulk "Re-index All" (which flips committed->pending) was
+        interrupted: the leftover pending backlog froze app launch on the UI
+        thread (same failure mode as the rolled-back Phase 101 D-04 auto-flip).
+        The desktop caller (MyLibraryTab._init_indexer) passes False because its
+        _auto_rescan_on_startup background worker re-extracts pending rows anyway
+        (they miss scan_all's cache-hit branch) — cancellable + progress-tracked,
+        off the UI thread. Tests keep the default True to exercise the recovery.
+
+        Returns: {'pending_deletes_recovered': N, 'pending_inserts_recovered': M,
+                  'pending_inserts_deferred': K}
         """
         # Pass A: HIGH-3 - finish any interrupted deletes
         deletes_recovered = self._recover_pending_deletes()
 
-        # Pass B: D-21 - re-extract pending inserts
+        # Pass B: D-21 - re-extract pending inserts (UNLESS deferred to the
+        # caller's background worker — see reextract_pending docstring).
+        if not reextract_pending:
+            deferred = self._conn.execute(
+                "SELECT COUNT(*) FROM processed_files WHERE status = 'pending'"
+            ).fetchone()[0]
+            if deferred:
+                logger.info(
+                    "startup_recovery: deferring re-extraction of %d pending "
+                    "file(s) to the background worker (not the UI thread)",
+                    deferred,
+                )
+            return {
+                "pending_deletes_recovered": deletes_recovered,
+                "pending_inserts_recovered": 0,
+                "pending_inserts_deferred": deferred,
+            }
+
         pending_rows = self._conn.execute(
             "SELECT filepath, sys_id FROM processed_files WHERE status = 'pending'"
         ).fetchall()
@@ -2433,6 +2474,7 @@ class LocalIndexer:
         return {
             "pending_deletes_recovered": deletes_recovered,
             "pending_inserts_recovered": inserts_recovered,
+            "pending_inserts_deferred": 0,
         }
 
     def _recover_pending_deletes(self) -> int:
@@ -2838,13 +2880,15 @@ class LocalIndexer:
         # Phase 97 LD-3: compress text and write ALL Phase 97 columns in the SINGLE
         # canonical Tantivy write site (Codex HIGH #2 / ADVICE LD-3).
         # D-06 FINAL: compress the STRIPPED text — cached_text == content == stripped.
-        # extraction_format_version bumped 1→2 to signal all-format-stripped rows.
+        # extraction_format_version: 1=pre-Phase-102, 2=Phase-102 rawdict reorder,
+        # 3=2026-05-31 edge-gap + Mn de-space revision (existing libraries need a
+        # manual "Re-index All" to pick up the improved letter-spacing de-collapse).
         cached_bytes, uncompressed_len = compress_cached_text(stripped)
         self._conn.execute(
             "INSERT OR REPLACE INTO local_pages "
             "(sys_id, uid, page_num, cached_text, cached_text_codec, "
             " cached_text_uncompressed_len, extraction_format_version, chunk_locator) "
-            "VALUES (?, ?, ?, ?, 'zstd', ?, 2, ?)",
+            "VALUES (?, ?, ?, ?, 'zstd', ?, 3, ?)",
             (sys_id, uid, page_num, cached_bytes, uncompressed_len, chunk_locator or ""),
         )
         self._conn.commit()

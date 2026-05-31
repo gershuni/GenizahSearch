@@ -1272,12 +1272,21 @@ class MyLibraryTab(QWidget):
             self._indexer = None
             return
 
-        # Run startup recovery (two-pass: pending deletes + pending inserts)
+        # Run startup recovery. Pass A (pending deletes) runs synchronously — it
+        # is a handful of fast Tantivy deletes. Pass B (re-extract pending) is
+        # DEFERRED to the background worker via reextract_pending=False: doing it
+        # inline on the UI thread froze launch when a bulk "Re-index All" left a
+        # large pending backlog (same failure mode as the rolled-back Phase 101
+        # D-04 auto-flip). _auto_rescan_on_startup (called right after, in the
+        # constructor) re-extracts those pending rows on the worker QThread —
+        # cancellable + progress-tracked.
         try:
-            recovery = self._indexer.startup_recovery()
-            if recovery.get("pending_deletes_recovered") or recovery.get(
-                "pending_inserts_recovered"
-            ):
+            recovery = self._indexer.startup_recovery(reextract_pending=False)
+            if any(recovery.get(k) for k in (
+                "pending_deletes_recovered",
+                "pending_inserts_recovered",
+                "pending_inserts_deferred",
+            )):
                 logger.info(
                     "MyLibraryTab startup_recovery: %s", recovery
                 )
