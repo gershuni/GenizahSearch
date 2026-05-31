@@ -4,22 +4,38 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [7.16.0] - 2026-05-31 — Hebrew PDF Text Quality
+
+A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dramatically improving search of typeset Hebrew scholarly books, plus new file-management actions for LOCAL hits. Desktop only.
+
+### New Features
+
+- **Open file location (desktop)** — LOCAL "My Library" hits now have an **Open file location** action that opens the containing folder in the OS file manager with the file selected, alongside the existing **Open file**. Available in the ResultDialog, the Browse panel, and the right-click menu on search results.
+- **File-aware right-click menu for LOCAL hits (desktop)** — Right-clicking a LOCAL search result now shows file actions — **Open file**, **Open file location**, **Copy file location**, **Copy filename** — instead of the Genizah cloud-community actions (View Document, corrections, comments, discoveries) that don't apply to your own documents.
 
 ### Improvements
 
 - **Hebrew PDF text quality — letter-spacing & word-boundary rewrite (desktop)** — A large rewrite of the LOCAL PDF Hebrew text extractor, dramatically improving search of typeset Hebrew scholarly books. Many books shattered emphasised/justified Hebrew into single letters (e.g. `אוצר הגאונים` indexed ~74% one-letter "words", so `פירוש המשנה` became `פירו ש ה מ ש נה` and was unsearchable), while tightly-set books fused whole phrases into one token. Word boundaries are now detected per line from the actual inter-letter spacing (an adaptive valley between within-word and between-word gaps), plus the embedded space glyph where a heading or citation is set with no visible gap. Measured on identical pages: `אוצר הגאונים` one-letter tokens 74% → ~5%, tightly-set books' word-fusion 16% → ~0%.
   - **Vowel/cantillation handling** — Hebrew combining marks (nikud and te'amim) are now classified by Unicode category, so the maqaf (`־`), sof-pasuq and similar punctuation are kept as real characters instead of being stripped as vowels (which had corrupted ranges like `סב־סג` and joined `דו־שיח`).
   - **Numbers read correctly** — Years and page numbers embedded in right-to-left text are no longer reversed (`1977` is `1977`, not `7791`; ranges like `194-256` stay intact).
-  - **To benefit, run "Re-index All" (אנדקס מחדש הכל)** in the My Library tab — these improvements apply to newly-extracted text, so existing libraries must be re-indexed once.
+  - **Garbled text layers flagged** — PDFs whose embedded text layer is unrecoverable garbage are now detected and marked in the My Library tree, so you know which files would need OCR rather than silently indexing noise.
+  - **To benefit, run "Re-index All" (אנדקס מחדש הכל)** in the My Library tab — these improvements apply to newly-extracted text, so existing libraries must be re-indexed once (`extraction_format_version` 2 → 3).
 
 ### Bug Fixes
 
+- **`.html` / `.xlsx` / `.csv` LOCAL files can now be opened (desktop)** — The "Open file" button refused to open these three formats even though My Library indexes them; the extension gate now uses the same supported-set as the indexer (centralized in `desktop/file_actions.py`, no longer a duplicated literal).
 - **App launch no longer freezes after an interrupted "Re-index All" (desktop)** — If a bulk re-index was interrupted, the next launch could hang before the window appeared because every pending file was re-extracted synchronously on the UI thread. Recovery now defers that work to the background worker, so the app opens immediately and re-extracts in the background.
+- **Four silent / crash-class bugs** from a code audit are fixed (error-handling and edge-case hardening across the indexer and a shared service path).
 
 ### Known Limitations
 
 - Some PDFs encode a maqaf or word-space as a drawn graphic or omit it entirely from the text layer (e.g. certain abbreviation-table cells where `כתבי־יד` was typed as `כתבייד`). Such cases cannot be recovered from text extraction — they would require OCR — and are extracted faithfully to the PDF's actual content.
+- The xlsx/Word/JSON **export** is still tuned for Genizah corpus results and is not yet adapted to LOCAL hits (deferred to a follow-up; LOCAL search shipped in v7.14 and export was never adapted).
+
+### Internal
+
+- Phase 102: `extract_pdf_pages` rewritten onto a rawdict-primary path with pure RTL glyph-trace reconstruction helpers (`shared/local_indexer_rtl.py`), Unicode-`Mn` nikud classification, per-line 1-D Otsu word-gap valley, and a `_ltr_damage_guard` RTL-trust fix. Nikud is stripped once in `_write_page_doc` for all formats (searchable). `corrupt_encoding` status + SQLite migration 2→3. 4-wave execution, 5 plans, ~150 new/updated tests.
+- New `desktop/file_actions.py` centralizes LOCAL open/reveal/copy-path actions (gated on the shared `_SUPPORTED_EXTENSIONS`); `reveal_local_file` uses the absolute Explorer path + Microsoft's documented `/select,<path>` form. Unit-tested in `tests/test_file_actions.py`.
 
 ---
 

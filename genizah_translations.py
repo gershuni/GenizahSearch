@@ -2429,6 +2429,11 @@ TRANSLATIONS = {
     "PDF page image in My Library: a LOCAL PDF search result now shows the original PDF page alongside the extracted text. Navigation between results and pages syncs the image automatically.": "תמונות עמודי PDF ב\"הספרייה שלי\" — תוצאת חיפוש בקובץ PDF מקומי מציגה כעת את עמוד ה-PDF המקורי לצד הטקסט שחולץ. הניווט בין תוצאות ובין עמודים מסנכרן את התמונה אוטומטית.",
     "Hebrew text extraction quality: two bugs that hurt search in Hebrew books are fixed — left-to-right word order is now correct, and fragmented text (single word or punctuation per line) joins back into continuous paragraphs.": "שיפור איכות חילוץ טקסט עברי — תוקנו שני באגים שפגעו בחיפוש בספרים עבריים: סדר מילים שמאל-לימין הפך לעברית, וקטעי טקסט מקוטעים (מילה או סימן פיסוק לשורה) מתאחדים שוב לפסקאות רציפות.",
     "To apply the fixes to an existing library, click \"Re-index All\" in the My Library tab.": "כדי להחיל את התיקונים על ספרייה קיימת, לחצו על \"אנדקס מחדש הכל\" בלשונית \"הספרייה שלי\".",
+    # v7.16 What's New — bar + dialog (Hebrew PDF Text Quality)
+    "Improved text processing in My Library — click Re-index All to enjoy the improvement": "שיפור בעיבוד טקסטים מ'הספרייה שלי' - לחצו על אנדקס מחדש הכול כדי ליהנות מן השיפור",
+    "Hebrew text from PDF files in My Library is now processed so that letter-spacing used for emphasis no longer splits words into separate pieces.": "טקסטים עבריים מקובצי פדף מעובדים כך שריווח בין אותיות לשם הדגשה אינו מפריד אותן למילים נפרדות",
+    "Improved handling of maqaf hyphens and numbers.": "תיקון בעיבוד של מקפים ומספרים",
+    "To apply the improvement to your existing library, click \"Re-index All\" in the My Library tab.": "כדי להחיל את השיפור על הספרייה הקיימת, לחצו על \"אנדקס מחדש הכל\" בלשונית \"הספרייה שלי\"",
     "Catalog Browse: browse manuscripts by domain hierarchy, author, or work title with combined filtering and free text search":
         "עיון לפי זיהוי: עיון בכתבי יד לפי היררכיית תחומים, מחבר או כותרת יצירה עם סינון משולב וחיפוש טקסט חופשי",
     "Cross-links: domain and author labels on browse pages link directly to catalog browse filtered by that value":
@@ -3259,6 +3264,12 @@ TRANSLATIONS = {
     "Local file": "קובץ מקומי",
     "Open file": "פתח קובץ",
     "Open this file with the default application (LOCAL documents only)": "פתח קובץ זה עם היישום ברירת המחדל (מסמכים מקומיים בלבד)",
+    # v7.16 — "Open file location" / "Copy file location" (LOCAL file actions)
+    "Open file location": "פתח את מיקום הקובץ",
+    "Copy file location": "העתק את מיקום הקובץ",
+    "Copy filename": "העתק שם קובץ",
+    "Open the containing folder and select this file": "פתח את התיקייה המכילה ובחר את הקובץ",
+    "Open the containing folder and select this file (LOCAL documents only)": "פתח את התיקייה המכילה ובחר את הקובץ (מסמכים מקומיים בלבד)",
     "Last scan: {} new files indexed, {} up to date": "סריקה אחרונה: {} קבצים חדשים אונדקסו, {} מעודכנים",
     # Phase 96 D-F1 — opt-out tree widget UI strings
     "File status & opt-outs:": "סטטוס קבצים ואפשרויות ביטול:",

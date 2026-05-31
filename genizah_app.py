@@ -270,7 +270,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("v7.15: PDF page images in My Library, Hebrew text fixes, and a new Re-index All button"))
+        self.lbl_msg.setText(tr("Improved text processing in My Library — click Re-index All to enjoy the improvement"))
         self.show()
 
     def on_learn_more(self):
@@ -304,10 +304,10 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("PDF page image in My Library: a LOCAL PDF search result now shows the original PDF page alongside the extracted text. Navigation between results and pages syncs the image automatically."),
-            tr("Hebrew text extraction quality: two bugs that hurt search in Hebrew books are fixed \u2014 left-to-right word order is now correct, and fragmented text (single word or punctuation per line) joins back into continuous paragraphs."),
+            tr("Hebrew text from PDF files in My Library is now processed so that letter-spacing used for emphasis no longer splits words into separate pieces."),
+            tr("Improved handling of maqaf hyphens and numbers."),
         ]
-        call_to_action = tr("To apply the fixes to an existing library, click \"Re-index All\" in the My Library tab.")
+        call_to_action = tr("To apply the improvement to your existing library, click \"Re-index All\" in the My Library tab.")
         align = 'right' if is_heb else 'left'
         dir_attr = "rtl" if is_heb else "ltr"
         lines = ''.join(
@@ -5422,6 +5422,46 @@ class GenizahGUI(QMainWindow):
 
         menu = QMenu(self)
 
+        # v7.16 — LOCAL "My Library" hits get a file-oriented menu (open / reveal /
+        # copy path), NOT the Genizah cloud-community actions (corrections, comments,
+        # discoveries, View Document) which are meaningless for a local document.
+        try:
+            from shared.local_sys_id import is_local_sys_id as _is_local
+            _is_local_result = bool(sys_id and _is_local(sys_id)) or (res.get('source') == 'LOCAL')
+        except Exception:
+            _is_local_result = (res.get('source') == 'LOCAL')
+
+        if _is_local_result:
+            from desktop.file_actions import open_local_file, reveal_local_file, copy_file_location
+            filepath = self._lookup_local_filepath(sys_id) if hasattr(self, '_lookup_local_filepath') else None
+
+            act_open = menu.addAction(tr("Open file"))
+            act_open.setEnabled(bool(filepath))
+            act_open.triggered.connect(lambda: open_local_file(filepath))
+
+            act_reveal = menu.addAction(tr("Open file location"))
+            act_reveal.setEnabled(bool(filepath))
+            act_reveal.triggered.connect(lambda: reveal_local_file(filepath))
+
+            act_copy_loc = menu.addAction(tr("Copy file location"))
+            act_copy_loc.setEnabled(bool(filepath))
+            act_copy_loc.triggered.connect(lambda: copy_file_location(filepath, QApplication.clipboard()))
+
+            menu.addSeparator()
+
+            # Copy the actual filename (basename of the path; the COL_SHELF text
+            # is the filename for LOCAL hits but may be styled/truncated).
+            _shelf_item = self.results_table.item(row, self.COL_SHELF)
+            _filename = os.path.basename(filepath) if filepath else (
+                _shelf_item.text() if _shelf_item else shelfmark)
+            act_copy_name = menu.addAction(tr("Copy filename"))
+            act_copy_name.setEnabled(bool(_filename))
+            act_copy_name.triggered.connect(
+                lambda: QApplication.clipboard().setText(_filename))
+
+            menu.exec(self.results_table.mapToGlobal(pos))
+            return
+
         # View action
         action_view = menu.addAction(tr("View Document"))
         action_view.triggered.connect(lambda: self._context_view_document(sys_id))
@@ -6855,6 +6895,13 @@ class GenizahGUI(QMainWindow):
         self.browse_open_file_btn.setVisible(False)  # shown only when a LOCAL hit is browsed
         self._current_local_filepath: str | None = None
         nav_bar.addWidget(self.browse_open_file_btn)
+
+        # v7.16 — "Open file location" button for LOCAL browse hits.
+        self.browse_open_file_location_btn = QPushButton(tr("Open file location"))
+        self.browse_open_file_location_btn.setToolTip(tr("Open the containing folder and select this file (LOCAL documents only)"))
+        self.browse_open_file_location_btn.clicked.connect(self._on_browse_open_file_location_clicked)
+        self.browse_open_file_location_btn.setVisible(False)  # shown only when a LOCAL hit is browsed
+        nav_bar.addWidget(self.browse_open_file_location_btn)
 
         # Phase 96 polish (Item 2): btn_local_browse_prev/next/view_toggle and
         # lbl_local_browse_page removed. btn_b_prev/btn_b_next/btn_b_all now
@@ -18676,6 +18723,8 @@ class GenizahGUI(QMainWindow):
                 self._current_local_filepath = None
                 if hasattr(self, 'browse_open_file_btn'):
                     self.browse_open_file_btn.setVisible(False)
+                if hasattr(self, 'browse_open_file_location_btn'):
+                    self.browse_open_file_location_btn.setVisible(False)
                 # Phase 96 bug #5 fix: hide LOCAL-only Browse nav widgets when
                 # opening a Genizah manuscript. Without this, if the user previously
                 # viewed a LOCAL file, the prev/next/toggle/open-file buttons remain
@@ -18890,6 +18939,9 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, "browse_open_file_btn"):
             self.browse_open_file_btn.setVisible(bool(filepath))
             self.browse_open_file_btn.setEnabled(bool(filepath))
+        if hasattr(self, "browse_open_file_location_btn"):
+            self.browse_open_file_location_btn.setVisible(bool(filepath))
+            self.browse_open_file_location_btn.setEnabled(bool(filepath))
 
         # 7. Render the text via the same gutter helper Genizah pages use.
         # Fix 1 (iter-6): per-page line restart — see earlier comment block.
@@ -19038,22 +19090,18 @@ class GenizahGUI(QMainWindow):
     def _on_browse_open_file_clicked(self):
         """Phase 95 D-28 — launch OS default app for the current LOCAL file.
 
-        WR-03 defense-in-depth: refuse to launch a file whose extension is
-        not in the LOCAL supported set, even though _lookup_local_filepath
-        only returns paths walked under user-chosen folders with
-        followlinks=False.
+        v7.16: delegates to ``desktop.file_actions.open_local_file``, which gates
+        on the shared ``_SUPPORTED_EXTENSIONS`` single source of truth (the prior
+        inline ``{'.docx', '.pdf', '.txt'}`` literal wrongly refused the
+        ``.html`` / ``.xlsx`` / ``.csv`` files My Library now indexes).
         """
-        filepath = getattr(self, '_current_local_filepath', None)
-        if not filepath or not os.path.exists(filepath):
-            return
-        ext = os.path.splitext(filepath)[1].lower()
-        if ext not in {'.docx', '.pdf', '.txt'}:
-            logger.warning(
-                "_on_browse_open_file_clicked: refusing to open file with "
-                "disallowed extension: %s", filepath
-            )
-            return
-        os.startfile(filepath)  # Windows-native
+        from desktop.file_actions import open_local_file
+        open_local_file(getattr(self, '_current_local_filepath', None))
+
+    def _on_browse_open_file_location_clicked(self):
+        """v7.16: reveal the current LOCAL file in the OS file manager."""
+        from desktop.file_actions import reveal_local_file
+        reveal_local_file(getattr(self, '_current_local_filepath', None))
 
     # ------------------------------------------------------------------
     # Phase 96 NEW-2: LOCAL Browse-panel navigation helpers
@@ -19289,6 +19337,9 @@ class GenizahGUI(QMainWindow):
         if hasattr(self, "browse_open_file_btn"):
             self.browse_open_file_btn.setVisible(bool(filepath))
             self.browse_open_file_btn.setEnabled(bool(filepath))
+        if hasattr(self, "browse_open_file_location_btn"):
+            self.browse_open_file_location_btn.setVisible(bool(filepath))
+            self.browse_open_file_location_btn.setEnabled(bool(filepath))
         try:
             basename = os.path.basename(filepath) if filepath else sys_id
             import html as _html_mod2
@@ -22852,6 +22903,8 @@ class GenizahGUI(QMainWindow):
         # to a Genizah ms via the Browse tab inputs or prev/next folio buttons.
         if hasattr(self, 'browse_open_file_btn'):
             self.browse_open_file_btn.setVisible(False)
+        if hasattr(self, 'browse_open_file_location_btn'):
+            self.browse_open_file_location_btn.setVisible(False)
         self.browse_highlight_data = []
         self.browse_highlight_pattern = None
         sid = self.browse_sys_input.text().strip()

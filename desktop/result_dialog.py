@@ -359,6 +359,16 @@ class ResultDialog(QDialog):
         self._rd_local_filepath = None  # filepath for the current LOCAL result
         action_row.addWidget(self.btn_rd_open_file)
 
+        # v7.16: "Open file location" — reveal the file in the OS file manager.
+        self.btn_rd_open_file_location = QPushButton(tr("Open file location"))
+        self.btn_rd_open_file_location.setToolTip(tr("Open the containing folder and select this file"))
+        self.btn_rd_open_file_location.setStyleSheet(
+            "QPushButton { background-color: #2980b9; color: white; border-radius: 4px; padding: 2px 8px; }"
+        )
+        self.btn_rd_open_file_location.setVisible(False)  # Hidden until a LOCAL result is shown
+        self.btn_rd_open_file_location.clicked.connect(self._rd_open_file_location)
+        action_row.addWidget(self.btn_rd_open_file_location)
+
         action_row.addStretch()
 
         # --- Second row: Community features (Edit, Version, Comment) ---
@@ -1944,17 +1954,18 @@ class ResultDialog(QDialog):
     def _rd_open_local_file(self):
         """Phase 95 smoke-fix (E): launch the LOCAL source file in the OS default app.
 
-        WR-03 defense-in-depth: refuse to launch a file whose extension is
-        not in the LOCAL supported set.
+        v7.16: delegates to ``desktop.file_actions.open_local_file``, which gates
+        on the shared ``_SUPPORTED_EXTENSIONS`` single source of truth (the prior
+        inline ``{'.docx', '.pdf', '.txt'}`` literal wrongly refused the
+        ``.html`` / ``.xlsx`` / ``.csv`` files My Library now indexes).
         """
-        import os
-        filepath = getattr(self, '_rd_local_filepath', None)
-        if not filepath or not os.path.exists(filepath):
-            return
-        ext = os.path.splitext(filepath)[1].lower()
-        if ext not in {'.docx', '.pdf', '.txt'}:
-            return
-        os.startfile(filepath)  # Windows-native
+        from desktop.file_actions import open_local_file
+        open_local_file(getattr(self, '_rd_local_filepath', None))
+
+    def _rd_open_file_location(self):
+        """v7.16: reveal the current LOCAL file in the OS file manager."""
+        from desktop.file_actions import reveal_local_file
+        reveal_local_file(getattr(self, '_rd_local_filepath', None))
 
     def _htmlify(self, text):
         """Convert plain LOCAL file text to safe HTML for QTextBrowser.
@@ -2026,13 +2037,16 @@ class ResultDialog(QDialog):
                     _fp = self._app._lookup_local_filepath(_src_id)
                 self._rd_local_filepath = _fp
                 self.btn_rd_open_file.setVisible(bool(_fp))
+                self.btn_rd_open_file_location.setVisible(bool(_fp))
             else:
                 self._rd_local_filepath = None
                 self.btn_rd_open_file.setVisible(False)
+                self.btn_rd_open_file_location.setVisible(False)
         except Exception:
             self._rd_local_filepath = None
             _is_local_hit = False
             self.btn_rd_open_file.setVisible(False)
+            self.btn_rd_open_file_location.setVisible(False)
 
         # Phase 100 (REVIEWS HIGH-2/HIGH-3): if the newly-shown result is NOT a LOCAL PDF
         # (non-LOCAL, or LOCAL non-PDF), cancel any in-flight render for this dialog's scope

@@ -24,7 +24,6 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
-import unicodedata
 
 import fitz  # PyMuPDF
 

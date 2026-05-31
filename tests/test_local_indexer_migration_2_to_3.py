@@ -15,7 +15,6 @@ from __future__ import annotations
 import sqlite3
 import inspect
 
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +139,7 @@ def test_corrupt_encoding_row_survives_prune_seeded_before_1to2(tmp_path):
     post-prune no-op. An unsupported extension (.xyz) is used to ensure the prune
     WOULD delete the row if status='corrupt_encoding' were not in _KEPT_STATUSES.
     """
-    from shared.local_indexer_migrations import _KEPT_STATUSES, run
+    from shared.local_indexer_migrations import run
 
     conn, _ = _make_v1_db_with_data(tmp_path)
     # Seed a corrupt_encoding row with an unsupported extension (.xyz)

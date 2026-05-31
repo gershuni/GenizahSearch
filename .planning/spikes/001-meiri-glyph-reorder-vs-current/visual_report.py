@@ -28,7 +28,6 @@ PROJECT_ROOT = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 sys.path.insert(0, PROJECT_ROOT)
 sys.path.insert(0, HERE)
 
-from shared.local_indexer import extract_pdf_pages  # noqa: E402
 import compare_extractors as C  # noqa: E402  (reuse current_extract_sampled)
 
 _MEIRI_PATH = os.path.join(PROJECT_ROOT, "ephraim_meiri_pdf_converter", "pdf_to_docx.py")

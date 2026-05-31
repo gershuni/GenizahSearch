@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.15.0
+# Genizah Search Pro 7.16.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,30 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.15.0?
+## What's New in Version 7.16.0?
+
+### v7.16.0: Hebrew PDF Text Quality
+
+A major overhaul of how **My Library** reads Hebrew PDFs. Typeset Hebrew
+scholarly books that previously came out unsearchable — shattered into single
+letters, or fused into giant run-on words — now extract and index correctly.
+
+- **Word boundaries detected from real letter spacing** — `אוצר הגאונים`
+  one-letter tokens dropped from ~74% to ~5%; tight-set books' word-fusion from
+  16% to ~0%, so `פירוש המשנה` is searchable again
+- **Vowels & punctuation by Unicode category** — the maqaf (`־`) and sof-pasuq
+  are kept, not stripped, so `דו־שיח` and `סב־סג` stay intact
+- **Numbers no longer reversed** — `1977` stays `1977`; ranges like `194-256`
+  stay intact
+- **Garbled text layers flagged** in the My Library tree (would need OCR)
+- **Open file location** for LOCAL hits (ResultDialog, Browse panel, and the
+  right-click menu) — opens the containing folder with the file selected; the
+  right-click menu for LOCAL files is now file-aware (Open file / Open file
+  location / Copy file location / Copy filename)
+- **Fixes** opening `.html` / `.xlsx` / `.csv` LOCAL files, and a launch
+  freeze after an interrupted re-index
+- **Run "Re-index All"** (אנדקס מחדש הכל) once to apply the text-quality fixes
+  to an existing library
 
 ### v7.15.0: PDF Page Image in My Library
 
@@ -348,7 +371,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Sear
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.15.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V7.16.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
