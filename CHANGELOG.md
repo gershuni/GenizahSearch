@@ -4,6 +4,25 @@ All notable changes to Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Improvements
+
+- **Hebrew PDF text quality — letter-spacing & word-boundary rewrite (desktop)** — A large rewrite of the LOCAL PDF Hebrew text extractor, dramatically improving search of typeset Hebrew scholarly books. Many books shattered emphasised/justified Hebrew into single letters (e.g. `אוצר הגאונים` indexed ~74% one-letter "words", so `פירוש המשנה` became `פירו ש ה מ ש נה` and was unsearchable), while tightly-set books fused whole phrases into one token. Word boundaries are now detected per line from the actual inter-letter spacing (an adaptive valley between within-word and between-word gaps), plus the embedded space glyph where a heading or citation is set with no visible gap. Measured on identical pages: `אוצר הגאונים` one-letter tokens 74% → ~5%, tightly-set books' word-fusion 16% → ~0%.
+  - **Vowel/cantillation handling** — Hebrew combining marks (nikud and te'amim) are now classified by Unicode category, so the maqaf (`־`), sof-pasuq and similar punctuation are kept as real characters instead of being stripped as vowels (which had corrupted ranges like `סב־סג` and joined `דו־שיח`).
+  - **Numbers read correctly** — Years and page numbers embedded in right-to-left text are no longer reversed (`1977` is `1977`, not `7791`; ranges like `194-256` stay intact).
+  - **To benefit, run "Re-index All" (אנדקס מחדש הכל)** in the My Library tab — these improvements apply to newly-extracted text, so existing libraries must be re-indexed once.
+
+### Bug Fixes
+
+- **App launch no longer freezes after an interrupted "Re-index All" (desktop)** — If a bulk re-index was interrupted, the next launch could hang before the window appeared because every pending file was re-extracted synchronously on the UI thread. Recovery now defers that work to the background worker, so the app opens immediately and re-extracts in the background.
+
+### Known Limitations
+
+- Some PDFs encode a maqaf or word-space as a drawn graphic or omit it entirely from the text layer (e.g. certain abbreviation-table cells where `כתבי־יד` was typed as `כתבייד`). Such cases cannot be recovered from text extraction — they would require OCR — and are extracted faithfully to the PDF's actual content.
+
+---
+
 ## [7.15.0] - 2026-05-28
 
 ### New Features
