@@ -45,7 +45,11 @@
   5. Exporting a Genizah-only result set to XLSX / CSV / TXT produces output structurally identical to pre-v7.17 output, and the `tests/test_export_xlsx_cross_parity.py` invariant passes with no modifications. (DOCX is the intentional exception — see `103-CONTEXT.md` D-10/D-12: the DOCX export is redesigned into a per-result rich-document block layout for both Genizah and LOCAL rows, so Genizah-only DOCX changes by design.)
   6. The "Local Documents" sheet title and its column headers appear in Hebrew when the export language is `he` and in English when the export language is `en`, matching the bilingual behaviour of the existing four Genizah sheets.
 
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 103-01-PLAN.md — Shared primitives: Local Documents bilingual header/title + row builder in export_dossier.py + reusable module-level DOCX block writer (shared/docx_export.py) [wave 1]
+- [ ] 103-02-PLAN.md — Desktop xlsx: Local Documents sheet (D-04/D-06), skip_local flip (D-07), LOCAL-only workbook (D-05), filepath-map wiring [wave 2]
+- [ ] 103-03-PLAN.md — Desktop CSV/TXT/DOCX: CSV column repurposing + Filepath/Page (D-08), TXT blocks (D-09), DOCX per-result block redesign (D-10/D-11/D-12) [wave 2]
+- [ ] 103-04-PLAN.md — Non-regression gate: cross-parity invariant unmodified + Genizah-only XLSX/CSV/TXT structure + DOCX carve-out assertion (LEXP-08) [wave 3]
 
 ---
 
@@ -323,7 +327,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 103. Search-Results LOCAL Export | v7.17 | 0/TBD | Not started | - |
+| 103. Search-Results LOCAL Export | v7.17 | 0/4 | Planned | - |
 | 104. Composition-Report LOCAL Export | v7.17 | 0/TBD | Not started | - |
 | 99. PDF Page Renderer | v7.15 | 2/2 | Complete | 2026-05-27 |
 | 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 3/3 | Complete | 2026-05-27 |
@@ -339,4 +343,4 @@ Next-milestone candidates (not in v7.17 scope): **D-F12** (regular Search ~8s wa
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-06-01 — v7.17 LOCAL Export Support STARTED (Phases 103-104). Phase 103: Search-Results LOCAL Export (LEXP-01/03/04/05/06/07/08 — all formats + xlsx "Local Documents" sheet + bilingual + non-regression). Phase 104: Composition-Report LOCAL Export (LEXP-02 — parity for export_comp_report). D-F17 active. Prior: v7.16 Hebrew PDF Text Quality CLOSED 2026-06-01 (Phase 102 + no-phase work; tag v7.16.0 @ ccb87c90).*
+*Last updated: 2026-06-01 — Phase 103 PLANNED (4 plans, 3 waves: shared primitives -> xlsx + csv/txt/docx consumers -> non-regression gate). v7.17 LOCAL Export Support STARTED (Phases 103-104). Phase 103: Search-Results LOCAL Export (LEXP-01/03/04/05/06/07/08 — all formats + xlsx "Local Documents" sheet + bilingual + non-regression). Phase 104: Composition-Report LOCAL Export (LEXP-02 — parity for export_comp_report). D-F17 active. Prior: v7.16 Hebrew PDF Text Quality CLOSED 2026-06-01 (Phase 102 + no-phase work; tag v7.16.0 @ ccb87c90).*
