@@ -42,7 +42,7 @@
   2. The "Manuscripts" and "Bibliography" sub-sheets in a mixed xlsx export contain no rows for LOCAL synthetic sys_ids — only real Genizah manuscripts appear there.
   3. Exporting a LOCAL-only result set to xlsx produces a usable workbook (the "Local Documents" sheet is populated and active; the Genizah sub-sheets are omitted or empty; no Python error is raised).
   4. Exporting a mixed result set to CSV, TXT, or DOCX produces a single unified table where LOCAL rows carry the local columns (filename/folder/filepath/page/matched-text) and Genizah rows carry the Genizah columns — no LOCAL row shows a row of empty/meaningless Genizah cells.
-  5. Exporting a Genizah-only result set in any format produces output structurally identical to pre-v7.17 output; the `tests/test_export_xlsx_cross_parity.py` invariant passes with no modifications.
+  5. Exporting a Genizah-only result set to XLSX / CSV / TXT produces output structurally identical to pre-v7.17 output, and the `tests/test_export_xlsx_cross_parity.py` invariant passes with no modifications. (DOCX is the intentional exception — see `103-CONTEXT.md` D-10/D-12: the DOCX export is redesigned into a per-result rich-document block layout for both Genizah and LOCAL rows, so Genizah-only DOCX changes by design.)
   6. The "Local Documents" sheet title and its column headers appear in Hebrew when the export language is `he` and in English when the export language is `en`, matching the bilingual behaviour of the existing four Genizah sheets.
 
 **Plans**: TBD
