@@ -32,6 +32,8 @@ Status: Phase 103 complete & verified. Phase 104 DEFERRED (no LOCAL comp-search 
 Last activity: 2026-06-01
 Next: (1) UAT Phase 105 (esp. EXPUX-01 dialog + EXPUX-04 visual context) + eyeball the renamed window title/About/exports; (2) close v7.17 (Phases 103 + 105 + rebrand) via `/gsd-complete-milestone`. Optional: `/gsd-plant-seed` for LEXP-02/EXP-F3. (Note: the GenizahSearchPro.spec working-copy regression was restored to HEAD — `.spec` is clean.)
 
+**OPEN DECISION — release version number (raised 2026-06-01, undecided):** ship this release as **v8.0.0** (treat the "Dicta Genizah Search Pro" rebrand as a flagship major bump — matches the project's own convention where v5.0/v6.0 marked milestones, not API breaks; bundled with real features Phase 103 LOCAL export + 105 polish) vs stay **v7.17.0** (rebrand is display-only, nothing breaks). Claude recommended **v8.0.0**. If v8.0.0: `bump_version.py 8.0.0`, also bump `_TARGET_VERSION` in `tests/test_release_artifacts.py` (bumper misses it), rename the v7.17 milestone → v8.0.0 in `.planning/`, author the `## [8.0.0]` CHANGELOG section folding in the `[Unreleased]` rebrand note. Rebrand details + the web-reuses-desktop-translations gotcha are in memory `project_desktop_app_rebrand.md`. Codex reviewed the rebrand: SHIP-WITH-FIXES, all resolved (`6c343bd3`).
+
 ## Deferred Items
 
 Items acknowledged and deferred at v7.16 milestone close on 2026-06-01 (`gsd-tools.cjs audit-open` reported 102 items; same historical accumulation as the v7.14/v7.15 closes — none are v7.16-specific blockers):
