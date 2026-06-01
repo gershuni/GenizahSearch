@@ -2485,8 +2485,7 @@ class SettingsDialog(QDialog):
             <p>Your indexed document text is stored in <code>local_index.sqlite3</code> inside your LOCAL index folder.
             The text is compressed with <b>zstd</b> (compression, not encryption).
             This cached data is <b>never uploaded</b> to GenizahSearch servers.
-            For at-rest encryption, use OS-level disk encryption (BitLocker / FileVault).
-            (ל"מ: לא מוצפן — zstd היא דחיסה בלבד, לא הצפנה; הנתונים אינם מועלים לשרת.)</p>
+            For at-rest encryption, use OS-level disk encryption (BitLocker / FileVault).</p>
 
             <h3>Data Source &amp; Acknowledgments</h3>
             <p>This software is built on the transcription dataset produced by the <b>MiDRASH Project</b>.

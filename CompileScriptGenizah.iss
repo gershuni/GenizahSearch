@@ -3,6 +3,11 @@
 ; License: CC BY-NC-SA 4.0 (Non-commercial use only)
 
 #define MyAppName "Dicta Genizah Search Pro"
+; Install directory name is decoupled from the (rebranded) display name and
+; kept at the LEGACY "Genizah Search Pro" so existing installs upgrade in
+; place and hardcoded paths (e.g. C:\Program Files\Genizah Search Pro\_internal)
+; keep resolving. Do NOT fold "Dicta" into this — it would orphan legacy paths.
+#define MyAppDirName "Genizah Search Pro"
 #define MyAppVersion "7.16.0"
 #define MyAppPublisher "Hillel Gershuni / Dicta"
 #define MyAppURL "https://www.GenizahSearch.com/"
@@ -19,7 +24,7 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
-DefaultDirName={autopf}\{#MyAppName}
+DefaultDirName={autopf}\{#MyAppDirName}
 UninstallDisplayIcon={app}\{#MyAppExeName}
 ; "ArchitecturesAllowed=x64compatible" specifies that Setup cannot run
 ; on anything but x64 and Windows 11 on Arm.
