@@ -175,3 +175,59 @@ def test_cell_count_limit(tmp_path):
     import pytest
     with pytest.raises(XlsxZipBombSuspected):
         list(extract_xlsx_pages(str(p)))
+
+
+# ---------------------------------------------------------------------------
+# v7.16 BUG-2 — uncached-formula fallback + empty-row guard
+# ---------------------------------------------------------------------------
+
+def test_uncached_formula_fallback(tmp_path):
+    """v7.16 BUG-2: a workbook of formula cells with NO cached values reads as all
+    None under data_only=True. Without a fallback this indexes as 'no_text_layer'
+    and is invisible to search. The extractor must retry with data_only=False so
+    the formula strings (which carry the searchable Hebrew) are recovered."""
+    import openpyxl
+    from shared.local_indexer import extract_xlsx_pages
+
+    p = tmp_path / "formulas.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws["A1"] = '=CONCATENATE("רוזנצווייג")'
+    ws["B1"] = "=1+2"
+    wb.save(str(p))
+
+    all_text = " ".join(text for _, text, _, _, _ in extract_xlsx_pages(str(p)))
+    assert "רוזנצווייג" in all_text, (
+        f"formula text not recovered via data_only=False fallback: {all_text!r}"
+    )
+
+
+def test_blank_rows_do_not_create_empty_pages(tmp_path):
+    """v7.16 BUG-2: an all-blank multi-column row joins to ' | ' whose .strip() is
+    '|' (truthy) — it must NOT be indexed as content. A wholly blank workbook must
+    yield zero chunks (not a blank searchable page)."""
+    import openpyxl
+    from shared.local_indexer import extract_xlsx_pages
+
+    # Mixed: blank rows interleaved with real rows -> only real rows kept.
+    p = tmp_path / "mixed.xlsx"
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["שם", "שנה"])
+    ws.append([None, None])
+    ws.append(["", ""])
+    ws.append(["רוזנצווייג", "1913"])
+    wb.save(str(p))
+    chunks = list(extract_xlsx_pages(str(p)))
+    text = "\n".join(t for _, t, _, _, _ in chunks)
+    assert "רוזנצווייג" in text
+    assert " | \n" not in text and not text.endswith(" | "), f"blank row leaked: {text!r}"
+
+    # Wholly blank workbook -> zero chunks (no empty 'no_text_layer'-masking page).
+    p2 = tmp_path / "blank.xlsx"
+    wb2 = openpyxl.Workbook()
+    ws2 = wb2.active
+    ws2.append([None, None, None])
+    ws2.append(["", "", ""])
+    wb2.save(str(p2))
+    assert list(extract_xlsx_pages(str(p2))) == []

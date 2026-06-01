@@ -6842,6 +6842,11 @@ class SearchEngine:
         self.local_index = None
         self.local_searcher = None
         self._local_open_error = None
+        # v7.16: gated timing — reopening a large LOCAL index is a candidate for
+        # the constant per-search/startup freeze. Enable with GENIZAH_PROFILE_SEARCH=1.
+        import os as _os, time as _time
+        _prof = _os.environ.get("GENIZAH_PROFILE_SEARCH")
+        _t0 = _time.perf_counter() if _prof else None
 
         if not os.path.isdir(Config.LOCAL_INDEX_DIR):
             LOGGER.info(
@@ -6873,6 +6878,9 @@ class SearchEngine:
             self.local_index = local_index
             self.local_searcher = local_index.searcher()
             LOGGER.info("LOCAL side-index opened: %s", Config.LOCAL_INDEX_DIR)
+            if _t0 is not None:
+                print(f"[PROFILE] _open_local_searcher (LOCAL index reopen) "
+                      f"took {_time.perf_counter() - _t0:.2f}s", flush=True)
         except Exception as open_exc:
             LOGGER.warning(
                 "LOCAL index open/schema-check failed: %r — attempting atomic rebuild",
@@ -7071,9 +7079,16 @@ class SearchEngine:
         return text_to_fingerprint(content, freq_map=HEBREW_FREQ)
 
     def _normalize_text(self, content: str) -> str:
-        """Normalize content for the text_normalized field.
-        W5 Option C callback — wraps lab_index_normalize."""
-        return self.lab_index_normalize(content)
+        """Normalize content for the text_normalized field (W5 Option C callback).
+
+        Wraps ``LabEngine.lab_index_normalize`` — a pure ``@staticmethod`` that
+        lives on :class:`LabEngine`, NOT on :class:`SearchEngine`. The previous
+        ``self.lab_index_normalize`` raised ``AttributeError`` whenever this
+        callback ran on a SearchEngine, which aborted every LOCAL LAB rebuild at
+        ``build_lab_side_index``'s pre-flight probe — so ``.meta.json`` was never
+        written, the index stayed perpetually "stale", and a doomed rebuild was
+        re-attempted on every startup/refresh (console churn + wasted reloads)."""
+        return LabEngine.lab_index_normalize(content)
 
     def _query_local_index(self, query_str: str, mode: str, gap: int,
                            limit=None, regex=None):
@@ -7115,9 +7130,20 @@ class SearchEngine:
             # Use self.local_index (kept alongside local_searcher) for parse_query.
             # tantivy.Searcher has no .index attribute — Index must be stored separately.
             # MEDIUM-1 deferred: full query builder (variants/Responsa) not extracted yet.
-            tantivy_q = self.local_index.parse_query(
-                query_str, ["content", "content_head", "content_tail"]
-            )
+            _fields = ["content", "content_head", "content_tail"]
+            try:
+                tantivy_q = self.local_index.parse_query(query_str, _fields)
+            except (ValueError, Exception):
+                # v7.16: Tantivy's query parser chokes on syntax metacharacters,
+                # which appear naturally in Hebrew abbreviations — the geresh in
+                # אמ' and the gershayim in רמב"ם both raise "Syntax Error" and the
+                # whole LOCAL search returned 0 results. Strip the metacharacters
+                # (`'"` + structural chars) so the term query parses; the precise
+                # match is still enforced by the regex filter below.
+                _safe = re.sub(r"[+\-&|!(){}\[\]^\"~*?:\\/']", " ", query_str).strip()
+                if not _safe:
+                    return []
+                tantivy_q = self.local_index.parse_query(_safe, _fields)
             search_limit = limit or Config.SEARCH_LIMIT
             res_obj = self.local_searcher.search(tantivy_q, search_limit)
             hits = res_obj.hits if hasattr(res_obj, "hits") else res_obj

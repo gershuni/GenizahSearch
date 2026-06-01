@@ -41,6 +41,7 @@ import datetime
 import errno
 import gc
 import hashlib
+import html
 import json
 import logging
 import os
@@ -877,6 +878,12 @@ def init_sqlite(db_path: str) -> sqlite3.Connection:
             kind        TEXT NOT NULL,
             created_at  REAL NOT NULL DEFAULT (strftime('%s','now'))
         );
+        -- get_folder_filepaths / _folder_optout_aggregate filter local_files by
+        -- folder_id; without this index each call is a full table scan (a 17K-row
+        -- library scanned once per registered folder). IF NOT EXISTS so it is
+        -- created on existing DBs on next open without a migration.
+        CREATE INDEX IF NOT EXISTS idx_local_files_folder_id
+            ON local_files(folder_id);
     """)
     conn.commit()
     # Phase 97 LD-2 (updated Phase 102): stamp target user_version on fresh (empty) DBs
@@ -1296,6 +1303,23 @@ def _detect_html_encoding(raw_bytes: bytes) -> str:
 # Phase 97 F-01: HTML extractor (lxml.html, NOT BeautifulSoup)
 # ---------------------------------------------------------------------------
 
+def _clean_html_text(s: str) -> str:
+    """Decode entities libxml2 left literal, and fold NBSP to a regular space.
+
+    v7.16 fix: libxml2's HTML parser does NOT decode entity references that lack
+    a trailing semicolon (e.g. ``&nbsp`` instead of ``&nbsp;``) — common in
+    hand-authored Hebrew transcription files — so they survive ``text_content()``
+    as the literal text ``&nbsp``. ``html.unescape`` decodes both the proper and
+    the semicolon-less legacy forms (``&nbsp`` → U+00A0); we then fold the
+    resulting non-breaking spaces to plain spaces so they tokenize for search and
+    do not render as stray glyphs. Applied to already-parsed strings (not raw
+    HTML), so proper entities lxml already decoded are untouched.
+    """
+    if not s:
+        return s
+    return html.unescape(s).replace("\u00a0", " ")
+
+
 def extract_html_pages(filepath: str) -> Iterator[tuple[int, str, str, str, bool]]:
     """Phase 97 F-01. Yields (chunk_num, text, title, chunk_locator, is_rtl).
     F-06: NO _fix_rtl_* calls — lxml.html returns logical-order strings already.
@@ -1330,7 +1354,7 @@ def extract_html_pages(filepath: str) -> Iterator[tuple[int, str, str, str, bool
     # Extract title from <title> element
     title_elem = tree.find(".//title")
     doc_title = (
-        (title_elem.text_content() or os.path.basename(filepath)).strip()
+        (_clean_html_text(title_elem.text_content()) or os.path.basename(filepath)).strip()
         if title_elem is not None
         else os.path.basename(filepath)
     )
@@ -1348,11 +1372,11 @@ def extract_html_pages(filepath: str) -> Iterator[tuple[int, str, str, str, bool
 
     if use_semantic:
         for chunk_num, h in enumerate(headings, start=1):
-            heading_text = (h.text_content() or "").strip()
+            heading_text = _clean_html_text(h.text_content() or "").strip()
             buf = [heading_text] if heading_text else []
             sib = h.getnext()
             while sib is not None and sib.tag not in ("h1", "h2"):
-                content = sib.text_content() or ""
+                content = _clean_html_text(sib.text_content() or "")
                 if content.strip():
                     buf.append(content)
                 sib = sib.getnext()
@@ -1368,9 +1392,9 @@ def extract_html_pages(filepath: str) -> Iterator[tuple[int, str, str, str, bool
         for start in range(0, max(len(paragraphs), 1), 20):
             chunk_paras = paragraphs[start: start + 20]
             texts = [
-                (p.text_content() or "").strip()
-                for p in chunk_paras
-                if (p.text_content() or "").strip()
+                t
+                for t in (_clean_html_text(p.text_content() or "").strip() for p in chunk_paras)
+                if t
             ]
             chunk_text = "\n".join(texts)
             if not chunk_text:
@@ -1418,46 +1442,66 @@ def extract_xlsx_pages(filepath: str) -> Iterator[tuple[int, str, str, str, bool
     except Exception:
         pass  # If metadata read fails, is_rtl stays False for all sheets
 
-    wb = load_workbook(filepath, read_only=True, data_only=True)
-    try:
-        chunk_num = 0
-        for sheet_name in wb.sheetnames:
-            ws = wb[sheet_name]
-            is_rtl = rtl_map.get(sheet_name, False)
-            rows_in_window: list[str] = []
-            cells_seen = 0
-            window_start_row = 1
-            for row_num, row in enumerate(ws.iter_rows(values_only=True), start=1):
-                cell_strs = [str(c) if c is not None else "" for c in row]
-                cells_seen += len(cell_strs)
-                if cells_seen > _MAX_CELLS_PER_SHEET:
-                    raise XlsxZipBombSuspected(
-                        f"cells_seen {cells_seen} exceeds _MAX_CELLS_PER_SHEET "
-                        f"{_MAX_CELLS_PER_SHEET} in sheet {sheet_name!r}"
-                    )
-                line = " | ".join(cell_strs)
-                if line.strip():
-                    rows_in_window.append(line)
-                if (row_num - window_start_row + 1) >= _XLSX_ROW_WINDOW:
+    def _stream(data_only: bool) -> Iterator[tuple[int, str, str, str, bool]]:
+        """Stream non-empty (sheet, row-window) chunks. data_only=True reads cached
+        cell VALUES; data_only=False reads the stored content (formula strings for
+        formula cells, literals otherwise) — used as a fallback when the value pass
+        is empty."""
+        wb = load_workbook(filepath, read_only=True, data_only=data_only)
+        try:
+            chunk_num = 0
+            for sheet_name in wb.sheetnames:
+                ws = wb[sheet_name]
+                is_rtl = rtl_map.get(sheet_name, False)
+                rows_in_window: list[str] = []
+                cells_seen = 0
+                window_start_row = 1
+                for row_num, row in enumerate(ws.iter_rows(values_only=True), start=1):
+                    cell_strs = [str(c) if c is not None else "" for c in row]
+                    cells_seen += len(cell_strs)
+                    if cells_seen > _MAX_CELLS_PER_SHEET:
+                        raise XlsxZipBombSuspected(
+                            f"cells_seen {cells_seen} exceeds _MAX_CELLS_PER_SHEET "
+                            f"{_MAX_CELLS_PER_SHEET} in sheet {sheet_name!r}"
+                        )
+                    # v7.16: a row is empty when ALL cells are blank. Test the
+                    # cells, NOT the joined line — " | ".join(['','']) is ' | '
+                    # whose .strip() is '|' (truthy), which would wrongly index a
+                    # blank row AND mask the all-empty-file fallback below.
+                    if any(cs.strip() for cs in cell_strs):
+                        rows_in_window.append(" | ".join(cell_strs))
+                    if (row_num - window_start_row + 1) >= _XLSX_ROW_WINDOW:
+                        # v7.16: only emit a doc when the window has text. An
+                        # all-empty window (e.g. uncached formulas that data_only
+                        # reads as None) must NOT create a blank searchable page.
+                        if rows_in_window:
+                            chunk_num += 1
+                            chunk_text = "\n".join(rows_in_window)[:_MAX_CHARS_PER_CHUNK]
+                            locator = f"{sheet_name}!R{window_start_row}:R{row_num}"
+                            yield chunk_num, chunk_text, title, locator, is_rtl
+                        rows_in_window = []
+                        window_start_row = row_num + 1
+                # Flush trailing partial window
+                if rows_in_window:
                     chunk_num += 1
-                    chunk_text = "\n".join(rows_in_window)
-                    if len(chunk_text) > _MAX_CHARS_PER_CHUNK:
-                        chunk_text = chunk_text[:_MAX_CHARS_PER_CHUNK]
-                    locator = f"{sheet_name}!R{window_start_row}:R{row_num}"
+                    last_row = window_start_row + len(rows_in_window) - 1
+                    chunk_text = "\n".join(rows_in_window)[:_MAX_CHARS_PER_CHUNK]
+                    locator = f"{sheet_name}!R{window_start_row}:R{last_row}"
                     yield chunk_num, chunk_text, title, locator, is_rtl
-                    rows_in_window = []
-                    window_start_row = row_num + 1
-            # Flush trailing partial window
-            if rows_in_window:
-                chunk_num += 1
-                last_row = window_start_row + len(rows_in_window) - 1
-                chunk_text = "\n".join(rows_in_window)
-                if len(chunk_text) > _MAX_CHARS_PER_CHUNK:
-                    chunk_text = chunk_text[:_MAX_CHARS_PER_CHUNK]
-                locator = f"{sheet_name}!R{window_start_row}:R{last_row}"
-                yield chunk_num, chunk_text, title, locator, is_rtl
-    finally:
-        wb.close()
+        finally:
+            wb.close()
+
+    produced = False
+    for chunk in _stream(data_only=True):
+        produced = True
+        yield chunk
+    if not produced:
+        # v7.16 fix (BUG-2): the value pass produced no text — the workbook is
+        # likely all uncached formulas (data_only=True yields None for those, so
+        # every row was empty and the file would index as 'no_text_layer' and be
+        # invisible to search). Retry reading the stored content so the formula
+        # strings themselves become searchable.
+        yield from _stream(data_only=False)
 
 
 # ---------------------------------------------------------------------------
@@ -1480,14 +1524,35 @@ def extract_csv_pages(filepath: str) -> Iterator[tuple[int, str, str, str]]:
     chosen_encoding = None
     sample_text = None
 
-    for enc in _CSV_ENCODINGS:
+    # v7.16 (BUG-3): detect a UTF-16 BOM BEFORE the single-byte cp1255 fallback.
+    # cp1255 decodes almost any byte sequence without raising, so a UTF-16 CSV
+    # (e.g. Excel "Unicode Text" export) would otherwise be mis-decoded into
+    # NUL-polluted garbage before the utf-16 fallback is ever reached. Excel
+    # always writes a BOM for UTF-16, so this covers the common case reliably;
+    # the NUL-ratio guard below catches BOM-less UTF-16LE as a backstop.
+    with open(filepath, "rb") as _bf:
+        bom = _bf.read(2)
+    encodings = list(_CSV_ENCODINGS)
+    if bom in (b"\xff\xfe", b"\xfe\xff"):
+        encodings = ["utf-16", *encodings]  # utf-16 codec strips BOM + picks endianness
+
+    for enc in encodings:
         try:
             with open(filepath, "r", encoding=enc, newline="") as f:
                 sample_text = f.read(4096)
-            chosen_encoding = enc
-            break
-        except UnicodeDecodeError:
+        except (UnicodeDecodeError, UnicodeError, LookupError):
             continue
+        # Reject a cp1255 read that is actually mis-decoded UTF-16 — a genuine
+        # cp1255 Hebrew CSV has ~no NUL chars, but UTF-16-as-cp1255 is riddled
+        # with them. Skip to the utf-16 fallback in that case.
+        if (
+            enc == "cp1255"
+            and sample_text
+            and sample_text.count("\x00") > len(sample_text) * 0.05
+        ):
+            continue
+        chosen_encoding = enc
+        break
 
     if chosen_encoding is None:
         raise EncodingError(
@@ -1886,6 +1951,30 @@ class LocalIndexer:
         ).fetchone()
         return row["filepath"] if row else None
 
+    def get_filepaths(self, sys_ids) -> dict:
+        """v7.16 BUG-6: batch sys_id -> canonical filepath lookup in ONE query.
+
+        Replaces N per-row get_filepath() round-trips on the UI thread (the cause
+        of the ~10s freeze when a LOCAL search returns many hits). Chunks the
+        IN(...) list under SQLite's variable limit. Returns a dict; missing
+        sys_ids are simply absent.
+        """
+        out: dict = {}
+        ids = [s for s in dict.fromkeys(sys_ids) if s]  # de-dup, preserve order, drop falsy
+        if not ids:
+            return out
+        CHUNK = 900  # stay under SQLITE_MAX_VARIABLE_NUMBER (default 999)
+        for i in range(0, len(ids), CHUNK):
+            batch = ids[i:i + CHUNK]
+            placeholders = ",".join("?" * len(batch))
+            cur = self._conn.execute(
+                f"SELECT sys_id, filepath FROM local_files WHERE sys_id IN ({placeholders})",
+                batch,
+            )
+            for r in cur.fetchall():
+                out[r["sys_id"]] = r["filepath"]
+        return out
+
     def list_all_filepaths(self) -> list:
         """Phase 96 D-F1: enumerate every on-disk filepath in the index.
 
@@ -1928,6 +2017,26 @@ class LocalIndexer:
             r["filepath"]: {"pages": r["page_count"], "status": r["extraction_status"]}
             for r in rows
         }
+
+    def get_folder_filepaths(self, folder_path: str) -> list:
+        """v7.16 BUG-5: canonical filepaths of every indexed file under *folder_path*.
+
+        Used by the per-folder opt-out checkboxes in the My Library folders list
+        to bulk include/exclude a whole folder from search. Returns [] for an
+        unknown folder.
+        """
+        from shared.local_sys_id import _canonical_filepath
+        canonical = _canonical_filepath(folder_path)
+        row = self._conn.execute(
+            "SELECT folder_id FROM folders WHERE path = ?", (canonical,)
+        ).fetchone()
+        if row is None:
+            return []
+        rows = self._conn.execute(
+            "SELECT filepath FROM local_files WHERE folder_id = ? AND pending_delete = 0",
+            (row["folder_id"],),
+        ).fetchall()
+        return [r["filepath"] for r in rows]
 
     def list_folders(self) -> list[dict]:
         """Return all registered folders ordered by added_at (D-15 / D-16).

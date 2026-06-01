@@ -73,10 +73,31 @@ def test_reveal_local_file_issues_explorer_select(tmp_path, monkeypatch):
         file_actions.subprocess, "Popen", lambda args: captured.setdefault("args", args)
     )
     assert file_actions.reveal_local_file(fp) is True
-    # Absolute Explorer path + Microsoft's documented single-arg `/select,<path>` form.
-    assert captured["args"][0].lower().endswith("explorer.exe")
-    assert os.path.isabs(captured["args"][0])
-    assert captured["args"][1] == f"/select,{os.path.normpath(fp)}"
+    # `/select,` and the path MUST be separate argv entries (the combined
+    # `/select,<path>` form breaks for paths with spaces — see reveal_local_file).
+    assert captured["args"][0] == "explorer"
+    assert captured["args"][1] == "/select,"
+    assert captured["args"][2] == os.path.normpath(fp)
+
+
+def test_reveal_local_file_path_with_spaces_kept_separate(tmp_path, monkeypatch):
+    """Regression (v7.16): a path with spaces must stay a SEPARATE argv entry.
+
+    The combined `/select,<path>` form caused subprocess to quote the whole
+    token, which Explorer parsed as no-selection and opened 'My Documents'.
+    """
+    sub = tmp_path / "My Folder With Spaces"
+    sub.mkdir()
+    fp = str(sub / "the file.pdf")
+    (sub / "the file.pdf").write_text("x", encoding="utf-8")
+    captured = {}
+    monkeypatch.setattr(
+        file_actions.subprocess, "Popen", lambda args: captured.setdefault("args", args)
+    )
+    assert file_actions.reveal_local_file(fp) is True
+    assert captured["args"][1] == "/select,"
+    assert captured["args"][2] == os.path.normpath(fp)  # full path, NOT combined into args[1]
+    assert " " in captured["args"][2]  # the spaces survive as one separate arg
 
 
 def test_reveal_local_file_not_gated_on_extension(tmp_path, monkeypatch):
@@ -87,7 +108,7 @@ def test_reveal_local_file_not_gated_on_extension(tmp_path, monkeypatch):
         file_actions.subprocess, "Popen", lambda args: captured.setdefault("args", args)
     )
     assert file_actions.reveal_local_file(fp) is True
-    assert captured["args"][1] == f"/select,{os.path.normpath(fp)}"
+    assert captured["args"][2] == os.path.normpath(fp)
 
 
 def test_reveal_local_file_missing_returns_false(tmp_path, monkeypatch):

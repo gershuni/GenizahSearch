@@ -46,7 +46,7 @@ if _CORE_IMPORT_ERROR:
         sys.exit(1)
     else:
         raise _CORE_IMPORT_ERROR
-from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker
+from gui_threads import SearchThread, LabSearchThread, IndexerThread, ShelfmarkLoaderThread, CompositionThread, LabCompositionThread, GroupingThread, StartupThread, EnrichMetadataThread, UpdateCheckerThread, PGPSourceWorker, ReadingDeskWorker, PGPBadgeWorker, PrintedBadgeWorker, PGPTagsWorker, PGPTagSearchWorker, SidecarUpdateThread, SidecarDownloadThread, PuzzleMetaLoaderThread, FilterCountWorker, RefinementReplayThread
 from desktop.widgets import (
     ActionsHoverWidget, _format_add_to_list_label,
     apply_find_highlight, _get_folio_number_from_shelfmark,
@@ -2872,6 +2872,11 @@ class GenizahGUI(QMainWindow):
 
         self.last_results = []
         self.last_search_query = ""
+        # v7.16 BUG-6: per-result-set sys_id -> canonical filepath cache. Primed in
+        # one batched SQLite query when results arrive, so result rendering and
+        # opt-out filtering do not issue N synchronous get_filepath() round-trips
+        # on the UI thread (the cause of the ~10s LOCAL-search freeze).
+        self._local_filepath_cache: dict = {}
         self.result_row_by_sys_id = {}
         self.comp_main = []
         self.comp_appendix = {}
@@ -16121,9 +16126,19 @@ class GenizahGUI(QMainWindow):
         self._schedule_session_save()
 
     def _on_restore_filter_finished(self, result_set):
-        """Handle filter recompute after session restore."""
+        """Handle filter recompute after session/history restore."""
         self.pre_search_restrict_sys_ids = result_set
         self._update_filter_chip_bar()
+        # History re-use: run the deferred search now that pre-search filters
+        # have resolved (set by _restore_*_from_state when re-running).
+        if getattr(self, '_rerun_search_after_filter', False):
+            self._rerun_search_after_filter = False
+            if self.query_input.text().strip() and not getattr(self, 'is_searching', False):
+                self.start_search()
+        elif getattr(self, '_rerun_comp_after_filter', False):
+            self._rerun_comp_after_filter = False
+            if self.comp_text_area.toPlainText().strip() and not getattr(self, 'is_comp_running', False):
+                self.run_composition()
 
     def _exclude_word_search_result(self, sys_id, row):
         """Exclude a single manuscript from word search results."""
@@ -16967,7 +16982,27 @@ class GenizahGUI(QMainWindow):
                 self._update_search_within_btn()
             return
 
+        # v7.16: gated UI-thread profiler to localize the LOCAL-search freeze.
+        # Enable with env GENIZAH_PROFILE_SEARCH=1 and run from a console.
+        import os as _os, time as _time
+        self._prof_on = bool(_os.environ.get("GENIZAH_PROFILE_SEARCH"))
+        self._prof_t = _time.perf_counter()
+
+        def _prof_ck(label):
+            if not self._prof_on:
+                return
+            now = _time.perf_counter()
+            print(f"[PROFILE] on_search_finished {label}: +{now - self._prof_t:.2f}s "
+                  f"(n={len(results)})", flush=True)
+            self._prof_t = now
+
+        self._prof_ck = _prof_ck
+
         self.last_results = results
+        # v7.16 BUG-6: prime the LOCAL filepath cache in one batched query before
+        # rendering/filtering iterate per-row (prevents the ~10s UI-thread freeze).
+        self._prime_local_filepath_cache(results)
+        _prof_ck("prime_filepath_cache")
 
         # Phase 55: Refinement chain update (uses RAW results before post-filters)
         if self._refine_mode:
@@ -17056,20 +17091,25 @@ class GenizahGUI(QMainWindow):
         self._has_result_domains = False
         self.btn_domain_filter.setEnabled(False)
 
+        _prof_ck("pre_render")
         # Use smaller initial batch during session restore for faster first paint
         restore_batch = 50 if getattr(self, '_restoring_session', False) else None
         self.load_next_batch(batch_size=restore_batch)
+        _prof_ck("load_next_batch")
 
         # Auto-fit columns to content (like double-clicking the column border)
         for col in (self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG):
             self.results_table.resizeColumnToContents(col)
+        _prof_ck("resize_columns")
 
         # Launch enrichment workers (async -- results appear first, enrichment fills in later)
         # During session restore, defer workers to keep UI responsive
         self._launch_enrichment_workers(results, defer=getattr(self, '_restoring_session', False))
+        _prof_ck("launch_enrichment")
 
         # Save session after search completes (crash-safe persistence)
         self._schedule_session_save()
+        _prof_ck("schedule_session_save")
         # Add to search history (skip during session restore and refinement -- D-15)
         if not getattr(self, '_restoring_session', False) and not self.refinement_chain:
             self._add_regular_search_to_history()
@@ -17113,23 +17153,48 @@ class GenizahGUI(QMainWindow):
         self._schedule_session_save()
 
     def _replay_for_restore(self):
-        """Replay chain during session restore. Shows 'Restoring refinement chain...' feedback."""
+        """Replay the refinement chain during session restore, OFF the UI thread.
+
+        Each chain step is a full execute_search (seconds for genizah scope);
+        replaying synchronously here froze the window once per step on startup
+        (a 3-step chain → 3 freezes). We run the replay on a worker and apply
+        the rebuilt restrict set when it finishes; the window stays responsive
+        with the already-rendered results visible.
+        """
+        if not self.refinement_chain:
+            return
         if hasattr(self, 'status_label'):
             self.status_label.setText(tr('Restoring refinement chain...'))
-            QApplication.processEvents()
-        try:
-            result = replay_chain(self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids)
-            self.refinement_restrict_sys_ids = result
-            self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            # Replay failed -- clear chain rather than leave stale state
-            self.refinement_chain = []
-            self.refinement_restrict_sys_ids = None
-        finally:
-            if hasattr(self, 'status_label'):
-                self.status_label.setText('')
+        # pre_search_restrict_sys_ids is set by now — capture the scope sig.
+        self._refinement_scope_sig = scope_signature(self.pre_search_restrict_sys_ids)
+        thread = RefinementReplayThread(
+            self.refinement_chain, self.searcher, self.pre_search_restrict_sys_ids
+        )
+        thread.finished_signal.connect(self._on_replay_for_restore_finished)
+        thread.error_signal.connect(self._on_replay_for_restore_error)
+        # Keep a reference so the QThread isn't garbage-collected mid-run.
+        self._replay_restore_thread = thread
+        thread.start()
+
+    def _on_replay_for_restore_finished(self, result_set):
+        """Apply the restrict set rebuilt by the off-thread chain replay."""
+        self.refinement_restrict_sys_ids = result_set
+        if hasattr(self, 'status_label'):
+            self.status_label.setText('')
+        if hasattr(self, '_update_refinement_strip'):
+            self._update_refinement_strip()
+        if hasattr(self, '_update_search_within_btn'):
+            self._update_search_within_btn()
+
+    def _on_replay_for_restore_error(self, msg):
+        """Replay failed -- clear the chain rather than leave stale state."""
+        logger.warning("Refinement chain replay (restore) failed: %s", msg)
+        self.refinement_chain = []
+        self.refinement_restrict_sys_ids = None
+        if hasattr(self, 'status_label'):
+            self.status_label.setText('')
+        if hasattr(self, '_update_refinement_strip'):
+            self._update_refinement_strip()
 
     def _enter_refine_mode(self):
         """D-02, D-03: Activate refine mode on desktop search bar."""
@@ -17351,11 +17416,24 @@ class GenizahGUI(QMainWindow):
         """Launch domain, PGP badge, printed badge, and measurement enrichment workers."""
         def _start():
             from gui_threads import DomainEnrichmentWorker
-            sys_ids = [r.get('display', {}).get('id') for r in results if r.get('display', {}).get('id')]
+            from shared.local_sys_id import is_local_sys_id as _is_local
+            # v7.16 BUG-6: Genizah enrichment (domain / PGP / printed / measurement)
+            # does NOT apply to LOCAL hits (97-prefix synthetic ids). Skip them so a
+            # large LOCAL result set does not spawn pointless badge workers + a
+            # synchronous UI-thread measurement query over ids that never match.
+            sys_ids = [
+                sid for r in results
+                for sid in ((r.get('display', {}) or {}).get('id'),)
+                if sid and not _is_local(sid)
+            ]
+            genizah_results = [
+                r for r in results
+                if not _is_local((r.get('display', {}) or {}).get('id') or '')
+            ]
             if sys_ids:
                 if self._domain_worker and self._domain_worker.isRunning():
                     self._domain_worker.wait()
-                self._domain_worker = DomainEnrichmentWorker(results)
+                self._domain_worker = DomainEnrichmentWorker(genizah_results)
                 self._domain_worker.finished.connect(self._on_domain_enrichment_loaded)
                 self._domain_worker.start()
 
@@ -17395,8 +17473,14 @@ class GenizahGUI(QMainWindow):
                         k: v for k, v in (getattr(self, 'pre_search_filters', {}) or {}).items()
                         if k in _meas_keys
                     }
-                # Re-apply filters now that measurement data is available
-                self._apply_results_table_filters()
+            else:
+                # All-LOCAL (or no-id) result set — no Genizah enrichment to do.
+                self._result_measurement_map = {}
+                self._measurement_fetch_complete = True
+                if hasattr(self, 'btn_measurement_filter'):
+                    self.btn_measurement_filter.setEnabled(False)
+            # Re-apply filters (also applies LOCAL opt-out filtering for LOCAL-only sets).
+            self._apply_results_table_filters()
 
         if defer:
             QTimer.singleShot(500, _start)
@@ -17933,6 +18017,8 @@ class GenizahGUI(QMainWindow):
         self.chk_search_header.blockSignals(False)
 
         self.last_results = formatted
+        # v7.16 BUG-6: batch-prime LOCAL filepath cache (see on_search_finished).
+        self._prime_local_filepath_cache(formatted)
         self.results_loaded = 0
         self.results_table.setRowCount(0)
         self.result_row_by_sys_id = {}
@@ -18742,15 +18828,47 @@ class GenizahGUI(QMainWindow):
 
         Queries the LocalIndexer's local_files SQLite table via get_filepath().
         Returns the filepath string or None if not found / indexer unavailable.
+
+        v7.16 BUG-6: consults `self._local_filepath_cache` first (primed once per
+        result set by `_prime_local_filepath_cache`), so the hot result-rendering
+        and opt-out-filter loops do not hit SQLite once per row on the UI thread.
         """
+        cache = getattr(self, '_local_filepath_cache', None)
+        if cache is not None and sys_id in cache:
+            return cache[sys_id]
         my_lib_tab = getattr(self, 'my_library_tab', None)
         indexer = getattr(my_lib_tab, '_indexer', None) if my_lib_tab else None
         if indexer is None:
             return None
         try:
-            return indexer.get_filepath(sys_id)
+            fp = indexer.get_filepath(sys_id)
         except Exception:
             return None
+        if cache is not None and fp is not None:
+            cache[sys_id] = fp
+        return fp
+
+    def _prime_local_filepath_cache(self, results):
+        """v7.16 BUG-6: batch-load canonical filepaths for all LOCAL hits in
+        `results` in ONE SQLite query, replacing N per-row get_filepath() calls
+        on the UI thread. Safe no-op when there are no LOCAL hits / no indexer.
+        """
+        self._local_filepath_cache = {}
+        try:
+            local_ids = [
+                sid for r in (results or [])
+                for sid in ((r.get('display', {}) or {}).get('id') or r.get('sys_id', ''),)
+                if sid and (r.get('display', {}) or {}).get('source') == 'LOCAL'
+            ]
+            if not local_ids:
+                return
+            my_lib_tab = getattr(self, 'my_library_tab', None)
+            indexer = getattr(my_lib_tab, '_indexer', None) if my_lib_tab else None
+            if indexer is None or not hasattr(indexer, 'get_filepaths'):
+                return
+            self._local_filepath_cache = indexer.get_filepaths(local_ids)
+        except Exception:
+            self._local_filepath_cache = {}
 
     def _get_local_pages_for_sys_id(self, sys_id: str) -> list:
         """Return sorted [(p_num, text), ...] for all indexed pages of a LOCAL sys_id.
@@ -24144,7 +24262,15 @@ class GenizahGUI(QMainWindow):
                 self._show_comp_history_menu()
 
     def _restore_regular_search_from_state(self, state, entry=None):
-        """Apply a history entry's state dict to the regular search tab."""
+        """Apply a history entry and re-run the regular search.
+
+        History no longer stores result snapshots (that bloated
+        search_history.json and froze the UI). We restore the query, search
+        params, pre-search filters and exclusions, then re-run the search.
+        Legacy entries that still carry a 'results' snapshot are restored
+        instantly for backward compatibility.
+        """
+        filter_pending = False
         if entry:
             self.query_input.setText(entry.get('query', ''))
             params = entry.get('search_params', {})
@@ -24175,6 +24301,7 @@ class GenizahGUI(QMainWindow):
                 worker.finished.connect(self._on_restore_filter_finished)
                 worker.start()
                 self._filter_restore_worker = worker
+                filter_pending = True
             else:
                 self.pre_search_restrict_sys_ids = None
             self._update_filter_chip_bar()
@@ -24186,12 +24313,28 @@ class GenizahGUI(QMainWindow):
 
         results = state.get('results', [])
         if results:
+            # Legacy entry with a stored snapshot — restore instantly.
             self.last_results = results
             self.on_search_finished(results)
+            self._schedule_session_save()
+            return
+
+        # Re-run the search. If pre-search filters are still recomputing on a
+        # worker, defer the run to _on_restore_filter_finished; else run now.
+        if filter_pending:
+            self._rerun_search_after_filter = True
+        elif self.query_input.text().strip() and not getattr(self, 'is_searching', False):
+            self.start_search()
         self._schedule_session_save()
 
     def _restore_comp_search_from_state(self, state, entry=None):
-        """Apply a history entry's state dict to the composition tab."""
+        """Apply a history entry and re-run the composition search.
+
+        History no longer stores result snapshots. We restore the source text,
+        params, filters and exclusions, switch to the composition tab and
+        re-run. Legacy entries with a stored snapshot are restored instantly.
+        """
+        filter_pending = False
         if entry:
             self.comp_text_area.setPlainText(state.get('source_text', ''))
             if entry.get('query'):
@@ -24211,6 +24354,7 @@ class GenizahGUI(QMainWindow):
                 worker.finished.connect(self._on_restore_filter_finished)
                 worker.start()
                 self._filter_restore_worker = worker
+                filter_pending = True
             else:
                 self.pre_search_restrict_sys_ids = None
             self._update_filter_chip_bar()
@@ -24218,9 +24362,13 @@ class GenizahGUI(QMainWindow):
         self._comp_domain_exclusions = set(state.get('domain_exclusions', []))
         self._comp_printed_filter_state = state.get('printed_filter', 'all')
 
+        # Switch to composition tab so the user sees the (re-run) search.
+        self.tabs.setCurrentWidget(self.composition_tab)
+
         results = state.get('results', [])
         filtered = state.get('filtered_results', [])
         if results or filtered:
+            # Legacy entry with a stored snapshot — restore instantly.
             self.comp_raw_items = results
             self.comp_raw_filtered = filtered
             self.comp_has_grouped_results = False
@@ -24231,9 +24379,14 @@ class GenizahGUI(QMainWindow):
             self.comp_grouped_filtered_appendix = {}
             self.comp_grouped_filtered_summary = {}
             self.display_comp_results(results, {}, {}, filtered, {}, {})
+            self._schedule_session_save()
+            return
 
-        # Switch to composition tab
-        self.tabs.setCurrentWidget(self.composition_tab)
+        # Re-run the composition search (source text already restored above).
+        if filter_pending:
+            self._rerun_comp_after_filter = True
+        elif self.comp_text_area.toPlainText().strip() and not getattr(self, 'is_comp_running', False):
+            self.run_composition()
         self._schedule_session_save()
 
     def _add_regular_search_to_history(self):
@@ -24261,8 +24414,11 @@ class GenizahGUI(QMainWindow):
                 'corpus_scope': getattr(self, '_search_corpus_scope', 'genizah'),
             },
             'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
+            # NOTE: result snapshots are intentionally NOT stored here. Storing
+            # results[:5000] per entry grew search_history.json to ~778 MB and
+            # froze the UI ~20-30s on every search (load+rewrite on the UI
+            # thread). Clicking a history entry now re-runs the search instead.
             'state': {
-                'results': results[:5000],
                 'domain_exclusions': sorted(getattr(self, '_domain_exclusions', set())),
                 'printed_filter': getattr(self, '_printed_filter_state', 'all'),
                 'excluded_sys_ids': sorted(getattr(self, 'excluded_sys_ids', set())),
@@ -24294,10 +24450,11 @@ class GenizahGUI(QMainWindow):
                 'mode_index': self.comp_mode_combo.currentIndex() if hasattr(self, 'comp_mode_combo') else 0,
             },
             'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
+            # NOTE: result snapshots intentionally NOT stored (see
+            # _add_regular_search_to_history). source_text is kept so clicking
+            # the entry can re-run the composition search.
             'state': {
                 'source_text': source_text,
-                'results': results[:5000],
-                'filtered_results': filtered[:5000],
                 'domain_exclusions': sorted(getattr(self, '_comp_domain_exclusions', set())),
                 'printed_filter': getattr(self, '_comp_printed_filter_state', 'all'),
             },

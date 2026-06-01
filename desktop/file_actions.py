@@ -57,12 +57,15 @@ def reveal_local_file(filepath: str | None) -> bool:
     if not filepath or not os.path.exists(filepath):
         return False
     normalized = os.path.normpath(filepath)
-    # Use the ABSOLUTE Explorer path (avoid a PATH / current-directory
-    # explorer.exe hijack) and Microsoft's documented single-argument form
-    # `/select,<path>`. explorer.exe returns exit code 1 even on success, so do
-    # not check it.
-    explorer = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "explorer.exe")
-    subprocess.Popen([explorer, f"/select,{normalized}"])  # noqa: S603
+    # IMPORTANT: pass `/select,` and the path as SEPARATE argv entries. The
+    # "documented" combined single-argument form (`/select,<path>`) BREAKS for
+    # any path containing spaces — subprocess quotes the whole token as
+    # "/select,C:\path with spaces\file", which Explorer cannot parse, so it
+    # silently opens "My Documents" instead of selecting the file (UAT-confirmed
+    # regression, v7.16). The separate-argument form is the one that actually
+    # works on Windows. explorer.exe returns exit code 1 even on success, so do
+    # not check it. (Bare "explorer" resolves from System32 via PATH.)
+    subprocess.Popen(["explorer", "/select,", normalized])  # noqa: S603,S607
     return True
 
 

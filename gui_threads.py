@@ -47,6 +47,36 @@ class IndexerThread(QThread):
             self.finished_signal.emit(total_docs)
         except Exception as e: self.error_signal.emit(str(e))
 
+class RefinementReplayThread(QThread):
+    """Replay a refinement chain off the UI thread to rebuild restrict sets.
+
+    ``replay_chain`` calls ``execute_search()`` once per chain step — seconds
+    per genizah-scope step. Running it on the UI thread during session restore
+    froze the window once per step (e.g. a 3-step chain → 3 freezes on
+    startup). This runs it on a worker; the chain's RefinementStep objects are
+    mutated in place (result_count / _result_uids) and are safe to read on the
+    UI thread after ``finished_signal`` fires (no concurrent access).
+    """
+
+    finished_signal = pyqtSignal(object)  # accumulated restrict set, or None
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, chain, searcher, filter_restrict):
+        super().__init__()
+        self.chain = chain
+        self.searcher = searcher
+        self.filter_restrict = filter_restrict
+
+    def run(self):
+        try:
+            from shared.refinement import replay_chain
+            result = replay_chain(self.chain, self.searcher, self.filter_restrict)
+            self.finished_signal.emit(result)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("RefinementReplayThread failed: %s", e)
+            self.error_signal.emit(str(e))
+
+
 class SearchThread(QThread):
     """Execute a search query asynchronously."""
 
@@ -70,6 +100,9 @@ class SearchThread(QThread):
                 if self.cancel_flag:
                     raise InterruptedError("Search cancelled by user")
                 self.progress_signal.emit(curr, total)
+            import os as _os, time as _time
+            _profile = _os.environ.get("GENIZAH_PROFILE_SEARCH")
+            _t0 = _time.perf_counter()
             results = self.searcher.execute_search(
                 self.query,
                 self.mode,
@@ -81,6 +114,12 @@ class SearchThread(QThread):
                 text_position=self.text_position,
                 corpus_scope=self.corpus_scope,
             )
+            if _profile:
+                print(
+                    f"[PROFILE] execute_search(scope={self.corpus_scope}, mode={self.mode}) "
+                    f"-> {len(results)} hits in {_time.perf_counter() - _t0:.2f}s",
+                    flush=True,
+                )
 
             self.results_signal.emit(results)
         except InterruptedError:

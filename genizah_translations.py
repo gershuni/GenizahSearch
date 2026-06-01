@@ -3274,6 +3274,8 @@ TRANSLATIONS = {
     # Phase 96 D-F1 — opt-out tree widget UI strings
     "File status & opt-outs:": "סטטוס קבצים ואפשרויות ביטול:",
     "Folder contents": "תכולת תיקייה",
+    # v7.16 BUG-5 — per-folder opt-out checkbox in the My Library folders list
+    "Uncheck to exclude this whole folder from search": "בטלו את הסימון כדי להחריג את כל התיקייה מהחיפוש",
     # Phase 97.2 R97.2-E — Reset My Library bilingual strings (registered
     # for tr() callers; the confirm dialog body uses inline EN/HE branching
     # per CURRENT_LANG since the QLineEdit accepts both literal tokens).

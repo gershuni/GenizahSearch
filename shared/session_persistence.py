@@ -170,6 +170,29 @@ def clear_session_state(path: str | None = None) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _strip_history_result_snapshots(data: dict) -> bool:
+    """Drop heavy per-entry result snapshots from a history dict, in place.
+
+    Older builds stored up to 5000 full result dicts per entry under
+    ``state['results']`` (and ``state['filtered_results']`` for composition).
+    With a 20-entry limit that grew ``search_history.json`` to hundreds of MB,
+    and every search loaded + rewrote the whole file on the UI thread — a
+    ~20-30s freeze on every search, independent of result count. History no
+    longer keeps result snapshots (clicking an entry re-runs the search), so
+    we remove them here. Returns True if anything was stripped.
+    """
+    stripped = False
+    for key in ("regular", "composition"):
+        for entry in data.get(key, []) or []:
+            state = entry.get("state") if isinstance(entry, dict) else None
+            if isinstance(state, dict):
+                if state.pop("results", None) is not None:
+                    stripped = True
+                if state.pop("filtered_results", None) is not None:
+                    stripped = True
+    return stripped
+
+
 def _load_history_file() -> dict:
     """Load the raw history dict from disk. Returns empty structure on error."""
     if not os.path.exists(HISTORY_FILE):
@@ -182,6 +205,9 @@ def _load_history_file() -> dict:
         # Ensure both keys exist
         data.setdefault("regular", [])
         data.setdefault("composition", [])
+        # Self-heal legacy bloat (see _strip_history_result_snapshots): a file
+        # that still carries result snapshots will be slimmed on the next save.
+        _strip_history_result_snapshots(data)
         return data
     except Exception as e:
         logger.error("Failed to load history file: %s", e)
@@ -230,6 +256,10 @@ def add_history_entry(search_type: str, entry: dict, limit: int = 20) -> bool:
         True on success, False on failure.
     """
     try:
+        # Invariant: history never persists result snapshots. Drop any that a
+        # caller passes (defensive — see _strip_history_result_snapshots).
+        _strip_history_result_snapshots({search_type: [entry]})
+
         data = _load_history_file()
         entries = data.get(search_type, [])
 

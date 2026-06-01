@@ -122,3 +122,42 @@ def test_encoding_chain(tmp_path):
     all_text = " ".join(text for _, text, _, _, _ in chunks)
     # Should contain the recovered Hebrew word
     assert "שלום" in all_text, f"Expected 'שלום' in extracted text, got: {all_text!r}"
+
+
+def test_semicolonless_nbsp_entity_decoded(tmp_path):
+    """v7.16 BUG-1: `&nbsp` WITHOUT a trailing semicolon (common in hand-authored
+    Hebrew transcription files) must NOT survive as the literal text '&nbsp'.
+
+    libxml2's HTML parser does not decode entity refs lacking a ';', so the
+    extractor must post-decode via html.unescape() and fold the resulting
+    non-breaking spaces to regular spaces.
+    """
+    from shared.local_indexer import extract_html_pages
+
+    html = (
+        "<html><body>"
+        "<p>צג,א,1 &nbsp&nbsp&nbsp</p>"
+        "<p>חלב שהבשר &amp; מותר</p>"
+        "</body></html>"
+    )
+    p = tmp_path / "nbsp_sample.html"
+    p.write_bytes(html.encode("utf-8"))
+
+    all_text = " ".join(text for _, text, _, _, _ in extract_html_pages(str(p)))
+    assert "&nbsp" not in all_text, (
+        f"literal '&nbsp' leaked into extracted text: {all_text!r}"
+    )
+    assert chr(0xA0) not in all_text, "non-breaking space U+00A0 should be folded to a regular space"
+    # The proper '&amp;' must still decode to a single ampersand.
+    assert "חלב שהבשר & מותר" in all_text, f"got: {all_text!r}"
+
+
+def test_clean_html_text_preserves_non_entity_ampersand():
+    """v7.16: a bare '&' that is not an entity (e.g. 'AT&T') is left intact."""
+    from shared.local_indexer import _clean_html_text
+
+    assert _clean_html_text("AT&T plain") == "AT&T plain"
+    assert _clean_html_text("a &amp; b") == "a & b"
+    # `&nbsp` (no semicolon) decodes to U+00A0 then folds to a regular space.
+    out = _clean_html_text("x&nbsp;y")
+    assert chr(0xA0) not in out and "&nbsp" not in out and out == "x y"

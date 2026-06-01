@@ -132,3 +132,20 @@ def test_encoding_total_failure_raises(tmp_path):
     with mock.patch("shared.local_indexer._CSV_ENCODINGS", ("utf-8",)):
         with pytest.raises(EncodingError):
             list(extract_csv_pages(str(p)))
+
+
+def test_utf16_bom_csv_decoded_not_cp1255_garbage(tmp_path):
+    """v7.16 BUG-3: a UTF-16 CSV (e.g. Excel 'Unicode Text' export) carries a BOM.
+    cp1255 would decode its bytes without error into NUL-polluted garbage, masking
+    the utf-16 fallback. The BOM must be detected first so the Hebrew survives."""
+    from shared.local_indexer import extract_csv_pages
+
+    p = tmp_path / "unicode.csv"
+    # Python's 'utf-16' codec writes a BOM. This is exactly the Excel export shape.
+    p.write_text("שם,שנה\nרוזנצווייג,1913\nברגמן,1916\n", encoding="utf-16")
+
+    chunks = list(extract_csv_pages(str(p)))
+    all_text = " ".join(text for _, text, _, _ in chunks)
+    assert "רוזנצווייג" in all_text, f"UTF-16 CSV mis-decoded: {all_text!r}"
+    assert "ברגמן" in all_text, f"UTF-16 CSV mis-decoded: {all_text!r}"
+    assert "\x00" not in all_text, "NUL chars present — decoded as cp1255 garbage"

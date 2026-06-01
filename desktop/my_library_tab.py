@@ -142,6 +142,8 @@ class _UnifiedFileTreeWidget(QTreeWidget):
     def __init__(self, parent, app):
         super().__init__(parent)
         self._app = app
+        # v7.16 BUG-5: the owning MyLibraryTab, for the master opt-out checkbox sync.
+        self._tab = parent
         self._suppress_signals = False
         # Track the set of paths CURRENTLY DISPLAYED in the tree (canonical
         # form). _commit_changes() uses this as the diff scope so paths
@@ -401,6 +403,14 @@ class _UnifiedFileTreeWidget(QTreeWidget):
                 )
         finally:
             self._suppress_signals = False
+        # NOTE: the per-folder opt-out checkbox aggregate is derived from the
+        # opt-out SET + the folder's DB filepaths, NOT from the tree contents —
+        # so it does NOT change as the tree fills, and calling it per batch was
+        # pure waste. Worse, _folder_optout_aggregate runs a full local_files
+        # scan PER registered folder, so doing it once per 100-file batch is
+        # O(batches × folders × files): ~15s for a 16.8K-file folder (×3 with
+        # the LAB-stale reload churn = the ~45s startup freeze). It now fires
+        # ONCE in _on_tree_finished. (Measured: 14.96s → 0.10s per population.)
 
     def _release_finished_worker(self, sender) -> None:
         """Codex Critique #3 HIGH fix: pop the just-finished worker from the
@@ -435,6 +445,15 @@ class _UnifiedFileTreeWidget(QTreeWidget):
         Codex Critique #3 HIGH retention fix).
         """
         # D-04: do NOT call self.expandAll(). User expands manually.
+        # Sync the per-folder opt-out checkboxes ONCE, now that population is
+        # done (moved here from _on_tree_batch — see note there). Guard on the
+        # token so a stale worker's finish doesn't trigger a redundant refresh.
+        if token == self._tree_token:
+            try:
+                if self._tab is not None and hasattr(self._tab, '_sync_master_optout_checkbox'):
+                    self._tab._sync_master_optout_checkbox()
+            except Exception:
+                pass
         self._release_finished_worker(self.sender())
 
     def _on_tree_error(self, msg: str, token: int) -> None:
@@ -546,14 +565,47 @@ class _UnifiedFileTreeWidget(QTreeWidget):
             self._commit_changes()
 
     def _on_item_changed(self, item, column):
-        """User toggled a checkbox — debounce the commit."""
+        """User toggled a checkbox — cascade folders to leaves, then debounce.
+
+        v7.16 BUG-4: ``ItemIsAutoTristate`` propagates child→parent state but is
+        NOT a reliable parent→child cascade. Unchecking a FOLDER therefore never
+        reached its leaf items, so the opt-out set (built from leaf states in
+        ``_collect_leaves_by_state``) stayed empty and folder unchecks did not
+        filter anything out of search results. We cascade a folder's definite
+        (Checked/Unchecked) state down to every descendant leaf explicitly.
+        """
         if self._suppress_signals:
             return
         # Only respond to changes on the checkbox column (col 0).
         if column != _COL_FILENAME:
             return
+        # A node with children is a folder: push its definite state to leaves.
+        # PartiallyChecked (mixed) is left alone — that is a derived state, not a
+        # user intent to flip the whole subtree.
+        if item is not None and item.childCount() > 0:
+            state = item.checkState(0)
+            if state in (Qt.CheckState.Checked, Qt.CheckState.Unchecked):
+                self._suppress_signals = True
+                try:
+                    self._set_descendant_leaves_check_state(item, state)
+                finally:
+                    self._suppress_signals = False
         # Restart the debounce timer; multiple rapid changes coalesce.
         self._save_timer.start()
+
+    def _set_descendant_leaves_check_state(self, node, state) -> None:
+        """Recursively set every descendant LEAF of *node* to *state* (BUG-4).
+
+        Folder nodes derive their own state from children via ItemIsAutoTristate,
+        so we only set leaves. Caller must guard with _suppress_signals to avoid
+        a signal storm / re-entrancy.
+        """
+        if node.childCount() == 0:
+            if node.data(0, Qt.ItemDataRole.UserRole):
+                node.setCheckState(0, state)
+            return
+        for i in range(node.childCount()):
+            self._set_descendant_leaves_check_state(node.child(i), state)
 
     def _commit_changes(self):
         """Debounce fired — perform SET-DIFFERENCE/UNION update, persist, re-filter.
@@ -604,6 +656,12 @@ class _UnifiedFileTreeWidget(QTreeWidget):
         try:
             if hasattr(app, '_reapply_filters_for_optout_change'):
                 app._reapply_filters_for_optout_change()
+        except Exception:
+            pass
+        # v7.16 BUG-5: reflect the new aggregate in the master opt-out checkbox.
+        try:
+            if self._tab is not None and hasattr(self._tab, '_sync_master_optout_checkbox'):
+                self._tab._sync_master_optout_checkbox()
         except Exception:
             pass
 
@@ -692,6 +750,39 @@ class LocalIndexerWorker(QThread):
             self.finished_signal.emit(result)
         except Exception as exc:  # noqa: BLE001
             logger.exception("LocalIndexerWorker: unhandled error")
+            self.error_signal.emit(str(exc))
+
+
+# ---------------------------------------------------------------------------
+# LabRebuildWorker — rebuild the LOCAL LAB side-index OFF the UI thread
+# ---------------------------------------------------------------------------
+
+class LabRebuildWorker(QThread):
+    """Run SearchEngine.rebuild_local_lab_index() off the UI thread.
+
+    The LOCAL LAB rebuild iterates every LOCAL page and recomputes fingerprints
+    — seconds to tens of seconds for a large library. The previous
+    `_maybe_rebuild_lab_if_stale` ran it synchronously on the UI thread, so once
+    the `lab_index_normalize` AttributeError that aborted the rebuild is fixed,
+    a stale LAB would freeze the window on startup. This moves it to a worker;
+    the tab reloads the searchers on the UI thread when it finishes.
+    """
+
+    finished_signal = pyqtSignal()
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, search_engine, indexer, lab_engine) -> None:
+        super().__init__()
+        self._search = search_engine
+        self._indexer = indexer
+        self._lab = lab_engine
+
+    def run(self) -> None:
+        try:
+            self._search.rebuild_local_lab_index(self._indexer, lab_engine=self._lab)
+            self.finished_signal.emit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("LabRebuildWorker: LOCAL LAB rebuild failed: %s", exc)
             self.error_signal.emit(str(exc))
 
 
@@ -1085,28 +1176,49 @@ class MyLibraryTab(QWidget):
                 return False
             if fresh:
                 return False
-            # Stale: rebuild via SearchEngine (Option C callback wiring).
-            logger.info(
-                "WR-08: LAB index stale (weights_hash mismatch) — triggering rebuild"
-            )
-            try:
-                # LAB weights live on the LabEngine — pass it so the rebuilt
-                # index's weights_hash matches the freshness check (else stale loop).
-                search.rebuild_local_lab_index(self._indexer, lab_engine=lab)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "MyLibraryTab._maybe_rebuild_lab_if_stale: "
-                    "rebuild_local_lab_index failed: %s", exc
-                )
+            # Single-flight: a rebuild may already be running (this is called
+            # from BOTH startup-recovery and worker-finished). Don't start a
+            # second writer over the same LAB index.
+            existing = getattr(self, "_lab_rebuild_worker", None)
+            if existing is not None and existing.isRunning():
                 return False
-            # Reload so the freshly-built LAB is visible in live session.
-            self._reload_all_local_indexes()
+            # Stale: rebuild OFF the UI thread. The rebuild iterates every LOCAL
+            # page (seconds to tens of seconds on a large library) — running it
+            # synchronously here froze the app on startup. LAB weights live on
+            # the LabEngine, so pass it (else the rebuilt weights_hash won't
+            # match the freshness check and the index stays perpetually stale).
+            logger.info(
+                "WR-08: LAB index stale (weights_hash mismatch) — "
+                "triggering background rebuild"
+            )
+            worker = LabRebuildWorker(search, self._indexer, lab)
+            worker.finished_signal.connect(self._on_lab_rebuild_finished)
+            worker.error_signal.connect(self._on_lab_rebuild_error)
+            worker.finished.connect(worker.deleteLater)
+            self._lab_rebuild_worker = worker
+            worker.start()
             return True
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "MyLibraryTab._maybe_rebuild_lab_if_stale: unexpected error: %s", exc
             )
             return False
+
+    def _on_lab_rebuild_finished(self) -> None:
+        """Background LAB rebuild done — reload searchers on the UI thread so the
+        freshly built index is visible in the live session."""
+        self._lab_rebuild_worker = None
+        try:
+            self._reload_all_local_indexes()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "MyLibraryTab._on_lab_rebuild_finished: reload failed: %s", exc
+            )
+
+    def _on_lab_rebuild_error(self, msg: str) -> None:
+        """Background LAB rebuild failed — log and clear the handle."""
+        self._lab_rebuild_worker = None
+        logger.warning("MyLibraryTab: LOCAL LAB rebuild failed: %s", msg)
 
     # ------------------------------------------------------------------
     # UI construction
@@ -1118,12 +1230,19 @@ class MyLibraryTab(QWidget):
         root.setSpacing(6)
 
         # ---- Section 1: folder list ----
+        # v7.16 BUG-5: each folder row carries its own opt-out checkbox
+        # ([ ] = excluded from search, [x] = included), so a whole folder can be
+        # toggled in/out of search directly from this upper pane (set up in
+        # _refresh_folder_list_ui; toggled via _on_folder_checkbox_changed).
         root.addWidget(QLabel(tr("Indexed folders:")))
 
         self._folder_list = QListWidget()
         self._folder_list.setSelectionMode(
             QAbstractItemView.SelectionMode.SingleSelection
         )
+        self._folder_list.itemChanged.connect(self._on_folder_checkbox_changed)
+        # Guard so programmatic check-state refreshes don't re-enter the handler.
+        self._suppress_folder_check_signals = False
         root.addWidget(self._folder_list, stretch=1)
 
         folder_btns = QHBoxLayout()
@@ -1202,6 +1321,98 @@ class MyLibraryTab(QWidget):
         self._disk_timer.setInterval(30_000)  # 30 seconds
         self._disk_timer.timeout.connect(self._update_disk_indicator)
         self._disk_timer.start()
+
+    # ------------------------------------------------------------------
+    # v7.16 BUG-5: per-folder opt-out checkboxes in the folders list
+    # ------------------------------------------------------------------
+
+    def _folder_optout_aggregate(self, folder_path: str):
+        """Return the check state a folder row should show, based on how many of
+        its files are currently opted out: Checked (none), Unchecked (all),
+        PartiallyChecked (some). Returns Checked for an empty/unknown folder."""
+        if self._indexer is None:
+            return Qt.CheckState.Checked
+        app = self._parent_window
+        optouts = getattr(app, '_local_file_optouts', None) or set()
+        try:
+            files = self._indexer.get_folder_filepaths(folder_path)
+        except Exception:
+            return Qt.CheckState.Checked
+        if not files:
+            return Qt.CheckState.Checked
+        opted = sum(1 for f in files if f in optouts)
+        if opted == 0:
+            return Qt.CheckState.Checked
+        if opted == len(files):
+            return Qt.CheckState.Unchecked
+        return Qt.CheckState.PartiallyChecked
+
+    def _on_folder_checkbox_changed(self, item) -> None:
+        """User toggled a folder's opt-out checkbox: include ([x]) or exclude
+        ([ ]) every file under that folder from search in one action."""
+        if self._suppress_folder_check_signals:
+            return
+        if self._indexer is None:
+            return
+        folder_path = item.data(Qt.ItemDataRole.UserRole)
+        if not folder_path:
+            return
+        state = item.checkState()
+        if state == Qt.CheckState.PartiallyChecked:
+            return  # derived state; only act on a definite user choice
+        try:
+            files = set(self._indexer.get_folder_filepaths(folder_path))
+        except Exception:
+            files = set()
+        if not files:
+            return
+        app = self._parent_window
+        if not hasattr(app, '_local_file_optouts') or app._local_file_optouts is None:
+            app._local_file_optouts = set()
+        if state == Qt.CheckState.Unchecked:
+            app._local_file_optouts |= files          # exclude the whole folder
+        else:
+            app._local_file_optouts -= files          # re-include the whole folder
+        try:
+            if hasattr(app, '_save_session'):
+                app._save_session()
+        except Exception:
+            pass
+        try:
+            if hasattr(app, '_reapply_filters_for_optout_change'):
+                app._reapply_filters_for_optout_change()
+        except Exception:
+            pass
+        # Keep the per-file tree in sync if it is showing the toggled folder.
+        try:
+            tree = getattr(self, '_unified_tree', None)
+            if tree is not None and getattr(tree, '_tree_folder_path', None) == folder_path:
+                tree.populate_for_folder(folder_path)
+        except Exception:
+            pass
+
+    def _refresh_folder_checkbox_states(self) -> None:
+        """Set every folder row's checkbox to reflect its current opt-out
+        aggregate. Signals suppressed so this never re-enters the handler.
+        Called after population, folder-list refresh, and per-file tree commits."""
+        lst = getattr(self, '_folder_list', None)
+        if lst is None:
+            return
+        self._suppress_folder_check_signals = True
+        try:
+            for i in range(lst.count()):
+                it = lst.item(i)
+                fp = it.data(Qt.ItemDataRole.UserRole)
+                if not fp:
+                    continue
+                it.setCheckState(self._folder_optout_aggregate(fp))
+        finally:
+            self._suppress_folder_check_signals = False
+
+    def _sync_master_optout_checkbox(self) -> None:
+        """v7.16 BUG-5: tree commits call this to refresh the per-folder checkbox
+        aggregates (kept under the old name so the tree's existing hook works)."""
+        self._refresh_folder_checkbox_states()
 
     # ------------------------------------------------------------------
     # Phase 97 C-06: disk indicator with merge headroom
@@ -2469,24 +2680,34 @@ class MyLibraryTab(QWidget):
             current.data(Qt.ItemDataRole.UserRole)
             if current is not None else None
         )
-        self._folder_list.clear()
-        restore_row = -1
-        for folder in self._indexer.list_folders():
-            path = folder["path"]
-            status = folder.get("status", "active")
-            item = QListWidgetItem(path)
-            item.setData(Qt.ItemDataRole.UserRole, path)
-            # Phase 97 D-NEW-2 / LD-9: skip-set includes Phase 95 'unavailable' + new 'unreachable'/'timeout'.
-            if status in ("unavailable", "unreachable", "timeout"):
-                item.setForeground(QColor("#f39c12"))
-                item.setToolTip(
-                    tr(
-                        "Folder not found at {} — files remain indexed from last scan."
-                    ).format(path)
-                )
-            self._folder_list.addItem(item)
-            if previous_path and path == previous_path:
-                restore_row = self._folder_list.count() - 1
+        # v7.16 BUG-5: setting checkState below fires itemChanged — suppress so
+        # the per-folder opt-out handler does not re-enter during a UI refresh.
+        self._suppress_folder_check_signals = True
+        try:
+            self._folder_list.clear()
+            restore_row = -1
+            for folder in self._indexer.list_folders():
+                path = folder["path"]
+                status = folder.get("status", "active")
+                item = QListWidgetItem(path)
+                item.setData(Qt.ItemDataRole.UserRole, path)
+                # v7.16 BUG-5: per-folder opt-out checkbox ([x] included / [ ] excluded).
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(self._folder_optout_aggregate(path))
+                item.setToolTip(tr("Uncheck to exclude this whole folder from search"))
+                # Phase 97 D-NEW-2 / LD-9: skip-set includes Phase 95 'unavailable' + new 'unreachable'/'timeout'.
+                if status in ("unavailable", "unreachable", "timeout"):
+                    item.setForeground(QColor("#f39c12"))
+                    item.setToolTip(
+                        tr(
+                            "Folder not found at {} — files remain indexed from last scan."
+                        ).format(path)
+                    )
+                self._folder_list.addItem(item)
+                if previous_path and path == previous_path:
+                    restore_row = self._folder_list.count() - 1
+        finally:
+            self._suppress_folder_check_signals = False
         # NOTE: do NOT auto-select here.  notify_session_restored() handles that
         # after opt-outs have been loaded from the session JSON.
         if restore_row >= 0:
