@@ -16982,27 +16982,10 @@ class GenizahGUI(QMainWindow):
                 self._update_search_within_btn()
             return
 
-        # v7.16: gated UI-thread profiler to localize the LOCAL-search freeze.
-        # Enable with env GENIZAH_PROFILE_SEARCH=1 and run from a console.
-        import os as _os, time as _time
-        self._prof_on = bool(_os.environ.get("GENIZAH_PROFILE_SEARCH"))
-        self._prof_t = _time.perf_counter()
-
-        def _prof_ck(label):
-            if not self._prof_on:
-                return
-            now = _time.perf_counter()
-            print(f"[PROFILE] on_search_finished {label}: +{now - self._prof_t:.2f}s "
-                  f"(n={len(results)})", flush=True)
-            self._prof_t = now
-
-        self._prof_ck = _prof_ck
-
         self.last_results = results
         # v7.16 BUG-6: prime the LOCAL filepath cache in one batched query before
         # rendering/filtering iterate per-row (prevents the ~10s UI-thread freeze).
         self._prime_local_filepath_cache(results)
-        _prof_ck("prime_filepath_cache")
 
         # Phase 55: Refinement chain update (uses RAW results before post-filters)
         if self._refine_mode:
@@ -17091,25 +17074,20 @@ class GenizahGUI(QMainWindow):
         self._has_result_domains = False
         self.btn_domain_filter.setEnabled(False)
 
-        _prof_ck("pre_render")
         # Use smaller initial batch during session restore for faster first paint
         restore_batch = 50 if getattr(self, '_restoring_session', False) else None
         self.load_next_batch(batch_size=restore_batch)
-        _prof_ck("load_next_batch")
 
         # Auto-fit columns to content (like double-clicking the column border)
         for col in (self.COL_SYS_ID, self.COL_LIBRARY, self.COL_SHELF, self.COL_IMG):
             self.results_table.resizeColumnToContents(col)
-        _prof_ck("resize_columns")
 
         # Launch enrichment workers (async -- results appear first, enrichment fills in later)
         # During session restore, defer workers to keep UI responsive
         self._launch_enrichment_workers(results, defer=getattr(self, '_restoring_session', False))
-        _prof_ck("launch_enrichment")
 
         # Save session after search completes (crash-safe persistence)
         self._schedule_session_save()
-        _prof_ck("schedule_session_save")
         # Add to search history (skip during session restore and refinement -- D-15)
         if not getattr(self, '_restoring_session', False) and not self.refinement_chain:
             self._add_regular_search_to_history()

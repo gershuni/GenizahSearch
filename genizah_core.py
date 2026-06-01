@@ -6842,11 +6842,6 @@ class SearchEngine:
         self.local_index = None
         self.local_searcher = None
         self._local_open_error = None
-        # v7.16: gated timing — reopening a large LOCAL index is a candidate for
-        # the constant per-search/startup freeze. Enable with GENIZAH_PROFILE_SEARCH=1.
-        import os as _os, time as _time
-        _prof = _os.environ.get("GENIZAH_PROFILE_SEARCH")
-        _t0 = _time.perf_counter() if _prof else None
 
         if not os.path.isdir(Config.LOCAL_INDEX_DIR):
             LOGGER.info(
@@ -6878,9 +6873,6 @@ class SearchEngine:
             self.local_index = local_index
             self.local_searcher = local_index.searcher()
             LOGGER.info("LOCAL side-index opened: %s", Config.LOCAL_INDEX_DIR)
-            if _t0 is not None:
-                print(f"[PROFILE] _open_local_searcher (LOCAL index reopen) "
-                      f"took {_time.perf_counter() - _t0:.2f}s", flush=True)
         except Exception as open_exc:
             LOGGER.warning(
                 "LOCAL index open/schema-check failed: %r — attempting atomic rebuild",

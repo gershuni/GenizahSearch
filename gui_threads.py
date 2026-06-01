@@ -100,9 +100,6 @@ class SearchThread(QThread):
                 if self.cancel_flag:
                     raise InterruptedError("Search cancelled by user")
                 self.progress_signal.emit(curr, total)
-            import os as _os, time as _time
-            _profile = _os.environ.get("GENIZAH_PROFILE_SEARCH")
-            _t0 = _time.perf_counter()
             results = self.searcher.execute_search(
                 self.query,
                 self.mode,
@@ -114,12 +111,6 @@ class SearchThread(QThread):
                 text_position=self.text_position,
                 corpus_scope=self.corpus_scope,
             )
-            if _profile:
-                print(
-                    f"[PROFILE] execute_search(scope={self.corpus_scope}, mode={self.mode}) "
-                    f"-> {len(results)} hits in {_time.perf_counter() - _t0:.2f}s",
-                    flush=True,
-                )
 
             self.results_signal.emit(results)
         except InterruptedError:
