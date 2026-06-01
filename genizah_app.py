@@ -19722,6 +19722,10 @@ class GenizahGUI(QMainWindow):
             # Fallback to visible results (excludes hidden/excluded rows)
             results_to_export = self._collect_sorted_results()
 
+        # Phase 103: prime the batch filepath cache for any LOCAL hits in the
+        # export set (BUG-6 pattern — ONE SQLite query, never per-row).
+        self._prime_local_filepath_cache(results_to_export)
+
         for r in results_to_export:
             d = r['display']
             sid = d.get('id', '')
@@ -19931,6 +19935,10 @@ class GenizahGUI(QMainWindow):
                         else None
                     ),
                     domain_name_map=_domain_name_map_for_xlsx,
+                    # Phase 103: pass the pre-primed cache dict (BUG-6 pattern —
+                    # _prime_local_filepath_cache already populated this for every
+                    # LOCAL sys_id; no per-row SQLite lookup during xlsx export).
+                    local_filepath_map=dict(getattr(self, '_local_filepath_cache', {}) or {}),
                 )
                 with open(path, 'wb') as f:
                     f.write(content)
