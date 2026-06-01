@@ -63,20 +63,20 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LEXP-01 | TBD | Pending |
-| LEXP-02 | TBD | Pending |
-| LEXP-03 | TBD | Pending |
-| LEXP-04 | TBD | Pending |
-| LEXP-05 | TBD | Pending |
-| LEXP-06 | TBD | Pending |
-| LEXP-07 | TBD | Pending |
-| LEXP-08 | TBD | Pending |
+| LEXP-01 | 103 | Pending |
+| LEXP-02 | 104 | Pending |
+| LEXP-03 | 103 | Pending |
+| LEXP-04 | 103 | Pending |
+| LEXP-05 | 103 | Pending |
+| LEXP-06 | 103 | Pending |
+| LEXP-07 | 103 | Pending |
+| LEXP-08 | 103 | Pending |
 
 **Coverage:**
 - v7.17 requirements: 8 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 8 ⚠️ (resolved by roadmapper)
+- Mapped to phases: 8
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-01*
-*Last updated: 2026-06-01 after milestone v7.17 initialization*
+*Last updated: 2026-06-01 — traceability filled by roadmapper (LEXP-01/03-08 → Phase 103; LEXP-02 → Phase 104; 8/8 mapped, 0 unmapped)*

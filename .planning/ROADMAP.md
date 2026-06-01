@@ -25,8 +25,46 @@
 - **v7.14 My Library — Local Document Search** -- Phases 95-98 (shipped 2026-05-24; closed 2026-05-27)
 - **v7.15 My Library Visual** -- Phases 99-101 (shipped 2026-05-28). See `milestones/v7.15-ROADMAP.md`
 - **v7.16 Hebrew PDF Text Quality** -- Phase 102 + no-phase quality work (shipped 2026-06-01). See `milestones/v7.16-ROADMAP.md`
+- **v7.17 LOCAL Export Support** -- Phases 103-104 (in progress)
 
 ## Phases
+
+### Phase 103: Search-Results LOCAL Export (All Formats + Bilingual + Non-Regression)
+
+**Goal**: Users can export a Search-results set containing LOCAL hits — in any of the four desktop formats — and receive useful, locally-meaningful columns for each LOCAL row, with a dedicated "Local Documents" sheet in xlsx and full non-regression on Genizah-only exports.
+
+**Depends on**: Phase 102 (LOCAL corpus infrastructure in place)
+
+**Requirements**: LEXP-01, LEXP-03, LEXP-04, LEXP-05, LEXP-06, LEXP-07, LEXP-08
+
+**Success Criteria** (what must be TRUE):
+  1. Exporting a mixed Genizah + LOCAL result set to xlsx produces a workbook whose "Local Documents" sheet lists each LOCAL hit's filename, parent folder, full filepath, page number, and matched-text snippet — and whose "Search Results" sheet contains only Genizah rows with no placeholder LOCAL entries.
+  2. The "Manuscripts" and "Bibliography" sub-sheets in a mixed xlsx export contain no rows for LOCAL synthetic sys_ids — only real Genizah manuscripts appear there.
+  3. Exporting a LOCAL-only result set to xlsx produces a usable workbook (the "Local Documents" sheet is populated and active; the Genizah sub-sheets are omitted or empty; no Python error is raised).
+  4. Exporting a mixed result set to CSV, TXT, or DOCX produces a single unified table where LOCAL rows carry the local columns (filename/folder/filepath/page/matched-text) and Genizah rows carry the Genizah columns — no LOCAL row shows a row of empty/meaningless Genizah cells.
+  5. Exporting a Genizah-only result set in any format produces output structurally identical to pre-v7.17 output; the `tests/test_export_xlsx_cross_parity.py` invariant passes with no modifications.
+  6. The "Local Documents" sheet title and its column headers appear in Hebrew when the export language is `he` and in English when the export language is `en`, matching the bilingual behaviour of the existing four Genizah sheets.
+
+**Plans**: TBD
+
+---
+
+### Phase 104: Composition-Report LOCAL Export
+
+**Goal**: Users running a Composition Search whose result set contains LOCAL hits receive the same local-column treatment (LEXP-01 parity) on the Composition-report export surface (`export_comp_report`), using the helpers and row-shape established in Phase 103.
+
+**Depends on**: Phase 103 (LOCAL row-shape + xlsx sheet helpers defined there)
+
+**Requirements**: LEXP-02
+
+**Success Criteria** (what must be TRUE):
+  1. Exporting a Composition-Search report whose chunks include LOCAL hits to xlsx places those LOCAL rows in a "Local Documents" sheet (or LOCAL-aware section), not in the Genizah chunk rows — each LOCAL row shows filename, folder, filepath, page, and matched text.
+  2. Exporting the same Composition-Search report to CSV, TXT, or DOCX produces a single table where LOCAL chunk rows carry the local columns and Genizah chunk rows carry the Genizah columns — no misleading empty cells for LOCAL rows.
+  3. A Genizah-only Composition-Search report export is structurally unchanged from pre-v7.17 output across all four formats.
+
+**Plans**: TBD
+
+---
 
 <details>
 <summary>✅ v7.16 Hebrew PDF Text Quality (Phase 102 + no-phase quality work) — SHIPPED 2026-06-01</summary>
@@ -285,6 +323,8 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
+| 103. Search-Results LOCAL Export | v7.17 | 0/TBD | Not started | - |
+| 104. Composition-Report LOCAL Export | v7.17 | 0/TBD | Not started | - |
 | 99. PDF Page Renderer | v7.15 | 2/2 | Complete | 2026-05-27 |
 | 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 3/3 | Complete | 2026-05-27 |
 | 101. LOCAL PDF RTL fix + remnant cleanup | v7.15 | 2/2 | Complete | 2026-05-28 |
@@ -292,11 +332,11 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 ## Backlog
 
-No active backlog entries. Phases 999.2/999.3 were promoted into v7.13; Phase 101 shipped in v7.15 and Phase 102 in v7.16 — full phase detail archived in `milestones/v7.15-ROADMAP.md` and `milestones/v7.16-ROADMAP.md`.
+No active backlog entries for future milestones.
 
-Next-milestone candidates (not yet phased): **D-F12** (regular Search ~8s wall-clock investigation), **D-F17** (xlsx/Word/JSON export not adapted to LOCAL / ALL), **D-F18** (context-menu LOCAL detection normalize through `display`) — see `docs/OPEN_ISSUES.md`.
+Next-milestone candidates (not in v7.17 scope): **D-F12** (regular Search ~8s wall-clock investigation), **D-F18** (context-menu LOCAL detection normalize through `display`) — see `docs/OPEN_ISSUES.md`.
 
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-06-01 — v7.16 Hebrew PDF Text Quality CLOSED via `/gsd-complete-milestone` (1 formal phase 102 + no-phase de-space/UAT/freeze work; shipped v7.16.0 desktop 2026-06-01, tag `v7.16.0` @ `ccb87c90`). Phase 102 + Phase 101 detail collapsed into milestone groups; archive at `.planning/milestones/v7.16-ROADMAP.md`. Next: `/gsd-new-milestone` (candidates D-F12 search-latency, D-F17 LOCAL/ALL export). Prior: 2026-05-27 v7.15 roadmap created; v7.13/v7.14 reconciled.*
+*Last updated: 2026-06-01 — v7.17 LOCAL Export Support STARTED (Phases 103-104). Phase 103: Search-Results LOCAL Export (LEXP-01/03/04/05/06/07/08 — all formats + xlsx "Local Documents" sheet + bilingual + non-regression). Phase 104: Composition-Report LOCAL Export (LEXP-02 — parity for export_comp_report). D-F17 active. Prior: v7.16 Hebrew PDF Text Quality CLOSED 2026-06-01 (Phase 102 + no-phase work; tag v7.16.0 @ ccb87c90).*
