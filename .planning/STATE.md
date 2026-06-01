@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v7.16
-milestone_name: Hebrew PDF Text Quality
-status: Milestone complete
-stopped_at: v7.16 milestone closed (shipped v7.16.0 desktop 2026-06-01)
+milestone: v7.17
+milestone_name: LOCAL Export Support
+status: Defining requirements
+stopped_at: v7.17 milestone started — defining requirements
 last_updated: "2026-06-01T00:00:00.000Z"
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -20,14 +20,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-01)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Planning next milestone — candidates D-F12 (regular Search ~8s wall-clock) and D-F17 (LOCAL/ALL export)
+**Current focus:** v7.17 LOCAL Export Support — defining requirements (closes D-F17)
 
 ## Current Position
 
-Milestone: **v7.16 Hebrew PDF Text Quality — CLOSED 2026-06-01** (shipped v7.16.0 desktop; tag `v7.16.0` @ `ccb87c90`; GitHub Release with installer marked latest; CI green). Closed via `/gsd-complete-milestone`. Archive: `.planning/milestones/v7.16-ROADMAP.md`.
-Phase: none active (102 complete & shipped).
-Shipped in v7.16: Phase 102 (LOCAL PDF text-layer extraction rewrite — rawdict per-glyph, RTL-gated reorder, Unicode-Mn nikud, per-line Otsu de-space, `_ltr_damage_guard` RTL-trust, corrupt_encoding; closes D-F13/D-F14/D-F16) + no-phase quality work: de-space follow-ups D-F13b/c/d, LOCAL UAT extraction fixes D-F19..D-F22 (HTML/xlsx/CSV + folder opt-out cascade BLOCKER) + D-F25 (apostrophe crash), file-management actions D-F24, and three search/startup freeze fixes D-F23 (778 MB `search_history.json`, large-folder O(n²) startup, LAB-rebuild churn). Pre-release: `[PROFILE]` debug instrumentation removed (`ccb87c90`).
-Next: `/gsd-new-milestone` to start the next milestone (leading candidates: D-F12 search-latency profile-first investigation; D-F17 LOCAL/ALL export adaptation).
+Milestone: **v7.17 LOCAL Export Support — STARTED 2026-06-01** (closes D-F17). Adapt the desktop result-export flows so LOCAL ("My Library") hits export with local-meaningful columns (filename/folder/filepath/page/matched-text) instead of empty Genizah columns, across XLSX/CSV/TXT/DOCX on the Search-results (`export_results`) and Composition-report (`export_comp_report`) surfaces; mixed/ALL xlsx gains a dedicated "Local Documents" sheet; Genizah-only exports unchanged. Desktop-only (web has no LOCAL); JSON + Parallels out of scope.
+Phase: none active yet — defining requirements, then roadmap (continues at **Phase 103**).
+Status: Defining requirements.
+Last activity: 2026-06-01 — Milestone v7.17 started (PROJECT.md updated, research skipped).
+Next: requirements → roadmap → `/gsd-discuss-phase 103` (or `/gsd-plan-phase 103`).
 
 ## Deferred Items
 
@@ -61,7 +62,7 @@ Carried forward to the next milestone (logged in `docs/OPEN_ISSUES.md`): **D-F12
 
 ## Session Continuity
 
-Last session: 2026-06-01 (v7.16.0 release via `/release` + milestone close via `/gsd-complete-milestone`)
-Stopped at: v7.16.0 shipped (desktop) — built installer (`GenizahSearchPro_V7.16.0_Setup.exe`, 277.9 MB), tag `v7.16.0` @ `ccb87c90`, GitHub Release with installer (marked latest), CI green; removed `[PROFILE]` debug instrumentation pre-release; milestone closed (MILESTONES/PROJECT/ROADMAP/STATE/RETROSPECTIVE updated, archive `.planning/milestones/v7.16-ROADMAP.md`).
-Resume file: `.planning/milestones/v7.16-ROADMAP.md` + `docs/OPEN_ISSUES.md` (D-F23 RESOLUTION).
-Next step: `/gsd-new-milestone` to start the next milestone — leading candidates D-F12 (regular Search ~8s wall-clock, profile-first) and D-F17 (LOCAL/ALL export). Optional `/gsd-cleanup` on the historical backlog.
+Last session: 2026-06-01 (`/gsd-new-milestone` — started v7.17 LOCAL Export Support)
+Stopped at: milestone questioning complete (scope confirmed: LOCAL-appropriate columns; dedicated "Local Documents" sheet for mixed/ALL xlsx; XLSX/CSV/TXT/DOCX; Search-results + Composition-report surfaces; desktop-only; JSON + Parallels out of scope; research skipped). PROJECT.md + STATE.md updated. Defining requirements next.
+Resume file: `.planning/PROJECT.md` (## Current Milestone: v7.17) + `docs/OPEN_ISSUES.md` (D-F17).
+Next step: define `.planning/REQUIREMENTS.md` → spawn roadmapper for ROADMAP.md (continues at Phase 103) → `/gsd-discuss-phase 103`.

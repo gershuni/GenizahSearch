@@ -8,6 +8,18 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
+## Current Milestone: v7.17 LOCAL Export Support
+
+**Goal:** Make every desktop result export usable when the result set contains LOCAL ("My Library") hits — emit local-meaningful columns (filename, folder, filepath, page, matched text) instead of the empty/irrelevant Genizah columns (shelfmark, library, IIIF, PGP, bibliography, domains) those rows produce today. Closes deferred issue **D-F17**.
+
+**Target features:**
+- LOCAL rows export with local-appropriate columns across all four desktop formats (XLSX, CSV, TXT, DOCX), on BOTH the Search-results export (`export_results`) and the Composition-report export (`export_comp_report`).
+- Mixed (ALL corpus) xlsx gains a dedicated **"Local Documents"** sheet; the Genizah `Manuscripts` / `Bibliography` sub-sheets exclude LOCAL rows.
+- CSV / TXT / DOCX single-table formats fall back to one LOCAL-aware table (local rows fill the local columns).
+- Genizah-only exports remain structurally unchanged (cross-parity invariant `tests/test_export_xlsx_cross_parity.py` preserved).
+
+**Key context:** Desktop-only — web "My Library" does not exist and web export already excludes LOCAL via `skip_local`, so the dual-app maintenance rule does not apply here. JSON export (web-only) and Parallels export are out of scope. LOCAL hits are 97-prefix synthetic sys_ids carrying a top-level `source='LOCAL'`; their result dicts already hold filepath / page / folder via the My Library SQLite (`get_filepaths`, `local_files`).
+
 ## Current State (v7.16 Hebrew PDF Text Quality shipped 2026-06-01)
 
 **Shipped:** v7.16 Hebrew PDF Text Quality (desktop only, 2026-06-01; tag `v7.16.0` @ `ccb87c90`)
@@ -295,10 +307,11 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 ### Active
 
-No formal requirements are open. Next-milestone candidates (not yet planned):
+**Milestone v7.17 — LOCAL Export Support (in progress).** Adapt the desktop result-export flows so LOCAL ("My Library") hits export with local-meaningful columns instead of empty Genizah columns, across XLSX/CSV/TXT/DOCX on the Search-results and Composition-report surfaces. Full requirements with REQ-IDs in `.planning/REQUIREMENTS.md`; phases in `.planning/ROADMAP.md`. Closes **D-F17**.
+
+Remaining next-milestone candidates (NOT in v7.17 scope):
 - **D-F12** — regular Search ~constant 8s wall-clock investigation (profile-first: instrument Tantivy candidate fetch → regex post-filter → enrichment → highlight build → return-to-UI; profile LOCAL-only / Genizah-unfiltered / Genizah-filtered; optimize the actual bottleneck — do NOT guess).
-- **D-F17** — adapt xlsx/Word/JSON export to LOCAL / ALL (local+genizah) result sets (currently Genizah-tuned only).
-- **D-F18** — context-menu LOCAL detection could normalize through `display`.
+- **D-F18** — context-menu LOCAL detection could normalize through `display` (P3, opportunistic when next editing `_show_results_context_menu`).
 
 ### Out of Scope
 
@@ -395,6 +408,7 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | v7.16: Unicode-`Mn` combining-mark test (not `0x05B0–0x05C7` range) | Range mis-treated maqaf/sof-pasuq as vowels and missed te'amim | ✓ Good — maqaf `־` preserved |
 | v7.16: search history stores no result snapshots (re-run on click) | Storing `results[:5000]`/entry grew `search_history.json` to 778 MB → ~20-30s UI-thread freeze every search | ✓ Good — migrated 778 MB → 0.08 MB |
 | v7.16: diagnose perf freezes by measuring on real data + parallel Claude/Codex | Headless PyQt probes ruled out wrong hypotheses; Codex flagged the unprofiled post-checkpoint history write | ✓ Good — converged on the real root cause |
+| v7.17: LOCAL rows export as local columns (not excluded); mixed/ALL xlsx gets a dedicated "Local Documents" sheet | Genizah columns (shelfmark/IIIF/PGP/bibliography/domains) are meaningless for local files; a separate sheet keeps both shapes clean and preserves the Genizah cross-parity invariant | — Pending |
 
 ## Evolution
 
@@ -414,7 +428,9 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-01 — v7.16 Hebrew PDF Text Quality milestone CLOSED (1 formal phase 102 + no-phase de-space/UAT/freeze work; shipped v7.16.0 desktop 2026-06-01, tag `v7.16.0` @ `ccb87c90`, GitHub Release with installer marked latest, CI green). LOCAL Hebrew PDF text-layer extraction rewritten (rawdict per-glyph, RTL-gated, Otsu de-space, Mn nikud), file-management actions for LOCAL hits, and three search/startup freeze fixes (778 MB history file, large-folder O(n²) startup, LAB-rebuild churn). Next: `/gsd-new-milestone` (leading candidates: D-F12 search-latency investigation, D-F17 LOCAL/ALL export).*
+*Last updated: 2026-06-01 — v7.17 LOCAL Export Support milestone STARTED (closes D-F17). Goal: adapt the desktop result exports (Search-results + Composition-report; XLSX/CSV/TXT/DOCX) so LOCAL "My Library" hits emit local columns (filename/folder/filepath/page/matched-text), and mixed/ALL xlsx gets a dedicated "Local Documents" sheet, while Genizah-only exports stay unchanged. Desktop-only (web has no LOCAL); JSON + Parallels out of scope. Requirements → `.planning/REQUIREMENTS.md`; roadmap → `.planning/ROADMAP.md`. Next: `/gsd-discuss-phase 103` or `/gsd-plan-phase 103`.*
+
+*Prior: 2026-06-01 — v7.16 Hebrew PDF Text Quality milestone CLOSED (1 formal phase 102 + no-phase de-space/UAT/freeze work; shipped v7.16.0 desktop, tag `v7.16.0` @ `ccb87c90`, GitHub Release with installer marked latest, CI green). LOCAL Hebrew PDF text-layer extraction rewritten (rawdict per-glyph, RTL-gated, Otsu de-space, Mn nikud), file-management actions for LOCAL hits, and three search/startup freeze fixes (778 MB history file, large-folder O(n²) startup, LAB-rebuild churn).*
 
 *Prior: 2026-05-28 — v7.15 My Library Visual CLOSED (3 phases 99-101, 7 plans, 6/6 PDFIMG-*). PDF page image rendering in ResultDialog + Browse + pre-release polish (RTL fix, LAB/remove-folder Windows fixes, "Re-index All" button).*
 
