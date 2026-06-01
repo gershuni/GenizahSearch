@@ -1,0 +1,82 @@
+# Requirements: GenizahSearch — Milestone v7.17 LOCAL Export Support
+
+**Defined:** 2026-06-01
+**Core Value:** Researchers can find what they need in the Genizah corpus
+**Closes:** OPEN_ISSUES **D-F17** (xlsx/Word/TXT/CSV export not adapted to LOCAL hits)
+
+## Milestone Goal
+
+Adapt the **desktop** result-export flows so a result set containing LOCAL ("My Library")
+hits exports usefully: LOCAL rows carry local-meaningful columns (filename, folder,
+filepath, page, matched text) instead of the empty/irrelevant Genizah columns (shelfmark,
+library, IIIF URL, PGP, bibliography, domains) they emit today. Mixed (Genizah + LOCAL)
+xlsx workbooks get a dedicated **"Local Documents"** sheet; single-table formats fall back
+to one LOCAL-aware table. Genizah-only exports stay unchanged.
+
+**Apps:** Desktop only. Web "My Library" does not exist, and web export already excludes
+LOCAL via `skip_local`, so the dual-app maintenance rule does not apply here.
+
+## v7.17 Requirements
+
+Each maps to a roadmap phase (continues numbering from Phase 102 → starts at **Phase 103**).
+
+### LOCAL Export Adaptation (LEXP)
+
+- [ ] **LEXP-01**: When a user exports **Search results** containing LOCAL hits, each LOCAL row carries local-meaningful values — **filename, parent folder, full filepath, page, and matched text** — in place of the empty Genizah columns (shelfmark / library / IIIF / PGP / domains).
+- [ ] **LEXP-02**: When a user exports a **Composition-Search report** containing LOCAL hits, each LOCAL row carries the same local columns (LEXP-01 parity on the `export_comp_report` surface).
+- [ ] **LEXP-03**: When a user exports a **mixed** Genizah + LOCAL result set to **xlsx**, the workbook contains a dedicated **"Local Documents"** sheet holding the LOCAL rows, and the Genizah "Search Results" sheet contains only Genizah rows.
+- [ ] **LEXP-04**: The Genizah-only sub-sheets (**Manuscripts**, **Bibliography**) contain **no** LOCAL rows — LOCAL synthetic sys_ids never produce empty/placeholder manuscript or bibliography entries.
+- [ ] **LEXP-05**: When a user exports a **LOCAL-only** result set to xlsx, the workbook is usable and centered on the Local Documents sheet; the Genizah sub-sheets are omitted or empty (never error).
+- [ ] **LEXP-06**: When a user exports to **CSV / TXT / DOCX**, the output is a single LOCAL-aware table: LOCAL rows populate the local columns and Genizah rows populate the Genizah columns, with no misleading empty cells for local rows.
+- [ ] **LEXP-07**: The new LOCAL columns and the "Local Documents" sheet title/headers are **bilingual** — Hebrew when `lang='he'`, English when `lang='en'` — consistent with the existing 4-sheet bilingual export.
+- [ ] **LEXP-08**: **Genizah-only exports remain structurally unchanged** across XLSX/CSV/TXT/DOCX; the xlsx cross-parity invariant (`tests/test_export_xlsx_cross_parity.py`) and the existing 4-sheet Genizah workbook are preserved (no regression).
+
+## Future Requirements
+
+Deferred to a future milestone. Tracked but not in this roadmap.
+
+### Export (EXP)
+
+- **EXP-F1**: Desktop JSON export of LOCAL / ALL result sets (only if a desktop JSON export is added later; desktop has no JSON export today).
+- **EXP-F2**: Parallels-export LOCAL adaptation (excluded from v7.17 scope by user direction).
+
+### Performance (PERF)
+
+- **PERF-F1**: D-F12 — regular Search ~constant ~8s wall-clock investigation (separate, profile-first effort; unrelated to export shape).
+
+## Out of Scope
+
+Explicitly excluded for v7.17. Documented to prevent scope creep.
+
+| Feature | Reason |
+|---------|--------|
+| Web exports (Excel / Word / JSON) | Web has no LOCAL corpus; web export already excludes LOCAL via `skip_local`. Nothing to adapt. |
+| JSON export of LOCAL rows | JSON export is web-only; desktop has no JSON export, and we are not adding one this milestone. |
+| Parallels export | User scoped this milestone to Search-results + Composition-report surfaces only. |
+| Changing Genizah export columns/structure | Non-goal — Genizah workbook shape and cross-parity invariant must be preserved (LEXP-08). |
+| OCR / text-extraction changes for image-only or corrupt PDFs | Separate concern (SEED-003); does not affect export shape. |
+| Search-latency work (D-F12) | Separate profile-first effort; not an export-shape change. |
+
+## Traceability
+
+Which phases cover which requirements. Populated during roadmap creation.
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| LEXP-01 | TBD | Pending |
+| LEXP-02 | TBD | Pending |
+| LEXP-03 | TBD | Pending |
+| LEXP-04 | TBD | Pending |
+| LEXP-05 | TBD | Pending |
+| LEXP-06 | TBD | Pending |
+| LEXP-07 | TBD | Pending |
+| LEXP-08 | TBD | Pending |
+
+**Coverage:**
+- v7.17 requirements: 8 total
+- Mapped to phases: 0 (pending roadmap)
+- Unmapped: 8 ⚠️ (resolved by roadmapper)
+
+---
+*Requirements defined: 2026-06-01*
+*Last updated: 2026-06-01 after milestone v7.17 initialization*
