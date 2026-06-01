@@ -43,6 +43,7 @@ try:
         _csv_extra_cols,
         _format_txt_genizah_block,
         _format_txt_local_block,
+        _local_page_label,
     )
 
     _HELPERS_AVAILABLE = True
@@ -244,7 +245,11 @@ def test_csv_local_filepath_formula_escaped():
 
 
 def test_txt_local_block_format():
-    """TXT LOCAL block: === filename | parent ===, Path: filepath, (page N) (D-09)."""
+    """TXT LOCAL block: === filename | parent ===, Path: filepath, (p. N) (D-09).
+
+    D-02: chunk_locator ('p. 5') is used VERBATIM and wrapped as '(p. 5)' — it
+    must NOT be double-prefixed to '(page p. 5)' (Codex MEDIUM #1).
+    """
     local_r = _local_result(locator="p. 5", p_num="5")
     fp_fn = lambda sid: LOCAL_FP  # noqa: E731
     block = _format_txt_local_block(local_r, filepath_fn=fp_fn)
@@ -253,7 +258,10 @@ def test_txt_local_block_format():
         f"Header line missing in block:\n{block!r}"
     )
     assert f"Path: {LOCAL_FP}" in block, f"Path line missing in block:\n{block!r}"
-    assert "(page p. 5)" in block, f"Page info missing in block:\n{block!r}"
+    assert "(p. 5)" in block, f"Page info missing in block:\n{block!r}"
+    assert "(page p. 5)" not in block, (
+        f"Page locator must not be double-prefixed (D-02):\n{block!r}"
+    )
 
 
 def test_txt_local_block_strips_markers():
@@ -305,6 +313,35 @@ def test_txt_genizah_block_no_path_line():
     gen_r = _genizah_result()
     block = _format_txt_genizah_block(gen_r)
     assert "Path:" not in block, "Genizah TXT block must not contain a 'Path:' line"
+
+
+# ---------------------------------------------------------------------------
+# Page-label (D-02) tests — Codex MEDIUM #1
+# ---------------------------------------------------------------------------
+
+
+def test_local_page_label_chunk_locator_verbatim():
+    """D-02: a human-formatted chunk_locator is used VERBATIM, never re-prefixed."""
+    assert _local_page_label({"chunk_locator": "p. 3", "p_num": "3"}) == "p. 3"
+    assert _local_page_label({"chunk_locator": "ff. 2v-3r"}) == "ff. 2v-3r"
+
+
+def test_local_page_label_pnum_fallback_synthesized():
+    """D-02: with no chunk_locator, a raw p_num is synthesized as 'p. N'."""
+    assert _local_page_label({"p_num": "7"}) == "p. 7"
+
+
+def test_local_page_label_empty_when_no_page():
+    """No locator and no p_num -> empty string (no stray 'p. ')."""
+    assert _local_page_label({}) == ""
+    assert _local_page_label({"p_num": ""}) == ""
+
+
+def test_local_page_label_no_double_prefix():
+    """A verbatim 'p. 3' locator stays 'p. 3' — no 'p. p. 3' / 'page p. 3'."""
+    label = _local_page_label({"chunk_locator": "p. 3"})
+    assert label == "p. 3"
+    assert "p. p." not in label and "page" not in label
 
 
 # ---------------------------------------------------------------------------
