@@ -2926,6 +2926,107 @@ def _build_search_results_xlsx_bytes(
     return bio.getvalue()
 
 
+# ---------------------------------------------------------------------------
+# Phase 103: module-level export helpers (offline-testable, no Qt/self deps)
+# Used by export_results CSV/TXT branches; unit-tested in
+# tests/test_local_export_csv_txt_docx.py.
+# ---------------------------------------------------------------------------
+
+def _build_export_data_row(result_dict, filepath_fn=None):
+    """Build one 7-column data_rows entry for export_results.
+
+    For LOCAL rows (display.source == 'LOCAL'): Shelfmark=filename,
+    Library=parent folder, Source='LOCAL', Snippet=matched text (Phase 103 D-08).
+    For Genizah rows: all 7 columns as before (caller fills library_name, shelf,
+    title via meta manager).
+
+    ``filepath_fn(sid) -> str`` is called only for LOCAL rows to get the full
+    filepath for parent-folder extraction; if omitted, parent folder is ''.
+
+    Returns (row: list[str], is_local: bool).
+    """
+    import os as _os
+    import re as _re
+    d = result_dict.get('display') or {}
+    sid = d.get('id', '')
+    is_local = d.get('source') == 'LOCAL'
+    raw_hl = result_dict.get('raw_file_hl', '')
+    snippet = str(raw_hl).strip().replace('\n', ' ').replace('\r', ' ')
+    snippet = _re.sub(r'\s+', ' ', snippet)
+    if is_local:
+        filename = d.get('shelfmark', '') or sid
+        fp = (filepath_fn(sid) if callable(filepath_fn) else '') or ''
+        parent_folder = _os.path.basename(_os.path.dirname(fp)) if fp else ''
+        row = [
+            sid,
+            parent_folder,
+            filename,
+            '',
+            str(result_dict.get('chunk_locator') or result_dict.get('p_num', '') or ''),
+            'LOCAL',
+            snippet,
+        ]
+    else:
+        row = [sid, '', '', '', '', d.get('source', ''), snippet]
+    return row, is_local
+
+
+def _csv_extra_cols(result_dict, filepath_fn=None, lang='en'):
+    """Return the extra (Filepath, Page) pair for LOCAL rows in a mixed CSV.
+
+    Returns [filepath_sanitized, page_sanitized] for LOCAL rows,
+    ['', ''] for Genizah rows.  Both values are already run through
+    ``sanitize_text_for_excel``.
+    """
+    from shared_export_utils import sanitize_text_for_excel
+    d = result_dict.get('display') or {}
+    if d.get('source') == 'LOCAL':
+        sid = d.get('id', '')
+        fp = (filepath_fn(sid) if callable(filepath_fn) else '') or ''
+        pg = str(result_dict.get('chunk_locator') or result_dict.get('p_num', '') or '')
+        return [sanitize_text_for_excel(fp), sanitize_text_for_excel(pg)]
+    return ['', '']
+
+
+def _format_txt_local_block(result_dict, filepath_fn=None):
+    """Return the TXT block string for a LOCAL result (Phase 103 D-09).
+
+    Format:
+        === {filename} | {parent} ===
+        Path: {filepath}  (page N)
+        {snippet_clean}
+
+    (trailing blank line NOT included — caller appends '\\n\\n')
+    """
+    import os as _os
+    d = result_dict.get('display') or {}
+    sid = d.get('id') or result_dict.get('sys_id') or ''
+    filename = d.get('shelfmark') or sid
+    fp = (filepath_fn(sid) if callable(filepath_fn) else '') or ''
+    parent = _os.path.basename(_os.path.dirname(fp)) if fp else ''
+    page = result_dict.get('chunk_locator') or result_dict.get('p_num') or ''
+    page_str = f"(page {page})" if page else ''
+    local_snippet = result_dict.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '').replace('*', '')
+    lines = [
+        f"=== {filename} | {parent} ===",
+        f"Path: {fp}  {page_str}",
+        local_snippet,
+    ]
+    return '\n'.join(lines)
+
+
+def _format_txt_genizah_block(result_dict):
+    """Return the TXT block string for a Genizah result — BYTE-IDENTICAL to
+    the pre-v7.17 output (LEXP-08 strict content non-regression).
+
+    Format:
+        === {shelfmark} | {title} ===
+        {snippet_with_markers}
+    """
+    snippet = result_dict.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
+    return f"=== {result_dict['display']['shelfmark']} | {result_dict['display']['title']} ===\n{snippet}"
+
+
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
     browse_thumb_resolved = pyqtSignal(str, object)
@@ -19726,16 +19827,24 @@ class GenizahGUI(QMainWindow):
         # export set (BUG-6 pattern — ONE SQLite query, never per-row).
         self._prime_local_filepath_cache(results_to_export)
 
+        # Phase 103: authoritative filepath snapshot — primed above for every
+        # LOCAL sys_id; reading from the snapshot prevents the per-row SQLite
+        # fallback in _lookup_local_filepath from firing during export.
+        _local_fp_export_map = dict(getattr(self, '_local_filepath_cache', {}) or {})
+
+        def _export_filepath(sid):
+            return _local_fp_export_map.get(sid, '') or ''
+
+        # Phase 103: shared LOCAL pre-check reused by CSV/TXT/DOCX branches.
+        _has_local_in_export = any(
+            (r.get('display') or {}).get('source') == 'LOCAL'
+            for r in results_to_export
+        )
+
         for r in results_to_export:
             d = r['display']
             sid = d.get('id', '')
-
-            # Fetch fresh metadata (Important for Lab Mode)
-            shelf, title = self.meta_mgr.get_meta_for_id(sid)
-            if not shelf or shelf == "Unknown":
-                shelf = d.get('shelfmark', '')
-            if not title:
-                title = d.get('title', '')
+            _is_local_hit = d.get('source') == 'LOCAL'
 
             # Use raw_file_hl so highlight markers remain intact
             # Clean snippet: remove newlines (input is now clean text with asterisks)
@@ -19743,19 +19852,38 @@ class GenizahGUI(QMainWindow):
             snippet = str(raw_hl).strip().replace('\n', ' ').replace('\r', ' ')
             snippet = re.sub(r'\s+', ' ', snippet)
 
-            # Get library info (full name for export)
-            library_code = self.meta_mgr.get_library_for_id(sid) if sid else ''
-            library_name = get_library_display(library_code, short=False) if library_code else ''
+            if _is_local_hit:
+                # Phase 103 D-08: mirror the on-screen LOCAL mapping
+                # (genizah_app.py:16728-16751): Shelfmark=filename,
+                # Library=parent folder, Source='LOCAL', Snippet=matched text.
+                filename = d.get('shelfmark', '') or sid
+                _fp = _export_filepath(sid)
+                parent_folder = os.path.basename(os.path.dirname(_fp)) if _fp else ''
+                data_rows.append([
+                    sid,
+                    parent_folder,          # Library col = parent folder
+                    filename,               # Shelfmark col = filename
+                    '',                     # Title col blank for LOCAL
+                    str(r.get('chunk_locator') or r.get('p_num', '') or ''),  # Image/Page = locator VERBATIM (D-02)
+                    'LOCAL',                # Source
+                    snippet,                # Snippet = matched text
+                ])
+            else:
+                # Fetch fresh metadata (Important for Lab Mode)
+                shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                if not shelf or shelf == "Unknown":
+                    shelf = d.get('shelfmark', '')
+                if not title:
+                    title = d.get('title', '')
 
-            data_rows.append([
-                sid,
-                library_name,
-                shelf,
-                title,
-                str(d.get('img', '')),
-                d.get('source', ''),
-                snippet
-            ])
+                # Get library info (full name for export)
+                library_code = self.meta_mgr.get_library_for_id(sid) if sid else ''
+                library_name = get_library_display(library_code, short=False) if library_code else ''
+
+                data_rows.append([
+                    sid, library_name, shelf, title,
+                    str(d.get('img', '')), d.get('source', ''), snippet,
+                ])
 
         credit_text = self._get_credit_header()
         def _strip_search_prefix(text):
@@ -19951,15 +20079,45 @@ class GenizahGUI(QMainWindow):
         # --- CSV ---
         elif fmt == 'csv':
             try:
+                from shared_export_utils import sanitize_text_for_excel
+                # Phase 103 D-08 / D-13: append Filepath + Page columns ONLY
+                # when LOCAL rows are present in the export set.
+                if _has_local_in_export:
+                    _fp_label = "נתיב מלא" if CURRENT_LANG == 'he' else "Filepath"
+                    _pg_label = "עמוד" if CURRENT_LANG == 'he' else "Page"
+                    csv_headers = headers + [_fp_label, _pg_label]
+                else:
+                    csv_headers = headers
                 with open(path, 'w', encoding='utf-8-sig', newline='') as f:
                     f.write(credit_text)
                     f.write("\n" + search_info_text + "\n")
                     writer = csv.writer(f)
                     writer.writerow([])
-                    writer.writerow(headers)
-                    for row in data_rows:
-                        # Strip highlight markers for CSV
-                        clean_row = [str(val).replace('*', '') for val in row]
+                    writer.writerow(csv_headers)
+                    for r, row in zip(results_to_export, data_rows):
+                        # Phase 103 T-103-07: strip '*' markers, then
+                        # formula-injection-escape EVERY cell (a LOCAL
+                        # filename/folder/filepath/matched-text beginning with
+                        # = + - @ would otherwise be a live formula when the
+                        # .csv is opened in Excel/Sheets).
+                        clean_row = [
+                            sanitize_text_for_excel(str(val).replace('*', ''))
+                            for val in row
+                        ]
+                        if _has_local_in_export:
+                            d = r.get('display') or {}
+                            if d.get('source') == 'LOCAL':
+                                sid = d.get('id', '')
+                                _fp = _export_filepath(sid)
+                                _pg = str(r.get('chunk_locator') or r.get('p_num', '') or '')
+                                # T-103-07: sanitize the appended LOCAL
+                                # filepath + page too.
+                                clean_row = clean_row + [
+                                    sanitize_text_for_excel(_fp),
+                                    sanitize_text_for_excel(_pg),
+                                ]
+                            else:
+                                clean_row = clean_row + ['', '']
                         writer.writerow(clean_row)
                 self._save_last_folder(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
@@ -19971,7 +20129,9 @@ class GenizahGUI(QMainWindow):
             try:
                 from docx import Document
                 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+                from shared.docx_export import write_docx_result_block
                 doc = Document()
+                # Credits + search-metadata header (unchanged).
                 for line in credit_text.split('\n'):
                     if not line.strip():
                         continue
@@ -19984,32 +20144,18 @@ class GenizahGUI(QMainWindow):
                     doc.add_paragraph(line.strip())
                 doc.add_paragraph("")
 
-                headers = [tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
-                table = doc.add_table(rows=1, cols=len(headers))
-                self._set_table_width_pct(table, 100)
-                hdr_cells = table.rows[0].cells
-                for idx, header in enumerate(headers):
-                    hdr_cells[idx].text = header
-
-                for row in data_rows:
-                    row_cells = table.add_row().cells
-                    for col_idx, val in enumerate(row):
-                        cell = row_cells[col_idx]
-                        if col_idx == 6:  # Snippet column (after adding Library)
-                            cell.text = ""
-                            self._add_docx_highlighted_runs(cell.paragraphs[0], val)
-                        else:
-                            cell.text = str(val).replace('*', '')
+                # Phase 103 D-10/D-11: per-result rich-document blocks
+                # (both Genizah + LOCAL) via the shared Wave-1 writer.
+                for r in results_to_export:
+                    d = r.get('display') or {}
+                    sid = d.get('id') or r.get('sys_id') or ''
+                    fp = _export_filepath(sid) if d.get('source') == 'LOCAL' else ''
+                    write_docx_result_block(doc, r, filepath=fp, lang=CURRENT_LANG)
 
                 if CURRENT_LANG == "he":
                     doc.styles["Normal"].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
                     for p in doc.paragraphs:
                         self._set_paragraph_rtl(p)
-                    self._set_table_rtl(table)
-                    for row in table.rows:
-                        for cell in row.cells:
-                            for p in cell.paragraphs:
-                                self._set_paragraph_rtl(p)
 
                 doc.save(path)
                 self._save_last_folder(path)
@@ -20024,9 +20170,28 @@ class GenizahGUI(QMainWindow):
                     f.write(credit_text)
                     f.write("\n" + search_info_text + "\n\n")
                     for r in results_to_export:
-                        # Clean snippet: remove newlines for single-line export
-                        snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
-                        f.write(f"=== {r['display']['shelfmark']} | {r['display']['title']} ===\n{snippet}\n\n")
+                        d = r.get('display') or {}
+                        if d.get('source') == 'LOCAL':
+                            # Phase 103 D-09: new LOCAL labeled block.
+                            # Marker-stripped snippet for the LOCAL surface only.
+                            sid = d.get('id') or r.get('sys_id') or ''
+                            filename = d.get('shelfmark') or sid
+                            fp = _export_filepath(sid)
+                            parent = os.path.basename(os.path.dirname(fp)) if fp else ''
+                            # D-02: chunk_locator VERBATIM; raw p_num fallback bare.
+                            page = r.get('chunk_locator') or r.get('p_num') or ''
+                            page_str = f"(page {page})" if page else ''
+                            local_snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '').replace('*', '')
+                            f.write(f"=== {filename} | {parent} ===\n")
+                            f.write(f"Path: {fp}  {page_str}\n")
+                            f.write(f"{local_snippet}\n\n")
+                        else:
+                            # GENIZAH branch — BYTE-IDENTICAL to the pre-v7.17
+                            # TXT output (LEXP-08 strict content non-regression).
+                            # Same snippet computation + write statement as before:
+                            # markers preserved as they were (no '*' stripping).
+                            snippet = r.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
+                            f.write(f"=== {r['display']['shelfmark']} | {r['display']['title']} ===\n{snippet}\n\n")
                 self._save_last_folder(path)
                 QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
             except Exception as e:
