@@ -2564,6 +2564,10 @@ def _build_search_results_xlsx_bytes(
     # substitution on the main sheet when ``lang == 'he'``. Unknown
     # names pass through unchanged.
     domain_name_map=None,
+    # Phase 103 (LEXP-03/05): sys_id -> filepath map for LOCAL rows. Pre-built
+    # by export_results via the batch-primed _local_filepath_cache. Defaults to
+    # None ({}) so the cross-parity test's 4-arg call works unchanged.
+    local_filepath_map=None,
 ):
     """Build the 4-sheet workbook bytes for desktop xlsx search-results export.
 
@@ -2624,6 +2628,7 @@ def _build_search_results_xlsx_bytes(
         sheet_titles,
         apply_manuscript_row_hyperlinks,
         build_image_url_for_row, apply_main_row_image_url_hyperlink,
+        local_documents_header_row, build_local_document_row,   # NEW (Phase 103)
     )
     from shared_export_utils import build_rich_snippet_cell
 
@@ -2637,6 +2642,28 @@ def _build_search_results_xlsx_bytes(
     _printed_set = set(printed_ids or [])
     _domains_map = dict(result_domains or {})
     _domain_name_map = dict(domain_name_map or {})
+
+    # Phase 103 (LEXP-03/04/05/D-14): LOCAL row partition helpers.
+    import os as _os
+    _local_filepath_map = dict(local_filepath_map or {})
+    _is_local_sys_id = None
+    try:
+        from shared.local_sys_id import is_local_sys_id as _is_local_sys_id
+    except Exception:
+        _is_local_sys_id = None
+
+    def _row_sys_id(r):
+        return (r.get('display') or {}).get('id') or r.get('sys_id') or ''
+
+    def _is_local_row(r):
+        # D-14: display.source == 'LOCAL' is PRIMARY; 97-prefix is SECONDARY.
+        if (r.get('display') or {}).get('source') == 'LOCAL':
+            return True
+        return bool(_is_local_sys_id and _is_local_sys_id(_row_sys_id(r)))
+
+    _has_local = any(_is_local_row(r) for r in (results or []))
+    # LOCAL-only when EVERY result row is LOCAL.
+    _local_only = _has_local and all(_is_local_row(r) for r in (results or []))
 
     # D-04 REVISED (2026-05-20): bilingual headers + sheet titles.
     # `headers_main` kwarg kept for back-compat with the cross-parity test
@@ -2662,7 +2689,12 @@ def _build_search_results_xlsx_bytes(
     ws_manu.sheet_view.rightToLeft = rtl
     ws_bib = wb.create_sheet(title=_titles['bibliography'])
     ws_bib.sheet_view.rightToLeft = rtl
-    # Smoke verification round 2 (2026-05-21): 4th sheet.
+    # Phase 103 D-06: Local Documents sheet only when >=1 LOCAL hit present.
+    ws_local = None
+    if _has_local:
+        ws_local = wb.create_sheet(title=_titles['local_documents'])
+        ws_local.sheet_view.rightToLeft = rtl
+    # Smoke verification round 2 (2026-05-21): 4th sheet — stays last.
     ws_credits = wb.create_sheet(title=_titles['credits_info'])
     ws_credits.sheet_view.rightToLeft = rtl
 
@@ -2680,6 +2712,9 @@ def _build_search_results_xlsx_bytes(
 
     # --- Main sheet data rows ---
     for res in results:
+        # Phase 103 D-04/D-14: LOCAL rows live on the Local Documents sheet, not here.
+        if _has_local and _is_local_row(res):
+            continue
         display_dict = res.get('display') or {}
         sys_id = display_dict.get('id') or res.get('sys_id') or ''
         meta = meta_resolver(sys_id) if sys_id else None
@@ -2770,8 +2805,8 @@ def _build_search_results_xlsx_bytes(
 
     manu_row = 2
     for sid in unique_sys_ids:
-        # Phase 95 D-45: desktop includes LOCAL rows (skip_local=False).
-        row = build_manuscript_row(sid, meta_resolver, lang=lang, skip_local=False)
+        # Phase 103 D-07: flip skip_local False -> True (LOCAL rows on Local Documents sheet).
+        row = build_manuscript_row(sid, meta_resolver, lang=lang, skip_local=True)
         if row is None:
             continue
         for col_idx, val in enumerate(row, 1):
@@ -2792,12 +2827,52 @@ def _build_search_results_xlsx_bytes(
 
     bib_row = 2
     for sid in unique_sys_ids:
-        # Phase 95 D-45: desktop includes LOCAL rows (skip_local=False).
-        for row in build_bibliography_rows(sid, meta_resolver, lang=lang, skip_local=False):
+        # Phase 103 D-07: flip skip_local False -> True (LOCAL rows on Local Documents sheet).
+        for row in build_bibliography_rows(sid, meta_resolver, lang=lang, skip_local=True):
             for col_idx, val in enumerate(row, 1):
                 v = sanitize_fn(val) if isinstance(val, str) else val
                 ws_bib.cell(row=bib_row, column=col_idx, value=v)
             bib_row += 1
+
+    # --- Local Documents sheet (Phase 103 D-01/D-02/D-03 — only when _has_local) ---
+    if ws_local is not None:
+        for col_idx, header in enumerate(local_documents_header_row(lang), 1):
+            cell = ws_local.cell(row=1, column=col_idx, value=header)
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(start_color="4F81BD", end_color="4F81BD", fill_type="solid")
+        local_row = 2
+        for r in results:
+            if not _is_local_row(r):   # D-14: display.source primary, 97-prefix secondary
+                continue
+            sid = _row_sys_id(r)
+            filename = (r.get('display') or {}).get('shelfmark') or sid
+            fp = _local_filepath_map.get(sid) or ''
+            parent_folder = ''
+            if fp:
+                try:
+                    parent_folder = _os.path.basename(_os.path.dirname(fp))
+                except Exception:
+                    parent_folder = ''
+            # D-02: chunk_locator VERBATIM when present; only the raw p_num fallback
+            # gets a synthesized 'p. ' label (avoids 'p. 3' becoming 'page p. 3').
+            page = r.get('chunk_locator') or (f"p. {r.get('p_num', '')}" if r.get('p_num') else '')
+            matched_text_raw = r.get('raw_file_hl', '') or r.get('snippet', '') or ''
+            row_vals = build_local_document_row(
+                filename, parent_folder, fp, page, matched_text_raw,
+                sanitize_fn=sanitize_fn,
+            )
+            for col_idx, val in enumerate(row_vals, 1):
+                if col_idx == 5:  # Matched Text — rich snippet (D-03), sanitize-before-split
+                    ws_local.cell(
+                        row=local_row, column=col_idx,
+                        value=build_rich_snippet_cell(val, sanitize_fn),
+                    )
+                else:
+                    ws_local.cell(row=local_row, column=col_idx, value=val)
+            local_row += 1
+        # Claude's-discretion column widths (D-01 lean sheet).
+        for col, width in zip('ABCDE', [45, 25, 80, 10, 70]):
+            ws_local.column_dimensions[col].width = width
 
     # --- Credits and Info sheet (smoke verification round 2, 2026-05-21) ---
     # Holds the canonical Stoekl Ben Ezra citation block + per-export search
@@ -2830,8 +2905,20 @@ def _build_search_results_xlsx_bytes(
     # Credits and Info sheet column widths are set by build_credits_info_sheet
     # itself (col A = 30 / col B = 70).
 
-    # --- Default-active sheet per D-03 ---
-    wb.active = wb.index(ws_main)
+    # --- Default-active sheet + LOCAL-only empty-Genizah-sheet removal (Phase 103 D-04/D-05) ---
+    # Phase 103 D-05 (REVIEWS HIGH): a LOCAL-only export must be EXACTLY
+    # [Local Documents, Credits and Info]. ws_main/ws_manu/ws_bib were created
+    # unconditionally above and are empty in the LOCAL-only case — remove them so
+    # the locked D-05 shape holds, then make Local Documents active. Mixed /
+    # Genizah-only keep all sheets and Search Results active (D-04). This is the
+    # LAST structural step before save (no further sheet creation follows).
+    if _local_only and ws_local is not None:
+        for _empty_ws in (ws_main, ws_manu, ws_bib):
+            if _empty_ws is not None and _empty_ws in wb.worksheets:
+                wb.remove(_empty_ws)
+        wb.active = wb.index(ws_local)
+    else:
+        wb.active = wb.index(ws_main)
 
     # --- Return bytes ---
     bio = io.BytesIO()
