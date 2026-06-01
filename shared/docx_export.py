@@ -61,7 +61,7 @@ def _page_label(result_dict):
     return ""
 
 
-def write_docx_result_block(doc, result_dict, filepath: str = "", lang: str = "en") -> None:
+def write_docx_result_block(doc, result_dict, filepath: str = "", lang: str = "en", full_text: str = "") -> None:
     """Write one per-result block to a python-docx Document (Phase 103 D-10/D-11).
 
     Block layout (both Genizah and LOCAL):
@@ -83,6 +83,12 @@ def write_docx_result_block(doc, result_dict, filepath: str = "", lang: str = "e
     d = result_dict.get("display") or {}
     is_local = d.get("source") == "LOCAL"
     raw_hl = result_dict.get("raw_file_hl", "") or result_dict.get("snippet", "") or ""
+    # EXPUX-04: expand to the fuller matched passage (capped + highlighted) when
+    # full_text is available; otherwise keep the ±60-char snippet. Expand BEFORE
+    # newline-collapsing so the matched-term recovery sees the original markers.
+    if full_text:
+        from shared_export_utils import build_expanded_context
+        raw_hl = build_expanded_context(full_text, raw_hl)
     raw_hl = str(raw_hl).replace("\n", " ").replace("\r", " ")
     # D-02 page label (chunk_locator verbatim; p_num fallback only).
     page = _page_label(result_dict)

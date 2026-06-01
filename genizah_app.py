@@ -3019,7 +3019,7 @@ def _csv_extra_cols(result_dict, filepath_fn=None, lang='en'):
     return ['', '']
 
 
-def _format_txt_local_block(result_dict, filepath_fn=None):
+def _format_txt_local_block(result_dict, filepath_fn=None, full_text=None):
     """Return the TXT block string for a LOCAL result (Phase 103 D-09).
 
     Format:
@@ -3028,8 +3028,14 @@ def _format_txt_local_block(result_dict, filepath_fn=None):
         {snippet_clean}
 
     (trailing blank line NOT included — caller appends '\\n\\n')
+
+    EXPUX-04: when ``full_text`` is provided, the snippet is the fuller
+    matched-passage context (capped, newlines preserved for readability,
+    ``*`` markers stripped to match the existing LOCAL plain-text style);
+    otherwise it falls back to the single-line ±60-char snippet.
     """
     import os as _os
+    from shared_export_utils import build_expanded_context
     d = result_dict.get('display') or {}
     sid = d.get('id') or result_dict.get('sys_id') or ''
     filename = d.get('shelfmark') or sid
@@ -3040,7 +3046,11 @@ def _format_txt_local_block(result_dict, filepath_fn=None):
     # to '(page p. 3)'.
     page = _local_page_label(result_dict)
     page_str = f"({page})" if page else ''
-    local_snippet = result_dict.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '').replace('*', '')
+    raw_hl = result_dict.get('raw_file_hl', '')
+    if full_text:
+        local_snippet = build_expanded_context(full_text, raw_hl).replace('\r', '').strip().replace('*', '')
+    else:
+        local_snippet = raw_hl.strip().replace('\n', ' ').replace('\r', '').replace('*', '')
     lines = [
         f"=== {filename} | {parent} ===",
         f"Path: {fp}  {page_str}",
@@ -3049,18 +3059,27 @@ def _format_txt_local_block(result_dict, filepath_fn=None):
     return '\n'.join(lines)
 
 
-def _format_txt_genizah_block(result_dict):
-    """Return the TXT block string for a Genizah result — BYTE-IDENTICAL to
-    the pre-v7.17 output (LEXP-08 strict content non-regression).
+def _format_txt_genizah_block(result_dict, full_text=None):
+    """Return the TXT block string for a Genizah result.
 
     Format:
         === {shelfmark} | {title} ===
         {snippet_with_markers}
+
+    EXPUX-04: when ``full_text`` is provided, the snippet is the fuller
+    matched-passage context (capped, ``*`` highlight markers preserved,
+    newlines kept for readability). When ``full_text`` is absent the snippet
+    is BYTE-IDENTICAL to the pre-v7.17 single-line output (LEXP-08 fallback —
+    the header/marker structure is unchanged either way).
     """
-    snippet = result_dict.get('raw_file_hl', '').strip().replace('\n', ' ').replace('\r', '')
+    raw_hl = result_dict.get('raw_file_hl', '')
+    if full_text:
+        from shared_export_utils import build_expanded_context
+        snippet = build_expanded_context(full_text, raw_hl).replace('\r', '').strip()
+    else:
+        snippet = raw_hl.strip().replace('\n', ' ').replace('\r', '')
     # WR-01: use .get() so a malformed/partial dict yields blanks instead of a
-    # KeyError. For a well-formed Genizah row this is byte-identical to the
-    # pre-v7.17 f"=== {shelfmark} | {title} ===" output (LEXP-08).
+    # KeyError. The header format is unchanged from pre-v7.17 (LEXP-08).
     d = result_dict.get('display') or {}
     return f"=== {d.get('shelfmark', '')} | {d.get('title', '')} ===\n{snippet}"
 
@@ -19924,6 +19943,20 @@ class GenizahGUI(QMainWindow):
             for r in results_to_export
         )
 
+        # EXPUX-04: fuller matched-passage text for DOCX/TXT. Mirrors the xlsx
+        # full_text resolution (genizah_app.py:2735) — LOCAL dicts carry
+        # 'full_text'; Genizah hydrates from the Tantivy index via 'uid'.
+        def _full_text_for_export(r):
+            ft = r.get('full_text') or r.get('full_text_excerpt') or ''
+            if not ft and getattr(self, 'searcher', None) is not None:
+                uid = r.get('uid', '')
+                if uid:
+                    try:
+                        ft = self.searcher.get_full_text_by_id(uid) or ''
+                    except Exception:
+                        ft = ''
+            return ft or ''
+
         for r in results_to_export:
             d = r['display']
             sid = d.get('id', '')
@@ -20223,7 +20256,8 @@ class GenizahGUI(QMainWindow):
                     d = r.get('display') or {}
                     sid = d.get('id') or r.get('sys_id') or ''
                     fp = _export_filepath(sid) if d.get('source') == 'LOCAL' else ''
-                    write_docx_result_block(doc, r, filepath=fp, lang=CURRENT_LANG)
+                    # EXPUX-04: pass fuller matched-passage text (capped + highlighted inside the writer).
+                    write_docx_result_block(doc, r, filepath=fp, lang=CURRENT_LANG, full_text=_full_text_for_export(r))
 
                 if CURRENT_LANG == "he":
                     doc.styles["Normal"].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
@@ -20249,12 +20283,13 @@ class GenizahGUI(QMainWindow):
                             # tested helper. Page label per D-02 — an already
                             # human-formatted locator like 'p. 3' renders as
                             # '(p. 3)', NOT '(page p. 3)'.
-                            f.write(_format_txt_local_block(r, _export_filepath) + "\n\n")
+                            # EXPUX-04: full_text expands the matched passage (capped + highlighted).
+                            f.write(_format_txt_local_block(r, _export_filepath, full_text=_full_text_for_export(r)) + "\n\n")
                         else:
-                            # GENIZAH branch — byte-identical to pre-v7.17 TXT
-                            # output (LEXP-08) via the tested helper (WR-01: .get()
-                            # so a malformed dict yields blanks, not a KeyError).
-                            f.write(_format_txt_genizah_block(r) + "\n\n")
+                            # GENIZAH branch — EXPUX-04 expands to the fuller matched
+                            # passage when full_text is available; falls back to the
+                            # byte-identical pre-v7.17 single-line snippet otherwise.
+                            f.write(_format_txt_genizah_block(r, full_text=_full_text_for_export(r)) + "\n\n")
                 self._save_last_folder(path)
                 self._show_export_saved_dialog(path)
             except Exception as e:

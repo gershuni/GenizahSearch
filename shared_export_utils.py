@@ -133,6 +133,88 @@ def remove_highlight_markers(text: Optional[str]) -> str:
 
 
 # ============================================================================
+# Expanded context for DOCX / TXT exports (Phase 105 EXPUX-04)
+# ============================================================================
+
+# DOCX/TXT show fuller matched-passage context than the ±60-char on-screen
+# snippet, capped so a multi-thousand-word PDF page cannot bloat the document.
+EXPORT_CONTEXT_CAP = 2000
+
+
+def _matched_terms_from_hl(raw_file_hl: Optional[str]) -> list:
+    """Return the highlighted (matched) substrings from a ``*``-marked snippet.
+
+    Odd-indexed parts of a ``*``-split are the highlighted spans. Returns them
+    deduped, stripped, non-empty, longest-first (so a single alternation regex
+    marks maximal spans before their substrings).
+    """
+    if not raw_file_hl:
+        return []
+    parts = str(raw_file_hl).split('*')
+    terms = [parts[i].strip() for i in range(1, len(parts), 2) if parts[i].strip()]
+    seen = set()
+    uniq = []
+    for t in terms:
+        if t not in seen:
+            seen.add(t)
+            uniq.append(t)
+    uniq.sort(key=len, reverse=True)
+    return uniq
+
+
+def build_expanded_context(full_text: Optional[str],
+                           raw_file_hl: Optional[str],
+                           cap: int = EXPORT_CONTEXT_CAP) -> str:
+    """Phase 105 EXPUX-04: a wider, highlighted context window for DOCX/TXT.
+
+    Recovers the matched term(s) from ``raw_file_hl`` (text between ``*``
+    markers), locates the first occurrence in ``full_text``, builds a window of
+    ``<= cap`` chars centred on it, and re-inserts ``*`` markers around every
+    in-window occurrence of the matched term(s). Truncation is flagged with
+    leading/trailing ellipses.
+
+    Fallback (NO regression): if ``full_text`` is empty, or no matched term can
+    be located inside it (e.g. normalization mismatch), the original
+    ``raw_file_hl`` snippet is returned unchanged.
+    """
+    ft = str(full_text or "")
+    hl = str(raw_file_hl or "")
+    if not ft.strip():
+        return hl
+    terms = _matched_terms_from_hl(hl)
+    if not terms:
+        return hl
+
+    first_pos = None
+    for t in terms:
+        idx = ft.find(t)
+        if idx != -1 and (first_pos is None or idx < first_pos):
+            first_pos = idx
+    if first_pos is None:
+        return hl  # matched term not present in full_text -> safe fallback
+
+    if cap and cap > 0 and len(ft) > cap:
+        half = cap // 2
+        start = max(0, first_pos - half)
+        end = min(len(ft), start + cap)
+        start = max(0, end - cap)  # re-extend left if we clipped the right edge
+        window = ft[start:end]
+    else:
+        start = 0
+        end = len(ft)
+        window = ft
+
+    # Drop stray source ``*`` so they cannot be mistaken for highlight markers.
+    window = window.replace('*', ' ')
+    pattern = re.compile("|".join(re.escape(t) for t in terms))
+    marked = pattern.sub(lambda m: f"*{m.group(0)}*", window)
+
+    prefix = "… " if start > 0 else ""
+    suffix = " …" if end < len(ft) else ""
+    return prefix + marked + suffix
+
+
+# ============================================================================
 # Rich-text snippet rendering (Phase 94 D-14)
 # ============================================================================
 
