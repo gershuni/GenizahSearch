@@ -1,10 +1,12 @@
 ---
-status: ship-with-fixes
+status: resolved
 phase: 103-search-results-local-export-all-formats-bilingual-non-regression
 reviewer: codex (codex-cli 0.130.0)
 date: 2026-06-01
 findings: { blocker: 0, high: 0, medium: 3, low: 2, nit: 0 }
 verified_against_code: true
+resolved_in: 8b25d5e4
+resolution: all 5 findings fixed (see commit); 273 export tests pass, ruff clean
 ---
 
 # Codex Cross-AI Code Review — Phase 103 (LOCAL Search-Results Export)
