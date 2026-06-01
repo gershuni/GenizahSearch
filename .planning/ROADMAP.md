@@ -46,7 +46,7 @@
   6. The "Local Documents" sheet title and its column headers appear in Hebrew when the export language is `he` and in English when the export language is `en`, matching the bilingual behaviour of the existing four Genizah sheets.
 
 **Plans**: 4 plans
-- [ ] 103-01-PLAN.md — Shared primitives: Local Documents bilingual header/title + row builder in export_dossier.py + reusable module-level DOCX block writer (shared/docx_export.py) [wave 1]
+- [x] 103-01-PLAN.md — Shared primitives: Local Documents bilingual header/title + row builder in export_dossier.py + reusable module-level DOCX block writer (shared/docx_export.py) [wave 1]
 - [ ] 103-02-PLAN.md — Desktop xlsx: Local Documents sheet (D-04/D-06), skip_local flip (D-07), LOCAL-only workbook (D-05), filepath-map wiring [wave 2]
 - [ ] 103-03-PLAN.md — Desktop CSV/TXT/DOCX: CSV column repurposing + Filepath/Page (D-08), TXT blocks (D-09), DOCX per-result block redesign (D-10/D-11/D-12) [wave 2]
 - [ ] 103-04-PLAN.md — Non-regression gate: cross-parity invariant unmodified + Genizah-only XLSX/CSV/TXT structure + DOCX carve-out assertion (LEXP-08) [wave 3]
@@ -327,7 +327,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 103. Search-Results LOCAL Export | v7.17 | 0/4 | Planned | - |
+| 103. Search-Results LOCAL Export | v7.17 | 1/4 | In Progress|  |
 | 104. Composition-Report LOCAL Export | v7.17 | 0/TBD | Not started | - |
 | 99. PDF Page Renderer | v7.15 | 2/2 | Complete | 2026-05-27 |
 | 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 3/3 | Complete | 2026-05-27 |
