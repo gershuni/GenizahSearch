@@ -408,7 +408,7 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | v7.16: Unicode-`Mn` combining-mark test (not `0x05B0–0x05C7` range) | Range mis-treated maqaf/sof-pasuq as vowels and missed te'amim | ✓ Good — maqaf `־` preserved |
 | v7.16: search history stores no result snapshots (re-run on click) | Storing `results[:5000]`/entry grew `search_history.json` to 778 MB → ~20-30s UI-thread freeze every search | ✓ Good — migrated 778 MB → 0.08 MB |
 | v7.16: diagnose perf freezes by measuring on real data + parallel Claude/Codex | Headless PyQt probes ruled out wrong hypotheses; Codex flagged the unprofiled post-checkpoint history write | ✓ Good — converged on the real root cause |
-| v7.17: LOCAL rows export as local columns (not excluded); mixed/ALL xlsx gets a dedicated "Local Documents" sheet | Genizah columns (shelfmark/IIIF/PGP/bibliography/domains) are meaningless for local files; a separate sheet keeps both shapes clean and preserves the Genizah cross-parity invariant | — Pending |
+| v7.17: LOCAL rows export as local columns (not excluded); mixed/ALL xlsx gets a dedicated "Local Documents" sheet | Genizah columns (shelfmark/IIIF/PGP/bibliography/domains) are meaningless for local files; a separate sheet keeps both shapes clean and preserves the Genizah cross-parity invariant | ✓ Good (Search-results, Phase 103) — Composition-report half = Phase 104 pending |
 
 ## Evolution
 
@@ -428,7 +428,7 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-01 — v7.17 LOCAL Export Support milestone STARTED (closes D-F17). Goal: adapt the desktop result exports (Search-results + Composition-report; XLSX/CSV/TXT/DOCX) so LOCAL "My Library" hits emit local columns (filename/folder/filepath/page/matched-text), and mixed/ALL xlsx gets a dedicated "Local Documents" sheet, while Genizah-only exports stay unchanged. Desktop-only (web has no LOCAL); JSON + Parallels out of scope. Requirements → `.planning/REQUIREMENTS.md`; roadmap → `.planning/ROADMAP.md`. Next: `/gsd-discuss-phase 103` or `/gsd-plan-phase 103`.*
+*Last updated: 2026-06-01 — Phase 103 (Search-Results LOCAL Export — XLSX/CSV/TXT/DOCX + bilingual "Local Documents" sheet + non-regression) COMPLETE & verified 6/6 must-haves (LEXP-01/03/04/05/06/07/08). Mixed exports now emit local-meaningful columns for LOCAL hits; LOCAL-only xlsx is exactly [Local Documents, Credits and Info]; Genizah-only XLSX/CSV/TXT stay byte-identical (cross-parity invariant untouched); DOCX intentionally redesigned into per-result blocks (D-12 carve-out). Code review: 0 critical / 3 warning / 3 info (advisory). Next milestone work: Phase 104 (Composition-report LOCAL export, LEXP-02) — `/gsd-discuss-phase 104` or `/gsd-plan-phase 104`.*
 
 *Prior: 2026-06-01 — v7.16 Hebrew PDF Text Quality milestone CLOSED (1 formal phase 102 + no-phase de-space/UAT/freeze work; shipped v7.16.0 desktop, tag `v7.16.0` @ `ccb87c90`, GitHub Release with installer marked latest, CI green). LOCAL Hebrew PDF text-layer extraction rewritten (rawdict per-glyph, RTL-gated, Otsu de-space, Mn nikud), file-management actions for LOCAL hits, and three search/startup freeze fixes (778 MB history file, large-folder O(n²) startup, LAB-rebuild churn).*
 
