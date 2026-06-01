@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Genizah Search Pro will be documented in this file.
+All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 

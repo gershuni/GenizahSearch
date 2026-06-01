@@ -95,7 +95,7 @@ def add_metadata_banner(composite: Image.Image,
 
     Three-row layout:
       Row 1: Shelfmarks (wraps if needed)
-      Row 2: Created by Genizah Search Pro / Dicta Genizah Search
+      Row 2: Created by Dicta Genizah Search Pro (desktop) / Dicta Genizah Search (web)
       Row 3: www.GenizahSearch.com
 
     Args:
@@ -130,7 +130,7 @@ def add_metadata_banner(composite: Image.Image,
     max_text_w = total_w - padding * 2
     shelf_lines = _wrap_shelfmarks(shelfmarks, font_shelfmark, max_text_w)
 
-    app_name = 'Dicta Genizah Search' if app_variant == 'web' else 'Genizah Search Pro'
+    app_name = 'Dicta Genizah Search' if app_variant == 'web' else 'Dicta Genizah Search Pro'
     attr_line = f"Created by {app_name}"
     url_line = "www.GenizahSearch.com"
 

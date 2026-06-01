@@ -1,4 +1,4 @@
-# Genizah Search Pro 7.16.0
+# Dicta Genizah Search Pro 7.16.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 

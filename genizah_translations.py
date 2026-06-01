@@ -3,7 +3,7 @@ from version import APP_VERSION
 
 TRANSLATIONS = {
     # --- General ---
-    f"Genizah Search Pro V{APP_VERSION}": f"Genizah Search Pro V{APP_VERSION}",
+    f"Dicta Genizah Search Pro V{APP_VERSION}": f"Dicta Genizah Search Pro V{APP_VERSION}",
     "Initializing components... Please wait.": "מאתחל רכיבים... אנא המתן.",
     "Fatal Error": "שגיאה קריטית",
     "Failed to initialize:\n{}": "אתחול נכשל:\n{}",
@@ -392,7 +392,7 @@ TRANSLATIONS = {
     "Update Error": "שגיאה בבדיקת עדכונים",
 
     # --- In-App Update Dialog ---
-    "Updating GenizahSearch": "מעדכן את GenizahSearch",
+    "Updating Dicta Genizah Search Pro": "מעדכן את Dicta Genizah Search Pro",
     "Updating to version {}": "מעדכן לגרסה {}",
     "Preparing download...": "מכין הורדה...",
     "Downloading...": "מוריד...",
@@ -739,7 +739,7 @@ TRANSLATIONS = {
         </style>
         <div style='font-family: Arial; font-size: 13px;' dir='rtl'>
             <div style='text-align:center;'>
-                <h2 style='margin-bottom:5px;'>Genizah Search Pro {APP_VERSION}</h2>
+                <h2 style='margin-bottom:5px;'>Dicta Genizah Search Pro {APP_VERSION}</h2>
                 <p style='color: #7f8c8d;'>פותח על ידי הלל גרשוני (<a href='mailto:gershuni@gmail.com'>gershuni@gmail.com</a>)</p>
                 <p>אתר: <a href='https://genizahsearch.com'>GenizahSearch.com</a> &mdash; אתר הגניזה של דיקטה</p>
             </div>
@@ -761,7 +761,7 @@ TRANSLATIONS = {
             <p>המאגר הבסיסי מופץ תחת רישיון Creative Commons Attribution 4.0 International (<a href='https://creativecommons.org/licenses/by/4.0/'>CC BY 4.0</a>)</p>
 
             <h3>ציטוט</h3>
-            <p>אם אתם משתמשים בתוצאות אלו למחקרכם, אנא צטטו את יוצרי המאגר: Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. <a href='https://doi.org/10.5281/zenodo.17734473'>https://doi.org/10.5281/zenodo.17734473</a>. ניתן לציין גם שהשתמשתם בתוכנה זו: Genizah Search Pro של הלל גרשוני.</p>
+            <p>אם אתם משתמשים בתוצאות אלו למחקרכם, אנא צטטו את יוצרי המאגר: Stoekl Ben Ezra, Daniel, Luigi Bambaci, Benjamin Kiessling, Hayim Lapin, Nurit Ezer, Elena Lolli, Marina Rustow, et al. MiDRASH Automatic Transcriptions. Data set. Zenodo, 2025. <a href='https://doi.org/10.5281/zenodo.17734473'>https://doi.org/10.5281/zenodo.17734473</a>. ניתן לציין גם שהשתמשתם בתוכנה זו: Dicta Genizah Search Pro של הלל גרשוני.</p>
         </div>
         """,
 
@@ -794,7 +794,7 @@ TRANSLATIONS = {
     "See Appendix for query information and excluded manuscripts.": "ראו נספח למידע על השאילתה וכתבי היד המוחרגים.",
 
     # --- Report Headers ---
-    "REPORT_CREDIT_TXT": """הופק באמצעות Genizah Search Pro
+    "REPORT_CREDIT_TXT": """הופק באמצעות Dicta Genizah Search Pro
 מקור הנתונים: תעתיקי MiDRASH (שטוקל בן עזרא ואח', 2025)
 המאגר זמין בכתובת: https://doi.org/10.5281/zenodo.17734473
 ================================================================================

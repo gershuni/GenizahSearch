@@ -2,7 +2,7 @@
 ; SEE THE DOCUMENTATION FOR DETAILS ON CREATING INNO SETUP SCRIPT FILES!
 ; License: CC BY-NC-SA 4.0 (Non-commercial use only)
 
-#define MyAppName "Genizah Search Pro"
+#define MyAppName "Dicta Genizah Search Pro"
 #define MyAppVersion "7.16.0"
 #define MyAppPublisher "Hillel Gershuni / Dicta"
 #define MyAppURL "https://www.GenizahSearch.com/"
