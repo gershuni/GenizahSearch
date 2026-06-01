@@ -241,6 +241,14 @@ _MAIN_HEADERS_HE: List[str] = [
     "יש PGP", "מודפס", "תחומים", "כתובת תמונה",
 ]
 
+# Phase 103 (LEXP-07 / D-13): Local Documents sheet bilingual column headers.
+_LOCAL_HEADERS_EN: List[str] = [
+    "Filename", "Parent Folder", "Full Filepath", "Page", "Matched Text",
+]
+_LOCAL_HEADERS_HE: List[str] = [
+    "שם קובץ", "תיקייה", "נתיב מלא", "עמוד", "טקסט תואם",
+]
+
 
 # Main-sheet column index (0-based) of the per-folio Image URL cell.
 # Used by the export sites to make the cell a clickable hyperlink.
@@ -381,6 +389,8 @@ _SHEET_TITLES_EN: Dict[str, str] = {
     # search metadata. The main sheet no longer carries the credit/metadata
     # rows that previously rode above (desktop) or below (web) the data rows.
     'credits_info': "Credits and Info",
+    # Phase 103 (D-04/D-13): dedicated sheet for LOCAL ("My Library") rows.
+    'local_documents': "Local Documents",
 }
 
 _SHEET_TITLES_HE: Dict[str, str] = {
@@ -388,6 +398,8 @@ _SHEET_TITLES_HE: Dict[str, str] = {
     'manuscripts': "כתבי יד",
     'bibliography': "ביבליוגרפיה",
     'credits_info': "קרדיט ומידע",
+    # Phase 103 (D-04/D-13): dedicated sheet for LOCAL ("My Library") rows.
+    'local_documents': "מסמכים מקומיים",
 }
 
 
@@ -401,6 +413,18 @@ def main_header_row(lang: str = 'en') -> List[str]:
     if lang == 'he':
         return list(_MAIN_HEADERS_HE)
     return list(_MAIN_HEADERS_EN)
+
+
+def local_documents_header_row(lang: str = 'en') -> List[str]:
+    """Return the 5 Local Documents sheet column headers in the requested language.
+
+    Phase 103 (LEXP-07 / D-13): bilingual headers for the new "Local Documents"
+    sub-sheet. Hebrew when ``lang == 'he'``, English otherwise. Returns a fresh
+    copy so callers cannot mutate the module constants.
+    """
+    if lang == 'he':
+        return list(_LOCAL_HEADERS_HE)
+    return list(_LOCAL_HEADERS_EN)
 
 
 def manuscript_header_row(lang: str = 'en') -> List[str]:
@@ -1175,3 +1199,40 @@ def build_bibliography_rows(
             entry.get('catalog_acronym') or '',
         ])
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Row emitter 3: Local Documents (Phase 103 — D-01 / D-14)
+# ---------------------------------------------------------------------------
+
+
+def build_local_document_row(
+    filename,
+    parent_folder,
+    full_filepath,
+    page,
+    matched_text_raw,
+    sanitize_fn=None,
+):
+    """Build one Local Documents sheet row (Phase 103, D-01/D-14).
+
+    Returns a list of exactly 5 Python primitives matching
+    :func:`local_documents_header_row` column order:
+    [filename, parent_folder, full_filepath, page, matched_text_raw].
+
+    Missing data renders as empty strings (NOT 'N/A' / placeholders).
+    ``matched_text_raw`` retains its ``*``-markers — the CALLER applies
+    ``build_rich_snippet_cell`` at write time (D-03), so it is NOT passed
+    through ``sanitize_fn`` here.
+
+    Qt-free, offline-testable: filepath lookup and os.path.basename/dirname
+    happen in the CALLER (``_build_search_results_xlsx_bytes``), per D-14.
+    """
+    _san = sanitize_fn or (lambda x: '' if x is None else str(x))
+    return [
+        _san(filename),
+        _san(parent_folder),
+        _san(full_filepath),
+        _san(page),
+        matched_text_raw or '',
+    ]
