@@ -15612,6 +15612,38 @@ class GenizahGUI(QMainWindow):
 
         return final_text + "\n"
 
+    def _show_export_saved_dialog(self, path):
+        """EXPUX-01: 'export complete' dialog with Open File / Open Folder.
+
+        Replaces the bare ``QMessageBox.information("Saved to {path}")`` toast at
+        every export-complete site in ``export_results`` + ``export_comp_report``.
+        Open File launches the saved export in its default app; Open Folder
+        reveals it in Explorer (reusing ``desktop.file_actions.reveal_local_file``,
+        which uses the spaces-safe separate-argv ``/select,`` form). Both actions
+        degrade gracefully (log, no crash) if the launch fails.
+        """
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Information)
+        box.setWindowTitle(tr("Saved"))
+        box.setText(tr("Saved to {}").format(path))
+        open_btn = box.addButton(tr("Open File"), QMessageBox.ButtonRole.AcceptRole)
+        folder_btn = box.addButton(tr("Open Folder"), QMessageBox.ButtonRole.ActionRole)
+        close_btn = box.addButton(tr("Close"), QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(close_btn)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is open_btn:
+            try:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+            except Exception:
+                logger.warning("EXPUX-01: Open File failed for %r", path, exc_info=True)
+        elif clicked is folder_btn:
+            try:
+                from desktop.file_actions import reveal_local_file
+                reveal_local_file(path)
+            except Exception:
+                logger.warning("EXPUX-01: Open Folder failed for %r", path, exc_info=True)
+
     def _get_lab_config_block(self):
         if getattr(self, 'btn_lab_mode_toggle', None) and self.btn_lab_mode_toggle.isChecked() and self.lab_engine:
             settings_dump = json.dumps({
@@ -20120,7 +20152,7 @@ class GenizahGUI(QMainWindow):
                 with open(path, 'wb') as f:
                     f.write(content)
                 self._save_last_folder(path)
-                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+                self._show_export_saved_dialog(path)
 
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{str(e)}")
@@ -20161,7 +20193,7 @@ class GenizahGUI(QMainWindow):
                             clean_row = clean_row + _csv_extra_cols(r, _export_filepath)
                         writer.writerow(clean_row)
                 self._save_last_folder(path)
-                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+                self._show_export_saved_dialog(path)
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{str(e)}")
 
@@ -20200,7 +20232,7 @@ class GenizahGUI(QMainWindow):
 
                 doc.save(path)
                 self._save_last_folder(path)
-                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+                self._show_export_saved_dialog(path)
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save DOCX:\n{str(e)}")
 
@@ -20224,7 +20256,7 @@ class GenizahGUI(QMainWindow):
                             # so a malformed dict yields blanks, not a KeyError).
                             f.write(_format_txt_genizah_block(r) + "\n\n")
                 self._save_last_folder(path)
-                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+                self._show_export_saved_dialog(path)
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{str(e)}")
 
@@ -20722,7 +20754,7 @@ class GenizahGUI(QMainWindow):
 
                     wb.save(path)
                     self._save_last_folder(path)
-                    QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+                    self._show_export_saved_dialog(path)
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{e}")
 
@@ -20750,7 +20782,7 @@ class GenizahGUI(QMainWindow):
                             clean_row = [str(val).replace('*', '') for val in row]
                             writer.writerow(clean_row)
                     self._save_last_folder(path)
-                    QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+                    self._show_export_saved_dialog(path)
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save CSV:\n{e}")
 
@@ -20885,7 +20917,7 @@ class GenizahGUI(QMainWindow):
 
                     doc.save(path)
                     self._save_last_folder(path)
-                    QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+                    self._show_export_saved_dialog(path)
                 except Exception as e:
                     QMessageBox.critical(self, tr("Error"), f"Failed to save DOCX:\n{e}")
 
@@ -20977,7 +21009,7 @@ class GenizahGUI(QMainWindow):
                     all_lines = summary_lines + detail_lines
                     f.write("\n".join(all_lines).strip() + "\n")
                 self._save_last_folder(path)
-                QMessageBox.information(self, tr("Saved"), tr("Saved to {}").format(path))
+                self._show_export_saved_dialog(path)
 
             except Exception as e:
                 QMessageBox.critical(self, tr("Error"), f"Failed to save TXT:\n{e}")
