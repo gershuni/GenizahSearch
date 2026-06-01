@@ -89,7 +89,11 @@ def write_docx_result_block(doc, result_dict, filepath: str = "", lang: str = "e
     if full_text:
         from shared_export_utils import build_expanded_context
         raw_hl = build_expanded_context(full_text, raw_hl)
-    raw_hl = str(raw_hl).replace("\n", " ").replace("\r", " ")
+    # Strip XML-illegal control chars (NUL / form-feed etc. from page text) so
+    # python-docx/lxml can't abort the export with "All strings must be XML
+    # compatible …". Covers the expanded-context AND the ±60 fallback paths.
+    from shared_export_utils import strip_xml_illegal_chars
+    raw_hl = strip_xml_illegal_chars(str(raw_hl).replace("\n", " ").replace("\r", " "))
     # D-02 page label (chunk_locator verbatim; p_num fallback only).
     page = _page_label(result_dict)
 
@@ -112,17 +116,19 @@ def write_docx_result_block(doc, result_dict, filepath: str = "", lang: str = "e
         meta_text = " · ".join([p for p in [library, img, source] if p])
         url_text = _genizah_url_for(d.get("id") or result_dict.get("sys_id") or "")
 
-    h = doc.add_paragraph(heading_text)
+    # Sanitize heading/meta/url too — filenames/titles are low-risk but a NUL
+    # anywhere aborts the whole doc, so be defensive across every added string.
+    h = doc.add_paragraph(strip_xml_illegal_chars(heading_text))
     if h.runs:
         h.runs[0].font.bold = True
     paras.append(h)
     if meta_text:
-        paras.append(doc.add_paragraph(meta_text))
+        paras.append(doc.add_paragraph(strip_xml_illegal_chars(meta_text)))
     body = doc.add_paragraph()
-    _add_highlighted_runs(body, raw_hl)
+    _add_highlighted_runs(body, raw_hl)  # raw_hl already sanitized above
     paras.append(body)
     if url_text:
-        paras.append(doc.add_paragraph(url_text))
+        paras.append(doc.add_paragraph(strip_xml_illegal_chars(url_text)))
     sep = doc.add_paragraph("_" * 40)
     paras.append(sep)
 

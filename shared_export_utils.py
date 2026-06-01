@@ -140,6 +140,24 @@ def remove_highlight_markers(text: Optional[str]) -> str:
 # snippet, capped so a multi-thousand-word PDF page cannot bloat the document.
 EXPORT_CONTEXT_CAP = 2000
 
+# XML 1.0 forbids the C0 control chars except tab (\x09) / LF (\x0a) / CR (\x0d).
+# lxml/python-docx (and openpyxl) raise "All strings must be XML compatible …"
+# when these reach a cell/run. Full PDF / Tantivy page text routinely carries
+# NULs and form-feeds (\x0c page breaks), which the old ±60-char snippet avoided.
+_XML_ILLEGAL_RE = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
+
+
+def strip_xml_illegal_chars(text: Optional[str]) -> str:
+    """Replace XML-illegal C0 control chars with a space (keeps tab/LF/CR).
+
+    Used before handing export text to python-docx/lxml so a NUL or form-feed
+    in extracted page text cannot abort the whole export. Replacing with a
+    space (not '') avoids fusing the words that flanked the control char.
+    """
+    if text is None:
+        return ""
+    return _XML_ILLEGAL_RE.sub(' ', str(text))
+
 
 def _matched_terms_from_hl(raw_file_hl: Optional[str]) -> list:
     """Return the highlighted (matched) substrings from a ``*``-marked snippet.
@@ -204,8 +222,10 @@ def build_expanded_context(full_text: Optional[str],
         end = len(ft)
         window = ft
 
-    # Drop stray source ``*`` so they cannot be mistaken for highlight markers.
-    window = window.replace('*', ' ')
+    # Strip XML-illegal control chars from the page text (full_text often has
+    # NULs / form-feeds the ±60 snippet avoided) so DOCX/TXT export can't abort,
+    # then drop stray source ``*`` so they aren't mistaken for highlight markers.
+    window = strip_xml_illegal_chars(window).replace('*', ' ')
     pattern = re.compile("|".join(re.escape(t) for t in terms))
     marked = pattern.sub(lambda m: f"*{m.group(0)}*", window)
 

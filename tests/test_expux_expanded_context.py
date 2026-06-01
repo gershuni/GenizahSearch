@@ -109,3 +109,47 @@ def test_local_txt_expands_and_strips_markers():
     assert "alpha" in block        # expanded context
     assert "*" not in block        # LOCAL TXT strips highlight markers
     assert "(p. 3)" in block
+
+
+# --- XML-illegal control char safety (DOCX crash fix) ----------------------
+
+def test_build_expanded_context_strips_control_chars():
+    import re as _re
+    full = "alpha \x00 beta needle \x0c gamma \x07 delta epsilon zeta eta"
+    out = build_expanded_context(full, "beta *needle* gamma")
+    assert not _re.search(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', out), \
+        "XML-illegal control chars must be stripped from expanded context"
+    assert "*needle*" in out
+
+
+def test_write_docx_block_with_control_chars_saves_without_error():
+    from io import BytesIO
+    from docx import Document
+    from shared.docx_export import write_docx_result_block
+    doc = Document()
+    r = {
+        "display": {"shelfmark": "notes.pdf", "source": "LOCAL", "id": "97000000000000001"},
+        "raw_file_hl": "beta *needle* gamma",
+    }
+    # full_text laced with NUL / form-feed / control chars (as real PDF page text can be).
+    full = "alpha beta needle gamma \x00 delta \x0c epsilon \x07 zeta eta theta"
+    write_docx_result_block(doc, r, filepath=r"C:\docs\notes.pdf", lang="en", full_text=full)
+    buf = BytesIO()
+    doc.save(buf)  # must NOT raise "All strings must be XML compatible …"
+    assert buf.tell() > 0
+
+
+def test_write_docx_block_genizah_with_control_chars_saves():
+    from io import BytesIO
+    from docx import Document
+    from shared.docx_export import write_docx_result_block
+    doc = Document()
+    r = {
+        "display": {"shelfmark": "T-S 12.1", "title": "Letter", "source": "", "id": "990012345678901"},
+        "raw_file_hl": "delta *hit* zeta",
+    }
+    full = "alpha beta gamma delta hit zeta \x00 eta \x01 theta iota"
+    write_docx_result_block(doc, r, filepath="", lang="he", full_text=full)
+    buf = BytesIO()
+    doc.save(buf)
+    assert buf.tell() > 0
