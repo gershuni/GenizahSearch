@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-01)
 ## Current Position
 
 Milestone: **v7.17 LOCAL Export Support — STARTED 2026-06-01** (closes D-F17). Adapt the desktop result-export flows so LOCAL ("My Library") hits export with local-meaningful columns (filename/folder/filepath/page/matched-text) instead of empty Genizah columns, across XLSX/CSV/TXT/DOCX on the Search-results (`export_results`) and Composition-report (`export_comp_report`) surfaces; mixed/ALL xlsx gains a dedicated "Local Documents" sheet; Genizah-only exports unchanged. Desktop-only (web has no LOCAL); JSON + Parallels out of scope.
-Phase: 105 — Export UX Polish (in progress)
-Plan: Implementing directly (4 EXPUX items; CONTEXT at .planning/phases/105-export-ux-polish/105-CONTEXT.md)
-Status: Phase 103 complete & verified. Phase 104 DEFERRED (no LOCAL comp-search UI → LEXP-02 = EXP-F3). Phase 105 ADDED 2026-06-01 (export-polish work surfaced during close): EXPUX-01 Open File/Folder dialog, EXPUX-02 LOCAL xlsx domain-warning suppression, EXPUX-03 LOCAL-only MiDRASH-credit omission, EXPUX-04 full-text capped context in DOCX/TXT.
+Phase: 105 — Export UX Polish (IMPLEMENTED; UAT pending)
+Plan: Implemented directly — 4 atomic commits + unit tests (see 105-SUMMARY.md)
+Status: Phase 103 complete & verified. Phase 104 DEFERRED (no LOCAL comp-search UI → LEXP-02 = EXP-F3). Phase 105 IMPLEMENTED 2026-06-01: EXPUX-01 Open File/Folder dialog (8 sites), EXPUX-02 LOCAL xlsx domain-warning suppression, EXPUX-03 LOCAL-only MiDRASH-credit omission, EXPUX-04 full-text capped context in DOCX/TXT. ruff clean (changed files); 60 targeted export tests green incl. cross-parity + LEXP-08 non-regression.
 Last activity: 2026-06-01
-Next: implement EXPUX-01..04 with atomic commits + tests + ruff, then close v7.17 (Phases 103 + 105) via `/gsd-complete-milestone`. Optional: `/gsd-plant-seed` for LEXP-02/EXP-F3.
+Next: (1) UAT Phase 105 (esp. EXPUX-01 dialog + EXPUX-04 visual context); (2) ⚠ PRE-EXISTING working-copy edit gutted GenizahSearchPro.spec (dropped collect_all pymupdf/zstandard/lxml — NOT from Phase 105; `git checkout GenizahSearchPro.spec` to restore HEAD); (3) close v7.17 (Phases 103 + 105) via `/gsd-complete-milestone`. Optional: `/gsd-plant-seed` for LEXP-02/EXP-F3.
 
 ## Deferred Items
 

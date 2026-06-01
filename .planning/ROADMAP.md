@@ -89,7 +89,7 @@
   4. DOCX and TXT exports (both Genizah and LOCAL rows, `export_results`) show the **full matched page/chunk text capped at ~2000 chars** with matched terms still highlighted, instead of the ±60-char one-line snippet; missing `full_text` falls back to today's snippet (no regression). (EXPUX-04)
   5. Genizah-only XLSX/CSV exports remain structurally unchanged; `tests/test_export_xlsx_cross_parity.py` stays green with no modification.
 
-**Plans**: TBD
+**Plans**: Implemented directly (no formal PLAN.md — 4 well-scoped edits, executed as 4 atomic commits with unit tests). See `105-SUMMARY.md`. EXPUX-04 widens the LEXP-08 TXT carve-out (Genizah TXT context expands by design, analogous to Phase 103 D-12's DOCX carve-out; header/marker structure + xlsx/csv unchanged).
 
 ---
 
@@ -352,7 +352,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 |-------|-----------|----------------|--------|-----------|
 | 103. Search-Results LOCAL Export | v7.17 | 4/4 | Complete    | 2026-06-01 |
 | 104. Composition-Report LOCAL Export | v7.17 | 0/0 | ⏸ Deferred (no LOCAL comp-search UI) | - |
-| 105. Export UX Polish | v7.17 | 0/TBD | In progress | - |
+| 105. Export UX Polish | v7.17 | 4/4 EXPUX | Implemented (tests green; UAT pending) | 2026-06-01 |
 | 99. PDF Page Renderer | v7.15 | 2/2 | Complete | 2026-05-27 |
 | 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 3/3 | Complete | 2026-05-27 |
 | 101. LOCAL PDF RTL fix + remnant cleanup | v7.15 | 2/2 | Complete | 2026-05-28 |
