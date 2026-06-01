@@ -2271,7 +2271,7 @@ TRANSLATIONS = {
     "Visit Website": "בקר באתר",
     "Visit our website": "בקר באתר שלנו",
     "Download App": "הורד אפליקציה",
-    "Get Genizah Search Pro": "הורדת Genizah Search Pro",
+    "Get Dicta Genizah Search Pro": "הורדת Dicta Genizah Search Pro",
     "Desktop Application": "אפליקציית שולחן עבודה",
     "Download for Windows": "הורד לחלונות",
     "Download for offline research": "הורד למחקר ללא אינטרנט",

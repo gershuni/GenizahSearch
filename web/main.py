@@ -2062,7 +2062,7 @@ def download_page_route():
     ui.add_head_html(page_meta(
         '/download',
         title='Download Desktop App | Dicta Genizah Search',
-        description='Download the Dicta Genizah Search desktop application for Windows. Full offline search across Cairo Genizah manuscripts.',
+        description='Download the Dicta Genizah Search Pro desktop application for Windows. Full offline search across Cairo Genizah manuscripts.',
     ))
     ui.add_head_html(ANALYTICS_SCRIPT)
     ui.add_head_html(POSTHOG_SCRIPT)

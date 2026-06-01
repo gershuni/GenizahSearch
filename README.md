@@ -367,7 +367,7 @@ Full reference, curl examples, and interactive Swagger UI: [docs/SEARCH_API.md](
 
 ### Web (Recommended)
 
-Visit [genizahsearch.com](https://genizahsearch.com) to start using Genizah Search Pro immediately.
+Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Genizah Search immediately.
 
 ### Desktop Installation
 
