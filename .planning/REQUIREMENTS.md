@@ -23,7 +23,7 @@ Each maps to a roadmap phase (continues numbering from Phase 102 → starts at *
 ### LOCAL Export Adaptation (LEXP)
 
 - [x] **LEXP-01**: When a user exports **Search results** containing LOCAL hits, each LOCAL row carries local-meaningful values — **filename, parent folder, full filepath, page, and matched text** — in place of the empty Genizah columns (shelfmark / library / IIIF / PGP / domains).
-- [ ] **LEXP-02**: When a user exports a **Composition-Search report** containing LOCAL hits, each LOCAL row carries the same local columns (LEXP-01 parity on the `export_comp_report` surface).
+- [⏸] **LEXP-02**: When a user exports a **Composition-Search report** containing LOCAL hits, each LOCAL row carries the same local columns (LEXP-01 parity on the `export_comp_report` surface). **DEFERRED 2026-06-01 → Future Requirements (EXP-F3).** Composition Search has no LOCAL corpus path today (corpus selector is Search-tab-only; `CompositionThread` gets no `corpus_scope`), so a composition report can never contain LOCAL hits — there is nothing to adapt until a LOCAL composition-search UI exists.
 - [x] **LEXP-03**: When a user exports a **mixed** Genizah + LOCAL result set to **xlsx**, the workbook contains a dedicated **"Local Documents"** sheet holding the LOCAL rows, and the Genizah "Search Results" sheet contains only Genizah rows.
 - [x] **LEXP-04**: The Genizah-only sub-sheets (**Manuscripts**, **Bibliography**) contain **no** LOCAL rows — LOCAL synthetic sys_ids never produce empty/placeholder manuscript or bibliography entries.
 - [x] **LEXP-05**: When a user exports a **LOCAL-only** result set to xlsx, the workbook is usable and centered on the Local Documents sheet; the Genizah sub-sheets are omitted or empty (never error).
@@ -39,6 +39,7 @@ Deferred to a future milestone. Tracked but not in this roadmap.
 
 - **EXP-F1**: Desktop JSON export of LOCAL / ALL result sets (only if a desktop JSON export is added later; desktop has no JSON export today).
 - **EXP-F2**: Parallels-export LOCAL adaptation (excluded from v7.17 scope by user direction).
+- **EXP-F3** (was LEXP-02, deferred 2026-06-01): Composition-report LOCAL export — LEXP-01 parity on `export_comp_report`. **Trigger:** wire a LOCAL/ALL corpus scope into Composition Search (so composition reports can contain LOCAL hits). Implementation is already scaffolded: reuse the Phase 103 helpers — `shared/export_dossier.py::build_local_document_row` / `local_documents_header_row`, `shared/docx_export.py::write_docx_result_block`, the `display['source']=='LOCAL'` partition, and the batch-primed `_local_filepath_cache`. The composition surface differs from search results (hierarchical Category→Manuscript→Pages, two text columns Source Context + Manuscript Text, 3+ xlsx sheets), so the xlsx placement / DOCX strategy / Source-Context-for-LOCAL decisions still need a discuss pass when revived.
 
 ### Performance (PERF)
 
@@ -64,7 +65,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | LEXP-01 | 103 | Complete |
-| LEXP-02 | 104 | Pending |
+| LEXP-02 | 104 | ⏸ Deferred → EXP-F3 (no LOCAL comp-search UI) |
 | LEXP-03 | 103 | Complete |
 | LEXP-04 | 103 | Complete |
 | LEXP-05 | 103 | Complete |
@@ -74,9 +75,10 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 **Coverage:**
 - v7.17 requirements: 8 total
-- Mapped to phases: 8
+- Delivered (Phase 103): 7 (LEXP-01, 03, 04, 05, 06, 07, 08)
+- Deferred to Future (EXP-F3): 1 (LEXP-02 — blocked on a missing LOCAL composition-search UI)
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-01*
-*Last updated: 2026-06-01 — traceability filled by roadmapper (LEXP-01/03-08 → Phase 103; LEXP-02 → Phase 104; 8/8 mapped, 0 unmapped)*
+*Last updated: 2026-06-01 — LEXP-02 (Phase 104) DEFERRED → Future Requirements EXP-F3 during /gsd-discuss-phase 104: Composition Search has no LOCAL corpus path (corpus selector is Search-tab-only; CompositionThread gets no corpus_scope), so export_comp_report can never see LOCAL hits. v7.17 ships with 7/8 LEXP requirements via Phase 103; LEXP-02 revives when a LOCAL composition-search UI is wired.*

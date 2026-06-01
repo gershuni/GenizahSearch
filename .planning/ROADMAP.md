@@ -25,7 +25,7 @@
 - **v7.14 My Library — Local Document Search** -- Phases 95-98 (shipped 2026-05-24; closed 2026-05-27)
 - **v7.15 My Library Visual** -- Phases 99-101 (shipped 2026-05-28). See `milestones/v7.15-ROADMAP.md`
 - **v7.16 Hebrew PDF Text Quality** -- Phase 102 + no-phase quality work (shipped 2026-06-01). See `milestones/v7.16-ROADMAP.md`
-- **v7.17 LOCAL Export Support** -- Phases 103-104 (in progress)
+- **v7.17 LOCAL Export Support** -- Phase 103 (shipped 2026-06-01); Phase 104 DEFERRED (no LOCAL composition-search UI exists yet — nothing to export)
 
 ## Phases
 
@@ -53,20 +53,24 @@
 
 ---
 
-### Phase 104: Composition-Report LOCAL Export
+### Phase 104: Composition-Report LOCAL Export — ⏸ DEFERRED (2026-06-01)
+
+> **DEFERRED — blocked on a missing precondition.** Composition Search has **no LOCAL corpus path**: the `Genizah/Local/ALL` corpus selector exists only on the regular Search tab (`genizah_app.py:5924`), and `CompositionThread` (`genizah_app.py:21532`) is never passed a `corpus_scope` (unlike `SearchThread` at `:16763`). LOCAL hits therefore cannot appear in a composition report, so `export_comp_report` has no observable LOCAL surface to adapt. Building LEXP-02 now would be speculative, real-UI-untestable code against data that cannot exist.
+>
+> **Trigger to revive:** when a LOCAL/ALL corpus scope is wired into Composition Search (so composition reports can contain LOCAL hits). At that point re-open this phase and apply the Phase 103 helpers (`shared/export_dossier.py::build_local_document_row` / `local_documents_header_row`, `shared/docx_export.py::write_docx_result_block`, the `display['source']=='LOCAL'` partition, and the batch-primed `_local_filepath_cache`). LEXP-02 moved to REQUIREMENTS.md → Future Requirements (EXP-F3).
 
 **Goal**: Users running a Composition Search whose result set contains LOCAL hits receive the same local-column treatment (LEXP-01 parity) on the Composition-report export surface (`export_comp_report`), using the helpers and row-shape established in Phase 103.
 
-**Depends on**: Phase 103 (LOCAL row-shape + xlsx sheet helpers defined there)
+**Depends on**: Phase 103 (LOCAL row-shape + xlsx sheet helpers defined there) **+ a LOCAL composition-search UI (does not exist yet)**
 
-**Requirements**: LEXP-02
+**Requirements**: LEXP-02 (deferred — see EXP-F3)
 
 **Success Criteria** (what must be TRUE):
   1. Exporting a Composition-Search report whose chunks include LOCAL hits to xlsx places those LOCAL rows in a "Local Documents" sheet (or LOCAL-aware section), not in the Genizah chunk rows — each LOCAL row shows filename, folder, filepath, page, and matched text.
   2. Exporting the same Composition-Search report to CSV, TXT, or DOCX produces a single table where LOCAL chunk rows carry the local columns and Genizah chunk rows carry the Genizah columns — no misleading empty cells for LOCAL rows.
   3. A Genizah-only Composition-Search report export is structurally unchanged from pre-v7.17 output across all four formats.
 
-**Plans**: TBD
+**Plans**: None — deferred before planning (see deferral banner above).
 
 ---
 
@@ -328,7 +332,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 103. Search-Results LOCAL Export | v7.17 | 4/4 | Complete    | 2026-06-01 |
-| 104. Composition-Report LOCAL Export | v7.17 | 0/TBD | Not started | - |
+| 104. Composition-Report LOCAL Export | v7.17 | 0/0 | ⏸ Deferred (no LOCAL comp-search UI) | - |
 | 99. PDF Page Renderer | v7.15 | 2/2 | Complete | 2026-05-27 |
 | 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 3/3 | Complete | 2026-05-27 |
 | 101. LOCAL PDF RTL fix + remnant cleanup | v7.15 | 2/2 | Complete | 2026-05-28 |
@@ -343,4 +347,4 @@ Next-milestone candidates (not in v7.17 scope): **D-F12** (regular Search ~8s wa
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-06-01 — Phase 103 PLANNED (4 plans, 3 waves: shared primitives -> xlsx + csv/txt/docx consumers -> non-regression gate). v7.17 LOCAL Export Support STARTED (Phases 103-104). Phase 103: Search-Results LOCAL Export (LEXP-01/03/04/05/06/07/08 — all formats + xlsx "Local Documents" sheet + bilingual + non-regression). Phase 104: Composition-Report LOCAL Export (LEXP-02 — parity for export_comp_report). D-F17 active. Prior: v7.16 Hebrew PDF Text Quality CLOSED 2026-06-01 (Phase 102 + no-phase work; tag v7.16.0 @ ccb87c90).*
+*Last updated: 2026-06-01 — Phase 104 DEFERRED during /gsd-discuss-phase 104. Discovered Composition Search has no LOCAL corpus path (corpus selector is Search-tab-only at genizah_app.py:5924; CompositionThread at :21532 gets no corpus_scope), so export_comp_report has no LOCAL surface to adapt. LEXP-02 moved to REQUIREMENTS.md Future (EXP-F3), gated on a LOCAL composition-search UI. v7.17 now = Phase 103 only and is closeable. Prior: Phase 103 COMPLETE & verified 6/6 (LEXP-01/03/04/05/06/07/08). v7.16 Hebrew PDF Text Quality CLOSED 2026-06-01 (Phase 102 + no-phase work; tag v7.16.0 @ ccb87c90).*
