@@ -1081,22 +1081,27 @@ class TestBilingualHeaderRows:
         # Smoke verification round 2 (2026-05-21): main sheet renamed
         # 'Genizah Results' -> 'Search Results'; new 'credits_info' key for
         # the 4th sheet that holds credits + per-export search metadata.
+        # Phase 103 (Plan 01): 'local_documents' key added for the Local
+        # Documents sheet in mixed/LOCAL-only exports (D-04/D-05).
         assert titles == {
             'main': "Search Results",
             'manuscripts': "Manuscripts",
             'bibliography': "Bibliography",
             'credits_info': "Credits and Info",
+            'local_documents': "Local Documents",
         }
 
     def test_sheet_titles_he(self):
         titles = sheet_titles('he')
         # Smoke verification round 2 (2026-05-21): main sheet renamed
         # 'תוצאות גניזה' -> 'תוצאות חיפוש'; new 'credits_info' key.
+        # Phase 103 (Plan 01): 'local_documents' key added.
         assert titles == {
             'main': "תוצאות חיפוש",
             'manuscripts': "כתבי יד",
             'bibliography': "ביבליוגרפיה",
             'credits_info': "קרדיט ומידע",
+            'local_documents': "מסמכים מקומיים",
         }
 
     def test_sheet_titles_default_lang_is_english(self):
