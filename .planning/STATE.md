@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-01)
 ## Current Position
 
 Milestone: **v7.17 LOCAL Export Support — STARTED 2026-06-01** (closes D-F17). Adapt the desktop result-export flows so LOCAL ("My Library") hits export with local-meaningful columns (filename/folder/filepath/page/matched-text) instead of empty Genizah columns, across XLSX/CSV/TXT/DOCX on the Search-results (`export_results`) and Composition-report (`export_comp_report`) surfaces; mixed/ALL xlsx gains a dedicated "Local Documents" sheet; Genizah-only exports unchanged. Desktop-only (web has no LOCAL); JSON + Parallels out of scope.
-Phase: 104 — ⏸ DEFERRED 2026-06-01 (during /gsd-discuss-phase 104)
-Plan: None — deferred before planning
-Status: Phase 103 complete & verified (6/6). Phase 104 deferred: Composition Search has no LOCAL corpus path (corpus selector is Search-tab-only at genizah_app.py:5924; CompositionThread at :21532 gets no corpus_scope), so export_comp_report has no LOCAL surface to adapt. LEXP-02 → REQUIREMENTS.md Future (EXP-F3), gated on a LOCAL composition-search UI.
+Phase: 105 — Export UX Polish (in progress)
+Plan: Implementing directly (4 EXPUX items; CONTEXT at .planning/phases/105-export-ux-polish/105-CONTEXT.md)
+Status: Phase 103 complete & verified. Phase 104 DEFERRED (no LOCAL comp-search UI → LEXP-02 = EXP-F3). Phase 105 ADDED 2026-06-01 (export-polish work surfaced during close): EXPUX-01 Open File/Folder dialog, EXPUX-02 LOCAL xlsx domain-warning suppression, EXPUX-03 LOCAL-only MiDRASH-credit omission, EXPUX-04 full-text capped context in DOCX/TXT.
 Last activity: 2026-06-01
-Next: v7.17 is now closeable with Phase 103 alone — run `/gsd-complete-milestone` to archive v7.17. Optional: `/gsd-plant-seed` so LEXP-02/EXP-F3 auto-surfaces when LOCAL composition-search work begins.
+Next: implement EXPUX-01..04 with atomic commits + tests + ruff, then close v7.17 (Phases 103 + 105) via `/gsd-complete-milestone`. Optional: `/gsd-plant-seed` for LEXP-02/EXP-F3.
 
 ## Deferred Items
 
