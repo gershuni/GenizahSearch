@@ -24,8 +24,18 @@
 - **v7.13 Research-Grade Downloads & PGP Filter** -- Phases 93-94 (shipped 2026-05-21)
 - **v7.14 My Library — Local Document Search** -- Phases 95-98 (shipped 2026-05-24; closed 2026-05-27)
 - **v7.15 My Library Visual** -- Phases 99-101 (shipped 2026-05-28). See `milestones/v7.15-ROADMAP.md`
+- **v7.16 Hebrew PDF Text Quality** -- Phase 102 + no-phase quality work (shipped 2026-06-01). See `milestones/v7.16-ROADMAP.md`
 
 ## Phases
+
+<details>
+<summary>✅ v7.16 Hebrew PDF Text Quality (Phase 102 + no-phase quality work) — SHIPPED 2026-06-01</summary>
+
+See: .planning/milestones/v7.16-ROADMAP.md
+
+1 formal phase (102, 5 plans) + post-phase no-phase quality work. Rewrote the LOCAL ("My Library") Hebrew PDF text-layer extractor onto a `page.get_text("rawdict")` per-glyph foundation (`shared/local_indexer_rtl.py`): RTL-gated reorder (Meiri core, no LTR regression), Unicode-`Mn` nikud/maqaf classification, per-line 1-D Otsu word-gap de-space, `_ltr_damage_guard` RTL-trust fix, corrupt_encoding detection; `extraction_format_version` 2→3. Emphasis letter-spacing no longer shatters Hebrew words (אוצר הגאונים single-letter tokens 73.5%→~3-5%) and tight typesetting no longer fuses phrases (רביצקי 15.8%→0.07%). No-phase work bundled: de-space follow-ups (D-F13b/c/d), LOCAL UAT extraction fixes (HTML/xlsx/CSV + folder opt-out cascade BLOCKER, D-F19..D-F22/D-F25), file-management actions for LOCAL hits (D-F24), and three search/startup freeze fixes (D-F23: 778 MB `search_history.json`, large-folder O(n²) startup, LAB-rebuild churn). Shipped v7.16.0 desktop-only (tag `v7.16.0`, GitHub Release with installer, CI green).
+
+</details>
 
 <details>
 <summary>✅ v7.15 My Library Visual (Phases 99-101) — SHIPPED 2026-05-28</summary>
@@ -273,61 +283,20 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 ## Progress
 
-**Execution Order:**
-v7.15 phases execute in numeric order: 99 → 100
-
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 99. PDF Page Renderer | v7.15 | 2/2 | Complete    | 2026-05-27 |
-| 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 3/3 | Complete    | 2026-05-27 |
+| 99. PDF Page Renderer | v7.15 | 2/2 | Complete | 2026-05-27 |
+| 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 3/3 | Complete | 2026-05-27 |
+| 101. LOCAL PDF RTL fix + remnant cleanup | v7.15 | 2/2 | Complete | 2026-05-28 |
+| 102. LOCAL PDF Text-Layer Extraction Rewrite | v7.16 | 5/5 | Complete | 2026-05-29 |
 
 ## Backlog
 
-Phases 999.2 and 999.3 were promoted into v7.13 as Phase 93 (PGP filter) and Phase 94 (research-grade exports) on 2026-05-19. No active backlog entries remain at this milestone boundary.
+No active backlog entries. Phases 999.2/999.3 were promoted into v7.13; Phase 101 shipped in v7.15 and Phase 102 in v7.16 — full phase detail archived in `milestones/v7.15-ROADMAP.md` and `milestones/v7.16-ROADMAP.md`.
 
-### Phase 101: LOCAL PDF text extraction RTL fix and Phase 100 remnant cleanup
-
-**Goal:** Clear the remnant issues blocking a clean v7.15 release. Primary: fix RTL/bidi word-order reversal in LOCAL PDF text extraction so Hebrew/Judeo-Arabic PDF transcriptions read in correct reading order (each line currently shows last-word-first). Secondary: close the Phase 100 code-review remnants and a pre-existing test-isolation flake.
-
-**Requirements**: D-01/D-03/D-05 (RTL word-order fix), D-04 (auto-reindex via extractor-version bump), D-06 (real Hebrew fixture — inbound asset, skip-if-absent), D-07 (WR-01 single lookup), D-08 (WR-02 regression test), D-09 (batch-order flake fix) — tracked via CONTEXT.md decision IDs (no formal REQ-IDs for this pre-release polish phase)
-**Depends on:** Phase 100
-
-**Scope (remnant items):**
-1. **RTL PDF text extraction** (P3, `docs/OPEN_ISSUES.md`; surfaced in Phase 100 UAT) — LOCAL PDF text extraction reverses word order per line on some RTL books. Likely PyMuPDF `get_text` returning glyph runs in visual order without bidi reordering. Fix: bidi-aware reorder of extracted lines (e.g. `python-bidi`) or x-coordinate-aware span reordering for RTL pages. Affects search indexing quality for LOCAL Hebrew PDFs (image rendering is unaffected — only the text layer).
-2. **Code review WR-01** (`genizah_app.py::_open_local_browse_page`) — Browse panel computes `is_pdf` from one `_lookup_local_filepath` call but re-looks-up `filepath` separately; if the two diverge the image pane reveals empty. Fix: compute `filepath` once, derive `is_pdf` from it.
-3. **Code review WR-02** — add a regression test asserting `PdfImageController._pending` is empty immediately after `discard_scope` (callback-retention guard).
-4. **Test-isolation flake** — `tests/test_local_indexer.py::test_txt_undecodable_marked_encoding_error` passes in isolation but fails in batch ordering (global-state pollution from a sibling test). Phase 100 did not touch this file; pre-existing.
-
-**Plans:** 2/2 plans complete
-
-Plans:
-- [x] 101-01-PLAN.md (Wave 1) — RTL word-order fix in extract_pdf_pages sort=True fallback + extractor-version auto-reindex + Wave 0 RTL/version tests + F-06 AST guard update + D-09 flake fix + fixture provenance README
-- [x] 101-02-PLAN.md (Wave 1) — WR-01 single-lookup _open_local_browse_page + WR-02 discard_scope regression test + OPEN_ISSUES.md bookkeeping
-
-### Phase 102: LOCAL PDF Text-Layer Extraction Rewrite (RTL-gated reorder + letter-spacing de-collapse)
-
-**Goal:** Rewrite the LOCAL PDF text-layer extractor in `shared/local_indexer.py` onto a `page.get_text("rawdict")` (per-glyph bbox) foundation that produces clean, searchable plain text for the Tantivy indexer. Validated against real corpus by Spike 001 (`.planning/spikes/001-meiri-glyph-reorder-vs-current/`). The rewrite must address the failure-mode catalog the spike found (F-A..F-G):
-- **RTL-gated segment reorder** adapted from Ephraim Meiri's `ephraim_meiri_pdf_converter/pdf_to_docx.py::_normalize_span_dir` + `_regroup_lines` + `_fix_visual_brackets` — fixes word/segment order, headers (F-F), digit/ref placement (F-A), reversed parens (F-C). **CRITICAL: gate reorder to RTL/Hebrew content only** — Meiri's reorder HURTS Latin/LTR text (spike: NW Semitic Dictionary was better in the current extractor), so LTR lines/blocks must stay on the current/non-reordered path. **No LTR regression.**
-- **Adaptive per-line letter-spacing de-collapse** (F-D/F-E) — the spike's biggest finding: justified Hebrew typesetting (e.g. אוצר הגאונים 46% single-letter tokens, רמבם 21%) shatters words into single letters; neither current nor Meiri fixes it. Re-derive word spacing from glyph bboxes using a per-line adaptive threshold (~1.8× median inter-glyph gap), ignoring embedded space glyphs. Must run BEFORE reorder so de-spaced words can be reordered (F-E). Prototyped working in the spike.
-- **Punctuation normalization** (F-B) — no space before punctuation.
-- **Corrupt-encoding detection** (F-G) — detect garbage text layers (bad/missing ToUnicode cmap, e.g. `Israeli_Vilna_shabbat_part_2.pdf`) and flag/skip rather than indexing garbage (these are future OCR consumers).
-
-Closes **D-F13**; reframes **D-F14** (adopt Meiri's reorder *core*, RTL-gated — NOT wholesale, NOT DOCX pipeline).
-**Requirements**: D-F13, D-F14, + spike failure modes F-A..F-G (catalog in Spike 001 README)
-**Depends on:** Phase 101 · **Evidence:** Spike 001 (verdict PARTIAL — reshaped this phase)
-**Scope:** Desktop-only (My Library), text-layer PDFs. **Out of scope:** OCR for image-only scans (D-F2 — deferred as an optional opt-in extension, seeded; a large share of the real library is image-only but common users won't need OCR and off-the-shelf pre-OCR exists); P3 View All renderer cleanups (D-F8/D-F10/D-F7).
-**Verification:** Regression fixtures for each failure mode — letter-spaced page (אוצר הגאונים-style), letter-spaced+reversed line, RTL header, AND an LTR/Latin PDF that must NOT regress; existing `tests/fixtures/local_indexer/single_word_per_line.pdf` guard still passes.
-**Note:** First piece of v7.16 work, appended after shipped v7.15 (Phases 99-101).
-**Plans:** 5/5 plans complete
-
-Plans:
-- [x] 102-01-PLAN.md (Wave 1) — RTL helpers: baseline line-grouping, RTL classify, adaptive 1.8x-median de-space (word-unit bbox-unions), Meiri reorder core, bracket/punctuation fix + glyph-trace fixtures
-- [x] 102-02-PLAN.md (Wave 2) — extract_pdf_pages rawdict rewrite (D-01/D-11) + LTR-damage guard (D-03) + corrupt-encoding (D-07) + multi-column-suspected (D-09) detectors
-- [x] 102-03-PLAN.md (Wave 3) — D-06 strip nikud once in _write_page_doc for ALL LOCAL formats (content == cached_text, both consonantal — NO divergence; un-vocalized search matches vocalized text) + extraction_format_version 1->2 + buffer-then-decide corrupt flow + corrupt_encoding wired into 3 in-file status surfaces. Non-PDF nikud DISPLAY deferred (SEED-004).
-- [x] 102-04-PLAN.md (Wave 1) — D-08 surface 4 desktop tree label/color + migration 2->3 (corrupt_encoding kept, NO auto-flip per D-10)
-- [x] 102-05-PLAN.md (Wave 4) — end-to-end fixtures (letter-spaced, RTL header, corrupt-encoding, LTR no-regression) + e2e extract/index/query tests covering F-A..F-G + D-06 + OPEN_ISSUES.md bookkeeping (D-F13 fixed, D-F14/D-F16 addressed)
+Next-milestone candidates (not yet phased): **D-F12** (regular Search ~8s wall-clock investigation), **D-F17** (xlsx/Word/JSON export not adapted to LOCAL / ALL), **D-F18** (context-menu LOCAL detection normalize through `display`) — see `docs/OPEN_ISSUES.md`.
 
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-05-27 — v7.15 My Library Visual roadmap created (`/gsd-roadmap`). 2 phases (99 PDF Page Renderer + 100 LOCAL PDF Image in ResultDialog + Browse), 6/6 PDFIMG-* requirements mapped. Desktop-only milestone closing deferred item D-F3 (side-by-side PDF). Numbering continues from v7.14's last phase 98. v7.13 + v7.14 milestones remain CLOSED (shipped v7.13.0 2026-05-21; v7.14.0 2026-05-24; reconciled 2026-05-27). Archives: `.planning/milestones/v7.13-ROADMAP.md` / `v7.13-REQUIREMENTS.md` / `v7.14-ROADMAP.md`.*
+*Last updated: 2026-06-01 — v7.16 Hebrew PDF Text Quality CLOSED via `/gsd-complete-milestone` (1 formal phase 102 + no-phase de-space/UAT/freeze work; shipped v7.16.0 desktop 2026-06-01, tag `v7.16.0` @ `ccb87c90`). Phase 102 + Phase 101 detail collapsed into milestone groups; archive at `.planning/milestones/v7.16-ROADMAP.md`. Next: `/gsd-new-milestone` (candidates D-F12 search-latency, D-F17 LOCAL/ALL export). Prior: 2026-05-27 v7.15 roadmap created; v7.13/v7.14 reconciled.*

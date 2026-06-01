@@ -1,5 +1,30 @@
 # Project Milestones: GenizahSearch
 
+## v7.16 Hebrew PDF Text Quality (Shipped: 2026-06-01)
+
+**Phases completed:** 1 formal phase (102, 5 plans) + post-phase no-phase quality work + release-cycle UAT/freeze fixes
+**Git range:** `v7.15.0` → `ccb87c90` (61 commits)
+**Scope:** 104 files changed, +34,513 / −441 (large insertion reflects the rawdict RTL helpers, ~150 new tests, and bundled real-PDF regression fixtures)
+**Timeline:** 2026-05-28 → 2026-06-01 (4 days)
+**App releases:** v7.16.0 (2026-06-01, desktop only), tagged `v7.16.0`
+
+**Delivered:** Rewrote how LOCAL ("My Library") Hebrew PDFs are read into the Tantivy index, so search of typeset Hebrew scholarly books works — emphasis letter-spacing no longer shatters words into single letters, tightly-set books no longer fuse phrases into one token, the maqaf and embedded numbers read correctly, and unrecoverable text layers are flagged. Bundled new file-management actions for LOCAL hits and three significant search/startup performance fixes discovered during UAT. Desktop-only — web "My Library" does not exist, so the dual-app maintenance rule does not apply. Formally one phase (102); the de-space refinements, UAT extraction fixes, and freeze fixes landed as no-phase edit+test work per the user's chosen workflow.
+
+**Key accomplishments:**
+
+- **Phase 102 — LOCAL PDF Text-Layer Extraction Rewrite (5 plans):** `extract_pdf_pages` rebuilt on a `page.get_text("rawdict")` per-glyph foundation with pure RTL glyph-trace reconstruction helpers (`shared/local_indexer_rtl.py`): RTL-gated segment reorder (Meiri core, no LTR regression), Unicode-`Mn` nikud/te'amim classification (preserves maqaf `־`/sof-pasuq), per-line 1-D Otsu word-gap valley de-space, `_ltr_damage_guard` RTL-trust fix (the real production blocker — it was discarding the better RTL output), and `corrupt_encoding` detection + status surface. Nikud stripped once in `_write_page_doc` for all LOCAL formats. `extraction_format_version` 2→3 (existing libraries need one manual "Re-index All"). Measured on identical pages: אוצר הגאונים single-letter tokens 73.5% → ~3-5%, רביצקי word-merge 15.8% → 0.07%, איגרות הרמב״ם 5.2% → 0.17%. ~150 new/updated tests; validated against real-corpus Spike 001.
+- **Post-102 de-space follow-ups (no-phase, D-F13b/c/d):** edge-gap + per-line Otsu boundary metric replacing the first-cut fixed-floor/median (which shattered wide letters and merged tight-set books); `startup_recovery` Pass B deferred off the UI thread (D-F13c launch freeze); locally-gated zero-width space-glyph word boundary (N1 — packed headings/tables encode word-spaces as zero-width glyphs the gap test can't see) + embedded-number bidi flip (N3 — Du-Siach years `3191` → `1913`); maqaf cured by the Mn test (N2).
+- **LOCAL UAT extraction fixes (D-F19..D-F22, D-F25):** HTML semicolon-less `&nbsp` decode (`_clean_html_text`); `.xlsx` formula-only/empty-workbook fallback to `data_only=False` (was indexed `no_text_layer`); UTF-16 `.csv` BOM detection before the cp1255 fallback; **unchecking a folder now cascades to its files** (BLOCKER — `ItemIsAutoTristate` is child→parent only); `אמ'` apostrophe Tantivy-metacharacter parse-crash sanitized.
+- **File-management actions for LOCAL hits (D-F24 + new):** "Open file location" (reveals in OS file manager), file-aware right-click menu (Open file / Open file location / Copy file location / Copy filename) replacing the Genizah cloud-community actions, per-folder opt-out checkboxes in the My Library list, and a fix so `.html`/`.xlsx`/`.csv` LOCAL files can be opened (centralized in `desktop/file_actions.py`).
+- **Three search/startup freezes fixed (D-F23, Codex-assisted):** (1) every search froze ~20-30s because `search_history.json` had grown to **778 MB** (each entry stored `results[:5000]`) and was re-read/rewritten on the UI thread per search — history now stores no result snapshots and **re-runs** the search on click (migrated 778 MB → 0.08 MB); (2) large-folder startup froze ~45s from a per-batch `O(batches×folders×files)` opt-out-checkbox refresh — moved to fire once after tree load (14.96s → 0.10s); (3) LAB-rebuild churn from a `lab_index_normalize` AttributeError that aborted every rebuild — fixed the delegation and moved the rebuild to a background `LabRebuildWorker`. Plus `idx_local_files_folder_id` and off-thread refinement replay.
+- **Pre-release cleanup:** removed the `[PROFILE]` (`GENIZAH_PROFILE_SEARCH=1`) debug instrumentation added during the freeze hunt (`ccb87c90`).
+
+**Known deferred items at close:** 102 historical backlog items (41 debug sessions, 53 quick tasks, 5 todos, 1 UAT gap, 2 unimplemented seeds) — the same accumulation deferred at the v7.14 and v7.15 closes; none are v7.16-specific blockers (see STATE.md Deferred Items). NEW/carried forward to the next milestone: **D-F12** (regular Search ~constant 8s wall-clock investigation), **D-F17** (xlsx/Word/JSON export not yet adapted to LOCAL / ALL results), **D-F18** (context-menu LOCAL detection could normalize through `display`).
+
+**Tag posture:** `v7.16.0` already created by `/release` 2026-06-01 (desktop only; GitHub Release with installer attached, marked `latest`). No separate `v7.16` milestone tag — consistent with v7.10–v7.15 convention.
+
+---
+
 ## v7.15 My Library Visual (Shipped: 2026-05-28)
 
 **Phases completed:** 3 phases (99, 100, 101), 7 plans, 8 tasks

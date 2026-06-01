@@ -8,6 +8,15 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
+## Current State (v7.16 Hebrew PDF Text Quality shipped 2026-06-01)
+
+**Shipped:** v7.16 Hebrew PDF Text Quality (desktop only, 2026-06-01; tag `v7.16.0` @ `ccb87c90`)
+- 1 formal phase (102, 5 plans) + post-phase no-phase quality/UAT/freeze work. 61 commits since v7.15.0; 104 files, +34,513/−441; 2026-05-28 → 2026-06-01.
+- **Phase 102 — LOCAL PDF text-layer extraction rewrite:** `extract_pdf_pages` rebuilt on a `page.get_text("rawdict")` per-glyph foundation (`shared/local_indexer_rtl.py`): RTL-gated Meiri reorder core (no LTR regression), Unicode-`Mn` nikud/te'amim classification (preserves maqaf `־`), per-line 1-D Otsu word-gap valley de-space, `_ltr_damage_guard` RTL-trust fix (the real production blocker), corrupt_encoding detection. Nikud stripped once for all LOCAL formats. `extraction_format_version` 2→3 (existing libraries need one "Re-index All"). אוצר הגאונים single-letter tokens 73.5%→~3-5%, רביצקי word-merge 15.8%→0.07%. ~150 tests; validated by Spike 001.
+- **No-phase work:** de-space follow-ups (D-F13b/c/d — edge-gap+Otsu, launch-freeze deferral, zero-width space-glyph boundary, number bidi), LOCAL UAT extraction fixes (D-F19..D-F22 HTML/xlsx/CSV + folder opt-out cascade BLOCKER, D-F25 apostrophe crash), file-management actions for LOCAL hits (D-F24), and three search/startup freeze fixes (D-F23: 778 MB `search_history.json`, large-folder O(n²) startup, LAB-rebuild churn).
+- Tagged `v7.16.0` via `/release` (desktop only; GitHub Release with installer, marked latest; CI green). Closed via `/gsd-complete-milestone` 2026-06-01.
+- **Carried forward:** D-F12 (regular Search ~8s wall-clock — leading next-milestone candidate), D-F17 (LOCAL/ALL export), D-F18 (context-menu LOCAL detection).
+
 ## Current State (v7.15 My Library Visual shipped + closed 2026-05-28)
 
 **Shipped + closed:** v7.15 My Library Visual (closed 2026-05-28)
@@ -278,15 +287,18 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - ✓ My Library — desktop local document search: 7th tab indexes user folders of `.docx`/`.pdf`/`.txt`/`.html`/`.xlsx`/`.csv` into a separate Tantivy side-index merged into Search / Composition / Parallels via RRF k=60 POST-dedup, with a `LOCAL` badge, corpus selector (`Genizah`/`Local`/`ALL`), three-state LOCAL filter, per-file opt-out tree, and three cloud-write gates that keep personal corpora entirely off the cloud (web/API/Supabase). Scaled to 13K files / 43 GB with atomic Tantivy rebuild + zstd text cache + crash recovery + Reset My Library. -- v7.14 (Phases 95-97.3)
 - ✓ NLI Resilience — shared circuit breaker (`shared/nli_circuit_breaker.py`) wired into all 10 NLI/IIIF fetch sites with bounded env-configurable timeouts; worst-case per-request blocking dropped 45s → ~9s; PostHog breaker telemetry via factored `shared/posthog_server.py`. Closes the 2026-05-25 production hang. -- v7.14 (Phase 98)
 
+- ✓ PDF page image rendering for LOCAL results (desktop): shared on-demand PyMuPDF renderer (QImage from filepath + 1-based page) off the UI thread via a worker with a bounded LRU of open `fitz.Document` handles and no on-disk image cache; ResultDialog + Browse show the rendered page next to extracted text and stay in sync on result/page navigation; non-PDF LOCAL files stay text-only (extension-gated); render failures degrade to a placeholder + log with no UI hang -- v7.15 (PDFIMG-01..06, Phases 99-100)
+
+- ✓ Hebrew PDF text-layer extraction rewrite for LOCAL search (desktop): `extract_pdf_pages` rebuilt on a `rawdict` per-glyph foundation with RTL-gated reorder, Unicode-`Mn` nikud/maqaf classification, per-line 1-D Otsu word-gap de-space, and `_ltr_damage_guard` RTL-trust fix — emphasis letter-spacing no longer shatters Hebrew words and tight typesetting no longer fuses phrases (אוצר הגאונים single-letter tokens 73.5%→~3-5%; רביצקי merge 15.8%→0.07%); corrupt text layers detected + flagged; `extraction_format_version` 2→3 -- v7.16 (Phase 102 + D-F13b/c/d)
+- ✓ File-management actions for LOCAL hits (desktop): Open file location + file-aware right-click menu (open / reveal / copy path / copy filename) replacing Genizah cloud-community actions, per-folder opt-out checkboxes, `.html`/`.xlsx`/`.csv` open support (`desktop/file_actions.py`) -- v7.16 (D-F24)
+- ✓ LOCAL search/startup performance + format fixes (desktop): search history no longer stores result snapshots (re-runs on click), eliminating the 778 MB `search_history.json` ~20-30s per-search freeze; large-folder startup O(n²) opt-out-checkbox refresh fixed (14.96s→0.10s); LAB rebuild runs on a background worker; HTML `&nbsp` / `.xlsx` formula-only / UTF-16 `.csv` extraction fixes; folder opt-out cascade -- v7.16 (D-F23, D-F19..D-F22)
+
 ### Active
 
-**v7.15 My Library Visual (PDF page image rendering for LOCAL results — desktop):**
-- [x] **PDFIMG-01**: A shared on-demand renderer produces a single PDF page image (QImage) from a filepath + 1-based page number without loading the rest of the document — Validated in Phase 99
-- [x] **PDFIMG-02**: Rendering runs off the UI thread via a worker, backed by a bounded LRU of open `fitz.Document` handles and no on-disk image cache — Validated in Phase 99
-- [ ] **PDFIMG-03**: In ResultDialog, a LOCAL PDF hit shows its rendered page image alongside the extracted text; navigating between results updates the image
-- [ ] **PDFIMG-04**: In the Browse panel, opening a LOCAL PDF result shows the rendered page image in the (previously hidden) image pane; prev/next page navigation updates the image to the matching page
-- [ ] **PDFIMG-05**: Non-PDF LOCAL files (`.docx`/`.html`/`.xlsx`/`.csv`/`.txt`) remain text-only — the image pane stays hidden, gated on file extension
-- [~] **PDFIMG-06**: Render failures (missing file, corrupt/encrypted PDF, page out of range) degrade gracefully to a user-visible placeholder and a log entry — no UI hang or crash — Renderer half validated in Phase 99 (classified `PdfRenderFailure` + single-log chokepoint + no-crash worker envelope); user-visible placeholder wired in Phase 100
+No formal requirements are open. Next-milestone candidates (not yet planned):
+- **D-F12** — regular Search ~constant 8s wall-clock investigation (profile-first: instrument Tantivy candidate fetch → regex post-filter → enrichment → highlight build → return-to-UI; profile LOCAL-only / Genizah-unfiltered / Genizah-filtered; optimize the actual bottleneck — do NOT guess).
+- **D-F17** — adapt xlsx/Word/JSON export to LOCAL / ALL (local+genizah) result sets (currently Genizah-tuned only).
+- **D-F18** — context-menu LOCAL detection could normalize through `display`.
 
 ### Out of Scope
 
@@ -377,6 +389,12 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | v7.12 Path B: `_TEST_BACKEND` shim removed | Tests should use real session storage with proper fixtures or adapter injection, not a parallel-universe storage backend | ✓ Good — `SimpleNamespace` + `monkeypatch.setattr('web.safe_storage.app', ...)` is the canonical pattern |
 | v7.12 Path B: task-scoped `WeakKeyDictionary` memo for `get_user_client()` | Per-user Client cache (E-path) rejected — Codex flagged "reopens Phase 90's scary surface." Memo keyed by `asyncio.current_task()` cannot survive across requests by construction | ✓ Good — 19.3x mean `/lists` speedup; Phase 90 D-12 invariant preserved |
 | v7.12 Path B: cross-AI plan review BEFORE execution | Gemini + Codex caught items internal plan-checker missed (e.g. Phase 92 5-surface audit widening; Phase 91 stale auth_profile security leak) | ✓ Good — pattern applied to every v7.12 phase plan |
+| v7.16: rawdict per-glyph PDF extraction (not `get_text` line strings) | Only foundation that lets word boundaries be re-derived from actual glyph spacing | ✓ Good — fixed letter-spacing shatter + phrase fusion |
+| v7.16: RTL-gated reorder (Meiri core; LTR untouched) | Meiri reorder helps Hebrew order/headers but HURTS Latin (Spike 001) | ✓ Good — no LTR regression |
+| v7.16: per-line 1-D Otsu word-gap valley (not a global fraction) | Intra/inter-word gaps overlap across book classes but are bimodal per line | ✓ Good — replaced first-cut fixed-floor/median that shattered/merged |
+| v7.16: Unicode-`Mn` combining-mark test (not `0x05B0–0x05C7` range) | Range mis-treated maqaf/sof-pasuq as vowels and missed te'amim | ✓ Good — maqaf `־` preserved |
+| v7.16: search history stores no result snapshots (re-run on click) | Storing `results[:5000]`/entry grew `search_history.json` to 778 MB → ~20-30s UI-thread freeze every search | ✓ Good — migrated 778 MB → 0.08 MB |
+| v7.16: diagnose perf freezes by measuring on real data + parallel Claude/Codex | Headless PyQt probes ruled out wrong hypotheses; Codex flagged the unprofiled post-checkpoint history write | ✓ Good — converged on the real root cause |
 
 ## Evolution
 
@@ -396,6 +414,8 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-05-28 — v7.15 milestone CLOSED (3 phases, 7 plans, 6/6 PDFIMG-* requirements). PDF page image rendering wired into ResultDialog + Browse (Phases 99-100) plus pre-release polish (Phase 101: RTL fix, intra-block newline collapse, LAB/remove-folder Windows fixes, "Re-index All" button). Next: `/release` skill ships v7.15.0 (web + desktop), then `/gsd-new-milestone` for v7.16 (likely target: regular Search performance investigation per D-F12).*
+*Last updated: 2026-06-01 — v7.16 Hebrew PDF Text Quality milestone CLOSED (1 formal phase 102 + no-phase de-space/UAT/freeze work; shipped v7.16.0 desktop 2026-06-01, tag `v7.16.0` @ `ccb87c90`, GitHub Release with installer marked latest, CI green). LOCAL Hebrew PDF text-layer extraction rewritten (rawdict per-glyph, RTL-gated, Otsu de-space, Mn nikud), file-management actions for LOCAL hits, and three search/startup freeze fixes (778 MB history file, large-folder O(n²) startup, LAB-rebuild churn). Next: `/gsd-new-milestone` (leading candidates: D-F12 search-latency investigation, D-F17 LOCAL/ALL export).*
+
+*Prior: 2026-05-28 — v7.15 My Library Visual CLOSED (3 phases 99-101, 7 plans, 6/6 PDFIMG-*). PDF page image rendering in ResultDialog + Browse + pre-release polish (RTL fix, LAB/remove-folder Windows fixes, "Re-index All" button).*
 
 *Prior: 2026-05-27 — v7.13 + v7.14 milestones CLOSED via retroactive `/gsd-complete-milestone` reconciliation (both shipped as app releases earlier — v7.13.0 2026-05-21, v7.14.0 2026-05-24 — but the GSD close ritual had been skipped). v7.13 requirements archived to `.planning/milestones/v7.13-REQUIREMENTS.md`; v7.14 recorded in `.planning/milestones/v7.14-ROADMAP.md`; MILESTONES.md gained both entries; the live `REQUIREMENTS.md` was deleted (fresh for the next milestone). For authoritative current behavior see CHANGELOG.md / CLAUDE.md "Recently Changed".*

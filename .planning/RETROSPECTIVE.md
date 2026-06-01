@@ -266,6 +266,44 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 - Model mix: opus (planner + executor); Codex CLI for cross-AI critique at every sub-decision
 - Notable: highest plan count to date for a single milestone (37), driven by the 9+9 plans of Phases 95+96 plus two emergency decimal sub-phases and a parallel web-resilience phase. The My Library chain (95→97.3) is one feature hardened over 5 phases — the cost of productizing an external prototype to real scale.
 
+## Milestone: v7.16 — Hebrew PDF Text Quality
+
+**Shipped:** 2026-06-01
+**Phases:** 1 formal (102) + no-phase quality work | **Plans:** 5 (Phase 102)
+
+> Note: v7.15 was shipped 2026-05-28 but its retrospective entry was skipped at close (drift — see Key Lesson 3 below); only the trends-table row was backfilled.
+
+### What Was Built
+- LOCAL ("My Library") Hebrew PDF text-layer extractor rewritten onto a `rawdict` per-glyph foundation: RTL-gated reorder, Unicode-`Mn` nikud/maqaf classification, per-line 1-D Otsu word-gap de-space, `_ltr_damage_guard` RTL-trust fix, corrupt_encoding detection (Phase 102, 5 plans)
+- De-space follow-ups from real-library UAT (D-F13b/c/d): edge-gap+Otsu metric, launch-freeze deferral, zero-width space-glyph boundary, embedded-number bidi
+- LOCAL UAT extraction fixes (HTML `&nbsp` / `.xlsx` formula-only / UTF-16 `.csv`) + folder opt-out cascade (BLOCKER) + file-management actions for LOCAL hits
+- Three search/startup freeze fixes (D-F23): 778 MB `search_history.json`, large-folder O(n²) startup, LAB-rebuild churn
+
+### What Worked
+- **Measure on real data, don't guess**: the freeze root causes were found by timing the actual operations against the real quarantined SQLite/data and a headless PyQt probe — which DISPROVED two plausible hypotheses (autotristate O(n²), search-path slowness) before any fix was written
+- **Parallel Claude + Codex investigation**: running Codex (`codex exec`) in the background while investigating independently, then comparing, converged on the real root cause with high confidence (Codex flagged the unprofiled post-checkpoint history write as #1 suspect)
+- **Real-corpus spike before the rewrite**: Spike 001 reshaped Phase 102 (RTL-gate the reorder; de-space is the dominant bug) and prevented an LTR regression
+- **Edit+test no-phase track for quality follow-ups**: the de-space/UAT/freeze work moved fast as edit+test cycles rather than full GSD phases — appropriate for a one-developer quality pass
+
+### What Was Inefficient
+- **A profiler that ends at a checkpoint has a blind spot**: the in-app `GENIZAH_PROFILE_SEARCH` profiler always showed the search path fast because the freeze (the history write) ran *after* the last checkpoint — burned time before pivoting to Codex
+- **The first de-space cut shipped a wrong metric**: center-gap-vs-1.8×-median shattered wide letters and merged tight-set books; needed a full rewrite to edge-gap + per-line Otsu after real-library UAT. A wider fixture set up front (tight-set + justified + letter-spaced classes) would have caught it
+- **One feature, five doc surfaces**: each fix touched OPEN_ISSUES + CHANGELOG + CLAUDE + STATE + memory — heavy bookkeeping for desktop-only quality work
+
+### Patterns Established
+- **Background Codex + self, then converge**: for hard diagnosis, run an independent cross-AI investigation in parallel and compare conclusions
+- **Quarantined-DB forensics**: the reset-quarantine SQLite copy preserves the pre-reset library for measuring real query costs offline
+- **Remove debugging scaffolding before release**: gated profiling earns its keep during a hunt, then gets cut once the root cause proves unrelated to the instrumented span
+
+### Key Lessons
+1. **Check file sizes early.** `(Get-Item search_history.json).Length` = 778 MB was the instant confirmation once Codex pointed at history persistence — a one-command check that would have short-circuited days of search-path theorizing.
+2. **Never bulk-mutate row state from `__init__` / the UI thread.** The history write, the startup opt-out refresh, the LAB rebuild, and the prior startup_recovery re-extract were all UI-thread freezes — every one moved to a background worker or eliminated (see `feedback_no_auto_reindex_in_init`).
+3. **`/release` still skips the milestone-close ritual.** v7.15 skipped the retrospective entirely (missing from this file until v7.16); run the close immediately after shipping — this is the fourth milestone in a row to note the same drift.
+
+### Cost Observations
+- Model mix: opus (release + close); Codex CLI (gpt-5.5) for the parallel freeze diagnosis
+- Notable: only 5 counted plans (one phase) but 4 days wall-clock — most of the milestone was no-phase edit+test quality work (de-space follow-ups, UAT fixes, three freeze fixes) that plan-count metrics don't capture
+
 ---
 
 ## Cross-Milestone Trends
@@ -287,6 +325,10 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 | v7.12 | 10 | 28 | 6 | 4.7 | Multitenant architecture (Path B) |
 | v7.13 | 2 | 5 | 3 | 1.7 | Research-grade exports + PGP filter |
 | v7.14 | 6 | 37 | 7 | 5.3 | My Library local document search |
+| v7.15 | 3 | 7 | 2 | 3.5 | My Library visual (PDF page image) |
+| v7.16 | 1* | 5 | 4 | 1.3 | Hebrew PDF text quality + freeze fixes |
+
+*v7.16: 1 formal phase (102); most of the milestone was no-phase edit+test quality work (de-space follow-ups, UAT fixes, three search/startup freeze fixes) not captured by plan count.
 
 **Observations:**
 - v6.5.0 had the lowest plans/day ratio — reflects the large batch translation work (multi-day server jobs) and bug-fix tail
