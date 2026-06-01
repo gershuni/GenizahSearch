@@ -4,7 +4,7 @@ milestone: v5.6.0
 milestone_name: milestone
 status: verifying
 stopped_at: Completed 103-04-PLAN.md (non-regression gate + full export suite green)
-last_updated: "2026-06-01T14:49:00.000Z"
+last_updated: "2026-06-01T14:58:56.561Z"
 last_activity: 2026-06-01
 progress:
   total_phases: 2
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-06-01)
 ## Current Position
 
 Milestone: **v7.17 LOCAL Export Support — STARTED 2026-06-01** (closes D-F17). Adapt the desktop result-export flows so LOCAL ("My Library") hits export with local-meaningful columns (filename/folder/filepath/page/matched-text) instead of empty Genizah columns, across XLSX/CSV/TXT/DOCX on the Search-results (`export_results`) and Composition-report (`export_comp_report`) surfaces; mixed/ALL xlsx gains a dedicated "Local Documents" sheet; Genizah-only exports unchanged. Desktop-only (web has no LOCAL); JSON + Parallels out of scope.
-Phase: 103 (search-results-local-export-all-formats-bilingual-non-regression) — COMPLETE (4/4 plans)
-Plan: 4 of 4 — DONE
+Phase: 104
+Plan: Not started
 Status: Phase complete — ready for verification
 Last activity: 2026-06-01
 Next: `/gsd-verify-phase 103` or `/gsd-discuss-phase 104` (export_comp_report LOCAL-aware LEXP-02).

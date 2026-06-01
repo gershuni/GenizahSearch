@@ -327,7 +327,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 103. Search-Results LOCAL Export | v7.17 | 4/4 | Complete   | 2026-06-01 |
+| 103. Search-Results LOCAL Export | v7.17 | 4/4 | Complete    | 2026-06-01 |
 | 104. Composition-Report LOCAL Export | v7.17 | 0/TBD | Not started | - |
 | 99. PDF Page Renderer | v7.15 | 2/2 | Complete | 2026-05-27 |
 | 100. LOCAL PDF Image in ResultDialog + Browse | v7.15 | 3/3 | Complete | 2026-05-27 |
