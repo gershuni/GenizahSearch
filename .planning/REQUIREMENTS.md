@@ -29,7 +29,7 @@ Each maps to a roadmap phase (continues numbering from Phase 102 → starts at *
 - [x] **LEXP-05**: When a user exports a **LOCAL-only** result set to xlsx, the workbook is usable and centered on the Local Documents sheet; the Genizah sub-sheets are omitted or empty (never error).
 - [x] **LEXP-06**: When a user exports to **CSV / TXT / DOCX**, the output is a single LOCAL-aware table: LOCAL rows populate the local columns and Genizah rows populate the Genizah columns, with no misleading empty cells for local rows.
 - [x] **LEXP-07**: The new LOCAL columns and the "Local Documents" sheet title/headers are **bilingual** — Hebrew when `lang='he'`, English when `lang='en'` — consistent with the existing 4-sheet bilingual export.
-- [ ] **LEXP-08**: **Genizah-only XLSX / CSV / TXT exports remain structurally unchanged**; the xlsx cross-parity invariant (`tests/test_export_xlsx_cross_parity.py`) and the existing 4-sheet Genizah workbook are preserved (no regression). **DOCX is the deliberate exception** — per Phase 103 discussion (`.planning/phases/103-.../103-CONTEXT.md` D-10/D-12), the DOCX export is intentionally redesigned from a 7-column table into a per-result rich-document block layout for **both** Genizah and LOCAL rows, so Genizah-only DOCX output changes **by design**. (The xlsx invariant is DOCX-independent and stays green.)
+- [x] **LEXP-08**: **Genizah-only XLSX / CSV / TXT exports remain structurally unchanged**; the xlsx cross-parity invariant (`tests/test_export_xlsx_cross_parity.py`) and the existing 4-sheet Genizah workbook are preserved (no regression). **DOCX is the deliberate exception** — per Phase 103 discussion (`.planning/phases/103-.../103-CONTEXT.md` D-10/D-12), the DOCX export is intentionally redesigned from a 7-column table into a per-result rich-document block layout for **both** Genizah and LOCAL rows, so Genizah-only DOCX output changes **by design**. (The xlsx invariant is DOCX-independent and stays green.)
 
 ## Future Requirements
 
@@ -70,7 +70,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | LEXP-05 | 103 | Complete |
 | LEXP-06 | 103 | Complete |
 | LEXP-07 | 103 | Complete |
-| LEXP-08 | 103 | Pending |
+| LEXP-08 | 103 | Complete |
 
 **Coverage:**
 - v7.17 requirements: 8 total
