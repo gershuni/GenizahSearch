@@ -10,6 +10,10 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 - **Desktop app renamed to "Dicta Genizah Search Pro"** — The desktop application's display name is now **Dicta Genizah Search Pro** everywhere it is shown to users: the window title, the About dialog (English + Hebrew), the updater dialog, the credits written into exported files (CSV / TXT / DOCX headers, the xlsx "Credits and Info" sheet, and the puzzle-image footer), the Windows executable metadata, and the installer (Start-menu / desktop shortcut and Add/Remove Programs). The web platform keeps its own name, **Dicta Genizah Search**. (Internal file names — `GenizahSearchPro.exe`, the installer artifact, and the data folders — are unchanged, so existing installs upgrade in place and auto-update keeps working.)
 
+### Fixed
+
+- **Hebrew interface coverage** — Added Hebrew translations for ~250 interface strings that previously showed in English to Hebrew users across both apps: the Reading Desk, image-viewer and browse controls (rotate / zoom / fullscreen / page navigation / library image toggles), the Projects & Lists panel, cloud-sync and data-update dialogs, search/variant/measurement filter controls, corrections / discoveries / comments actions, and export prompts. Also fixed three places where Hebrew text leaked into the English interface (the Visual Similarity dialog header, the "copy info" labels for items not in a list, and the Parallels "Category:" label) and a Help-page link that pointed at a non-existent repository branch. Surfaced by a pre-release internationalization audit.
+
 ---
 
 ## [7.16.0] - 2026-05-31 — Hebrew PDF Text Quality

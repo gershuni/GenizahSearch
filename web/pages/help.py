@@ -627,7 +627,7 @@ tools that need programmatic access to the corpus.
 the full API.
 
 **Cairo Genizah Research skill for Claude:** a ready-to-use
-[Claude skill](https://github.com/gershuni/GenizahSearch/tree/main/skills/cairo-genizah-research)
+[Claude skill](https://github.com/gershuni/GenizahSearch/tree/master-main/skills/cairo-genizah-research)
 drives this API to find candidate witnesses for a phrase, piyyut,
 responsum, letter, or composition, returning a tiered ranked list
 with browse text, library attribution, and image URLs.
@@ -1244,7 +1244,7 @@ def _create_hebrew_content():
 
 **סכמת OpenAPI:** [`/api/openapi.json`](/api/openapi.json) מתעדת את המבנה המלא של ה-API.
 
-**סקיל Cairo Genizah Research ל-Claude:** [סקיל מוכן לשימוש](https://github.com/gershuni/GenizahSearch/tree/main/skills/cairo-genizah-research) המפעיל את ה-API למציאת עדי נוסח לביטוי, פיוט, תשובה, מכתב או חיבור, ומחזיר רשימה מדורגת עם טקסט מתוך עמוד העיון, ייחוס לספרייה וקישורי תמונה.
+**סקיל Cairo Genizah Research ל-Claude:** [סקיל מוכן לשימוש](https://github.com/gershuni/GenizahSearch/tree/master-main/skills/cairo-genizah-research) המפעיל את ה-API למציאת עדי נוסח לביטוי, פיוט, תשובה, מכתב או חיבור, ומחזיר רשימה מדורגת עם טקסט מתוך עמוד העיון, ייחוס לספרייה וקישורי תמונה.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === הספרייה שלי — מסמכים מקומיים (Phase 95 D-31 + D-32 + D-33) ===

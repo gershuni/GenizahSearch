@@ -4781,7 +4781,7 @@ class GenizahGUI(QMainWindow):
         main_layout.setSpacing(0)
 
         # Orange header
-        header = QLabel(f'  {tr("Visual Similarity")} -- {shelfmark}  |  דמיון חזותי')
+        header = QLabel(f'  {tr("Visual Similarity")} -- {shelfmark}  ')
         header.setStyleSheet("background-color: #e65100; color: white; font-size: 18px; font-weight: bold; padding: 12px;")
         main_layout.addWidget(header)
 
@@ -13722,20 +13722,20 @@ class GenizahGUI(QMainWindow):
             if format_type == 'compact':
                 text = f"{shelfmark} - {title}" if title else shelfmark
             elif format_type == 'detailed':
-                lines = [f"מספר מדף: {shelfmark}"]
+                lines = [f"{tr('Shelfmark:')} {shelfmark}"]
                 if title:
-                    lines.append(f"כותרת: {title}")
-                lines.append(f"מספר מערכת: {sys_id}")
+                    lines.append(f"{tr('Title:')} {title}")
+                lines.append(f"{tr('System ID:')} {sys_id}")
                 text = '\n'.join(lines)
             else:  # with_link
-                lines = [f"מספר מדף: {shelfmark}"]
+                lines = [f"{tr('Shelfmark:')} {shelfmark}"]
                 if title:
-                    lines.append(f"כותרת: {title}")
-                lines.append(f"מספר מערכת: {sys_id}")
+                    lines.append(f"{tr('Title:')} {title}")
+                lines.append(f"{tr('System ID:')} {sys_id}")
                 # Phase 85 D-06: synthetic sys_ids skip the KTIV link in clipboard text
                 if not is_synthetic_sys_id(sys_id):
                     ktiv_url = f"https://www.nli.org.il/he/discover/manuscripts/hebrew-manuscripts/itempage?vid=KTIV&scope=KTIV&docId=PNX_MANUSCRIPTS{sys_id}"
-                    lines.append(f"קישור: {ktiv_url}")
+                    lines.append(f"{tr('Link:')} {ktiv_url}")
                 text = '\n'.join(lines)
 
         clipboard = QApplication.clipboard()

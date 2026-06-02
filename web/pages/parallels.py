@@ -1344,7 +1344,7 @@ def create_parallels_page(initial_text: str = None):
 
             # Category selector
             with ui.row().classes('w-full items-center gap-2 mb-4'):
-                ui.label(tr('Category:') if tr('Category:') != 'Category:' else 'קטגוריה:').classes('text-sm').style('color: var(--text-secondary);')
+                ui.label(tr('Category:')).classes('text-sm').style('color: var(--text-secondary);')
                 cat_options = {'all': tr('All')}
                 for key, book_data in source_data['books'].items():
                     cat_options[key] = book_data['name']
