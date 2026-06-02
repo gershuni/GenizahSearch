@@ -11,6 +11,7 @@ This directory contains all project documentation, organized by category.
 | Need to... | Read this |
 |------------|-----------|
 | **See open bugs & issues** | [OPEN_ISSUES.md](OPEN_ISSUES.md) |
+| **See feature ideas / what to build next** | [FEATURE_IDEAS.md](FEATURE_IDEAS.md) |
 | Deploy the website | [guides/DEPLOYMENT_TECHNICAL.md](guides/DEPLOYMENT_TECHNICAL.md) |
 | Manage browser extension | [guides/DEPLOYMENT_TECHNICAL.md#browser-extension](guides/DEPLOYMENT_TECHNICAL.md#browser-extension-genizahsearch-image-helper) |
 | Manage the website (non-technical) | [guides/WEBSITE_ADMIN_GUIDE.md](guides/WEBSITE_ADMIN_GUIDE.md) |
