@@ -8,17 +8,19 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v7.17 LOCAL Export Support
+## Current Milestone: v8.0.0 Dicta Rebrand & Joins Lab
 
-**Goal:** Make every desktop result export usable when the result set contains LOCAL ("My Library") hits — emit local-meaningful columns (filename, folder, filepath, page, matched text) instead of the empty/irrelevant Genizah columns (shelfmark, library, IIIF, PGP, bibliography, domains) those rows produce today. Closes deferred issue **D-F17**.
+**Goal:** Ship the flagship **v8.0.0** "Dicta Genizah Search Pro" release — the desktop rebrand (delivered) and LOCAL ("My Library") export support (delivered, Phases 103 + 105) bundled with the new **Joins Lab**: an interactive, **human-in-the-loop** join-hunting workbench (both apps) where a scholar keeps ONE anchor fragment in view (image + numbered transcription) and drives the app's EXISTING search tools to find the fragments that physically join it. There is NO automated join-finder — the scholar is the ranker and confirmer.
 
-**Target features:**
-- LOCAL rows export with local-appropriate columns across all four desktop formats (XLSX, CSV, TXT, DOCX), on BOTH the Search-results export (`export_results`) and the Composition-report export (`export_comp_report`).
-- Mixed (ALL corpus) xlsx gains a dedicated **"Local Documents"** sheet; the Genizah `Manuscripts` / `Bibliography` sub-sheets exclude LOCAL rows.
-- CSV / TXT / DOCX single-table formats fall back to one LOCAL-aware table (local rows fill the local columns).
-- Genizah-only exports remain structurally unchanged (cross-parity invariant `tests/test_export_xlsx_cross_parity.py` preserved).
+**Bundles (already delivered, folded in from the v7.17 cycle):**
+- Desktop rebrand → "Dicta Genizah Search Pro" — display name only; binary identifiers unchanged so installs upgrade in place (commit `6e0c312d` + follow-ups).
+- LOCAL ("My Library") export across XLSX/CSV/TXT/DOCX with a bilingual "Local Documents" sheet — Phases 103 + 105 (closes **D-F17**).
 
-**Key context:** Desktop-only — web "My Library" does not exist and web export already excludes LOCAL via `skip_local`, so the dual-app maintenance rule does not apply here. JSON export (web-only) and Parallels export are out of scope. LOCAL hits are 97-prefix synthetic sys_ids carrying a top-level `source='LOCAL'`; their result dicts already hold filepath / page / folder via the My Library SQLite (`get_filepaths`, `local_files`).
+**New build — Joins Lab (two independent components, both apps):**
+- **Component A — Join Workbench (primary):** dedicated tab/page; pinned anchor (image + numbered transcription); "Find joins" entry from desktop ResultDialog + Browse (web+desktop); show existing/known joins (PGP+FJMS+user+community); conservative `[`/`]` tear-side assist (only when clear); seed searches from the anchor into the existing search module (variants/fuzzy/Responsa/regex); collect candidates to a list; side-by-side compare; act on a confirmed join (joins button + export + add-to-list; optional open-in-Puzzle).
+- **Component B — Search-support algorithms (secondary, independent):** parallels seeded from the anchor; corpus-driven suggest-then-search completion (first/last N words); `[`/`]`-aware torn-word completion.
+
+**Key context:** The MVP rides existing primitives — line-start/line-end search, gap notation, parallels, the joins panel, the Fragment Puzzle (both apps), and the variant/fuzzy/Responsa/regex search module — so it is largely UI composition + seed helpers, not new search-engine work. No new index or sidecar (`line_starts`/`line_ends` already present on web + most desktop users). The slow research-only auto-ranked v7/v8 join finder is explicitly OUT of scope. Requirements (JWB-01..09, JSA-01..03) in `.planning/REQUIREMENTS.md`. **The roadmap is intentionally deferred pending a Genizah-scholar design-critique session that will pressure-test the design against the real material nature of the corpus before phases are locked.** Origin: Spike 002 (`.planning/spikes/002-assisted-join-workbench/SPIKE-FINDINGS.md`) + `docs/FEATURE_IDEAS.md` + `docs/archive/JOIN_FINDER_REPORT.md`.
 
 ## Current State (v7.16 Hebrew PDF Text Quality shipped 2026-06-01)
 
@@ -305,13 +307,17 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - ✓ File-management actions for LOCAL hits (desktop): Open file location + file-aware right-click menu (open / reveal / copy path / copy filename) replacing Genizah cloud-community actions, per-folder opt-out checkboxes, `.html`/`.xlsx`/`.csv` open support (`desktop/file_actions.py`) -- v7.16 (D-F24)
 - ✓ LOCAL search/startup performance + format fixes (desktop): search history no longer stores result snapshots (re-runs on click), eliminating the 778 MB `search_history.json` ~20-30s per-search freeze; large-folder startup O(n²) opt-out-checkbox refresh fixed (14.96s→0.10s); LAB rebuild runs on a background worker; HTML `&nbsp` / `.xlsx` formula-only / UTF-16 `.csv` extraction fixes; folder opt-out cascade -- v7.16 (D-F23, D-F19..D-F22)
 
+- ✓ LOCAL ("My Library") export support (desktop): Search-results export across XLSX/CSV/TXT/DOCX emits local-meaningful columns (filename/folder/filepath/page/matched-text) for LOCAL hits, with a dedicated bilingual "Local Documents" xlsx sheet, LOCAL-excluded Genizah sub-sheets, single-table CSV/TXT/DOCX fallbacks, and a preserved Genizah cross-parity invariant (DOCX redesigned by design). Plus export UX polish (Open File/Folder dialog, LOCAL-only domain-warning + MiDRASH-credit suppression, capped full-text context in DOCX/TXT). Closes D-F17. -- v8.0.0 / folded v7.17 (Phases 103 + 105; LEXP-01/03–08, EXPUX-01–04)
+- ✓ Desktop rebrand → "Dicta Genizah Search Pro" (display name only — window title, About EN+HE, updater, exported-file credits, puzzle PNG footer, version metadata, installer, README/CHANGELOG, web download-page title; binary identifiers UNCHANGED so installs upgrade in place; web brand "Dicta Genizah Search" unchanged) + i18n gap closure (223 desktop+web gaps / 246 keys) -- v8.0.0 / folded v7.17 (BRAND-01/02; commit `6e0c312d` + follow-ups)
+
 ### Active
 
-**Milestone v7.17 — LOCAL Export Support (in progress).** Adapt the desktop result-export flows so LOCAL ("My Library") hits export with local-meaningful columns instead of empty Genizah columns, across XLSX/CSV/TXT/DOCX on the Search-results and Composition-report surfaces. Full requirements with REQ-IDs in `.planning/REQUIREMENTS.md`; phases in `.planning/ROADMAP.md`. Closes **D-F17**.
+**Milestone v8.0.0 — Dicta Rebrand & Joins Lab (in progress).** The rebrand (display-only) and LOCAL export (Phases 103 + 105) are delivered and fold into the v8.0.0 release. The new build is **Joins Lab** — Component A (Join Workbench hub, primary) + Component B (search-support algorithms, secondary/independent), both apps, human-in-the-loop, NO auto-finder. Full requirements (JWB-01..09, JSA-01..03) in `.planning/REQUIREMENTS.md`. **Roadmap deferred pending a Genizah-scholar design-critique session.** Version decision RESOLVED → v8.0.0 (the actual version-file bump happens at `/release` time, not now).
 
-Remaining next-milestone candidates (NOT in v7.17 scope):
+Carried-forward candidates (NOT in v8.0.0 scope unless promoted):
 - **D-F12** — regular Search ~constant 8s wall-clock investigation (profile-first: instrument Tantivy candidate fetch → regex post-filter → enrichment → highlight build → return-to-UI; profile LOCAL-only / Genizah-unfiltered / Genizah-filtered; optimize the actual bottleneck — do NOT guess).
 - **D-F18** — context-menu LOCAL detection could normalize through `display` (P3, opportunistic when next editing `_show_results_context_menu`).
+- **EXP-F3** (was LEXP-02) — Composition-report LOCAL export, gated on a LOCAL composition-search UI.
 
 ### Out of Scope
 
@@ -408,7 +414,10 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | v7.16: Unicode-`Mn` combining-mark test (not `0x05B0–0x05C7` range) | Range mis-treated maqaf/sof-pasuq as vowels and missed te'amim | ✓ Good — maqaf `־` preserved |
 | v7.16: search history stores no result snapshots (re-run on click) | Storing `results[:5000]`/entry grew `search_history.json` to 778 MB → ~20-30s UI-thread freeze every search | ✓ Good — migrated 778 MB → 0.08 MB |
 | v7.16: diagnose perf freezes by measuring on real data + parallel Claude/Codex | Headless PyQt probes ruled out wrong hypotheses; Codex flagged the unprofiled post-checkpoint history write | ✓ Good — converged on the real root cause |
-| v7.17: LOCAL rows export as local columns (not excluded); mixed/ALL xlsx gets a dedicated "Local Documents" sheet | Genizah columns (shelfmark/IIIF/PGP/bibliography/domains) are meaningless for local files; a separate sheet keeps both shapes clean and preserves the Genizah cross-parity invariant | ✓ Good (Search-results, Phase 103) — Composition-report half = Phase 104 pending |
+| v7.17: LOCAL rows export as local columns (not excluded); mixed/ALL xlsx gets a dedicated "Local Documents" sheet | Genizah columns (shelfmark/IIIF/PGP/bibliography/domains) are meaningless for local files; a separate sheet keeps both shapes clean and preserves the Genizah cross-parity invariant | ✓ Good (Search-results, Phase 103) — Composition-report half deferred → EXP-F3 |
+| v8.0.0: fold the v7.17 cycle (rebrand + LOCAL export) INTO v8.0.0 rather than closing v7.17 separately | The rebrand is the flagship "Pro" bump; bundling the delivered LOCAL export + the new Joins Lab under one v8.0.0 milestone matches the project's own major-version convention (v5/v6/v7 marked milestones, not API breaks) and the user's milestone naming | ✓ Good — no "v7.17" in history; Phases 103/105 kept as delivered (no destructive phase-clear) |
+| v8.0.0: Joins Lab is human-in-the-loop (scholar = ranker), NOT the auto-ranked v7/v8 finder | The auto-finder is research-only (no code), slow (~90s/fragment), low-recall (≤47% R@50), and 40% of cases have no parallels; the scholar-driven workbench composes existing primitives and ships as ~M | — Pending (roadmap deferred to scholar-critique) |
+| v8.0.0: defer the roadmap until after a Genizah-scholar design-critique session | The user will role-play a scholar to pressure-test JWB/JSA against the real material nature before phases lock; hardening a roadmap first would be likely-throwaway churn | — Pending |
 
 ## Evolution
 
@@ -428,7 +437,7 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-01 — Phase 103 (Search-Results LOCAL Export — XLSX/CSV/TXT/DOCX + bilingual "Local Documents" sheet + non-regression) COMPLETE & verified 6/6 must-haves (LEXP-01/03/04/05/06/07/08). Mixed exports now emit local-meaningful columns for LOCAL hits; LOCAL-only xlsx is exactly [Local Documents, Credits and Info]; Genizah-only XLSX/CSV/TXT stay byte-identical (cross-parity invariant untouched); DOCX intentionally redesigned into per-result blocks (D-12 carve-out). Code review: 0 critical / 3 warning / 3 info (advisory). Next milestone work: Phase 104 (Composition-report LOCAL export, LEXP-02) — `/gsd-discuss-phase 104` or `/gsd-plan-phase 104`.*
+*Last updated: 2026-06-02 — Milestone **v8.0.0 Dicta Rebrand & Joins Lab** opened (folds the delivered v7.17 cycle — rebrand + LOCAL export, Phases 103/105 — into v8.0.0; version decision RESOLVED → v8.0.0). New build = **Joins Lab**: Component A (Join Workbench hub) + Component B (search-support algorithms), both apps, human-in-the-loop, NO auto-finder. Requirements written (JWB-01..09, JSA-01..03 in REQUIREMENTS.md). **Roadmap intentionally deferred** pending a Genizah-scholar design-critique session (user-led, fresh session) that will pressure-test the design against the real material nature before phases lock. Origin: Spike 002 SPIKE-FINDINGS.md + docs/FEATURE_IDEAS.md.*
 
 *Prior: 2026-06-01 — v7.16 Hebrew PDF Text Quality milestone CLOSED (1 formal phase 102 + no-phase de-space/UAT/freeze work; shipped v7.16.0 desktop, tag `v7.16.0` @ `ccb87c90`, GitHub Release with installer marked latest, CI green). LOCAL Hebrew PDF text-layer extraction rewritten (rawdict per-glyph, RTL-gated, Otsu de-space, Mn nikud), file-management actions for LOCAL hits, and three search/startup freeze fixes (778 MB history file, large-folder O(n²) startup, LAB-rebuild churn).*
 

@@ -1,98 +1,135 @@
-# Requirements: GenizahSearch — Milestone v7.17 LOCAL Export Support
+# Requirements: GenizahSearch — Milestone v8.0.0 Dicta Rebrand & Joins Lab
 
-**Defined:** 2026-06-01
+**Defined:** 2026-06-02 (folds the v7.17 cycle into v8.0.0 per user decision 2026-06-02)
 **Core Value:** Researchers can find what they need in the Genizah corpus
-**Closes:** OPEN_ISSUES **D-F17** (xlsx/Word/TXT/CSV export not adapted to LOCAL hits)
+**Flagship:** **Joins Lab** — an interactive, human-in-the-loop join-hunting workbench (both apps)
 
 ## Milestone Goal
 
-Adapt the **desktop** result-export flows so a result set containing LOCAL ("My Library")
-hits exports usefully: LOCAL rows carry local-meaningful columns (filename, folder,
-filepath, page, matched text) instead of the empty/irrelevant Genizah columns (shelfmark,
-library, IIIF URL, PGP, bibliography, domains) they emit today. Mixed (Genizah + LOCAL)
-xlsx workbooks get a dedicated **"Local Documents"** sheet; single-table formats fall back
-to one LOCAL-aware table. Genizah-only exports stay unchanged.
+Ship **v8.0.0** as the flagship "Dicta Genizah Search Pro" release: the desktop rebrand
+(delivered) and LOCAL ("My Library") export support (delivered — Phases 103 + 105) bundled
+with the new **Joins Lab**. In the Joins Lab a scholar keeps **one anchor fragment in view**
+(image + numbered transcription) and drives the app's **existing** search tools to find the
+fragments that physically join it. **Human-in-the-loop: the scholar is the ranker and confirmer
+— there is NO automated join-finder.** Both apps.
 
-**Apps:** Desktop only. Web "My Library" does not exist, and web export already excludes
-LOCAL via `skip_local`, so the dual-app maintenance rule does not apply here.
+**Apps:** Both web and desktop. The dual-app maintenance rule applies to the Joins Lab.
 
-## v7.17 Requirements
+> **Status note:** Requirements are written; the **roadmap is intentionally deferred** until
+> after a **Genizah-scholar design-critique session** (user-led) that will pressure-test the
+> JWB/JSA requirements against the real material nature of the corpus before phases are locked.
 
-Each maps to a roadmap phase (continues numbering from Phase 102 → starts at **Phase 103**).
+---
 
-### LOCAL Export Adaptation (LEXP)
+## Delivered (folded in from the v7.17 cycle)
 
-- [x] **LEXP-01**: When a user exports **Search results** containing LOCAL hits, each LOCAL row carries local-meaningful values — **filename, parent folder, full filepath, page, and matched text** — in place of the empty Genizah columns (shelfmark / library / IIIF / PGP / domains).
-- [⏸] **LEXP-02**: When a user exports a **Composition-Search report** containing LOCAL hits, each LOCAL row carries the same local columns (LEXP-01 parity on the `export_comp_report` surface). **DEFERRED 2026-06-01 → Future Requirements (EXP-F3).** Composition Search has no LOCAL corpus path today (corpus selector is Search-tab-only; `CompositionThread` gets no `corpus_scope`), so a composition report can never contain LOCAL hits — there is nothing to adapt until a LOCAL composition-search UI exists.
-- [x] **LEXP-03**: When a user exports a **mixed** Genizah + LOCAL result set to **xlsx**, the workbook contains a dedicated **"Local Documents"** sheet holding the LOCAL rows, and the Genizah "Search Results" sheet contains only Genizah rows.
-- [x] **LEXP-04**: The Genizah-only sub-sheets (**Manuscripts**, **Bibliography**) contain **no** LOCAL rows — LOCAL synthetic sys_ids never produce empty/placeholder manuscript or bibliography entries.
-- [x] **LEXP-05**: When a user exports a **LOCAL-only** result set to xlsx, the workbook is usable and centered on the Local Documents sheet; the Genizah sub-sheets are omitted or empty (never error).
-- [x] **LEXP-06**: When a user exports to **CSV / TXT / DOCX**, the output is a single LOCAL-aware table: LOCAL rows populate the local columns and Genizah rows populate the Genizah columns, with no misleading empty cells for local rows.
-- [x] **LEXP-07**: The new LOCAL columns and the "Local Documents" sheet title/headers are **bilingual** — Hebrew when `lang='he'`, English when `lang='en'` — consistent with the existing 4-sheet bilingual export.
-- [x] **LEXP-08**: **Genizah-only XLSX / CSV / TXT exports remain structurally unchanged**; the xlsx cross-parity invariant (`tests/test_export_xlsx_cross_parity.py`) and the existing 4-sheet Genizah workbook are preserved (no regression). **DOCX is the deliberate exception** — per Phase 103 discussion (`.planning/phases/103-.../103-CONTEXT.md` D-10/D-12), the DOCX export is intentionally redesigned from a 7-column table into a per-result rich-document block layout for **both** Genizah and LOCAL rows, so Genizah-only DOCX output changes **by design**. (The xlsx invariant is DOCX-independent and stays green.)
+These shipped during the v7.17 work and release **under the v8.0.0 tag**. Full original
+requirement text is preserved in git history (prior `REQUIREMENTS.md`) and `MILESTONES.md`.
 
-### Export UX Polish (EXPUX) — Phase 105
+### Rebrand (BRAND)
+- [x] **BRAND-01**: Desktop app **display name** → "Dicta Genizah Search Pro" (window title, About
+  EN+HE, updater, exported-file credits incl. the shared xlsx Credits sheet, puzzle PNG footer,
+  version metadata, installer, README/CHANGELOG, web download-page title). **Binary identifiers**
+  (`GenizahSearchPro.exe`, `.spec`, `.iss`, `dist`/AppData folders, auto-update fetch) **UNCHANGED**
+  so installs upgrade in place. Web brand ("Dicta Genizah Search") unchanged. — delivered (commit
+  `6e0c312d` + follow-ups; Codex-reviewed SHIP-WITH-FIXES, resolved `6c343bd3`).
+- [x] **BRAND-02**: i18n gap closure during rebrand polish (223 desktop+web missing-`tr()` gaps /
+  246 keys). — delivered.
 
-Surfaced during the v7.17 close (2026-06-01). Desktop-only export-experience fixes on both export surfaces (`export_results` + `export_comp_report`).
+### LOCAL Export (LEXP / EXPUX) — Phases 103 + 105
+- [x] **LEXP-01, 03, 04, 05, 06, 07, 08** (Phase 103) — Search-results LOCAL export across
+  XLSX / CSV / TXT / DOCX, dedicated bilingual "Local Documents" sheet, Genizah sub-sheets exclude
+  LOCAL, LOCAL-only workbook usable, single-table fallbacks, cross-parity non-regression (DOCX
+  redesigned by design). Closes **D-F17**.
+- [⏸] **LEXP-02** → deferred to Future **EXP-F3** (Composition Search has no LOCAL corpus path).
+- [x] **EXPUX-01, 02, 03, 04** (Phase 105) — export UX polish: Open File/Folder dialog (EXPUX-01 UI
+  **UAT pending**), LOCAL-only domain-warning suppression, LOCAL-only MiDRASH-credit omission,
+  capped full-text context in DOCX/TXT.
 
-- [x] **EXPUX-01**: The "export complete" dialog (every `tr("Saved to {}")` site) offers **Open File** + **Open Folder** actions (launch the saved file / reveal it in Explorer) alongside Close. *(`_show_export_saved_dialog`; 8 sites. UI — UAT pending.)*
-- [x] **EXPUX-02**: A **LOCAL-only** xlsx export does not raise the "Domain enrichment pending" warning — that check fires only when ≥1 **Genizah** sys_id is present (domains are Genizah-only).
-- [x] **EXPUX-03**: A **LOCAL-only** export (any format) omits the MiDRASH data-source / Zenodo dataset credit lines (keeps "Generated by Genizah Search Pro" + search metadata). Mixed / Genizah-only exports keep the full MiDRASH credit.
-- [x] **EXPUX-04**: DOCX + TXT exports (`export_results`, both Genizah and LOCAL rows) show the full matched page/chunk text capped at ~2000 chars with matched terms highlighted, instead of the ±60-char one-line snippet; missing `full_text` falls back to today's snippet (no regression). Genizah-only XLSX/CSV unchanged; cross-parity invariant stays green.
+---
 
-## Future Requirements
+## New Build — Joins Lab
 
-Deferred to a future milestone. Tracked but not in this roadmap.
+### Component A — Join Workbench (JWB) — primary, both apps
 
-### Export (EXP)
+- [ ] **JWB-01**: A dedicated **"Join Workbench"** tab/page exists in both web and desktop.
+- [ ] **JWB-02**: A scholar opens the Workbench with a fragment **pinned as the anchor** via a
+  **"Find joins"** action from the desktop **ResultDialog** and from **Browse (web + desktop)**;
+  also openable **by shelfmark** for a cold start.
+- [ ] **JWB-03**: The anchor fragment — its **image** and its **numbered transcription** — stays in
+  view while the scholar runs searches.
+- [ ] **JWB-04**: The Workbench shows the joins **already known** for the anchor (PGP
+  `document_fragments` + FJMS scholarly joins + user pairwise joins + community puzzle joins), so the
+  hunt starts beyond what is already recorded.
+- [ ] **JWB-05**: A **conservative** tear-side assist reads the anchor's `[` / `]` transcription
+  markers (lines ending `]` → right side; starting `[` → left side; mid-line marks a torn word) and
+  **suggests** the likely side / search direction **only when the evidence is clear**; otherwise it
+  stays silent. The scholar can always override. (Real fragment state is messy — the assist must
+  never assert a guess.)
+- [ ] **JWB-06**: From the anchor (a selected line / torn word + a **direction**: rest-of-line,
+  line-above, lines-below, lines-above, previous/next page), the scholar **seeds a search** that
+  pre-fills the **existing** search module (variants / fuzzy / Responsa / regex); the seeded query is
+  fully editable (try-and-error preserved).
+- [ ] **JWB-07**: The scholar collects search results as **candidates in a list** within the Workbench.
+- [ ] **JWB-08**: The scholar compares the anchor and a candidate **side-by-side** (image +
+  transcription) to confirm a join by eye.
+- [ ] **JWB-09**: On a confirmed join the scholar can **act**: add it via the **existing joins
+  button**, **export** the details (clipboard / file), and **add candidates to a list**.
+  (Open-in-Puzzle remains available as optional polish — both apps have the Puzzle.)
 
-- **EXP-F1**: Desktop JSON export of LOCAL / ALL result sets (only if a desktop JSON export is added later; desktop has no JSON export today).
-- **EXP-F2**: Parallels-export LOCAL adaptation (excluded from v7.17 scope by user direction).
-- **EXP-F3** (was LEXP-02, deferred 2026-06-01): Composition-report LOCAL export — LEXP-01 parity on `export_comp_report`. **Trigger:** wire a LOCAL/ALL corpus scope into Composition Search (so composition reports can contain LOCAL hits). Implementation is already scaffolded: reuse the Phase 103 helpers — `shared/export_dossier.py::build_local_document_row` / `local_documents_header_row`, `shared/docx_export.py::write_docx_result_block`, the `display['source']=='LOCAL'` partition, and the batch-primed `_local_filepath_cache`. The composition surface differs from search results (hierarchical Category→Manuscript→Pages, two text columns Source Context + Manuscript Text, 3+ xlsx sheets), so the xlsx placement / DOCX strategy / Source-Context-for-LOCAL decisions still need a discuss pass when revived.
+### Component B — Search-support algorithms (JSA) — secondary, independent, both apps
 
-### Performance (PERF)
+- [ ] **JSA-01**: The scholar **seeds parallels** (composition search) from the anchor passage to
+  surface shared-distinctive-phrase candidates across the corpus.
+- [ ] **JSA-02**: **Corpus-driven suggest-then-search completion** — from the first/last *N* words of
+  a torn line, the Workbench surfaces candidate **completions** found in the corpus; the scholar picks
+  one to search.
+- [ ] **JSA-03**: **`[` / `]`-aware torn-word completion** — the torn-word markers drive a completion
+  search (e.g., `…את הש[` → candidates beginning `[מים ואת הארץ`).
 
-- **PERF-F1**: D-F12 — regular Search ~constant ~8s wall-clock investigation (separate, profile-first effort; unrelated to export shape).
+---
 
-## Out of Scope
+## Future Requirements (not v8.0.0)
 
-Explicitly excluded for v7.17. Documented to prevent scope creep.
+- **JOINS-F1**: **Relative-offset cross-line positional search** — find a fragment with word A near
+  line *i* and word B near line *i+k* (the "נשמע at line x, אמר at line x+4" example). Fits the
+  two-phase architecture (Tantivy candidates → post-filter by line distance over `L{n}:word` /
+  per-line arrays) but the relative-offset matcher needs a perf + correctness **SPIKE** before
+  committing to a phase.
+- **JOINS-F2**: **Dicta / Sefaria citation-ID** as a sharper completion source for canonical texts
+  (Bible / Talmud / fixed liturgy) — stronger than corpus frequency for cited material.
+- **JOINS-F3**: **Batch export** of many suggestions for offline review + a **persisted personal
+  candidate list with re-import** back into the Workbench (beyond plain "add to list").
+- **JOINS-F4**: **Automated ranked join-finder** (research-only v7/v8 two-hop + visual rerank) —
+  XL, ~90s/fragment, ≤47% Recall@50, no code exists; explicitly **OUT** of the human-in-the-loop
+  product.
+- **EXP-F3** (carried, was LEXP-02): Composition-report LOCAL export — gated on a LOCAL
+  composition-search UI.
+- **PERF-F1** (carried): D-F12 — regular Search ~constant ~8s wall-clock (profile-first effort).
+
+## Out of Scope (v8.0.0)
 
 | Feature | Reason |
 |---------|--------|
-| Web exports (Excel / Word / JSON) | Web has no LOCAL corpus; web export already excludes LOCAL via `skip_local`. Nothing to adapt. |
-| JSON export of LOCAL rows | JSON export is web-only; desktop has no JSON export, and we are not adding one this milestone. |
-| Parallels export | User scoped this milestone to Search-results + Composition-report surfaces only. |
-| Changing Genizah export columns/structure | Non-goal — Genizah workbook shape and cross-parity invariant must be preserved (LEXP-08). |
-| OCR / text-extraction changes for image-only or corrupt PDFs | Separate concern (SEED-003); does not affect export shape. |
-| Search-latency work (D-F12) | Separate profile-first effort; not an export-shape change. |
+| Automated / auto-ranked join finder | Human-in-the-loop by design — the scholar is the ranker. The auto-algorithm is slow + low-recall + has no code (research-only). → JOINS-F4 |
+| New search-engine modes | The Workbench rides the **existing** search module (variants/fuzzy/Responsa/regex); no new modes for the MVP. |
+| New index or sidecar | `line_starts` / `line_ends` already present (web + most desktop users); no new index/DB needed for the MVP. |
+| One-click scholarly citations | Parked by user ("keep in the bucket — not sure how useful"); stays in `docs/FEATURE_IDEAS.md` backlog. |
+| Relative-offset positional search | Spike-gated → Future (JOINS-F1). |
 
 ## Traceability
 
-Which phases cover which requirements. Populated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LEXP-01 | 103 | Complete |
-| LEXP-02 | 104 | ⏸ Deferred → EXP-F3 (no LOCAL comp-search UI) |
-| LEXP-03 | 103 | Complete |
-| LEXP-04 | 103 | Complete |
-| LEXP-05 | 103 | Complete |
-| LEXP-06 | 103 | Complete |
-| LEXP-07 | 103 | Complete |
-| LEXP-08 | 103 | Complete |
-| EXPUX-01 | 105 | Implemented (UAT pending) |
-| EXPUX-02 | 105 | Complete |
-| EXPUX-03 | 105 | Complete |
-| EXPUX-04 | 105 | Complete |
+| BRAND-01, 02 | pre-release polish (no phase) | Delivered |
+| LEXP-01, 03–08 | 103 | Delivered |
+| EXPUX-01–04 | 105 | Delivered (EXPUX-01 UAT pending) |
+| JWB-01..09 | TBD — roadmap pending scholar critique | Active |
+| JSA-01..03 | TBD — roadmap pending scholar critique | Active |
 
 **Coverage:**
-- v7.17 requirements: 8 LEXP + 4 EXPUX = 12 total
-- Delivered (Phase 103): 7 (LEXP-01, 03, 04, 05, 06, 07, 08)
-- Phase 105: 4 (EXPUX-01..04) — implemented + unit-tested; EXPUX-01 (dialog) UAT pending
-- Deferred to Future (EXP-F3): 1 (LEXP-02 — blocked on a missing LOCAL composition-search UI)
-- Unmapped: 0 ✓
+- Delivered (folded): BRAND (2) + LEXP (7) + EXPUX (4) = 13.
+- New active: JWB (9) + JSA (3) = 12. Unmapped to phases ON PURPOSE — roadmap deferred until after the Genizah-scholar design-critique session.
 
 ---
-*Requirements defined: 2026-06-01*
-*Last updated: 2026-06-01 — LEXP-02 (Phase 104) DEFERRED → Future Requirements EXP-F3 during /gsd-discuss-phase 104: Composition Search has no LOCAL corpus path (corpus selector is Search-tab-only; CompositionThread gets no corpus_scope), so export_comp_report can never see LOCAL hits. v7.17 ships with 7/8 LEXP requirements via Phase 103; LEXP-02 revives when a LOCAL composition-search UI is wired.*
+*Requirements defined: 2026-06-02. v7.17 folded into v8.0.0 per user decision; Phases 103/105 kept as delivered (no destructive phase-clear). Roadmap intentionally deferred pending a Genizah-scholar design-critique session.*

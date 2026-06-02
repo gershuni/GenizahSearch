@@ -1,57 +1,73 @@
 ---
 gsd_state_version: 1.0
-milestone: v5.6.0
-milestone_name: milestone
-status: verifying
-stopped_at: Completed 103-04-PLAN.md (non-regression gate + full export suite green)
-last_updated: "2026-06-01T14:58:56.561Z"
-last_activity: 2026-06-01
+milestone: v8.0.0
+milestone_name: Dicta Rebrand & Joins Lab
+status: defining
+stopped_at: Requirements written (JWB-01..09, JSA-01..03); roadmap deferred pending Genizah-scholar design-critique session
+last_updated: "2026-06-02T05:19:41.000Z"
+last_activity: 2026-06-02
 progress:
-  total_phases: 2
-  completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-01)
+See: .planning/PROJECT.md (updated 2026-06-02)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 103 — search-results-local-export-all-formats-bilingual-non-regression
+**Current focus:** v8.0.0 Joins Lab — shaping done, design-critique pending before roadmap
 
 ## Current Position
 
-Milestone: **v7.17 LOCAL Export Support — STARTED 2026-06-01** (closes D-F17). Adapt the desktop result-export flows so LOCAL ("My Library") hits export with local-meaningful columns (filename/folder/filepath/page/matched-text) instead of empty Genizah columns, across XLSX/CSV/TXT/DOCX on the Search-results (`export_results`) and Composition-report (`export_comp_report`) surfaces; mixed/ALL xlsx gains a dedicated "Local Documents" sheet; Genizah-only exports unchanged. Desktop-only (web has no LOCAL); JSON + Parallels out of scope.
-Phase: 105 — Export UX Polish (IMPLEMENTED; UAT pending)
-Plan: Implemented directly — 4 atomic commits + unit tests (see 105-SUMMARY.md)
-Status: Phase 103 complete & verified. Phase 104 DEFERRED (no LOCAL comp-search UI → LEXP-02 = EXP-F3). Phase 105 IMPLEMENTED 2026-06-01: EXPUX-01 Open File/Folder dialog (8 sites), EXPUX-02 LOCAL xlsx domain-warning suppression, EXPUX-03 LOCAL-only MiDRASH-credit omission, EXPUX-04 full-text capped context in DOCX/TXT. ruff clean (changed files); 60 targeted export tests green incl. cross-parity + LEXP-08 non-regression. **Desktop rebrand → "Dicta Genizah Search Pro" DONE 2026-06-01** (commit `6e0c312d`, pre-close polish): display name only (window title, About EN+HE, updater, exported-file credits incl. shared xlsx Credits sheet via new `app_name` param on `credits_lines`/`build_credits_info_sheet`, puzzle PNG footer, version_info ProductName/FileDescription, .iss AppName, README/CHANGELOG headers, web download-page title). Binary identifiers (`GenizahSearchPro.exe`, .spec `name=`, .iss `MyAppExeName`/`OutputBaseFilename`, dist/AppData `GenizahSearchPro` folders, auto-update fetch) UNCHANGED so installs upgrade in place. `bump_version.py` README regex retargeted. Web app brand ("Dicta Genizah Search") unchanged. 212 targeted tests green; ruff clean.
-Last activity: 2026-06-01
-Next: (1) UAT Phase 105 (esp. EXPUX-01 dialog + EXPUX-04 visual context) + eyeball the renamed window title/About/exports; (2) close v7.17 (Phases 103 + 105 + rebrand) via `/gsd-complete-milestone`. Optional: `/gsd-plant-seed` for LEXP-02/EXP-F3. (Note: the GenizahSearchPro.spec working-copy regression was restored to HEAD — `.spec` is clean.)
+Milestone: **v8.0.0 Dicta Rebrand & Joins Lab — STARTED 2026-06-02.** Folds the delivered v7.17 cycle (the "Dicta Genizah Search Pro" rebrand + LOCAL "My Library" export, Phases 103 + 105) into the flagship v8.0.0 release, and adds **Joins Lab** — an interactive **human-in-the-loop** join-hunting workbench (Component A) + optional search-support algorithms (Component B), both apps. NO automated join-finder.
 
-**OPEN DECISION — release version number (raised 2026-06-01, undecided):** ship this release as **v8.0.0** (treat the "Dicta Genizah Search Pro" rebrand as a flagship major bump — matches the project's own convention where v5.0/v6.0 marked milestones, not API breaks; bundled with real features Phase 103 LOCAL export + 105 polish) vs stay **v7.17.0** (rebrand is display-only, nothing breaks). Claude recommended **v8.0.0**. If v8.0.0: `bump_version.py 8.0.0`, also bump `_TARGET_VERSION` in `tests/test_release_artifacts.py` (bumper misses it), rename the v7.17 milestone → v8.0.0 in `.planning/`, author the `## [8.0.0]` CHANGELOG section folding in the `[Unreleased]` rebrand note. Rebrand details + the web-reuses-desktop-translations gotcha are in memory `project_desktop_app_rebrand.md`. Codex reviewed the rebrand: SHIP-WITH-FIXES, all resolved (`6c343bd3`).
+Phase: **Not started** — requirements defined; roadmap deferred.
+Plan: —
+Status: **Requirements written. Roadmap INTENTIONALLY DEFERRED** until after a **Genizah-scholar design-critique session**. The user will run that as a fresh role-play session (a Genizah scholar who explores the app + the real material nature, asks hard questions, and offers recommendations / pushbacks) to stress-test JWB-01..09 / JSA-01..03 before phases are locked.
+Last activity: 2026-06-02 — v8.0.0 milestone opened via `/gsd-new-milestone`; scope shaped through free conversation; PROJECT.md + REQUIREMENTS.md written; v7.17 folded in (Phases 103/105 kept as delivered; **no destructive phase-clear**).
+
+### Scope (locked 2026-06-02)
+
+**Component A — Join Workbench (primary, both apps):** JWB-01 dedicated tab/page · JWB-02 "Find joins" entry from desktop ResultDialog + Browse (web+desktop) + open-by-shelfmark · JWB-03 pinned anchor (image + numbered transcription) · JWB-04 show existing/known joins (PGP+FJMS+user+community) · JWB-05 conservative `[`/`]` tear-side assist (only when clear) · JWB-06 seed search from anchor into the existing search module (variants/fuzzy/Responsa/regex), editable · JWB-07 collect candidates to a list · JWB-08 side-by-side compare · JWB-09 act on confirmed join (joins button + export + add-to-list; optional Puzzle).
+
+**Component B — Search-support algorithms (secondary, independent, both apps):** JSA-01 parallels seeded from anchor · JSA-02 corpus-driven suggest-then-search completion (first/last N words) · JSA-03 `[`/`]`-aware torn-word completion.
+
+**Deferred to Future (not v8.0.0):** JOINS-F1 relative-offset cross-line positional search (spike-gated) · JOINS-F2 Dicta/Sefaria citation-ID completion source · JOINS-F3 batch-export + persisted list re-import · JOINS-F4 auto-ranked finder (out) · EXP-F3 composition-report LOCAL export · PERF-F1 D-F12 search latency. One-click citations parked in `docs/FEATURE_IDEAS.md`.
+
+### Next
+
+1. **Genizah-scholar design-critique session** (user-led, fresh `/clear` session): explore the app + real material nature; pressure-test JWB/JSA; surface recommendations + pushbacks; revise `REQUIREMENTS.md` as needed. Source material: `.planning/spikes/002-assisted-join-workbench/SPIKE-FINDINGS.md`, `docs/FEATURE_IDEAS.md`, `docs/archive/JOIN_FINDER_REPORT.md`, `docs/plans/JOIN_FINDER_IMPLEMENTATION_PLAN.md`.
+2. **Then** create the roadmap (re-enter `/gsd-new-milestone` to resume roadmapping, or run the roadmapper directly) → `/gsd-plan-phase` for the first Joins Lab phase. **Phase numbering continues from 105 → 106+.**
+
+**Version decision RESOLVED:** ship as **v8.0.0** (closes the open decision from 2026-06-01). The actual version-file bump (`scripts/bump_version.py 8.0.0`, plus `_TARGET_VERSION` in `tests/test_release_artifacts.py` which the bumper misses, plus a `## [8.0.0]` CHANGELOG section folding the `[Unreleased]` rebrand note) happens at `/release` time — NOT now. Rebrand gotchas in memory `project_desktop_app_rebrand.md`.
+
+**Build prerequisite (Joins Lab):** the Tantivy index must carry `line_starts` / `line_ends` (older indexes raise a rebuild error at `genizah_core.py:8583`). Already satisfied on web + most desktop users; degrade gracefully for stragglers.
 
 ## Deferred Items
 
-Items acknowledged and deferred at v7.16 milestone close on 2026-06-01 (`gsd-tools.cjs audit-open` reported 102 items; same historical accumulation as the v7.14/v7.15 closes — none are v7.16-specific blockers):
+Items acknowledged and deferred at v7.16 milestone close on 2026-06-01 (`gsd-tools.cjs audit-open` reported 102 items; same historical accumulation as the v7.14/v7.15 closes — none are milestone blockers):
 
 | Category | Count | Notes |
 |----------|-------|-------|
-| Debug sessions | 41 | Mostly diagnosed-not-closed entries predating v7.13. Includes `local-search-freeze-2026-05-31` — actually RESOLVED this milestone (see OPEN_ISSUES D-F23); the tracker entry is just stale. |
-| UAT gaps | 1 | Phase 100 `100-HUMAN-UAT.md` — 0 pending scenarios (effectively done; status flag not flipped). |
+| Debug sessions | 41 | Mostly diagnosed-not-closed entries predating v7.13. Includes `local-search-freeze-2026-05-31` — actually RESOLVED (OPEN_ISSUES D-F23); tracker entry stale. |
+| UAT gaps | 1 | Phase 100 `100-HUMAN-UAT.md` — 0 pending scenarios (effectively done; flag not flipped). |
 | Quick tasks | 53 | Historical backlog (oldest from 2026-02). Use `/gsd-cleanup` to triage between milestones. |
-| Pending todos | 5 | Largest: server-side search with email notification; NLI MARC crawl; unified metadata text search. |
+| Pending todos | 6 | Largest: server-side search with email notification; NLI MARC crawl; unified metadata text search; one-click scholarly citations (2026-06-01). |
 | Unimplemented seeds | 2 | SEED-001 server-side IIIF image cache (dormant; blocked on NLI TOS); SEED-003 opt-in OCR extension for image-only / corrupt-text-layer PDFs (dormant). |
 
-Carried forward to v7.17+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular Search ~constant 8s wall-clock — profile-first: instrument Tantivy candidate fetch → regex post-filter → enrichment → highlight build → return-to-UI; profile LOCAL-only / Genizah-unfiltered / Genizah-filtered; optimize the actual bottleneck — do NOT guess), **D-F18** (context-menu LOCAL detection could normalize through `display`). D-F17 (xlsx/Word/JSON export not adapted to LOCAL / ALL results) is now the active milestone goal. Recommend a `/gsd-cleanup` pass on the historical backlog between milestones.
+Carried forward to v8.0.0+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular Search ~8s wall-clock — profile-first), **D-F18** (context-menu LOCAL detection via `display`). **EXP-F3** (composition-report LOCAL export, gated on a LOCAL comp-search UI). D-F17 (LOCAL export shape) is now DELIVERED (Phases 103 + 105, folded into v8.0.0). Recommend a `/gsd-cleanup` pass on the historical backlog.
 
 ## Recently Closed Milestones
 
-- **v7.16 Hebrew PDF Text Quality** — shipped 2026-06-01 (v7.16.0, desktop); 1 formal phase (102, 5 plans) + no-phase de-space/UAT/freeze work; tag `v7.16.0` @ `ccb87c90`. LOCAL Hebrew PDF text-layer extraction rewrite (rawdict per-glyph, RTL-gated, Otsu de-space, Mn nikud, `_ltr_damage_guard`), file-management actions for LOCAL hits, and three search/startup freeze fixes (778 MB history file, large-folder O(n²) startup, LAB-rebuild churn). See `.planning/milestones/v7.16-ROADMAP.md`.
-- **v7.15 My Library Visual** — shipped 2026-05-28; 3 phases (99, 100, 101); 7 plans; 6/6 PDFIMG-* requirements. PDF page image rendering alongside LOCAL extracted text in ResultDialog + Browse, RTL/bidi reflow fixes, "Re-index All" recovery button. See `.planning/milestones/v7.15-ROADMAP.md`.
+- **v7.17 (folded, NOT separately closed)** — the rebrand + LOCAL export work shipped under the v7.17 phase numbers (103, 105) but, per the 2026-06-02 decision, is **folded into v8.0.0** rather than tagged/closed as its own milestone. Phases 103/105 retained as delivered. No "v7.17" release tag will exist.
+- **v7.16 Hebrew PDF Text Quality** — shipped 2026-06-01 (v7.16.0, desktop); 1 formal phase (102, 5 plans) + no-phase de-space/UAT/freeze work; tag `v7.16.0` @ `ccb87c90`. LOCAL Hebrew PDF text-layer extraction rewrite, file-management actions for LOCAL hits, three search/startup freeze fixes. See `.planning/milestones/v7.16-ROADMAP.md`.
+- **v7.15 My Library Visual** — shipped 2026-05-28; 3 phases (99, 100, 101); 7 plans; 6/6 PDFIMG-*. PDF page image rendering in ResultDialog + Browse, RTL/bidi reflow fixes, "Re-index All" recovery button.
 - **v7.14 My Library — Local Document Search** — shipped 2026-05-24 (v7.14.0), closed 2026-05-27; 6 phases (95, 96, 97, 97.2/97.3 inserted, 98); 37 plans. Desktop local document search + Phase 98 NLI resilience.
 - **v7.13 Research-Grade Downloads & PGP Filter** — shipped 2026-05-21 (v7.13.0), closed 2026-05-27; 2 phases (93, 94); 5 plans; 14/14 requirements.
 - **v7.12 Multitenant Architecture (Path B)** — shipped 2026-05-18; 10 phases; 28 plans; 49/49 requirements.
@@ -60,14 +76,13 @@ Carried forward to v7.17+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular 
 
 ### Roadmap Evolution
 
-- Phase 102 added (2026-05-29): PDF Extraction Reorder — adopt Meiri glyph-level parser (closes D-F13 letter-spaced emphasis + D-F14 rawdict reorder). First piece of v7.16 work; appended to the roadmap after the shipped v7.15 (Phases 99-101) per user choice of a single inserted phase rather than a full new milestone. Not yet planned.
-- Phase 102 RE-SCOPED (2026-05-29) after Spike 001 (`.planning/spikes/001-meiri-glyph-reorder-vs-current/`, verdict PARTIAL): now "LOCAL PDF Text-Layer Extraction Rewrite (RTL-gated reorder + letter-spacing de-collapse)". Spike findings: (1) Meiri's reorder helps Hebrew order/headers/brackets but NOT letter-spacing, and HURTS Latin → must be RTL-gated, no LTR regression; (2) the dominant text-layer bug is letter-spacing fragmentation (אוצר הגאונים 46%), fixable via rawdict per-line adaptive gap de-collapse (prototyped); (3) a LARGE share of the real library is image-only scans → OCR (D-F2) deferred as optional opt-in extension `SEED-003`; (4) new failure mode D-F16 corrupt text-layer encoding (Vilna Shabbat) → detect+flag in 102. Catalog F-A..F-G in spike README. Still not planned — next: discuss/plan Phase 102.
-- Phase 102 EXECUTED & CLOSED (commit `494c0c49`, 5/5 plans, 18/18 verification). Then a POST-102 de-space quality pass landed as NO-PHASE edits (2026-05-31) because the first real-library UAT (Hillel) showed the per-line de-space still mis-handled several book classes: D-F13b rewrote the boundary metric from center-gap-vs-1.8×median to **edge-gap + per-line 1-D Otsu valley** (the 1.8×-median/0.45-floor first cut SHATTERED wide letters off justified words and MERGED tight-set books) and found the real production blocker was `_ltr_damage_guard` discarding the good de-space on RTL pages; D-F13c fixed a launch freeze (`startup_recovery` Pass B re-extracting a bulk pending backlog on the UI thread → `reextract_pending=False` defers it); D-F13d added a locally-gated zero-width space-glyph word boundary (N1 — tight headings/tables encode word-spaces as zero-width glyphs the gap test can't see; the "Otsu outlier" hypothesis was probe-DISPROVED) and an embedded-number bidi flip (N3 — `1977`→`7791`). N2 maqaf was already cured by D-F13b's Unicode-`Mn` mark test. Known residual: PDFs whose maqaf/space is absent from the text layer entirely (e.g. some `הקדמות-שילת` abbreviation-table cells `כתבי־יד`→`כתבייד`) are unrecoverable without OCR. All tracked in `docs/OPEN_ISSUES.md` (D-F13b/c/d) + `CHANGELOG.md [Unreleased]`; commits `733c02af`+`d4f61245`. Existing LOCAL libraries need one manual "Re-index All" (per-row `extraction_format_version` 2→3).
-- Phases 103-104 added (2026-06-01): v7.17 LOCAL Export Support roadmap created. Phase 103 covers all four export formats on the `export_results` surface plus the xlsx "Local Documents" sheet, bilingual headers, and the non-regression invariant (LEXP-01/03/04/05/06/07/08). Phase 104 ports the same LOCAL-row treatment to `export_comp_report` (LEXP-02). 8/8 LEXP requirements mapped with zero orphans.
+- v8.0.0 opened (2026-06-02): folds the delivered v7.17 cycle (rebrand + LOCAL export, Phases 103/105) into the flagship v8.0.0 release and adds **Joins Lab** (Spike 002, FEASIBLE / ~M). Two independent components — A: Join Workbench hub (primary); B: search-support algorithms (secondary). Both apps. Human-in-the-loop; the auto-ranked v7/v8 finder is explicitly OUT. **Roadmap deferred** until after a user-led Genizah-scholar design-critique session. Phase numbering will continue from 105.
+- Phases 103-105 (v7.17 cycle, now folded into v8.0.0): Phase 103 Search-results LOCAL export (LEXP-01/03–08, COMPLETE & verified); Phase 104 → DEFERRED to EXP-F3 (no LOCAL comp-search UI); Phase 105 Export UX Polish (EXPUX-01..04, implemented — EXPUX-01 dialog UAT pending). Desktop rebrand → "Dicta Genizah Search Pro" delivered as pre-release polish (commit `6e0c312d` + follow-ups).
+- Phase 102 (v7.16) EXECUTED & CLOSED (commit `494c0c49`) + POST-102 de-space quality pass as NO-PHASE edits (D-F13b/c/d). Existing LOCAL libraries need one manual "Re-index All" (`extraction_format_version` 2→3).
 
 ## Session Continuity
 
-Last session: 2026-06-01T14:49:00.000Z
-Stopped at: Completed 103-04-PLAN.md (non-regression gate + full export suite green)
+Last session: 2026-06-02T05:19:41.000Z
+Stopped at: v8.0.0 milestone opened; scope shaped + requirements written; roadmap deferred pending Genizah-scholar design-critique session.
 Resume file: None
-Next step: `/gsd-verify-phase 103` to confirm all 8 LEXP requirements satisfied.
+Next step: User runs the Genizah-scholar design-critique session (fresh `/clear`), then the roadmap is created and `/gsd-plan-phase 106` (first Joins Lab phase) begins.
