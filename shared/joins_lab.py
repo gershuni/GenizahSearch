@@ -618,6 +618,8 @@ def htmlify(text: str, pattern: Optional[str] = None) -> str:
     """Escape corpus text to HTML, optionally highlighting pattern matches.
 
     Processing order (T-106-08 XSS mitigation):
+    0. Strip any raw MARK_A/MARK_B sentinel bytes already present in the input,
+       so untrusted corpus content can never forge a highlight region (WR-01).
     1. Substitute match regions with NUL-byte sentinels (MARK_A/MARK_B).
     2. html.escape() the whole text (including any '<'/'>'/'&') — corpus content
        is fully escaped and cannot inject markup.
@@ -628,7 +630,7 @@ def htmlify(text: str, pattern: Optional[str] = None) -> str:
 
     Pure function — no I/O (D-06). Transplanted from sketch L98-110.
     """
-    text = text or ""
+    text = (text or "").replace(MARK_A, "").replace(MARK_B, "")
     if pattern:
         try:
             rx = re.compile(pattern, re.IGNORECASE | re.MULTILINE)

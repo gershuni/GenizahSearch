@@ -23,6 +23,7 @@ from shared.joins_lab import (
     merge_candidates,
     detect_self_match,
     _match_line,
+    htmlify,
     snippet_html,
     snippet_plain,
 )
@@ -691,3 +692,27 @@ class TestSnippet:
         assert "שורה ד" not in out
         # Joined with "  /  "
         assert "  /  " in out
+
+    def test_htmlify_strips_injected_sentinels(self):
+        """WR-01: raw SOH/STX sentinel bytes in untrusted corpus text must NOT forge
+        a highlight region. They are stripped before substitution, so corpus content
+        cannot wrap itself in the <b style=...> highlight tag."""
+        out = htmlify("normal \x01injected\x02 text", "normal")
+        # The legitimate pattern match still gets one highlight wrapper.
+        assert out.count("<b style=") == 1
+        # 'normal' (the real match) is highlighted; 'injected' must NOT be.
+        assert "<b style='color:#dc2626'>normal</b>" in out
+        assert "<b style='color:#dc2626'>injected</b>" not in out
+        # No stray closing tags from the forged sentinels.
+        assert out.count("</b>") == 1
+        # Raw sentinel bytes never survive into the output.
+        assert "\x01" not in out
+        assert "\x02" not in out
+
+    def test_htmlify_strips_sentinels_without_pattern(self):
+        """WR-01: sentinel stripping applies even when no highlight pattern is given,
+        so corpus content can never emit a highlight tag on its own."""
+        out = htmlify("clean \x01\x02 text", None)
+        assert "<b style=" not in out
+        assert "\x01" not in out
+        assert "\x02" not in out
