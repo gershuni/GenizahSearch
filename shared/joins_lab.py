@@ -551,6 +551,57 @@ def merge_candidates(text_cands: list, vs_cands: list) -> list:
     return merged
 
 
+# ── Self-match detection + first-hit locator (SC#5) ─────────────────────────
+
+
+def detect_self_match(raw_results: list, anchor_sid: str) -> bool:
+    """Report whether the anchor's own sys_id appears in a fetched result list.
+
+    This is a sys_id SET-MEMBERSHIP check over an already-fetched result list (D-06).
+    It reports whether the anchor's own sys_id appears among the results the engine
+    returned for the composed query — i.e. the anchor itself satisfied the query as
+    evidenced by the engine returning it.
+
+    It is bracket-AGNOSTIC by construction: it keys on sys_id and NEVER re-runs
+    the line-start position regex, so a leading tear-bracket token in the anchor's
+    text cannot affect this boolean either way.
+
+    It does NOT, and must not be read to, prove that the line-break engine path
+    returns bracket-prefixed line-start hits — the line-break Tantivy candidate
+    expansion does not add bracket variants, so that end-to-end guarantee is OUT
+    of Phase 106's scope (RESEARCH R-02, corrected 2026-06-03 per Codex review).
+
+    The caller obtains raw_results from execute_search; the "include anchor itself"
+    UI toggle (Phase 108) consumes this boolean together with dedup_candidates'
+    include_self parameter.
+
+    Pure function — no I/O (D-06). Transplanted from sketch _anchor_matched (L1100).
+    """
+    return any(_r_sid(r) == anchor_sid for r in raw_results)
+
+
+def _match_line(lines: list, pattern: Optional[str]) -> int:
+    """Return the index of the first line whose content matches the pattern.
+
+    Returns -1 if pattern is None/empty, if no line matches, or if the
+    pattern is malformed (re.error swallowed — no raise).
+
+    Case-insensitive match (re.IGNORECASE).
+
+    Pure function — no I/O (D-06). Transplanted from sketch L113-123.
+    """
+    if not pattern:
+        return -1
+    try:
+        rx = re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        return -1
+    for i, ln in enumerate(lines):
+        if rx.search(ln):
+            return i
+    return -1
+
+
 # ── compose() — line-break query composition (SC#1) ─────────────────────────
 
 
