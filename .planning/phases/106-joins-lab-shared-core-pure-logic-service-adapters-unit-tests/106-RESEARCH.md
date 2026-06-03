@@ -58,7 +58,7 @@
 
 Phase 106 extracts the validated Joins Lab domain logic from the throwaway sketch (`join_workbench.py.txt`) into a production-grade `shared/joins_lab.py` module. The sketch already contains all six logic units in PyQt-free form — the QThread wrappers strip away, leaving pure functions. The primary deliverable is a typed, tested module with a `SearchExecutor` Protocol boundary, not a new capability.
 
-The two research flags (R-01 and R-02) are resolved with concrete code evidence below. The most important finding: **page-level anchoring (`content_head`/`content_tail`) and line-break syntax (`|` groups) run through the SAME engine dispatch path and CAN compose into a single `execute_search` call.** The `text_position` parameter is passed through to `_execute_line_break_search` and handled as a post-Tantivy position filter there. R-02: bracket stripping in the engine is controlled by `_query_has_brackets(query_str)` / `_strip_brackets(text)` — both are module-level pure functions that `shared/joins_lab.py` can import directly.
+The two research flags (R-01 and R-02) are resolved with concrete code evidence below. The most important finding: **page-level anchoring (`content_head`/`content_tail`) and line-break syntax (`|` groups) run through the SAME engine dispatch path and CAN compose into a single `execute_search` call.** The `text_position` parameter is passed through to `_execute_line_break_search` and handled as a post-Tantivy position filter there. R-02 (CORRECTED 2026-06-03 per Codex review): the engine's bracket helpers `_query_has_brackets(query_str)` / `_strip_brackets(text)` strip brackets at the regex-match / position-filter stage of the line-break path, BUT the line-break Tantivy CANDIDATE EXPANSION (`_expand_responsa_component`) does NOT add bracket variants — so bracket-prefixed line-START hits are not guaranteed to be RETURNED by the engine in the line-break path. `shared/joins_lab.py` does NOT import these helpers; its self-match is a pure sys_id-membership check, not a bracket guarantee.
 
 **Primary recommendation:** Plan five sequential tasks: (1) typed domain model + `SearchExecutor` Protocol + `dict→Candidate` normalizer; (2) `compose()` pure function + round-trip tests; (3) cross-side membership function + `FakeSearchExecutor` tests; (4) dedup/merge/provenance functions + tests; (5) self-match + snippet/page helpers + tests + static import guard.
 
@@ -73,7 +73,7 @@ The two research flags (R-01 and R-02) are resolved with concrete code evidence 
 | Cross-side page membership | Shared module | Engine (via `SearchExecutor.get_browse_page`) | Set logic is pure; total_pages comes from the engine |
 | Candidate dedup / compaction | Shared module | — | Pure; keyed on `(sys_id, page, uid)` |
 | Text/VS merge ordering + provenance | Shared module | — | Pure; VS and text result sets are already-fetched input |
-| Self-match detection | Shared module | — | Pure; checks anchor's sys_id against result dict set |
+| Self-match detection | Shared module | — | Pure sys_id MEMBERSHIP check over already-fetched results (does NOT prove engine bracket handling — R-02 corrected) |
 | Snippet/page helpers | Shared module | — | Pure text manipulation; regex highlighting |
 | VS look-alikes fetch | `shared/visual_similarity_service.py` | — | Pre-existing service; Phase 105+109 wire it; Phase 106 only calls `get_suggestions` |
 | Material/measurement fetch | `shared/fjms_service.py` | — | Pre-existing service; Phase 106 only calls `get_measurements` |
@@ -136,13 +136,15 @@ The non-line-break path (lines 8564-8580) maps `text_position` to `content_head`
 
 ---
 
-## R-02 Resolution: Leading Tear-Bracket Tokens and the `line_start` Test
+## R-02 Resolution: Leading Tear-Bracket Tokens and the `line_start` Test (CORRECTED 2026-06-03 per Codex review)
 
-**Answer: The engine strips brackets from content before applying the line-start/line-end regex position check ONLY when the query itself contains no literal brackets. The bracket stripping is controlled by `_query_has_brackets(query_str)` → `_strip_brackets(content)` at lines 8124-8128 and 8142-8153. For a typical scholar query (no literal `[`/`]` in the query), the engine strips brackets from content before matching.**
+**Original (over-broad) claim — NOW CORRECTED:** an earlier draft of this section stated the engine "auto-strips leading tear-brackets for line-break queries" as a safe end-to-end self-match guarantee. Codex (live-repo read access) showed that claim is only partially true for the line-break path. The corrected, precise resolution follows.
 
-### Code Trace
+**Corrected answer: The engine's bracket helpers strip brackets only at the REGEX-MATCH / POSITION-FILTER stage of the line-break path (when the query itself is bracket-free). They do NOT make bracket-prefixed line-START hits a guaranteed RETURN, because the line-break Tantivy CANDIDATE EXPANSION does not add bracket variants. So "the engine auto-strips tear-brackets for line-break queries" is NOT a safe end-to-end guarantee.**
 
-In `_execute_line_break_search` at lines 8124-8128:
+### Code Trace (what bracket-stripping DOES cover)
+
+In `_execute_line_break_search` at lines 8124-8128, for a bracket-free query the content is bracket-stripped before the regex match:
 
 ```python
 # genizah_core.py:8124-8128
@@ -152,29 +154,29 @@ match_content = content if _brackets_in_query else _strip_brackets(content)
 match_obj = regex.search(match_content)
 ```
 
-`_query_has_brackets` (line 6342) strips gap tokens (`[3]`, `[|2]`) before checking, so a line-break query like `|שהדותא [|1] ממשלה|` has no literal brackets — the function returns `False`, and `match_content = _strip_brackets(content)`. 
+`_query_has_brackets` (line 6342) strips gap tokens (`[3]`, `[|2]`) before checking, so a line-break query like `|שהדותא [|1] ממשלה|` has no literal brackets — the function returns `False`, and `match_content = _strip_brackets(content)`. The page-level position check at lines 8142-8153 similarly strips brackets from the prefix/suffix when the query is bracket-free. So far so good: WHEN a candidate's content reaches the regex stage, a leading `]` does not defeat the position check.
 
-`_strip_brackets` (line 6352) removes all `[` and `]` from the content text. So a corpus line `]שהדותא ממשלה` becomes `שהדותא ממשלה` before the regex match. A line_start query for `שהדותא` will match the stripped line at position 0, satisfying the line-start constraint.
+### What bracket-stripping does NOT cover (the corrected gap)
 
-The page-level position check at lines 8142-8153 similarly strips brackets from the prefix/suffix check when the query is bracket-free.
+The line-break Tantivy candidate expansion uses `_expand_responsa_component()` (genizah_core.py:8019, body ~7885-7920), which — unlike NORMAL search (which calls `_add_bracket_variants()` at ~7543-7549) — does **NOT** add bracket variants to the Tantivy candidate set. Additionally, page-scope line-break results are only appended when a raw-regex `highlight(content, regex)` matches the ORIGINAL content (genizah_core.py:8193-8200), and `highlight()` returns `None` on no raw regex match (~7683-7685). Net effect: a corpus line whose word at the line start is tear-bracket-prefixed (`]שהדותא`) is not guaranteed to even be RETURNED as a candidate by the line-break path, regardless of the downstream strip. The strip helps the candidates that DO get returned; it does not expand the candidate set.
 
-**Implication for self-match detection (SC#5):**
-Self-match uses the same `execute_search` path, so if the anchor's own text starts with `]`, the bracket is stripped before the line-start test — the self-match check naturally handles this correctly as long as it uses the same engine call rather than a hand-rolled regex test.
+**Implication for self-match detection (SC#5) — CORRECTED:**
+`detect_self_match()` is a PURE sys_id SET-MEMBERSHIP check over an already-fetched result list (D-06). It reports whether the anchor's own sys_id appears among the results the engine returned for the composed query (i.e. the anchor itself satisfied the composed query as evidenced by the engine returning it). It is bracket-AGNOSTIC by construction — it keys on sys_id only and never re-runs a line-start position regex — so it makes NO claim about engine-level bracket handling and does NOT prove bracket-prefixed line-start matching. SC#5 is satisfied by this pure membership check plus the snippet/page helpers; bracket-prefixed line-start end-to-end behavior is explicitly OUT of Phase 106's scope. (No engine changes are proposed — out of phase scope.)
 
 **Implication for `compose()` (D-07/D-08):**
-The scholar's query terms must NOT themselves contain `[` or `]` (user types the clean Hebrew word, not the tear-marked form). If the query is bracket-free, the engine's bracket-stripping handles the corpus side transparently. This is a constraint the `BuilderRow.term` field should document: terms are the search tokens, not raw corpus text.
+The scholar's query terms must NOT themselves contain `[` or `]` (user types the clean Hebrew word, not the tear-marked form). This is a constraint the `BuilderRow.term` field should document: terms are the search tokens, not raw corpus text.
 
-**Module-level functions (importable without heavy init):**
+**Module-level functions (importable without heavy init) — NOT imported by `shared/joins_lab.py`:**
 
 ```python
 # genizah_core.py:6342
 def _query_has_brackets(query_str: str) -> bool: ...
 
-# genizah_core.py:6352  
+# genizah_core.py:6352
 def _strip_brackets(text: str) -> str: ...
 ```
 
-Both are module-level pure functions. `shared/joins_lab.py` can import them directly for any bracket-handling logic it needs (e.g., in snippet centering or self-match display).
+Both are module-level pure functions. They exist and are importable, but `shared/joins_lab.py` (Phase 106) does NOT import them — the module needs no bracket logic (self-match is sys_id membership; snippet centering is pure text ops). Importing them would be an unused-import (`F401`) violation under the repo's ruff config.
 
 ---
 
@@ -537,11 +539,11 @@ def merge_candidates(
 
 **How to avoid:** `page_of(res)` handles the `_P{N}` uid pattern as fallback. For `uid="{sid}|vs"`, neither fallback finds a page number — `page_of` returns `None`. The dedup key becomes `(sys_id, None)`. Only one VS-only candidate per sys_id survives dedup, which is correct (VS provides one entry per sys_id).
 
-### Pitfall 4: Bracket-Free Query + Bracket-Prefixed Corpus Content (R-02)
+### Pitfall 4: Bracket-Free Query + Bracket-Prefixed Corpus Content (R-02, CORRECTED 2026-06-03 per Codex review)
 
-**What goes wrong:** A scholar queries for `שהדותא` (a clean word); the corpus page starts with `]שהדותא`. Without bracket stripping, `regex.search(content)` would match, but the line-start position check would see `]` before the word and reject it.
+**What goes wrong:** A scholar queries for `שהדותא` (a clean word); the corpus page starts with `]שהדותא`. The engine's line-break REGEX/position stage strips brackets when the query is bracket-free, so a returned candidate is not defeated by a leading `]` — BUT the line-break Tantivy CANDIDATE EXPANSION does not add bracket variants, so a bracket-prefixed line-start hit is not guaranteed to be RETURNED in the first place.
 
-**How to avoid:** The engine handles this automatically via `_strip_brackets(content)` when `_query_has_brackets(query_str)` is False. The shared module's self-match detection and snippet centering should apply the same logic. Use `_strip_brackets` (importable from `genizah_core`) when doing any position-sensitive text operations in the module.
+**How to avoid (Phase 106 scope):** Do NOT rely on a bracket-safe end-to-end self-match guarantee — it does not hold for the line-break path, and fixing the engine is OUT of phase scope. The shared module's `detect_self_match` is a PURE sys_id-membership check over already-fetched results: it is bracket-agnostic by construction (it never runs a position-sensitive regex) and makes no engine-bracket claim. The module does NOT import `_strip_brackets` / `_query_has_brackets` (it needs no bracket logic; importing them would be an unused-import F401 violation).
 
 ### Pitfall 5: `compose()` Returns `None` for Single-Row / Anchor-Only Queries
 
@@ -697,7 +699,7 @@ All claims in this research were verified against live source code or the frozen
 - `genizah_core.py:5811` — `_parse_line_break_query` source (verified importable, headless)
 - `genizah_core.py:8001-8219` — `_execute_line_break_search` full implementation (R-01 resolution)
 - `genizah_core.py:8298-8365` — `execute_search` + line-break dispatch path (R-01 resolution)
-- `genizah_core.py:6342,6352` — `_query_has_brackets`, `_strip_brackets` (R-02 resolution)
+- `genizah_core.py:6342,6352` — `_query_has_brackets`, `_strip_brackets` (R-02 resolution — strip is regex/position-stage only) plus `_expand_responsa_component` ~7885-7920 (NO bracket-variant expansion) and `_add_bracket_variants` ~7543-7549 (normal-search only) — R-02 CORRECTED per Codex review
 - `genizah_core.py:3695,3731` — `get_meta_for_id`, `get_library_for_id` signatures
 - `genizah_core.py:9483-9578` — `get_browse_page` signature + return dict shape
 - `shared/visual_similarity_service.py:97-128` — `get_suggestions` return shape
@@ -719,7 +721,7 @@ All claims in this research were verified against live source code or the frozen
 **Confidence breakdown:**
 - Standard stack: HIGH — no new deps; uses existing shared services verified in production
 - R-01 (page-anchor execution path): HIGH — traced through `execute_search` → `_execute_line_break_search` source code
-- R-02 (bracket handling): HIGH — `_query_has_brackets` + `_strip_brackets` implementation read directly
+- R-02 (bracket handling): HIGH — CORRECTED per Codex review: strip is regex/position-stage only; line-break candidate expansion adds NO bracket variants, so no end-to-end bracket-safe self-match guarantee (self-match = pure sys_id membership; engine changes out of scope)
 - Architecture patterns: HIGH — cross-referenced with sketch + CODEX-PRODUCTIONIZE-CRITIQUE
 - Test strategy: HIGH — follows existing project test conventions verified in `tests/`
 
@@ -737,7 +739,7 @@ All claims in this research were verified against live source code or the frozen
 
 1. **R-01 RESOLVED: ONE engine call.** `execute_search(query_str_with_pipe_syntax, ..., text_position='start'|'end'|None)` covers both the line-break and the page-anchor cases. The `text_position` parameter is forwarded through `execute_search` into `_execute_line_break_search` where it is applied as a post-regex position filter (lines 8142-8153). No intersection step needed. `compose()` returns a 3-tuple `(query_str, responsa_options, page_position)`.
 
-2. **R-02 RESOLVED: Engine auto-strips brackets.** When the query is bracket-free (typical scholar query), `_execute_line_break_search` applies `_strip_brackets(content)` before the regex match at line 8125. Leading tear-bracket tokens (e.g., `]שהדותא`) are stripped before line-start position checking. Self-match detection and snippet centering in the shared module should use the same `_strip_brackets` / `_query_has_brackets` functions (importable from `genizah_core`).
+2. **R-02 CORRECTED (2026-06-03 per Codex review): bracket-safety is NOT an end-to-end guarantee for the line-break path.** The engine's `_strip_brackets`/`_query_has_brackets` helpers strip brackets only at the regex-match/position-filter stage (lines 8124-8153) for bracket-free queries; they do NOT make bracket-prefixed line-START hits a guaranteed RETURN, because the line-break Tantivy candidate expansion (`_expand_responsa_component`, ~7885-7920) does NOT add bracket variants (normal search does, ~7543-7549). The shared module therefore does NOT import these helpers and makes NO bracket claim: `detect_self_match` is a pure sys_id-membership check over already-fetched results (bracket-agnostic by construction). Engine-side bracket behavior is OUT of Phase 106 scope.
 
 3. **`_parse_line_break_query` is safe to import without engine init.** Confirmed via headless Python import test. The round-trip test (SC#1) can import it directly.
 
@@ -757,7 +759,7 @@ All claims in this research were verified against live source code or the frozen
 |------|-------|--------|
 | Standard stack | HIGH | No new deps; all existing shared services verified |
 | R-01 (page-anchor + line-break path) | HIGH | Traced through execute_search → _execute_line_break_search source code with line citations |
-| R-02 (bracket handling) | HIGH | _query_has_brackets + _strip_brackets implementation read and understood |
+| R-02 (bracket handling) | HIGH | CORRECTED per Codex live-repo review: regex/position-stage strip verified (8124-8153); line-break candidate expansion `_expand_responsa_component` (~7885-7920) does NOT add bracket variants, so no end-to-end bracket-safe self-match guarantee — self-match is a pure sys_id-membership check; engine changes out of scope |
 | SearchExecutor Protocol | HIGH | All 4 methods verified in genizah_core.py with line numbers |
 | Result dict shape | HIGH | Verified from _execute_line_break_search output construction + VS worker output |
 | Test strategy | HIGH | Matches existing class-based pytest conventions in tests/ |
