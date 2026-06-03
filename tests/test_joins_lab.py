@@ -21,6 +21,8 @@ from shared.joins_lab import (
     apply_cross_side,
     dedup_candidates,
     merge_candidates,
+    detect_self_match,
+    _match_line,
 )
 
 
@@ -523,3 +525,72 @@ class TestMerge:
         result = merge_candidates(text_cands, vs_cands)
         sys_ids = [c.sys_id for c in result]
         assert sys_ids.index("X") < sys_ids.index("Y")
+
+
+# ── Plan 03 Task 1 tests ──────────────────────────────────────────────────────
+
+
+class TestSelfMatch:
+    """Pure sys_id membership checks — asserts ONLY membership behavior (R-02 corrected)."""
+
+    def test_anchor_present(self):
+        """detect_self_match returns True when anchor's sys_id is in the result list."""
+        results = [
+            _make_result("990001", 3),
+            _make_result("ANCHOR", 1),
+        ]
+        assert detect_self_match(results, "ANCHOR") is True
+
+    def test_anchor_absent(self):
+        """detect_self_match returns False when anchor's sys_id is not present."""
+        results = [_make_result("990001", 3)]
+        assert detect_self_match(results, "ANCHOR") is False
+
+    def test_empty_results(self):
+        """detect_self_match returns False for an empty result list."""
+        assert detect_self_match([], "ANCHOR") is False
+
+    def test_membership_is_sysid_only(self):
+        """Anchor is detected regardless of full_text content — pure sys_id membership.
+
+        This test asserts ONLY that membership is text-content-independent.
+        It does NOT assert anything about whether the ENGINE would return a
+        bracket-prefixed line-start hit — that is out of phase scope (R-02 corrected).
+        """
+        # Result with plain full_text
+        plain_result = _make_result("ANCHOR", 1, full_text="שלום עולם")
+        # Result whose full_text begins with a leading tear-bracket token
+        bracket_result = _make_result("ANCHOR", 2, full_text="]ועתה ממשלה")
+        # Both should be detected — sys_id membership, text content is irrelevant
+        assert detect_self_match([plain_result], "ANCHOR") is True
+        assert detect_self_match([bracket_result], "ANCHOR") is True
+
+
+class TestMatchLine:
+    """Pure first-hit line index locator."""
+
+    def test_first_hit(self):
+        """Returns the index of the FIRST line matching the pattern."""
+        lines = ["שלום עולם", "ועתה ממשלה", "ממשלה שוב"]
+        # 'ממשלה' first appears at index 1
+        assert _match_line(lines, "ממשלה") == 1
+
+    def test_no_match(self):
+        """Returns -1 when no line matches."""
+        assert _match_line(["אבג", "דהו"], "ממשלה") == -1
+
+    def test_no_pattern_empty_string(self):
+        """Returns -1 for an empty-string pattern."""
+        assert _match_line(["אבג"], "") == -1
+
+    def test_no_pattern_none(self):
+        """Returns -1 for a None pattern."""
+        assert _match_line(["אבג"], None) == -1
+
+    def test_bad_regex(self):
+        """Returns -1 for a malformed pattern (re.error swallowed)."""
+        assert _match_line(["אבג"], "[") == -1
+
+    def test_case_insensitive(self):
+        """Pattern matching is case-insensitive (Latin characters)."""
+        assert _match_line(["ABC def"], "abc") == 0
