@@ -19,6 +19,8 @@ from shared.joins_lab import (
     resolve_other_side_pages,
     cross_side_membership,
     apply_cross_side,
+    dedup_candidates,
+    merge_candidates,
 )
 
 
@@ -398,3 +400,126 @@ class TestCrossSide:
         mr = apply_cross_side(executor, base, "b_q", {}, "OR")
         pages = {c.page for c in mr.candidates if c.sys_id == "B"}
         assert 4 not in pages   # page 4 > total_pages=3 must not appear
+
+
+# ── Plan 02 Task 2 tests ──────────────────────────────────────────────────────
+
+
+class TestDedup:
+    def test_dedup_same_page(self):
+        """Two raw dicts for the same (sys_id, page) collapse to ONE Candidate."""
+        raw = [
+            _make_result("990001", 5),
+            _make_result("990001", 5, snippet="dup"),
+        ]
+        out, anchor_matched = dedup_candidates(raw, anchor_sid="ANCHOR")
+        assert len(out) == 1
+        assert anchor_matched is False
+
+    def test_distinct_pages_kept(self):
+        """(sys_id, 5) and (sys_id, 6) are distinct and both survive dedup."""
+        raw = [
+            _make_result("990001", 5),
+            _make_result("990001", 6),
+        ]
+        out, _ = dedup_candidates(raw, anchor_sid="ANCHOR")
+        assert len(out) == 2
+        pages = {c.page for c in out}
+        assert pages == {5, 6}
+
+    def test_vs_uid_key(self):
+        """A VS-only raw dict (uid='{sid}|vs') yields key (sys_id, None);
+        two such dicts for the same sid collapse to one Candidate."""
+        raw = [
+            {"display": {"id": "990002"}, "uid": "990002|vs"},
+            {"display": {"id": "990002"}, "uid": "990002|vs", "snippet": "dup"},
+        ]
+        out, _ = dedup_candidates(raw, anchor_sid="ANCHOR")
+        assert len(out) == 1
+        assert out[0].key == ("990002", None)
+
+    def test_via_text_marked(self):
+        """Every deduped Candidate from dedup_candidates has via_text True."""
+        raw = [_make_result("990001", 5)]
+        out, _ = dedup_candidates(raw, anchor_sid="ANCHOR")
+        assert all(c.via_text is True for c in out)
+
+    def test_anchor_self_excluded_by_default(self):
+        """A raw dict whose sys_id == anchor_sid is dropped when include_self=False,
+        and the returned anchor_matched flag is True."""
+        raw = [_make_result("ANCHOR_SID", 1)]
+        out, anchor_matched = dedup_candidates(raw, anchor_sid="ANCHOR_SID")
+        assert len(out) == 0
+        assert anchor_matched is True
+
+    def test_anchor_self_included_when_flag(self):
+        """Same dict with include_self=True is kept and its Candidate.is_anchor_self is True."""
+        raw = [_make_result("ANCHOR_SID", 1)]
+        out, anchor_matched = dedup_candidates(raw, anchor_sid="ANCHOR_SID", include_self=True)
+        assert len(out) == 1
+        assert out[0].is_anchor_self is True
+        assert anchor_matched is True
+
+
+class TestMerge:
+    def test_text_only_passthrough(self):
+        """merge_candidates(text=[3 cands], vs=[]) returns those 3, order preserved."""
+        text_cands = [
+            Candidate(sys_id="A", page=1, via_text=True),
+            Candidate(sys_id="B", page=2, via_text=True),
+            Candidate(sys_id="C", page=3, via_text=True),
+        ]
+        result = merge_candidates(text_cands, [])
+        assert len(result) == 3
+        assert [c.sys_id for c in result] == ["A", "B", "C"]
+
+    def test_vs_only(self):
+        """merge_candidates(text=[], vs=[2 cands]) returns the 2 vs cands."""
+        vs_cands = [
+            Candidate(sys_id="X", page=None, via_vs=True, vs_rank=1),
+            Candidate(sys_id="Y", page=None, via_vs=True, vs_rank=2),
+        ]
+        result = merge_candidates([], vs_cands)
+        assert len(result) == 2
+
+    def test_overlap_annotated(self):
+        """A text cand for sid 'X' and a vs cand for sid 'X' (vs_rank 4):
+        merged 'X' Candidate has via_text True AND via_vs True AND vs_rank 4."""
+        text_cands = [Candidate(sys_id="X", page=5, via_text=True)]
+        vs_cands = [Candidate(sys_id="X", page=None, via_vs=True, vs_rank=4)]
+        result = merge_candidates(text_cands, vs_cands)
+        x_cand = next(c for c in result if c.sys_id == "X" and c.page == 5)
+        assert x_cand.via_text is True
+        assert x_cand.via_vs is True
+        assert x_cand.vs_rank == 4
+
+    def test_ordering(self):
+        """Given text cands for X(also-vs rank2), Y(text-only), and a VS-only Z(rank5):
+        merged order is [X (both, tier0), Y (text, tier1), Z (vs-only, tier2)];
+        within tier-2 sorted by vs_rank."""
+        text_cands = [
+            Candidate(sys_id="X", page=1, via_text=True),
+            Candidate(sys_id="Y", page=2, via_text=True),
+        ]
+        vs_cands = [
+            Candidate(sys_id="X", page=None, via_vs=True, vs_rank=2),
+            Candidate(sys_id="Z", page=None, via_vs=True, vs_rank=5),
+        ]
+        result = merge_candidates(text_cands, vs_cands)
+        sys_ids = [c.sys_id for c in result]
+        # X (both) must come before Y (text-only) must come before Z (vs-only)
+        assert sys_ids.index("X") < sys_ids.index("Y") < sys_ids.index("Z")
+
+    def test_both_tier_sorts_before_text(self):
+        """A both-cand always precedes a text-only cand regardless of input order."""
+        # Y is text-only, X is both — even if Y is listed first in input
+        text_cands = [
+            Candidate(sys_id="Y", page=2, via_text=True),
+            Candidate(sys_id="X", page=1, via_text=True),
+        ]
+        vs_cands = [
+            Candidate(sys_id="X", page=None, via_vs=True, vs_rank=1),
+        ]
+        result = merge_candidates(text_cands, vs_cands)
+        sys_ids = [c.sys_id for c in result]
+        assert sys_ids.index("X") < sys_ids.index("Y")
