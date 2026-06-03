@@ -125,7 +125,7 @@ metadata-image), with **no PyQt and no direct `fist_data/*.db` access**. No UI.
   5. Self-match detection (does the anchor satisfy the composed query) plus the centered snippet/page helpers are unit-tested.
   6. A static import test proves the module imports with no PyQt symbols and opens no `fist_data/*.db` directly — all data flows through shared services or the `SearchExecutor` adapter.
 
-**Plans:** 3 plans (3 waves — single-file module forces sequential mutation)
+**Plans:** 3/3 plans complete
   - [x] 106-01-PLAN.md — module skeleton: frozen dataclasses + SearchExecutor Protocol + dict→Candidate normalizer + page_of + compose() (SC#1) + static import guard (SC#6)
   - [x] 106-02-PLAN.md — cross-side AND/OR membership via SearchExecutor (SC#2) + candidate dedup/compaction (SC#3) + text/VS merge ordering with provenance (SC#4)
   - [x] 106-03-PLAN.md — self-match detection (SC#5) + centered snippet/page helpers (SC#5)
@@ -484,7 +484,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 106. Joins Lab Shared Core (logic + adapters + tests) | v8.0.0 | 3/3 | Complete   | 2026-06-03 |
+| 106. Joins Lab Shared Core (logic + adapters + tests) | v8.0.0 | 3/3 | Complete    | 2026-06-03 |
 | 107. Desktop Join Workbench — Anchor, Entry, Actions & Join Model | v8.0.0 | 0/? | Not started | - |
 | 108. Desktop Join Workbench — Builders, Candidates & Compare | v8.0.0 | 0/? | Not started | - |
 | 109. Visual-Similarity Merge & Soft-Retire | v8.0.0 | 0/? | Not started | - |
