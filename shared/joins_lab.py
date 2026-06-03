@@ -16,6 +16,7 @@ fjms_service).
 from __future__ import annotations
 
 import dataclasses
+import html
 import re
 from dataclasses import dataclass
 from typing import Optional, Protocol, runtime_checkable
@@ -600,6 +601,83 @@ def _match_line(lines: list, pattern: Optional[str]) -> int:
         if rx.search(ln):
             return i
     return -1
+
+
+# ── HTML snippet helpers (SC#5) ──────────────────────────────────────────────
+
+# Internal sentinel tokens used to bracket highlighted matches before HTML-escaping.
+# These characters (SOH/STX) are not valid in corpus text and survive html.escape() unchanged.
+MARK_A = "\x01"   # marks the start of a regex highlight region
+MARK_B = "\x02"   # marks the end of a regex highlight region
+
+
+def htmlify(text: str, pattern: Optional[str] = None) -> str:
+    """Escape corpus text to HTML, optionally highlighting pattern matches.
+
+    Processing order (T-106-08 XSS mitigation):
+    1. Substitute match regions with NUL-byte sentinels (MARK_A/MARK_B).
+    2. html.escape() the whole text (including any '<'/'>'/'&') — corpus content
+       is fully escaped and cannot inject markup.
+    3. Replace '\\n' with '<br>'.
+    4. Replace sentinels with the fixed '<b style=...>' tag — only this module's
+       own tag survives the escape pass.
+    5. Wrap in a right-to-left div.
+
+    Pure function — no I/O (D-06). Transplanted from sketch L98-110.
+    """
+    text = text or ""
+    if pattern:
+        try:
+            rx = re.compile(pattern, re.IGNORECASE | re.MULTILINE)
+            text = rx.sub(lambda m: MARK_A + m.group(0) + MARK_B, text)
+        except re.error:
+            pass
+    t = html.escape(text)
+    t = t.replace("\n", "<br>")
+    t = t.replace(MARK_A, "<b style='color:#dc2626'>").replace(MARK_B, "</b>")
+    return f"<div dir='rtl' style='text-align:right'>{t}</div>"
+
+
+def snippet_html(text: str, pattern: Optional[str], max_lines: int = 8) -> str:
+    """HTML snippet centered on the first regex match.
+
+    The matched line is always visible in the output window (so the caller does
+    not need to scroll to see why this result was included). When no match is
+    found, the first non-blank lines are returned instead.
+
+    Returns an RTL-wrapped, HTML-escaped string with the match highlighted in
+    red-bold (via htmlify). max_lines controls the window size (default 8).
+
+    Pure function — no I/O (D-06). Transplanted from sketch L126-135.
+    """
+    lines = (text or "").split("\n")
+    hit = _match_line(lines, pattern)
+    if hit < 0:
+        chosen = [ln for ln in lines if ln.strip()][:max_lines]
+    else:
+        lo = max(0, hit - 2)
+        chosen = lines[lo:lo + max_lines]
+    return htmlify("\n".join(chosen), pattern)
+
+
+def snippet_plain(text: str, pattern: Optional[str], max_chars: int = 220) -> str:
+    """Plain-text snippet centered on the first regex match, for table cells.
+
+    Joins up to 3 lines around the first match with '  /  ', stripped of
+    whitespace. Truncates to max_chars with a trailing '…' when over the cap.
+    When no match is found, uses the first 3 non-blank lines instead.
+
+    Pure function — no I/O (D-06). Transplanted from sketch L138-148.
+    """
+    lines = (text or "").split("\n")
+    hit = _match_line(lines, pattern)
+    if hit < 0:
+        parts = [ln.strip() for ln in lines if ln.strip()][:3]
+    else:
+        lo = max(0, hit - 1)
+        parts = [ln.strip() for ln in lines[lo:lo + 3] if ln.strip()]
+    s = "  /  ".join(parts)
+    return (s[:max_chars] + "…") if len(s) > max_chars else s
 
 
 # ── compose() — line-break query composition (SC#1) ─────────────────────────

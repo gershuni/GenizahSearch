@@ -23,7 +23,6 @@ from shared.joins_lab import (
     merge_candidates,
     detect_self_match,
     _match_line,
-    htmlify,
     snippet_html,
     snippet_plain,
 )
@@ -632,8 +631,8 @@ class TestSnippet:
         """No match → snippet_html returns first non-blank lines, RTL-wrapped, no highlight."""
         out = snippet_html(self._LONG_TEXT, "NOT_IN_TEXT_XYZ")
         assert "dir='rtl'" in out
-        # No highlight <b> tag when no match
-        assert "<b" not in out
+        # No bold highlight tag when no match (note: <br> is present but not <b style=...)
+        assert "<b style=" not in out
         # Contains first line
         assert "שורה ראשונה" in out
 
