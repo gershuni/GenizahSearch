@@ -535,7 +535,10 @@ def merge_candidates(text_cands: list, vs_cands: list) -> list:
     for r in text_cands:
         v = vs_by_sid.get(r.sys_id)
         if v is not None:
-            r = dataclasses.replace(r, via_vs=True, vs_rank=v.vs_rank)
+            # Carry vs_score through too (WR-02): dropping it would re-stamp the
+            # candidate as via_vs=True with vs_score=None, which the Candidate
+            # docstring defines as "no VS data (NOT 0.0)" — Pitfall 6.
+            r = dataclasses.replace(r, via_vs=True, vs_rank=v.vs_rank, vs_score=v.vs_score)
         annotated_text.append(r)
 
     text_sids = {r.sys_id for r in annotated_text}

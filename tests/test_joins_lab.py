@@ -497,6 +497,18 @@ class TestMerge:
         assert x_cand.via_vs is True
         assert x_cand.vs_rank == 4
 
+    def test_overlap_carries_vs_score(self):
+        """WR-02: annotating an overlapping text candidate must copy vs_score, not
+        leave it None (None == 'no VS data' — Pitfall 6). A candidate with real VS
+        data must not be mislabeled as having none."""
+        text_cands = [Candidate(sys_id="X", page=5, via_text=True)]
+        vs_cands = [Candidate(sys_id="X", page=None, via_vs=True, vs_rank=4, vs_score=0.91)]
+        result = merge_candidates(text_cands, vs_cands)
+        x_cand = next(c for c in result if c.sys_id == "X" and c.page == 5)
+        assert x_cand.via_vs is True
+        assert x_cand.vs_rank == 4
+        assert x_cand.vs_score == 0.91
+
     def test_ordering(self):
         """Given text cands for X(also-vs rank2), Y(text-only), and a VS-only Z(rank5):
         merged order is [X (both, tier0), Y (text, tier1), Z (vs-only, tier2)];
