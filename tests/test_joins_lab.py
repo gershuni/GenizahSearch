@@ -137,6 +137,18 @@ class TestNormalize:
         assert c.vs_rank == 4
 
 
+class TestDataclasses:
+    def test_candidate_key_property(self):
+        c = Candidate(sys_id="990001", page=3)
+        assert c.key == ("990001", 3)
+
+    def test_merge_result_construction(self):
+        c = Candidate(sys_id="990002", page=1)
+        mr = MergeResult(candidates=(c,), note="test")
+        assert len(mr.candidates) == 1
+        assert mr.note == "test"
+
+
 class TestProtocol:
     def test_fake_is_searchexecutor(self):
         assert isinstance(FakeSearchExecutor(), SearchExecutor)
