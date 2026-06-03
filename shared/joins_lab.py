@@ -15,10 +15,10 @@ fjms_service).
 """
 from __future__ import annotations
 
+import dataclasses
 import re
 from dataclasses import dataclass
 from typing import Optional, Protocol, runtime_checkable
-# (Plan 02 will add `import dataclasses` when it introduces dataclasses.replace().)
 
 
 # ── Frozen domain model ───────────────────────────────────────────────────────
@@ -460,6 +460,95 @@ def apply_cross_side(
 
     note = f"B matched {len(b_set)} pages · +{added} via other side"
     return MergeResult(candidates=tuple(out), note=note)
+
+
+# ── Candidate dedup / compaction (SC#3) ──────────────────────────────────────
+
+
+def dedup_candidates(
+    raw: list,
+    anchor_sid: str,
+    include_self: bool = False,
+) -> tuple:
+    """Deduplicate raw result dicts to one Candidate per (sys_id, page).
+
+    Transplanted from sketch _on_results dedup block (L1102-1114).
+
+    - Keyed on Candidate.key == (sys_id, page). VS-only rows (uid='{sid}|vs')
+      get page=None, so only one VS-only candidate per sys_id survives.
+    - Every surviving Candidate has via_text=True (it came from a text search).
+    - Candidates whose sys_id == anchor_sid are flagged as is_anchor_self.
+      When include_self=False (default) they are excluded from the output.
+    - Returns (deduped_list, anchor_matched) where anchor_matched=True means
+      at least one raw result belonged to the anchor fragment itself.
+
+    Pure function — no I/O (D-06).
+    """
+    seen: set = set()
+    out: list = []
+    anchor_matched = False
+    for r in raw:
+        sid = _r_sid(r)
+        is_self = sid == anchor_sid
+        if is_self:
+            anchor_matched = True
+        if is_self and not include_self:
+            continue
+        cand = normalize_candidate(r)
+        key = cand.key
+        if key in seen:
+            continue
+        seen.add(key)
+        cand = dataclasses.replace(cand, via_text=True, is_anchor_self=is_self)
+        out.append(cand)
+    return (out, anchor_matched)
+
+
+# ── Text/VS merge ordering with provenance (SC#4) ────────────────────────────
+
+
+def merge_candidates(text_cands: list, vs_cands: list) -> list:
+    """Merge text and VS candidate lists into a stable, provenance-tagged ordering.
+
+    Transplanted from sketch _maybe_assemble (L1156-1174).
+
+    Takes already-fetched lists (D-05/D-06 — VS is fetched by the caller via
+    get_vs_service(), never by this function). Frozen Candidates are annotated
+    via dataclasses.replace() — never attribute mutation (T-106-06 mitigation).
+
+    Ordering: tier 0 (both via_text AND via_vs) → tier 1 (text-only) →
+    tier 2 (VS-only). Within tier 2, sorted by vs_rank ascending.
+    Within tiers 0 and 1 the relative order from text_cands is preserved (stable sort).
+
+    Pure function — no I/O (D-06).
+    """
+    if not vs_cands:
+        return list(text_cands)
+    if not text_cands:
+        return list(vs_cands)
+
+    vs_by_sid = {v.sys_id: v for v in vs_cands}
+
+    # Annotate text candidates that also appear in the VS set
+    annotated_text = []
+    for r in text_cands:
+        v = vs_by_sid.get(r.sys_id)
+        if v is not None:
+            r = dataclasses.replace(r, via_vs=True, vs_rank=v.vs_rank)
+        annotated_text.append(r)
+
+    text_sids = {r.sys_id for r in annotated_text}
+    vs_only = [v for v in vs_cands if v.sys_id not in text_sids]
+
+    merged = annotated_text + vs_only
+
+    def _k(c: "Candidate"):
+        both = c.via_text and c.via_vs
+        tier = 0 if both else (1 if c.via_text else 2)
+        return (tier, c.vs_rank if c.vs_rank is not None else 99999)
+
+    merged.sort(key=_k)
+    return merged
 
 
 # ── compose() — line-break query composition (SC#1) ─────────────────────────
