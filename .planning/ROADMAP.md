@@ -128,7 +128,7 @@ metadata-image), with **no PyQt and no direct `fist_data/*.db` access**. No UI.
 **Plans:** 3 plans (3 waves — single-file module forces sequential mutation)
   - [x] 106-01-PLAN.md — module skeleton: frozen dataclasses + SearchExecutor Protocol + dict→Candidate normalizer + page_of + compose() (SC#1) + static import guard (SC#6)
   - [x] 106-02-PLAN.md — cross-side AND/OR membership via SearchExecutor (SC#2) + candidate dedup/compaction (SC#3) + text/VS merge ordering with provenance (SC#4)
-  - [ ] 106-03-PLAN.md — self-match detection (SC#5) + centered snippet/page helpers (SC#5)
+  - [x] 106-03-PLAN.md — self-match detection (SC#5) + centered snippet/page helpers (SC#5)
 
 ---
 
@@ -484,7 +484,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 106. Joins Lab Shared Core (logic + adapters + tests) | v8.0.0 | 2/3 | In Progress|  |
+| 106. Joins Lab Shared Core (logic + adapters + tests) | v8.0.0 | 3/3 | Complete   | 2026-06-03 |
 | 107. Desktop Join Workbench — Anchor, Entry, Actions & Join Model | v8.0.0 | 0/? | Not started | - |
 | 108. Desktop Join Workbench — Builders, Candidates & Compare | v8.0.0 | 0/? | Not started | - |
 | 109. Visual-Similarity Merge & Soft-Retire | v8.0.0 | 0/? | Not started | - |
