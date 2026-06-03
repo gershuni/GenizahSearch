@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
 milestone: v8.0.0
-milestone_name: Dicta Rebrand & Joins Lab
-status: planning
-stopped_at: v8.0.0 Joins Lab roadmap CREATED (Phases 106-110, Codex extract-pure-logic-first sequence); web UI deferred. Next = /gsd-discuss-phase 106 (resolve the 7 deferrals) then /gsd-plan-phase 106. Sketch preserved at tag spike-002-joins-workbench (live tree clean).
-last_updated: "2026-06-03T00:00:00.000Z"
-last_activity: 2026-06-03
+milestone_name: Joins Lab — Phases 106-110
+status: "**v8.0.0 Joins Lab roadmap CREATED (2026-06-03).** Phases 106-110 written into `ROADMAP.md` on the Codex extract-pure-logic-first sequence: **106** shared core (pure logic + service adapters + unit tests, behind a `SearchExecutor` adapter; no PyQt, no direct sqlite) · **107** desktop Workbench frame (anchor + entry points + public action APIs + pairwise→group join model via `get_connected_fragments_by_id`) · **108** desktop builders + candidates + compare (line-by-line builder both sides, cross-side AND/OR, dedup, self-match, tear-side assist with the CORRECTED `[`/`]` rule) · **109** Visual-Similarity merge + soft-retire · **110** parallels seeding (JSA-01). **Web Joins Lab UI deferred to a later phase** (desktop-first). The validated throwaway sketch is preserved as the executable spec at tag `spike-002-joins-workbench` (+ frozen `.py.txt` archive); live tree is clean. **7 deferrals (REQUIREMENTS § Deferrals) MUST be resolved in discuss-phase before each phase's plan locks** — do NOT auto-answer discuss-phase."
+stopped_at: Phase 106 context gathered
+last_updated: "2026-06-03T11:31:24.718Z"
+last_activity: 2026-06-02 — v8.0.0 milestone opened via `/gsd-new-milestone`; scope shaped through free conversation; PROJECT.md + REQUIREMENTS.md written; v7.17 folded in (Phases 103/105 kept as delivered; **no destructive phase-clear**).
 progress:
-  total_phases: 7
-  completed_phases: 2
-  total_plans: 0
-  completed_plans: 0
-  percent: 29
+  total_phases: 8
+  completed_phases: 1
+  total_plans: 4
+  completed_plans: 5
+  percent: 100
 ---
 
 # Project State
@@ -45,6 +45,7 @@ Last activity: 2026-06-02 — v8.0.0 milestone opened via `/gsd-new-milestone`; 
 1. ✅ **Genizah-scholar design-critique session — DONE (2026-06-03).** Ran as a throwaway-sketch
    exploration; conclusions in `REQUIREMENTS.md` § Design-Critique Conclusions & Amendments.
    Sketch preserved at tag `spike-002-joins-workbench` + `.planning/spikes/002-.../sketch/`.
+
 2. ✅ **v8.0.0 Joins Lab roadmap — CREATED (2026-06-03).** Phases 106-110 in `ROADMAP.md`.
 3. **`/gsd-discuss-phase 106`** (user-led — do NOT auto-answer). Resolve the 7 deferrals
    (REQUIREMENTS § Deferrals / discuss-phase questions) BEFORE the Phase 106 plan locks. The most
@@ -52,6 +53,7 @@ Last activity: 2026-06-02 — v8.0.0 milestone opened via `/gsd-new-milestone`; 
    builder depth (variation columns? raw-query preview? page-level Text START/END?), #6 JSA-02/03
    keep-spike-cut (affects whether Phase 110 grows). #2/#4/#5/#7 bear more on 108/109 and the web
    phase but should be acknowledged.
+
 4. **`/gsd-plan-phase 106`** → execute → verify; repeat down the chain 107 → 108 → 109 → 110. Web
    Joins Lab UI is a LATER phase on the shared core (deferral #5).
 
@@ -92,7 +94,7 @@ Carried forward to v8.0.0+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular
 
 ## Session Continuity
 
-Last session: 2026-06-03
-Stopped at: v8.0.0 Joins Lab roadmap CREATED (Phases 106-110 in ROADMAP.md). Sketch preserved at tag `spike-002-joins-workbench`; live tree clean.
-Resume file: .planning/ROADMAP.md (§ v8.0.0 Joins Lab — Phases 106-110) + .planning/spikes/002-assisted-join-workbench/ (executable spec + critiques)
+Last session: 2026-06-03T11:31:24.710Z
+Stopped at: Phase 106 context gathered
+Resume file: .planning/phases/106-joins-lab-shared-core-pure-logic-service-adapters-unit-tests/106-CONTEXT.md
 Next step: `/gsd-discuss-phase 106` (user-led — resolve the 7 deferrals; do NOT auto-answer), then `/gsd-plan-phase 106` → execute → verify, chaining 107→110. Web UI a later phase.
