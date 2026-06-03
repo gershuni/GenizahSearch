@@ -23,6 +23,9 @@ from shared.joins_lab import (
     merge_candidates,
     detect_self_match,
     _match_line,
+    htmlify,
+    snippet_html,
+    snippet_plain,
 )
 
 
@@ -594,3 +597,86 @@ class TestMatchLine:
     def test_case_insensitive(self):
         """Pattern matching is case-insensitive (Latin characters)."""
         assert _match_line(["ABC def"], "abc") == 0
+
+
+# ── Plan 03 Task 2 tests ──────────────────────────────────────────────────────
+
+
+class TestSnippet:
+    """Centered snippet helpers — HTML and plain text (SC#5)."""
+
+    # Hebrew fixture: 12-line block with the target term 'ממשלה' on line 5 (index 4)
+    _LONG_TEXT = "\n".join([
+        "שורה ראשונה",          # 0
+        "שורה שניה",            # 1
+        "שורה שלישית",          # 2
+        "שורה רביעית",          # 3
+        "ועתה ממשלה חזקה",      # 4  ← target term here
+        "שורה שישית",           # 5
+        "שורה שביעית",          # 6
+        "שורה שמינית",          # 7
+        "שורה תשיעית",          # 8
+        "שורה עשירית",          # 9
+        "שורה אחת עשרה",        # 10
+        "שורה שתים עשרה",       # 11
+    ])
+
+    def test_html_centers_on_match(self):
+        """snippet_html output includes the matched line and is RTL-wrapped with highlight."""
+        out = snippet_html(self._LONG_TEXT, "ממשלה")
+        assert "dir='rtl'" in out
+        assert "<b" in out
+        assert "ממשלה" in out
+
+    def test_html_no_match_takes_first_lines(self):
+        """No match → snippet_html returns first non-blank lines, RTL-wrapped, no highlight."""
+        out = snippet_html(self._LONG_TEXT, "NOT_IN_TEXT_XYZ")
+        assert "dir='rtl'" in out
+        # No highlight <b> tag when no match
+        assert "<b" not in out
+        # Contains first line
+        assert "שורה ראשונה" in out
+
+    def test_html_escapes(self):
+        """HTML special characters in corpus text are escaped."""
+        text_with_lt = "line one\nשורה עם <תג> בתוכה\nline three"
+        out = snippet_html(text_with_lt, "שורה")
+        assert "&lt;" in out
+
+    def test_html_max_lines_window(self):
+        """With max_lines=4 and a hit on line 8, output contains no more than 4 source lines."""
+        # Build a text where target is on line 8 (index 7)
+        lines = [f"line {i}" for i in range(15)]
+        lines[7] = "target word here"
+        text = "\n".join(lines)
+        out = snippet_html(text, "target", max_lines=4)
+        assert "target" in out
+        # The raw window (before htmlify) should be at most 4 lines
+        # We count <br> separators in the output (each \n → <br>)
+        br_count = out.count("<br>")
+        # max_lines=4 means at most 4 lines joined by 3 <br>s
+        assert br_count <= 3
+
+    def test_plain_centers_and_caps(self):
+        """snippet_plain centers on hit and truncates to max_chars+1 with trailing '…'."""
+        # Build a long text where the target appears in the middle
+        lines = ["שורה " + ("א" * 30) + f" {i}" for i in range(20)]
+        lines[10] = "שורה מיוחדת ממשלה חזקה"
+        text = "\n".join(lines)
+        out = snippet_plain(text, "ממשלה", max_chars=30)
+        # When over the cap, must end with '…'
+        assert out.endswith("…")
+        # Total length must be <= max_chars + 1 (the '…' character)
+        assert len(out) <= 31
+
+    def test_plain_no_match(self):
+        """No match → snippet_plain returns first 3 non-blank stripped lines joined."""
+        text = "  שורה א  \n\n  שורה ב  \n  שורה ג  \n  שורה ד  "
+        out = snippet_plain(text, "NOT_IN_TEXT_XYZ")
+        assert "שורה א" in out
+        assert "שורה ב" in out
+        assert "שורה ג" in out
+        # Fourth line should NOT appear (only first 3)
+        assert "שורה ד" not in out
+        # Joined with "  /  "
+        assert "  /  " in out
