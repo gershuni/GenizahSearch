@@ -276,6 +276,192 @@ def normalize_candidate(res: dict) -> Candidate:
     )
 
 
+# ── Cross-side membership helpers (SC#2) ─────────────────────────────────────
+
+
+def resolve_other_side_pages(page: int, total_pages: Optional[int]) -> frozenset:
+    """Return the set of neighbor page numbers that form the 'other side' of a leaf.
+
+    For a recto/verso leaf, the other side is the adjacent image:
+      first page  → {p+1}
+      last page   → {p-1}
+      middle page → {p-1, p+1}
+      single-page doc → empty set
+
+    total_pages=None means unknown upper bound; the lower clamp (drop < 1) still applies.
+
+    Pure function — no I/O (D-06).
+    """
+    neighbors = set()
+    for n in (page - 1, page + 1):
+        if n < 1:
+            continue
+        if total_pages is not None and n > total_pages:
+            continue
+        neighbors.add(n)
+    return frozenset(neighbors)
+
+
+def cross_side_membership(
+    base_keys: set,
+    b_set: set,
+    combine: str,
+    totals: dict,
+) -> set:
+    """Pure AND/OR set logic for cross-side filtering (transplanted from sketch L400-428).
+
+    base_keys: set of (sys_id, page) tuples from the this-side search.
+    b_set:     set of (sys_id, page) tuples from the other-side search.
+    combine:   'AND' or 'OR'.
+    totals:    {sys_id: total_pages | None} — used by OR to clamp neighbor synthesis.
+
+    AND: keep only base entries where a neighbor (sid, p±1) appears in b_set.
+    OR:  start from base_keys; for each (sid, q) in b_set add neighbor pages (q±1)
+         that are in-bounds and not already in the set.
+
+    Pure function — no I/O (D-06).
+    """
+    if combine == "AND":
+        return {
+            (sid, p)
+            for (sid, p) in base_keys
+            if (sid, p - 1) in b_set or (sid, p + 1) in b_set
+        }
+    # OR: accumulate base + synthesized neighbors
+    result = set(base_keys)
+    for (sid, q) in b_set:
+        t = totals.get(sid)
+        for n in (q - 1, q + 1):
+            if n < 1:
+                continue
+            if t is not None and n > t:
+                continue
+            result.add((sid, n))
+    return result
+
+
+def apply_cross_side(
+    executor: "SearchExecutor",
+    base: list,
+    b_query: str,
+    b_responsa_options: dict,
+    combine: str,
+    anchor_pattern: Optional[str] = None,
+) -> "MergeResult":
+    """I/O-bound orchestrator for cross-side AND/OR membership (SC#2).
+
+    Runs query B through the injected SearchExecutor, builds a b_set of (sys_id, page)
+    pairs, then applies AND/OR logic to filter/extend the base Candidate list.
+
+    AND: returns only base candidates whose (sys_id, page±1) appears in b_set.
+    OR:  returns base candidates plus synthesized neighbor Candidates for each b_set
+         page whose adjacent page is not already represented.
+
+    Failure in any executor call degrades gracefully to fewer/no candidates rather than
+    raising (T-106-05 mitigation). corpus_scope='genizah' is passed explicitly.
+
+    Returns MergeResult(candidates=tuple, note=str).
+    """
+    # 1) Run query B through the engine → b_set of (sid, page)
+    try:
+        bres = (
+            executor.execute_search(
+                b_query,
+                "exact",
+                0,
+                responsa_options=b_responsa_options,
+                corpus_scope="genizah",
+            )
+            or []
+        )
+    except Exception:
+        bres = []
+
+    b_set = set()
+    for r in bres:
+        c = normalize_candidate(r)
+        if c.sys_id and c.page is not None:
+            b_set.add((c.sys_id, c.page))
+
+    # 2) total_pages cache: per-sid, fetched lazily from get_browse_page(sid, 1)
+    _totals_cache: dict = {}
+
+    def _page_total(sid: str) -> Optional[int]:
+        if sid not in _totals_cache:
+            t = None
+            try:
+                page_data = executor.get_browse_page(sid, 1)
+                if page_data is not None:
+                    t = page_data.get("total_pages")
+            except Exception:
+                t = None
+            _totals_cache[sid] = t
+        return _totals_cache[sid]
+
+    # 3) AND: filter base to those with a b_set neighbor
+    if combine == "AND":
+        out = [
+            c
+            for c in base
+            if c.sys_id
+            and c.page is not None
+            and ((c.sys_id, c.page - 1) in b_set or (c.sys_id, c.page + 1) in b_set)
+        ]
+        note = f"B matched {len(b_set)} pages"
+        return MergeResult(candidates=tuple(out), note=note)
+
+    # 4) OR: start from base, synthesize neighbors for each b_set page
+    out = list(base)
+    seen = {c.key for c in base}
+    added = 0
+    for (sid, q) in b_set:
+        t = _page_total(sid)
+        for n in (q - 1, q + 1):
+            if n < 1:
+                continue
+            if t is not None and n > t:
+                continue
+            if (sid, n) in seen:
+                continue
+            seen.add((sid, n))
+            # Synthesize a neighbor result dict (sketch _make_neighbor_result shape)
+            txt = ""
+            try:
+                page_data = executor.get_browse_page(sid, n)
+                if page_data is not None:
+                    txt = page_data.get("text", "") or ""
+            except Exception:
+                txt = ""
+            shelf, title = "", ""
+            try:
+                shelf, title = executor.get_meta_for_id(sid)
+            except Exception:
+                pass
+            lib = ""
+            try:
+                lib = executor.get_library_for_id(sid) or ""
+            except Exception:
+                pass
+            neighbor_res = {
+                "display": {
+                    "id": sid,
+                    "shelfmark": shelf,
+                    "title": title,
+                    "library_code": lib,
+                    "img": n,
+                },
+                "full_text": txt,
+                "uid": f"{sid}|{n}",
+                "highlight_pattern": anchor_pattern,
+                "_via_other_side": True,
+            }
+            out.append(normalize_candidate(neighbor_res))
+            added += 1
+
+    note = f"B matched {len(b_set)} pages · +{added} via other side"
+    return MergeResult(candidates=tuple(out), note=note)
+
+
 # ── compose() — line-break query composition (SC#1) ─────────────────────────
 
 
