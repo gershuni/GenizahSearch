@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v8.0.0
 milestone_name: Dicta Rebrand & Joins Lab
-status: defining
-stopped_at: Requirements written (JWB-01..09, JSA-01..03); roadmap deferred pending Genizah-scholar design-critique session
-last_updated: "2026-06-02T05:19:41.000Z"
-last_activity: 2026-06-02
+status: roadmapping
+stopped_at: Design-critique COMPLETE (sketch + 2 Codex critiques); REQUIREMENTS amended (JWB-05/06 fixed, JWB-10/11/12 added, pairwise→group join model decided, deferrals listed); roadmap next (phases 106+)
+last_updated: "2026-06-03T00:00:00.000Z"
+last_activity: 2026-06-03
 progress:
   total_phases: 0
   completed_phases: 0
@@ -27,9 +27,9 @@ See: .planning/PROJECT.md (updated 2026-06-02)
 
 Milestone: **v8.0.0 Dicta Rebrand & Joins Lab — STARTED 2026-06-02.** Folds the delivered v7.17 cycle (the "Dicta Genizah Search Pro" rebrand + LOCAL "My Library" export, Phases 103 + 105) into the flagship v8.0.0 release, and adds **Joins Lab** — an interactive **human-in-the-loop** join-hunting workbench (Component A) + optional search-support algorithms (Component B), both apps. NO automated join-finder.
 
-Phase: **Not started** — requirements defined; roadmap deferred.
+Phase: **Not started** — requirements amended post-critique; roadmap (phases 106+) is the next step.
 Plan: —
-Status: **Requirements written. Roadmap INTENTIONALLY DEFERRED** until after a **Genizah-scholar design-critique session**. The user will run that as a fresh role-play session (a Genizah scholar who explores the app + the real material nature, asks hard questions, and offers recommendations / pushbacks) to stress-test JWB-01..09 / JSA-01..03 before phases are locked.
+Status: **Design-critique COMPLETE (2026-06-03); requirements amended; roadmap UNBLOCKED.** The critique ran as a throwaway-sketch exploration (`desktop/join_workbench.py`) validated across ~6 UAT iterations + 2 Codex critiques (scholar-design + productionize). Join model DECIDED: pairwise→group (reuse `JoinsManager.get_connected_fragments_by_id` BFS — no new schema). New reqs JWB-10/11/12 (line builder / cross-side AND/OR / unified candidate sources incl. Visual-Similarity merge). Build constraint: extract shared tested logic behind a `SearchExecutor` adapter, desktop-first UI, i18n from start. Next: roadmap → `/gsd-plan-phase 106`.
 Last activity: 2026-06-02 — v8.0.0 milestone opened via `/gsd-new-milestone`; scope shaped through free conversation; PROJECT.md + REQUIREMENTS.md written; v7.17 folded in (Phases 103/105 kept as delivered; **no destructive phase-clear**).
 
 ### Scope (locked 2026-06-02)
@@ -42,8 +42,16 @@ Last activity: 2026-06-02 — v8.0.0 milestone opened via `/gsd-new-milestone`; 
 
 ### Next
 
-1. **Genizah-scholar design-critique session** (user-led, fresh `/clear` session): explore the app + real material nature; pressure-test JWB/JSA; surface recommendations + pushbacks; revise `REQUIREMENTS.md` as needed. Source material: `.planning/spikes/002-assisted-join-workbench/SPIKE-FINDINGS.md`, `docs/FEATURE_IDEAS.md`, `docs/archive/JOIN_FINDER_REPORT.md`, `docs/plans/JOIN_FINDER_IMPLEMENTATION_PLAN.md`.
-2. **Then** create the roadmap (re-enter `/gsd-new-milestone` to resume roadmapping, or run the roadmapper directly) → `/gsd-plan-phase` for the first Joins Lab phase. **Phase numbering continues from 105 → 106+.**
+1. ✅ **Genizah-scholar design-critique session — DONE (2026-06-03).** Run as a build-a-throwaway-
+   sketch exploration (`desktop/join_workbench.py`); conclusions folded into `REQUIREMENTS.md`
+   (§ Design-Critique Conclusions & Amendments). Evidence + reversal recipe:
+   `.planning/spikes/002-assisted-join-workbench/` (DESKTOP-INTEGRATION-NOTES, CODEX-CRITIQUE,
+   CODEX-PRODUCTIONIZE-CRITIQUE, REVERT.md).
+2. **Create the roadmap** (phases 106+) following Codex's productionize sequence: extract pure
+   shared logic + unit tests (behind a `SearchExecutor` adapter) → service adapters → public action
+   APIs → desktop Workbench UI + i18n → Visual-Similarity merge / soft-retire → verify; **web UI a
+   LATER phase** on the same shared API. Then `/gsd-plan-phase 106`. **Carry the deferrals list
+   (REQUIREMENTS § Deferrals / discuss-phase questions) into discuss-phase.** Phase numbering 105 → 106+.
 
 **Version decision RESOLVED:** ship as **v8.0.0** (closes the open decision from 2026-06-01). The actual version-file bump (`scripts/bump_version.py 8.0.0`, plus `_TARGET_VERSION` in `tests/test_release_artifacts.py` which the bumper misses, plus a `## [8.0.0]` CHANGELOG section folding the `[Unreleased]` rebrand note) happens at `/release` time — NOT now. Rebrand gotchas in memory `project_desktop_app_rebrand.md`.
 
@@ -82,7 +90,7 @@ Carried forward to v8.0.0+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular
 
 ## Session Continuity
 
-Last session: 2026-06-02T05:19:41.000Z
-Stopped at: v8.0.0 milestone opened; scope shaped + requirements written; roadmap deferred pending Genizah-scholar design-critique session.
-Resume file: None
-Next step: User runs the Genizah-scholar design-critique session (fresh `/clear`), then the roadmap is created and `/gsd-plan-phase 106` (first Joins Lab phase) begins.
+Last session: 2026-06-03
+Stopped at: Design-critique COMPLETE (sketch + 2 Codex critiques); REQUIREMENTS amended; roadmap UNBLOCKED.
+Resume file: .planning/spikes/002-assisted-join-workbench/DESKTOP-INTEGRATION-NOTES.md
+Next step: Create the v8.0.0 roadmap (phases 106+, Codex-sequenced), then `/gsd-plan-phase 106`. Deferrals (REQUIREMENTS § Deferrals / discuss-phase questions) → discuss-phase.

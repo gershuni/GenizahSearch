@@ -89,6 +89,74 @@ requirement text is preserved in git history (prior `REQUIREMENTS.md`) and `MILE
 
 ---
 
+## Design-Critique Conclusions & Amendments (2026-06-03)
+
+The deferred **Genizah-scholar design-critique session is COMPLETE** — run as a build-a-throwaway-
+sketch exploration (`desktop/join_workbench.py`, validated across ~6 UAT iterations). Evidence:
+`.planning/spikes/002-assisted-join-workbench/` (CODEX-CRITIQUE, CODEX-PRODUCTIONIZE-CRITIQUE,
+DESKTOP-INTEGRATION-NOTES). **The roadmap is now UNBLOCKED.**
+
+### Validated shape (what the scholar reacted to and approved)
+Anchor pane (image via the proven `enrich_metadata` → `images_nli/ext` route + zoom + folio
+prev/next + brief metadata, dark-mode/RTL safe) | a **line-by-line query builder for BOTH sides of
+the leaf** | candidates as grid/table (deduped one-per-image) with material + visual-similarity +
+highlighted snippet + Y/?/N triage + four actions | side-by-side compare.
+
+### Amendments to existing requirements
+- **JWB-05 (tear-side assist) — FIX THE INVERTED RULE.** Verified vs the corpus: **start-`]` = LEFT
+  half (beginning torn), end-`[` = RIGHT half (end torn)** (8.2:1 / 3.35:1). The original text was
+  backwards. Also DOWNGRADE prominence: on 2,178 known physical joins a clean complementary L+R read
+  fires on only **2.5%**; the dominant verdict is "both edges torn" (55%). Make "both edges"
+  first-class; stay silent ~38% of the time.
+- **JWB-06 (seed search) — REFRAME.** Do NOT pre-seed the anchor's own line text; the scholar hunts
+  what is **MISSING** (the continuation), not what's present. Replaced by the builder (JWB-10).
+- **JWB-04 / JWB-09 (joins) — JOIN MODEL DECIDED (user, 2026-06-03): reuse the existing
+  pairwise→group pattern.** Persist 2-fragment join records (`fragment_a/b` + `relationship_type` +
+  notes, via `corrections_client.create_join` / `JoinsManager.create_join_local` → Supabase +
+  joins_cache.pkl); present GROUPS via the existing BFS transitive closure
+  (`JoinsManager.get_connected_fragments_by_id` — A+B, A+C, B+D → {A,B,C,D}). **No new schema.**
+  JWB-04 shows the anchor's connected group; JWB-09 "Add as Join" persists pairwise + refreshes it.
+
+### New requirements (validated by the critique)
+- [ ] **JWB-10 — Line-by-line query builder.** Rows = manuscript lines; per-row line START/END
+  anchors; "↓ N lines" gap → composes the engine's line-break syntax (`|` groups, `[|N]` line-gaps).
+  RTL: the line-START anchor sits on the right (Hebrew line start).
+- [ ] **JWB-11 — Cross-side AND/OR.** An identical builder for the OTHER side of the leaf (= adjacent
+  image p±1; first→+1, last→−1, middle→both). Query B runs through the engine; matching is
+  `(sys_id, page±1)` set membership. AND narrows a flood; OR widens a poor yield. (Distinct from
+  JOINS-F1's cross-LINE offset; this is cross-SIDE and needs no spike.)
+- [ ] **JWB-12 — Unified candidate sources (folds in Visual Similarity).** One surface, three
+  sources: text / visual-similarity look-alikes / combined (provenance badges ★both / ⊙VS / ✎text,
+  both-first ordering). Soft-retire the standalone Visual Similarity dialog (reach parity → reroute
+  its entry points → deprecate; keep the JoinsDialog pick-mode hook). Every candidate carries the
+  four actions (Browse / Puzzle / Add to List / Add as Join). + a self-match verification readout
+  ("anchor matches this query ✓/✗") and an "include anchor itself" toggle.
+
+### Build constraints (architecture — Codex productionize critique, agreed)
+- Extract the **pure logic** (query composition, cross-side membership, dedup/compaction, VS/text
+  merge, snippet/page helpers) into a **shared, tested module** (web-reusable; no PyQt, no direct
+  `fist_data/*.db`) behind a `SearchExecutor` adapter. **Unit-test before UI.**
+- Use shared services (visual_similarity / FJMS-measurement / metadata-image), not ad-hoc sqlite.
+- Replace private `_vs_*` calls with **public action APIs**.
+- **i18n from the start** (acceptance criteria, not cleanup). **Desktop-first UI; web is a LATER
+  phase on the same shared API** (web-usable now, not built now). Batch per-candidate calls (perf).
+- The throwaway sketch remains the **executable spec** (reversible: `JOINS-SKETCH` markers + REVERT.md).
+
+### Deferrals / discuss-phase questions (CARRY FORWARD — discuss before phases lock)
+1. **N-fragment join richness** beyond transitive grouping — tentative/uncertain joins, per-edge
+   evidence/confidence/notes? (Codex's top data-model risk; pairwise→group chosen for v8 — confirm
+   the richer model stays deferred.)
+2. **Dimensions = evidence badges + soft warnings, NOT hard filters** (true vertical-tear halves
+   differ in width). Confirm no hard dimension filter.
+3. **Builder depth**: per-row variation columns? editable raw composed-query preview? page-level
+   Text START/END in addition to per-row line START/END?
+4. **VS-dialog retirement timing** — reroute this phase or a follow-up?
+5. **Web-parity phase** — when, and which UI subset?
+6. **JSA-02 / JSA-03** — keep / spike / cut for v8? (Earlier lean: JSA-01 only; spike JSA-03; cut JSA-02.)
+7. **"Other side" = adjacent image p±1** confirmed; revisit for multi-leaf manuscripts?
+
+---
+
 ## Future Requirements (not v8.0.0)
 
 - **JOINS-F1**: **Relative-offset cross-line positional search** — find a fragment with word A near
@@ -124,8 +192,9 @@ requirement text is preserved in git history (prior `REQUIREMENTS.md`) and `MILE
 | BRAND-01, 02 | pre-release polish (no phase) | Delivered |
 | LEXP-01, 03–08 | 103 | Delivered |
 | EXPUX-01–04 | 105 | Delivered (EXPUX-01 UAT pending) |
-| JWB-01..09 | TBD — roadmap pending scholar critique | Active |
-| JSA-01..03 | TBD — roadmap pending scholar critique | Active |
+| JWB-01..09 (JWB-05/06 amended) | TBD — roadmap (critique DONE 2026-06-03) | Active |
+| JWB-10, 11, 12 (new — builder / cross-side / unified sources+VS merge) | TBD — roadmap | Active |
+| JSA-01..03 | TBD — roadmap (JSA-02/03 in deferrals to discuss) | Active |
 
 **Coverage:**
 - Delivered (folded): BRAND (2) + LEXP (7) + EXPUX (4) = 13.
