@@ -84,31 +84,6 @@ class ResultDialog(QDialog):
         self.metadata_loaded.connect(self.on_metadata_loaded)
         self.load_result_by_index(self.current_result_idx)
 
-    def _open_join_workbench(self):  # JOINS-SKETCH
-        """Anchor the currently-viewed fragment/page and open the Join Workbench."""
-        app = self._app
-        if not app or not hasattr(app, "open_joins_workbench"):
-            return
-        base = {}
-        try:
-            if self.all_results and 0 <= self.current_result_idx < len(self.all_results):
-                base = dict(self.all_results[self.current_result_idx])
-        except Exception:
-            base = {}
-        # Overlay the live page state so the anchor reflects what is on screen.
-        disp = dict(base.get("display") or {})
-        if self.current_sys_id:
-            disp["id"] = self.current_sys_id
-        if self.current_p_num:
-            disp["img"] = self.current_p_num
-        base["display"] = disp
-        if self.current_page_text:
-            base["full_text"] = self.current_page_text
-        if self.current_page_uid:
-            base["uid"] = self.current_page_uid
-        app.open_joins_workbench(base)
-        self.close()  # don't leave this dialog stacked on top of the workbench (item 1)
-
     def init_ui(self):
         self.setWindowTitle(tr("Manuscript Viewer"))
         self.resize(1300, 850) # Wider for split view
@@ -300,14 +275,6 @@ class ResultDialog(QDialog):
         self.btn_search_parallels.setToolTip(tr("Search for parallels"))
         self.btn_search_parallels.clicked.connect(self.search_for_parallels)
 
-        # JOINS-SKETCH: pin the currently-viewed fragment as the anchor and hunt for joins.
-        self.btn_rd_find_joins = QPushButton(f"\U0001f517 {tr('Find joins')}")
-        self.btn_rd_find_joins.setToolTip(tr("Open the Join Workbench with this fragment as the anchor"))
-        self.btn_rd_find_joins.setStyleSheet(
-            "QPushButton { background-color: #7c3aed; color: white; border-radius: 4px; padding: 2px 8px; }"
-        )
-        self.btn_rd_find_joins.clicked.connect(self._open_join_workbench)
-
         # Add to List button
         self.btn_add_to_list = QPushButton(_format_add_to_list_label(False))
         self.btn_add_to_list.setToolTip(tr("Add to List"))
@@ -370,7 +337,6 @@ class ResultDialog(QDialog):
 
         action_row.addWidget(self.btn_view_transcription)
         action_row.addWidget(self.btn_search_parallels)
-        action_row.addWidget(self.btn_rd_find_joins)  # JOINS-SKETCH
         action_row.addWidget(self.btn_add_to_list)
         action_row.addWidget(self.btn_add_to_puzzle)
         action_row.addWidget(self.btn_ext_info)
