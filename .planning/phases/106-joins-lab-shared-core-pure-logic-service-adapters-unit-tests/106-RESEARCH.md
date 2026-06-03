@@ -681,17 +681,13 @@ All claims in this research were verified against live source code or the frozen
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Exact field names for `Candidate` dataclass**
-   - What we know: Fields needed are `sys_id`, `page`, `uid`, `shelfmark`, `title`, `library_code`, `full_text`, `snippet`, `highlight_pattern`, `score`, `provenance` (flags), `vs_score`, `vs_rank`.
-   - What's unclear: Whether to store raw `display` dict or normalize all fields flat. Flat is testable; nested preserves round-trip to result dict format.
-   - Recommendation: Flat fields matching the normalizer's output; a `to_result_dict()` method for reverse conversion if needed.
+1. **Exact field names for `Candidate` dataclass** — RESOLVED: Plan 01 uses FLAT Candidate fields matching the normalizer's output (`sys_id`, `page`, `uid`, `shelfmark`, `title`, `library_code`, `full_text`, `snippet`, `highlight_pattern`, `score`, `scope`, the `via_*`/`is_anchor_self` provenance flags, `vs_rank`, `vs_score`), not a nested raw `display` dict. Flat is the testable choice and is the single source of truth produced by `normalize_candidate()`. (Claude's Discretion per CONTEXT.md.)
+   - Original framing: store raw `display` dict vs normalize flat — flat is testable; nested preserves round-trip to result dict format. A `to_result_dict()` reverse converter can be added later if a round-trip back to result-dict shape is needed.
 
-2. **`page_position` constraint enforcement location**
-   - What we know: D-08 says page-START only on first row, page-END only on last row.
-   - What's unclear: Whether to enforce in `compose()` (raise ValueError on invalid) or in the domain model constructor.
-   - Recommendation: Enforce in `SideQuery.__post_init__` for fast fail; document in `compose()` docstring.
+2. **`page_position` constraint enforcement location** — RESOLVED: Plan 01 splits enforcement across BOTH layers. `SideQuery.__post_init__` validates the VALUE domain (must be `'start'`|`'end'`|`None`, else ValueError — fast fail at model construction). `compose()` then enforces PLACEMENT: it raises ValueError if `page_position == 'start'` but the first row has no non-empty content, or `page_position == 'end'` but the last row has no non-empty content (D-08: page-START anchors the first line, page-END the last line; anchoring an empty/missing line is meaningless). (Claude's Discretion per CONTEXT.md.)
+   - Original framing: enforce in `compose()` (raise ValueError on invalid) vs the domain-model constructor — answered as both: value domain in `__post_init__`, placement in `compose()`.
 
 ---
 
