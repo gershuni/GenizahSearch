@@ -192,13 +192,16 @@ highlighted snippet + Y/?/N triage + four actions | side-by-side compare.
 | BRAND-01, 02 | pre-release polish (no phase) | Delivered |
 | LEXP-01, 03–08 | 103 | Delivered |
 | EXPUX-01–04 | 105 | Delivered (EXPUX-01 UAT pending) |
-| JWB-01..09 (JWB-05/06 amended) | TBD — roadmap (critique DONE 2026-06-03) | Active |
-| JWB-10, 11, 12 (new — builder / cross-side / unified sources+VS merge) | TBD — roadmap | Active |
-| JSA-01..03 | TBD — roadmap (JSA-02/03 in deferrals to discuss) | Active |
+| (foundational logic for JWB-10/11/12 + build constraints) | 106 (shared core) | Active |
+| JWB-01, 02, 03, 04, 09 | 107 (desktop frame + actions + join model) | Active |
+| JWB-05 (amended), 06 (reframed), 07, 08, 10, 11 | 108 (desktop builders + candidates + compare) | Active |
+| JWB-12 (unified sources + VS merge) | 108 (text/combined surface) + 109 (VS source + soft-retire) | Active |
+| JSA-01 | 110 (parallels seeding) | Active |
+| JSA-02, 03 | 110 (discuss-phase disposition: keep/spike/cut) | Active |
 
 **Coverage:**
 - Delivered (folded): BRAND (2) + LEXP (7) + EXPUX (4) = 13.
-- New active: JWB (9) + JSA (3) = 12. Unmapped to phases ON PURPOSE — roadmap deferred until after the Genizah-scholar design-critique session.
+- New active: JWB (9) + JSA (3) = 12. **Mapped to Phases 106-110 (roadmap created 2026-06-03)** — see the table above and `ROADMAP.md` § v8.0.0 Joins Lab. Web Joins Lab UI deferred to a later phase.
 
 ---
 *Requirements defined: 2026-06-02. v7.17 folded into v8.0.0 per user decision; Phases 103/105 kept as delivered (no destructive phase-clear). Roadmap intentionally deferred pending a Genizah-scholar design-critique session.*

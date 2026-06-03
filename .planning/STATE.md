@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.0.0
 milestone_name: Dicta Rebrand & Joins Lab
-status: roadmapping
-stopped_at: Design-critique COMPLETE (sketch + 2 Codex critiques); REQUIREMENTS amended (JWB-05/06 fixed, JWB-10/11/12 added, pairwise→group join model decided, deferrals listed); roadmap next (phases 106+)
+status: planning
+stopped_at: v8.0.0 Joins Lab roadmap CREATED (Phases 106-110, Codex extract-pure-logic-first sequence); web UI deferred. Next = /gsd-discuss-phase 106 (resolve the 7 deferrals) then /gsd-plan-phase 106. Sketch preserved at tag spike-002-joins-workbench (live tree clean).
 last_updated: "2026-06-03T00:00:00.000Z"
 last_activity: 2026-06-03
 progress:
-  total_phases: 0
-  completed_phases: 0
+  total_phases: 7
+  completed_phases: 2
   total_plans: 0
   completed_plans: 0
-  percent: 0
+  percent: 29
 ---
 
 # Project State
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-02)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v8.0.0 Joins Lab — shaping done, design-critique pending before roadmap
+**Current focus:** v8.0.0 Joins Lab — roadmap created (Phases 106-110); next = discuss-phase 106
 
 ## Current Position
 
 Milestone: **v8.0.0 Dicta Rebrand & Joins Lab — STARTED 2026-06-02.** Folds the delivered v7.17 cycle (the "Dicta Genizah Search Pro" rebrand + LOCAL "My Library" export, Phases 103 + 105) into the flagship v8.0.0 release, and adds **Joins Lab** — an interactive **human-in-the-loop** join-hunting workbench (Component A) + optional search-support algorithms (Component B), both apps. NO automated join-finder.
 
-Phase: **Not started** — requirements amended post-critique; roadmap (phases 106+) is the next step.
+Phase: **106 — Joins Lab Shared Core (NOT started).** Roadmap created 2026-06-03; awaiting `/gsd-discuss-phase 106` then `/gsd-plan-phase 106`.
 Plan: —
-Status: **Design-critique COMPLETE (2026-06-03); requirements amended; roadmap UNBLOCKED.** The critique ran as a throwaway-sketch exploration (`desktop/join_workbench.py`) validated across ~6 UAT iterations + 2 Codex critiques (scholar-design + productionize). Join model DECIDED: pairwise→group (reuse `JoinsManager.get_connected_fragments_by_id` BFS — no new schema). New reqs JWB-10/11/12 (line builder / cross-side AND/OR / unified candidate sources incl. Visual-Similarity merge). Build constraint: extract shared tested logic behind a `SearchExecutor` adapter, desktop-first UI, i18n from start. Next: roadmap → `/gsd-plan-phase 106`.
+Status: **v8.0.0 Joins Lab roadmap CREATED (2026-06-03).** Phases 106-110 written into `ROADMAP.md` on the Codex extract-pure-logic-first sequence: **106** shared core (pure logic + service adapters + unit tests, behind a `SearchExecutor` adapter; no PyQt, no direct sqlite) · **107** desktop Workbench frame (anchor + entry points + public action APIs + pairwise→group join model via `get_connected_fragments_by_id`) · **108** desktop builders + candidates + compare (line-by-line builder both sides, cross-side AND/OR, dedup, self-match, tear-side assist with the CORRECTED `[`/`]` rule) · **109** Visual-Similarity merge + soft-retire · **110** parallels seeding (JSA-01). **Web Joins Lab UI deferred to a later phase** (desktop-first). The validated throwaway sketch is preserved as the executable spec at tag `spike-002-joins-workbench` (+ frozen `.py.txt` archive); live tree is clean. **7 deferrals (REQUIREMENTS § Deferrals) MUST be resolved in discuss-phase before each phase's plan locks** — do NOT auto-answer discuss-phase.
 Last activity: 2026-06-02 — v8.0.0 milestone opened via `/gsd-new-milestone`; scope shaped through free conversation; PROJECT.md + REQUIREMENTS.md written; v7.17 folded in (Phases 103/105 kept as delivered; **no destructive phase-clear**).
 
 ### Scope (locked 2026-06-02)
@@ -42,16 +42,18 @@ Last activity: 2026-06-02 — v8.0.0 milestone opened via `/gsd-new-milestone`; 
 
 ### Next
 
-1. ✅ **Genizah-scholar design-critique session — DONE (2026-06-03).** Run as a build-a-throwaway-
-   sketch exploration (`desktop/join_workbench.py`); conclusions folded into `REQUIREMENTS.md`
-   (§ Design-Critique Conclusions & Amendments). Evidence + reversal recipe:
-   `.planning/spikes/002-assisted-join-workbench/` (DESKTOP-INTEGRATION-NOTES, CODEX-CRITIQUE,
-   CODEX-PRODUCTIONIZE-CRITIQUE, REVERT.md).
-2. **Create the roadmap** (phases 106+) following Codex's productionize sequence: extract pure
-   shared logic + unit tests (behind a `SearchExecutor` adapter) → service adapters → public action
-   APIs → desktop Workbench UI + i18n → Visual-Similarity merge / soft-retire → verify; **web UI a
-   LATER phase** on the same shared API. Then `/gsd-plan-phase 106`. **Carry the deferrals list
-   (REQUIREMENTS § Deferrals / discuss-phase questions) into discuss-phase.** Phase numbering 105 → 106+.
+1. ✅ **Genizah-scholar design-critique session — DONE (2026-06-03).** Ran as a throwaway-sketch
+   exploration; conclusions in `REQUIREMENTS.md` § Design-Critique Conclusions & Amendments.
+   Sketch preserved at tag `spike-002-joins-workbench` + `.planning/spikes/002-.../sketch/`.
+2. ✅ **v8.0.0 Joins Lab roadmap — CREATED (2026-06-03).** Phases 106-110 in `ROADMAP.md`.
+3. **`/gsd-discuss-phase 106`** (user-led — do NOT auto-answer). Resolve the 7 deferrals
+   (REQUIREMENTS § Deferrals / discuss-phase questions) BEFORE the Phase 106 plan locks. The most
+   load-bearing for 106's scope: #1 join-model richness (confirm pairwise→group stays for v8), #3
+   builder depth (variation columns? raw-query preview? page-level Text START/END?), #6 JSA-02/03
+   keep-spike-cut (affects whether Phase 110 grows). #2/#4/#5/#7 bear more on 108/109 and the web
+   phase but should be acknowledged.
+4. **`/gsd-plan-phase 106`** → execute → verify; repeat down the chain 107 → 108 → 109 → 110. Web
+   Joins Lab UI is a LATER phase on the shared core (deferral #5).
 
 **Version decision RESOLVED:** ship as **v8.0.0** (closes the open decision from 2026-06-01). The actual version-file bump (`scripts/bump_version.py 8.0.0`, plus `_TARGET_VERSION` in `tests/test_release_artifacts.py` which the bumper misses, plus a `## [8.0.0]` CHANGELOG section folding the `[Unreleased]` rebrand note) happens at `/release` time — NOT now. Rebrand gotchas in memory `project_desktop_app_rebrand.md`.
 
@@ -91,6 +93,6 @@ Carried forward to v8.0.0+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular
 ## Session Continuity
 
 Last session: 2026-06-03
-Stopped at: Design-critique COMPLETE (sketch + 2 Codex critiques); REQUIREMENTS amended; roadmap UNBLOCKED.
-Resume file: .planning/spikes/002-assisted-join-workbench/DESKTOP-INTEGRATION-NOTES.md
-Next step: Create the v8.0.0 roadmap (phases 106+, Codex-sequenced), then `/gsd-plan-phase 106`. Deferrals (REQUIREMENTS § Deferrals / discuss-phase questions) → discuss-phase.
+Stopped at: v8.0.0 Joins Lab roadmap CREATED (Phases 106-110 in ROADMAP.md). Sketch preserved at tag `spike-002-joins-workbench`; live tree clean.
+Resume file: .planning/ROADMAP.md (§ v8.0.0 Joins Lab — Phases 106-110) + .planning/spikes/002-assisted-join-workbench/ (executable spec + critiques)
+Next step: `/gsd-discuss-phase 106` (user-led — resolve the 7 deferrals; do NOT auto-answer), then `/gsd-plan-phase 106` → execute → verify, chaining 107→110. Web UI a later phase.

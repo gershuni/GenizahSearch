@@ -25,7 +25,7 @@
 - **v7.14 My Library — Local Document Search** -- Phases 95-98 (shipped 2026-05-24; closed 2026-05-27)
 - **v7.15 My Library Visual** -- Phases 99-101 (shipped 2026-05-28). See `milestones/v7.15-ROADMAP.md`
 - **v7.16 Hebrew PDF Text Quality** -- Phase 102 + no-phase quality work (shipped 2026-06-01). See `milestones/v7.16-ROADMAP.md`
-- **v7.17 LOCAL Export Support** -- Phase 103 (shipped 2026-06-01) + Phase 105 Export UX Polish (in progress); Phase 104 DEFERRED (no LOCAL composition-search UI exists yet — nothing to export)
+- **v8.0.0 Dicta Rebrand & Joins Lab** -- BRAND (no-phase) + Phases 103 + 105 (delivered, folded from v7.17; Phase 104 → EXP-F3) + **Phases 106-110 Joins Lab** (active; roadmap created 2026-06-03). Web Joins Lab UI deferred to a later phase.
 
 ## Phases
 
@@ -90,6 +90,137 @@
   5. Genizah-only XLSX/CSV exports remain structurally unchanged; `tests/test_export_xlsx_cross_parity.py` stays green with no modification.
 
 **Plans**: Implemented directly (no formal PLAN.md — 4 well-scoped edits, executed as 4 atomic commits with unit tests). See `105-SUMMARY.md`. EXPUX-04 widens the LEXP-08 TXT carve-out (Genizah TXT context expands by design, analogous to Phase 103 D-12's DOCX carve-out; header/marker structure + xlsx/csv unchanged).
+
+---
+
+## v8.0.0 Joins Lab — Phases 106-110 (active; roadmap created 2026-06-03)
+
+> Sequenced per the Codex productionize critique ("C-stricter"): extract pure, unit-tested logic
+> first → desktop UI on top → VS merge → search-support. **Web Joins Lab UI is deferred to a LATER
+> phase** on the same shared API (desktop-first; the shared core is web-usable from Phase 106). The
+> validated throwaway sketch (tag `spike-002-joins-workbench`, frozen at
+> `.planning/spikes/002-assisted-join-workbench/sketch/`) is the **executable spec**, NOT the build
+> base. **7 deferrals (REQUIREMENTS § Deferrals / discuss-phase questions) MUST be resolved in
+> `/gsd-discuss-phase` before each phase's plan locks** — especially the join-model richness (#1),
+> dimensions-as-evidence-not-filter (#2), and the JSA-02/03 keep/spike/cut call (#6).
+
+### Phase 106: Joins Lab Shared Core (pure logic + service adapters + unit tests)
+
+**Goal**: A new shared, **web-reusable, unit-tested** module encapsulates the validated Joins Lab
+domain logic — anchor/candidate identity, line-by-line query composition into the engine's
+line-break syntax, cross-side `(sys_id, page±1)` membership, candidate dedup/compaction, text/visual
+merge ordering with provenance, self-match detection, and snippet/page helpers — behind a
+`SearchExecutor` adapter and the existing shared services (visual_similarity / FJMS-measurement /
+metadata-image), with **no PyQt and no direct `fist_data/*.db` access**. No UI.
+
+**Depends on**: none (foundational). Executable spec: tag `spike-002-joins-workbench`.
+
+**Requirements**: foundational logic for JWB-10, JWB-11, JWB-12 + the architecture build constraints.
+
+**Success Criteria** (what must be TRUE):
+  1. A pure function composes a multi-row builder spec (per-row line START/END anchors + "↓ N lines" gaps) into the engine's line-break query (`|` groups, `[|N]` line-gaps), unit-tested for round-trips against `genizah_core._parse_line_break_query` including RTL line-start-on-right.
+  2. A pure function resolves the "other side" page set (first→+1, last→−1, middle→both) and decides cross-side AND/OR candidate membership by `(sys_id, page±1)` set logic, unit-tested with AND-narrows / OR-widens fixtures.
+  3. Candidate dedup/compaction collapses one-result-per-image via a canonical candidate key (sys_id, page, side image, adjacent-side membership), unit-tested.
+  4. The text/visual-similarity merge yields a stable both-first → text → VS-only ordering with provenance tags, unit-tested.
+  5. Self-match detection (does the anchor satisfy the composed query) plus the centered snippet/page helpers are unit-tested.
+  6. A static import test proves the module imports with no PyQt symbols and opens no `fist_data/*.db` directly — all data flows through shared services or the `SearchExecutor` adapter.
+
+**Plans**: TBD (set at `/gsd-plan-phase 106`, after discuss-phase).
+
+---
+
+### Phase 107: Desktop Join Workbench — Anchor, Entry Points, Actions & Join Model
+
+**Goal**: A dedicated desktop **"Join Workbench"** opens with a fragment **pinned as anchor** (image
++ numbered transcription, zoom + folio nav, brief metadata, dark-mode/RTL safe), shows the anchor's
+**already-known joins as a connected GROUP** (pairwise→group BFS), and exposes **public action
+APIs** (Browse / Puzzle / Add-to-List / Add-as-Join) that persist a confirmed join via the existing
+pairwise path and refresh the group. Bilingual from the first line. No candidate search yet.
+
+**Depends on**: Phase 106 (shared identity / known-joins helpers).
+
+**Requirements**: JWB-01, JWB-02, JWB-03, JWB-04, JWB-09 + build constraints (public APIs, i18n).
+
+**Success Criteria** (what must be TRUE):
+  1. A "Join Workbench" tab/window exists in the desktop app and opens with an anchor pinned via a **"Find joins"** action from the **ResultDialog** and from **Browse**, and **by shelfmark** for a cold start (JWB-01/02).
+  2. The anchor's **image** (via the proven `enrich_metadata` → `images_nli/ext` route + `ImageLoaderThread`, not raw FL-substituted thumbnails) and its **numbered transcription** stay in view with zoom ± and folio prev/next; both render correctly in **dark mode and RTL** (JWB-03).
+  3. The Workbench lists the anchor's already-known joins as a **connected group** from `JoinsManager.get_connected_fragments_by_id` over PGP + FJMS + user + community joins (JWB-04).
+  4. **"Add as Join"** persists a 2-fragment record via the existing `corrections_client.create_join` / `JoinsManager.create_join_local` path (Supabase + `joins_cache.pkl`), and the known-joins group refreshes to include it (JWB-09).
+  5. Browse / Puzzle / Add-to-List / Add-as-Join are invoked through **public, named action methods** — **no `_vs_*` private calls** remain on the workbench path.
+  6. Every new string is wrapped in `tr()`; the Workbench renders fully in Hebrew under `lang=he` with **no hardcoded English** (acceptance criterion, not cleanup).
+
+**Plans**: TBD.
+
+---
+
+### Phase 108: Desktop Join Workbench — Query Builders, Candidates & Compare
+
+**Goal**: The scholar drives the hunt — a **line-by-line query builder** for the anchor side and an
+**identical builder for the OTHER side** of the leaf (cross-side AND/OR), running the **existing**
+search engine; results return as **deduped one-per-image candidates** in grid + table views with
+material + highlighted snippet + Y/?/N triage + a self-match readout, plus side-by-side
+anchor↔candidate compare. The conservative tear-side assist appears only when clearly one-sided.
+
+**Depends on**: Phase 106 (composition / membership / dedup / merge logic) + Phase 107 (Workbench shell + actions).
+
+**Requirements**: JWB-05 (amended), JWB-06 (reframed), JWB-07, JWB-08, JWB-10, JWB-11 + the text/combined candidate surface of JWB-12.
+
+**Success Criteria** (what must be TRUE):
+  1. A line-by-line builder (rows = lines; per-row line START/END anchors with the START anchor on the **right** for RTL; "↓ N lines" gap) composes and runs a line-break query through the existing engine — hunting the **missing continuation**, NOT pre-seeding the anchor's own line text (JWB-10, JWB-06 reframed).
+  2. An identical builder for the **OTHER side** (adjacent image p±1; first→+1, last→−1, middle→both) runs query B; **AND narrows** a flood and **OR widens** a poor yield, via `(sys_id, page±1)` membership (JWB-11).
+  3. Candidates render **deduped one-per-image** in both grid and table views, each with material, a **highlighted matched-text snippet**, and **Y/?/N triage**; a refine/filter bar filters by text / material / has-dimensions / triage (JWB-07; JWB-12 surface).
+  4. A **self-match readout** shows whether the anchor itself satisfies the current query (✓/✗) and an **"include anchor itself"** toggle works (JWB-12 verification — fixes the "can't find the fragment itself" trap).
+  5. Selecting a candidate shows it **side-by-side** with the anchor (image + transcription) for eyeball confirmation, with the four actions available (JWB-08).
+  6. The tear-side assist reads the anchor's `[`/`]` markers with the **CORRECTED rule (start-`]` = LEFT, end-`[` = RIGHT)** and surfaces a side suggestion **only when clearly one-sided**; otherwise it stays silent or reports "both edges" (JWB-05 amended).
+  7. Manuscript dimensions appear as **evidence / soft warnings, never a hard filter** (deferral #2 — confirm in discuss-phase).
+
+**Plans**: TBD.
+
+---
+
+### Phase 109: Visual-Similarity Merge & Soft-Retire
+
+**Goal**: The candidate surface gains the **visual-similarity look-alike source** and a **combined
+view** (provenance badges ★both / ⊙VS / ✎text, both-first ordering) via the shared VS service; the
+standalone **Visual Similarity dialog's entry points are rerouted** into the Workbench and the old
+dialog is **marked removable** after a parity verification pass (the JoinsDialog pick-mode hook is
+preserved).
+
+**Depends on**: Phase 106 (merge logic) + Phase 108 (candidate surface).
+
+**Requirements**: JWB-12 (VS source + combined view + soft-retire).
+
+**Success Criteria** (what must be TRUE):
+  1. "Visual similarities" and "Search + visual" sources populate the candidate surface from the **shared visual_similarity service**, with provenance badges and both-first ordering (JWB-12).
+  2. The standalone Visual Similarity dialog's entry points **route into the Workbench**; the old dialog is **deprecated (marked removable)** after a parity verification pass; the JoinsDialog **pick-mode hook still works**.
+  3. Per-candidate enrichment (browse text / measurement / thumbnail / snippet / membership) is **batched**, not per-candidate-serial, verified on an ~80-candidate VS load (Codex perf risk).
+
+**Plans**: TBD.
+
+---
+
+### Phase 110: Search-Support — Parallels Seeding (JSA-01)
+
+**Goal**: From the anchor passage the scholar **seeds a parallels (composition) search** to surface
+shared-distinctive-phrase candidates across the corpus, returned into the Workbench candidate
+surface. JSA-02 (corpus-completion) and JSA-03 (torn-word completion) are resolved at discuss-phase:
+keep / spike / cut.
+
+**Depends on**: Phase 108 (candidate surface).
+
+**Requirements**: JSA-01 (JSA-02 / JSA-03 — discuss-phase disposition; earlier lean: JSA-01 only, spike JSA-03, cut JSA-02).
+
+**Success Criteria** (what must be TRUE):
+  1. A "Find parallels" action **seeds the existing composition/parallels search** from the anchor passage and returns shared-distinctive-phrase candidates into the Workbench candidate list (JSA-01).
+  2. The JSA-02 / JSA-03 disposition is **recorded** (implemented, spiked, or cut) per the discuss-phase decision, with the rationale captured.
+
+**Plans**: TBD.
+
+---
+
+> **Deferred to a later phase / milestone:** **Web Joins Lab UI** on the shared Phase-106 API
+> (desktop-first per the productionize critique — building two UIs before the model stabilizes
+> doubles QA). Web parity timing is deferral #5.
 
 ---
 
@@ -350,7 +481,12 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 103. Search-Results LOCAL Export | v7.17 | 4/4 | Complete    | 2026-06-01 |
+| 106. Joins Lab Shared Core (logic + adapters + tests) | v8.0.0 | 0/? | Not started | - |
+| 107. Desktop Join Workbench — Anchor, Entry, Actions & Join Model | v8.0.0 | 0/? | Not started | - |
+| 108. Desktop Join Workbench — Builders, Candidates & Compare | v8.0.0 | 0/? | Not started | - |
+| 109. Visual-Similarity Merge & Soft-Retire | v8.0.0 | 0/? | Not started | - |
+| 110. Search-Support — Parallels Seeding (JSA-01) | v8.0.0 | 0/? | Not started | - |
+| 103. Search-Results LOCAL Export | v7.17→v8.0.0 | 4/4 | Complete    | 2026-06-01 |
 | 104. Composition-Report LOCAL Export | v7.17 | 0/0 | ⏸ Deferred (no LOCAL comp-search UI) | - |
 | 105. Export UX Polish | v7.17 | 4/4 EXPUX | Implemented (tests green; UAT pending) | 2026-06-01 |
 | 99. PDF Page Renderer | v7.15 | 2/2 | Complete | 2026-05-27 |
@@ -367,4 +503,5 @@ Next-milestone candidates (not in v7.17 scope): **D-F12** (regular Search ~8s wa
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-06-01 — Phase 105 (Export UX Polish) ADDED to v7.17: 4 export-experience fixes (EXPUX-01 Open File/Folder dialog; EXPUX-02 LOCAL xlsx domain-warning suppression; EXPUX-03 LOCAL-only MiDRASH-credit omission; EXPUX-04 full-text capped context in DOCX/TXT). Phase 104 DEFERRED during /gsd-discuss-phase 104. Discovered Composition Search has no LOCAL corpus path (corpus selector is Search-tab-only at genizah_app.py:5924; CompositionThread at :21532 gets no corpus_scope), so export_comp_report has no LOCAL surface to adapt. LEXP-02 moved to REQUIREMENTS.md Future (EXP-F3), gated on a LOCAL composition-search UI. v7.17 now = Phase 103 only and is closeable. Prior: Phase 103 COMPLETE & verified 6/6 (LEXP-01/03/04/05/06/07/08). v7.16 Hebrew PDF Text Quality CLOSED 2026-06-01 (Phase 102 + no-phase work; tag v7.16.0 @ ccb87c90).*
+*Last updated: 2026-06-03 — **v8.0.0 Joins Lab roadmap created**: Phases 106-110 added (106 shared core + tests; 107 desktop Workbench frame + actions + pairwise→group join model; 108 desktop builders + candidates + compare; 109 Visual-Similarity merge + soft-retire; 110 parallels seeding / JSA-01). Codex extract-pure-logic-first sequence; web UI deferred to a later phase. v7.17 folded into v8.0.0 (Phases 103/105 delivered). 7 deferrals (REQUIREMENTS § Deferrals) to resolve in `/gsd-discuss-phase` before each phase's plan locks; the validated sketch is preserved as the executable spec at tag `spike-002-joins-workbench`. NEXT: `/gsd-discuss-phase 106` → `/gsd-plan-phase 106`.*
+*Prior update: 2026-06-01 — Phase 105 (Export UX Polish) ADDED to v7.17: 4 export-experience fixes (EXPUX-01 Open File/Folder dialog; EXPUX-02 LOCAL xlsx domain-warning suppression; EXPUX-03 LOCAL-only MiDRASH-credit omission; EXPUX-04 full-text capped context in DOCX/TXT). Phase 104 DEFERRED during /gsd-discuss-phase 104. Discovered Composition Search has no LOCAL corpus path (corpus selector is Search-tab-only at genizah_app.py:5924; CompositionThread at :21532 gets no corpus_scope), so export_comp_report has no LOCAL surface to adapt. LEXP-02 moved to REQUIREMENTS.md Future (EXP-F3), gated on a LOCAL composition-search UI. v7.17 now = Phase 103 only and is closeable. Prior: Phase 103 COMPLETE & verified 6/6 (LEXP-01/03/04/05/06/07/08). v7.16 Hebrew PDF Text Quality CLOSED 2026-06-01 (Phase 102 + no-phase work; tag v7.16.0 @ ccb87c90).*
