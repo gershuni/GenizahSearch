@@ -329,7 +329,7 @@ def _match_line(lines, pattern) -> int:
 1. No `PyQt6` / `PyQt5` / `PySide6` symbol in the module's namespace or imports.
 2. No `sqlite3.connect` call to a path containing `fist_data` (AST inspection or grep).
 
-**Verified importability:** `genizah_core._parse_line_break_query` is module-level and imports cleanly without engine init (confirmed above). `shared/joins_lab.py` will import only stdlib + `genizah_core._parse_line_break_query` + `genizah_core._query_has_brackets` + `genizah_core._strip_brackets` (all module-level) + the `SearchExecutor` Protocol (no instantiation). [VERIFIED: headless import test]
+**Verified importability:** `genizah_core._parse_line_break_query` is module-level and imports cleanly without engine init (confirmed above). **(CORRECTED 2026-06-03 per Codex review):** `shared/joins_lab.py` imports only stdlib (`re`, `dataclasses`, `typing`, `html`) and defines the `SearchExecutor` Protocol — it imports **no** `genizah_core` functions (the round-trip TEST imports `_parse_line_break_query` directly in `tests/test_joins_lab.py`; the module itself uses none of the bracket helpers, so importing them would be a Ruff F401 violation against `ruff.toml`). [VERIFIED: headless import test + F401 reasoning]
 
 ---
 
