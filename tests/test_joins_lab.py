@@ -510,6 +510,18 @@ class TestMerge:
         assert x_cand.vs_rank == 4
         assert x_cand.vs_score == 0.91
 
+    def test_overlap_rankonly_vs_does_not_clobber_existing_score(self):
+        """WR-02 follow-up (Codex LOW): a rank-only VS candidate (vs_score=None) must
+        NOT overwrite a vs_score the text candidate already carries. The merge keeps
+        the existing real score rather than re-stamping it to None."""
+        text_cands = [Candidate(sys_id="X", page=5, via_text=True, vs_score=0.77)]
+        vs_cands = [Candidate(sys_id="X", page=None, via_vs=True, vs_rank=2, vs_score=None)]
+        result = merge_candidates(text_cands, vs_cands)
+        x_cand = next(c for c in result if c.sys_id == "X" and c.page == 5)
+        assert x_cand.via_vs is True
+        assert x_cand.vs_rank == 2
+        assert x_cand.vs_score == 0.77  # preserved, not clobbered with None
+
     def test_ordering(self):
         """Given text cands for X(also-vs rank2), Y(text-only), and a VS-only Z(rank5):
         merged order is [X (both, tier0), Y (text, tier1), Z (vs-only, tier2)];

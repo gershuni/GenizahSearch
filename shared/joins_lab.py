@@ -538,7 +538,11 @@ def merge_candidates(text_cands: list, vs_cands: list) -> list:
             # Carry vs_score through too (WR-02): dropping it would re-stamp the
             # candidate as via_vs=True with vs_score=None, which the Candidate
             # docstring defines as "no VS data (NOT 0.0)" — Pitfall 6.
-            r = dataclasses.replace(r, via_vs=True, vs_rank=v.vs_rank, vs_score=v.vs_score)
+            # Don't clobber an existing real score with None (WR-02 follow-up,
+            # Codex LOW): a rank-only VS candidate (vs_score=None) must not erase
+            # a vs_score the text candidate already carries.
+            vs_score = v.vs_score if v.vs_score is not None else r.vs_score
+            r = dataclasses.replace(r, via_vs=True, vs_rank=v.vs_rank, vs_score=vs_score)
         annotated_text.append(r)
 
     text_sids = {r.sys_id for r in annotated_text}
