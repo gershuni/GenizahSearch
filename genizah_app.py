@@ -7009,6 +7009,14 @@ class GenizahGUI(QMainWindow):
         self.btn_b_external_link.clicked.connect(self._browse_open_external_link)
         self._browse_external_url = None
 
+        # JOINS-SKETCH: anchor the currently-browsed fragment and hunt for joins.
+        self.btn_b_find_joins = QPushButton(f"\U0001f517 {tr('Find joins')}")
+        self.btn_b_find_joins.setToolTip(tr("Open the Join Workbench with this fragment as the anchor"))
+        self.btn_b_find_joins.setStyleSheet(
+            "QPushButton { background-color: #7c3aed; color: white; border-radius: 4px; padding: 2px 8px; }"
+        )
+        self.btn_b_find_joins.clicked.connect(self._browse_open_join_workbench)
+
         # Phase 95 REQ-6 D-10 — three-state LOCAL filter button (parallels surface).
         self.local_filter_btn_parallels = QPushButton(self)
         self.local_filter_btn_parallels.setStyleSheet("QPushButton { padding: 2px 6px; }")
@@ -7022,6 +7030,7 @@ class GenizahGUI(QMainWindow):
         # ext_info_row layout: Puzzle, Parallels, List | Info | Bib FJMS, Bib NLI, Catalog | Ktiv, External Link | stretch | Translations
         ext_info_row.addWidget(self.btn_b_add_to_puzzle)
         ext_info_row.addWidget(self.btn_find_parallels)
+        ext_info_row.addWidget(self.btn_b_find_joins)  # JOINS-SKETCH
         ext_info_row.addWidget(self.local_filter_btn_parallels)
         ext_info_row.addWidget(self.local_filter_inactive_lbl_parallels)
         ext_info_row.addWidget(self.btn_browse_add_to_list)
@@ -17063,14 +17072,17 @@ class GenizahGUI(QMainWindow):
             browse_btn = self._create_action_button("📖", tr("Browse manuscript"), lambda _, r=res: self.open_result_in_browse_from_table(r))
             view_btn = self._create_action_button("👁", tr("View result"), lambda _, r=res: self.show_full_text_for_result(r))
 
+            joins_btn = self._create_action_button("\U0001f517", tr("Find joins"), lambda _, r=res: self.open_joins_workbench(r))  # JOINS-SKETCH
             if is_hebrew:
                 # Hebrew: Star on Left (added first), then others expand to Right
                 actions_widget.add_btn(list_btn, always_visible=True)
                 actions_widget.add_btn(view_btn)
+                actions_widget.add_btn(joins_btn)
                 actions_widget.add_btn(browse_btn)
             else:
                 # English: Star on Right (added last), others expand to Left
                 actions_widget.add_btn(browse_btn)
+                actions_widget.add_btn(joins_btn)
                 actions_widget.add_btn(view_btn)
                 actions_widget.add_btn(list_btn, always_visible=True)
 
@@ -18770,6 +18782,54 @@ class GenizahGUI(QMainWindow):
                     fl_id = m.group(1)
 
         return fl_id
+
+    def open_joins_workbench(self, res):  # JOINS-SKETCH
+        """Open the Join Workbench sketch with this result pinned as the anchor."""
+        if not res:
+            return
+        if not getattr(self, 'searcher', None):
+            QMessageBox.information(self, tr("Please wait"),
+                                    tr("Search engine is still loading."))
+            return
+        try:
+            from desktop.join_workbench import JoinWorkbenchDialog
+        except Exception as e:
+            QMessageBox.warning(self, tr("Error"), f"Join Workbench unavailable: {e}")
+            return
+        dlg = JoinWorkbenchDialog(self, self, res)
+        self._join_workbench = dlg  # keep a reference (modeless window)
+        dlg.show()
+
+    def _browse_open_join_workbench(self):  # JOINS-SKETCH
+        """Build an anchor result from the currently-browsed fragment and open the workbench."""
+        sid = getattr(self, 'current_browse_sid', None)
+        if not sid:
+            QMessageBox.information(self, tr("Please wait"),
+                                    tr("Load a manuscript in Browse first."))
+            return
+        shelf = title = ''
+        try:
+            shelf, title = self.meta_mgr.get_meta_for_id(sid)
+        except Exception:
+            pass
+        lib = ''
+        try:
+            lib = self.meta_mgr.get_library_for_id(sid) or ''
+        except Exception:
+            pass
+        text = getattr(self, 'browse_original_text', '') or ''
+        if not text:
+            try:
+                text = self.browse_text.toPlainText()
+            except Exception:
+                text = ''
+        res = {
+            'display': {'id': sid, 'shelfmark': shelf, 'title': title,
+                        'library_code': lib, 'img': getattr(self, 'current_browse_p', None)},
+            'full_text': text,
+            'highlight_pattern': getattr(self, 'browse_highlight_pattern', None),
+        }
+        self.open_joins_workbench(res)
 
     def show_full_text(self):
         row = self.results_table.currentRow()
