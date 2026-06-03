@@ -125,7 +125,10 @@ metadata-image), with **no PyQt and no direct `fist_data/*.db` access**. No UI.
   5. Self-match detection (does the anchor satisfy the composed query) plus the centered snippet/page helpers are unit-tested.
   6. A static import test proves the module imports with no PyQt symbols and opens no `fist_data/*.db` directly — all data flows through shared services or the `SearchExecutor` adapter.
 
-**Plans**: TBD (set at `/gsd-plan-phase 106`, after discuss-phase).
+**Plans:** 3 plans (3 waves — single-file module forces sequential mutation)
+  - [ ] 106-01-PLAN.md — module skeleton: frozen dataclasses + SearchExecutor Protocol + dict→Candidate normalizer + page_of + compose() (SC#1) + static import guard (SC#6)
+  - [ ] 106-02-PLAN.md — cross-side AND/OR membership via SearchExecutor (SC#2) + candidate dedup/compaction (SC#3) + text/VS merge ordering with provenance (SC#4)
+  - [ ] 106-03-PLAN.md — self-match detection (SC#5) + centered snippet/page helpers (SC#5)
 
 ---
 
