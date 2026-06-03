@@ -16,6 +16,9 @@ from shared.joins_lab import (
     normalize_candidate,
     page_of,
     compose,
+    resolve_other_side_pages,
+    cross_side_membership,
+    apply_cross_side,
 )
 
 
@@ -276,3 +279,122 @@ class TestStaticImport:
     def test_importable_without_engine_init(self):
         mod = importlib.import_module("shared.joins_lab")
         assert mod is not None
+
+
+# ── Plan 02 Task 1 tests ──────────────────────────────────────────────────────
+
+
+class TestResolveOtherSide:
+    def test_first_page(self):
+        assert resolve_other_side_pages(1, total_pages=10) == frozenset({2})
+
+    def test_last_page(self):
+        assert resolve_other_side_pages(10, total_pages=10) == frozenset({9})
+
+    def test_middle_page(self):
+        assert resolve_other_side_pages(5, total_pages=10) == frozenset({4, 6})
+
+    def test_single_page_doc(self):
+        assert resolve_other_side_pages(1, total_pages=1) == frozenset()
+
+    def test_total_unknown(self):
+        # total_pages=None: no upper clamp; lower clamp still drops <1
+        result = resolve_other_side_pages(5, total_pages=None)
+        assert result == frozenset({4, 6})
+
+
+class TestCrossSide:
+    # ── cross_side_membership (pure set logic) ────────────────────────────────
+
+    def test_and_narrows(self):
+        # base: {('A',3), ('A',7), ('B',2)}, b_set: {('A',2), ('B',9)}
+        # AND keeps only base entries with a neighbor in b_set:
+        #   ('A',3): (A,2) in b_set → kept
+        #   ('A',7): neither (A,6) nor (A,8) in b_set → dropped
+        #   ('B',2): neither (B,1) nor (B,3) in b_set → dropped
+        base_keys = {("A", 3), ("A", 7), ("B", 2)}
+        b_set = {("A", 2), ("B", 9)}
+        result = cross_side_membership(base_keys, b_set, "AND", totals={})
+        assert result == {("A", 3)}
+
+    def test_or_widens(self):
+        # OR returns the base set UNION neighbor pages of b_set entries
+        # b_set has ("A", 2): neighbors are page 1 (if not in base) and page 3
+        # base has ("A", 3) already, so only ("A", 1) added; page 3 already in base
+        base_keys = {("A", 3)}
+        b_set = {("A", 2)}
+        totals = {"A": 10}
+        result = cross_side_membership(base_keys, b_set, "OR", totals=totals)
+        # Should contain original base AND neighbor(s) of b_set not already in base
+        assert ("A", 3) in result
+        assert ("A", 1) in result   # neighbor of (A,2) not in base → added
+
+    def test_or_no_upper_overflow(self):
+        # b_set page at last page should not synthesize a page > total_pages
+        base_keys = {("A", 5)}
+        b_set = {("A", 10)}
+        totals = {"A": 10}
+        result = cross_side_membership(base_keys, b_set, "OR", totals=totals)
+        # (A, 11) would overflow → not added
+        assert ("A", 11) not in result
+        # (A, 9) is valid neighbor
+        assert ("A", 9) in result
+
+    # ── apply_cross_side (I/O via FakeSearchExecutor) ─────────────────────────
+
+    def test_and_filters_base(self):
+        # FakeSearchExecutor returns B-side results for ('A', 2)
+        # Base has text Candidates for ('A', 3) and ('A', 7)
+        # AND: ('A', 3) neighbor ('A', 2) is in b_set → kept
+        # AND: ('A', 7) neither ('A', 6) nor ('A', 8) in b_set → dropped
+        b_result = _make_result("A", 2)
+        executor = FakeSearchExecutor(results=[b_result])
+        base = [
+            normalize_candidate(_make_result("A", 3)),
+            normalize_candidate(_make_result("A", 7)),
+        ]
+        mr = apply_cross_side(executor, base, "b_query", {}, "AND")
+        assert len(mr.candidates) == 1
+        assert mr.candidates[0].sys_id == "A"
+        assert mr.candidates[0].page == 3
+        # Executor recorded an execute_search call with corpus_scope 'genizah'
+        assert any(
+            call[0] == "execute_search" and call[2].get("corpus_scope") == "genizah"
+            for call in executor.calls
+        )
+
+    def test_or_synthesizes_neighbor(self):
+        # B-side has result at ('B', 3); OR should synthesize neighbor ('B', 2)
+        # Base has no 'B' candidates at all
+        b_result = _make_result("B", 3)
+        executor = FakeSearchExecutor(
+            results=[b_result],
+            browse_pages={("B", 2): {"text": "שלום עולם", "total_pages": 5}},
+            meta={"B": ("T-S 12.001", "כותרת")},
+            library={"B": "CUL"},
+        )
+        base = []
+        mr = apply_cross_side(executor, base, "b_q", {}, "OR", anchor_pattern="שלום")
+        # A neighbor candidate should have been synthesized for ('B', 2)
+        neighbor_cands = [c for c in mr.candidates if c.sys_id == "B" and c.page == 2]
+        assert len(neighbor_cands) == 1
+        cand = neighbor_cands[0]
+        assert cand.via_other_side is True
+
+    def test_total_pages_clamps(self):
+        # B-side page at the document's last page (total_pages=3, b_page=3)
+        # OR: neighbor (B, 4) should NOT be synthesized (> total_pages)
+        b_result = _make_result("B", 3)
+        executor = FakeSearchExecutor(
+            results=[b_result],
+            browse_pages={
+                ("B", 1): {"text": "", "total_pages": 3},
+                ("B", 2): {"text": "neighbor text", "total_pages": 3},
+            },
+            meta={"B": ("T-S 12.002", "")},
+            library={"B": "CUL"},
+        )
+        base = []
+        mr = apply_cross_side(executor, base, "b_q", {}, "OR")
+        pages = {c.page for c in mr.candidates if c.sys_id == "B"}
+        assert 4 not in pages   # page 4 > total_pages=3 must not appear
