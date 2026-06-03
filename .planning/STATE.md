@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.0.0
 milestone_name: Joins Lab — Phases 106-110
-status: "**v8.0.0 Joins Lab roadmap CREATED (2026-06-03).** Phases 106-110 written into `ROADMAP.md` on the Codex extract-pure-logic-first sequence: **106** shared core (pure logic + service adapters + unit tests, behind a `SearchExecutor` adapter; no PyQt, no direct sqlite) · **107** desktop Workbench frame (anchor + entry points + public action APIs + pairwise→group join model via `get_connected_fragments_by_id`) · **108** desktop builders + candidates + compare (line-by-line builder both sides, cross-side AND/OR, dedup, self-match, tear-side assist with the CORRECTED `[`/`]` rule) · **109** Visual-Similarity merge + soft-retire · **110** parallels seeding (JSA-01). **Web Joins Lab UI deferred to a later phase** (desktop-first). The validated throwaway sketch is preserved as the executable spec at tag `spike-002-joins-workbench` (+ frozen `.py.txt` archive); live tree is clean. **7 deferrals (REQUIREMENTS § Deferrals) MUST be resolved in discuss-phase before each phase's plan locks** — do NOT auto-answer discuss-phase."
+status: executing
 stopped_at: Phase 106 context gathered
-last_updated: "2026-06-03T11:31:24.718Z"
-last_activity: 2026-06-02 — v8.0.0 milestone opened via `/gsd-new-milestone`; scope shaped through free conversation; PROJECT.md + REQUIREMENTS.md written; v7.17 folded in (Phases 103/105 kept as delivered; **no destructive phase-clear**).
+last_updated: "2026-06-03T13:44:41.691Z"
+last_activity: 2026-06-03 -- Phase 106 planning complete
 progress:
   total_phases: 8
   completed_phases: 1
-  total_plans: 4
+  total_plans: 7
   completed_plans: 5
-  percent: 100
+  percent: 71
 ---
 
 # Project State
@@ -29,8 +29,8 @@ Milestone: **v8.0.0 Dicta Rebrand & Joins Lab — STARTED 2026-06-02.** Folds th
 
 Phase: **106 — Joins Lab Shared Core (NOT started).** Roadmap created 2026-06-03; awaiting `/gsd-discuss-phase 106` then `/gsd-plan-phase 106`.
 Plan: —
-Status: **v8.0.0 Joins Lab roadmap CREATED (2026-06-03).** Phases 106-110 written into `ROADMAP.md` on the Codex extract-pure-logic-first sequence: **106** shared core (pure logic + service adapters + unit tests, behind a `SearchExecutor` adapter; no PyQt, no direct sqlite) · **107** desktop Workbench frame (anchor + entry points + public action APIs + pairwise→group join model via `get_connected_fragments_by_id`) · **108** desktop builders + candidates + compare (line-by-line builder both sides, cross-side AND/OR, dedup, self-match, tear-side assist with the CORRECTED `[`/`]` rule) · **109** Visual-Similarity merge + soft-retire · **110** parallels seeding (JSA-01). **Web Joins Lab UI deferred to a later phase** (desktop-first). The validated throwaway sketch is preserved as the executable spec at tag `spike-002-joins-workbench` (+ frozen `.py.txt` archive); live tree is clean. **7 deferrals (REQUIREMENTS § Deferrals) MUST be resolved in discuss-phase before each phase's plan locks** — do NOT auto-answer discuss-phase.
-Last activity: 2026-06-02 — v8.0.0 milestone opened via `/gsd-new-milestone`; scope shaped through free conversation; PROJECT.md + REQUIREMENTS.md written; v7.17 folded in (Phases 103/105 kept as delivered; **no destructive phase-clear**).
+Status: Ready to execute
+Last activity: 2026-06-03 -- Phase 106 planning complete
 
 ### Scope (locked 2026-06-02)
 
