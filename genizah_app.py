@@ -3229,6 +3229,9 @@ class GenizahGUI(QMainWindow):
         # Puzzle window singleton (Phase 48)
         self._puzzle_window = None
 
+        # Join Workbench singleton (Phase 107)
+        self._join_workbench = None
+
         # Phase 96 fix-10: guard against any _save_session() call that fires
         # during the startup window (between __init__ and _restore_session()
         # completing).  If _save_session() wrote during this window it would
@@ -6939,6 +6942,13 @@ class GenizahGUI(QMainWindow):
         self.btn_b_add_to_puzzle.setEnabled(False)
         self.btn_b_add_to_puzzle.clicked.connect(self._browse_add_to_puzzle)
 
+        # Find joins button (Phase 107 JWB-02) - defined here, added to ext_info_row below
+        self.btn_b_find_joins = QPushButton(f"\U0001F517 {tr('Find joins')}")
+        self.btn_b_find_joins.setToolTip(tr("Find joins"))
+        self.btn_b_find_joins.setAccessibleName(tr("Find joins"))
+        self.btn_b_find_joins.setEnabled(False)   # enabled when a manuscript is loaded
+        self.btn_b_find_joins.clicked.connect(self._browse_open_join_workbench)
+
         # Add to List button for browse tab - defined here, added to ext_info_row below
         self.btn_browse_add_to_list = QPushButton(_format_add_to_list_label(False))
         self.btn_browse_add_to_list.setToolTip(tr("Add to List"))
@@ -7019,8 +7029,9 @@ class GenizahGUI(QMainWindow):
         self.local_filter_inactive_lbl_parallels.setVisible(False)
         self._update_local_filter_btn_parallels()
 
-        # ext_info_row layout: Puzzle, Parallels, List | Info | Bib FJMS, Bib NLI, Catalog | Ktiv, External Link | stretch | Translations
+        # ext_info_row layout: Puzzle, Find joins, Parallels, List | Info | Bib FJMS, Bib NLI, Catalog | Ktiv, External Link | stretch | Translations
         ext_info_row.addWidget(self.btn_b_add_to_puzzle)
+        ext_info_row.addWidget(self.btn_b_find_joins)
         ext_info_row.addWidget(self.btn_find_parallels)
         ext_info_row.addWidget(self.local_filter_btn_parallels)
         ext_info_row.addWidget(self.local_filter_inactive_lbl_parallels)
@@ -8244,6 +8255,8 @@ class GenizahGUI(QMainWindow):
         self.browse_version_combo.setEnabled(True)
         self.btn_b_add_to_view.setEnabled(True)
         self.btn_b_add_to_puzzle.setEnabled(True)
+        if hasattr(self, "btn_b_find_joins"):
+            self.btn_b_find_joins.setEnabled(True)
 
         # Enable Visual Similarity button if data available
         _vs_has = False
@@ -9839,6 +9852,27 @@ class GenizahGUI(QMainWindow):
                     folio_label = current_img.get('label', '1r')
         # add_to_puzzle handles missing fl_id via PuzzleMetaLoaderThread (NLI resolution)
         self.add_to_puzzle(sid, shelfmark, folio_label, fl_id)
+
+    def _browse_open_join_workbench(self):
+        """Browse tab entry point for the Join Workbench. D-03 #2.
+        CODEX-VERIFIED must-fix #2: the page attr is self.current_browse_p, NOT self.p."""
+        sid = getattr(self, "current_browse_sid", None)
+        if not sid:
+            return
+        p = getattr(self, "current_browse_p", 1) or 1   # REAL attr (genizah_app.py:3200) - NOT self.p
+        text = getattr(self, "browse_original_text", "") or ""
+        shelf = ""
+        try:
+            shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+        except Exception:
+            shelf = ""
+        res = {
+            "display": {"id": sid, "shelfmark": shelf, "img": p, "library_code": "", "title": ""},
+            "full_text": text,
+            "uid": f"{sid}_P{int(p):03d}",
+        }
+        self.open_joins_workbench(res)
+        # Browse tab stays open (it is a persistent tab)
 
     def _browse_rd_add_entry(self, sys_id, shelfmark, sequence_order=None):
         """Add a single manuscript entry to the reading desk (duplicate-safe).
@@ -15385,6 +15419,49 @@ class GenizahGUI(QMainWindow):
         self._puzzle_window.show()
         self._puzzle_window.raise_()
         self._puzzle_window.activateWindow()
+
+    # ------------------------------------------------------------------ #
+    # Phase 107: Join Workbench host methods                              #
+    # ------------------------------------------------------------------ #
+
+    def open_joins_workbench(self, res: dict):
+        """Open (or re-anchor) the Join Workbench for the given result.
+        D-01: modeless (show(), not exec()). D-02: single reusable instance - second call re-anchors.
+        """
+        from desktop.join_workbench import JoinWorkbenchWindow  # lazy import (desktop-only)
+        if self._join_workbench is None or not self._join_workbench.isVisible():
+            self._join_workbench = JoinWorkbenchWindow(self, self)
+        self._join_workbench.set_anchor(res)
+        self._join_workbench.show()
+        self._join_workbench.raise_()
+        self._join_workbench.activateWindow()
+
+    def open_anchor_in_puzzle(self, sys_id: str):
+        """Public: add a fragment to the Fragment Puzzle canvas (Join Workbench path). SC#5."""
+        self._vs_add_to_puzzle(sys_id)
+
+    def open_anchor_as_join(self, anchor_sys_id: str, anchor_shelfmark: str):
+        """Public: open JoinsDialog with anchor as Fragment A; scholar enters B freely. SC#5, D-14."""
+        def browse_shelfmark(target_shelfmark):
+            self.browse_shelf_input.setText(target_shelfmark)
+            self._set_last_browse_field("shelf")
+            self.browse_load()
+
+        from corrections_ui import JoinsDialog
+        dialog = JoinsDialog(
+            self, self.corrections_client,
+            document_id=anchor_sys_id,
+            shelfmark=anchor_shelfmark,
+            on_browse=browse_shelfmark,
+            shelf_model=getattr(self, 'shelf_model', None),
+            joins_mgr=getattr(self, 'joins_mgr', None),
+            shelf_completer=getattr(self, 'shelf_completer', None),
+            lists_mgr=getattr(self, 'lists_mgr', None),
+            meta_mgr=self.meta_mgr,
+        )
+        # frag_b_input left EMPTY - scholar enters B freely (R-02). exec() blocks; the workbench
+        # caller calls _reload_known_joins() after this returns (SC#4 / Pitfall 3).
+        dialog.exec()
 
     def _open_settings_dialog(self):
         """Open the settings dialog."""
