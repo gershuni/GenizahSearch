@@ -152,7 +152,10 @@ pairwise path and refresh the group. Bilingual from the first line. No candidate
   5. Browse / Puzzle / Add-to-List / Add-as-Join are invoked through **public, named action methods** — **no `_vs_*` private calls** remain on the workbench path.
   6. Every new string is wrapped in `tr()`; the Workbench renders fully in Hebrew under `lang=he` with **no hardcoded English** (acceptance criterion, not cleanup).
 
-**Plans**: TBD.
+**Plans**: 3 plans
+- [ ] 107-01-PLAN.md — i18n keys + pure helpers (iiif_full/meta_brief/badge_for_source/dedup_join_rows) + 3 Wave-0 test files (unit suite + 2 AST guards: no _vs_*, tr-key coverage) [wave 1]
+- [ ] 107-02-PLAN.md — JoinWorkbenchWindow shell: modeless QDialog + anchor pane (image route/zoom/folio nav/transcription) + three-source known-joins panel (badges + batched thumbnails, hidden-when-empty) + anchor action-row + per-row actions [wave 2]
+- [ ] 107-03-PLAN.md — host wiring: open_joins_workbench single-instance + open_anchor_in_puzzle/open_anchor_as_join public wrappers + ResultDialog & Browse Find-joins entry hooks + full-suite/ruff gate [wave 3]
 
 ---
 
