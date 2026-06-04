@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v8.0.0
 milestone_name: Joins Lab — Phases 106-110
 status: verifying
-stopped_at: Phase 106 context gathered
-last_updated: "2026-06-03T15:03:08.142Z"
+stopped_at: Phase 107 context gathered
+last_updated: "2026-06-04T03:37:20.353Z"
 last_activity: 2026-06-03
 progress:
   total_phases: 8
@@ -94,7 +94,7 @@ Carried forward to v8.0.0+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular
 
 ## Session Continuity
 
-Last session: 2026-06-03T14:53:35.642Z
-Stopped at: Phase 106 context gathered
-Resume file: None
+Last session: 2026-06-04T03:37:20.320Z
+Stopped at: Phase 107 context gathered
+Resume file: .planning/phases/107-desktop-join-workbench-anchor-entry-points-actions-join-model/107-CONTEXT.md
 Next step: `/gsd-discuss-phase 106` (user-led — resolve the 7 deferrals; do NOT auto-answer), then `/gsd-plan-phase 106` → execute → verify, chaining 107→110. Web UI a later phase.
