@@ -6942,6 +6942,13 @@ class GenizahGUI(QMainWindow):
         self.btn_b_add_to_puzzle.setEnabled(False)
         self.btn_b_add_to_puzzle.clicked.connect(self._browse_add_to_puzzle)
 
+        # Find joins button (Phase 107 JWB-02) - defined here, added to ext_info_row below
+        self.btn_b_find_joins = QPushButton(f"\U0001F517 {tr('Find joins')}")
+        self.btn_b_find_joins.setToolTip(tr("Find joins"))
+        self.btn_b_find_joins.setAccessibleName(tr("Find joins"))
+        self.btn_b_find_joins.setEnabled(False)   # enabled when a manuscript is loaded
+        self.btn_b_find_joins.clicked.connect(self._browse_open_join_workbench)
+
         # Add to List button for browse tab - defined here, added to ext_info_row below
         self.btn_browse_add_to_list = QPushButton(_format_add_to_list_label(False))
         self.btn_browse_add_to_list.setToolTip(tr("Add to List"))
@@ -7022,8 +7029,9 @@ class GenizahGUI(QMainWindow):
         self.local_filter_inactive_lbl_parallels.setVisible(False)
         self._update_local_filter_btn_parallels()
 
-        # ext_info_row layout: Puzzle, Parallels, List | Info | Bib FJMS, Bib NLI, Catalog | Ktiv, External Link | stretch | Translations
+        # ext_info_row layout: Puzzle, Find joins, Parallels, List | Info | Bib FJMS, Bib NLI, Catalog | Ktiv, External Link | stretch | Translations
         ext_info_row.addWidget(self.btn_b_add_to_puzzle)
+        ext_info_row.addWidget(self.btn_b_find_joins)
         ext_info_row.addWidget(self.btn_find_parallels)
         ext_info_row.addWidget(self.local_filter_btn_parallels)
         ext_info_row.addWidget(self.local_filter_inactive_lbl_parallels)
@@ -8247,6 +8255,8 @@ class GenizahGUI(QMainWindow):
         self.browse_version_combo.setEnabled(True)
         self.btn_b_add_to_view.setEnabled(True)
         self.btn_b_add_to_puzzle.setEnabled(True)
+        if hasattr(self, "btn_b_find_joins"):
+            self.btn_b_find_joins.setEnabled(True)
 
         # Enable Visual Similarity button if data available
         _vs_has = False
@@ -9842,6 +9852,27 @@ class GenizahGUI(QMainWindow):
                     folio_label = current_img.get('label', '1r')
         # add_to_puzzle handles missing fl_id via PuzzleMetaLoaderThread (NLI resolution)
         self.add_to_puzzle(sid, shelfmark, folio_label, fl_id)
+
+    def _browse_open_join_workbench(self):
+        """Browse tab entry point for the Join Workbench. D-03 #2.
+        CODEX-VERIFIED must-fix #2: the page attr is self.current_browse_p, NOT self.p."""
+        sid = getattr(self, "current_browse_sid", None)
+        if not sid:
+            return
+        p = getattr(self, "current_browse_p", 1) or 1   # REAL attr (genizah_app.py:3200) - NOT self.p
+        text = getattr(self, "browse_original_text", "") or ""
+        shelf = ""
+        try:
+            shelf, _ = self.meta_mgr.get_meta_for_id(sid)
+        except Exception:
+            shelf = ""
+        res = {
+            "display": {"id": sid, "shelfmark": shelf, "img": p, "library_code": "", "title": ""},
+            "full_text": text,
+            "uid": f"{sid}_P{int(p):03d}",
+        }
+        self.open_joins_workbench(res)
+        # Browse tab stays open (it is a persistent tab)
 
     def _browse_rd_add_entry(self, sys_id, shelfmark, sequence_order=None):
         """Add a single manuscript entry to the reading desk (duplicate-safe).
