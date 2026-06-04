@@ -18,7 +18,6 @@ from desktop.join_workbench import (
     _clamp_zoom,
     _image_url_for_idx,
     normalize_join_source,
-    _other_member_of,
     build_known_join_rows,
 )
 
