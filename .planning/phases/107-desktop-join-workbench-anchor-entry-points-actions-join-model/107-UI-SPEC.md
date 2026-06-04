@@ -392,11 +392,20 @@ Not applicable. This phase introduces no third-party component registries, no np
 - [ ] Dimension 1 Copywriting: PASS
 - [ ] Dimension 2 Visuals: PASS
 - [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: not applicable — PyQt6 desktop
+- [x] Dimension 1 Copywriting: PASS (FLAG — non-blocking, see below)
+- [x] Dimension 2 Visuals: PASS (FLAG — non-blocking, see below)
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: not applicable — PyQt6 desktop
 
-**Approval:** pending
+**Approval:** approved 2026-06-04 (gsd-ui-checker — 6/6 dimensions, 0 blocks, 2 non-blocking FLAGs)
+
+### Checker Recommendations (non-blocking — fold into planning)
+
+- **REC-1 (Copywriting):** the cold-start **"Open"** button is a bare verb. Use **"Open fragment" / "פתח קטע"** so the label stands alone for keyboard users; and **confirm the `"Open"` tr() key actually exists** in `genizah_translations.py` (the spec marked it "likely present; verify") — add it explicitly if missing.
+- **REC-2 (Copywriting):** the **"Could not load joins."** inline error states no recovery path. Add a retry affordance — e.g. `tr("Could not load joins. Click to retry.")` or a small retry icon-button beside the label — consistent with the app's other fetch-failure handling.
+- **REC-3 (Visuals/a11y):** the eight emoji icon-only action buttons (📖🧩📋🔗 anchor row + per known-join row, plus ⚓ make-anchor) carry `setToolTip()` only. Add `setAccessibleName(tr(...))` per button at zero layout cost (screen-reader / keyboard discovery) — especially the ⚓ re-anchor glyph, whose role isn't obvious.
 
 ---
 
