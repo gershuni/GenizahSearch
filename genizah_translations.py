@@ -3667,3 +3667,21 @@ LIBRARY_CODES_HE = {
     # Phase 95 D-13 — My Library namespace (LOCAL sys_ids start with 97).
     'LOCAL': 'הספרייה שלי',
 }
+
+# === Phase 107 — Join Workbench i18n (CLOSED set for Plans 01/02/03) ===
+# 11 NEW keys. "Add as Join" is REUSED (already at genizah_translations.py:3226) — NOT in this block.
+TRANSLATIONS.update({
+    # --- UI labels (Plan 01 helpers + Plan 02 window + Plan 03 entry points) ---
+    "Find joins":       "מצא צירופים",
+    "Join Workbench":   "מעבדת צירופים",
+    "ANCHOR":           "עוגן",
+    "Known Joins":      "צירופים ידועים",
+    "Make anchor":      "הגדר כעוגן",
+    "Known join":       "צירוף ידוע",
+    "Open fragment":    "פתח קטע",
+    "Enter shelfmark…": "הזן סימת מדף…",
+    # --- helper / panel strings introduced by Plan 02 (bootstrapped HERE, used there) ---
+    "img":              "תמונה",                       # meta_brief image-count unit (Plan 02 Task 1)
+    "Could not load joins. Click to retry.": "לא ניתן לטעון צירופים. לחץ לניסיון חוזר.",  # known-joins retry affordance (Plan 02 Task 3, REC-2)
+    "No manuscript found for '{}'": "לא נמצא כתב יד עבור '{}'",  # cold-start no-match (Plan 02 Task 3)
+})
