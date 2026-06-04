@@ -15,6 +15,11 @@ from desktop.join_workbench import (
     r_title,
     r_text,
     r_lib,
+    _clamp_zoom,
+    _image_url_for_idx,
+    normalize_join_source,
+    _other_member_of,
+    build_known_join_rows,
 )
 
 
@@ -337,3 +342,170 @@ class TestMetaBrief:
         """Empty meta → empty string (no separators)."""
         result = meta_brief({})
         assert result == ""
+
+
+# ── TestClampZoom ────────────────────────────────────────────────────────────
+
+
+class TestClampZoom:
+    """Unit tests for _clamp_zoom() — zoom bounds enforcement (Task 1, Plan 02)."""
+
+    def test_clamp_zoom_max(self):
+        """Values above 4.0 are clamped to 4.0."""
+        assert _clamp_zoom(5.0) == 4.0
+
+    def test_clamp_zoom_min(self):
+        """Values below 0.25 are clamped to 0.25."""
+        assert _clamp_zoom(0.1) == 0.25
+
+    def test_clamp_zoom_in_range(self):
+        """Values within [0.25, 4.0] are returned unchanged."""
+        assert _clamp_zoom(1.0) == 1.0
+        assert _clamp_zoom(2.0) == 2.0
+        assert _clamp_zoom(0.25) == 0.25
+        assert _clamp_zoom(4.0) == 4.0
+
+    def test_clamp_zoom_exact_min(self):
+        assert _clamp_zoom(0.25) == 0.25
+
+    def test_clamp_zoom_exact_max(self):
+        assert _clamp_zoom(4.0) == 4.0
+
+    def test_clamp_zoom_below_min(self):
+        assert _clamp_zoom(0.0) == 0.25
+
+    def test_clamp_zoom_above_max(self):
+        assert _clamp_zoom(100.0) == 4.0
+
+
+# ── TestImageUrlForIdx ───────────────────────────────────────────────────────
+
+
+class TestImageUrlForIdx:
+    """Unit tests for _image_url_for_idx() — index-based image URL builder (Task 1, Plan 02)."""
+
+    def test_nli_base_url_appends_iiif_path(self):
+        """NLI FL base URL → appends /full/2000,/0/default.jpg."""
+        images = [{"url": "https://x/FL1"}]
+        assert _image_url_for_idx(images, 0) == "https://x/FL1/full/2000,/0/default.jpg"
+
+    def test_direct_jpg_returned_unchanged(self):
+        """Direct .jpg URL → returned as-is (no IIIF suffix)."""
+        images = [{"url": "https://x/1.jpg"}]
+        assert _image_url_for_idx(images, 0) == "https://x/1.jpg"
+
+    def test_empty_list_returns_empty(self):
+        """Empty list → empty string."""
+        assert _image_url_for_idx([], 0) == ""
+
+    def test_out_of_range_idx_returns_empty(self):
+        """Index out of range → empty string."""
+        assert _image_url_for_idx([{"url": "u"}], 9) == ""
+
+    def test_negative_idx_returns_empty(self):
+        """Negative index → empty string."""
+        assert _image_url_for_idx([{"url": "u"}], -1) == ""
+
+    def test_valid_second_image(self):
+        """Second image in a two-image list."""
+        images = [{"url": "https://x/FL1"}, {"url": "https://x/FL2"}]
+        assert _image_url_for_idx(images, 1) == "https://x/FL2/full/2000,/0/default.jpg"
+
+    def test_custom_width(self):
+        """Custom width is passed to iiif_full."""
+        images = [{"url": "https://x/FL9"}]
+        assert _image_url_for_idx(images, 0, width=400) == "https://x/FL9/full/400,/0/default.jpg"
+
+
+# ── TestNormalizeJoinSource ──────────────────────────────────────────────────
+
+
+class TestNormalizeJoinSource:
+    """Unit tests for normalize_join_source() — source string normalization (Task 2, Plan 02)."""
+
+    def test_explicit_source_string(self):
+        assert normalize_join_source({"source": "user"}) == "user"
+        assert normalize_join_source({"source": "PGP"}) == "PGP"
+        assert normalize_join_source({"source": "FJMS"}) == "FJMS"
+        assert normalize_join_source({"source": "community"}) == "community"
+
+    def test_is_local_true_no_source(self):
+        """is_local=True with no source → 'user'."""
+        assert normalize_join_source({"is_local": True}) == "user"
+
+    def test_no_source_no_local(self):
+        """No source, no is_local → empty string."""
+        assert normalize_join_source({}) == ""
+
+    def test_empty_source_with_is_local(self):
+        """Empty source with is_local=True → 'user'."""
+        assert normalize_join_source({"source": "", "is_local": True}) == "user"
+
+
+# ── TestBuildKnownJoinRows ───────────────────────────────────────────────────
+
+
+class TestBuildKnownJoinRows:
+    """Unit tests for build_known_join_rows() — four-source merge + per-member rows (Task 2, Plan 02)."""
+
+    def test_empty_all_sources_returns_empty(self):
+        """No joins from any source → empty list."""
+        assert build_known_join_rows([], [], [], [], "990001", "T-S 1") == []
+
+    def test_single_user_join_single_member(self):
+        """A single A-B join → one member row (B)."""
+        user_joins = [
+            {"fragment_a": "T-S 1", "fragment_b": "T-S 2",
+             "source": "user", "document_id_a": "990001", "document_id_b": "X"}
+        ]
+        rows = build_known_join_rows(user_joins, [], [], [], "990001", "T-S 1")
+        assert len(rows) == 1
+        assert rows[0]["other_shelf"] == "T-S 2"
+        assert rows[0]["source"] == "user"
+
+    def test_transitive_abc_surfaces_both_members(self):
+        """A-B + B-C transitive chain → both B and C surface as members.
+
+        must-fix #5: the connected group includes all members, not just direct joins.
+        """
+        user_joins = [
+            {"fragment_a": "T-S 1", "fragment_b": "T-S 2",
+             "source": "user", "document_id_a": "990001", "document_id_b": "X"},
+            {"fragment_a": "T-S 2", "fragment_b": "T-S 3",
+             "source": "user", "document_id_a": "X", "document_id_b": "Y"},
+        ]
+        rows = build_known_join_rows(user_joins, [], [], [], "990001", "T-S 1")
+        shelves = {r["other_shelf"] for r in rows}
+        assert "T-S 2" in shelves
+        assert "T-S 3" in shelves
+
+    def test_community_only_pair_survives_with_community_source(self):
+        """Community-only join survives with source='community' (green badge)."""
+        community_joins = [
+            {"fragment_a": "T-S 1", "fragment_b": "T-S 9",
+             "source": "community", "document_id_a": "990001", "document_id_b": ""}
+        ]
+        rows = build_known_join_rows([], [], [], community_joins, "990001", "T-S 1")
+        assert len(rows) == 1
+        assert rows[0]["source"] == "community"
+        assert rows[0]["other_shelf"] == "T-S 9"
+
+    def test_four_source_merge_and_dedup(self):
+        """Joins from all four sources → merged and deduped, one row per member."""
+        user_joins = [
+            {"fragment_a": "T-S 1", "fragment_b": "T-S 2",
+             "source": "user", "document_id_a": "990001", "document_id_b": "X"},
+            {"fragment_a": "T-S 2", "fragment_b": "T-S 3",
+             "source": "user", "document_id_a": "X", "document_id_b": "Y"},
+        ]
+        community_joins = [
+            {"fragment_a": "T-S 1", "fragment_b": "T-S 9",
+             "source": "community", "document_id_a": "990001", "document_id_b": ""}
+        ]
+        rows = build_known_join_rows(user_joins, [], [], community_joins, "990001", "T-S 1")
+        shelves = {r["other_shelf"] for r in rows}
+        srcs = {r["other_shelf"]: r["source"] for r in rows}
+        assert "T-S 2" in shelves
+        assert "T-S 3" in shelves
+        assert "T-S 9" in shelves
+        assert srcs["T-S 9"] == "community"
