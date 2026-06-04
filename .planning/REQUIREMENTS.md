@@ -61,11 +61,12 @@ requirement text is preserved in git history (prior `REQUIREMENTS.md`) and `MILE
 - [ ] **JWB-04**: The Workbench shows the joins **already known** for the anchor (PGP
   `document_fragments` + FJMS scholarly joins + user pairwise joins + community puzzle joins), so the
   hunt starts beyond what is already recorded.
-- [ ] **JWB-05**: A **conservative** tear-side assist reads the anchor's `[` / `]` transcription
-  markers (lines ending `]` → right side; starting `[` → left side; mid-line marks a torn word) and
-  **suggests** the likely side / search direction **only when the evidence is clear**; otherwise it
-  stays silent. The scholar can always override. (Real fragment state is messy — the assist must
-  never assert a guess.)
+- [ ] **JWB-05** *(DEFERRED from Phase 108 → Phase 110 disposition, 2026-06-04; see Amendments)*: A
+  **conservative** tear-side assist reads the anchor's `[` / `]` transcription markers (**corrected
+  rule** below — start-`]` = LEFT, end-`[` = RIGHT) and **suggests** the likely side / search
+  direction **only when the evidence is clear**; otherwise it stays silent. The scholar can always
+  override. (Real fragment state is messy — the assist must never assert a guess.) **108 is the
+  *manual* finder; the side-assist belongs to the *algorithmic* Component B.**
 - [ ] **JWB-06**: From the anchor (a selected line / torn word + a **direction**: rest-of-line,
   line-above, lines-below, lines-above, previous/next page), the scholar **seeds a search** that
   pre-fills the **existing** search module (variants / fuzzy / Responsa / regex); the seeded query is
@@ -108,6 +109,11 @@ highlighted snippet + Y/?/N triage + four actions | side-by-side compare.
   backwards. Also DOWNGRADE prominence: on 2,178 known physical joins a clean complementary L+R read
   fires on only **2.5%**; the dominant verdict is "both edges torn" (55%). Make "both edges"
   first-class; stay silent ~38% of the time.
+  - **DEFERRED out of Phase 108 (2026-06-04 discuss-phase).** 108 is the *manual* finder; the
+    side-verdict UI earns its keep in the *algorithmic* Component B → **reassigned to Phase 110's
+    discuss-phase disposition** (keep / spike / cut, alongside JSA-03 — both are `[`/`]`-driven).
+    NOTE: bracket-aware *matching correctness* (a leading `]` must not defeat line-start / self-match
+    — 106 R-02) stays in Phase 108; only the side-verdict assist UI is deferred.
 - **JWB-06 (seed search) — REFRAME.** Do NOT pre-seed the anchor's own line text; the scholar hunts
   what is **MISSING** (the continuation), not what's present. Replaced by the builder (JWB-10).
 - **JWB-04 / JWB-09 (joins) — JOIN MODEL DECIDED (user, 2026-06-03): reuse the existing
@@ -147,7 +153,9 @@ highlighted snippet + Y/?/N triage + four actions | side-by-side compare.
    evidence/confidence/notes? (Codex's top data-model risk; pairwise→group chosen for v8 — confirm
    the richer model stays deferred.)
 2. **Dimensions = evidence badges + soft warnings, NOT hard filters** (true vertical-tear halves
-   differ in width). Confirm no hard dimension filter.
+   differ in width). **CONFIRMED (2026-06-04 discuss-phase):** soft evidence + a soft size-mismatch
+   hint, **never an *automatic* cull** — PLUS an *opt-in* explicit min/max size filter, **off by
+   default** (power-user cull, user-invoked). SC#7's "never an automatic hard filter" holds.
 3. **Builder depth**: per-row variation columns? editable raw composed-query preview? page-level
    Text START/END in addition to per-row line START/END?
 4. **VS-dialog retirement timing** — reroute this phase or a follow-up?
@@ -194,10 +202,10 @@ highlighted snippet + Y/?/N triage + four actions | side-by-side compare.
 | EXPUX-01–04 | 105 | Delivered (EXPUX-01 UAT pending) |
 | (foundational logic for JWB-10/11/12 + build constraints) | 106 (shared core) | Active |
 | JWB-01, 02, 03, 04, 09 | 107 (desktop frame + actions + join model) | Active |
-| JWB-05 (amended), 06 (reframed), 07, 08, 10, 11 | 108 (desktop builders + candidates + compare) | Active |
+| JWB-06 (reframed), 07, 08, 10, 11 | 108 (desktop builders + candidates + compare) | Active |
 | JWB-12 (unified sources + VS merge) | 108 (text/combined surface) + 109 (VS source + soft-retire) | Active |
 | JSA-01 | 110 (parallels seeding) | Active |
-| JSA-02, 03 | 110 (discuss-phase disposition: keep/spike/cut) | Active |
+| JSA-02, 03 + **JWB-05** (deferred from 108) | 110 (discuss-phase disposition: keep/spike/cut) | Active |
 
 **Coverage:**
 - Delivered (folded): BRAND (2) + LEXP (7) + EXPUX (4) = 13.

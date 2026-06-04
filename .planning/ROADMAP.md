@@ -165,11 +165,13 @@ pairwise path and refresh the group. Bilingual from the first line. No candidate
 **identical builder for the OTHER side** of the leaf (cross-side AND/OR), running the **existing**
 search engine; results return as **deduped one-per-image candidates** in grid + table views with
 material + highlighted snippet + Y/?/N triage + a self-match readout, plus side-by-side
-anchor↔candidate compare. The conservative tear-side assist appears only when clearly one-sided.
+anchor↔candidate compare. The conservative `[`/`]` tear-side assist is **DEFERRED out of this phase**
+(2026-06-04 discuss-phase) to the algorithmic Component B (Phase 110 disposition) — 108 is the
+*manual* finder.
 
 **Depends on**: Phase 106 (composition / membership / dedup / merge logic) + Phase 107 (Workbench shell + actions).
 
-**Requirements**: JWB-05 (amended), JWB-06 (reframed), JWB-07, JWB-08, JWB-10, JWB-11 + the text/combined candidate surface of JWB-12.
+**Requirements**: JWB-06 (reframed), JWB-07, JWB-08, JWB-10, JWB-11 + the text/combined candidate surface of JWB-12. (JWB-05 tear-side assist **deferred** to Phase 110 disposition — 2026-06-04 discuss-phase.)
 
 **Success Criteria** (what must be TRUE):
   1. A line-by-line builder (rows = lines; per-row line START/END anchors with the START anchor on the **right** for RTL; "↓ N lines" gap) composes and runs a line-break query through the existing engine — hunting the **missing continuation**, NOT pre-seeding the anchor's own line text (JWB-10, JWB-06 reframed).
@@ -177,8 +179,8 @@ anchor↔candidate compare. The conservative tear-side assist appears only when 
   3. Candidates render **deduped one-per-image** in both grid and table views, each with material, a **highlighted matched-text snippet**, and **Y/?/N triage**; a refine/filter bar filters by text / material / has-dimensions / triage (JWB-07; JWB-12 surface).
   4. A **self-match readout** shows whether the anchor itself satisfies the current query (✓/✗) and an **"include anchor itself"** toggle works (JWB-12 verification — fixes the "can't find the fragment itself" trap).
   5. Selecting a candidate shows it **side-by-side** with the anchor (image + transcription) for eyeball confirmation, with the four actions available (JWB-08).
-  6. The tear-side assist reads the anchor's `[`/`]` markers with the **CORRECTED rule (start-`]` = LEFT, end-`[` = RIGHT)** and surfaces a side suggestion **only when clearly one-sided**; otherwise it stays silent or reports "both edges" (JWB-05 amended).
-  7. Manuscript dimensions appear as **evidence / soft warnings, never a hard filter** (deferral #2 — confirm in discuss-phase).
+  6. ~~The tear-side assist reads the anchor's `[`/`]` markers…~~ **DEFERRED out of Phase 108** (2026-06-04 discuss-phase) — JWB-05 moves to the algorithmic Component B (Phase 110 disposition). NOT a Phase 108 success criterion. (Bracket-aware *matching* correctness — a leading `]` must not defeat line-start / self-match — stays in scope; only the side-verdict UI is deferred.)
+  7. Manuscript dimensions appear as **evidence / soft warnings, never an *automatic* hard filter** (deferral #2 — **CONFIRMED** in discuss-phase: soft evidence + mismatch hint by default, PLUS an *opt-in* explicit min/max size cull, off by default).
 
 **Plans**: TBD.
 
@@ -209,12 +211,13 @@ preserved).
 
 **Goal**: From the anchor passage the scholar **seeds a parallels (composition) search** to surface
 shared-distinctive-phrase candidates across the corpus, returned into the Workbench candidate
-surface. JSA-02 (corpus-completion) and JSA-03 (torn-word completion) are resolved at discuss-phase:
-keep / spike / cut.
+surface. JSA-02 (corpus-completion), JSA-03 (torn-word completion), and **JWB-05 (the `[`/`]`
+tear-side assist, deferred here from Phase 108 — both are `[`/`]`-driven algorithmic features) are
+resolved at discuss-phase: keep / spike / cut.
 
 **Depends on**: Phase 108 (candidate surface).
 
-**Requirements**: JSA-01 (JSA-02 / JSA-03 — discuss-phase disposition; earlier lean: JSA-01 only, spike JSA-03, cut JSA-02).
+**Requirements**: JSA-01 (JSA-02 / JSA-03 / **JWB-05** — discuss-phase disposition; earlier lean: JSA-01 only, spike JSA-03 + JWB-05, cut JSA-02).
 
 **Success Criteria** (what must be TRUE):
   1. A "Find parallels" action **seeds the existing composition/parallels search** from the anchor passage and returns shared-distinctive-phrase candidates into the Workbench candidate list (JSA-01).
