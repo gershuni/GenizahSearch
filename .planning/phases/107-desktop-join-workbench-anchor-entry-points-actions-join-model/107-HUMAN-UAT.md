@@ -89,3 +89,34 @@ status: resolved-in-code
 fix: `puzzle_add_targets()` (pure, unit-tested) always pins the anchor exactly once,
 deduped; both single-add and add-selected route through it via the public
 `open_anchor_in_puzzle` (SC#5). Puzzle canvas also dedups by (sys_id, folio_label).
+
+---
+
+UAT round 2 (2026-06-04, Hillel) — refinements on the round-1 build.
+
+### G7. Anchor image should pan with the cursor when zoomed
+status: resolved-in-code
+fix: `_PannableScrollArea` (drag-to-pan, hand cursor); image scroll switched to
+`widgetResizable=False` + center alignment so a zoomed pixmap overflows and scrolls;
+`_apply_zoom` resizes the label to the scaled pixmap.
+
+### G8. Transcription text must be right-aligned
+status: resolved-in-code
+fix: `_right_align_anchor_text()` merges AlignRight block format across the whole
+document after each text load (belt-and-suspenders over htmlify's RTL div).
+
+### G9. Joins-context button = chain icon + dropdown triangle
+status: resolved-in-code
+fix: button text now "🔗 ▾" (icon + triangle); label moved to tooltip/accessibleName.
+
+### G10. Joins section collapsed by default, click "Known Joins" to open, resizable, default half height
+status: resolved-in-code
+fix: left pane is a vertical QSplitter (image / text / joins). Joins body hidden by
+default; the clickable "▸ Known Joins (N)" header toggles it (`_toggle_joins_body`);
+expanded → splitter gives joins ≈ 50% of the height; all three panes drag-resizable.
+
+### G11. Puzzle window should show the whole fragment by default (general issue)
+status: resolved-in-code
+fix: single-fragment add in `desktop/puzzle.py::_on_image_loaded` now calls
+`_fit_all_fragments()` instead of `ensureVisible` so the whole fragment is framed.
+NOTE: this is a general puzzle-window change, not strictly Phase 107.

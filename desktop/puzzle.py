@@ -1395,8 +1395,9 @@ class PuzzleCanvasWindow(QMainWindow):
                 self._fit_all_fragments()
                 logger.info("Document load complete: all fragments loaded")
         else:
-            # Single fragment add: scroll to show it without shrinking existing fragments
-            self.canvas_view.ensureVisible(item.sceneBoundingRect(), 50, 50)
+            # Single fragment add: fit the view so the WHOLE fragment is visible
+            # by default (UAT). The scholar can re-zoom afterwards via the toolbar.
+            self._fit_all_fragments()
 
     def _fit_all_fragments(self):
         """Fit view to show all fragments with some padding."""

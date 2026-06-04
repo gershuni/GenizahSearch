@@ -318,7 +318,7 @@ try:
         QCheckBox, QMenu,
     )
     from PyQt6.QtCore import Qt, QThread, pyqtSignal
-    from PyQt6.QtGui import QPalette, QPixmap, QImage
+    from PyQt6.QtGui import QPalette, QPixmap, QImage, QTextCursor, QTextBlockFormat
     from desktop.image_loader import ImageLoaderThread
     from desktop.widgets.line_number_text_edit import apply_line_numbered_text
     _QT_AVAILABLE = True
@@ -565,6 +565,50 @@ if _QT_AVAILABLE:
                     qimg = None
                 self.resolved.emit(self._gen, i, qimg)
 
+    class _PannableScrollArea(QScrollArea):
+        """QScrollArea whose content can be dragged with the mouse (hand-pan).
+
+        UAT: when the anchor image is zoomed larger than the viewport the scholar
+        drags it into view instead of fishing for scrollbars. Mouse events that
+        the inner QLabel ignores propagate up to this widget.
+        """
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self._panning = False
+            self._pan_anchor = None
+            self.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
+
+        def mousePressEvent(self, e):
+            if e.button() == Qt.MouseButton.LeftButton:
+                self._panning = True
+                self._pan_anchor = e.position().toPoint()
+                self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+                e.accept()
+                return
+            super().mousePressEvent(e)
+
+        def mouseMoveEvent(self, e):
+            if self._panning and self._pan_anchor is not None:
+                pos = e.position().toPoint()
+                delta = pos - self._pan_anchor
+                self._pan_anchor = pos
+                hbar = self.horizontalScrollBar()
+                vbar = self.verticalScrollBar()
+                hbar.setValue(hbar.value() - delta.x())
+                vbar.setValue(vbar.value() - delta.y())
+                e.accept()
+                return
+            super().mouseMoveEvent(e)
+
+        def mouseReleaseEvent(self, e):
+            if e.button() == Qt.MouseButton.LeftButton and self._panning:
+                self._panning = False
+                self.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
+                e.accept()
+                return
+            super().mouseReleaseEvent(e)
+
     # -------------------------------------------------------------------------
     # JoinWorkbenchWindow — the main modeless QDialog shell (Plan 02, JWB-01).
     # -------------------------------------------------------------------------
@@ -602,6 +646,8 @@ if _QT_AVAILABLE:
             # Known-join rows (cached for the joins-context dropdown) + per-row checkboxes
             self._known_join_rows = []
             self._join_row_checks = []
+            # Joins section is collapsed by default; clicking the header expands it.
+            self._joins_expanded = False
 
             # Worker refs (best-effort cancel on re-anchor / close)
             self._anchor_worker = None
@@ -699,30 +745,37 @@ if _QT_AVAILABLE:
 
             layout.addLayout(toolbar)
 
-            # 5. Image area (scroll + label)
-            self.anchor_img_scroll = QScrollArea()
-            self.anchor_img_scroll.setWidgetResizable(True)
+            # 5. Image area — pannable scroll (UAT: drag to move a zoomed image).
+            # widgetResizable=False so a zoomed pixmap overflows the viewport and
+            # becomes scrollable/pannable; the scroll area centers small images.
+            self.anchor_img_scroll = _PannableScrollArea()
+            self.anchor_img_scroll.setWidgetResizable(False)
+            self.anchor_img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
             img_bg = "#374151" if self.is_dark else "#e2e8f0"
             self.anchor_img_label = QLabel()
             self.anchor_img_label.setMinimumSize(360, 280)
             self.anchor_img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.anchor_img_label.setStyleSheet(f"background:{img_bg};")
             self.anchor_img_scroll.setWidget(self.anchor_img_label)
-            layout.addWidget(self.anchor_img_scroll, 1)
 
-            # 6. Transcription text browser
-            # UAT: Hebrew transcription is RTL — right-align the text AND move the
-            # line-number gutter to the right edge. apply_line_numbered_text's
-            # _reposition_gutter already places the gutter on the leading (right)
-            # side when the widget's layoutDirection is RTL, so setting the
-            # direction here drives both behaviours.
+            # 6. Transcription text browser — RTL: right-aligned text AND the
+            # line-number gutter on the right edge (apply_line_numbered_text's
+            # _reposition_gutter places the gutter on the leading side under RTL).
             self.anchor_text_browser = QTextBrowser()
             self.anchor_text_browser.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-            layout.addWidget(self.anchor_text_browser, 1)
 
-            # 7. Known-joins panel — UAT: lives UNDER the anchor text on the LEFT
-            # side (the right pane is reserved for the Phase-108 candidate hunt).
-            layout.addWidget(self._build_joins_panel())
+            # 7. Image / text / joins in a vertical splitter so each is resizable
+            # (UAT). The known-joins section lives UNDER the text on the LEFT;
+            # the right pane is reserved for the Phase-108 candidate hunt.
+            self.left_split = QSplitter(Qt.Orientation.Vertical)
+            self.left_split.addWidget(self.anchor_img_scroll)
+            self.left_split.addWidget(self.anchor_text_browser)
+            self.left_split.addWidget(self._build_joins_panel())
+            self.left_split.setStretchFactor(0, 1)
+            self.left_split.setStretchFactor(1, 1)
+            self.left_split.setStretchFactor(2, 0)
+            self.left_split.setSizes([360, 300, 1])  # joins collapsed (header only)
+            layout.addWidget(self.left_split, 1)
 
             return pane
 
@@ -784,11 +837,11 @@ if _QT_AVAILABLE:
             return pane
 
         def _build_joins_panel(self) -> QWidget:
-            """Build the known-joins panel (hidden when empty, D-11).
+            """Build the known-joins panel (UAT round 2).
 
-            UAT additions: a "joins context" dropdown button (mirrors the
-            ResultDialog joins button), a Select-All checkbox + "Add selected to
-            puzzle" button, and per-row select checkboxes (built in _build_join_row).
+            Collapsed by default: only the clickable "Known Joins (N)" header
+            shows; clicking it expands a resizable body (controls + scrollable
+            rows). A chain-icon dropdown button gives the joins-context menu.
             """
             header_color = "#14b8a6" if self.is_dark else "#0f766e"
 
@@ -797,24 +850,35 @@ if _QT_AVAILABLE:
             joins_panel_layout.setContentsMargins(0, 0, 0, 0)
             joins_panel_layout.setSpacing(4)
 
-            # Header row: title + joins-context dropdown button
+            # Header row: clickable collapse/expand toggle + chain-icon dropdown.
             header_row = QHBoxLayout()
             header_row.setSpacing(6)
-            self.joins_header = QLabel()
-            self.joins_header.setStyleSheet(
-                f"font-weight:bold;font-size:11px;color:{header_color};"
+            self.btn_joins_toggle = QPushButton(f"▸ {tr('Known Joins')}")
+            self.btn_joins_toggle.setFlat(True)
+            self.btn_joins_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.btn_joins_toggle.setStyleSheet(
+                f"QPushButton{{font-weight:bold;font-size:11px;color:{header_color};"
+                f"text-align:left;border:none;padding:0;}}"
             )
-            header_row.addWidget(self.joins_header)
+            self.btn_joins_toggle.clicked.connect(self._toggle_joins_body)
+            header_row.addWidget(self.btn_joins_toggle)
             header_row.addStretch()
 
-            self.btn_joins_context = QPushButton(tr("Joins context"))
+            # Joins-context dropdown — chain icon + ▾ triangle to signal a menu.
+            self.btn_joins_context = QPushButton("\U0001f517 ▾")
+            self.btn_joins_context.setFixedWidth(42)
             self.btn_joins_context.setToolTip(tr("Joins context"))
             self.btn_joins_context.setAccessibleName(tr("Joins context"))
             self.btn_joins_context.clicked.connect(self._show_joins_context_menu)
             header_row.addWidget(self.btn_joins_context)
             joins_panel_layout.addLayout(header_row)
 
-            # Bulk-select controls row
+            # Collapsible body (controls + scrollable rows) — hidden by default.
+            self.joins_body = QWidget()
+            body_layout = QVBoxLayout(self.joins_body)
+            body_layout.setContentsMargins(0, 0, 0, 0)
+            body_layout.setSpacing(4)
+
             controls_row = QHBoxLayout()
             controls_row.setSpacing(6)
             self.chk_join_select_all = QCheckBox(tr("Select All"))
@@ -826,22 +890,52 @@ if _QT_AVAILABLE:
             self.btn_add_selected_puzzle.setAccessibleName(tr("Add selected to puzzle"))
             self.btn_add_selected_puzzle.clicked.connect(self._add_selected_to_puzzle)
             controls_row.addWidget(self.btn_add_selected_puzzle)
-            joins_panel_layout.addLayout(controls_row)
+            body_layout.addLayout(controls_row)
 
-            # Scrollable rows container
             rows_scroll = QScrollArea()
             rows_scroll.setWidgetResizable(True)
-            rows_scroll.setMaximumHeight(320)
             rows_container = QWidget()
             self.joins_rows_layout = QVBoxLayout(rows_container)
             self.joins_rows_layout.setContentsMargins(0, 0, 0, 0)
             self.joins_rows_layout.setSpacing(2)
             self.joins_rows_layout.addStretch()
             rows_scroll.setWidget(rows_container)
-            joins_panel_layout.addWidget(rows_scroll)
+            body_layout.addWidget(rows_scroll)
+
+            self.joins_body.setVisible(False)  # collapsed by default
+            joins_panel_layout.addWidget(self.joins_body)
 
             self.joins_panel.setVisible(False)
             return self.joins_panel
+
+        def _joins_header_text(self) -> str:
+            """Header label: arrow reflects expanded state + current join count."""
+            arrow = "▾" if self._joins_expanded else "▸"
+            n = len(self._known_join_rows)
+            return f"{arrow} {tr('Known Joins')} ({n})"
+
+        def _set_joins_expanded(self, expanded: bool):
+            """Show/hide the joins body and resize the splitter (default ≈ half)."""
+            self._joins_expanded = bool(expanded)
+            try:
+                self.joins_body.setVisible(self._joins_expanded)
+                self.btn_joins_toggle.setText(self._joins_header_text())
+            except RuntimeError:
+                return
+            split = getattr(self, "left_split", None)
+            if split is None:
+                return
+            total = sum(split.sizes()) or split.height() or 720
+            if self._joins_expanded:
+                # joins ≈ half the height; image + text share the other half.
+                split.setSizes([int(total * 0.25), int(total * 0.25), int(total * 0.5)])
+            else:
+                # joins collapsed to its header; image + text share the space.
+                split.setSizes([int(total * 0.5), int(total * 0.5), 1])
+
+        def _toggle_joins_body(self):
+            """Header click — flip the joins section open/closed (UAT)."""
+            self._set_joins_expanded(not self._joins_expanded)
 
         # ------------------------------------------------------------------
         # Anchor loading / set_anchor
@@ -877,6 +971,7 @@ if _QT_AVAILABLE:
             self._fit_pending = True  # fit the whole fragment to view on first image
             self._anchor_full_pix = None
             self._anchor_images = []
+            self._set_joins_expanded(False)  # joins collapse on each fresh anchor
 
             try:
                 self.anchor_img_label.setText("...")
@@ -917,6 +1012,7 @@ if _QT_AVAILABLE:
                     source_text=text,
                     is_html=True,
                 )
+                self._right_align_anchor_text()
             except RuntimeError:
                 pass
 
@@ -1014,6 +1110,9 @@ if _QT_AVAILABLE:
             )
             try:
                 self.anchor_img_label.setPixmap(scaled)
+                # Size the label to the pixmap so the scroll area can pan/scroll a
+                # zoomed image (minimumSize keeps small images centered).
+                self.anchor_img_label.resize(scaled.size())
             except RuntimeError:
                 pass
 
@@ -1063,6 +1162,25 @@ if _QT_AVAILABLE:
                     source_text=text,
                     is_html=True,
                 )
+                self._right_align_anchor_text()
+            except RuntimeError:
+                pass
+
+        def _right_align_anchor_text(self):
+            """Force every block of the anchor transcription to right-align (RTL UAT).
+
+            htmlify already emits a right-aligned RTL div, but applying the block
+            format directly guarantees right alignment regardless of how Qt renders
+            the wrapper.
+            """
+            try:
+                cursor = self.anchor_text_browser.textCursor()
+                cursor.select(QTextCursor.SelectionType.Document)
+                fmt = QTextBlockFormat()
+                fmt.setAlignment(Qt.AlignmentFlag.AlignRight)
+                cursor.mergeBlockFormat(fmt)
+                cursor.clearSelection()
+                self.anchor_text_browser.setTextCursor(cursor)
             except RuntimeError:
                 pass
 
@@ -1157,7 +1275,7 @@ if _QT_AVAILABLE:
                 return
 
             try:
-                self.joins_header.setText(f"{tr('Known Joins')} ({count})")
+                self.btn_joins_toggle.setText(self._joins_header_text())
             except RuntimeError:
                 return
 
