@@ -3684,4 +3684,7 @@ TRANSLATIONS.update({
     "img":              "תמונה",                       # meta_brief image-count unit (Plan 02 Task 1)
     "Could not load joins. Click to retry.": "לא ניתן לטעון צירופים. לחץ לניסיון חוזר.",  # known-joins retry affordance (Plan 02 Task 3, REC-2)
     "No manuscript found for '{}'": "לא נמצא כתב יד עבור '{}'",  # cold-start no-match (Plan 02 Task 3)
+    # --- Phase 107 UAT follow-up (left-pane joins panel + puzzle multi-add) ---
+    "Add selected to puzzle": "הוסף נבחרים לפאזל",
+    "Joins context":          "הקשר הצירופים",
 })

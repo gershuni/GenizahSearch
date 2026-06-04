@@ -19,6 +19,7 @@ from desktop.join_workbench import (
     _image_url_for_idx,
     normalize_join_source,
     build_known_join_rows,
+    puzzle_add_targets,
 )
 
 
@@ -508,3 +509,29 @@ class TestBuildKnownJoinRows:
         assert "T-S 3" in shelves
         assert "T-S 9" in shelves
         assert srcs["T-S 9"] == "community"
+
+
+class TestPuzzleAddTargets:
+    """puzzle_add_targets() — anchor auto-add + dedup (UAT follow-up)."""
+
+    def test_anchor_always_first_and_present(self):
+        assert puzzle_add_targets("ANCH", ["M1", "M2"]) == ["ANCH", "M1", "M2"]
+
+    def test_anchor_not_duplicated_when_among_members(self):
+        # "if the anchor already there it does not add it again"
+        assert puzzle_add_targets("ANCH", ["M1", "ANCH", "M2"]) == ["ANCH", "M1", "M2"]
+
+    def test_members_deduped(self):
+        assert puzzle_add_targets("ANCH", ["M1", "M1", "M2"]) == ["ANCH", "M1", "M2"]
+
+    def test_empty_and_falsy_sids_dropped(self):
+        assert puzzle_add_targets("ANCH", ["", None, "  ", "M1"]) == ["ANCH", "M1"]
+
+    def test_empty_members_returns_anchor_only(self):
+        assert puzzle_add_targets("ANCH", []) == ["ANCH"]
+
+    def test_no_anchor_no_members_returns_empty(self):
+        assert puzzle_add_targets("", []) == []
+
+    def test_whitespace_trimmed_for_dedup(self):
+        assert puzzle_add_targets("ANCH", [" ANCH ", "M1"]) == ["ANCH", "M1"]

@@ -44,9 +44,48 @@ result: [pending]
 
 total: 7
 passed: 0
-issues: 0
+issues: 6
 pending: 7
 skipped: 0
 blocked: 0
 
 ## Gaps
+
+UAT round 1 (2026-06-04, Hillel) surfaced 6 refinements to the workbench shell.
+All addressed in code; pending live re-test.
+
+### G1. Anchor image should default to showing the ENTIRE fragment
+status: resolved-in-code
+fix: `_fit_to_view()` computes a fit-to-viewport zoom on the first image of each
+anchor (`_fit_pending` set in `set_anchor`, consumed in `_on_img`). Folio nav /
+manual zoom keep the user's current zoom.
+
+### G2. Known-joins panel belongs on the LEFT, under the anchor text (scrollable)
+status: resolved-in-code
+fix: panel construction moved from `_build_right_pane` to `_build_joins_panel()`,
+added to the left anchor pane under the transcription browser. Right pane reserved
+for the Phase-108 candidate hunt. Internal QScrollArea (maxHeight 320) preserved.
+
+### G3. Joins-context button (like ResultDialog) that shows the joins
+status: resolved-in-code
+fix: `btn_joins_context` in the joins-panel header opens a QMenu of connected
+members (`_show_joins_context_menu`); selecting one re-anchors the workbench.
+NOTE: implemented as a re-anchor dropdown (closest match to ResultDialog's joins
+button) — confirm this is the intended behavior vs. opening the full JoinsDialog.
+
+### G4. Anchor text + line numbering must be right-aligned (RTL)
+status: resolved-in-code
+fix: `anchor_text_browser.setLayoutDirection(RightToLeft)` — the line-number
+gutter's `_reposition_gutter` already moves the gutter to the right (leading) edge
+under RTL, so text and numbers both right-align.
+
+### G5. "Add selected to puzzle" checkbox + add-only-one option
+status: resolved-in-code
+fix: per-row select checkbox + Select-All + "Add selected to puzzle" button in the
+joins panel; the existing per-row 🧩 button remains the add-only-one path.
+
+### G6. Adding to puzzle auto-adds the anchor (dedup if already present)
+status: resolved-in-code
+fix: `puzzle_add_targets()` (pure, unit-tested) always pins the anchor exactly once,
+deduped; both single-add and add-selected route through it via the public
+`open_anchor_in_puzzle` (SC#5). Puzzle canvas also dedups by (sys_id, folio_label).

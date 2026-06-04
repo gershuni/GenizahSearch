@@ -32,6 +32,7 @@ __all__ = [
     "normalize_join_source",
     "_other_member_of",
     "build_known_join_rows",
+    "puzzle_add_targets",
     # Plan 02 window class
     "JoinWorkbenchWindow",
 ]
@@ -284,6 +285,25 @@ def build_known_join_rows(user_joins, pgp_joins, fjms_joins, community_joins,
     return rows
 
 
+def puzzle_add_targets(anchor_sid, member_sids):
+    """Return the ordered, de-duplicated list of sys_ids to add to the puzzle.
+
+    UAT contract: "adding to puzzle automatically adds the anchor; if the anchor
+    is already there it is not added again."  The anchor is ALWAYS first and
+    appears EXACTLY once, even if it also shows up among ``member_sids``.  Empty
+    / falsy sids are dropped.  The puzzle canvas itself further dedups by
+    (sys_id, folio_label), so re-adding across separate clicks is also safe.
+    """
+    out = []
+    seen = set()
+    for sid in [anchor_sid, *(member_sids or [])]:
+        sid = (sid or "").strip()
+        if sid and sid not in seen:
+            seen.add(sid)
+            out.append(sid)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Plan 02 — Qt imports and QThread workers.
 # These are placed BELOW the pure helpers so the module can still be imported
@@ -295,6 +315,7 @@ try:
     from PyQt6.QtWidgets import (
         QDialog, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QScrollArea,
         QSplitter, QTextBrowser, QWidget, QLineEdit, QInputDialog, QMessageBox,
+        QCheckBox, QMenu,
     )
     from PyQt6.QtCore import Qt, QThread, pyqtSignal
     from PyQt6.QtGui import QPalette, QPixmap, QImage
@@ -576,6 +597,11 @@ if _QT_AVAILABLE:
             self._anchor_idx = 0
             self._zoom = 1.0
             self._anchor_full_pix = None
+            # UAT follow-up: fit-the-whole-fragment-to-view on each fresh anchor image
+            self._fit_pending = False
+            # Known-join rows (cached for the joins-context dropdown) + per-row checkboxes
+            self._known_join_rows = []
+            self._join_row_checks = []
 
             # Worker refs (best-effort cancel on re-anchor / close)
             self._anchor_worker = None
@@ -685,8 +711,18 @@ if _QT_AVAILABLE:
             layout.addWidget(self.anchor_img_scroll, 1)
 
             # 6. Transcription text browser
+            # UAT: Hebrew transcription is RTL — right-align the text AND move the
+            # line-number gutter to the right edge. apply_line_numbered_text's
+            # _reposition_gutter already places the gutter on the leading (right)
+            # side when the widget's layoutDirection is RTL, so setting the
+            # direction here drives both behaviours.
             self.anchor_text_browser = QTextBrowser()
+            self.anchor_text_browser.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
             layout.addWidget(self.anchor_text_browser, 1)
+
+            # 7. Known-joins panel — UAT: lives UNDER the anchor text on the LEFT
+            # side (the right pane is reserved for the Phase-108 candidate hunt).
+            layout.addWidget(self._build_joins_panel())
 
             return pane
 
@@ -742,18 +778,55 @@ if _QT_AVAILABLE:
             anchor_action_row.addStretch()
             layout.addLayout(anchor_action_row)
 
-            # 3. Known-joins panel (hidden when empty, D-11)
+            # 3. (Phase 108) candidate-hunt surface lands here. The known-joins
+            # panel moved to the LEFT pane (under the anchor text) per UAT.
+            layout.addStretch()
+            return pane
+
+        def _build_joins_panel(self) -> QWidget:
+            """Build the known-joins panel (hidden when empty, D-11).
+
+            UAT additions: a "joins context" dropdown button (mirrors the
+            ResultDialog joins button), a Select-All checkbox + "Add selected to
+            puzzle" button, and per-row select checkboxes (built in _build_join_row).
+            """
+            header_color = "#14b8a6" if self.is_dark else "#0f766e"
+
             self.joins_panel = QWidget()
             joins_panel_layout = QVBoxLayout(self.joins_panel)
             joins_panel_layout.setContentsMargins(0, 0, 0, 0)
             joins_panel_layout.setSpacing(4)
 
-            header_color = "#14b8a6" if self.is_dark else "#0f766e"
+            # Header row: title + joins-context dropdown button
+            header_row = QHBoxLayout()
+            header_row.setSpacing(6)
             self.joins_header = QLabel()
             self.joins_header.setStyleSheet(
                 f"font-weight:bold;font-size:11px;color:{header_color};"
             )
-            joins_panel_layout.addWidget(self.joins_header)
+            header_row.addWidget(self.joins_header)
+            header_row.addStretch()
+
+            self.btn_joins_context = QPushButton(tr("Joins context"))
+            self.btn_joins_context.setToolTip(tr("Joins context"))
+            self.btn_joins_context.setAccessibleName(tr("Joins context"))
+            self.btn_joins_context.clicked.connect(self._show_joins_context_menu)
+            header_row.addWidget(self.btn_joins_context)
+            joins_panel_layout.addLayout(header_row)
+
+            # Bulk-select controls row
+            controls_row = QHBoxLayout()
+            controls_row.setSpacing(6)
+            self.chk_join_select_all = QCheckBox(tr("Select All"))
+            self.chk_join_select_all.stateChanged.connect(self._on_join_select_all)
+            controls_row.addWidget(self.chk_join_select_all)
+            controls_row.addStretch()
+            self.btn_add_selected_puzzle = QPushButton(tr("Add selected to puzzle"))
+            self.btn_add_selected_puzzle.setToolTip(tr("Add selected to puzzle"))
+            self.btn_add_selected_puzzle.setAccessibleName(tr("Add selected to puzzle"))
+            self.btn_add_selected_puzzle.clicked.connect(self._add_selected_to_puzzle)
+            controls_row.addWidget(self.btn_add_selected_puzzle)
+            joins_panel_layout.addLayout(controls_row)
 
             # Scrollable rows container
             rows_scroll = QScrollArea()
@@ -768,10 +841,7 @@ if _QT_AVAILABLE:
             joins_panel_layout.addWidget(rows_scroll)
 
             self.joins_panel.setVisible(False)
-            layout.addWidget(self.joins_panel)
-
-            layout.addStretch()
-            return pane
+            return self.joins_panel
 
         # ------------------------------------------------------------------
         # Anchor loading / set_anchor
@@ -804,6 +874,7 @@ if _QT_AVAILABLE:
 
             self._anchor_idx = max(0, page - 1)
             self._zoom = 1.0
+            self._fit_pending = True  # fit the whole fragment to view on first image
             self._anchor_full_pix = None
             self._anchor_images = []
 
@@ -897,7 +968,30 @@ if _QT_AVAILABLE:
             if gen != self._gen:
                 return  # must-fix #7
             self._anchor_full_pix = QPixmap.fromImage(qimage)
+            # UAT: show the ENTIRE fragment by default. Fit once per fresh anchor
+            # image; folio nav / manual zoom keep the user's current zoom.
+            if self._fit_pending:
+                self._fit_to_view()
+                self._fit_pending = False
             self._apply_zoom()
+
+        def _fit_to_view(self):
+            """Set the zoom factor so the whole fragment image fits the image area."""
+            if not self._anchor_full_pix:
+                return
+            try:
+                vp = self.anchor_img_scroll.viewport().size()
+            except RuntimeError:
+                return
+            pw, ph = self._anchor_full_pix.width(), self._anchor_full_pix.height()
+            vw, vh = vp.width(), vp.height()
+            if pw <= 0 or ph <= 0 or vw <= 0 or vh <= 0:
+                return
+            ratio = min(vw / pw, vh / ph)
+            if ratio > 0:
+                # Never upscale a small image past native; allow shrink-to-fit below
+                # the manual-zoom clamp floor so the whole fragment is visible.
+                self._zoom = min(ratio, 1.0)
 
         def _on_img_failed(self, gen: int):
             """Handle load_failed signal. Drop if generation is stale."""
@@ -1046,6 +1140,16 @@ if _QT_AVAILABLE:
                     item.widget().deleteLater()
 
             count = len(rows)
+            # Cache rows for the joins-context dropdown; reset bulk-select state.
+            self._known_join_rows = list(rows)
+            self._join_row_checks = []
+            try:
+                self.chk_join_select_all.blockSignals(True)
+                self.chk_join_select_all.setChecked(False)
+                self.chk_join_select_all.blockSignals(False)
+            except RuntimeError:
+                pass
+
             # D-11: panel hidden entirely when empty
             try:
                 self.joins_panel.setVisible(count > 0)
@@ -1114,6 +1218,15 @@ if _QT_AVAILABLE:
             h.setSpacing(4)
             h.setContentsMargins(4, 2, 4, 2)
 
+            # Per-row select checkbox (UAT: "add selected to puzzle"). Carries the
+            # member sys_id/shelfmark so _add_selected_to_puzzle can collect picks.
+            chk = QCheckBox()
+            chk.setProperty("member_sid", other_sid)
+            chk.setProperty("member_shelf", other_shelf)
+            chk.stateChanged.connect(self._on_join_row_check_changed)
+            h.addWidget(chk)
+            self._join_row_checks.append(chk)
+
             # Thumbnail label (48x48, filled by ThumbBatchWorker slot)
             thumb_label = QLabel("(no img)")
             thumb_label.setFixedSize(48, 48)
@@ -1172,8 +1285,9 @@ if _QT_AVAILABLE:
             btn_puzzle.setFixedWidth(28)
             btn_puzzle.setToolTip(tr("Add to Puzzle"))
             btn_puzzle.setAccessibleName(tr("Add to Puzzle"))
+            # UAT: adding a single member also pins the anchor (dedup-safe).
             btn_puzzle.clicked.connect(
-                lambda checked=False, sid=other_sid: self._app.open_anchor_in_puzzle(sid)
+                lambda checked=False, sid=other_sid: self._add_member_to_puzzle_with_anchor(sid)
             )
             actions.addWidget(btn_puzzle)
 
@@ -1207,6 +1321,86 @@ if _QT_AVAILABLE:
 
             h.addLayout(actions)
             return widget
+
+        # ------------------------------------------------------------------
+        # Known-joins puzzle / selection / context callbacks (UAT follow-up)
+        # ------------------------------------------------------------------
+
+        def _add_to_puzzle_targets(self, member_sids):
+            """Add the anchor + the given members to the puzzle via the public
+            host method (SC#5: open_anchor_in_puzzle, NOT _vs_*).
+
+            puzzle_add_targets guarantees the anchor is included exactly once and
+            is never duplicated; the puzzle canvas dedups across separate clicks.
+            """
+            for sid in puzzle_add_targets(self._anchor_sid, member_sids):
+                self._app.open_anchor_in_puzzle(sid)
+
+        def _add_member_to_puzzle_with_anchor(self, member_sid):
+            """Single-member add — pins the anchor too (UAT)."""
+            self._add_to_puzzle_targets([member_sid])
+
+        def _add_selected_to_puzzle(self):
+            """Add every checked known-join row (plus the anchor) to the puzzle (UAT)."""
+            picks = []
+            for chk in self._join_row_checks:
+                try:
+                    if chk.isChecked():
+                        picks.append(chk.property("member_sid") or "")
+                except RuntimeError:
+                    continue
+            self._add_to_puzzle_targets(picks)
+
+        def _on_join_row_check_changed(self, _state=None):
+            """Keep the Select-All tri-state in sync with the per-row checkboxes."""
+            checks = [c for c in self._join_row_checks]
+            if not checks:
+                return
+            try:
+                checked = sum(1 for c in checks if c.isChecked())
+                self.chk_join_select_all.blockSignals(True)
+                self.chk_join_select_all.setChecked(checked == len(checks) and checked > 0)
+                self.chk_join_select_all.blockSignals(False)
+            except RuntimeError:
+                pass
+
+        def _on_join_select_all(self, state):
+            """Select / clear every per-row checkbox."""
+            want = bool(state)
+            for chk in self._join_row_checks:
+                try:
+                    chk.blockSignals(True)
+                    chk.setChecked(want)
+                    chk.blockSignals(False)
+                except RuntimeError:
+                    continue
+
+        def _show_joins_context_menu(self):
+            """Pop a dropdown of the connected members (mirrors the ResultDialog
+            joins button). Selecting a member re-anchors the workbench on it."""
+            menu = QMenu(self)
+            rows = self._known_join_rows or []
+            if not rows:
+                act = menu.addAction(tr("No joined fragments"))
+                act.setEnabled(False)
+            else:
+                header = menu.addAction(f"{tr('Known Joins')} ({len(rows)})")
+                header.setEnabled(False)
+                menu.addSeparator()
+                for row in rows:
+                    sid = row.get("other_sid") or ""
+                    shelf = row.get("other_shelf") or "?"
+                    label, _ = badge_for_source(row.get("source") or "", self.is_dark)
+                    act = menu.addAction(f"[{label}] {shelf}")
+                    act.triggered.connect(
+                        lambda checked=False, s=sid, sh=shelf: self.set_anchor(
+                            {"display": {"id": s, "shelfmark": sh, "img": 1},
+                             "uid": f"{s}_P001"}
+                        )
+                    )
+            menu.exec(self.btn_joins_context.mapToGlobal(
+                self.btn_joins_context.rect().bottomLeft()
+            ))
 
         # ------------------------------------------------------------------
         # Anchor action-row callbacks
