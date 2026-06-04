@@ -120,3 +120,27 @@ status: resolved-in-code
 fix: single-fragment add in `desktop/puzzle.py::_on_image_loaded` now calls
 `_fit_all_fragments()` instead of `ensureVisible` so the whole fragment is framed.
 NOTE: this is a general puzzle-window change, not strictly Phase 107.
+
+---
+
+UAT round 3 (2026-06-04, Hillel) — naming + cold-start polish.
+
+### G12. Remove the "ANCHOR" tag label
+status: resolved-in-code
+fix: dropped the ANCHOR QLabel from the anchor pane (the tr key is left in
+TRANSLATIONS, harmless).
+
+### G13. "Pick from List" icon next to "Open fragment"
+status: resolved-in-code
+fix: 📋 button in the cold-start row → `_pick_from_list()` opens a list picker
+(mirrors JoinsDialog `_show_list_picker`, via `self._app.lists_mgr`); selecting an
+item sets it as the anchor.
+
+### G14. Rename "Join Workbench" → "Joins Lab" (matches the Hebrew מעבדת צירופים)
+status: resolved-in-code
+fix: window title + cold-start dialog titles use tr("Joins Lab"); translation key
+renamed "Join Workbench" → "Joins Lab" (Hebrew unchanged).
+
+### G15. Hebrew fix: "הזן סימת מדף…" → "הזן מספר מדף…"
+status: resolved-in-code
+fix: corrected the "Enter shelfmark…" value in the Phase-107 i18n block.

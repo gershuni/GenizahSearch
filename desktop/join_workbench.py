@@ -315,7 +315,7 @@ try:
     from PyQt6.QtWidgets import (
         QDialog, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QScrollArea,
         QSplitter, QTextBrowser, QWidget, QLineEdit, QInputDialog, QMessageBox,
-        QCheckBox, QMenu,
+        QCheckBox, QMenu, QComboBox, QListWidget, QListWidgetItem,
     )
     from PyQt6.QtCore import Qt, QThread, pyqtSignal
     from PyQt6.QtGui import QPalette, QPixmap, QImage, QTextCursor, QTextBlockFormat
@@ -664,7 +664,7 @@ if _QT_AVAILABLE:
             self.is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
 
             self._init_ui()
-            self.setWindowTitle(tr("Join Workbench"))
+            self.setWindowTitle(tr("Joins Lab"))
             self.setMinimumSize(900, 680)
             self.resize(1000, 720)
 
@@ -688,12 +688,7 @@ if _QT_AVAILABLE:
             layout.setContentsMargins(8, 8, 8, 8)
             layout.setSpacing(6)
 
-            # 1. ANCHOR tag strip
-            anchor_tag = QLabel(tr("ANCHOR"))
-            anchor_tag.setStyleSheet("font-weight:bold;font-size:11px;color:#14b8a6;")
-            layout.addWidget(anchor_tag)
-
-            # 2. Shelfmark label
+            # 1. Shelfmark label
             self.anchor_shelf = QLabel()
             self.anchor_shelf.setStyleSheet("font-weight:bold;font-size:15px;")
             self.anchor_shelf.setTextInteractionFlags(
@@ -794,6 +789,13 @@ if _QT_AVAILABLE:
             btn_open.clicked.connect(self._cold_start_open)
             coldstart_row.addWidget(self.coldstart_input, 1)
             coldstart_row.addWidget(btn_open)
+            # Pick-from-personal-list button (📋) — mirrors the JoinsDialog affordance.
+            self.btn_coldstart_pick = QPushButton("\U0001f4cb")
+            self.btn_coldstart_pick.setFixedWidth(30)
+            self.btn_coldstart_pick.setToolTip(tr("Pick from personal list"))
+            self.btn_coldstart_pick.setAccessibleName(tr("Pick from personal list"))
+            self.btn_coldstart_pick.clicked.connect(self._pick_from_list)
+            coldstart_row.addWidget(self.btn_coldstart_pick)
             layout.addLayout(coldstart_row)
 
             # 2. Anchor action-row (always visible, D-13)
@@ -1562,6 +1564,108 @@ if _QT_AVAILABLE:
         # Cold-start entry point (Entry point #3, D-03)
         # ------------------------------------------------------------------
 
+        def _pick_from_list(self):
+            """Pick a fragment from a personal list and set it as the anchor (UAT).
+
+            Mirrors the JoinsDialog list-picker (corrections_ui._show_list_picker).
+            """
+            lists_mgr = getattr(self._app, "lists_mgr", None)
+            if not lists_mgr:
+                QMessageBox.information(
+                    self, tr("Joins Lab"), tr("No lists available")
+                )
+                return
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle(tr("Pick from List"))
+            dialog.resize(400, 300)
+            layout = QVBoxLayout(dialog)
+
+            list_layout = QHBoxLayout()
+            list_layout.addWidget(QLabel(tr("List:")))
+            list_combo = QComboBox()
+            list_combo.addItem(tr("-- Select list --"), None)
+            try:
+                all_lists = lists_mgr.get_all_lists(include_recent=True)
+            except Exception:
+                all_lists = []
+            for lst in all_lists:
+                display_name = lst.get("name", tr("Unnamed"))
+                if lst.get("is_recent"):
+                    display_name = tr("Recent")
+                list_combo.addItem(display_name, lst.get("id"))
+            list_layout.addWidget(list_combo, 1)
+            layout.addLayout(list_layout)
+
+            items_list = QListWidget()
+            layout.addWidget(items_list, 1)
+
+            def load_list_items():
+                items_list.clear()
+                list_id = list_combo.currentData()
+                if not list_id:
+                    return
+                try:
+                    entries = lists_mgr.get_items_in_list(list_id)
+                except Exception:
+                    entries = []
+                for entry in entries:
+                    sid = entry.get("sys_id", "")
+                    shelf = sid
+                    title = ""
+                    if self.meta_mgr and sid:
+                        try:
+                            s, _ = self.meta_mgr.get_meta_for_id(sid)
+                            if s:
+                                shelf = s
+                            cached = self.meta_mgr.nli_cache.get(sid, {})
+                            title = cached.get("title", "")
+                            if title and len(title) > 40:
+                                title = title[:40] + "..."
+                        except (KeyError, AttributeError, IndexError):
+                            pass
+                    display = f"{shelf} - {title}" if title else shelf
+                    li = QListWidgetItem(display)
+                    li.setData(Qt.ItemDataRole.UserRole, {"sys_id": sid, "shelfmark": shelf})
+                    items_list.addItem(li)
+
+            list_combo.currentIndexChanged.connect(load_list_items)
+
+            btn_row = QHBoxLayout()
+            btn_row.addStretch()
+            btn_cancel = QPushButton(tr("Cancel"))
+            btn_cancel.clicked.connect(dialog.reject)
+            btn_row.addWidget(btn_cancel)
+            btn_select = QPushButton(tr("Select"))
+            btn_select.setEnabled(False)
+            btn_row.addWidget(btn_select)
+            layout.addLayout(btn_row)
+
+            items_list.itemSelectionChanged.connect(
+                lambda: btn_select.setEnabled(bool(items_list.selectedItems()))
+            )
+            items_list.itemDoubleClicked.connect(lambda: btn_select.click())
+
+            picked = {}
+
+            def do_select():
+                sel = items_list.selectedItems()
+                if sel:
+                    picked.update(sel[0].data(Qt.ItemDataRole.UserRole) or {})
+                    dialog.accept()
+
+            btn_select.clicked.connect(do_select)
+
+            if dialog.exec() and picked.get("sys_id"):
+                self.set_anchor({
+                    "display": {
+                        "id": picked["sys_id"],
+                        "shelfmark": picked.get("shelfmark", ""),
+                        "img": 1,
+                    },
+                    "uid": f"{picked['sys_id']}_P001",
+                })
+
         def _cold_start_open(self):
             """Resolve a shelfmark string and set it as the anchor.
 
@@ -1584,7 +1688,7 @@ if _QT_AVAILABLE:
                     f"{o.get('shelfmark', '')} - {o.get('title', '')}" for o in opts
                 ]
                 choice, ok = QInputDialog.getItem(
-                    self, tr("Join Workbench"), tr("Enter shelfmark…"), items, 0, False
+                    self, tr("Joins Lab"), tr("Enter shelfmark…"), items, 0, False
                 )
                 if not ok:
                     return
@@ -1592,7 +1696,7 @@ if _QT_AVAILABLE:
 
             if not sid:
                 QMessageBox.warning(
-                    self, tr("Join Workbench"),
+                    self, tr("Joins Lab"),
                     tr("No manuscript found for '{}'").format(q),
                 )
                 return

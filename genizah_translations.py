@@ -3673,13 +3673,13 @@ LIBRARY_CODES_HE = {
 TRANSLATIONS.update({
     # --- UI labels (Plan 01 helpers + Plan 02 window + Plan 03 entry points) ---
     "Find joins":       "מצא צירופים",
-    "Join Workbench":   "מעבדת צירופים",
+    "Joins Lab":        "מעבדת צירופים",
     "ANCHOR":           "עוגן",
     "Known Joins":      "צירופים ידועים",
     "Make anchor":      "הגדר כעוגן",
     "Known join":       "צירוף ידוע",
     "Open fragment":    "פתח קטע",
-    "Enter shelfmark…": "הזן סימת מדף…",
+    "Enter shelfmark…": "הזן מספר מדף…",
     # --- helper / panel strings introduced by Plan 02 (bootstrapped HERE, used there) ---
     "img":              "תמונה",                       # meta_brief image-count unit (Plan 02 Task 1)
     "Could not load joins. Click to retry.": "לא ניתן לטעון צירופים. לחץ לניסיון חוזר.",  # known-joins retry affordance (Plan 02 Task 3, REC-2)
@@ -3687,4 +3687,5 @@ TRANSLATIONS.update({
     # --- Phase 107 UAT follow-up (left-pane joins panel + puzzle multi-add) ---
     "Add selected to puzzle": "הוסף נבחרים לפאזל",
     "Joins context":          "הקשר הצירופים",
+    "No lists available":     "אין רשימות זמינות",
 })
