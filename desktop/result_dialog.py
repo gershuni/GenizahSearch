@@ -285,6 +285,12 @@ class ResultDialog(QDialog):
         self.btn_add_to_puzzle.setToolTip(tr("Add to Fragment Puzzle"))
         self.btn_add_to_puzzle.clicked.connect(self._add_to_puzzle)
 
+        # Find joins button (Phase 107 JWB-02)
+        self.btn_rd_find_joins = QPushButton(f"\U0001F517 {tr('Find joins')}")
+        self.btn_rd_find_joins.setToolTip(tr("Find joins"))
+        self.btn_rd_find_joins.setAccessibleName(tr("Find joins"))
+        self.btn_rd_find_joins.clicked.connect(self._open_join_workbench)
+
         self.btn_ext_info = QPushButton(f"ℹ️ {tr('Info')}")
         self.btn_ext_info.setToolTip(tr("Show Extended Info"))
         self.btn_ext_info.setCheckable(True)
@@ -339,6 +345,7 @@ class ResultDialog(QDialog):
         action_row.addWidget(self.btn_search_parallels)
         action_row.addWidget(self.btn_add_to_list)
         action_row.addWidget(self.btn_add_to_puzzle)
+        action_row.addWidget(self.btn_rd_find_joins)
         action_row.addWidget(self.btn_ext_info)
         action_row.addWidget(self.btn_rd_bib_fjms)
         action_row.addWidget(self.btn_rd_bib_nli)
@@ -722,6 +729,31 @@ class ResultDialog(QDialog):
                     folio_label = current_img.get('label', '1r')
         parent.add_to_puzzle(sys_id, shelfmark, folio_label, fl_id)
         self.close()
+
+    def _open_join_workbench(self):
+        """Entry point: open/re-anchor the Join Workbench with the live page state. D-03 #1.
+        Builds the anchor from self.data (the live result dict) + the live current_* page attrs
+        (CODEX-VERIFIED must-fix #1: self.current_result does NOT exist - use self.data)."""
+        res = dict(self.data) if getattr(self, "data", None) else {}
+        # overlay the live page sys_id / page so the anchor matches what the scholar is viewing
+        sid = getattr(self, "current_sys_id", None)
+        if sid:
+            res["display"] = dict(res.get("display") or {})
+            res["display"]["id"] = sid
+            pnum = getattr(self, "current_p_num", None)   # REAL attr (result_dialog.py:68) - NOT p_num
+            if pnum:
+                res["display"]["img"] = pnum
+        # carry the live page text + uid so the workbench has the current folio's transcription/uid
+        txt = getattr(self, "current_page_text", None)
+        if txt:
+            res["full_text"] = txt
+        uid = getattr(self, "current_page_uid", None)
+        if uid:
+            res["uid"] = uid
+        app = getattr(self, "_app", None) or self.parent()
+        if app is not None and hasattr(app, "open_joins_workbench"):
+            app.open_joins_workbench(res)
+        self.close()   # ResultDialog closes after launching the workbench (iteration B / D-03 #1)
 
     def _rd_search_visual_similarity(self):
         """D-10: Show visual similarity dialog from ResultDialog context."""
