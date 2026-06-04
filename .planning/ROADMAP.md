@@ -488,7 +488,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 106. Joins Lab Shared Core (logic + adapters + tests) | v8.0.0 | 3/3 | Complete    | 2026-06-03 |
-| 107. Desktop Join Workbench — Anchor, Entry, Actions & Join Model | v8.0.0 | 3/3 | Complete   | 2026-06-04 |
+| 107. Desktop Join Workbench — Anchor, Entry, Actions & Join Model | v8.0.0 | 3/3 | Complete    | 2026-06-04 |
 | 108. Desktop Join Workbench — Builders, Candidates & Compare | v8.0.0 | 0/? | Not started | - |
 | 109. Visual-Similarity Merge & Soft-Retire | v8.0.0 | 0/? | Not started | - |
 | 110. Search-Support — Parallels Seeding (JSA-01) | v8.0.0 | 0/? | Not started | - |
