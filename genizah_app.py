@@ -3229,6 +3229,9 @@ class GenizahGUI(QMainWindow):
         # Puzzle window singleton (Phase 48)
         self._puzzle_window = None
 
+        # Join Workbench singleton (Phase 107)
+        self._join_workbench = None
+
         # Phase 96 fix-10: guard against any _save_session() call that fires
         # during the startup window (between __init__ and _restore_session()
         # completing).  If _save_session() wrote during this window it would
@@ -15385,6 +15388,49 @@ class GenizahGUI(QMainWindow):
         self._puzzle_window.show()
         self._puzzle_window.raise_()
         self._puzzle_window.activateWindow()
+
+    # ------------------------------------------------------------------ #
+    # Phase 107: Join Workbench host methods                              #
+    # ------------------------------------------------------------------ #
+
+    def open_joins_workbench(self, res: dict):
+        """Open (or re-anchor) the Join Workbench for the given result.
+        D-01: modeless (show(), not exec()). D-02: single reusable instance - second call re-anchors.
+        """
+        from desktop.join_workbench import JoinWorkbenchWindow  # lazy import (desktop-only)
+        if self._join_workbench is None or not self._join_workbench.isVisible():
+            self._join_workbench = JoinWorkbenchWindow(self, self)
+        self._join_workbench.set_anchor(res)
+        self._join_workbench.show()
+        self._join_workbench.raise_()
+        self._join_workbench.activateWindow()
+
+    def open_anchor_in_puzzle(self, sys_id: str):
+        """Public: add a fragment to the Fragment Puzzle canvas (Join Workbench path). SC#5."""
+        self._vs_add_to_puzzle(sys_id)
+
+    def open_anchor_as_join(self, anchor_sys_id: str, anchor_shelfmark: str):
+        """Public: open JoinsDialog with anchor as Fragment A; scholar enters B freely. SC#5, D-14."""
+        def browse_shelfmark(target_shelfmark):
+            self.browse_shelf_input.setText(target_shelfmark)
+            self._set_last_browse_field("shelf")
+            self.browse_load()
+
+        from corrections_ui import JoinsDialog
+        dialog = JoinsDialog(
+            self, self.corrections_client,
+            document_id=anchor_sys_id,
+            shelfmark=anchor_shelfmark,
+            on_browse=browse_shelfmark,
+            shelf_model=getattr(self, 'shelf_model', None),
+            joins_mgr=getattr(self, 'joins_mgr', None),
+            shelf_completer=getattr(self, 'shelf_completer', None),
+            lists_mgr=getattr(self, 'lists_mgr', None),
+            meta_mgr=self.meta_mgr,
+        )
+        # frag_b_input left EMPTY - scholar enters B freely (R-02). exec() blocks; the workbench
+        # caller calls _reload_known_joins() after this returns (SC#4 / Pitfall 3).
+        dialog.exec()
 
     def _open_settings_dialog(self):
         """Open the settings dialog."""
