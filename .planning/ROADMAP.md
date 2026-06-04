@@ -154,7 +154,7 @@ pairwise path and refresh the group. Bilingual from the first line. No candidate
 
 **Plans**: 3 plans
 - [x] 107-01-PLAN.md — i18n keys + pure helpers (iiif_full/meta_brief/badge_for_source/dedup_join_rows) + 3 Wave-0 test files (unit suite + 2 AST guards: no _vs_*, tr-key coverage) [wave 1]
-- [ ] 107-02-PLAN.md — JoinWorkbenchWindow shell: modeless QDialog + anchor pane (image route/zoom/folio nav/transcription) + three-source known-joins panel (badges + batched thumbnails, hidden-when-empty) + anchor action-row + per-row actions [wave 2]
+- [x] 107-02-PLAN.md — JoinWorkbenchWindow shell: modeless QDialog + anchor pane (image route/zoom/folio nav/transcription) + three-source known-joins panel (badges + batched thumbnails, hidden-when-empty) + anchor action-row + per-row actions [wave 2]
 - [ ] 107-03-PLAN.md — host wiring: open_joins_workbench single-instance + open_anchor_in_puzzle/open_anchor_as_join public wrappers + ResultDialog & Browse Find-joins entry hooks + full-suite/ruff gate [wave 3]
 
 ---
@@ -488,7 +488,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 106. Joins Lab Shared Core (logic + adapters + tests) | v8.0.0 | 3/3 | Complete    | 2026-06-03 |
-| 107. Desktop Join Workbench — Anchor, Entry, Actions & Join Model | v8.0.0 | 1/3 | In Progress|  |
+| 107. Desktop Join Workbench — Anchor, Entry, Actions & Join Model | v8.0.0 | 2/3 | In Progress|  |
 | 108. Desktop Join Workbench — Builders, Candidates & Compare | v8.0.0 | 0/? | Not started | - |
 | 109. Visual-Similarity Merge & Soft-Retire | v8.0.0 | 0/? | Not started | - |
 | 110. Search-Support — Parallels Seeding (JSA-01) | v8.0.0 | 0/? | Not started | - |
