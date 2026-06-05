@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Joins Lab — Redesign Sketch (Phase 108)</title>
+<style>
+  :root{
+    --bg:#1e1e1e; --panel:#252526; --panel2:#2d2d2d; --line:#3c3c3c;
+    --line2:#555; --txt:#d4d4d4; --muted:#94a3b8; --muted2:#6b7280;
+    --teal:#14b8a6; --teal-d:#0f766e; --blue:#3b82f6;
+    --y:#22c55e; --q:#f59e0b; --n:#ef4444;
+    --chip:#33373b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#141414;color:var(--txt);
+       font-family:'Segoe UI',Arial,sans-serif;font-size:13px;line-height:1.45}
+  .wrap{max-width:1320px;margin:18px auto;padding:0 16px 80px}
+  h1{font-size:19px;margin:0 0 2px}
+  .sub{color:var(--muted);font-size:12px;margin-bottom:14px}
+  .legend{background:var(--panel);border:1px solid var(--line);border-radius:8px;
+          padding:10px 14px;margin-bottom:16px}
+  .legend summary{cursor:pointer;font-weight:600;color:var(--teal)}
+  .legend ul{margin:8px 0 2px;padding-inline-start:20px;columns:2;column-gap:26px}
+  .legend li{margin:3px 0;color:#cbd5e1}
+  .legend li b{color:#fff}
+
+  /* desktop window frame */
+  .win{background:var(--bg);border:1px solid var(--line);border-radius:10px;
+       overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+  .titlebar{background:#323233;padding:7px 12px;font-size:12px;color:#cfcfcf;
+            display:flex;align-items:center;gap:8px;border-bottom:1px solid #000}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+  .split{display:flex;min-height:660px}
+  .anchor{flex:0 0 30%;min-width:210px;padding:12px;
+          display:flex;flex-direction:column;gap:8px;background:#1b1b1b}
+  .grip{flex:0 0 7px;background:var(--panel2);cursor:col-resize;position:relative;
+        border-inline:1px solid var(--line)}
+  .grip::after{content:"⋮";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+        color:var(--muted2);font-size:14px}
+  .grip:hover{background:#33373b}
+  .find{flex:1;min-width:0;padding:12px;display:flex;flex-direction:column;gap:8px}
+
+  .shelf{font-weight:700;font-size:15px}
+  .meta{font-size:11px;color:var(--muted)}
+  .toolbar{display:flex;gap:6px;align-items:center}
+  .btn{background:var(--panel2);border:1px solid var(--line2);color:var(--txt);
+       border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer}
+  .btn:hover{border-color:var(--teal);color:#fff}
+  .btn.sm{padding:3px 7px;font-size:12px}
+  .btn.icon{width:34px;height:32px;display:inline-flex;align-items:center;
+            justify-content:center;font-size:15px;padding:0}
+  .btn.primary{background:var(--teal-d);border-color:var(--teal);color:#fff;font-weight:600}
+  .btn.ghost{background:transparent;border-color:var(--line)}
+  .btn:disabled{opacity:.38;cursor:not-allowed;border-color:var(--line);color:var(--muted2)}
+  .btn:disabled:hover{border-color:var(--line);color:var(--muted2)}
+  .spacer{flex:1}
+
+  .anchor-img{flex:1;min-height:230px;background:
+      repeating-linear-gradient(45deg,#2a2620,#2a2620 12px,#272320 12px,#272320 24px);
+      border:1px solid var(--line);border-radius:6px;display:flex;align-items:center;
+      justify-content:center;color:#7a6f5d;font-size:12px;position:relative}
+  .anchor-img .pageno{position:absolute;top:6px;inset-inline-start:8px;
+      background:#000a;padding:2px 6px;border-radius:4px;color:#cbb58a;font-size:11px}
+  .translit{border:1px solid var(--line);border-radius:6px;background:#181818;
+            padding:8px 10px;height:120px;overflow:auto;direction:rtl;text-align:right;
+            font-size:13px;color:#e5e7eb}
+  .translit .ln{display:flex;gap:8px;flex-direction:row-reverse}
+  .translit .num{color:var(--muted2);min-width:18px;text-align:left;font-size:11px;
+                 user-select:none}
+  .known{border:1px solid var(--line);border-radius:6px;background:#181818;
+         padding:6px 10px;color:var(--muted);font-size:12px;cursor:pointer}
+  .anchor-actions{display:flex;gap:10px;align-items:center;justify-content:center;
+                  border-top:1px dashed var(--line);margin-top:2px;padding-top:8px}
+
+  /* find pane */
+  .qline{display:flex;align-items:center;gap:6px}
+  .boxes{flex:1;display:flex;gap:4px;align-items:center;background:#181818;
+         border:1px solid var(--line2);border-radius:6px;padding:3px 4px}
+  .wbox{flex:1;min-width:60px;background:#2d2d2d;border:1px solid #444;border-radius:4px;
+        padding:5px 8px;color:#fff;direction:rtl;text-align:right;font-size:13px}
+  .wbox::placeholder{color:#6b7280}
+  .oror{color:var(--teal);font-size:11px;cursor:pointer;white-space:nowrap;padding:0 2px}
+  .info{color:var(--muted);cursor:help;font-size:13px;position:relative}
+  .info:hover .tip{display:block}
+  .tip{display:none;position:absolute;z-index:40;top:20px;inset-inline-start:-6px;
+       width:230px;background:#0b0b0b;border:1px solid var(--line2);border-radius:6px;
+       padding:8px 10px;font-size:11px;color:#cbd5e1;direction:ltr;text-align:left;
+       box-shadow:0 6px 20px #000a}
+  .tip code{color:var(--teal);font-family:Consolas,monospace}
+  .gear{cursor:pointer;color:var(--muted);font-size:15px;padding:3px;border-radius:5px}
+  .gear:hover{background:#33373b;color:#fff}
+  .gear .badge{font-size:9px;color:var(--teal);vertical-align:super}
+  .gap-inline{display:flex;align-items:center;gap:1px;font-size:12px;color:var(--teal);
+              white-space:nowrap}
+  .num-in.sm{width:46px;padding:2px 5px}
+  .num-in.xs{width:40px;padding:2px 4px;color:#fff}
+  .addline{align-self:flex-start;color:var(--teal);font-size:12px;cursor:pointer;
+           background:none;border:none;padding:2px 0}
+  .preview{background:#2d2d2d;border:1px solid var(--line2);border-radius:4px;
+           padding:5px 9px;font-family:Consolas,monospace;font-size:13px;color:#9fb6c9;
+           direction:rtl;text-align:right;min-height:26px}
+  .otherside{display:flex;align-items:center;gap:8px;font-size:12px;color:#cbd5e1}
+  .otherbox{border-inline-start:2px solid var(--teal-d);padding-inline-start:10px;
+            margin-inline-start:4px;display:none;flex-direction:column;gap:6px}
+  .otherbox.on{display:flex}
+  select.mini{background:#2d2d2d;border:1px solid var(--line2);color:var(--txt);
+              border-radius:5px;padding:3px 6px;font-size:12px}
+  .findrow{display:flex;align-items:center;gap:8px}
+
+  /* results */
+  .restoolbar{display:flex;align-items:center;gap:6px;border-top:1px solid var(--line);
+              padding-top:8px;margin-top:2px}
+  .seg{display:flex;border:1px solid var(--line2);border-radius:6px;overflow:hidden}
+  .seg .btn{border:none;border-radius:0;border-inline-end:1px solid var(--line2)}
+  .seg .btn:last-child{border-inline-end:none}
+  .seg .btn.act{background:var(--teal-d);color:#fff}
+  .count{font-size:11px;color:var(--muted)}
+
+  .grid{flex:1;display:grid;grid-template-columns:repeat(2,1fr);gap:8px;overflow:auto;
+        padding:2px;min-height:200px}
+  .card{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px;
+        display:flex;gap:8px;position:relative;border-inline-start:3px solid transparent}
+  .card.y{border-inline-start-color:var(--y)}
+  .card.q{border-inline-start-color:var(--q)}
+  .card.selected{border-color:var(--teal);box-shadow:inset 0 0 0 1px var(--teal)}
+  .cardck{position:absolute;top:6px;inset-inline-end:6px;z-index:3;width:16px;height:16px;
+          accent-color:var(--teal);cursor:pointer}
+  .card .thumb{flex:0 0 56px;height:72px;border-radius:4px;background:
+      repeating-linear-gradient(45deg,#2a2620,#2a2620 8px,#272320 8px,#272320 16px)}
+  .card .body{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+  .card .sm{font-weight:600;font-size:12px}
+  .card .score{color:var(--muted);font-size:11px}
+  .snip{font-size:12px;color:#cbd5e1;direction:rtl;text-align:right;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .snip mark{background:#3b5; color:#04210f;border-radius:2px;padding:0 1px;background:#facc15;color:#3a2c00}
+  .matline{font-size:11px;color:var(--muted)}
+  .cardfoot{display:flex;align-items:center;gap:4px;margin-top:2px}
+  .tri{display:flex;gap:3px}
+  .tri .t{width:22px;height:20px;border-radius:4px;border:1px solid var(--line2);
+          background:#222;color:#aaa;font-size:11px;cursor:pointer;display:flex;
+          align-items:center;justify-content:center}
+  .tri .t.y{border-color:var(--y);color:var(--y)} .tri .t.q{border-color:var(--q);color:var(--q)}
+  .tri .t.n{border-color:var(--n);color:var(--n)}
+  .iconrow{display:flex;gap:3px;margin-inline-start:auto}
+  .iconrow .ib{width:26px;height:24px;border-radius:5px;border:1px solid var(--line);
+       background:#222;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px}
+  .iconrow .ib:hover{border-color:var(--teal);background:#2a2f2e}
+
+  /* table */
+  .tablewrap{flex:1;overflow:auto;display:none}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th,td{border-bottom:1px solid var(--line);padding:5px 7px;text-align:start}
+  th{color:var(--muted);font-weight:600;position:sticky;top:0;background:var(--bg)}
+  td .snip{white-space:nowrap}
+  tr.sel{background:#1f2a28}
+  .bulkbar{display:none;align-items:center;gap:8px;background:#13201d;
+           border:1px solid var(--teal-d);border-radius:6px;padding:6px 10px;margin-bottom:6px}
+  .bulkbar.on{display:flex}
+  .bulkbar .n{color:var(--teal);font-weight:600}
+
+  /* overlays */
+  .scrim{position:fixed;inset:0;background:#000a;display:none;align-items:center;
+         justify-content:center;z-index:60}
+  .scrim.on{display:flex}
+  .dialog{background:var(--panel);border:1px solid var(--line2);border-radius:10px;
+          padding:16px 18px;min-width:300px;box-shadow:0 20px 60px #000b}
+  .dialog h3{margin:0 0 10px;font-size:14px;color:#fff}
+  .dialog .grp{display:flex;flex-direction:column;gap:7px}
+  .ck{display:flex;align-items:center;gap:8px;font-size:13px;color:#d4d4d4}
+  .ck input{width:15px;height:15px}
+  .ck .sgn{color:var(--teal);font-family:Consolas,monospace;margin-inline-start:auto}
+  .ck.dis{color:#666} .ck.dis .sgn{color:#555}
+  .hr{border-top:1px solid var(--line);margin:10px 0}
+  .dialog .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+  .num-in{width:54px;background:#2d2d2d;border:1px solid var(--line2);color:#fff;
+          border-radius:5px;padding:3px 6px}
+  .note{font-size:11px;color:var(--muted2);margin-top:6px}
+  .fraginfo{background:#181818;border:1px solid var(--line);border-radius:7px;
+            padding:8px 10px;margin-bottom:12px}
+  .fi-title{font-weight:600;color:#e5e7eb;font-size:12px}
+  .fi-grid{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+  .fi-grid span{background:var(--chip);color:#cbd5e1;border-radius:10px;padding:2px 9px;font-size:11px}
+  .fi-acts{display:flex;gap:6px;flex-wrap:wrap}
+
+  /* context menu */
+  .ctx{position:fixed;z-index:70;background:#202022;border:1px solid var(--line2);
+       border-radius:8px;padding:5px;display:none;min-width:210px;box-shadow:0 12px 36px #000b}
+  .ctx.on{display:block}
+  .ctx .mi{padding:7px 10px;border-radius:5px;cursor:pointer;display:flex;gap:9px;
+           align-items:center;font-size:12px}
+  .ctx .mi:hover{background:var(--teal-d);color:#fff}
+  .ctx .sep{height:1px;background:var(--line);margin:4px 6px}
+
+  /* compare window */
+  .compare{width:min(1000px,94vw);height:min(640px,90vh);background:var(--bg);
+           border:1px solid var(--line2);border-radius:10px;display:flex;flex-direction:column;
+           overflow:hidden;box-shadow:0 20px 60px #000c}
+  .cmp-head{background:#323233;padding:7px 12px;display:flex;align-items:center;gap:10px;
+            font-size:12px;border-bottom:1px solid #000}
+  .cmp-body{flex:1;display:flex;min-height:0}
+  .cmp-pane{flex:1;padding:10px;display:flex;flex-direction:column;gap:6px}
+  .cmp-pane:first-child{border-inline-end:1px solid var(--line);background:#1b1b1b}
+  .cmp-img{flex:1;min-height:140px;background:
+      repeating-linear-gradient(45deg,#2a2620,#2a2620 12px,#272320 12px,#272320 24px);
+      border:1px solid var(--line);border-radius:6px}
+  .cmp-foot{border-top:1px solid var(--line);padding:8px 12px;display:flex;
+            align-items:center;gap:10px}
+  .badge2{font-size:11px;background:#3a2c00;color:#facc15;border-radius:4px;padding:2px 7px}
+  .cap{font-size:11px;color:var(--muted2)}
+  .pill{font-size:10px;background:var(--chip);color:#cbd5e1;border-radius:10px;padding:2px 8px}
+  .anno{font-size:10px;color:#f0abfc;border:1px dashed #a21caf55;border-radius:5px;
+        padding:1px 6px;background:#2a0a2e33}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Joins Lab — redesign sketch</h1>
+  <div class="sub">Phase 108 · interactive mockup (dark, RTL-aware) · click the ⚙ / buttons / right-click a card to open the popovers. Approximation of the PyQt window — spacing & exact pixels will be tuned in code.</div>
+
+  <details class="legend" open>
+    <summary>✓ What changed (your notes → how it's addressed)</summary>
+    <ul>
+      <li><b>Minimalist:</b> options/modifiers/filters hidden behind buttons; only the query + results show by default.</li>
+      <li><b>Anchor pane ~30%, resizable</b> (QSplitter — drag the ⋮ grip).</li>
+      <li><b>4 icons → anchor side, no text:</b> 📖 / 🧩 / ☰ / 🔗 (tooltips only) act on the <b>anchor</b>.</li>
+      <li><b>Per-line ⚙:</b> modifiers + ⊢/⊣ start/end in the ⚙ dialog; the <b>gap ↓N is a compact inline control</b> on each line (no extra row).</li>
+      <li><b>Bulk Browse single-only:</b> 📖 is disabled unless exactly one item is checked.</li>
+      <li><b>Filter shows the current fragment</b> (library/material/size/lines) + "from anchor" shortcuts.</li>
+      <li><b>Global "Search options" button:</b> variants / Judeo-Arabic / flex / bidirectional.</li>
+      <li><b>Typed signs + tooltip ⓘ:</b> boxes accept <code>#</code>/<code>%</code>/<code>*</code>/<code>−</code>; ⓘ shows the legend.</li>
+      <li><b>"This side" / self-match line / "include anchor" — removed.</b></li>
+      <li><b>"search also on the other side"</b> (keeps AND-narrow / OR-widen).</li>
+      <li><b>Filter → button</b> (popover), not an always-on row.</li>
+      <li><b>"Browse results ▶"</b> prominent by Grid/Table → stepping compare window.</li>
+      <li><b>Grid actions = icons</b> (tooltips), not text. <b>Right-click context menu</b> on grid/table.</li>
+      <li><b>Grid & table both have checkboxes</b> → one <b>shared bulk-action bar</b> above the results.</li>
+      <li><b>Add to Puzzle adds the anchor too</b> (in cards, table, and Compare).</li>
+    </ul>
+  </details>
+
+  <div class="win">
+    <div class="titlebar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      &nbsp;Joins Lab — T-S 12.123 (anchor)</div>
+    <div class="split">
+
+      <!-- ================= ANCHOR PANE ================= -->
+      <div class="anchor">
+        <div style="display:flex;align-items:baseline;gap:10px">
+          <div class="shelf">T-S 12.123</div>
+          <div class="meta">CUL · paper · ~17 lines · 14.2 × 9.8 cm</div>
+        </div>
+        <div class="toolbar">
+          <button class="btn sm">−</button><button class="btn sm">+</button>
+          <span class="spacer"></span>
+          <button class="btn sm">◄ folio</button>
+          <span class="cap">1r</span>
+          <button class="btn sm">folio ►</button>
+        </div>
+        <div class="anchor-img"><span class="pageno">1r</span>anchor manuscript image (pinned)</div>
+        <div class="translit" dir="rtl">
+          <div class="ln"><span class="num">1</span><span>בשם רחמנא נפתח בעזרת מי שאמר</span></div>
+          <div class="ln"><span class="num">2</span><span>והיה העולם ויהי כן זכרון לבני</span></div>
+          <div class="ln"><span class="num">3</span><span>ישראל אשר יצאו ממצרים ביד חזקה</span></div>
+          <div class="ln"><span class="num">4</span><span>ובזרוע נטויה ובמורא גדל ובאתות</span></div>
+        </div>
+        <div class="known" onclick="this.innerHTML = this.innerHTML.includes('▸') ? '▾ Known joins (3) — T-S 12.124 · T-S NS 5.7 · ENA 2.9' : '▸ Known joins (3)'">▸ Known joins (3)</div>
+
+        <div class="anchor-actions">
+          <button class="btn icon" title="Browse this fragment">📖</button>
+          <button class="btn icon" title="Add anchor to a Puzzle">🧩</button>
+          <button class="btn icon" title="Add anchor to a list">☰</button>
+          <button class="btn icon" title="Start a join from this anchor">🔗</button>
+        </div>
+      </div>
+
+      <div class="grip" title="drag to resize — the two panes are a QSplitter"></div>
+
+      <!-- ================= FIND PANE ================= -->
+      <div class="find">
+        <!-- line 1: two OR boxes -->
+        <div class="qline">
+          <div class="boxes">
+            <span class="info">ⓘ
+              <span class="tip">
+                Type signs directly, or use ⚙:<br>
+                <code>#word</code> grammatical prefixes<br>
+                <code>word#</code> grammatical suffixes<br>
+                <code>%word</code> plene / defective<br>
+                <code>*word</code> / <code>word*</code> wildcard<br>
+                <code>−word</code> exclude
+              </span>
+            </span>
+            <input class="wbox" dir="rtl" placeholder="word(s) on this line…" value="ושמואל">
+            <span class="oror">+ or</span>
+          </div>
+          <span class="gap-inline" title="lines to skip before the next line">↓<input class="num-in xs" type="number" value="1" min="0"></span>
+          <span class="gear" title="Line options (modifiers, ⊢/⊣ start/end)" onclick="openLine()">⚙</span>
+        </div>
+        <!-- line 2: one box, has modifiers (badge) -->
+        <div class="qline">
+          <div class="boxes">
+            <span class="info">ⓘ<span class="tip"><code>#word</code> prefixes · <code>word#</code> suffixes · <code>%</code> plene · <code>*</code> wildcard · <code>−</code> exclude</span></span>
+            <input class="wbox" dir="rtl" placeholder="word(s) on this line…" value="הוגו">
+            <input class="wbox" dir="rtl" value="ברגמן">
+            <span class="oror">+ or</span>
+          </div>
+          <span class="gap-inline" title="lines to skip before the next line">↓<input class="num-in xs" type="number" value="0" min="0"></span>
+          <span class="gear" title="Line options — this line has modifiers" onclick="openLine()">⚙<span class="badge">#−</span></span>
+        </div>
+        <button class="addline" onclick="this.insertAdjacentHTML('beforebegin','')">+ Add line</button>
+
+        <div class="preview" dir="rtl" title="composed query (read-only)">‏(ושמואל) ↓1 ‎#(הוגו/ברגמן)</div>
+
+        <div class="otherside">
+          <label class="ck" style="gap:6px"><input type="checkbox" onclick="document.getElementById('ob').classList.toggle('on',this.checked)"> search also on the other side of the leaf (p ±1)</label>
+          <select class="mini"><option>AND — narrow</option><option>OR — widen</option></select>
+        </div>
+        <div class="otherbox" id="ob">
+          <div class="qline">
+            <div class="boxes">
+              <input class="wbox" dir="rtl" placeholder="word(s) required on the OTHER side…">
+              <span class="oror">+ or</span>
+            </div>
+            <span class="gap-inline" title="lines to skip before the next line">↓<input class="num-in xs" type="number" value="1" min="0"></span>
+            <span class="gear" title="Line options" onclick="openLine()">⚙</span>
+          </div>
+        </div>
+
+        <div class="findrow">
+          <button class="btn ghost" onclick="open1('dlgOpts')">⚙ Search options ▾</button>
+          <span class="anno">global: variants · Judeo-Arabic · flex · bidirectional</span>
+          <span class="spacer"></span>
+          <button class="btn primary">Find candidates</button>
+        </div>
+
+        <!-- results toolbar -->
+        <div class="restoolbar">
+          <div class="seg">
+            <button class="btn act" id="bGrid" onclick="view('grid')">Grid</button>
+            <button class="btn" id="bTable" onclick="view('table')">Table</button>
+          </div>
+          <button class="btn primary" onclick="open1('cmp')">Browse results ▶</button>
+          <span class="spacer"></span>
+          <button class="btn ghost" onclick="open1('dlgFilter')">Filter ▾</button>
+          <span class="count">42 candidates · 38 untriaged</span>
+        </div>
+
+        <!-- shared selection bulk-action bar (grid AND table) -->
+        <div class="bulkbar" id="bulk">
+          <span class="n">0 selected</span>
+          <span class="cap">apply to checked:</span>
+          <button class="btn icon sm" id="bulkBrowse" title="Browse — select exactly one">📖</button>
+          <button class="btn icon sm" title="Add all to Puzzle (with anchor)">🧩</button>
+          <button class="btn icon sm" title="Add all to list">☰</button>
+          <button class="btn icon sm" title="Add as join">🔗</button>
+          <span class="spacer"></span>
+          <button class="btn ghost sm" onclick="clearSel()">✕ clear</button>
+        </div>
+
+        <!-- GRID -->
+        <div class="grid" id="grid">
+          <div class="card y" oncontextmenu="ctxMenu(event)">
+            <input type="checkbox" class="selck cardck" onclick="onSel(this)" title="Select"><div class="thumb"></div>
+            <div class="body">
+              <div class="sm">T-S 8.45 <span class="score">· 0.91</span></div>
+              <div class="snip" dir="rtl">…פרנץ רוזנצווייג <mark>ושמואל</mark> <mark>הוגו ברגמן</mark> בשנת…</div>
+              <div class="matline">paper · 13.9 × 9.5 cm · p.2</div>
+              <div class="cardfoot">
+                <div class="tri"><span class="t y">Y</span><span class="t">?</span><span class="t">N</span></div>
+                <div class="iconrow">
+                  <span class="ib" title="Browse">📖</span>
+                  <span class="ib" title="Add to Puzzle (with anchor)">🧩</span>
+                  <span class="ib" title="Add to list">☰</span>
+                  <span class="ib" title="Add as join">🔗</span>
+                  <span class="ib" title="Compare side-by-side" onclick="open1('cmp')">⇄</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card" oncontextmenu="ctxMenu(event)">
+            <input type="checkbox" class="selck cardck" onclick="onSel(this)" title="Select"><div class="thumb"></div>
+            <div class="body">
+              <div class="sm">ENA 2.9 <span class="score">· 0.78</span></div>
+              <div class="snip" dir="rtl">…<mark>ושמואל</mark> בן יהודה הוגו…</div>
+              <div class="matline">parchment · — · p.1 <span class="pill">other side matched</span></div>
+              <div class="cardfoot">
+                <div class="tri"><span class="t">Y</span><span class="t">?</span><span class="t">N</span></div>
+                <div class="iconrow">
+                  <span class="ib" title="Browse">📖</span><span class="ib" title="Add to Puzzle (with anchor)">🧩</span>
+                  <span class="ib" title="Add to list">☰</span><span class="ib" title="Add as join">🔗</span>
+                  <span class="ib" title="Compare side-by-side" onclick="open1('cmp')">⇄</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card q" oncontextmenu="ctxMenu(event)">
+            <input type="checkbox" class="selck cardck" onclick="onSel(this)" title="Select"><div class="thumb"></div>
+            <div class="body">
+              <div class="sm">Halper 331 <span class="score">· 0.74</span></div>
+              <div class="snip" dir="rtl">…רוזנצווייג <mark>ושמואל</mark>…</div>
+              <div class="matline">paper · 15.1 × 10.2 cm · p.3 ⚠ size +1.1cm</div>
+              <div class="cardfoot">
+                <div class="tri"><span class="t">Y</span><span class="t q">?</span><span class="t">N</span></div>
+                <div class="iconrow">
+                  <span class="ib" title="Browse">📖</span><span class="ib" title="Add to Puzzle (with anchor)">🧩</span>
+                  <span class="ib" title="Add to list">☰</span><span class="ib" title="Add as join">🔗</span>
+                  <span class="ib" title="Compare side-by-side" onclick="open1('cmp')">⇄</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card" oncontextmenu="ctxMenu(event)">
+            <input type="checkbox" class="selck cardck" onclick="onSel(this)" title="Select"><div class="thumb"></div>
+            <div class="body">
+              <div class="sm">Mosseri IV.12 <span class="score">· 0.69</span></div>
+              <div class="snip" dir="rtl">…הוגו <mark>ברגמן</mark> ירושלים…</div>
+              <div class="matline">paper · 14.0 × 9.9 cm · p.1</div>
+              <div class="cardfoot">
+                <div class="tri"><span class="t">Y</span><span class="t">?</span><span class="t">N</span></div>
+                <div class="iconrow">
+                  <span class="ib" title="Browse">📖</span><span class="ib" title="Add to Puzzle (with anchor)">🧩</span>
+                  <span class="ib" title="Add to list">☰</span><span class="ib" title="Add as join">🔗</span>
+                  <span class="ib" title="Compare side-by-side" onclick="open1('cmp')">⇄</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TABLE -->
+        <div class="tablewrap" id="tablewrap">
+          <table>
+            <thead><tr>
+              <th style="width:26px"><input type="checkbox" onclick="allSel(this)"></th>
+              <th>Shelfmark</th><th>Score</th><th>Snippet</th><th>Material</th>
+              <th>Dimensions</th><th>Page</th><th>Triage</th>
+            </tr></thead>
+            <tbody id="tbody">
+              <tr oncontextmenu="ctxMenu(event)"><td><input type="checkbox" class="selck" onclick="onSel(this)"></td>
+                <td>T-S 8.45</td><td>0.91</td><td><span class="snip" dir="rtl">…<mark>ושמואל</mark> הוגו ברגמן…</span></td>
+                <td>paper</td><td>13.9 × 9.5</td><td>2</td><td><span style="color:var(--y)">Y</span></td></tr>
+              <tr oncontextmenu="ctxMenu(event)"><td><input type="checkbox" class="selck" onclick="onSel(this)"></td>
+                <td>ENA 2.9</td><td>0.78</td><td><span class="snip" dir="rtl">…<mark>ושמואל</mark> בן יהודה…</span></td>
+                <td>parchment</td><td>—</td><td>1</td><td>·</td></tr>
+              <tr oncontextmenu="ctxMenu(event)"><td><input type="checkbox" class="selck" onclick="onSel(this)"></td>
+                <td>Halper 331</td><td>0.74</td><td><span class="snip" dir="rtl">…רוזנצווייג <mark>ושמואל</mark>…</span></td>
+                <td>paper</td><td>15.1 × 10.2</td><td>3</td><td><span style="color:var(--q)">?</span></td></tr>
+              <tr oncontextmenu="ctxMenu(event)"><td><input type="checkbox" class="selck" onclick="onSel(this)"></td>
+                <td>Mosseri IV.12</td><td>0.69</td><td><span class="snip" dir="rtl">…הוגו <mark>ברגמן</mark>…</span></td>
+                <td>paper</td><td>14.0 × 9.9</td><td>1</td><td>·</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== per-line ⚙ dialog ===== -->
+<div class="scrim" id="dlgLine" onclick="if(event.target==this)close1('dlgLine')">
+  <div class="dialog">
+    <h3>Line options — line 2</h3>
+    <div class="grp">
+      <label class="ck"><input type="checkbox"> Negation (exclude) <span class="sgn">−word</span></label>
+      <label class="ck"><input type="checkbox"> Plene / defective <span class="sgn">%word</span></label>
+      <label class="ck"><input type="checkbox" checked> Grammatical prefixes <span class="sgn">#word</span></label>
+      <label class="ck"><input type="checkbox"> Grammatical suffixes <span class="sgn">word#</span></label>
+      <label class="ck dis" title="disabled — line has more than one OR box"><input type="checkbox" disabled> Wildcard prefix <span class="sgn">*word</span></label>
+      <label class="ck"><input type="checkbox"> Wildcard suffix <span class="sgn">word*</span></label>
+      <div class="hr"></div>
+      <label class="ck"><input type="checkbox"> Starts the line (right edge, RTL) <span class="sgn">⊢</span></label>
+      <label class="ck"><input type="checkbox"> Ends the line (left edge, RTL) <span class="sgn">⊣</span></label>
+    </div>
+    <div class="note">Wildcard-prefix is greyed for multi-box OR lines (the engine can't hoist a leading <code>*</code> onto a group).</div>
+    <div class="foot"><button class="btn ghost" onclick="close1('dlgLine')">Cancel</button><button class="btn primary" onclick="close1('dlgLine')">Apply</button></div>
+  </div>
+</div>
+
+<!-- ===== global Search options ===== -->
+<div class="scrim" id="dlgOpts" onclick="if(event.target==this)close1('dlgOpts')">
+  <div class="dialog">
+    <h3>Search options (apply to the whole query)</h3>
+    <div class="grp">
+      <label class="ck"><input type="checkbox" checked> Expand spelling variants</label>
+      <label class="ck"><input type="checkbox"> Judeo-Arabic</label>
+      <label class="ck"><input type="checkbox"> Flexible spacing</label>
+      <label class="ck"><input type="checkbox"> Bidirectional</label>
+    </div>
+    <div class="foot"><button class="btn primary" onclick="close1('dlgOpts')">Done</button></div>
+  </div>
+</div>
+
+<!-- ===== Filter popover ===== -->
+<div class="scrim" id="dlgFilter" onclick="if(event.target==this)close1('dlgFilter')">
+  <div class="dialog" style="min-width:360px">
+    <h3>Filter candidates</h3>
+    <div class="fraginfo">
+      <div class="fi-title">Current fragment — T-S 12.123</div>
+      <div class="fi-grid">
+        <span>CUL</span><span>paper</span><span>14.2 × 9.8 cm</span><span>~17 lines</span>
+      </div>
+      <div class="fi-acts">
+        <button class="btn ghost sm" onclick="event.preventDefault()">match material (paper)</button>
+        <button class="btn ghost sm" onclick="event.preventDefault()">width ±2 cm of anchor</button>
+      </div>
+      <div class="note" style="margin:4px 0 0">Unknown fields are hidden; the "from anchor" shortcuts appear only for known values.</div>
+    </div>
+    <div class="grp">
+      <input class="wbox" dir="ltr" style="direction:ltr;text-align:left" placeholder="shelfmark, text, or title…">
+      <label class="ck">Material <select class="mini" style="margin-inline-start:auto"><option>any</option><option>paper</option><option>parchment</option></select></label>
+      <label class="ck"><input type="checkbox"> Has dimensions only</label>
+      <label class="ck">Triage <select class="mini" style="margin-inline-start:auto"><option>all</option><option>Y kept</option><option>? maybe</option><option>N dismissed</option><option>untriaged</option></select></label>
+      <div class="hr"></div>
+      <label class="ck">Width (cm) <input class="num-in" type="number" value="12"> – <input class="num-in" type="number" value="16"></label>
+      <div class="note">Size is opt-in & off by default — dimensions otherwise show only as soft evidence / mismatch hint.</div>
+    </div>
+    <div class="foot"><button class="btn ghost" onclick="close1('dlgFilter')">Reset</button><button class="btn primary" onclick="close1('dlgFilter')">Apply</button></div>
+  </div>
+</div>
+
+<!-- ===== context menu ===== -->
+<div class="ctx" id="ctx">
+  <div class="mi">📖 Browse</div>
+  <div class="mi">🧩 Add to Puzzle <span class="cap">(+ anchor)</span></div>
+  <div class="mi">☰ Add to list</div>
+  <div class="mi">🔗 Add as join (A=anchor, B=this)</div>
+  <div class="mi" onclick="hideCtx();open1('cmp')">⇄ Compare side-by-side</div>
+  <div class="sep"></div>
+  <div class="mi" style="color:var(--y)">Y — keep</div>
+  <div class="mi" style="color:var(--q)">? — maybe</div>
+  <div class="mi" style="color:var(--n)">N — dismiss</div>
+</div>
+
+<!-- ===== Browse-results compare window ===== -->
+<div class="scrim" id="cmp" onclick="if(event.target==this)close1('cmp')">
+  <div class="compare">
+    <div class="cmp-head"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      &nbsp;Compare — anchor ↔ candidate <span class="badge2">other side matched</span>
+      <span class="spacer" style="flex:1"></span><span class="cap">candidate 3 / 42 (filtered)</span></div>
+    <div class="cmp-body">
+      <div class="cmp-pane">
+        <div class="shelf">T-S 12.123 <span class="cap">· anchor (static)</span></div>
+        <div class="cmp-img"></div>
+        <div class="translit" dir="rtl" style="height:90px"><div class="ln"><span class="num">1</span><span>בשם רחמנא נפתח בעזרת מי שאמר</span></div></div>
+      </div>
+      <div class="cmp-pane">
+        <div class="shelf">ENA 2.9 <span class="cap">· p.1 (neighbor of matched p.2)</span></div>
+        <div class="cmp-img"></div>
+        <div class="translit" dir="rtl" style="height:90px"><div class="ln"><span class="num">1</span><span>…<mark>ושמואל</mark> בן יהודה הוגו…</span></div></div>
+      </div>
+    </div>
+    <div class="cmp-foot">
+      <button class="btn sm">◀ Prev</button><button class="btn sm">Next ▶</button>
+      <span class="cap">|</span>
+      <div class="tri"><span class="t">Y</span><span class="t">?</span><span class="t">N</span></div>
+      <button class="btn sm ghost">Re-anchor to this</button>
+      <span class="spacer" style="flex:1"></span>
+      <button class="btn icon" title="Browse">📖</button>
+      <button class="btn icon" title="Add to Puzzle (anchor + candidate)">🧩</button>
+      <button class="btn icon" title="Add to list">☰</button>
+      <button class="btn icon" title="Add as join (A=anchor, B=candidate)">🔗</button>
+      <button class="btn ghost sm" onclick="close1('cmp')">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function open1(id){document.getElementById(id).classList.add('on')}
+function close1(id){document.getElementById(id).classList.remove('on')}
+function openLine(){open1('dlgLine')}
+function view(m){
+  const g=document.getElementById('grid'), t=document.getElementById('tablewrap');
+  const bg=document.getElementById('bGrid'), bt=document.getElementById('bTable');
+  if(m==='grid'){g.style.display='grid';t.style.display='none';bg.classList.add('act');bt.classList.remove('act');}
+  else{g.style.display='none';t.style.display='block';bt.classList.add('act');bg.classList.remove('act');}
+}
+// Unified selection across BOTH grid cards and table rows (shared .selck class).
+function setVis(ck){
+  const c=ck.closest('.card'); if(c) c.classList.toggle('selected',ck.checked);
+  const t=ck.closest('tr');   if(t) t.classList.toggle('sel',ck.checked);
+}
+function onSel(ck){ setVis(ck); updateBulk(); }
+function allSel(ck){ document.querySelectorAll('.selck').forEach(x=>{x.checked=ck.checked; setVis(x);}); updateBulk(); }
+function clearSel(){ document.querySelectorAll('.selck').forEach(x=>{x.checked=false; setVis(x);});
+  const m=document.querySelector('th input[type=checkbox]'); if(m) m.checked=false; updateBulk(); }
+function updateBulk(){ const n=document.querySelectorAll('.selck:checked').length; const b=document.getElementById('bulk');
+  b.classList.toggle('on',n>0); if(n>0) b.querySelector('.n').textContent=n+' selected';
+  // Browse only makes sense for ONE fragment — disable it for 0 or >1 selected.
+  const br=document.getElementById('bulkBrowse');
+  br.disabled = (n!==1);
+  br.title = (n===1) ? 'Browse this fragment' : 'Browse — select exactly one';
+}
+function ctxMenu(e){ e.preventDefault(); const c=document.getElementById('ctx');
+  c.classList.add('on'); c.style.left=Math.min(e.clientX,innerWidth-230)+'px'; c.style.top=Math.min(e.clientY,innerHeight-300)+'px'; }
+function hideCtx(){ document.getElementById('ctx').classList.remove('on'); }
+document.addEventListener('click',e=>{ if(!e.target.closest('#ctx')) hideCtx(); });
+</script>
+</body>
+</html>
