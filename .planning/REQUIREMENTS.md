@@ -72,7 +72,7 @@ requirement text is preserved in git history (prior `REQUIREMENTS.md`) and `MILE
   pre-fills the **existing** search module (variants / fuzzy / Responsa / regex); the seeded query is
   fully editable (try-and-error preserved).
 - [x] **JWB-07**: The scholar collects search results as **candidates in a list** within the Workbench.
-- [ ] **JWB-08**: The scholar compares the anchor and a candidate **side-by-side** (image +
+- [x] **JWB-08**: The scholar compares the anchor and a candidate **side-by-side** (image +
   transcription) to confirm a join by eye.
 - [ ] **JWB-09**: On a confirmed join the scholar can **act**: add it via the **existing joins
   button**, **export** the details (clipboard / file), and **add candidates to a list**.
