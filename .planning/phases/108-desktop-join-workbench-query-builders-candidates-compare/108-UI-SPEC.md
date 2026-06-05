@@ -47,11 +47,19 @@ All values are multiples of 4, matching the existing PyQt app convention:
 | lg | 24px | Inter-section vertical spacing (builder → refine bar → candidate area) |
 | xl | 32px | Not used at component level; reserved for dialog-level breathing room |
 
-Exceptions:
-- Card thumbnail fixed at 220×130 px (content-driven, not a spacing token).
-- Card fixed width 232 px (grid column width — matches the sketch invariant).
-- Compare pane image minimum height 360 px (content-driven).
-- Touch/click targets for Y/?/N + action buttons: minimum 28×28 px (compact card row), 34×28 px for prev/next nav buttons.
+Exceptions (content-driven sizes and deliberate sub-grid density values — not spacing tokens):
+
+- **QueryBuilder layout internal spacing: 2px** — `JoinQueryBuilder` outer `QVBoxLayout`
+  (`spacing=2, contentsMargins=0`) and each row `QHBoxLayout` (`spacing=2, contentsMargins=0`).
+  Intentionally sub-grid to match the compact row density of the existing
+  `TabularQueryBuilderDialog`; UAT-validated in Spike 002. This is an internal layout-density
+  value applied only within the query-builder widget itself, not a margin/padding token used
+  at pane or section level.
+- Card thumbnail fixed at 220×130 px (content-driven element size, not a spacing token).
+- Card fixed width 232 px (grid column width — matches the sketch invariant; element size).
+- Compare pane image minimum height 360 px (content-driven element size).
+- Touch/click targets for Y/?/N + action buttons: minimum 28×28 px (compact card row),
+  34×28 px for prev/next nav buttons (element size; accessibility minimum, not a spacing token).
 
 ---
 
@@ -126,11 +134,16 @@ not deletion — no confirmation required.
   [+ Add Line button]  [variants checkbox]  [stretch]
 ```
 
+Note: `spacing=2` here is the deliberate sub-grid density value documented in the Spacing Scale
+exceptions table above.
+
 **Each row is a `QHBoxLayout(spacing=2, contentsMargins=0)` containing:**
 
 ```
 [ends line ⊣ checkbox] [term QLineEdit, stretch=1] [⊢ starts line checkbox] [↓ N ln QSpinBox] [× QPushButton, fixedWidth=24]
 ```
+
+Note: `spacing=2` here is the same deliberate sub-grid density value as the outer layout.
 
 RTL/LTR contract (D-06):
 - The `term` `QLineEdit` (Hebrew word input) has `setLayoutDirection(Qt.LayoutDirection.RightToLeft)` — Hebrew text entry flows right-to-left.
@@ -303,7 +316,21 @@ Size-mismatch soft hint: if anchor has W/H and candidate has W/H and the ratio o
 
 **Thumbnail loading:** `ThumbResolver` QThread resolves NLI thumbnail URL via `meta_mgr.get_thumbnail(sys_id)` for all cards in the current page simultaneously (batch-per-page, not serial). Max 5 concurrent `ImageLoaderThread` instances (`MAX_CONCURRENT_IMG = 5`). On failure: `"(no image)"` text in label.
 
-**Tooltip for buttons:**
+**Accessible names for card action buttons (Dim 2 — matches CompareDialog action row pattern):**
+
+Each card action button declares both a tooltip AND `setAccessibleName(tr(...))` so screen readers
+and automated accessibility tools can identify the control beyond the emoji glyph:
+
+| Button | Tooltip | `setAccessibleName(tr(...))` |
+|--------|---------|------------------------------|
+| ⤢ | tr("Enlarge and compare beside anchor") | tr("Compare") |
+| ⚓ (card) | tr("Re-anchor on this fragment") | tr("Re-anchor") |
+| 📖 | tr("Browse manuscript") | tr("Browse manuscript") |
+| 🧩 | tr("Add to Puzzle") | tr("Open in Puzzle") |
+| 📋 | tr("Add to List") | tr("Add to list") |
+| 🔗 | tr("Add as Join") | tr("Add as join") |
+
+**Tooltip for buttons (legacy reference — superseded by the table above):**
 - ⤢: tr("Enlarge and compare beside anchor")
 - ⚓: tr("Re-anchor on this fragment")
 - 📖: tr("Browse manuscript")
