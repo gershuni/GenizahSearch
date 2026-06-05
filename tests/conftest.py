@@ -61,6 +61,8 @@ if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
         "test_local_optout_persistence.py",
         "test_recovery_scan_runs_cleanup.py",
         "test_disk_headroom.py",
+        # Phase 108 Join Lab widget construction smoke tests (QWidget build).
+        "test_join_workbench_construct.py",
         # Phase 100 PdfImageController + PdfRenderWorker QThread.
         "test_pdf_image_controller.py",
         "test_pdf_page_renderer.py",

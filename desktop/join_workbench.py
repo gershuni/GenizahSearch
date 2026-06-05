@@ -704,8 +704,11 @@ if _QT_AVAILABLE:
             self._rows_box.setSpacing(2)
             outer.addLayout(self._rows_box)
 
-            # Add first row
-            self.add_row(placeholder=self._first_hint)
+            # NOTE: the first row is added at the END of this method (see below),
+            # AFTER every widget add_row()/_update_preview() touches (the modifier
+            # checkboxes, the global-options checkboxes, page_pos, and especially
+            # self._preview_edit) has been constructed. add_row() appends into the
+            # already-positioned self._rows_box, so the row still renders at the top.
 
             # Controls row: [+ Add Line] [variants checkbox] [stretch]
             ctrl_row = QHBoxLayout()
@@ -821,6 +824,12 @@ if _QT_AVAILABLE:
             )
             preview_row.addWidget(self._preview_edit, 1)
             outer.addLayout(preview_row)
+
+            # Add the first row LAST — now that _preview_edit, the modifier
+            # checkboxes, the global-options checkboxes and page_pos all exist,
+            # add_row()'s trailing _update_preview() can run without an
+            # AttributeError. The row inserts into the top-positioned _rows_box.
+            self.add_row(placeholder=self._first_hint)
 
         def _on_add_line(self):
             self.add_row()
