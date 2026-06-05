@@ -61,21 +61,32 @@ VS-dialog soft-retire (Phase 109); JSA / parallels seeding (Phase 110); web Join
   - Carry the **full existing modifier row** (Start/End of line `|_`/`_|`, Negation, Defective,
     Wildcards, Prefixes/Suffixes, Bidirectional, Flex Spacing, Judeo-Arabic, Variants) + Search
     Options + a **(read-only) Preview** field.
-  - **⚠ REVISED 2026-06-05 (Codex round-2 HIGH, user decision = WIRE not trim):** the per-word
-    modifiers (**Negation, Defective/Plene, Wildcard start/end, Prefixes, Suffixes**) must actually
-    affect the composed query — they are **per-word, applied to the ACTIVE (focused) OR-box**, exactly
-    mirroring `TabularQueryBuilderDialog`'s `_active_word` mechanism (`genizah_app.py:1559`,
-    `:1731-1789` per-word `{'text','mods'}` + focus event filter + `mod_ind` indicator below each box).
-    Each OR-box stores its own `mods` dict; focusing a box reflects/edits that box's mods via the
-    modifier row; `build_side_query()` **decorates each box's token with its mods BEFORE OR-joining**,
-    using the EXACT order in `genizah_core.py:6014-6027`: plene `%`→prefix `#`→suffix `…#`→wildcard
-    `*…`/`…*`, and negation `-…` (prepend). A decorated box yields e.g. `#שלום`, `שלום*`, `-עץ`; an
-    OR row of decorated boxes yields `(#שלום/%שלומות)`. The two GLOBAL Search-Options toggles
-    (**Variants, Judeo-Arabic, Flex Spacing, Bidirectional**) stay in `_responsa_opts()` as today
-    (they ARE global). Transplant the existing dialog's `_on_modifier_changed` / `_on_word_text_changed`
-    / `_update_preview` / per-word decoration logic rather than re-inventing it. The headless builder
-    test must assert a decorated box round-trips: e.g. a box `שלום` with `prefix` mod composes a term
-    parseable by `parse_responsa_query` as a grammatical-prefix component (`#שלום`).
+  - **⚠ RE-REVISED 2026-06-05 (Codex round-3 HIGH, user decision = Option B, per-row hoist):** the
+    per-word modifiers (**Negation, Defective/Plene, Wildcard start/end, Prefixes, Suffixes**) must
+    affect the composed query, BUT the engine parser does **NOT** apply per-alternative modifiers
+    INSIDE an OR slash-group — `(#שלום/%שלומות)` makes `#`/`%` LITERAL search characters
+    (`genizah_core.py:6121-6163`: leading `-/%/#` and trailing `#` are stripped from the WHOLE token,
+    then `inner.split('/')` takes RAW words). The shipping `TabularQueryBuilderDialog` /
+    `generate_tabular_syntax` (`genizah_core.py:6014-6033`) has this SAME latent limitation. So round-2's
+    per-box `(#a/%b)` design is REPLACED with **PER-ROW modifiers, hoisted OUTSIDE the group**:
+    - **Modifiers are PER-ROW**, not per-box. The modifier checkboxes reflect/edit the **active ROW**'s
+      `mods` (the row containing the focused box). Each ROW stores ONE `mods` dict (not each box). Track
+      the active row from box focus (transplant `TabularQueryBuilderDialog`'s focus/active mechanism,
+      `genizah_app.py:1559`/`:1731-1789`, scoped to the ROW). **RR-16:** clear the active-row reference
+      when a row is removed (mirror `genizah_app.py:1932-1934`).
+    - `build_side_query()` builds each row's `BuilderRow.term` as: SINGLE-box row → decorate the lone
+      token directly using the EXACT `genizah_core.py:6014-6027` order (`%`→`#`→`…#`→`*…`/`…*`, `-`
+      prepend) → e.g. `#שלום`, `שלום*`, `-עץ`. MULTI-box row → build the group `(a/b/c)` FIRST, then
+      HOIST the row mods OUTSIDE: negation `-(a/b)`, plene `%(a/b)`, prefix `#(a/b)`, suffix `(a/b)#`,
+      wildcard-suffix `(a/b)*` (all parser-supported group forms). **Wildcard-PREFIX `*(…)` is NOT
+      hoistable onto a group** (the parser doesn't strip leading `*` before the OR check) — disable the
+      wildcard-prefix checkbox on multi-box rows (single-box rows keep it).
+    - The GLOBAL Search-Options toggles (**Variants, Judeo-Arabic, Flex Spacing, Bidirectional**) are
+      handled separately (see **RR-14** — `compose()` drops ja/flex/bidir, so the desktop pane must
+      merge them into the `ro` after composing).
+    - The builder test must assert PARSER-LEVEL: `#(שלום/שלומות)` → `parse_responsa_query` yields an OR
+      component with both `words` AND `grammatical_prefixes=True`; `-(עץ/אילן)` → negated group; a
+      single-box `#שלום` → grammatical-prefix. NOT a `#`-substring grep.
 - **D-05:** **Per-row semantics:** each row = one manuscript line; the `[ ] or [ ] or [ ]` boxes are
   **OR-alternatives** for that line (spelling variants / synonyms). **⚠ REVISED 2026-06-05 (Codex
   review HIGH #1, code-verified):** OR composes to the engine's **real slash-group syntax
@@ -291,6 +302,42 @@ NEW code-verified issues. Bindings:
   arithmetic on a `None` page — guard `if page is None: treat as page 1` (or render the "no image"
   placeholder) before `page-1`. Update Plan 03 (`_enqueue_image_for_pane`) and Plan 04
   (`CompareDialog._fill_*` page handling).
+
+### Round-3 Review Resolutions (2026-06-05 — Codex code-verified re-review, fold into the replan)
+Round 2's RR-9..RR-12: RR-11 + RR-12 CONFIRMED landed; RR-9 + RR-10 were PARTIAL; plus a new
+pre-existing finding (compose drops ja/flex/bidir). Bindings:
+
+- **RR-13 (HIGH — OR-modifier semantics → PER-ROW HOIST, user decision Option B).** Supersedes the
+  round-2 per-box `(#a/%b)` design (which the parser treats as literal — `genizah_core.py:6121-6163`).
+  See re-revised **D-04**. Modifiers are PER-ROW; the active-row mods are HOISTED outside the OR group:
+  single-box → `#שלום`; multi-box → `#(a/b)` / `%(a/b)` / `-(a/b)` / `(a/b)#` / `(a/b)*`. Disable
+  wildcard-PREFIX on multi-box rows (not hoistable). Plan 02: per-ROW `mods`, active-row tracking +
+  cleanup-on-row-removal (RR-16), `build_side_query()` hoist logic, Preview shows the hoisted form.
+  Plan 01 (or 02) test: PARSER-level assertion that `#(a/b)` → OR component with `grammatical_prefixes`
+  on the group, `-(a/b)` → negated group, single-box `#שלום` → prefix; the prior `(#a/%b)`/decorate-
+  in-group assertions are REPLACED (they assert the broken form). Update Plan 02 `<behavior>`/`<action>`/
+  `<read_first>` (add `generate_tabular_syntax` `genizah_core.py:5972-6035` as the proven decoration
+  reference + `:6121-6163` parser) / acceptance / must_haves, and Plan 01 Task 3 test.
+- **RR-14 (HIGH — ja/flex/bidir are dropped by `compose()`).** Code-verified: `compose()` HARDCODES
+  `"ja": False, "flex_spacing": False, "bidirectional": False` (`shared/joins_lab.py:741-748`) and
+  `SideQuery` has no fields for them — so the builder's `_responsa_opts()` ja/flex/bidir NEVER reach the
+  engine when Plan 03 passes `compose()`'s `ro` to `SearchThread`. **Fix in the DESKTOP pane (keep Phase
+  106 frozen):** in Plan 03 `do_search`, after `query_str, ro, page_pos = compose(side)`, MERGE the
+  builder's ja/flex/bidir into `ro` (e.g. `ro.update({k: v for k, v in self.builder._responsa_opts().items() if k in ("ja","flex_spacing","bidirectional")})`); for the OTHER side, merge `self.other_builder._responsa_opts()`'s
+  ja/flex/bidir into the `b_ro` passed to `apply_cross_side(...)`. (`variants` already flows through
+  `compose` via `SideQuery.variants` — do NOT double-handle it.) Add a test asserting the merged `ro`
+  carries ja/flex/bidir when toggled. Update Plan 02 (`_responsa_opts()` exposes the three keys), Plan
+  03 (`do_search` merge + cross-side `b_ro` merge), and the relevant key_links.
+- **RR-15 (blocker — Plan 02 Task 0 ruff F401 ORDERING).** The Plan-02↔Plan-03 import SPLIT (RR-10) is
+  correct, but Plan 02 runs `ruff check desktop/join_workbench.py` in the SAME Task 0 that ADDS the
+  still-unused `QFrame`/`QSpinBox`/`QEvent` → F401 self-fail (`ruff.toml:14-20`). **Fix:** FOLD the Plan
+  02 import edit INTO the builder task (Task 1) that actually USES `QFrame`/`QSpinBox`/`QEvent`, so the
+  imports and their first use land together and ruff runs clean — OR keep a separate import task but move
+  its `ruff check` to AFTER the builder task. No `# noqa`. Update Plan 02 task structure + acceptance.
+- **RR-16 (LOW — active-row cleanup).** When an OR-box (or row) is removed, clear the active-row
+  reference so a deleted row/box can't receive modifier writes (mirror `genizah_app.py:1932-1934`).
+  Fold into Plan 02's row/box-removal handlers + an acceptance note. (Folded into RR-13's active-row
+  mechanism.)
 
 </decisions>
 
