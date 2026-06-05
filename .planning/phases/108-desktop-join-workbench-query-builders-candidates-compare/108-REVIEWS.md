@@ -1,125 +1,152 @@
 ---
 phase: 108
-round: 2
+round: 3
 reviewers: [codex]
-reviewed_at: 2026-06-05T09:22:38Z
+reviewed_at: 2026-06-05T10:07:43Z
 plans_reviewed: [108-01-PLAN.md, 108-02-PLAN.md, 108-03-PLAN.md, 108-04-PLAN.md]
 model: codex-cli 0.136.0 (default model)
 note: >
-  ROUND 2 — re-review of the plans AFTER the round-1 findings were folded in via
-  `/gsd-plan-phase 108 --reviews`. Run code-verified with
-  --dangerously-bypass-approvals-and-sandbox so Codex could check plan claims against the
-  live source (the Windows sandbox blocks file reads otherwise). Round 1 is preserved at
-  108-REVIEWS-round1.md. Verdict: all 8 round-1 resolutions (RR-1..RR-8) CONFIRMED landed
-  (RR-8 partial), but the replan left/introduced 3 NEW execution risks (2 release blockers).
+  ROUND 3 — re-review of the round-2 fold-in (RR-9..RR-12), code-verified with
+  --dangerously-bypass-approvals-and-sandbox. Rounds 1 and 2 preserved at
+  108-REVIEWS-round1.md / 108-REVIEWS-round2.md. Verdict: RR-11 + RR-12 CONFIRMED; RR-9 PARTIAL
+  (the per-word modifier wiring hits a real parser limitation); RR-10 PARTIAL (Plan 02 Task 0
+  still self-fails ruff); plus a NEW pre-existing finding (compose() drops JA/Flex/Bidir).
+  Orchestrator cross-check ADDED below the Codex output: the `(#a/%b)` form is NOT a Phase-108-new
+  bug — the shipping `generate_tabular_syntax` produces the identical form — which reframes RR-9 as
+  a product decision, not a regression.
 ---
 
-# Cross-AI Plan Review — Phase 108 (Round 2)
+# Cross-AI Plan Review — Phase 108 (Round 3)
 
 ## Codex Review
 
 **Summary**
 
-Round 2 fixed the main Round-1 plan drift: OR is now slash-group/parser-tested, Plans 03/04 now treat
-candidates as `Candidate` dataclasses, Add-as-Join is routed through an extended public API,
-translations are included, and matched-page images use the per-page image path. I would not execute
-yet: the replan introduced or left three execution risks, two of which are release blockers.
+The round-2 fold-in is improved but **not safe to execute yet**. RR-11 and RR-12 landed correctly. RR-9
+is only partial: the plan wires per-box modifiers, but live parser semantics do **not** support
+per-alternative modifiers inside `(a/b)` slash groups, and negation inside an OR group is especially
+wrong. RR-10 is also partial: Plan 03 imports were moved correctly, but Plan 02 Task 0 still runs Ruff
+immediately after adding `QFrame`/`QSpinBox`/`QEvent`, before Task 1 uses them.
 
-**Round-1 Fix Verification**
+**Round-2 Fix Verification**
 
 | RR | Status | Evidence |
 |----|--------|----------|
-| RR-1 OR syntax | CONFIRMED | Context now says slash-group `(w1/w2/w3)`, not `\|`, at `108-CONTEXT.md:66-75`. Plan 01 requires parser-level `parse_responsa_query` assertions at `108-01-PLAN.md:264-272`. Plan 02 assembles `"/".join(tokens)` at `108-02-PLAN.md:257-267`. Live parser supports `(עץ/אילן)` at `genizah_core.py:5727` and splits OR at `genizah_core.py:6139-6146`. |
-| RR-2 Candidate vs dict | CONFIRMED | Plan 03 uses `Candidate` attributes, not `r_sid(c)`/`c.get()`/`page_of(c)`, at `108-03-PLAN.md:66-70`; adds `candidate_to_result_dict` at `108-03-PLAN.md:188-193`; uses the `merge_candidates` list directly at `108-03-PLAN.md:362-364`. Live: `Candidate` at `shared/joins_lab.py:76`; `dedup_candidates` returns candidates at `:498-505`; `merge_candidates` returns a list at `:511`/`:526-527`/`:558-559`. |
-| RR-3 Add-as-Join public path | CONFIRMED | Plan 03 includes `genizah_app.py` and extends `open_anchor_as_join(..., partner_sys_id=None, partner_shelfmark=None)` at `108-03-PLAN.md:129-156`; workbench call uses `partner_shelfmark=` at `108-03-PLAN.md:238-239`. Live public method leaves B empty at `genizah_app.py:15443-15464`; private prefill line at `genizah_app.py:5242-5261` — the plan targets the right gap. |
-| RR-4 i18n guard | CONFIRMED | Plans 02/03/04 include `genizah_translations.py` in `files_modified` (`108-02:7-9`, `108-03:8-10`, `108-04:7-9`) and require registering new `tr()` keys (`108-02:275-283`, `108-03:255`, `108-04:166`). Live guard at `tests/test_join_workbench_i18n.py:56-70`. |
-| RR-5 Other-side page-position | CONFIRMED | D-07 revised at `108-CONTEXT.md:83-91`. Plan 02 adds `allow_page_position` and hides the combo when false (`108-02:204-210`, `:246-250`). Plan 03 instantiates the other builder with `allow_page_position=False` (`108-03:321-327`). Live `apply_cross_side()` does not pass `text_position` at `shared/joins_lab.py:369-375`. |
-| RR-6 Batch measurements | CONFIRMED (with new concern below) | Plan 01 extends existing `get_measurement_summaries_batch`, not a new method (`108-01:141-156`); Plan 03 consumes existing keys (`108-03:210-219`). Live method preserves COALESCE width/height at `shared/fjms_service.py:3005-3060`. |
-| RR-7 Page-specific images | CONFIRMED | Plan 03 requires `enrich_metadata(...).get("images")` + `_image_url_for_idx(images, page-1, width)` (`108-03:246-250`); Plan 04 uses `_enqueue_image_for_pane(..., c.page)` (`108-04:150-152`). Live helper is per-index at `desktop/join_workbench.py:189-197`; thumbnail is manuscript-level at `genizah_core.py:4892`. |
-| RR-8 Missing imports | PARTIAL | Plan 02 adds the imports (`108-02:150-154`) but also runs `ruff check desktop/join_workbench.py` immediately (`108-02:165`). `ruff.toml:15-18` selects `F401`, and Plan 02 front-loads Plan-03-only `QGridLayout`/`QTableWidget`/`QTableWidgetItem`/`SearchThread` — so Task 0 likely fails lint before those names are used. |
+| RR-9 | **PARTIAL** | Plan 02 adds per-box `mods`, active-box focus, `_on_modifier_changed`, `_decorate`, and decorated slash-join (`108-02-PLAN.md:258-262`, `:317-330`, `:342-350`); decoration order matches `genizah_core.py:6008-6027`. Active-word mechanism correctly identified (`genizah_app.py:1559`, `:1735`, `:1779-1784`). **But** the live parser strips `-/%/#` from the whole token then `inner.split('/')` takes raw words (`genizah_core.py:6121-6163`): `(#word/%alt)` yields OR words containing literal `#`/`%`, not modifier flags. Plan 01's decorated-OR test is too weak (`108-01-PLAN.md:332-336`). |
+| RR-10 | **PARTIAL** | Plan 02 correctly excludes Plan-03-only imports (`108-02-PLAN.md:181-188`); Plan 03 moves `QGridLayout`/`QTableWidget`/`QTableWidgetItem`/`SearchThread` to Wave 3 (`108-03-PLAN.md:151-157`). But Plan 02 Task 0 runs `ruff check desktop/join_workbench.py` (`108-02-PLAN.md:193-201`) right after adding `QFrame`/`QSpinBox`/`QEvent`, BEFORE Task 1 uses them; `ruff.toml:14-20` selects F401, so Task 0 self-fails. |
+| RR-11 | **CONFIRMED** | Plan 01 mirrors the existing line-height guard: `has_size_category`, `sc_col`, conditional `col_names`, `None` fallback (`108-01-PLAN.md:170-182`) + absent-column test (`:199-202`). Live guard pattern at `shared/fjms_service.py:3017-3029`; SELECT-failure path at `:3035-3060`. |
+| RR-12 | **CONFIRMED** | Plan 03 guards before `page-1` in `_enqueue_image_for_pane` (`108-03-PLAN.md:272-280`); Plan 04 passes `c.page` through without arithmetic (`108-04-PLAN.md:156-159`). Live `Candidate.page` optional (`shared/joins_lab.py:103-104`); None-page fixture (`tests/test_joins_lab.py:121-124`); helper `_image_url_for_idx` (`desktop/join_workbench.py:189-197`). |
+
+**RR-1..RR-8 Regression Check**
+
+RR-1 slash-group OR, RR-2 Candidate model, RR-3 public Add-as-Join, RR-4 i18n registration, RR-5
+other-side page-position omission, RR-6 batch reuse, RR-7 per-page images remain intact; RR-8's import
+split is conceptually intact but still blocked by the RR-10 Task-0 ruff ordering bug.
 
 **New Concerns**
 
-- **HIGH — Modifier row controls are planned as visible but mostly no-op.** CONTEXT/UI require Negation,
-  Defective, Wildcards, Prefixes, Suffixes (`108-CONTEXT.md:61-62`, `108-UI-SPEC.md:176-178`). The live
-  existing builder applies those as per-word token syntax at `genizah_core.py:6008-6027` (`-word`,
-  `%word`, `#word`, `word#`, `*word`, `word*`). But Plan 02 only stores/uses `ja`, `flex`, `bidir`,
-  `variants` in `_responsa_opts()` and builds terms from raw box text at `108-02-PLAN.md:241-267`.
-  Selecting Prefix/Negation/etc. would change the preview but not the query semantics.
-
-- **MEDIUM (blocker) — Plan 02 Task 0 likely fails ruff (F401).** The import block lacks the names at
-  `desktop/join_workbench.py:315-320`; Plan 02 adds ALL names before Plan 03 uses several (`108-02:150-154`);
-  ruff enforces unused imports (`ruff.toml:15-18`). Move Plan-03 imports to Plan 03, or `# noqa: F401`
-  every intentionally deferred import (not only `SearchThread`).
-
-- **MEDIUM — `size_category` old-sidecar robustness is internally contradictory.** Plan 01 adds it as a
-  plain selected column (`108-01:154-156`) but also says a missing `size_category` should degrade to
-  `None` (`108-01:160-162`). The live method guards the optional `avg_line_height_mm` before adding it to
-  the SELECT (`shared/fjms_service.py:3017-3029`); an unguarded missing column makes the SELECT fail and
-  returns an empty batch (`:3035-3060`).
-
-- **LOW — Per-page image helper needs a `page is None` guard.** `Candidate.page` is optional
-  (`shared/joins_lab.py:104`); tests cover `(sys_id, None)` (`tests/test_joins_lab.py:121-124`). Plan 03
-  subtracts `page-1` (`108-03:246-250`); Plan 04 passes `c.page` directly (`108-04:142-152`).
+- **HIGH — Decorated OR groups are not parser-supported.** Plan serializes mixed per-box modifiers as
+  `(#שלום/%שלומות)` (`108-CONTEXT.md:70-73`, `108-02-PLAN.md:346-350`), but the live parser only
+  supports the modifier OUTSIDE the OR token, e.g. documented `#(שלום/שלומות)` (`genizah_core.py:5727-5728`);
+  inside OR, alternatives are raw strings from `inner.split('/')` (`genizah_core.py:6139-6163`). This
+  silently turns modifiers into literal search text.
+- **HIGH — Negation inside slash-OR is semantically wrong.** Plan `_decorate` returns `"-" + text`
+  (`108-02-PLAN.md:342-343`), then slash-joins (`:346-350`). Live negation is recognized only before OR
+  parsing (`genizah_core.py:6115-6119`); `(-עץ/שלום)` is not a negated component.
+- **HIGH — JA/Flex/Bidir global toggles still appear no-op on the planned search path.** Plan 02 defines
+  `_responsa_opts()` with JA/flex/bidir (`108-02-PLAN.md:337-341`), but `SideQuery` only stores
+  `variants` and `page_position` (`shared/joins_lab.py:47-65`); `compose()` HARDCODES `ja`,
+  `flex_spacing`, `bidirectional` = False (`shared/joins_lab.py:741-748`); Plan 03 passes the `ro` from
+  `compose(side)` directly to `SearchThread` (`108-03-PLAN.md:377-381`). The builder's `_responsa_opts()`
+  is never consumed.
+- **LOW — Active-box removal cleanup is underspecified.** Focus tracking by object identity is coherent
+  (`108-02-PLAN.md:317-330`), but added OR boxes are removable (`:286-288`) and the plan does not clear
+  `_active_box` if the focused box is deleted. The existing dialog clears stale active-word state on
+  removal (`genizah_app.py:1932-1934`).
 
 **Suggestions**
 
-- Either implement token decoration for the full modifier row, or remove the unsupported per-word
-  controls from Phase 108 (scholars can still type `#`/`%`/`*`/`-` directly — the engine parses them).
-- Move deferred imports into the wave that uses them, or explicitly `noqa` every intentionally unused
-  import.
-- Add `has_size_category = "size_category" in cols` and build a `sc_col` fragment like the existing
-  `lh_col` guard.
-- Make `_enqueue_image_for_pane` treat a missing page as page 1 (or "No image") without arithmetic on
-  `None`.
+1. For RR-9: either add parser support for per-alternative modifiers inside OR groups (with tests
+   asserting flags for `(#x/%y)` and `(-x/y)`), or constrain the UI so slash-OR rows cannot mix per-box
+   modifiers. Hoisting only works when the same modifier applies to the whole group, e.g. `#(a/b)`.
+2. Move Plan 02 import edits into the same task that adds `JoinQueryBuilder`, or remove ruff from Task 0
+   and run it after Task 1.
+3. In Plan 03, do not rely on `compose()` for JA/flex/bidir. After composing, merge
+   `self.builder._responsa_opts()` into `ro`; do the same for the other-side builder before
+   `apply_cross_side`.
 
 **Risk Assessment**
 
-Overall risk: **HIGH** until the modifier no-op and the Plan 02 lint issue are fixed. The main Round-1
-blockers are mostly resolved, but execution as written can still fail lint and silently run wrong
-searches when modifier controls are used.
-
-**RELEASE BLOCKERS:** modifier-row no-op semantics; Plan 02 unused-import ruff failure; `size_category`
-missing-column guard (if old-sidecar compatibility is required).
+Overall risk: **HIGH**. **RELEASE BLOCKERS:** RR-9 decorated-OR / negation semantics; RR-10 Plan 02
+Task-0 ruff failure; global JA/Flex/Bidir toggles still no-op on the planned execution path.
 
 ---
 
 ## Consensus Summary
 
-Single reviewer (`--codex`), code-verified against the live repo with `file:line` citations — these are
-plan↔code drift findings, not style. This round is a **re-review after the round-1 fold-in**, so the
-headline is two-part: (1) the round-1 work landed, and (2) a small set of new, fixable issues remain.
+Single reviewer (`--codex`), code-verified. Round 3 confirms RR-11 + RR-12 landed and RR-1..RR-8 did not
+regress, but surfaces three execution blockers. Two are clean mechanical fixes; one (RR-9) is a genuine
+product/parser decision. **Orchestrator cross-check added below** — it changes how finding #1 should be
+read.
 
-### Round-1 resolutions — all CONFIRMED
-RR-1 (slash-group OR + parser-level test), RR-2 (Candidate model + adapter + list-not-MergeResult),
-RR-3 (public Add-as-Join), RR-4 (i18n files), RR-5 (other-side page-position dropped, 106 frozen),
-RR-6 (reuse existing batch method), RR-7 (per-page images) all verified landed. RR-8 (imports) landed
-but collides with the lint gate (see below).
+### Orchestrator cross-check on the RR-9 "decorated-OR" finding (NOT a Phase-108-new bug)
+The shipping `TabularQueryBuilderDialog` serializes its query through
+`genizah_core.generate_tabular_syntax()` (`genizah_app.py:2070-2073`). That function (`genizah_core.py:6014-6033`)
+does the IDENTICAL thing the round-2 plan does: it decorates each word (`%`→`#`→`#`-append→`*`→`*`,
+`genizah_core.py:6014-6027`) and then, for a multi-alternative component, emits
+`f"({'/'.join(words_with_mods)})"` — i.e. `(#a/%b)`. So:
+- The `(#a/%b)` form the plan produces is **consistent with the production dialog**, NOT a new defect.
+- The parser limitation Codex found is **pre-existing and shared**: in BOTH the shipping dialog and the
+  planned builder, per-alternative modifiers inside a multi-box OR group degrade to literal characters
+  (`genizah_core.py:6139-6163`). Single-box modifiers (`#שלום`, `שלום*`, `-עץ`) work correctly in both.
+- Therefore RR-9 is best treated as a PRODUCT DECISION about a known engine limitation, not a
+  regression to "fix before any execution." The honest options:
 
-### Must-fix before execution (new this round)
-1. **Modifier row no-op (HIGH).** Plan 02 builds Negation/Defective/Wildcards/Prefixes/Suffixes
-   checkboxes (locked in D-04) but `_responsa_opts()` + raw-text `build_side_query` never apply them —
-   the engine wants per-word token decoration (`-`/`%`/`#`/`*`, `genizah_core.py:6008-6027`). **This is a
-   CONTEXT-level decision (touches the locked D-04 modifier row): TRIM the per-word controls from 108
-   (keep variants/JA/flex/bidir; scholars type `#`/`%`/`*`/`-` directly — the engine parses them), OR
-   WIRE per-word token decoration into `build_side_query`.** Recommend TRIM for 108 (lower risk; the raw
-   syntax still works), wire later if scholars ask.
-2. **Plan 02 Task 0 ruff F401 (blocker).** Front-loading Plan-03-only imports + an immediate
-   `ruff check` self-fails. Move `QGridLayout`/`QTableWidget`/`QTableWidgetItem`/`SearchThread` to the
-   Plan 03 wave (the first plan that USES them), keeping only `QFrame`/`QSpinBox` in Plan 02.
-3. **`size_category` missing-column guard (MEDIUM→blocker if old sidecars matter).** Mirror the existing
-   `avg_line_height_mm` guard: `has_size_category = "size_category" in cols`, conditional `sc_col`,
-   and `None` when absent. Resolves Plan 01's internal contradiction.
+  - **(A) Match the existing dialog** — reuse the proven `generate_tabular_syntax` decoration (or keep
+    the equivalent `_decorate`). Single-box mods work; multi-box-OR mods are literal-inside-`(…)` exactly
+    like the shipping Tabular Search. Lowest risk, consistent app-wide. Document the limitation; a future
+    engine phase can lift it.
+  - **(B) Hoist row-level modifiers outside the group → `#(a/b)`** — parser-correct, and it makes the
+    COMMON case work (the OR-alternatives are usually spelling variants of one word, so applying the same
+    `#`/`%` to all of them is what you actually want). Cost: modifiers become PER-ROW (not per-box); you
+    cannot give two alternatives different modifiers. Diverges from the existing dialog's serialization.
+  - **(C) Extend the engine parser** to apply per-alternative modifiers inside OR groups (`(#a/%b)`).
+    Correct in full generality but an engine change with blast radius into the existing dialog + Responsa
+    search — out of Phase-108 scope; a separate engine phase.
+
+  Recommendation: **(B) hoist row-level `#(a/b)`** for 108 — it is parser-correct AND fixes the common
+  spelling-variant case (which (A) leaves silently broken), without an engine change. Keep negation
+  row-level too: `-(a/b)` is parsed as a negated component (the `-` is stripped before the OR check at
+  `genizah_core.py:6115-6119`, so `-(a/b)` DOES negate the whole group — verify in the replan). This
+  makes modifiers a PER-ROW control rather than per-box — a small UI-model change from round 2.
+
+### Must-fix before execution
+1. **RR-9 OR-modifier semantics (HIGH).** Decide (A)/(B)/(C) above — this is a CONTEXT-level decision
+   (touches revised D-04). The replan must update the serialization AND strengthen Plan 01's test to
+   assert PARSER flags (e.g. `#(a/b)` → both alternatives carry `grammatical_prefixes`; `(#a/b)` → does
+   NOT), so the test can't pass on a literal-`#` string.
+2. **JA/Flex/Bidir no-op (HIGH).** `compose()` hardcodes them False and `SideQuery` can't carry them
+   (`shared/joins_lab.py:741-748`). Fix in the DESKTOP pane (keep Phase 106 frozen): after
+   `query_str, ro, page_pos = compose(side)`, merge the builder's `_responsa_opts()` JA/flex/bidir into
+   `ro` before `SearchThread`; merge the other-side builder's opts into `b_ro` before `apply_cross_side`.
+   Add a test asserting the merged `ro` carries ja/flex/bidir when toggled.
+3. **Plan 02 Task 0 ruff F401 (blocker).** Don't run `ruff check` in Task 0 when the just-added
+   `QFrame`/`QSpinBox`/`QEvent` are still unused — either fold the import edit into Task 1 (the builder
+   that uses them) or move the ruff gate to the end of Task 1. (RR-10's Plan-02↔Plan-03 split is right;
+   only the intra-Plan-02 task ordering is wrong.)
 
 ### Should-resolve
-4. **Per-page image `page is None` guard (LOW).** `_enqueue_image_for_pane` / `_image_url_for_idx`
-   must not do `page-1` arithmetic on a `None` page (VS-only/None-page candidates) — treat as page 1
-   or "No image."
+4. **Active-box cleanup (LOW).** Clear `_active_box` when the focused OR-box is removed (mirror
+   `genizah_app.py:1932-1934`), so a deleted box can't receive modifier writes.
+
+### Confirmed landed
+RR-11 (size_category column guard), RR-12 (page-None guard), and RR-1..RR-8 (no regression).
 
 ### Recommended next step
-Route these through `/gsd-plan-phase 108 --reviews` again. Finding #1 needs a one-line CONTEXT decision
-(trim vs wire the per-word modifier controls) — the replan will surface it; #2/#3/#4 are mechanical
-plan edits. After that, the plans should be execution-ready (round-1 blockers are gone).
+Route through `/gsd-plan-phase 108 --reviews` once more. Finding #1 needs a one-line CONTEXT decision
+(A/B/C — recommend B, hoist `#(a/b)` per-row); #2/#3/#4 are mechanical. After this the plans should be
+execution-ready — the loop has now driven 3 rounds with decreasing severity (round 1: 4 HIGH; round 2:
+1 HIGH + 2 blockers; round 3: 2 real blockers + 1 product decision, the rest pre-existing/known).
 
 ### Divergent Views
-None — single reviewer.
+None — single reviewer (orchestrator cross-check supplements, does not contradict).
