@@ -3689,3 +3689,60 @@ TRANSLATIONS.update({
     "Joins context":          "הקשר הצירופים",
     "No lists available":     "אין רשימות זמינות",
 })
+
+# === Phase 108-02 — JoinQueryBuilder i18n (Plan 02 builder widget) ===
+# All new tr() keys introduced by JoinQueryBuilder in desktop/join_workbench.py.
+TRANSLATIONS.update({
+    # --- Row controls ---
+    "+ or":                  "+ או",
+    "+ Add Line":            "+ הוסף שורה",
+    "Add another single word that may appear INSTEAD (OR) on this same line":
+        "הוסף מילה נוספת שיכולה להופיע במקום (OR) על אותה שורה",
+    "Add an OR alternative to this line":
+        "הוסף חלופת OR לשורה זו",
+    "Add another manuscript line to the query":
+        "הוסף שורת כתב יד נוספת לשאילתה",
+    "Remove row":            "הסר שורה",
+    "Remove this OR alternative": "הסר חלופת OR זו",
+    "ends line ⊣":           "מסיים שורה ⊣",
+    "The LAST word must be at the END of the line (left edge in Hebrew) — a torn line ending":
+        "המילה האחרונה חייבת להיות בסוף השורה (קצה שמאל בעברית) — שורה קרועה בסופה",
+    "⊢ starts line":         "⊢ מתחיל שורה",
+    "The FIRST word must be at the START of the line (right edge in Hebrew) — a torn line beginning":
+        "המילה הראשונה חייבת להיות בתחילת השורה (קצה ימין בעברית) — שורה קרועה בתחילתה",
+    "Lines to skip before the next line (0 = the very next line)":
+        "שורות לדלג לפני השורה הבאה (0 = השורה הבאה ממש)",
+    "↓ ":                    "↓ ",
+    " ln":                   " שורות",
+
+    # --- Variants / global options ---
+    "variants":              "וריאנטים",
+    "Expand spelling variants (responsa variant expansion)":
+        "הרחב וריאנטים כתיביים (הרחבת וריאנטים של פרויקט השו\"ת)",
+
+    # --- Modifier row (PER-ROW) ---
+    "(modifiers apply to the focused line)":
+        "(המאפיינים חלים על השורה הממוקדת)",
+    "Wildcard-prefix can't apply to an OR group — use it on a single-word line":
+        "ג'וקר-תחילי לא חל על קבוצת OR — השתמש בו על שורה עם מילה אחת",
+
+    # --- Page-position control (anchor side, RR-5) ---
+    "page: anywhere":        "עמוד: בכל מקום",
+    "page: start of text":   "עמוד: תחילת הטקסט",
+    "page: end of text":     "עמוד: סוף הטקסט",
+    "Match must fall at the START or END of the page text (like the main search). Realizes the page-anchored first/last line.":
+        "ההתאמה חייבת להיות בתחילת או סוף הטקסט בעמוד (כמו בחיפוש הרגיל). מממשת שורה ראשונה/אחרונה מעוגנת לעמוד.",
+
+    # --- Preview ---
+    "Preview:":              "תצוגה מקדימה:",
+    "(query preview — fill in at least one word box)":
+        "(תצוגה מקדימה של השאילתה — מלא לפחות תיבת מילה אחת)",
+    "(page anchor needs a non-empty anchored line)":
+        "(עיגון עמוד דורש שורה מעוגנת עם תוכן)",
+
+    # --- Placeholder ---
+    "word(s) on this line…":           "מילה/ות בשורה זו…",
+    "word(s) required on the OTHER side…": "מילה/ות נדרשת בצד השני…",
+    "or…":                   "או…",
+    "word…":                 "מילה…",
+})
