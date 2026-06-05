@@ -3849,3 +3849,34 @@ TRANSLATIONS.update({
         "TODO: פעולת השוואה (תוכנן בשלב 104)",
 })
 
+# === Phase 108-04 — CompareDialog i18n (Plan 04 two-pane compare) ===
+# All new tr() keys introduced by CompareDialog in desktop/join_workbench.py.
+TRANSLATIONS.update({
+    # --- Navigation buttons ---
+    "< prev":                     "< הקודם",
+    "Previous candidate":         "מועמד קודם",
+    "next >":                     "הבא >",
+    "Next candidate":             "מועמד הבא",
+
+    # --- Triage buttons (emoji + label) ---
+    "Y yes":                      "Y כן",
+    "? maybe":                    "? אולי",
+    "N no":                       "N לא",
+
+    # --- Action row ---
+    "📖 Browse":                  "📖 עיין",
+    "🧩 Puzzle":                  "🧩 פאזל",
+    "📋 Add to List":             "📋 הוסף לרשימה",
+    "🔗 Add as Join":             "🔗 הוסף כצירוף",
+    "⚓ Re-anchor":               "⚓ עגון מחדש",
+
+    # --- Pane placeholders ---
+    "…":                          "…",
+
+    # --- Candidate pane meta ---
+    "other side matched":         "הצד השני תאם",
+
+    # --- Position label prefix ---
+    "candidate":                  "מועמד",
+})
+

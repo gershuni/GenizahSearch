@@ -2315,21 +2315,272 @@ if _QT_AVAILABLE:
                 self.apply_filters()
 
         def open_compare(self, global_idx: int):
-            """Open the side-by-side compare dialog for a candidate.
+            """Open the side-by-side CompareDialog for a candidate (JWB-08).
 
-            TODO: Plan 04 will replace this stub with CompareDialog.
-            Currently sets focus to the candidate card if visible.
+            Creates a modeless CompareDialog and shows it; keeps a reference so it
+            is not garbage-collected while open.
             """
-            # TODO: open_compare stub (Plan 04 will implement CompareDialog)
-            card = self.cards.get(global_idx)
-            if card is not None:
-                try:
-                    card.setFocus()
-                except RuntimeError:
-                    pass
-            logger.info(
-                "open_compare: global_idx=%d (CompareDialog stub — Plan 04)", global_idx
+            self._compare = CompareDialog(self.wb, global_idx)
+            self._compare.show()
+
+    # -------------------------------------------------------------------------
+    # Plan 04 — CompareDialog (QDialog) — two-pane side-by-side compare (JWB-08).
+    # -------------------------------------------------------------------------
+
+    class CompareDialog(QDialog):
+        """Modeless two-pane compare dialog: anchor (left) vs candidate (right).
+
+        D-16: carries its OWN anchor pane — the Phase-107 pinned pane is NOT reused,
+        so the workbench stays usable behind the dialog.
+        RR-2: the filtered list holds Candidate dataclasses; reads candidate.* attributes
+        directly.  The anchor (wb._anchor_res) is the raw Phase-107 DICT — read with r_*.
+        RR-12: c.page (Optional[int]) is passed STRAIGHT to _enqueue_image_for_pane, which
+        guards None internally — no page-1 arithmetic here.
+        D-20: all actions route through Phase-107 public methods (no _vs_* calls).
+        """
+
+        def __init__(self, wb, start_idx: int):
+            super().__init__(wb)
+            self.wb = wb
+            self.idx = max(0, min(start_idx, max(0, len(wb.filtered) - 1)))
+            self.setWindowTitle(tr("Compare"))
+            self.resize(1320, 870)
+            # Modeless child; add maximize button hint (UI-SPEC Surface 9)
+            self.setWindowFlags(
+                self.windowFlags() | Qt.WindowType.WindowMaximizeButtonHint
             )
+            self.setModal(False)
+
+            v = QVBoxLayout(self)
+            v.setSpacing(4)
+
+            # ── Top bar: prev/next nav + position label + Y/?/N triage ──────
+            topbar = QHBoxLayout()
+            self.prev_btn = QPushButton(tr("< prev"))
+            self.prev_btn.setFixedSize(34, 28)
+            self.prev_btn.setAccessibleName(tr("Previous candidate"))
+            self.prev_btn.clicked.connect(lambda: self.step(-1))
+            topbar.addWidget(self.prev_btn)
+
+            self.pos_lbl = QLabel("")
+            topbar.addWidget(self.pos_lbl, 1)
+
+            self.nxt_btn = QPushButton(tr("next >"))
+            self.nxt_btn.setFixedSize(34, 28)
+            self.nxt_btn.setAccessibleName(tr("Next candidate"))
+            self.nxt_btn.clicked.connect(lambda: self.step(1))
+            topbar.addWidget(self.nxt_btn)
+
+            for emoji, val, aname in (
+                (tr("Y yes"), "yes", tr("Mark yes")),
+                (tr("? maybe"), "maybe", tr("Mark maybe")),
+                (tr("N no"), "no", tr("Mark no")),
+            ):
+                btn = QPushButton(emoji)
+                btn.setAccessibleName(aname)
+                btn.clicked.connect(lambda _, x=val: self._mark(x))
+                topbar.addWidget(btn)
+            v.addLayout(topbar)
+
+            # ── Action row: Browse / Puzzle / List / Join / Re-anchor ────────
+            arow = QHBoxLayout()
+            browse_btn = QPushButton(tr("📖 Browse"))
+            browse_btn.setAccessibleName(tr("📖 Browse"))
+            browse_btn.clicked.connect(lambda: self.wb.open_result_in_browse(self._cur()))
+            arow.addWidget(browse_btn)
+
+            puzzle_btn = QPushButton(tr("🧩 Puzzle"))
+            puzzle_btn.setAccessibleName(tr("🧩 Puzzle"))
+            puzzle_btn.clicked.connect(lambda: self.wb.open_result_in_puzzle(self._cur()))
+            arow.addWidget(puzzle_btn)
+
+            list_btn = QPushButton(tr("📋 Add to List"))
+            list_btn.setAccessibleName(tr("📋 Add to List"))
+            list_btn.clicked.connect(lambda: self.wb.open_result_in_list(self._cur(), None))
+            arow.addWidget(list_btn)
+
+            join_btn = QPushButton(tr("🔗 Add as Join"))
+            join_btn.setAccessibleName(tr("🔗 Add as Join"))
+            join_btn.clicked.connect(lambda: self.wb.open_result_as_join(self._cur()))
+            arow.addWidget(join_btn)
+
+            reanchor_btn = QPushButton(tr("⚓ Re-anchor"))
+            reanchor_btn.setAccessibleName(tr("⚓ Re-anchor"))
+            reanchor_btn.clicked.connect(self._reanchor)
+            arow.addWidget(reanchor_btn)
+
+            arow.addStretch()
+            v.addLayout(arow)
+
+            # ── Two-pane body ────────────────────────────────────────────────
+            body = QHBoxLayout()
+            self.left = self._pane()    # anchor pane
+            self.right = self._pane()   # candidate pane
+            body.addLayout(self.left["box"], 1)
+            body.addLayout(self.right["box"], 1)
+            v.addLayout(body, 1)
+
+            # Paint initial state
+            if wb.filtered:
+                self.paint()
+
+        def _pane(self) -> dict:
+            """Factory: build one compare pane (VBoxLayout + 4 widgets).
+
+            Returns dict with keys: box, shelf, meta, img, txt.
+            """
+            box = QVBoxLayout()
+            shelf = QLabel()
+            shelf.setStyleSheet("font-weight:bold;font-size:13px;")
+            shelf.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            shelf.setWordWrap(True)
+
+            meta = QLabel()
+            meta.setWordWrap(True)
+            meta.setStyleSheet(f"font-size:11px;color:{_META_COLOR};")
+
+            img = QLabel(tr("…"))
+            img.setMinimumHeight(360)
+            img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            img.setStyleSheet("background:#e2e8f0;color:#64748b;")
+
+            txt = QTextBrowser()
+            txt.setReadOnly(True)
+
+            box.addWidget(shelf)
+            box.addWidget(meta)
+            box.addWidget(img)
+            box.addWidget(txt, 1)
+            return {"box": box, "shelf": shelf, "meta": meta, "img": img, "txt": txt}
+
+        def _fill_anchor(self, pane: dict, res_dict: dict):
+            """Fill the anchor pane from the raw result DICT (read with r_* helpers, RR-2).
+
+            The anchor is the Phase-107 pinned result dict — never a Candidate.
+            """
+            try:
+                pane["shelf"].setText(r_shelf(res_dict))
+            except RuntimeError:
+                return
+            # Meta line: meta_brief + optional dimension/material from enrich cache
+            bits = [meta_brief(res_dict)]
+            enrich = self.wb._candidate_pane._enrich if hasattr(
+                self.wb, "_candidate_pane"
+            ) else {}
+            anchor_key = (r_sid(res_dict), page_of(res_dict))
+            m = enrich.get(anchor_key) or {}
+            width_cm = m.get("width_cm")
+            height_cm = m.get("height_cm")
+            material = m.get("material")
+            if width_cm and height_cm:
+                bits.append(f"▧ {width_cm:.0f}x{height_cm:.0f} cm")
+            elif material:
+                bits.append("▧ " + str(material))
+            try:
+                pane["meta"].setText("   ·   ".join(b for b in bits if b))
+            except RuntimeError:
+                return
+            # Transcription text (RTL numbered, Pitfall 5 — try/except on htmlify)
+            try:
+                apply_line_numbered_text(
+                    pane["txt"],
+                    htmlify(r_text(res_dict), res_dict.get("highlight_pattern")),
+                    source_text=r_text(res_dict),
+                    is_html=True,
+                )
+            except Exception:
+                pass
+            # Image: per-page via _enqueue_image_for_pane (RR-7); passes page through
+            # (may be None for synthetic anchor — the pump guards None per RR-12)
+            p = page_of(res_dict)
+            self.wb._enqueue_image_for_pane(pane["img"], r_sid(res_dict), p, width=1400)
+
+        def _fill_candidate(self, pane: dict, c):
+            """Fill the candidate pane from a Candidate dataclass (RR-2).
+
+            Reads c.* attributes directly — never r_sid(c)/r_text(c)/page_of(c).
+            RR-12: passes c.page (Optional[int]) straight to _enqueue_image_for_pane;
+            the pump's None-page guard handles VS-only / None-page rows — no page-1
+            arithmetic here.
+            """
+            try:
+                pane["shelf"].setText(c.shelfmark)
+            except RuntimeError:
+                return
+            # Meta line: library · title + optional dimension/material + "other side matched"
+            lib_title = " · ".join(p for p in [c.library_code, c.title[:60]] if p)
+            bits = [lib_title] if lib_title else []
+            enrich = self.wb._candidate_pane._enrich if hasattr(
+                self.wb, "_candidate_pane"
+            ) else {}
+            m = enrich.get(c.key) or {}   # c.key = (sys_id, page) per RR-2
+            width_cm = m.get("width_cm")
+            height_cm = m.get("height_cm")
+            material = m.get("material")
+            if width_cm and height_cm:
+                bits.append(f"▧ {width_cm:.0f}x{height_cm:.0f} cm")
+            elif material:
+                bits.append("▧ " + str(material))
+            if c.via_other_side:
+                bits.append(tr("other side matched"))   # D-18 / R-06 label
+            try:
+                pane["meta"].setText("   ·   ".join(b for b in bits if b))
+            except RuntimeError:
+                return
+            # Transcription text (RTL numbered, Pitfall 5 — try/except on htmlify)
+            try:
+                apply_line_numbered_text(
+                    pane["txt"],
+                    htmlify(c.full_text, c.highlight_pattern),
+                    source_text=c.full_text,
+                    is_html=True,
+                )
+            except Exception:
+                pass
+            # Image: matched page via _enqueue_image_for_pane (RR-7).
+            # RR-12: pass c.page DIRECTLY (Optional[int]) — the pump guards None;
+            # no page-1 arithmetic on c.page here.
+            self.wb._enqueue_image_for_pane(pane["img"], c.sys_id, c.page, width=1400)
+
+        def paint(self):
+            """Refresh both panes and the position label for self.idx."""
+            if not self.wb.filtered:
+                return
+            cand = self.wb.filtered[self.idx]
+            tri = self.wb.triage.get(cand.sys_id)
+            try:
+                self.pos_lbl.setText(
+                    tr("candidate") + f" {self.idx + 1}/{len(self.wb.filtered)}"
+                    f"   {r_shelf(self.wb._anchor_res)}  vs  {cand.shelfmark}"
+                    f"   [{tri or '-'}]"
+                )
+            except RuntimeError:
+                return
+            # Anchor pane stays static (D-18) — re-filled on every paint
+            self._fill_anchor(self.left, self.wb._anchor_res)
+            # Candidate pane reflects the current candidate
+            self._fill_candidate(self.right, cand)
+
+        def step(self, d: int):
+            """Move prev/next through the filtered candidate list (clamp, no wrap)."""
+            if not self.wb.filtered:
+                return
+            self.idx = max(0, min(self.idx + d, len(self.wb.filtered) - 1))
+            self.paint()
+
+        def _cur(self):
+            """Return the current Candidate (Candidate dataclass, RR-2)."""
+            return self.wb.filtered[self.idx]
+
+        def _mark(self, val: str):
+            """Mark current candidate and refresh position label."""
+            self.wb.mark(self._cur().sys_id, val)
+            self.paint()
+
+        def _reanchor(self):
+            """Set current candidate as the new anchor, then close dialog."""
+            self.wb.set_anchor(candidate_to_result_dict(self._cur()))
+            self.accept()
 
     # -------------------------------------------------------------------------
     # JoinWorkbenchWindow — the main modeless QDialog shell (Plan 02, JWB-01).
