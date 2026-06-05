@@ -3022,11 +3022,15 @@ class FjmsService:
             return {}  # Lookup failed; return empty dict
         has_line_height = 'avg_line_height_mm' in cols
         lh_col = ", avg_line_height_mm" if has_line_height else ""
+        has_size_category = 'size_category' in cols
+        sc_col = ", size_category" if has_size_category else ""
 
         # Define column names for positional fallback (review concern #6)
         col_names = ['AlmaId', 'width_cm', 'height_cm', 'avg_num_lines', 'avg_text_density', 'material']
         if has_line_height:
             col_names.append('avg_line_height_mm')
+        if has_size_category:
+            col_names.append('size_category')
 
         try:
             for i in range(0, len(unique_ids), 500):
@@ -3036,7 +3040,7 @@ class FjmsService:
                     SELECT AlmaId,
                            COALESCE(catalog_width_cm, max_computed_width_cm) as width_cm,
                            COALESCE(catalog_height_cm, max_computed_height_cm) as height_cm,
-                           avg_num_lines, avg_text_density, material{lh_col}
+                           avg_num_lines, avg_text_density, material{lh_col}{sc_col}
                     FROM manuscript_measurements
                     WHERE AlmaId IN ({ph})
                 """, chunk)
@@ -3054,6 +3058,7 @@ class FjmsService:
                         'avg_line_height_mm': r.get('avg_line_height_mm') if has_line_height else None,
                         'avg_text_density': r.get('avg_text_density'),
                         'material': r.get('material'),
+                        'size_category': r.get('size_category') if has_size_category else None,
                     }
         except Exception as e:
             logger.error(f"FjmsService.get_measurement_summaries_batch error: {e}")

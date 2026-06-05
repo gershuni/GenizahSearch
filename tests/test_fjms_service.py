@@ -1863,3 +1863,237 @@ def test_catalog_and_free_desc_stay_in_sync_after_migration(instatution_db):
         )
     finally:
         conn.close()
+
+
+# ── TestGetMeasurementSummariesBatch (108-01, RR-6, RR-11) ────────────────────
+
+def _make_meas_db_with_size_category(tmp_path, db_name="meas_with_sc.db"):
+    """Create a test DB with manuscript_measurements table that includes size_category."""
+    db_path = str(tmp_path / db_name)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("""
+        CREATE TABLE manuscript_measurements (
+            AlmaId TEXT PRIMARY KEY,
+            catalog_width_cm REAL,
+            catalog_height_cm REAL,
+            max_computed_width_cm REAL,
+            max_computed_height_cm REAL,
+            avg_num_lines REAL,
+            avg_text_density REAL,
+            avg_line_height_mm REAL,
+            material TEXT,
+            size_category TEXT
+        )
+    """)
+    rows = [
+        ("SYS001", 15.0, 20.0, None, None, 25.0, 0.7, 8.5, "parchment", "folio"),
+        ("SYS002", None, None, 12.0, 18.0, 20.0, 0.6, 7.0, "paper", "quarto"),
+        ("SYS003", 10.0, 14.0, None, None, 15.0, 0.5, 6.0, "parchment", "octavo"),
+    ]
+    conn.executemany(
+        "INSERT INTO manuscript_measurements VALUES (?,?,?,?,?,?,?,?,?,?)", rows
+    )
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+def _make_meas_db_without_size_category(tmp_path, db_name="meas_no_sc.db"):
+    """Create a test DB with manuscript_measurements table that LACKS size_category (old sidecar)."""
+    db_path = str(tmp_path / db_name)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("""
+        CREATE TABLE manuscript_measurements (
+            AlmaId TEXT PRIMARY KEY,
+            catalog_width_cm REAL,
+            catalog_height_cm REAL,
+            max_computed_width_cm REAL,
+            max_computed_height_cm REAL,
+            avg_num_lines REAL,
+            avg_text_density REAL,
+            avg_line_height_mm REAL,
+            material TEXT
+        )
+    """)
+    rows = [
+        ("SYS_A", 11.0, 16.0, None, None, 18.0, 0.65, 7.2, "parchment"),
+        ("SYS_B", None, None, 9.0, 13.0, 12.0, 0.55, 5.5, "paper"),
+    ]
+    conn.executemany(
+        "INSERT INTO manuscript_measurements VALUES (?,?,?,?,?,?,?,?,?)", rows
+    )
+    conn.commit()
+    conn.close()
+    return db_path
+
+
+class TestGetMeasurementSummariesBatch:
+    """Tests for FjmsService.get_measurement_summaries_batch (additive size_category, RR-6, RR-11)."""
+
+    def test_with_size_category_returns_value(self, tmp_path):
+        """WITH-column: seeded size_category value is returned in each dict."""
+        db_path = _make_meas_db_with_size_category(tmp_path)
+        svc = FjmsService(db_path=db_path, thread_safe=False)
+        try:
+            result = svc.get_measurement_summaries_batch(["SYS001", "SYS002"])
+            assert "SYS001" in result
+            assert "SYS002" in result
+            assert result["SYS001"]["size_category"] == "folio"
+            assert result["SYS002"]["size_category"] == "quarto"
+        finally:
+            svc.close()
+
+    def test_existing_keys_unchanged(self, tmp_path):
+        """WITH-column: existing keys (width_cm, height_cm, avg_num_lines, avg_text_density,
+        material, avg_line_height_mm) are still present and correct — no regression."""
+        db_path = _make_meas_db_with_size_category(tmp_path)
+        svc = FjmsService(db_path=db_path, thread_safe=False)
+        try:
+            result = svc.get_measurement_summaries_batch(["SYS001"])
+            r = result["SYS001"]
+            # Explicit key presence
+            assert "width_cm" in r
+            assert "height_cm" in r
+            assert "avg_num_lines" in r
+            assert "avg_text_density" in r
+            assert "material" in r
+            assert "avg_line_height_mm" in r
+            assert "size_category" in r
+            # Values
+            assert r["width_cm"] == 15.0
+            assert r["height_cm"] == 20.0
+            assert r["avg_num_lines"] == 25.0
+            assert r["material"] == "parchment"
+            assert r["avg_line_height_mm"] == 8.5
+        finally:
+            svc.close()
+
+    def test_coalesce_computed_width_fallback(self, tmp_path):
+        """COALESCE(catalog_width_cm, max_computed_width_cm) fallback preserved:
+        SYS002 has no catalog widths but has computed widths."""
+        db_path = _make_meas_db_with_size_category(tmp_path)
+        svc = FjmsService(db_path=db_path, thread_safe=False)
+        try:
+            result = svc.get_measurement_summaries_batch(["SYS002"])
+            r = result["SYS002"]
+            # SYS002: catalog_width_cm=None, max_computed_width_cm=12.0 → COALESCE=12.0
+            assert r["width_cm"] == 12.0
+            assert r["height_cm"] == 18.0
+        finally:
+            svc.close()
+
+    def test_absent_column_degrades_to_none_not_empty_batch(self, tmp_path):
+        """ABSENT-column (RR-11): a sidecar WITHOUT size_category still returns the
+        batch (non-empty), with size_category=None for each row, and legacy keys intact."""
+        db_path = _make_meas_db_without_size_category(tmp_path)
+        svc = FjmsService(db_path=db_path, thread_safe=False)
+        try:
+            result = svc.get_measurement_summaries_batch(["SYS_A", "SYS_B"])
+            # The batch must NOT be empty — this is the load-bearing RR-11 assertion
+            assert len(result) == 2, (
+                "Absent size_category column must NOT produce an empty batch "
+                "(the column-guard prevents the SELECT from failing)"
+            )
+            for sid in ["SYS_A", "SYS_B"]:
+                assert sid in result
+                r = result[sid]
+                # size_category must be None (not absent, not an error)
+                assert "size_category" in r
+                assert r["size_category"] is None
+                # Legacy keys intact
+                assert "width_cm" in r
+                assert "height_cm" in r
+                assert "avg_num_lines" in r
+                assert "material" in r
+                assert "avg_line_height_mm" in r
+        finally:
+            svc.close()
+
+    def test_absent_column_legacy_values_correct(self, tmp_path):
+        """ABSENT-column: the actual legacy values are correct (not all None)."""
+        db_path = _make_meas_db_without_size_category(tmp_path)
+        svc = FjmsService(db_path=db_path, thread_safe=False)
+        try:
+            result = svc.get_measurement_summaries_batch(["SYS_A"])
+            r = result["SYS_A"]
+            assert r["width_cm"] == 11.0
+            assert r["height_cm"] == 16.0
+            assert r["material"] == "parchment"
+            assert r["avg_line_height_mm"] == 7.2
+            assert r["size_category"] is None
+        finally:
+            svc.close()
+
+    def test_missing_sys_id_absent_from_result(self, tmp_path):
+        """A sys_id not in the DB is absent from the result dict, not present with None values."""
+        db_path = _make_meas_db_with_size_category(tmp_path)
+        svc = FjmsService(db_path=db_path, thread_safe=False)
+        try:
+            result = svc.get_measurement_summaries_batch(["SYS001", "SYS_MISSING"])
+            assert "SYS001" in result
+            assert "SYS_MISSING" not in result
+        finally:
+            svc.close()
+
+    def test_batch_boundary_500_returns_all_matches(self, tmp_path):
+        """A >500-id input still returns all matching rows (500 batch boundary works)."""
+        db_path = str(tmp_path / "meas_large.db")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("""
+            CREATE TABLE manuscript_measurements (
+                AlmaId TEXT PRIMARY KEY,
+                catalog_width_cm REAL,
+                catalog_height_cm REAL,
+                max_computed_width_cm REAL,
+                max_computed_height_cm REAL,
+                avg_num_lines REAL,
+                avg_text_density REAL,
+                avg_line_height_mm REAL,
+                material TEXT,
+                size_category TEXT
+            )
+        """)
+        # Seed 600 rows
+        ids = [f"SYS{i:04d}" for i in range(600)]
+        conn.executemany(
+            "INSERT INTO manuscript_measurements VALUES (?,?,?,?,?,?,?,?,?,?)",
+            [(sid, 10.0, 15.0, None, None, 20.0, 0.5, 6.0, "paper", "folio") for sid in ids],
+        )
+        conn.commit()
+        conn.close()
+
+        svc = FjmsService(db_path=db_path, thread_safe=False)
+        try:
+            result = svc.get_measurement_summaries_batch(ids)
+            assert len(result) == 600, "All 600 rows must be returned despite >500 batch boundary"
+            # Spot-check size_category on boundary rows
+            assert result["SYS0000"]["size_category"] == "folio"
+            assert result["SYS0499"]["size_category"] == "folio"
+            assert result["SYS0500"]["size_category"] == "folio"
+            assert result["SYS0599"]["size_category"] == "folio"
+        finally:
+            svc.close()
+
+    def test_empty_sys_ids_returns_empty(self, tmp_path):
+        """Empty sys_ids list returns an empty dict without error."""
+        db_path = _make_meas_db_with_size_category(tmp_path)
+        svc = FjmsService(db_path=db_path, thread_safe=False)
+        try:
+            result = svc.get_measurement_summaries_batch([])
+            assert result == {}
+        finally:
+            svc.close()
+
+    def test_no_parallel_get_measurements_batch_method(self):
+        """Regression: no parallel get_measurements_batch method was added (RR-6).
+        The existing method must be the only batch measurement API."""
+        import inspect
+        methods = [name for name, _ in inspect.getmembers(FjmsService, predicate=inspect.isfunction)]
+        assert "get_measurement_summaries_batch" in methods
+        assert "get_measurements_batch" not in methods, (
+            "A parallel get_measurements_batch was added — RR-6 requires REUSE/EXTEND of "
+            "get_measurement_summaries_batch instead"
+        )
