@@ -1,191 +1,125 @@
 ---
 phase: 108
+round: 2
 reviewers: [codex]
-reviewed_at: 2026-06-05T05:26:31Z
+reviewed_at: 2026-06-05T09:22:38Z
 plans_reviewed: [108-01-PLAN.md, 108-02-PLAN.md, 108-03-PLAN.md, 108-04-PLAN.md]
 model: codex-cli 0.136.0 (default model)
 note: >
-  First Codex run was blocked by a broken Windows sandbox (`spawn setup refresh`) and
-  could not read the codebase; re-run with --dangerously-bypass-approvals-and-sandbox so
-  Codex could verify plan claims against the actual source. The review below is the
-  code-verified run. One distinct nuance from the sandbox-blocked run (per-page snippet
-  overwrite when enrichment is keyed by sys_id) is folded into Concern 2 below.
+  ROUND 2 — re-review of the plans AFTER the round-1 findings were folded in via
+  `/gsd-plan-phase 108 --reviews`. Run code-verified with
+  --dangerously-bypass-approvals-and-sandbox so Codex could check plan claims against the
+  live source (the Windows sandbox blocks file reads otherwise). Round 1 is preserved at
+  108-REVIEWS-round1.md. Verdict: all 8 round-1 resolutions (RR-1..RR-8) CONFIRMED landed
+  (RR-8 partial), but the replan left/introduced 3 NEW execution risks (2 release blockers).
 ---
 
-# Cross-AI Plan Review — Phase 108
+# Cross-AI Plan Review — Phase 108 (Round 2)
 
 ## Codex Review
 
 **Summary**
 
-Overall, the plans are well-structured by wave and correctly identify several real seams, but
-there are major plan-code drift issues that should be fixed before execution. The two biggest are
-load-bearing: embedded `|` does **not** round-trip as an OR group in the real search parser, and
-Phase-106 candidate APIs return `Candidate` dataclasses, while Plans 03/04 treat them as raw result
-dicts. As written, Phase 108 would produce wrong OR searches and later UI/action code would fail at
-runtime.
+Round 2 fixed the main Round-1 plan drift: OR is now slash-group/parser-tested, Plans 03/04 now treat
+candidates as `Candidate` dataclasses, Add-as-Join is routed through an extended public API,
+translations are included, and matched-page images use the per-page image path. I would not execute
+yet: the replan introduced or left three execution risks, two of which are release blockers.
 
-**Strengths**
+**Round-1 Fix Verification**
 
-- The RTL fix target is accurate: `TabularQueryBuilderDialog.__init__` still has the dialog-level
-  RTL call at `genizah_app.py:1555`, while preview/input RTL remain at `genizah_app.py:1704` and
-  `genizah_app.py:1779`.
-- The right-pane attach seam is exactly as claimed at `desktop/join_workbench.py:838`.
-- `SearchThread` does accept and forward `text_position` and `corpus_scope` at `gui_threads.py:86`
-  and `gui_threads.py:103`.
-- `execute_search()` forwards `text_position` into `_execute_line_break_search()` at
-  `genizah_core.py:8355`, and the line-break path enforces start/end text position at
-  `genizah_core.py:8142`.
-- The `manuscript_measurements` columns named in Plan 01 exist in the import schema at
-  `scripts/import_measurements.py:495`. `FjmsService` also uses `sqlite3.Row` via direct and
-  thread-local connections at `shared/fjms_service.py:747` and `shared/thread_local_db.py:93`.
+| RR | Status | Evidence |
+|----|--------|----------|
+| RR-1 OR syntax | CONFIRMED | Context now says slash-group `(w1/w2/w3)`, not `\|`, at `108-CONTEXT.md:66-75`. Plan 01 requires parser-level `parse_responsa_query` assertions at `108-01-PLAN.md:264-272`. Plan 02 assembles `"/".join(tokens)` at `108-02-PLAN.md:257-267`. Live parser supports `(עץ/אילן)` at `genizah_core.py:5727` and splits OR at `genizah_core.py:6139-6146`. |
+| RR-2 Candidate vs dict | CONFIRMED | Plan 03 uses `Candidate` attributes, not `r_sid(c)`/`c.get()`/`page_of(c)`, at `108-03-PLAN.md:66-70`; adds `candidate_to_result_dict` at `108-03-PLAN.md:188-193`; uses the `merge_candidates` list directly at `108-03-PLAN.md:362-364`. Live: `Candidate` at `shared/joins_lab.py:76`; `dedup_candidates` returns candidates at `:498-505`; `merge_candidates` returns a list at `:511`/`:526-527`/`:558-559`. |
+| RR-3 Add-as-Join public path | CONFIRMED | Plan 03 includes `genizah_app.py` and extends `open_anchor_as_join(..., partner_sys_id=None, partner_shelfmark=None)` at `108-03-PLAN.md:129-156`; workbench call uses `partner_shelfmark=` at `108-03-PLAN.md:238-239`. Live public method leaves B empty at `genizah_app.py:15443-15464`; private prefill line at `genizah_app.py:5242-5261` — the plan targets the right gap. |
+| RR-4 i18n guard | CONFIRMED | Plans 02/03/04 include `genizah_translations.py` in `files_modified` (`108-02:7-9`, `108-03:8-10`, `108-04:7-9`) and require registering new `tr()` keys (`108-02:275-283`, `108-03:255`, `108-04:166`). Live guard at `tests/test_join_workbench_i18n.py:56-70`. |
+| RR-5 Other-side page-position | CONFIRMED | D-07 revised at `108-CONTEXT.md:83-91`. Plan 02 adds `allow_page_position` and hides the combo when false (`108-02:204-210`, `:246-250`). Plan 03 instantiates the other builder with `allow_page_position=False` (`108-03:321-327`). Live `apply_cross_side()` does not pass `text_position` at `shared/joins_lab.py:369-375`. |
+| RR-6 Batch measurements | CONFIRMED (with new concern below) | Plan 01 extends existing `get_measurement_summaries_batch`, not a new method (`108-01:141-156`); Plan 03 consumes existing keys (`108-03:210-219`). Live method preserves COALESCE width/height at `shared/fjms_service.py:3005-3060`. |
+| RR-7 Page-specific images | CONFIRMED | Plan 03 requires `enrich_metadata(...).get("images")` + `_image_url_for_idx(images, page-1, width)` (`108-03:246-250`); Plan 04 uses `_enqueue_image_for_pane(..., c.page)` (`108-04:150-152`). Live helper is per-index at `desktop/join_workbench.py:189-197`; thumbnail is manuscript-level at `genizah_core.py:4892`. |
+| RR-8 Missing imports | PARTIAL | Plan 02 adds the imports (`108-02:150-154`) but also runs `ruff check desktop/join_workbench.py` immediately (`108-02:165`). `ruff.toml:15-18` selects `F401`, and Plan 02 front-loads Plan-03-only `QGridLayout`/`QTableWidget`/`QTableWidgetItem`/`SearchThread` — so Task 0 likely fails lint before those names are used. |
 
-**Concerns**
+**New Concerns**
 
-- **HIGH — Embedded `|` is not an OR operator in the real engine.** `compose()` preserves
-  `BuilderRow.term` and only splits on whitespace at `shared/joins_lab.py:758`. The engine's OR
-  syntax is parenthesized slash groups, documented and parsed as `(word1/word2)` at
-  `genizah_core.py:5727` and `genizah_core.py:6139`. Bare `word1|word2` falls through as a single
-  word at `genizah_core.py:6219`, then gets quoted in Tantivy and escaped in regex at
-  `genizah_core.py:7439` and `genizah_core.py:7593`. In line-break mode, embedded pipes are also not
-  split; only leading/trailing/standalone pipes are line syntax at `genizah_core.py:5875`. **This
-  invalidates the current OR-box plan** (Plan 01 Task 3, Plan 02 Task 1, D-05, R-01). The research
-  itself hedged on this; the code confirms the `|`-join is wrong.
+- **HIGH — Modifier row controls are planned as visible but mostly no-op.** CONTEXT/UI require Negation,
+  Defective, Wildcards, Prefixes, Suffixes (`108-CONTEXT.md:61-62`, `108-UI-SPEC.md:176-178`). The live
+  existing builder applies those as per-word token syntax at `genizah_core.py:6008-6027` (`-word`,
+  `%word`, `#word`, `word#`, `*word`, `word*`). But Plan 02 only stores/uses `ja`, `flex`, `bidir`,
+  `variants` in `_responsa_opts()` and builds terms from raw box text at `108-02-PLAN.md:241-267`.
+  Selecting Prefix/Negation/etc. would change the preview but not the query semantics.
 
-- **HIGH — Plans 03/04 confuse `Candidate` objects with result dicts.** `dedup_candidates()` returns
-  `Candidate` objects at `shared/joins_lab.py:498`. `apply_cross_side()` returns
-  `MergeResult(candidates=tuple(Candidate...))` and normalizes synthesized neighbor dicts immediately
-  at `shared/joins_lab.py:446`. `merge_candidates()` returns a plain list, **not** a `MergeResult`, at
-  `shared/joins_lab.py:511`. Therefore calls like `r_sid(c)`, `r_text(c)`, `c.get(...)`,
-  `page_of(res)`, and `result.candidates` in Plans 03/04 will break unless a Candidate→result adapter
-  is added. (Sub-nuance: even if enrichment were keyed by `sys_id`, page-specific snippet/highlight
-  evidence can be overwritten when the same fragment appears on multiple pages — enrichment/snippets
-  should be keyed by the candidate key `(sys_id, page)` or list index, while measurement lookup may
-  stay `sys_id`-keyed.)
+- **MEDIUM (blocker) — Plan 02 Task 0 likely fails ruff (F401).** The import block lacks the names at
+  `desktop/join_workbench.py:315-320`; Plan 02 adds ALL names before Plan 03 uses several (`108-02:150-154`);
+  ruff enforces unused imports (`ruff.toml:15-18`). Move Plan-03 imports to Plan 03, or `# noqa: F401`
+  every intentionally deferred import (not only `SearchThread`).
 
-- **HIGH — Add-as-Join A+B prefill is not available through the public API.** The public
-  `open_anchor_as_join()` only accepts `anchor_sys_id, anchor_shelfmark` and explicitly leaves B empty
-  at `genizah_app.py:15443`. The existing A+B prefill path is private `_vs_open_joins_with_partner()`
-  at `genizah_app.py:5242`, which the no-private guard (D-20) forbids. Plans 03/04 cannot satisfy D-17
-  without adding/extending a public method.
+- **MEDIUM — `size_category` old-sidecar robustness is internally contradictory.** Plan 01 adds it as a
+  plain selected column (`108-01:154-156`) but also says a missing `size_category` should degrade to
+  `None` (`108-01:160-162`). The live method guards the optional `avg_line_height_mm` before adding it to
+  the SELECT (`shared/fjms_service.py:3017-3029`); an unguarded missing column makes the SELECT fail and
+  returns an empty batch (`:3035-3060`).
 
-- **HIGH — New `tr()` keys will fail the existing i18n guard unless translations are added.**
-  `test_join_workbench_i18n.py` requires every `tr()` key in `desktop/join_workbench.py` to exist in
-  `TRANSLATIONS` at `tests/test_join_workbench_i18n.py:55`. Plans 02-04 add many new keys but do not
-  include `genizah_translations.py` in `files_modified`.
-
-- **MEDIUM — Other-side builder page position is silently dropped.** `apply_cross_side()` accepts only
-  `b_query` and `b_responsa_options`, then calls `executor.execute_search()` without `text_position`
-  at `shared/joins_lab.py:344`. If the same `JoinQueryBuilder` exposes page-position for the other
-  side, the UI will imply a constraint the API cannot enforce.
-
-- **MEDIUM — R-03 is outdated.** A batch measurement API already exists:
-  `get_measurement_summaries_batch()` at `shared/fjms_service.py:3005`. It uses
-  `COALESCE(catalog_width_cm, max_computed_width_cm)` at `shared/fjms_service.py:3037`. Plan 01's
-  proposed new method may still be useful for `size_category`, but the "no batch API exists" premise
-  is false and raw catalog-only width/height will miss computed-only measurements.
-
-- **MEDIUM — Page-specific compare images need a different helper than thumbnails.**
-  `meta_mgr.get_thumbnail()` is manuscript-level at `genizah_core.py:4892`. Matched-page image loading
-  should use enriched image lists and `_image_url_for_idx()` at `desktop/join_workbench.py:189`, like
-  the anchor loader does at `desktop/join_workbench.py:365`.
-
-- **LOW — Import and Qt-guard details are missing.** `desktop/join_workbench.py` currently imports
-  only a subset of widgets at `desktop/join_workbench.py:315`. Plans use `QFrame`, `QSpinBox`,
-  `QGridLayout`, `QTableWidget`, `QTableWidgetItem`, and `SearchThread`, which are not imported there.
+- **LOW — Per-page image helper needs a `page is None` guard.** `Candidate.page` is optional
+  (`shared/joins_lab.py:104`); tests cover `(sys_id, None)` (`tests/test_joins_lab.py:121-124`). Plan 03
+  subtracts `page-1` (`108-03:246-250`); Plan 04 passes `c.page` directly (`108-04:142-152`).
 
 **Suggestions**
 
-- Replace OR-box serialization from `word1|word2` to the actual Responsa syntax, likely
-  `(word1/word2)` for single-token alternatives. If boxes may contain multi-word phrases, the current
-  `BuilderRow.term: str` model cannot represent phrase-level OR safely; either restrict OR boxes to
-  one token or extend the shared model deliberately.
-- Add a real parser-level regression test for OR boxes using `_parse_line_break_query()` /
-  `parse_responsa_query()` or an engine-level search fixture. A test that only checks `compose()`
-  contains `|` will lock in the wrong behavior.
-- Redesign Plans 03/04 around `Candidate` as the UI model. Use `candidate.sys_id`, `candidate.page`,
-  `candidate.full_text`, etc., and add a small `candidate_to_result_dict()` only for host methods that
-  require raw result dicts.
-- Change `merge_candidates(self._text_cands, [])` handling to use the returned list directly, not
-  `.candidates`.
-- Add a public host method or extend
-  `open_anchor_as_join(..., partner_sys_id=None, partner_shelfmark=None)` so Add-as-Join can prefill B
-  without `_vs_*`.
-- Include `genizah_translations.py` in Plans 02-04 or add a dedicated i18n wave; otherwise the
-  existing guard will fail.
-- Either remove page-position from the other-side builder in 108 or extend `apply_cross_side()` to
-  accept and forward B-side `text_position`, with Phase-106 tests.
-- Prefer adapting `get_measurement_summaries_batch()` or adding a thin shape adapter over creating a
-  parallel batch method with overlapping semantics.
+- Either implement token decoration for the full modifier row, or remove the unsupported per-word
+  controls from Phase 108 (scholars can still type `#`/`%`/`*`/`-` directly — the engine parses them).
+- Move deferred imports into the wave that uses them, or explicitly `noqa` every intentionally unused
+  import.
+- Add `has_size_category = "size_category" in cols` and build a `sc_col` fragment like the existing
+  `lh_col` guard.
+- Make `_enqueue_image_for_pane` treat a missing page as page 1 (or "No image") without arithmetic on
+  `None`.
 
 **Risk Assessment**
 
-**HIGH.** The wave ordering is sensible, and several seams are accurately identified, but the current
-plans rely on two false API assumptions: embedded `|` as OR, and result dicts after Phase-106
-dedup/merge. Those are core to candidate generation and rendering. Add the public Add-as-Join API gap
-and missing translation updates, and execution as written is likely to fail tests and produce
-incorrect search behavior.
+Overall risk: **HIGH** until the modifier no-op and the Plan 02 lint issue are fixed. The main Round-1
+blockers are mostly resolved, but execution as written can still fail lint and silently run wrong
+searches when modifier controls are used.
+
+**RELEASE BLOCKERS:** modifier-row no-op semantics; Plan 02 unused-import ruff failure; `size_category`
+missing-column guard (if old-sidecar compatibility is required).
 
 ---
 
 ## Consensus Summary
 
-Only one external reviewer was requested (`--codex`), so this is a synthesis/prioritization of
-Codex's code-verified findings rather than a cross-reviewer consensus. Codex ran against the live
-repository and cited `file:line` for every claim — these are plan↔code drift findings, not style
-opinions, and several are blocking.
+Single reviewer (`--codex`), code-verified against the live repo with `file:line` citations — these are
+plan↔code drift findings, not style. This round is a **re-review after the round-1 fold-in**, so the
+headline is two-part: (1) the round-1 work landed, and (2) a small set of new, fixable issues remain.
 
-### Must-fix before execution (HIGH, code-verified)
+### Round-1 resolutions — all CONFIRMED
+RR-1 (slash-group OR + parser-level test), RR-2 (Candidate model + adapter + list-not-MergeResult),
+RR-3 (public Add-as-Join), RR-4 (i18n files), RR-5 (other-side page-position dropped, 106 frozen),
+RR-6 (reuse existing batch method), RR-7 (per-page images) all verified landed. RR-8 (imports) landed
+but collides with the lint gate (see below).
 
-1. **OR-box `|` serialization is wrong (load-bearing).** The real engine uses `(word1/word2)` slash
-   groups (`genizah_core.py:5727/:6139`); a bare `word1|word2` term is treated as a single word
-   (`:6219`) and escaped in regex (`:7593`). Plan 01 Task 3, Plan 02 Task 1, D-05 and R-01 all encode
-   the wrong syntax. **Fix the serialization AND replace the `compose()`-only headless test with a
-   real parser/engine-level OR regression** — otherwise the test locks in incorrect behavior.
-2. **`Candidate`-vs-dict confusion across Plans 03/04.** `dedup_candidates()`/`apply_cross_side()`
-   return `Candidate` dataclasses; `merge_candidates()` returns a plain list (not a `MergeResult`).
-   The pane/card/compare code assumes raw result dicts (`r_sid(c)`, `r_text(c)`, `c.get(...)`,
-   `page_of(res)`, `result.candidates`) and will fail at runtime. Decide the UI model (`Candidate`
-   throughout + a thin `candidate_to_result_dict()` only where host methods require dicts) and rewrite
-   the affected sections. Key per-page enrichment by `(sys_id, page)`, not `sys_id`.
-3. **D-17 Add-as-Join A+B prefill has no public path.** `open_anchor_as_join()` leaves B empty
-   (`genizah_app.py:15443`); the A+B path is the forbidden private `_vs_open_joins_with_partner()`
-   (`:5242`). A new/extended public host method is required, or D-17 is unachievable under D-20.
-4. **i18n guard will fail.** New `tr()` keys must land in `TRANSLATIONS`
-   (`tests/test_join_workbench_i18n.py:55`), but `genizah_translations.py` is absent from
-   `files_modified` in Plans 02-04.
+### Must-fix before execution (new this round)
+1. **Modifier row no-op (HIGH).** Plan 02 builds Negation/Defective/Wildcards/Prefixes/Suffixes
+   checkboxes (locked in D-04) but `_responsa_opts()` + raw-text `build_side_query` never apply them —
+   the engine wants per-word token decoration (`-`/`%`/`#`/`*`, `genizah_core.py:6008-6027`). **This is a
+   CONTEXT-level decision (touches the locked D-04 modifier row): TRIM the per-word controls from 108
+   (keep variants/JA/flex/bidir; scholars type `#`/`%`/`*`/`-` directly — the engine parses them), OR
+   WIRE per-word token decoration into `build_side_query`.** Recommend TRIM for 108 (lower risk; the raw
+   syntax still works), wire later if scholars ask.
+2. **Plan 02 Task 0 ruff F401 (blocker).** Front-loading Plan-03-only imports + an immediate
+   `ruff check` self-fails. Move `QGridLayout`/`QTableWidget`/`QTableWidgetItem`/`SearchThread` to the
+   Plan 03 wave (the first plan that USES them), keeping only `QFrame`/`QSpinBox` in Plan 02.
+3. **`size_category` missing-column guard (MEDIUM→blocker if old sidecars matter).** Mirror the existing
+   `avg_line_height_mm` guard: `has_size_category = "size_category" in cols`, conditional `sc_col`,
+   and `None` when absent. Resolves Plan 01's internal contradiction.
 
-### Should-resolve (MEDIUM)
-
-5. Other-side page-position is silently dropped — `apply_cross_side()` doesn't forward `text_position`
-   (`shared/joins_lab.py:344`). Either drop page-position from the other-side builder in 108 or extend
-   the Phase-106 API.
-6. R-03 premise is stale — `get_measurement_summaries_batch()` already exists
-   (`shared/fjms_service.py:3005`) and uses `COALESCE` over computed widths; raw catalog-only columns
-   miss computed-only measurements. Prefer adapting it over adding an overlapping method.
-7. Compare/matched-page images should use `_image_url_for_idx()` (`desktop/join_workbench.py:189`),
-   not manuscript-level `get_thumbnail()`.
-
-### Minor (LOW)
-
-8. Missing widget/`SearchThread` imports in `desktop/join_workbench.py:315`.
-9. (From the sandbox-blocked run) Plan 01's combined `-k measurements_batch` invocation can deselect
-   unrelated new tests; Plan 04 `files_modified` omits `108-VALIDATION.md`. Worth a quick cleanup.
-
-### Agreed Strengths
-
-- Wave ordering (non-`join_workbench.py` scaffolds first, then forced-sequential single-file UI waves)
-  is sound. Reuse of Phase-106 pure logic over new engine work is the right architecture. The RTL fix
-  target, attach seam, and `text_position`/`corpus_scope` forwarding are all accurately identified and
-  code-confirmed.
+### Should-resolve
+4. **Per-page image `page is None` guard (LOW).** `_enqueue_image_for_pane` / `_image_url_for_idx`
+   must not do `page-1` arithmetic on a `None` page (VS-only/None-page candidates) — treat as page 1
+   or "No image."
 
 ### Recommended next step
-
-Several findings (especially #1, #2, #3) require revisiting CONTEXT decisions (D-05 OR semantics, D-17
-public-API path) and the Phase-106 API surface — not just plan edits. Route through
-`/gsd-plan-phase 108 --reviews` to fold these in, and likely a short discuss-phase touch-up on the
-OR-syntax and Add-as-Join-public-method decisions before re-planning.
+Route these through `/gsd-plan-phase 108 --reviews` again. Finding #1 needs a one-line CONTEXT decision
+(trim vs wire the per-word modifier controls) — the replan will surface it; #2/#3/#4 are mechanical
+plan edits. After that, the plans should be execution-ready (round-1 blockers are gone).
 
 ### Divergent Views
-
 None — single reviewer.
