@@ -5,7 +5,6 @@ status: draft
 shadcn_initialized: false
 preset: none
 created: 2026-06-05
-platform: desktop-pyqt6
 ---
 
 # Phase 108 — UI Design Contract
@@ -44,7 +43,7 @@ All values are multiples of 4, matching the existing PyQt app convention:
 |-------|-------|-------|
 | xs | 4px | `setSpacing(4)` / `setContentsMargins(4,4,4,4)` inside cards and compact rows |
 | sm | 8px | `setSpacing(8)` in main layouts; button row internal gaps |
-| md | 16px | `setContentsMargins(16,...)` for pane-level inset; section padding |
+| md | 16px | `setContentsMargins(16,...)` for pane-level inset; section padding; other-side builder indent |
 | lg | 24px | Inter-section vertical spacing (builder → refine bar → candidate area) |
 | xl | 32px | Not used at component level; reserved for dialog-level breathing room |
 
@@ -53,7 +52,6 @@ Exceptions:
 - Card fixed width 232 px (grid column width — matches the sketch invariant).
 - Compare pane image minimum height 360 px (content-driven).
 - Touch/click targets for Y/?/N + action buttons: minimum 28×28 px (compact card row), 34×28 px for prev/next nav buttons.
-- Other-side builder indent: 18 px left margin (visual subordination under the anchor builder).
 
 ---
 
@@ -64,12 +62,13 @@ PyQt6 widget typography — sizes specified as `setStyleSheet("font-size: Npx; .
 | Role | Size | Weight | Usage |
 |------|------|--------|-------|
 | Body / default | system default (~13px) | 400 regular | All widget default text; table cell text |
-| Label / metadata | 11px | 400 regular | Metadata lines (library · img · title), material/dim evidence, status bar, snippet in cards |
-| Label / small | 10px | 400 regular | Helper lines inside cards (material + VS score line); snippet `QTextBrowser` in card |
+| Label / small | 10px | 400 regular | Metadata helper lines (library · img · title), material/dim evidence, snippet `QTextBrowser` in cards, status bar |
 | Heading / shelf | 12–13px | 600 bold | Shelfmark label on candidate cards and in CompareDialog panes |
-| Section tag | 11px | 600 bold | Section labels (e.g. "THIS SIDE —", "OTHER SIDE", "CANDIDATES") — colored per section |
+| Section tag | 10px | 600 bold | Section labels (e.g. "THIS SIDE —", "OTHER SIDE", "CANDIDATES") — colored per section; weight 600 differentiates from metadata labels at the same size |
 
-Line heights: PyQt default (auto). No explicit `line-height` override needed.
+Body line height: ~16px (PyQt system default for ~13px body — no explicit `line-height` override required).
+
+**Hierarchy summary:** 10px regular (metadata) < 10px bold (section tags) < ~13px regular (body) < 12–13px bold (shelfmarks). Four roles, two weights (400 / 600).
 
 ---
 
@@ -101,6 +100,8 @@ Accent reserved for:
 - Sky `#0ea5e9`: dimension/material evidence text only.
 - Triage colors: exclusively the 3px card border as a triage state signal.
 - Red bold: exclusively inline snippet match highlight.
+
+**Primary visual anchor:** the teal `#0f766e` "THIS SIDE —" section label at the top of the right pane draws the eye to the builder entry point.
 
 Destructive: no destructive (delete/remove) actions in this phase. "N" triage is dismissal-only,
 not deletion — no confirmation required.
@@ -165,7 +166,7 @@ A single `QHBoxLayout` with checkboxes for: Start/End of line (already per-row a
 - Anchor-side builder: tr("word(s) on this line…") (first row hint); subsequent rows: tr("word(s) on this line…")
 - Other-side builder: first row placeholder: tr("word(s) required on the OTHER side…")
 
-**Empty state:** if all term fields are blank, `is_empty()` returns True; the Search button is disabled with tooltip tr("Enter at least one word to search").
+**Empty state:** if all term fields are blank, `is_empty()` returns True; the Find Candidates button is disabled with tooltip tr("Enter at least one word to search").
 
 ---
 
@@ -174,18 +175,18 @@ A single `QHBoxLayout` with checkboxes for: Start/End of line (already per-row a
 **Overall `QVBoxLayout` (rv):**
 
 ```
-[Section tag: "THIS SIDE — …"]    ← teal #0f766e, 11px bold
+[Section tag: "THIS SIDE — …"]    ← teal #0f766e, 10px bold
 [anchor QueryBuilder]
 [other-side header row]            ← QCheckBox + QComboBox AND/OR
-[other-side QueryBuilder]          ← indented 18px, hidden by default
-[source + action row]              ← [include anchor ckb] [stretch] [Text btn] [Visual btn stub] [Combined btn stub] [Search btn]
+[other-side QueryBuilder]          ← indented 16px (md token), hidden by default
+[source + action row]              ← [include anchor ckb] [stretch] [Text btn] [Visual btn stub] [Combined btn stub] [Find Candidates btn]
 [refine/filter bar]
 [status bar + view toggle + pagination]
 [QScrollArea: grid host]           ← visible when view_mode == "grid"
 [QTableWidget]                     ← visible when view_mode == "table"
 ```
 
-**Section label helper:** `QLabel`, bold, font-size 11px, colored, word-wrap True. Reuse the sketch's `_tag(text, color)` pattern.
+**Section label helper:** `QLabel`, bold, font-size 10px, colored, word-wrap True. Reuse the sketch's `_tag(text, color)` pattern.
 
 ---
 
@@ -199,7 +200,7 @@ A single `QHBoxLayout` with checkboxes for: Start/End of line (already per-row a
   - tooltip: tr("AND: keep only candidates whose other side also matches — narrows a flood.\nOR: also pull in pages whose other side matches — widens a poor yield.")
 - stretch
 
-**Other-side box (`QWidget` with `QVBoxLayout`, `contentsMargins=(18,0,0,0)`):**
+**Other-side box (`QWidget` with `QVBoxLayout`, `contentsMargins=(16,0,0,0)`):**
 - Contains the second `QueryBuilder` instance.
 - Default: `setVisible(False)`.
 - Expand: `setVisible(True)` when checkbox is toggled on.
@@ -212,15 +213,15 @@ A single `QHBoxLayout` with checkboxes for: Start/End of line (already per-row a
 **`QHBoxLayout`:**
 
 ```
-[include anchor checkbox]  [stretch]  [Text button]  [Visual button DISABLED]  [Combined button DISABLED]  [Search button]
+[include anchor checkbox]  [stretch]  [Text button]  [Visual button DISABLED]  [Combined button DISABLED]  [Find Candidates button]
 ```
 
-- "include anchor itself" checkbox — tr("Include anchor itself"); tooltip: tr("Show the anchor fragment in the results if it matches — useful to verify your query is correct (applies on next Search)")
-- "Text" button — tr("Search"); `setMinimumWidth(110)`; primary search action
+- "include anchor itself" checkbox — tr("Include anchor itself"); tooltip: tr("Show the anchor fragment in the results if it matches — useful to verify your query is correct (applies on next Find Candidates)"); **default: `setChecked(False)` (exclude the anchor by default, per D-15)**
+- "Text" button — tr("Find Candidates"); `setMinimumWidth(110)`; primary search action
 - "Visual similarities" button — tr("Visual similarities"); **disabled** (`setEnabled(False)`); tooltip: tr("Visual similarity candidates — arrives in Phase 109"); visual affordance: Qt Disabled palette state (grayed out)
 - "Search + visual" button — tr("Search + visual"); **disabled** (`setEnabled(False)`); tooltip: tr("Combined text + visual — arrives in Phase 109"); same disabled affordance
 
-**Note:** In 108 the three-button model is the JWB-12 scaffold. Only "Text" is wired. The disabled buttons communicate the roadmap without needing a separate "coming soon" label.
+**Note:** In 108 the three-button model is the JWB-12 scaffold. Only "Find Candidates" is wired. The disabled buttons communicate the roadmap without needing a separate "coming soon" label.
 
 ---
 
@@ -248,13 +249,13 @@ A single `QHBoxLayout` with checkboxes for: Start/End of line (already per-row a
 [status QLabel, stretch=1]  [view toggle QPushButton]  [< prev QPushButton, fixedWidth=34]  [page label QLabel]  [next > QPushButton, fixedWidth=34]
 ```
 
-- Status label: font-size 11px, color `#94a3b8` (muted); updates with self-match readout + filtered count + triage counts.
+- Status label: font-size 10px, color `#94a3b8` (muted); updates with self-match readout + filtered count + triage counts.
 
 **Self-match readout (D-15) — placement decision (Claude's Discretion):**
 The self-match signal lives INLINE in the status label, prefixed before the count:
 - When anchor matched: `"⚓ anchor matches this query ✓  ·  N/M shown  [Y x  ? y  N z]"`
 - When anchor did NOT match: `"⚓ anchor does NOT match this query ✗  ·  N/M shown  [Y x  ? y  N z]"`
-- When no query run yet or VS-only: status shows: `"Build a line-by-line query, then Search."` (initial) or search/progress updates.
+- When no query run yet or VS-only: status shows: `"Build a line-by-line query, then Find Candidates."` (initial) or search/progress updates.
 
 Rationale: inline placement avoids a separate UI widget, stays always visible without competing with the candidate area, and matches the sketch's established pattern. The anchor-self-match ✓/✗ is a diagnostic signal, not a primary action — it belongs in the status band.
 
@@ -356,7 +357,7 @@ Column layout:
 **Each pane (`_pane()` returning a VBoxLayout):**
 ```
 [shelfmark QLabel, bold 13px]
-[meta QLabel, wordWrap, 11px, color META_COLOR]    ← library · img · title · "◧ W×H · material" · "VS N.NN"
+[meta QLabel, wordWrap, 10px, color META_COLOR]    ← library · img · title · "◧ W×H · material" · "VS N.NN"
 [image QLabel, minHeight=360, AlignCenter, bg #e2e8f0]
 [QTextBrowser, stretch=1]                           ← apply_line_numbered_text, RTL, highlighted
 ```
@@ -404,7 +405,8 @@ table simultaneously.
 | Variants checkbox | "variants" |
 | Preview label | "Preview:" |
 | Include anchor checkbox | "Include anchor itself" |
-| Source: Text button | "Search" |
+| Include anchor default | `setChecked(False)` — OFF by default (exclude the anchor; the ✓/✗ readout confirms query self-consistency without cluttering results with the anchor itself) |
+| Source: Text button | "Find Candidates" |
 | Source: Visual button (disabled) | "Visual similarities" |
 | Source: Combined button (disabled) | "Search + visual" |
 | Disabled source tooltip | "Visual similarity candidates — arrives in Phase 109" |
@@ -421,13 +423,13 @@ table simultaneously.
 | Size filter tooltip | "Opt-in: filter by manuscript width (cm). Anchor: {W}×{H} cm. Off by default." |
 | View toggle (to table) | "Table view" |
 | View toggle (to grid) | "Grid view" |
-| Status: initial | "Build a line-by-line query, then Search." |
+| Status: initial | "Build a line-by-line query, then Find Candidates." |
 | Status: working | "working…" |
 | Status: cross-side checking | "this side: N · checking other side (AND)…" |
 | Status: anchor matched ✓ | "⚓ anchor matches this query ✓  ·  N/M shown  [Y x  ? y  N z]" |
 | Status: anchor not matched ✗ | "⚓ anchor does NOT match this query ✗  ·  N/M shown  [Y x  ? y  N z]" |
 | Status: count only | "N/M shown  [Y x  ? y  N z]" |
-| Status: error | "error: {message}" |
+| Status: error | "error: {message} — try again or adjust your query." (tr()-wrapped; {message} portion truncated at 140 chars before substitution) |
 | Empty state (no results yet) | (no separate empty state widget — the status label covers it) |
 | Empty state (0 results after search) | "0 results. Try broadening your query or removing line anchors." |
 | Empty state (0 after filter) | "0 of N shown — adjust filters to see more candidates." |
@@ -472,15 +474,15 @@ destructive confirmation copy needed.
 
 1. On dialog open: focus → anchor-side builder first row `term` QLineEdit.
 2. Inside a QueryBuilder: Tab moves L→R across `[end checkbox] [term] [start checkbox] [gap spinbox] [× button]`, then to next row.
-3. Enter / Return in any `term` field triggers `do_search()` (same as "Search" button).
+3. Enter / Return in any `term` field triggers `do_search()` (same as "Find Candidates" button).
 4. Keyboard shortcut: no new global shortcuts defined (follows existing app conventions).
 5. CompareDialog: ← / → arrow keys (or < prev / next > buttons) step through candidates.
 
 ### Search trigger events
 
-- "Search" button click: `do_search()`
+- "Find Candidates" button click: `do_search()`
 - Enter in any builder `term` QLineEdit: `do_search()`
-- Toggling other-side AND/OR combo: does NOT auto-re-search (user must click Search again)
+- Toggling other-side AND/OR combo: does NOT auto-re-search (user must click Find Candidates again)
 - Toggling "include anchor itself": does NOT auto-re-search
 
 ### Filter trigger events
@@ -513,12 +515,12 @@ destructive confirmation copy needed.
 
 | State | Status label text | Button state |
 |-------|-------------------|--------------|
-| Initial / idle | "Build a line-by-line query, then Search." | Search enabled |
-| Searching | "working…" | Search, Visual, Combined disabled |
+| Initial / idle | "Build a line-by-line query, then Find Candidates." | Find Candidates enabled |
+| Searching | "working…" | Find Candidates, Visual, Combined disabled |
 | Cross-side checking | "this side: N · checking other side (AND/OR)…" | buttons disabled |
 | VS loading | "loading visual similarities… N/M" | buttons disabled |
 | Done | "{self-match}  N/M shown  [Y x  ? y  N z]" | buttons re-enabled |
-| Error | "error: {message}" (truncated at 140 chars) | buttons re-enabled |
+| Error | "error: {message} — try again or adjust your query." (truncated at 140 chars) | buttons re-enabled |
 
 ### RTL/LTR split (D-06) — detailed contract
 
