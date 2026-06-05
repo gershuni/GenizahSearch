@@ -2,6 +2,7 @@
 
 **Mapped:** 2026-06-05
 **Files analyzed:** 8 new/modified surfaces
+
 **Analogs found:** 8 / 8
 
 ---
@@ -29,7 +30,7 @@
 
 **Analog:** `TabularQueryBuilderDialog` (`genizah_app.py:1543`) for chrome; spike `QueryBuilder` (sketch L478-581) for row model
 
-**Transplant vs net-new:** Modifier-checkbox row pattern (checkboxes + options) transplants from TabularQueryBuilderDialog; the row model (vertical rows, per-row start/end/gap) transplants from the spike; `compose()` call and 3-tuple return replaces `get_syntax()`.
+**Transplant vs net-new:** Modifier-checkbox row pattern (checkboxes + options) transplants from TabularQueryBuilderDialog; the row model (vertical rows, per-row start/end/gap) transplants from the spike. **Net-new vs the spike:** the spike uses ONE `term` QLineEdit per row; D-04/D-05 (USER-CONFIRMED 2026-06-05) require a horizontal strip of MULTIPLE clickable OR word-boxes per row with a `[+ or]` button — `build_side_query()` joins each row's non-empty box texts with `|` into the single `BuilderRow.term`. `compose()` call and 3-tuple return replaces `get_syntax()`.
 
 **Imports pattern** — mirror `desktop/join_workbench.py` top-of-file (line 1-10):
 ```python
@@ -38,19 +39,34 @@ from shared.joins_lab import htmlify, page_of, snippet_html, snippet_plain
 from shared.joins_lab import BuilderRow, SideQuery, compose
 ```
 
-**Row widget construction pattern** (spike sketch L507-535 — transplant verbatim, then wrap in `tr()`):
+**Multi-box row construction pattern** (EXTENDS spike sketch L507-535 single-box `add_row` → N OR word-boxes; then wrap in `tr()`):
 ```python
+def _make_box(self, placeholder: str) -> QLineEdit:
+    box = QLineEdit()
+    box.setLayoutDirection(Qt.LayoutDirection.RightToLeft)   # RTL content, LTR chrome
+    box.setPlaceholderText(placeholder)
+    box.returnPressed.connect(self.on_enter)
+    box.textChanged.connect(self._update_preview)
+    return box
+
 def add_row(self):
     rw = QWidget()
     row = QHBoxLayout(rw)
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(2)                       # UI-SPEC: 2px internal density
+    # RTL: in Hebrew a line STARTS on the right and ENDS on the left, so
+    # "ends line" sits left of the boxes strip and "starts line" sits right of it.
     end = QCheckBox(tr("ends line ⊣"))  # ⊣ — line END (left edge in Hebrew)
     end.setToolTip(tr("Last word must be at the END of the line (left edge in Hebrew)"))
-    term = QLineEdit()
-    term.setLayoutDirection(Qt.LayoutDirection.RightToLeft)   # RTL content, LTR chrome
-    term.setPlaceholderText(self.first_hint if not self.rows else tr("word(s) on this line…"))
-    term.returnPressed.connect(self.on_enter)
+    # boxes_strip: the horizontal strip of OR word-boxes (one BuilderRow.term, |-joined)
+    boxes_strip = QHBoxLayout()
+    boxes_strip.setSpacing(2)
+    first_box = self._make_box(self.first_hint if not self.rows else tr("word(s) on this line…"))
+    boxes = [first_box]
+    boxes_strip.addWidget(first_box, 1)
+    add_or = QPushButton(tr("+ or"))                       # ← appends another OR-alternative box
+    add_or.setAccessibleName(tr("Add an OR alternative to this line"))
+    add_or.setToolTip(tr("Add another word that may appear INSTEAD (OR) on this same line"))
     start = QCheckBox(tr("⊢ starts line"))  # ⊢ — line START (right edge in Hebrew)
     start.setToolTip(tr("First word must be at the START of the line (right edge in Hebrew)"))
     gap = QSpinBox()
@@ -61,16 +77,26 @@ def add_row(self):
     rm = QPushButton("×")     # ×
     rm.setFixedWidth(24)
     rm.setAccessibleName(tr("Remove row"))
-    entry = {"start": start, "term": term, "end": end, "gap": gap, "rm": rm, "widget": rw}
+    entry = {"start": start, "boxes": boxes, "boxes_strip": boxes_strip,
+             "end": end, "gap": gap, "rm": rm, "widget": rw}
+    add_or.clicked.connect(lambda: self.add_or_box(entry))
     rm.clicked.connect(lambda: self.remove_row(entry))
     row.addWidget(end)
-    row.addWidget(term, 1)
+    row.addLayout(boxes_strip, 1)
+    row.addWidget(add_or)
     row.addWidget(start)
     row.addWidget(gap)
     row.addWidget(rm)
     self.rows.append(entry)
     self.rows_box.addWidget(rw)
     self._sync()
+
+def add_or_box(self, entry: dict):
+    """Append another OR-alternative word-box to this row (each added box is removable, keep >= 1)."""
+    box = self._make_box(tr("or…"))
+    entry["boxes"].append(box)
+    entry["boxes_strip"].addWidget(box, 1)
+    self._update_preview()
 ```
 
 **Modifier-checkbox row pattern** (TabularQueryBuilderDialog `:1627-1685` — borrow structure, adapt to Lines-first scope):
@@ -102,19 +128,24 @@ def _responsa_opts(self) -> dict:
     }
 ```
 
-**`is_empty()` and `compose()` call pattern** (spike sketch L552-581, adapted to use `shared/joins_lab.compose()`):
+**`is_empty()` and `build_side_query()` call pattern** (multi-box: each row's non-empty box texts join with `|` into the single term; calls `shared/joins_lab.compose()`):
 ```python
 def is_empty(self) -> bool:
-    return not any(e["term"].text().strip() for e in self.rows)
+    return not any(b.text().strip() for e in self.rows for b in e["boxes"])
 
 def build_side_query(self) -> SideQuery | None:
-    """Build a SideQuery from the current widget state. Returns None if empty."""
-    filled = [e for e in self.rows if e["term"].text().strip()]
-    if not filled:
+    """Build a SideQuery from the current widget state. Returns None if empty.
+
+    Each row holds multiple OR word-boxes (D-04/D-05); join the non-empty box texts
+    with '|' (no spaces) into the single BuilderRow.term. A single-box row therefore
+    yields the bare term (additive, identical to the single-box design); whitespace
+    WITHIN a box is preserved as multi-word proximity on that line.
+    """
+    if self.is_empty():
         return None
     rows = tuple(
         BuilderRow(
-            term=e["term"].text().strip(),   # single-box: caller joins OR alternatives with | before creating widget
+            term="|".join(b.text().strip() for b in e["boxes"] if b.text().strip()),
             line_start=e["start"].isChecked(),
             line_end=e["end"].isChecked(),
             gap_to_next=e["gap"].value(),
@@ -127,6 +158,12 @@ def build_side_query(self) -> SideQuery | None:
         page_position=self._page_position(),  # None | 'start' | 'end'
     )
 ```
+
+> `compose()` (Phase 106) applies the start-anchor `|` prepend to the FIRST token of the first box's
+> term and the end-anchor `|` append to the LAST token — the multi-box UI produces exactly the same
+> `term` string the single-box design would have, so the downstream `compose()` 3-tuple contract is
+> UNCHANGED (`(query_str, responsa_options, page_position)`), `BuilderRow` still carries one `term`,
+> and the engine path (`text_position` forward, ONE line-break engine call) is untouched.
 
 **Dark-mode detection pattern** (TabularQueryBuilderDialog `:1572-1574` — copy verbatim):
 ```python
@@ -149,7 +186,7 @@ self._preview_label.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 ```
 
 **RTL-chrome bug to NOT repeat (Pitfall 6 / R-04 / D-06):**
-Do NOT call `self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)` on the `JoinQueryBuilder` or its row `QHBoxLayout`. Only set RTL on individual `QLineEdit` (term boxes) — already shown above at `term.setLayoutDirection(...)`.
+Do NOT call `self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)` on the `JoinQueryBuilder` or its row `QHBoxLayout`. Only set RTL on individual `QLineEdit` (the OR word-boxes) — already shown above in `_make_box()` at `box.setLayoutDirection(...)`.
 
 ---
 
@@ -980,6 +1017,7 @@ All 8 surfaces have analogs. The following items are **net-new logic** within ot
 
 | Item | Inside class | Reason |
 |------|-------------|--------|
+| Multi-box OR row (`boxes` strip + `[+ or]` / `add_or_box`) (D-04/D-05) | `JoinQueryBuilder` | Spike uses ONE `term` box per row; the locked design is N clickable OR word-boxes per row joined with `\|` into the single term — additive extension of the spike row |
 | JWB-12 source-selector row (D-14) | `JoinCandidatePane` | No prior source-selector widget in the codebase; VS/Combined disabled in 108 |
 | `_EnrichWorker` batch logic | `_EnrichWorker.run()` | Spike did serial per-card calls; the batch pattern is the anti-pattern fix |
 | Size-mismatch hint computation | `_EnrichWorker.run()` | Novel logic; ratio > 1.4 threshold from D-13 |
@@ -998,3 +1036,4 @@ All 8 surfaces have analogs. The following items are **net-new logic** within ot
 ---
 
 ## PATTERN MAPPING COMPLETE
+</content>
