@@ -3746,3 +3746,106 @@ TRANSLATIONS.update({
     "or…":                   "או…",
     "word…":                 "מילה…",
 })
+
+# === Phase 108-03 — JoinCandidatePane / CandidateCard i18n (Plan 03 candidate surface) ===
+# All new tr() keys introduced by workers, pane, and cards in desktop/join_workbench.py.
+TRANSLATIONS.update({
+    # --- Image/thumb states ---
+    "loading…":         "טוען…",     # loading…
+    "(no image)":            "(אין תמונה)",  # (אין תמונה)
+
+    # --- CandidateCard triage + action buttons ---
+    "Mark yes":              "סמן כן",     # סמן כן
+    "Mark maybe":            "סמן אולי",   # סמן אולי
+    "Mark no":               "סמן לא",     # סמן לא
+    "Compare":               "השווה",      # השווה
+    "Re-anchor":             "עגון מחדש",   # עגון מחדש
+    "Compare side-by-side with anchor":
+        "השווה זה לצד עם העוגן",
+    "Set this candidate as the new anchor":
+        "הגדר מועמד זה כעוגן חדש",
+
+    # --- CandidateCard provenance badges ---
+    "  ⚓ self":         "  ⚓ עצמו",    # ⚓ עצמו
+    "  ⇄ other side":   "  ⇄ צד שני",   # ⇄ צד שני
+
+    # --- CandidateCard dimension/material labels ---
+    "⚠ size mismatch":  "⚠ פער בגודל",  # ⚠ פער בגודל
+    "Size may not match anchor":
+        "הגודל עשוי לא התאים לעוגן",
+
+    # --- CandidateCard action row ---
+    "Browse":                "עיין",             # עיין
+    "Puzzle":                "פאזל",             # פאזל
+    "List":                  "רשימה",       # רשימה
+    "Add as Join":           "הוסף כצירוף",  # הוסף כצירוף
+
+    # --- JoinCandidatePane section tag ---
+    "THIS SIDE — find candidate pages matching, line by line (hunt the MISSING continuation):":
+        "צד זה — מצא עמודים מתאימים, שורה אחר שורה (חפש את ההמשך חסר):",
+
+    # --- Other-side collapsible ---
+    "Also constrain the OTHER side of the leaf (adjacent image p+/-1):":
+        "הגבל גם את הצד השני (תמונה סמוכה p±1):",
+    "AND (narrow)":          "וגם (ANDצמצם)",
+    "OR (widen)":            "או (ORהרחב)",
+    "word(s) on this line…":   "מילה/ות בשורה זו…",
+
+    # --- Source selector ---
+    "Include anchor itself": "כלל את העוגן עצמו",
+    "Find Candidates":       "מצא מועמדים",
+    "Visual similarities":   "דמיון חיצוני",
+    "Search + visual":       "חיפוש + חיצוני",
+    "Visual similarity candidates — arrives in Phase 109":
+        "מועמדים בדמיון חיצוני — יגיע בשלב 109",
+    "Visual source (coming soon)":
+        "מקור חיצוני (בקרוב)",
+    "Combined source (coming soon)":
+        "מקור משולב (בקרוב)",
+    "Text source (active)":  "מקור טקסט (פעיל)",
+
+    # --- Refine bar ---
+    "Filter by shelfmark, text, or title…":
+        "סנן לפי מספר מדף, טקסט או כותר…",
+    "any material":          "כל חומר",
+    "Has dimensions":        "יש מידות",
+    "all triage":            "כל סיווג",
+    "Y — kept":         "Y — נשמר",
+    "? — maybe":        "? — אולי",
+    "N — dismissed":    "N — נדחה",
+    "untriaged":             "ללא סיווג",
+    "Size filter":           "סנן גודל",
+    "min width (cm)":        "רוחב מינימאלי (ס\"מ)",
+    "max width (cm)":        "רוחב מקסימאלי (ס\"מ)",
+
+    # --- Status / view toggle / pagination ---
+    "Build a line-by-line query, then Find Candidates.":
+        "בנה שאילתה שורה-אחר-שורה, אחר מצא מועמדים.",
+    "Table view":            "תצוגת טבלאי",
+    "Grid view":             "תצוגת רשת",
+    "working…":         "עובד…",
+    "shown":                 "מוצגים",
+    "← Prev":           "קודם →",
+    "Next →":           "← הבא",
+
+    # --- Self-match readout (D-15) ---
+    "⚓ anchor matches this query ✓  ·  ":
+        "⚓ העוגן תואם שאילתה זו ✓  ·  ",
+    "⚓ anchor does NOT match this query ✗  ·  ":
+        "⚓ העוגן אינו תואם שאילתה זו ✗  ·  ",
+
+    # --- Table headers ---
+    "Shelfmark":             "מספר מדף",
+    "Score":                 "ציון",
+    "Snippet":               "קטע",
+    "Material":              "חומר",
+    "Dimensions":            "מידות",
+    "Source":                "מקור",
+    "Page":                  "עמוד",
+    "Triage":                "סיווג",
+
+    # --- Open-compare stub ---
+    "TODO: open_compare stub (Plan 04 will implement CompareDialog)":
+        "TODO: פעולת השוואה (תוכנן בשלב 104)",
+})
+

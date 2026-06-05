@@ -201,6 +201,36 @@ def _image_url_for_idx(images, idx, width=2000):
 
 
 # ---------------------------------------------------------------------------
+# Plan 03 — candidate_to_result_dict adapter (pure, testable; no Qt)
+# ---------------------------------------------------------------------------
+
+
+def candidate_to_result_dict(c) -> dict:
+    """Thin adapter: Candidate dataclass -> raw result-dict shape for Phase-107 host methods.
+
+    Used ONLY at host-method boundaries (browse / add-to-list / image pump).
+    Do NOT use this on Candidate attributes inside the pane/workers — read the
+    dataclass fields directly (RR-2).
+    """
+    return {
+        "display": {
+            "id": c.sys_id,
+            "shelfmark": c.shelfmark,
+            "title": c.title,
+            "library_code": c.library_code,
+            "img": c.page,
+        },
+        "full_text": c.full_text,
+        "snippet": c.snippet,
+        "uid": c.uid,
+        "highlight_pattern": c.highlight_pattern,
+        "score": c.score,
+        "scope": c.scope,
+        "_via_other_side": c.via_other_side,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Plan 02 — four-source known-joins data layer (pure, testable)
 # ---------------------------------------------------------------------------
 
@@ -1243,6 +1273,1065 @@ if _QT_AVAILABLE:
             return self._meta_mgr.get_library_for_id(sys_id) or ""
 
     # -------------------------------------------------------------------------
+    # Plan 03 — QThread workers (Candidate-typed; RR-2)
+    # -------------------------------------------------------------------------
+
+    # Colour constants shared by CandidateCard and JoinCandidatePane.
+    # All cards use these palette values regardless of dark-mode.
+    _META_COLOR = "#64748b"
+    _DIM_COLOR = "#94a3b8"
+    _TRI_COLOR = {
+        None: "#94a3b8",
+        "yes": "#16a34a",
+        "maybe": "#d97706",
+        "no": "#dc2626",
+    }
+    _MAX_CONCURRENT_IMG = 5   # bounded image-loader pool (PATTERNS "5 slots")
+
+    class ThumbResolver(QThread):
+        """Resolve NLI thumbnail URLs for candidate cards (manuscript-level, RR-7 note).
+
+        Grid card THUMBNAILS are manuscript-level (get_thumbnail is fine here);
+        the per-page matched image is resolved via _image_url_for_idx in the
+        _enqueue_image_for_pane helper on the window.
+
+        Signal: resolved(card_index, url_or_empty)
+        """
+
+        resolved = pyqtSignal(int, str)
+
+        def __init__(self, meta_mgr, items: list):
+            super().__init__()
+            self.meta_mgr = meta_mgr
+            self.items = list(items)   # list of (idx, sys_id)
+            self._cancel = False
+
+        def cancel(self):
+            self._cancel = True
+
+        def run(self):
+            for idx, sid in self.items:
+                if self._cancel:
+                    return
+                url = ""
+                try:
+                    if sid:
+                        url = self.meta_mgr.get_thumbnail(sid) or ""
+                except Exception:
+                    url = ""
+                if self._cancel:
+                    return
+                self.resolved.emit(idx, url)
+
+    class _CrossSideWorker(QThread):
+        """Run cross-side AND/OR membership check off the UI thread.
+
+        Receives an ALREADY-MERGED b_ro (the pane merges the other_builder's
+        ja/flex/bidir into it before starting this worker — RR-14).
+
+        Signal: done(MergeResult)
+        """
+
+        done = pyqtSignal(object)
+
+        def __init__(self, executor, base_candidates: list, b_query,
+                     b_ro: dict, combine: str, a_pattern):
+            super().__init__()
+            self.executor = executor
+            self.base = list(base_candidates)   # list of Candidate
+            self.b_query = b_query              # SideQuery (other side)
+            self.b_ro = b_ro                    # MERGED responsa_options (RR-14)
+            self.combine = combine              # 'AND' | 'OR'
+            self.a_pattern = a_pattern
+            self._cancel = False
+
+        def cancel(self):
+            self._cancel = True
+
+        def run(self):
+            from shared.joins_lab import apply_cross_side, compose, MergeResult
+            try:
+                b_str, _b_ro_ignored, _b_pos = compose(self.b_query)
+            except ValueError:
+                self.done.emit(MergeResult(candidates=tuple(self.base), note=""))
+                return
+            if not b_str:
+                self.done.emit(MergeResult(candidates=tuple(self.base), note=""))
+                return
+            try:
+                # Pass the MERGED b_ro as b_responsa_options — do NOT re-compose here.
+                result = apply_cross_side(
+                    self.executor,
+                    self.base,
+                    self.b_query,
+                    self.b_ro,
+                    self.combine,
+                    self.a_pattern,
+                )
+            except Exception as exc:
+                logger.warning("_CrossSideWorker error: %s", exc)
+                result = MergeResult(candidates=tuple(self.base), note="")
+            self.done.emit(result)
+
+    class _EnrichWorker(QThread):
+        """Batch-enrich all candidates: measurements + snippets + size-mismatch hints.
+
+        Emits a dict keyed by (sys_id, page) — c.key — so the same sys_id at
+        different pages does not overwrite each other's snippet (RR-2 per-page key).
+        Triage is SEPARATELY keyed by sys_id (R-05 deliberate split — a physical
+        fragment shares triage regardless of which page it was found at).
+
+        Signal: enriched({(sys_id, page): {...}})
+        """
+
+        enriched = pyqtSignal(dict)
+
+        def __init__(self, fjms_svc, candidates: list, anchor_meas):
+            super().__init__()
+            self.fjms_svc = fjms_svc
+            self.candidates = list(candidates)  # list of Candidate (RR-2)
+            self.anchor_meas = anchor_meas or {}
+            self._cancel = False
+
+        def cancel(self):
+            self._cancel = True
+
+        def run(self):
+            from shared.joins_lab import snippet_html, snippet_plain
+            # Batch measurement fetch — ONE IN-query, never per-card (D-21, Pitfall 3)
+            sys_ids = [c.sys_id for c in self.candidates]   # Candidate attribute (RR-2)
+            meas = {}
+            try:
+                meas = self.fjms_svc.get_measurement_summaries_batch(sys_ids)  # RR-6
+            except Exception as exc:
+                logger.warning("_EnrichWorker.get_measurement_summaries_batch: %s", exc)
+
+            out = {}   # keyed by (sys_id, page) == c.key (RR-2)
+            for c in self.candidates:
+                if self._cancel:
+                    return
+                # Measurements are per-manuscript (one size per sys_id)
+                m = meas.get(c.sys_id) or {}
+                # Read EXISTING key names from get_measurement_summaries_batch (RR-6)
+                width_cm = m.get("width_cm")
+                height_cm = m.get("height_cm")
+                material = m.get("material")
+                avg_num_lines = m.get("avg_num_lines")
+                size_category = m.get("size_category")
+                # Size-mismatch flag: ratio > 1.4 when both anchor and candidate width known (D-13)
+                mismatch = False
+                a_w = self.anchor_meas.get("width_cm") if self.anchor_meas else None
+                if width_cm and a_w:
+                    try:
+                        ratio = max(width_cm, a_w) / max(min(width_cm, a_w), 0.01)
+                        mismatch = ratio > 1.4
+                    except Exception:
+                        mismatch = False
+                # Snippet generation — pure, safe off-thread
+                snip_h = snippet_html(c.full_text, c.highlight_pattern, max_lines=6)
+                snip_p = snippet_plain(c.full_text, c.highlight_pattern, max_chars=220)
+                # Key by c.key = (sys_id, page) — per-page (RR-2)
+                out[c.key] = {
+                    "width_cm": width_cm,
+                    "height_cm": height_cm,
+                    "material": material,
+                    "avg_num_lines": avg_num_lines,
+                    "size_category": size_category,
+                    "snippet_html": snip_h,
+                    "snippet_plain": snip_p,
+                    "mismatch": mismatch,
+                }
+            self.enriched.emit(out)
+
+    # -------------------------------------------------------------------------
+    # Plan 03 — _tag helper (section label) used by JoinCandidatePane
+    # -------------------------------------------------------------------------
+
+    def _tag(text: str, color: str) -> QLabel:
+        """Return a styled section-tag QLabel (teal/green section header)."""
+        lbl = QLabel(text)
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet(
+            f"font-size:11px;font-weight:bold;color:{color};"
+            f"padding:2px 0;"
+        )
+        return lbl
+
+    # -------------------------------------------------------------------------
+    # Plan 03 — CandidateCard (QFrame) — one card per Candidate in the grid view
+    # -------------------------------------------------------------------------
+
+    class CandidateCard(QFrame):
+        """A fixed-width card for one Candidate in the grid view (UI-SPEC Surface 2).
+
+        Reads Candidate attributes directly (RR-2).  Triage border colour is driven
+        by wb.triage[sys_id] (sys_id-keyed per R-05).
+        """
+
+        def __init__(self, pane, c, global_idx: int, enrich: dict):
+            super().__init__()
+            self.pane = pane            # JoinCandidatePane
+            self.c = c                  # Candidate dataclass (RR-2)
+            self.global_idx = global_idx
+            self.sid = c.sys_id         # read Candidate attribute directly (RR-2)
+            self.setFixedWidth(232)
+            self.setFrameShape(QFrame.Shape.Box)
+            self._restyle()
+
+            lay = QVBoxLayout(self)
+            lay.setContentsMargins(4, 4, 4, 4)
+            lay.setSpacing(2)
+
+            # 1. Thumbnail image label
+            self.img = QLabel(tr("loading…"))
+            self.img.setFixedSize(220, 130)
+            self.img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.img.setStyleSheet("background:#e2e8f0;color:#64748b;")
+            lay.addWidget(self.img)
+
+            # 2. Shelfmark + provenance badge
+            shelf_text = c.shelfmark
+            if c.is_anchor_self:
+                shelf_text += tr("  ⚓ self")
+            elif c.via_other_side:
+                shelf_text += tr("  ⇄ other side")
+            shelf_lbl = QLabel(shelf_text)
+            shelf_lbl.setStyleSheet("font-weight:bold;font-size:12px;")
+            shelf_lbl.setWordWrap(True)
+            lay.addWidget(shelf_lbl)
+
+            # 3. Dimension / material evidence line (from pre-fetched enrich dict, RR-6)
+            m = enrich.get(c.key) or {}   # c.key = (sys_id, page) — RR-2 per-page key
+            width_cm = m.get("width_cm")
+            height_cm = m.get("height_cm")
+            material = m.get("material")
+            avg_num_lines = m.get("avg_num_lines")
+            size_category = m.get("size_category")
+            dim_parts = []
+            if width_cm and height_cm:
+                dim_parts.append(f"{width_cm:.0f}x{height_cm:.0f} cm")
+            elif size_category:
+                dim_parts.append(str(size_category))
+            if material:
+                dim_parts.append(str(material))
+            if avg_num_lines:
+                dim_parts.append(f"~{avg_num_lines:.0f} ln")
+            if dim_parts:
+                dim_str = "  ·  ".join(dim_parts)
+                if m.get("mismatch"):
+                    dim_str += f'  <span style="color:#d97706">{tr("⚠ size mismatch")}</span>'
+                dim_lbl = QLabel(dim_str)
+                dim_lbl.setStyleSheet(f"font-size:10px;color:{_DIM_COLOR};")
+                if m.get("mismatch"):
+                    dim_lbl.setToolTip(tr("Size may not match anchor"))
+                lay.addWidget(dim_lbl)
+
+            # 4. Snippet (pre-fetched HTML)
+            snip = QTextBrowser()
+            snip.setFixedHeight(72)
+            snip.setReadOnly(True)
+            snip.setHtml(m.get("snippet_html") or "")
+            lay.addWidget(snip)
+
+            # 5. Triage row (Y / ? / N) + Compare + Re-anchor
+            trow = QHBoxLayout()
+            trow.setSpacing(2)
+            for emoji, val, aname in (
+                ("Y", "yes", tr("Mark yes")),
+                ("?", "maybe", tr("Mark maybe")),
+                ("N", "no", tr("Mark no")),
+            ):
+                btn = QPushButton(emoji)
+                btn.setFixedSize(28, 28)
+                btn.setAccessibleName(aname)
+                btn.clicked.connect(
+                    lambda _checked=False, v=val, s=self.sid: self.pane.wb.mark(s, v)
+                )
+                trow.addWidget(btn)
+
+            cmp_btn = QPushButton("⧂")
+            cmp_btn.setFixedSize(28, 28)
+            cmp_btn.setAccessibleName(tr("Compare"))
+            cmp_btn.setToolTip(tr("Compare side-by-side with anchor"))
+            cmp_btn.clicked.connect(
+                lambda _checked=False, gi=self.global_idx: self.pane.open_compare(gi)
+            )
+            trow.addWidget(cmp_btn)
+
+            reanchor_btn = QPushButton("⚓")
+            reanchor_btn.setFixedSize(28, 28)
+            reanchor_btn.setAccessibleName(tr("Re-anchor"))
+            reanchor_btn.setToolTip(tr("Set this candidate as the new anchor"))
+            reanchor_btn.clicked.connect(
+                lambda _checked=False, c_=c: self.pane.wb.set_anchor(
+                    candidate_to_result_dict(c_)
+                )
+            )
+            trow.addWidget(reanchor_btn)
+            lay.addLayout(trow)
+
+            # 6. Action row: Browse / Puzzle / List / Join
+            arow = QHBoxLayout()
+            arow.setSpacing(2)
+
+            browse_btn = QPushButton(tr("Browse"))
+            browse_btn.setAccessibleName(tr("Browse"))
+            browse_btn.clicked.connect(
+                lambda _checked=False, c_=c: self.pane.wb.open_result_in_browse(c_)
+            )
+            arow.addWidget(browse_btn)
+
+            puzzle_btn = QPushButton(tr("Puzzle"))
+            puzzle_btn.setAccessibleName(tr("Puzzle"))
+            puzzle_btn.clicked.connect(
+                lambda _checked=False, c_=c: self.pane.wb.open_result_in_puzzle(c_)
+            )
+            arow.addWidget(puzzle_btn)
+
+            list_btn = QPushButton(tr("List"))
+            list_btn.setAccessibleName(tr("List"))
+            list_btn.clicked.connect(
+                lambda _checked=False, c_=c, b=None: self.pane.wb.open_result_in_list(c_, b)
+            )
+            arow.addWidget(list_btn)
+
+            join_btn = QPushButton(tr("Add as Join"))
+            join_btn.setAccessibleName(tr("Add as Join"))
+            join_btn.clicked.connect(
+                lambda _checked=False, c_=c: self.pane.wb.open_result_as_join(c_)
+            )
+            arow.addWidget(join_btn)
+
+            lay.addLayout(arow)
+
+        def _restyle(self):
+            """Update card border based on triage state and anchor-self flag."""
+            if self.c.is_anchor_self:
+                self.setStyleSheet("QFrame{border:3px solid #14b8a6;border-radius:4px;}")
+                return
+            tri = self.pane.wb.triage.get(self.sid)
+            color = _TRI_COLOR.get(tri, _TRI_COLOR[None])
+            self.setStyleSheet(f"QFrame{{border:3px solid {color};border-radius:4px;}}")
+
+        def set_pixmap(self, pix):
+            """Set the thumbnail pixmap (called from GUI thread — Pitfall 4 safe)."""
+            try:
+                if pix and not pix.isNull():
+                    self.img.setText("")
+                    self.img.setPixmap(pix.scaled(
+                        220, 130,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    ))
+                else:
+                    self.img.setText(tr("(no image)"))
+            except RuntimeError:
+                pass   # widget deleted — standard Phase 107 guard
+
+    # -------------------------------------------------------------------------
+    # Plan 03 — JoinCandidatePane (QWidget) — right-pane candidate hunt surface
+    # -------------------------------------------------------------------------
+
+    _GRID_COLS = 4
+    _PER_PAGE = 20
+
+    class JoinCandidatePane(QWidget):
+        """Candidate-hunt surface in the Workbench right pane (Plan 03, JWB-07/10/11/12).
+
+        Owns:
+        - anchor-side JoinQueryBuilder (this side)
+        - other-side collapsible JoinQueryBuilder (other-side builder, allow_page_position=False)
+        - source selector (Text/Visual-disabled/Combined-disabled, D-14)
+        - refine bar (text/material/dimensions/triage/size filters)
+        - status label + self-match readout + view-toggle + pagination
+        - grid (QScrollArea + QGridLayout, default) and table (QTableWidget, toggle)
+        - _CrossSideWorker / _EnrichWorker coordination
+        """
+
+        def __init__(self, wb, executor):
+            super().__init__()
+            self.wb = wb            # JoinWorkbenchWindow (back-ref for triage/actions)
+            self.executor = executor  # _DesktopSearchExecutor
+
+            # Internal state
+            self._text_cands = None   # list[Candidate] after dedup
+            self._sources = {"text"}  # always text-only in Phase 108
+            self._enrich: dict = {}   # {(sys_id, page): {...}} — per-page key (RR-2)
+            self._anchor_matched = None  # bool or None
+            self.results: list = []   # list[Candidate] — post-merge
+            self.cards: dict = {}     # {global_idx: CandidateCard}
+            self._page = 0            # current grid/table page (0-based)
+            self.view_mode = "grid"   # 'grid' | 'table'
+            self._resolver = None     # ThumbResolver (current page)
+            self._cross_worker = None
+            self._enrich_worker = None
+            self._search_thread = None
+
+            self._build_ui()
+
+        def _build_ui(self):
+            rv = QVBoxLayout(self)
+            rv.setContentsMargins(0, 0, 0, 0)
+            rv.setSpacing(4)
+
+            # --- Section tag ---
+            rv.addWidget(_tag(
+                tr("THIS SIDE — find candidate pages matching, line by line (hunt the MISSING continuation):"),
+                "#0f766e",
+            ))
+
+            # --- Anchor (this-side) builder ---
+            self.builder = JoinQueryBuilder(
+                self.do_search,
+                first_hint=tr("word(s) on this line…"),
+            )
+            rv.addWidget(self.builder)
+
+            # --- Other-side collapsible ---
+            os_row = QHBoxLayout()
+            self.other_enable = QCheckBox(
+                tr("Also constrain the OTHER side of the leaf (adjacent image p+/-1):")
+            )
+            self.other_enable.setToolTip(
+                "AND narrows: only candidates whose adjacent page ALSO matches.\n"
+                "OR widens: include adjacent pages as extra candidates."
+            )
+            self.other_enable.toggled.connect(
+                lambda v: self.other_box.setVisible(v)
+            )
+            os_row.addWidget(self.other_enable)
+            self.combine_combo = QComboBox()
+            self.combine_combo.addItem(tr("AND (narrow)"))
+            self.combine_combo.addItem(tr("OR (widen)"))
+            os_row.addWidget(self.combine_combo)
+            os_row.addStretch()
+            rv.addLayout(os_row)
+
+            self.other_box = QWidget()
+            ob = QVBoxLayout(self.other_box)
+            ob.setContentsMargins(16, 0, 0, 0)
+            ob.setSpacing(2)
+            # RR-5: allow_page_position=False on the other-side builder
+            self.other_builder = JoinQueryBuilder(
+                self.do_search,
+                first_hint=tr("word(s) required on the OTHER side…"),
+                allow_page_position=False,
+            )
+            ob.addWidget(self.other_builder)
+            self.other_box.setVisible(False)  # collapsed by default (D-01)
+            rv.addWidget(self.other_box)
+
+            # --- Source selector + action row (D-14) ---
+            src_row = QHBoxLayout()
+            src_row.setSpacing(4)
+
+            # Include-anchor checkbox (D-15: default OFF)
+            self.include_anchor_chk = QCheckBox(tr("Include anchor itself"))
+            self.include_anchor_chk.setChecked(False)
+            src_row.addWidget(self.include_anchor_chk)
+
+            src_row.addStretch()
+
+            # Find Candidates button (Text / wired)
+            self.btn_find = QPushButton(tr("Find Candidates"))
+            self.btn_find.clicked.connect(self.do_search)
+            src_row.addWidget(self.btn_find)
+
+            # Visual source button (disabled stub — Phase 109)
+            self.btn_visual = QPushButton(tr("Visual similarities"))
+            self.btn_visual.setEnabled(False)
+            self.btn_visual.setToolTip(
+                tr("Visual similarity candidates — arrives in Phase 109")
+            )
+            self.btn_visual.setAccessibleName(tr("Visual source (coming soon)"))
+            src_row.addWidget(self.btn_visual)
+
+            # Combined source button (disabled stub — Phase 109)
+            self.btn_combined = QPushButton(tr("Search + visual"))
+            self.btn_combined.setEnabled(False)
+            self.btn_combined.setToolTip(
+                tr("Visual similarity candidates — arrives in Phase 109")
+            )
+            self.btn_combined.setAccessibleName(tr("Combined source (coming soon)"))
+            src_row.addWidget(self.btn_combined)
+
+            rv.addLayout(src_row)
+
+            # --- Refine / filter bar ---
+            refine = QHBoxLayout()
+            refine.setSpacing(4)
+
+            self.filter_in = QLineEdit()
+            self.filter_in.setPlaceholderText(
+                tr("Filter by shelfmark, text, or title…")
+            )
+            self.filter_in.textChanged.connect(self.apply_filters)
+            refine.addWidget(self.filter_in, 1)
+
+            self.mat_filter = QComboBox()
+            self.mat_filter.addItem(tr("any material"))
+            self.mat_filter.currentIndexChanged.connect(self.apply_filters)
+            refine.addWidget(self.mat_filter)
+
+            self.dim_chk = QCheckBox(tr("Has dimensions"))
+            self.dim_chk.stateChanged.connect(self.apply_filters)
+            refine.addWidget(self.dim_chk)
+
+            self.tri_filter = QComboBox()
+            self.tri_filter.addItems([
+                tr("all triage"),
+                tr("Y — kept"),
+                tr("? — maybe"),
+                tr("N — dismissed"),
+                tr("untriaged"),
+            ])
+            self.tri_filter.currentIndexChanged.connect(self.apply_filters)
+            refine.addWidget(self.tri_filter)
+
+            # Opt-in size filter (D-13: collapsed/off by default)
+            self.size_btn = QPushButton(tr("Size filter"))
+            self.size_btn.setCheckable(True)
+            self.size_btn.toggled.connect(self._toggle_size_filter)
+            refine.addWidget(self.size_btn)
+
+            rv.addLayout(refine)
+
+            # Size filter spinboxes (hidden by default)
+            self._size_row = QHBoxLayout()
+            self.size_min = QSpinBox()
+            self.size_min.setRange(0, 200)
+            self.size_min.setPrefix(tr("min width (cm)") + " ")
+            self.size_min.valueChanged.connect(self.apply_filters)
+            self.size_max = QSpinBox()
+            self.size_max.setRange(0, 200)
+            self.size_max.setValue(200)
+            self.size_max.setPrefix(tr("max width (cm)") + " ")
+            self.size_max.valueChanged.connect(self.apply_filters)
+            self._size_row.addWidget(self.size_min)
+            self._size_row.addWidget(self.size_max)
+            self._size_row.addStretch()
+            self._size_widget = QWidget()
+            self._size_widget.setLayout(self._size_row)
+            self._size_widget.setVisible(False)
+            rv.addWidget(self._size_widget)
+
+            # --- Status + view-toggle + pagination row ---
+            status_row = QHBoxLayout()
+            status_row.setSpacing(4)
+
+            self.status = QLabel(
+                tr("Build a line-by-line query, then Find Candidates.")
+            )
+            self.status.setStyleSheet("font-size:10px;color:#94a3b8;")
+            status_row.addWidget(self.status, 1)
+
+            self.view_btn = QPushButton(tr("Table view"))
+            self.view_btn.clicked.connect(self.toggle_view)
+            status_row.addWidget(self.view_btn)
+
+            self.btn_prev = QPushButton(tr("← Prev"))
+            self.btn_prev.setFixedWidth(60)
+            self.btn_prev.clicked.connect(self._prev_page)
+            status_row.addWidget(self.btn_prev)
+
+            self.page_lbl = QLabel("")
+            status_row.addWidget(self.page_lbl)
+
+            self.btn_next = QPushButton(tr("Next →"))
+            self.btn_next.setFixedWidth(60)
+            self.btn_next.clicked.connect(self._next_page)
+            status_row.addWidget(self.btn_next)
+
+            rv.addLayout(status_row)
+
+            # --- Grid view (default) ---
+            self.grid_scroll = QScrollArea()
+            self.grid_scroll.setWidgetResizable(True)
+            self._grid_container = QWidget()
+            self.grid_layout = QGridLayout(self._grid_container)
+            self.grid_layout.setSpacing(4)
+            self.grid_scroll.setWidget(self._grid_container)
+            rv.addWidget(self.grid_scroll, 1)
+
+            # --- Table view (hidden by default) ---
+            _headers = [
+                tr("Shelfmark"), tr("Score"), tr("Snippet"),
+                tr("Material"), tr("Dimensions"), tr("Source"),
+                tr("Page"), tr("Triage"),
+            ]
+            self.table = QTableWidget(0, len(_headers))
+            self.table.setHorizontalHeaderLabels(_headers)
+            self.table.setEditTriggers(
+                QTableWidget.EditTrigger.NoEditTriggers
+            )
+            self.table.setSelectionBehavior(
+                QTableWidget.SelectionBehavior.SelectRows
+            )
+            self.table.setSortingEnabled(False)
+            self.table.cellDoubleClicked.connect(
+                lambda row, _col: self._table_double_clicked(row)
+            )
+            self.table.setVisible(False)
+            rv.addWidget(self.table, 1)
+
+        # --- RR-14: global ja/flex/bidir merge helper ---
+
+        def _merge_globals(self, builder, ro: dict) -> dict:
+            """Merge builder's ja/flex_spacing/bidirectional into ro.
+
+            compose() hardcodes ja/flex/bidir=False in the returned ro; this step
+            pulls the actual UI-toggle values back in so the global Search-Options
+            actually reach the engine (RR-14). variants flows correctly via
+            SideQuery.variants -> compose -> ro so it is NOT re-merged here.
+            """
+            overrides = {
+                k: v
+                for k, v in builder._responsa_opts().items()
+                if k in ("ja", "flex_spacing", "bidirectional")
+            }
+            ro.update(overrides)
+            return ro
+
+        # --- Search flow ---
+
+        def do_search(self):
+            """Build and launch the main search (R-01 — ONE engine call per find)."""
+            from shared.joins_lab import compose
+            if self.builder.is_empty():
+                try:
+                    self.status.setText(
+                        tr("Build a line-by-line query, then Find Candidates.")
+                    )
+                except RuntimeError:
+                    pass
+                return
+
+            side = self.builder.build_side_query()
+            if side is None:
+                return
+            try:
+                query_str, ro, page_pos = compose(side)
+            except ValueError as exc:
+                try:
+                    self.status.setText(str(exc))
+                except RuntimeError:
+                    pass
+                return
+
+            # RR-14: merge the builder's real ja/flex/bidir into the composed ro
+            # (compose hardcodes them False at :745-747 in joins_lab.py)
+            self._merge_globals(self.builder, ro)
+
+            self._sources = {"text"}
+            self._text_cands = None
+            try:
+                self.status.setText(tr("working…"))
+                self.btn_find.setEnabled(False)
+                self.btn_visual.setEnabled(False)
+                self.btn_combined.setEnabled(False)
+            except RuntimeError:
+                pass
+
+            # Cancel any previous search thread
+            if self._search_thread is not None:
+                try:
+                    self._search_thread.quit()
+                except Exception:
+                    pass
+                self._search_thread = None
+
+            # R-01: page_position forwarded as text_position; genizah scope only
+            self._search_thread = SearchThread(
+                self.wb.searcher,
+                query_str,
+                "exact",
+                0,
+                responsa_options=ro,
+                text_position=page_pos,
+                corpus_scope="genizah",
+            )
+            self._search_thread.results_signal.connect(self._on_results)
+            self._search_thread.start()
+
+        def _on_results(self, raw: list):
+            """Handle raw engine results; dedup and optionally start cross-side worker."""
+            from shared.joins_lab import compose, detect_self_match, dedup_candidates
+            try:
+                self.btn_find.setEnabled(True)
+            except RuntimeError:
+                pass
+
+            include_self = self.include_anchor_chk.isChecked()
+            self._anchor_matched = detect_self_match(raw, self.wb._anchor_sid)
+            deduped, _ = dedup_candidates(raw, self.wb._anchor_sid, include_self)
+            self._text_cands = list(deduped)
+
+            # Other-side cross-filter?
+            use_other = (
+                self.other_enable.isChecked()
+                and not self.other_builder.is_empty()
+            )
+            if use_other:
+                b_side = self.other_builder.build_side_query()
+                if b_side is not None:
+                    try:
+                        _b_str, b_ro, _b_pos = compose(b_side)
+                    except ValueError:
+                        self._maybe_assemble()
+                        return
+                    # RR-14: merge the OTHER builder's ja/flex/bidir into b_ro
+                    self._merge_globals(self.other_builder, b_ro)
+
+                    combine = (
+                        "AND" if self.combine_combo.currentIndex() == 0 else "OR"
+                    )
+                    a_pattern = (
+                        self._text_cands[0].highlight_pattern
+                        if self._text_cands else None
+                    )
+                    # Cancel old cross-side worker
+                    if self._cross_worker is not None:
+                        try:
+                            self._cross_worker.cancel()
+                        except Exception:
+                            pass
+                    self._cross_worker = _CrossSideWorker(
+                        self.executor,
+                        self._text_cands,
+                        b_side,
+                        b_ro,        # MERGED b_ro (RR-14)
+                        combine,
+                        a_pattern,
+                    )
+                    self._cross_worker.done.connect(self._on_cross_done)
+                    self._cross_worker.start()
+                    return
+            self._maybe_assemble()
+
+        def _on_cross_done(self, merge_result):
+            """Handle cross-side worker result (MergeResult — .candidates is correct here)."""
+            self._text_cands = list(merge_result.candidates)  # MergeResult.candidates
+            self._maybe_assemble()
+
+        def _maybe_assemble(self):
+            """Merge sources and start enrichment (RR-2: merge_candidates returns a LIST)."""
+            from shared.joins_lab import merge_candidates
+            # merge_candidates returns a plain LIST — do NOT read .candidates on it (RR-2)
+            self.results = list(merge_candidates(self._text_cands or [], []))
+            self._page = 0
+            self._start_enrich()
+
+        def _start_enrich(self):
+            """Start the batched enrichment worker."""
+            from shared.fjms_service import get_fjms_service
+            # Cancel old enrich worker
+            if self._enrich_worker is not None:
+                try:
+                    self._enrich_worker.cancel()
+                except Exception:
+                    pass
+                self._enrich_worker = None
+
+            fjms_svc = None
+            try:
+                fjms_svc = get_fjms_service()
+            except Exception:
+                pass
+
+            # Anchor measurements for size-mismatch hint
+            anchor_meas = {}
+            if self.wb._anchor_sid:
+                try:
+                    from shared.fjms_service import get_fjms_service as _gsvc
+                    svc = _gsvc()
+                    batch = svc.get_measurement_summaries_batch([self.wb._anchor_sid])
+                    anchor_meas = batch.get(self.wb._anchor_sid) or {}
+                except Exception:
+                    anchor_meas = {}
+
+            if fjms_svc is not None and self.results:
+                self._enrich_worker = _EnrichWorker(fjms_svc, self.results, anchor_meas)
+                self._enrich_worker.enriched.connect(self._on_enriched)
+                self._enrich_worker.start()
+            else:
+                # No fjms service or empty results — proceed without enrichment
+                self._enrich = {}
+                self.apply_filters()
+
+        def _on_enriched(self, enrich: dict):
+            """Handle enrichment result (keyed by (sys_id, page) — RR-2)."""
+            self._enrich = enrich
+            # Populate material filter from unique materials in enrich
+            materials = sorted(set(
+                v.get("material") or ""
+                for v in enrich.values()
+                if v.get("material")
+            ))
+            try:
+                current_mat = self.mat_filter.currentText()
+                self.mat_filter.blockSignals(True)
+                self.mat_filter.clear()
+                self.mat_filter.addItem(tr("any material"))
+                for mat in materials:
+                    self.mat_filter.addItem(mat)
+                # Restore previous selection if still available
+                idx = self.mat_filter.findText(current_mat)
+                if idx >= 0:
+                    self.mat_filter.setCurrentIndex(idx)
+                self.mat_filter.blockSignals(False)
+            except RuntimeError:
+                pass
+            self.apply_filters()
+
+        def apply_filters(self):
+            """Apply refine-bar filters and update the display."""
+            text_q = (self.filter_in.text() if self.filter_in else "").strip().lower()
+            mat_q = (
+                self.mat_filter.currentText() if self.mat_filter else ""
+            )
+            mat_any = (mat_q == tr("any material") or not mat_q)
+            need_dims = self.dim_chk.isChecked()
+            tri_q_idx = self.tri_filter.currentIndex()
+            # tri_q_idx: 0=all, 1=Y, 2=?, 3=N, 4=untriaged
+            _tri_map = {1: "yes", 2: "maybe", 3: "no"}
+
+            size_active = self.size_btn.isChecked() if hasattr(self, "size_btn") else False
+            size_min = self.size_min.value() if size_active else 0
+            size_max = self.size_max.value() if size_active else 200
+
+            filtered = []
+            for c in self.results:
+                # Text filter
+                if text_q and not (
+                    text_q in (c.shelfmark or "").lower()
+                    or text_q in (c.full_text or "").lower()
+                    or text_q in (c.title or "").lower()
+                ):
+                    continue
+                # Material filter
+                m = self._enrich.get(c.key) or {}
+                if not mat_any:
+                    if (m.get("material") or "") != mat_q:
+                        continue
+                # Has-dimensions filter
+                if need_dims and not (m.get("width_cm") and m.get("height_cm")):
+                    continue
+                # Triage filter
+                if tri_q_idx == 4:
+                    # untriaged
+                    if self.wb.triage.get(c.sys_id):
+                        continue
+                elif tri_q_idx in _tri_map:
+                    if self.wb.triage.get(c.sys_id) != _tri_map[tri_q_idx]:
+                        continue
+                # Size filter (opt-in)
+                if size_active:
+                    w = m.get("width_cm")
+                    if w is None or not (size_min <= w <= size_max):
+                        continue
+                filtered.append(c)
+
+            self.wb.filtered = filtered
+
+            # Self-match inline prefix (D-15 / UI-SPEC self-match format)
+            if self._anchor_matched is True:
+                prefix = tr("⚓ anchor matches this query ✓  ·  ")
+            elif self._anchor_matched is False:
+                prefix = tr("⚓ anchor does NOT match this query ✗  ·  ")
+            else:
+                prefix = ""
+
+            try:
+                self.status.setText(
+                    f"{prefix}{len(filtered)}/{len(self.results)} " + tr("shown")
+                )
+            except RuntimeError:
+                pass
+
+            self.render_results()
+            self._update_status_counts()
+
+        def render_results(self):
+            """Dispatch to the current view mode."""
+            if self.view_mode == "grid":
+                self._render_grid_page()
+            else:
+                self._render_table()
+
+        def _render_grid_page(self):
+            """Render the current page of candidates into the grid (QGridLayout)."""
+            # Clear old cards
+            self.wb._cancel_images()
+            self.cards.clear()
+            # Remove all widgets from grid
+            while self.grid_layout.count():
+                item = self.grid_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+
+            start = self._page * _PER_PAGE
+            page_cands = self.wb.filtered[start:start + _PER_PAGE]
+            items_for_thumbs = []
+            for i, c in enumerate(page_cands):
+                gidx = start + i
+                enrich = self._enrich
+                card = CandidateCard(self, c, gidx, enrich)
+                self.cards[gidx] = card
+                self.grid_layout.addWidget(card, i // _GRID_COLS, i % _GRID_COLS)
+                items_for_thumbs.append((gidx, c.sys_id))
+
+            # Start ThumbResolver for this page
+            if items_for_thumbs and self.wb.meta_mgr is not None:
+                if self._resolver is not None:
+                    try:
+                        self._resolver.cancel()
+                    except Exception:
+                        pass
+                self._resolver = ThumbResolver(self.wb.meta_mgr, items_for_thumbs)
+                self._resolver.resolved.connect(self._on_thumb_url)
+                self._resolver.start()
+
+            self._update_pagination()
+
+        def _on_thumb_url(self, card_idx: int, url: str):
+            """Handle a ThumbResolver URL — enqueue image load on GUI thread."""
+            card = self.cards.get(card_idx)
+            if card is None:
+                return
+            if not url:
+                try:
+                    card.img.setText(tr("(no image)"))
+                except RuntimeError:
+                    pass
+                return
+            # Load via the bounded pool; use "card" target for scaled display
+            loader = ImageLoaderThread(url)
+            def _on_loaded(qi, c=card):
+                try:
+                    if qi is not None and not qi.isNull():
+                        pix = QPixmap.fromImage(qi)
+                        c.set_pixmap(pix)
+                    else:
+                        c.set_pixmap(None)
+                except RuntimeError:
+                    pass
+            loader.image_loaded.connect(_on_loaded)
+            loader.load_failed.connect(lambda c=card: c.set_pixmap(None))
+            loader.start()
+            self.wb._img_threads.append(loader)
+
+        def _render_table(self):
+            """Render all filtered candidates into the table view."""
+            self.table.setRowCount(0)
+            for c in self.wb.filtered:
+                m = self._enrich.get(c.key) or {}
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                self.table.setItem(row, 0, QTableWidgetItem(c.shelfmark or ""))
+                score_str = f"{c.score:.3f}" if c.score is not None else ""
+                self.table.setItem(row, 1, QTableWidgetItem(score_str))
+                self.table.setItem(row, 2, QTableWidgetItem(m.get("snippet_plain") or ""))
+                self.table.setItem(row, 3, QTableWidgetItem(m.get("material") or ""))
+                w = m.get("width_cm")
+                h = m.get("height_cm")
+                dims = f"{w:.0f}x{h:.0f}" if w and h else ""
+                self.table.setItem(row, 4, QTableWidgetItem(dims))
+                self.table.setItem(row, 5, QTableWidgetItem(c.scope or ""))
+                self.table.setItem(row, 6, QTableWidgetItem(str(c.page) if c.page else ""))
+                self.table.setItem(
+                    row, 7, QTableWidgetItem(self.wb.triage.get(c.sys_id) or "")
+                )
+            self._update_pagination()
+
+        def _table_double_clicked(self, row: int):
+            """Map table row to global index and open compare."""
+            # Table shows all filtered (no pagination), so row == global_filtered_idx
+            self.open_compare(row)
+
+        def _update_pagination(self):
+            """Update prev/next buttons and page label."""
+            total = len(self.wb.filtered)
+            total_pages = max(1, (total + _PER_PAGE - 1) // _PER_PAGE)
+            try:
+                self.btn_prev.setEnabled(self._page > 0)
+                self.btn_next.setEnabled(self._page < total_pages - 1)
+                self.page_lbl.setText(f"{self._page + 1}/{total_pages}")
+            except RuntimeError:
+                pass
+
+        def _prev_page(self):
+            if self._page > 0:
+                self._page -= 1
+                self.render_results()
+
+        def _next_page(self):
+            total = len(self.wb.filtered)
+            total_pages = max(1, (total + _PER_PAGE - 1) // _PER_PAGE)
+            if self._page < total_pages - 1:
+                self._page += 1
+                self.render_results()
+
+        def toggle_view(self):
+            """Toggle between grid and table views."""
+            self.view_mode = "table" if self.view_mode == "grid" else "grid"
+            try:
+                self.view_btn.setText(
+                    tr("Grid view") if self.view_mode == "table" else tr("Table view")
+                )
+                self.grid_scroll.setVisible(self.view_mode == "grid")
+                self.table.setVisible(self.view_mode == "table")
+            except RuntimeError:
+                pass
+            self.wb._cancel_images()
+            self.render_results()
+
+        def _restyle_card(self, sys_id: str):
+            """Restyle any visible card whose sys_id matches (triage-state change)."""
+            for card in self.cards.values():
+                if card.sid == sys_id:
+                    try:
+                        card._restyle()
+                    except RuntimeError:
+                        pass
+
+        def _update_status_counts(self):
+            """Append [Y x  ? y  N z] triage counts to the status label."""
+            y = sum(1 for v in self.wb.triage.values() if v == "yes")
+            m = sum(1 for v in self.wb.triage.values() if v == "maybe")
+            n = sum(1 for v in self.wb.triage.values() if v == "no")
+            try:
+                base = self.status.text().split("  [")[0]
+                self.status.setText(f"{base}  [Y {y}  ? {m}  N {n}]")
+            except RuntimeError:
+                pass
+
+        def _toggle_size_filter(self, on: bool):
+            """Show/hide the size filter spinboxes."""
+            try:
+                self._size_widget.setVisible(on)
+            except RuntimeError:
+                pass
+            if not on:
+                self.apply_filters()
+
+        def open_compare(self, global_idx: int):
+            """Open the side-by-side compare dialog for a candidate.
+
+            TODO: Plan 04 will replace this stub with CompareDialog.
+            Currently sets focus to the candidate card if visible.
+            """
+            # TODO: open_compare stub (Plan 04 will implement CompareDialog)
+            card = self.cards.get(global_idx)
+            if card is not None:
+                try:
+                    card.setFocus()
+                except RuntimeError:
+                    pass
+            logger.info(
+                "open_compare: global_idx=%d (CompareDialog stub — Plan 04)", global_idx
+            )
+
+    # -------------------------------------------------------------------------
     # JoinWorkbenchWindow — the main modeless QDialog shell (Plan 02, JWB-01).
     # -------------------------------------------------------------------------
 
@@ -1298,6 +2387,19 @@ if _QT_AVAILABLE:
             # Dark-mode detection — set once in __init__ (pattern from result_dialog.py:562)
             palette = self.palette()
             self.is_dark = palette.color(QPalette.ColorRole.Window).lightness() < 128
+
+            # Plan 03 — triage state (sys_id-keyed per R-05; reset on re-anchor per D-10).
+            # Deliberate split from the (sys_id, page) enrichment key: a physical fragment
+            # is triaged once regardless of which page image was found at.
+            self.triage: dict = {}
+            # Plan 03 — post-filter candidate list (populated by JoinCandidatePane)
+            self.filtered: list = []
+
+            # Plan 03 — bounded image-loader pool state (5-slot, PATTERNS block)
+            self._img_queue: list = []
+            self._img_active: list = []
+            self._img_threads: list = []
+            self._thumb_resolver = None
 
             self._init_ui()
             self.setWindowTitle(tr("Joins Lab"))
@@ -1469,9 +2571,10 @@ if _QT_AVAILABLE:
             anchor_action_row.addStretch()
             layout.addLayout(anchor_action_row)
 
-            # 3. (Phase 108) candidate-hunt surface lands here. The known-joins
-            # panel moved to the LEFT pane (under the anchor text) per UAT.
-            layout.addStretch()
+            # 3. (Phase 108) candidate-hunt surface — JoinCandidatePane (Plan 03).
+            # The known-joins panel moved to the LEFT pane (under the anchor text) per UAT.
+            self._candidate_pane = JoinCandidatePane(self, self._executor)
+            layout.addWidget(self._candidate_pane, 1)
             return pane
 
         def _build_joins_panel(self) -> QWidget:
@@ -1610,6 +2713,9 @@ if _QT_AVAILABLE:
             self._anchor_full_pix = None
             self._anchor_images = []
             self._set_joins_expanded(False)  # joins collapse on each fresh anchor
+            # D-10: triage reset on re-anchor (sys_id-keyed; cleared so old marks
+            # from a previous anchor don't bleed into the new session).
+            self.triage = {}
 
             try:
                 self.anchor_img_label.setText("...")
@@ -1851,7 +2957,162 @@ if _QT_AVAILABLE:
             """Invalidate generation + cancel workers on close."""
             self._gen += 1  # must-fix #7: invalidate any in-flight workers
             self._cancel_workers()
+            self._cancel_images()
             super().closeEvent(event)
+
+        # ------------------------------------------------------------------
+        # Plan 03 — triage state (D-10 / R-05)
+        # ------------------------------------------------------------------
+
+        def mark(self, sys_id: str, val: str):
+            """Record a triage decision for a fragment (sys_id-keyed, R-05).
+
+            val: 'yes' | 'maybe' | 'no'.
+            Triage is keyed by sys_id (physical fragment), not (sys_id, page) — the
+            deliberate split from the enrichment-dict key means a fragment triaged via
+            page 3 is immediately visible when the scholar looks at page 4 of the same
+            manuscript. See test_join_workbench_triage.py for the contract.
+            """
+            self.triage[sys_id] = val
+            # Propagate visual update to the candidate pane (may not exist yet).
+            try:
+                self._candidate_pane._restyle_card(sys_id)
+                self._candidate_pane._update_status_counts()
+            except (RuntimeError, AttributeError):
+                pass
+
+        # ------------------------------------------------------------------
+        # Plan 03 — public action delegators (D-20: zero _vs_ calls)
+        # One Candidate -> one host-method call via the PUBLIC API.
+        # ------------------------------------------------------------------
+
+        def open_result_in_browse(self, c):
+            """Open a candidate Candidate in Browse (Phase-107 host method)."""
+            self._app.open_result_in_browse_from_table(candidate_to_result_dict(c))
+
+        def open_result_in_puzzle(self, c):
+            """Open a candidate in Fragment Puzzle (Phase-107 host method)."""
+            self._app.open_anchor_in_puzzle(c.sys_id)
+
+        def open_result_in_list(self, c, anchor_widget=None):
+            """Add a candidate to a personal list (Phase-107 host method)."""
+            self._app.show_add_to_list_menu(
+                [{"sys_id": c.sys_id, "fl_id": "", "img": c.page or 1}],
+                source="join_workbench",
+                anchor_widget=anchor_widget,
+            )
+
+        def open_result_as_join(self, c):
+            """Open JoinsDialog pre-filled with anchor as A and candidate as B.
+
+            Calls the EXTENDED public open_anchor_as_join (RR-3, D-17, D-20).
+            No _vs_ private calls.
+            """
+            if not self._anchor_res:
+                return
+            self._app.open_anchor_as_join(
+                r_sid(self._anchor_res),
+                r_shelf(self._anchor_res),
+                partner_sys_id=c.sys_id,
+                partner_shelfmark=c.shelfmark,
+            )
+
+        # ------------------------------------------------------------------
+        # Plan 03 — bounded image-loader pool (5 slots, PATTERNS block)
+        # _enqueue_image_for_pane resolves per-page IIIF URL (RR-7/RR-12).
+        # ------------------------------------------------------------------
+
+        def _enqueue_image(self, label, url, target=None):
+            """Enqueue a URL for loading into a QLabel (bounded 5-slot pool)."""
+            if not url:
+                try:
+                    label.setText(tr("(no image)"))
+                except RuntimeError:
+                    pass
+                return
+            self._img_queue.append((label, url, target))
+            self._pump_images()
+
+        def _pump_images(self):
+            """Start image loaders up to the 5-slot ceiling (Pitfall 4: QPixmap on GUI thread)."""
+            # Clean up finished threads
+            self._img_threads = [t for t in self._img_threads if t.isRunning()]
+            while self._img_queue and len(self._img_threads) < _MAX_CONCURRENT_IMG:
+                label, url, target = self._img_queue.pop(0)
+                loader = ImageLoaderThread(url)
+                # Closure captures label + target; QPixmap.fromImage MUST run on GUI thread.
+                def _on_loaded(qi, lbl=label, tgt=target):
+                    try:
+                        if qi is not None and not qi.isNull():
+                            pix = QPixmap.fromImage(qi)
+                            if tgt == "card":
+                                # Card set_pixmap scales to 220x130
+                                lbl.setText("")
+                                lbl.setPixmap(pix.scaled(
+                                    220, 130,
+                                    Qt.AspectRatioMode.KeepAspectRatio,
+                                    Qt.TransformationMode.SmoothTransformation,
+                                ))
+                            else:
+                                lbl.setPixmap(pix.scaled(
+                                    lbl.width() or 400, lbl.height() or 300,
+                                    Qt.AspectRatioMode.KeepAspectRatio,
+                                    Qt.TransformationMode.SmoothTransformation,
+                                ))
+                        else:
+                            lbl.setText(tr("(no image)"))
+                    except RuntimeError:
+                        pass   # widget deleted — standard Phase 107 guard
+                loader.image_loaded.connect(_on_loaded)
+                loader.load_failed.connect(
+                    lambda lbl=label: self._try_setText(lbl, tr("(no image)"))
+                )
+                loader.finished.connect(self._pump_images)
+                loader.start()
+                self._img_threads.append(loader)
+
+        def _try_setText(self, label, text: str):
+            """Set label text, ignoring RuntimeError for deleted widgets."""
+            try:
+                label.setText(text)
+            except RuntimeError:
+                pass
+
+        def _enqueue_image_for_pane(self, label, sys_id: str, page, width: int = 1400):
+            """Resolve and enqueue the MATCHED PAGE image for a candidate (RR-7, RR-12).
+
+            Uses the per-page _image_url_for_idx path (NOT meta_mgr.get_thumbnail()).
+            RR-12 GUARD: Candidate.page is Optional[int]; a None page is treated as
+            page 1 (first page) before the page-1 arithmetic.
+            """
+            # RR-12: guard None page BEFORE any page-1 arithmetic
+            if page is None:
+                page = 1
+            images = None
+            try:
+                meta = self.meta_mgr.enrich_metadata(sys_id)
+                images = (meta or {}).get("images") or []
+            except Exception:
+                images = []
+            # page is 1-based; _image_url_for_idx is 0-based; returns '' for out-of-range
+            url = _image_url_for_idx(images, page - 1, width)
+            self._enqueue_image(label, url)
+
+        def _cancel_images(self):
+            """Cancel all pending image loads (called on re-anchor / page change / close)."""
+            self._img_queue.clear()
+            for t in self._img_threads:
+                try:
+                    t.cancel()
+                except Exception:
+                    pass
+            self._img_threads.clear()
+            if self._thumb_resolver is not None:
+                try:
+                    self._thumb_resolver.cancel()
+                except Exception:
+                    pass
+                self._thumb_resolver = None
 
         # ------------------------------------------------------------------
         # Known-joins panel
