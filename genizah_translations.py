@@ -3810,6 +3810,11 @@ TRANSLATIONS.update({
     # --- Other-side collapsible ---
     "Also constrain the OTHER side of the leaf (adjacent image p+/-1):":
         "הגבל גם את הצד השני (תמונה סמוכה p±1):",
+    # Relabeled in Phase 108 redesign (adapted_decision 11)
+    "search also on the other side of the leaf (p ±1)":
+        "חפש גם בצד השני של הדף (p ±1)",
+    "AND narrows: only candidates whose adjacent page ALSO matches. OR widens: include adjacent pages as extra candidates.":
+        "AND מצמצם: רק מועמדים שהעמוד הסמוך שלהם גם תואם. OR מרחיב: כלול עמודים סמוכים כמועמדים נוספים.",
     "AND (narrow)":          "וגם (ANDצמצם)",
     "OR (widen)":            "או (ORהרחב)",
     "word(s) on this line…":   "מילה/ות בשורה זו…",

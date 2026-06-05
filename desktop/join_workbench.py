@@ -1696,12 +1696,6 @@ if _QT_AVAILABLE:
             rv.setContentsMargins(0, 0, 0, 0)
             rv.setSpacing(4)
 
-            # --- Section tag ---
-            rv.addWidget(_tag(
-                tr("THIS SIDE — find candidate pages matching, line by line (hunt the MISSING continuation):"),
-                "#0f766e",
-            ))
-
             # --- Anchor (this-side) builder ---
             self.builder = JoinQueryBuilder(
                 self.do_search,
@@ -1712,11 +1706,10 @@ if _QT_AVAILABLE:
             # --- Other-side collapsible ---
             os_row = QHBoxLayout()
             self.other_enable = QCheckBox(
-                tr("Also constrain the OTHER side of the leaf (adjacent image p+/-1):")
+                tr("search also on the other side of the leaf (p ±1)")
             )
             self.other_enable.setToolTip(
-                "AND narrows: only candidates whose adjacent page ALSO matches.\n"
-                "OR widens: include adjacent pages as extra candidates."
+                tr("AND narrows: only candidates whose adjacent page ALSO matches. OR widens: include adjacent pages as extra candidates.")
             )
             self.other_enable.toggled.connect(
                 lambda v: self.other_box.setVisible(v)
@@ -1743,39 +1736,15 @@ if _QT_AVAILABLE:
             self.other_box.setVisible(False)  # collapsed by default (D-01)
             rv.addWidget(self.other_box)
 
-            # --- Source selector + action row (D-14) ---
+            # --- Find Candidates action row ---
             src_row = QHBoxLayout()
             src_row.setSpacing(4)
-
-            # Include-anchor checkbox (D-15: default OFF)
-            self.include_anchor_chk = QCheckBox(tr("Include anchor itself"))
-            self.include_anchor_chk.setChecked(False)
-            src_row.addWidget(self.include_anchor_chk)
-
             src_row.addStretch()
 
             # Find Candidates button (Text / wired)
             self.btn_find = QPushButton(tr("Find Candidates"))
             self.btn_find.clicked.connect(self.do_search)
             src_row.addWidget(self.btn_find)
-
-            # Visual source button (disabled stub — Phase 109)
-            self.btn_visual = QPushButton(tr("Visual similarities"))
-            self.btn_visual.setEnabled(False)
-            self.btn_visual.setToolTip(
-                tr("Visual similarity candidates — arrives in Phase 109")
-            )
-            self.btn_visual.setAccessibleName(tr("Visual source (coming soon)"))
-            src_row.addWidget(self.btn_visual)
-
-            # Combined source button (disabled stub — Phase 109)
-            self.btn_combined = QPushButton(tr("Search + visual"))
-            self.btn_combined.setEnabled(False)
-            self.btn_combined.setToolTip(
-                tr("Visual similarity candidates — arrives in Phase 109")
-            )
-            self.btn_combined.setAccessibleName(tr("Combined source (coming soon)"))
-            src_row.addWidget(self.btn_combined)
 
             rv.addLayout(src_row)
 
@@ -1949,8 +1918,6 @@ if _QT_AVAILABLE:
             try:
                 self.status.setText(tr("working…"))
                 self.btn_find.setEnabled(False)
-                self.btn_visual.setEnabled(False)
-                self.btn_combined.setEnabled(False)
             except RuntimeError:
                 pass
 
@@ -1983,7 +1950,8 @@ if _QT_AVAILABLE:
             except RuntimeError:
                 pass
 
-            include_self = self.include_anchor_chk.isChecked()
+            # Anchor is excluded by default (adapted_decision 11: hardcoded)
+            include_self = False
             self._anchor_matched = detect_self_match(raw, self.wb._anchor_sid)
             deduped, _ = dedup_candidates(raw, self.wb._anchor_sid, include_self)
             self._text_cands = list(deduped)
@@ -2155,17 +2123,14 @@ if _QT_AVAILABLE:
 
             self.wb.filtered = filtered
 
-            # Self-match inline prefix (D-15 / UI-SPEC self-match format)
-            if self._anchor_matched is True:
-                prefix = tr("⚓ anchor matches this query ✓  ·  ")
-            elif self._anchor_matched is False:
-                prefix = tr("⚓ anchor does NOT match this query ✗  ·  ")
-            else:
-                prefix = ""
+            # Prune selection to current filtered universe (adapted_decision 6)
+            if hasattr(self, "_selected_keys"):
+                filtered_keys = {self._candidate_key(c) for c in filtered}
+                self._selected_keys &= filtered_keys
 
             try:
                 self.status.setText(
-                    f"{prefix}{len(filtered)}/{len(self.results)} " + tr("shown")
+                    f"{len(filtered)}/{len(self.results)} " + tr("shown")
                 )
             except RuntimeError:
                 pass
