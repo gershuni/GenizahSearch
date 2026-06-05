@@ -1552,7 +1552,6 @@ class TabularQueryBuilderDialog(QDialog):
         self.setWindowTitle(tr("Tabular Search"))
         self.setMinimumSize(750, 500)
         self.resize(800, 550)
-        self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
         self._syntax = ''
         self._negated_words = []
