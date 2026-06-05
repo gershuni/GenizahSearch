@@ -61,6 +61,21 @@ VS-dialog soft-retire (Phase 109); JSA / parallels seeding (Phase 110); web Join
   - Carry the **full existing modifier row** (Start/End of line `|_`/`_|`, Negation, Defective,
     Wildcards, Prefixes/Suffixes, Bidirectional, Flex Spacing, Judeo-Arabic, Variants) + Search
     Options + a **(read-only) Preview** field.
+  - **⚠ REVISED 2026-06-05 (Codex round-2 HIGH, user decision = WIRE not trim):** the per-word
+    modifiers (**Negation, Defective/Plene, Wildcard start/end, Prefixes, Suffixes**) must actually
+    affect the composed query — they are **per-word, applied to the ACTIVE (focused) OR-box**, exactly
+    mirroring `TabularQueryBuilderDialog`'s `_active_word` mechanism (`genizah_app.py:1559`,
+    `:1731-1789` per-word `{'text','mods'}` + focus event filter + `mod_ind` indicator below each box).
+    Each OR-box stores its own `mods` dict; focusing a box reflects/edits that box's mods via the
+    modifier row; `build_side_query()` **decorates each box's token with its mods BEFORE OR-joining**,
+    using the EXACT order in `genizah_core.py:6014-6027`: plene `%`→prefix `#`→suffix `…#`→wildcard
+    `*…`/`…*`, and negation `-…` (prepend). A decorated box yields e.g. `#שלום`, `שלום*`, `-עץ`; an
+    OR row of decorated boxes yields `(#שלום/%שלומות)`. The two GLOBAL Search-Options toggles
+    (**Variants, Judeo-Arabic, Flex Spacing, Bidirectional**) stay in `_responsa_opts()` as today
+    (they ARE global). Transplant the existing dialog's `_on_modifier_changed` / `_on_word_text_changed`
+    / `_update_preview` / per-word decoration logic rather than re-inventing it. The headless builder
+    test must assert a decorated box round-trips: e.g. a box `שלום` with `prefix` mod composes a term
+    parseable by `parse_responsa_query` as a grammatical-prefix component (`#שלום`).
 - **D-05:** **Per-row semantics:** each row = one manuscript line; the `[ ] or [ ] or [ ]` boxes are
   **OR-alternatives** for that line (spelling variants / synonyms). **⚠ REVISED 2026-06-05 (Codex
   review HIGH #1, code-verified):** OR composes to the engine's **real slash-group syntax
@@ -238,7 +253,44 @@ the planner MUST encode in the plans:
 - **RR-8 (LOW #8 — imports):** Plan 02 (or the first plan to touch them) must add the missing
   `desktop/join_workbench.py` widget imports: `QFrame`, `QSpinBox`, `QGridLayout`, `QTableWidget`,
   `QTableWidgetItem` (PyQt6.QtWidgets) and `from gui_threads import SearchThread`. The current import
-  block (`:315`) lacks them.
+  block (`:315`) lacks them. **⚠ See RR-10 — split the imports across waves to avoid an F401 lint
+  failure.**
+
+### Round-2 Review Resolutions (2026-06-05 — Codex code-verified re-review, fold into the replan)
+Round 1's RR-1..RR-8 all landed (Codex CONFIRMED). The round-2 re-review (`108-REVIEWS.md`) found 4
+NEW code-verified issues. Bindings:
+
+- **RR-9 (HIGH — modifier-row no-op → WIRE per-word).** See revised **D-04**. User decision: WIRE
+  (not trim) the per-word modifiers. Plan 02 must give each OR-box a `mods` dict, edit the active
+  (focused) box's mods via the modifier row (transplant the existing `_active_word` /
+  `_on_modifier_changed` / `mod_ind` mechanism from `genizah_app.py:1559`/`:1731-1789`), and have
+  `build_side_query()` decorate each box's token (`%`/`#`/`#`-append/`*`-pre/`*`-append, `-`-prepend
+  per `genizah_core.py:6014-6027`) BEFORE the `/`-OR-join. Search-Options globals
+  (Variants/JA/Flex/Bidir) stay in `_responsa_opts()`. Plan 01's builder test (and/or Plan 02's) must
+  add a parser-level assertion that a decorated box round-trips (e.g. `prefix` mod on `שלום` →
+  `parse_responsa_query("#שלום")` yields a grammatical-prefix component). Update Plan 02 Task 1
+  `<behavior>`/`<action>`/`acceptance_criteria`/`must_haves`, and the Preview must reflect decoration.
+- **RR-10 (MEDIUM/blocker — Plan 02 Task 0 ruff F401).** `ruff.toml:14-20` selects `F401` (unused
+  imports). Plan 02 Task 0 currently front-loads Plan-03-only imports AND runs `ruff check
+  desktop/join_workbench.py` in the SAME task → guaranteed lint failure. **Fix:** keep only the imports
+  Plan 02 actually USES in Plan 02 (`QFrame`, `QSpinBox`); MOVE `QGridLayout`, `QTableWidget`,
+  `QTableWidgetItem`, and `from gui_threads import SearchThread` into **Plan 03** (the wave that first
+  uses them — the grid/table render + SearchThread launch). Do NOT use blanket `# noqa: F401` to mask
+  it. Update Plan 02 + Plan 03 import tasks + their acceptance greps accordingly.
+- **RR-11 (MEDIUM/blocker — `size_category` missing-column guard).** Plan 01 must NOT add
+  `size_category` as an unconditional SELECT column — an old sidecar lacking the column would make the
+  whole SELECT fail and return an empty batch (`shared/fjms_service.py:3035-3060`). **Mirror the
+  existing `avg_line_height_mm` guard (`:3017-3029`):** `has_size_category = "size_category" in cols`,
+  build a conditional `sc_col = ", size_category" if has_size_category else ""`, and return
+  `size_category` as `None` when absent. Resolve Plan 01's internal contradiction (plain column vs
+  degrade-to-None) in favor of the guarded form. Add a test asserting the method still works (returns
+  `size_category: None`) against a table WITHOUT the column.
+- **RR-12 (LOW — per-page image `page is None` guard).** `Candidate.page` is `Optional[int]`
+  (`shared/joins_lab.py:104`; VS-only / None-page rows exist, `tests/test_joins_lab.py:121-124`).
+  `_enqueue_image_for_pane` (and any `_image_url_for_idx(images, page-1, …)` call) must NOT do
+  arithmetic on a `None` page — guard `if page is None: treat as page 1` (or render the "no image"
+  placeholder) before `page-1`. Update Plan 03 (`_enqueue_image_for_pane`) and Plan 04
+  (`CompareDialog._fill_*` page handling).
 
 </decisions>
 
