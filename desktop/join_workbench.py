@@ -893,7 +893,11 @@ if _QT_AVAILABLE:
             return box
 
         def add_or_box(self, entry: dict):
-            """Append a new OR-alternative word-box to an existing row."""
+            """Append a new OR-alternative word-box to an existing row.
+
+            When a second box is added, wildcard_prefix is cleared (RR-13) because
+            the parser can't hoist a leading '*' onto an OR group.
+            """
             new_box = self._make_box(entry, tr("or…"))
             # Add a small × button to remove this extra box
             rm_box_btn = QPushButton("×")
@@ -905,7 +909,10 @@ if _QT_AVAILABLE:
             )
             entry["boxes_strip_layout"].addWidget(rm_box_btn)
             new_box["rm_btn"] = rm_box_btn
-            self._refresh_modifier_enabled()
+            # Clear stale wildcard_prefix on multi-box row (RR-13)
+            if len(entry["boxes"]) > 1:
+                entry["mods"]["wildcard_prefix"] = False
+                self._update_row_indicator(entry)
             self._update_preview()
 
         def _remove_box(self, entry: dict, box: dict, rm_btn):
