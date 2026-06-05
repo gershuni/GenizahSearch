@@ -351,7 +351,7 @@ try:
         QWidget, QLineEdit, QInputDialog, QMessageBox,
         QCheckBox, QMenu, QComboBox, QListWidget, QListWidgetItem,
     )
-    from PyQt6.QtCore import Qt, QEvent, QThread, pyqtSignal
+    from PyQt6.QtCore import Qt, QThread, pyqtSignal
     from PyQt6.QtGui import QPalette, QPixmap, QImage, QTextCursor, QTextBlockFormat
     from desktop.image_loader import ImageLoaderThread
     from desktop.widgets.line_number_text_edit import apply_line_numbered_text
@@ -679,10 +679,6 @@ if _QT_AVAILABLE:
             self._first_hint = first_hint
             self._allow_page_position = allow_page_position
 
-            # Active-ROW state — kept for legacy compat but no longer used by modifier row
-            self._active_row = None
-            self._updating_modifiers = False
-
             # Global search options dict (persists even if dialog is never opened).
             # _responsa_opts() reads from here; the "Search options ▾" dialog writes here.
             self._global_opts = {
@@ -883,7 +879,6 @@ if _QT_AVAILABLE:
             edit = QLineEdit()
             edit.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
             edit.setPlaceholderText(placeholder_text or tr("word…"))
-            edit.installEventFilter(self)
             edit.returnPressed.connect(self.on_enter)
             edit.textChanged.connect(self._update_preview)
 
