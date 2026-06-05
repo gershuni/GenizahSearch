@@ -3856,7 +3856,7 @@ TRANSLATIONS.update({
     "← Prev":           "קודם →",
     "Next →":           "← הבא",
 
-    # --- Self-match readout (D-15) ---
+    # --- Self-match readout (D-15 — kept for backward compat) ---
     "⚓ anchor matches this query ✓  ·  ":
         "⚓ העוגן תואם שאילתה זו ✓  ·  ",
     "⚓ anchor does NOT match this query ✗  ·  ":
@@ -3871,6 +3871,34 @@ TRANSLATIONS.update({
     "Source":                "מקור",
     "Page":                  "עמוד",
     "Triage":                "סיווג",
+
+    # --- Phase 108 redesign: results toolbar + Filter dialog + bulk bar ---
+    "Browse results ▶":      "עיין בתוצאות ▶",
+    "Open Browse results compare window":
+        "פתח חלון השוואה לעיון בתוצאות",
+    "Filter ▾":              "סנן ▾",
+    "Open filter dialog":    "פתח תיבת סינון",
+    "Filter candidates":     "סנן מועמדים",
+    "Current fragment":      "קטע נוכחי",
+    "match material":        "התאם חומר",
+    "width ±2 cm of anchor": "רוחב ±2 ס\"מ מהעוגן",
+    "Filter by width (cm)":  "סנן לפי רוחב (ס\"מ)",
+    "min":                   "מינ",
+    "max":                   "מקס",
+    "Size filter note":      "סינון גודל הוא אופציונאלי — מידות מוצגות כרמז בלבד.",
+    "Reset":                 "איפוס",
+    "Triage":                "סיווג",  # already exists but safe duplicate
+
+    # --- Bulk bar ---
+    "selected":              "נבחרו",
+    "Browse — select exactly one":
+        "עיין — בחר בדיוק אחד",
+    "Add all to Puzzle (with anchor)":
+        "הוסף הכל לפאזל (עם עוגן)",
+    "Add all to list":       "הוסף הכל לרשימה",
+    "Add as join — select exactly one":
+        "הוסף כצירוף — בחר בדיוק אחד",
+    "✕ clear":               "✕ נקה",
 
     # --- Open-compare stub ---
     "TODO: open_compare stub (Plan 04 will implement CompareDialog)":

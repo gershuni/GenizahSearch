@@ -1748,25 +1748,17 @@ if _QT_AVAILABLE:
 
             rv.addLayout(src_row)
 
-            # --- Refine / filter bar ---
-            refine = QHBoxLayout()
-            refine.setSpacing(4)
-
+            # --- Filter controls (persistent hidden widgets; apply_filters reads them) ---
+            # These are NOT shown in the main layout; they live in the "Filter ▾" dialog.
             self.filter_in = QLineEdit()
             self.filter_in.setPlaceholderText(
                 tr("Filter by shelfmark, text, or title…")
             )
-            self.filter_in.textChanged.connect(self.apply_filters)
-            refine.addWidget(self.filter_in, 1)
 
             self.mat_filter = QComboBox()
             self.mat_filter.addItem(tr("any material"))
-            self.mat_filter.currentIndexChanged.connect(self.apply_filters)
-            refine.addWidget(self.mat_filter)
 
             self.dim_chk = QCheckBox(tr("Has dimensions"))
-            self.dim_chk.stateChanged.connect(self.apply_filters)
-            refine.addWidget(self.dim_chk)
 
             self.tri_filter = QComboBox()
             self.tri_filter.addItems([
@@ -1776,64 +1768,108 @@ if _QT_AVAILABLE:
                 tr("N — dismissed"),
                 tr("untriaged"),
             ])
-            self.tri_filter.currentIndexChanged.connect(self.apply_filters)
-            refine.addWidget(self.tri_filter)
 
-            # Opt-in size filter (D-13: collapsed/off by default)
+            # Size filter spinboxes — opt-in (D-13: off by default)
             self.size_btn = QPushButton(tr("Size filter"))
             self.size_btn.setCheckable(True)
-            self.size_btn.toggled.connect(self._toggle_size_filter)
-            refine.addWidget(self.size_btn)
-
-            rv.addLayout(refine)
-
-            # Size filter spinboxes (hidden by default)
-            self._size_row = QHBoxLayout()
             self.size_min = QSpinBox()
             self.size_min.setRange(0, 200)
-            self.size_min.setPrefix(tr("min width (cm)") + " ")
-            self.size_min.valueChanged.connect(self.apply_filters)
             self.size_max = QSpinBox()
             self.size_max.setRange(0, 200)
             self.size_max.setValue(200)
-            self.size_max.setPrefix(tr("max width (cm)") + " ")
-            self.size_max.valueChanged.connect(self.apply_filters)
-            self._size_row.addWidget(self.size_min)
-            self._size_row.addWidget(self.size_max)
-            self._size_row.addStretch()
-            self._size_widget = QWidget()
-            self._size_widget.setLayout(self._size_row)
-            self._size_widget.setVisible(False)
-            rv.addWidget(self._size_widget)
 
-            # --- Status + view-toggle + pagination row ---
-            status_row = QHBoxLayout()
-            status_row.setSpacing(4)
+            # --- Results toolbar: [Grid][Table] + Browse results ▶ + Filter ▾ + count ---
+            res_toolbar = QHBoxLayout()
+            res_toolbar.setSpacing(4)
+
+            self.view_btn = QPushButton(tr("Table view"))
+            self.view_btn.clicked.connect(self.toggle_view)
+            res_toolbar.addWidget(self.view_btn)
+
+            self.btn_browse_results = QPushButton(tr("Browse results ▶"))
+            self.btn_browse_results.setToolTip(tr("Open Browse results compare window"))
+            self.btn_browse_results.clicked.connect(self._browse_results)
+            res_toolbar.addWidget(self.btn_browse_results)
+
+            res_toolbar.addStretch()
+
+            # "Filter ▾" button — opens filter dialog
+            self.btn_filter = QPushButton(tr("Filter ▾"))
+            self.btn_filter.setToolTip(tr("Open filter dialog"))
+            self.btn_filter.clicked.connect(self._open_filter_dialog)
+            res_toolbar.addWidget(self.btn_filter)
 
             self.status = QLabel(
                 tr("Build a line-by-line query, then Find Candidates.")
             )
             self.status.setStyleSheet("font-size:10px;color:#94a3b8;")
-            status_row.addWidget(self.status, 1)
+            res_toolbar.addWidget(self.status)
 
-            self.view_btn = QPushButton(tr("Table view"))
-            self.view_btn.clicked.connect(self.toggle_view)
-            status_row.addWidget(self.view_btn)
+            rv.addLayout(res_toolbar)
 
+            # --- Shared bulk-action bar (grid + table) — hidden until selection non-empty ---
+            self._selected_keys: set = set()
+            bulk_bar = QHBoxLayout()
+            self._bulk_bar_widget = QWidget()
+            self._bulk_bar_widget.setVisible(False)
+            bulk_inner = QHBoxLayout(self._bulk_bar_widget)
+            bulk_inner.setSpacing(4)
+            self._bulk_count_lbl = QLabel("")
+            bulk_inner.addWidget(self._bulk_count_lbl)
+
+            self._bulk_browse_btn = QPushButton("📖")
+            self._bulk_browse_btn.setFixedWidth(32)
+            self._bulk_browse_btn.setToolTip(tr("Browse — select exactly one"))
+            self._bulk_browse_btn.setEnabled(False)
+            self._bulk_browse_btn.clicked.connect(self._bulk_browse)
+            bulk_inner.addWidget(self._bulk_browse_btn)
+
+            bulk_puzzle_btn = QPushButton("🧩")
+            bulk_puzzle_btn.setFixedWidth(32)
+            bulk_puzzle_btn.setToolTip(tr("Add all to Puzzle (with anchor)"))
+            bulk_puzzle_btn.clicked.connect(self._bulk_puzzle)
+            bulk_inner.addWidget(bulk_puzzle_btn)
+
+            bulk_list_btn = QPushButton("☰")
+            bulk_list_btn.setFixedWidth(32)
+            bulk_list_btn.setToolTip(tr("Add all to list"))
+            bulk_list_btn.clicked.connect(self._bulk_list)
+            bulk_inner.addWidget(bulk_list_btn)
+
+            self._bulk_join_btn = QPushButton("🔗")
+            self._bulk_join_btn.setFixedWidth(32)
+            self._bulk_join_btn.setToolTip(tr("Add as join — select exactly one"))
+            self._bulk_join_btn.setEnabled(False)
+            self._bulk_join_btn.clicked.connect(self._bulk_join)
+            bulk_inner.addWidget(self._bulk_join_btn)
+
+            bulk_inner.addStretch()
+
+            bulk_clear_btn = QPushButton(tr("✕ clear"))
+            bulk_clear_btn.clicked.connect(self._bulk_clear)
+            bulk_inner.addWidget(bulk_clear_btn)
+
+            bulk_bar.addWidget(self._bulk_bar_widget)
+            rv.addLayout(bulk_bar)
+
+            # --- Pagination row ---
+            pag_row = QHBoxLayout()
+            pag_row.setSpacing(4)
             self.btn_prev = QPushButton(tr("← Prev"))
             self.btn_prev.setFixedWidth(60)
             self.btn_prev.clicked.connect(self._prev_page)
-            status_row.addWidget(self.btn_prev)
+            pag_row.addWidget(self.btn_prev)
 
             self.page_lbl = QLabel("")
-            status_row.addWidget(self.page_lbl)
+            pag_row.addWidget(self.page_lbl)
 
             self.btn_next = QPushButton(tr("Next →"))
             self.btn_next.setFixedWidth(60)
             self.btn_next.clicked.connect(self._next_page)
-            status_row.addWidget(self.btn_next)
+            pag_row.addWidget(self.btn_next)
 
-            rv.addLayout(status_row)
+            pag_row.addStretch()
+            rv.addLayout(pag_row)
 
             # --- Grid view (default) ---
             self.grid_scroll = QScrollArea()
@@ -1915,6 +1951,9 @@ if _QT_AVAILABLE:
 
             self._sources = {"text"}
             self._text_cands = None
+            # Clear selection on new search (adapted_decision 6)
+            self._selected_keys.clear()
+            self._update_bulk_bar()
             try:
                 self.status.setText(tr("working…"))
                 self.btn_find.setEnabled(False)
@@ -2293,13 +2332,310 @@ if _QT_AVAILABLE:
                 pass
 
         def _toggle_size_filter(self, on: bool):
-            """Show/hide the size filter spinboxes."""
-            try:
-                self._size_widget.setVisible(on)
-            except RuntimeError:
-                pass
+            """Kept for apply_filters compatibility — no visible widget to show/hide now."""
             if not on:
                 self.apply_filters()
+
+        # ------------------------------------------------------------------
+        # Filter ▾ dialog
+        # ------------------------------------------------------------------
+
+        def _open_filter_dialog(self):
+            """Open the filter dialog (adapted_decision 12).
+
+            Builds a fresh dialog each time, pre-populating controls from the
+            persistent hidden filter widgets (filter_in, mat_filter, etc.).
+            On Apply the hidden widgets are updated + apply_filters is called.
+            Anchor info panel shows known fields from wb anchor state.
+            """
+            dlg = QDialog(self)
+            dlg.setWindowTitle(tr("Filter candidates"))
+            lay = QVBoxLayout(dlg)
+            lay.setSpacing(6)
+
+            # --- Current fragment info panel ---
+            anchor_meta = {}
+            if self.wb._anchor_sid:
+                try:
+                    anchor_meta = self.wb.meta_mgr.enrich_metadata(self.wb._anchor_sid) or {}
+                except Exception:
+                    anchor_meta = {}
+            anchor_shelf = ""
+            if self.wb._anchor_res:
+                from desktop.join_workbench import r_shelf
+                anchor_shelf = r_shelf(self.wb._anchor_res)
+
+            # Gather known fields from enrich dict for the anchor
+            anchor_enrich = self.wb._candidate_pane._enrich.get(
+                (self.wb._anchor_sid, None)
+            ) if hasattr(self.wb, "_candidate_pane") else {}
+            # Try measurement data from the pane's enrich cache
+            anchor_meas_w = None
+            anchor_meas_mat = None
+            for key, ev in (self._enrich or {}).items():
+                if isinstance(key, tuple) and len(key) >= 1 and key[0] == self.wb._anchor_sid:
+                    anchor_meas_w = ev.get("width_cm")
+                    anchor_meas_mat = ev.get("material")
+                    break
+
+            if anchor_shelf or self.wb._anchor_sid:
+                info_grp = QWidget()
+                info_lay = QVBoxLayout(info_grp)
+                info_lay.setContentsMargins(6, 4, 6, 4)
+                info_lay.setSpacing(3)
+                info_title = QLabel(
+                    f"{tr('Current fragment')} — {anchor_shelf or self.wb._anchor_sid}"
+                )
+                info_title.setStyleSheet("font-weight:bold;font-size:11px;")
+                info_lay.addWidget(info_title)
+
+                # Show only known fields
+                known_parts = []
+                lib = anchor_meta.get("library_code") or ""
+                if lib:
+                    known_parts.append(lib)
+                if anchor_meas_mat:
+                    known_parts.append(str(anchor_meas_mat))
+                if anchor_meas_w:
+                    known_parts.append(f"{anchor_meas_w:.0f} cm")
+                if known_parts:
+                    chips_lbl = QLabel("  ·  ".join(known_parts))
+                    chips_lbl.setStyleSheet("font-size:11px;color:#94a3b8;")
+                    info_lay.addWidget(chips_lbl)
+
+                # "from anchor" shortcuts
+                if anchor_meas_mat or anchor_meas_w:
+                    shortcuts_row = QHBoxLayout()
+                    if anchor_meas_mat:
+                        btn_mat = QPushButton(
+                            tr("match material") + f" ({anchor_meas_mat})"
+                        )
+                        btn_mat.setFlat(True)
+                        btn_mat.clicked.connect(
+                            lambda _checked=False, m=anchor_meas_mat: _set_mat(m)
+                        )
+                        shortcuts_row.addWidget(btn_mat)
+                    if anchor_meas_w:
+                        btn_w = QPushButton(tr("width ±2 cm of anchor"))
+                        btn_w.setFlat(True)
+                        btn_w.clicked.connect(
+                            lambda _checked=False, w=anchor_meas_w: _set_width_range(w)
+                        )
+                        shortcuts_row.addWidget(btn_w)
+                    shortcuts_row.addStretch()
+                    info_lay.addLayout(shortcuts_row)
+
+                info_grp.setStyleSheet(
+                    "QWidget{border:1px solid #3c3c3c;border-radius:6px;background:#181818;}"
+                )
+                lay.addWidget(info_grp)
+
+            # --- Filter controls ---
+            dlg_filter_in = QLineEdit()
+            dlg_filter_in.setPlaceholderText(tr("Filter by shelfmark, text, or title…"))
+            dlg_filter_in.setText(self.filter_in.text())
+            lay.addWidget(dlg_filter_in)
+
+            mat_row = QHBoxLayout()
+            mat_row.addWidget(QLabel(tr("Material") + ":"))
+            dlg_mat = QComboBox()
+            dlg_mat.addItem(tr("any material"))
+            current_mats = [
+                self.mat_filter.itemText(i)
+                for i in range(1, self.mat_filter.count())
+            ]
+            for m in current_mats:
+                dlg_mat.addItem(m)
+            idx = dlg_mat.findText(self.mat_filter.currentText())
+            if idx >= 0:
+                dlg_mat.setCurrentIndex(idx)
+            mat_row.addWidget(dlg_mat, 1)
+            lay.addLayout(mat_row)
+
+            dlg_dim = QCheckBox(tr("Has dimensions"))
+            dlg_dim.setChecked(self.dim_chk.isChecked())
+            lay.addWidget(dlg_dim)
+
+            tri_row = QHBoxLayout()
+            tri_row.addWidget(QLabel(tr("Triage") + ":"))
+            dlg_tri = QComboBox()
+            dlg_tri.addItems([
+                tr("all triage"), tr("Y — kept"), tr("? — maybe"),
+                tr("N — dismissed"), tr("untriaged"),
+            ])
+            dlg_tri.setCurrentIndex(self.tri_filter.currentIndex())
+            tri_row.addWidget(dlg_tri, 1)
+            lay.addLayout(tri_row)
+
+            sep2 = QFrame()
+            sep2.setFrameShape(QFrame.Shape.HLine)
+            sep2.setFrameShadow(QFrame.Shadow.Sunken)
+            lay.addWidget(sep2)
+
+            dlg_size_chk = QCheckBox(tr("Filter by width (cm)"))
+            dlg_size_chk.setChecked(self.size_btn.isChecked())
+            lay.addWidget(dlg_size_chk)
+
+            size_row = QHBoxLayout()
+            dlg_size_min = QSpinBox()
+            dlg_size_min.setRange(0, 200)
+            dlg_size_min.setValue(self.size_min.value())
+            dlg_size_min.setPrefix(tr("min") + " ")
+            size_row.addWidget(dlg_size_min)
+            dlg_size_max = QSpinBox()
+            dlg_size_max.setRange(0, 200)
+            dlg_size_max.setValue(self.size_max.value())
+            dlg_size_max.setPrefix(tr("max") + " ")
+            size_row.addWidget(dlg_size_max)
+            size_row.addStretch()
+            lay.addLayout(size_row)
+
+            # Note text
+            note = QLabel(tr("Size filter note"))
+            note.setStyleSheet("font-size:10px;color:#6b7280;")
+            note.setWordWrap(True)
+            lay.addWidget(note)
+
+            # "from anchor" shortcut helpers for the dialog's spinboxes
+            def _set_mat(m):
+                idx2 = dlg_mat.findText(m)
+                if idx2 >= 0:
+                    dlg_mat.setCurrentIndex(idx2)
+
+            def _set_width_range(w):
+                dlg_size_chk.setChecked(True)
+                dlg_size_min.setValue(max(0, int(w) - 2))
+                dlg_size_max.setValue(min(200, int(w) + 2))
+
+            btn_row = QHBoxLayout()
+            btn_reset = QPushButton(tr("Reset"))
+            btn_apply = QPushButton(tr("Apply"))
+            btn_apply.setDefault(True)
+            btn_row.addWidget(btn_reset)
+            btn_row.addStretch()
+            btn_row.addWidget(btn_apply)
+            lay.addLayout(btn_row)
+
+            def _on_reset():
+                dlg_filter_in.setText("")
+                dlg_mat.setCurrentIndex(0)
+                dlg_dim.setChecked(False)
+                dlg_tri.setCurrentIndex(0)
+                dlg_size_chk.setChecked(False)
+                dlg_size_min.setValue(0)
+                dlg_size_max.setValue(200)
+
+            def _on_apply():
+                # Write back to persistent hidden filter widgets
+                self.filter_in.setText(dlg_filter_in.text())
+                # Sync material combo
+                self.mat_filter.blockSignals(True)
+                idx2 = self.mat_filter.findText(dlg_mat.currentText())
+                if idx2 >= 0:
+                    self.mat_filter.setCurrentIndex(idx2)
+                self.mat_filter.blockSignals(False)
+                self.dim_chk.setChecked(dlg_dim.isChecked())
+                self.tri_filter.setCurrentIndex(dlg_tri.currentIndex())
+                self.size_btn.setChecked(dlg_size_chk.isChecked())
+                self.size_min.setValue(dlg_size_min.value())
+                self.size_max.setValue(dlg_size_max.value())
+                self.apply_filters()
+                dlg.accept()
+
+            btn_reset.clicked.connect(_on_reset)
+            btn_apply.clicked.connect(_on_apply)
+            dlg.exec()
+
+        # ------------------------------------------------------------------
+        # "Browse results ▶" + bulk actions + selection management
+        # ------------------------------------------------------------------
+
+        def _candidate_key(self, c) -> str:
+            """Return a stable string key for a Candidate (sys_id + page)."""
+            return f"{c.sys_id}:{c.page}"
+
+        def _set_selected(self, key: str, checked: bool):
+            """Toggle a candidate key in _selected_keys and update bulk bar."""
+            if checked:
+                self._selected_keys.add(key)
+            else:
+                self._selected_keys.discard(key)
+            self._update_bulk_bar()
+
+        def _update_bulk_bar(self):
+            """Show/hide the bulk bar; update count label + enabled state."""
+            n = len(self._selected_keys)
+            try:
+                self._bulk_bar_widget.setVisible(n > 0)
+                self._bulk_count_lbl.setText(f"{n} {tr('selected')}")
+                # Browse and Join enabled only for exactly ONE selection
+                self._bulk_browse_btn.setEnabled(n == 1)
+                self._bulk_join_btn.setEnabled(n == 1)
+            except RuntimeError:
+                pass
+
+        def _bulk_browse(self):
+            """Bulk Browse — single selection only; opens browse for that candidate."""
+            if len(self._selected_keys) != 1:
+                return
+            key = next(iter(self._selected_keys))
+            for c in self.wb.filtered:
+                if self._candidate_key(c) == key:
+                    self.wb.open_result_in_browse(c)
+                    return
+
+        def _bulk_puzzle(self):
+            """Bulk puzzle — adds anchor + all selected candidates (adapted_decision 7)."""
+            sids = []
+            for c in self.wb.filtered:
+                if self._candidate_key(c) in self._selected_keys:
+                    sids.append(c.sys_id)
+            if sids and self.wb._anchor_sid:
+                from desktop.join_workbench import puzzle_add_targets
+                for sid in puzzle_add_targets(self.wb._anchor_sid, sids):
+                    self.wb._app.open_anchor_in_puzzle(sid)
+
+        def _bulk_list(self):
+            """Bulk add-to-list — all selected candidates."""
+            items = []
+            for c in self.wb.filtered:
+                if self._candidate_key(c) in self._selected_keys:
+                    items.append({"sys_id": c.sys_id, "fl_id": "", "img": c.page or 1})
+            if items:
+                self.wb._app.show_add_to_list_menu(items, source="join_workbench")
+
+        def _bulk_join(self):
+            """Bulk join — single selection only; opens join dialog."""
+            if len(self._selected_keys) != 1:
+                return
+            key = next(iter(self._selected_keys))
+            for c in self.wb.filtered:
+                if self._candidate_key(c) == key:
+                    self.wb.open_result_as_join(c)
+                    return
+
+        def _bulk_clear(self):
+            """Clear all selections and re-render."""
+            self._selected_keys.clear()
+            self._update_bulk_bar()
+            self.render_results()
+
+        def _browse_results(self):
+            """Open CompareDialog over filtered list (adapted_decision 13).
+
+            If exactly one candidate is selected, start at that candidate;
+            otherwise start at the first result.
+            """
+            if not self.wb.filtered:
+                return
+            start_idx = 0
+            if len(self._selected_keys) == 1:
+                key = next(iter(self._selected_keys))
+                for i, c in enumerate(self.wb.filtered):
+                    if self._candidate_key(c) == key:
+                        start_idx = i
+                        break
+            self.open_compare(start_idx)
 
         def open_compare(self, global_idx: int):
             """Open the side-by-side CompareDialog for a candidate (JWB-08).
