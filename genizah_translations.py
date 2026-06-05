@@ -3876,6 +3876,12 @@ TRANSLATIONS.update({
     "Page":                  "עמוד",
     "Triage":                "סיווג",
 
+    # --- Phase 108 redesign: anchor pane icon-only tooltips (adapted_decision 14) ---
+    "Browse this fragment":  "עיין בקטע זה",
+    "Add anchor to a Puzzle": "הוסף עוגן לפאזל",
+    "Add anchor to a list":  "הוסף עוגן לרשימה",
+    "Start a join from this anchor": "התחל צירוף מעוגן זה",
+
     # --- Phase 108 redesign: results toolbar + Filter dialog + bulk bar ---
     "Browse results ▶":      "עיין בתוצאות ▶",
     "Open Browse results compare window":

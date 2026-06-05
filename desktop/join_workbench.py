@@ -2876,8 +2876,10 @@ if _QT_AVAILABLE:
 
             puzzle_btn = QPushButton(tr("🧩 Puzzle"))
             puzzle_btn.setAccessibleName(tr("🧩 Puzzle"))
+            # Compare puzzle: anchor + candidate (adapted_decision 10)
             puzzle_btn.clicked.connect(lambda: self.wb.open_result_in_puzzle(self._cur()))
             arow.addWidget(puzzle_btn)
+            # Note: open_result_in_puzzle already adds anchor+candidate via open_anchors_in_puzzle
 
             list_btn = QPushButton(tr("📋 Add to List"))
             list_btn.setAccessibleName(tr("📋 Add to List"))
@@ -3150,9 +3152,14 @@ if _QT_AVAILABLE:
             root = QHBoxLayout(self)
             root.setContentsMargins(0, 0, 0, 0)
             splitter = QSplitter(Qt.Orientation.Horizontal)
+            # Anchor pane ~30%; right (candidate) pane ~70% (adapted_decision 14).
+            # Both panes are resizable via the splitter handle.
             splitter.addWidget(self._build_anchor_pane())
             splitter.addWidget(self._build_right_pane())
-            splitter.setSizes([420, 540])
+            splitter.setStretchFactor(0, 0)   # anchor fixed-ish
+            splitter.setStretchFactor(1, 1)   # right pane takes remaining space
+            splitter.setSizes([300, 700])
+            splitter.setMinimumWidth(900)
             root.addWidget(splitter)
 
         def _build_anchor_pane(self) -> QWidget:
@@ -3246,10 +3253,50 @@ if _QT_AVAILABLE:
             self.left_split.setSizes([360, 300, 1])  # joins collapsed (header only)
             layout.addWidget(self.left_split, 1)
 
+            # 8. Anchor action buttons — ICON-ONLY at the BOTTOM of the anchor pane
+            # (adapted_decision 14). These act on the ANCHOR, not candidates.
+            anchor_actions = QHBoxLayout()
+            anchor_actions.setSpacing(8)
+            anchor_actions.addStretch()
+
+            self.btn_anchor_browse = QPushButton("📖")
+            self.btn_anchor_browse.setFixedSize(34, 32)
+            self.btn_anchor_browse.setToolTip(tr("Browse this fragment"))
+            self.btn_anchor_browse.setAccessibleName(tr("Browse manuscript"))
+            self.btn_anchor_browse.clicked.connect(self._anchor_browse)
+            anchor_actions.addWidget(self.btn_anchor_browse)
+
+            self.btn_anchor_puzzle = QPushButton("🧩")
+            self.btn_anchor_puzzle.setFixedSize(34, 32)
+            self.btn_anchor_puzzle.setToolTip(tr("Add anchor to a Puzzle"))
+            self.btn_anchor_puzzle.setAccessibleName(tr("Add to Puzzle"))
+            self.btn_anchor_puzzle.clicked.connect(self._anchor_puzzle)
+            anchor_actions.addWidget(self.btn_anchor_puzzle)
+
+            self.btn_anchor_list = QPushButton("☰")
+            self.btn_anchor_list.setFixedSize(34, 32)
+            self.btn_anchor_list.setToolTip(tr("Add anchor to a list"))
+            self.btn_anchor_list.setAccessibleName(tr("Add to List"))
+            self.btn_anchor_list.clicked.connect(self._anchor_add_to_list)
+            anchor_actions.addWidget(self.btn_anchor_list)
+
+            self.btn_anchor_add_join = QPushButton("🔗")
+            self.btn_anchor_add_join.setFixedSize(34, 32)
+            self.btn_anchor_add_join.setToolTip(tr("Start a join from this anchor"))
+            self.btn_anchor_add_join.setAccessibleName(tr("Add as Join"))
+            self.btn_anchor_add_join.clicked.connect(self._on_add_as_join)
+            anchor_actions.addWidget(self.btn_anchor_add_join)
+
+            anchor_actions.addStretch()
+            layout.addLayout(anchor_actions)
+
             return pane
 
         def _build_right_pane(self) -> QWidget:
-            """Build the right pane: cold-start row + anchor action-row + known-joins panel."""
+            """Build the right pane: cold-start row + candidate pane.
+
+            Anchor actions moved to bottom of anchor pane (adapted_decision 14).
+            """
             pane = QWidget()
             layout = QVBoxLayout(pane)
             layout.setContentsMargins(8, 8, 8, 8)
@@ -3272,43 +3319,7 @@ if _QT_AVAILABLE:
             coldstart_row.addWidget(self.btn_coldstart_pick)
             layout.addLayout(coldstart_row)
 
-            # 2. Anchor action-row (always visible, D-13)
-            anchor_action_row = QHBoxLayout()
-            anchor_action_row.setSpacing(4)
-
-            self.btn_anchor_browse = QPushButton("\U0001f4d6")
-            self.btn_anchor_browse.setFixedWidth(28)
-            self.btn_anchor_browse.setToolTip(tr("Browse manuscript"))
-            self.btn_anchor_browse.setAccessibleName(tr("Browse manuscript"))
-            self.btn_anchor_browse.clicked.connect(self._anchor_browse)
-            anchor_action_row.addWidget(self.btn_anchor_browse)
-
-            self.btn_anchor_puzzle = QPushButton("\U0001f9e9")
-            self.btn_anchor_puzzle.setFixedWidth(28)
-            self.btn_anchor_puzzle.setToolTip(tr("Add to Puzzle"))
-            self.btn_anchor_puzzle.setAccessibleName(tr("Add to Puzzle"))
-            self.btn_anchor_puzzle.clicked.connect(self._anchor_puzzle)
-            anchor_action_row.addWidget(self.btn_anchor_puzzle)
-
-            self.btn_anchor_list = QPushButton("\U0001f4cb")
-            self.btn_anchor_list.setFixedWidth(28)
-            self.btn_anchor_list.setToolTip(tr("Add to List"))
-            self.btn_anchor_list.setAccessibleName(tr("Add to List"))
-            self.btn_anchor_list.clicked.connect(self._anchor_add_to_list)
-            anchor_action_row.addWidget(self.btn_anchor_list)
-
-            self.btn_anchor_add_join = QPushButton("\U0001f517")
-            self.btn_anchor_add_join.setFixedWidth(28)
-            self.btn_anchor_add_join.setToolTip(tr("Add as Join"))
-            self.btn_anchor_add_join.setAccessibleName(tr("Add as Join"))
-            self.btn_anchor_add_join.clicked.connect(self._on_add_as_join)
-            anchor_action_row.addWidget(self.btn_anchor_add_join)
-
-            anchor_action_row.addStretch()
-            layout.addLayout(anchor_action_row)
-
-            # 3. (Phase 108) candidate-hunt surface — JoinCandidatePane (Plan 03).
-            # The known-joins panel moved to the LEFT pane (under the anchor text) per UAT.
+            # 2. (Phase 108) candidate-hunt surface — JoinCandidatePane (Plan 03).
             self._candidate_pane = JoinCandidatePane(self, self._executor)
             layout.addWidget(self._candidate_pane, 1)
             return pane
@@ -3727,8 +3738,10 @@ if _QT_AVAILABLE:
             self._app.open_result_in_browse_from_table(candidate_to_result_dict(c))
 
         def open_result_in_puzzle(self, c):
-            """Open a candidate in Fragment Puzzle (Phase-107 host method)."""
-            self._app.open_anchor_in_puzzle(c.sys_id)
+            """Open anchor + candidate in Fragment Puzzle (adapted_decision 10)."""
+            from desktop.join_workbench import puzzle_add_targets
+            sids = puzzle_add_targets(self._anchor_sid, [c.sys_id])
+            self._app.open_anchors_in_puzzle(sids)
 
         def open_result_in_list(self, c, anchor_widget=None):
             """Add a candidate to a personal list (Phase-107 host method)."""

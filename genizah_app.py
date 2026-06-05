@@ -15439,6 +15439,20 @@ class GenizahGUI(QMainWindow):
         """Public: add a fragment to the Fragment Puzzle canvas (Join Workbench path). SC#5."""
         self._vs_add_to_puzzle(sys_id)
 
+    def open_anchors_in_puzzle(self, sys_ids: list):
+        """Public: add multiple fragments to the Fragment Puzzle canvas.
+
+        De-dupes preserving order; loops open_anchor_in_puzzle which accumulates.
+        Callers: JoinWorkbenchWindow (adapted_decision 10).
+        Single-fragment callers (Phase 107) keep calling open_anchor_in_puzzle(sys_id).
+        """
+        seen: set = set()
+        for sid in (sys_ids or []):
+            sid = (sid or "").strip()
+            if sid and sid not in seen:
+                seen.add(sid)
+                self.open_anchor_in_puzzle(sid)
+
     def open_anchor_as_join(
         self,
         anchor_sys_id: str,
