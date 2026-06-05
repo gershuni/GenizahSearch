@@ -62,9 +62,19 @@ VS-dialog soft-retire (Phase 109); JSA / parallels seeding (Phase 110); web Join
     Wildcards, Prefixes/Suffixes, Bidirectional, Flex Spacing, Judeo-Arabic, Variants) + Search
     Options + a **(read-only) Preview** field.
 - **D-05:** **Per-row semantics:** each row = one manuscript line; the `[ ] or [ ] or [ ]` boxes are
-  **OR-alternatives** for that line (spelling variants / synonyms) composing to a **`|` group**;
-  "Lines gap: N" = the blank-line gap **down** to the next row. (See **R-01** — the 106 `BuilderRow`
-  carries a single `term`; OR-within-row composes via `|` either in `term` or an additive field.)
+  **OR-alternatives** for that line (spelling variants / synonyms). **⚠ REVISED 2026-06-05 (Codex
+  review HIGH #1, code-verified):** OR composes to the engine's **real slash-group syntax
+  `(w1/w2/w3)`**, NOT a `|` group. A bare `w1|w2` is parsed as a SINGLE word and regex-escaped
+  (`genizah_core.py:5727` documents `(עץ/אילן)->['עץ','אילן']`; `:6219`/`:7593` confirm the pipe
+  fall-through). **OR boxes are SINGLE-TOKEN** (user decision 2026-06-05): each box holds one word;
+  `build_side_query()` joins a row's non-empty single-token boxes into `BuilderRow.term =
+  "(" + "/".join(tokens) + ")"` (a single-box row stays a **bare term** — additive, no regression;
+  whitespace inside a lone box stays as proximity). Phrase-level OR (multi-word boxes) is **NOT**
+  offered in v8 (see Deferred Ideas). "Lines gap: N" = the blank-line gap **down** to the next row.
+  (**R-01 RESOLVED**: the `|`-join hypothesis was wrong; the slash-group is the correct round-trip
+  through `_parse_line_break_query`/`parse_responsa_query`. The headless test must assert the
+  composed query parses as an OR group via the **parser/engine**, NOT merely that `compose()`
+  contains a separator — a `compose()`-only `|` test would lock in the bug.)
 - **D-06:** **RTL content / LTR chrome.** In the EN UI the **query-content area** (rows + word
   boxes) is **RTL** (first word on the right — Hebrew line start, the 107/106 start-on-right
   invariant); the **surrounding chrome** (modifier checkboxes, scope selector, gap labels, buttons)
@@ -74,6 +84,12 @@ VS-dialog soft-retire (Phase 109); JSA / parallels seeding (Phase 110); web Join
   simple toggle flips to **OR** (widen a poor yield). "Other side" = adjacent image **p±1** within
   the same sys_id (first→+1, last→−1, middle→both), membership via `(sys_id, page±1)` set logic
   (locked 106 D-13). Multi-leaf/bifolio adjacency deferred.
+  **⚠ REVISED 2026-06-05 (Codex review MEDIUM #5, user decision):** the OTHER-side builder
+  instance **omits the page-position (start/end-of-text) control** — Phase-106 `apply_cross_side()`
+  (`shared/joins_lab.py:344`) runs query B WITHOUT `text_position`, so exposing the control there
+  would be a silent no-op. Phase 106 stays **frozen** (no `apply_cross_side` signature change in
+  108). The `JoinQueryBuilder` widget therefore takes a flag (e.g. `allow_page_position: bool`,
+  default True) so the anchor-side instance keeps the control and the other-side instance hides it.
 
 ### Candidate surface (JWB-07, JWB-12 text/combined surface)
 - **D-08:** **Grid is the default view, 20/page**, with a **table toggle**. Grid **cards show
@@ -113,6 +129,16 @@ VS-dialog soft-retire (Phase 109); JSA / parallels seeding (Phase 110); web Join
 - **D-17:** **All four actions + Y/?/N triage are reachable inside CompareDialog**, so a join can be
   confirmed without going back. **Add-as-Join here pre-fills anchor = fragment A, this candidate =
   fragment B** (then the existing `JoinsDialog` persist path from 107 D-14).
+  **⚠ RESOLVED 2026-06-05 (Codex review HIGH #3, code-verified):** the public
+  `open_anchor_as_join(anchor_sys_id, anchor_shelfmark)` (`genizah_app.py:15443`) leaves B EMPTY;
+  the only A+B prefill path today is the **private** `_vs_open_joins_with_partner()`
+  (`genizah_app.py:5242`, sets `dialog.frag_b_input.setText(partner_shelfmark)`), which **D-20
+  forbids** the workbench from calling. **Fix (locked):** EXTEND the public method to
+  `open_anchor_as_join(anchor_sys_id, anchor_shelfmark, partner_sys_id=None, partner_shelfmark=None)`
+  — when `partner_shelfmark` is given it sets `dialog.frag_b_input.setText(partner_shelfmark)` before
+  `dialog.exec()` (lifting the one extra line from `_vs_open_joins_with_partner` into the public
+  method). This keeps D-20 intact (workbench calls the PUBLIC method only) and satisfies D-17.
+  **`genizah_app.py` must therefore appear in `files_modified` of the plan that wires Add-as-Join.**
 - **D-18:** **Compare nav:** prev/next steps through the **(filtered) candidate list**; each
   candidate **opens to the page that matched** (incl. the **cross-side p±1 page** when matched via
   the other-side builder — see **R-06**), with folio nav on the candidate side; the **anchor pane
@@ -158,6 +184,61 @@ VS-dialog soft-retire (Phase 109); JSA / parallels seeding (Phase 110); web Join
 - **R-06:** Compare "open the matched page" (D-18) — when a candidate matched via the **other-side
   builder (query B on p±1)**, determine which page (the A-side or the B-side) the CompareDialog
   should open to, and whether to label which side matched.
+
+### Cross-AI Review Resolutions (2026-06-05 — Codex code-verified, fold into the replan)
+These are **binding directives for the replan** (`/gsd-review --codex` → `108-REVIEWS.md`). All were
+verified against the live source by file:line. The two that change locked decisions (HIGH #1 → D-05,
+HIGH #3 → D-17, MEDIUM #5 → D-07) are already revised inline above; the rest are implementation fixes
+the planner MUST encode in the plans:
+
+- **RR-1 (HIGH #1 — OR syntax):** see revised **D-05**. Serialize OR boxes as `(w1/w2/w3)`
+  slash-groups, single-token boxes; single-box row = bare term. **Replace the `compose()`-only `|`
+  test** (Plan 01 Task 3 + Plan 02 Task 1 currently assert `term == "פירוש|פירש"`) with a
+  **parser/engine-level OR regression**: assert `(w1/w2)` composes and `parse_responsa_query()` /
+  `_parse_line_break_query()` yields an OR group with `words=[w1, w2]` (mirror `genizah_core.py:5727`).
+  A `|`-asserting test would lock in the bug.
+- **RR-2 (HIGH #2 — Candidate vs dict):** `dedup_candidates()`/`apply_cross_side()` return **`Candidate`
+  dataclasses**; `merge_candidates()` returns a **plain list** (NOT a `MergeResult` — Plan 03
+  `_maybe_assemble` uses `result.candidates`, which fails). **Decision: use `Candidate` as the UI
+  model throughout Plans 03/04** — read `candidate.sys_id` / `.page` / `.full_text` /
+  `.highlight_pattern` / `.shelfmark` / `.score`, NOT `r_sid(c)` / `r_text(c)` / `c.get(...)`. Add a
+  thin **`candidate_to_result_dict(c) -> dict`** adapter (in `desktop/join_workbench.py` or
+  `shared/joins_lab.py`) ONLY where a Phase-107 host method requires a raw result dict
+  (`open_result_in_browse_from_table(res)`, `show_add_to_list_menu([{...}])`, `_enqueue_image_for_pane`).
+  Fix `_maybe_assemble` to use the returned list directly (`self.results = list(merge_candidates(...))`).
+  **Key per-page enrichment/snippets by `(sys_id, page)` (or list index), NOT `sys_id`** — the same
+  fragment on two pages must not overwrite each other's snippet/highlight. (Measurement *lookup* may
+  stay `sys_id`-keyed; triage stays `sys_id`-keyed per R-05.)
+- **RR-3 (HIGH #3 — Add-as-Join public path):** see revised **D-17**. Extend public
+  `open_anchor_as_join(..., partner_sys_id=None, partner_shelfmark=None)` in `genizah_app.py`; add
+  `genizah_app.py` to the wiring plan's `files_modified`. No `_vs_*` call from the workbench (D-20).
+- **RR-4 (HIGH #4 — i18n guard):** `tests/test_join_workbench_i18n.py::test_all_tr_keys_in_translations`
+  fails unless every new `tr()` key in `desktop/join_workbench.py` exists in
+  `genizah_translations.TRANSLATIONS`. **Add `genizah_translations.py` to `files_modified` in EVERY
+  plan that introduces new `tr()` keys (Plans 02, 03, 04)** and add the keys (EN+HE) via
+  `TRANSLATIONS.update({...})`.
+- **RR-5 (MEDIUM #5 — other-side page-position):** see revised **D-07**. Drop the page-position
+  control on the other-side builder; Phase-106 `apply_cross_side()` stays frozen.
+- **RR-6 (MEDIUM #6 — batch measurements):** a batch API **already exists**:
+  `FjmsService.get_measurement_summaries_batch()` (`shared/fjms_service.py:3005`), returning
+  `{AlmaId: {width_cm, height_cm, avg_num_lines, avg_text_density, avg_line_height_mm, material}}` via
+  `COALESCE(catalog_width_cm, max_computed_width_cm)` (so it catches computed-only measurements that
+  raw catalog columns miss). **Decision: REUSE/EXTEND it rather than add a parallel
+  `get_measurements_batch`.** It lacks only `size_category` — add `size_category` to its SELECT +
+  returned dict (additive, keep the existing keys/tests green), and have `_EnrichWorker` consume the
+  existing key names (`width_cm`/`height_cm`/`material`/`avg_num_lines`/`size_category`). Update Plan
+  01 accordingly (no `manuscript_measurements WHERE AlmaId IN` net-new method premise). Adjust the
+  Plan 01 pytest selector from the broad `-k measurements_batch` to a precise node id so unrelated
+  tests aren't deselected (LOW #9).
+- **RR-7 (MEDIUM #7 — page-specific images):** matched-page / compare images must use **per-page**
+  resolution (`desktop/join_workbench.py::_image_url_for_idx` `:189`, as the Phase-107 anchor loader
+  does at `:365`) + enriched image lists — NOT manuscript-level `meta_mgr.get_thumbnail()` (which is
+  one image per manuscript). Grid *thumbnails* may stay manuscript-level, but the CompareDialog panes
+  and any "open to the matched page" image MUST resolve the specific `page_of(res)` image.
+- **RR-8 (LOW #8 — imports):** Plan 02 (or the first plan to touch them) must add the missing
+  `desktop/join_workbench.py` widget imports: `QFrame`, `QSpinBox`, `QGridLayout`, `QTableWidget`,
+  `QTableWidgetItem` (PyQt6.QtWidgets) and `from gui_threads import SearchThread`. The current import
+  block (`:315`) lacks them.
 
 </decisions>
 
@@ -279,6 +360,14 @@ VS-dialog soft-retire (Phase 109); JSA / parallels seeding (Phase 110); web Join
   modifier row suffice); revisit if power users want fully-manual regex from the builder.
 - **Editable raw composed-query preview** (string↔rows round-trip) — Preview stays read-only
   (106 D-10).
+- **Alternative "plain search-bar mode" for the builder** (a single search field with the usual
+  exact / variants / fuzzy / responsa / regex mode options, as a toggle alongside the line-by-line
+  builder) — raised by Hillel during the 2026-06-05 review touch-up ("we may also add … but not
+  necessarily now"). **Deferred** — 108 ships the line-builder with single-token `(w1/w2)` OR
+  (revised D-05); revisit a free-form search-bar mode in a later iteration if useful.
+- **Phrase-level / multi-word OR alternatives** (OR-ing whole phrases, not single tokens) — the
+  engine's `(…/…)` is word-level only; would need a new `BuilderRow` representation or N unioned
+  searches. Deferred out of v8 (decided 2026-06-05, revised D-05).
 - **Triage persisted to disk across app sessions** — rejected for v8 (D-10); a confirmed join is
   persisted as a real join.
 - **Per-row per-term variants columns** — global variants modifier suffices (106 deferred).
