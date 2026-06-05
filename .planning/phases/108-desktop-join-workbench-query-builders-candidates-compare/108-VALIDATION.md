@@ -45,14 +45,14 @@ render, CompareDialog panes, and snippet highlighting in-widget are Qt/UAT.
 | Requirement | Behavior | Test Type | Automated Command | File Exists | Status |
 |-------------|----------|-----------|-------------------|-------------|--------|
 | JWB-06 / JWB-10 | `compose()` from multi-box rows produces correct line-break query | unit (headless) | `pytest tests/test_joins_lab.py -k compose -x` | ✅ (Phase 106) | ⬜ pending |
-| JWB-06 | Builder widget `is_empty()` True when all boxes blank; OR-boxes join into `term` with `\|` | unit (headless) | `pytest tests/test_join_workbench_builder.py -x` | ❌ W0 | ⬜ pending |
+| JWB-06 | Builder widget `is_empty()` True when all boxes blank; single-token OR-boxes join into `term` as the slash-group `(w1/w2)` (RR-1), verified parser-level via `parse_responsa_query` | unit (headless) | `pytest tests/test_join_workbench_builder.py -x` | ❌ W0 | ⬜ pending |
 | JWB-11 | Cross-side AND keeps only candidates with matched neighbor (`(sys_id, page±1)`) | unit (headless) | `pytest tests/test_joins_lab.py -k cross_side -x` | ✅ (Phase 106) | ⬜ pending |
 | JWB-11 | Cross-side OR adds synthesized neighbor results | unit (headless) | `pytest tests/test_joins_lab.py -k cross_side_or -x` | ✅ (Phase 106) | ⬜ pending |
 | JWB-07 | Candidates render deduped one-per-image (grid + table); filter bar narrows | unit + UAT | `pytest tests/test_joins_lab.py -k dedup -x` + manual | ✅ partial | ⬜ pending |
 | JWB-12 (verify) | `detect_self_match()` finds anchor in raw results; include-anchor toggle | unit (headless) | `pytest tests/test_joins_lab.py -k self_match -x` | ✅ (Phase 106) | ⬜ pending |
 | JWB-12 (text/combined) | `merge_candidates(text, [])` returns text as-is; ✎text provenance badge | unit (headless) | `pytest tests/test_joins_lab.py -k merge -x` | ✅ (Phase 106) | ⬜ pending |
 | JWB-08 | CompareDialog opens candidate side-by-side to the matched page; four actions reachable | UAT | manual (Qt) | — | ⬜ pending |
-| D-13 (R-03) | `get_measurements_batch(sys_ids)` returns correct data via one IN-query | unit (headless) | `pytest tests/test_fjms_service.py -k measurements_batch -x` | ❌ W0 | ⬜ pending |
+| D-13 (R-03/RR-6) | EXTENDED `get_measurement_summaries_batch(sys_ids)` returns `size_category` (additive) via the existing batched IN-query + COALESCE | unit (headless) | `pytest tests/test_fjms_service.py::TestGetMeasurementSummariesBatch -x` | ✅ exists (extend) | ⬜ pending |
 | D-10 (R-05) | Triage keyed by `sys_id`; same fragment at different pages shares triage state | unit (headless) | `pytest tests/test_join_workbench_triage.py -x` | ❌ W0 | ⬜ pending |
 | D-06 (R-04) | `TabularQueryBuilderDialog.__init__` has no dialog-level `setLayoutDirection(RightToLeft)` | unit (AST/grep) | `pytest tests/test_tabular_builder_rtl.py -x` | ❌ W0 | ⬜ pending |
 | D-19 | All new builder/candidate/CompareDialog strings are `tr()`-wrapped | unit (AST guard) | `pytest tests/test_join_workbench_i18n.py -x` | ✅ (Phase 107, full-module scan) | ⬜ pending |
@@ -64,8 +64,8 @@ render, CompareDialog panes, and snippet highlighting in-widget are Qt/UAT.
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_join_workbench_builder.py` — `JoinQueryBuilder.is_empty()`, `build_side_query()`/`compose()` from widget state (headless pure logic), **multiple OR-boxes per row auto-joined into `BuilderRow.term` with `\|`** (D-04/D-05 multi-box design, user-confirmed 2026-06-05)
-- [ ] `tests/test_fjms_service.py::TestGetMeasurementsBatch` — batch IN-query returns correct data; missing sys_ids absent; batch size (500) respected
+- [ ] `tests/test_join_workbench_builder.py` — `JoinQueryBuilder.is_empty()`, `build_side_query()`/`compose()` from widget state (headless pure logic), **single-token OR-boxes per row auto-joined into `BuilderRow.term` as the slash-group `(w1/w2)`** (RR-1, revised D-05 2026-06-05); a single-box row = bare term. The OR test asserts PARSER-level via `genizah_core.parse_responsa_query` (an OR group with both `words`) — NOT a `compose()`-only separator check (that would lock in the `\|` bug).
+- [ ] `tests/test_fjms_service.py::TestGetMeasurementSummariesBatch` — the EXTENDED batch method returns `size_category` (additive); existing keys + missing-id absence + 500-batch boundary unchanged (RR-6 — extend the existing method, do NOT add a net-new `get_measurements_batch`)
 - [ ] `tests/test_join_workbench_triage.py` — triage keyed by `sys_id`; same fragment at different pages shares triage state; cleared on re-anchor
 - [ ] `tests/test_tabular_builder_rtl.py` — AST assertion that `TabularQueryBuilderDialog.__init__` does NOT call `self.setLayoutDirection(RightToLeft)`
 
