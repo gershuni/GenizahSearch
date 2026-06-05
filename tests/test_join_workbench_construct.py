@@ -73,7 +73,18 @@ def test_join_candidate_pane_constructs():
     assert len(pane.builder.rows) == 1
     assert len(pane.other_builder.rows) == 1
     assert pane.other_builder.page_pos is None
-    assert pane.table.columnCount() == 8
+    # Column 0 = checkbox; 1..8 = data (adapted_decision 8)
+    assert pane.table.columnCount() == 9
+    # Per-row ⚙ gear button present in first row
+    assert "gear" in pane.builder.rows[0]
+    # No include_anchor_chk (removed in adapted_decision 11)
+    assert not hasattr(pane, "include_anchor_chk")
+    # Selection set present
+    assert hasattr(pane, "_selected_keys")
+    # Bulk bar widget present
+    assert hasattr(pane, "_bulk_bar_widget")
+    # Search options button present
+    assert hasattr(pane.builder, "_btn_search_opts")
 
 
 def test_join_workbench_window_opens():

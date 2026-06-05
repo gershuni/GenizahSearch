@@ -3802,6 +3802,10 @@ TRANSLATIONS.update({
     "Puzzle":                "פאזל",             # פאזל
     "List":                  "רשימה",       # רשימה
     "Add as Join":           "הוסף כצירוף",  # הוסף כצירוף
+    # Icon-only button tooltips (Phase 108 redesign)
+    "Add to Puzzle (with anchor)":  "הוסף לפאזל (עם עוגן)",
+    "Add to list":                  "הוסף לרשימה",
+    "Select this candidate":        "בחר מועמד זה",
 
     # --- JoinCandidatePane section tag ---
     "THIS SIDE — find candidate pages matching, line by line (hunt the MISSING continuation):":

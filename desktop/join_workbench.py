@@ -1488,6 +1488,9 @@ if _QT_AVAILABLE:
 
         Reads Candidate attributes directly (RR-2).  Triage border colour is driven
         by wb.triage[sys_id] (sys_id-keyed per R-05).
+        Action buttons are icon-only with tr() tooltips (adapted_decision 9).
+        Per-card checkbox reads from pane._selected_keys on render (adapted_decision 6).
+        Right-click context menu: same actions + Y/?/N triage (adapted_decision 9).
         """
 
         def __init__(self, pane, c, global_idx: int, enrich: dict):
@@ -1496,13 +1499,31 @@ if _QT_AVAILABLE:
             self.c = c                  # Candidate dataclass (RR-2)
             self.global_idx = global_idx
             self.sid = c.sys_id         # read Candidate attribute directly (RR-2)
+            self._ckey = pane._candidate_key(c)  # stable key for selection set
             self.setFixedWidth(232)
             self.setFrameShape(QFrame.Shape.Box)
+            self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            self.customContextMenuRequested.connect(self._ctx_menu)
             self._restyle()
 
             lay = QVBoxLayout(self)
             lay.setContentsMargins(4, 4, 4, 4)
             lay.setSpacing(2)
+
+            # 0. Per-card selection checkbox (top-right)
+            chk_row = QHBoxLayout()
+            chk_row.addStretch()
+            self._sel_chk = QCheckBox()
+            self._sel_chk.setToolTip(tr("Select this candidate"))
+            # Block signals while setting initial state (adapted_decision 6)
+            self._sel_chk.blockSignals(True)
+            self._sel_chk.setChecked(self._ckey in pane._selected_keys)
+            self._sel_chk.blockSignals(False)
+            self._sel_chk.stateChanged.connect(
+                lambda state: pane._set_selected(self._ckey, bool(state))
+            )
+            chk_row.addWidget(self._sel_chk)
+            lay.addLayout(chk_row)
 
             # 1. Thumbnail image label
             self.img = QLabel(tr("loading…"))
@@ -1555,7 +1576,7 @@ if _QT_AVAILABLE:
             snip.setHtml(m.get("snippet_html") or "")
             lay.addWidget(snip)
 
-            # 5. Triage row (Y / ? / N) + Compare + Re-anchor
+            # 5. Triage row (Y / ? / N)
             trow = QHBoxLayout()
             trow.setSpacing(2)
             for emoji, val, aname in (
@@ -1570,66 +1591,122 @@ if _QT_AVAILABLE:
                     lambda _checked=False, v=val, s=self.sid: self.pane.wb.mark(s, v)
                 )
                 trow.addWidget(btn)
-
-            cmp_btn = QPushButton("⧂")
-            cmp_btn.setFixedSize(28, 28)
-            cmp_btn.setAccessibleName(tr("Compare"))
-            cmp_btn.setToolTip(tr("Compare side-by-side with anchor"))
-            cmp_btn.clicked.connect(
-                lambda _checked=False, gi=self.global_idx: self.pane.open_compare(gi)
-            )
-            trow.addWidget(cmp_btn)
-
-            reanchor_btn = QPushButton("⚓")
-            reanchor_btn.setFixedSize(28, 28)
-            reanchor_btn.setAccessibleName(tr("Re-anchor"))
-            reanchor_btn.setToolTip(tr("Set this candidate as the new anchor"))
-            reanchor_btn.clicked.connect(
-                lambda _checked=False, c_=c: self.pane.wb.set_anchor(
-                    candidate_to_result_dict(c_)
-                )
-            )
-            trow.addWidget(reanchor_btn)
+            trow.addStretch()
             lay.addLayout(trow)
 
-            # 6. Action row: Browse / Puzzle / List / Join
+            # 6. Action row: ICON-ONLY buttons (adapted_decision 9)
             arow = QHBoxLayout()
             arow.setSpacing(2)
 
-            browse_btn = QPushButton(tr("Browse"))
+            browse_btn = QPushButton("📖")
+            browse_btn.setFixedSize(28, 28)
+            browse_btn.setToolTip(tr("Browse"))
             browse_btn.setAccessibleName(tr("Browse"))
             browse_btn.clicked.connect(
                 lambda _checked=False, c_=c: self.pane.wb.open_result_in_browse(c_)
             )
             arow.addWidget(browse_btn)
 
-            puzzle_btn = QPushButton(tr("Puzzle"))
+            puzzle_btn = QPushButton("🧩")
+            puzzle_btn.setFixedSize(28, 28)
+            puzzle_btn.setToolTip(tr("Add to Puzzle (with anchor)"))
             puzzle_btn.setAccessibleName(tr("Puzzle"))
             puzzle_btn.clicked.connect(
                 lambda _checked=False, c_=c: self.pane.wb.open_result_in_puzzle(c_)
             )
             arow.addWidget(puzzle_btn)
 
-            list_btn = QPushButton(tr("List"))
+            list_btn = QPushButton("☰")
+            list_btn.setFixedSize(28, 28)
+            list_btn.setToolTip(tr("Add to list"))
             list_btn.setAccessibleName(tr("List"))
             list_btn.clicked.connect(
                 lambda _checked=False, c_=c, b=None: self.pane.wb.open_result_in_list(c_, b)
             )
             arow.addWidget(list_btn)
 
-            join_btn = QPushButton(tr("Add as Join"))
+            join_btn = QPushButton("🔗")
+            join_btn.setFixedSize(28, 28)
+            join_btn.setToolTip(tr("Add as Join"))
             join_btn.setAccessibleName(tr("Add as Join"))
             join_btn.clicked.connect(
                 lambda _checked=False, c_=c: self.pane.wb.open_result_as_join(c_)
             )
             arow.addWidget(join_btn)
 
+            cmp_btn = QPushButton("⇄")
+            cmp_btn.setFixedSize(28, 28)
+            cmp_btn.setToolTip(tr("Compare side-by-side with anchor"))
+            cmp_btn.setAccessibleName(tr("Compare"))
+            cmp_btn.clicked.connect(
+                lambda _checked=False, gi=self.global_idx: self.pane.open_compare(gi)
+            )
+            arow.addWidget(cmp_btn)
+
+            reanchor_btn = QPushButton("⚓")
+            reanchor_btn.setFixedSize(28, 28)
+            reanchor_btn.setToolTip(tr("Set this candidate as the new anchor"))
+            reanchor_btn.setAccessibleName(tr("Re-anchor"))
+            reanchor_btn.clicked.connect(
+                lambda _checked=False, c_=c: self.pane.wb.set_anchor(
+                    candidate_to_result_dict(c_)
+                )
+            )
+            arow.addWidget(reanchor_btn)
+
             lay.addLayout(arow)
 
+        def _ctx_menu(self, pos):
+            """Right-click context menu: same actions + Y/?/N triage (adapted_decision 9)."""
+            menu = QMenu(self)
+            c = self.c
+
+            a_browse = menu.addAction("📖 " + tr("Browse"))
+            a_browse.triggered.connect(
+                lambda: self.pane.wb.open_result_in_browse(c)
+            )
+            a_puzzle = menu.addAction("🧩 " + tr("Add to Puzzle (with anchor)"))
+            a_puzzle.triggered.connect(
+                lambda: self.pane.wb.open_result_in_puzzle(c)
+            )
+            a_list = menu.addAction("☰ " + tr("Add to list"))
+            a_list.triggered.connect(
+                lambda: self.pane.wb.open_result_in_list(c, None)
+            )
+            a_join = menu.addAction("🔗 " + tr("Add as Join"))
+            a_join.triggered.connect(
+                lambda: self.pane.wb.open_result_as_join(c)
+            )
+            a_cmp = menu.addAction("⇄ " + tr("Compare side-by-side with anchor"))
+            a_cmp.triggered.connect(
+                lambda gi=self.global_idx: self.pane.open_compare(gi)
+            )
+
+            menu.addSeparator()
+
+            for label, val in (
+                ("Y — " + tr("Mark yes"), "yes"),
+                ("? — " + tr("Mark maybe"), "maybe"),
+                ("N — " + tr("Mark no"), "no"),
+            ):
+                act = menu.addAction(label)
+                act.triggered.connect(
+                    lambda _checked=False, v=val, s=self.sid: self.pane.wb.mark(s, v)
+                )
+
+            menu.exec(self.mapToGlobal(pos))
+
         def _restyle(self):
-            """Update card border based on triage state and anchor-self flag."""
+            """Update card border based on triage/selection state."""
             if self.c.is_anchor_self:
                 self.setStyleSheet("QFrame{border:3px solid #14b8a6;border-radius:4px;}")
+                return
+            # Show selection outline when in _selected_keys
+            if hasattr(self, "_ckey") and self._ckey in self.pane._selected_keys:
+                self.setStyleSheet(
+                    "QFrame{border:2px solid #14b8a6;border-radius:4px;"
+                    "box-shadow:inset 0 0 0 1px #14b8a6;}"
+                )
                 return
             tri = self.pane.wb.triage.get(self.sid)
             color = _TRI_COLOR.get(tri, _TRI_COLOR[None])
@@ -1881,13 +1958,16 @@ if _QT_AVAILABLE:
             rv.addWidget(self.grid_scroll, 1)
 
             # --- Table view (hidden by default) ---
+            # Column 0 = checkbox; columns 1..8 = data (adapted_decision 8)
             _headers = [
+                "",  # col 0: checkbox (master select-all on header click)
                 tr("Shelfmark"), tr("Score"), tr("Snippet"),
                 tr("Material"), tr("Dimensions"), tr("Source"),
                 tr("Page"), tr("Triage"),
             ]
             self.table = QTableWidget(0, len(_headers))
             self.table.setHorizontalHeaderLabels(_headers)
+            self.table.setColumnWidth(0, 30)
             self.table.setEditTriggers(
                 QTableWidget.EditTrigger.NoEditTriggers
             )
@@ -1895,8 +1975,10 @@ if _QT_AVAILABLE:
                 QTableWidget.SelectionBehavior.SelectRows
             )
             self.table.setSortingEnabled(False)
-            self.table.cellDoubleClicked.connect(
-                lambda row, _col: self._table_double_clicked(row)
+            self.table.cellDoubleClicked.connect(self._table_double_clicked)
+            # Master select-all: clicking the checkbox column header toggles all rows
+            self.table.horizontalHeader().sectionClicked.connect(
+                self._on_table_header_clicked
             )
             self.table.setVisible(False)
             rv.addWidget(self.table, 1)
@@ -2247,30 +2329,110 @@ if _QT_AVAILABLE:
             self.wb._img_threads.append(loader)
 
         def _render_table(self):
-            """Render all filtered candidates into the table view."""
+            """Render all filtered candidates into the table view.
+
+            Column layout (adapted_decision 8):
+              0: checkbox  1: Shelfmark  2: Score  3: Snippet  4: Material
+              5: Dimensions  6: Source  7: Page  8: Triage
+            """
             self.table.setRowCount(0)
             for c in self.wb.filtered:
                 m = self._enrich.get(c.key) or {}
                 row = self.table.rowCount()
                 self.table.insertRow(row)
-                self.table.setItem(row, 0, QTableWidgetItem(c.shelfmark or ""))
+
+                # Col 0: selection checkbox (block signals while initializing)
+                chk_item = QTableWidgetItem()
+                ckey = self._candidate_key(c)
+                chk_item.setData(Qt.ItemDataRole.UserRole, ckey)
+                chk_item.setCheckState(
+                    Qt.CheckState.Checked if ckey in self._selected_keys
+                    else Qt.CheckState.Unchecked
+                )
+                self.table.setItem(row, 0, chk_item)
+
+                # Data columns (offset +1)
+                self.table.setItem(row, 1, QTableWidgetItem(c.shelfmark or ""))
                 score_str = f"{c.score:.3f}" if c.score is not None else ""
-                self.table.setItem(row, 1, QTableWidgetItem(score_str))
-                self.table.setItem(row, 2, QTableWidgetItem(m.get("snippet_plain") or ""))
-                self.table.setItem(row, 3, QTableWidgetItem(m.get("material") or ""))
+                self.table.setItem(row, 2, QTableWidgetItem(score_str))
+                self.table.setItem(row, 3, QTableWidgetItem(m.get("snippet_plain") or ""))
+                self.table.setItem(row, 4, QTableWidgetItem(m.get("material") or ""))
                 w = m.get("width_cm")
                 h = m.get("height_cm")
                 dims = f"{w:.0f}x{h:.0f}" if w and h else ""
-                self.table.setItem(row, 4, QTableWidgetItem(dims))
-                self.table.setItem(row, 5, QTableWidgetItem(c.scope or ""))
-                self.table.setItem(row, 6, QTableWidgetItem(str(c.page) if c.page else ""))
+                self.table.setItem(row, 5, QTableWidgetItem(dims))
+                self.table.setItem(row, 6, QTableWidgetItem(c.scope or ""))
+                self.table.setItem(row, 7, QTableWidgetItem(str(c.page) if c.page else ""))
                 self.table.setItem(
-                    row, 7, QTableWidgetItem(self.wb.triage.get(c.sys_id) or "")
+                    row, 8, QTableWidgetItem(self.wb.triage.get(c.sys_id) or "")
                 )
+
+            # Wire cellChanged to update selection set (must connect AFTER setRowCount(0))
+            try:
+                self.table.cellChanged.disconnect(self._on_table_cell_changed)
+            except Exception:
+                pass
+            self.table.cellChanged.connect(self._on_table_cell_changed)
+
             self._update_pagination()
 
-        def _table_double_clicked(self, row: int):
-            """Map table row to global index and open compare."""
+        def _on_table_cell_changed(self, row: int, col: int):
+            """Handle checkbox column toggle (col 0) to update _selected_keys."""
+            if col != 0:
+                return
+            item = self.table.item(row, 0)
+            if item is None:
+                return
+            ckey = item.data(Qt.ItemDataRole.UserRole)
+            if not ckey:
+                return
+            checked = item.checkState() == Qt.CheckState.Checked
+            if checked:
+                self._selected_keys.add(ckey)
+            else:
+                self._selected_keys.discard(ckey)
+            self._update_bulk_bar()
+
+        def _on_table_header_clicked(self, section: int):
+            """Master select-all/none on checkbox column header click (adapted_decision 8)."""
+            if section != 0:
+                return
+            # Determine whether to select all or deselect all
+            all_selected = all(
+                self.table.item(r, 0) is not None and
+                self.table.item(r, 0).checkState() == Qt.CheckState.Checked
+                for r in range(self.table.rowCount())
+            ) if self.table.rowCount() > 0 else False
+
+            # Block cellChanged to batch-update efficiently
+            try:
+                self.table.cellChanged.disconnect(self._on_table_cell_changed)
+            except Exception:
+                pass
+
+            new_state = Qt.CheckState.Unchecked if all_selected else Qt.CheckState.Checked
+            for r in range(self.table.rowCount()):
+                item = self.table.item(r, 0)
+                if item is None:
+                    continue
+                item.setCheckState(new_state)
+                ckey = item.data(Qt.ItemDataRole.UserRole)
+                if ckey:
+                    if new_state == Qt.CheckState.Checked:
+                        self._selected_keys.add(ckey)
+                    else:
+                        self._selected_keys.discard(ckey)
+
+            self.table.cellChanged.connect(self._on_table_cell_changed)
+            self._update_bulk_bar()
+
+        def _table_double_clicked(self, row: int, col: int):
+            """Map table row to global index and open compare.
+
+            Clicking column 0 (checkbox) must NOT open compare (adapted_decision 8).
+            """
+            if col == 0:
+                return  # checkbox column — don't open compare
             # Table shows all filtered (no pagination), so row == global_filtered_idx
             self.open_compare(row)
 
