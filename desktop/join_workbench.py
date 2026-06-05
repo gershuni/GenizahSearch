@@ -654,23 +654,22 @@ if _QT_AVAILABLE:
         """Multi-row query builder: rows of single-token OR word-boxes.
 
         Each row has:
-        - End-anchor checkbox (⊣ ends line)
+        - An ⓘ info tooltip button (typed-sign legend)
         - A horizontal strip of single-token word-boxes ("boxes_strip")
         - A [+ or] button to add OR alternatives
-        - A per-row modifier indicator label
-        - Start-anchor checkbox (⊢ starts line)
-        - A gap QSpinBox (lines to skip to next)
+        - A per-row modifier indicator label (badge)
+        - A compact gap QSpinBox (↓N lines to skip)
+        - A per-row ⚙ gear button (opens options dialog for that row)
         - A remove button (×)
 
         Modifiers are PER-ROW (one mods dict per row, hoisted outside the slash-group).
-        The shared modifier row reflects/edits the ACTIVE ROW's mods dict.
+        Global search options (variants/ja/flex/bidir) live in self._global_opts dict
+        and are edited via the "Search options ▾" button dialog.
         build_side_query() composes a SideQuery → compose() 3-tuple.
 
         RR-5: allow_page_position=True (anchor side) / False (other side).
-        RR-13: active-row modifier wiring, wildcard-prefix disabled on multi-box rows.
+        RR-13: wildcard-prefix disabled on multi-box rows (enforced in ⚙ dialog).
         RR-14: _responsa_opts() exposes ja/flex_spacing/bidirectional for Plan 03 merge.
-        RR-15: QFrame/QSpinBox/QEvent imports added in this same task.
-        RR-16: active-row reference cleared on row/box removal.
         """
 
         def __init__(self, on_search, first_hint: str,
@@ -680,12 +679,21 @@ if _QT_AVAILABLE:
             self._first_hint = first_hint
             self._allow_page_position = allow_page_position
 
-            # Active-ROW state (transplanted from TabularQueryBuilderDialog, scoped to ROW)
+            # Active-ROW state — kept for legacy compat but no longer used by modifier row
             self._active_row = None
             self._updating_modifiers = False
 
+            # Global search options dict (persists even if dialog is never opened).
+            # _responsa_opts() reads from here; the "Search options ▾" dialog writes here.
+            self._global_opts = {
+                "variants": False,
+                "ja": False,
+                "flex_spacing": False,
+                "bidirectional": False,
+            }
+
             # Row list: each entry is a dict with keys:
-            #   end, boxes, add_or, ind, start, gap, rm, widget, boxes_strip_layout
+            #   end, boxes, mods, ind, start, gap, rm, widget, boxes_strip_layout
             self.rows = []
 
             self._init_ui()
@@ -699,95 +707,30 @@ if _QT_AVAILABLE:
             outer.setSpacing(2)
             outer.setContentsMargins(0, 0, 0, 0)
 
-            # Row container
+            # Row container — rows are inserted here by add_row()
             self._rows_box = QVBoxLayout()
             self._rows_box.setSpacing(2)
             outer.addLayout(self._rows_box)
 
             # NOTE: the first row is added at the END of this method (see below),
-            # AFTER every widget add_row()/_update_preview() touches (the modifier
-            # checkboxes, the global-options checkboxes, page_pos, and especially
-            # self._preview_edit) has been constructed. add_row() appends into the
-            # already-positioned self._rows_box, so the row still renders at the top.
+            # AFTER every widget add_row()/_update_preview() touches (page_pos and
+            # especially self._preview_edit) has been constructed.
 
-            # Controls row: [+ Add Line] [variants checkbox] [stretch]
+            # Controls row: [+ Add Line] [stretch] [Search options ▾]
             ctrl_row = QHBoxLayout()
             btn_add_line = QPushButton(tr("+ Add Line"))
             btn_add_line.setToolTip(tr("Add another manuscript line to the query"))
             btn_add_line.clicked.connect(self._on_add_line)
             ctrl_row.addWidget(btn_add_line)
-
-            self.chk_opt_variants = QCheckBox(tr("variants"))
-            self.chk_opt_variants.setToolTip(
-                tr("Expand spelling variants (responsa variant expansion)")
-            )
-            self.chk_opt_variants.stateChanged.connect(self._update_preview)
-            ctrl_row.addWidget(self.chk_opt_variants)
             ctrl_row.addStretch()
+
+            # "Search options ▾" button — opens dialog for variants/ja/flex/bidir
+            self._btn_search_opts = QPushButton(tr("Search options ▾"))
+            self._btn_search_opts.setToolTip(tr("Global search options (variants, Judeo-Arabic, flex spacing, bidirectional)"))
+            self._btn_search_opts.clicked.connect(self._open_search_options_dialog)
+            ctrl_row.addWidget(self._btn_search_opts)
+
             outer.addLayout(ctrl_row)
-
-            # Modifier row separator
-            sep = QFrame()
-            sep.setFrameShape(QFrame.Shape.HLine)
-            sep.setFrameShadow(QFrame.Shadow.Sunken)
-            outer.addWidget(sep)
-
-            # PER-ROW modifier row (active-row wiring)
-            mod_row = QHBoxLayout()
-            mod_label = QLabel(tr("Modifiers") + ":")
-            mod_row.addWidget(mod_label)
-
-            self.chk_negation = QCheckBox(tr("Negation −"))
-            self.chk_negation.setToolTip(tr("Negation tooltip"))
-            mod_row.addWidget(self.chk_negation)
-
-            self.chk_plene = QCheckBox(tr("Plene/Defective %"))
-            self.chk_plene.setToolTip(tr("Plene/defective spelling tooltip"))
-            mod_row.addWidget(self.chk_plene)
-
-            self.chk_wild_start = QCheckBox(tr("Wildcard *_"))
-            self.chk_wild_start.setToolTip(tr("Words ending with..."))
-            mod_row.addWidget(self.chk_wild_start)
-
-            self.chk_wild_end = QCheckBox(tr("Wildcard _*"))
-            self.chk_wild_end.setToolTip(tr("Words starting with..."))
-            mod_row.addWidget(self.chk_wild_end)
-
-            self.chk_prefix = QCheckBox(tr("Prefixes #_"))
-            self.chk_prefix.setToolTip(tr("Grammatical prefixes tooltip"))
-            mod_row.addWidget(self.chk_prefix)
-
-            self.chk_suffix = QCheckBox(tr("Suffixes _#"))
-            self.chk_suffix.setToolTip(tr("Grammatical suffixes tooltip"))
-            mod_row.addWidget(self.chk_suffix)
-
-            # Hint: these modifiers apply to the focused row
-            hint_lbl = QLabel(tr("(modifiers apply to the focused line)"))
-            hint_lbl.setStyleSheet("color: #888; font-size: 11px;")
-            mod_row.addWidget(hint_lbl)
-            mod_row.addStretch()
-            outer.addLayout(mod_row)
-
-            # Connect all six modifier checkboxes to _on_modifier_changed
-            for chk in [self.chk_negation, self.chk_plene, self.chk_wild_start,
-                        self.chk_wild_end, self.chk_prefix, self.chk_suffix]:
-                chk.stateChanged.connect(self._on_modifier_changed)
-
-            # GLOBAL Search-Options row (RR-14: ja/flex/bidir stay global; Plan 03 merges)
-            opts_row = QHBoxLayout()
-            opts_row.addWidget(QLabel(tr("Search Options") + ":"))
-            self.chk_opt_ja = QCheckBox(tr("Judeo-Arabic"))
-            self.chk_opt_flex = QCheckBox(tr("Flex Spacing"))
-            self.chk_opt_bidir = QCheckBox(tr("Bidirectional"))
-            opts_row.addWidget(self.chk_opt_ja)
-            opts_row.addWidget(self.chk_opt_flex)
-            opts_row.addWidget(self.chk_opt_bidir)
-            opts_row.addStretch()
-            outer.addLayout(opts_row)
-
-            # Connect global opts to preview only (not _on_modifier_changed)
-            for chk in [self.chk_opt_ja, self.chk_opt_flex, self.chk_opt_bidir]:
-                chk.stateChanged.connect(self._update_preview)
 
             # Page-position control (anchor side only — RR-5)
             if self._allow_page_position:
@@ -825,10 +768,9 @@ if _QT_AVAILABLE:
             preview_row.addWidget(self._preview_edit, 1)
             outer.addLayout(preview_row)
 
-            # Add the first row LAST — now that _preview_edit, the modifier
-            # checkboxes, the global-options checkboxes and page_pos all exist,
-            # add_row()'s trailing _update_preview() can run without an
-            # AttributeError. The row inserts into the top-positioned _rows_box.
+            # Add the first row LAST — now that _preview_edit and page_pos all exist,
+            # add_row()'s trailing _update_preview() can run without an AttributeError.
+            # The row inserts into the top-positioned _rows_box.
             self.add_row(placeholder=self._first_hint)
 
         def _on_add_line(self):
@@ -848,13 +790,12 @@ if _QT_AVAILABLE:
             row_layout.setSpacing(2)
             row_layout.setContentsMargins(0, 0, 0, 0)
 
-            # End-anchor checkbox (⊣)
-            end_chk = QCheckBox(tr("ends line ⊣"))
-            end_chk.setToolTip(
-                tr("The LAST word must be at the END of the line "
-                   "(left edge in Hebrew) — a torn line ending")
-            )
-            row_layout.addWidget(end_chk)
+            # ⓘ typed-sign legend tooltip button (D-04: tooltip only, no parsing)
+            info_btn = QPushButton("ⓘ")
+            info_btn.setFixedWidth(22)
+            info_btn.setFlat(True)
+            info_btn.setToolTip(tr("Typed sign legend tooltip"))
+            row_layout.addWidget(info_btn)
 
             # Boxes strip (horizontal layout for OR word-boxes)
             boxes_strip_widget = QWidget()
@@ -871,21 +812,13 @@ if _QT_AVAILABLE:
             )
             row_layout.addWidget(add_or_btn)
 
-            # Per-row modifier indicator label
+            # Per-row modifier indicator label (badge — shown when mods are set)
             ind_lbl = QLabel("")
-            ind_lbl.setStyleSheet("color: #888; font-size: 10px;")
+            ind_lbl.setStyleSheet("color: #14b8a6; font-size: 10px;")
             ind_lbl.setVisible(False)
             row_layout.addWidget(ind_lbl)
 
-            # Start-anchor checkbox (⊢)
-            start_chk = QCheckBox(tr("⊢ starts line"))
-            start_chk.setToolTip(
-                tr("The FIRST word must be at the START of the line "
-                   "(right edge in Hebrew) — a torn line beginning")
-            )
-            row_layout.addWidget(start_chk)
-
-            # Gap spinbox
+            # Gap spinbox (compact inline ↓N)
             gap_spin = QSpinBox()
             gap_spin.setRange(0, 40)
             gap_spin.setPrefix(tr("↓ "))
@@ -893,16 +826,29 @@ if _QT_AVAILABLE:
             gap_spin.setToolTip(
                 tr("Lines to skip before the next line (0 = the very next line)")
             )
+            gap_spin.setFixedWidth(72)
             row_layout.addWidget(gap_spin)
+
+            # Per-row ⚙ gear button (opens line options dialog — step 2)
+            gear_btn = QPushButton("⚙")
+            gear_btn.setFixedWidth(26)
+            gear_btn.setToolTip(tr("Line options (modifiers, starts/ends line)"))
+            row_layout.addWidget(gear_btn)
 
             # Remove button
             rm_btn = QPushButton("×")
             rm_btn.setFixedWidth(24)
             rm_btn.setAccessibleName(tr("Remove row"))
-
             row_layout.addWidget(rm_btn)
 
-            # Build the entry dict
+            # Build the entry dict (start/end checkboxes are now in the ⚙ dialog but
+            # we keep them as hidden QCheckBoxes on the entry so build_side_query can
+            # read them — wired in the gear dialog via copy-on-OK in step 2).
+            start_chk = QCheckBox()
+            start_chk.setVisible(False)
+            end_chk = QCheckBox()
+            end_chk.setVisible(False)
+
             entry = {
                 "end": end_chk,
                 "boxes": [],
@@ -911,6 +857,7 @@ if _QT_AVAILABLE:
                 "start": start_chk,
                 "gap": gap_spin,
                 "rm": rm_btn,
+                "gear": gear_btn,
                 "widget": row_widget,
                 "boxes_strip_layout": boxes_strip_layout,
             }
@@ -918,6 +865,7 @@ if _QT_AVAILABLE:
             # Wire [+ or] and remove
             add_or_btn.clicked.connect(lambda checked=False, e=entry: self.add_or_box(e))
             rm_btn.clicked.connect(lambda checked=False, e=entry: self._remove_row(e))
+            gear_btn.clicked.connect(lambda checked=False, e=entry: self._open_row_options_dialog(e))
 
             # Add first box
             self._make_box(entry, placeholder)
@@ -964,29 +912,25 @@ if _QT_AVAILABLE:
             """Remove an OR-alternative box (keep >= 1 box per row)."""
             if len(entry["boxes"]) <= 1:
                 return
-            # Clear active-row reference if this box was focused (RR-16)
-            if self._active_row is entry:
-                self._active_row = None
             box["edit"].setParent(None)
             box["edit"].deleteLater()
             rm_btn.setParent(None)
             rm_btn.deleteLater()
             entry["boxes"].remove(box)
-            self._refresh_modifier_enabled()
+            # Clear stale wildcard_prefix when row now has 1 box (RR-13)
+            if len(entry["boxes"]) == 1:
+                entry["mods"]["wildcard_prefix"] = False
+            self._update_row_indicator(entry)
             self._update_preview()
 
         def _remove_row(self, entry: dict):
             """Remove a row (keep >= 1 row)."""
             if len(self.rows) <= 1:
                 return
-            # RR-16: clear active-row reference if removed row was active
-            if self._active_row is entry:
-                self._active_row = None
             entry["widget"].setParent(None)
             entry["widget"].deleteLater()
             self.rows.remove(entry)
             self._sync()
-            self._refresh_modifier_enabled()
             self._update_preview()
 
         def _sync(self):
@@ -995,66 +939,127 @@ if _QT_AVAILABLE:
                 e["gap"].setVisible(i < len(self.rows) - 1)
 
         # ------------------------------------------------------------------
-        # Active-ROW modifier wiring (RR-13 — transplanted from TabularQueryBuilderDialog)
+        # "Search options ▾" dialog (global options: variants/ja/flex/bidir)
         # ------------------------------------------------------------------
 
-        def eventFilter(self, obj, event):
-            """Catch FocusIn on word-box QLineEdits to track the active row."""
-            if event.type() == QEvent.Type.FocusIn:
-                for entry in self.rows:
-                    for box in entry["boxes"]:
-                        if box["edit"] is obj:
-                            self._on_row_focus(entry)
-                            return super().eventFilter(obj, event)
-            return super().eventFilter(obj, event)
+        def _open_search_options_dialog(self):
+            """Open a modal dialog to edit global search options (_global_opts dict)."""
+            dlg = QDialog(self)
+            dlg.setWindowTitle(tr("Search options"))
+            lay = QVBoxLayout(dlg)
+            lay.setSpacing(6)
 
-        def _on_row_focus(self, entry: dict):
-            """Reflect the focused row's mods onto the modifier checkboxes."""
-            self._active_row = entry
-            self._updating_modifiers = True
-            try:
-                mods = entry["mods"]
-                self.chk_negation.setChecked(mods.get("negation", False))
-                self.chk_plene.setChecked(mods.get("plene", False))
-                self.chk_wild_start.setChecked(mods.get("wildcard_prefix", False))
-                self.chk_wild_end.setChecked(mods.get("wildcard_suffix", False))
-                self.chk_prefix.setChecked(mods.get("prefix", False))
-                self.chk_suffix.setChecked(mods.get("suffix", False))
-                self._refresh_modifier_enabled()
-            finally:
-                self._updating_modifiers = False
+            chk_variants = QCheckBox(tr("Expand spelling variants"))
+            chk_variants.setChecked(self._global_opts["variants"])
+            chk_ja = QCheckBox(tr("Judeo-Arabic"))
+            chk_ja.setChecked(self._global_opts["ja"])
+            chk_flex = QCheckBox(tr("Flex Spacing"))
+            chk_flex.setChecked(self._global_opts["flex_spacing"])
+            chk_bidir = QCheckBox(tr("Bidirectional"))
+            chk_bidir.setChecked(self._global_opts["bidirectional"])
 
-        def _refresh_modifier_enabled(self):
-            """Disable wildcard-prefix when the active row has >1 box (RR-13).
+            for chk in (chk_variants, chk_ja, chk_flex, chk_bidir):
+                lay.addWidget(chk)
 
-            The parser doesn't strip a leading '*' before the OR-group check, so
-            *(a/b) is NOT a valid group wildcard-prefix (genizah_core.py:6140).
-            """
-            if self._active_row is not None and len(self._active_row["boxes"]) > 1:
-                self.chk_wild_start.setEnabled(False)
-                self.chk_wild_start.setToolTip(
-                    tr("Wildcard-prefix can't apply to an OR group — "
-                       "use it on a single-word line")
-                )
+            btn_row = QHBoxLayout()
+            btn_done = QPushButton(tr("Done"))
+            btn_done.setDefault(True)
+            btn_row.addStretch()
+            btn_row.addWidget(btn_done)
+            lay.addLayout(btn_row)
+
+            def _on_done():
+                self._global_opts["variants"] = chk_variants.isChecked()
+                self._global_opts["ja"] = chk_ja.isChecked()
+                self._global_opts["flex_spacing"] = chk_flex.isChecked()
+                self._global_opts["bidirectional"] = chk_bidir.isChecked()
+                self._update_preview()
+                dlg.accept()
+
+            btn_done.clicked.connect(_on_done)
+            dlg.exec()
+
+        # ------------------------------------------------------------------
+        # Per-row ⚙ line options dialog
+        # ------------------------------------------------------------------
+
+        def _open_row_options_dialog(self, entry: dict):
+            """Open a modal dialog to edit per-row modifiers (copy-on-OK)."""
+            multi_box = len(entry["boxes"]) > 1
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle(tr("Line options"))
+            lay = QVBoxLayout(dlg)
+            lay.setSpacing(6)
+
+            mods = entry["mods"]
+
+            chk_neg = QCheckBox(tr("Negation −"))
+            chk_neg.setChecked(mods.get("negation", False))
+            chk_plene = QCheckBox(tr("Plene/Defective %"))
+            chk_plene.setChecked(mods.get("plene", False))
+            chk_prefix = QCheckBox(tr("Prefixes #_"))
+            chk_prefix.setChecked(mods.get("prefix", False))
+            chk_suffix = QCheckBox(tr("Suffixes _#"))
+            chk_suffix.setChecked(mods.get("suffix", False))
+
+            # Wildcard prefix: disabled + cleared when row has >1 OR box (RR-13)
+            chk_wp = QCheckBox(tr("Wildcard *_"))
+            if multi_box:
+                chk_wp.setEnabled(False)
+                chk_wp.setChecked(False)  # cleared — no stale True (RR-13)
+                chk_wp.setToolTip(tr("Wildcard-prefix disabled for multi-box OR lines"))
             else:
-                self.chk_wild_start.setEnabled(True)
-                self.chk_wild_start.setToolTip(tr("Words ending with..."))
+                chk_wp.setChecked(mods.get("wildcard_prefix", False))
 
-        def _on_modifier_changed(self):
-            """Write the six checkbox states into the active row's mods dict."""
-            if self._updating_modifiers or self._active_row is None:
-                return
-            mods = {
-                "negation": self.chk_negation.isChecked(),
-                "plene": self.chk_plene.isChecked(),
-                "wildcard_prefix": self.chk_wild_start.isChecked(),
-                "wildcard_suffix": self.chk_wild_end.isChecked(),
-                "prefix": self.chk_prefix.isChecked(),
-                "suffix": self.chk_suffix.isChecked(),
-            }
-            self._active_row["mods"] = mods
-            self._update_row_indicator(self._active_row)
-            self._update_preview()
+            chk_ws = QCheckBox(tr("Wildcard _*"))
+            chk_ws.setChecked(mods.get("wildcard_suffix", False))
+
+            sep = QFrame()
+            sep.setFrameShape(QFrame.Shape.HLine)
+            sep.setFrameShadow(QFrame.Shadow.Sunken)
+
+            chk_start = QCheckBox(tr("⊢ starts line"))
+            chk_start.setToolTip(tr("The FIRST word must be at the START of the line (right edge in Hebrew)"))
+            chk_start.setChecked(entry["start"].isChecked())
+            chk_end = QCheckBox(tr("⊣ ends line"))
+            chk_end.setToolTip(tr("The LAST word must be at the END of the line (left edge in Hebrew)"))
+            chk_end.setChecked(entry["end"].isChecked())
+
+            for w in (chk_neg, chk_plene, chk_prefix, chk_suffix, chk_wp, chk_ws, sep, chk_start, chk_end):
+                lay.addWidget(w)
+
+            btn_row = QHBoxLayout()
+            btn_cancel = QPushButton(tr("Cancel"))
+            btn_ok = QPushButton(tr("Apply"))
+            btn_ok.setDefault(True)
+            btn_row.addStretch()
+            btn_row.addWidget(btn_cancel)
+            btn_row.addWidget(btn_ok)
+            lay.addLayout(btn_row)
+
+            btn_cancel.clicked.connect(dlg.reject)
+
+            def _on_ok():
+                # Copy-on-OK — write back to entry only on confirmation
+                new_mods = {
+                    "negation": chk_neg.isChecked(),
+                    "plene": chk_plene.isChecked(),
+                    "prefix": chk_prefix.isChecked(),
+                    "suffix": chk_suffix.isChecked(),
+                    "wildcard_prefix": chk_wp.isChecked() if not multi_box else False,
+                    "wildcard_suffix": chk_ws.isChecked(),
+                }
+                entry["mods"] = new_mods
+                entry["start"].setChecked(chk_start.isChecked())
+                entry["end"].setChecked(chk_end.isChecked())
+                self._update_row_indicator(entry)
+                self._sync()
+                self._update_preview()
+                dlg.accept()
+
+            btn_ok.clicked.connect(_on_ok)
+            dlg.exec()
 
         _MOD_DISPLAY = {
             "negation": "−",
@@ -1094,18 +1099,19 @@ if _QT_AVAILABLE:
         def _responsa_opts(self) -> dict:
             """Return the GLOBAL search options dict for Plan 03 to merge (RR-14).
 
+            Reads from self._global_opts dict (persists across dialog open/close).
             NOTE: PER-ROW token modifiers (negation/plene/prefix/suffix/wildcards) are
             NOT in here — they are baked into the term by build_side_query's hoist (RR-13).
             ja/flex_spacing/bidirectional are exposed here because compose() hardcodes them
             False and SideQuery can't carry them — Plan 03's do_search merges them into ro.
             """
-            v = self.chk_opt_variants.isChecked()
+            v = self._global_opts.get("variants", False)
             return {
                 "responsa_mode": True,
                 "variants": v,
-                "ja": self.chk_opt_ja.isChecked(),
-                "flex_spacing": self.chk_opt_flex.isChecked(),
-                "bidirectional": self.chk_opt_bidir.isChecked(),
+                "ja": self._global_opts.get("ja", False),
+                "flex_spacing": self._global_opts.get("flex_spacing", False),
+                "bidirectional": self._global_opts.get("bidirectional", False),
                 "variant_mode": "variants" if v else "exact",
             }
 
@@ -1182,7 +1188,7 @@ if _QT_AVAILABLE:
 
             return SideQuery(
                 rows=tuple(builder_rows),
-                variants=self.chk_opt_variants.isChecked(),
+                variants=self._global_opts.get("variants", False),
                 page_position=self._page_position(),
             )
 

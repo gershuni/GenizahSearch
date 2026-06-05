@@ -3720,7 +3720,30 @@ TRANSLATIONS.update({
     "Expand spelling variants (responsa variant expansion)":
         "הרחב וריאנטים כתיביים (הרחבת וריאנטים של פרויקט השו\"ת)",
 
-    # --- Modifier row (PER-ROW) ---
+    # --- New global Search options button + dialog (Phase 108 redesign) ---
+    "Search options ▾":     "אפשרויות חיפוש ▾",
+    "Global search options (variants, Judeo-Arabic, flex spacing, bidirectional)":
+        "אפשרויות חיפוש גלובליות (וריאנטים, ערבית-יהודית, רווח גמיש, דו-כיווני)",
+    "Search options":        "אפשרויות חיפוש",
+    "Expand spelling variants": "הרחב וריאנטים כתיביים",
+
+    # --- Per-row ⚙ line options dialog (Phase 108 redesign) ---
+    "Line options":          "אפשרויות שורה",
+    "Line options (modifiers, starts/ends line)":
+        "אפשרויות שורה (מאפיינים, התחלת/סיום שורה)",
+    "Wildcard-prefix disabled for multi-box OR lines":
+        "תחילית ג'וקר מושבתת לשורות OR עם תיבות מרובות",
+    "⊣ ends line":           "⊣ מסיים שורה",
+    "The FIRST word must be at the START of the line (right edge in Hebrew)":
+        "המילה הראשונה חייבת להיות בתחילת השורה (קצה ימין בעברית)",
+    "The LAST word must be at the END of the line (left edge in Hebrew)":
+        "המילה האחרונה חייבת להיות בסוף השורה (קצה שמאל בעברית)",
+
+    # --- ⓘ typed-sign legend tooltip ---
+    "Typed sign legend tooltip":
+        "הקלד סימנים ישירות בתיבה:\n#מילה קידומות / מילה# סיומות / %מילה מלא-חסר / *מילה / מילה* ג'וקר / −מילה שלילה",
+
+    # --- Modifier row (PER-ROW — legacy, kept for backward compat) ---
     "(modifiers apply to the focused line)":
         "(המאפיינים חלים על השורה הממוקדת)",
     "Wildcard-prefix can't apply to an OR group — use it on a single-word line":
