@@ -316,14 +316,16 @@ def puzzle_add_targets(anchor_sid, member_sids):
 
 try:
     from PyQt6.QtWidgets import (
-        QDialog, QFrame, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QScrollArea,
-        QSpinBox, QSplitter, QTextBrowser, QWidget, QLineEdit, QInputDialog, QMessageBox,
+        QDialog, QFrame, QGridLayout, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
+        QScrollArea, QSpinBox, QSplitter, QTableWidget, QTableWidgetItem, QTextBrowser,
+        QWidget, QLineEdit, QInputDialog, QMessageBox,
         QCheckBox, QMenu, QComboBox, QListWidget, QListWidgetItem,
     )
     from PyQt6.QtCore import Qt, QEvent, QThread, pyqtSignal
     from PyQt6.QtGui import QPalette, QPixmap, QImage, QTextCursor, QTextBlockFormat
     from desktop.image_loader import ImageLoaderThread
     from desktop.widgets.line_number_text_edit import apply_line_numbered_text
+    from gui_threads import SearchThread
     _QT_AVAILABLE = True
 except ImportError:
     _QT_AVAILABLE = False

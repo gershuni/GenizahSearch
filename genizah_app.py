@@ -15439,8 +15439,22 @@ class GenizahGUI(QMainWindow):
         """Public: add a fragment to the Fragment Puzzle canvas (Join Workbench path). SC#5."""
         self._vs_add_to_puzzle(sys_id)
 
-    def open_anchor_as_join(self, anchor_sys_id: str, anchor_shelfmark: str):
-        """Public: open JoinsDialog with anchor as Fragment A; scholar enters B freely. SC#5, D-14."""
+    def open_anchor_as_join(
+        self,
+        anchor_sys_id: str,
+        anchor_shelfmark: str,
+        partner_sys_id: str = None,
+        partner_shelfmark: str = None,
+    ):
+        """Public: open JoinsDialog with anchor as Fragment A; scholar enters B freely.
+        SC#5, D-14, RR-3/D-17.
+
+        Optional partner_sys_id / partner_shelfmark: when the JoinCandidatePane identifies
+        a candidate, it calls this method with the candidate shelfmark to pre-fill Fragment B.
+        partner_sys_id is accepted for symmetry / future use; the dialog B field keys on
+        shelfmark (matching the dialog's UX). The no-partner call path (Phase-107 callers
+        passing only anchor_sid + shelf) is unchanged — frag_b_input is left EMPTY.
+        """
         def browse_shelfmark(target_shelfmark):
             self.browse_shelf_input.setText(target_shelfmark)
             self._set_last_browse_field("shelf")
@@ -15458,8 +15472,13 @@ class GenizahGUI(QMainWindow):
             lists_mgr=getattr(self, 'lists_mgr', None),
             meta_mgr=self.meta_mgr,
         )
-        # frag_b_input left EMPTY - scholar enters B freely (R-02). exec() blocks; the workbench
-        # caller calls _reload_known_joins() after this returns (SC#4 / Pitfall 3).
+        # Pre-fill Fragment B when a partner candidate was provided (D-17 / RR-3).
+        # When partner_shelfmark is None (Phase-107 callers), frag_b_input stays EMPTY
+        # so the scholar enters B freely (R-02).
+        if partner_shelfmark:
+            dialog.frag_b_input.setText(partner_shelfmark)
+        # exec() blocks; the workbench caller calls _reload_known_joins() after this returns
+        # (SC#4 / Pitfall 3).
         dialog.exec()
 
     def _open_settings_dialog(self):
