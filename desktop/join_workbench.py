@@ -35,8 +35,9 @@ __all__ = [
     "puzzle_add_targets",
     # Plan 02 window class
     "JoinWorkbenchWindow",
-    # Plan 03 (108-02) query builder
+    # Plan 03 (108-02) query builder + executor adapter
     "JoinQueryBuilder",
+    "_DesktopSearchExecutor",
 ]
 
 # ---------------------------------------------------------------------------
@@ -1168,6 +1169,78 @@ if _QT_AVAILABLE:
                 self._on_search_cb()
 
     # -------------------------------------------------------------------------
+    # _DesktopSearchExecutor — thin SearchExecutor Protocol adapter (D-22, Plan 03).
+    # Wraps self.searcher (SearchEngine) + self.meta_mgr (MetadataManager).
+    # -------------------------------------------------------------------------
+
+    class _DesktopSearchExecutor:
+        """Concrete adapter satisfying the Phase-106 SearchExecutor Protocol.
+
+        Thin passthrough — no per-app normalizer (Phase-106 D-01).
+        Instantiated as self._executor in JoinWorkbenchWindow.__init__.
+        Plan 03 passes self._executor into the candidate pane.
+        """
+
+        def __init__(self, searcher, meta_mgr):
+            self._searcher = searcher
+            self._meta_mgr = meta_mgr
+
+        def execute_search(
+            self,
+            query_str,
+            mode,
+            gap,
+            progress_callback=None,
+            exclude_words=None,
+            responsa_options=None,
+            restrict_sys_ids=None,
+            text_position=None,
+            corpus_scope="all",
+        ):
+            """Forward to searcher.execute_search; return [] on any failure."""
+            try:
+                return self._searcher.execute_search(
+                    query_str,
+                    mode,
+                    gap,
+                    progress_callback=progress_callback,
+                    exclude_words=exclude_words,
+                    responsa_options=responsa_options,
+                    restrict_sys_ids=restrict_sys_ids,
+                    text_position=text_position,
+                    corpus_scope=corpus_scope,
+                ) or []
+            except Exception:
+                return []
+
+        def get_browse_page(
+            self,
+            sys_id,
+            p_num=None,
+            next_prev=0,
+            absolute_index=None,
+            allow_cross=False,
+            volume_ie=None,
+        ):
+            """Forward to searcher.get_browse_page."""
+            return self._searcher.get_browse_page(
+                sys_id,
+                p_num=p_num,
+                next_prev=next_prev,
+                absolute_index=absolute_index,
+                allow_cross=allow_cross,
+                volume_ie=volume_ie,
+            )
+
+        def get_meta_for_id(self, sys_id: str) -> tuple:
+            """Forward to meta_mgr.get_meta_for_id."""
+            return self._meta_mgr.get_meta_for_id(sys_id)
+
+        def get_library_for_id(self, sys_id: str) -> str:
+            """Forward to meta_mgr.get_library_for_id."""
+            return self._meta_mgr.get_library_for_id(sys_id) or ""
+
+    # -------------------------------------------------------------------------
     # JoinWorkbenchWindow — the main modeless QDialog shell (Plan 02, JWB-01).
     # -------------------------------------------------------------------------
 
@@ -1187,6 +1260,9 @@ if _QT_AVAILABLE:
             self.searcher = app.searcher
             self.joins_mgr = app.joins_mgr
             self.corrections_client = getattr(app, "corrections_client", None)
+
+            # Phase-106 SearchExecutor adapter — Plan 03 passes this to the candidate pane.
+            self._executor = _DesktopSearchExecutor(self.searcher, self.meta_mgr)
 
             # Generation token — monotonically increasing, bumped on every set_anchor.
             # must-fix #7: every worker carries a copy and every slot drops stale results.
