@@ -142,14 +142,16 @@ exceptions table above.
 **Each row is a `QHBoxLayout(spacing=2, contentsMargins=0)` containing:**
 
 ```
-[ends line ⊣ checkbox] [term QLineEdit, stretch=1] [⊢ starts line checkbox] [↓ N ln QSpinBox] [× QPushButton, fixedWidth=24]
+[ends line ⊣ checkbox] [boxes_strip: OR word-box QLineEdits, stretch=1] [+ or button] [row mod-indicator label] [⊢ starts line checkbox] [↓ N ln QSpinBox] [× QPushButton, fixedWidth=24]
 ```
 
-Note: `spacing=2` here is the same deliberate sub-grid density value as the outer layout.
+Note: `spacing=2` here is the same deliberate sub-grid density value as the outer layout. Each row
+holds N single-token OR word-boxes (the `[+ or]` button appends another); the OR group is assembled
+in `build_side_query()` as the engine slash-group `(w1/w2)`, never typed by the scholar (RR-1).
 
 RTL/LTR contract (D-06):
-- The `term` `QLineEdit` (Hebrew word input) has `setLayoutDirection(Qt.LayoutDirection.RightToLeft)` — Hebrew text entry flows right-to-left.
-- The surrounding row chrome (`ends line ⊣`, `⊢ starts line`, gap spinbox, `×` remove button) is LTR (natural widget order in an `QHBoxLayout` without `RightToLeft` override).
+- Each OR word-box `QLineEdit` (Hebrew word input) has `setLayoutDirection(Qt.LayoutDirection.RightToLeft)` — Hebrew text entry flows right-to-left.
+- The surrounding row chrome (`ends line ⊣`, `+ or`, `⊢ starts line`, gap spinbox, `×` remove button) is LTR (natural widget order in an `QHBoxLayout` without `RightToLeft` override).
 - Hebrew line START is the right edge: "⊢ starts line" checkbox sits to the RIGHT of the input field; "ends line ⊣" sits to the LEFT. This matches what the sketch established in iteration E.
 - The full builder `QWidget` does NOT set `setLayoutDirection(RightToLeft)` — only the input fields inside it do.
 
@@ -171,17 +173,38 @@ Below the controls row, a `QHBoxLayout` containing:
 ```
 [QLabel "Preview:"]  [QLineEdit, stretch=1, readOnly=True, setStyleSheet("color: #94a3b8;")]
 ```
-Updates on every keystroke and checkbox change via `_update_preview()` calling `compose()`.
+Updates on every keystroke, box-add, and modifier change via `_update_preview()` calling `compose()`.
+The Preview shows the HOISTED composed query (e.g. `#(שלום/שלומות)`).
 
 **Modifier row (carried from `TabularQueryBuilderDialog`):**
 
-A single `QHBoxLayout` with checkboxes for: Start/End of line (already per-row above, so OMIT these from the modifier row), Negation, Defective, Wildcards, Prefixes, Suffixes, Bidirectional, Flex Spacing, Judeo-Arabic, Variants (global — already in controls row, so OMIT duplicate). Remaining modifiers in the row: Negation, Defective, Wildcards, Prefixes, Suffixes, Bidirectional, Flex Spacing, Judeo-Arabic. These map to `responsa_options` keys passed to `compose()`.
+A single `QHBoxLayout` with checkboxes for: Start/End of line (already per-row above, so OMIT these from the modifier row), Negation, Defective, Wildcards, Prefixes, Suffixes, Bidirectional, Flex Spacing, Judeo-Arabic, Variants (global — already in controls row, so OMIT duplicate). Remaining modifiers in the row: Negation, Defective, Wildcards, Prefixes, Suffixes, Bidirectional, Flex Spacing, Judeo-Arabic.
+
+⚠ **REVISED 2026-06-05 (RR-13/RR-14, user decision Option B — SUPERSEDES the round-2 per-box design):**
+the modifiers split into two groups:
+- **PER-ROW token modifiers** (Negation `−`, Defective/Plene `%`, Wildcards, Prefixes `#_`, Suffixes `_#`):
+  these belong to the **active ROW** (the row containing the focused box), stored as ONE `mods` dict per row,
+  and are **HOISTED OUTSIDE the OR group** by `build_side_query()` — single-box row → `#שלום`; multi-box row →
+  `#(a/b)` / `%(a/b)` / `-(a/b)` / `(a/b)#` / `(a/b)*` (the parser-supported group forms,
+  `genizah_core.py:6121-6163`). The round-2 "each box has its own mods, decorate-then-OR-join into `(#a/%b)`"
+  design is REPLACED — `(#a/%b)` is parsed as LITERAL `#`/`%` characters, not modifiers. **Wildcard-PREFIX
+  `*(…)` is NOT hoistable** onto a multi-box group (the parser does not strip a leading `*` before the OR
+  check, `genizah_core.py:6140`) → disable/grey the wildcard-prefix checkbox when the active row has >1 box;
+  keep it for single-box rows. The modifier row reflects/edits the ACTIVE ROW's mods (transplant the
+  `TabularQueryBuilderDialog` focus/active mechanism scoped to the ROW); clear the active-row reference when a
+  row/box is removed (RR-16, mirror `genizah_app.py:1932-1934`). A small hint label "(modifiers apply to the
+  focused line)" tells the scholar these are per-row.
+- **GLOBAL Search-Options toggles** (Bidirectional, Flex Spacing, Judeo-Arabic, Variants): these stay GLOBAL
+  and are exposed by the builder's `_responsa_opts()`. NOTE (RR-14): `compose()` drops `ja`/`flex_spacing`/
+  `bidirectional` (`shared/joins_lab.py:745-747`) — the desktop pane's `do_search` MUST merge them from
+  `_responsa_opts()` into the composed `ro` before `SearchThread`, and do the same into the cross-side `b_ro`
+  before `apply_cross_side` (otherwise the toggles are silent no-ops).
 
 **First-row placeholder text:**
 - Anchor-side builder: tr("word(s) on this line…") (first row hint); subsequent rows: tr("word(s) on this line…")
 - Other-side builder: first row placeholder: tr("word(s) required on the OTHER side…")
 
-**Empty state:** if all term fields are blank, `is_empty()` returns True; the Find Candidates button is disabled with tooltip tr("Enter at least one word to search").
+**Empty state:** if all word-boxes are blank, `is_empty()` returns True; the Find Candidates button is disabled with tooltip tr("Enter at least one word to search").
 
 ---
 
@@ -216,7 +239,7 @@ A single `QHBoxLayout` with checkboxes for: Start/End of line (already per-row a
 - stretch
 
 **Other-side box (`QWidget` with `QVBoxLayout`, `contentsMargins=(16,0,0,0)`):**
-- Contains the second `QueryBuilder` instance.
+- Contains the second `QueryBuilder` instance (`allow_page_position=False`, RR-5).
 - Default: `setVisible(False)`.
 - Expand: `setVisible(True)` when checkbox is toggled on.
 - No collapse animation — plain show/hide.
@@ -393,26 +416,26 @@ Column layout:
 
 Pane sizing: equal stretch (no fixed ratio — QHBoxLayout default). Dialog total 1320×870 → each pane approximately 640 wide. Image target size: 620×460 px (passed as `target=(620, 460)` to `_load_image()`).
 
-Anchor pane (left): populated from `wb.anchor` (the pinned fragment); does NOT reload when navigating candidates — stays static.
+Anchor pane (left): populated from `wb._anchor_res` (the pinned fragment DICT — read with r_*); does NOT reload when navigating candidates — stays static.
 
-Candidate pane (right): loads the candidate's image via `_load_image(pane["img"], r_sid(res), width=1400, target=(620, 460))` and text via `apply_line_numbered_text`.
+Candidate pane (right): c is a Candidate — loads the candidate's image via `wb._enqueue_image_for_pane(pane["img"], c.sys_id, c.page, width=1400)` (the per-page `_image_url_for_idx` resolver, None-page-guarded — RR-7/RR-12) and text via `apply_line_numbered_text(htmlify(c.full_text, c.highlight_pattern), ...)`.
 
 **"Open to the matched page" (D-18):**
-When a candidate was pulled in via the other-side builder (i.e. `res["_via_other_side"]` is True), the compare dialog opens to the NEIGHBORING page (p±1) that matched query B, not the candidate's own page. The `page_of(res)` accessor already resolves this from `res["display"]["img"]` which the `_CrossSideWorker` sets when building neighbor result dicts. No special-case branch needed — `_fill()` uses `res["display"]["img"]` as the page index. Label the candidate pane meta line with `"  ·  other side matched"` when `_via_other_side` is set.
+When a candidate was pulled in via the other-side builder (i.e. `c.via_other_side` is True), the compare dialog opens to the NEIGHBORING page (p±1) that matched query B — `c.page` is ALREADY the neighbor page (set by the cross-side path when building neighbor Candidates). No special-case branch needed — `_fill_candidate()` uses `c.page` directly (passed to `_enqueue_image_for_pane`, which guards None). Label the candidate pane meta line with `"  ·  other side matched"` when `c.via_other_side` is set.
 
 **Triage inside CompareDialog:**
-- Y / ? / N buttons in top bar call `wb.mark(r_sid(candidate), val)` — persists to `wb.triage` and restyles the originating card.
+- Y / ? / N buttons in top bar call `wb.mark(self._cur().sys_id, val)` — persists to `wb.triage` (sys_id-keyed) and restyles the originating card.
 - The position label refreshes to show the current triage state.
 
 **Re-anchor inside CompareDialog:**
-- Calls `wb.set_anchor(current_candidate)` and closes the dialog (`self.accept()`).
+- Calls `wb.set_anchor(candidate_to_result_dict(self._cur()))` and closes the dialog (`self.accept()`).
 
 **Add as Join inside CompareDialog (D-17):**
-- Calls `wb.act_join(current_candidate)` → opens `JoinsDialog` pre-filled with anchor=fragment A, candidate=fragment B via the Phase 107 public action API (D-20: no `_vs_*` private calls).
+- Calls `wb.open_result_as_join(self._cur())` → opens `JoinsDialog` pre-filled with anchor=fragment A, candidate=fragment B via the EXTENDED public `open_anchor_as_join(..., partner_sys_id=, partner_shelfmark=)` (D-20: no `_vs_*` private calls; RR-3).
 
 **Prev/Next navigation:**
-- Steps through `wb.filtered` (the current filtered list, including triage filter state).
-- Wraps to bounds (clamps, no wrap-around).
+- Steps through `wb.filtered` (the current filtered list of Candidates, including triage filter state).
+- Clamps to bounds (no wrap-around).
 
 ---
 
@@ -431,8 +454,20 @@ table simultaneously.
 | Anchor-side builder hint | "word(s) on this line…" |
 | Other-side builder hint (first row) | "word(s) required on the other side…" |
 | Add Line button | "+ Add Line" |
+| Add OR-alternative button | "+ or" |
 | Variants checkbox | "variants" |
 | Preview label | "Preview:" |
+| Modifier: Negation | "Negation −" |
+| Modifier: Plene/Defective | "Plene/Defective %" |
+| Modifier: Wildcard prefix | "Wildcard *_" |
+| Modifier: Wildcard suffix | "Wildcard _*" |
+| Modifier: Prefixes | "Prefixes #_" |
+| Modifier: Suffixes | "Suffixes _#" |
+| Modifier hint (per-row) | "(modifiers apply to the focused line)" |
+| Wildcard-prefix disabled on OR group tooltip | "Wildcard-prefix can't apply to an OR group — use it on a single-word line" |
+| Search-Option: Judeo-Arabic | "Judeo-Arabic" |
+| Search-Option: Flex Spacing | "Flex Spacing" |
+| Search-Option: Bidirectional | "Bidirectional" |
 | Include anchor checkbox | "Include anchor itself" |
 | Include anchor default | `setChecked(False)` — OFF by default (exclude the anchor; the ✓/✗ readout confirms query self-consistency without cluttering results with the anchor itself) |
 | Source: Text button | "Find Candidates" |
@@ -501,16 +536,16 @@ destructive confirmation copy needed.
 
 ### Focus order and keyboard navigation
 
-1. On dialog open: focus → anchor-side builder first row `term` QLineEdit.
-2. Inside a QueryBuilder: Tab moves L→R across `[end checkbox] [term] [start checkbox] [gap spinbox] [× button]`, then to next row.
-3. Enter / Return in any `term` field triggers `do_search()` (same as "Find Candidates" button).
+1. On dialog open: focus → anchor-side builder first row first OR word-box QLineEdit.
+2. Inside a QueryBuilder: Tab moves L→R across `[end checkbox] [OR word-boxes] [+ or] [start checkbox] [gap spinbox] [× button]`, then to next row. Focusing a word-box makes its ROW the active row (the modifier row reflects that row's mods).
+3. Enter / Return in any word-box triggers `do_search()` (same as "Find Candidates" button).
 4. Keyboard shortcut: no new global shortcuts defined (follows existing app conventions).
 5. CompareDialog: ← / → arrow keys (or < prev / next > buttons) step through candidates.
 
 ### Search trigger events
 
 - "Find Candidates" button click: `do_search()`
-- Enter in any builder `term` QLineEdit: `do_search()`
+- Enter in any builder word-box: `do_search()`
 - Toggling other-side AND/OR combo: does NOT auto-re-search (user must click Find Candidates again)
 - Toggling "include anchor itself": does NOT auto-re-search
 
@@ -522,9 +557,9 @@ destructive confirmation copy needed.
 ### Triage persistence scope (D-10)
 
 - Keyed by `sys_id` (canonical per-candidate key surviving re-runs; stable across filter changes).
-- Lives in `self.triage = {}` on `JoinWorkbenchDialog`.
+- Lives in `self.triage = {}` on `JoinWorkbenchWindow`.
 - Cleared on re-anchor (`set_anchor()` resets `self.triage = {}`).
-- NOT persisted to disk (a confirmed join is persisted as a real join via Act_join → JoinsDialog).
+- NOT persisted to disk (a confirmed join is persisted as a real join via Add-as-Join → JoinsDialog).
 
 ### Image loading concurrency
 
@@ -532,13 +567,15 @@ destructive confirmation copy needed.
 - Grid page: `ThumbResolver` resolves NLI thumbnail URLs for all 20 cards simultaneously (bulk QThread), then images are enqueued into the bounded 5-slot pool.
 - `_cancel_images()` called on: page change, view toggle, dialog close.
 - Card image on load failure: `label.setText("(no image)")`.
+- Matched-page pane images (CompareDialog + any "open to the matched page") resolve the SPECIFIC page via `_enqueue_image_for_pane` (`_image_url_for_idx`), None-page-guarded (RR-7/RR-12) — NOT manuscript-level `get_thumbnail`.
 
 ### Search execution (D-21 — batched enrichment)
 
 - Search results from `SearchThread` arrive in `_on_results()` — raw list.
-- Dedup to one-per-image before any enrichment (key: `uid` or `sys_id|img`).
-- All per-candidate enrichment (material, dimensions via `shared/fjms_service`, thumbnail URL via `meta_mgr.get_thumbnail`, snippet via `snippet_html/snippet_plain`, cross-side membership) is batched in workers, not per-candidate serial.
-- Cross-side worker (`_CrossSideWorker`) runs after the main text results arrive; fires progress signals; result delivered to `_on_cross_done()`.
+- `do_search` MERGES the builder's GLOBAL ja/flex/bidir into the composed `ro` before `SearchThread` (compose drops them — RR-14); the cross-side `b_ro` is merged the same way before `apply_cross_side`.
+- Dedup to one-per-image (Candidate dataclasses) before any enrichment.
+- All per-candidate enrichment (material, dimensions via `shared/fjms_service.get_measurement_summaries_batch`, thumbnail URL via `meta_mgr.get_thumbnail`, snippet via `snippet_html/snippet_plain`, cross-side membership) is batched in workers, keyed by `(sys_id, page)`, not per-candidate serial.
+- Cross-side worker (`_CrossSideWorker`) runs after the main text results arrive (receives the merged `b_ro`); result delivered to `_on_cross_done()`.
 
 ### Loading / progress states
 
@@ -555,8 +592,8 @@ destructive confirmation copy needed.
 
 | Element | Direction | Rationale |
 |---------|-----------|-----------|
-| `term` QLineEdit in each builder row | RTL (`setLayoutDirection(RightToLeft)`) | Hebrew text input |
-| Row `QHBoxLayout` chrome (end checkbox, start checkbox, gap, × button) | LTR (default) | Chrome reads left-to-right |
+| OR word-box QLineEdits in each builder row | RTL (`setLayoutDirection(RightToLeft)`) | Hebrew text input |
+| Row `QHBoxLayout` chrome (end checkbox, + or, start checkbox, gap, × button) | LTR (default) | Chrome reads left-to-right |
 | Snippet `QTextBrowser` content | RTL (`htmlify()` wraps in `<div dir='rtl'>`) | Hebrew text display |
 | Anchor `QTextBrowser` (line-numbered text) | RTL via `apply_line_numbered_text` | Hebrew text |
 | CompareDialog text panes | RTL via `apply_line_numbered_text` | Hebrew text |
@@ -594,6 +631,7 @@ dependencies are PyQt6 (existing desktop dep) + project-internal modules (`deskt
 | Thumbnail sizes | Grid cards: 220×130 (thumbnail); CompareDialog: 620×460 | Grid for quick scan; compare for detail |
 | Snippet max_lines | 6 lines in cards; 3-line plain text in table (max_chars=220) | Cards have space for 6 lines at fixedHeight=72; table cells are compact |
 | "copy selected anchor text → row" affordance (D-02) | DEFERRED to post-108 | Not chosen for 108; builder starts blank; the full modifier row suffices |
+| Modifier scope (RR-13) | PER-ROW, hoisted outside the OR group; wildcard-prefix disabled on multi-box rows | Parser only honors group-level hoisted modifiers (`#(a/b)`); per-alternative `(#a/%b)` degrades to literal characters; the common case (spelling variants of one word) wants the same modifier on all alternatives |
 | Size-mismatch threshold | Ratio > 1.4 in either W or H dimension triggers soft hint | ~40% size difference is meaningful for physical join evidence without being overly sensitive |
 | Provenance badge for text-only (108) | No badge suffix (text is the 108-only source; badge would be noise) | Badges become meaningful when VS is wired in Phase 109 |
 | Status label empty-state copy | Inline in status (no separate empty-state widget) | Consistent with app's existing search result area pattern |
