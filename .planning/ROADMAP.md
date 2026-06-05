@@ -182,7 +182,11 @@ anchor↔candidate compare. The conservative `[`/`]` tear-side assist is **DEFER
   6. ~~The tear-side assist reads the anchor's `[`/`]` markers…~~ **DEFERRED out of Phase 108** (2026-06-04 discuss-phase) — JWB-05 moves to the algorithmic Component B (Phase 110 disposition). NOT a Phase 108 success criterion. (Bracket-aware *matching* correctness — a leading `]` must not defeat line-start / self-match — stays in scope; only the side-verdict UI is deferred.)
   7. Manuscript dimensions appear as **evidence / soft warnings, never an *automatic* hard filter** (deferral #2 — **CONFIRMED** in discuss-phase: soft evidence + mismatch hint by default, PLUS an *opt-in* explicit min/max size cull, off by default).
 
-**Plans**: TBD.
+**Plans**: 4 plans
+- [ ] 108-01-PLAN.md — Wave-0 scaffolds: get_measurements_batch (D-21) + TabularQueryBuilderDialog RTL-chrome fix (D-06) + builder/triage/RTL test stubs [wave 1]
+- [ ] 108-02-PLAN.md — JoinQueryBuilder widget (line-by-line, OR-`|` join, page-position, modifier row, Preview) + _DesktopSearchExecutor adapter (JWB-06/10/11 input) [wave 2]
+- [ ] 108-03-PLAN.md — Candidate surface: JoinCandidatePane + CandidateCard + batched workers + source selector + self-match readout + grid/table + triage + public actions (JWB-07/10/11/12) [wave 3]
+- [ ] 108-04-PLAN.md — CompareDialog side-by-side (JWB-08) + matched-page open + in-dialog actions/triage/re-anchor + full-suite/ruff phase gate [wave 4]
 
 ---
 
