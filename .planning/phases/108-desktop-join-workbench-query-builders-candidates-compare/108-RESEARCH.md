@@ -852,22 +852,19 @@ All claims in this research are VERIFIED by reading source files. No assumptions
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **`JoinQueryBuilder` file placement: add to `desktop/join_workbench.py` or create `desktop/join_candidate_pane.py`?**
    - What we know: Phase 107 uses a single `desktop/join_workbench.py` per the single-file convention.
-   - What's unclear: At Phase 108 size the file may grow significantly.
-   - Recommendation: Start in `desktop/join_workbench.py` (matching the existing convention); if it exceeds ~1500 lines, split `CompareDialog` or `JoinQueryBuilder` to a separate file as a Wave N task.
+   - **RESOLVED:** All Phase 108 code stays in `desktop/join_workbench.py` (matches the Phase 107 convention; the existing i18n + `_vs_*` AST guards full-scan that module). If the file later exceeds ~1500 lines, splitting `CompareDialog`/`JoinQueryBuilder` to a separate `desktop/` module is a future refactor, not a Phase 108 task.
 
 2. **`page_position` UI affordance: where does the "Start of text" / "End of text" option appear?**
    - What we know: D-08 (Phase 106) specifies page-START anchor on first row only, page-END on last row only.
-   - What's unclear: The UI-SPEC does not show a "Start of text" / "End of text" control explicitly — it shows the row-level "⊢ starts line" / "ends line ⊣" checkboxes. The page-position option (whether the match must be at the page-level start/end) is a SEPARATE concept.
-   - Recommendation: Include a small "page position" combobox or pair of checkboxes in the builder's controls row (below the modifier row, alongside the source selector row). This is "Claude's Discretion" per the CONTEXT.md.
+   - **RESOLVED:** A small page-position control sits in the builder's controls row (below the modifier row, alongside the source-selector row) — page-START offered on the first row only, page-END on the last row only (realizes 106 D-08). "Claude's Discretion" per CONTEXT.md; implemented in Plan 02.
 
 3. **`gui_threads.SearchThread` `cancel_flag` mechanism:** Does cancellation work reliably for line-break searches?
    - What we know: The sketch sets `self._search_thread.cancel_flag = True` at line 1465.
-   - What's unclear: Whether `_execute_line_break_search` checks `cancel_flag` between hits (the iteration loop at `:8112`).
-   - Recommendation: Check `:8112` in a future planning task; if `cancel_flag` is not checked in the loop, the search will run to completion even after the user cancels. Not a blocker but a UX gap.
+   - **RESOLVED:** Pre-existing UX gap (whether `_execute_line_break_search` checks `cancel_flag` in its iteration loop at `:8112`), NOT introduced by Phase 108 and NOT a blocker. Phase 108 does not change `genizah_core` cancellation; deferred to a future `/gsd-quick` if scholars report long uncancellable line-break runs.
 
 ---
 

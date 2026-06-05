@@ -55,8 +55,8 @@ render, CompareDialog panes, and snippet highlighting in-widget are Qt/UAT.
 | D-13 (R-03) | `get_measurements_batch(sys_ids)` returns correct data via one IN-query | unit (headless) | `pytest tests/test_fjms_service.py -k measurements_batch -x` | ❌ W0 | ⬜ pending |
 | D-10 (R-05) | Triage keyed by `sys_id`; same fragment at different pages shares triage state | unit (headless) | `pytest tests/test_join_workbench_triage.py -x` | ❌ W0 | ⬜ pending |
 | D-06 (R-04) | `TabularQueryBuilderDialog.__init__` has no dialog-level `setLayoutDirection(RightToLeft)` | unit (AST/grep) | `pytest tests/test_tabular_builder_rtl.py -x` | ❌ W0 | ⬜ pending |
-| D-19 | All new builder/candidate/CompareDialog strings are `tr()`-wrapped | unit (AST guard) | `pytest tests/test_join_workbench_i18n.py -x` | ❌ W0 | ⬜ pending |
-| D-20 | No `_vs_*` private calls on the workbench path | static AST guard | `pytest tests/test_no_vs_private_calls_108.py -x` | ❌ W0 | ⬜ pending |
+| D-19 | All new builder/candidate/CompareDialog strings are `tr()`-wrapped | unit (AST guard) | `pytest tests/test_join_workbench_i18n.py -x` | ✅ (Phase 107, full-module scan) | ⬜ pending |
+| D-20 | No `_vs_*` private calls on the workbench path | static AST guard | `pytest tests/test_join_workbench_no_private.py -x` | ✅ (Phase 107, full-module scan) | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -64,12 +64,14 @@ render, CompareDialog panes, and snippet highlighting in-widget are Qt/UAT.
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_join_workbench_builder.py` — `JoinQueryBuilder.is_empty()`, `compose()` from widget state (headless pure logic), OR-box → `\|` term joining
+- [ ] `tests/test_join_workbench_builder.py` — `JoinQueryBuilder.is_empty()`, `build_side_query()`/`compose()` from widget state (headless pure logic), **multiple OR-boxes per row auto-joined into `BuilderRow.term` with `\|`** (D-04/D-05 multi-box design, user-confirmed 2026-06-05)
 - [ ] `tests/test_fjms_service.py::TestGetMeasurementsBatch` — batch IN-query returns correct data; missing sys_ids absent; batch size (500) respected
 - [ ] `tests/test_join_workbench_triage.py` — triage keyed by `sys_id`; same fragment at different pages shares triage state; cleared on re-anchor
 - [ ] `tests/test_tabular_builder_rtl.py` — AST assertion that `TabularQueryBuilderDialog.__init__` does NOT call `self.setLayoutDirection(RightToLeft)`
-- [ ] `tests/test_join_workbench_i18n.py` — AST guard: all new Phase 108 string literals wrapped in `tr()`
-- [ ] `tests/test_no_vs_private_calls_108.py` — static grep/AST: no `_vs_` method calls in Phase 108 additions
+
+*Already exist (Phase 107, full-module AST scan — cover Phase 108 additions automatically, no new file needed):*
+- `tests/test_join_workbench_i18n.py` — all string literals in `desktop/join_workbench.py` wrapped in `tr()` (D-19)
+- `tests/test_join_workbench_no_private.py` — no `_vs_*` method calls in `desktop/join_workbench.py` (D-20)
 
 *Existing Phase 106 tests in `tests/test_joins_lab.py` already cover compose, dedup, merge, cross-side, self-match, snippet helpers — no gaps there.*
 
