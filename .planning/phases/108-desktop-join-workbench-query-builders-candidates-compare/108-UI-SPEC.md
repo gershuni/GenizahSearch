@@ -1,10 +1,12 @@
 ---
 phase: 108
 slug: desktop-join-workbench-query-builders-candidates-compare
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-06-05
+reviewed_at: 2026-06-05
+review: 6/6 dimensions passed (gsd-ui-checker, pass 3)
 ---
 
 # Phase 108 — UI Design Contract
