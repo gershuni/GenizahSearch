@@ -67,11 +67,11 @@ requirement text is preserved in git history (prior `REQUIREMENTS.md`) and `MILE
   direction **only when the evidence is clear**; otherwise it stays silent. The scholar can always
   override. (Real fragment state is messy — the assist must never assert a guess.) **108 is the
   *manual* finder; the side-assist belongs to the *algorithmic* Component B.**
-- [ ] **JWB-06**: From the anchor (a selected line / torn word + a **direction**: rest-of-line,
+- [x] **JWB-06**: From the anchor (a selected line / torn word + a **direction**: rest-of-line,
   line-above, lines-below, lines-above, previous/next page), the scholar **seeds a search** that
   pre-fills the **existing** search module (variants / fuzzy / Responsa / regex); the seeded query is
   fully editable (try-and-error preserved).
-- [ ] **JWB-07**: The scholar collects search results as **candidates in a list** within the Workbench.
+- [x] **JWB-07**: The scholar collects search results as **candidates in a list** within the Workbench.
 - [ ] **JWB-08**: The scholar compares the anchor and a candidate **side-by-side** (image +
   transcription) to confirm a join by eye.
 - [ ] **JWB-09**: On a confirmed join the scholar can **act**: add it via the **existing joins

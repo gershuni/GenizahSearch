@@ -183,7 +183,7 @@ anchor↔candidate compare. The conservative `[`/`]` tear-side assist is **DEFER
   7. Manuscript dimensions appear as **evidence / soft warnings, never an *automatic* hard filter** (deferral #2 — **CONFIRMED** in discuss-phase: soft evidence + mismatch hint by default, PLUS an *opt-in* explicit min/max size cull, off by default).
 
 **Plans**: 4 plans
-- [ ] 108-01-PLAN.md — Wave-0 scaffolds: extend get_measurement_summaries_batch (+size_category, D-21/RR-6/RR-11) + TabularQueryBuilderDialog RTL-chrome fix (D-06) + builder/triage/RTL test stubs (parser-level OR + hoisted-modifier round-trip) [wave 1]
+- [x] 108-01-PLAN.md — Wave-0 scaffolds: extend get_measurement_summaries_batch (+size_category, D-21/RR-6/RR-11) + TabularQueryBuilderDialog RTL-chrome fix (D-06) + builder/triage/RTL test stubs (parser-level OR + hoisted-modifier round-trip) [wave 1]
 - [ ] 108-02-PLAN.md — JoinQueryBuilder widget (line-by-line, slash-group OR `(a/b)` with per-row hoisted modifiers `#(a/b)`, page-position, modifier row, Preview) + _DesktopSearchExecutor adapter (JWB-06/10/11 input) [wave 2]
 - [ ] 108-03-PLAN.md — Candidate surface: JoinCandidatePane + CandidateCard + batched workers + source selector + self-match readout + grid/table + triage + public actions (JWB-07/10/11/12) [wave 3]
 - [ ] 108-04-PLAN.md — CompareDialog side-by-side (JWB-08) + matched-page open + in-dialog actions/triage/re-anchor + full-suite/ruff phase gate [wave 4]
@@ -496,7 +496,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 |-------|-----------|----------------|--------|-----------|
 | 106. Joins Lab Shared Core (logic + adapters + tests) | v8.0.0 | 3/3 | Complete    | 2026-06-03 |
 | 107. Desktop Join Workbench — Anchor, Entry, Actions & Join Model | v8.0.0 | 3/3 | Complete    | 2026-06-04 |
-| 108. Desktop Join Workbench — Builders, Candidates & Compare | v8.0.0 | 0/? | Not started | - |
+| 108. Desktop Join Workbench — Builders, Candidates & Compare | v8.0.0 | 1/4 | In Progress|  |
 | 109. Visual-Similarity Merge & Soft-Retire | v8.0.0 | 0/? | Not started | - |
 | 110. Search-Support — Parallels Seeding (JSA-01) | v8.0.0 | 0/? | Not started | - |
 | 103. Search-Results LOCAL Export | v7.17→v8.0.0 | 4/4 | Complete    | 2026-06-01 |
