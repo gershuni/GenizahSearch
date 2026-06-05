@@ -892,9 +892,9 @@ All claims in this research are VERIFIED by reading source files. No assumptions
 | Pitfalls | HIGH | Each pitfall is grounded in a specific code line or test failure pattern from Phase 107 |
 | Batch enrichment | HIGH | Confirmed no batch measurement method exists; confirmed batch IN-query pattern to follow |
 
-### Open Questions
-- Where exactly the page-position (page-START/page-END) option appears in the builder UI (Claude's discretion; not covered in UI-SPEC).
-- Whether `SearchThread.cancel_flag` is checked inside `_execute_line_break_search` iteration loop (minor UX gap, not a blocker).
+### Open Questions (RESOLVED — see "## Open Questions (RESOLVED)" above)
+- Page-position (page-START/page-END) placement → **RESOLVED:** Claude's discretion; a small control in the builder controls row (page-START on first row only, page-END on last row only), implemented in Plan 02.
+- `SearchThread.cancel_flag` inside the `_execute_line_break_search` loop → **RESOLVED:** pre-existing UX gap, not introduced by Phase 108, not a blocker; deferred to a future `/gsd-quick`.
 
 ### Ready for Planning
 Research complete. Planner can now create PLAN.md files.
