@@ -1,43 +1,55 @@
 ---
 status: partial
 phase: 108-desktop-join-workbench-query-builders-candidates-compare
-source: [108-VERIFICATION.md]
+source: [108-VERIFICATION.md, 108-REDESIGN-SUMMARY.md]
 started: 2026-06-05T12:59:01Z
-updated: 2026-06-05T12:59:01Z
+updated: 2026-06-06T00:00:00Z
 ---
 
 ## Current Test
 
-[awaiting human testing]
+[awaiting human testing of the REDESIGNED Join Lab]
 
 ## Tests
 
-### 1. Grid/table candidate render
-expected: Open the Workbench, anchor a fragment, run a multi-box OR builder query. Grid shows 20 candidates per page (4 columns); each card has a thumbnail image loading, a dimension/material line from FJMS batch enrichment, a 72px snippet browser with highlighted terms, and Y/?/N triage buttons that change the card border color. Toggle grid↔table and confirm counts match.
+### 1. Layout & anchor pane
+expected: Join Lab opens. Anchor pane defaults to ~30% width and is resizable (drag the splitter). The four anchor actions are ICON-ONLY (📖 browse / 🧩 puzzle / ☰ list / 🔗 join, no text) at the bottom of the anchor pane and act on the ANCHOR.
 result: [pending]
 
-### 2. CompareDialog matched-page + cross-side label
-expected: With a candidate matching via the other-side builder (AND or OR), click Compare. CompareDialog opens modeless 1320x870; left pane shows anchor image+text; right pane shows candidate image for the cross-side neighbor page; meta line contains "other side matched" text; anchor pane stays static when stepping prev/next.
+### 2. Query builder — per-line ⚙, gap, signs, Search options
+expected: Each query line has a ⚙ that opens THAT line's options (negation/plene/prefix/suffix/wildcards + ⊢ starts / ⊣ ends line); wildcard-prefix is greyed when the line has >1 OR box. The gap "↓N" is a compact inline control on the line (no extra row). The ⓘ tooltip lists the sign legend, and typing #/word#/%/*word/word*/− in a box works. A "Search options ▾" button holds the global toggles (variants / Judeo-Arabic / flex / bidirectional). The read-only preview updates.
 result: [pending]
 
-### 3. Four actions + Add-as-Join Fragment B pre-fill
-expected: Trigger each of the four actions (Browse / Puzzle / Add to List / Add as Join) from a grid card and from inside CompareDialog. All four delegate to the workbench host without any _vs_* private calls; Add as Join opens JoinsDialog with Fragment A = anchor and Fragment B = candidate shelfmark pre-filled.
+### 3. Grid candidates + context menu
+expected: Grid shows ~20/page; each card has a selection checkbox, a thumbnail, material/dims, a highlighted snippet, Y/?/N triage, and ICON-ONLY action buttons (📖🧩☰🔗 + ⇄ compare) with tooltips. Right-click a card → context menu with the same actions + triage.
 result: [pending]
 
-### 4. Self-match readout + include-anchor toggle
-expected: Build a query the anchor itself satisfies; the self-match readout shows "⚓ anchor matches this query ✓" inline in the status bar. Toggle "Include anchor itself" (default OFF) and confirm the anchor appears in / disappears from the candidate list on the next search run.
+### 4. Table checkboxes + shared bulk bar
+expected: Table view has a leading checkbox column; clicking the column-0 header toggles all. Checking items (grid OR table) shows a shared bulk-action bar; 📖 Browse and 🔗 Add-as-join are enabled ONLY when exactly one is checked; 🧩 Add-to-Puzzle and ☰ Add-to-list act on all checked. Selection survives grid paging and grid↔table toggle.
 result: [pending]
 
-### 5. Global ja/flex/bidir toggles reach the engine (RR-14)
-expected: Toggle Judeo-Arabic, Flex Spacing, or Bidirectional in the builder and re-run search; results differ from the plain search because _merge_globals() merges them back into the composed ro after compose() hardcodes them False.
+### 5. Browse results / Compare
+expected: "Browse results ▶" (next to Grid/Table) opens the side-by-side compare stepping the filtered list (starts at the single selected item if exactly one, else the first); card ⇄ and table double-click also open compare. Cross-side candidates open to the neighbor page with an "other side matched" label; all four actions + Y/?/N triage + Re-anchor are reachable inside; the anchor pane stays static across Prev/Next.
+result: [pending]
+
+### 6. Puzzle includes the anchor
+expected: "Add to Puzzle" from a grid card, from the bulk bar, and from inside Compare adds the ANCHOR plus the candidate(s) to the puzzle canvas (anchor first, de-duped).
+result: [pending]
+
+### 7. Filter dialog with current-fragment info
+expected: "Filter ▾" opens a dialog with text/material/has-dimensions/triage/size controls, PLUS a "Current fragment" panel showing the anchor's known fields (library/material/size/lines — unknowns omitted) and "from anchor" shortcuts. Filters narrow the candidate list.
+result: [pending]
+
+### 8. Other side + global options reach the engine
+expected: "search also on the other side of the leaf (p ±1)" with AND-narrow / OR-widen narrows/widens via the adjacent page. Toggling Judeo-Arabic / Flex Spacing / Bidirectional in Search options changes the result set (the globals reach the engine — RR-14).
 result: [pending]
 
 ## Summary
 
-total: 5
+total: 8
 passed: 0
 issues: 0
-pending: 5
+pending: 8
 skipped: 0
 blocked: 0
 
