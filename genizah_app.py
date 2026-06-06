@@ -3446,7 +3446,7 @@ class GenizahGUI(QMainWindow):
         corner_widget = QWidget()
         corner_layout = QHBoxLayout(corner_widget)
         corner_layout.setContentsMargins(5, 0, 5, 0)
-        corner_layout.setSpacing(8)
+        corner_layout.setSpacing(3)  # tightened (Feature 6)
 
         def _corner_sep():
             s = QLabel("|"); s.setStyleSheet("color: gray;"); return s
@@ -3501,6 +3501,16 @@ class GenizahGUI(QMainWindow):
         self.corner_puzzle_btn.setStyleSheet("font-size: 16px;")
         self.corner_puzzle_btn.clicked.connect(self._open_puzzle_window)
         corner_layout.addWidget(self.corner_puzzle_btn)
+        corner_layout.addWidget(_corner_sep())
+
+        # Joins Lab button (Feature 6)
+        self.corner_joins_btn = QPushButton("\U0001F517")  # 🔗 link emoji
+        self.corner_joins_btn.setFlat(True)
+        self.corner_joins_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.corner_joins_btn.setToolTip(tr("Joins Lab"))
+        self.corner_joins_btn.setStyleSheet("font-size: 16px;")
+        self.corner_joins_btn.clicked.connect(self.open_join_workbench)
+        corner_layout.addWidget(self.corner_joins_btn)
         corner_layout.addWidget(_corner_sep())
 
         # Settings gear
@@ -15423,6 +15433,31 @@ class GenizahGUI(QMainWindow):
     # Phase 107: Join Workbench host methods                              #
     # ------------------------------------------------------------------ #
 
+    def open_join_workbench(self):
+        """Open the Join Lab (no anchor required). Restores last session state if available.
+
+        Called by the corner_joins_btn (Feature 6) and used as the new no-arg launcher.
+        If persisted join_lab state exists with a non-empty anchor, restore_state() is called
+        to rebuild input + defer the search to the background worker (hard constraint: no
+        synchronous search on the UI thread — Feature 7).
+        """
+        from desktop.join_workbench import JoinWorkbenchWindow  # lazy import (desktop-only)
+        if self._join_workbench is None or not self._join_workbench.isVisible():
+            self._join_workbench = JoinWorkbenchWindow(self, self)
+        self._join_workbench.show()
+        self._join_workbench.raise_()
+        self._join_workbench.activateWindow()
+
+        # Restore last session state if available (Feature 7)
+        try:
+            from shared.session_persistence import load_session_state
+            state = load_session_state() or {}
+            jl_state = state.get("join_lab") or {}
+            if jl_state and jl_state.get("anchor", {}).get("sys_id"):
+                self._join_workbench.restore_state(jl_state)
+        except Exception as exc:
+            logger.debug("open_join_workbench: restore_state failed: %s", exc)
+
     def open_joins_workbench(self, res: dict):
         """Open (or re-anchor) the Join Workbench for the given result.
         D-01: modeless (show(), not exec()). D-02: single reusable instance - second call re-anchors.
@@ -25068,6 +25103,15 @@ class GenizahGUI(QMainWindow):
             }
             # Add composition summary text
             state_dict['composition_search']['summary_text'] = getattr(self, 'comp_summary_text', '')
+
+            # Feature 7: persist Join Lab INPUT state (never results)
+            jw = getattr(self, '_join_workbench', None)
+            if jw is not None:
+                try:
+                    state_dict['join_lab'] = jw.to_state()
+                except Exception as _jl_exc:
+                    logger.debug("_save_session: join_lab to_state failed: %s", _jl_exc)
+
             save_session_state(state_dict)
         except Exception as e:
             logger.error("Failed to save session state: %s", e)
@@ -25410,6 +25454,18 @@ class GenizahGUI(QMainWindow):
                     except Exception as exc:
                         logger.warning("_restore_local_browse failed: %s", exc)
                 QTimer.singleShot(400, _restore_local_browse)
+
+            # Feature 7: restore Join Lab if it was open (defers search to background worker)
+            jl_state = state.get('join_lab') or {}
+            if jl_state.get('open') and jl_state.get('anchor', {}).get('sys_id'):
+                def _restore_join_lab(jls=jl_state):
+                    try:
+                        self.open_join_workbench()
+                        if self._join_workbench is not None:
+                            self._join_workbench.restore_state(jls)
+                    except Exception as exc:
+                        logger.warning("_restore_join_lab failed: %s", exc)
+                QTimer.singleShot(500, _restore_join_lab)
 
             # Hide restore progress bar and show "Session restored" in statusbar
             self.search_progress.setVisible(False)
