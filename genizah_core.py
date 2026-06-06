@@ -3548,6 +3548,110 @@ def _get_fjms_service():
     return _fjms_svc
 
 
+# ------------------------------------------------------------------------------
+#  Bounded, thread-safe LRU for MetadataManager.nli_cache
+# ------------------------------------------------------------------------------
+# Origin: 2026-06-06 production heap re-attribution. ``self.nli_cache`` was a
+# plain ``dict`` with NO eviction; on the long-running web service it accrued
+# one metadata entry per unique manuscript ever browsed/enriched and never
+# released them (50K+ entries and still climbing on a 3-day-old process). This
+# bounds it to ``NLI_CACHE_MAX_ENTRIES`` with LRU eviction.
+#
+# Why a *locked* wrapper rather than the lock-free ``_bounded_cache_*`` helpers
+# used for the manifest caches: nli_cache is read/written from MULTIPLE threads
+# (the 2-worker ``nli_executor`` pool AND Starlette's sync-route threadpool) and
+# is iterated at genizah_core.py:~5062/~5097. A plain dict's get/set are
+# GIL-atomic, but an OrderedDict's ``move_to_end``/``popitem`` are not, so
+# eviction under concurrency could corrupt ordering or raise. The RLock makes
+# each operation atomic and ``items()``/``keys()``/``values()``/iteration return
+# snapshots so concurrent writes can't raise "mutated during iteration".
+#
+# Pickles as a plain ``dict`` (``__reduce__``) so ``nli_cache.pkl`` keeps its
+# existing on-disk format and stays loadable by the desktop app / older builds.
+_NLI_CACHE_MAX_ENTRIES = max(0, int(os.environ.get('NLI_CACHE_MAX_ENTRIES', '75000')))
+
+
+class _BoundedLRUCache:
+    """Thread-safe, bounded, dict-like LRU.
+
+    Implements only the ``nli_cache`` API surface actually used across both
+    apps: ``in``, ``[]`` (get/set), ``.get()``, ``.items()``, ``.keys()``,
+    ``.values()``, ``len()`` and iteration. ``maxsize <= 0`` disables eviction
+    (unbounded — restores legacy behavior for an escape hatch).
+    """
+
+    __slots__ = ('_data', '_maxsize', '_lock')
+
+    def __init__(self, maxsize=_NLI_CACHE_MAX_ENTRIES, data=None):
+        self._data = OrderedDict()
+        self._maxsize = int(maxsize)
+        self._lock = threading.RLock()
+        if data:
+            with self._lock:
+                for key, value in data.items():
+                    self._data[key] = value
+                self._evict_locked()
+
+    def _evict_locked(self):
+        # Caller must hold self._lock.
+        if self._maxsize > 0:
+            while len(self._data) > self._maxsize:
+                self._data.popitem(last=False)
+
+    def __contains__(self, key):
+        with self._lock:
+            return key in self._data
+
+    def __getitem__(self, key):
+        with self._lock:
+            value = self._data[key]  # raises KeyError like dict
+            self._data.move_to_end(key)
+            return value
+
+    def __setitem__(self, key, value):
+        with self._lock:
+            self._data[key] = value
+            self._data.move_to_end(key)
+            self._evict_locked()
+
+    def get(self, key, default=None):
+        with self._lock:
+            if key not in self._data:
+                return default
+            self._data.move_to_end(key)
+            return self._data[key]
+
+    def items(self):
+        with self._lock:
+            return list(self._data.items())
+
+    def keys(self):
+        with self._lock:
+            return list(self._data.keys())
+
+    def values(self):
+        with self._lock:
+            return list(self._data.values())
+
+    def __len__(self):
+        with self._lock:
+            return len(self._data)
+
+    def __iter__(self):
+        with self._lock:
+            return iter(list(self._data.keys()))
+
+    def __reduce__(self):
+        # Serialize as a plain dict: keeps nli_cache.pkl format unchanged and
+        # loadable by older builds / the desktop app.
+        with self._lock:
+            return (dict, (dict(self._data),))
+
+    @property
+    def maxsize(self):
+        return self._maxsize
+
+
 # ==============================================================================
 #  METADATA MANAGER
 # ==============================================================================
@@ -3558,7 +3662,8 @@ class MetadataManager:
     """Handle metadata parsing, remote retrieval, and persistent caching."""
     def __init__(self):
         self.meta_map = {}
-        self.nli_cache = {}
+        # Bounded LRU (was an unbounded dict — see _BoundedLRUCache above).
+        self.nli_cache = _BoundedLRUCache()
         self.csv_bank = {}
         self._shelfmark_index = None
         self.nli_executor = ThreadPoolExecutor(max_workers=2)
@@ -3585,7 +3690,14 @@ class MetadataManager:
     def _load_small_caches(self):
         if os.path.exists(Config.CACHE_NLI):
             try:
-                with open(Config.CACHE_NLI, 'rb') as f: self.nli_cache = pickle.load(f)
+                with open(Config.CACHE_NLI, 'rb') as f:
+                    _loaded = pickle.load(f)
+                # On-disk format is a plain dict; wrap into the bounded LRU.
+                # (Defensive: tolerate a legacy pickled _BoundedLRUCache too.)
+                if isinstance(_loaded, _BoundedLRUCache):
+                    self.nli_cache = _loaded
+                else:
+                    self.nli_cache = _BoundedLRUCache(data=dict(_loaded))
             except Exception as e:
                 LOGGER.warning("Failed to load NLI cache from %s: %s", Config.CACHE_NLI, e)
         if os.path.exists(Config.CACHE_META):
@@ -3759,7 +3871,9 @@ class MetadataManager:
 
     def save_caches(self):
         try:
-            with open(Config.CACHE_NLI, 'wb') as f: pickle.dump(self.nli_cache, f)
+            # Persist as a plain dict (snapshot) so the on-disk format is
+            # unchanged and remains loadable by older builds / the desktop app.
+            with open(Config.CACHE_NLI, 'wb') as f: pickle.dump(dict(self.nli_cache.items()), f)
         except Exception as e:
             LOGGER.error("Failed to persist NLI cache to %s: %s", Config.CACHE_NLI, e)
 
