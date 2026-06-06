@@ -790,7 +790,15 @@ if _QT_AVAILABLE:
             info_btn = QPushButton("ⓘ")
             info_btn.setFixedWidth(22)
             info_btn.setFlat(True)
-            info_btn.setToolTip(tr("Typed sign legend tooltip"))
+            info_btn.setToolTip(tr(
+                "Type signs directly in a word box:\n"
+                "  #word — grammatical prefixes\n"
+                "  word# — grammatical suffixes\n"
+                "  %word — plene/defective spelling\n"
+                "  *word / word* — wildcard\n"
+                "  −word — exclude\n"
+                "(the same options are available via the line's ⚙)"
+            ))
             row_layout.addWidget(info_btn)
 
             # Boxes strip (horizontal layout for OR word-boxes)
@@ -1217,6 +1225,102 @@ if _QT_AVAILABLE:
             if self._on_search_cb is not None:
                 self._on_search_cb()
 
+        # ------------------------------------------------------------------
+        # Session persistence (Feature 7) — INPUT state only; no results.
+        # ------------------------------------------------------------------
+
+        def to_state(self) -> dict:
+            """Serialize the builder INPUT state to a plain dict (for session persistence).
+
+            Captures: per-row boxes (text), mods, start/end checkbox states, gap value;
+            _global_opts; and page_position index.
+            Never persists candidates or results.
+            """
+            rows_state = []
+            for entry in self.rows:
+                rows_state.append({
+                    "boxes": [b["edit"].text() for b in entry["boxes"]],
+                    "mods": dict(entry["mods"]),
+                    "start": entry["start"].isChecked(),
+                    "end": entry["end"].isChecked(),
+                    "gap": entry["gap"].value(),
+                })
+            page_pos_idx = 0
+            if self.page_pos is not None:
+                page_pos_idx = self.page_pos.currentIndex()
+            return {
+                "rows": rows_state,
+                "global_opts": dict(self._global_opts),
+                "page_pos_idx": page_pos_idx,
+            }
+
+        def from_state(self, state: dict):
+            """Restore builder INPUT state from a plain dict (inverse of to_state).
+
+            Clears existing rows, then rebuilds from state["rows"].
+            Safe to call on a freshly constructed builder.
+            """
+            rows_data = state.get("rows") or []
+            global_opts = state.get("global_opts") or {}
+            page_pos_idx = state.get("page_pos_idx", 0)
+
+            # Restore global opts FIRST (add_row calls _update_preview which reads these)
+            self._global_opts.update({
+                k: bool(global_opts.get(k, False))
+                for k in ("variants", "ja", "flex_spacing", "bidirectional")
+            })
+
+            # Remove all existing rows
+            for entry in list(self.rows):
+                try:
+                    entry["widget"].setParent(None)
+                    entry["widget"].deleteLater()
+                except RuntimeError:
+                    pass
+            self.rows.clear()
+
+            # Rebuild rows from state
+            for row_data in rows_data:
+                boxes_texts = row_data.get("boxes") or [""]
+                mods = row_data.get("mods") or {}
+                start_chk = row_data.get("start", False)
+                end_chk = row_data.get("end", False)
+                gap_val = row_data.get("gap", 0)
+
+                # add_row adds the first box with placeholder text
+                entry = self.add_row(placeholder=boxes_texts[0] if boxes_texts else "")
+                # Set text on the first box
+                if boxes_texts:
+                    try:
+                        entry["boxes"][0]["edit"].setText(boxes_texts[0])
+                    except (IndexError, KeyError):
+                        pass
+                # Add extra OR boxes
+                for extra_text in boxes_texts[1:]:
+                    self.add_or_box(entry)
+                    try:
+                        entry["boxes"][-1]["edit"].setText(extra_text)
+                    except (IndexError, KeyError):
+                        pass
+                # Restore mods, start/end, gap
+                entry["mods"] = dict(mods)
+                entry["start"].setChecked(bool(start_chk))
+                entry["end"].setChecked(bool(end_chk))
+                entry["gap"].setValue(int(gap_val))
+                self._update_row_indicator(entry)
+
+            # If no rows were restored, add one blank row
+            if not self.rows:
+                self.add_row(placeholder=self._first_hint)
+
+            # Restore page-position selection
+            if self.page_pos is not None:
+                idx = int(page_pos_idx)
+                if 0 <= idx < self.page_pos.count():
+                    self.page_pos.setCurrentIndex(idx)
+
+            self._update_preview()
+
     # -------------------------------------------------------------------------
     # _DesktopSearchExecutor — thin SearchExecutor Protocol adapter (D-22, Plan 03).
     # Wraps self.searcher (SearchEngine) + self.meta_mgr (MetadataManager).
@@ -1589,6 +1693,33 @@ if _QT_AVAILABLE:
             trow.addStretch()
             lay.addLayout(trow)
 
+            # 5b. Per-card folio browse: ◀ p.N ▶ (Feature 3)
+            # Maintains a per-card current-page index; flips the card thumbnail in place.
+            # RR-12: None-page guard — default to 1 if c.page is None.
+            self._card_page = max(1, c.page or 1)
+            folio_row = QHBoxLayout()
+            folio_row.setSpacing(2)
+            self._folio_prev_btn = QPushButton("◀")
+            self._folio_prev_btn.setFixedSize(24, 22)
+            self._folio_prev_btn.setAccessibleName(tr("Previous folio"))
+            self._folio_prev_btn.setToolTip(tr("Previous folio"))
+            self._folio_prev_btn.clicked.connect(self._card_folio_prev)
+            folio_row.addWidget(self._folio_prev_btn)
+
+            self._folio_lbl = QLabel(f"p.{self._card_page}")
+            self._folio_lbl.setStyleSheet("font-size:10px;color:#94a3b8;")
+            folio_row.addWidget(self._folio_lbl)
+
+            self._folio_next_btn = QPushButton("▶")
+            self._folio_next_btn.setFixedSize(24, 22)
+            self._folio_next_btn.setAccessibleName(tr("Next folio"))
+            self._folio_next_btn.setToolTip(tr("Next folio"))
+            self._folio_next_btn.clicked.connect(self._card_folio_next)
+            folio_row.addWidget(self._folio_next_btn)
+
+            folio_row.addStretch()
+            lay.addLayout(folio_row)
+
             # 6. Action row: ICON-ONLY buttons (adapted_decision 9)
             arow = QHBoxLayout()
             arow.setSpacing(2)
@@ -1722,6 +1853,38 @@ if _QT_AVAILABLE:
             except RuntimeError:
                 pass   # widget deleted — standard Phase 107 guard
 
+        def _card_folio_prev(self):
+            """Step to the previous folio image for this card (Feature 3)."""
+            if self._card_page <= 1:
+                return
+            self._card_page -= 1
+            self._refresh_card_image()
+
+        def _card_folio_next(self):
+            """Step to the next folio image for this card (Feature 3).
+
+            Upper bound: clamp at the image-count once known (graceful overshoot → no image).
+            """
+            self._card_page += 1
+            self._refresh_card_image()
+
+        def _refresh_card_image(self):
+            """Re-enqueue the image for the current _card_page via the window's resolver.
+
+            RR-12: _enqueue_image_for_pane guards None internally; page is always int here.
+            """
+            try:
+                self._folio_lbl.setText(f"p.{self._card_page}")
+                self.img.setText(tr("loading…"))
+            except RuntimeError:
+                return
+            try:
+                self.pane.wb._enqueue_image_for_pane(
+                    self.img, self.sid, self._card_page, width=400
+                )
+            except Exception:
+                pass
+
     # -------------------------------------------------------------------------
     # Plan 03 — JoinCandidatePane (QWidget) — right-pane candidate hunt surface
     # -------------------------------------------------------------------------
@@ -1850,7 +2013,7 @@ if _QT_AVAILABLE:
             self.size_max.setRange(0, 200)
             self.size_max.setValue(200)
 
-            # --- Results toolbar: [Grid][Table] + Browse results ▶ + Filter ▾ + count ---
+            # --- Results toolbar: [Grid][Table] + Browse results ▶ + Clear + Filter ▾ + count ---
             res_toolbar = QHBoxLayout()
             res_toolbar.setSpacing(4)
 
@@ -1862,6 +2025,14 @@ if _QT_AVAILABLE:
             self.btn_browse_results.setToolTip(tr("Open Browse results compare window"))
             self.btn_browse_results.clicked.connect(self._browse_results)
             res_toolbar.addWidget(self.btn_browse_results)
+
+            # "Clear" button — resets lab + clears persisted join_lab session state (Feature 5)
+            self.btn_clear_lab = QPushButton(tr("Clear"))
+            self.btn_clear_lab.setToolTip(
+                tr("Clear anchor, builders, candidates, triage and session state")
+            )
+            self.btn_clear_lab.clicked.connect(self._clear_lab)
+            res_toolbar.addWidget(self.btn_clear_lab)
 
             res_toolbar.addStretch()
 
@@ -1924,19 +2095,22 @@ if _QT_AVAILABLE:
             bulk_bar.addWidget(self._bulk_bar_widget)
             rv.addLayout(bulk_bar)
 
-            # --- Pagination row ---
+            # --- Pagination row (hidden until filtered > _PER_PAGE) ---
             pag_row = QHBoxLayout()
             pag_row.setSpacing(4)
             self.btn_prev = QPushButton(tr("← Prev"))
             self.btn_prev.setFixedWidth(60)
+            self.btn_prev.setVisible(False)  # hidden until needed
             self.btn_prev.clicked.connect(self._prev_page)
             pag_row.addWidget(self.btn_prev)
 
             self.page_lbl = QLabel("")
+            self.page_lbl.setVisible(False)  # hidden until needed
             pag_row.addWidget(self.page_lbl)
 
             self.btn_next = QPushButton(tr("Next →"))
             self.btn_next.setFixedWidth(60)
+            self.btn_next.setVisible(False)  # hidden until needed
             self.btn_next.clicked.connect(self._next_page)
             pag_row.addWidget(self.btn_next)
 
@@ -2431,10 +2605,21 @@ if _QT_AVAILABLE:
             # Table shows all filtered (no pagination), so row == global_filtered_idx
             self.open_compare(row)
 
+        def _update_pagination_visibility(self):
+            """Show prev/next row ONLY when filtered results span more than one page."""
+            visible = len(self.wb.filtered) > _PER_PAGE
+            try:
+                self.btn_prev.setVisible(visible)
+                self.page_lbl.setVisible(visible)
+                self.btn_next.setVisible(visible)
+            except RuntimeError:
+                pass
+
         def _update_pagination(self):
-            """Update prev/next buttons and page label."""
+            """Update prev/next buttons and page label, and hide row when not needed."""
             total = len(self.wb.filtered)
             total_pages = max(1, (total + _PER_PAGE - 1) // _PER_PAGE)
+            self._update_pagination_visibility()
             try:
                 self.btn_prev.setEnabled(self._page > 0)
                 self.btn_next.setEnabled(self._page < total_pages - 1)
@@ -2467,6 +2652,86 @@ if _QT_AVAILABLE:
                 pass
             self.wb._cancel_images()
             self.render_results()
+
+        def _clear_lab(self):
+            """Clear anchor, builders, candidates, triage, selection, filter (Feature 5).
+
+            Also wipes the persisted join_lab session state so a subsequent restore is empty.
+            """
+            # Reset anchor on the window
+            self.wb._anchor_sid = None
+            self.wb._anchor_res = None
+            self.wb._anchor_images = []
+            self.wb._anchor_idx = 0
+            self.wb.triage = {}
+            self.wb.filtered = []
+            try:
+                self.wb.anchor_shelf.setText("")
+                self.wb.anchor_meta.setText("")
+                self.wb.anchor_img_label.clear()
+            except RuntimeError:
+                pass
+
+            # Reset builders — clear all rows, add one blank row back
+            for builder in (self.builder, self.other_builder):
+                # Remove all rows
+                for entry in list(builder.rows):
+                    try:
+                        entry["widget"].setParent(None)
+                        entry["widget"].deleteLater()
+                    except RuntimeError:
+                        pass
+                builder.rows.clear()
+                builder._global_opts = {
+                    "variants": False,
+                    "ja": False,
+                    "flex_spacing": False,
+                    "bidirectional": False,
+                }
+                builder.add_row(placeholder=builder._first_hint)
+
+            # Reset other-side enable
+            try:
+                self.other_enable.setChecked(False)
+                self.other_box.setVisible(False)
+            except RuntimeError:
+                pass
+
+            # Reset candidates / selection
+            self.results = []
+            self._text_cands = None
+            self._selected_keys.clear()
+            self._enrich.clear()
+            self._page = 0
+            self._update_bulk_bar()
+
+            # Reset filter controls to defaults
+            try:
+                self.filter_in.clear()
+                self.mat_filter.setCurrentIndex(0)
+                self.tri_filter.setCurrentIndex(0)
+            except RuntimeError:
+                pass
+
+            # Re-render (empty)
+            self.wb._cancel_images()
+            self.render_results()
+            self._update_pagination_visibility()
+            try:
+                self.status.setText(
+                    tr("Build a line-by-line query, then Find Candidates.")
+                )
+            except RuntimeError:
+                pass
+
+            # Wipe persisted join_lab state (write empty state on next _save_session)
+            try:
+                from shared.session_persistence import load_session_state, save_session_state
+                state = load_session_state() or {}
+                state["join_lab"] = {"open": False}
+                save_session_state(state)
+            except Exception as exc:
+                logger.debug("_clear_lab: could not wipe join_lab state: %s", exc)
 
         def _restyle_card(self, sys_id: str):
             """Restyle any visible card whose sys_id matches (triage-state change)."""
@@ -2907,9 +3172,11 @@ if _QT_AVAILABLE:
                 self.paint()
 
         def _pane(self) -> dict:
-            """Factory: build one compare pane (VBoxLayout + 4 widgets).
+            """Factory: build one compare pane (VBoxLayout + 4 widgets + folio controls).
 
-            Returns dict with keys: box, shelf, meta, img, txt.
+            Returns dict with keys: box, shelf, meta, folio_prev, folio_lbl, folio_next,
+            img, txt, sys_id (str), page (int).
+            Folio controls flip that pane's image independently of candidate-list Prev/Next.
             """
             box = QVBoxLayout()
             shelf = QLabel()
@@ -2921,6 +3188,24 @@ if _QT_AVAILABLE:
             meta.setWordWrap(True)
             meta.setStyleSheet(f"font-size:11px;color:{_META_COLOR};")
 
+            # Per-pane folio browse row (Feature 4)
+            folio_row = QHBoxLayout()
+            folio_row.setSpacing(2)
+            folio_prev = QPushButton("◀")
+            folio_prev.setFixedSize(28, 22)
+            folio_prev.setToolTip(tr("Previous folio"))
+            folio_prev.setAccessibleName(tr("Previous folio"))
+            folio_lbl = QLabel("p.1")
+            folio_lbl.setStyleSheet(f"font-size:10px;color:{_META_COLOR};")
+            folio_next = QPushButton("▶")
+            folio_next.setFixedSize(28, 22)
+            folio_next.setToolTip(tr("Next folio"))
+            folio_next.setAccessibleName(tr("Next folio"))
+            folio_row.addWidget(folio_prev)
+            folio_row.addWidget(folio_lbl)
+            folio_row.addWidget(folio_next)
+            folio_row.addStretch()
+
             img = QLabel(tr("…"))
             img.setMinimumHeight(360)
             img.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -2931,9 +3216,26 @@ if _QT_AVAILABLE:
 
             box.addWidget(shelf)
             box.addWidget(meta)
+            box.addLayout(folio_row)
             box.addWidget(img)
             box.addWidget(txt, 1)
-            return {"box": box, "shelf": shelf, "meta": meta, "img": img, "txt": txt}
+
+            pane_dict = {
+                "box": box,
+                "shelf": shelf,
+                "meta": meta,
+                "folio_prev": folio_prev,
+                "folio_lbl": folio_lbl,
+                "folio_next": folio_next,
+                "img": img,
+                "txt": txt,
+                "sys_id": "",
+                "page": 1,
+            }
+            # Wire folio buttons — capture pane_dict by reference
+            folio_prev.clicked.connect(lambda _=False, pd=pane_dict: self._pane_folio_step(pd, -1))
+            folio_next.clicked.connect(lambda _=False, pd=pane_dict: self._pane_folio_step(pd, +1))
+            return pane_dict
 
         def _fill_anchor(self, pane: dict, res_dict: dict):
             """Fill the anchor pane from the raw result DICT (read with r_* helpers, RR-2).
@@ -2975,6 +3277,13 @@ if _QT_AVAILABLE:
             # Image: per-page via _enqueue_image_for_pane (RR-7); passes page through
             # (may be None for synthetic anchor — the pump guards None per RR-12)
             p = page_of(res_dict)
+            # Track pane identity for per-pane folio browse (Feature 4)
+            pane["sys_id"] = r_sid(res_dict)
+            pane["page"] = max(1, p or 1)
+            try:
+                pane["folio_lbl"].setText(f"p.{pane['page']}")
+            except (RuntimeError, KeyError):
+                pass
             self.wb._enqueue_image_for_pane(pane["img"], r_sid(res_dict), p, width=1400)
 
         def _fill_candidate(self, pane: dict, c):
@@ -3022,6 +3331,13 @@ if _QT_AVAILABLE:
             # Image: matched page via _enqueue_image_for_pane (RR-7).
             # RR-12: pass c.page DIRECTLY (Optional[int]) — the pump guards None;
             # no page-1 arithmetic on c.page here.
+            # Track pane identity for per-pane folio browse (Feature 4)
+            pane["sys_id"] = c.sys_id
+            pane["page"] = max(1, c.page or 1)
+            try:
+                pane["folio_lbl"].setText(f"p.{pane['page']}")
+            except (RuntimeError, KeyError):
+                pass
             self.wb._enqueue_image_for_pane(pane["img"], c.sys_id, c.page, width=1400)
 
         def paint(self):
@@ -3063,6 +3379,28 @@ if _QT_AVAILABLE:
             """Set current candidate as the new anchor, then close dialog."""
             self.wb.set_anchor(candidate_to_result_dict(self._cur()))
             self.accept()
+
+        def _pane_folio_step(self, pane: dict, delta: int):
+            """Step pane image to the adjacent folio in place (Feature 4).
+
+            Independent of the candidate-list prev/next (which steps candidates).
+            RR-12: pane["page"] is always int (≥1); guard against going below 1.
+            """
+            new_page = max(1, pane["page"] + delta)
+            pane["page"] = new_page
+            try:
+                pane["folio_lbl"].setText(f"p.{new_page}")
+                pane["img"].setText(tr("loading…"))
+            except (RuntimeError, KeyError):
+                return
+            if not pane.get("sys_id"):
+                return
+            try:
+                self.wb._enqueue_image_for_pane(
+                    pane["img"], pane["sys_id"], new_page, width=1400
+                )
+            except Exception:
+                pass
 
     # -------------------------------------------------------------------------
     # JoinWorkbenchWindow — the main modeless QDialog shell (Plan 02, JWB-01).
@@ -3857,6 +4195,136 @@ if _QT_AVAILABLE:
                 except Exception:
                     pass
                 self._thumb_resolver = None
+
+        # ------------------------------------------------------------------
+        # Session persistence (Feature 7) — INPUT only; never saves results.
+        # ------------------------------------------------------------------
+
+        def to_state(self) -> dict:
+            """Serialize the Join Lab INPUT state to a plain dict.
+
+            Captured: anchor identity, both builder states, other-side enable + mode,
+            triage dict, filter text + material + triage filter + view_mode, open flag.
+            Candidate result lists are NEVER persisted (search_history.json lesson).
+            """
+            pane = getattr(self, "_candidate_pane", None)
+            anchor_state = {
+                "sys_id": self._anchor_sid or "",
+                "shelfmark": r_shelf(self._anchor_res) if self._anchor_res else "",
+                "img": (self._anchor_res.get("display") or {}).get("img", 1)
+                       if self._anchor_res else 1,
+                "uid": (self._anchor_res or {}).get("uid", ""),
+            }
+            builder_state = pane.builder.to_state() if pane else {}
+            other_builder_state = pane.other_builder.to_state() if pane else {}
+            other_enabled = False
+            other_mode_idx = 0
+            filter_text = ""
+            mat_filter_idx = 0
+            tri_filter_idx = 0
+            view_mode = "grid"
+            if pane is not None:
+                try:
+                    other_enabled = pane.other_enable.isChecked()
+                    other_mode_idx = pane.combine_combo.currentIndex()
+                    filter_text = pane.filter_in.text()
+                    mat_filter_idx = pane.mat_filter.currentIndex()
+                    tri_filter_idx = pane.tri_filter.currentIndex()
+                    view_mode = pane.view_mode
+                except RuntimeError:
+                    pass
+
+            return {
+                "open": self.isVisible(),
+                "anchor": anchor_state,
+                "builder": builder_state,
+                "other_builder": other_builder_state,
+                "other_enabled": other_enabled,
+                "other_mode_idx": other_mode_idx,
+                "triage": dict(self.triage),
+                "filter_text": filter_text,
+                "mat_filter_idx": mat_filter_idx,
+                "tri_filter_idx": tri_filter_idx,
+                "view_mode": view_mode,
+            }
+
+        def restore_state(self, state: dict):
+            """Restore the Join Lab INPUT state from a dict (see to_state).
+
+            Sets the anchor, rebuilds builders/filters/triage, then DEFERS the
+            candidate search to the background SearchThread via do_search().
+            NEVER blocks the UI thread — no synchronous search here (hard constraint).
+            """
+            if not state:
+                return
+
+            # Restore anchor
+            anchor = state.get("anchor") or {}
+            sid = anchor.get("sys_id") or ""
+            if sid:
+                shelfmark = anchor.get("shelfmark") or sid
+                img = anchor.get("img") or 1
+                uid = anchor.get("uid") or f"{sid}_P001"
+                res_dict = {
+                    "display": {"id": sid, "shelfmark": shelfmark, "img": img},
+                    "uid": uid,
+                }
+                self.set_anchor(res_dict)
+
+            pane = getattr(self, "_candidate_pane", None)
+            if pane is None:
+                return
+
+            # Restore builders
+            builder_state = state.get("builder") or {}
+            if builder_state:
+                try:
+                    pane.builder.from_state(builder_state)
+                except Exception as exc:
+                    logger.warning("restore_state: builder from_state failed: %s", exc)
+
+            other_builder_state = state.get("other_builder") or {}
+            if other_builder_state:
+                try:
+                    pane.other_builder.from_state(other_builder_state)
+                except Exception as exc:
+                    logger.warning("restore_state: other_builder from_state failed: %s", exc)
+
+            # Restore other-side enable + mode
+            try:
+                other_enabled = bool(state.get("other_enabled", False))
+                pane.other_enable.setChecked(other_enabled)
+                pane.other_box.setVisible(other_enabled)
+                other_mode_idx = int(state.get("other_mode_idx", 0))
+                if 0 <= other_mode_idx < pane.combine_combo.count():
+                    pane.combine_combo.setCurrentIndex(other_mode_idx)
+            except RuntimeError:
+                pass
+
+            # Restore triage
+            self.triage = dict(state.get("triage") or {})
+
+            # Restore filter controls
+            try:
+                filter_text = state.get("filter_text") or ""
+                pane.filter_in.setText(filter_text)
+                mat_filter_idx = int(state.get("mat_filter_idx", 0))
+                if 0 <= mat_filter_idx < pane.mat_filter.count():
+                    pane.mat_filter.setCurrentIndex(mat_filter_idx)
+                tri_filter_idx = int(state.get("tri_filter_idx", 0))
+                if 0 <= tri_filter_idx < pane.tri_filter.count():
+                    pane.tri_filter.setCurrentIndex(tri_filter_idx)
+                view_mode = state.get("view_mode") or "grid"
+                if view_mode != pane.view_mode:
+                    pane.toggle_view()
+            except RuntimeError:
+                pass
+
+            # DEFERRED search — runs on the background SearchThread, never on the UI thread
+            # (hard constraint: no synchronous search / heavy work in restore).
+            if sid and not pane.builder.is_empty():
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(0, pane.do_search)
 
         # ------------------------------------------------------------------
         # Known-joins panel

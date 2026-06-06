@@ -3739,9 +3739,9 @@ TRANSLATIONS.update({
     "The LAST word must be at the END of the line (left edge in Hebrew)":
         "המילה האחרונה חייבת להיות בסוף השורה (קצה שמאל בעברית)",
 
-    # --- ⓘ typed-sign legend tooltip ---
-    "Typed sign legend tooltip":
-        "הקלד סימנים ישירות בתיבה:\n#מילה קידומות / מילה# סיומות / %מילה מלא-חסר / *מילה / מילה* ג'וקר / −מילה שלילה",
+    # --- ⓘ typed-sign legend tooltip (real multi-line legend; replaced placeholder) ---
+    "Type signs directly in a word box:\n  #word — grammatical prefixes\n  word# — grammatical suffixes\n  %word — plene/defective spelling\n  *word / word* — wildcard\n  −word — exclude\n(the same options are available via the line's ⚙)":
+        "הקלד סימנים ישירות בתיבת המילה:\n  #מילה — קידומות דקדוקיות\n  מילה# — סיומות דקדוקיות\n  %מילה — כתיב מלא/חסר\n  *מילה / מילה* — ג'וקר\n  −מילה — שלילה\n(אותן אפשרויות זמינות דרך ⚙ בשורה)",
 
     # --- Modifier row (PER-ROW — legacy, kept for backward compat) ---
     "(modifiers apply to the focused line)":
@@ -3944,5 +3944,26 @@ TRANSLATIONS.update({
 
     # --- Position label prefix ---
     "candidate":                  "מועמד",
+})
+
+# === Phase 108 Polish Round 2 — new tr() keys ===
+TRANSLATIONS.update({
+    # --- Feature 3: per-card folio browse ---
+    "Previous folio":             "עמוד קודם",
+    "Next folio":                 "עמוד הבא",
+
+    # --- Feature 4: CompareDialog per-pane folio browse ---
+    "◄ anchor folio":             "עמוד עוגן קודם ◄",
+    "anchor folio ►":             "עמוד עוגן הבא ►",
+    "◄ candidate folio":          "עמוד מועמד קודם ◄",
+    "candidate folio ►":          "עמוד מועמד הבא ►",
+
+    # --- Feature 5: Clear button ---
+    "Clear":                      "נקה הכל",
+    "Clear anchor, builders, candidates, triage and session state":
+        "נקה עוגן, בוני שאילתות, מועמדים, סיווג ומצב הפעלה",
+
+    # --- Feature 6: corner Joins icon ---
+    "Joins Lab":                  "מעבדת צירופים",  # already exists, safe duplicate
 })
 

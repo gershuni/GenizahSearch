@@ -100,3 +100,101 @@ def test_join_workbench_window_opens():
     assert win.windowTitle()                # "Joins Lab"
     assert win._executor is not None
     assert hasattr(win, "anchor_shelf")     # left (Phase-107) pane built
+
+
+# ── Polish round 2: Feature 7 — session persistence round-trip tests ─────────
+
+
+def test_join_query_builder_to_state_from_state_round_trip():
+    """JoinQueryBuilder.to_state() → fresh builder.from_state() round-trips losslessly.
+
+    Sets rows/boxes/mods/gaps/global-opts, serializes, builds a fresh builder,
+    restores from state, and asserts identical state AND identical build_side_query() output.
+    """
+    from desktop.join_workbench import JoinQueryBuilder
+
+    # Build a builder with known state
+    b1 = JoinQueryBuilder(on_search=lambda: None, first_hint="hint",
+                          allow_page_position=True)
+    # Set up first row
+    row0 = b1.rows[0]
+    row0["boxes"][0]["edit"].setText("מילה")
+    row0["mods"] = {"negation": False, "plene": True, "prefix": False,
+                    "suffix": False, "wildcard_prefix": False, "wildcard_suffix": True}
+    row0["start"].setChecked(True)
+    row0["end"].setChecked(False)
+    row0["gap"].setValue(3)
+
+    # Add second row
+    entry2 = b1.add_row()
+    entry2["boxes"][0]["edit"].setText("שורה")
+    entry2["mods"] = {"negation": False, "plene": False, "prefix": True,
+                      "suffix": True, "wildcard_prefix": False, "wildcard_suffix": False}
+    entry2["start"].setChecked(False)
+    entry2["end"].setChecked(True)
+    entry2["gap"].setValue(0)
+
+    # Set global opts
+    b1._global_opts = {
+        "variants": True,
+        "ja": False,
+        "flex_spacing": True,
+        "bidirectional": False,
+    }
+    # Set page position (index 1 = "page: start of text")
+    b1.page_pos.setCurrentIndex(1)
+
+    # Capture expected query
+    expected_query = b1.build_side_query()
+
+    # Serialize
+    state = b1.to_state()
+    assert len(state["rows"]) == 2
+    assert state["global_opts"]["variants"] is True
+    assert state["global_opts"]["flex_spacing"] is True
+    assert state["page_pos_idx"] == 1
+
+    # Build a fresh builder and restore
+    b2 = JoinQueryBuilder(on_search=lambda: None, first_hint="hint",
+                          allow_page_position=True)
+    b2.from_state(state)
+
+    # Assert restored state matches
+    assert len(b2.rows) == 2
+    assert b2.rows[0]["boxes"][0]["edit"].text() == "מילה"
+    assert b2.rows[0]["mods"]["plene"] is True
+    assert b2.rows[0]["mods"]["wildcard_suffix"] is True
+    assert b2.rows[0]["start"].isChecked() is True
+    assert b2.rows[0]["end"].isChecked() is False
+    assert b2.rows[0]["gap"].value() == 3
+
+    assert b2.rows[1]["boxes"][0]["edit"].text() == "שורה"
+    assert b2.rows[1]["mods"]["prefix"] is True
+    assert b2.rows[1]["mods"]["suffix"] is True
+    assert b2.rows[1]["end"].isChecked() is True
+    assert b2.rows[1]["gap"].value() == 0
+
+    assert b2._global_opts["variants"] is True
+    assert b2._global_opts["flex_spacing"] is True
+    assert b2.page_pos.currentIndex() == 1
+
+    # Assert build_side_query() produces identical output
+    restored_query = b2.build_side_query()
+    assert expected_query == restored_query, (
+        f"Round-trip mismatch:\n  expected: {expected_query}\n  got: {restored_query}"
+    )
+
+
+def test_join_workbench_window_to_state_open_false():
+    """JoinWorkbenchWindow.to_state() returns a dict with open=False when not shown."""
+    from desktop.join_workbench import JoinWorkbenchWindow
+
+    win = JoinWorkbenchWindow(parent=None, app=MagicMock())
+    # Not shown (isVisible() == False by default for a QDialog not yet exec()/show()ed)
+    state = win.to_state()
+    assert isinstance(state, dict)
+    assert "open" in state
+    assert state["open"] is False   # freshly built, never shown
+    assert "anchor" in state
+    assert "builder" in state
+    assert "triage" in state
