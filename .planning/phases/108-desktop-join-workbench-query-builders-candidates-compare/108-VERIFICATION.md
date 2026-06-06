@@ -1,7 +1,8 @@
 ---
 phase: 108-desktop-join-workbench-query-builders-candidates-compare
 verified: 2026-06-05T13:00:00Z
-status: human_needed
+status: passed
+human_uat: passed 2026-06-06 (see 108-HUMAN-UAT.md) — user-approved after redesign + 3 polish rounds
 score: 7/7 must-haves verified
 overrides_applied: 0
 human_verification:
