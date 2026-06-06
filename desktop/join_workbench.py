@@ -342,6 +342,9 @@ def puzzle_add_targets(anchor_sid, member_sids):
 # Pure helper (no Qt) so cards/table/compare/filter can all call it.
 # ---------------------------------------------------------------------------
 
+# Triage glyphs — language-neutral (avoids leaking English yes/maybe/no into HE UI)
+_TRIAGE_GLYPH = {"yes": "Y", "maybe": "?", "no": "N"}
+
 _MATERIAL_HE = {
     "paper":     "נייר",
     "parchment": "קלף",
@@ -2427,6 +2430,8 @@ if _QT_AVAILABLE:
                     anchor_meas = batch.get(self.wb._anchor_sid) or {}
                 except Exception:
                     anchor_meas = {}
+            # Cache for CompareDialog._fill_anchor (anchor material/dims on BOTH panes)
+            self.wb._anchor_meas = anchor_meas
 
             if fjms_svc is not None and self.results:
                 self._enrich_worker = _EnrichWorker(fjms_svc, self.results, anchor_meas)
@@ -2657,7 +2662,7 @@ if _QT_AVAILABLE:
                 self.table.setItem(row, 5, QTableWidgetItem(dims))
                 self.table.setItem(row, 6, QTableWidgetItem(str(c.page) if c.page else ""))
                 self.table.setItem(
-                    row, 7, QTableWidgetItem(self.wb.triage.get(c.sys_id) or "")
+                    row, 7, QTableWidgetItem(_TRIAGE_GLYPH.get(self.wb.triage.get(c.sys_id), ""))
                 )
 
             # Wire cellChanged to update selection set (must connect AFTER setRowCount(0))
@@ -3258,9 +3263,9 @@ if _QT_AVAILABLE:
             topbar.addWidget(self.nxt_btn)
 
             for emoji, val, aname in (
-                (tr("Y yes"), "yes", tr("Mark yes")),
-                (tr("? maybe"), "maybe", tr("Mark maybe")),
-                (tr("N no"), "no", tr("Mark no")),
+                ("Y", "yes", tr("Mark yes")),
+                ("?", "maybe", tr("Mark maybe")),
+                ("N", "no", tr("Mark no")),
             ):
                 btn = QPushButton(emoji)
                 btn.setAccessibleName(aname)
@@ -3437,9 +3442,12 @@ if _QT_AVAILABLE:
             ) else {}
             anchor_key = (r_sid(res_dict), page_of(res_dict))
             m = enrich.get(anchor_key) or {}
-            width_cm = m.get("width_cm")
-            height_cm = m.get("height_cm")
-            material = m.get("material")
+            # The anchor is never enriched into the candidate _enrich dict — fall back to
+            # the cached anchor measurements so the anchor pane shows material/dims too.
+            am = getattr(self.wb, "_anchor_meas", {}) or {}
+            width_cm = m.get("width_cm") or am.get("width_cm")
+            height_cm = m.get("height_cm") or am.get("height_cm")
+            material = m.get("material") or am.get("material")
             try:
                 pane["meta"].setText(meta_brief(res_dict))
             except RuntimeError:

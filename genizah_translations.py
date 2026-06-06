@@ -3887,7 +3887,7 @@ TRANSLATIONS.update({
     "Start a join from this anchor": "התחל צירוף מעוגן זה",
 
     # --- Phase 108 redesign: results toolbar + Filter dialog + bulk bar ---
-    "Browse results ▶":      "עיין בתוצאות ▶",
+    "Browse results ▶":      "◀ עיין בתוצאות",
     "Open Browse results compare window":
         "פתח חלון השוואה לעיון בתוצאות",
     "Filter ▾":              "סנן ▾",
