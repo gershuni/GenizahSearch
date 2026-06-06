@@ -73,8 +73,10 @@ def test_join_candidate_pane_constructs():
     assert len(pane.builder.rows) == 1
     assert len(pane.other_builder.rows) == 1
     assert pane.other_builder.page_pos is None
-    # Column 0 = checkbox; 1..8 = data (adapted_decision 8)
-    assert pane.table.columnCount() == 9
+    # Feature 10: Source column removed; 8 cols total.
+    # Column layout: 0 checkbox, 1 Shelfmark, 2 Score, 3 Snippet,
+    #                4 Material, 5 Dimensions, 6 Page, 7 Triage
+    assert pane.table.columnCount() == 8
     # Per-row ⚙ gear button present in first row
     assert "gear" in pane.builder.rows[0]
     # No include_anchor_chk (removed in adapted_decision 11)

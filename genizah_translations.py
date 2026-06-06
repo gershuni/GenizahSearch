@@ -3819,8 +3819,11 @@ TRANSLATIONS.update({
         "חפש גם בצד השני של הדף (p ±1)",
     "AND narrows: only candidates whose adjacent page ALSO matches. OR widens: include adjacent pages as extra candidates.":
         "AND מצמצם: רק מועמדים שהעמוד הסמוך שלהם גם תואם. OR מרחיב: כלול עמודים סמוכים כמועמדים נוספים.",
-    "AND (narrow)":          "וגם (ANDצמצם)",
-    "OR (widen)":            "או (ORהרחב)",
+    # Feature 6 (Polish 3): Latin-free combo items + tooltip
+    "Narrow: keep only candidates whose adjacent page also matches. Widen: include adjacent pages as extra candidates.":
+        "צמצום: שמור רק מועמדים שהעמוד הסמוך שלהם גם תואם. הרחבה: כלול עמודים סמוכים כמועמדים נוספים.",
+    "Narrow":                "צמצום",
+    "Widen":                 "הרחבה",
     "word(s) on this line…":   "מילה/ות בשורה זו…",
 
     # --- Source selector ---
@@ -3853,12 +3856,13 @@ TRANSLATIONS.update({
     # --- Status / view toggle / pagination ---
     "Build a line-by-line query, then Find Candidates.":
         "בנה שאילתה שורה-אחר-שורה, אחר מצא מועמדים.",
-    "Table view":            "תצוגת טבלאי",
+    "Table view":            "תצוגת טבלה",
     "Grid view":             "תצוגת רשת",
     "working…":         "עובד…",
     "shown":                 "מוצגים",
-    "← Prev":           "קודם →",
-    "Next →":           "← הבא",
+    # Feature 7 (Polish 3): RTL-correct glyphs — Prev points right, Next points left
+    "Prev →":           "→ קודם",
+    "← Next":           "הבא ←",
 
     # --- Self-match readout (D-15 — kept for backward compat) ---
     "⚓ anchor matches this query ✓  ·  ":
@@ -3918,10 +3922,10 @@ TRANSLATIONS.update({
 # === Phase 108-04 — CompareDialog i18n (Plan 04 two-pane compare) ===
 # All new tr() keys introduced by CompareDialog in desktop/join_workbench.py.
 TRANSLATIONS.update({
-    # --- Navigation buttons ---
-    "< prev":                     "< הקודם",
+    # --- Navigation buttons (Feature 7: RTL-correct glyphs) ---
+    "prev >":                     "> הקודם",
     "Previous candidate":         "מועמד קודם",
-    "next >":                     "הבא >",
+    "< next":                     "הבא <",
     "Next candidate":             "מועמד הבא",
 
     # --- Triage buttons (emoji + label) ---
@@ -3965,5 +3969,27 @@ TRANSLATIONS.update({
 
     # --- Feature 6: corner Joins icon ---
     "Joins Lab":                  "מעבדת צירופים",  # already exists, safe duplicate
+})
+
+# === Phase 108 Polish Round 3 — new tr() keys ===
+TRANSLATIONS.update({
+    # --- Feature 6: Latin-free combine combo + tooltip (already inserted above inline) ---
+    # (keys added inline into the round-2 block to avoid duplication)
+
+    # --- Feature 3: compare pane zoom + dims label (new keys) ---
+    # "Zoom in" and "Zoom out" already exist in TRANSLATIONS (line ~1761)
+
+    # --- Feature 7: RTL nav glyphs (already inserted above inline) ---
+    # (pagination + compare nav keys updated inline)
+
+    # --- Feature 9: material display (pure Python helper, no new tr() keys) ---
+
+    # --- Feature 1: card text worker feedback ---
+    # "loading…" already exists
+
+    # --- Anchor pane zoom buttons (now tr()-wrapped) ---
+    # "Zoom in" / "Zoom out" already in TRANSLATIONS
+
+    # Placeholder — keep block non-empty for future additions
 })
 

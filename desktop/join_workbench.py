@@ -338,6 +338,35 @@ def puzzle_add_targets(anchor_sid, member_sids):
 
 
 # ---------------------------------------------------------------------------
+# Feature 9 — material_display: Hebrew material terms in HE UI
+# Pure helper (no Qt) so cards/table/compare/filter can all call it.
+# ---------------------------------------------------------------------------
+
+_MATERIAL_HE = {
+    "paper":     "נייר",
+    "parchment": "קלף",
+    "papyrus":   "פפירוס",
+    "vellum":    "קלף",
+    "leather":   "עור",
+    "cloth":     "בד",
+    "mixed":     "מעורב",
+}
+
+
+def material_display(material: str) -> str:
+    """Return the Hebrew material term in HE UI, English otherwise.
+
+    Gated on CURRENT_LANG=='he'; unknown values are returned as-is.
+    Filter VALUE stays English (only the displayed label is Hebrew).
+    """
+    if not material:
+        return material or ""
+    if CURRENT_LANG == "he":
+        return _MATERIAL_HE.get(material.lower(), material)
+    return material
+
+
+# ---------------------------------------------------------------------------
 # Plan 02 — Qt imports and QThread workers.
 # These are placed BELOW the pure helpers so the module can still be imported
 # headlessly (the Qt imports themselves are safe, but worker subclasses require
@@ -1401,11 +1430,12 @@ if _QT_AVAILABLE:
     # All cards use these palette values regardless of dark-mode.
     _META_COLOR = "#64748b"
     _DIM_COLOR = "#94a3b8"
+    # Feature 5 (Polish 3): muted/desaturated tones at 2px — easier on the eye.
     _TRI_COLOR = {
         None: "#94a3b8",
-        "yes": "#16a34a",
-        "maybe": "#d97706",
-        "no": "#dc2626",
+        "yes": "#4d9e6a",    # softer green  (was #16a34a)
+        "maybe": "#c4853a",  # softer amber  (was #d97706)
+        "no": "#c05050",     # softer red    (was #dc2626)
     }
     _MAX_CONCURRENT_IMG = 5   # bounded image-loader pool (PATTERNS "5 slots")
 
@@ -1655,7 +1685,7 @@ if _QT_AVAILABLE:
             elif size_category:
                 dim_parts.append(str(size_category))
             if material:
-                dim_parts.append(str(material))
+                dim_parts.append(material_display(str(material)))  # Feature 9: HE material
             if avg_num_lines:
                 dim_parts.append(f"~{avg_num_lines:.0f} ln")
             if dim_parts:
@@ -1669,11 +1699,15 @@ if _QT_AVAILABLE:
                 lay.addWidget(dim_lbl)
 
             # 4. Snippet (pre-fetched HTML)
-            snip = QTextBrowser()
-            snip.setFixedHeight(72)
-            snip.setReadOnly(True)
-            snip.setHtml(m.get("snippet_html") or "")
-            lay.addWidget(snip)
+            # Feature 1: save as self.snip so folio-flip can update the text.
+            self.snip = QTextBrowser()
+            self.snip.setFixedHeight(72)
+            self.snip.setReadOnly(True)
+            self.snip.setHtml(m.get("snippet_html") or "")
+            lay.addWidget(self.snip)
+            # Feature 1: page-text worker ref (None until folio flip is requested)
+            self._card_text_worker = None
+            self._card_text_gen = 0
 
             # 5. Triage row (Y / ? / N)
             trow = QHBoxLayout()
@@ -1699,7 +1733,8 @@ if _QT_AVAILABLE:
             self._card_page = max(1, c.page or 1)
             folio_row = QHBoxLayout()
             folio_row.setSpacing(2)
-            self._folio_prev_btn = QPushButton("◀")
+            # Feature 7: RTL-correct glyphs — PREV points right (▶), NEXT points left (◀)
+            self._folio_prev_btn = QPushButton("▶")
             self._folio_prev_btn.setFixedSize(24, 22)
             self._folio_prev_btn.setAccessibleName(tr("Previous folio"))
             self._folio_prev_btn.setToolTip(tr("Previous folio"))
@@ -1710,7 +1745,7 @@ if _QT_AVAILABLE:
             self._folio_lbl.setStyleSheet("font-size:10px;color:#94a3b8;")
             folio_row.addWidget(self._folio_lbl)
 
-            self._folio_next_btn = QPushButton("▶")
+            self._folio_next_btn = QPushButton("◀")
             self._folio_next_btn.setFixedSize(24, 22)
             self._folio_next_btn.setAccessibleName(tr("Next folio"))
             self._folio_next_btn.setToolTip(tr("Next folio"))
@@ -1782,6 +1817,19 @@ if _QT_AVAILABLE:
 
             lay.addLayout(arow)
 
+        def mouseDoubleClickEvent(self, event):
+            """Feature 2: double-click opens Compare (skip if on checkbox/buttons)."""
+            child = self.childAt(event.position().toPoint())
+            # Don't open compare when clicking a checkbox or push-button
+            if child is not None and isinstance(child, (QCheckBox, QPushButton)):
+                super().mouseDoubleClickEvent(event)
+                return
+            try:
+                self.pane.open_compare(self.global_idx)
+            except Exception:
+                pass
+            event.accept()
+
         def _ctx_menu(self, pos):
             """Right-click context menu: same actions + Y/?/N triage (adapted_decision 9)."""
             menu = QMenu(self)
@@ -1825,18 +1873,20 @@ if _QT_AVAILABLE:
         def _restyle(self):
             """Update card border based on triage/selection state."""
             if self.c.is_anchor_self:
-                self.setStyleSheet("QFrame{border:3px solid #14b8a6;border-radius:4px;}")
+                # Feature 5: 2px softer teal for anchor-self (was 3px)
+                self.setStyleSheet("QFrame{border:2px solid #4db8a6;border-radius:4px;}")
                 return
             # Show selection outline when in _selected_keys
             if hasattr(self, "_ckey") and self._ckey in self.pane._selected_keys:
                 self.setStyleSheet(
-                    "QFrame{border:2px solid #14b8a6;border-radius:4px;"
-                    "box-shadow:inset 0 0 0 1px #14b8a6;}"
+                    "QFrame{border:2px solid #4db8a6;border-radius:4px;"
+                    "box-shadow:inset 0 0 0 1px #4db8a6;}"
                 )
                 return
             tri = self.pane.wb.triage.get(self.sid)
             color = _TRI_COLOR.get(tri, _TRI_COLOR[None])
-            self.setStyleSheet(f"QFrame{{border:3px solid {color};border-radius:4px;}}")
+            # Feature 5: 2px border (was 3px)
+            self.setStyleSheet(f"QFrame{{border:2px solid {color};border-radius:4px;}}")
 
         def set_pixmap(self, pix):
             """Set the thumbnail pixmap (called from GUI thread — Pitfall 4 safe)."""
@@ -1854,19 +1904,21 @@ if _QT_AVAILABLE:
                 pass   # widget deleted — standard Phase 107 guard
 
         def _card_folio_prev(self):
-            """Step to the previous folio image for this card (Feature 3)."""
+            """Step to the previous folio image and text for this card (Features 3+1)."""
             if self._card_page <= 1:
                 return
             self._card_page -= 1
             self._refresh_card_image()
+            self._refresh_card_text()
 
         def _card_folio_next(self):
-            """Step to the next folio image for this card (Feature 3).
+            """Step to the next folio image and text for this card (Features 3+1).
 
             Upper bound: clamp at the image-count once known (graceful overshoot → no image).
             """
             self._card_page += 1
             self._refresh_card_image()
+            self._refresh_card_text()
 
         def _refresh_card_image(self):
             """Re-enqueue the image for the current _card_page via the window's resolver.
@@ -1882,6 +1934,48 @@ if _QT_AVAILABLE:
                 self.pane.wb._enqueue_image_for_pane(
                     self.img, self.sid, self._card_page, width=400
                 )
+            except Exception:
+                pass
+
+        def _refresh_card_text(self):
+            """Fetch the page text for the current _card_page on a background worker.
+
+            Feature 1: folio flip also updates the snippet.
+            RR-12: page is always int here (guard was applied in _card_folio_prev/next).
+            A local _card_text_gen token ensures stale results are dropped.
+            """
+            try:
+                self.snip.setPlainText(tr("loading…"))
+            except RuntimeError:
+                return
+            # Cancel any in-flight text worker for this card
+            if self._card_text_worker is not None:
+                try:
+                    self._card_text_worker.cancel()
+                except Exception:
+                    pass
+                self._card_text_worker = None
+            self._card_text_gen += 1
+            my_gen = self._card_text_gen
+            page = self._card_page
+            sid = self.sid
+            try:
+                # _PageTextWorker uses the wb gen as its own token; we add a local check.
+                worker = _PageTextWorker(self.pane.wb, self.pane.wb._gen, sid, page)
+
+                def _on_done(wgen: int, txt: str, _my_gen: int = my_gen) -> None:
+                    if _my_gen != self._card_text_gen:
+                        return  # stale: a newer folio flip is in-flight
+                    try:
+                        from shared.joins_lab import snippet_html
+                        hi = snippet_html(txt, self.c.highlight_pattern, max_lines=6) if txt else ""
+                        self.snip.setHtml(hi or "")
+                    except RuntimeError:
+                        pass
+
+                worker.done.connect(_on_done)
+                worker.start()
+                self._card_text_worker = worker
             except Exception:
                 pass
 
@@ -1943,16 +2037,18 @@ if _QT_AVAILABLE:
             self.other_enable = QCheckBox(
                 tr("search also on the other side of the leaf (p ±1)")
             )
+            # Feature 6: tooltip without Latin AND/OR
             self.other_enable.setToolTip(
-                tr("AND narrows: only candidates whose adjacent page ALSO matches. OR widens: include adjacent pages as extra candidates.")
+                tr("Narrow: keep only candidates whose adjacent page also matches. Widen: include adjacent pages as extra candidates.")
             )
             self.other_enable.toggled.connect(
                 lambda v: self.other_box.setVisible(v)
             )
             os_row.addWidget(self.other_enable)
+            # Feature 6: combo items without Latin AND/OR
             self.combine_combo = QComboBox()
-            self.combine_combo.addItem(tr("AND (narrow)"))
-            self.combine_combo.addItem(tr("OR (widen)"))
+            self.combine_combo.addItem(tr("Narrow"))
+            self.combine_combo.addItem(tr("Widen"))
             os_row.addWidget(self.combine_combo)
             os_row.addStretch()
             rv.addLayout(os_row)
@@ -2098,7 +2194,8 @@ if _QT_AVAILABLE:
             # --- Pagination row (hidden until filtered > _PER_PAGE) ---
             pag_row = QHBoxLayout()
             pag_row.setSpacing(4)
-            self.btn_prev = QPushButton(tr("← Prev"))
+            # Feature 7: RTL-correct glyphs — Prev points right (→), Next points left (←)
+            self.btn_prev = QPushButton(tr("Prev →"))
             self.btn_prev.setFixedWidth(60)
             self.btn_prev.setVisible(False)  # hidden until needed
             self.btn_prev.clicked.connect(self._prev_page)
@@ -2108,7 +2205,7 @@ if _QT_AVAILABLE:
             self.page_lbl.setVisible(False)  # hidden until needed
             pag_row.addWidget(self.page_lbl)
 
-            self.btn_next = QPushButton(tr("Next →"))
+            self.btn_next = QPushButton(tr("← Next"))
             self.btn_next.setFixedWidth(60)
             self.btn_next.setVisible(False)  # hidden until needed
             self.btn_next.clicked.connect(self._next_page)
@@ -2127,11 +2224,13 @@ if _QT_AVAILABLE:
             rv.addWidget(self.grid_scroll, 1)
 
             # --- Table view (hidden by default) ---
-            # Column 0 = checkbox; columns 1..8 = data (adapted_decision 8)
+            # Feature 10: Source column removed (always "text" in Phase 108).
+            # Column layout: 0 checkbox, 1 Shelfmark, 2 Score, 3 Snippet,
+            #                4 Material, 5 Dimensions, 6 Page, 7 Triage  (8 cols total)
             _headers = [
                 "",  # col 0: checkbox (master select-all on header click)
                 tr("Shelfmark"), tr("Score"), tr("Snippet"),
-                tr("Material"), tr("Dimensions"), tr("Source"),
+                tr("Material"), tr("Dimensions"),
                 tr("Page"), tr("Triage"),
             ]
             self.table = QTableWidget(0, len(_headers))
@@ -2348,16 +2447,24 @@ if _QT_AVAILABLE:
                 if v.get("material")
             ))
             try:
-                current_mat = self.mat_filter.currentText()
+                # Feature 9: store English value as userData; display HE label when HE UI.
+                # apply_filters reads userData (English) for comparison so filter VALUE
+                # stays English regardless of display language.
+                current_mat_val = self.mat_filter.currentData() or self.mat_filter.currentText()
                 self.mat_filter.blockSignals(True)
                 self.mat_filter.clear()
-                self.mat_filter.addItem(tr("any material"))
+                self.mat_filter.addItem(tr("any material"), "")  # userData="" = any
                 for mat in materials:
-                    self.mat_filter.addItem(mat)
-                # Restore previous selection if still available
-                idx = self.mat_filter.findText(current_mat)
-                if idx >= 0:
-                    self.mat_filter.setCurrentIndex(idx)
+                    self.mat_filter.addItem(material_display(mat), mat)  # display HE, value EN
+                # Restore previous selection by userData
+                restored = False
+                for i in range(self.mat_filter.count()):
+                    if self.mat_filter.itemData(i) == current_mat_val:
+                        self.mat_filter.setCurrentIndex(i)
+                        restored = True
+                        break
+                if not restored:
+                    self.mat_filter.setCurrentIndex(0)
                 self.mat_filter.blockSignals(False)
             except RuntimeError:
                 pass
@@ -2366,10 +2473,13 @@ if _QT_AVAILABLE:
         def apply_filters(self):
             """Apply refine-bar filters and update the display."""
             text_q = (self.filter_in.text() if self.filter_in else "").strip().lower()
-            mat_q = (
-                self.mat_filter.currentText() if self.mat_filter else ""
-            )
-            mat_any = (mat_q == tr("any material") or not mat_q)
+            # Feature 9: read English value from userData (display label may be Hebrew)
+            mat_q = ""
+            if self.mat_filter:
+                mat_q = self.mat_filter.currentData()
+                if mat_q is None:
+                    mat_q = ""   # userData not set (legacy path)
+            mat_any = (not mat_q)  # userData=="" means "any material"
             need_dims = self.dim_chk.isChecked()
             tri_q_idx = self.tri_filter.currentIndex()
             # tri_q_idx: 0=all, 1=Y, 2=?, 3=N, 4=untriaged
@@ -2500,9 +2610,10 @@ if _QT_AVAILABLE:
         def _render_table(self):
             """Render all filtered candidates into the table view.
 
-            Column layout (adapted_decision 8):
-              0: checkbox  1: Shelfmark  2: Score  3: Snippet  4: Material
-              5: Dimensions  6: Source  7: Page  8: Triage
+            Feature 10: Source column removed (was col 6; always "text" in Phase 108).
+            Column layout: 0 checkbox, 1 Shelfmark, 2 Score, 3 Snippet,
+                           4 Material, 5 Dimensions, 6 Page, 7 Triage  (8 cols total)
+            Feature 12: Snippet column uses QLabel with highlight markup (col 3).
             """
             self.table.setRowCount(0)
             for c in self.wb.filtered:
@@ -2520,20 +2631,33 @@ if _QT_AVAILABLE:
                 )
                 self.table.setItem(row, 0, chk_item)
 
-                # Data columns (offset +1)
+                # Data columns (offset +1); Source column removed (Feature 10)
                 self.table.setItem(row, 1, QTableWidgetItem(c.shelfmark or ""))
                 score_str = f"{c.score:.3f}" if c.score is not None else ""
                 self.table.setItem(row, 2, QTableWidgetItem(score_str))
-                self.table.setItem(row, 3, QTableWidgetItem(m.get("snippet_plain") or ""))
-                self.table.setItem(row, 4, QTableWidgetItem(m.get("material") or ""))
+                # Feature 12: snippet with highlight markup via QLabel
+                snip_html = m.get("snippet_html") or ""
+                snip_plain = m.get("snippet_plain") or ""
+                if snip_html:
+                    snip_lbl = QLabel()
+                    snip_lbl.setTextFormat(Qt.TextFormat.RichText)
+                    snip_lbl.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+                    snip_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    snip_lbl.setWordWrap(False)
+                    snip_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+                    snip_lbl.setText(f'<span dir="rtl">{snip_html}</span>')
+                    self.table.setCellWidget(row, 3, snip_lbl)
+                else:
+                    self.table.setItem(row, 3, QTableWidgetItem(snip_plain))
+                mat_val = m.get("material") or ""
+                self.table.setItem(row, 4, QTableWidgetItem(material_display(mat_val)))
                 w = m.get("width_cm")
                 h = m.get("height_cm")
                 dims = f"{w:.0f}x{h:.0f}" if w and h else ""
                 self.table.setItem(row, 5, QTableWidgetItem(dims))
-                self.table.setItem(row, 6, QTableWidgetItem(c.scope or ""))
-                self.table.setItem(row, 7, QTableWidgetItem(str(c.page) if c.page else ""))
+                self.table.setItem(row, 6, QTableWidgetItem(str(c.page) if c.page else ""))
                 self.table.setItem(
-                    row, 8, QTableWidgetItem(self.wb.triage.get(c.sys_id) or "")
+                    row, 7, QTableWidgetItem(self.wb.triage.get(c.sys_id) or "")
                 )
 
             # Wire cellChanged to update selection set (must connect AFTER setRowCount(0))
@@ -2860,17 +2984,21 @@ if _QT_AVAILABLE:
 
             mat_row = QHBoxLayout()
             mat_row.addWidget(QLabel(tr("Material") + ":"))
+            # Feature 9: mirror the mat_filter items including userData (English) + display (HE)
             dlg_mat = QComboBox()
-            dlg_mat.addItem(tr("any material"))
-            current_mats = [
-                self.mat_filter.itemText(i)
+            dlg_mat.addItem(tr("any material"), "")
+            current_mat_items = [
+                (self.mat_filter.itemText(i), self.mat_filter.itemData(i) or self.mat_filter.itemText(i))
                 for i in range(1, self.mat_filter.count())
             ]
-            for m in current_mats:
-                dlg_mat.addItem(m)
-            idx = dlg_mat.findText(self.mat_filter.currentText())
-            if idx >= 0:
-                dlg_mat.setCurrentIndex(idx)
+            for label, val in current_mat_items:
+                dlg_mat.addItem(label, val)
+            # Restore selection by userData
+            current_val = self.mat_filter.currentData() or ""
+            for i in range(dlg_mat.count()):
+                if dlg_mat.itemData(i) == current_val:
+                    dlg_mat.setCurrentIndex(i)
+                    break
             mat_row.addWidget(dlg_mat, 1)
             lay.addLayout(mat_row)
 
@@ -2920,6 +3048,12 @@ if _QT_AVAILABLE:
 
             # "from anchor" shortcut helpers for the dialog's spinboxes
             def _set_mat(m):
+                # Feature 9: find by userData (English value), not display text
+                for i in range(dlg_mat.count()):
+                    if (dlg_mat.itemData(i) or "") == m:
+                        dlg_mat.setCurrentIndex(i)
+                        return
+                # Fallback: match by text (handles legacy / unknown materials)
                 idx2 = dlg_mat.findText(m)
                 if idx2 >= 0:
                     dlg_mat.setCurrentIndex(idx2)
@@ -2950,11 +3084,17 @@ if _QT_AVAILABLE:
             def _on_apply():
                 # Write back to persistent hidden filter widgets
                 self.filter_in.setText(dlg_filter_in.text())
-                # Sync material combo
+                # Sync material combo by userData (Feature 9: English value)
                 self.mat_filter.blockSignals(True)
-                idx2 = self.mat_filter.findText(dlg_mat.currentText())
-                if idx2 >= 0:
-                    self.mat_filter.setCurrentIndex(idx2)
+                chosen_val = dlg_mat.currentData() or ""
+                synced = False
+                for i in range(self.mat_filter.count()):
+                    if (self.mat_filter.itemData(i) or "") == chosen_val:
+                        self.mat_filter.setCurrentIndex(i)
+                        synced = True
+                        break
+                if not synced:
+                    self.mat_filter.setCurrentIndex(0)
                 self.mat_filter.blockSignals(False)
                 self.dim_chk.setChecked(dlg_dim.isChecked())
                 self.tri_filter.setCurrentIndex(dlg_tri.currentIndex())
@@ -3101,7 +3241,8 @@ if _QT_AVAILABLE:
 
             # ── Top bar: prev/next nav + position label + Y/?/N triage ──────
             topbar = QHBoxLayout()
-            self.prev_btn = QPushButton(tr("< prev"))
+            # Feature 7: RTL-correct glyphs — prev points right (>), next points left (<)
+            self.prev_btn = QPushButton(tr("prev >"))
             self.prev_btn.setFixedSize(34, 28)
             self.prev_btn.setAccessibleName(tr("Previous candidate"))
             self.prev_btn.clicked.connect(lambda: self.step(-1))
@@ -3110,7 +3251,7 @@ if _QT_AVAILABLE:
             self.pos_lbl = QLabel("")
             topbar.addWidget(self.pos_lbl, 1)
 
-            self.nxt_btn = QPushButton(tr("next >"))
+            self.nxt_btn = QPushButton(tr("< next"))
             self.nxt_btn.setFixedSize(34, 28)
             self.nxt_btn.setAccessibleName(tr("Next candidate"))
             self.nxt_btn.clicked.connect(lambda: self.step(1))
@@ -3172,11 +3313,13 @@ if _QT_AVAILABLE:
                 self.paint()
 
         def _pane(self) -> dict:
-            """Factory: build one compare pane (VBoxLayout + 4 widgets + folio controls).
+            """Factory: build one compare pane (VBoxLayout + widgets + folio + zoom).
 
-            Returns dict with keys: box, shelf, meta, folio_prev, folio_lbl, folio_next,
-            img, txt, sys_id (str), page (int).
-            Folio controls flip that pane's image independently of candidate-list Prev/Next.
+            Feature 3: adds dims_lbl (material/dimensions line) and zoom − / + controls.
+            Feature 7: folio glyphs RTL-corrected.
+            Returns dict with keys: box, shelf, meta, dims_lbl,
+            folio_prev, folio_lbl, folio_next, img, txt,
+            sys_id (str), page (int), zoom (float), full_pix (QPixmap or None).
             """
             box = QVBoxLayout()
             shelf = QLabel()
@@ -3188,23 +3331,41 @@ if _QT_AVAILABLE:
             meta.setWordWrap(True)
             meta.setStyleSheet(f"font-size:11px;color:{_META_COLOR};")
 
-            # Per-pane folio browse row (Feature 4)
-            folio_row = QHBoxLayout()
-            folio_row.setSpacing(2)
-            folio_prev = QPushButton("◀")
+            # Feature 3: material/dimensions line
+            dims_lbl = QLabel()
+            dims_lbl.setWordWrap(True)
+            dims_lbl.setStyleSheet(f"font-size:10px;color:{_DIM_COLOR};")
+            dims_lbl.setVisible(False)
+
+            # Per-pane folio browse + zoom row (Features 4+3)
+            # Feature 7: RTL glyphs — PREV points right (▶), NEXT points left (◀)
+            ctrl_row = QHBoxLayout()
+            ctrl_row.setSpacing(2)
+            folio_prev = QPushButton("▶")
             folio_prev.setFixedSize(28, 22)
             folio_prev.setToolTip(tr("Previous folio"))
             folio_prev.setAccessibleName(tr("Previous folio"))
             folio_lbl = QLabel("p.1")
             folio_lbl.setStyleSheet(f"font-size:10px;color:{_META_COLOR};")
-            folio_next = QPushButton("▶")
+            folio_next = QPushButton("◀")
             folio_next.setFixedSize(28, 22)
             folio_next.setToolTip(tr("Next folio"))
             folio_next.setAccessibleName(tr("Next folio"))
-            folio_row.addWidget(folio_prev)
-            folio_row.addWidget(folio_lbl)
-            folio_row.addWidget(folio_next)
-            folio_row.addStretch()
+            ctrl_row.addWidget(folio_prev)
+            ctrl_row.addWidget(folio_lbl)
+            ctrl_row.addWidget(folio_next)
+            ctrl_row.addStretch()
+            # Feature 3: zoom controls
+            btn_zoom_out = QPushButton("-")
+            btn_zoom_out.setFixedSize(26, 22)
+            btn_zoom_out.setToolTip(tr("Zoom out"))
+            btn_zoom_out.setAccessibleName(tr("Zoom out"))
+            btn_zoom_in = QPushButton("+")
+            btn_zoom_in.setFixedSize(26, 22)
+            btn_zoom_in.setToolTip(tr("Zoom in"))
+            btn_zoom_in.setAccessibleName(tr("Zoom in"))
+            ctrl_row.addWidget(btn_zoom_out)
+            ctrl_row.addWidget(btn_zoom_in)
 
             img = QLabel(tr("…"))
             img.setMinimumHeight(360)
@@ -3216,7 +3377,8 @@ if _QT_AVAILABLE:
 
             box.addWidget(shelf)
             box.addWidget(meta)
-            box.addLayout(folio_row)
+            box.addWidget(dims_lbl)
+            box.addLayout(ctrl_row)
             box.addWidget(img)
             box.addWidget(txt, 1)
 
@@ -3224,6 +3386,7 @@ if _QT_AVAILABLE:
                 "box": box,
                 "shelf": shelf,
                 "meta": meta,
+                "dims_lbl": dims_lbl,
                 "folio_prev": folio_prev,
                 "folio_lbl": folio_lbl,
                 "folio_next": folio_next,
@@ -3231,11 +3394,33 @@ if _QT_AVAILABLE:
                 "txt": txt,
                 "sys_id": "",
                 "page": 1,
+                "zoom": 1.0,
+                "full_pix": None,
             }
             # Wire folio buttons — capture pane_dict by reference
             folio_prev.clicked.connect(lambda _=False, pd=pane_dict: self._pane_folio_step(pd, -1))
             folio_next.clicked.connect(lambda _=False, pd=pane_dict: self._pane_folio_step(pd, +1))
+            # Wire zoom — capture pane_dict by reference
+            btn_zoom_out.clicked.connect(lambda _=False, pd=pane_dict: self._pane_zoom(pd, 1/1.25))
+            btn_zoom_in.clicked.connect(lambda _=False, pd=pane_dict: self._pane_zoom(pd, 1.25))
             return pane_dict
+
+        def _pane_zoom(self, pane: dict, factor: float):
+            """Feature 3: apply zoom factor to a compare pane image.
+
+            Clamps zoom to [0.25, 4.0].  Re-requests image at new pixel width so
+            the IIIF server returns a larger/smaller tile (no client-side stretch).
+            """
+            pane["zoom"] = _clamp_zoom(pane.get("zoom", 1.0) * factor)
+            if not pane.get("sys_id"):
+                return
+            scaled_width = max(400, int(1400 * pane["zoom"]))
+            try:
+                self.wb._enqueue_image_for_pane(
+                    pane["img"], pane["sys_id"], pane["page"], width=scaled_width
+                )
+            except Exception:
+                pass
 
         def _fill_anchor(self, pane: dict, res_dict: dict):
             """Fill the anchor pane from the raw result DICT (read with r_* helpers, RR-2).
@@ -3246,8 +3431,7 @@ if _QT_AVAILABLE:
                 pane["shelf"].setText(r_shelf(res_dict))
             except RuntimeError:
                 return
-            # Meta line: meta_brief + optional dimension/material from enrich cache
-            bits = [meta_brief(res_dict)]
+            # Meta line: meta_brief
             enrich = self.wb._candidate_pane._enrich if hasattr(
                 self.wb, "_candidate_pane"
             ) else {}
@@ -3256,14 +3440,24 @@ if _QT_AVAILABLE:
             width_cm = m.get("width_cm")
             height_cm = m.get("height_cm")
             material = m.get("material")
-            if width_cm and height_cm:
-                bits.append(f"▧ {width_cm:.0f}x{height_cm:.0f} cm")
-            elif material:
-                bits.append("▧ " + str(material))
             try:
-                pane["meta"].setText("   ·   ".join(b for b in bits if b))
+                pane["meta"].setText(meta_brief(res_dict))
             except RuntimeError:
                 return
+            # Feature 3: material/dimensions line (separate label below meta)
+            dim_parts = []
+            if width_cm and height_cm:
+                dim_parts.append(f"{width_cm:.0f}×{height_cm:.0f} cm")
+            if material:
+                dim_parts.append(material_display(str(material)))  # Feature 9
+            try:
+                if dim_parts:
+                    pane["dims_lbl"].setText("  ·  ".join(dim_parts))
+                    pane["dims_lbl"].setVisible(True)
+                else:
+                    pane["dims_lbl"].setVisible(False)
+            except (RuntimeError, KeyError):
+                pass
             # Transcription text (RTL numbered, Pitfall 5 — try/except on htmlify)
             try:
                 apply_line_numbered_text(
@@ -3298,9 +3492,11 @@ if _QT_AVAILABLE:
                 pane["shelf"].setText(c.shelfmark)
             except RuntimeError:
                 return
-            # Meta line: library · title + optional dimension/material + "other side matched"
+            # Meta line: library · title + "other side matched"
             lib_title = " · ".join(p for p in [c.library_code, c.title[:60]] if p)
-            bits = [lib_title] if lib_title else []
+            meta_parts = [lib_title] if lib_title else []
+            if c.via_other_side:
+                meta_parts.append(tr("other side matched"))   # D-18 / R-06 label
             enrich = self.wb._candidate_pane._enrich if hasattr(
                 self.wb, "_candidate_pane"
             ) else {}
@@ -3308,16 +3504,24 @@ if _QT_AVAILABLE:
             width_cm = m.get("width_cm")
             height_cm = m.get("height_cm")
             material = m.get("material")
-            if width_cm and height_cm:
-                bits.append(f"▧ {width_cm:.0f}x{height_cm:.0f} cm")
-            elif material:
-                bits.append("▧ " + str(material))
-            if c.via_other_side:
-                bits.append(tr("other side matched"))   # D-18 / R-06 label
             try:
-                pane["meta"].setText("   ·   ".join(b for b in bits if b))
+                pane["meta"].setText("   ·   ".join(b for b in meta_parts if b))
             except RuntimeError:
                 return
+            # Feature 3: material/dimensions line (separate label)
+            dim_parts = []
+            if width_cm and height_cm:
+                dim_parts.append(f"{width_cm:.0f}×{height_cm:.0f} cm")
+            if material:
+                dim_parts.append(material_display(str(material)))  # Feature 9
+            try:
+                if dim_parts:
+                    pane["dims_lbl"].setText("  ·  ".join(dim_parts))
+                    pane["dims_lbl"].setVisible(True)
+                else:
+                    pane["dims_lbl"].setVisible(False)
+            except (RuntimeError, KeyError):
+                pass
             # Transcription text (RTL numbered, Pitfall 5 — try/except on htmlify)
             try:
                 apply_line_numbered_text(
@@ -3341,7 +3545,7 @@ if _QT_AVAILABLE:
             self.wb._enqueue_image_for_pane(pane["img"], c.sys_id, c.page, width=1400)
 
         def paint(self):
-            """Refresh both panes and the position label for self.idx."""
+            """Refresh both panes, position label, and compare border (Feature 4)."""
             if not self.wb.filtered:
                 return
             cand = self.wb.filtered[self.idx]
@@ -3354,6 +3558,8 @@ if _QT_AVAILABLE:
                 )
             except RuntimeError:
                 return
+            # Feature 4: update compare border color to reflect current candidate's triage
+            self._restyle_compare(tri)
             # Anchor pane stays static (D-18) — re-filled on every paint
             self._fill_anchor(self.left, self.wb._anchor_res)
             # Candidate pane reflects the current candidate
@@ -3371,9 +3577,20 @@ if _QT_AVAILABLE:
             return self.wb.filtered[self.idx]
 
         def _mark(self, val: str):
-            """Mark current candidate and refresh position label."""
+            """Mark current candidate, refresh label, and color the compare border (Feature 4)."""
             self.wb.mark(self._cur().sys_id, val)
             self.paint()
+            self._restyle_compare(val)
+
+        def _restyle_compare(self, triage_val):
+            """Feature 4: apply triage-colored border to the compare window (gentle 2px)."""
+            color = _TRI_COLOR.get(triage_val, _TRI_COLOR[None])
+            try:
+                self.setStyleSheet(
+                    f"QDialog{{border:2px solid {color};border-radius:4px;}}"
+                )
+            except RuntimeError:
+                pass
 
         def _reanchor(self):
             """Set current candidate as the new anchor, then close dialog."""
@@ -3381,10 +3598,11 @@ if _QT_AVAILABLE:
             self.accept()
 
         def _pane_folio_step(self, pane: dict, delta: int):
-            """Step pane image to the adjacent folio in place (Feature 4).
+            """Step pane image AND text to the adjacent folio (Features 4+1).
 
             Independent of the candidate-list prev/next (which steps candidates).
             RR-12: pane["page"] is always int (≥1); guard against going below 1.
+            Feature 1: also fetches page text via _PageTextWorker (background, never UI-thread).
             """
             new_page = max(1, pane["page"] + delta)
             pane["page"] = new_page
@@ -3399,6 +3617,45 @@ if _QT_AVAILABLE:
                 self.wb._enqueue_image_for_pane(
                     pane["img"], pane["sys_id"], new_page, width=1400
                 )
+            except Exception:
+                pass
+            # Feature 1: fetch page text on background worker
+            try:
+                pane["txt"].setPlainText(tr("loading…"))
+            except (RuntimeError, KeyError):
+                pass
+            try:
+                gen = self.wb._gen
+                sid = pane["sys_id"]
+                txt_widget = pane["txt"]
+                highlight = None
+                # Determine highlight pattern from current candidate (if candidate pane)
+                if self.wb.filtered and 0 <= self.idx < len(self.wb.filtered):
+                    cur = self.wb.filtered[self.idx]
+                    highlight = getattr(cur, "highlight_pattern", None)
+
+                def _make_text_handler(w, h):
+                    def _on_text(wgen: int, txt: str) -> None:
+                        if wgen != self.wb._gen:
+                            return
+                        try:
+                            apply_line_numbered_text(
+                                w,
+                                htmlify(txt, h),
+                                source_text=txt,
+                                is_html=True,
+                            )
+                        except RuntimeError:
+                            pass
+                    return _on_text
+
+                worker = _PageTextWorker(self.wb, gen, sid, new_page)
+                worker.done.connect(_make_text_handler(txt_widget, highlight))
+                worker.start()
+                # Keep ref to avoid GC (not stored; CompareDialog is short-lived)
+                if not hasattr(self, "_pane_text_workers"):
+                    self._pane_text_workers = []
+                self._pane_text_workers.append(worker)
             except Exception:
                 pass
 
@@ -3522,23 +3779,24 @@ if _QT_AVAILABLE:
 
             btn_zoom_out = QPushButton("-")
             btn_zoom_out.setFixedWidth(30)
-            btn_zoom_out.setToolTip("Zoom out")
-            btn_zoom_out.setAccessibleName("Zoom out")
+            btn_zoom_out.setToolTip(tr("Zoom out"))
+            btn_zoom_out.setAccessibleName(tr("Zoom out"))
             btn_zoom_out.clicked.connect(self._zoom_out)
             toolbar.addWidget(btn_zoom_out)
 
             btn_zoom_in = QPushButton("+")
             btn_zoom_in.setFixedWidth(30)
-            btn_zoom_in.setToolTip("Zoom in")
-            btn_zoom_in.setAccessibleName("Zoom in")
+            btn_zoom_in.setToolTip(tr("Zoom in"))
+            btn_zoom_in.setAccessibleName(tr("Zoom in"))
             btn_zoom_in.clicked.connect(self._zoom_in)
             toolbar.addWidget(btn_zoom_in)
 
             toolbar.addStretch()
 
-            self.btn_folio_prev = QPushButton("◄")
+            # Feature 7: RTL glyphs — PREV points right (►), NEXT points left (◄)
+            self.btn_folio_prev = QPushButton("►")
             self.btn_folio_prev.setFixedWidth(30)
-            self.btn_folio_prev.setAccessibleName("Previous folio")
+            self.btn_folio_prev.setAccessibleName(tr("Previous folio"))
             self.btn_folio_prev.clicked.connect(self._folio_prev)
             toolbar.addWidget(self.btn_folio_prev)
 
@@ -3546,9 +3804,9 @@ if _QT_AVAILABLE:
             self.folio_counter.setStyleSheet("font-size:11px;color:#94a3b8;")
             toolbar.addWidget(self.folio_counter)
 
-            self.btn_folio_next = QPushButton("►")
+            self.btn_folio_next = QPushButton("◄")
             self.btn_folio_next.setFixedWidth(30)
-            self.btn_folio_next.setAccessibleName("Next folio")
+            self.btn_folio_next.setAccessibleName(tr("Next folio"))
             self.btn_folio_next.clicked.connect(self._folio_next)
             toolbar.addWidget(self.btn_folio_next)
 
