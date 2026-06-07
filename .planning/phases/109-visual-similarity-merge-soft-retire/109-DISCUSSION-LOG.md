@@ -60,3 +60,64 @@
 
 Page-weighted ★both; physical deletion of old dialog code (later cleanup); pick-mode→Workbench;
 web VS soft-retire; temporary fallback toggle; min-score floor / top-N cap; full visual parity.
+
+---
+
+# Gap-Closure Round 3 (2026-06-07) — UAT REJECTED, 8 change requests (G-06..G-13)
+
+**Areas discussed:** G-08 pick-mode intent, G-06 badge vocabulary, G-13 "see more" message, G-12+G-11 visual/layout
+**Locked as specified without discussion:** G-07 (remove duplicate VS buttons), G-09 (remove vs_rank), G-10 (triage second-click undo), G-11 mechanics
+
+## G-08 — JoinsDialog VS button intent (REVERSES G-05)
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Leave dialog → explore in Lab | Button anchors Workbench on Fragment A and closes JoinsDialog; no pick-back; create join via "Add as Join". Retires G-05 pick-callback. | ✓ |
+| Keep pick-back, close on pick | Keep "Select as partner" → fill Fragment B; close both after pick. Preserves G-05. | |
+
+**Follow-up — toggle state on open:** Toggle ON / **Toggle OFF (plain)** ✓ — consistent with Find-Joins after G-07.
+**Follow-up — pick-callback machinery:** **Keep, marked removable (D-11 one-cycle)** ✓ / Remove now.
+
+## G-06 — Badge vocabulary
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| One eye for all VS | Eye 👁 replaces BOTH ★both and ⊙VS; same eye on the toggle button; tooltip "visual similarity"; no rank. | ✓ |
+| Eye for intersection, keep ⊙VS | Eye = ★both only; pure look-alikes keep ⊙VS (no rank). Two symbols. | |
+
+## G-13 — "Turn off Visual Similarity to see more results" message
+
+| Question | Options | Selected |
+|----------|---------|----------|
+| Placement | **Distinct hint line near results grid** / Appended to status line | **Distinct hint line** ✓ |
+| Empty-intersection | **Combine: "No look-alikes match this search — turn off VS to see all results"** / Keep empty message only | **Combine both** ✓ |
+
+**Trigger (not asked — locked from Hillel's wording):** shown whenever toggle ON and results are shown (pure-VS + intersection).
+
+## G-12 — Visibly-ON toggle
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Accent fill when checked | Colored fill (blue bg, white text) on :checked. | |
+| Sunken/border only | Stronger border + sunken look, no color fill. | ✓ |
+| Add a checkmark to label | "👁 Visual Similarity ✓". | |
+
+**Caveat captured:** bare native sunken state was the original too-subtle complaint — planner must use an explicit :checked rule with a clearly heavier/darker border so ON is unmistakable.
+
+## G-11 — Folio nav + triage on one row
+
+| Option | Description | Selected |
+|--------|-------------|----------|
+| Triage left, folio right | [Y][?][N] … [▶ p.N ◀] | |
+| Folio left, triage right | [▶ p.N ◀] … [Y][?][N] | ✓ |
+| All adjacent, left-aligned | [Y][?][N] [▶ p.N ◀] … | |
+
+## Claude's Discretion (round 3)
+
+- Exact eye glyph rendering (emoji 👁 vs themed icon); precise :checked border weight/shade for G-12;
+  exact wording/styling of the G-13 hint line; how `self.close()` vs reject/accept is invoked in `_show_vs_picker`.
+
+## Deferred / Out of scope (round 3)
+
+- Physical deletion of `_show_vs_dialog`, the pick-callback machinery, and the G-07 reroute handlers
+  (all marked-removable, one-cycle soft-retire per D-11 — a later cleanup phase).

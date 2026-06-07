@@ -369,8 +369,123 @@ workbench path), D-19 (VS via shared service).
 
 </gap_closure_round>
 
+<gap_closure_round_3>
+## Gap-Closure Round 3 (2026-06-07) — UAT REJECTED, 8 change requests (G-06..G-13)
+
+Hillel ran the live desktop app after the round-2 toggle redesign landed (Plans 04-06) and returned
+8 change requests. The toggle/intersection **MECHANICS work**; these are display, layout,
+entry-point, and affordance refinements. `/gsd-plan-phase 109 --gaps` plans these. The
+`_show_vs_dialog` deprecation marker stays "pending parity sign-off" (NOT live) until a clean re-UAT
+after G-06..G-13 land.
+
+**Authority note:** Where these gaps conflict with earlier decisions, the gaps win. Specifically
+**G-08 REVERSES G-05** — the pick-back-to-Fragment-B callback is retired; the JoinsDialog button
+becomes a "leave dialog → explore joins in the Lab" action.
+
+### Discussed gaps (decisions locked)
+
+#### G-06 — Single eye badge for all VS look-alikes (+ eye on the toggle)
+- **G-06.1:** The eye glyph **👁** is the SINGLE marker for any visual look-alike. It **replaces BOTH
+  the `★ both` badge AND the `⊙ VS` badge** on candidate cards (`join_workbench.py:1732-1738`).
+  No `★`, no `⊙`, no rank.
+- **G-06.2:** The eye badge carries the tooltip **"visual similarity"** (HE: "דמיון חזותי").
+- **G-06.3:** The **same eye 👁** prefixes the "Visual Similarity" toggle button label (`:2204`) so
+  button and badge share one visual vocabulary.
+- **G-06.4:** Badge applies to any `via_vs` candidate (both the text∩VS intersection and pure-VS).
+  In pure-VS mode (toggle ON, empty box) every card carries the eye (consistent/harmless); in text
+  mode (toggle OFF) only look-alikes among text hits carry it (informative). ⚓self / ⇄other-side
+  badges unchanged. Text-only stays UNBADGED (CONTEXT ✎text RESOLVED).
+
+#### G-07 — Remove the duplicate VS buttons in Browse tab + ResultDialog
+- **G-07.1:** Delete `btn_b_visual_sim` (Browse tab, `genizah_app.py:~7246`) and `btn_rd_visual_sim`
+  (`desktop/result_dialog.py:464`) — the widget + its `.clicked.connect(...)` line. "Find Joins"
+  (`btn_b_find_joins` / `btn_rd_find_joins`) already routes into the Workbench.
+- **G-07.2:** The now-dead reroute handlers `_browse_view_visual_similarity` (`:4708`) and
+  `_rd_search_visual_similarity` (`result_dialog.py:757`) are **marked removable** (one-cycle
+  soft-retire, D-11 style) — NOT deleted in 109. Consequence: no entry point opens the Workbench
+  with toggle ON anymore (the user toggles ON manually); `open_joins_workbench(source="visual")`
+  goes dormant but is retained (cheap source→toggle mapping; still referenced by the
+  marked-removable handlers).
+
+#### G-08 — JoinsDialog VS button → "find joins in joins lab" (REVERSES G-05 pick-back)
+- **G-08.1:** Icon **🔍 → 🔗 (link)**; tooltip → **"find joins in joins lab"**
+  (`corrections_ui.py:3443-3446`).
+- **G-08.2:** `_show_vs_picker` (`corrections_ui.py:4756`) opens the Workbench anchored on Fragment A
+  **plain (toggle OFF — `open_joins_workbench(res)`, NO `source="visual"`, NO `pick_callback`)**,
+  consistent with the Find-Joins entry points after G-07, then **closes the JoinsDialog**
+  (`self.close()` — the in-progress JoinsDialog state is intentionally abandoned; the user is
+  leaving to work in the Lab).
+- **G-08.3:** **No pick-back to Fragment B.** The user creates the join from inside the Lab (the
+  candidate card's "Add as Join" 🔗). `_on_vs_pick` (`:4780`) loses its only caller.
+- **G-08.4:** The Workbench **pick-callback machinery is KEPT but marked removable** (one-cycle
+  soft-retire, D-11 style): `_pick_callback`, the "Select as partner" button (`:1893-1906`),
+  `set_pick_callback`/`clear_pick_callback`, `_invoke_pick`. Their tests stay green. With BOTH the
+  normal-mode (G-07) and pick-mode (G-08) callers now gone, `_show_vs_dialog` is **confirmed fully
+  unreferenced** → on a clean re-UAT the deprecation marker goes live (still no physical deletion in
+  109 per D-11).
+
+#### G-09 — Remove the VS rank label
+- **G-09.1:** Drop the `#{c.vs_rank}` append (`join_workbench.py:1736-1737`). Subsumed by G-06.1 —
+  the `⊙ VS#rank` badge is gone entirely; the eye carries no rank.
+
+#### G-10 — Triage second-click undo (per-state toggle)
+- **G-10.1:** In `mark(sys_id, val)` (`:4731`): if the candidate's current triage already equals
+  `val`, **clear it** (`self.triage.pop(sys_id, None)`); otherwise set it. Then restyle + update
+  counts as today. Idempotent toggle per state (clicking Y then Y clears; clicking Y then N sets N).
+
+#### G-11 — Folio nav onto the triage row
+- **G-11.1:** Merge the separate `folio_row` (`:1804-1826`) into a single row with the triage
+  buttons (`trow`, `:1782-1798`). **Order: folio nav LEFT, triage RIGHT** —
+  `[▶ p.N ◀]  …(stretch)…  [Y][?][N]`. Removes one row of vertical space per card.
+
+#### G-12 — Visibly-ON toggle
+- **G-12.1:** Make the ON state apparent via a **stronger sunken/border treatment** on `:checked`
+  (NOT a bold accent color fill — Hillel's explicit choice). **Caveat for the planner:** the
+  original complaint was the *default* checkable pressed-look being too subtle, so a bare native
+  sunken state is NOT sufficient — use an explicit `:checked` stylesheet rule with a clearly
+  heavier/darker border (and at most a faint background shade, no full accent fill) so ON is
+  unmistakable vs OFF across Windows themes. Re-verified in the re-UAT (Scenario A / G-12).
+
+#### G-13 — "Turn off Visual Similarity to see more results"
+- **G-13.1:** Show the hint as a **distinct, subtly-styled hint line near the results grid**
+  (separate from the "{n}/{m} shown" counter at `:2863-2864`), eye-prefixed.
+- **G-13.2:** **Trigger:** shown whenever the **toggle is ON and results are shown** (covers both
+  pure-VS and intersection states, per Hillel's wording "the VS set / intersection").
+- **G-13.3:** **Empty-intersection precedence:** when toggle ON + term yields zero look-alikes
+  (`_empty_intersection and not filtered`, `:2860`), show the **combined** message
+  **"No look-alikes match this search — turn off Visual Similarity to see all results"**
+  (HE: "אין דומים חזותית התואמים לחיפוש זה — כבו את הדמיון החזותי כדי לראות הכל"). The bare
+  "0/0 shown" / never-resolving "loading…" states must NOT appear (MEDIUM-1 still holds).
+
+### i18n (D-17 still in force)
+Every new/changed string above is `tr()`-wrapped with EN+HE keys in
+`genizah_translations.TRANSLATIONS` (the `tests/test_join_workbench_i18n.py` guard applies). Reuse
+**חזותי** (NOT חיצוני) for all VS strings (G-01 precedent). New HE keys needed: eye-badge tooltip
+"דמיון חזותי", the G-13.3 combined empty message, the G-13.1 hint-line text, and the G-08 tooltip
+"find joins in joins lab".
+
+### Re-UAT after these fixes
+A fresh `109-HUMAN-UAT.md` round must re-verify the toggle states (ON-empty / ON+term / OFF-badge)
+with the eye badge, the G-13 hint + combined empty message, the G-08 button (link icon, new tooltip,
+dialog closes, NO "Select as partner" surfaced from the JoinsDialog), the G-11/G-12 layout, G-10
+triage undo, and confirm the G-07 buttons are gone. The previously-NOT-REACHED scenarios (four
+actions on VS cards, reused-window re-anchor, perf ≥80) still need a pass. Gates the deprecation
+marker (D-11/D-14b).
+
+### Unchanged decisions still in force
+D-01 (VS auto-loads — now toggle ON empty), D-04/D-05/D-06/D-07 (full set, no floor/cap,
+manuscript-level), D-08 (no-VS → greyed toggle), D-09 + AMENDMENT (page-lazy network/thumbnail;
+batched cheap local enrich), D-11 (retain old dialog one cycle; NOW ALSO covers the pick-callback
+machinery + the G-07 reroute handlers), D-13 (desktop-only; web untouched), D-14a (automated parity
+invariant stays green), D-17 (i18n from line one), D-18 (no `_vs_*` on workbench path), D-19 (VS via
+shared service). G-04 single-toggle model preserved. **G-05 pick-back callback REVERSED by G-08**
+(machinery retained marked-removable).
+
+</gap_closure_round_3>
+
 ---
 
 *Phase: 109-visual-similarity-merge-soft-retire*
 *Context gathered: 2026-06-07*
 *Gap-closure round appended: 2026-06-07 (G-01..G-05; D-10 source-model superseded, D-12 reversed)*
+*Gap-closure round 3 appended: 2026-06-07 (G-06..G-13; G-08 reverses G-05 pick-back)*
