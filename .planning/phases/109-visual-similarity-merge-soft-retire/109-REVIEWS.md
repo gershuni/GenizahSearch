@@ -9,8 +9,18 @@ note: >
   gsd-plan-checker passed. The internal checker validated plan-internal consistency; Codex read the
   LIVE code and found 4 HIGH execution blockers + 2 MEDIUM + 1 LOW. The original pre-execution review
   of Plans 01-03 is preserved at 109-REVIEWS-preexec.md.
-verdict: REVISION REQUIRED (4 HIGH blockers) — fed back to planner same session
+verdict: RESOLVED — 3 Codex rounds; all blockers closed; "NONE — clear to execute" (2026-06-07)
+revision_commits: [c1658a4d (round 1), 9f759927 (round 2)]
 ---
+
+> **RESOLUTION (2026-06-07):** The 4 HIGH + 2 MEDIUM + 1 LOW below were fed back to the planner.
+> Round-1 revision (`c1658a4d`) closed HIGH-1, HIGH-4, MEDIUM-1, MEDIUM-2, LOW; Codex pass 2 found
+> HIGH-2 + HIGH-3 only PARTIALLY closed (+1 new HIGH, same root). Round-2 revision (`9f759927`) gave a
+> concrete `JoinWorkbenchWindow.set_source()` rewrite (clear `_pending_vs` only when `apply_source()`
+> returns True) and a `set_anchor()` card-widget clear via the existing `render_results()`/
+> `_render_grid_page()` path. Codex pass 3 verdict: **NONE — clear to execute** (no new issues). The
+> findings below are retained as the audit trail.
+
 
 # Cross-AI Plan Review — Phase 109 gap-closure round
 
