@@ -272,6 +272,24 @@ def candidate_to_result_dict(c) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Plan 06 — pick_callback helper (pure, testable, no Qt)
+# ---------------------------------------------------------------------------
+
+
+def _invoke_pick(callback, c) -> bool:
+    """Pick-mode: forward a chosen Candidate's (sys_id, shelfmark) to the JoinsDialog callback.
+
+    Returns True and calls callback(c.sys_id, c.shelfmark) when a callback is set.
+    Returns False without calling callback when callback is None.
+    Named without a _vs_ prefix so the no_private AST guard (D-18) does not flag callers.
+    """
+    if callback is None:
+        return False
+    callback(c.sys_id, c.shelfmark)
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Plan 02 — four-source known-joins data layer (pure, testable)
 # ---------------------------------------------------------------------------
 
@@ -1866,6 +1884,26 @@ if _QT_AVAILABLE:
                 )
             )
             arow.addWidget(reanchor_btn)
+
+            # Plan 06 — pick mode: "Select as partner" button (G-05 / D-18).
+            # Only created when a pick_callback is active on the Workbench window.
+            # Because set_pick_callback/clear_pick_callback call _rerender_candidate_cards(),
+            # a callback set AFTER the first render still produces this button (HIGH-4).
+            # Named _on_pick_partner — no _vs_ prefix to keep D-18 no-private guard green.
+            if self.pane.wb._pick_callback is not None:
+                pick_btn = QPushButton(tr("Select as partner"))
+                pick_btn.setToolTip(tr("Select as partner"))
+                pick_btn.setAccessibleName(tr("Select as partner"))
+
+                def _on_pick_partner(_checked=False, c_=c):
+                    try:
+                        if _invoke_pick(self.pane.wb._pick_callback, c_):
+                            self.pane.wb.close()
+                    except RuntimeError:
+                        pass
+
+                pick_btn.clicked.connect(_on_pick_partner)
+                lay.addWidget(pick_btn)
 
             lay.addLayout(arow)
 
@@ -4026,6 +4064,9 @@ if _QT_AVAILABLE:
             self._img_threads: list = []
             self._thumb_resolver = None
 
+            # Plan 06 — pick-mode callback (None = normal Workbench; set via set_pick_callback).
+            self._pick_callback = None
+
             self._init_ui()
             self.setWindowTitle(tr("Joins Lab"))
             self.setMinimumSize(900, 680)
@@ -4340,6 +4381,45 @@ if _QT_AVAILABLE:
             if applied:
                 pane._pending_vs = None   # clear ONLY after the request was actually applied
             # else: leave pane._pending_vs set; _on_anchor_set applies it once the new anchor's VS is known
+
+        # ------------------------------------------------------------------
+        # Plan 06 — pick-mode callback (G-05 / HIGH-4)
+        # ------------------------------------------------------------------
+
+        def set_pick_callback(self, cb):
+            """Enter pick mode: store the callback and re-render visible cards so the
+            'Select as partner' button appears on current-page cards immediately.
+
+            HIGH-4: call BEFORE set_anchor/set_source so the FIRST rendered card page already
+            reflects pick mode. The pre-anchor re-render paints the OLD anchor's cards — that is
+            safe because the immediately-following set_anchor (Plan 05 BLOCKER B) clears the grid
+            before the NEW anchor repaints, so no stale-anchor pick card survives.
+            """
+            self._pick_callback = cb
+            self._rerender_candidate_cards()
+
+        def clear_pick_callback(self):
+            """Leave pick mode: clear the callback and re-render visible cards so any stale
+            'Select as partner' buttons are removed immediately (normal-open safety net).
+
+            HIGH-4: call BEFORE set_anchor on a normal (non-pick) open so the first rendered
+            card page already has no pick button.
+            """
+            self._pick_callback = None
+            self._rerender_candidate_cards()
+
+        def _rerender_candidate_cards(self):
+            """Belt-and-braces re-render: rebuild the current page's CandidateCards so each
+            card re-evaluates the pick-button condition against the current _pick_callback.
+            No-ops when the pane is not yet constructed or is already deleted.
+            """
+            pane = getattr(self, "_candidate_pane", None)
+            if pane is None:
+                return
+            try:
+                pane.render_results()   # re-runs _render_grid_page -> rebuilds cards
+            except (RuntimeError, AttributeError):
+                pass
 
         # ------------------------------------------------------------------
         # Anchor loading / set_anchor

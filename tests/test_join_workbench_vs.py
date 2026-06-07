@@ -486,14 +486,16 @@ def test_set_pick_callback_rerenders():
         def render_results(self):
             render_calls.append("render")
 
+    # Stub needs _rerender_candidate_cards bound from JoinWorkbenchWindow for the unbound-call pattern
     class _FakeWinStub:
         _pick_callback = None
         _candidate_pane = _FakePaneStub()
+        _rerender_candidate_cards = JoinWorkbenchWindow._rerender_candidate_cards
 
     win = _FakeWinStub()
 
     # set_pick_callback must store the callback AND trigger a re-render
-    cb = lambda sys_id, shelf: None
+    cb = lambda sys_id, shelf: None  # noqa: E731
     JoinWorkbenchWindow.set_pick_callback(win, cb)
     assert win._pick_callback is cb, "set_pick_callback must store the callback"
     assert len(render_calls) == 1, (
