@@ -748,25 +748,25 @@ the service's degradation path and D-08 grey-out behavior.
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Source selector widget type (Claude's discretion)**
    - What we know: Phase 108 stub has `src_row` QHBoxLayout with only `btn_find`.
    - What's unclear: QRadioButton group vs QComboBox vs custom toggle buttons.
-   - Recommendation: QRadioButton group (3 buttons: Text / Visual / Combined) — consistent with
+   - RESOLVED (adopted in Plan 02 Task 1): QRadioButton group (3 buttons: Text / Visual / Combined) — consistent with
      the CONTEXT.md "source selector" language and matches standard desktop UI patterns. QComboBox
      is also acceptable. Claude's discretion.
 
 2. **When to grey out Visual vs Combined (D-08)**
    - What we know: Visual greyed out when no VS data. Combined uses VS + text.
    - What's unclear: Should Combined also be greyed out when no VS data?
-   - Recommendation: Yes — Combined without VS data is identical to Text. Greyout both Visual
+   - RESOLVED (adopted in Plan 02 Task 1): Yes — Combined without VS data is identical to Text. Greyout both Visual
      and Combined when `has_suggestions()` is False.
 
 3. **VS fetch timing: on anchor load or on source change?**
    - What we know: `set_anchor` clears triage and resets state; `_on_anchor_loaded` signals completion.
    - What's unclear: Whether to eagerly call `has_suggestions()` right after anchor loads (to enable/disable greying out) vs only when user selects Visual.
-   - Recommendation: Eagerly check `has_suggestions()` in `_on_anchor_loaded` to grey-out the
+   - RESOLVED (adopted in Plan 02 Task 1): Eagerly check `has_suggestions()` in `_on_anchor_loaded` to grey-out the
      Visual option immediately — avoids a confusing UX where the option looks enabled until clicked.
 
 ---

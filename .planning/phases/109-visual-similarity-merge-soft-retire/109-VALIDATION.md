@@ -1,9 +1,9 @@
 ---
 phase: 109
 slug: visual-similarity-merge-soft-retire
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: approved
+nyquist_compliant: true
+wave_0_complete: false  # flips true when the executor completes Wave 0 (Plan 01 Task 1 creates tests/test_join_workbench_vs.py)
 created: 2026-06-07
 ---
 
@@ -77,11 +77,11 @@ created: 2026-06-07
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references (`tests/test_join_workbench_vs.py`)
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 10s (quick run)
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies (all 7 auto tasks across plans 01–03 carry a `<verify><automated>` command; Task 3 of Plan 03 is a human-verify checkpoint)
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (`tests/test_join_workbench_vs.py` created in Plan 01 Task 1)
+- [x] No watch-mode flags
+- [x] Feedback latency < 10s (quick run)
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-06-07 (plan-time; gsd-plan-checker Dimension 8 pass)
