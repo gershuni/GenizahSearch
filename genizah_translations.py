@@ -4008,3 +4008,15 @@ TRANSLATIONS.update({
     "VS rank": "דירוג דמיון",
 })
 
+# === Phase 109 gap-closure (G-04 toggle + G-05 pick) ===
+TRANSLATIONS.update({
+    # G-04: the single "Visual Similarity" toggle tooltip (the LABEL key "Visual Similarity"
+    # already exists at line 3194 -> "דמיון חזותי"; do NOT re-add it).
+    "Show only visual look-alikes; with a search term, only look-alikes that also match":
+        "הצג רק דומים חזותית; עם מונח חיפוש, רק דומים חזותית שגם מתאימים",
+    # G-03/G-04: empty-intersection state (toggle ON + term with no look-alike match)
+    "No look-alikes match this search": "אין דומים חזותית התואמים לחיפוש זה",
+    # G-05: pick-mode affordance + JoinsDialog tooltip
+    "Select as partner": "בחר כשותף",
+    "Pick a partner in the Join Lab": "בחר שותף במעבדת הצירופים",
+})
