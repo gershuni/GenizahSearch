@@ -207,7 +207,7 @@ preserved).
   2. The standalone Visual Similarity dialog's entry points **route into the Workbench**; the old dialog is **deprecated (marked removable)** after a parity verification pass; the JoinsDialog **pick-mode hook still works**.
   3. Per-candidate enrichment (browse text / measurement / thumbnail / snippet / membership) is **batched**, not per-candidate-serial, verified on an ~80-candidate VS load (Codex perf risk).
 
-**Plans**: 7 plans (3 executed + 4 gap-closure after UAT REJECTED, G-01..G-05)
+**Plans**: 13 plans (3 executed + 4 gap-closure round-2 G-01..G-05 + 6 gap-closure round-3 G-06..G-13 after UAT REJECTED again)
 - [x] 109-01-PLAN.md — Wave-0 VS adapter shim + i18n keys + tests
 - [x] 109-02-PLAN.md — Visual/Combined source selector + source-aware merge + badges + parity test
 - [x] 109-03-PLAN.md — reroute Browse/ResultDialog entry points + deprecation marker + UAT scaffold
@@ -215,6 +215,12 @@ preserved).
 - [x] 109-05-PLAN.md — G-04/G-03/G-02: single Visual-Similarity toggle (replaces 3 radios) + intersection assemble + page-lazy VS card text (Wave 2)
 - [x] 109-06-PLAN.md — G-05: reroute JoinsDialog pick-mode into the Workbench + tooltip + deprecation re-eval (Wave 3)
 - [ ] 109-07-PLAN.md — re-UAT checkpoint (toggle states + deferred scenarios; gates the deprecation marker, Wave 4)
+- [ ] 109-08-PLAN.md — gap-round-3: pre-seed EN+HE tr() keys (eye tooltip / G-13 hint+empty / G-08 link tooltip) (Wave 1)
+- [ ] 109-09-PLAN.md — G-06/G-09/G-12: single eye 👁 badge (drops ★both/⊙VS/rank) + eye-prefixed toggle + visible-ON :checked style (Wave 2)
+- [ ] 109-10-PLAN.md — G-07: remove duplicate Browse + ResultDialog VS buttons; mark reroute handlers removable (Wave 3)
+- [ ] 109-11-PLAN.md — G-10/G-11/G-13: triage second-click undo + merged folio+triage row + VS hint line & combined empty message (Wave 4)
+- [ ] 109-12-PLAN.md — G-08: JoinsDialog VS button → 🔗 plain Join-Lab open + close (reverses G-05); pick machinery marked removable; _show_vs_dialog fully unreferenced (Wave 5)
+- [ ] 109-13-PLAN.md — gap-round-3 re-UAT checkpoint (eye badge + G-07..G-13 + deferred K/L/M); owns the deprecation-marker flip (Wave 6, autonomous:false)
 
 ---
 
