@@ -1,6 +1,5 @@
 """ResultDialog -- manuscript result viewer dialog (extracted from genizah_app.py, v7.9)."""
 
-import json
 import re
 import threading
 
