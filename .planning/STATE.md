@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v8.0.0
 milestone_name: Joins Lab — Phases 106-110
 status: executing
-stopped_at: Phase 109 context gathered
-last_updated: "2026-06-07T18:07:56.331Z"
+stopped_at: Phase 109 gap-closure round 3 context gathered (G-06..G-13)
+last_updated: "2026-06-07T19:37:42.408Z"
 last_activity: 2026-06-07
 progress:
   total_phases: 8
@@ -94,7 +94,7 @@ Carried forward to v8.0.0+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular
 
 ## Session Continuity
 
-Last session: 2026-06-07T18:07:56.325Z
-Stopped at: Phase 109 context gathered
-Resume file: None
+Last session: 2026-06-07T19:37:42.402Z
+Stopped at: Phase 109 gap-closure round 3 context gathered (G-06..G-13)
+Resume file: .planning/phases/109-visual-similarity-merge-soft-retire/109-CONTEXT.md
 Next step: /gsd-verify-work for Phase 108 (VALIDATION.md ready; nyquist_compliant + wave_0_complete = true).
