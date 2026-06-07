@@ -35,10 +35,35 @@ clients' element trees not reclaimed / pruners blocked), NOT nli_cache and NOT
 the export-payload ObservableDict-wrapping theory from 2026-05-19. Matches the
 ORIGINAL 2026-04 OPEN_ISSUES hypothesis.
 
-## Next
-- Leave tracemalloc running (baseline now reset to 19:37:28). Snapshot again after
-  a LONGER, busier window (hours / peak traffic) to catch the leak firing and pin
-  the file:line. Stop tracemalloc (`?action=stop`) once captured to drop overhead.
-- nli_cache bound (genizah_core.py `_BoundedLRUCache`) is implemented + tested but
-  is hygiene — this data says it is NOT the multi-GB driver.
-- Cross-check NiceGUI prune (`prune_user_storage`/client GC) + disconnect handlers.
+## SECOND WINDOW — 2026-06-07 02:16 (6.6 h, the decisive read)
+Baseline 19:37:28 (06-06) → snapshot 02:16:37 (06-07), ~6.6 h, same PID (no restart):
+- VmRSS 13,521,944 → 13,527,444 kb = **+5.5 MB over 6.6 h (<1 MB/hr — essentially FLAT)**.
+- RssAnon +3.7 MB. nli_cache 51,017 → 52,611 (+1,594). clients 11 / tab_storage 123.
+- tracemalloc diff (group_by=traceback): ~26 MB of *tracked* allocation churn but RSS
+  net +5.5 MB ⇒ overwhelmingly TRANSIENT. Top growers are framework/runtime churn:
+  nicegui/observables.py:52 (ObservableDict wrapping, +40K objs across 2 entries),
+  concurrent/futures/thread.py:58/:92 (threadpool WorkItems, +90K objs),
+  threading.py:1010, asyncio/runners.py:194, inspect.py:3054; app code only
+  genizah_core.py:4055 (IIIF/MARC negative-cache region) + :4628 (`current_meta['images']`
+  enrichment) — both transient per-enrichment, count-correlated with traffic.
+  text_element.py:15 +1.31MB/+1 offset by button.py:36 −1.31MB/−1 (a single big element
+  re-attributed, not growth).
+
+## CONCLUSION (supersedes the "find the leak" framing)
+**The process is NOT actively leaking in these windows — it has PLATEAUED around
+13.5 GB.** Two windows (9 min + 6.6 h) both show flat RSS. The dramatic 1.78 GB →
+13.5 GB rise over the first ~3 days was **front-loaded** (working set / caches /
+NiceGUI sessions filling to steady state), now leveled off. No retained app-level
+surface dominates; churn is normal NiceGUI + threadpool transients.
+
+**Caveat:** both windows were OFF-PEAK (evening + overnight Israel time). One
+daytime-peak RSS check (cheap `/_internal/memstat` polls, no tracemalloc needed)
+would make the plateau conclusive vs. a possible peak-traffic-correlated climb.
+
+## Actions
+- tracemalloc STOPPED (overhead removed).
+- nli_cache bound (committed `592c984e`) = hygiene; data confirms it is NOT the driver.
+- Pragmatic fix for a high-but-plateaued working set: systemd `MemoryHigh`/`MemoryMax`
+  + periodic (e.g. weekly) restart, rather than a code leak-hunt.
+- Optional: lower baseline (csv_bank/translations resident set) only if 13 GB is too
+  high for the box.
