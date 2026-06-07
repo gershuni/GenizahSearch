@@ -4753,15 +4753,17 @@ class GenizahGUI(QMainWindow):
         self._show_vs_dialog(sys_id, shelfmark, data)
 
     def _show_vs_dialog(self, sys_id, shelfmark, data, parent_dialog=None, on_pick=None):
-        # DEPRECATED — pending parity sign-off (Phase 109, D-11 / D-14): The NORMAL-MODE path
-        # (on_pick is None) is no longer reachable from standard entry points —
-        # _browse_view_visual_similarity and _rd_search_visual_similarity now open the Join
-        # Workbench (Visual source) directly. This code is retained for ONE CYCLE as a safety net
-        # and WILL BE DELETED in a future cleanup phase once the parity UAT (D-14b, 109-HUMAN-UAT.md)
-        # has signed off. Do not add new normal-mode callers.
-        #
-        # EXCEPTION (D-12): The PICK-MODE branch (on_pick is not None, ~line 5107) remains ACTIVE —
-        # it is the JoinsDialog visual partner-picker for Add-as-Join and MUST keep working (SC#2).
+        # DEPRECATED — pending parity sign-off; normal AND pick callers rerouted
+        # (Phase 109, D-11 / D-14b). BOTH the normal-mode path (on_pick is None) AND the
+        # pick-mode path (on_pick is not None, the JoinsDialog partner-picker) are now rerouted
+        # to the Join Workbench:
+        #   - Normal-mode: _browse_view_visual_similarity and _rd_search_visual_similarity
+        #     open open_joins_workbench(source='visual') directly (Plan 03).
+        #   - Pick-mode: corrections_ui.py _show_vs_picker now calls
+        #     open_joins_workbench(source='visual', pick_callback=...) (Plan 06, G-05).
+        # This code is RETAINED for one cycle (D-11) as a safety net; it stays present until the
+        # parity UAT (109-HUMAN-UAT.md, D-14b) signs off — only THEN is it removable in a future
+        # cleanup phase. Do not add new callers.
         """Create and show the enriched Visual Similarity workbench dialog."""
         dlg = QDialog(self)
         dlg.setWindowTitle(f'{tr("Visual Similarity")} -- {shelfmark}')
@@ -15437,13 +15439,29 @@ class GenizahGUI(QMainWindow):
         except Exception as exc:
             logger.debug("open_join_workbench: restore_state failed: %s", exc)
 
-    def open_joins_workbench(self, res: dict, source: str = "text"):
+    def open_joins_workbench(self, res: dict, source: str = "text", pick_callback=None):
         """Open (or re-anchor) the Join Workbench. D-01 modeless; single reusable instance.
-        source: 'text' (default) | 'visual' | 'combined' — selects the candidate source after open (D-10)."""
+        source: 'text' (default) | 'visual' | 'combined' — selects the candidate source after open (D-10).
+        pick_callback: optional callable(sys_id, shelfmark) for pick-mode (G-05 / Plan 06).
+        """
         from desktop.join_workbench import JoinWorkbenchWindow  # lazy import (desktop-only)
         if self._join_workbench is None or not self._join_workbench.isVisible():
             self._join_workbench = JoinWorkbenchWindow(self, self)
-        self._join_workbench.set_anchor(res)          # sets _anchor_sid FIRST
+        # HIGH-4: set/clear the pick callback BEFORE anchoring + source-load so the first card page
+        # is built with the correct pick-button state (set_source('visual') renders synchronously).
+        # clear_pick_callback on the None path ensures a reused window from a normal open does not
+        # keep a stale pick callback and re-renders to drop any stale pick buttons.
+        # The pre-anchor set_pick_callback re-render paints the OLD anchor's cards, but the next
+        # set_anchor (Plan 05 BLOCKER B) clears the grid before the NEW anchor repaints, so no
+        # stale-anchor pick card survives.
+        try:
+            if pick_callback is not None:
+                self._join_workbench.set_pick_callback(pick_callback)
+            else:
+                self._join_workbench.clear_pick_callback()
+        except (RuntimeError, AttributeError) as exc:
+            logger.warning("open_joins_workbench: set/clear pick_callback failed: %s", exc)
+        self._join_workbench.set_anchor(res)          # sets _anchor_sid; BLOCKER B clears old cards
         if source and source != "text":
             try:
                 self._join_workbench.set_source(source)   # pending-source aware (review #2); D-08 guarded

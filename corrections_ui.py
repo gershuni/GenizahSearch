@@ -3442,7 +3442,7 @@ class JoinsDialog(QDialog):
         # "Visual Suggestions" button — pick fragment B from VS dialog
         self.btn_vs_pick = QPushButton("🔍")
         self.btn_vs_pick.setFixedWidth(30)
-        self.btn_vs_pick.setToolTip(tr("Visual Similarity") + " — " + tr("Pick from visual suggestions"))
+        self.btn_vs_pick.setToolTip(tr("Visual Similarity") + " — " + tr("Pick a partner in the Join Lab"))
         self.btn_vs_pick.clicked.connect(self._show_vs_picker)
         frag_b_layout.addWidget(self.btn_vs_pick)
 
@@ -4754,32 +4754,28 @@ class JoinsDialog(QDialog):
         dialog.exec()
 
     def _show_vs_picker(self):
-        """Open Visual Similarity dialog to pick fragment B from suggestions."""
+        """Open the Join Workbench in pick mode to let the user select fragment B from VS look-alikes.
+
+        G-05 (Plan 06): rerouted from the old _show_vs_dialog pick path into the Workbench.
+        The Workbench loads VS itself (set_source='visual') and greys the toggle (D-08) when the
+        anchor has no VS data — no pre-fetch or QMessageBox is needed here.
+        """
         parent_app = self.parent()
-        if not parent_app or not hasattr(parent_app, '_show_vs_dialog'):
+        if not parent_app or not hasattr(parent_app, "open_joins_workbench"):
             return
         if not self.document_id:
             return
-
-        # Get VS suggestions for fragment A
-        try:
-            from shared.visual_similarity_service import get_vs_service
-            vs_svc = get_vs_service(thread_safe=False)
-            if not vs_svc.is_available() or not vs_svc.has_suggestions(self.document_id):
-                from PyQt6.QtWidgets import QMessageBox
-                QMessageBox.information(self, tr("Visual Similarity"), tr("No visual similarity suggestions"))
-                return
-            data = vs_svc.get_suggestions(self.document_id, 200)
-            parent_app._enrich_vs_suggestions(data)
-        except Exception:
-            return
-
-        # Show the full VS dialog with on_pick callback — "Add as Join" fills frag_b
         shelf_a = self.frag_a_input.text() or self.shelfmark or self.document_id
-        parent_app._show_vs_dialog(
-            self.document_id, shelf_a, data,
-            on_pick=self._on_vs_pick,
-        )
+        res = {
+            "display": {
+                "id": self.document_id,
+                "shelfmark": shelf_a,
+                "library_code": "",
+                "title": "",
+                "img": None,
+            }
+        }
+        parent_app.open_joins_workbench(res, source="visual", pick_callback=self._on_vs_pick)
 
     def _on_vs_pick(self, partner_sys_id, partner_shelfmark):
         """Callback when user picks a suggestion from VS dialog."""
