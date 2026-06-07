@@ -4753,6 +4753,15 @@ class GenizahGUI(QMainWindow):
         self._show_vs_dialog(sys_id, shelfmark, data)
 
     def _show_vs_dialog(self, sys_id, shelfmark, data, parent_dialog=None, on_pick=None):
+        # DEPRECATED — pending parity sign-off (Phase 109, D-11 / D-14): The NORMAL-MODE path
+        # (on_pick is None) is no longer reachable from standard entry points —
+        # _browse_view_visual_similarity and _rd_search_visual_similarity now open the Join
+        # Workbench (Visual source) directly. This code is retained for ONE CYCLE as a safety net
+        # and WILL BE DELETED in a future cleanup phase once the parity UAT (D-14b, 109-HUMAN-UAT.md)
+        # has signed off. Do not add new normal-mode callers.
+        #
+        # EXCEPTION (D-12): The PICK-MODE branch (on_pick is not None, ~line 5107) remains ACTIVE —
+        # it is the JoinsDialog visual partner-picker for Add-as-Join and MUST keep working (SC#2).
         """Create and show the enriched Visual Similarity workbench dialog."""
         dlg = QDialog(self)
         dlg.setWindowTitle(f'{tr("Visual Similarity")} -- {shelfmark}')
