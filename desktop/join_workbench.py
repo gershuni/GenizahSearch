@@ -2058,7 +2058,6 @@ if _QT_AVAILABLE:
 
             # Internal state
             self._text_cands = None   # list[Candidate] after dedup
-            self._sources = {"text"}  # set-membership; canonical vocab "text"/"visual"/"combined"
             self._enrich: dict = {}   # {(sys_id, page): {...}} — per-page key (RR-2)
             self._anchor_matched = None  # bool or None
             self.results: list = []   # list[Candidate] — post-merge
@@ -2069,10 +2068,11 @@ if _QT_AVAILABLE:
             self._cross_worker = None
             self._enrich_worker = None
             self._search_thread = None
-            # Phase 109 VS source state (review #8a canonical vocab)
+            # Phase 109 VS source state (G-04 toggle model)
             self._vs_cands = None         # list[Candidate] from VS load, or None
-            self._active_source = "text"  # canonical token: "text" | "visual" | "combined"
-            self._pending_source = None   # source requested before grey-out is known (review #2)
+            self._vs_on = False           # G-04: the single toggle's checked state (bool)
+            self._vs_loaded_sid = None    # HIGH-1: anchor sys_id _vs_cands was loaded FOR (staleness key)
+            self._pending_vs = None       # bool|None — toggle request deferred until new anchor's VS is known (BLOCKER A)
 
             self._build_ui()
 
@@ -2127,23 +2127,19 @@ if _QT_AVAILABLE:
             src_row = QHBoxLayout()
             src_row.setSpacing(4)
 
-            # Phase 109: three-source radio selector (review #8a canonical vocab)
-            from PyQt6.QtWidgets import QRadioButton, QButtonGroup
-            self.rb_text = QRadioButton(tr("Text"))
-            self.rb_visual = QRadioButton(tr("Visual similarities"))
-            self.rb_combined = QRadioButton(tr("Search + visual"))
-            self.rb_text.setChecked(True)
-            self._source_group = QButtonGroup(self)
-            for _rb in (self.rb_text, self.rb_visual, self.rb_combined):
-                self._source_group.addButton(_rb)
-                src_row.addWidget(_rb)
-            self.rb_text.toggled.connect(lambda v: v and self._on_source_changed("text"))
-            self.rb_visual.toggled.connect(lambda v: v and self._on_source_changed("visual"))
-            self.rb_combined.toggled.connect(lambda v: v and self._on_source_changed("combined"))
+            # Phase 109 G-04: single checkable "Visual Similarity" toggle (replaces 3 radios)
+            self.btn_vs_toggle = QPushButton(tr("Visual Similarity"))
+            self.btn_vs_toggle.setCheckable(True)
+            self.btn_vs_toggle.setToolTip(
+                tr("Show only visual look-alikes; with a search term, only look-alikes that also match")
+            )
+            self.btn_vs_toggle.toggled.connect(self._on_vs_toggle)
+            src_row.addWidget(self.btn_vs_toggle)
 
             src_row.addStretch()
 
-            # Find Candidates button (Text / Combined; hidden for Visual auto-load)
+            # Find Candidates button (always visible; with toggle ON + term, user presses Find
+            # to run the text search; toggle ON + empty box auto-assembles on toggle)
             self.btn_find = QPushButton(tr("Find Candidates"))
             self.btn_find.clicked.connect(self.do_search)
             src_row.addWidget(self.btn_find)
@@ -2370,7 +2366,6 @@ if _QT_AVAILABLE:
             # (compose hardcodes them False at :745-747 in joins_lab.py)
             self._merge_globals(self.builder, ro)
 
-            self._sources = {"text"}
             self._text_cands = None
             # Clear selection on new search (adapted_decision 6)
             self._selected_keys.clear()
@@ -2464,39 +2459,48 @@ if _QT_AVAILABLE:
             self._maybe_assemble()
 
         # ------------------------------------------------------------------ #
-        # Phase 109 — VS source selector helpers                            #
+        # Phase 109 G-04 — VS toggle helpers (replaces 3-radio model)      #
         # ------------------------------------------------------------------ #
 
-        def _on_source_changed(self, source: str):
-            """Handle source radio toggle (review #1 — clear stale candidates).
+        def _on_vs_toggle(self, checked: bool):
+            """Handle the VS toggle button toggled signal (G-04 — boolean state machine).
 
-            Sets _active_source, keeps _sources set-membership in canonical vocab,
-            routes: Visual auto-loads (D-01), Combined loads VS now (D-02),
-            Text drops VS so no ⊙VS rows leak into a text-only view.
+            ON:  load/refresh the CURRENT anchor's VS set (D-01 auto-load), then assemble.
+                 assemble handles both the empty-box pure-VS case and the with-term
+                 intersection case from self._vs_on + has_term.
+            OFF: keep self._vs_cands (HIGH-1 — OFF-mode ★both badges still need the set);
+                 reassemble text-only-with-badges.
             """
-            self._active_source = source           # canonical token (review #8a)
-            self._sources = {source}               # set-membership in canonical vocab
-            try:
-                self.btn_find.setVisible(source != "visual")
-            except RuntimeError:
-                pass
-            if source == "visual":
-                # review #1: Visual-only view must NOT carry stale text candidates.
-                self._text_cands = []              # explicit clear; _maybe_assemble passes text=[]
-                self._load_vs()                    # D-01 auto-load (no query, no button)
+            self._vs_on = bool(checked)
+            if checked:
+                self._ensure_vs_loaded_for_anchor(silent=False)
                 self._maybe_assemble()
-            elif source == "combined":
-                # D-02: needs both halves; load VS now, text comes via do_search
-                self._load_vs()
-                if self.builder.is_empty():
-                    # D-02 degrade-to-Visual-only: review #1 — do NOT merge stale text
-                    self._text_cands = []
-                    self._maybe_assemble()
-                # else: user presses Find Candidates -> do_search -> _maybe_assemble picks up _vs_cands
-            else:  # text
-                # review #1: drop VS so a Text-only view never shows ⊙VS rows
+            else:
+                # Do NOT null _vs_cands — keep the CURRENT anchor's set for OFF-mode badges
+                # (HIGH-1 / G-04 bullet 4). Re-render text-only-with-badges.
+                self._maybe_assemble()
+
+        def _ensure_vs_loaded_for_anchor(self, silent: bool = False):
+            """HIGH-1: load + memoize the CURRENT anchor's VS set so OFF-mode badges are
+            computed from the current anchor (not a stale prior anchor). Idempotent per
+            wb._anchor_sid."""
+            sid = self.wb._anchor_sid
+            if not sid:
                 self._vs_cands = None
-                # leave existing text results; do not auto-run
+                self._vs_loaded_sid = None
+                return
+            if self._vs_loaded_sid == sid and self._vs_cands is not None:
+                return  # already loaded for this exact anchor
+            self._vs_cands = self._load_visual_candidates(sid)  # [] when no VS (D-08) — fine
+            self._vs_loaded_sid = sid
+            if not silent:
+                try:
+                    if self._vs_cands:
+                        self.status.setText(tr("Visual look-alikes loaded"))
+                    else:
+                        self.status.setText(tr("No visual similarity data for this manuscript"))
+                except RuntimeError:
+                    pass
 
         def _load_visual_candidates(self, anchor_sid, service=None):
             """Fetch + adapt the anchor's VS look-alikes into list[Candidate] (D-01/D-05).
@@ -2533,20 +2537,16 @@ if _QT_AVAILABLE:
             return out
 
         def _load_vs(self):
-            """D-01: store the anchor's VS look-alikes on self._vs_cands + update status."""
-            anchor_sid = self.wb._anchor_sid
-            self._vs_cands = self._load_visual_candidates(anchor_sid)
-            try:
-                if self._vs_cands:
-                    self.status.setText(tr("Visual look-alikes loaded"))
-                else:
-                    self.status.setText(tr("No visual similarity data for this manuscript"))
-            except RuntimeError:
-                pass
+            """D-01: store the anchor's VS look-alikes on self._vs_cands + update status.
+
+            Now delegates to _ensure_vs_loaded_for_anchor (centralises load + staleness key).
+            """
+            self._ensure_vs_loaded_for_anchor(silent=False)
 
         def _on_anchor_set(self):
-            """Enable/disable Visual+Combined based on whether the anchor has VS data (D-08),
-            then apply any pending source request (review #2)."""
+            """Enable/disable the VS toggle based on whether the anchor has VS data (D-08),
+            apply any pending source request (HIGH-3 / BLOCKER A), and reassemble for the
+            new anchor (HIGH-2)."""
             from shared.visual_similarity_service import get_vs_service
             svc = get_vs_service()
             has_vs = (
@@ -2555,66 +2555,100 @@ if _QT_AVAILABLE:
                 and svc.has_suggestions(self.wb._anchor_sid)
             )
             try:
-                self.rb_visual.setEnabled(has_vs)
-                self.rb_combined.setEnabled(has_vs)
-                if not has_vs and (self.rb_visual.isChecked() or self.rb_combined.isChecked()):
-                    self.rb_text.setChecked(True)   # fall back to Text
+                self.btn_vs_toggle.setEnabled(has_vs)
+                if not has_vs and self.btn_vs_toggle.isChecked():
+                    self.btn_vs_toggle.setChecked(False)
+                    self._vs_on = False
             except RuntimeError:
                 pass
-            # review #2: a source requested via set_source() BEFORE grey-out was known is applied now.
-            pending = self._pending_source
-            self._pending_source = None
-            if pending:
-                self.apply_source(pending)
+            # HIGH-1: load the CURRENT anchor's VS whenever available, even toggle OFF, for badges.
+            if has_vs:
+                self._ensure_vs_loaded_for_anchor(silent=True)
+            # HIGH-3 / BLOCKER A: apply any pending source request now that VS availability is
+            # known for THIS anchor, and clear the pending flag ONLY if it was actually applied.
+            pending = self._pending_vs
+            if pending is not None:
+                applied = self.apply_source("visual" if pending else "text")
+                if applied:
+                    self._pending_vs = None   # clear ONLY after the request was actually applied
+            # HIGH-2: reassemble for the NEW anchor under the current toggle (re-anchor reload).
+            self._maybe_assemble()
 
-        def apply_source(self, source: str):
-            """Select the source radio; handle already-checked (no toggle signal) by calling
-            _on_source_changed directly so VS reloads for the new anchor (review #2b)."""
-            rb = {
-                "text": self.rb_text,
-                "visual": self.rb_visual,
-                "combined": self.rb_combined,
-            }.get(source)
-            if rb is None:
-                return
-            if source in ("visual", "combined") and not rb.isEnabled():
-                # D-08: disabled (no VS data) -> stay on Text rather than selecting a dead source
+        def apply_source(self, source: str) -> bool:
+            """Switch the candidate source to 'source'. Returns True iff actually applied.
+
+            HIGH-3: queries has_suggestions() directly for 'anchor HAS VS' — NOT btn_vs_toggle.isEnabled().
+            set_source uses the return value to guard the pending-clear (BLOCKER A).
+            'combined' is a synonym for 'visual' (maps to toggle ON) for forward-caller compatibility.
+            """
+            want_on = source in ("visual", "combined")
+            if want_on:
+                from shared.visual_similarity_service import get_vs_service
+                svc = get_vs_service()
+                has_vs = (
+                    bool(self.wb._anchor_sid)
+                    and svc.is_available()
+                    and svc.has_suggestions(self.wb._anchor_sid)
+                )
+                if not has_vs:
+                    # D-08: new anchor has no VS — stay OFF (toggle greyed by _on_anchor_set)
+                    try:
+                        if self.btn_vs_toggle.isChecked():
+                            self.btn_vs_toggle.setChecked(False)
+                        self._vs_on = False
+                    except RuntimeError:
+                        pass
+                    return False   # NOT applied -> set_source keeps _pending_vs for _on_anchor_set
                 try:
-                    self.rb_text.setChecked(True)
+                    if self.btn_vs_toggle.isChecked():
+                        self._on_vs_toggle(True)        # already checked -> no toggled signal; call directly
+                    else:
+                        self.btn_vs_toggle.setChecked(True)  # fires toggled -> _on_vs_toggle
                 except RuntimeError:
-                    pass
-                return
-            try:
-                if rb.isChecked():
-                    self._on_source_changed(source)  # review #2b: no toggle signal — call directly
-                else:
-                    rb.setChecked(True)              # fires toggled -> _on_source_changed
-            except RuntimeError:
-                pass
+                    return False
+                return True
+            else:  # "text"
+                try:
+                    self.btn_vs_toggle.setChecked(False)
+                    self._vs_on = False
+                except RuntimeError:
+                    return False
+                return True
 
         # ------------------------------------------------------------------ #
         # End Phase 109 VS helpers                                           #
         # ------------------------------------------------------------------ #
 
         def _maybe_assemble(self):
-            """Merge sources source-awarely and start enrichment (RR-2: merge_candidates returns a LIST).
+            """Merge sources based on the boolean VS toggle and assemble results.
 
-            Review #1: never merges stale candidates from the inactive source.
-              - visual   -> text half = []          (Visual-only; no stale text)
-              - text     -> vs half   = []          (Text-only; no ⊙VS rows)
-              - combined -> both halves; if the builder is empty, text half = [] (degrade to VS-only)
+            G-04 toggle model (Task 1/2):
+              - toggle ON  + empty box -> pure VS (merge_candidates([], vs))
+              - toggle ON  + term      -> INTERSECTION only (★both: via_text AND via_vs)
+              - toggle OFF             -> text-with-VS-badges; VS-only rows excluded
+            Tracks _empty_intersection flag for MEDIUM-1 empty-state message in apply_filters.
             """
             from shared.joins_lab import merge_candidates
-            src = self._active_source
-            if src == "visual":
-                text_half, vs_half = [], (self._vs_cands or [])
-            elif src == "combined":
-                # degrade-to-VS-only when the builder produced no text candidates (review #1)
-                text_half = self._text_cands or []
-                vs_half = self._vs_cands or []
-            else:  # text
-                text_half, vs_half = (self._text_cands or []), []
-            self.results = list(merge_candidates(text_half, vs_half))
+            text = self._text_cands or []
+            vs = self._vs_cands or []
+            has_term = (not self.builder.is_empty()) or bool(text)
+            self._empty_intersection = False  # MEDIUM-1: drives the empty-state message in apply_filters
+            if self._vs_on and not has_term:
+                # toggle ON + empty box -> pure VS look-alikes (G-04 bullet 1)
+                merged = list(merge_candidates([], vs))
+            elif self._vs_on and has_term:
+                # toggle ON + term -> INTERSECTION only (★both); NOT the old union (G-04 bullets 2,3)
+                merged_all = merge_candidates(text, vs)
+                merged = [c for c in merged_all if c.via_text and c.via_vs]
+                if not merged:
+                    self._empty_intersection = True   # MEDIUM-1
+            else:
+                # toggle OFF -> text-only rows, but text candidates that are ALSO VS look-alikes keep
+                # the VS/★both badge (G-04 bullet 4). merge_candidates annotates via_vs on text rows
+                # that appear in vs; we then DROP VS-only rows.
+                merged_all = merge_candidates(text, vs)
+                merged = [c for c in merged_all if c.via_text]  # text-only + ★both, never VS-only
+            self.results = list(merged)
             self._page = 0
             self._start_enrich()
 
@@ -4244,24 +4278,28 @@ if _QT_AVAILABLE:
         # ------------------------------------------------------------------
 
         def set_source(self, source: str):
-            """Public: switch the candidate source (e.g. 'visual') after open. Used by reroutes (Plan 03).
+            """Public: switch the candidate source (e.g. 'visual') after open. Used by reroutes
+            (Plan 03 / Plan 06).
 
-            Review #2: on a reused window, grey-out runs async in _on_anchor_loaded AFTER this call.
-            Store the request as pending and let _on_anchor_set apply it once VS availability is known;
-            apply immediately only if the pane already knows (no pending anchor load in flight).
+            BLOCKER A (HIGH-3): stash the request as pane._pending_vs and clear it ONLY when
+            apply_source() returns True (actually applied). On a reused window whose previous anchor
+            had no VS, apply_source returns False -> we MUST keep _pending_vs so _on_anchor_set
+            re-applies it for the NEW anchor once its VS availability is known. (The old code swallowed
+            the request by clearing the pending flag unconditionally before checking the return value.)
             """
             pane = getattr(self, "_candidate_pane", None)
             if pane is None:
                 return
-            # Always stash as pending; _on_anchor_set applies it after grey-out. If no anchor load
-            # is in flight (radios already reflect the current anchor), apply now too.
-            pane._pending_source = source
+            # map the source string to the boolean pending flag ('visual'/'combined' -> True, else False)
+            pane._pending_vs = source in ("visual", "combined")
             try:
-                pane.apply_source(source)  # apply_source no-ops to Text if source is disabled (D-08)
-                pane._pending_source = None
+                applied = pane.apply_source(source)
             except (RuntimeError, AttributeError):
                 # pane not fully ready yet — _on_anchor_set will apply pending after grey-out (review #2)
-                pass
+                return
+            if applied:
+                pane._pending_vs = None   # clear ONLY after the request was actually applied
+            # else: leave pane._pending_vs set; _on_anchor_set applies it once the new anchor's VS is known
 
         # ------------------------------------------------------------------
         # Anchor loading / set_anchor
