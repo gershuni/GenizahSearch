@@ -3993,3 +3993,18 @@ TRANSLATIONS.update({
     # Placeholder — keep block non-empty for future additions
 })
 
+# === Phase 109 — Visual-Similarity source wiring ===
+TRANSLATIONS.update({
+    # Provenance badges appended to CandidateCard shelf text (note leading 2 spaces).
+    # Review #6: NO "  ✎ text" badge — text-only candidates render UNBADGED (CONTEXT ✎text RESOLVED).
+    "  ★ both": "  ★ שניהם",
+    "  ⊙ VS": "  ⊙ דמיון",
+    # Source selector labels (radio buttons)
+    "Text": "טקסט",
+    # Source state / status messages
+    "Visual look-alikes loaded": "דמיון חיצוני נטען",
+    "No visual similarity data for this manuscript": "אין נתוני דמיון חיצוני עבור כתב יד זה",
+    # Compact rank/score label on VS cards (Claude's discretion C — shown as plain text, formatted at call site)
+    "VS rank": "דירוג דמיון",
+})
+

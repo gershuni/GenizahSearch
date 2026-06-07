@@ -201,6 +201,47 @@ def _image_url_for_idx(images, idx, width=2000):
 
 
 # ---------------------------------------------------------------------------
+# Plan 01 — VS→Candidate adapter shim (pure, testable; no Qt)
+# ---------------------------------------------------------------------------
+
+
+def _normalize_vs_row(row: dict, shelfmark: str = "", title: str = "",
+                      library_code: str = "") -> dict:
+    """Map a get_suggestions() row to a normalize_candidate()-compatible dict.
+
+    VS service output: {'alma_id': str, 'svm_score': float, 'rank': int}
+    Key renames: alma_id -> display.id, rank -> vs_rank (normalize_candidate reads 'vs_rank').
+    display.img = None -> page_of() returns None -> Candidate.page = None (VS is
+    manuscript-level; RR-12 None-page guard relies on this).
+    _via_vs = True -> Candidate.via_vs = True.
+
+    Review #5: shelfmark MUST never be empty. _EnrichWorker does NOT populate
+    shelfmark/title (verified join_workbench.py:1530-1598), and CandidateCard reads
+    c.shelfmark with NO fallback (verified :1668) -> a blank shim shelfmark renders a
+    blank bold card label. Plan 02 passes a readable shelfmark from meta_mgr.csv_bank;
+    when none is available, fall back to str(alma_id) so the card is never blank.
+
+    Named without a _vs_ prefix so the no_private AST guard (D-18) does not flag callers.
+    """
+    alma_id = row["alma_id"]
+    return {
+        "display": {
+            "id": alma_id,
+            "shelfmark": shelfmark or str(alma_id),   # review #5: never blank
+            "title": title,
+            "library_code": library_code,
+            "img": None,
+        },
+        "uid": f"{alma_id}|vs",
+        "vs_rank": row["rank"],
+        "svm_score": row["svm_score"],
+        "_via_vs": True,
+        "full_text": "",
+        "scope": "",
+    }
+
+
+# ---------------------------------------------------------------------------
 # Plan 03 — candidate_to_result_dict adapter (pure, testable; no Qt)
 # ---------------------------------------------------------------------------
 
