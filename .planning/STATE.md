@@ -4,8 +4,8 @@ milestone: v8.0.0
 milestone_name: Joins Lab — Phases 106-110
 status: executing
 stopped_at: Phase 109 context gathered
-last_updated: "2026-06-07T14:56:25.892Z"
-last_activity: 2026-06-07 -- Phase 109 planning complete
+last_updated: "2026-06-07T15:05:32.356Z"
+last_activity: 2026-06-07 -- Phase 109 execution started
 progress:
   total_phases: 8
   completed_phases: 4
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-02)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 108 — desktop-join-workbench-query-builders-candidates-compare
+**Current focus:** Phase 109 — visual-similarity-merge-soft-retire
 
 ## Current Position
 
 Milestone: **v8.0.0 Dicta Rebrand & Joins Lab — STARTED 2026-06-02.** Folds the delivered v7.17 cycle (the "Dicta Genizah Search Pro" rebrand + LOCAL "My Library" export, Phases 103 + 105) into the flagship v8.0.0 release, and adds **Joins Lab** — an interactive **human-in-the-loop** join-hunting workbench (Component A) + optional search-support algorithms (Component B), both apps. NO automated join-finder.
 
-Phase: 109
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-07 -- Phase 109 planning complete
+Phase: 109 (visual-similarity-merge-soft-retire) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 109
+Last activity: 2026-06-07 -- Phase 109 execution started
 
 ### Scope (locked 2026-06-02)
 
