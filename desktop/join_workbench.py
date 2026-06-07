@@ -2031,6 +2031,41 @@ if _QT_AVAILABLE:
             except Exception:
                 pass
 
+        def load_vs_text(self):
+            """G-02: page-lazy fetch of a VS candidate's transcription (manuscript first page).
+
+            Mirrors _refresh_card_text but for via_vs rows with no full_text. D-09 page-lazy.
+            Called from _render_grid_page for each visible page card — never for the full ≤200 set.
+            For non-VS or already-texted cards this is a no-op (the guard below).
+            The done handler ALWAYS sets the snippet (even to "") so it never stays "loading…".
+            """
+            if not (getattr(self.c, "via_vs", False) and not (self.c.full_text or "")):
+                return
+            self._card_text_gen += 1
+            my_gen = self._card_text_gen
+            try:
+                self.snip.setPlainText(tr("loading…"))
+            except RuntimeError:
+                return
+            try:
+                worker = _PageTextWorker(self.pane.wb, self.pane.wb._gen, self.sid, 1)
+
+                def _on_done(_wgen, txt, _my_gen=my_gen):
+                    if _my_gen != self._card_text_gen:
+                        return
+                    try:
+                        from shared.joins_lab import snippet_html
+                        hi = snippet_html(txt, self.c.highlight_pattern, max_lines=6) if txt else ""
+                        self.snip.setHtml(hi or "")   # ALWAYS set — empty resolves to "", never stuck on "loading…"
+                    except RuntimeError:
+                        pass
+
+                worker.done.connect(_on_done)
+                worker.start()
+                self._card_text_worker = worker
+            except Exception:
+                pass
+
     # -------------------------------------------------------------------------
     # Plan 03 — JoinCandidatePane (QWidget) — right-pane candidate hunt surface
     # -------------------------------------------------------------------------
@@ -2822,6 +2857,7 @@ if _QT_AVAILABLE:
                 enrich = self._enrich
                 card = CandidateCard(self, c, gidx, enrich)
                 self.cards[gidx] = card
+                card.load_vs_text()   # G-02: page-lazy VS card text fetch (no-op for non-VS / already-texted)
                 self.grid_layout.addWidget(card, i // _GRID_COLS, i % _GRID_COLS)
                 items_for_thumbs.append((gidx, c.sys_id))
 
