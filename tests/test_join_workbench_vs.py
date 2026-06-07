@@ -436,3 +436,73 @@ def test_vs_card_carries_full_text():
     assert "snip.setHtml" in src, (
         "G-02: snip.setHtml not found in load_vs_text done handler — snippet might get stuck on 'loading…'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 06 tests — Task 1: pick_callback capability + 'Select as partner'
+# ---------------------------------------------------------------------------
+
+
+def test_invoke_pick_forwards_sysid_shelfmark():
+    """Plan 06 Task 1: _invoke_pick(callback, c) calls callback(c.sys_id, c.shelfmark) and returns True.
+    Returns False without calling callback when callback is None (Qt-free / module-level helper).
+    """
+    from desktop.join_workbench import _invoke_pick, _normalize_vs_row
+    from shared.joins_lab import normalize_candidate
+
+    c = normalize_candidate(_normalize_vs_row(
+        {"alma_id": "990001234500205171", "svm_score": 14.7, "rank": 1},
+        shelfmark="T-S 12.123",
+    ))
+
+    # Case 1: valid callback — must forward sys_id + shelfmark and return True
+    received = []
+    def cb(sys_id, shelf):
+        received.append((sys_id, shelf))
+
+    result = _invoke_pick(cb, c)
+    assert result is True, "_invoke_pick must return True when callback is provided"
+    assert len(received) == 1, "_invoke_pick must call the callback exactly once"
+    assert received[0] == (c.sys_id, c.shelfmark), (
+        f"_invoke_pick must forward (sys_id, shelfmark); got {received[0]}"
+    )
+
+    # Case 2: None callback — must return False without calling anything
+    result_none = _invoke_pick(None, c)
+    assert result_none is False, "_invoke_pick must return False when callback is None"
+    assert len(received) == 1, "_invoke_pick must NOT call callback when callback is None"
+
+
+def test_set_pick_callback_rerenders():
+    """Plan 06 Task 1 — HIGH-4 belt-and-braces: set_pick_callback and clear_pick_callback each
+    call _rerender_candidate_cards(), which invokes pane.render_results() so a callback set/cleared
+    after the first render immediately refreshes pick buttons on visible cards. (Qt-free stub test.)
+    """
+    from desktop.join_workbench import JoinWorkbenchWindow
+
+    render_calls = []
+
+    class _FakePaneStub:
+        def render_results(self):
+            render_calls.append("render")
+
+    class _FakeWinStub:
+        _pick_callback = None
+        _candidate_pane = _FakePaneStub()
+
+    win = _FakeWinStub()
+
+    # set_pick_callback must store the callback AND trigger a re-render
+    cb = lambda sys_id, shelf: None
+    JoinWorkbenchWindow.set_pick_callback(win, cb)
+    assert win._pick_callback is cb, "set_pick_callback must store the callback"
+    assert len(render_calls) == 1, (
+        "HIGH-4: set_pick_callback must call _rerender_candidate_cards() -> render_results()"
+    )
+
+    # clear_pick_callback must clear the callback AND trigger a re-render
+    JoinWorkbenchWindow.clear_pick_callback(win)
+    assert win._pick_callback is None, "clear_pick_callback must set _pick_callback to None"
+    assert len(render_calls) == 2, (
+        "HIGH-4: clear_pick_callback must call _rerender_candidate_cards() -> render_results()"
+    )
