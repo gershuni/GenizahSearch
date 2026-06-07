@@ -207,7 +207,14 @@ preserved).
   2. The standalone Visual Similarity dialog's entry points **route into the Workbench**; the old dialog is **deprecated (marked removable)** after a parity verification pass; the JoinsDialog **pick-mode hook still works**.
   3. Per-candidate enrichment (browse text / measurement / thumbnail / snippet / membership) is **batched**, not per-candidate-serial, verified on an ~80-candidate VS load (Codex perf risk).
 
-**Plans**: TBD.
+**Plans**: 7 plans (3 executed + 4 gap-closure after UAT REJECTED, G-01..G-05)
+- [x] 109-01-PLAN.md — Wave-0 VS adapter shim + i18n keys + tests
+- [x] 109-02-PLAN.md — Visual/Combined source selector + source-aware merge + badges + parity test
+- [x] 109-03-PLAN.md — reroute Browse/ResultDialog entry points + deprecation marker + UAT scaffold
+- [ ] 109-04-PLAN.md — G-01: fix Hebrew חיצוני→חזותי + pre-seed gap-round tr() keys (Wave 1)
+- [ ] 109-05-PLAN.md — G-04/G-03/G-02: single Visual-Similarity toggle (replaces 3 radios) + intersection assemble + page-lazy VS card text (Wave 2)
+- [ ] 109-06-PLAN.md — G-05: reroute JoinsDialog pick-mode into the Workbench + tooltip + deprecation re-eval (Wave 3)
+- [ ] 109-07-PLAN.md — re-UAT checkpoint (toggle states + deferred scenarios; gates the deprecation marker, Wave 4)
 
 ---
 
