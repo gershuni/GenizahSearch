@@ -71,6 +71,16 @@ exists and is unit-tested in `shared/joins_lab.py` (Phase 106), and the VS servi
   enrichment (browse text / measurement / thumbnail / snippet / cross-side membership) **MUST be
   PAGE-LAZY** — enrich only the visible 20-card page — **on top of** being batched (108 D-21).
   Page-lazy + batched is how SC#3's "~80-candidate VS load" budget holds when the set is 200.
+  - **D-09 AMENDMENT (2026-06-07, post-codex-review concern #4 — user-confirmed):** The page-lazy
+    rule is **scoped to the network/IIIF-bound work**: **thumbnails** (ThumbResolver — already
+    page-lazy, ≤20/page) and any **per-candidate browse-text / network fetch** stay page-lazy.
+    **Cheap local-only enrichment MAY run batched over the full ≤200 set:** measurements =
+    a single batched SQL (`FjmsService.get_measurement_summaries_batch`), snippets = pure-Python
+    over already-fetched text. These are O(1) DB round-trips / in-memory loops, not per-candidate
+    network calls (RESEARCH A2/A3). **The hard rule that survives, and SC#3's actual gate:** NO
+    per-candidate SERIAL network/IIIF fetch over the full set — anything network-bound is page-lazy.
+    Plan 03's UAT perf check still observes the ~80-candidate load; an instrumentation assertion that
+    the network/thumbnail path receives only the visible page is encouraged.
 
 ### Soft-retire depth (deferral #4)
 - **D-10:** **Reroute BOTH normal-mode entry points to the Workbench (Visual):**
@@ -118,6 +128,12 @@ exists and is unit-tested in `shared/joins_lab.py` (Phase 106), and the VS servi
 - Where the parity-pass record lives (lean: a parity scenario in `109-HUMAN-UAT.md` + the automated
   test); exact deprecation-marker style/comment.
 - Whether ⊙VS cards display `vs_rank` / `svm_score` (a nicety — lean: show a compact rank/score).
+- **RESOLVED (2026-06-07, post-codex-review concern #6 — user-confirmed): ✎text badge reading.**
+  JWB-12 lists badges ★both / ⊙VS / ✎text, but **text-only candidates render UNBADGED** (Phase-108
+  precedent). Only ★both and ⊙VS carry an explicit badge; an unbadged card == text-only by
+  elimination (unambiguous, since the other two provenances ARE labeled). This is the intended
+  reading of JWB-12's badge list — do NOT add a `tr("  ✎ text")` badge. ⚓self / ⇄other-side badges
+  (108 plumbing) are unaffected.
 - Grey-out vs hide for the disabled Visual option when the anchor has no VS data (D-08).
 - Exact mechanism by which the rerouted entry points set source=Visual at/after open.
 - How much of the old dialog's enrichment (`_enrich_vs_suggestions`) logic is reused vs replaced by
