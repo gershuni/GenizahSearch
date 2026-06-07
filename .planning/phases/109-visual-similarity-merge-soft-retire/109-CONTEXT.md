@@ -283,7 +283,94 @@ exists and is unit-tested in `shared/joins_lab.py` (Phase 106), and the VS servi
 
 </deferred>
 
+<gap_closure_round>
+## Gap-Closure Round (2026-06-07) — UAT REJECTED, 5 gaps (G-01..G-05)
+
+Hillel's manual parity UAT (`109-HUMAN-UAT.md`) **rejected** sign-off. The reroute itself works
+(Browse + ResultDialog open the Workbench with Visual), but the source UX must be **redesigned**
+and **two locked decisions reversed**. `/gsd-plan-phase 109 --gaps` plans these. The
+`_show_vs_dialog` deprecation marker stays "pending parity sign-off" (NOT live) until a clean re-UAT
+after G-01..G-05 land.
+
+**Authority note:** Where the gaps below conflict with the original D-01..D-19 decisions, **the gaps
+win** (they are Hillel's post-UAT corrections). Specifically D-10's three-source *radio model* is
+SUPERSEDED by the G-04 toggle, and D-12 ("keep pick-mode on the old dialog") is REVERSED by G-05.
+
+### G-01 (low, quick) — HE label: חיצוני → חזותי
+`genizah_translations.py` mistranslates "visual" as **חיצוני** ("external") in the Phase-109 VS keys.
+Confirmed offenders: line 3832 `"Visual similarities": "דמיון חיצוני"`, 3833 `"Search + visual":
+"חיפוש + חיצוני"`, 3835/3837 (108 stub strings), 4005 `"Visual look-alikes loaded": "דמיון חיצוני
+נטען"`, 4006 `"No visual similarity data…": "…דמיון חיצוני…"`. Correct word = **חזותי**.
+**SURGICAL ONLY** — many *legitimate* "external" uses of חיצוני exist (external services/website/
+metadata, lines 43/107/112/315/1732/2867/3414…); do NOT blanket-replace. Fix only the VS keys, and
+re-audit every Phase-109/108-VS key for the same slip.
+
+### G-02 (medium) — VS candidate cards must show transcription text
+VS cards currently show metadata/shelfmark only. They must ALSO render the candidate's transcription
+text like text-source cards do. The VS adapter (`_normalize_vs_row`, Plan 01, `join_workbench.py:208`)
+and `_load_visual_candidates` (Plan 02, `:2501`) must carry the candidate `full_text` through to the
+`Candidate`, and `CandidateCard` (`:~1668`/`snip` at `:2000`) must display it for the via_vs path.
+Source of VS card text: enrich via the existing batched browse-text path (page-lazy, D-09) — VS rows
+are `page=None`, so text is manuscript/first-page level.
+
+### G-03 (high, bug) — Combined "Search + visual" perpetually "loading", never renders
+The combined assembly path hangs (never-completing fetch / missing finished-signal / assemble waiting
+on a text search never triggered). The card-level `tr("loading…")` placeholder (`:1982`/`:2000`)
+never resolves. **Disposition:** G-04 removes the Combined radio, so the fix lands *inside the new
+toggle design*, not the old Combined branch — but the planner MUST identify the hang's root cause so
+the new "toggle ON + search term" intersection path cannot reproduce it (esp. the empty-builder
+degrade and the enrich-worker `enriched` signal completion).
+
+### G-04 (high, REDESIGN — SUPERSEDES D-10 source model)
+Replace the Text/Visual/Combined **radio group** (`_build_ui` `:2130-2151`, `_on_source_changed`
+`:2470`, `apply_source` `:2570`, `set_source` `:4246`, source-aware `_maybe_assemble` `:2599`) with a
+single **"Visual Similarity" toggle button placed next to "Find Candidates"**. Required behavior:
+- **Toggle ON, search box empty** → show the anchor's VS candidates (pure visual; = old Visual source).
+- **Toggle ON, with a search term** → show ONLY candidates that are BOTH VS look-alikes AND match the
+  term (**intersection** `search ∩ VS`, i.e. ★both only — NOT the old both-first *union*).
+- **Toggle ON after an existing search** → filter the existing results down to the VS∩term intersection.
+- **Toggle OFF** → normal text results (no VS-only rows added), but text candidates that are also VS
+  look-alikes STILL carry the VS/★both badge (informational regardless of toggle). ⇒ VS must be loaded
+  for the anchor whenever available so the badge intersection can be computed even with the toggle OFF.
+- **Same behavior in the side-by-side `CompareDialog`** (`:3435`) — it walks `wb.filtered`, so it
+  inherits the toggle's filtering, but the planner must verify the toggle/badge state reaches it.
+- No-VS anchor (D-08): the toggle is **disabled/greyed** (replaces the radio grey-out, Scenario 5).
+- Keep the VS provenance badges (★both / ⊙VS). Text-only stays UNBADGED (CONTEXT ✎text RESOLVED).
+
+This folds the Combined radio into "toggle ON + term". Re-plan the 109-02 source-selector internals
+around a boolean toggle state (drop `_active_source` tri-state radios / `rb_text|rb_visual|rb_combined`
+/ `_source_group`). `set_source('visual')` from the rerouted entry points (Plan 03) must keep working
+against the toggle (map source='visual' → toggle ON).
+
+### G-05 (medium, REVERSES D-12) — wire JoinsDialog pick-mode into the Workbench + tooltip
+The JoinsDialog visual partner-picker (`corrections_ui.py::_show_vs_picker` `:4756` →
+`parent_app._show_vs_dialog(..., on_pick=self._on_vs_pick)`; `_on_vs_pick` fills `frag_b_input`;
+button tooltip at `:3445`) must NO LONGER open the old standalone orange dialog. Reroute it into the
+**Workbench in a pick/partner capacity** and update the tooltip. This reverses D-12/SC#2.
+**Recommended minimal pick surface (planner may refine, plan-checker validates):** give the Workbench
+an optional `pick_callback` — when set, the Workbench is anchored on fragment A and candidate cards
+expose a "Select as partner" affordance that invokes the callback with `(partner_sys_id,
+partner_shelfmark)` and closes the window; the JoinsDialog wires `_on_vs_pick` as that callback. With
+BOTH normal + pick paths rerouted, the planner should **re-evaluate** whether `_show_vs_dialog` can be
+marked fully removable — but **retain the code one cycle** per D-11 (no physical deletion in 109).
+
+### Re-verify after gap fixes (deferred UAT scenarios)
+Scenarios 3 (four actions), 4 (reused-window re-anchor), 6 (perf ≥80 look-alikes) were NOT REACHED in
+the UAT — they must be re-verified against the redesigned toggle UX once G-01..G-05 land. The new
+`109-HUMAN-UAT.md` round must cover the toggle states (ON-empty / ON+term / OFF-badge), the Compare
+dialog parity, G-05 pick-return, and the G-01 HE label.
+
+### Unchanged decisions still in force
+D-01 (VS auto-loads — now: toggle ON empty), D-04/D-05/D-06/D-07 (full set, no floor/cap, manuscript-
+level ★both), D-08 (no-VS → now greyed *toggle*), D-09 + AMENDMENT (page-lazy network/thumbnail;
+batched cheap local enrich), D-11 (retain old dialog one cycle), D-13 (desktop-only; web untouched),
+D-14a (automated parity invariant stays green), D-17 (i18n from line one), D-18 (no `_vs_*` on
+workbench path), D-19 (VS via shared service).
+
+</gap_closure_round>
+
 ---
 
 *Phase: 109-visual-similarity-merge-soft-retire*
 *Context gathered: 2026-06-07*
+*Gap-closure round appended: 2026-06-07 (G-01..G-05; D-10 source-model superseded, D-12 reversed)*
