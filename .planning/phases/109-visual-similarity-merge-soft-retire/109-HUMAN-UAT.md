@@ -1,203 +1,238 @@
 ---
 phase: 109-visual-similarity-merge-soft-retire
-plan: "03"
+plan: "07"
 type: human-uat
-status: diagnosed
+status: partial
 created: "2026-06-07"
 updated: "2026-06-07"
-automated_gate: PASSED  # test_load_visual_candidates_parity (D-14a) — green as of Plan 03
-parity_sign_off: REJECTED  # D-14b — Hillel's manual UAT found 5 gaps (see Gaps section); 2 supersede locked decisions (D-10, D-12)
+automated_gate: PASSED  # 36 tests: test_join_workbench_vs + test_join_workbench_i18n + test_join_workbench_no_private + test_visual_similarity_dialog + test_join_workbench_construct — all green
+parity_sign_off: PENDING  # D-14b — Hillel must run Scenarios A-M on the live desktop app; not yet signed off
 ---
 
-# Phase 109 Plan 03: Parity UAT (D-14b / D-16)
+# Phase 109 Plan 07: Parity UAT — Visual Similarity Toggle Design (D-14b re-verification)
 
-The automated parity invariant (`test_load_visual_candidates_parity`, D-14a) passed before
-this scaffold was created. The items below require a human (Hillel) to manually click through
-the running desktop GUI.
+This is the SECOND round of the parity UAT. The first round (Plan 03) was **REJECTED** with 5 gaps
+(G-01..G-05). Plans 04-06 implemented all gap fixes: G-01 Hebrew label, G-02 VS card text, G-03
+no-spinner empty state, G-04 single toggle replacing 3 radios, G-05 pick-mode rerouted to Workbench.
 
-**Prerequisite confirmed:** `python -m pytest tests/test_join_workbench_vs.py::test_load_visual_candidates_parity -x` — GREEN.
+The automated gate (Task 1, including `tests/test_join_workbench_construct.py` per the Codex LOW fix)
+is GREEN before this manual UAT proceeds.
+
+**The `_show_vs_dialog` deprecation marker stays "pending parity sign-off; normal AND pick callers
+rerouted" until ALL scenarios A-M pass. On Hillel's approval, update this file's frontmatter to
+`status: complete` / `parity_sign_off: APPROVED` — the marker then goes live (D-11/D-14b).**
 
 ---
 
 ## Current Test (automated)
 
-| Test | Status | Details |
-|------|--------|---------|
-| `test_load_visual_candidates_parity` (D-14a) | PASSED | Workbench Visual sys_id set == service get_suggestions set; all via_vs=True; all shelfmarks non-blank |
-| `test_join_workbench_vs.py` (6 tests) | PASSED | Full VS test suite |
-| `test_join_workbench_no_private.py` (2 tests) | PASSED | No _vs_* private calls on rerouted paths |
-| `test_join_workbench_i18n.py` (4 tests) | PASSED | i18n guard |
-| `test_visual_similarity_dialog.py` (6 tests) | PASSED | Pick-mode dialog tests (D-12 preserved) |
-| `test_join_workbench_construct.py` (6 tests) | PASSED | Window construction |
-| ruff check genizah_app.py desktop/result_dialog.py | PASSED | Clean |
+Run before this UAT round. ALL must be green before the human click-through begins.
+
+```
+python -m pytest tests/test_join_workbench_vs.py tests/test_join_workbench_i18n.py \
+  tests/test_join_workbench_no_private.py tests/test_visual_similarity_dialog.py \
+  tests/test_join_workbench_construct.py -q
+```
+
+| Test file / suite | Tests | Status | Details |
+|-------------------|-------|--------|---------|
+| `test_join_workbench_vs.py` | 22 | PASSED | Parity (D-14a), toggle/ensure-vs/set_source-pending, intersection, empty-state, re-anchor, pick-callback, invoke-pick |
+| `test_join_workbench_i18n.py` | 4 | PASSED | i18n guard — all new tr() keys present in TRANSLATIONS |
+| `test_join_workbench_no_private.py` | 2 | PASSED | No `_vs_*` private calls on rerouted paths (D-18) |
+| `test_visual_similarity_dialog.py` | 6 | PASSED | Pick-mode dialog tests (D-12 preserved) |
+| `test_join_workbench_construct.py` | 2 | PASSED | Window construction — Qt __init__ ordering (LOW fix from Codex review) |
+| **Total** | **36** | **PASSED** | `36 passed in 2.91s` — 2026-06-07 |
 
 ---
 
-## Tests (Manual Parity UAT — PENDING)
+## Tests (Manual Parity UAT — PENDING sign-off)
 
-The following scenarios must be run on the live desktop application by Hillel.
-
-### Scenario 1: Browse "Visual similarity" reroute (D-10)
-
-Pick 3–5 real anchors that HAVE VS data.
-
-For each anchor:
-
-**1a. Entry point reroute**
-- [ ] From Browse, click "Visual similarity" button
-- [ ] CONFIRM: Join Workbench opens (not the old orange VS dialog)
-- [ ] CONFIRM: Fragment is pinned as anchor in the Workbench
-- [ ] CONFIRM: Visual source is auto-selected (not Text)
-- [ ] CONFIRM: VS candidates load automatically (paginated 20/page)
-
-**1b. Shelfmark non-blank (review #5)**
-- [ ] CONFIRM: Every VS candidate card shows a NON-EMPTY shelfmark
-- [ ] CONFIRM: No card shows a raw numeric alma_id or blank shelfmark text
-
-**1c. Parity — same look-alike set**
-- [ ] CONFIRM: The sys_id set shown in the Workbench Visual source matches
-  `get_vs_service().get_suggestions(sys_id, 200)` output
-- [ ] CONFIRM: No text-only candidates leak into the Visual view (no ★both or ⊙VS missing)
+The following scenarios cover G-01..G-05 (gap fixes from round 1) plus the three scenarios that
+were NOT REACHED in the first round (four actions, reused-window re-anchor, perf ≥80). Hillel
+checks each box on the live desktop app (`python genizah_app.py`).
 
 ---
 
-### Scenario 2: ResultDialog "Search visual similarity" reroute (D-10)
+### Scenario A — G-01 Hebrew label
 
-**2a. Entry point reroute**
-- [ ] From a search result, open the ResultDialog
-- [ ] Click "Search visual similarity" button
-- [ ] CONFIRM: Join Workbench opens with Visual source auto-loaded
-- [ ] CONFIRM: The ResultDialog closes after launching the Workbench
+**Setup:** Switch the desktop UI to Hebrew (`lang=he`). Open the Joins Workbench.
 
----
-
-### Scenario 3: Four actions on VS candidate cards (D-16)
-
-On a VS candidate card in the Workbench Visual source:
-
-- [ ] CONFIRM: "Browse" action opens the candidate in Browse
-- [ ] CONFIRM: "Puzzle" action adds the candidate to the Fragment Puzzle
-- [ ] CONFIRM: "Add to List" action adds the candidate to a list
-- [ ] CONFIRM: "Add as Join" action opens the JoinsDialog with the candidate pre-filled
+- [ ] CONFIRM: The Visual Similarity toggle button reads **חזותי** ("visual"), NOT חיצוני ("external")
+- [ ] CONFIRM: All VS-related status strings also use **חזותי** wherever the visual concept appears
+- [ ] CONFIRM: No occurrence of the word **חיצוני** in the Workbench for the visual-similarity context
 
 ---
 
-### Scenario 4: Reused-window re-anchor (pending-source / review #2)
+### Scenario B — Toggle ON, empty search box (pure VS)
 
-- [ ] Switch the Workbench from Visual → Text → Combined on a reused window
-- [ ] Via Browse "Visual similarity", re-anchor to a DIFFERENT VS-bearing fragment
-- [ ] CONFIRM: Visual source reloads for the NEW anchor (not the previous one)
-- [ ] CONFIRM: Candidate cards update to the new anchor's VS look-alikes
+**Setup:** Pick 3-5 anchors that HAVE VS data (try Browse → "Visual similarity" entry, or open-by-shelfmark). For each:
 
----
-
-### Scenario 5: No-VS anchor grey-out (D-08)
-
-Pick 1 anchor with NO VS data (approximately 50% of manuscripts have none).
-
-- [ ] CONFIRM: Visual source radio button is GREYED OUT / disabled
-- [ ] CONFIRM: Combined source radio button is GREYED OUT / disabled
-- [ ] CONFIRM: Pane stays on Text source (not stuck on a disabled source)
+- [ ] Toggle the "Visual Similarity" button ON with the search builder box empty
+- [ ] CONFIRM: The anchor's VS look-alikes load automatically (no text query needed)
+- [ ] CONFIRM: Results are paginated 20 cards per page
+- [ ] CONFIRM: Every candidate card shows a NON-EMPTY shelfmark (no raw numeric alma_id, no blank)
+- [ ] CONFIRM: The sys_id set displayed matches `get_vs_service().get_suggestions(sys_id, 200)` output (same look-alikes, no text-only leakage)
 
 ---
 
-### Scenario 6: Performance check (D-09 / SC#3)
+### Scenario C — Toggle ON + a search term (intersection)
 
-Open an anchor with ≥80 look-alikes.
+**Setup:** With the toggle ON, type a search term in the builder and click Find.
 
-- [ ] CONFIRM: First 20-card page renders promptly (no long hang)
-- [ ] CONFIRM: Paging (next page) stays responsive
-- [ ] CONFIRM: Thumbnails fetch per-page (≤20), not all 200 upfront
+- [ ] CONFIRM: ONLY candidates that are BOTH VS look-alikes AND match the text term appear
+- [ ] CONFIRM: Text-only candidates (not VS look-alikes) do NOT appear
+- [ ] CONFIRM: VS-only candidates (not matching the text term) do NOT appear
+- [ ] CONFIRM: Matching candidates carry a **★both** badge marking them as intersection hits
 
 ---
 
-### Scenario 7: JoinsDialog pick-mode still works (D-12 / SC#2)
+### Scenario D — Toggle ON after an existing search (filter down)
 
-- [ ] Open JoinsDialog for a join
-- [ ] Open the visual partner-picker ("Visual similarity" in JoinsDialog)
-- [ ] Pick a VS candidate as the partner fragment
-- [ ] CONFIRM: The join is created with the selected partner (pick-mode works)
-- [ ] CONFIRM: The old VS dialog behavior (orange dialog) still appears for the pick-mode path
+**Setup:** With the toggle OFF, run a text search first. Then toggle ON.
+
+- [ ] CONFIRM: The existing results filter down — only the VS∩term intersection remains visible
+- [ ] CONFIRM: Text-only candidates that were showing before are removed from the candidate pane
+- [ ] CONFIRM: The filtered set shows **★both** badges on the remaining candidates
+
+---
+
+### Scenario E — Toggle OFF badge behavior (HIGH-1)
+
+**Setup:** With the toggle OFF (or on a fresh Workbench session where the toggle was never turned on), run a text search.
+
+- [ ] CONFIRM: Normal text results appear — no VS-only rows in the pane
+- [ ] CONFIRM: Among the text results, any candidate that IS also a VS look-alike for the current anchor shows the **★both** or VS badge — even on a FRESH search where the toggle was never turned on (the current anchor's VS is loaded for badging regardless of toggle state)
+- [ ] CONFIRM: Candidates that are NOT VS look-alikes show no VS badge
+
+---
+
+### Scenario F — G-02 VS card transcription text
+
+**Setup:** Toggle ON and load VS candidates (Scenario B condition).
+
+- [ ] CONFIRM: VS candidate cards display the candidate's **transcription text** (not metadata or shelfmark only)
+- [ ] CONFIRM: The text appears in the candidate card body (may load lazily per page — wait for the page to settle)
+- [ ] CONFIRM: Text renders for the visible page cards; subsequent pages load text on navigation
+
+---
+
+### Scenario G — G-03 empty intersection, no spinner (MEDIUM-1)
+
+**Setup:** Toggle ON + enter a search term that you know matches NO VS look-alike for this anchor (e.g., a very specific rare word not likely in the look-alike set). Click Find.
+
+- [ ] CONFIRM: The result pane does NOT spin indefinitely ("loading…" forever)
+- [ ] CONFIRM: The result pane does NOT show a bare "0/0 shown" with no other message
+- [ ] CONFIRM: The result pane shows the message **"No look-alikes match this search"** (Hebrew: **"אין דומים חזותית התואמים לחיפוש זה"**)
+
+---
+
+### Scenario H — No-VS anchor disabled toggle (D-08)
+
+**Setup:** Pick an anchor with NO VS data (roughly half of all manuscripts have none).
+
+- [ ] CONFIRM: The "Visual Similarity" toggle button is **greyed out / disabled**
+- [ ] CONFIRM: The pane stays on text results (not stuck on a disabled VS view)
+- [ ] CONFIRM: No error or crash occurs when clicking the greyed toggle
+
+---
+
+### Scenario I — Compare dialog parity
+
+**Setup:** With the toggle ON and VS (or intersection) candidates visible, open the side-by-side Compare dialog.
+
+- [ ] CONFIRM: The Compare dialog reflects the **toggle-filtered / badged candidate state** (shows the same set of candidates visible in the Workbench pane)
+- [ ] CONFIRM: If toggle is OFF (text mode), Compare shows the text candidates with their VS badges
+
+---
+
+### Scenario J — G-05 pick-mode return (HIGH-4)
+
+**Setup:** Open a JoinsDialog (Join Lab) for an existing join. Click the partner-picker button (🔍).
+
+- [ ] CONFIRM: The Join Workbench opens — NOT the old orange VS dialog
+- [ ] CONFIRM: The Workbench opens **in pick capacity** (pick mode active)
+- [ ] CONFIRM: The **FIRST PAGE** of candidate cards already shows a **"Select as partner"** button — the button is present on the first render, NOT only after paging or scrolling (HIGH-4 ordering: callback set before first render)
+- [ ] Pick a candidate by clicking "Select as partner"
+- [ ] CONFIRM: **Fragment B** in the JoinsDialog is filled with the picked shelfmark
+- [ ] CONFIRM: The picker window **closes** after the pick
+
+---
+
+### Scenario K — Four actions on VS candidate cards (NOT REACHED in round 1, re-verify)
+
+**Setup:** With the toggle ON and VS candidates loaded, focus on one VS candidate card.
+
+- [ ] CONFIRM: **Browse** action opens the candidate in the Browse panel
+- [ ] CONFIRM: **Puzzle** action adds the candidate to the Fragment Puzzle
+- [ ] CONFIRM: **Add to List** action adds the candidate to a user list
+- [ ] CONFIRM: **Add as Join** action opens the JoinsDialog with the candidate pre-filled
+
+---
+
+### Scenario L — Reused-window re-anchor reloads VS (NOT REACHED in round 1 — HIGH-2)
+
+**Setup:** The Workbench is already open on a VS-bearing anchor (call it anchor A). Re-anchor the SAME window to a DIFFERENT VS-bearing fragment (call it anchor B). Use either: the candidate card "⚓" re-anchor button on a candidate of anchor A, OR open Browse "Visual similarity" on a different fragment.
+
+- [ ] CONFIRM: After re-anchoring to B, the VS look-alikes **RELOAD for the NEW anchor B** — the candidate set changes (it is B's look-alike set, NOT A's)
+- [ ] CONFIRM: The anchor pin indicator in the Workbench shows anchor B's shelfmark (not A's)
+- [ ] CONFIRM: With the toggle OFF on the re-anchored window, any VS badges shown on text candidates reflect **anchor B's** VS set (not anchor A's stale set)
+
+---
+
+### Scenario M — Performance: ≥80 look-alikes (NOT REACHED in round 1)
+
+**Setup:** Find and open an anchor with ≥80 VS look-alikes. Toggle ON.
+
+- [ ] CONFIRM: The **first 20-card page renders promptly** (no multi-second hang before any cards appear)
+- [ ] CONFIRM: Navigating to the next page stays **responsive** (no per-card serial network stall)
+- [ ] CONFIRM: Thumbnails fetch for the visible page only (≤20 at a time), not all 200 look-alikes upfront
 
 ---
 
 ## Summary
 
-| Scenario | Status | Anchors Tested | Notes |
-|----------|--------|----------------|-------|
-| 1a Browse reroute (Workbench opens, not old dialog) | PASS | (live) | Workbench opens with Visual; reroute works |
-| 1b Shelfmarks non-blank | PASS | (live) | Cards show shelfmark |
-| 1c Same look-alike set (no stale text) | PASS | (live) | — |
-| 2a ResultDialog reroute + closes | PASS | (live) | — |
-| 3 Four actions on VS candidates | NOT REACHED | — | Superseded by G-04 redesign |
-| 4 Reused-window re-anchor reloads VS | NOT REACHED | — | Superseded by G-04 redesign |
-| 5 No-VS anchor grey-out correct | NOT REACHED | — | Superseded by G-04 (radios removed → toggle button) |
-| 6 Perf: first 20-card page renders promptly | NOT REACHED | — | — |
-| 7 Pick-mode still works (D-12 / SC#2) | CHANGE REQUESTED | — | G-05: reverse D-12 — wire pick-mode into Join Lab + new tooltip |
+Record results here as you work through the scenarios.
 
-**Verdict: REJECTED — 5 gaps found (G-01..G-05). G-04 supersedes the D-10 source-model; G-05 reverses D-12. Routing to gap-closure planning.**
+| Scenario | Status | Notes |
+|----------|--------|-------|
+| A — Hebrew label (חזותי) | PENDING | |
+| B — Toggle ON, pure VS look-alikes | PENDING | |
+| C — Toggle ON + term (intersection only) | PENDING | |
+| D — Toggle ON after existing search (filter down) | PENDING | |
+| E — Toggle OFF badge behavior (HIGH-1) | PENDING | |
+| F — VS card transcription text (G-02) | PENDING | |
+| G — Empty intersection message, no spinner (G-03/MEDIUM-1) | PENDING | |
+| H — No-VS anchor greyed toggle (D-08) | PENDING | |
+| I — Compare dialog parity | PENDING | |
+| J — Pick-mode return, first-page button (G-05/HIGH-4) | PENDING | |
+| K — Four actions on VS cards | PENDING | |
+| L — Reused-window re-anchor VS reload (HIGH-2) | PENDING | |
+| M — Perf: ≥80 look-alikes, first page prompt | PENDING | |
+
+**Overall verdict:** PENDING — awaiting human sign-off.
 
 ---
 
-## Gaps
+## Note on Deprecation Marker
 
-Hillel's manual parity UAT (2026-06-07) found 5 gaps. The reroute itself works (Browse + ResultDialog
-open the Workbench with Visual), but the source UX must be redesigned and two locked decisions reversed.
-These feed `/gsd-plan-phase 109 --gaps`.
+The `_show_vs_dialog` deprecation marker in `genizah_app.py` currently reads:
+**"pending parity sign-off; normal AND pick callers rerouted"**
 
-### G-01 — Hebrew label wrong: חיצוני → חזותי  (severity: low, quick fix)
-status: failed
-The Hebrew translation for the "Visual" source/label reads **חיצוני** ("external") but must be
-**חזותי** ("visual"). Fix in `genizah_translations.py` (the Phase-109 keys added in 109-01). Audit ALL
-Phase-109 HE keys for the same mistake.
+This marker stays exactly as-is until ALL Scenarios A-M pass. On Hillel's approval:
+1. Update this file's frontmatter: `status: complete` / `parity_sign_off: APPROVED`
+2. The `_show_vs_dialog` deprecation marker goes live (D-11/D-14b) — the old method can be
+   scheduled for removal in the next cleanup phase.
 
-### G-02 — VS candidate cards must show the transcription text  (severity: medium)
-status: failed
-VS candidate cards currently show metadata/shelfmark only. They must ALSO display the candidate's
-transcription text (like text-source candidate cards do). Affects `CandidateCard` rendering for the
-VS / via_vs path in `desktop/join_workbench.py`. Implies the VS adapter (`_normalize_vs_row`, 109-01)
-and/or `_load_visual_candidates` (109-02) must carry the candidate `full_text` through, and the card
-must render it.
+If any scenario FAILS, describe the failure — it routes to a follow-up gap-closure round (the
+marker remains "pending parity sign-off" until a clean re-UAT).
 
-### G-03 — "Search + visual" (Combined) is stuck on "loading" and never renders  (severity: high, bug)
-status: failed
-Selecting the combined Search+VS view shows a perpetual "loading" state and never displays results.
-The Combined assembly path (`_maybe_assemble` combined branch + `_load_visual_candidates` / merge in
-109-02) hangs or never resolves. Needs debugging — likely a never-completing fetch, a missing
-finished-signal, or an assemble that waits on a text search that was never triggered. (Note: G-04
-changes the interaction model, so the fix should land within the new toggle design, not the old
-Combined radio.)
+---
 
-### G-04 — Replace the 3-radio source selector with a single "Visual Similarity" toggle button  (severity: high, REDESIGN — supersedes D-10)
-status: failed — supersedes locked decision D-10 (Text/Visual/Combined radio source model)
-Replace the Text/Visual/Combined radio group with a single **"Visual Similarity" toggle button placed
-next to "Find Candidates"**. Required behavior:
-- **Toggle ON, search box empty** → show the VS candidates (pure visual).
-- **Toggle ON, with a search term** → show only candidates that have BOTH vs AND match the term
-  (intersection: search results ∩ VS candidates). "Search will automatically show only those with
-  vs+term."
-- **Toggle ON after an existing search** → filter the existing results down to the vs∩term intersection
-  ("we will see only terms that are in vs candidates").
-- **Toggle OFF** → normal text results, but candidates that are also VS look-alikes STILL show the VS
-  badge (badge is informational regardless of toggle state).
-- **Same behavior in the side-by-side Compare dialog.**
-This removes the Combined radio (folds into the toggle ON + search term case) and the no-VS grey-out
-(Scenario 5) becomes a disabled/greyed toggle button instead. Re-plan the 109-02 source-selector
-internals (`_build_ui` radios, `_on_source_changed`, `apply_source`/`set_source`, `_maybe_assemble`)
-around the toggle model. Keep the VS provenance badges.
+## Resume Signal
 
-### G-05 — Wire JoinsDialog pick-mode into the Join Lab + update tooltip  (severity: medium, REVERSES D-12)
-status: failed — reverses locked decision D-12 (keep pick-mode on the old standalone dialog)
-The JoinsDialog visual partner-picker (pick-mode `_show_vs_dialog` `on_pick` branch) should no longer
-open the old standalone orange dialog — reroute it into the new Join Lab / Workbench (in a pick/partner
-capacity) and update the button tooltip accordingly. This reverses D-12/SC#2 (which deliberately kept
-pick-mode untouched). With pick-mode rerouted, the `_show_vs_dialog` deprecation can extend to the
-pick-mode path too (re-evaluate whether the dialog can be fully retired, or what minimal pick surface
-the Workbench needs).
+Type **"approved"** if ALL Scenarios A-M pass — then the executor will update this file's
+frontmatter to `status: complete` / `parity_sign_off: APPROVED` and the `_show_vs_dialog`
+deprecation marker goes live.
 
-### Not-yet-verified (deferred until after gap fixes)
-Scenarios 3 (four actions), 4 (reused-window re-anchor), 6 (perf ≥80 look-alikes) were not reached —
-re-verify them against the redesigned toggle UX once G-01..G-05 land.
-
-**Next:** `/gsd-plan-phase 109 --gaps` → creates gap-closure plans (G-01..G-05) → `/gsd-execute-phase 109 --gaps-only`.
-The `_show_vs_dialog` deprecation marker stays "pending parity sign-off" (NOT live) until a clean re-UAT.
+Otherwise, describe the failing scenario(s) by letter — they will route to a follow-up
+gap-closure round.
