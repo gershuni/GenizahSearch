@@ -6,7 +6,7 @@ status: partial
 created: "2026-06-07"
 updated: "2026-06-07"
 automated_gate: PASSED  # 36 tests: test_join_workbench_vs + test_join_workbench_i18n + test_join_workbench_no_private + test_visual_similarity_dialog + test_join_workbench_construct — all green
-parity_sign_off: PENDING  # D-14b — Hillel must run Scenarios A-M on the live desktop app; not yet signed off
+parity_sign_off: REJECTED  # D-14b — Hillel ran the live UAT 2026-06-07 and returned 8 change requests (G-06..G-13 below); marker stays "pending parity sign-off"
 ---
 
 # Phase 109 Plan 07: Parity UAT — Visual Similarity Toggle Design (D-14b re-verification)
@@ -195,21 +195,89 @@ Record results here as you work through the scenarios.
 
 | Scenario | Status | Notes |
 |----------|--------|-------|
-| A — Hebrew label (חזותי) | PENDING | |
-| B — Toggle ON, pure VS look-alikes | PENDING | |
-| C — Toggle ON + term (intersection only) | PENDING | |
-| D — Toggle ON after existing search (filter down) | PENDING | |
-| E — Toggle OFF badge behavior (HIGH-1) | PENDING | |
-| F — VS card transcription text (G-02) | PENDING | |
-| G — Empty intersection message, no spinner (G-03/MEDIUM-1) | PENDING | |
-| H — No-VS anchor greyed toggle (D-08) | PENDING | |
-| I — Compare dialog parity | PENDING | |
-| J — Pick-mode return, first-page button (G-05/HIGH-4) | PENDING | |
-| K — Four actions on VS cards | PENDING | |
-| L — Reused-window re-anchor VS reload (HIGH-2) | PENDING | |
-| M — Perf: ≥80 look-alikes, first page prompt | PENDING | |
+| A — Hebrew label (חזותי) | ISSUE | Toggle ON-state not visually apparent (→ G-12) |
+| B — Toggle ON, pure VS look-alikes | (not reported) | |
+| C — Toggle ON + term (intersection only) | ISSUE | "★both" badge to be replaced by an eye badge (→ G-06) |
+| D — Toggle ON after existing search (filter down) | ISSUE | badge change (→ G-06); needs "turn off VS to see more" message (→ G-13) |
+| E — Toggle OFF badge behavior (HIGH-1) | ISSUE | badge change (→ G-06) |
+| F — VS card transcription text (G-02) | (not reported) | |
+| G — Empty intersection message, no spinner (G-03/MEDIUM-1) | (not reported) | |
+| H — No-VS anchor greyed toggle (D-08) | (not reported) | |
+| I — Compare dialog parity | (not reported) | |
+| J — Pick-mode return, first-page button (G-05/HIGH-4) | ISSUE | works, but icon→link, tooltip→"find joins in joins lab", close JoinsDialog after open (→ G-08) |
+| K — Four actions on VS cards | (not reported) | |
+| L — Reused-window re-anchor VS reload (HIGH-2) | (not reported) | |
+| M — Perf: ≥80 look-alikes, first page prompt | (not reported) | |
+| (cross-cutting) — VS rank "vs #1" display | ISSUE | remove the ranking (→ G-09) |
+| (cross-cutting) — y/n/? triage | ISSUE | second click on same state should undo (→ G-10) |
+| (cross-cutting) — grid item layout | ISSUE | move `< >` nav onto the y/n/? row to save space (→ G-11) |
+| (cross-cutting) — Browse + ResultDialog VS button | ISSUE | remove (duplicate of Find Joins) (→ G-07) |
 
-**Overall verdict:** PENDING — awaiting human sign-off.
+**Overall verdict:** REJECTED (2026-06-07) — 8 change requests (G-06..G-13). The toggle/intersection
+mechanics work; the rejections are display, layout, entry-point, and affordance refinements. The
+`_show_vs_dialog` deprecation marker stays "pending parity sign-off; normal AND pick callers rerouted".
+
+---
+
+## Gaps (Round 3 — UAT feedback 2026-06-07)
+
+Hillel ran the live desktop app and returned 8 change requests. The toggle/intersection mechanics
+work; these are display, layout, entry-point, and affordance refinements. All route to a follow-up
+gap-closure round (`/gsd-plan-phase 109 --gaps`).
+
+### G-06 — Eye badge instead of "★both" (+ eye on the toggle button)
+status: failed
+scenarios: C, D, E
+- Replace the **"★both"** intersection badge with a simple **eye icon badge**.
+- The eye badge carries a tooltip **"visual similarity"**.
+- Also add the **eye icon to the "Visual Similarity" toggle button** (so the button and the badge
+  share the same visual vocabulary).
+
+### G-07 — Remove the duplicate VS button in Browse tab + ResultDialog
+status: failed
+scenarios: (new scope — normal-mode entry points)
+- Remove the Visual-Similarity button in the **Browse tab** and in the **ResultDialog**.
+- Rationale: it duplicates the existing **"Find Joins"** button, which already routes into the
+  Workbench. (Plan 03 rerouted these entry points into the Workbench; Hillel now wants them removed
+  entirely — this advances the soft-retire toward removing the normal-mode VS affordances.)
+
+### G-08 — JoinsDialog VS button → Joins Lab (icon + tooltip + close)
+status: failed
+scenarios: J
+- The JoinsDialog VS button correctly opens the Joins Lab now (as requested). Refinements:
+  - Change the icon from 🔍 to a **link icon**.
+  - Change the tooltip to **"find joins in joins lab"**.
+  - **Close the JoinsDialog** after opening the Joins Lab.
+
+### G-09 — Remove the VS ranking display ("vs #1", etc.)
+status: failed
+scenarios: (cross-cutting — candidate cards)
+- Remove the visual-similarity rank label ("vs #1" / "VS #1" / vs_rank) from candidate cards.
+
+### G-10 — Triage y/n/? second-click undo
+status: failed
+scenarios: (cross-cutting — triage)
+- Clicking a triage button (y / n / ?) on a candidate and then clicking the **same** button again
+  should **undo / clear** that triage state (toggle behavior), not keep it set.
+
+### G-11 — Compact grid item: move `< >` nav onto the y/n/? row
+status: failed
+scenarios: (cross-cutting — grid item layout)
+- Move the `< >` (folio prev/next) navigation **inside the grid items** to the **same row** as the
+  y/n/? triage buttons, to reduce vertical space per card.
+
+### G-12 — Make the "Visual Similarity" toggle visibly ON
+status: failed
+scenarios: A
+- When the Visual Similarity button is toggled ON, make it **visually apparent that it is active**
+  (clear checked/pressed styling — not ambiguous with the OFF state).
+
+### G-13 — "Turn off Visual Similarity to see more results" message
+status: failed
+scenarios: D
+- When the Visual Similarity toggle is ON (results are filtered to the VS set / intersection), show
+  a clear message in the fashion of **"Turn off the visual similarity button to see more results"**
+  so the user understands why fewer results appear.
 
 ---
 
