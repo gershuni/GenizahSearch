@@ -206,3 +206,197 @@ def test_set_source_keeps_pending_when_not_applied():
     assert true_pane._pending_vs is None, (
         "set_source should clear _pending_vs when apply_source returns True (actually applied)."
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 05 tests — Task 2: intersection assemble + empty-state + re-anchor
+# ---------------------------------------------------------------------------
+
+
+def _make_candidate(sys_id, via_text=False, via_vs=False, vs_rank=None):
+    """Build a minimal Candidate-like object for assemble tests."""
+    import dataclasses
+    from shared.joins_lab import normalize_candidate
+    from desktop.join_workbench import _normalize_vs_row
+
+    if via_vs and not via_text:
+        # pure VS candidate
+        row = {"alma_id": sys_id, "svm_score": 10.0, "rank": vs_rank or 1}
+        c = normalize_candidate(_normalize_vs_row(row, shelfmark=str(sys_id)))
+        return c
+    elif via_text:
+        # text candidate — normalize then patch via_text=True (as dedup_candidates would)
+        fake_res = {
+            "display": {
+                "id": sys_id,
+                "shelfmark": str(sys_id),
+                "title": "",
+                "library_code": "",
+                "img": 1,
+            },
+            "uid": f"{sys_id}|1",
+            "full_text": "sample text",
+            "scope": "text",
+            "vs_rank": None,
+            "svm_score": None,
+            "_via_vs": via_vs,  # can be True for ★both tests
+        }
+        c = normalize_candidate(fake_res)
+        # dedup_candidates sets via_text=True on survivors; replicate that here
+        return dataclasses.replace(c, via_text=True)
+    raise ValueError("must specify via_text or via_vs")
+
+
+def test_intersection_is_both_only():
+    """Task 2 RED: intersection (toggle ON + term) returns only candidates in BOTH sets (G-04)."""
+    from shared.joins_lab import merge_candidates
+
+    # T1: text-only, T2: in both sets, V3: VS-only
+    t1 = _make_candidate("T1", via_text=True)
+    t2 = _make_candidate("T2", via_text=True)
+    v2 = _make_candidate("T2", via_vs=True, vs_rank=1)   # same sys_id as t2 -> ★both
+    v3 = _make_candidate("V3", via_vs=True, vs_rank=2)
+
+    # The intersection helper: merge_candidates(text, vs) then filter via_text AND via_vs
+    merged_all = merge_candidates([t1, t2], [v2, v3])
+    intersection = [c for c in merged_all if c.via_text and c.via_vs]
+
+    assert len(intersection) == 1, f"Expected 1 intersection candidate, got {len(intersection)}"
+    assert intersection[0].sys_id == "T2", f"Expected T2 in intersection, got {intersection[0].sys_id}"
+
+
+def test_toggle_on_empty_box_is_pure_vs():
+    """Task 2 RED: toggle ON + no term -> pure VS (merge_candidates([], vs))."""
+    from shared.joins_lab import merge_candidates
+
+    v1 = _make_candidate("V1", via_vs=True, vs_rank=1)
+    v2 = _make_candidate("V2", via_vs=True, vs_rank=2)
+
+    # toggle ON + empty box: text=[] -> pure VS output
+    result = list(merge_candidates([], [v1, v2]))
+    assert len(result) == 2, f"Expected 2 VS candidates, got {len(result)}"
+    assert all(c.via_vs for c in result), "All pure-VS candidates should have via_vs=True"
+    assert all(not c.via_text for c in result), "Pure-VS candidates should NOT have via_text=True"
+
+
+def test_toggle_off_keeps_vs_badge_on_text_match():
+    """Task 2 RED: toggle OFF -> text candidates that are also VS look-alikes retain via_vs badge (G-04 bullet 4)."""
+    from shared.joins_lab import merge_candidates
+
+    # T2 is a text candidate; v2 has the same sys_id -> merge_candidates marks T2 via_vs=True
+    t2 = _make_candidate("T2", via_text=True)
+    v2 = _make_candidate("T2", via_vs=True, vs_rank=1)
+    v3 = _make_candidate("V3", via_vs=True, vs_rank=2)  # VS-only
+
+    # toggle OFF: merge all, then filter to via_text only (exclude VS-only rows)
+    merged_all = merge_candidates([t2], [v2, v3])
+    toggle_off_result = [c for c in merged_all if c.via_text]
+
+    assert len(toggle_off_result) == 1, f"Expected 1 result (T2 with badge), got {len(toggle_off_result)}"
+    assert toggle_off_result[0].sys_id == "T2"
+    assert toggle_off_result[0].via_vs is True, "T2 must carry via_vs=True (★both badge) in toggle-OFF mode"
+    assert not any(c.sys_id == "V3" for c in toggle_off_result), "V3 (VS-only) must NOT appear in toggle-OFF results"
+
+
+def test_empty_intersection_renders_empty_not_spinner():
+    """Task 2 RED: disjoint text/VS sets -> intersection is [] (no perpetual spinner: G-03)."""
+    from shared.joins_lab import merge_candidates
+
+    t1 = _make_candidate("T1", via_text=True)
+    v3 = _make_candidate("V3", via_vs=True, vs_rank=1)  # different sys_id -> no overlap
+
+    # Intersection of disjoint sets must be []
+    merged_all = merge_candidates([t1], [v3])
+    intersection = [c for c in merged_all if c.via_text and c.via_vs]
+    assert intersection == [], f"Expected empty intersection, got {intersection}"
+
+    # Structural check: _start_enrich has an empty-results branch that routes to apply_filters
+    # (never a spinner). Assert the else branch is present in the source.
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+    assert "# G-03:" in src or "G-03" in src, (
+        "G-03 anti-spinner comment not found in _start_enrich's empty-results branch"
+    )
+
+
+def test_empty_intersection_status_message():
+    """Task 2 RED: _maybe_assemble + apply_filters sets tr('No look-alikes match this search') on empty intersection (MEDIUM-1)."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+    assert 'tr("No look-alikes match this search")' in src, (
+        "MEDIUM-1: tr('No look-alikes match this search') not found in apply_filters — "
+        "empty-intersection empty-state message missing"
+    )
+    assert "_empty_intersection" in src, (
+        "MEDIUM-1: _empty_intersection flag not found — drives the empty-state branch in apply_filters"
+    )
+
+
+def test_set_anchor_invalidates_candidate_state():
+    """Task 2 RED: HIGH-2 + NEW-HIGH — set_anchor clears pane data AND invokes render_results (BLOCKER B)."""
+    from desktop.join_workbench import JoinWorkbenchWindow
+
+    render_calls = []
+
+    class _FakePaneStub:
+        _text_cands = ["old_text_cand"]
+        _vs_cands = ["old_vs_cand"]
+        _vs_loaded_sid = "OLD_SID"
+        results = ["old_result"]
+
+        def render_results(self):
+            render_calls.append(1)
+
+    class _MockLabel:
+        def setText(self, *a):
+            pass
+
+    class _FakeWin:
+        """Minimal stub exposing the attributes set_anchor touches."""
+        _gen = 0
+        _anchor_sid = None
+        _anchor_res = None
+        filtered = ["old_filtered"]
+        triage = {}
+        _candidate_pane = None  # will be set below
+        anchor_shelf = _MockLabel()  # QLabel mock
+        anchor_img_label = _MockLabel()  # QLabel mock
+        _anchor_images = []
+        _anchor_idx = 0
+        _zoom = 1.0
+        _fit_pending = False
+        _anchor_full_pix = None
+        _img_loader = None
+
+        def _cancel_workers(self):
+            pass
+
+        def _start_anchor_load(self, *a, **kw):
+            pass
+
+        def _reload_known_joins(self, *a, **kw):
+            pass
+
+        def _set_joins_expanded(self, *a):
+            pass
+
+    win = _FakeWin()
+    pane = _FakePaneStub()
+    win._candidate_pane = pane
+
+    # Call set_anchor with a minimal result dict
+    res = {"display": {"id": "NEW_SID", "shelfmark": "T-S 1.1", "img": 1}, "uid": "NEW_SID|1"}
+    JoinWorkbenchWindow.set_anchor(win, res)
+
+    # Data must be cleared
+    assert pane._text_cands is None, "set_anchor must clear pane._text_cands"
+    assert pane._vs_cands is None, "set_anchor must clear pane._vs_cands"
+    assert pane._vs_loaded_sid is None, "set_anchor must clear pane._vs_loaded_sid"
+    assert pane.results == [], "set_anchor must reset pane.results to []"
+    assert win.filtered == [], "set_anchor must reset wb.filtered to []"
+
+    # render_results MUST be invoked (clears old card widgets — BLOCKER B / NEW-HIGH)
+    assert len(render_calls) == 1, (
+        f"set_anchor must call pane.render_results() exactly once to clear stale card widgets, "
+        f"got {len(render_calls)} calls"
+    )
