@@ -400,3 +400,39 @@ def test_set_anchor_invalidates_candidate_state():
         f"set_anchor must call pane.render_results() exactly once to clear stale card widgets, "
         f"got {len(render_calls)} calls"
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 05 tests — Task 3: VS card text (G-02, page-lazy)
+# ---------------------------------------------------------------------------
+
+
+def test_vs_card_carries_full_text():
+    """Task 3 RED: VS candidate cards fetch transcription text via page-lazy browse (G-02).
+
+    Structural test: CandidateCard has a load_vs_text() method, and _render_grid_page
+    calls card.load_vs_text() for each page card (page-lazy, not wholesale).
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+
+    # CandidateCard must have a load_vs_text method
+    assert "def load_vs_text(self):" in src, (
+        "G-02: CandidateCard.load_vs_text() method not found in desktop/join_workbench.py"
+    )
+
+    # _render_grid_page must call card.load_vs_text() (page-lazy — only for the current page)
+    assert "card.load_vs_text()" in src, (
+        "G-02: card.load_vs_text() not called in _render_grid_page — page-lazy VS text fetch missing"
+    )
+
+    # The fetch uses get_browse_page (via _PageTextWorker) — not a direct NLI call
+    assert "get_browse_page" in src, (
+        "G-02: get_browse_page not found — VS card text should reuse the _PageTextWorker path"
+    )
+
+    # done handler MUST always set the snippet (never stuck on 'loading…')
+    # Check: the done handler calls self.snip.setHtml (resolves even when txt is empty)
+    assert "snip.setHtml" in src, (
+        "G-02: snip.setHtml not found in load_vs_text done handler — snippet might get stuck on 'loading…'"
+    )
