@@ -3829,12 +3829,12 @@ TRANSLATIONS.update({
     # --- Source selector ---
     "Include anchor itself": "כלל את העוגן עצמו",
     "Find Candidates":       "מצא מועמדים",
-    "Visual similarities":   "דמיון חיצוני",
-    "Search + visual":       "חיפוש + חיצוני",
+    "Visual similarities":   "דמיון חזותי",
+    "Search + visual":       "חיפוש + חזותי",
     "Visual similarity candidates — arrives in Phase 109":
-        "מועמדים בדמיון חיצוני — יגיע בשלב 109",
+        "מועמדים בדמיון חזותי — יגיע בשלב 109",
     "Visual source (coming soon)":
-        "מקור חיצוני (בקרוב)",
+        "מקור חזותי (בקרוב)",
     "Combined source (coming soon)":
         "מקור משולב (בקרוב)",
     "Text source (active)":  "מקור טקסט (פעיל)",
@@ -4002,8 +4002,8 @@ TRANSLATIONS.update({
     # Source selector labels (radio buttons)
     "Text": "טקסט",
     # Source state / status messages
-    "Visual look-alikes loaded": "דמיון חיצוני נטען",
-    "No visual similarity data for this manuscript": "אין נתוני דמיון חיצוני עבור כתב יד זה",
+    "Visual look-alikes loaded": "דמיון חזותי נטען",
+    "No visual similarity data for this manuscript": "אין נתוני דמיון חזותי עבור כתב יד זה",
     # Compact rank/score label on VS cards (Claude's discretion C — shown as plain text, formatted at call site)
     "VS rank": "דירוג דמיון",
 })
