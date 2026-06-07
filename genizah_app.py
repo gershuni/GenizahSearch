@@ -4706,57 +4706,24 @@ class GenizahGUI(QMainWindow):
     _VS_SERVER_URL = "https://genizahsearch.com"
 
     def _browse_view_visual_similarity(self):
-        """Show Visual Similarity suggestions dialog for current browse manuscript."""
-        sys_id = self.current_browse_sid
-        if not sys_id:
-            print(f"[VS] No current_browse_sid")
+        """REROUTED (Phase 109, D-10): open the Join Workbench with the Visual source auto-loaded."""
+        sid = getattr(self, "current_browse_sid", None)
+        if not sid:
             return
-        print(f"[VS] Opening dialog for sys_id={sys_id}")
-
-        shelfmark = None
-        if self.meta_mgr:
-            try:
-                shelfmark, _ = self.meta_mgr.get_meta_for_id(sys_id)
-            except (KeyError, AttributeError, IndexError):
-                pass
-        shelfmark = shelfmark or sys_id
-
-        # Try local DB first (enrich with shelfmark/domain from csv_bank/fjms)
+        shelf = ""
         try:
-            from shared.visual_similarity_service import get_vs_service
-            vs_svc = get_vs_service(thread_safe=False)
-            if vs_svc.is_available() and vs_svc.has_suggestions(sys_id):
-                data = vs_svc.get_suggestions(sys_id, 200)
-                self._enrich_vs_suggestions(data)
-                self._show_vs_dialog(sys_id, shelfmark, data)
-                return
+            shelf, _ = self.meta_mgr.get_meta_for_id(sid)
         except Exception:
-            pass  # Domain enrichment failed; populate empty defaults
-
-        # Try cache
-        if not hasattr(self, '_vs_cache'):
-            self._vs_cache = DesktopVSCache()
-        cached = self._vs_cache.get_cached(sys_id)
-        if cached is not None:
-            self._enrich_vs_suggestions(cached)
-            self._show_vs_dialog(sys_id, shelfmark, cached)
-            return
-
-        # Fetch from server (on-demand fallback)
-        try:
-            import urllib.request
-            url = f'{self._VS_SERVER_URL}/api/visual_suggestions/{sys_id}?limit=200'
-            with urllib.request.urlopen(url, timeout=15) as resp:
-                data = json.loads(resp.read().decode())
-            if data:
-                self._vs_cache.store(sys_id, data)
-                self._enrich_vs_suggestions(data)
-                self._show_vs_dialog(sys_id, shelfmark, data)
-                return
-        except Exception:
-            pass  # Cache operation failed; continue without cached data
-
-        QMessageBox.information(self, tr("Visual Similarity"), tr("No visual similarity suggestions"))
+            shelf = ""
+        shelf = shelf or sid
+        p = getattr(self, "current_browse_p", 1) or 1
+        text = getattr(self, "browse_original_text", "") or ""
+        res = {
+            "display": {"id": sid, "shelfmark": shelf, "img": p, "library_code": "", "title": ""},
+            "full_text": text,
+            "uid": f"{sid}_P{int(p):03d}",
+        }
+        self.open_joins_workbench(res, source="visual")   # D-01 auto-load
 
     def _enrich_vs_suggestions(self, data):
         """Enrich raw VS suggestions with shelfmark, library_code, domain from csv_bank/fjms."""
@@ -15461,14 +15428,18 @@ class GenizahGUI(QMainWindow):
         except Exception as exc:
             logger.debug("open_join_workbench: restore_state failed: %s", exc)
 
-    def open_joins_workbench(self, res: dict):
-        """Open (or re-anchor) the Join Workbench for the given result.
-        D-01: modeless (show(), not exec()). D-02: single reusable instance - second call re-anchors.
-        """
+    def open_joins_workbench(self, res: dict, source: str = "text"):
+        """Open (or re-anchor) the Join Workbench. D-01 modeless; single reusable instance.
+        source: 'text' (default) | 'visual' | 'combined' — selects the candidate source after open (D-10)."""
         from desktop.join_workbench import JoinWorkbenchWindow  # lazy import (desktop-only)
         if self._join_workbench is None or not self._join_workbench.isVisible():
             self._join_workbench = JoinWorkbenchWindow(self, self)
-        self._join_workbench.set_anchor(res)
+        self._join_workbench.set_anchor(res)          # sets _anchor_sid FIRST
+        if source and source != "text":
+            try:
+                self._join_workbench.set_source(source)   # pending-source aware (review #2); D-08 guarded
+            except (RuntimeError, AttributeError) as exc:  # review #8c: narrow + log, never swallow-all
+                logger.warning("open_joins_workbench: set_source(%r) failed: %s", source, exc)
         self._join_workbench.show()
         self._join_workbench.raise_()
         self._join_workbench.activateWindow()

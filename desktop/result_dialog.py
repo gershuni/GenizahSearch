@@ -756,10 +756,7 @@ class ResultDialog(QDialog):
         self.close()   # ResultDialog closes after launching the workbench (iteration B / D-03 #1)
 
     def _rd_search_visual_similarity(self):
-        """D-10: Show visual similarity dialog from ResultDialog context."""
-        parent = self._app
-        if not parent or not hasattr(parent, '_show_vs_dialog'):
-            return
+        """REROUTED (Phase 109, D-10): open the Join Workbench with the Visual source auto-loaded."""
         sys_id = self.current_sys_id
         if not sys_id:
             return
@@ -767,42 +764,21 @@ class ResultDialog(QDialog):
         if self.all_results and 0 <= self.current_result_idx < len(self.all_results):
             result = self.all_results[self.current_result_idx]
             shelfmark = (result.get('display', {}).get('shelfmark')
-                         or result.get('shelfmark')
-                         or str(sys_id))
-        # Fetch and show VS dialog — local DB first, then cache, then server
-        try:
-            from shared.visual_similarity_service import get_vs_service
-            vs_svc = get_vs_service(thread_safe=False)
-            if vs_svc.is_available() and vs_svc.has_suggestions(sys_id):
-                data = vs_svc.get_suggestions(sys_id, 200)
-                parent._enrich_vs_suggestions(data)
-                parent._show_vs_dialog(sys_id, shelfmark, data, parent_dialog=self)
-                return
-        except Exception:
-            pass  # Cache operation failed; continue without cached data
-        # Try cache
-        if not hasattr(parent, '_vs_cache'):
-            from desktop.vs_cache import DesktopVSCache
-            parent._vs_cache = DesktopVSCache()
-        cached = parent._vs_cache.get_cached(sys_id)
-        if cached is not None:
-            parent._enrich_vs_suggestions(cached)
-            parent._show_vs_dialog(sys_id, shelfmark, cached, parent_dialog=self)
-            return
-        # Fetch from server
-        try:
-            import urllib.request
-            url = f'{parent._VS_SERVER_URL}/api/visual_suggestions/{sys_id}?limit=200'
-            with urllib.request.urlopen(url, timeout=15) as resp:
-                data = json.loads(resp.read().decode())
-            if data:
-                parent._vs_cache.store(sys_id, data)
-                parent._enrich_vs_suggestions(data)
-                parent._show_vs_dialog(sys_id, shelfmark, data, parent_dialog=self)
-                return
-        except Exception:
-            pass  # Cache operation failed; continue without cached data
-        QMessageBox.information(self, tr("Visual Similarity"), tr("No visual similarity suggestions"))
+                         or result.get('shelfmark') or str(sys_id))
+        res = {"display": {"id": sys_id, "shelfmark": shelfmark, "library_code": "", "title": ""}}
+        pnum = getattr(self, "current_p_num", None)
+        if pnum:
+            res["display"]["img"] = pnum
+        txt = getattr(self, "current_page_text", None)
+        if txt:
+            res["full_text"] = txt
+        uid = getattr(self, "current_page_uid", None)
+        if uid:
+            res["uid"] = uid
+        app = getattr(self, "_app", None) or self.parent()
+        if app is not None and hasattr(app, "open_joins_workbench"):
+            app.open_joins_workbench(res, source="visual")
+        self.close()
 
     def _update_add_to_list_button(self):
         parent = self._app
