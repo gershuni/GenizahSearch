@@ -2687,7 +2687,8 @@ if _QT_AVAILABLE:
                 self._enrich_worker.enriched.connect(self._on_enriched)
                 self._enrich_worker.start()
             else:
-                # No fjms service or empty results — proceed without enrichment
+                # G-03: empty intersection renders an empty state here (apply_filters sets the
+                # 'no matches' label) — never a perpetual spinner. No fjms service OR empty results.
                 self._enrich = {}
                 self.apply_filters()
 
@@ -2783,9 +2784,12 @@ if _QT_AVAILABLE:
                 self._selected_keys &= filtered_keys
 
             try:
-                self.status.setText(
-                    f"{len(filtered)}/{len(self.results)} " + tr("shown")
-                )
+                if getattr(self, "_empty_intersection", False) and not filtered:
+                    self.status.setText(tr("No look-alikes match this search"))   # MEDIUM-1
+                else:
+                    self.status.setText(
+                        f"{len(filtered)}/{len(self.results)} " + tr("shown")
+                    )
             except RuntimeError:
                 pass
 
@@ -4339,6 +4343,21 @@ if _QT_AVAILABLE:
             # D-10: triage reset on re-anchor (sys_id-keyed; cleared so old marks
             # from a previous anchor don't bleed into the new session).
             self.triage = {}
+
+            # HIGH-2 + NEW-HIGH (BLOCKER B): invalidate per-anchor candidate DATA and clear the
+            # stale rendered CARD WIDGETS so the NEW anchor reloads cleanly and no previous-anchor
+            # cards (incl. any "Select as partner" pick buttons in the Plan-06 pick flow) linger.
+            pane = getattr(self, "_candidate_pane", None)
+            if pane is not None:
+                pane._text_cands = None
+                pane._vs_cands = None
+                pane._vs_loaded_sid = None     # force _ensure_vs_loaded_for_anchor to reload for the new sid
+                pane.results = []
+                self.filtered = []             # wb.filtered is the window attr read by _render_grid_page
+                try:
+                    pane.render_results()      # existing card-widget clear: empties self.cards + the grid
+                except (RuntimeError, AttributeError):
+                    pass
 
             try:
                 self.anchor_img_label.setText("...")
