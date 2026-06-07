@@ -117,3 +117,92 @@ def test_thumbnail_path_is_page_scoped():
     page_slice = big[start:start + _PER_PAGE]
     assert len(page_slice) == _PER_PAGE        # exactly one page (<=20), never all 80 (review #4)
     assert _PER_PAGE <= 20
+
+
+# ---------------------------------------------------------------------------
+# Plan 05 tests — Task 1: toggle + boolean state machine + guarded pending
+# ---------------------------------------------------------------------------
+
+
+def test_no_source_radios_in_build_ui():
+    """Task 1 RED: the 3 radios are gone; a single checkable VS toggle is present (G-04)."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+    # Radio widget names MUST be absent after the replacement
+    assert "rb_combined" not in src, "rb_combined still present — 3-radio model not removed"
+    assert "rb_visual" not in src, "rb_visual still present — 3-radio model not removed"
+    assert "rb_text" not in src, "rb_text still present — 3-radio model not removed"
+    assert "_source_group" not in src, "_source_group still present — 3-radio model not removed"
+    # Single toggle MUST be present with setCheckable(True) and tr("Visual Similarity") label
+    assert "setCheckable(True)" in src, "btn_vs_toggle.setCheckable(True) not found"
+    assert 'tr("Visual Similarity")' in src, 'tr("Visual Similarity") toggle label not found'
+
+
+def test_ensure_vs_load_keyed_to_anchor():
+    """Task 1 RED: _ensure_vs_loaded_for_anchor is idempotent per anchor sid (HIGH-1 + HIGH-2)."""
+    load_calls = []
+
+    class _StubWB:
+        _anchor_sid = "AAA"
+
+    class _StubPane:
+        wb = _StubWB()
+        _vs_cands = None
+        _vs_loaded_sid = None
+
+        def _load_visual_candidates(self, sid):
+            load_calls.append(sid)
+            return [object()]  # non-empty — simulates VS data
+
+        def status(self):
+            pass
+
+    from desktop.join_workbench import JoinCandidatePane
+    stub = _StubPane()
+
+    # Call twice with the same anchor — should load ONCE (memoised)
+    JoinCandidatePane._ensure_vs_loaded_for_anchor(stub, silent=True)
+    JoinCandidatePane._ensure_vs_loaded_for_anchor(stub, silent=True)
+    assert len(load_calls) == 1, f"Expected 1 load, got {len(load_calls)} — not memoised per anchor"
+
+    # Change anchor sid — should reload
+    stub.wb._anchor_sid = "BBB"
+    JoinCandidatePane._ensure_vs_loaded_for_anchor(stub, silent=True)
+    assert len(load_calls) == 2, f"Expected 2 loads after anchor change, got {len(load_calls)}"
+
+
+def test_set_source_keeps_pending_when_not_applied():
+    """Task 1 RED: BLOCKER A — set_source('visual') keeps _pending_vs when apply_source returns False."""
+    from desktop.join_workbench import JoinWorkbenchWindow
+
+    class _FalsePaneStub:
+        """Simulates a pane whose anchor has no VS — apply_source returns False."""
+        _pending_vs = None
+
+        def apply_source(self, source):
+            return False  # no VS for this anchor
+
+    class _TruePaneStub:
+        """Simulates a pane whose anchor HAS VS — apply_source returns True."""
+        _pending_vs = None
+
+        def apply_source(self, source):
+            return True
+
+    # Case 1: no-VS anchor -> _pending_vs must stay set (NOT cleared)
+    false_pane = _FalsePaneStub()
+    # Call the window-level set_source method unbound with a stub `self`
+    stub_win = type("W", (), {"_candidate_pane": false_pane})()
+    JoinWorkbenchWindow.set_source(stub_win, "visual")
+    assert false_pane._pending_vs is True, (
+        "BLOCKER A: _pending_vs was cleared even though apply_source returned False. "
+        "The request is swallowed — set_anchor can never re-apply it."
+    )
+
+    # Case 2: anchor HAS VS -> _pending_vs must be cleared after apply_source returns True
+    true_pane = _TruePaneStub()
+    stub_win2 = type("W", (), {"_candidate_pane": true_pane})()
+    JoinWorkbenchWindow.set_source(stub_win2, "visual")
+    assert true_pane._pending_vs is None, (
+        "set_source should clear _pending_vs when apply_source returns True (actually applied)."
+    )
