@@ -3282,6 +3282,12 @@ class GenizahGUI(QMainWindow):
             # Init Lab Engine (lightweight init)
             self.lab_engine = LabEngine(self.meta_mgr, self.var_mgr)
 
+            # Phase 110 A1: inject the LabEngine's weights-hash into the SearchEngine
+            # so standard-composition LOCAL-LAB freshness checks compare against the
+            # SAME hash the index was built with (RF-4 — un-silences 'all'-scope LOCAL
+            # LAB hits). Cheap in-memory read; never triggers a rebuild.
+            self._refresh_lab_weights_hash_override()
+
             # Connect VariantManager to Lab settings for variant search configuration
             if self.var_mgr and self.lab_engine:
                 self.var_mgr.set_settings(self.lab_engine.settings)
@@ -6715,6 +6721,31 @@ class GenizahGUI(QMainWindow):
         self.btn_reset_comp.setStyleSheet("padding: 2px 8px;")
         self.btn_reset_comp.clicked.connect(self._reset_composition)
 
+        # Phase 110 (COMP-LOC-01): pre-search corpus selector for composition.
+        # Mirrors the Search-tab corpus_scope_combo (genizah_app.py:5953) EXACTLY —
+        # no preceding QLabel, tooltip only, hardcoded HE/EN item labels built once
+        # from CURRENT_LANG. Orthogonal to Lab Mode (D-06): the combo's value is read
+        # in run_composition for BOTH the Lab and standard branches. Do NOT cross-sync
+        # with self.corpus_scope_combo (the Search-tab combo) — the two are independent
+        # (RESEARCH RF-1: only the Lab-Mode toggle cross-syncs, NOT the corpus selector).
+        self.comp_corpus_scope_combo = QComboBox()
+        if CURRENT_LANG == 'he':
+            self.comp_corpus_scope_combo.addItem("גניזה", "genizah")
+            self.comp_corpus_scope_combo.addItem("מקומי", "local")
+            self.comp_corpus_scope_combo.addItem("הכול", "all")
+        else:
+            self.comp_corpus_scope_combo.addItem("Genizah", "genizah")
+            self.comp_corpus_scope_combo.addItem("Local", "local")
+            self.comp_corpus_scope_combo.addItem("ALL", "all")
+        self.comp_corpus_scope_combo.setToolTip(tr("Select which corpus to search"))
+        self.comp_corpus_scope_combo.setFixedWidth(90)
+        _comp_saved_scope = getattr(self, '_comp_corpus_scope', 'genizah')
+        _comp_scope_idx = self.comp_corpus_scope_combo.findData(_comp_saved_scope)
+        if _comp_scope_idx >= 0:
+            self.comp_corpus_scope_combo.setCurrentIndex(_comp_scope_idx)
+        self.comp_corpus_scope_combo.currentIndexChanged.connect(self._on_comp_corpus_scope_changed)
+
+        cr.addWidget(self.comp_corpus_scope_combo)
         cr.addWidget(self.btn_lab_mode_toggle_comp)
         cr.addWidget(self.chk_lab_deep_comp)
         cr.addWidget(self.btn_comp_run)
@@ -6722,6 +6753,15 @@ class GenizahGUI(QMainWindow):
         cr.addWidget(self.btn_reset_comp)
 
         in_l.addLayout(cr)
+
+        # Phase 110 (COMP-LOC-02): per-run LOCAL LAB staleness signal. Shown only
+        # when a Local/ALL run executed against a PRESENT-but-stale LOCAL LAB index
+        # (read from the per-run result payload — A2/M2). A user with NO LOCAL index
+        # never sees it. The text uses the key seeded in Plan 01.
+        self.lbl_comp_local_stale = QLabel("")
+        self.lbl_comp_local_stale.setStyleSheet("color: #e67e22; font-size: 11px; font-weight: bold;")
+        self.lbl_comp_local_stale.setVisible(False)
+        in_l.addWidget(self.lbl_comp_local_stale)
 
         self.lab_panel_comp = LabPanel(self, 'comp')
         in_l.addWidget(self.lab_panel_comp)
@@ -16849,6 +16889,76 @@ class GenizahGUI(QMainWindow):
         self._search_corpus_scope = scope
         self._save_session()
 
+    def _on_comp_corpus_scope_changed(self, _index):
+        """Phase 110 (COMP-LOC-01): persist the composition corpus scope and
+        proactively refresh the LOCAL-LAB staleness hint. Mirrors
+        ``_on_corpus_scope_changed`` with a defensive guard (RESEARCH Pitfall 5)."""
+        combo = getattr(self, 'comp_corpus_scope_combo', None)
+        if combo is None:
+            return
+        self._comp_corpus_scope = combo.currentData() or 'genizah'
+        self._save_session()
+        # A2 — proactive staleness hint on scope change (guarded; never raises).
+        try:
+            self._refresh_comp_stale_label_for_scope(self._comp_corpus_scope)
+        except Exception:
+            logger.debug("comp stale-label refresh failed", exc_info=True)
+
+    def _refresh_comp_stale_label_for_scope(self, scope):
+        """Phase 110 (COMP-LOC-02 / Round-2 #5): without running a search, show/hide
+        the LOCAL-LAB staleness label for the given scope. M2 distinction: only a
+        PRESENT-but-stale index triggers the note; a missing index shows nothing.
+
+        FIRST refreshes the weights-hash override so the SearchEngine freshness check
+        cannot report "fresh" off an override gone stale after a LabPanel "Rebuild Lab
+        Index" (which mutates LabEngine.dynamic_rank_map without refreshing the override
+        until the next run). Guarded — never triggers a rebuild."""
+        if not hasattr(self, 'lbl_comp_local_stale'):
+            return
+        try:
+            # Round-2 #5 — sync the override before reading freshness.
+            self._refresh_lab_weights_hash_override()
+        except Exception:
+            logger.debug("comp stale-label override refresh failed", exc_info=True)
+        lab = getattr(self, 'lab_engine', None)
+        searcher = getattr(self, 'searcher', None)
+        lab_mode_on = (
+            hasattr(self, 'btn_lab_mode_toggle_comp')
+            and self.btn_lab_mode_toggle_comp.isChecked()
+        )
+        eng = lab if lab_mode_on else searcher
+        present = (
+            getattr(eng, 'local_lab_searcher', None) is not None if eng else False
+        )
+        stale = False
+        if eng is not None and present:
+            try:
+                stale = not eng._check_local_lab_freshness()
+            except Exception:
+                stale = False
+        if scope in ('local', 'all') and present and stale:
+            self.lbl_comp_local_stale.setText(
+                tr("LOCAL index is outdated — rebuild in My Library tab")
+            )
+            self.lbl_comp_local_stale.setVisible(True)
+        else:
+            self.lbl_comp_local_stale.setVisible(False)
+
+    def _refresh_lab_weights_hash_override(self):
+        """Phase 110 A1: keep SearchEngine's lab weights-hash in sync with LabEngine.
+
+        Cheap in-memory hash read; never triggers a rebuild
+        (feedback_no_auto_reindex_in_init). Called at startup, after every LOCAL LAB
+        rebuild (via MyLibraryTab._on_lab_rebuild_finished), before each Local/ALL
+        standard composition run, and before the proactive stale-label check (#5)."""
+        try:
+            searcher = getattr(self, 'searcher', None)
+            lab = getattr(self, 'lab_engine', None)
+            if searcher is not None and lab is not None:
+                searcher._lab_weights_hash_override = lab._current_lab_weights_hash()
+        except Exception as _e:
+            logger.warning("Phase 110: failed to refresh lab weights-hash override: %s", _e)
+
     def toggle_search(self):
         # PGP Tags mode — execute tag search instead of text search
         if self.mode_combo.currentIndex() == self.MODE_PGP_TAGS:
@@ -25051,6 +25161,8 @@ class GenizahGUI(QMainWindow):
                     'chunk_size': self.spin_chunk.value() if hasattr(self, 'spin_chunk') else 5,
                     'max_freq': self.spin_freq.value() if hasattr(self, 'spin_freq') else 10,
                     'mode_index': self.comp_mode_combo.currentIndex() if hasattr(self, 'comp_mode_combo') else 0,
+                    # Phase 110 (COMP-LOC-01) full-restore: persist the comp corpus scope.
+                    'comp_corpus_scope': getattr(self, '_comp_corpus_scope', 'genizah'),
                     'results': getattr(self, 'comp_raw_items', [])[:5000],
                     'filtered_results': getattr(self, 'comp_raw_filtered', [])[:5000],
                     'domain_exclusions': sorted(getattr(self, '_comp_domain_exclusions', set())),
@@ -25292,6 +25404,18 @@ class GenizahGUI(QMainWindow):
                 self.spin_freq.setValue(comp['max_freq'])
             if comp.get('mode_index') is not None:
                 self.comp_mode_combo.setCurrentIndex(comp['mode_index'])
+
+            # Phase 110 (COMP-LOC-01) full-restore: restore the comp corpus scope.
+            # Validate fail-closed (T-110-06): unknown/garbage normalizes to genizah.
+            self._comp_corpus_scope = comp.get('comp_corpus_scope', 'genizah')
+            if self._comp_corpus_scope not in ('genizah', 'local', 'all'):
+                self._comp_corpus_scope = 'genizah'
+            if hasattr(self, 'comp_corpus_scope_combo'):
+                _comp_idx = self.comp_corpus_scope_combo.findData(self._comp_corpus_scope)
+                if _comp_idx >= 0:
+                    self.comp_corpus_scope_combo.blockSignals(True)
+                    self.comp_corpus_scope_combo.setCurrentIndex(_comp_idx)
+                    self.comp_corpus_scope_combo.blockSignals(False)
 
             self._comp_domain_exclusions = set(comp.get('domain_exclusions', []))
             self._comp_printed_filter_state = comp.get('printed_filter', 'all')
