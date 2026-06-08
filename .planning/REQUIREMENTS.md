@@ -101,13 +101,13 @@ requirement text is preserved in git history (prior `REQUIREMENTS.md`) and `MILE
 > deferred composition-report LOCAL export (EXP-F3). Desktop-only (web has no composition UI; LOCAL is
 > desktop-only).
 
-- [ ] **COMP-LOC-01**: A **pre-search Genizah / Local / ALL corpus selector** on the composition /
+- [x] **COMP-LOC-01**: A **pre-search Genizah / Local / ALL corpus selector** on the composition /
   parallels tab (mirroring the existing Search-tab selector, `genizah_app.py:5953`) scopes which
   corpus composition searches. The selector is **orthogonal to the composition search MODE** — both
   standard and **Lab** modes honor it; **"Lab Mode" is NOT hardwired to LOCAL** (it searches whichever
   corpus the dropdown selects, exactly like regular search). *(No post-search LOCAL filter activation
   this phase — pre-search scoping only, user decision 2026-06-08.)*
-- [ ] **COMP-LOC-02**: Composition search **executes against the selected corpus** — **Local** returns
+- [x] **COMP-LOC-02**: Composition search **executes against the selected corpus** — **Local** returns
   only LOCAL hits, **ALL** returns Genizah + LOCAL **merged**, **Genizah** is unchanged from today;
   results render into the existing composition results surface. A **stale LOCAL LAB index** surfaces a
   rebuild / staleness signal rather than silently omitting LOCAL composition hits.

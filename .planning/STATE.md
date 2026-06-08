@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v8.0.0
 milestone_name: Joins Lab — Phases 106-110
 status: executing
-stopped_at: Phase 110 Plan 01 complete — Wave-0 test scaffold + D-08 i18n key; Plan 02 next
-last_updated: "2026-06-08T18:11:00.000Z"
-last_activity: 2026-06-08 -- Phase 110 Plan 01 executed (test scaffold)
+stopped_at: Phase 110 Plan 02 complete — composition engine corpus_scope + thread plumbing; Plan 03 next (UI selector + _lab_weights_hash_override injection)
+last_updated: "2026-06-08T18:13:40.252Z"
+last_activity: 2026-06-08 -- Phase 110 Plan 02 executed (engine corpus_scope; all 10 Wave-0 pure-engine tests green; comp threads plumbed)
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 35
-  completed_plans: 32
-  percent: 91
+  completed_plans: 34
+  percent: 97
 ---
 
 # Project State
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-06-02)
 Milestone: **v8.0.0 Dicta Rebrand & Joins Lab — STARTED 2026-06-02.** Folds the delivered v7.17 cycle (the "Dicta Genizah Search Pro" rebrand + LOCAL "My Library" export, Phases 103 + 105) into the flagship v8.0.0 release, and adds **Joins Lab** — an interactive **human-in-the-loop** join-hunting workbench (Component A) + optional search-support algorithms (Component B), both apps. NO automated join-finder.
 
 Phase: 110 (composition-parallels-search-local-corpus-support-desktop) — EXECUTING
-Plan: 2 of 4 (Plan 01 Wave-0 test scaffold complete)
-Status: Ready to execute Plan 02 (engine corpus_scope)
-Last activity: 2026-06-08 -- Phase 110 Plan 01 executed (test scaffold + D-08 i18n key)
+Plan: 3 of 4 (Plans 01 Wave-0 scaffold + 02 engine corpus_scope complete)
+Status: Ready to execute Plan 03 (desktop comp-tab Genizah/Local/ALL selector + _lab_weights_hash_override injection at GenizahGUI init + after LOCAL LAB rebuild)
+Last activity: 2026-06-08 -- Phase 110 Plan 02 executed (engine corpus_scope; all 10 Wave-0 pure-engine tests green; comp threads plumbed)
 
 ### Scope (locked 2026-06-02)
 
@@ -88,10 +88,11 @@ Carried forward to v8.0.0+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular
 - v8.0.0 opened (2026-06-02): folds the delivered v7.17 cycle (rebrand + LOCAL export, Phases 103/105) into the flagship v8.0.0 release and adds **Joins Lab** (Spike 002, FEASIBLE / ~M). Two independent components — A: Join Workbench hub (primary); B: search-support algorithms (secondary). Both apps. Human-in-the-loop; the auto-ranked v7/v8 finder is explicitly OUT. **Roadmap deferred** until after a user-led Genizah-scholar design-critique session. Phase numbering will continue from 105.
 - Phases 103-105 (v7.17 cycle, now folded into v8.0.0): Phase 103 Search-results LOCAL export (LEXP-01/03–08, COMPLETE & verified); Phase 104 → DEFERRED to EXP-F3 (no LOCAL comp-search UI); Phase 105 Export UX Polish (EXPUX-01..04, implemented — EXPUX-01 dialog UAT pending). Desktop rebrand → "Dicta Genizah Search Pro" delivered as pre-release polish (commit `6e0c312d` + follow-ups).
 - Phase 102 (v7.16) EXECUTED & CLOSED (commit `494c0c49`) + POST-102 de-space quality pass as NO-PHASE edits (D-F13b/c/d). Existing LOCAL libraries need one manual "Re-index All" (`extraction_format_version` 2→3).
+- Phase 110 Plan 02 (2026-06-08): composition engine `corpus_scope` landed. `search_composition_logic` + `lab_composition_search` accept `corpus_scope` as the LAST param (C3); fail-closed normalizer coerces unknown→`genizah` (C4); Genizah loop gated `!= 'local'`, LOCAL LAB loop/hook gated `!= 'genizah'`; per-run `local_lab_stale` + `corpus_scope` echoed on EVERY return dict incl. both early returns (A2 + Round-2 #4); stale≠no-index (M2). `SearchEngine._current_lab_weights_hash` now honors `_lab_weights_hash_override` (RF-4 — fixes all-scope LOCAL-LAB silent drop; Plan 03 injects the value). Composition merge stays score-interleaved — NO RRF (RF-2). Threads plumbed in gui_threads.py (default `'genizah'`). All 10 Wave-0 pure-engine tests green; 18 regression tests green; COMP-LOC-01/02 marked complete. Commits `80583a60`, `f44aa0ee`.
 
 ## Session Continuity
 
-Last session: 2026-06-08T18:04:53.874Z
-Stopped at: Phase 110 REFRAMED + context gathered — Component B deferred; Phase 110 = LOCAL-composition wiring + EXP-F3
+Last session: 2026-06-08T18:13:00Z
+Stopped at: Phase 110 Plan 02 complete — composition engine corpus_scope + thread plumbing; Plan 03 next (UI selector + _lab_weights_hash_override injection)
 Resume file: None
-Next step: /gsd-verify-work for Phase 108 (VALIDATION.md ready; nyquist_compliant + wave_0_complete = true).
+Next step: /gsd-execute-phase 110 — Plan 03 (desktop comp-tab Genizah/Local/ALL selector wired to the two run_composition call sites + inject searcher._lab_weights_hash_override = lab_engine._current_lab_weights_hash() at GenizahGUI init and after every LOCAL LAB rebuild).
