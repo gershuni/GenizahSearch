@@ -271,6 +271,17 @@ Record results as you work through the scenarios.
 > page's text (not the whole MS); triage reads ✓/?/✗ and toggles on second click; prev/next labels
 > fit — plus the earlier F-R4-1/F-R4-2 items and the rest of Round 4 (A2–A8, K/L/M).
 
+### F-R4-4 — Compare nav arrows must point outward (bidi mirroring) — FIXED, re-test required
+
+- **Reported (2026-06-08, Hillel, with screenshot):** both Compare nav arrows rendered as `>`
+  (Qt bidi-mirrors `<`/`>` inside the RTL buttons). The arrows should point to the OUTER edges —
+  prev (right button) `>` on the right, next (left button) `<` on the left — with `הקודם`/`הבא`
+  inner.
+- **Fix (commit `9e1113e1`):** the toolbar stays RTL (prev right / next left) but each nav button
+  is forced to LTR internal layout (`setLayoutDirection(LeftToRight)`) so the brackets render
+  literally; visual-order HE strings `הקודם>` (arrow trails, outer-right) and `<הבא` (arrow leads,
+  outer-left). English keys unchanged. Gate: 59 passed.
+
 ---
 
 ## Resume Signal
