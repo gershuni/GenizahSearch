@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v8.0.0
 milestone_name: Joins Lab — Phases 106-110
 status: executing
-stopped_at: Phase 109 gap-closure round 3 context gathered (G-06..G-13)
+stopped_at: Phase 109 COMPLETE (VS merge & soft-retire; UAT approved, 3/3 SC verified) — ready for Phase 110
 last_updated: "2026-06-08T11:53:33.707Z"
 last_activity: 2026-06-08
 progress:
@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-02)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 109 — visual-similarity-merge-soft-retire
+**Current focus:** Phase 110 — search-support: parallels seeding (JSA-01)
 
 ## Current Position
 

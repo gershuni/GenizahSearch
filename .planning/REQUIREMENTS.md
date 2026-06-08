@@ -131,7 +131,7 @@ highlighted snippet + Y/?/N triage + four actions | side-by-side compare.
   image p±1; first→+1, last→−1, middle→both). Query B runs through the engine; matching is
   `(sys_id, page±1)` set membership. AND narrows a flood; OR widens a poor yield. (Distinct from
   JOINS-F1's cross-LINE offset; this is cross-SIDE and needs no spike.)
-- [ ] **JWB-12 — Unified candidate sources (folds in Visual Similarity).** One surface, three
+- [x] **JWB-12 — Unified candidate sources (folds in Visual Similarity).** ✅ Phase 109 (2026-06-08; 3/3 SC verified, UAT-approved). NOTE: the badge scheme evolved during gap rounds to a single 👁 eye badge (G-06/G-09, replacing ★both/⊙VS/✎text), the 3-radio selector became a Visual Similarity toggle (G-04), and the JoinsDialog pick-mode hook was retired (G-08) rather than kept — all user-approved. One surface, three
   sources: text / visual-similarity look-alikes / combined (provenance badges ★both / ⊙VS / ✎text,
   both-first ordering). Soft-retire the standalone Visual Similarity dialog (reach parity → reroute
   its entry points → deprecate; keep the JoinsDialog pick-mode hook). Every candidate carries the
@@ -203,7 +203,7 @@ highlighted snippet + Y/?/N triage + four actions | side-by-side compare.
 | (foundational logic for JWB-10/11/12 + build constraints) | 106 (shared core) | Active |
 | JWB-01, 02, 03, 04, 09 | 107 (desktop frame + actions + join model) | Active |
 | JWB-06 (reframed), 07, 08, 10, 11 | 108 (desktop builders + candidates + compare) | Active |
-| JWB-12 (unified sources + VS merge) | 108 (text/combined surface) + 109 (VS source + soft-retire) | Active |
+| JWB-12 (unified sources + VS merge) | 108 (text/combined surface) + 109 (VS source + soft-retire) | ✅ Complete (Phase 109, 2026-06-08) |
 | JSA-01 | 110 (parallels seeding) | Active |
 | JSA-02, 03 + **JWB-05** (deferred from 108) | 110 (discuss-phase disposition: keep/spike/cut) | Active |
 
