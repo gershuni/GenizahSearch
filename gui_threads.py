@@ -170,7 +170,8 @@ class CompositionThread(QThread):
 
     def __init__(self, searcher, text, chunk, freq, mode, filter_text=None, threshold=5,
                  boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
-                 min_boundary_matches=0, min_delimiter_distance=3, restrict_sys_ids=None):
+                 min_boundary_matches=0, min_delimiter_distance=3, restrict_sys_ids=None,
+                 corpus_scope='genizah'):
         super().__init__()
         self.searcher = searcher
         self.text = text
@@ -181,6 +182,10 @@ class CompositionThread(QThread):
         self.threshold = threshold
         self.cancel_flag = False
         self.restrict_sys_ids = restrict_sys_ids
+        # Phase 110 (COMP-LOC-01): corpus selector — 'genizah'|'local'|'all'.
+        # Default 'genizah' (NOT SearchThread's 'all') so existing callers keep
+        # today's Genizah-only behavior (D-13 non-regression).
+        self.corpus_scope = corpus_scope
         # Boundary search parameters
         self.boundary_mode = boundary_mode
         self.boundary_delimiter = boundary_delimiter
@@ -206,7 +211,8 @@ class CompositionThread(QThread):
                 boundary_boost=self.boundary_boost,
                 min_boundary_matches=self.min_boundary_matches,
                 min_delimiter_distance=self.min_delimiter_distance,
-                restrict_sys_ids=self.restrict_sys_ids
+                restrict_sys_ids=self.restrict_sys_ids,
+                corpus_scope=self.corpus_scope
             )
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))
@@ -223,7 +229,8 @@ class LabCompositionThread(QThread):
 
     def __init__(self, lab_engine, text, mode, chunk_size=None, excluded_ids=None, filter_text=None,
                  deep_scan=False, scan_limit=50000, boundary_mode='full', boundary_delimiter='\n',
-                 boundary_boost=1.5, min_boundary_matches=0, min_delimiter_distance=3):
+                 boundary_boost=1.5, min_boundary_matches=0, min_delimiter_distance=3,
+                 corpus_scope='genizah'):
         super().__init__()
         self.lab_engine = lab_engine
         self.text = text
@@ -234,6 +241,9 @@ class LabCompositionThread(QThread):
         self.deep_scan = deep_scan
         self.scan_limit = scan_limit
         self.cancel_flag = False
+        # Phase 110 (COMP-LOC-01): corpus selector — 'genizah'|'local'|'all'.
+        # Default 'genizah' so existing callers keep Genizah-only behavior (D-13).
+        self.corpus_scope = corpus_scope
         # Boundary search parameters
         self.boundary_mode = boundary_mode
         self.boundary_delimiter = boundary_delimiter
@@ -268,7 +278,8 @@ class LabCompositionThread(QThread):
                 boundary_delimiter=self.boundary_delimiter,
                 boundary_boost=self.boundary_boost,
                 min_boundary_matches=self.min_boundary_matches,
-                min_delimiter_distance=self.min_delimiter_distance
+                min_delimiter_distance=self.min_delimiter_distance,
+                corpus_scope=self.corpus_scope
             )
             self.scan_finished_signal.emit(result)
         except Exception as e: self.error_signal.emit(str(e))
