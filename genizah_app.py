@@ -4707,6 +4707,11 @@ class GenizahGUI(QMainWindow):
 
     def _browse_view_visual_similarity(self):
         """REROUTED (Phase 109, D-10): open the Join Workbench with the Visual source auto-loaded."""
+        # DEPRECATED — marked removable (Phase 109 G-07, D-11 one-cycle soft-retire). The Browse-tab
+        # Visual-Similarity button that called this was removed in G-07; "Find Joins" is now the
+        # single Browse entry into the Join Workbench. This handler is RETAINED one cycle as a safety
+        # net (it still maps source="visual" -> toggle ON via open_joins_workbench). No live caller
+        # remains. Do not add new callers. Removable once the parity UAT (109-HUMAN-UAT.md) signs off.
         sid = getattr(self, "current_browse_sid", None)
         if not sid:
             return
@@ -7236,16 +7241,6 @@ class GenizahGUI(QMainWindow):
         self.btn_b_joins.setMenu(self.joins_menu)
         community_bar.addWidget(self.btn_b_joins)
 
-        # Visual Similarity button — gentle orange, icon-only like joins button
-        self.btn_b_visual_sim = QToolButton()
-        self.btn_b_visual_sim.setText("🔬")
-        self.btn_b_visual_sim.setToolTip(tr("Visual Similarity"))
-        self.btn_b_visual_sim.setEnabled(False)
-        self.btn_b_visual_sim.setFixedSize(40, 32)
-        self.btn_b_visual_sim.setStyleSheet("")
-        self.btn_b_visual_sim.clicked.connect(self._browse_view_visual_similarity)
-        community_bar.addWidget(self.btn_b_visual_sim)
-
         community_bar.addStretch()
         text_layout.addWidget(_make_scrollable_row(community_bar))
 
@@ -8247,12 +8242,6 @@ class GenizahGUI(QMainWindow):
         self.btn_b_add_to_puzzle.setEnabled(True)
         if hasattr(self, "btn_b_find_joins"):
             self.btn_b_find_joins.setEnabled(True)
-
-        # Enable Visual Similarity button if data available
-        _vs_has = False
-        _vs_has = bool(self.meta_mgr and self.meta_mgr.csv_bank.get(sid, {}).get('has_vs'))
-        self.btn_b_visual_sim.setVisible(_vs_has)
-        self.btn_b_visual_sim.setEnabled(_vs_has)
 
         # Populate external library link button
         self._browse_external_url = meta.get('external_url') or meta.get('marc', {}).get('external_iiif_link')
