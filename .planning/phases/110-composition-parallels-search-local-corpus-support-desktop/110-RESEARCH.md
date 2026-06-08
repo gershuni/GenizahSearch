@@ -676,9 +676,9 @@ This phase is a desktop-internal wiring change. All dependencies are already in 
 | RF-6 (parallels) | HIGH | Verified separate button controls; inheritance confirmed |
 | Validation Architecture | HIGH | Mapped to specific function/param changes; existing test patterns reusable |
 
-### Open Questions
+### Open Questions (RESOLVED)
 
-1. **A1 resolution:** Confirm `src_lbl` on a composition item from `lab_composition_search` with LOCAL LAB hits equals `'LOCAL'`. The LOCAL LAB side-index writes `source` field from the page record — verify `shared/local_indexer.py` writes `source='LOCAL'` for all LOCAL pages. (LOW risk — fallback is `is_local_sys_id`.)
+1. **A1 — RESOLVED (resolved-by-design):** The original question — confirm `src_lbl == 'LOCAL'` on a composition item from `lab_composition_search` with LOCAL LAB hits — does NOT gate execution. Plan 04 uses `is_local_sys_id(sys_id)` as the **primary** LOCAL discriminator (LOCAL sys_ids are 18-digit `97…` values per `shared/local_sys_id.py:53-79`; LOCAL headers are built from that numeric sys_id, `shared/local_indexer.py:939-941`), with `src_lbl == 'LOCAL'` treated only as an optional fast path. Codex round-2 (live source) further narrowed the related C6 concern. So the answer is non-blocking either way (LOW risk, fallback verified).
 
 ### Ready for Planning
 

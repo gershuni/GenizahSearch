@@ -16,6 +16,11 @@ created: 2026-06-08
 > cross-parity row (structural, not byte-for-byte for xlsx/docx, C5). All test_comp_corpus_scope.py
 > tests are PURE-ENGINE so Wave 2 is deterministically green (C2). Export tests target MODULE-LEVEL
 > helpers in shared/export_dossier.py (C1).
+> Updated 2026-06-08 (--reviews ROUND 2): added `test_early_return_carries_scope_payload` (Round-2 #4 —
+> both engine early-return paths carry corpus_scope + local_lab_stale; pure-engine, green at Wave 2) and
+> `test_local_only_export_no_metadata_fetch` (Round-2 #1 — a LOCAL-only composition export does NOT call
+> `_fetch_metadata_with_dialog`; xfail at Wave 0/2, green at Wave 4 when Plan 04 lands the LOCAL
+> metadata-prefetch filter). Fixtures use a realistic 18-digit `97…` LOCAL sys_id, not `LOCAL_…` (#6).
 
 ---
 
@@ -52,11 +57,13 @@ created: 2026-06-08
 | COMP-LOC-01 | Lab Mode is decoupled from corpus — both standard & Lab honor the selector (both directions, pure-engine) | unit | `pytest tests/test_comp_corpus_scope.py::test_lab_mode_not_hardwired_to_local -x` | ❌ W0 | ⬜ pending |
 | COMP-LOC-02 | `corpus_scope='all'` on standard composition includes LOCAL LAB hits | unit | `pytest tests/test_comp_corpus_scope.py::test_std_comp_all_includes_local_hits -x` | ❌ W0 | ⬜ pending |
 | COMP-LOC-02 | Present-but-stale LAB sets the PER-RUN verdict (`result['local_lab_stale']`) + engine flag; no-index reports nothing; no silent drop | unit | `pytest tests/test_comp_corpus_scope.py::test_stale_lab_sets_flag -x` | ❌ W0 | ⬜ pending |
+| COMP-LOC-02 | Both engine EARLY-RETURN paths (lab empty-text + standard too-short) still carry `corpus_scope` + `local_lab_stale` (Round-2 #4) | unit | `pytest tests/test_comp_corpus_scope.py::test_early_return_carries_scope_payload -x` | ❌ W0 | ⬜ pending |
 | COMP-LOC-02 / D-12 | Invalid/typo `corpus_scope` fails CLOSED to `genizah` (LOCAL LAB loop never runs) | unit | `pytest tests/test_comp_corpus_scope.py::test_invalid_scope_fails_closed -x` | ❌ W0 | ⬜ pending |
 | COMP-LOC-02 | Genizah default path equals the omitted-arg path (D-13 default-equality; full non-regression also guarded by LOCAL-hook-not-called + pre-existing comp suites) | regression | `pytest tests/test_comp_corpus_scope.py::test_genizah_default_nonregression -x` | ❌ W0 | ⬜ pending |
 | EXP-F3 | LOCAL hit in composition export carries LOCAL columns (filename/folder/path/page/matched-text) via module-level helper | unit | `pytest tests/test_comp_export_local.py::test_xlsx_local_row_shape -x` | ❌ W0 | ⬜ pending |
 | EXP-F3 | All four formats (xlsx/csv/txt/docx) emit a LOCAL-aware path; partition helper splits Genizah vs LOCAL | unit | `pytest tests/test_comp_export_local.py::test_all_formats_local_aware -x` | ❌ W0 | ⬜ pending |
 | EXP-F3 | Genizah-only composition export STRUCTURALLY unchanged (partition leaves Genizah rows identical + empty LOCAL set; not byte-for-byte for xlsx/docx) | unit | `pytest tests/test_comp_export_local.py::test_genizah_only_export_unchanged -x` | ❌ W0 | ⬜ pending |
+| EXP-F3 / D-12 | A LOCAL-only composition export filters `97…` ids out of the NLI prefetch → does NOT call `_fetch_metadata_with_dialog` (Round-2 #1) | unit | `pytest tests/test_comp_export_local.py::test_local_only_export_no_metadata_fetch -x` | ❌ W0 | ⬜ pending |
 | D-12 | No Supabase/cloud-write calls after a LOCAL composition run (pure-engine) | unit | `pytest tests/test_comp_corpus_scope.py::test_no_cloud_write_on_local_comp -x` | ❌ W0 | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
@@ -65,8 +72,8 @@ created: 2026-06-08
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_comp_corpus_scope.py` — stubs for COMP-LOC-01/02, D-12, fail-closed scope, Genizah non-regression (ALL pure-engine — no UI import — so Wave 2's whole-file verify is green, C2)
-- [ ] `tests/test_comp_export_local.py` — stubs for EXP-F3 targeting the MODULE-LEVEL helpers `_partition_comp_export_rows` / `_build_local_comp_row` in shared/export_dossier.py (C1); structural parity (C5)
+- [ ] `tests/test_comp_corpus_scope.py` — stubs for COMP-LOC-01/02, D-12, fail-closed scope, early-return payload (#4), Genizah non-regression (ALL pure-engine — no UI import — so Wave 2's whole-file verify is green, C2)
+- [ ] `tests/test_comp_export_local.py` — stubs for EXP-F3 targeting the MODULE-LEVEL helpers `_partition_comp_export_rows` / `_build_local_comp_row` in shared/export_dossier.py (C1); structural parity (C5); the LOCAL-only-no-metadata-fetch test (#1, xfail until Wave 4); a realistic `97…` LOCAL fixture (#6)
 
 **Existing tests to extend (not re-create):**
 - `tests/test_corpus_scope_routing.py` — add composition-scope variants
@@ -80,6 +87,7 @@ created: 2026-06-08
 |----------|-------------|------------|-------------------|
 | Corpus selector renders next to the mode/Lab-Mode controls on the composition tab, bilingual (EN/HE) | COMP-LOC-01 | PyQt6 widget placement/label is visual; headless tests can't assert Qt layout reliably | Launch desktop app → Composition tab → confirm Genizah/Local/ALL dropdown present (no "Corpus:" label, mirrors the Search tab). Labels switch HE/EN only after a language change + RESTART (combo built once from CURRENT_LANG; M3) |
 | Stale-LAB rebuild/staleness signal is visible to the user (banner/inline note) for a present-but-stale index, and CLEARS after a My-Library rebuild | COMP-LOC-02 | Signal styling/visibility + post-rebuild refresh is a UI affordance | Run a Local/ALL composition with a present-but-stale LAB index → confirm a rebuild/staleness signal appears (not empty results); rebuild in My Library → run again → confirm it clears. A user with NO LOCAL index never sees it |
+| Selected corpus scope persists when full session restore is OFF/declined (persistent-prefs path) and survives a composition history re-run | COMP-LOC-01 | Session/history persistence across UI flows (Round-2 #2/#3) | Set scope Local/ALL → set session restore to "never" (or decline) → reopen → confirm dropdown restores the scope (#2). Run a Local/ALL composition → click that history entry → confirm the re-run uses the original scope, not Genizah (#3) |
 | Parallels-from-browse launch inherits the selected corpus scope | EXP-F3 / RF-6 | End-to-end UI flow across tabs | Browse → "search parallels" → confirm the composition run uses the current selector value |
 
 ---
@@ -94,3 +102,4 @@ created: 2026-06-08
 - [ ] `nyquist_compliant: true` set in frontmatter
 
 **Approval:** pending
+</content>
