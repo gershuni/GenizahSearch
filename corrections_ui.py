@@ -3439,10 +3439,10 @@ class JoinsDialog(QDialog):
             self.btn_from_list.clicked.connect(self._show_list_picker)
             frag_b_layout.addWidget(self.btn_from_list)
 
-        # "Visual Suggestions" button — pick fragment B from VS dialog
-        self.btn_vs_pick = QPushButton("🔍")
+        # "Find joins in Join Lab" button — open the Workbench anchored on Fragment A (plain, no pick-back)
+        self.btn_vs_pick = QPushButton("🔗")
         self.btn_vs_pick.setFixedWidth(30)
-        self.btn_vs_pick.setToolTip(tr("Visual Similarity") + " — " + tr("Pick a partner in the Join Lab"))
+        self.btn_vs_pick.setToolTip(tr("find joins in joins lab"))
         self.btn_vs_pick.clicked.connect(self._show_vs_picker)
         frag_b_layout.addWidget(self.btn_vs_pick)
 
@@ -4754,11 +4754,11 @@ class JoinsDialog(QDialog):
         dialog.exec()
 
     def _show_vs_picker(self):
-        """Open the Join Workbench in pick mode to let the user select fragment B from VS look-alikes.
+        """Opens the Join Workbench anchored on Fragment A as a normal (toggle-OFF) browse.
 
-        G-05 (Plan 06): rerouted from the old _show_vs_dialog pick path into the Workbench.
-        The Workbench loads VS itself (set_source='visual') and greys the toggle (D-08) when the
-        anchor has no VS data — no pre-fetch or QMessageBox is needed here.
+        G-08 (Plan 12, REVERSES G-05): no pick-back to Fragment B — the user creates the join
+        from inside the Lab via 'Add as Join'. Opens the Workbench PLAIN (no source='visual',
+        no pick_callback), then closes this JoinsDialog so the user works in the Lab.
         """
         parent_app = self.parent()
         if not parent_app or not hasattr(parent_app, "open_joins_workbench"):
@@ -4775,9 +4775,11 @@ class JoinsDialog(QDialog):
                 "img": None,
             }
         }
-        parent_app.open_joins_workbench(res, source="visual", pick_callback=self._on_vs_pick)
+        parent_app.open_joins_workbench(res)   # G-08: plain open, toggle OFF, no pick-back
+        self.close()                            # G-08.2: abandon the in-progress JoinsDialog; user works in the Lab
 
     def _on_vs_pick(self, partner_sys_id, partner_shelfmark):
+        # G-08: caller removed (no pick-back); retained one cycle (D-11) — removable next cleanup.
         """Callback when user picks a suggestion from VS dialog."""
         self._selected_doc_id_b = partner_sys_id
         self.frag_b_input.setText(partner_shelfmark)
