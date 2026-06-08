@@ -33,6 +33,8 @@ key_files:
   modified:
     - shared/export_dossier.py
     - genizah_app.py
+    - genizah_core.py
+    - genizah_translations.py
 decisions:
   - "LOCAL row/partition logic is MODULE-LEVEL in export_dossier (C1) so the Wave-0 tests import stable symbols, not closures"
   - "genizah_ids = filter_genizah_ids_for_metadata(unique_ids, is_local_sys_id) replaces unique_ids as the source for missing/_fetch_metadata_with_dialog — a LOCAL-only export never fires an NLI lookup (D-12)"
@@ -140,3 +142,71 @@ Files exist:
 Commits exist:
 - e4e7f3a2 — FOUND
 - 131f5a42 — FOUND
+
+---
+
+## Code Review Corrections (2026-06-08, Codex review `110-CODEX-CODE-REVIEW.md`)
+
+The Codex code review of Phase 110 surfaced 7 findings (1 BLOCKER, 2 HIGH, 3 MED, 1 LOW), all now fixed and committed. The original Plan-04 work above stands; these are corrections to the LOCAL display + LOCAL-only export shape that the first pass missed.
+
+### Fixes applied
+
+**FIX 1 — [BLOCKER / D-12] LOCAL `97…` ids no longer leak to NLI/FJMS during display grouping.**
+- `genizah_core.py::group_composition_results` filters LOCAL ids out of `ids` (`genizah_ids = [sid for sid in ids if sid and not is_local_sys_id(sid)]`) before `batch_fetch_shelfmarks` — the prior code passed every grouped id, so a LOCAL comp run could reach the NLI network path before export. The export-time prefetch fix from the original Plan 04 did NOT cover the pre-display grouping path.
+- `genizah_app.py::_collect_comp_domain_data` strips LOCAL ids from `all_sys_ids` before the FJMS domains + printed-status lookups.
+- `genizah_app.py::display_comp_results::_collect_id` skips LOCAL ids so they never enter `ids_to_fetch` → `start_metadata_loading`.
+- `genizah_app.py::start_metadata_loading` defensively strips LOCAL ids at the loader entry point (covers any caller).
+- New pure-engine test `tests/test_comp_corpus_scope.py::test_local_comp_grouping_no_nli_fetch` proves `batch_fetch_shelfmarks` is called with `[]` for a LOCAL grouped item.
+
+**FIX 2 — [HIGH / 5a] LOCAL-only composition export omits Genizah/MiDRASH/Stökl credits.**
+- `export_comp_report` computes `_has_local` / `_local_only_comp_export` over ALL comp items (Main + Appendix + Filtered + Filtered-Appendix + Known) and threads `local_only=_local_only_comp_export` into `_get_credit_header(...)`. `_get_credit_header(local_only=True)` already suppressed the MiDRASH/Zenodo block — it was simply never called with the flag for comp exports.
+
+**FIX 3 — [HIGH / 5b] LOCAL-only export drops empty Genizah sheets + uses "Documents" terminology.**
+- XLSX: for a LOCAL-only export, the empty Genizah `Report View` / `Raw Data` sheets are removed before save (mirrors the Phase 103 search export at `genizah_app.py:2924-2934`); the workbook collapses to `[Local Documents, Query information]` with Local Documents active.
+- CSV/DOCX/TXT: a LOCAL-only export does not emit the 10-column Genizah table/headers; the Local Documents surface is primary. Summary/section labels use LOCAL terminology.
+- New FLAT EN→HE keys in `genizah_translations.py`: `Documents Found` / `Main Documents` / `Filtered by Text (Documents)` / `Excluded Documents` / `EXCLUDED DOCUMENTS` / `Matched Text`.
+- MIXED exports keep BOTH surfaces (Genizah manuscript rows + Local Documents); Genizah-only exports are structurally unchanged.
+
+**FIX 4 — [MED] Excluded LOCAL rows no longer duplicate into "Excluded Manuscripts".**
+- XLSX excluded-sheet writer and DOCX excluded-table writer partition `c_known` into Genizah vs LOCAL; only Genizah known items go to "Excluded Manuscripts". LOCAL known items stay only in the Local Documents surface. For a LOCAL-only export the "Excluded Manuscripts" sheet/section is not created at all.
+
+**FIX 5 — [MED] Filepath cache primed at the display entry point (covers session restore).**
+- `display_comp_results` calls `_prime_comp_local_filepath_cache(...)` over the flattened main/appendix/filtered/known set at the START of the method, so session-restored comp data (rendered directly via `display_comp_results`) never falls back to per-row `indexer.get_filepath` on the UI thread. The fresh-scan prime is retained (harmless).
+
+**FIX 6 — [MED] `_has_local` uses the item predicate, not just the 97-prefix.**
+- `_has_local = any(_is_local_item(it) for it in _all_comp_items)` (so a `src_lbl='LOCAL'` item with a missing/non-97 sid is still exported to Local Documents). `local_ids` (97-prefix) is kept only for filepath-cache priming.
+- New test `test_src_lbl_local_without_display_lands_on_local_surface`.
+
+**FIX 7 — [LOW] Removed stale xfail markers + added the two reported-bug tests.**
+- Removed the 4 `@pytest.mark.xfail(strict=False)` decorators in `tests/test_comp_export_local.py` (the helpers exist; tests are real passes now). Removed the now-unused `pytest` import.
+- Added `test_local_only_export_omits_genizah_credits` (5a) and `test_local_only_export_uses_document_terminology` (5b) — both pure (no Qt), exercising the LOCAL-only predicate + the `credits_lines`/partition/header builders.
+
+### Correction to original "Verification Results" note
+
+The earlier note (line 99) said the EXP-F3 tests stay as `xfail`/`xpassed` "the intended green state". Per FIX 7 the xfail markers are now REMOVED — `tests/test_comp_export_local.py` reports plain passes, not xpasses.
+
+### Verification (post-corrections)
+
+```
+python -m pytest tests/test_comp_export_local.py tests/test_comp_corpus_scope.py -q
+20 passed              (no xfail/xpass — real passes, incl. the 4 new tests)
+
+python -m pytest tests/test_export_dossier*.py tests/test_export_xlsx*.py tests/test_local*export*.py -q
+148 passed             (Phase 103 export regression unaffected)
+
+python -m pytest tests/test_lab_composition_chunk_hits.py tests/test_corpus_scope_routing.py -q
+18 passed              (pre-existing comp suites green)
+
+python -c "import genizah_core, genizah_app, shared.export_dossier"     # exit 0
+python -c "import genizah_translations"                                 # exit 0
+python -m ruff check genizah_core.py genizah_app.py shared/export_dossier.py genizah_translations.py \
+  tests/test_comp_export_local.py tests/test_comp_corpus_scope.py
+All checks passed!
+```
+
+### Code-review-corrections commits
+
+| Severity | Commit | Message |
+|----------|--------|---------|
+| BLOCKER (FIX 1) | be8a98a2 | fix(110): stop LOCAL 97-ids leaking to NLI/FJMS in comp display grouping (D-12 BLOCKER) |
+| HIGH+MED+LOW (FIX 2-7) | b26c3146 | fix(110): LOCAL-only comp export — credits, terminology, sheet shape, excluded dedup, restore prime (5a/5b/4/5/6/7) |
