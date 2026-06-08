@@ -8954,8 +8954,15 @@ class SearchEngine:
         - 'combined': Full search with score boost for boundary matches
 
         Phase 110 (COMP-LOC-01/02): corpus_scope selects which index loop runs —
-        'genizah' (Genizah Tantivy loop only), 'local' (LOCAL LAB hook only), or 'all'
-        (both, merged into the same doc_hits accumulator — NOT RRF).
+        'genizah' (Genizah Tantivy loop only), 'local' (regular My-Library index
+        only), or 'all' (both, merged into the same doc_hits accumulator — NOT RRF).
+
+        Phase 110 DESIGN CORRECTION (2026-06-08): standard composition queries the
+        REGULAR My-Library index (self.local_searcher), the same index regular
+        search scope=Local uses — NOT the LAB side-index. The LAB side-index is
+        opt-in via Lab Mode (LabEngine.lab_composition_search). The default path
+        has no weights-hash / no staleness; an empty LOCAL result is just "no
+        results" (no staleness banner).
         """
         # Phase 110 C4: fail CLOSED — never expose LOCAL on a bad value.
         if corpus_scope not in ('genizah', 'local', 'all'):
@@ -9133,37 +9140,41 @@ class SearchEngine:
         except InterruptedError:
             was_cancelled = True
 
-        # Phase 95 D-09 / REQ-6: LOCAL LAB extension for search_composition_logic (I14).
-        # Same pattern as lab_composition_search LOCAL LAB hook above — queries
-        # local_lab_searcher with the same regex/fingerprint scoring. NOT RRF (D-09).
-        # CR-01 FIX: wrap freshness call in try/except — D-37 fallback semantics
-        # (LOCAL LAB unavailable should NEVER break standard Composition Search).
-        try:
-            _lab_fresh = self._check_local_lab_freshness()
-        except Exception as _lab_fresh_exc:
-            LOGGER.warning(
-                "search_composition_logic: _check_local_lab_freshness raised %r — "
-                "skipping LOCAL LAB extension (D-37 fallback).",
-                _lab_fresh_exc,
-            )
-            _lab_fresh = False
-        # Phase 97 R-01: skip LOCAL LAB composition search if is_searchable gate closed.
+        # Phase 110 DESIGN CORRECTION (2026-06-08, Plan 110-03 UAT checkpoint):
+        # Standard (Lab-Mode-OFF) composition now queries the REGULAR My-Library
+        # index (self.local_searcher / self.local_index) — the SAME index that
+        # regular search scope=Local uses — NOT the LOCAL LAB side-index. The LAB
+        # side-index is opt-in ("Lab Mode") only; routing the default path through
+        # it returned nothing when the user had never built a LAB index. The regular
+        # LOCAL schema (shared/local_indexer.build_local_schema) carries
+        # content/unique_id/full_header/source/content_head/content_tail — every
+        # field this hook reads — so the doc-field reads are unchanged.
+        #
+        # Lab Mode composition (LabEngine.lab_composition_search) is UNCHANGED and
+        # keeps using the LAB side-index + its own freshness/staleness. The default
+        # path has NO weights-hash and NO staleness concept: an empty LOCAL result
+        # is treated exactly like an empty Genizah result ("no results"), with no
+        # staleness banner.
+        #
+        # CR-01 fallback semantics preserved: the outer try/except below guarantees
+        # LOCAL never breaks standard Composition Search.
+        # Phase 97 R-01: skip LOCAL composition search if is_searchable gate closed.
         _scl_tab = self._my_library_tab_ref() if getattr(self, "_my_library_tab_ref", None) is not None else None
         _scl_is_searchable = getattr(_scl_tab, "is_searchable", True) if _scl_tab is not None else True
-        # Phase 110 A2 + M2: per-run stale verdict — stale ONLY when an index is present
-        # but not fresh (stale != no-index). Set the back-compat engine flag only then.
-        _local_index_present_scl = getattr(self, 'local_lab_searcher', None) is not None
-        _local_lab_stale = bool(
-            corpus_scope in ('local', 'all') and _local_index_present_scl and not _lab_fresh
-        )
-        if _local_lab_stale:
-            self.local_lab_searcher_stale = True
-        # Phase 110: gate the LOCAL LAB hook on corpus_scope (skipped on a Genizah-only run).
-        if not was_cancelled and corpus_scope != 'genizah' and _lab_fresh and _scl_is_searchable:
+        # Phase 110 correction: the regular index has no staleness — the standard
+        # path never reports stale. (Lab-Mode staleness is handled in
+        # lab_composition_search only.) Keep the per-run key for the result payload.
+        _local_lab_stale = False
+        # Phase 110: gate the LOCAL hook on corpus_scope (skipped on a Genizah-only run).
+        if (not was_cancelled and corpus_scope != 'genizah'
+                and getattr(self, 'local_searcher', None) is not None
+                and getattr(self, 'local_index', None) is not None
+                and _scl_is_searchable):
             try:
-                _local_lab_index_scl = getattr(self, "_local_lab_index", None)
-                _local_lab_searcher_scl = self.local_lab_searcher
-                if _local_lab_index_scl is not None and _local_lab_searcher_scl is not None:
+                _local_index_scl = self.local_index
+                _local_searcher_scl = self.local_searcher
+                _local_fields_scl = ["content", "content_head", "content_tail"]
+                if _local_index_scl is not None and _local_searcher_scl is not None:
                     for _i_scl, (_token_idx_scl, _chunk_scl, _chunk_crossed_scl) in enumerate(chunks_data):
                         _t_query_scl = self.build_tantivy_query(_chunk_scl, mode)
                         _regex_scl = self.build_regex_pattern(_chunk_scl, mode, 0)
@@ -9174,13 +9185,29 @@ class SearchEngine:
                         if filter_text and _regex_scl.search(filter_text):
                             _is_text_filtered_scl = True
                         try:
-                            _query_scl = _local_lab_index_scl.parse_query(
-                                _t_query_scl, ["content"]
-                            )
-                            _hits_scl = _local_lab_searcher_scl.search(_query_scl, 50).hits
+                            # Mirror _query_local_index's metacharacter-strip
+                            # fallback (v7.16 load-bearing fix): Tantivy's parser
+                            # chokes on the geresh in אמ' / gershayim in רמב"ם and
+                            # the whole LOCAL search returned 0. Strip the syntax
+                            # metacharacters and re-parse; the regex filter below
+                            # still enforces the precise match.
+                            try:
+                                _query_scl = _local_index_scl.parse_query(
+                                    _t_query_scl, _local_fields_scl
+                                )
+                            except (ValueError, Exception):
+                                _safe_scl = re.sub(
+                                    r"[+\-&|!(){}\[\]^\"~*?:\\/']", " ", _t_query_scl
+                                ).strip()
+                                if not _safe_scl:
+                                    continue
+                                _query_scl = _local_index_scl.parse_query(
+                                    _safe_scl, _local_fields_scl
+                                )
+                            _hits_scl = _local_searcher_scl.search(_query_scl, 50).hits
                             _is_freq_filtered_scl = len(_hits_scl) > max_freq
                             for _score_scl, _doc_addr_scl in _hits_scl:
-                                _doc_scl = _local_lab_searcher_scl.doc(_doc_addr_scl)
+                                _doc_scl = _local_searcher_scl.doc(_doc_addr_scl)
                                 _content_scl = _doc_scl['content'][0]
                                 _match_content_scl = (
                                     _content_scl
@@ -9237,7 +9264,7 @@ class SearchEngine:
                             pass
             except Exception as _scl_exc:
                 LAB_LOGGER.warning(
-                    "search_composition_logic: LOCAL LAB scan failed: %r", _scl_exc
+                    "search_composition_logic: LOCAL (regular-index) scan failed: %r", _scl_exc
                 )
 
         # 3. Build results with Wide Context
