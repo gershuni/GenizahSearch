@@ -78,15 +78,44 @@ requirement text is preserved in git history (prior `REQUIREMENTS.md`) and `MILE
   button**, **export** the details (clipboard / file), and **add candidates to a list**.
   (Open-in-Puzzle remains available as optional polish — both apps have the Puzzle.)
 
-### Component B — Search-support algorithms (JSA) — secondary, independent, both apps
+### Component B — Search-support algorithms (JSA) — ⏸ DEFERRED to post-v8.0.0 (2026-06-08)
 
-- [ ] **JSA-01**: The scholar **seeds parallels** (composition search) from the anchor passage to
-  surface shared-distinctive-phrase candidates across the corpus.
-- [ ] **JSA-02**: **Corpus-driven suggest-then-search completion** — from the first/last *N* words of
-  a torn line, the Workbench surfaces candidate **completions** found in the corpus; the scholar picks
-  one to search.
-- [ ] **JSA-03**: **`[` / `]`-aware torn-word completion** — the torn-word markers drive a completion
-  search (e.g., `…את הש[` → candidates beginning `[מים ואת הארץ`).
+> **DEFERRED in full (2026-06-08, /gsd-discuss-phase 110).** Per user decision, **all of Component B
+> is pushed out of v8.0.0** so the milestone can ship. The Phase 110 slot was repurposed for the
+> LOCAL-composition wiring the user wants before release (see § New Build — Composition LOCAL Corpus
+> below + Phase 110 in ROADMAP.md). These requirements move to **Future Requirements → Component B
+> (search-support algorithms)** and will be re-scoped in a post-v8.0.0 milestone.
+
+- [⏸] **JSA-01** *(deferred)*: The scholar **seeds parallels** (composition search) from the anchor
+  passage to surface shared-distinctive-phrase candidates across the corpus.
+- [⏸] **JSA-02** *(deferred)*: **Corpus-driven suggest-then-search completion** — from the first/last
+  *N* words of a torn line, the Workbench surfaces candidate **completions** found in the corpus; the
+  scholar picks one to search.
+- [⏸] **JSA-03** *(deferred)*: **`[` / `]`-aware torn-word completion** — the torn-word markers drive
+  a completion search (e.g., `…את הש[` → candidates beginning `[מים ואת הארץ`).
+
+### New Build — Composition / Parallels LOCAL Corpus (COMP-LOC) — Phase 110, desktop
+
+> **Added 2026-06-08 (/gsd-discuss-phase 110)** as the repurposed Phase 110 scope (Component B
+> deferred). Wires the LOCAL ("My Library") corpus into composition/parallels search and un-gates the
+> deferred composition-report LOCAL export (EXP-F3). Desktop-only (web has no composition UI; LOCAL is
+> desktop-only).
+
+- [ ] **COMP-LOC-01**: A **pre-search Genizah / Local / ALL corpus selector** on the composition /
+  parallels tab (mirroring the existing Search-tab selector, `genizah_app.py:5953`) scopes which
+  corpus composition searches. The selector is **orthogonal to the composition search MODE** — both
+  standard and **Lab** modes honor it; **"Lab Mode" is NOT hardwired to LOCAL** (it searches whichever
+  corpus the dropdown selects, exactly like regular search). *(No post-search LOCAL filter activation
+  this phase — pre-search scoping only, user decision 2026-06-08.)*
+- [ ] **COMP-LOC-02**: Composition search **executes against the selected corpus** — **Local** returns
+  only LOCAL hits, **ALL** returns Genizah + LOCAL **merged**, **Genizah** is unchanged from today;
+  results render into the existing composition results surface. A **stale LOCAL LAB index** surfaces a
+  rebuild / staleness signal rather than silently omitting LOCAL composition hits.
+- [ ] **EXP-F3** *(promoted from Future)*: **Composition-report LOCAL export** — `export_comp_report`
+  (`genizah_app.py:20447`) becomes LOCAL-aware so a Local/ALL composition run exports LOCAL hits with
+  local-meaningful columns (filename / folder / filepath / page / matched-text), reusing the Phase 103
+  export helpers (`shared/export_dossier.py`, `shared/docx_export.py`). No longer gated — Phase 110
+  builds the LOCAL composition-search UI it was waiting on.
 
 ---
 
@@ -179,9 +208,25 @@ highlighted snippet + Y/?/N triage + four actions | side-by-side compare.
 - **JOINS-F4**: **Automated ranked join-finder** (research-only v7/v8 two-hop + visual rerank) —
   XL, ~90s/fragment, ≤47% Recall@50, no code exists; explicitly **OUT** of the human-in-the-loop
   product.
-- **EXP-F3** (carried, was LEXP-02): Composition-report LOCAL export — gated on a LOCAL
-  composition-search UI.
 - **PERF-F1** (carried): D-F12 — regular Search ~constant ~8s wall-clock (profile-first effort).
+- ~~**EXP-F3** (was LEXP-02): Composition-report LOCAL export~~ → **PROMOTED into v8.0.0 Phase 110**
+  (2026-06-08) — the LOCAL composition-search UI it was gated on is now being built in the same phase.
+
+### Component B — Search-support algorithms (DEFERRED from v8.0.0, 2026-06-08)
+
+The full Component B (Join Workbench search-support algorithms) was deferred out of v8.0.0 at
+`/gsd-discuss-phase 110` so the milestone could ship. These ride the **completed** Component A
+(Phases 106–109) and re-enter scope in a **post-v8.0.0 milestone**:
+
+- **JSA-01**: Seed parallels (composition search) **from the anchor passage** in the Join Workbench →
+  shared-distinctive-phrase candidates into the candidate surface. *(Note: distinct from COMP-LOC-01
+  above — JSA-01 is anchor-driven seeding inside the Workbench; COMP-LOC is the corpus selector on the
+  standalone composition tab.)*
+- **JSA-02**: Corpus-driven suggest-then-search completion (first/last *N* words of a torn line).
+- **JSA-03**: `[` / `]`-aware torn-word completion.
+- **JWB-05**: Conservative `[` / `]` tear-side assist (start-`]` = LEFT, end-`[` = RIGHT; "both edges
+  torn" first-class; silent when unclear). Deferred from Phase 108 → was Phase 110 disposition → now
+  deferred to post-v8.0.0 with the rest of Component B.
 
 ## Out of Scope (v8.0.0)
 
@@ -204,12 +249,15 @@ highlighted snippet + Y/?/N triage + four actions | side-by-side compare.
 | JWB-01, 02, 03, 04, 09 | 107 (desktop frame + actions + join model) | Active |
 | JWB-06 (reframed), 07, 08, 10, 11 | 108 (desktop builders + candidates + compare) | Active |
 | JWB-12 (unified sources + VS merge) | 108 (text/combined surface) + 109 (VS source + soft-retire) | ✅ Complete (Phase 109, 2026-06-08) |
-| JSA-01 | 110 (parallels seeding) | Active |
-| JSA-02, 03 + **JWB-05** (deferred from 108) | 110 (discuss-phase disposition: keep/spike/cut) | Active |
+| COMP-LOC-01, 02 + EXP-F3 | 110 (composition/parallels LOCAL corpus + LOCAL export) | Active |
+| ~~JSA-01, 02, 03 + JWB-05~~ | ~~110~~ → **DEFERRED to post-v8.0.0** (2026-06-08) | Deferred |
 
 **Coverage:**
 - Delivered (folded): BRAND (2) + LEXP (7) + EXPUX (4) = 13.
-- New active: JWB (9) + JSA (3) = 12. **Mapped to Phases 106-110 (roadmap created 2026-06-03)** — see the table above and `ROADMAP.md` § v8.0.0 Joins Lab. Web Joins Lab UI deferred to a later phase.
+- New active: JWB (9, Phases 106–109 ✅ complete) + COMP-LOC (2) + EXP-F3 (1) = 12, mapped to Phases
+  106–110. **Component B / JSA (3) + JWB-05 DEFERRED** out of v8.0.0 (2026-06-08, /gsd-discuss-phase
+  110) — Phase 110 repurposed to the LOCAL-composition wiring. Web Joins Lab UI deferred to a later
+  phase. After Phase 110 → `/release` v8.0.0.
 
 ---
 *Requirements defined: 2026-06-02. v7.17 folded into v8.0.0 per user decision; Phases 103/105 kept as delivered (no destructive phase-clear). Roadmap intentionally deferred pending a Genizah-scholar design-critique session.*

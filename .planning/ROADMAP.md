@@ -224,21 +224,42 @@ preserved).
 
 ---
 
-### Phase 110: Search-Support — Parallels Seeding (JSA-01)
+### Phase 110: Composition / Parallels Search — LOCAL Corpus Support (desktop)
 
-**Goal**: From the anchor passage the scholar **seeds a parallels (composition) search** to surface
-shared-distinctive-phrase candidates across the corpus, returned into the Workbench candidate
-surface. JSA-02 (corpus-completion), JSA-03 (torn-word completion), and **JWB-05 (the `[`/`]`
-tear-side assist, deferred here from Phase 108 — both are `[`/`]`-driven algorithmic features) are
-resolved at discuss-phase: keep / spike / cut.
+> **REFRAMED 2026-06-08 (discuss-phase).** Phase 110 was "Search-Support — Parallels Seeding
+> (JSA-01)". Per user decision, **all of Component B (JSA-01 anchor parallels seeding + JSA-02
+> corpus-completion + JSA-03 torn-word completion + JWB-05 tear-side assist) is DEFERRED to a
+> post-v8.0.0 milestone** (see REQUIREMENTS § Future — Component B). Phase 110 now delivers the
+> LOCAL ("My Library") corpus path for composition/parallels search that the user wants before
+> release — which also **un-gates the deferred Phase 104 / EXP-F3** (composition-report LOCAL export
+> was deferred precisely because no LOCAL composition-search UI existed; this phase builds it).
 
-**Depends on**: Phase 108 (candidate surface).
+**Goal**: Wire the LOCAL ("My Library") corpus into composition / parallels search. A pre-search
+**Genizah / Local / ALL** corpus selector on the composition tab (mirroring the existing Search-tab
+selector, `genizah_app.py:5953`) scopes which corpus composition searches — applied **uniformly to
+BOTH standard and Lab composition modes** (corpus is orthogonal to search mode; **Lab Mode is no
+longer hardwired to LOCAL** — it searches whichever corpus the dropdown picks, exactly like regular
+search). Composition-report export (`export_comp_report`, `genizah_app.py:20447`) becomes
+**LOCAL-aware** (EXP-F3, promoted from Future via the Phase 103 export helpers). **Desktop-only**
+(web has no composition UI; LOCAL "My Library" is desktop-only). This is the **last v8.0.0 phase** —
+then `/release`.
 
-**Requirements**: JSA-01 (JSA-02 / JSA-03 / **JWB-05** — discuss-phase disposition; earlier lean: JSA-01 only, spike JSA-03 + JWB-05, cut JSA-02).
+**Depends on**: v7.14 LOCAL side-index (LAB) + the Search-tab corpus-selector pattern
+(`genizah_app.py:5953` → `gui_threads.py:86` → `genizah_core.py:8412`, RRF k=60 LOCAL merge).
+
+**Requirements**: COMP-LOC-01, COMP-LOC-02, EXP-F3 (promoted from Future).
 
 **Success Criteria** (what must be TRUE):
-  1. A "Find parallels" action **seeds the existing composition/parallels search** from the anchor passage and returns shared-distinctive-phrase candidates into the Workbench candidate list (JSA-01).
-  2. The JSA-02 / JSA-03 disposition is **recorded** (implemented, spiked, or cut) per the discuss-phase decision, with the rationale captured.
+  1. The composition / parallels tab has a **pre-search Genizah / Local / ALL corpus selector**;
+     selecting **Local** searches only the LOCAL corpus, **ALL** searches Genizah + LOCAL merged,
+     **Genizah** is unchanged from today (COMP-LOC-01/02).
+  2. Corpus selection is **orthogonal to the composition search MODE** — both standard and Lab modes
+     honor the selector; **Lab Mode is not hardwired to LOCAL** (COMP-LOC-01).
+  3. Exporting a **Local or ALL** composition run **includes LOCAL hits** with local-meaningful
+     columns (filename / folder / filepath / page / matched-text) — `export_comp_report` no longer
+     silently drops them (EXP-F3).
+  4. A **stale LOCAL LAB index** surfaces a rebuild / staleness signal rather than silently omitting
+     LOCAL composition hits.
 
 **Plans**: TBD.
 
@@ -511,7 +532,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 | 107. Desktop Join Workbench — Anchor, Entry, Actions & Join Model | v8.0.0 | 3/3 | Complete    | 2026-06-04 |
 | 108. Desktop Join Workbench — Builders, Candidates & Compare | v8.0.0 | 7/4 | Complete    | 2026-06-06 |
 | 109. Visual-Similarity Merge & Soft-Retire | v8.0.0 | 13/13 | Complete    | 2026-06-08 |
-| 110. Search-Support — Parallels Seeding (JSA-01) | v8.0.0 | 0/? | Not started | - |
+| 110. Composition/Parallels — LOCAL Corpus Support (+EXP-F3) | v8.0.0 | 0/? | Not started | - |
 | 103. Search-Results LOCAL Export | v7.17→v8.0.0 | 4/4 | Complete    | 2026-06-01 |
 | 104. Composition-Report LOCAL Export | v7.17 | 0/0 | ⏸ Deferred (no LOCAL comp-search UI) | - |
 | 105. Export UX Polish | v7.17 | 4/4 EXPUX | Implemented (tests green; UAT pending) | 2026-06-01 |
@@ -529,5 +550,6 @@ Next-milestone candidates (not in v7.17 scope): **D-F12** (regular Search ~8s wa
 ---
 
 *Roadmap created: 2026-02-09*
-*Last updated: 2026-06-03 — **v8.0.0 Joins Lab roadmap created**: Phases 106-110 added (106 shared core + tests; 107 desktop Workbench frame + actions + pairwise→group join model; 108 desktop builders + candidates + compare; 109 Visual-Similarity merge + soft-retire; 110 parallels seeding / JSA-01). Codex extract-pure-logic-first sequence; web UI deferred to a later phase. v7.17 folded into v8.0.0 (Phases 103/105 delivered). 7 deferrals (REQUIREMENTS § Deferrals) to resolve in `/gsd-discuss-phase` before each phase's plan locks; the validated sketch is preserved as the executable spec at tag `spike-002-joins-workbench`. NEXT: `/gsd-discuss-phase 106` → `/gsd-plan-phase 106`.*
+*Last updated: 2026-06-08 — **Phase 110 REFRAMED** (discuss-phase): was "Search-Support — Parallels Seeding (JSA-01)"; per user decision **all of Component B (JSA-01/02/03 + JWB-05) deferred to a post-v8.0.0 milestone** (REQUIREMENTS § Future — Component B). Phase 110 now = **Composition/Parallels — LOCAL Corpus Support** (desktop): pre-search Genizah/Local/ALL selector on the composition tab (corpus orthogonal to mode; Lab Mode no longer hardwired to LOCAL) + LOCAL-aware `export_comp_report` (EXP-F3 promoted from Future). Un-gates the deferred Phase 104. New reqs COMP-LOC-01/02. Then `/release` v8.0.0. CONTEXT: `.planning/phases/110-*/110-CONTEXT.md`.*
+*Prior update: 2026-06-03 — **v8.0.0 Joins Lab roadmap created**: Phases 106-110 added (106 shared core + tests; 107 desktop Workbench frame + actions + pairwise→group join model; 108 desktop builders + candidates + compare; 109 Visual-Similarity merge + soft-retire; 110 parallels seeding / JSA-01). Codex extract-pure-logic-first sequence; web UI deferred to a later phase. v7.17 folded into v8.0.0 (Phases 103/105 delivered). 7 deferrals (REQUIREMENTS § Deferrals) to resolve in `/gsd-discuss-phase` before each phase's plan locks; the validated sketch is preserved as the executable spec at tag `spike-002-joins-workbench`. NEXT: `/gsd-discuss-phase 106` → `/gsd-plan-phase 106`.*
 *Prior update: 2026-06-01 — Phase 105 (Export UX Polish) ADDED to v7.17: 4 export-experience fixes (EXPUX-01 Open File/Folder dialog; EXPUX-02 LOCAL xlsx domain-warning suppression; EXPUX-03 LOCAL-only MiDRASH-credit omission; EXPUX-04 full-text capped context in DOCX/TXT). Phase 104 DEFERRED during /gsd-discuss-phase 104. Discovered Composition Search has no LOCAL corpus path (corpus selector is Search-tab-only at genizah_app.py:5924; CompositionThread at :21532 gets no corpus_scope), so export_comp_report has no LOCAL surface to adapt. LEXP-02 moved to REQUIREMENTS.md Future (EXP-F3), gated on a LOCAL composition-search UI. v7.17 now = Phase 103 only and is closeable. Prior: Phase 103 COMPLETE & verified 6/6 (LEXP-01/03/04/05/06/07/08). v7.16 Hebrew PDF Text Quality CLOSED 2026-06-01 (Phase 102 + no-phase work; tag v7.16.0 @ ccb87c90).*
