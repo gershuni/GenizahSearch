@@ -25005,7 +25005,7 @@ class GenizahGUI(QMainWindow):
 
     def _save_session(self):
         """Save current search state to disk for session persistence."""
-        from shared.session_persistence import save_session_state
+        from shared.session_persistence import load_session_state, save_session_state
         # Phase 96 fix-10: do NOT overwrite the on-disk session during the
         # startup window (before _restore_session() has read the file) or
         # while a restore is in progress.  Without this guard any background
@@ -25117,6 +25117,17 @@ class GenizahGUI(QMainWindow):
                     state_dict['join_lab'] = jw.to_state()
                 except Exception as _jl_exc:
                     logger.debug("_save_session: join_lab to_state failed: %s", _jl_exc)
+            else:
+                # The Join Lab window is not instantiated this session (e.g. a background save
+                # fires during startup-restore BEFORE the user opens it). Do NOT drop the key —
+                # carry forward the previously-persisted join_lab so the remembered anchor/input
+                # survives an app restart instead of being wiped by an early empty save.
+                try:
+                    _prior = load_session_state() or {}
+                    if _prior.get('join_lab'):
+                        state_dict['join_lab'] = _prior['join_lab']
+                except Exception as _jl_exc2:
+                    logger.debug("_save_session: preserve prior join_lab failed: %s", _jl_exc2)
 
             save_session_state(state_dict)
         except Exception as e:

@@ -1189,3 +1189,20 @@ def test_join_lab_window_reused_not_recreated_when_hidden():
     assert "fresh = self._join_workbench is None" in src, (
         "open_join_workbench must only restore_state from disk for a freshly-created window"
     )
+
+
+def test_save_session_preserves_join_lab_when_window_absent():
+    """Regression (survives restart): _save_session must NOT drop the persisted join_lab when the
+    Join Lab window is not instantiated. A background save during/after startup-restore (jw is
+    None) used to write a session WITHOUT join_lab, wiping the remembered anchor before the user
+    reopened the Lab. The else-branch must carry forward the prior persisted join_lab."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "genizah_app.py").read_text(encoding="utf-8")
+
+    block = src[src.find("# Feature 7: persist Join Lab INPUT state"):]
+    block = block[:block.find("save_session_state(state_dict)")]
+    assert "else:" in block, "_save_session must handle the jw-is-None case (no silent wipe)"
+    assert "load_session_state()" in block, "the jw-is-None branch must read the prior session"
+    assert "state_dict['join_lab'] = _prior['join_lab']" in block, (
+        "the jw-is-None branch must carry forward the previously-persisted join_lab"
+    )
