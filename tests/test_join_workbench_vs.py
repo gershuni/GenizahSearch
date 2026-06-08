@@ -1043,3 +1043,106 @@ def test_compare_mark_does_not_override_paint_restyle():
         "after a toggle-off, the border must reflect cleared triage (None) — "
         "_mark must not override paint() with the clicked value"
     )
+
+
+# ---------------------------------------------------------------------------
+# Round-4 UAT — Compare: zoom, page-scoped text, glyphs ✓/✗, wider nav buttons
+# ---------------------------------------------------------------------------
+
+
+def test_triage_glyphs_are_check_and_cross():
+    """Round-4 #4: triage buttons (card + compare) and the table glyph map use ✓ / ? / ✗."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+
+    assert '("✓", "yes", tr("Mark yes"))' in src, "✓ glyph not wired for the 'yes' triage button"
+    assert '("✗", "no", tr("Mark no"))' in src, "✗ glyph not wired for the 'no' triage button"
+    assert '("Y", "yes"' not in src and '("N", "no"' not in src, "old Y/N triage glyphs still present"
+    assert '_TRIAGE_GLYPH = {"yes": "✓", "maybe": "?", "no": "✗"}' in src, (
+        "table _TRIAGE_GLYPH map must match the ✓/?/✗ buttons"
+    )
+
+
+def test_compare_nav_buttons_have_room_for_text():
+    """Round-4 #5: prev/next in compare are no longer a fixed 34px (which clipped the label)."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+
+    cmp_init = src[src.find("# ── Top bar: prev/next nav"):src.find("# ── Action row")]
+    assert cmp_init.count("setMinimumWidth(84)") >= 2, (
+        "both prev_btn and nxt_btn must set a minimum width wide enough for their label"
+    )
+    assert "self.prev_btn.setFixedSize(34, 28)" not in cmp_init, "prev_btn still pinned to 34px"
+    assert "self.nxt_btn.setFixedSize(34, 28)" not in cmp_init, "nxt_btn still pinned to 34px"
+
+
+def test_compare_text_is_page_scoped_not_whole_manuscript():
+    """Round-4 #2/#3: both compare panes load the matched-PAGE transcription via
+    _load_pane_page_text; the candidate pane no longer dumps c.full_text (the whole MS)."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+
+    fill_anchor = src[src.find("def _fill_anchor("):src.find("def _fill_candidate(")]
+    fill_cand = src[src.find("def _fill_candidate("):src.find("def paint(")]
+
+    assert "_load_pane_page_text(pane" in fill_anchor, "anchor pane must fetch its page text (#2)"
+    assert "_load_pane_page_text(pane" in fill_cand, "candidate pane must fetch its page text (#3)"
+    # Target the actual rendering CODE (not comments): the candidate text must no longer be
+    # rendered from c.full_text (the whole manuscript).
+    assert "htmlify(c.full_text" not in fill_cand and "source_text=c.full_text" not in fill_cand, (
+        "candidate pane must NOT render c.full_text (the whole manuscript) — it must be page-scoped"
+    )
+
+
+def test_compare_zoom_is_client_side_scale_no_refetch():
+    """Round-4 #1: _pane_zoom scales the cached full pixmap client-side (mirrors _apply_zoom) and
+    sizes the label for panning — it no longer re-fetches the image (which got downscaled away)."""
+    import pathlib
+    import types
+    from desktop.join_workbench import CompareDialog
+
+    # Static: the zoom handler must not re-fetch via _enqueue_image_for_pane
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+    pz = src[src.find("def _pane_zoom("):src.find("def _render_pane_image(")]
+    assert "_enqueue_image_for_pane" not in pz, "_pane_zoom must not re-fetch — zoom is client-side now"
+
+    # Behavioural: scaling math + label sizing
+    calls = {}
+
+    class _FakePix:
+        def __init__(self, w, h):
+            self._w, self._h = w, h
+
+        def width(self):
+            return self._w
+
+        def height(self):
+            return self._h
+
+        def scaled(self, w, h, *a):
+            calls["scaled"] = (w, h)
+            return _FakePix(w, h)
+
+        def size(self):
+            return (self._w, self._h)
+
+    class _FakeLbl:
+        def setPixmap(self, p):
+            calls["setPixmap"] = True
+
+        def resize(self, s):
+            calls["resize"] = s
+
+    pane = {"full_pix": _FakePix(1000, 800), "img": _FakeLbl(), "zoom": 1.0}
+    stub = types.SimpleNamespace()
+    stub._render_pane_image = lambda pd: CompareDialog._render_pane_image(stub, pd)
+
+    CompareDialog._pane_zoom(stub, pane, 1.25)
+
+    assert abs(pane["zoom"] - 1.25) < 1e-9, "zoom factor not applied to pane['zoom']"
+    assert calls.get("scaled") == (1250, 1000), (
+        f"full pixmap must be scaled to zoomed size, got {calls.get('scaled')}"
+    )
+    assert calls.get("setPixmap") and calls.get("resize") == (1250, 1000), (
+        "label must be repainted and resized to the scaled pixmap for panning"
+    )

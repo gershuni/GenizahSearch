@@ -406,7 +406,8 @@ def puzzle_add_targets(anchor_sid, member_sids):
 # ---------------------------------------------------------------------------
 
 # Triage glyphs — language-neutral (avoids leaking English yes/maybe/no into HE UI)
-_TRIAGE_GLYPH = {"yes": "Y", "maybe": "?", "no": "N"}
+# Round-4 UAT: ✓ / ? / ✗ (was Y / ? / N) to match the triage buttons.
+_TRIAGE_GLYPH = {"yes": "✓", "maybe": "?", "no": "✗"}
 
 
 def _candidate_shelf_badge(c):
@@ -1838,9 +1839,9 @@ if _QT_AVAILABLE:
 
             # --- triage RIGHT (Y / ? / N) ---
             for emoji, val, aname in (
-                ("Y", "yes", tr("Mark yes")),
+                ("✓", "yes", tr("Mark yes")),
                 ("?", "maybe", tr("Mark maybe")),
-                ("N", "no", tr("Mark no")),
+                ("✗", "no", tr("Mark no")),
             ):
                 btn = QPushButton(emoji)
                 btn.setFixedSize(28, 28)
@@ -3693,7 +3694,8 @@ if _QT_AVAILABLE:
             topbar = QHBoxLayout()
             # Feature 7: RTL-correct glyphs — prev points right (>), next points left (<)
             self.prev_btn = QPushButton(tr("prev >"))
-            self.prev_btn.setFixedSize(34, 28)
+            self.prev_btn.setFixedHeight(28)
+            self.prev_btn.setMinimumWidth(84)   # round-4: 34px clipped the label text
             self.prev_btn.setAccessibleName(tr("Previous candidate"))
             self.prev_btn.clicked.connect(lambda: self.step(-1))
             topbar.addWidget(self.prev_btn)
@@ -3702,15 +3704,16 @@ if _QT_AVAILABLE:
             topbar.addWidget(self.pos_lbl, 1)
 
             self.nxt_btn = QPushButton(tr("< next"))
-            self.nxt_btn.setFixedSize(34, 28)
+            self.nxt_btn.setFixedHeight(28)
+            self.nxt_btn.setMinimumWidth(84)   # round-4: 34px clipped the label text
             self.nxt_btn.setAccessibleName(tr("Next candidate"))
             self.nxt_btn.clicked.connect(lambda: self.step(1))
             topbar.addWidget(self.nxt_btn)
 
             for emoji, val, aname in (
-                ("Y", "yes", tr("Mark yes")),
+                ("✓", "yes", tr("Mark yes")),
                 ("?", "maybe", tr("Mark maybe")),
-                ("N", "no", tr("Mark no")),
+                ("✗", "no", tr("Mark no")),
             ):
                 btn = QPushButton(emoji)
                 btn.setAccessibleName(aname)
@@ -3818,9 +3821,15 @@ if _QT_AVAILABLE:
             ctrl_row.addWidget(btn_zoom_in)
 
             img = QLabel(tr("…"))
-            img.setMinimumHeight(360)
             img.setAlignment(Qt.AlignmentFlag.AlignCenter)
             img.setStyleSheet("background:#e2e8f0;color:#64748b;")
+            # Round-4: a zoomed image overflows its pane — host it in a pannable scroll area
+            # (drag to pan) so zoom in/out is actually visible (was downscaled-to-label before).
+            img_scroll = _PannableScrollArea()
+            img_scroll.setWidgetResizable(False)
+            img_scroll.setMinimumHeight(360)
+            img_scroll.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            img_scroll.setWidget(img)
 
             txt = QTextBrowser()
             txt.setReadOnly(True)
@@ -3829,7 +3838,7 @@ if _QT_AVAILABLE:
             box.addWidget(meta)
             box.addWidget(dims_lbl)
             box.addLayout(ctrl_row)
-            box.addWidget(img)
+            box.addWidget(img_scroll, 1)
             box.addWidget(txt, 1)
 
             pane_dict = {
@@ -3841,6 +3850,7 @@ if _QT_AVAILABLE:
                 "folio_lbl": folio_lbl,
                 "folio_next": folio_next,
                 "img": img,
+                "img_scroll": img_scroll,
                 "txt": txt,
                 "sys_id": "",
                 "page": 1,
@@ -3856,19 +3866,106 @@ if _QT_AVAILABLE:
             return pane_dict
 
         def _pane_zoom(self, pane: dict, factor: float):
-            """Feature 3: apply zoom factor to a compare pane image.
+            """Feature 3 / round-4: apply a zoom factor to a compare pane image.
 
-            Clamps zoom to [0.25, 4.0].  Re-requests image at new pixel width so
-            the IIIF server returns a larger/smaller tile (no client-side stretch).
+            Client-side scale of the cached full-resolution pixmap (mirrors the main anchor
+            image's _apply_zoom), clamped to [0.25, 4.0]. The previous implementation re-fetched
+            at a larger width but then _pump_images downscaled it back to the label size, so zoom
+            had NO visible effect (round-4 UAT). No network on a zoom click now.
             """
             pane["zoom"] = _clamp_zoom(pane.get("zoom", 1.0) * factor)
-            if not pane.get("sys_id"):
+            self._render_pane_image(pane)
+
+        def _render_pane_image(self, pane: dict):
+            """Scale the pane's cached full pixmap by its zoom and size the label so the
+            pannable scroll area can pan a zoomed image (mirrors window._apply_zoom)."""
+            pix = pane.get("full_pix")
+            lbl = pane.get("img")
+            if pix is None or lbl is None:
                 return
-            scaled_width = max(400, int(1400 * pane["zoom"]))
+            z = pane.get("zoom", 1.0) or 1.0
+            try:
+                scaled = pix.scaled(
+                    max(1, int(pix.width() * z)),
+                    max(1, int(pix.height() * z)),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+                lbl.setPixmap(scaled)
+                lbl.resize(scaled.size())
+            except RuntimeError:
+                pass
+
+        def _set_pane_pix(self, pane: dict, pix):
+            """Store a freshly-loaded full pixmap and fit it to the viewport on (re)load.
+
+            Fit-to-view never upscales past native (min(ratio, 1.0)) — same rule as the main
+            anchor image — so a fresh image fills the pane and the user zooms IN from there."""
+            pane["full_pix"] = pix
+            vw = vh = 0
+            try:
+                scroll = pane.get("img_scroll")
+                if scroll is not None:
+                    vw = scroll.viewport().width()
+                    vh = scroll.viewport().height()
+            except RuntimeError:
+                vw = vh = 0
+            pw = max(1, pix.width())
+            ph = max(1, pix.height())
+            if vw > 10 and vh > 10:
+                ratio = min(vw / pw, vh / ph)
+                pane["zoom"] = min(ratio, 1.0) if ratio > 0 else 1.0
+            else:
+                pane["zoom"] = 1.0
+            self._render_pane_image(pane)
+
+        def _load_pane_image(self, pane: dict, sys_id: str, page):
+            """Fetch the pane's (sys_id, page) image at good resolution and render it with
+            client-side zoom (via the on_pixmap hook). Replaces the old direct enqueue that
+            relied on label-fit scaling (which defeated zoom)."""
+            if not sys_id:
+                return
             try:
                 self.wb._enqueue_image_for_pane(
-                    pane["img"], pane["sys_id"], pane["page"], width=scaled_width
+                    pane["img"], sys_id, page, width=1400,
+                    on_pixmap=lambda p, pd=pane: self._set_pane_pix(pd, p),
                 )
+            except Exception:
+                pass
+
+        def _load_pane_page_text(self, pane: dict, highlight):
+            """Fetch the (sys_id, page) folio transcription for a pane on a background worker
+            and render it line-numbered. Round-4: the text below each image must be the TEXT OF
+            THAT PAGE — the anchor pane had none, and the candidate pane showed the WHOLE
+            manuscript (c.full_text) instead of the matched page."""
+            sid = pane.get("sys_id")
+            if not sid:
+                return
+            try:
+                pane["txt"].setPlainText(tr("loading…"))
+            except (RuntimeError, KeyError):
+                return
+            try:
+                gen = self.wb._gen
+                page = pane.get("page", 1)
+                txt_widget = pane["txt"]
+
+                def _on_text(wgen: int, txt: str, w=txt_widget, h=highlight) -> None:
+                    if wgen != self.wb._gen:
+                        return
+                    try:
+                        apply_line_numbered_text(
+                            w, htmlify(txt, h), source_text=txt, is_html=True,
+                        )
+                    except RuntimeError:
+                        pass
+
+                worker = _PageTextWorker(self.wb, gen, sid, page)
+                worker.done.connect(_on_text)
+                worker.start()
+                if not hasattr(self, "_pane_text_workers"):
+                    self._pane_text_workers = []
+                self._pane_text_workers.append(worker)
             except Exception:
                 pass
 
@@ -3911,27 +4008,19 @@ if _QT_AVAILABLE:
                     pane["dims_lbl"].setVisible(False)
             except (RuntimeError, KeyError):
                 pass
-            # Transcription text (RTL numbered, Pitfall 5 — try/except on htmlify)
-            try:
-                apply_line_numbered_text(
-                    pane["txt"],
-                    htmlify(r_text(res_dict), res_dict.get("highlight_pattern")),
-                    source_text=r_text(res_dict),
-                    is_html=True,
-                )
-            except Exception:
-                pass
-            # Image: per-page via _enqueue_image_for_pane (RR-7); passes page through
-            # (may be None for synthetic anchor — the pump guards None per RR-12)
+            # Track pane identity for per-pane folio browse (Feature 4) BEFORE loading text/image.
             p = page_of(res_dict)
-            # Track pane identity for per-pane folio browse (Feature 4)
             pane["sys_id"] = r_sid(res_dict)
             pane["page"] = max(1, p or 1)
             try:
                 pane["folio_lbl"].setText(f"p.{pane['page']}")
             except (RuntimeError, KeyError):
                 pass
-            self.wb._enqueue_image_for_pane(pane["img"], r_sid(res_dict), p, width=1400)
+            # Round-4 #2: the anchor pane had no text. Fetch the matched PAGE's transcription
+            # (the same page shown in the image) on a background worker, like folio nav does.
+            self._load_pane_page_text(pane, res_dict.get("highlight_pattern"))
+            # Image: per-page (RR-7); page may be None for synthetic anchor — pump guards None.
+            self._load_pane_image(pane, r_sid(res_dict), p)
 
         def _fill_candidate(self, pane: dict, c):
             """Fill the candidate pane from a Candidate dataclass (RR-2).
@@ -3978,27 +4067,19 @@ if _QT_AVAILABLE:
                     pane["dims_lbl"].setVisible(False)
             except (RuntimeError, KeyError):
                 pass
-            # Transcription text (RTL numbered, Pitfall 5 — try/except on htmlify)
-            try:
-                apply_line_numbered_text(
-                    pane["txt"],
-                    htmlify(c.full_text, c.highlight_pattern),
-                    source_text=c.full_text,
-                    is_html=True,
-                )
-            except Exception:
-                pass
-            # Image: matched page via _enqueue_image_for_pane (RR-7).
-            # RR-12: pass c.page DIRECTLY (Optional[int]) — the pump guards None;
-            # no page-1 arithmetic on c.page here.
-            # Track pane identity for per-pane folio browse (Feature 4)
+            # Track pane identity for per-pane folio browse (Feature 4) BEFORE loading text/image.
+            # RR-12: c.page is Optional[int]; pane["page"] is clamped to ≥1.
             pane["sys_id"] = c.sys_id
             pane["page"] = max(1, c.page or 1)
             try:
                 pane["folio_lbl"].setText(f"p.{pane['page']}")
             except (RuntimeError, KeyError):
                 pass
-            self.wb._enqueue_image_for_pane(pane["img"], c.sys_id, c.page, width=1400)
+            # Round-4 #3: show the matched PAGE's transcription (the page shown in the image),
+            # NOT c.full_text (the whole manuscript). Fetch page text on a background worker.
+            self._load_pane_page_text(pane, c.highlight_pattern)
+            # Image: matched page (RR-7). c.page may be None — pump/loader guard None.
+            self._load_pane_image(pane, c.sys_id, c.page)
 
         def paint(self):
             """Refresh both panes, position label, and compare border (Feature 4)."""
@@ -4073,51 +4154,14 @@ if _QT_AVAILABLE:
                 return
             if not pane.get("sys_id"):
                 return
-            try:
-                self.wb._enqueue_image_for_pane(
-                    pane["img"], pane["sys_id"], new_page, width=1400
-                )
-            except Exception:
-                pass
-            # Feature 1: fetch page text on background worker
-            try:
-                pane["txt"].setPlainText(tr("loading…"))
-            except (RuntimeError, KeyError):
-                pass
-            try:
-                gen = self.wb._gen
-                sid = pane["sys_id"]
-                txt_widget = pane["txt"]
-                highlight = None
-                # Determine highlight pattern from current candidate (if candidate pane)
-                if self.wb.filtered and 0 <= self.idx < len(self.wb.filtered):
-                    cur = self.wb.filtered[self.idx]
-                    highlight = getattr(cur, "highlight_pattern", None)
-
-                def _make_text_handler(w, h):
-                    def _on_text(wgen: int, txt: str) -> None:
-                        if wgen != self.wb._gen:
-                            return
-                        try:
-                            apply_line_numbered_text(
-                                w,
-                                htmlify(txt, h),
-                                source_text=txt,
-                                is_html=True,
-                            )
-                        except RuntimeError:
-                            pass
-                    return _on_text
-
-                worker = _PageTextWorker(self.wb, gen, sid, new_page)
-                worker.done.connect(_make_text_handler(txt_widget, highlight))
-                worker.start()
-                # Keep ref to avoid GC (not stored; CompareDialog is short-lived)
-                if not hasattr(self, "_pane_text_workers"):
-                    self._pane_text_workers = []
-                self._pane_text_workers.append(worker)
-            except Exception:
-                pass
+            # Highlight pattern from the current candidate (if any) for the page text.
+            highlight = None
+            if self.wb.filtered and 0 <= self.idx < len(self.wb.filtered):
+                highlight = getattr(self.wb.filtered[self.idx], "highlight_pattern", None)
+            # Round-4: reuse the shared page-text + zoomable-image helpers so folio nav matches
+            # the initial fill (page-scoped text + client-side zoom).
+            self._load_pane_page_text(pane, highlight)
+            self._load_pane_image(pane, pane["sys_id"], new_page)
 
     # -------------------------------------------------------------------------
     # JoinWorkbenchWindow — the main modeless QDialog shell (Plan 02, JWB-01).
@@ -4926,15 +4970,19 @@ if _QT_AVAILABLE:
         # _enqueue_image_for_pane resolves per-page IIIF URL (RR-7/RR-12).
         # ------------------------------------------------------------------
 
-        def _enqueue_image(self, label, url, target=None):
-            """Enqueue a URL for loading into a QLabel (bounded 5-slot pool)."""
+        def _enqueue_image(self, label, url, target=None, on_pixmap=None):
+            """Enqueue a URL for loading into a QLabel (bounded 5-slot pool).
+
+            on_pixmap (optional): callback(QPixmap) invoked on the GUI thread with the FULL
+            loaded pixmap. When set, the default label-fit scaling is skipped so the caller can
+            render the pixmap itself (used by CompareDialog for client-side zoom — round-4)."""
             if not url:
                 try:
                     label.setText(tr("(no image)"))
                 except RuntimeError:
                     pass
                 return
-            self._img_queue.append((label, url, target))
+            self._img_queue.append((label, url, target, on_pixmap))
             self._pump_images()
 
         def _pump_images(self):
@@ -4942,14 +4990,18 @@ if _QT_AVAILABLE:
             # Clean up finished threads
             self._img_threads = [t for t in self._img_threads if t.isRunning()]
             while self._img_queue and len(self._img_threads) < _MAX_CONCURRENT_IMG:
-                label, url, target = self._img_queue.pop(0)
+                label, url, target, on_pix = self._img_queue.pop(0)
                 loader = ImageLoaderThread(url)
                 # Closure captures label + target; QPixmap.fromImage MUST run on GUI thread.
-                def _on_loaded(qi, lbl=label, tgt=target):
+                def _on_loaded(qi, lbl=label, tgt=target, op=on_pix):
                     try:
                         if qi is not None and not qi.isNull():
                             pix = QPixmap.fromImage(qi)
-                            if tgt == "card":
+                            if op is not None:
+                                # Caller renders the full pixmap itself (CompareDialog zoom).
+                                lbl.setText("")
+                                op(pix)
+                            elif tgt == "card":
                                 # Card set_pixmap scales to 220x130
                                 lbl.setText("")
                                 lbl.setPixmap(pix.scaled(
@@ -4982,12 +5034,13 @@ if _QT_AVAILABLE:
             except RuntimeError:
                 pass
 
-        def _enqueue_image_for_pane(self, label, sys_id: str, page, width: int = 1400):
+        def _enqueue_image_for_pane(self, label, sys_id: str, page, width: int = 1400, on_pixmap=None):
             """Resolve and enqueue the MATCHED PAGE image for a candidate (RR-7, RR-12).
 
             Uses the per-page _image_url_for_idx path (NOT meta_mgr.get_thumbnail()).
             RR-12 GUARD: Candidate.page is Optional[int]; a None page is treated as
             page 1 (first page) before the page-1 arithmetic.
+            on_pixmap (optional): see _enqueue_image — lets CompareDialog do client-side zoom.
             """
             # RR-12: guard None page BEFORE any page-1 arithmetic
             if page is None:
@@ -5000,7 +5053,7 @@ if _QT_AVAILABLE:
                 images = []
             # page is 1-based; _image_url_for_idx is 0-based; returns '' for out-of-range
             url = _image_url_for_idx(images, page - 1, width)
-            self._enqueue_image(label, url)
+            self._enqueue_image(label, url, on_pixmap=on_pixmap)
 
         def _cancel_images(self):
             """Cancel all pending image loads (called on re-anchor / page change / close)."""
