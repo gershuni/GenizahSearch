@@ -5,14 +5,26 @@ Pins the contract Plan 02 will implement: a `corpus_scope` selector (Genizah /
 Local / ALL) on BOTH composition engines, orthogonal to mode (Lab Mode is no
 longer hardwired to LOCAL).
 
+Phase 110 DESIGN CORRECTION (2026-06-08, Plan 110-03 UAT checkpoint): STANDARD
+(Lab-Mode-OFF) composition queries the REGULAR My-Library index
+(`self.local_searcher` / `self.local_index`) — the SAME index regular search
+scope=Local uses — NOT the LAB side-index. The LAB side-index is opt-in via Lab
+Mode (`lab_composition_search`, unchanged). The default path has NO weights-hash
+and NO staleness concept (an empty LOCAL result is just "no results"). The
+standard-path routing tests therefore assert routing to `local_searcher`; the
+Lab-path tests keep asserting LAB `local_lab_searcher` routing; staleness is a
+Lab-Mode-only concern (`test_stale_lab_sets_flag` is repurposed to the Lab path).
+
 Requirements covered (one test per VALIDATION.md row):
-  - COMP-LOC-01: corpus_scope routes which index loop runs (Genizah / LOCAL LAB),
-    for BOTH standard `search_composition_logic` and Lab `lab_composition_search`,
-    in BOTH directions (Lab honors the selector — D decoupling).
-  - COMP-LOC-02: `corpus_scope='all'` includes LOCAL LAB hits; a present-but-stale
-    LAB sets a per-run staleness verdict (does NOT silently drop); both engine
-    early-return paths still carry the scope payload (Round-2 #4); an invalid /
-    typo scope fails CLOSED to Genizah (never exposes LOCAL — also D-12).
+  - COMP-LOC-01: corpus_scope routes which index loop runs — for standard
+    composition (Genizah loop vs the REGULAR LOCAL index) and Lab composition
+    (Genizah lab loop vs the LAB side-index), in BOTH directions (Lab honors the
+    selector — D decoupling).
+  - COMP-LOC-02: standard `corpus_scope='all'` includes regular-LOCAL hits; a
+    present-but-stale LAB sets a per-run staleness verdict on the LAB path (does
+    NOT silently drop); both engine early-return paths still carry the scope
+    payload (Round-2 #4); an invalid / typo scope fails CLOSED to Genizah (never
+    exposes LOCAL — also D-12).
   - D-12: a LOCAL composition run invokes ZERO Supabase/cloud-write surfaces
     (the three v7.14 gates: search_serializer, corrections_service, lists_sync).
   - D-13 (Genizah non-regression): enforced by THREE complementary checks, not a
@@ -45,11 +57,15 @@ from unittest.mock import MagicMock, patch
 
 def _build_search_engine():
     """A SearchEngine with __init__ bypassed and the minimum attributes the
-    standard `search_composition_logic` LOCAL-LAB hook + Genizah loop touch.
+    standard `search_composition_logic` LOCAL hook + Genizah loop touch.
 
-    The Genizah Tantivy loop and the LOCAL LAB loop are both spy-able:
-      - engine.searcher.search          -> Genizah loop
-      - engine.local_lab_searcher.search -> LOCAL LAB loop (gated on freshness)
+    Phase 110 DESIGN CORRECTION (2026-06-08): standard (Lab-Mode-OFF) composition
+    now queries the REGULAR My-Library index (self.local_searcher / self.local_index),
+    NOT the LAB side-index. The routing spies are therefore:
+      - engine.searcher.search        -> Genizah loop
+      - engine.local_searcher.search  -> LOCAL hook (regular index)
+    `engine.local_lab_searcher` is still defined as a spy so tests can assert the
+    standard path does NOT touch the LAB side-index (it must stay at 0 calls).
     """
     from genizah_core import SearchEngine
 
@@ -63,7 +79,16 @@ def _build_search_engine():
     engine.searcher = MagicMock(name="genizah_searcher")
     engine.searcher.search.return_value = _g_hits
 
-    # --- LOCAL LAB index (the corpus_scope='local'/'all' hook)
+    # --- Regular LOCAL My-Library index (the corpus_scope='local'/'all' hook).
+    # Phase 110 correction: standard composition queries THIS, not the LAB index.
+    engine.local_index = MagicMock(name="local_index")
+    engine.local_index.parse_query.return_value = MagicMock(name="local_query")
+    _reg_hits = MagicMock()
+    _reg_hits.hits = []
+    engine.local_searcher = MagicMock(name="local_searcher")
+    engine.local_searcher.search.return_value = _reg_hits
+
+    # --- LOCAL LAB side-index spy (must NOT be touched by the standard path).
     engine._local_lab_index = MagicMock(name="local_lab_index")
     engine._local_lab_index.parse_query.return_value = MagicMock(name="local_lab_query")
     _l_hits = MagicMock()
@@ -72,8 +97,8 @@ def _build_search_engine():
     engine.local_lab_searcher.search.return_value = _l_hits
     engine.local_lab_searcher_stale = False
 
-    # Freshness is forced True by default so the LOCAL LAB hook is REACHABLE when
-    # the scope asks for it; individual tests override via patch.object.
+    # Freshness/weights-hash still defined for back-compat, but the standard path
+    # no longer reads them (the regular index has no staleness concept).
     engine._check_local_lab_freshness = MagicMock(return_value=True)
     engine._current_lab_weights_hash = MagicMock(return_value="hash-fresh")
     engine._my_library_tab_ref = None  # is_searchable defaults True
@@ -170,18 +195,43 @@ def test_lab_comp_local_skips_genizah_lab():
 
 def test_std_comp_genizah_skips_local_lab():
     """COMP-LOC-01: standard composition with corpus_scope='genizah' runs the
-    Genizah Tantivy loop and NEVER reaches the LOCAL LAB hook."""
+    Genizah Tantivy loop and NEVER reaches the LOCAL hook — neither the regular
+    LOCAL index NOR the LAB side-index (Phase 110 correction)."""
     engine = _build_search_engine()
     engine.search_composition_logic(
         _SOURCE_TEXT, chunk_size=4, max_freq=1000, mode="variants",
         corpus_scope="genizah",
     )
-    assert engine.local_lab_searcher.search.call_count == 0, (
-        "corpus_scope='genizah' must NOT reach the LOCAL LAB hook in "
+    assert engine.local_searcher.search.call_count == 0, (
+        "corpus_scope='genizah' must NOT reach the regular LOCAL index in "
         "search_composition_logic"
+    )
+    assert engine.local_lab_searcher.search.call_count == 0, (
+        "corpus_scope='genizah' must NOT touch the LAB side-index either"
     )
     assert engine.searcher.search.call_count > 0, (
         "corpus_scope='genizah' must still run the Genizah Tantivy loop"
+    )
+
+
+def test_std_comp_local_uses_regular_index():
+    """COMP-LOC-01/02 (Phase 110 correction): standard composition with
+    corpus_scope='local' queries the REGULAR My-Library index
+    (self.local_searcher), skips the Genizah Tantivy loop, and does NOT touch the
+    LAB side-index."""
+    engine = _build_search_engine()
+    engine.search_composition_logic(
+        _SOURCE_TEXT, chunk_size=4, max_freq=1000, mode="variants",
+        corpus_scope="local",
+    )
+    assert engine.local_searcher.search.call_count > 0, (
+        "corpus_scope='local' must query the regular LOCAL index"
+    )
+    assert engine.searcher.search.call_count == 0, (
+        "corpus_scope='local' must SKIP the Genizah Tantivy loop"
+    )
+    assert engine.local_lab_searcher.search.call_count == 0, (
+        "corpus_scope='local' must NOT touch the LAB side-index (opt-in via Lab Mode)"
     )
 
 
@@ -211,15 +261,11 @@ def test_lab_mode_not_hardwired_to_local():
 
 def test_std_comp_all_includes_local_hits():
     """COMP-LOC-02: standard composition with corpus_scope='all' consults BOTH
-    the Genizah Tantivy loop AND the LOCAL LAB hook.
+    the Genizah Tantivy loop AND the REGULAR LOCAL index (Phase 110 correction).
 
-    The LOCAL LAB hook is gated on freshness; the live weights-hash override is
-    injected by the app (Plan 03), so this engine-level test forces freshness
-    True (stub `_check_local_lab_freshness` -> True) so the hook is reached."""
+    The standard path queries the regular My-Library index (self.local_searcher),
+    NOT the LAB side-index — no freshness/weights-hash gate is involved."""
     engine = _build_search_engine()
-    engine._check_local_lab_freshness = MagicMock(return_value=True)
-    # Mirror the live app's override hook so the freshness gate opens.
-    engine._lab_weights_hash_override = engine._current_lab_weights_hash()
 
     engine.search_composition_logic(
         _SOURCE_TEXT, chunk_size=4, max_freq=1000, mode="variants",
@@ -228,48 +274,54 @@ def test_std_comp_all_includes_local_hits():
     assert engine.searcher.search.call_count > 0, (
         "corpus_scope='all' must run the Genizah Tantivy loop"
     )
-    assert engine.local_lab_searcher.search.call_count > 0, (
-        "corpus_scope='all' must ALSO reach the LOCAL LAB hook (LOCAL hits "
+    assert engine.local_searcher.search.call_count > 0, (
+        "corpus_scope='all' must ALSO reach the regular LOCAL index (LOCAL hits "
         "merged into the same doc_hits accumulator — COMP-LOC-02)"
+    )
+    assert engine.local_lab_searcher.search.call_count == 0, (
+        "the standard path must NOT touch the LAB side-index (opt-in via Lab Mode)"
     )
 
 
 def test_stale_lab_sets_flag():
-    """COMP-LOC-02: a present-but-stale LAB sets the PER-RUN staleness verdict
-    (the A2 payload flag `result['local_lab_stale']`) AND the back-compat engine
-    flag — it does NOT silently drop. When NO LOCAL index exists at all
-    (local_lab_searcher is None), staleness is NOT reported (M2 — distinguish
-    stale-but-present from absent)."""
-    # (a) Present-but-stale: a LAB searcher EXISTS but the freshness check fails.
-    engine = _build_search_engine()
-    engine._check_local_lab_freshness = MagicMock(return_value=False)
-    engine.local_lab_searcher_stale = True  # the freshness check sets this side-effect
+    """COMP-LOC-02 (Phase 110 correction): staleness is now a LAB-MODE-ONLY
+    concern. The Lab path (`lab_composition_search`) surfaces the PER-RUN
+    staleness verdict (the A2 payload flag `result['local_lab_stale']`) AND the
+    back-compat engine flag when its LAB index is present-but-stale — it does NOT
+    silently drop. When NO LOCAL LAB index exists (local_lab_searcher is None),
+    staleness is NOT reported (M2 — distinguish stale-but-present from absent).
 
-    result = engine.search_composition_logic(
-        _SOURCE_TEXT, chunk_size=4, max_freq=1000, mode="variants",
-        corpus_scope="local",
+    (The standard path no longer touches the LAB index — it queries the regular
+    My-Library index which has no staleness concept; see
+    test_std_comp_local_uses_regular_index.)"""
+    # (a) Present-but-stale: a LAB searcher EXISTS but the freshness check fails.
+    lab = _build_lab_engine()
+    lab._check_local_lab_freshness = MagicMock(return_value=False)
+    lab.local_lab_searcher_stale = False
+
+    result = lab.lab_composition_search(
+        _SOURCE_TEXT, mode="variants", chunk_size=4, corpus_scope="local",
     )
     assert result.get("local_lab_stale") is True, (
         "A present-but-stale LAB must surface a per-run staleness verdict "
         "(result['local_lab_stale'] is True — A2)"
     )
-    assert engine.local_lab_searcher_stale is True, (
+    assert lab.local_lab_searcher_stale is True, (
         "The back-compat engine flag local_lab_searcher_stale must also be set"
     )
 
-    # (b) No LOCAL index at all: staleness must NOT be reported (M2).
-    engine_none = _build_search_engine()
-    engine_none.local_lab_searcher = None
-    engine_none._local_lab_index = None
-    engine_none._check_local_lab_freshness = MagicMock(return_value=False)
-    engine_none.local_lab_searcher_stale = False
+    # (b) No LOCAL LAB index at all: staleness must NOT be reported (M2).
+    lab_none = _build_lab_engine()
+    lab_none.local_lab_searcher = None
+    lab_none._local_lab_index = None
+    lab_none._check_local_lab_freshness = MagicMock(return_value=False)
+    lab_none.local_lab_searcher_stale = False
 
-    result_none = engine_none.search_composition_logic(
-        _SOURCE_TEXT, chunk_size=4, max_freq=1000, mode="variants",
-        corpus_scope="local",
+    result_none = lab_none.lab_composition_search(
+        _SOURCE_TEXT, mode="variants", chunk_size=4, corpus_scope="local",
     )
     assert not result_none.get("local_lab_stale"), (
-        "With NO LOCAL index, no staleness verdict should be reported (M2 — "
+        "With NO LOCAL LAB index, no staleness verdict should be reported (M2 — "
         "stale != absent)"
     )
 
@@ -281,15 +333,17 @@ def test_invalid_scope_fails_closed():
     for bad_scope in ("gnizah", "", "LOCALish", "garbage"):
         # Standard engine
         engine = _build_search_engine()
-        engine._check_local_lab_freshness = MagicMock(return_value=True)
-        engine._lab_weights_hash_override = engine._current_lab_weights_hash()
         engine.search_composition_logic(
             _SOURCE_TEXT, chunk_size=4, max_freq=1000, mode="variants",
             corpus_scope=bad_scope,
         )
+        assert engine.local_searcher.search.call_count == 0, (
+            f"standard composition with invalid corpus_scope={bad_scope!r} must "
+            f"fail CLOSED (never hit the regular LOCAL index)"
+        )
         assert engine.local_lab_searcher.search.call_count == 0, (
             f"standard composition with invalid corpus_scope={bad_scope!r} must "
-            f"fail CLOSED (never hit the LOCAL LAB loop)"
+            f"never touch the LAB side-index either"
         )
         assert engine.searcher.search.call_count > 0, (
             f"invalid corpus_scope={bad_scope!r} must still run the Genizah loop"
@@ -393,8 +447,6 @@ def test_no_cloud_write_on_local_comp():
             patch.object(_lists_sync, "sync_list_to_cloud", create=True) as spy_list:
 
         engine = _build_search_engine()
-        engine._check_local_lab_freshness = MagicMock(return_value=True)
-        engine._lab_weights_hash_override = engine._current_lab_weights_hash()
         engine.search_composition_logic(
             _SOURCE_TEXT, chunk_size=4, max_freq=1000, mode="variants",
             corpus_scope="local",
