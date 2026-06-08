@@ -455,15 +455,6 @@ class ResultDialog(QDialog):
         self.btn_joins.setMenu(self.rd_joins_menu)
         community_row.addWidget(self.btn_joins)
 
-        # Visual Similarity button — gentle orange, next to joins
-        self.btn_rd_visual_sim = QPushButton("🔬")
-        self.btn_rd_visual_sim.setToolTip(tr("Visual Similarity"))
-        self.btn_rd_visual_sim.setFixedSize(40, 32)
-        self.btn_rd_visual_sim.setStyleSheet("")
-        self.btn_rd_visual_sim.setVisible(False)
-        self.btn_rd_visual_sim.clicked.connect(self._rd_search_visual_similarity)
-        community_row.addWidget(self.btn_rd_visual_sim)
-
         community_row.addStretch()
 
         self.txt_extended_info = QTextBrowser()
@@ -756,6 +747,10 @@ class ResultDialog(QDialog):
 
     def _rd_search_visual_similarity(self):
         """REROUTED (Phase 109, D-10): open the Join Workbench with the Visual source auto-loaded."""
+        # DEPRECATED — marked removable (Phase 109 G-07, D-11 one-cycle soft-retire). The ResultDialog
+        # Visual-Similarity button that called this was removed in G-07; "Find Joins" is now the
+        # single ResultDialog entry into the Join Workbench. RETAINED one cycle as a safety net.
+        # No live caller remains. Do not add new callers. Removable once the parity UAT signs off.
         sys_id = self.current_sys_id
         if not sys_id:
             return
@@ -3074,12 +3069,6 @@ class ResultDialog(QDialog):
             self.btn_rd_measurements.setVisible(False)
             if hasattr(self, 'btn_compact_measurements'):
                 self.btn_compact_measurements.setVisible(False)
-
-        # 3b. Visual Similarity button (D-10: ResultDialog context)
-        _parent = self._app
-        _vs_has_rd = bool(_parent and hasattr(_parent, 'meta_mgr') and _parent.meta_mgr
-                          and _parent.meta_mgr.csv_bank.get(sid, {}).get('has_vs'))
-        self.btn_rd_visual_sim.setVisible(_vs_has_rd)
 
         # 4. Build Extended Info HTML (Text)
         # Store enrichment meta for translate badge rebuild
