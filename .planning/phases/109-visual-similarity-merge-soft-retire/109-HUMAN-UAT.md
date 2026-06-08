@@ -242,6 +242,35 @@ Record results as you work through the scenarios.
 > Compare candidate pane AND in Table mode; (c) Y/?/N in the Compare window mark AND clear on a
 > second click (border + position label follow); plus the rest of Round 4 (A2–A8, K/L/M).
 
+### F-R4-3 — Compare window: zoom, anchor/candidate text, glyphs, nav width — FIXED, re-test required
+
+- **Reported (2026-06-08, Hillel), 5 items in the Compare window:** (1) zoom in/out does nothing;
+  (2) no transcription below the anchor; (3) the text below the candidate ("other side") is the
+  WHOLE manuscript, not the matched page/image; (4) make the Y/?/N triage glyphs ✓/?/✗;
+  (5) the prev/next buttons are too narrow for their labels.
+- **Fixes (commit `453bbcf1`):**
+  1. **Zoom** — `_pane_zoom` re-fetched a larger image but `_pump_images` downscaled it back to the
+     label, so zoom was invisible. Reworked to **client-side** scaling of a cached full pixmap
+     (mirrors the main anchor `_apply_zoom`): the pane image now sits in a `_PannableScrollArea`
+     (drag to pan); a new opt-in `on_pixmap` hook delivers the full pixmap so it fits-to-view on
+     load and scales by zoom on each click (no network).
+  2. **Anchor text** — `_fill_anchor` now fetches the matched-page transcription via a shared
+     `_load_pane_page_text` (background worker), like folio nav.
+  3. **Candidate text** — `_fill_candidate` no longer dumps `c.full_text` (whole MS); it loads the
+     matched-PAGE text via the same helper.
+  4. **Glyphs** — ✓ / ? / ✗ on the card + compare triage buttons and the table glyph map.
+  5. **Nav width** — Compare prev/next widened (fixed 34px → `setMinimumWidth(84)`).
+- **Regression guard:** 4 headless tests (client-side zoom math + label resize; page-scoped text in
+  both panes; ✓/✗ glyphs; wider nav). `_pane_folio_step` shares the same helpers.
+- **Status:** automated gate **58 passed** (was 54), 200 passed across join-workbench/compare/
+  candidate suites, ruff clean.
+
+> **Re-test focus (round 4, cumulative):** marker stays **PENDING** until Hillel confirms on the
+> rebuilt app — in the **Compare** window: zoom +/- visibly enlarges/shrinks the image (drag to pan
+> when zoomed); the anchor pane shows transcription; the candidate pane shows only the matched
+> page's text (not the whole MS); triage reads ✓/?/✗ and toggles on second click; prev/next labels
+> fit — plus the earlier F-R4-1/F-R4-2 items and the rest of Round 4 (A2–A8, K/L/M).
+
 ---
 
 ## Resume Signal
