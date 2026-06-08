@@ -727,3 +727,39 @@ def test_folio_and_triage_share_one_row():
     assert combined_marker in src, (
         f"G-11.1: '{combined_marker}' comment not found — combined row not implemented"
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 11 tests — Task 3: VS hint line + combined empty-intersection message (G-13)
+# ---------------------------------------------------------------------------
+
+
+def test_vs_hint_and_combined_empty_strings_present():
+    """G-13: Static source scan — apply_filters references both the hint key and the combined-empty key.
+
+    Both tr() keys must be present in the source so the i18n guard and behavioural contract hold.
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+
+    # G-13.1: the hint label must be constructed with the "Turn off" key
+    assert 'tr("Turn off Visual Similarity to see more results")' in src, (
+        "G-13.1: tr('Turn off Visual Similarity to see more results') not found — "
+        "VS hint line not added to the pane"
+    )
+
+    # G-13.3: the combined empty-intersection message must be present in apply_filters
+    assert 'tr("No look-alikes match this search — turn off Visual Similarity to see all results")' in src, (
+        "G-13.3: combined empty-intersection tr() key not found — "
+        "'No look-alikes match this search — turn off Visual Similarity to see all results' missing"
+    )
+
+    # G-13: self.vs_hint must exist (the QLabel constructed in __init__)
+    assert "self.vs_hint" in src, (
+        "G-13: self.vs_hint not found — hint QLabel not added to the pane"
+    )
+
+    # The hint visibility must be driven by _vs_on (hidden when toggle OFF)
+    assert "vs_hint.setVisible" in src, (
+        "G-13: vs_hint.setVisible not found — hint visibility not toggled based on _vs_on"
+    )

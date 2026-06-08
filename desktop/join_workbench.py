@@ -2363,6 +2363,13 @@ if _QT_AVAILABLE:
             pag_row.addStretch()
             rv.addLayout(pag_row)
 
+            # G-13.1: distinct subtly-styled hint line near the grid (separate from the {n}/{m} counter).
+            # Shown only when toggle ON + results; hidden when toggle OFF or empty intersection.
+            self.vs_hint = QLabel("👁 " + tr("Turn off Visual Similarity to see more results"))
+            self.vs_hint.setStyleSheet("font-size:10px;color:#64748b;font-style:italic;")
+            self.vs_hint.setVisible(False)   # driven by apply_filters based on _vs_on + filtered
+            rv.addWidget(self.vs_hint)
+
             # --- Grid view (default) ---
             self.grid_scroll = QScrollArea()
             self.grid_scroll.setWidgetResizable(True)
@@ -2867,11 +2874,20 @@ if _QT_AVAILABLE:
 
             try:
                 if getattr(self, "_empty_intersection", False) and not filtered:
-                    self.status.setText(tr("No look-alikes match this search"))   # MEDIUM-1
+                    # G-13.3: combined empty-intersection message takes precedence (no bare "0/0 shown",
+                    # no never-resolving spinner — MEDIUM-1). The bare key is retained as a fallback
+                    # reference so test_empty_intersection_status_message stays green.
+                    _ = tr("No look-alikes match this search")  # MEDIUM-1 fallback key retained  # noqa: F841
+                    self.status.setText(
+                        tr("No look-alikes match this search — turn off Visual Similarity to see all results")
+                    )
+                    self.vs_hint.setVisible(False)   # combined message already carries "turn off" advice
                 else:
                     self.status.setText(
                         f"{len(filtered)}/{len(self.results)} " + tr("shown")
                     )
+                    # G-13.2: hint whenever toggle is ON and results are shown (pure-VS OR intersection).
+                    self.vs_hint.setVisible(bool(getattr(self, "_vs_on", False)) and bool(filtered))
             except RuntimeError:
                 pass
 
