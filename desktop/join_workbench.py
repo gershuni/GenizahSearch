@@ -2147,6 +2147,7 @@ if _QT_AVAILABLE:
             self._resolver = None     # ThumbResolver (current page)
             self._cross_worker = None
             self._enrich_worker = None
+            self._retired_workers = []  # crash-safety: running _EnrichWorkers awaiting finished() (0xC0000409)
             self._search_thread = None
             # Phase 109 VS source state (G-04 toggle model)
             self._vs_cands = None         # list[Candidate] from VS load, or None
@@ -2749,16 +2750,71 @@ if _QT_AVAILABLE:
             self._page = 0
             self._start_enrich()
 
+        def _retire_enrich_worker(self):
+            """Crash-safely tear down the current _EnrichWorker before starting a new one.
+
+            A QThread must NOT be destroyed while still running — doing so triggers Qt's
+            "QThread: Destroyed while thread is still running" abort, which surfaces on Windows
+            as exit code 0xC0000409 (STATUS_STACK_BUFFER_OVERRUN / MSVC fastfail). cancel() only
+            sets a flag; run()'s in-flight measurement SQL batch keeps executing until it returns,
+            so simply doing `self._enrich_worker = None` here drops the only Python reference and
+            CPython refcounting deletes the C++ QThread mid-run -> hard crash. This reproduced as
+            "toggle Visual Similarity OFF right after a search" (the search's enrich worker is
+            still running when the toggle re-enters _start_enrich).
+
+            Fix: cancel + disconnect the stale result, then RETAIN a still-running worker in
+            self._retired_workers (reaped on its finished() signal) instead of dropping it. An
+            already-finished worker is safe to release immediately.
+            """
+            old = self._enrich_worker
+            self._enrich_worker = None
+            if old is None:
+                return
+            try:
+                old.cancel()
+            except Exception:
+                pass
+            # Drop the stale result so a late emit from the cancelled worker cannot clobber the
+            # new worker's enrichment dict.
+            try:
+                old.enriched.disconnect(self._on_enriched)
+            except (TypeError, RuntimeError):
+                pass
+            try:
+                running = old.isRunning()
+            except RuntimeError:
+                running = False
+            if not running:
+                return  # finished -> safe to let it be garbage-collected now
+            # Still running: keep a reference until it actually finishes (no mid-run destruction).
+            self._retired_workers.append(old)
+            try:
+                old.finished.connect(lambda w=old: self._reap_enrich_worker(w))
+            except (TypeError, RuntimeError):
+                pass
+            # Guard the race where it finished between the isRunning() check and the connect.
+            try:
+                if not old.isRunning():
+                    self._reap_enrich_worker(old)
+            except RuntimeError:
+                self._reap_enrich_worker(old)
+
+        def _reap_enrich_worker(self, w):
+            """Release a retired _EnrichWorker once its QThread has actually finished.
+
+            Runs on the UI thread (finished() is delivered to the main thread), so mutating
+            self._retired_workers here is safe. Retaining the reference until finished() is what
+            prevents destroying a running QThread (Windows 0xC0000409)."""
+            try:
+                self._retired_workers.remove(w)
+            except (ValueError, RuntimeError):
+                pass
+
         def _start_enrich(self):
             """Start the batched enrichment worker."""
             from shared.fjms_service import get_fjms_service
-            # Cancel old enrich worker
-            if self._enrich_worker is not None:
-                try:
-                    self._enrich_worker.cancel()
-                except Exception:
-                    pass
-                self._enrich_worker = None
+            # Cancel old enrich worker (crash-safe teardown — see _retire_enrich_worker).
+            self._retire_enrich_worker()
 
             fjms_svc = None
             try:

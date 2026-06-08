@@ -810,3 +810,144 @@ def test_joinsdialog_opens_plain_and_closes():
         "G-08.2: self.close() not found in _show_vs_picker — JoinsDialog must be closed "
         "after opening the Workbench so the user works in the Lab"
     )
+
+
+# ---------------------------------------------------------------------------
+# Round-4 UAT crash fix — _EnrichWorker QThread teardown (Windows 0xC0000409)
+#
+# Repro: toggling Visual Similarity OFF right after a search re-entered _start_enrich
+# while the search's _EnrichWorker QThread was still running its in-flight SQL batch.
+# The old code did `self._enrich_worker = None` immediately after cancel(), dropping the
+# only Python reference; CPython refcounting then destroyed the C++ QThread mid-run ->
+# Qt "Destroyed while thread is still running" -> abort -> exit code 0xC0000409.
+# ---------------------------------------------------------------------------
+
+
+class _FakeEnrichSignal:
+    """Minimal stand-in for a pyqtSignal — records connect/disconnect without Qt."""
+
+    def __init__(self, name, log):
+        self._name = name
+        self._log = log
+
+    def connect(self, *args):
+        self._log.append(self._name + ":connect")
+
+    def disconnect(self, *args):
+        self._log.append(self._name + ":disconnect")
+
+
+class _FakeEnrichWorker:
+    """QThread-like stub with a controllable isRunning()."""
+
+    def __init__(self, log, running=True):
+        self._log = log
+        self._running = running
+        self.enriched = _FakeEnrichSignal("enriched", log)
+        self.finished = _FakeEnrichSignal("finished", log)
+
+    def cancel(self):
+        self._log.append("cancel")
+
+    def isRunning(self):
+        return self._running
+
+
+def _retire_stub(worker):
+    """Build a stub self for the unbound _retire_enrich_worker / _reap_enrich_worker calls."""
+    class _Stub:
+        pass
+    s = _Stub()
+    s._enrich_worker = worker
+    s._retired_workers = []
+    s._on_enriched = lambda d: None
+    return s
+
+
+def test_enrich_worker_running_is_retained_not_dropped():
+    """Regression (0xC0000409): a still-running _EnrichWorker must be RETAINED (reaped on
+    finished()), never dropped while running. Dropping it destroys the C++ QThread mid-run."""
+    from desktop.join_workbench import JoinCandidatePane
+
+    log = []
+    worker = _FakeEnrichWorker(log, running=True)
+    stub = _retire_stub(worker)
+
+    JoinCandidatePane._retire_enrich_worker(stub)
+
+    assert "cancel" in log, "old worker must be cancelled"
+    assert "enriched:disconnect" in log, "stale result signal must be disconnected"
+    assert stub._enrich_worker is None, "_enrich_worker slot must be cleared for the new worker"
+    # CRITICAL: the running worker is retained (so its QThread is not destroyed mid-run)
+    assert worker in stub._retired_workers, (
+        "a still-running _EnrichWorker must be retained in _retired_workers, not dropped"
+    )
+    assert "finished:connect" in log, "finished() must be wired to reap the retained worker"
+
+
+def test_enrich_worker_finished_is_released_immediately():
+    """A worker that has already finished is safe to release — it must NOT pile up in
+    _retired_workers (no leak), and the slot is cleared."""
+    from desktop.join_workbench import JoinCandidatePane
+
+    log = []
+    worker = _FakeEnrichWorker(log, running=False)
+    stub = _retire_stub(worker)
+
+    JoinCandidatePane._retire_enrich_worker(stub)
+
+    assert "cancel" in log
+    assert stub._enrich_worker is None
+    assert stub._retired_workers == [], (
+        "a finished worker must be released immediately (not retained)"
+    )
+
+
+def test_retire_enrich_worker_no_op_when_none():
+    """_retire_enrich_worker is a safe no-op when there is no current worker."""
+    from desktop.join_workbench import JoinCandidatePane
+
+    stub = _retire_stub(None)
+    JoinCandidatePane._retire_enrich_worker(stub)  # must not raise
+    assert stub._enrich_worker is None
+    assert stub._retired_workers == []
+
+
+def test_reap_enrich_worker_releases_retained():
+    """The finished() reaper drops the retained worker once its QThread has finished."""
+    from desktop.join_workbench import JoinCandidatePane
+
+    worker = object()
+    class _Stub:
+        pass
+    stub = _Stub()
+    stub._retired_workers = [worker]
+
+    JoinCandidatePane._reap_enrich_worker(stub, worker)
+    assert worker not in stub._retired_workers
+    # Idempotent / safe if called again
+    JoinCandidatePane._reap_enrich_worker(stub, worker)
+
+
+def test_start_enrich_routes_through_crash_safe_teardown():
+    """Static guard: _start_enrich must NOT re-introduce the 'cancel then set None' drop.
+
+    Teardown must go through _retire_enrich_worker (cancel + retain running QThread)."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+
+    assert "def _retire_enrich_worker" in src and "def _reap_enrich_worker" in src, (
+        "crash-safe teardown methods missing"
+    )
+    assert "self._retired_workers" in src, "_retired_workers retention list missing"
+
+    # Bound the _start_enrich body and assert it no longer drops the worker reference inline.
+    start = src.find("def _start_enrich(")
+    assert start != -1
+    body = src[start:src.find("\n        def ", start + 1)]
+    assert "self._retire_enrich_worker()" in body, (
+        "_start_enrich must call self._retire_enrich_worker() for crash-safe teardown"
+    )
+    assert "self._enrich_worker = None" not in body, (
+        "_start_enrich must not drop _enrich_worker inline — that is the 0xC0000409 bug"
+    )
