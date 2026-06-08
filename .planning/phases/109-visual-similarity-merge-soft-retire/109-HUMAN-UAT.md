@@ -301,6 +301,25 @@ Record results as you work through the scenarios.
   fresh-only restore asserted. ruff clean; gate 54 passed; 6 Qt construct tests pass offscreen.
 - **Re-test:** open Join Lab, set an anchor + some triage, CLOSE the window, reopen (corner button)
   → state is there; also confirm it survives an app restart (open Join Lab again after relaunch).
+- **Within-session: CONFIRMED by Hillel.** Restart still failed → see F-R4-6.
+
+### F-R4-6 — Join Lab state didn't survive app restart (jw-None save wiped it) — FIXED, re-test required
+
+- **Reported (2026-06-08, Hillel):** after the F-R4-5 fix, state is remembered within a session but
+  still does not survive an app restart.
+- **Diagnosis:** the on-disk `session.json` DID contain the correct `join_lab` anchor after exit
+  (verified against the live file: `T-S 8.242`, `open:false`), and `restore_state` rebuilds from it
+  correctly (probe confirmed `_anchor_sid` restored). The break: a background `_save_session` firing
+  AFTER startup-restore completes — while the Join Lab window is not yet instantiated (`jw is None`)
+  — rebuilt the session dict WITHOUT a `join_lab` key, silently wiping the remembered anchor before
+  the user reopened the Lab. The `_restoring_session` guard only covers the restore window, not the
+  post-restore/pre-open gap.
+- **Fix (commit `6c52a3b9`):** in `_save_session`, when `jw is None`, carry forward the
+  previously-persisted `join_lab` from disk instead of dropping the key. Manual reopen
+  (`open_join_workbench`) then restores it; if the window was open at exit, `_restore_join_lab`
+  auto-reopens it. Static regression guard added; ruff clean; gate 55 passed.
+- **Re-test:** set an anchor in Join Lab, fully quit + relaunch the app, open the Join Lab → the
+  last anchor/builder/triage is restored.
 
 ---
 
