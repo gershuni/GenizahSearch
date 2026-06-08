@@ -261,7 +261,11 @@ then `/release`.
   4. A **stale LOCAL LAB index** surfaces a rebuild / staleness signal rather than silently omitting
      LOCAL composition hits.
 
-**Plans**: TBD.
+**Plans**: 4 plans
+- [ ] 110-01-PLAN.md — Wave-0 test scaffolds (test_comp_corpus_scope.py + test_comp_export_local.py) + D-08 staleness i18n keys (EN+HE) [wave 1]
+- [ ] 110-02-PLAN.md — corpus_scope gating on search_composition_logic + lab_composition_search, weights-hash override fix (RF-4), plumbed through both composition threads [wave 2]
+- [ ] 110-03-PLAN.md — composition-tab Genizah/Local/ALL selector + run_composition wiring + session persist + stale-LAB label + weights-hash injection + Lab decoupling (human-verify checkpoint) [wave 3]
+- [ ] 110-04-PLAN.md — EXP-F3: LOCAL-aware export_comp_report across xlsx/csv/txt/docx via Phase 103 helpers, Genizah-only cross-parity [wave 4]
 
 ---
 
