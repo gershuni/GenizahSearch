@@ -45,6 +45,30 @@
 <decisions>
 ## Implementation Decisions
 
+> **⚠ DESIGN CORRECTION 2026-06-08 (Plan 110-03 UAT checkpoint).** During human verification of
+> the composition corpus selector, standard (Lab-Mode-OFF) composition with scope=Local returned
+> **nothing**. Root cause: Plans 110-01/02/03 routed *standard* LOCAL composition through the **LOCAL
+> LAB side-index** (`local_lab_searcher`), which only exists once the user has built it via Lab Mode —
+> so it was `None`, the `_check_local_lab_freshness()` gate failed, and the hook was silently skipped.
+> **User's corrected intent (authoritative):** the LAB index is an **opt-in** ("Lab Mode") for both
+> search and composition; **by default both must use the REGULAR index.** So standard composition with
+> scope=Local/ALL must query the **regular My-Library index** (`local_searcher`/`local_index`, the same
+> index regular search scope=Local uses — its schema carries `content`/`unique_id`/`full_header`/`source`,
+> everything the composition hook reads), and **Lab Mode** keeps using the LAB/fingerprint side-index.
+> **Consequences (supersede the originals below):**
+> - **D-07/RF-2 (amended):** standard `Local`/`ALL` composition merges hits from the regular LOCAL index
+>   (`local_searcher`), NOT the LAB side-index. Lab Mode composition (`lab_composition_search`) still uses
+>   the LAB side-index — unchanged.
+> - **D-08/RF-4 (SUPERSEDED for the default path):** the LAB weights-hash mismatch + the
+>   `_lab_weights_hash_override` + the 3-site refresh + the stale-LAB signal were only needed *because*
+>   the default path was wrongly routed through the LAB index. The regular LOCAL index has **no weights
+>   hash / no staleness concept** → the default path needs none of it. Per user: an empty LOCAL result
+>   is treated exactly like an empty Genizah result ("no results"), **no staleness banner.** Any LAB
+>   staleness concern is now Lab-Mode-only (pre-existing `lab_composition_search` behavior; out of scope).
+> - **Tests (110-01) amended:** the standard-path routing tests assert routing to the **regular**
+>   `local_searcher` (not `local_lab_searcher`); Lab-path tests keep asserting LAB routing;
+>   `test_stale_lab_sets_flag` is repurposed to the Lab path (or dropped from the default path).
+
 ### Scope & deferral
 - **D-01:** **Defer ALL of Component B to a post-v8.0.0 milestone** (user decision). JSA-01 / JSA-02 /
   JSA-03 / JWB-05 moved to REQUIREMENTS.md § Future → "Component B — Search-support algorithms". No
