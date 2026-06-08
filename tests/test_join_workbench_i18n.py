@@ -94,6 +94,28 @@ def test_phase107_host_keys_in_translations():
     )
 
 
+# Gap-round-3 keys (G-06 eye tooltip / G-13 hint+empty / G-08 link tooltip).
+# These are CALLED by desktop/join_workbench.py (eye tooltip, hint, empty msg) and by
+# corrections_ui.py (G-08 tooltip) — corrections_ui.py is not AST-scanned, so this guard
+# pins the G-08 key too.
+GAP_ROUND_3_KEYS = [
+    "visual similarity",
+    "Turn off Visual Similarity to see more results",
+    "No look-alikes match this search — turn off Visual Similarity to see all results",
+    "find joins in joins lab",
+]
+
+
+def test_gap_round_3_keys_in_translations():
+    """G-06/G-13/G-08: every gap-round-3 key resolves in TRANSLATIONS (D-17)."""
+    from genizah_translations import TRANSLATIONS
+    missing = [k for k in GAP_ROUND_3_KEYS if k not in TRANSLATIONS]
+    assert not missing, (
+        f"Gap-round-3 keys absent from TRANSLATIONS: {missing}\n"
+        "Fix: add to the Phase-109 gap-round-3 TRANSLATIONS.update block in genizah_translations.py."
+    )
+
+
 def test_phase107_host_keys_translated_and_wrapped():
     """SC#6 (host): Phase-107 host strings are tr()-wrapped in genizah_app.py /
     desktop/result_dialog.py.

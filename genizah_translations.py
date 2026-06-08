@@ -4020,3 +4020,21 @@ TRANSLATIONS.update({
     "Select as partner": "בחר כשותף",
     "Pick a partner in the Join Lab": "בחר שותף במעבדת הצירופים",
 })
+
+# === Phase 109 gap-closure round 3 (G-06 eye badge / G-13 hint+empty / G-08 link tooltip) ===
+TRANSLATIONS.update({
+    # G-06.2: tooltip on the single eye 👁 badge (replaces ★both / ⊙VS badges) AND on the
+    # eye-prefixed toggle. Reuse חזותי (NOT חיצוני).
+    "visual similarity": "דמיון חזותי",
+    # G-13.1: the distinct, subtly-styled hint line shown near the grid whenever the toggle is ON
+    # and results are shown (pure-VS OR intersection). Eye-prefixed at the call site.
+    "Turn off Visual Similarity to see more results":
+        "כבו את הדמיון החזותי כדי לראות יותר תוצאות",
+    # G-13.3: combined empty-intersection message (toggle ON + term yields zero look-alikes).
+    # Takes precedence over the bare "No look-alikes match this search" key.
+    "No look-alikes match this search — turn off Visual Similarity to see all results":
+        "אין דומים חזותית התואמים לחיפוש זה — כבו את הדמיון החזותי כדי לראות הכל",
+    # G-08.1: the JoinsDialog VS button's new tooltip (icon 🔍→🔗; the button now leaves the dialog
+    # and opens the anchor PLAIN in the Join Lab).
+    "find joins in joins lab": "מצא צירופים במעבדת הצירופים",
+})
