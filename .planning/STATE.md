@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v8.0.0
 milestone_name: Joins Lab — Phases 106-110
 status: executing
-stopped_at: Phase 109 plan 13 Task 1 committed (automated gate 45/45; round-4 UAT written; awaiting Hillel click-through at Task 2 checkpoint)
-last_updated: "2026-06-08T03:22:48Z"
+stopped_at: Phase 109 gap-closure round 3 context gathered (G-06..G-13)
+last_updated: "2026-06-08T11:53:33.707Z"
 last_activity: 2026-06-08
 progress:
   total_phases: 8
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 27
-  completed_plans: 29
+  completed_plans: 31
   percent: 100
 ---
 
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-06-02)
 
 Milestone: **v8.0.0 Dicta Rebrand & Joins Lab — STARTED 2026-06-02.** Folds the delivered v7.17 cycle (the "Dicta Genizah Search Pro" rebrand + LOCAL "My Library" export, Phases 103 + 105) into the flagship v8.0.0 release, and adds **Joins Lab** — an interactive **human-in-the-loop** join-hunting workbench (Component A) + optional search-support algorithms (Component B), both apps. NO automated join-finder.
 
-Phase: 109 (visual-similarity-merge-soft-retire) — EXECUTING
-Plan: 6 of 13
+Phase: 110
+Plan: Not started
 Status: Ready to execute
 Last activity: 2026-06-08
 
