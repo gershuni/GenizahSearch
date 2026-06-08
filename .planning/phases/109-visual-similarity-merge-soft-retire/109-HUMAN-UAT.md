@@ -2,11 +2,11 @@
 phase: 109-visual-similarity-merge-soft-retire
 plan: "13"
 type: human-uat
-status: partial
+status: complete
 created: "2026-06-07"
 updated: "2026-06-08"
-automated_gate: PASSED  # 45 tests: test_join_workbench_vs(27) + test_join_workbench_i18n(5) + test_join_workbench_no_private(2) + test_visual_similarity_dialog(6) + test_join_workbench_construct(2) + test_triage_second_click_clears + test_folio_and_triage_share_one_row + test_vs_hint_and_combined_empty_strings_present + test_browse_resultdialog_vs_buttons_removed + test_joinsdialog_opens_plain_and_closes — all green (2026-06-08)
-parity_sign_off: PENDING  # D-14b — Round 4 in progress; marker stays "pending parity sign-off" until Hillel signs off
+automated_gate: PASSED  # final gate 59 tests green (incl. round-4 crash/eye/zoom/text/glyph/nav/session regression tests); see Round-4 Findings Log
+parity_sign_off: APPROVED  # D-14b — Hillel approved round 4 on 2026-06-08 (F-R4-1..F-R4-6 all fixed + re-verified); _show_vs_dialog marker now live-removable
 ---
 
 # Phase 109 Plan 13: Parity UAT — Visual Similarity Toggle Design (D-14b Round 4)
@@ -320,6 +320,18 @@ Record results as you work through the scenarios.
   auto-reopens it. Static regression guard added; ruff clean; gate 55 passed.
 - **Re-test:** set an anchor in Join Lab, fully quit + relaunch the app, open the Join Lab → the
   last anchor/builder/triage is restored.
+
+---
+
+## Round 4 Verdict — APPROVED (2026-06-08)
+
+Hillel approved the consolidated round-4 UAT. All round-4 findings fixed and re-verified:
+F-R4-1 (toggle-off crash), F-R4-2 (eye badge in Compare + Table), F-R4-3 (Compare zoom / page-text /
+✓?✗ glyphs / nav width), F-R4-4 (nav arrows), F-R4-5 (Join Lab state within-session), F-R4-6 (Join
+Lab state across restart). `_show_vs_dialog` deprecation marker is now **live-removable** (D-11/D-14b)
+— the method + its orphaned helpers (`_on_vs_fetch_complete`, `_enrich_vs_suggestions`) are retained
+one cycle and scheduled for physical deletion in a future cleanup phase. `status: complete` /
+`parity_sign_off: APPROVED`.
 
 ---
 

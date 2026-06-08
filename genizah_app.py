@@ -4766,15 +4766,14 @@ class GenizahGUI(QMainWindow):
         self._show_vs_dialog(sys_id, shelfmark, data)
 
     def _show_vs_dialog(self, sys_id, shelfmark, data, parent_dialog=None, on_pick=None):
-        # DEPRECATED — no live caller (Phase 109 G-07 + G-08, D-11 / D-14b): both the
-        # normal-mode entry points (Browse + ResultDialog VS buttons, removed in G-07) AND the
-        # pick-mode caller (JoinsDialog partner-picker, rerouted to a plain Join-Lab open in G-08)
-        # no longer call this method. The ONLY remaining reference is the call inside the orphaned
-        # VS-dialog-fetch helper above (itself zero callers) — so nothing live can reach this
-        # method. RETAINED one cycle (D-11) as a safety net alongside its orphaned helpers. The
-        # removability marker stays "pending parity sign-off" until the re-UAT
-        # (109-HUMAN-UAT.md, D-14b) passes; only THEN is it removable in a future cleanup phase.
-        # Do not add new callers.
+        # DEPRECATED — REMOVABLE (Phase 109, D-11 / D-14b): the parity UAT
+        # (109-HUMAN-UAT.md, round 4) signed off on 2026-06-08. This method has NO live caller —
+        # both the normal-mode entry points (Browse + ResultDialog VS buttons, removed in G-07)
+        # AND the pick-mode caller (JoinsDialog partner-picker, rerouted to a plain Join-Lab open
+        # in G-08) are gone; its only reference is the orphaned _on_vs_fetch_complete helper above,
+        # which is itself dead. Remove the whole cluster together — _show_vs_dialog,
+        # _on_vs_fetch_complete, and _enrich_vs_suggestions — in the next cleanup phase. Retained
+        # here only to keep that cleanup atomic; do not add new callers.
         """Create and show the enriched Visual Similarity workbench dialog."""
         dlg = QDialog(self)
         dlg.setWindowTitle(f'{tr("Visual Similarity")} -- {shelfmark}')
