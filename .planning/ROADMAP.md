@@ -214,7 +214,7 @@ preserved).
 - [x] 109-04-PLAN.md — G-01: fix Hebrew חיצוני→חזותי + pre-seed gap-round tr() keys (Wave 1)
 - [x] 109-05-PLAN.md — G-04/G-03/G-02: single Visual-Similarity toggle (replaces 3 radios) + intersection assemble + page-lazy VS card text (Wave 2)
 - [x] 109-06-PLAN.md — G-05: reroute JoinsDialog pick-mode into the Workbench + tooltip + deprecation re-eval (Wave 3)
-- [ ] 109-07-PLAN.md — re-UAT checkpoint (toggle states + deferred scenarios; gates the deprecation marker, Wave 4)
+- [x] 109-07-PLAN.md — re-UAT checkpoint (toggle states + deferred scenarios; gates the deprecation marker, Wave 4)
 - [x] 109-08-PLAN.md — gap-round-3: pre-seed EN+HE tr() keys (eye tooltip / G-13 hint+empty / G-08 link tooltip) (Wave 1)
 - [x] 109-09-PLAN.md — G-06/G-09/G-12: single eye 👁 badge (drops ★both/⊙VS/rank) + eye-prefixed toggle + visible-ON :checked style (Wave 2)
 - [x] 109-10-PLAN.md — G-07: remove duplicate Browse + ResultDialog VS buttons; mark reroute handlers removable (Wave 3)
@@ -510,7 +510,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 | 106. Joins Lab Shared Core (logic + adapters + tests) | v8.0.0 | 3/3 | Complete    | 2026-06-03 |
 | 107. Desktop Join Workbench — Anchor, Entry, Actions & Join Model | v8.0.0 | 3/3 | Complete    | 2026-06-04 |
 | 108. Desktop Join Workbench — Builders, Candidates & Compare | v8.0.0 | 7/4 | Complete    | 2026-06-06 |
-| 109. Visual-Similarity Merge & Soft-Retire | v8.0.0 | 11/13 | In Progress|  |
+| 109. Visual-Similarity Merge & Soft-Retire | v8.0.0 | 12/13 | In Progress|  |
 | 110. Search-Support — Parallels Seeding (JSA-01) | v8.0.0 | 0/? | Not started | - |
 | 103. Search-Results LOCAL Export | v7.17→v8.0.0 | 4/4 | Complete    | 2026-06-01 |
 | 104. Composition-Report LOCAL Export | v7.17 | 0/0 | ⏸ Deferred (no LOCAL comp-search UI) | - |
