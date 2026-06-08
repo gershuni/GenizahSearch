@@ -24971,6 +24971,19 @@ class GenizahGUI(QMainWindow):
                 self.spin_freq.setValue(params['max_freq'])
             if 'mode_index' in params:
                 self.comp_mode_combo.setCurrentIndex(params['mode_index'])
+            # Phase 110 (COMP-LOC-01 / Round-2 #3): restore the comp corpus scope
+            # BEFORE run_composition() fires (it reads comp_corpus_scope_combo) so the
+            # re-run uses the ORIGINAL scope. Validate fail-closed (T-110-06).
+            _hist_scope = (params or {}).get('comp_corpus_scope', 'genizah')
+            if _hist_scope not in ('genizah', 'local', 'all'):
+                _hist_scope = 'genizah'
+            self._comp_corpus_scope = _hist_scope
+            if hasattr(self, 'comp_corpus_scope_combo'):
+                _hist_idx = self.comp_corpus_scope_combo.findData(_hist_scope)
+                if _hist_idx >= 0:
+                    self.comp_corpus_scope_combo.blockSignals(True)
+                    self.comp_corpus_scope_combo.setCurrentIndex(_hist_idx)
+                    self.comp_corpus_scope_combo.blockSignals(False)
             # Restore pre-search filters
             psf = entry.get('pre_search_filters', {})
             self.pre_search_filters = psf
@@ -25073,6 +25086,9 @@ class GenizahGUI(QMainWindow):
                 'chunk_size': self.spin_chunk.value() if hasattr(self, 'spin_chunk') else 5,
                 'max_freq': self.spin_freq.value() if hasattr(self, 'spin_freq') else 10,
                 'mode_index': self.comp_mode_combo.currentIndex() if hasattr(self, 'comp_mode_combo') else 0,
+                # Phase 110 (COMP-LOC-01 / Round-2 #3): capture the comp corpus scope
+                # so a history re-run uses the ORIGINAL scope, not the current default.
+                'comp_corpus_scope': getattr(self, '_comp_corpus_scope', 'genizah'),
             },
             'pre_search_filters': dict(getattr(self, 'pre_search_filters', {})),
             # NOTE: result snapshots intentionally NOT stored (see
@@ -25141,6 +25157,27 @@ class GenizahGUI(QMainWindow):
                 self.corpus_scope_combo.blockSignals(True)
                 self.corpus_scope_combo.setCurrentIndex(scope_idx)
                 self.corpus_scope_combo.blockSignals(False)
+
+        # Phase 110 (COMP-LOC-01 / Round-2 #2): the composition corpus scope is ALSO
+        # restored on the persistent-prefs path, so it survives even when full session
+        # restore is disabled/declined (the early returns in _restore_session at
+        # restore_mode=='never'/no-data/decline fire AFTER persistent prefs are
+        # applied) — mirroring how the regular-search scope already behaves.
+        comp_pref = state.get('composition_search', {}) if isinstance(state, dict) else {}
+        comp_scope = comp_pref.get('comp_corpus_scope', 'genizah')
+        if comp_scope not in {'genizah', 'local', 'all'}:
+            logger.warning(
+                "Session preferences: invalid comp_corpus_scope=%r; using genizah",
+                comp_scope,
+            )
+            comp_scope = 'genizah'
+        self._comp_corpus_scope = comp_scope
+        if hasattr(self, 'comp_corpus_scope_combo'):
+            comp_scope_idx = self.comp_corpus_scope_combo.findData(comp_scope)
+            if comp_scope_idx >= 0:
+                self.comp_corpus_scope_combo.blockSignals(True)
+                self.comp_corpus_scope_combo.setCurrentIndex(comp_scope_idx)
+                self.comp_corpus_scope_combo.blockSignals(False)
 
     def _save_session(self):
         """Save current search state to disk for session persistence."""
