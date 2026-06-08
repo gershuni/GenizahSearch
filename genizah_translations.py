@@ -4040,3 +4040,14 @@ TRANSLATIONS.update({
     # and opens the anchor PLAIN in the Join Lab).
     "find joins in joins lab": "מצא צירופים במעבדת הצירופים",
 })
+
+# === Phase 110 — Composition LOCAL-corpus staleness banner (D-08) ===
+TRANSLATIONS.update({
+    # D-08 staleness label shown via tr(...) on the composition tab (Plan 03) when a
+    # Local/ALL composition runs against a present-but-stale LOCAL LAB index. The EN
+    # literal IS the dict key so tr() round-trips for English users. Do NOT add
+    # corpus-combo item strings or a preceding corpus label — those are hardcoded
+    # HE/EN in the combo exactly like the Search-tab selector (RESEARCH § Secondary sources).
+    "LOCAL index is outdated — rebuild in My Library tab":
+        "מאגר 'הספרייה שלי' אינו מעודכן — בנו אותו מחדש בלשונית הספרייה שלי",
+})
