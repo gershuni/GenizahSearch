@@ -584,3 +584,31 @@ def test_eye_badge_precedence_after_self_otherside():
     assert offset_other < offset_eye, (
         "G-06.4 precedence violated: via_other_side branch must appear BEFORE elif c.via_vs: (eye) branch"
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 09 tests — Task 2: eye-prefix toggle + :checked stylesheet (G-06.3 + G-12.1)
+# ---------------------------------------------------------------------------
+
+
+def test_toggle_eye_and_checked_style():
+    """G-06.3/G-12.1: static scan - toggle label has eye 👁 prefix + QPushButton:checked border rule."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+
+    # The toggle label must contain the eye glyph and still call tr("Visual Similarity")
+    assert '"👁 " + tr("Visual Similarity")' in src or "'👁 ' + tr('Visual Similarity')" in src, (
+        "G-06.3: btn_vs_toggle label must be '\"👁 \" + tr(\"Visual Similarity\")' — eye prefix not found"
+    )
+    assert 'tr("Visual Similarity")' in src, (
+        "G-06.3: tr('Visual Similarity') call must still be present in the toggle label"
+    )
+
+    # QPushButton:checked stylesheet rule with a border declaration must exist (G-12.1)
+    assert "QPushButton:checked" in src, (
+        "G-12.1: QPushButton:checked stylesheet rule not found — ON state not explicitly styled"
+    )
+    assert "border" in src[src.find("QPushButton:checked"):src.find("QPushButton:checked") + 200], (
+        "G-12.1: no 'border' declaration found in the QPushButton:checked rule — "
+        "ON state must have an explicit heavier/darker border"
+    )

@@ -2202,8 +2202,18 @@ if _QT_AVAILABLE:
             src_row.setSpacing(4)
 
             # Phase 109 G-04: single checkable "Visual Similarity" toggle (replaces 3 radios)
-            self.btn_vs_toggle = QPushButton(tr("Visual Similarity"))
+            # G-06.3: eye glyph prefix makes the toggle share the same visual vocabulary as the badge
+            self.btn_vs_toggle = QPushButton("👁 " + tr("Visual Similarity"))
             self.btn_vs_toggle.setCheckable(True)
+            # G-12.1: explicit :checked style so ON is unmistakable vs OFF (heavier border, faint shade,
+            # no full accent fill — Hillel's explicit choice; bare native sunken state is NOT sufficient)
+            self.btn_vs_toggle.setStyleSheet(
+                "QPushButton:checked {"
+                "  border: 2px solid #475569;"
+                "  background-color: #e2e8f0;"
+                "  font-weight: bold;"
+                "}"
+            )
             self.btn_vs_toggle.setToolTip(
                 tr("Show only visual look-alikes; with a search term, only look-alikes that also match")
             )
