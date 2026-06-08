@@ -3282,12 +3282,6 @@ class GenizahGUI(QMainWindow):
             # Init Lab Engine (lightweight init)
             self.lab_engine = LabEngine(self.meta_mgr, self.var_mgr)
 
-            # Phase 110 A1: inject the LabEngine's weights-hash into the SearchEngine
-            # so standard-composition LOCAL-LAB freshness checks compare against the
-            # SAME hash the index was built with (RF-4 — un-silences 'all'-scope LOCAL
-            # LAB hits). Cheap in-memory read; never triggers a rebuild.
-            self._refresh_lab_weights_hash_override()
-
             # Connect VariantManager to Lab settings for variant search configuration
             if self.var_mgr and self.lab_engine:
                 self.var_mgr.set_settings(self.lab_engine.settings)
@@ -6753,15 +6747,6 @@ class GenizahGUI(QMainWindow):
         cr.addWidget(self.btn_reset_comp)
 
         in_l.addLayout(cr)
-
-        # Phase 110 (COMP-LOC-02): per-run LOCAL LAB staleness signal. Shown only
-        # when a Local/ALL run executed against a PRESENT-but-stale LOCAL LAB index
-        # (read from the per-run result payload — A2/M2). A user with NO LOCAL index
-        # never sees it. The text uses the key seeded in Plan 01.
-        self.lbl_comp_local_stale = QLabel("")
-        self.lbl_comp_local_stale.setStyleSheet("color: #e67e22; font-size: 11px; font-weight: bold;")
-        self.lbl_comp_local_stale.setVisible(False)
-        in_l.addWidget(self.lbl_comp_local_stale)
 
         self.lab_panel_comp = LabPanel(self, 'comp')
         in_l.addWidget(self.lab_panel_comp)
@@ -16890,74 +16875,17 @@ class GenizahGUI(QMainWindow):
         self._save_session()
 
     def _on_comp_corpus_scope_changed(self, _index):
-        """Phase 110 (COMP-LOC-01): persist the composition corpus scope and
-        proactively refresh the LOCAL-LAB staleness hint. Mirrors
-        ``_on_corpus_scope_changed`` with a defensive guard (RESEARCH Pitfall 5)."""
+        """Phase 110 (COMP-LOC-01): persist the composition corpus scope. Mirrors
+        ``_on_corpus_scope_changed`` with a defensive guard (RESEARCH Pitfall 5).
+
+        Phase 110 DESIGN CORRECTION (2026-06-08): standard composition queries the
+        REGULAR My-Library index, which has no staleness concept — so there is no
+        proactive staleness hint and no weights-hash override to refresh here."""
         combo = getattr(self, 'comp_corpus_scope_combo', None)
         if combo is None:
             return
         self._comp_corpus_scope = combo.currentData() or 'genizah'
         self._save_session()
-        # A2 — proactive staleness hint on scope change (guarded; never raises).
-        try:
-            self._refresh_comp_stale_label_for_scope(self._comp_corpus_scope)
-        except Exception:
-            logger.debug("comp stale-label refresh failed", exc_info=True)
-
-    def _refresh_comp_stale_label_for_scope(self, scope):
-        """Phase 110 (COMP-LOC-02 / Round-2 #5): without running a search, show/hide
-        the LOCAL-LAB staleness label for the given scope. M2 distinction: only a
-        PRESENT-but-stale index triggers the note; a missing index shows nothing.
-
-        FIRST refreshes the weights-hash override so the SearchEngine freshness check
-        cannot report "fresh" off an override gone stale after a LabPanel "Rebuild Lab
-        Index" (which mutates LabEngine.dynamic_rank_map without refreshing the override
-        until the next run). Guarded — never triggers a rebuild."""
-        if not hasattr(self, 'lbl_comp_local_stale'):
-            return
-        try:
-            # Round-2 #5 — sync the override before reading freshness.
-            self._refresh_lab_weights_hash_override()
-        except Exception:
-            logger.debug("comp stale-label override refresh failed", exc_info=True)
-        lab = getattr(self, 'lab_engine', None)
-        searcher = getattr(self, 'searcher', None)
-        lab_mode_on = (
-            hasattr(self, 'btn_lab_mode_toggle_comp')
-            and self.btn_lab_mode_toggle_comp.isChecked()
-        )
-        eng = lab if lab_mode_on else searcher
-        present = (
-            getattr(eng, 'local_lab_searcher', None) is not None if eng else False
-        )
-        stale = False
-        if eng is not None and present:
-            try:
-                stale = not eng._check_local_lab_freshness()
-            except Exception:
-                stale = False
-        if scope in ('local', 'all') and present and stale:
-            self.lbl_comp_local_stale.setText(
-                tr("LOCAL index is outdated — rebuild in My Library tab")
-            )
-            self.lbl_comp_local_stale.setVisible(True)
-        else:
-            self.lbl_comp_local_stale.setVisible(False)
-
-    def _refresh_lab_weights_hash_override(self):
-        """Phase 110 A1: keep SearchEngine's lab weights-hash in sync with LabEngine.
-
-        Cheap in-memory hash read; never triggers a rebuild
-        (feedback_no_auto_reindex_in_init). Called at startup, after every LOCAL LAB
-        rebuild (via MyLibraryTab._on_lab_rebuild_finished), before each Local/ALL
-        standard composition run, and before the proactive stale-label check (#5)."""
-        try:
-            searcher = getattr(self, 'searcher', None)
-            lab = getattr(self, 'lab_engine', None)
-            if searcher is not None and lab is not None:
-                searcher._lab_weights_hash_override = lab._current_lab_weights_hash()
-        except Exception as _e:
-            logger.warning("Phase 110: failed to refresh lab weights-hash override: %s", _e)
 
     def toggle_search(self):
         # PGP Tags mode — execute tag search instead of text search
@@ -21841,15 +21769,13 @@ class GenizahGUI(QMainWindow):
 
         # Phase 110 (COMP-LOC-01): read the corpus scope selector. Genizah is the
         # default for any caller without the combo (D-13 non-regression).
+        # Phase 110 DESIGN CORRECTION (2026-06-08): standard composition queries the
+        # REGULAR My-Library index (no weights-hash / no staleness), so there is no
+        # pre-run override refresh. Lab Mode keeps its own LAB-index freshness.
         _comp_scope = (
             (self.comp_corpus_scope_combo.currentData() or 'genizah')
             if hasattr(self, 'comp_corpus_scope_combo') else 'genizah'
         )
-        # Phase 110 A1 (fourth call site): refresh the weights-hash override
-        # immediately before a Local/ALL run so the LOCAL-LAB freshness check sees
-        # the live LabEngine weights. Cheap, guarded, never rebuilds.
-        if _comp_scope in ('local', 'all'):
-            self._refresh_lab_weights_hash_override()
 
         # 1. נתיב מעבדה (LAB MODE)
         if self.btn_lab_mode_toggle_comp.isChecked():
@@ -22017,21 +21943,9 @@ class GenizahGUI(QMainWindow):
         self.is_comp_running = False
         self.reset_comp_ui()
 
-        # Phase 110 (COMP-LOC-02 / A2): drive the LOCAL-LAB staleness label from the
-        # PER-RUN result payload — NOT the live combo or the engine's mutable flag,
-        # which can reflect a different run if the user changed scope mid-flight.
-        # local_lab_stale is False both when fresh AND when there is no LOCAL index
-        # (Plan 02 M2), so a user with no LOCAL library never sees the warning.
-        _run_scope = (result_obj or {}).get('corpus_scope', 'genizah') if isinstance(result_obj, dict) else 'genizah'
-        _run_stale = bool((result_obj or {}).get('local_lab_stale', False)) if isinstance(result_obj, dict) else False
-        if hasattr(self, 'lbl_comp_local_stale'):
-            if _run_scope in ('local', 'all') and _run_stale:
-                self.lbl_comp_local_stale.setText(
-                    tr("LOCAL index is outdated — rebuild in My Library tab")
-                )
-                self.lbl_comp_local_stale.setVisible(True)
-            else:
-                self.lbl_comp_local_stale.setVisible(False)
+        # Phase 110 DESIGN CORRECTION (2026-06-08): standard composition queries the
+        # REGULAR My-Library index, which has no staleness concept — an empty LOCAL
+        # result is treated exactly like an empty Genizah result. No staleness label.
 
         # Detect partial results (search was cancelled)
         is_partial = False

@@ -1214,19 +1214,6 @@ class MyLibraryTab(QWidget):
             logger.warning(
                 "MyLibraryTab._on_lab_rebuild_finished: reload failed: %s", exc
             )
-        # Phase 110 A1: after a real LOCAL LAB rebuild, re-sync the parent window's
-        # SearchEngine weights-hash override so standard-composition freshness checks
-        # see the freshly-built index as fresh (otherwise the stale note never clears).
-        # Cheap in-memory hash read; never triggers another rebuild.
-        try:
-            pw = getattr(self, '_parent_window', None)
-            if pw is not None and hasattr(pw, '_refresh_lab_weights_hash_override'):
-                pw._refresh_lab_weights_hash_override()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "MyLibraryTab._on_lab_rebuild_finished: weights-hash refresh failed: %s",
-                exc,
-            )
 
     def _on_lab_rebuild_error(self, msg: str) -> None:
         """Background LAB rebuild failed — log and clear the handle."""
