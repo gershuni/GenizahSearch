@@ -277,6 +277,10 @@ def candidate_to_result_dict(c) -> dict:
 
 
 def _invoke_pick(callback, c) -> bool:
+    # MARKED REMOVABLE (Phase 109 G-08, D-11 one-cycle soft-retire): with the JoinsDialog pick-back
+    # retired (G-08 reverses G-05), this pick-callback machinery has no live caller. RETAINED one
+    # cycle as a safety net; tests (test_invoke_pick_forwards_sysid_shelfmark,
+    # test_set_pick_callback_rerenders) keep it green. Removable once the parity UAT signs off.
     """Pick-mode: forward a chosen Candidate's (sys_id, shelfmark) to the JoinsDialog callback.
 
     Returns True and calls callback(c.sys_id, c.shelfmark) when a callback is set.
@@ -1889,6 +1893,10 @@ if _QT_AVAILABLE:
             # Because set_pick_callback/clear_pick_callback call _rerender_candidate_cards(),
             # a callback set AFTER the first render still produces this button (HIGH-4).
             # Named _on_pick_partner — no _vs_ prefix to keep D-18 no-private guard green.
+            # MARKED REMOVABLE (Phase 109 G-08, D-11 one-cycle soft-retire): with the JoinsDialog pick-back
+            # retired (G-08 reverses G-05), this pick-callback machinery has no live caller. RETAINED one
+            # cycle as a safety net; tests (test_invoke_pick_forwards_sysid_shelfmark,
+            # test_set_pick_callback_rerenders) keep it green. Removable once the parity UAT signs off.
             if self.pane.wb._pick_callback is not None:
                 pick_btn = QPushButton(tr("Select as partner"))
                 pick_btn.setToolTip(tr("Select as partner"))
@@ -4090,6 +4098,10 @@ if _QT_AVAILABLE:
             self._thumb_resolver = None
 
             # Plan 06 — pick-mode callback (None = normal Workbench; set via set_pick_callback).
+            # MARKED REMOVABLE (Phase 109 G-08, D-11 one-cycle soft-retire): with the JoinsDialog pick-back
+            # retired (G-08 reverses G-05), this pick-callback machinery has no live caller. RETAINED one
+            # cycle as a safety net; tests (test_invoke_pick_forwards_sysid_shelfmark,
+            # test_set_pick_callback_rerenders) keep it green. Removable once the parity UAT signs off.
             self._pick_callback = None
 
             self._init_ui()
@@ -4409,6 +4421,10 @@ if _QT_AVAILABLE:
 
         # ------------------------------------------------------------------
         # Plan 06 — pick-mode callback (G-05 / HIGH-4)
+        # MARKED REMOVABLE (Phase 109 G-08, D-11 one-cycle soft-retire): with the JoinsDialog pick-back
+        # retired (G-08 reverses G-05), this pick-callback machinery has no live caller. RETAINED one
+        # cycle as a safety net; tests (test_invoke_pick_forwards_sysid_shelfmark,
+        # test_set_pick_callback_rerenders) keep it green. Removable once the parity UAT signs off.
         # ------------------------------------------------------------------
 
         def set_pick_callback(self, cb):

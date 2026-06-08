@@ -4731,6 +4731,10 @@ class GenizahGUI(QMainWindow):
         self.open_joins_workbench(res, source="visual")   # D-01 auto-load
 
     def _enrich_vs_suggestions(self, data):
+        # MARKED REMOVABLE (Phase 109 G-08, D-11 one-cycle soft-retire): orphaned VS-dialog-fetch
+        # helper — no live caller since the Plan-03 reroute bypassed it. The only thing it still
+        # references is the now-dead VS dialog method below (also retained). Retained one cycle;
+        # removable once the parity UAT signs off. Do not wire new callers.
         """Enrich raw VS suggestions with shelfmark, library_code, domain from csv_bank/fjms."""
         csv_bank = self.meta_mgr.csv_bank if self.meta_mgr else {}
         try:
@@ -4752,23 +4756,25 @@ class GenizahGUI(QMainWindow):
                 s['domain'] = '--'  # Domain enrichment failed; use placeholder
 
     def _on_vs_fetch_complete(self, sys_id, shelfmark, data):
+        # MARKED REMOVABLE (Phase 109 G-08, D-11 one-cycle soft-retire): orphaned VS-dialog-fetch
+        # helper — no live caller since the Plan-03 reroute bypassed it. The only thing it still
+        # references is the now-dead VS dialog method below (also retained). Retained one cycle;
+        # removable once the parity UAT signs off. Do not wire new callers.
         if not hasattr(self, '_vs_cache'):
             self._vs_cache = DesktopVSCache()
         self._vs_cache.store(sys_id, data)
         self._show_vs_dialog(sys_id, shelfmark, data)
 
     def _show_vs_dialog(self, sys_id, shelfmark, data, parent_dialog=None, on_pick=None):
-        # DEPRECATED — pending parity sign-off; normal AND pick callers rerouted
-        # (Phase 109, D-11 / D-14b). BOTH the normal-mode path (on_pick is None) AND the
-        # pick-mode path (on_pick is not None, the JoinsDialog partner-picker) are now rerouted
-        # to the Join Workbench:
-        #   - Normal-mode: _browse_view_visual_similarity and _rd_search_visual_similarity
-        #     open open_joins_workbench(source='visual') directly (Plan 03).
-        #   - Pick-mode: corrections_ui.py _show_vs_picker now calls
-        #     open_joins_workbench(source='visual', pick_callback=...) (Plan 06, G-05).
-        # This code is RETAINED for one cycle (D-11) as a safety net; it stays present until the
-        # parity UAT (109-HUMAN-UAT.md, D-14b) signs off — only THEN is it removable in a future
-        # cleanup phase. Do not add new callers.
+        # DEPRECATED — no live caller (Phase 109 G-07 + G-08, D-11 / D-14b): both the
+        # normal-mode entry points (Browse + ResultDialog VS buttons, removed in G-07) AND the
+        # pick-mode caller (JoinsDialog partner-picker, rerouted to a plain Join-Lab open in G-08)
+        # no longer call this method. The ONLY remaining reference is the call inside the orphaned
+        # VS-dialog-fetch helper above (itself zero callers) — so nothing live can reach this
+        # method. RETAINED one cycle (D-11) as a safety net alongside its orphaned helpers. The
+        # removability marker stays "pending parity sign-off" until the re-UAT
+        # (109-HUMAN-UAT.md, D-14b) passes; only THEN is it removable in a future cleanup phase.
+        # Do not add new callers.
         """Create and show the enriched Visual Similarity workbench dialog."""
         dlg = QDialog(self)
         dlg.setWindowTitle(f'{tr("Visual Similarity")} -- {shelfmark}')
