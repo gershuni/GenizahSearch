@@ -20576,7 +20576,6 @@ class GenizahGUI(QMainWindow):
                     self._local_filepath_cache = _local_indexer.get_filepaths(local_ids) or {}
             except Exception:
                 self._local_filepath_cache = {}
-        _has_local = bool(local_ids)
 
         def _resolve_item_sid(ms_item):
             """sys_id for a grouped comp item, header-parse fallback (Pitfall 2)."""
@@ -20593,6 +20592,20 @@ class GenizahGUI(QMainWindow):
                 return True
             return _is_local_sys_id(_resolve_item_sid(ms_item))
 
+        # Phase 110 (5a/5b/6): LOCAL detection over the ACTUAL comp item predicate
+        # (src_lbl=='LOCAL' OR 97… sys_id), NOT just the 97-prefix id list.
+        # `_has_local` decides whether the LOCAL surface is emitted (so a
+        # src_lbl='LOCAL' item with a missing/non-97 sid still exports — fix 6).
+        # `_local_only_comp_export` (every comp item is LOCAL) drives the LOCAL-only
+        # credit suppression (5a), Genizah-sheet drop + "Documents" terminology
+        # (5b), and "Excluded Manuscripts" omission (fix 4). `local_ids` stays as
+        # the 97-prefix list used only for filepath-cache priming above.
+        _all_comp_items = self._collect_comp_items(c_main, c_appx, c_filt, c_filt_appx, c_known)
+        _has_local = any(_is_local_item(it) for it in _all_comp_items)
+        _local_only_comp_export = _has_local and all(
+            _is_local_item(it) for it in _all_comp_items
+        )
+
         # 3. שמירה
         comp_title = self.comp_title_input.text().strip() or tr("Untitled Composition")
         base_path = self._default_report_path(comp_title, tr("Composition_Report"))
@@ -20604,7 +20617,9 @@ class GenizahGUI(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, tr("Save Report"), default_path, selected_filter)
         if not path: return
 
-        credit_text = self._get_credit_header()
+        # Phase 110 (5a): a LOCAL-only comp export omits the MiDRASH/Stökl/Zenodo
+        # data-source credits (meaningless for the user's own documents).
+        credit_text = self._get_credit_header(local_only=_local_only_comp_export)
         query_text = self.comp_text_area.toPlainText().strip()
         comp_settings_lines = [
             tr("Chunk: ") + f"{self.spin_chunk.value()}",
@@ -21083,7 +21098,14 @@ class GenizahGUI(QMainWindow):
                         ws_report.column_dimensions[col].width = width
                         ws_raw.column_dimensions[col].width = width
 
-                    if c_known:
+                    # Phase 110 (fix 4): only Genizah known items go to the
+                    # "Excluded Manuscripts" sheet — LOCAL excluded rows already
+                    # render on the Local Documents sheet (no duplication). For a
+                    # LOCAL-only export the sheet is never created.
+                    _genizah_known = [
+                        it for it in c_known if not (_has_local and _is_local_item(it))
+                    ]
+                    if _genizah_known and not _local_only_comp_export:
                         ws_excluded = wb.create_sheet(tr("Excluded Manuscripts"))
                         ws_excluded.sheet_view.rightToLeft = True
                         ws_excluded.append([tr("System ID"), tr("Shelfmark"), tr("Title")])
@@ -21107,13 +21129,14 @@ class GenizahGUI(QMainWindow):
                             sid, _, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
                             return [sid or "", shelf or "", title or ""]
 
-                        for item in self._sort_comp_items(c_known):
+                        for item in self._sort_comp_items(_genizah_known):
                             ws_excluded.append(_excluded_row(item))
 
                     # Phase 110 (EXP-F3): dedicated "Local Documents" sheet for
                     # LOCAL hits — same bilingual header/title + rich matched-text
                     # cell as the Phase 103 search export. Only when LOCAL rows
                     # exist (Genizah-only export keeps today's sheet set — C5).
+                    ws_local = None
                     if local_table_rows:
                         from shared.export_dossier import (
                             local_documents_header_row as _local_hdr,
@@ -21133,6 +21156,17 @@ class GenizahGUI(QMainWindow):
                             local_row += 1
                         for col, width in zip('ABCDE', [45, 25, 80, 10, 70]):
                             ws_local.column_dimensions[col].width = width
+
+                    # Phase 110 (5b): for a LOCAL-only export, drop the now-empty
+                    # Genizah Report View / Raw Data sheets (mirrors the Phase 103
+                    # search export at ~2924-2934). The workbook collapses to
+                    # [Local Documents, Query information]; Local Documents is the
+                    # primary surface. Mixed / Genizah-only exports keep all sheets.
+                    if _local_only_comp_export and ws_local is not None:
+                        for _empty_ws in (ws_report, ws_raw):
+                            if _empty_ws is not None and _empty_ws in wb.worksheets:
+                                wb.remove(_empty_ws)
+                        wb.active = wb.index(ws_local)
 
                     wb.save(path)
                     self._save_last_folder(path)
@@ -21155,23 +21189,29 @@ class GenizahGUI(QMainWindow):
                         tr("Source Context"),
                         tr("Manuscript Text"),
                     ]
+                    from shared.export_dossier import (
+                        local_documents_header_row as _local_hdr,
+                        sheet_titles as _sheet_titles,
+                    )
                     with open(path, 'w', encoding='utf-8-sig', newline='') as f:
                         f.write(credit_text)
                         writer = csv.writer(f)
                         writer.writerow([])
-                        writer.writerow(headers)
-                        for row in table_rows:
-                            clean_row = [str(val).replace('*', '') for val in row]
-                            writer.writerow(clean_row)
-                        # Phase 110 (EXP-F3): LOCAL rows in a labeled section after
-                        # the Genizah table, under the bilingual Local Documents
-                        # header (single-file CSV — Phase 103 convention).
+                        # Phase 110 (5b): a LOCAL-only export does NOT emit the
+                        # 10-column Genizah header/table at all — the Local
+                        # Documents section is the primary (and only) surface.
+                        if not _local_only_comp_export:
+                            writer.writerow(headers)
+                            for row in table_rows:
+                                clean_row = [str(val).replace('*', '') for val in row]
+                                writer.writerow(clean_row)
+                        # Phase 110 (EXP-F3): LOCAL rows under the bilingual Local
+                        # Documents header (single-file CSV — Phase 103 convention).
+                        # In a mixed export this follows the Genizah table; in a
+                        # LOCAL-only export it is the primary surface.
                         if local_table_rows:
-                            from shared.export_dossier import (
-                                local_documents_header_row as _local_hdr,
-                                sheet_titles as _sheet_titles,
-                            )
-                            writer.writerow([])
+                            if not _local_only_comp_export:
+                                writer.writerow([])
                             writer.writerow([_sheet_titles(CURRENT_LANG)['local_documents']])
                             writer.writerow(_local_hdr(CURRENT_LANG))
                             for row in local_table_rows:
@@ -21203,52 +21243,69 @@ class GenizahGUI(QMainWindow):
                             p.runs[0].font.bold = True
                     doc.add_paragraph("")
                     doc.add_paragraph(tr("Report Summary"))
-                    stats_lines = [
-                        f"{tr('Total Manuscripts Found')}: {total_count}",
-                        f"{tr('Main Manuscripts')}: {len(c_main)}",
-                        f"{tr('Main Appendix (Groups)')}: {len(c_appx)}",
-                        f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
-                        f"{tr('Excluded Manuscripts')}: {known_count}",
-                    ]
+                    # Phase 110 (5b): LOCAL-only export uses "Documents"
+                    # terminology in the summary; Genizah/mixed keep "Manuscripts".
+                    if _local_only_comp_export:
+                        stats_lines = [
+                            f"{tr('Documents Found')}: {total_count}",
+                            f"{tr('Main Documents')}: {len(c_main)}",
+                            f"{tr('Main Appendix (Groups)')}: {len(c_appx)}",
+                            f"{tr('Filtered by Text (Documents)')}: {filtered_total}",
+                            f"{tr('Excluded Documents')}: {known_count}",
+                        ]
+                    else:
+                        stats_lines = [
+                            f"{tr('Total Manuscripts Found')}: {total_count}",
+                            f"{tr('Main Manuscripts')}: {len(c_main)}",
+                            f"{tr('Main Appendix (Groups)')}: {len(c_appx)}",
+                            f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
+                            f"{tr('Excluded Manuscripts')}: {known_count}",
+                        ]
                     for line in stats_lines:
                         doc.add_paragraph(line)
-                    doc.add_paragraph(tr("See Appendix for query information and excluded manuscripts."))
+                    if not _local_only_comp_export:
+                        doc.add_paragraph(tr("See Appendix for query information and excluded manuscripts."))
                     doc.add_paragraph("")
 
-                    headers = [
-                        tr("Category"),
-                        tr("Group"),
-                        tr("System ID"),
-                        tr("Library"),
-                        tr("Shelfmark"),
-                        tr("Title"),
-                        tr("Image"),
-                        tr("Score"),
-                        tr("Source Context"),
-                        tr("Manuscript Text"),
-                    ]
-                    table = doc.add_table(rows=1, cols=len(headers))
-                    table.autofit = False
-                    self._set_table_width_pct(table, 100)
-                    hdr_cells = table.rows[0].cells
-                    for idx, header in enumerate(headers):
-                        hdr_cells[idx].text = header
                     available_width = section.page_width - section.left_margin - section.right_margin
-                    ratios = [0.04, 0.05, 0.06, 0.08, 0.06, 0.08, 0.05, 0.04, 0.27, 0.27]  # Adjusted for Library
-                    for idx, ratio in enumerate(ratios):
-                        width = int(available_width * ratio)
-                        for cell in table.columns[idx].cells:
-                            cell.width = width
+                    # Phase 110 (5b): a LOCAL-only export does NOT emit the 10-column
+                    # Genizah manuscript table — the Local Documents blocks below are
+                    # the primary surface. Mixed / Genizah-only emit it as before.
+                    table = None
+                    if not _local_only_comp_export:
+                        headers = [
+                            tr("Category"),
+                            tr("Group"),
+                            tr("System ID"),
+                            tr("Library"),
+                            tr("Shelfmark"),
+                            tr("Title"),
+                            tr("Image"),
+                            tr("Score"),
+                            tr("Source Context"),
+                            tr("Manuscript Text"),
+                        ]
+                        table = doc.add_table(rows=1, cols=len(headers))
+                        table.autofit = False
+                        self._set_table_width_pct(table, 100)
+                        hdr_cells = table.rows[0].cells
+                        for idx, header in enumerate(headers):
+                            hdr_cells[idx].text = header
+                        ratios = [0.04, 0.05, 0.06, 0.08, 0.06, 0.08, 0.05, 0.04, 0.27, 0.27]  # Adjusted for Library
+                        for idx, ratio in enumerate(ratios):
+                            width = int(available_width * ratio)
+                            for cell in table.columns[idx].cells:
+                                cell.width = width
 
-                    for row in table_rows:
-                        row_cells = table.add_row().cells
-                        for col_idx, val in enumerate(row):
-                            cell = row_cells[col_idx]
-                            if col_idx in (8, 9):  # Source Context and Manuscript Text columns
-                                cell.text = ""
-                                self._add_docx_highlighted_runs(cell.paragraphs[0], val)
-                            else:
-                                cell.text = str(val).replace('*', '')
+                        for row in table_rows:
+                            row_cells = table.add_row().cells
+                            for col_idx, val in enumerate(row):
+                                cell = row_cells[col_idx]
+                                if col_idx in (8, 9):  # Source Context and Manuscript Text columns
+                                    cell.text = ""
+                                    self._add_docx_highlighted_runs(cell.paragraphs[0], val)
+                                else:
+                                    cell.text = str(val).replace('*', '')
 
                     # Phase 110 (EXP-F3 / M6): LOCAL hits render as per-result
                     # "research handout" blocks (filename / parent / filepath /
@@ -21279,50 +21336,59 @@ class GenizahGUI(QMainWindow):
                     for line in comp_settings_lines:
                         doc.add_paragraph(line)
 
-                    doc.add_paragraph("")
-                    doc.add_heading(tr("Excluded Manuscripts"), level=2)
+                    # Phase 110 (fix 4 / 5b): only Genizah known items belong in the
+                    # "Excluded Manuscripts" table — LOCAL excluded rows already
+                    # rendered in the Local Documents blocks above. For a LOCAL-only
+                    # export the excluded section is omitted entirely.
+                    _docx_genizah_known = [
+                        it for it in c_known if not (_has_local and _is_local_item(it))
+                    ]
                     excluded_table = None
-                    if c_known:
-                        excluded_table = doc.add_table(rows=1, cols=3)
-                        excluded_table.autofit = False
-                        self._set_table_width_pct(excluded_table, 100)
-                        excluded_hdr = excluded_table.rows[0].cells
-                        for idx, header in enumerate([tr("System ID"), tr("Shelfmark"), tr("Title")]):
-                            excluded_hdr[idx].text = header
-                        excluded_widths = [0.2, 0.3, 0.5]
-                        for idx, ratio in enumerate(excluded_widths):
-                            width = int(available_width * ratio)
-                            for cell in excluded_table.columns[idx].cells:
-                                cell.width = width
-                        for item in self._sort_comp_items(c_known):
-                            item_type = item.get('type', '')
-                            if item_type == 'part':
-                                sid = item.get('sys_id', '')
-                                shelf = item.get('part_display', '')
-                                title = item.get('oxford_title', '')
-                            elif item_type == 'manuscript':
-                                sid = item.get('sys_id', '')
-                                shelf, title = self.meta_mgr.get_meta_for_id(sid)
-                                if not shelf or shelf == "Unknown":
-                                    shelf = self.meta_mgr.get_shelfmark_from_header(item.get('raw_header', ''))
-                            else:
-                                sid, _, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
-                            row_cells = excluded_table.add_row().cells
-                            row_cells[0].text = str(sid or "")
-                            row_cells[1].text = str(shelf or "")
-                            row_cells[2].text = str(title or "")
-                    else:
-                        doc.add_paragraph(tr("None"))
+                    if not _local_only_comp_export:
+                        doc.add_paragraph("")
+                        doc.add_heading(tr("Excluded Manuscripts"), level=2)
+                        if _docx_genizah_known:
+                            excluded_table = doc.add_table(rows=1, cols=3)
+                            excluded_table.autofit = False
+                            self._set_table_width_pct(excluded_table, 100)
+                            excluded_hdr = excluded_table.rows[0].cells
+                            for idx, header in enumerate([tr("System ID"), tr("Shelfmark"), tr("Title")]):
+                                excluded_hdr[idx].text = header
+                            excluded_widths = [0.2, 0.3, 0.5]
+                            for idx, ratio in enumerate(excluded_widths):
+                                width = int(available_width * ratio)
+                                for cell in excluded_table.columns[idx].cells:
+                                    cell.width = width
+                            for item in self._sort_comp_items(_docx_genizah_known):
+                                item_type = item.get('type', '')
+                                if item_type == 'part':
+                                    sid = item.get('sys_id', '')
+                                    shelf = item.get('part_display', '')
+                                    title = item.get('oxford_title', '')
+                                elif item_type == 'manuscript':
+                                    sid = item.get('sys_id', '')
+                                    shelf, title = self.meta_mgr.get_meta_for_id(sid)
+                                    if not shelf or shelf == "Unknown":
+                                        shelf = self.meta_mgr.get_shelfmark_from_header(item.get('raw_header', ''))
+                                else:
+                                    sid, _, shelf, title = self._get_meta_for_header(item.get('raw_header', ''))
+                                row_cells = excluded_table.add_row().cells
+                                row_cells[0].text = str(sid or "")
+                                row_cells[1].text = str(shelf or "")
+                                row_cells[2].text = str(title or "")
+                        else:
+                            doc.add_paragraph(tr("None"))
 
                     if CURRENT_LANG == "he":
                         doc.styles["Normal"].paragraph_format.alignment = WD_PARAGRAPH_ALIGNMENT.RIGHT
                         for p in doc.paragraphs:
                             self._set_paragraph_rtl(p)
-                        self._set_table_rtl(table)
-                        for row in table.rows:
-                            for cell in row.cells:
-                                for p in cell.paragraphs:
-                                    self._set_paragraph_rtl(p)
+                        if table is not None:
+                            self._set_table_rtl(table)
+                            for row in table.rows:
+                                for cell in row.cells:
+                                    for p in cell.paragraphs:
+                                        self._set_paragraph_rtl(p)
                         if excluded_table is not None:
                             self._set_table_rtl(excluded_table)
                             for row in excluded_table.rows:
@@ -21401,10 +21467,14 @@ class GenizahGUI(QMainWindow):
                     else:
                         return self._fmt_item_legacy(ms_item)
 
+                # Phase 110 (5b): LOCAL-only export uses "Documents" terminology
+                # for the summary + section headings; Genizah/mixed keep
+                # "Manuscripts".
+                _found_label = tr("Documents Found") if _local_only_comp_export else tr("Total Manuscripts Found")
                 summary_lines = [
                     sep, tr("COMPOSITION REPORT SUMMARY"), sep,
                     f"Title: {comp_title}",
-                    f"{tr('Total Manuscripts Found')}: {total_count}"
+                    f"{_found_label}: {total_count}"
                 ]
                 detail_lines = [sep, tr("ALL RESULTS"), sep]
 
@@ -21414,13 +21484,22 @@ class GenizahGUI(QMainWindow):
                     )
                     for item in flat_items: detail_lines.extend(_fmt_ms_entry(item))
                 else:
-                    summary_lines.extend([
-                        f"{tr('Main Manuscripts')}: {len(c_main)}",
-                        f"{tr('Main Appendix (Groups)')}: {len(c_appx)}",
-                        f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
-                        f"{tr('Excluded Manuscripts')}: {known_count}"
-                    ])
-                    detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
+                    if _local_only_comp_export:
+                        summary_lines.extend([
+                            f"{tr('Main Documents')}: {len(c_main)}",
+                            f"{tr('Main Appendix (Groups)')}: {len(c_appx)}",
+                            f"{tr('Filtered by Text (Documents)')}: {filtered_total}",
+                            f"{tr('Excluded Documents')}: {known_count}"
+                        ])
+                        detail_lines = [sep, tr("Main Documents"), sep]
+                    else:
+                        summary_lines.extend([
+                            f"{tr('Main Manuscripts')}: {len(c_main)}",
+                            f"{tr('Main Appendix (Groups)')}: {len(c_appx)}",
+                            f"{tr('Filtered by Text (Manuscripts)')}: {filtered_total}",
+                            f"{tr('Excluded Manuscripts')}: {known_count}"
+                        ])
+                        detail_lines = [sep, tr("MAIN MANUSCRIPTS"), sep]
                     for item in c_main: detail_lines.extend(_fmt_ms_entry(item))
                     if c_appx:
                         detail_lines.extend([sep, tr("MAIN APPENDIX") + " (Grouped)", sep])
@@ -21436,7 +21515,8 @@ class GenizahGUI(QMainWindow):
                             detail_lines.append(f"=== GROUP: {sig} ({len(items)} items) ===")
                             for item in items: detail_lines.extend(_fmt_ms_entry(item))
                     if c_known:
-                        detail_lines.extend([sep, tr("EXCLUDED MANUSCRIPTS"), sep])
+                        _excl_heading = tr("EXCLUDED DOCUMENTS") if _local_only_comp_export else tr("EXCLUDED MANUSCRIPTS")
+                        detail_lines.extend([sep, _excl_heading, sep])
                         for item in c_known: detail_lines.extend(_fmt_ms_entry(item))
 
                 with open(path, 'w', encoding='utf-8') as f:
@@ -22631,6 +22711,23 @@ class GenizahGUI(QMainWindow):
 
     def display_comp_results(self, main_res, main_appx, main_summ, filt_res, filt_appx, filt_summ):
         # 1. Reset and cleanup
+        # Phase 110 (fix 5): batch-prime the LOCAL filepath cache at the DISPLAY
+        # entry point, covering BOTH the fresh-scan callback (already primes
+        # before grouping) and the session-restore path (which renders restored
+        # comp results directly via display_comp_results, bypassing the scan
+        # prime). Without this, a restored LOCAL comp row would fall back to a
+        # per-row indexer.get_filepath() SQLite call on the UI thread.
+        try:
+            _prime_items = list(main_res or [])
+            for _grp in (main_appx or {}).values():
+                _prime_items.extend(_grp)
+            _prime_items.extend(filt_res or [])
+            for _grp in (filt_appx or {}).values():
+                _prime_items.extend(_grp)
+            _prime_items.extend(getattr(self, 'comp_known', []) or [])
+            self._prime_comp_local_filepath_cache(_prime_items)
+        except Exception:
+            pass
         self.is_comp_running = False
         self.btn_comp_run.setText(tr("Analyze Composition"))
         self.btn_comp_run.setStyleSheet("background-color: #2980b9; color: white;")

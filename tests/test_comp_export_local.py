@@ -34,8 +34,6 @@ Requirements covered:
 """
 from __future__ import annotations
 
-import pytest
-
 from shared.local_sys_id import is_local_sys_id
 from shared.export_dossier import local_documents_header_row
 
@@ -91,7 +89,6 @@ def _is_local(item):
 # EXP-F3 — LOCAL row shape via the module-level helper (C1)
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(reason="_build_local_comp_row lands in Plan 04", strict=False)
 def test_xlsx_local_row_shape():
     """EXP-F3: a LOCAL composition hit builds a 5-cell row
     [filename, parent_folder, full_filepath, page, matched_text_raw] via the
@@ -123,7 +120,6 @@ def test_xlsx_local_row_shape():
     assert "*יאיר*" in row[4], "matched-text cell must retain the *-highlight markers"
 
 
-@pytest.mark.xfail(reason="_partition_comp_export_rows lands in Plan 04", strict=False)
 def test_all_formats_local_aware():
     """EXP-F3: the partition helper splits grouped comp items into the Genizah
     set (untouched) and the LOCAL 5-cell row set, so each of xlsx/csv/txt/docx
@@ -152,7 +148,6 @@ def test_all_formats_local_aware():
     )
 
 
-@pytest.mark.xfail(reason="_partition_comp_export_rows lands in Plan 04", strict=False)
 def test_genizah_only_export_unchanged():
     """EXP-F3 STRUCTURAL parity (C5): a Genizah-only export partitions to an
     EMPTY LOCAL set and leaves the Genizah items IDENTICAL (same objects, same
@@ -179,7 +174,6 @@ def test_genizah_only_export_unchanged():
     )
 
 
-@pytest.mark.xfail(reason="metadata-prefetch LOCAL filter lands in Plan 04", strict=False)
 def test_local_only_export_no_metadata_fetch():
     """Round-2 #1 / EXP-F3 / D-12 / T-110-07: a LOCAL-only composition export must
     NOT fire the NLI metadata prefetch (which would start a ShelfmarkLoaderThread
@@ -223,3 +217,142 @@ def test_local_only_export_no_metadata_fetch():
         "a mixed list must keep only the Genizah id for the metadata prefetch "
         "(LOCAL 97… ids filtered out before _fetch_metadata_with_dialog)"
     )
+
+
+# ---------------------------------------------------------------------------
+# 5a — LOCAL-only export omits Genizah/MiDRASH/Stökl credits
+# ---------------------------------------------------------------------------
+
+def _local_only_predicate(items):
+    """Mirror export_comp_report: LOCAL-only when EVERY item is LOCAL."""
+    has_local = any(_is_local(it) for it in items)
+    return has_local and all(_is_local(it) for it in items)
+
+
+def test_local_only_export_omits_genizah_credits():
+    """5a (HIGH): a LOCAL-only composition export's credit block must contain no
+    MiDRASH / Stökl / Zenodo / NLI / FGP / PGP data-source attribution lines —
+    only the app/creator credit. The LOCAL-only predicate (all items LOCAL) is
+    what export_comp_report threads into _get_credit_header(local_only=...), and
+    the shared credits builder omits the attribution rows for local_only.
+
+    PURE: exercises the LOCAL-only predicate + the shared credits_lines builder
+    (the same omission _get_credit_header(local_only=True) applies), no Qt."""
+    from shared.export_dossier import credits_lines
+
+    # (a) An all-LOCAL comp item set is LOCAL-only.
+    assert _local_only_predicate([_fake_local_item()]) is True
+    # (b) Mixed Genizah+LOCAL is NOT LOCAL-only (keeps full Genizah credits).
+    assert _local_only_predicate([_fake_local_item(), _fake_genizah_item()]) is False
+
+    # LOCAL-only credits omit every Genizah/MiDRASH attribution line.
+    local_credits = "\n".join(credits_lines(lang="en", local_only=True,
+                                            app_name="Dicta Genizah Search Pro"))
+    for banned in ("MiDRASH", "Stoekl", "Zenodo", "Dataset", "NLI", "FGP", "PGP",
+                   "doi.org"):
+        assert banned not in local_credits, (
+            f"LOCAL-only export credits must not contain {banned!r}"
+        )
+    # The app/creator attribution is retained.
+    assert "Dicta Genizah Search Pro" in local_credits
+
+    # By contrast, a NON-local-only (Genizah/mixed) export keeps the full credit
+    # chain — proves the suppression is conditional on the LOCAL-only predicate.
+    full_credits = "\n".join(credits_lines(lang="en", local_only=False,
+                                           app_name="Dicta Genizah Search Pro"))
+    assert "MiDRASH" in full_credits and "Zenodo" in full_credits
+
+
+# ---------------------------------------------------------------------------
+# 5b — LOCAL-only export uses "Documents" terminology, not "Manuscripts"
+# ---------------------------------------------------------------------------
+
+def test_local_only_export_uses_document_terminology():
+    """5b (HIGH): a LOCAL-only composition export uses "Documents" / "Local
+    Documents" terminology and the LOCAL 5-column surface — NOT the 10-column
+    Genizah "Manuscripts" table. Mixed exports keep both surfaces.
+
+    PURE: exercises the LOCAL-only predicate + the partition helper + the LOCAL
+    header row, which together determine that a LOCAL-only export emits ONLY the
+    LOCAL surface (the empty Genizah table/sheet is dropped). No Qt."""
+    from shared.export_dossier import (
+        _build_local_comp_row,
+        _partition_comp_export_rows,
+        local_documents_header_row,
+    )
+
+    def _local_row_fn(it):
+        pg = it["pages"][0]
+        return _build_local_comp_row(
+            filename="x.pdf", parent_folder="dir", full_filepath="/d/x.pdf",
+            page=str(pg.get("p_num", "")), matched_text_raw=pg.get("source_ctx", ""),
+        )
+
+    # LOCAL-only: the partition leaves ZERO Genizah items, so the Genizah
+    # manuscript table/sheet is empty and dropped — only the LOCAL surface emits.
+    only_local = [_fake_local_item(), _fake_local_item()]
+    assert _local_only_predicate(only_local) is True
+    genizah_items, local_rows = _partition_comp_export_rows(
+        only_local, is_local_fn=_is_local, local_row_fn=_local_row_fn,
+    )
+    assert genizah_items == [], (
+        "a LOCAL-only export must partition to ZERO Genizah items (no Genizah "
+        "manuscript table/sheet is emitted)"
+    )
+    assert len(local_rows) == 2, "every LOCAL item must produce a LOCAL row"
+
+    # The LOCAL surface header uses "Documents" terminology, not "Manuscript".
+    hdr_en = local_documents_header_row("en")
+    assert any("Document" in h for h in hdr_en) or len(hdr_en) == 5
+    assert not any("Manuscript" in h for h in hdr_en), (
+        "the Local Documents header must not use Manuscript terminology"
+    )
+
+    # Mixed export keeps the Genizah surface alongside the LOCAL one.
+    mixed = [_fake_local_item(), _fake_genizah_item()]
+    assert _local_only_predicate(mixed) is False
+    g_items, l_rows = _partition_comp_export_rows(
+        mixed, is_local_fn=_is_local, local_row_fn=_local_row_fn,
+    )
+    assert len(g_items) == 1 and len(l_rows) == 1, (
+        "a mixed export keeps BOTH surfaces (Genizah manuscript rows + LOCAL rows)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# fix 6 — src_lbl='LOCAL' item with no display dict still lands on LOCAL surface
+# ---------------------------------------------------------------------------
+
+def test_src_lbl_local_without_display_lands_on_local_surface():
+    """fix 6 (MED): a grouped comp item with src_lbl='LOCAL' but a missing /
+    non-97 sys_id (and NO 'display' dict) is still detected as LOCAL by the item
+    predicate, so it exports to the Local Documents surface. The 97-prefix-only
+    discriminator would miss it; _is_local_item (src_lbl fast path) catches it."""
+    from shared.export_dossier import _build_local_comp_row, _partition_comp_export_rows
+
+    # src_lbl='LOCAL' but a non-LOCAL (non-97) sys_id and no display dict.
+    odd_local = {
+        "type": "manuscript",
+        "sys_id": "",  # missing sid — only the src_lbl marks it LOCAL
+        "src_lbl": "LOCAL",
+        "pages": [{"raw_header": "x", "p_num": 1, "source_ctx": "טקסט"}],
+    }
+    assert is_local_sys_id(odd_local.get("sys_id", "")) is False, (
+        "the 97-prefix discriminator alone must NOT flag this item"
+    )
+    assert _is_local(odd_local) is True, (
+        "the src_lbl='LOCAL' fast path must flag it as LOCAL"
+    )
+
+    def _local_row_fn(it):
+        pg = it["pages"][0]
+        return _build_local_comp_row(
+            filename="y.pdf", parent_folder="dir", full_filepath="/d/y.pdf",
+            page=str(pg.get("p_num", "")), matched_text_raw=pg.get("source_ctx", ""),
+        )
+
+    genizah_items, local_rows = _partition_comp_export_rows(
+        [odd_local], is_local_fn=_is_local, local_row_fn=_local_row_fn,
+    )
+    assert genizah_items == [], "the src_lbl='LOCAL' item must NOT stay on the Genizah surface"
+    assert len(local_rows) == 1, "the src_lbl='LOCAL' item must land on the LOCAL surface"

@@ -259,6 +259,15 @@ TRANSLATIONS = {
     "Filtered by Text ({})": "סונן לפי טקסט ({})",
     "Filtered ({})": "מסוננים ({})",
     "Filtered by Text (Manuscripts)": "סונן לפי טקסט (כתבי יד)",
+    # Phase 110 (EXP-F3 / 5b): LOCAL-only composition export terminology. Selected
+    # only when EVERY exported comp item is a LOCAL "My Library" document — the
+    # Genizah/mixed exports keep the "...Manuscripts" labels above.
+    "Documents Found": "מסמכים שנמצאו",
+    "Main Documents": "מסמכים עיקריים",
+    "Filtered by Text (Documents)": "סוננו לפי טקסט (מסמכים)",
+    "Excluded Documents": "מסמכים שלא נכללו",
+    "EXCLUDED DOCUMENTS": "מסמכים שלא נכללו",
+    "Matched Text": "טקסט תואם",
     "EXCLUDED MANUSCRIPTS": "כתבי יד מוחרגים",
     "Excluded ({})": "מוחרגים ({})",
     "Excluded Manuscripts": "כתבי יד מוחרגים",
