@@ -16714,6 +16714,12 @@ class GenizahGUI(QMainWindow):
                 if sid:
                     all_sys_ids.add(sid)
 
+        # Phase 110 (D-12): FJMS domains + printed status are Genizah-catalog
+        # lookups — strip LOCAL `97…` sys_ids so a LOCAL comp hit never reaches
+        # them (LOCAL files have no catalog domain/printed metadata).
+        from shared.local_sys_id import is_local_sys_id as _is_local
+        all_sys_ids = {sid for sid in all_sys_ids if not _is_local(sid)}
+
         if not all_sys_ids:
             self._comp_result_domain_map = {}
             self._comp_result_domain_counts = {}
@@ -18642,6 +18648,16 @@ class GenizahGUI(QMainWindow):
         return contains
 
     def start_metadata_loading(self, ids):
+        if not ids:
+            return
+        # Phase 110 (D-12): defensively strip LOCAL `97…` sys_ids at the loader
+        # entry point so a private LOCAL id can NEVER reach the NLI
+        # ShelfmarkLoaderThread, regardless of caller (comp display, search, etc).
+        try:
+            from shared.local_sys_id import is_local_sys_id as _is_local
+            ids = [sid for sid in ids if not _is_local(sid)]
+        except Exception:
+            pass
         if not ids:
             return
         logger.debug("start_metadata_loading: %d ids, sample=%s", len(ids), ids[:10])
@@ -22698,11 +22714,15 @@ class GenizahGUI(QMainWindow):
             self.lbl_comp_status.setStyleSheet(f"color: {msg_color}; font-weight: bold;")
 
         ids_to_fetch = set()
+        # Phase 110 (D-12): never queue a LOCAL `97…` sys_id for the NLI shelfmark
+        # loader — LOCAL display fields come from the primed filepath cache, not
+        # the network. Mirrors the group_composition_results / FJMS filters.
+        from shared.local_sys_id import is_local_sys_id as _is_local_for_fetch
         def _collect_id(item):
             sid = item.get('sys_id')
             if not sid:
                 sid, _ = self.meta_mgr.parse_header_smart(item.get('raw_header', ''))
-            if sid and sid not in self.meta_mgr.nli_cache:
+            if sid and not _is_local_for_fetch(sid) and sid not in self.meta_mgr.nli_cache:
                  ids_to_fetch.add(sid)
 
         # Collect domain data for composition results

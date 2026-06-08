@@ -460,6 +460,49 @@ def test_genizah_default_nonregression():
 
 
 # ---------------------------------------------------------------------------
+# D-12 (display path) — LOCAL ids never reach the NLI metadata fetch during
+# group_composition_results
+# ---------------------------------------------------------------------------
+
+def test_local_comp_grouping_no_nli_fetch():
+    """D-12 (BLOCKER): group_composition_results must filter LOCAL `97…` sys_ids
+    OUT of the metadata fetch — a grouped LOCAL composition item must NEVER reach
+    self.meta_mgr.batch_fetch_shelfmarks (which submits to the NLI network path
+    for ids not in csv_bank).
+
+    A LOCAL-only grouping run must call batch_fetch_shelfmarks([]) — the private
+    LOCAL id is stripped before the fetch."""
+    from genizah_core import SearchEngine
+
+    LOCAL_SYS_ID = "970012345601234567"
+
+    engine = SearchEngine.__new__(SearchEngine)  # bypass __init__
+    engine.meta_mgr = MagicMock(name="meta_mgr")
+    # csv_bank / nli_cache emptiness mirrors a real LOCAL id (not catalogued).
+    engine.meta_mgr.nli_cache = {}
+    engine.meta_mgr.csv_bank = {}
+    engine.meta_mgr.get_shelfmark_from_header.return_value = "doc.pdf"
+
+    local_item = {
+        "type": "manuscript",
+        "sys_id": LOCAL_SYS_ID,
+        "src_lbl": "LOCAL",
+        "score": 10,
+        "raw_header": f"{LOCAL_SYS_ID}_LOCAL_P3_F1r",
+        "pages": [],
+    }
+
+    engine.group_composition_results([local_item], threshold=5)
+
+    assert engine.meta_mgr.batch_fetch_shelfmarks.call_count == 1
+    called_ids = engine.meta_mgr.batch_fetch_shelfmarks.call_args[0][0]
+    assert called_ids == [], (
+        "a LOCAL grouped composition item must produce an EMPTY id list for "
+        "batch_fetch_shelfmarks (D-12 — no private LOCAL id reaches the NLI fetch)"
+    )
+
+
+# ---------------------------------------------------------------------------
 # D-12 — no cloud-write surface fires on a LOCAL composition run
 # ---------------------------------------------------------------------------
 

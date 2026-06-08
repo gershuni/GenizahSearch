@@ -9571,8 +9571,15 @@ class SearchEngine:
         if status_callback:
             status_callback(tr("Fetching metadata..."))
 
+        # Phase 110 (D-12 / Round-2 #1): filter LOCAL `97…` sys_ids OUT of the
+        # NLI/FJMS metadata fetch. A private LOCAL id is not in csv_bank, so a
+        # grouped LOCAL composition run would otherwise reach the NLI network
+        # path. LOCAL display data comes only from the primed filepath cache.
+        from shared.local_sys_id import is_local_sys_id
+        genizah_ids = [sid for sid in ids if sid and not is_local_sys_id(sid)]
+
         # Load metadata (fast due to previous fix)
-        self.meta_mgr.batch_fetch_shelfmarks([x for x in ids if x], progress_callback=progress_callback)
+        self.meta_mgr.batch_fetch_shelfmarks(genizah_ids, progress_callback=progress_callback)
 
         if status_callback:
             status_callback(tr("Grouping results..."))
