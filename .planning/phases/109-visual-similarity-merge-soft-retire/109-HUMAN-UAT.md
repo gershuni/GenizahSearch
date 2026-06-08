@@ -1,30 +1,35 @@
 ---
 phase: 109-visual-similarity-merge-soft-retire
-plan: "07"
+plan: "13"
 type: human-uat
 status: partial
 created: "2026-06-07"
-updated: "2026-06-07"
-automated_gate: PASSED  # 36 tests: test_join_workbench_vs + test_join_workbench_i18n + test_join_workbench_no_private + test_visual_similarity_dialog + test_join_workbench_construct — all green
-parity_sign_off: REJECTED  # D-14b — Hillel ran the live UAT 2026-06-07 and returned 8 change requests (G-06..G-13 below); marker stays "pending parity sign-off"
+updated: "2026-06-08"
+automated_gate: PASSED  # 45 tests: test_join_workbench_vs(27) + test_join_workbench_i18n(5) + test_join_workbench_no_private(2) + test_visual_similarity_dialog(6) + test_join_workbench_construct(2) + test_triage_second_click_clears + test_folio_and_triage_share_one_row + test_vs_hint_and_combined_empty_strings_present + test_browse_resultdialog_vs_buttons_removed + test_joinsdialog_opens_plain_and_closes — all green (2026-06-08)
+parity_sign_off: PENDING  # D-14b — Round 4 in progress; marker stays "pending parity sign-off" until Hillel signs off
 ---
 
-# Phase 109 Plan 07: Parity UAT — Visual Similarity Toggle Design (D-14b re-verification)
+# Phase 109 Plan 13: Parity UAT — Visual Similarity Toggle Design (D-14b Round 4)
 
-This is the SECOND round of the parity UAT. The first round (Plan 03) was **REJECTED** with 5 gaps
-(G-01..G-05). Plans 04-06 implemented all gap fixes: G-01 Hebrew label, G-02 VS card text, G-03
-no-spinner empty state, G-04 single toggle replacing 3 radios, G-05 pick-mode rerouted to Workbench.
+This is the CONSOLIDATED round-4 re-UAT. It subsumes the superseded Plan 07 round (round 3
+was rejected with 8 change requests G-06..G-13). Plans 08-12 implemented all gap fixes: G-06
+eye badge (replacing ★both/⊙VS#rank), G-07 VS buttons removed from Browse + ResultDialog,
+G-08 JoinsDialog button rerouted plain + closes dialog, G-09 rank label removed, G-10 triage
+undo, G-11 merged folio+triage row, G-12 visibly-ON toggle, G-13 hint + combined empty message.
 
-The automated gate (Task 1, including `tests/test_join_workbench_construct.py` per the Codex LOW fix)
-is GREEN before this manual UAT proceeds.
+> **Consolidation note (2026-06-08):** Plan 07's round 3 was REJECTED and superseded by this Plan
+> 13 per user decision ("Consolidate — one round"). This single consolidated round is the ONLY
+> comprehensive human UAT for the phase. The Scenarios A-M base checklist from rounds 2/3 is
+> preserved below (scenarios F, H, I that round 4 does not explicitly repeat are retained for
+> reference). The round-4 block (Scenarios A2-A8 + re-verified K/L/M) follows the history section.
 
-**The `_show_vs_dialog` deprecation marker stays "pending parity sign-off; normal AND pick callers
-rerouted" until ALL scenarios A-M pass. On Hillel's approval, update this file's frontmatter to
-`status: complete` / `parity_sign_off: APPROVED` — the marker then goes live (D-11/D-14b).**
+**The `_show_vs_dialog` deprecation marker stays "pending parity sign-off" until ALL Round-4
+scenarios pass. On Hillel's approval, this file's frontmatter flips to `status: complete` /
+`parity_sign_off: APPROVED` — the marker then goes live (D-11/D-14b).**
 
 ---
 
-## Current Test (automated)
+## Round 4 Automated Gate (2026-06-08)
 
 Run before this UAT round. ALL must be green before the human click-through begins.
 
@@ -36,131 +41,114 @@ python -m pytest tests/test_join_workbench_vs.py tests/test_join_workbench_i18n.
 
 | Test file / suite | Tests | Status | Details |
 |-------------------|-------|--------|---------|
-| `test_join_workbench_vs.py` | 22 | PASSED | Parity (D-14a), toggle/ensure-vs/set_source-pending, intersection, empty-state, re-anchor, pick-callback, invoke-pick |
-| `test_join_workbench_i18n.py` | 4 | PASSED | i18n guard — all new tr() keys present in TRANSLATIONS |
+| `test_join_workbench_vs.py` | 27 | PASSED | Core parity + toggle/intersection + eye badge + triage toggle + folio-merge + VS buttons removed + JoinsDialog reroute |
+| `test_join_workbench_i18n.py` | 5 | PASSED | i18n guard — all gap-round-3 keys (visual similarity, hint, combined empty, link tooltip) in TRANSLATIONS |
 | `test_join_workbench_no_private.py` | 2 | PASSED | No `_vs_*` private calls on rerouted paths (D-18) |
 | `test_visual_similarity_dialog.py` | 6 | PASSED | Pick-mode dialog tests (D-12 preserved) |
-| `test_join_workbench_construct.py` | 2 | PASSED | Window construction — Qt __init__ ordering (LOW fix from Codex review) |
-| **Total** | **36** | **PASSED** | `36 passed in 2.91s` — 2026-06-07 |
+| `test_join_workbench_construct.py` | 2 | PASSED | Window construction — Qt __init__ ordering (Codex LOW fix) |
+| **Total** | **45** | **PASSED** | `45 passed in 3.00s` — 2026-06-08 |
 
 ---
 
-## Tests (Manual Parity UAT — PENDING sign-off)
+## Round 4 Scenarios (Human click-through on `python genizah_app.py`)
 
-The following scenarios cover G-01..G-05 (gap fixes from round 1) plus the three scenarios that
-were NOT REACHED in the first round (four actions, reused-window re-anchor, perf ≥80). Hillel
-checks each box on the live desktop app (`python genizah_app.py`).
-
----
-
-### Scenario A — G-01 Hebrew label
-
-**Setup:** Switch the desktop UI to Hebrew (`lang=he`). Open the Joins Workbench.
-
-- [ ] CONFIRM: The Visual Similarity toggle button reads **חזותי** ("visual"), NOT חיצוני ("external")
-- [ ] CONFIRM: All VS-related status strings also use **חזותי** wherever the visual concept appears
-- [ ] CONFIRM: No occurrence of the word **חיצוני** in the Workbench for the visual-similarity context
+Hillel checks each box on the live desktop app. Switch to `lang=he` for at least Scenarios
+A2/A3/A4/A8 to confirm Hebrew strings use **חזותי** (NOT חיצוני).
 
 ---
 
-### Scenario B — Toggle ON, empty search box (pure VS)
+### Scenario A2 — G-06 Single Eye Badge
 
-**Setup:** Pick 3-5 anchors that HAVE VS data (try Browse → "Visual similarity" entry, or open-by-shelfmark). For each:
+**Setup:** Toggle ON; load VS look-alikes (pick an anchor with VS data).
 
-- [ ] Toggle the "Visual Similarity" button ON with the search builder box empty
-- [ ] CONFIRM: The anchor's VS look-alikes load automatically (no text query needed)
-- [ ] CONFIRM: Results are paginated 20 cards per page
-- [ ] CONFIRM: Every candidate card shows a NON-EMPTY shelfmark (no raw numeric alma_id, no blank)
-- [ ] CONFIRM: The sys_id set displayed matches `get_vs_service().get_suggestions(sys_id, 200)` output (same look-alikes, no text-only leakage)
-
----
-
-### Scenario C — Toggle ON + a search term (intersection)
-
-**Setup:** With the toggle ON, type a search term in the builder and click Find.
-
-- [ ] CONFIRM: ONLY candidates that are BOTH VS look-alikes AND match the text term appear
-- [ ] CONFIRM: Text-only candidates (not VS look-alikes) do NOT appear
-- [ ] CONFIRM: VS-only candidates (not matching the text term) do NOT appear
-- [ ] CONFIRM: Matching candidates carry a **★both** badge marking them as intersection hits
+- [ ] CONFIRM: Every visual look-alike card shows a SINGLE eye **👁** badge (NO ★both, NO ⊙VS, NO "#rank")
+- [ ] CONFIRM (lang=he): Hovering the eye badge shows tooltip **"דמיון חזותי"** (not "דמיון חיצוני")
+- [ ] CONFIRM (lang=en): Hovering the eye badge shows tooltip **"visual similarity"**
+- [ ] CONFIRM: Text-only candidates (toggle OFF) are **unbadged** — no eye badge on non-VS cards
+- [ ] CONFIRM: Intersection hits (toggle ON + term) carry the eye badge (not ★both)
+- [ ] CONFIRM: ⚓self / ⇄other-side badges still appear where applicable and take precedence over the eye
 
 ---
 
-### Scenario D — Toggle ON after an existing search (filter down)
+### Scenario A3 — G-06.3 + G-12 Toggle Appearance
 
-**Setup:** With the toggle OFF, run a text search first. Then toggle ON.
+**Setup:** Open the Joins Workbench. Look at the "Visual Similarity" toggle button.
 
-- [ ] CONFIRM: The existing results filter down — only the VS∩term intersection remains visible
-- [ ] CONFIRM: Text-only candidates that were showing before are removed from the candidate pane
-- [ ] CONFIRM: The filtered set shows **★both** badges on the remaining candidates
-
----
-
-### Scenario E — Toggle OFF badge behavior (HIGH-1)
-
-**Setup:** With the toggle OFF (or on a fresh Workbench session where the toggle was never turned on), run a text search.
-
-- [ ] CONFIRM: Normal text results appear — no VS-only rows in the pane
-- [ ] CONFIRM: Among the text results, any candidate that IS also a VS look-alike for the current anchor shows the **★both** or VS badge — even on a FRESH search where the toggle was never turned on (the current anchor's VS is loaded for badging regardless of toggle state)
-- [ ] CONFIRM: Candidates that are NOT VS look-alikes show no VS badge
+- [ ] CONFIRM: The toggle label reads **👁 Visual Similarity** (eye prefix on the label)
+- [ ] CONFIRM (lang=he): The toggle label reads **👁 דמיון חזותי** (eye + correct HE term, not חיצוני)
+- [ ] Toggle ON: CONFIRM the ON state is **UNMISTAKABLE** — heavier/darker border (not just a subtle sunken look), visually distinct from OFF across the Windows theme
+- [ ] Toggle OFF: CONFIRM it **visibly returns** to the OFF appearance (no ambiguity between ON and OFF states)
 
 ---
 
-### Scenario F — G-02 VS card transcription text
+### Scenario A4 — G-13 Hint + Combined Empty Message
 
-**Setup:** Toggle ON and load VS candidates (Scenario B condition).
+**Setup:** Open an anchor with VS data. Toggle ON with results showing (pure-VS or intersection).
 
-- [ ] CONFIRM: VS candidate cards display the candidate's **transcription text** (not metadata or shelfmark only)
-- [ ] CONFIRM: The text appears in the candidate card body (may load lazily per page — wait for the page to settle)
-- [ ] CONFIRM: Text renders for the visible page cards; subsequent pages load text on navigation
-
----
-
-### Scenario G — G-03 empty intersection, no spinner (MEDIUM-1)
-
-**Setup:** Toggle ON + enter a search term that you know matches NO VS look-alike for this anchor (e.g., a very specific rare word not likely in the look-alike set). Click Find.
-
-- [ ] CONFIRM: The result pane does NOT spin indefinitely ("loading…" forever)
-- [ ] CONFIRM: The result pane does NOT show a bare "0/0 shown" with no other message
-- [ ] CONFIRM: The result pane shows the message **"No look-alikes match this search"** (Hebrew: **"אין דומים חזותית התואמים לחיפוש זה"**)
+- [ ] CONFIRM: A distinct, subtly-styled, eye-prefixed hint line appears near the grid reading **"Turn off Visual Similarity to see more results"**
+- [ ] CONFIRM (lang=he): The hint reads in Hebrew with **חזותי** (not חיצוני)
+- [ ] Toggle OFF: CONFIRM the hint **disappears**
+- [ ] Toggle ON again to confirm it reappears
+- [ ] Now toggle ON + enter a search term that matches NO VS look-alike for this anchor:
+  - [ ] CONFIRM: The combined message **"No look-alikes match this search — turn off Visual Similarity to see all results"** appears
+  - [ ] CONFIRM: There is NO bare "0/0 shown" with no other message
+  - [ ] CONFIRM: There is NO never-resolving "loading…" spinner
 
 ---
 
-### Scenario H — No-VS anchor disabled toggle (D-08)
+### Scenario A5 — G-10 Triage Undo
 
-**Setup:** Pick an anchor with NO VS data (roughly half of all manuscripts have none).
+**Setup:** Toggle ON and load VS candidates. Find a candidate card.
 
-- [ ] CONFIRM: The "Visual Similarity" toggle button is **greyed out / disabled**
-- [ ] CONFIRM: The pane stays on text results (not stuck on a disabled VS view)
-- [ ] CONFIRM: No error or crash occurs when clicking the greyed toggle
-
----
-
-### Scenario I — Compare dialog parity
-
-**Setup:** With the toggle ON and VS (or intersection) candidates visible, open the side-by-side Compare dialog.
-
-- [ ] CONFIRM: The Compare dialog reflects the **toggle-filtered / badged candidate state** (shows the same set of candidates visible in the Workbench pane)
-- [ ] CONFIRM: If toggle is OFF (text mode), Compare shows the text candidates with their VS badges
+- [ ] Click **Y** on a card: CONFIRM it marks the card as "yes" (visually highlighted)
+- [ ] Click **Y** again on the same card: CONFIRM it **clears / undoes** the triage (no triage state)
+- [ ] Click **Y** then **N** on the same card: CONFIRM it ends on **N** (not a double-clear)
+- [ ] Repeat the toggle pattern for **?** (question): click ?, click ? again to clear
+- [ ] Repeat the toggle pattern for **N** (no): click N, click N again to clear
 
 ---
 
-### Scenario J — G-05 pick-mode return (HIGH-4)
+### Scenario A6 — G-11 Merged Folio+Triage Row
 
-**Setup:** Open a JoinsDialog (Join Lab) for an existing join. Click the partner-picker button (🔍).
+**Setup:** Toggle ON with candidates loaded. Look at the layout of candidate cards.
 
-- [ ] CONFIRM: The Join Workbench opens — NOT the old orange VS dialog
-- [ ] CONFIRM: The Workbench opens **in pick capacity** (pick mode active)
-- [ ] CONFIRM: The **FIRST PAGE** of candidate cards already shows a **"Select as partner"** button — the button is present on the first render, NOT only after paging or scrolling (HIGH-4 ordering: callback set before first render)
-- [ ] Pick a candidate by clicking "Select as partner"
-- [ ] CONFIRM: **Fragment B** in the JoinsDialog is filled with the picked shelfmark
-- [ ] CONFIRM: The picker window **closes** after the pick
+- [ ] CONFIRM: Each candidate card shows the folio nav (**◀ p.N ▶** or equivalent) and the **Y/?/N** triage buttons on **ONE row** (folio LEFT, triage RIGHT)
+- [ ] CONFIRM: This saves a row of vertical space vs the old layout (two separate rows for folio and triage)
+- [ ] CONFIRM: The folio prev/next buttons still **flip the card page** (navigate to a different page of that candidate)
 
 ---
 
-### Scenario K — Four actions on VS candidate cards (NOT REACHED in round 1, re-verify)
+### Scenario A7 — G-07 VS Buttons Gone
 
-**Setup:** With the toggle ON and VS candidates loaded, focus on one VS candidate card.
+**Setup:** Open the Browse tab on a VS-bearing manuscript.
+
+- [ ] CONFIRM: There is **NO standalone Visual-Similarity button** (🔬 or equivalent) in the Browse tab — only "Find Joins"
+- [ ] CONFIRM: The "Find Joins" button **still opens the Workbench** on that fragment
+
+**Setup:** Open a ResultDialog (search result detail).
+
+- [ ] CONFIRM: There is **NO 🔬 VS button** in the ResultDialog — only "Find Joins"
+- [ ] CONFIRM: "Find Joins" in the ResultDialog **still opens the Workbench** on that fragment
+
+---
+
+### Scenario A8 — G-08 JoinsDialog Link Button
+
+**Setup:** Open the Join Lab (JoinsDialog) for an existing join.
+
+- [ ] CONFIRM: The partner-picker button shows a **🔗 link icon**
+- [ ] CONFIRM (lang=en): The tooltip reads **"find joins in joins lab"**
+- [ ] CONFIRM (lang=he): The tooltip reads the correct HE string with **חזותי** (not חיצוני)
+- [ ] Click the link button: CONFIRM the **Join Workbench opens** anchored on Fragment A as a NORMAL (toggle-OFF) browse
+- [ ] CONFIRM: The JoinsDialog **closes** after the Workbench opens
+- [ ] CONFIRM: The Workbench opened via this path shows **NO "Select as partner" button** on the candidate cards (pick-back retired)
+- [ ] CONFIRM: The Workbench opened this way is NOT the old orange VS dialog — it is the standard Join Workbench
+
+---
+
+### Scenario K (re-verify) — Four Actions on VS Cards
+
+**Setup:** Toggle ON and load VS candidates.
 
 - [ ] CONFIRM: **Browse** action opens the candidate in the Browse panel
 - [ ] CONFIRM: **Puzzle** action adds the candidate to the Fragment Puzzle
@@ -169,17 +157,17 @@ checks each box on the live desktop app (`python genizah_app.py`).
 
 ---
 
-### Scenario L — Reused-window re-anchor reloads VS (NOT REACHED in round 1 — HIGH-2)
+### Scenario L (re-verify) — Reused-Window Re-Anchor VS Reload
 
-**Setup:** The Workbench is already open on a VS-bearing anchor (call it anchor A). Re-anchor the SAME window to a DIFFERENT VS-bearing fragment (call it anchor B). Use either: the candidate card "⚓" re-anchor button on a candidate of anchor A, OR open Browse "Visual similarity" on a different fragment.
+**Setup:** The Workbench is open on a VS-bearing anchor A. Re-anchor to a DIFFERENT VS-bearing fragment B.
 
-- [ ] CONFIRM: After re-anchoring to B, the VS look-alikes **RELOAD for the NEW anchor B** — the candidate set changes (it is B's look-alike set, NOT A's)
-- [ ] CONFIRM: The anchor pin indicator in the Workbench shows anchor B's shelfmark (not A's)
-- [ ] CONFIRM: With the toggle OFF on the re-anchored window, any VS badges shown on text candidates reflect **anchor B's** VS set (not anchor A's stale set)
+- [ ] CONFIRM: After re-anchoring to B, the VS look-alikes **reload for anchor B** (the candidate set changes — it is B's look-alike set, NOT A's stale set)
+- [ ] CONFIRM: The anchor pin indicator shows **anchor B's shelfmark** (not A's)
+- [ ] CONFIRM: With toggle OFF on the re-anchored window, VS badges on text candidates reflect **anchor B's** VS set (not A's stale set)
 
 ---
 
-### Scenario M — Performance: ≥80 look-alikes (NOT REACHED in round 1)
+### Scenario M (re-verify) — Performance: ≥80 Look-alikes
 
 **Setup:** Find and open an anchor with ≥80 VS look-alikes. Toggle ON.
 
@@ -189,118 +177,131 @@ checks each box on the live desktop app (`python genizah_app.py`).
 
 ---
 
-## Summary
+## Round 4 Summary Table
 
-Record results here as you work through the scenarios.
+Record results as you work through the scenarios.
 
 | Scenario | Status | Notes |
 |----------|--------|-------|
-| A — Hebrew label (חזותי) | ISSUE | Toggle ON-state not visually apparent (→ G-12) |
-| B — Toggle ON, pure VS look-alikes | (not reported) | |
-| C — Toggle ON + term (intersection only) | ISSUE | "★both" badge to be replaced by an eye badge (→ G-06) |
-| D — Toggle ON after existing search (filter down) | ISSUE | badge change (→ G-06); needs "turn off VS to see more" message (→ G-13) |
-| E — Toggle OFF badge behavior (HIGH-1) | ISSUE | badge change (→ G-06) |
-| F — VS card transcription text (G-02) | (not reported) | |
-| G — Empty intersection message, no spinner (G-03/MEDIUM-1) | (not reported) | |
-| H — No-VS anchor greyed toggle (D-08) | (not reported) | |
-| I — Compare dialog parity | (not reported) | |
-| J — Pick-mode return, first-page button (G-05/HIGH-4) | ISSUE | works, but icon→link, tooltip→"find joins in joins lab", close JoinsDialog after open (→ G-08) |
-| K — Four actions on VS cards | (not reported) | |
-| L — Reused-window re-anchor VS reload (HIGH-2) | (not reported) | |
-| M — Perf: ≥80 look-alikes, first page prompt | (not reported) | |
-| (cross-cutting) — VS rank "vs #1" display | ISSUE | remove the ranking (→ G-09) |
-| (cross-cutting) — y/n/? triage | ISSUE | second click on same state should undo (→ G-10) |
-| (cross-cutting) — grid item layout | ISSUE | move `< >` nav onto the y/n/? row to save space (→ G-11) |
-| (cross-cutting) — Browse + ResultDialog VS button | ISSUE | remove (duplicate of Find Joins) (→ G-07) |
-
-**Overall verdict:** REJECTED (2026-06-07) — 8 change requests (G-06..G-13). The toggle/intersection
-mechanics work; the rejections are display, layout, entry-point, and affordance refinements. The
-`_show_vs_dialog` deprecation marker stays "pending parity sign-off; normal AND pick callers rerouted".
+| A2 — Eye badge (single 👁, no ★both/⊙VS/rank) | | |
+| A3 — Toggle eye label + unmistakable ON state | | |
+| A4 — Hint line + combined empty message | | |
+| A5 — Triage undo (second-click clears) | | |
+| A6 — Merged folio+triage row | | |
+| A7 — VS buttons gone (Browse + ResultDialog) | | |
+| A8 — JoinsDialog link button (🔗, plain open, closes, no pick-back) | | |
+| K — Four actions on VS cards | | |
+| L — Re-anchor VS reload | | |
+| M — Perf: ≥80 look-alikes, first page prompt | | |
 
 ---
 
-## Gaps (Round 3 — UAT feedback 2026-06-07)
+## Resume Signal
 
-Hillel ran the live desktop app and returned 8 change requests. The toggle/intersection mechanics
-work; these are display, layout, entry-point, and affordance refinements. All route to a follow-up
-gap-closure round (`/gsd-plan-phase 109 --gaps`).
+Type **"approved"** if ALL Round-4 scenarios pass — then Task 3 (executor) will:
+1. Update this file's frontmatter to `status: complete` / `parity_sign_off: APPROVED`
+2. Flip the `_show_vs_dialog` deprecation marker from "pending parity sign-off" to **REMOVABLE
+   (signed off)** in `genizah_app.py` — the old method and its orphaned helpers become
+   schedulable for physical deletion in the next cleanup phase (retained one more cycle per D-11).
 
-### G-06 — Eye badge instead of "★both" (+ eye on the toggle button)
-status: failed
-scenarios: C, D, E
-- Replace the **"★both"** intersection badge with a simple **eye icon badge**.
-- The eye badge carries a tooltip **"visual similarity"**.
-- Also add the **eye icon to the "Visual Similarity" toggle button** (so the button and the badge
-  share the same visual vocabulary).
+Otherwise, describe the failing scenario(s) by label (e.g., "A4 fails: hint shows when toggle
+OFF") — they route to a follow-up gap-closure round and the marker stays "pending parity sign-off".
 
-### G-07 — Remove the duplicate VS button in Browse tab + ResultDialog
-status: failed
-scenarios: (new scope — normal-mode entry points)
-- Remove the Visual-Similarity button in the **Browse tab** and in the **ResultDialog**.
-- Rationale: it duplicates the existing **"Find Joins"** button, which already routes into the
-  Workbench. (Plan 03 rerouted these entry points into the Workbench; Hillel now wants them removed
-  entirely — this advances the soft-retire toward removing the normal-mode VS affordances.)
+---
 
-### G-08 — JoinsDialog VS button → Joins Lab (icon + tooltip + close)
-status: failed
-scenarios: J
-- The JoinsDialog VS button correctly opens the Joins Lab now (as requested). Refinements:
-  - Change the icon from 🔍 to a **link icon**.
-  - Change the tooltip to **"find joins in joins lab"**.
-  - **Close the JoinsDialog** after opening the Joins Lab.
+## History — Previous Rounds (audit trail)
 
-### G-09 — Remove the VS ranking display ("vs #1", etc.)
-status: failed
-scenarios: (cross-cutting — candidate cards)
-- Remove the visual-similarity rank label ("vs #1" / "VS #1" / vs_rank) from candidate cards.
+### Round 1 (Plan 03 — REJECTED 2026-06-07)
 
-### G-10 — Triage y/n/? second-click undo
-status: failed
-scenarios: (cross-cutting — triage)
-- Clicking a triage button (y / n / ?) on a candidate and then clicking the **same** button again
-  should **undo / clear** that triage state (toggle behavior), not keep it set.
+The first parity UAT after initial VS integration. Rejected with 5 gaps (G-01..G-05):
+- G-01: Hebrew label חיצוני → חזותי
+- G-02: VS candidate cards missing transcription text
+- G-03: Combined "Search + visual" perpetually loading (never renders)
+- G-04: Radio group replaced by single toggle (D-10 source model superseded)
+- G-05: JoinsDialog pick-mode rerouted to Workbench pick-capacity (D-12 reversed)
 
-### G-11 — Compact grid item: move `< >` nav onto the y/n/? row
-status: failed
-scenarios: (cross-cutting — grid item layout)
-- Move the `< >` (folio prev/next) navigation **inside the grid items** to the **same row** as the
-  y/n/? triage buttons, to reduce vertical space per card.
+### Round 2/3 Base Scenarios (Plans 04-06 implemented G-01..G-05 — then REJECTED again 2026-06-07)
 
-### G-12 — Make the "Visual Similarity" toggle visibly ON
-status: failed
-scenarios: A
-- When the Visual Similarity button is toggled ON, make it **visually apparent that it is active**
-  (clear checked/pressed styling — not ambiguous with the OFF state).
+Plans 04-06 implemented G-01..G-05. The second round UAT (Plan 07) ran on 2026-06-07 and was
+**REJECTED** with 8 further change requests (G-06..G-13). The toggle/intersection mechanics
+worked; the rejections were display, layout, entry-point, and affordance refinements.
 
-### G-13 — "Turn off Visual Similarity to see more results" message
-status: failed
-scenarios: D
-- When the Visual Similarity toggle is ON (results are filtered to the VS set / intersection), show
-  a clear message in the fashion of **"Turn off the visual similarity button to see more results"**
-  so the user understands why fewer results appear.
+The Scenarios A-M from round 2/3 are preserved below for reference. Scenarios F, H, and I were
+NOT changed by G-06..G-13 and remain verifiable; they are included in the round-4 consolidated
+pass implicitly (the new A2-A8 scenarios cover their gap-specific successors).
+
+#### Scenario A — G-01 Hebrew label (round 2/3 baseline)
+
+- [ ] Toggle reads **חזותי** (not חיצוני) in Hebrew mode
+- [ ] No occurrence of חיצוני in the VS context
+
+#### Scenario B — Toggle ON, pure VS look-alikes (round 2/3 baseline)
+
+- [ ] VS look-alikes load automatically; paginated 20/page; shelfmarks non-empty
+
+#### Scenario C — Toggle ON + search term (intersection only) (round 2/3 baseline)
+
+- [ ] Only VS∩term candidates appear; text-only excluded; VS-only excluded
+
+#### Scenario D — Toggle ON after existing search (filter down) (round 2/3 baseline)
+
+- [ ] Existing results filter to VS∩term; text-only candidates removed
+
+#### Scenario E — Toggle OFF badge behavior (round 2/3 baseline)
+
+- [ ] Text-only candidates appear; VS look-alikes among text results carry a badge
+
+#### Scenario F — G-02 VS card transcription text (round 2/3 baseline — NOT changed by G-06..G-13)
+
+- [ ] VS candidate cards display the candidate's transcription text
+- [ ] Text appears in the card body (may load lazily per page)
+
+#### Scenario G — G-03 empty intersection message (round 2/3 baseline — superseded by A4)
+
+- [ ] No perpetual spinner; no bare "0/0 shown"; correct empty message shown
+
+#### Scenario H — No-VS anchor disabled toggle (D-08) (round 2/3 baseline — NOT changed by G-06..G-13)
+
+- [ ] Toggle is greyed out / disabled for an anchor with no VS data
+- [ ] No error or crash when clicking the greyed toggle
+
+#### Scenario I — Compare dialog parity (round 2/3 baseline — NOT changed by G-06..G-13)
+
+- [ ] Compare dialog reflects the toggle-filtered / badged candidate state
+
+#### Scenario J — G-05 pick-mode return (round 2/3 baseline — superseded by A8 in round 4)
+
+> **SUPERSEDED by Scenario A8.** The G-05 behavior (pick-mode Workbench with "Select as
+> partner") was **reversed by G-08** (Plans 12). The JoinsDialog button now opens the
+> Workbench PLAIN (no pick-back). A8 is the correct round-4 verification of this entry point.
+
+Round 2/3 overall verdict: REJECTED 2026-06-07 — 8 change requests (G-06..G-13). The
+toggle/intersection mechanics worked; rejections were display, layout, entry-point refinements.
+The `_show_vs_dialog` deprecation marker stayed "pending parity sign-off; normal AND pick callers
+rerouted".
+
+**Gap requests from round 3 (all implemented in Plans 08-12):**
+- G-06: Single eye badge replaces ★both + ⊙VS#rank; eye on toggle label
+- G-07: Remove VS buttons from Browse + ResultDialog
+- G-08: JoinsDialog button → 🔗 link, plain open, closes dialog (REVERSES G-05 pick-back)
+- G-09: Remove VS rank label (#N)
+- G-10: Triage second-click undo
+- G-11: Merge folio nav onto triage row
+- G-12: Make toggle ON state visually unmistakable
+- G-13: "Turn off Visual Similarity" hint + combined empty message
 
 ---
 
 ## Note on Deprecation Marker
 
 The `_show_vs_dialog` deprecation marker in `genizah_app.py` currently reads:
-**"pending parity sign-off; normal AND pick callers rerouted"**
+**"no live caller; both normal-mode (G-07) and pick-mode (G-08) callers gone; pending parity sign-off"**
 
-This marker stays exactly as-is until ALL Scenarios A-M pass. On Hillel's approval:
+This marker stays as-is until ALL Round-4 scenarios pass. On Hillel's approval:
 1. Update this file's frontmatter: `status: complete` / `parity_sign_off: APPROVED`
-2. The `_show_vs_dialog` deprecation marker goes live (D-11/D-14b) — the old method can be
-   scheduled for removal in the next cleanup phase.
+2. The `_show_vs_dialog` deprecation marker goes LIVE (D-11/D-14b) — the whole dead cluster
+   (`_show_vs_dialog`, `_on_vs_fetch_complete`, `_enrich_vs_suggestions`) becomes removable
+   together in the next cleanup phase. The code is **retained** (NOT deleted) in Phase 109.
 
 If any scenario FAILS, describe the failure — it routes to a follow-up gap-closure round (the
 marker remains "pending parity sign-off" until a clean re-UAT).
-
----
-
-## Resume Signal
-
-Type **"approved"** if ALL Scenarios A-M pass — then the executor will update this file's
-frontmatter to `status: complete` / `parity_sign_off: APPROVED` and the `_show_vs_dialog`
-deprecation marker goes live.
-
-Otherwise, describe the failing scenario(s) by letter — they will route to a follow-up
-gap-closure round.
