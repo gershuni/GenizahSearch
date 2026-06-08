@@ -196,6 +196,30 @@ Record results as you work through the scenarios.
 
 ---
 
+## Round 4 Findings Log
+
+### F-R4-1 — CRASH on toggle Visual Similarity OFF after a search — FIXED, re-test required
+
+- **Reported (2026-06-08, Hillel):** "Clicking off VS after search caused crash. Process finished
+  with exit code -1073740791 (0xC0000409)." Relates to Scenario E (toggle-OFF path) / A4.
+- **Root cause:** `JoinCandidatePane._start_enrich` tore down the previous `_EnrichWorker` (a
+  `QThread`) with `self._enrich_worker = None` immediately after `cancel()`. `cancel()` only sets a
+  flag — `run()`'s in-flight measurement SQL batch keeps executing. Dropping the only Python
+  reference let CPython refcounting destroy the C++ QThread mid-run → Qt
+  *"QThread: Destroyed while thread is still running"* → `abort()` → Windows `0xC0000409`
+  (MSVC fastfail). Toggling OFF right after a search hits the window where the search's enrich
+  worker is still running.
+- **Fix (commit `bf0a6353`):** extracted `_retire_enrich_worker()` — cancel + disconnect the stale
+  `enriched` signal, then **retain** a still-running worker in `self._retired_workers` and reap it on
+  its `finished()` signal (delivered on the UI thread) instead of dropping it; an already-finished
+  worker is released immediately. `_start_enrich` now calls `_retire_enrich_worker()`.
+- **Regression guard:** 5 headless tests in `tests/test_join_workbench_vs.py` (running-worker
+  retained, finished-worker released, None no-op, reaper releases, static `_start_enrich` guard).
+- **Status:** automated gate **50 passed** (was 45), ruff clean. **The marker stays PENDING** —
+  Scenario E / A4 (and the rest of Round 4) must be re-verified on the rebuilt app before sign-off.
+
+---
+
 ## Resume Signal
 
 Type **"approved"** if ALL Round-4 scenarios pass — then Task 3 (executor) will:
