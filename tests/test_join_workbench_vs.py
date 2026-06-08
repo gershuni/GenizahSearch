@@ -1148,14 +1148,25 @@ def test_compare_zoom_is_client_side_scale_no_refetch():
     )
 
 
-def test_compare_nav_hebrew_arrow_leads_label():
-    """Round-4: Hebrew prev/next compare buttons lead with the arrow (>הקודם / <הבא),
-    not trailing it. Pins Hillel's preference against an i18n re-sweep."""
+def test_compare_nav_hebrew_arrows_point_outward():
+    """Round-4: forced-LTR Hebrew nav buttons — prev (right button) arrow trails ("הקודם>"),
+    next (left button) arrow leads ("<הבא"), so both point to the OUTER edge. The buttons set
+    LayoutDirection LeftToRight so the angle brackets are not bidi-mirrored. Pins Hillel's
+    preference against an i18n re-sweep + guards the LTR layout direction."""
+    import pathlib
     from genizah_translations import TRANSLATIONS
 
-    assert TRANSLATIONS.get("prev >") == ">הקודם", (
-        f'prev button HE must be ">הקודם", got {TRANSLATIONS.get("prev >")!r}'
+    assert TRANSLATIONS.get("prev >") == "הקודם>", (
+        f'prev button HE must be "הקודם>" (arrow trailing, outer-right), got {TRANSLATIONS.get("prev >")!r}'
     )
     assert TRANSLATIONS.get("< next") == "<הבא", (
-        f'next button HE must be "<הבא", got {TRANSLATIONS.get("< next")!r}'
+        f'next button HE must be "<הבא" (arrow leading, outer-left), got {TRANSLATIONS.get("< next")!r}'
+    )
+
+    # The forced-LTR layout direction is what stops the brackets mirroring in the RTL UI.
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+    nav_start = src.find("self.prev_btn = QPushButton")
+    nav = src[nav_start:src.find("for emoji, val, aname in (", nav_start)]
+    assert nav.count("setLayoutDirection(Qt.LayoutDirection.LeftToRight)") >= 2, (
+        "both prev_btn and nxt_btn must force LTR layout so the angle brackets don't bidi-mirror"
     )

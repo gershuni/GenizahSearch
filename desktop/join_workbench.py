@@ -3692,8 +3692,12 @@ if _QT_AVAILABLE:
 
             # ── Top bar: prev/next nav + position label + Y/?/N triage ──────
             topbar = QHBoxLayout()
-            # Feature 7: RTL-correct glyphs — prev points right (>), next points left (<)
+            # Round-4: the toolbar stays RTL so prev sits on the RIGHT and next on the LEFT, but
+            # each nav button is forced to LTR internal layout so the angle bracket is NOT bidi-
+            # mirrored. With the visual-order strings ("הקודם>" / "<הבא") the arrow points to the
+            # OUTER edge of each button (prev → right, next → left) and the word sits inner.
             self.prev_btn = QPushButton(tr("prev >"))
+            self.prev_btn.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
             self.prev_btn.setFixedHeight(28)
             self.prev_btn.setMinimumWidth(84)   # round-4: 34px clipped the label text
             self.prev_btn.setAccessibleName(tr("Previous candidate"))
@@ -3704,6 +3708,7 @@ if _QT_AVAILABLE:
             topbar.addWidget(self.pos_lbl, 1)
 
             self.nxt_btn = QPushButton(tr("< next"))
+            self.nxt_btn.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
             self.nxt_btn.setFixedHeight(28)
             self.nxt_btn.setMinimumWidth(84)   # round-4: 34px clipped the label text
             self.nxt_btn.setAccessibleName(tr("Next candidate"))
