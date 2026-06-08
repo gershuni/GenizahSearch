@@ -951,3 +951,95 @@ def test_start_enrich_routes_through_crash_safe_teardown():
     assert "self._enrich_worker = None" not in body, (
         "_start_enrich must not drop _enrich_worker inline — that is the 0xC0000409 bug"
     )
+
+
+# ---------------------------------------------------------------------------
+# Round-4 UAT — eye badge in Compare + Table, and triage toggle works in Compare
+# ---------------------------------------------------------------------------
+
+
+def _badge_stub(**kw):
+    import types
+    base = dict(shelfmark="T-S 1.1", is_anchor_self=False, via_other_side=False, via_vs=False)
+    base.update(kw)
+    return types.SimpleNamespace(**base)
+
+
+def test_shelf_badge_eye_for_visual_lookalike():
+    """Round-4 #1/#3: a visual look-alike gets the single 👁 badge + 'visual similarity' tooltip."""
+    from desktop.join_workbench import _candidate_shelf_badge
+
+    text, tip = _candidate_shelf_badge(_badge_stub(via_vs=True))
+    assert text.endswith("👁"), f"visual look-alike must carry the eye badge — got {text!r}"
+    assert tip == "visual similarity" or tip == "דמיון חזותי", (
+        f"eye tooltip must be the tr('visual similarity') string — got {tip!r}"
+    )
+
+
+def test_shelf_badge_precedence_and_text_only_unbadged():
+    """G-06.4 precedence in the shared helper: anchor-self > other-side > visual; text-only plain."""
+    from desktop.join_workbench import _candidate_shelf_badge
+
+    # text-only -> no badge, no tooltip
+    text, tip = _candidate_shelf_badge(_badge_stub())
+    assert text == "T-S 1.1" and tip is None, "text-only candidate must be unbadged"
+
+    # anchor-self wins even if via_vs is also set
+    text, tip = _candidate_shelf_badge(_badge_stub(is_anchor_self=True, via_vs=True))
+    assert "👁" not in text and tip is None, "anchor-self must take precedence over the eye"
+
+    # other-side wins over via_vs
+    text, tip = _candidate_shelf_badge(_badge_stub(via_other_side=True, via_vs=True))
+    assert "👁" not in text and tip is None, "other-side must take precedence over the eye"
+
+
+def test_table_and_compare_render_eye_badge():
+    """Round-4 #1/#3: _render_table (table) and _fill_candidate (compare) route the shelf text
+    through _candidate_shelf_badge so the eye appears in BOTH surfaces, with a tooltip wired."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+
+    # Table
+    tbl = src[src.find("def _render_table("):src.find("def _on_table_cell_changed(")]
+    assert "_candidate_shelf_badge(c)" in tbl, "_render_table must badge the shelfmark via the shared helper"
+    assert "setToolTip(eye_tip)" in tbl, "_render_table must wire the eye tooltip on the shelfmark cell"
+
+    # Compare candidate pane
+    cmp = src[src.find("def _fill_candidate("):src.find("def paint(")]
+    assert "_candidate_shelf_badge(c)" in cmp, "_fill_candidate must badge the compare shelf via the shared helper"
+    assert 'pane["shelf"].setToolTip' in cmp, "compare shelf must wire the eye tooltip"
+
+
+def test_compare_mark_does_not_override_paint_restyle():
+    """Round-4 #2: CompareDialog._mark must let paint() restyle from the ACTUAL (toggled) triage —
+    it must NOT re-color the border with the clicked value, which left the border stuck after a
+    second-click toggle-off ('triage doesn't work in compare')."""
+    import types
+    from desktop.join_workbench import CompareDialog
+
+    events = []
+    triage = {}
+
+    def fake_mark(sid, val):
+        # mirror wb.mark G-10 toggle semantics
+        if triage.get(sid) == val:
+            triage.pop(sid, None)
+        else:
+            triage[sid] = val
+
+    stub = types.SimpleNamespace(
+        _cur=lambda: types.SimpleNamespace(sys_id="S"),
+        wb=types.SimpleNamespace(triage=triage, mark=fake_mark),
+        # paint() in real code re-reads triage and calls _restyle_compare(actual); emulate that
+        _restyle_compare=lambda v: events.append(("restyle", v)),
+    )
+    stub.paint = lambda: stub._restyle_compare(triage.get("S"))
+
+    CompareDialog._mark(stub, "yes")              # first click -> set yes
+    assert events[-1] == ("restyle", "yes"), "first Y click should colour the border 'yes'"
+
+    CompareDialog._mark(stub, "yes")              # second click -> toggle OFF
+    assert events[-1] == ("restyle", None), (
+        "after a toggle-off, the border must reflect cleared triage (None) — "
+        "_mark must not override paint() with the clicked value"
+    )

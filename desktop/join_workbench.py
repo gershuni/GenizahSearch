@@ -408,6 +408,30 @@ def puzzle_add_targets(anchor_sid, member_sids):
 # Triage glyphs — language-neutral (avoids leaking English yes/maybe/no into HE UI)
 _TRIAGE_GLYPH = {"yes": "Y", "maybe": "?", "no": "N"}
 
+
+def _candidate_shelf_badge(c):
+    """Shared provenance-badge text + eye tooltip for a Candidate.
+
+    Used by the candidate TABLE row and the COMPARE candidate pane so the 👁 visual-similarity
+    badge (G-06) and the ⚓ self / ⇄ other-side badges render IDENTICALLY to the grid card across
+    all three surfaces (round-4 UAT: eye must appear in compare + table too).
+
+    Precedence (G-06.4): anchor-self > other-side > visual look-alike. Text-only candidates are
+    unbadged. Returns (shelf_text, eye_tooltip) where eye_tooltip is the tr() tooltip for a visual
+    look-alike or None.
+
+    NB: CandidateCard keeps its own inline copy of this precedence (pinned by
+    test_eye_badge_precedence_after_self_otherside) — keep the two in sync.
+    """
+    text = c.shelfmark or ""
+    if getattr(c, "is_anchor_self", False):
+        return text + tr("  ⚓ self"), None
+    if getattr(c, "via_other_side", False):
+        return text + tr("  ⇄ other side"), None
+    if getattr(c, "via_vs", False):
+        return text + "  👁", tr("visual similarity")
+    return text, None
+
 _MATERIAL_HE = {
     "paper":     "נייר",
     "parchment": "קלף",
@@ -3053,7 +3077,12 @@ if _QT_AVAILABLE:
                 self.table.setItem(row, 0, chk_item)
 
                 # Data columns (offset +1); Source column removed (Feature 10)
-                self.table.setItem(row, 1, QTableWidgetItem(c.shelfmark or ""))
+                # Round-4: shelfmark carries the same 👁 / ⚓ / ⇄ badge as the grid card.
+                shelf_text, eye_tip = _candidate_shelf_badge(c)
+                shelf_item = QTableWidgetItem(shelf_text)
+                if eye_tip:
+                    shelf_item.setToolTip(eye_tip)   # G-06.2 "visual similarity"
+                self.table.setItem(row, 1, shelf_item)
                 score_str = f"{c.score:.3f}" if c.score is not None else ""
                 self.table.setItem(row, 2, QTableWidgetItem(score_str))
                 # Feature 12: snippet with highlight markup via QLabel
@@ -3912,8 +3941,11 @@ if _QT_AVAILABLE:
             the pump's None-page guard handles VS-only / None-page rows — no page-1
             arithmetic here.
             """
+            # Round-4: the compare candidate pane carries the same 👁 / ⚓ / ⇄ badge as the card.
+            shelf_text, eye_tip = _candidate_shelf_badge(c)
             try:
-                pane["shelf"].setText(c.shelfmark)
+                pane["shelf"].setText(shelf_text)
+                pane["shelf"].setToolTip(eye_tip or "")   # G-06.2 "visual similarity" (cleared if none)
             except RuntimeError:
                 return
             # Meta line: library · title + "other side matched"
@@ -4001,10 +4033,14 @@ if _QT_AVAILABLE:
             return self.wb.filtered[self.idx]
 
         def _mark(self, val: str):
-            """Mark current candidate, refresh label, and color the compare border (Feature 4)."""
+            """Mark current candidate, refresh label, and color the compare border (Feature 4).
+
+            G-10 / round-4: wb.mark() TOGGLES (a second click on the same value clears the triage).
+            paint() re-reads the ACTUAL post-toggle triage and restyles the border accordingly, so
+            we must NOT re-color with the clicked `val` afterwards — doing that left the border stuck
+            on the clicked colour after a toggle-off (the "triage doesn't work in compare" report)."""
             self.wb.mark(self._cur().sys_id, val)
             self.paint()
-            self._restyle_compare(val)
 
         def _restyle_compare(self, triage_val):
             """Feature 4: apply triage-colored border to the compare window (gentle 2px)."""
