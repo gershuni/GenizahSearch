@@ -21839,6 +21839,18 @@ class GenizahGUI(QMainWindow):
         if boundary_mode == 'full' and hasattr(self, 'spin_min_chunks'):
             min_boundary_matches = self.spin_min_chunks.value()
 
+        # Phase 110 (COMP-LOC-01): read the corpus scope selector. Genizah is the
+        # default for any caller without the combo (D-13 non-regression).
+        _comp_scope = (
+            (self.comp_corpus_scope_combo.currentData() or 'genizah')
+            if hasattr(self, 'comp_corpus_scope_combo') else 'genizah'
+        )
+        # Phase 110 A1 (fourth call site): refresh the weights-hash override
+        # immediately before a Local/ALL run so the LOCAL-LAB freshness check sees
+        # the live LabEngine weights. Cheap, guarded, never rebuilds.
+        if _comp_scope in ('local', 'all'):
+            self._refresh_lab_weights_hash_override()
+
         # 1. נתיב מעבדה (LAB MODE)
         if self.btn_lab_mode_toggle_comp.isChecked():
             if not self.lab_engine:
@@ -21868,7 +21880,8 @@ class GenizahGUI(QMainWindow):
                 boundary_delimiter=boundary_delimiter,
                 boundary_boost=boundary_boost,
                 min_boundary_matches=min_boundary_matches,
-                min_delimiter_distance=min_delimiter_distance
+                min_delimiter_distance=min_delimiter_distance,
+                corpus_scope=_comp_scope
             )
             self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
 
@@ -21893,7 +21906,8 @@ class GenizahGUI(QMainWindow):
                 boundary_boost=boundary_boost,
                 min_boundary_matches=min_boundary_matches,
                 min_delimiter_distance=min_delimiter_distance,
-                restrict_sys_ids=getattr(self, 'pre_search_restrict_sys_ids', None)
+                restrict_sys_ids=getattr(self, 'pre_search_restrict_sys_ids', None),
+                corpus_scope=_comp_scope
             )
             if hasattr(self.comp_thread, 'scan_finished_signal'):
                  self.comp_thread.scan_finished_signal.connect(self.on_comp_scan_finished)
@@ -22002,6 +22016,22 @@ class GenizahGUI(QMainWindow):
     def on_comp_scan_finished(self, result_obj):
         self.is_comp_running = False
         self.reset_comp_ui()
+
+        # Phase 110 (COMP-LOC-02 / A2): drive the LOCAL-LAB staleness label from the
+        # PER-RUN result payload — NOT the live combo or the engine's mutable flag,
+        # which can reflect a different run if the user changed scope mid-flight.
+        # local_lab_stale is False both when fresh AND when there is no LOCAL index
+        # (Plan 02 M2), so a user with no LOCAL library never sees the warning.
+        _run_scope = (result_obj or {}).get('corpus_scope', 'genizah') if isinstance(result_obj, dict) else 'genizah'
+        _run_stale = bool((result_obj or {}).get('local_lab_stale', False)) if isinstance(result_obj, dict) else False
+        if hasattr(self, 'lbl_comp_local_stale'):
+            if _run_scope in ('local', 'all') and _run_stale:
+                self.lbl_comp_local_stale.setText(
+                    tr("LOCAL index is outdated — rebuild in My Library tab")
+                )
+                self.lbl_comp_local_stale.setVisible(True)
+            else:
+                self.lbl_comp_local_stale.setVisible(False)
 
         # Detect partial results (search was cancelled)
         is_partial = False
