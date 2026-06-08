@@ -121,4 +121,22 @@ I re-checked Codex's two non-LOW findings against the source before recording th
 no D-13 web-file touch; the 36-test baseline is green.
 
 These are refinements to plan wording and acceptance criteria, not a redesign — the locked
-G-06..G-13 decisions stand. Fold via `/gsd-plan-phase 109 --reviews`.
+G-06..G-13 decisions stand.
+
+---
+
+## Resolution — folded INLINE 2026-06-08 (not via `--reviews`)
+
+All four findings were applied directly to the plan files (fixes were small/surgical and verified
+against the live tree, so the full planner+checker replan loop was unnecessary). Frontmatter re-parsed
+clean; code fences balanced; the revised acceptance criteria re-checked against the live source.
+
+| # | Sev | Plan(s) | Resolution |
+|---|-----|---------|-----------|
+| 1 | HIGH | 109-12, 109-13 | **Refined beyond Codex's note.** Live-tree check showed `_on_vs_fetch_complete` is itself **orphaned** (zero callers — `grep` returns only its `def`), and the Plan-03 reroute already bypassed it; the pick path was already rerouted by Plan 06. So the true state is "**no live caller**", proven by `_on_vs_fetch_complete` having zero callers. 109-12 now: marks `_on_vs_fetch_complete` + `_enrich_vs_suggestions` removable (D-11), rewords the `_show_vs_dialog` marker to "no live caller" (drops "fully unreferenced"), and **replaces the false def-only grep acceptance** with the zero-caller-helper proof. 109-13's marker-flip wording + read_first updated to match; cleanup of the whole dead cluster (dialog + both helpers) noted as atomic for the future removal phase. |
+| 2 | MEDIUM | 109-09 | Made the precedence **explicit**: the eye is an `elif c.via_vs` AFTER `is_anchor_self`/`via_other_side` (those keep their badge — matches G-06.4 "⚓self/⇄other-side unchanged"; NOT additive). `must_haves` truth #1 reworded; added headless `test_eye_badge_precedence_after_self_otherside` (asserts source branch order); acceptance pins the order. |
+| 3 | LOW | 109-10 | Added a CAUTION: `_parent` is a generic local reused in other methods/files — delete only the block-scoped assignment beside `btn_rd_visual_sim`, never a file-wide replace. (Same for `_vs_has` in Task 1.) |
+| 4 | LOW | 109-09 | Added Task-1 step 4: update stale `★both`/`⊙VS` comments (~:2700/:2720) to the eye vocabulary; clarified the badge test greps the tr()-wrapped literals (precise), not a bare `★`/`⊙` glyph, so comments can't false-fail. |
+
+Net effect on risk: the HIGH false-premise is removed and the deprecation gate now rests on a *true*,
+grep-checkable invariant. Plans 09–13 are ready to execute; no `--reviews` replan needed.
