@@ -15418,21 +15418,29 @@ class GenizahGUI(QMainWindow):
         synchronous search on the UI thread — Feature 7).
         """
         from desktop.join_workbench import JoinWorkbenchWindow  # lazy import (desktop-only)
-        if self._join_workbench is None or not self._join_workbench.isVisible():
+        # D-02: SINGLE reusable instance. Only build a new window when none exists — a merely
+        # HIDDEN window (closed via X) is re-shown with its in-memory state (anchor, builders,
+        # triage, results) intact. Recreating on `not isVisible()` discarded that state and then
+        # serialized the fresh-empty window at app exit, so Join Lab state was "not remembered"
+        # upon closing the window or across restart.
+        fresh = self._join_workbench is None
+        if fresh:
             self._join_workbench = JoinWorkbenchWindow(self, self)
         self._join_workbench.show()
         self._join_workbench.raise_()
         self._join_workbench.activateWindow()
 
-        # Restore last session state if available (Feature 7)
-        try:
-            from shared.session_persistence import load_session_state
-            state = load_session_state() or {}
-            jl_state = state.get("join_lab") or {}
-            if jl_state and jl_state.get("anchor", {}).get("sys_id"):
-                self._join_workbench.restore_state(jl_state)
-        except Exception as exc:
-            logger.debug("open_join_workbench: restore_state failed: %s", exc)
+        # Restore last session state ONLY for a freshly-created window (Feature 7). A reused
+        # (hidden) instance already holds newer in-memory state — restoring would clobber it.
+        if fresh:
+            try:
+                from shared.session_persistence import load_session_state
+                state = load_session_state() or {}
+                jl_state = state.get("join_lab") or {}
+                if jl_state and jl_state.get("anchor", {}).get("sys_id"):
+                    self._join_workbench.restore_state(jl_state)
+            except Exception as exc:
+                logger.debug("open_join_workbench: restore_state failed: %s", exc)
 
     def open_joins_workbench(self, res: dict, source: str = "text", pick_callback=None):
         """Open (or re-anchor) the Join Workbench. D-01 modeless; single reusable instance.
@@ -15440,7 +15448,9 @@ class GenizahGUI(QMainWindow):
         pick_callback: optional callable(sys_id, shelfmark) for pick-mode (G-05 / Plan 06).
         """
         from desktop.join_workbench import JoinWorkbenchWindow  # lazy import (desktop-only)
-        if self._join_workbench is None or not self._join_workbench.isVisible():
+        # D-02: SINGLE reusable instance — reuse a hidden (closed) window so its state survives;
+        # set_anchor below re-anchors it. (Recreating on `not isVisible()` lost the prior state.)
+        if self._join_workbench is None:
             self._join_workbench = JoinWorkbenchWindow(self, self)
         # HIGH-4: set/clear the pick callback BEFORE anchoring + source-load so the first card page
         # is built with the correct pick-button state (set_source('visual') renders synchronously).

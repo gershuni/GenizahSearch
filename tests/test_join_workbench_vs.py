@@ -1159,8 +1159,8 @@ def test_compare_nav_hebrew_arrows_point_outward():
     assert TRANSLATIONS.get("prev >") == "<הקודם", (
         f'prev button HE must be "<הקודם", got {TRANSLATIONS.get("prev >")!r}'
     )
-    assert TRANSLATIONS.get("< next") == ">הבא", (
-        f'next button HE must be ">הבא", got {TRANSLATIONS.get("< next")!r}'
+    assert TRANSLATIONS.get("< next") == "הבא>", (
+        f'next button HE must be "הבא>", got {TRANSLATIONS.get("< next")!r}'
     )
 
     # The forced-LTR layout direction is what stops the brackets mirroring in the RTL UI.
@@ -1169,4 +1169,23 @@ def test_compare_nav_hebrew_arrows_point_outward():
     nav = src[nav_start:src.find("for emoji, val, aname in (", nav_start)]
     assert nav.count("setLayoutDirection(Qt.LayoutDirection.LeftToRight)") >= 2, (
         "both prev_btn and nxt_btn must force LTR layout so the angle brackets don't bidi-mirror"
+    )
+
+
+def test_join_lab_window_reused_not_recreated_when_hidden():
+    """Regression: the Join Lab is a SINGLE reusable instance (D-02). Closing (hiding) then
+    reopening must NOT rebuild a fresh empty window — that discarded the in-memory state
+    (anchor/builders/triage) and then serialized the empty window at app exit, so the Join Lab
+    state was 'not remembered' upon closing the window or across restart."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "genizah_app.py").read_text(encoding="utf-8")
+
+    assert "or not self._join_workbench.isVisible()" not in src, (
+        "open_*_workbench must create the Join Lab window only when the instance is None, never "
+        "on `not isVisible()` — recreating a hidden window loses state + breaks session persistence"
+    )
+    # The disk restore must be gated to a freshly-created window so a reused (hidden) instance
+    # carrying newer in-memory state is not clobbered on reopen.
+    assert "fresh = self._join_workbench is None" in src, (
+        "open_join_workbench must only restore_state from disk for a freshly-created window"
     )

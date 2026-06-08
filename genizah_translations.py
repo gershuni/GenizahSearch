@@ -3923,11 +3923,11 @@ TRANSLATIONS.update({
 # All new tr() keys introduced by CompareDialog in desktop/join_workbench.py.
 TRANSLATIONS.update({
     # --- Navigation buttons (Feature 7: RTL-correct glyphs) ---
-    # Round-4 UAT: buttons are forced LTR so the stored string renders verbatim. Per Hillel the
-    # arrows are swapped between the buttons: prev (right) = "<הקודם", next (left) = ">הבא".
+    # Round-4 UAT: buttons are forced LTR so the stored string renders verbatim. Per Hillel:
+    # prev (right) = "<הקודם" (arrow before word); next (left) = "הבא>" (arrow after the word).
     "prev >":                     "<הקודם",
     "Previous candidate":         "מועמד קודם",
-    "< next":                     ">הבא",
+    "< next":                     "הבא>",
     "Next candidate":             "מועמד הבא",
 
     # --- Triage buttons (emoji + label) ---
