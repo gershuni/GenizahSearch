@@ -1266,3 +1266,67 @@ def build_local_document_row(
         _san(page),
         matched_text_raw or '',
     ]
+
+
+# ---------------------------------------------------------------------------
+# Phase 110 (EXP-F3 / C1): module-level helpers for LOCAL-aware composition
+# export. These are PURE (no Qt, no `self`) so the Wave-0 tests can import them
+# directly as:
+#     from shared.export_dossier import _build_local_comp_row, _partition_comp_export_rows
+# `export_comp_report` (genizah_app.py) delegates to them — the LOCAL row/partition
+# logic lives here so it is importable + offline-testable, not buried in a closure.
+# ---------------------------------------------------------------------------
+
+
+def _build_local_comp_row(
+    filename,
+    parent_folder,
+    full_filepath,
+    page,
+    matched_text_raw,
+    sanitize_fn=None,
+):
+    """Thin pure wrapper over :func:`build_local_document_row` (Phase 110 C1).
+
+    Returns the same 5-cell list
+    ``[filename, parent_folder, full_filepath, page, matched_text_raw]`` in the
+    column order of :func:`local_documents_header_row`. Exists so the
+    composition-export tests import a stable module-level symbol rather than a
+    closure defined inside ``export_comp_report``.
+    """
+    return build_local_document_row(
+        filename, parent_folder, full_filepath, page, matched_text_raw,
+        sanitize_fn=sanitize_fn,
+    )
+
+
+def _partition_comp_export_rows(items, is_local_fn, local_row_fn):
+    """Split grouped composition items into (genizah_items, local_rows) (Phase 110 C1).
+
+    Pure. ``is_local_fn(item) -> bool`` discriminates LOCAL vs Genizah;
+    ``local_row_fn(item) -> list`` builds the 5-cell LOCAL row for a LOCAL item.
+
+    Returns a 2-tuple:
+      - ``genizah_items`` = the items for which ``is_local_fn`` is False, with the
+        objects UNTOUCHED and the original order preserved.
+      - ``local_rows`` = ``[local_row_fn(it) for it in items if is_local_fn(it)]``
+        (each a 5-cell list).
+
+    When NO local items are present this returns ``(items_in_same_order, [])`` —
+    the Genizah path is bit-for-bit the same input objects, which is the
+    structural cross-parity guarantee (C5).
+    """
+    genizah_items = [it for it in items if not is_local_fn(it)]
+    local_rows = [local_row_fn(it) for it in items if is_local_fn(it)]
+    return genizah_items, local_rows
+
+
+def filter_genizah_ids_for_metadata(unique_ids, is_local_fn):
+    """Filter LOCAL sys_ids out of a metadata-prefetch id list (Phase 110 Round-2 #1 / D-12).
+
+    Returns ``[uid for uid in unique_ids if not is_local_fn(uid)]`` — the Genizah
+    ids only. ``export_comp_report`` uses this so a LOCAL/ALL composition export
+    never starts an NLI metadata/network lookup (``_fetch_metadata_with_dialog``)
+    for a private LOCAL ``97…`` id. Pure + importable for unit testing.
+    """
+    return [uid for uid in unique_ids if not is_local_fn(uid)]

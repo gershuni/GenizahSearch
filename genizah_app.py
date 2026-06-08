@@ -20527,10 +20527,55 @@ class GenizahGUI(QMainWindow):
         collect_ids(all_filtered)
 
         unique_ids = list(set(all_ids))
-        if unique_ids:
-            missing = [uid for uid in unique_ids if uid not in self.meta_mgr.nli_cache]
+        # Phase 110 (EXP-F3 / Round-2 #1 / D-12): filter LOCAL `97…` sys_ids OUT of
+        # the NLI metadata prefetch. LOCAL data comes only from the primed filepath
+        # cache (below) — a private LOCAL id must NEVER reach
+        # _fetch_metadata_with_dialog (which starts a ShelfmarkLoaderThread / NLI
+        # network lookup). A LOCAL-only export yields genizah_ids == [] -> missing
+        # empty -> the dialog is never shown.
+        from shared.local_sys_id import is_local_sys_id as _is_local_sys_id
+        from shared.export_dossier import (
+            _build_local_comp_row,
+            filter_genizah_ids_for_metadata,
+        )
+        genizah_ids = filter_genizah_ids_for_metadata(unique_ids, _is_local_sys_id)
+        if genizah_ids:
+            missing = [uid for uid in genizah_ids if uid not in self.meta_mgr.nli_cache]
             if missing:
                 self._fetch_metadata_with_dialog(missing, title=tr("Fetching metadata before export..."))
+
+        # 2b. Phase 110 (EXP-F3): batch-prime the LOCAL filepath cache over the
+        # FULL M7 coverage set (Main + Appendix + Filtered + Filtered-Appendix +
+        # Known) so an appendix LOCAL hit's filepath resolves too. local_ids is the
+        # set of `97…` LOCAL sys_ids; priming uses the LOCAL indexer
+        # (my_library_tab._indexer.get_filepaths) — NOT self.indexer (the Genizah
+        # Indexer, which has no get_filepaths). No per-row SQLite calls.
+        local_ids = [sid for sid in unique_ids if _is_local_sys_id(sid)]
+        self._local_filepath_cache = {}
+        if local_ids:
+            try:
+                _my_lib_tab = getattr(self, 'my_library_tab', None)
+                _local_indexer = getattr(_my_lib_tab, '_indexer', None) if _my_lib_tab else None
+                if _local_indexer is not None and hasattr(_local_indexer, 'get_filepaths'):
+                    self._local_filepath_cache = _local_indexer.get_filepaths(local_ids) or {}
+            except Exception:
+                self._local_filepath_cache = {}
+        _has_local = bool(local_ids)
+
+        def _resolve_item_sid(ms_item):
+            """sys_id for a grouped comp item, header-parse fallback (Pitfall 2)."""
+            sid = ms_item.get('sys_id') or ''
+            if not sid:
+                parsed = self.meta_mgr.parse_header_smart(ms_item.get('raw_header', '')) or ('', None)
+                sid = parsed[0] or ''
+            return sid
+
+        def _is_local_item(ms_item):
+            """LOCAL detector for a grouped comp item (RESEARCH Pitfall 2 — no
+            display dict): src_lbl=='LOCAL' fast path, else the real 97… sys_id."""
+            if ms_item.get('src_lbl') == 'LOCAL':
+                return True
+            return _is_local_sys_id(_resolve_item_sid(ms_item))
 
         # 3. שמירה
         comp_title = self.comp_title_input.text().strip() or tr("Untitled Composition")
@@ -20577,6 +20622,29 @@ class GenizahGUI(QMainWindow):
             t = re.sub(r'\*(\s+)\*', r'\1', t)
 
             return t.strip()
+
+        def _local_row_for_page(sid, page):
+            """Phase 110 (EXP-F3): build the 5-cell LOCAL row for a comp page,
+            matching the Phase 103 Local Documents shape + the on-screen comp
+            display (shelfmark=filename, library=parent/folder).
+
+            filepath comes from the batch-primed cache (no per-row SQLite). PAGE
+            (C6): page-level p_num/chunk_locator first, header parse only as
+            fallback. matched_text = the page's source_ctx via _clean_and_marker.
+            """
+            fp = (self._local_filepath_cache or {}).get(sid, '') or ''
+            filename = os.path.basename(fp) if fp else (sid or '')
+            parent = os.path.basename(os.path.dirname(fp)) if fp else ''
+            # C6 — page from page-level fields first, header parse only as fallback.
+            p_num = page.get('p_num')
+            if not p_num:
+                loc = page.get('chunk_locator') or ''
+                p_num = loc or self._get_meta_for_header(page.get('raw_header', ''))[1]
+            matched = _clean_and_marker(page.get('source_ctx', ''))
+            return _build_local_comp_row(
+                filename, parent, fp, str(p_num or ''), matched,
+                sanitize_fn=sanitize_for_excel,
+            )
 
         # ==========================================
         #  XLSX & CSV Logic
