@@ -215,8 +215,32 @@ Record results as you work through the scenarios.
   worker is released immediately. `_start_enrich` now calls `_retire_enrich_worker()`.
 - **Regression guard:** 5 headless tests in `tests/test_join_workbench_vs.py` (running-worker
   retained, finished-worker released, None no-op, reaper releases, static `_start_enrich` guard).
-- **Status:** automated gate **50 passed** (was 45), ruff clean. **The marker stays PENDING** —
-  Scenario E / A4 (and the rest of Round 4) must be re-verified on the rebuilt app before sign-off.
+- **Status:** automated gate **50 passed** (was 45), ruff clean.
+
+### F-R4-2 — Eye badge + triage missing from Compare and Table views — FIXED, re-test required
+
+- **Reported (2026-06-08, Hillel), 3 items:** (1) the 👁 eye badge should also appear in the
+  Compare window; (2) the Y/?/N triage toggle should also work in the Compare window; (3) the 👁
+  eye badge should also appear in Table mode. The round-3 work (G-06 eye, G-10 triage) had only
+  been applied to the grid **card** view.
+- **Root cause:** the eye badge and triage state were card-only. Compare's `_fill_candidate` set a
+  bare shelfmark; Table's `_render_table` set a bare shelfmark; Compare's Y/?/N buttons existed but
+  `_mark()` re-coloured the border with the clicked value *after* `paint()`, so a G-10 second-click
+  toggle-OFF left the border stuck (looked like the toggle didn't work).
+- **Fix (commit `26a57088`):**
+  - New shared pure helper `_candidate_shelf_badge(c)` (👁 + "visual similarity" tooltip; ⚓self /
+    ⇄other-side precedence). **Compare** `_fill_candidate` and **Table** `_render_table` now badge
+    the shelfmark through it (eye + tooltip in both). The card keeps its inline copy (pinned test).
+  - Compare `_mark()` no longer overrides `paint()` — `paint()` re-reads the actual (possibly
+    toggled-off) triage and restyles the border, so Y/?/N now toggle correctly in Compare.
+- **Regression guard:** 4 headless tests (helper eye + precedence + text-only-unbadged; table &
+  compare use the helper; compare `_mark` toggle-off honored).
+- **Status:** automated gate **54 passed** (was 50), ruff clean.
+
+> **Re-test focus for round 4:** the marker stays **PENDING** until Hillel re-verifies on the
+> rebuilt app: (a) toggle VS OFF after a search — no crash (F-R4-1); (b) 👁 badge shows in the
+> Compare candidate pane AND in Table mode; (c) Y/?/N in the Compare window mark AND clear on a
+> second click (border + position label follow); plus the rest of Round 4 (A2–A8, K/L/M).
 
 ---
 
