@@ -3656,6 +3656,14 @@ if _QT_AVAILABLE:
             Creates a modeless CompareDialog and shows it; keeps a reference so it
             is not garbage-collected while open.
             """
+            # WR-01: close any previous dialog first so its closeEvent waits on running
+            # _PageTextWorker QThreads before it is dropped (avoids destroying one mid-fetch).
+            prev = getattr(self, "_compare", None)
+            if prev is not None:
+                try:
+                    prev.close()
+                except RuntimeError:
+                    pass
             self._compare = CompareDialog(self.wb, global_idx)
             self._compare.show()
 
@@ -3967,12 +3975,37 @@ if _QT_AVAILABLE:
 
                 worker = _PageTextWorker(self.wb, gen, sid, page)
                 worker.done.connect(_on_text)
-                worker.start()
                 if not hasattr(self, "_pane_text_workers"):
                     self._pane_text_workers = []
                 self._pane_text_workers.append(worker)
+                # WR-01 (same 0xC0000409 class as _EnrichWorker): reap on finished so the list
+                # does not grow unbounded; closeEvent below waits on any still-running worker so
+                # its QThread is never destroyed mid-run when the modeless dialog is torn down.
+                worker.finished.connect(lambda w=worker: self._reap_pane_text_worker(w))
+                worker.start()
             except Exception:
                 pass
+
+        def _reap_pane_text_worker(self, w):
+            """Release a finished _PageTextWorker from the retention list (UI thread)."""
+            try:
+                self._pane_text_workers.remove(w)
+            except (ValueError, RuntimeError, AttributeError):
+                pass
+
+        def closeEvent(self, event):
+            """Crash-safety (WR-01 / 0xC0000409): the modeless CompareDialog may be torn down
+            (closed, or replaced when open_compare reassigns self._compare) while a _PageTextWorker
+            QThread is still fetching page text. Wait — bounded — for any running page-text worker
+            to finish before teardown so its C++ QThread is not destroyed mid-run. get_browse_page
+            is fast, so this rarely blocks. Mirrors the _EnrichWorker retain-until-finished fix."""
+            for w in list(getattr(self, "_pane_text_workers", []) or []):
+                try:
+                    if w.isRunning():
+                        w.wait(2000)
+                except RuntimeError:
+                    pass
+            super().closeEvent(event)
 
         def _fill_anchor(self, pane: dict, res_dict: dict):
             """Fill the anchor pane from the raw result DICT (read with r_* helpers, RR-2).

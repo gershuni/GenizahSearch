@@ -1206,3 +1206,32 @@ def test_save_session_preserves_join_lab_when_window_absent():
     assert "state_dict['join_lab'] = _prior['join_lab']" in block, (
         "the jw-is-None branch must carry forward the previously-persisted join_lab"
     )
+
+
+def test_compare_page_text_worker_teardown_is_crash_safe():
+    """WR-01 (same 0xC0000409 class as _EnrichWorker): CompareDialog must not let a _PageTextWorker
+    QThread be destroyed mid-run. It must reap finished workers, wait on running ones in a
+    closeEvent, and open_compare must close the previous dialog before replacing it."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+
+    # Reaper + closeEvent on CompareDialog
+    assert "def _reap_pane_text_worker" in src, "CompareDialog must reap finished _PageTextWorkers"
+    # The page-text worker must wire finished() -> reaper
+    lpt = src[src.find("def _load_pane_page_text("):src.find("def _reap_pane_text_worker(")]
+    assert "_reap_pane_text_worker(w)" in lpt, "_load_pane_page_text must wire finished() to the reaper"
+
+    # CompareDialog.closeEvent waits on running page-text workers (bounded)
+    # (locate the CompareDialog closeEvent specifically — after _reap_pane_text_worker)
+    after_reap = src[src.find("def _reap_pane_text_worker("):]
+    ce = after_reap[after_reap.find("def closeEvent("):]
+    ce = ce[:ce.find("\n        def ")] if "\n        def " in ce else ce[:2000]
+    assert "_pane_text_workers" in ce and "w.wait(" in ce, (
+        "CompareDialog.closeEvent must wait (bounded) on running _PageTextWorker QThreads"
+    )
+
+    # open_compare closes the previous dialog before reassigning self._compare
+    oc = src[src.find("def open_compare("):src.find("def open_compare(") + 800]
+    assert "prev.close()" in oc, (
+        "open_compare must close the previous CompareDialog so its closeEvent waits on workers"
+    )
