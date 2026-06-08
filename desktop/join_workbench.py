@@ -4748,7 +4748,12 @@ if _QT_AVAILABLE:
             page 3 is immediately visible when the scholar looks at page 4 of the same
             manuscript. See test_join_workbench_triage.py for the contract.
             """
-            self.triage[sys_id] = val
+            # G-10.1: idempotent per-state toggle. If the current triage already equals val,
+            # clear it; otherwise set it. (Clicking Y then Y clears; clicking Y then N sets N.)
+            if self.triage.get(sys_id) == val:
+                self.triage.pop(sys_id, None)
+            else:
+                self.triage[sys_id] = val
             # Propagate visual update to the candidate pane (may not exist yet).
             try:
                 self._candidate_pane._restyle_card(sys_id)

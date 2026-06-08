@@ -647,3 +647,46 @@ def test_browse_resultdialog_vs_buttons_removed():
     assert "btn_rd_find_joins" in rd_src, (
         "G-07: btn_rd_find_joins missing from desktop/result_dialog.py — Find Joins button incorrectly removed"
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 11 tests — Task 1: idempotent triage toggle (G-10.1)
+# ---------------------------------------------------------------------------
+
+
+def test_triage_second_click_clears():
+    """G-10.1: Clicking the same triage state twice clears it; a different state sets it.
+
+    Tests mark() unbound on a stub self — no Qt construction needed.
+    """
+    from desktop.join_workbench import JoinWorkbenchWindow
+
+    class _StubPane:
+        def _restyle_card(self, sys_id):
+            pass
+
+        def _update_status_counts(self):
+            pass
+
+    class _StubWin:
+        triage = {}
+        _candidate_pane = _StubPane()
+
+    win = _StubWin()
+
+    # First click on "yes" sets it
+    JoinWorkbenchWindow.mark(win, "SYS-A", "yes")
+    assert win.triage.get("SYS-A") == "yes", "First mark('yes') must set triage to 'yes'"
+
+    # Second click on "yes" (same state) CLEARS it
+    JoinWorkbenchWindow.mark(win, "SYS-A", "yes")
+    assert "SYS-A" not in win.triage, (
+        "G-10.1: Second mark('yes') on same sys_id must pop it (idempotent clear)"
+    )
+
+    # Click "yes" then "no" — sets to "no" (different state, does NOT clear)
+    JoinWorkbenchWindow.mark(win, "SYS-A", "yes")
+    JoinWorkbenchWindow.mark(win, "SYS-A", "no")
+    assert win.triage.get("SYS-A") == "no", (
+        "G-10.1: mark('yes') then mark('no') must leave triage as 'no'"
+    )
