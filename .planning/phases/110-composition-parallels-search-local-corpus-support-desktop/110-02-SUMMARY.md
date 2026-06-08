@@ -109,5 +109,49 @@ None - no external service configuration required.
 - FOUND: f44aa0ee (Task 2)
 
 ---
+
+## Design correction (Plan 110-03 UAT checkpoint, 2026-06-08)
+
+During human verification of the composition corpus selector (Plan 110-03),
+standard (Lab-Mode-OFF) composition with scope=Local returned **nothing**. Root
+cause: this plan routed *standard* LOCAL composition through the **LOCAL LAB
+side-index** (`local_lab_searcher`), gated on `_check_local_lab_freshness()`. The
+LAB index only exists once the user has built it via Lab Mode — so it was `None`,
+the freshness gate failed, and the hook was silently skipped.
+
+**Authoritative corrected intent** (110-CONTEXT.md "⚠ DESIGN CORRECTION
+2026-06-08" block): the LAB side-index is **opt-in** ("Lab Mode") for both search
+and composition; **by default both use the REGULAR index.** This correction was
+applied as a follow-up DESIGN-CORRECTION pass:
+
+- **Engine (genizah_core.py):** `search_composition_logic`'s standard LOCAL hook
+  re-pointed from `self._local_lab_index` / `self.local_lab_searcher` (LAB) to the
+  **regular My-Library index** `self.local_index` / `self.local_searcher` — the
+  same index regular search scope=Local uses. The hook now parses
+  `["content","content_head","content_tail"]` with the v7.16 Hebrew
+  metacharacter-strip fallback (mirrored from `_query_local_index`) and drops the
+  `_lab_fresh` / `_check_local_lab_freshness` dependency. The default path reports
+  NO staleness (`local_lab_stale = False`); an empty LOCAL result is treated like
+  an empty Genizah result. `lab_composition_search` (Lab Mode) is **unchanged** —
+  it keeps the LAB side-index + its freshness/staleness.
+  Commit `3dfd62a3` (feat).
+- **Tests (tests/test_comp_corpus_scope.py):** standard-path routing assertions
+  re-pointed to the regular `local_searcher`; added
+  `test_std_comp_local_uses_regular_index`; `test_stale_lab_sets_flag` repurposed
+  to the Lab path (staleness is now Lab-Mode-only). Commit `dafbb755` (test).
+- **UI (genizah_app.py + desktop/my_library_tab.py):** the now-moot
+  `_lab_weights_hash_override` machinery introduced for the default path was
+  removed by Plan 110-03's correction pass — the staleness label
+  (`lbl_comp_local_stale`), `_refresh_comp_stale_label_for_scope`,
+  `_refresh_lab_weights_hash_override` (3 call sites), and the post-rebuild
+  my_library_tab callback. The `_lab_weights_hash_override` read path in
+  `SearchEngine._current_lab_weights_hash` is now dead but left in place (harmless).
+  Commit `784368e1` (refactor).
+
+The COMP-LOC-01/02 requirements remain satisfied; the corpus selector,
+session/history persistence, and Lab decoupling are unchanged. Plan 110-03 remains
+at its human-verify checkpoint pending re-verification under the corrected routing.
+
+---
 *Phase: 110-composition-parallels-search-local-corpus-support-desktop*
 *Completed: 2026-06-08*
