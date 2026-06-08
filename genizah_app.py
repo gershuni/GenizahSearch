@@ -20646,6 +20646,50 @@ class GenizahGUI(QMainWindow):
                 sanitize_fn=sanitize_for_excel,
             )
 
+        def _local_pages_for_item(ms_item):
+            """(sid, page) pairs for one LOCAL comp item (one per page)."""
+            sid = _resolve_item_sid(ms_item)
+            pages = ms_item.get('pages', [])
+            if pages:
+                return [(sid, page) for page in pages]
+            # Fallback item: the item itself carries the page-level fields.
+            return [(sid, ms_item)]
+
+        def _collect_local_comp_pages():
+            """Phase 110 (EXP-F3 / M7): every LOCAL (sid, page) across Main +
+            Appendix + Filtered + Filtered-Appendix + Known, in input order
+            (Main first, then appendix groups by size). The Genizah row builders
+            skip these items (they emit to the LOCAL surface instead)."""
+            pairs = []
+            for ms_item in c_main:
+                if _is_local_item(ms_item):
+                    pairs.extend(_local_pages_for_item(ms_item))
+            for _sig, items in sorted(c_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                for ms_item in items:
+                    if _is_local_item(ms_item):
+                        pairs.extend(_local_pages_for_item(ms_item))
+            for ms_item in c_filt:
+                if _is_local_item(ms_item):
+                    pairs.extend(_local_pages_for_item(ms_item))
+            for _sig, items in sorted(c_filt_appx.items(), key=lambda x: len(x[1]), reverse=True):
+                for ms_item in items:
+                    if _is_local_item(ms_item):
+                        pairs.extend(_local_pages_for_item(ms_item))
+            for ms_item in c_known:
+                if _is_local_item(ms_item):
+                    pairs.extend(_local_pages_for_item(ms_item))
+            return pairs
+
+        # Phase 110 (EXP-F3): the parallel LOCAL surface. local_comp_pages is the
+        # ordered (sid, page) coverage set (Main+Appendix+...); local_table_rows is
+        # the 5-col (filename/parent/filepath/page/matched-text) rows for xlsx/csv.
+        # Empty when _has_local is False, so every format branch below executes
+        # today's exact Genizah-only code path (structural parity — C5).
+        local_comp_pages = _collect_local_comp_pages() if _has_local else []
+        local_table_rows = [
+            _local_row_for_page(sid, page) for sid, page in local_comp_pages
+        ]
+
         # ==========================================
         #  XLSX & CSV Logic
         # ==========================================
@@ -20659,6 +20703,10 @@ class GenizahGUI(QMainWindow):
 
             def add_rows(items, category, group_name=""):
                 for ms_item in items:
+                    # Phase 110 (EXP-F3): LOCAL items go to local_table_rows, not
+                    # the 10-col Genizah table (filename/folder, no IIIF/PGP/etc).
+                    if _has_local and _is_local_item(ms_item):
+                        continue
                     item_type = ms_item.get('type', '')
                     if item_type == 'part':
                         # For Parts, use Part display name and Oxford title
@@ -20898,6 +20946,10 @@ class GenizahGUI(QMainWindow):
                                 report_row = _write_report_header(ws_report, report_row, group_name)
                             ms_ranges = []
                             for ms_item in group_items:
+                                # Phase 110 (EXP-F3): LOCAL items render on the
+                                # Local Documents sheet, not the Report View tree.
+                                if _has_local and _is_local_item(ms_item):
+                                    continue
                                 ms_item_rows = []
                                 item_type = ms_item.get('type', '')
                                 if item_type == 'part':
@@ -21042,6 +21094,30 @@ class GenizahGUI(QMainWindow):
                         for item in self._sort_comp_items(c_known):
                             ws_excluded.append(_excluded_row(item))
 
+                    # Phase 110 (EXP-F3): dedicated "Local Documents" sheet for
+                    # LOCAL hits — same bilingual header/title + rich matched-text
+                    # cell as the Phase 103 search export. Only when LOCAL rows
+                    # exist (Genizah-only export keeps today's sheet set — C5).
+                    if local_table_rows:
+                        from shared.export_dossier import (
+                            local_documents_header_row as _local_hdr,
+                            sheet_titles as _sheet_titles,
+                        )
+                        ws_local = wb.create_sheet(_sheet_titles(CURRENT_LANG)['local_documents'])
+                        ws_local.sheet_view.rightToLeft = True
+                        _write_headers(ws_local, 1, _local_hdr(CURRENT_LANG))
+                        local_row = 2
+                        for row_vals in local_table_rows:
+                            for col_idx, val in enumerate(row_vals, 1):
+                                if col_idx == 5:  # Matched Text — rich *-highlight cell
+                                    write_rich_cell(ws_local, local_row, col_idx, str(val))
+                                else:
+                                    ws_local.cell(row=local_row, column=col_idx,
+                                                  value=sanitize_for_excel(str(val)))
+                            local_row += 1
+                        for col, width in zip('ABCDE', [45, 25, 80, 10, 70]):
+                            ws_local.column_dimensions[col].width = width
+
                     wb.save(path)
                     self._save_last_folder(path)
                     self._show_export_saved_dialog(path)
@@ -21071,6 +21147,19 @@ class GenizahGUI(QMainWindow):
                         for row in table_rows:
                             clean_row = [str(val).replace('*', '') for val in row]
                             writer.writerow(clean_row)
+                        # Phase 110 (EXP-F3): LOCAL rows in a labeled section after
+                        # the Genizah table, under the bilingual Local Documents
+                        # header (single-file CSV — Phase 103 convention).
+                        if local_table_rows:
+                            from shared.export_dossier import (
+                                local_documents_header_row as _local_hdr,
+                                sheet_titles as _sheet_titles,
+                            )
+                            writer.writerow([])
+                            writer.writerow([_sheet_titles(CURRENT_LANG)['local_documents']])
+                            writer.writerow(_local_hdr(CURRENT_LANG))
+                            for row in local_table_rows:
+                                writer.writerow([str(val).replace('*', '') for val in row])
                     self._save_last_folder(path)
                     self._show_export_saved_dialog(path)
                 except Exception as e:
@@ -21144,6 +21233,26 @@ class GenizahGUI(QMainWindow):
                                 self._add_docx_highlighted_runs(cell.paragraphs[0], val)
                             else:
                                 cell.text = str(val).replace('*', '')
+
+                    # Phase 110 (EXP-F3 / M6): LOCAL hits render as per-result
+                    # "research handout" blocks (filename / parent / filepath /
+                    # page / matched-text) via the shared Phase 103 DOCX writer,
+                    # AFTER the Genizah table (M7 ordering). Each block uses the
+                    # full LOCAL result_dict contract write_docx_result_block reads.
+                    if local_comp_pages:
+                        from shared.docx_export import write_docx_result_block
+                        from shared.export_dossier import sheet_titles as _sheet_titles
+                        doc.add_heading(_sheet_titles(CURRENT_LANG)['local_documents'], level=2)
+                        for sid, page in local_comp_pages:
+                            fp = (self._local_filepath_cache or {}).get(sid, '') or ''
+                            filename = os.path.basename(fp) if fp else (sid or '')
+                            result_dict = {
+                                'display': {'source': 'LOCAL', 'id': sid, 'shelfmark': filename},
+                                'snippet': _clean_and_marker(page.get('source_ctx', '')),
+                                'chunk_locator': page.get('chunk_locator', ''),
+                                'p_num': page.get('p_num'),
+                            }
+                            write_docx_result_block(doc, result_dict, filepath=fp, lang=CURRENT_LANG)
 
                     doc.add_page_break()
                     doc.add_heading(tr("Appendix"), level=1)
@@ -21221,6 +21330,26 @@ class GenizahGUI(QMainWindow):
                 total_count = len(c_main) + appendix_count + known_count + filtered_total
 
                 def _fmt_ms_entry(ms_item):
+                    # Phase 110 (EXP-F3 / D-09): LOCAL hits get a labeled block
+                    # with filename / parent folder / filepath / page / matched-text
+                    # instead of the Genizah shelf/title block (mirrors the Phase
+                    # 103 search-export TXT LOCAL convention).
+                    if _has_local and _is_local_item(ms_item):
+                        sid = _resolve_item_sid(ms_item)
+                        fp = (self._local_filepath_cache or {}).get(sid, '') or ''
+                        filename = os.path.basename(fp) if fp else (sid or '')
+                        parent = os.path.basename(os.path.dirname(fp)) if fp else ''
+                        ms_block = [sep, f"=== {filename} | {parent} ===", sep]
+                        pages = ms_item.get('pages', []) or [ms_item]
+                        for page in pages:
+                            p_num = page.get('p_num')
+                            if not p_num:
+                                loc = page.get('chunk_locator') or ''
+                                p_num = loc or self._get_meta_for_header(page.get('raw_header', ''))[1]
+                            src_clean = _clean_and_marker(page.get('source_ctx', ''))
+                            ms_block.append(f"Path: {fp}  (page {p_num or ''})")
+                            ms_block.append(tr("Source Context") + ":\n" + src_clean)
+                        return ms_block
                     item_type = ms_item.get('type', '')
                     if item_type == 'part':
                         part_display = ms_item.get('part_display', '')
