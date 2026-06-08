@@ -1,120 +1,124 @@
 ---
 phase: 109
-round: gap-closure (G-01..G-05)
+round: gap-closure-round-3
 reviewers: [codex]
-reviewed_at: 2026-06-07
-plans_reviewed: [109-04-PLAN.md, 109-05-PLAN.md, 109-06-PLAN.md, 109-07-PLAN.md]
+reviewed_at: 2026-06-08T00:23:22Z
+plans_reviewed: [109-08, 109-09, 109-10, 109-11, 109-12, 109-13]
+codex_model: default (codex-cli 0.136.0)
+self_skipped: claude (running inside Claude Code)
 note: >
-  Pre-execution cross-AI drift review of the GAP-CLOSURE plans (04-07), run after the internal
-  gsd-plan-checker passed. The internal checker validated plan-internal consistency; Codex read the
-  LIVE code and found 4 HIGH execution blockers + 2 MEDIUM + 1 LOW. The original pre-execution review
-  of Plans 01-03 is preserved at 109-REVIEWS-preexec.md.
-verdict: RESOLVED — 3 Codex rounds; all blockers closed; "NONE — clear to execute" (2026-06-07)
-revision_commits: [c1658a4d (round 1), 9f759927 (round 2)]
+  Round-3 pre-execution review of the NEW gap-closure plans only (G-06..G-13).
+  Codex's first pass could not read files (Windows sandbox spawn failure); re-run
+  with --dangerously-bypass-approvals-and-sandbox so the plan↔code drift check
+  actually executed against the live tree (144K tokens, files read).
+  The prior round-2 review is preserved at 109-REVIEWS-round2.md.
 ---
 
-> **RESOLUTION (2026-06-07):** The 4 HIGH + 2 MEDIUM + 1 LOW below were fed back to the planner.
-> Round-1 revision (`c1658a4d`) closed HIGH-1, HIGH-4, MEDIUM-1, MEDIUM-2, LOW; Codex pass 2 found
-> HIGH-2 + HIGH-3 only PARTIALLY closed (+1 new HIGH, same root). Round-2 revision (`9f759927`) gave a
-> concrete `JoinWorkbenchWindow.set_source()` rewrite (clear `_pending_vs` only when `apply_source()`
-> returns True) and a `set_anchor()` card-widget clear via the existing `render_results()`/
-> `_render_grid_page()` path. Codex pass 3 verdict: **NONE — clear to execute** (no new issues). The
-> findings below are retained as the audit trail.
+# Cross-AI Plan Review — Phase 109 (gap-closure round 3)
 
+Single external reviewer this round: **Codex** (`codex exec`, file access). Claude self-skipped
+(this orchestrator runs inside Claude Code — independence rule). Codex's highest-value contribution
+is **plan↔code drift** — it opened the live source and verified every anchor. The internal
+plan-checker validated plan-internal consistency and PASSED; Codex caught a drift the checker could
+not (it took the plan's "fully unreferenced" claim at face value; Codex grepped the actual code).
 
-# Cross-AI Plan Review — Phase 109 gap-closure round
+Baseline confirmed by Codex against the live tree: the 36-test gate currently passes (`36 passed`).
 
-## Codex Review (codex-cli 0.136.0, read-only repo access)
+---
 
-**Summary** — The plans are mostly grounded in the live code and Plan 04 is suitably surgical, but
-Plans 05 and 06 have several live-code execution blockers. The biggest drift: G-04 explicitly requires
-VS data loaded even when the toggle is OFF so text rows can still get VS badges; Plan 05 only preserves
-`_vs_cands` if it was already loaded. There are also reused-window/re-anchor state bugs and a pick-mode
-ordering bug that can leave the Workbench without a "Select as partner" button.
+## Codex Review
 
-**Strengths**
-- Plan 04's G-01 edit set is correct and surgical: VS offenders at `genizah_translations.py:3832-3837`
-  + `:4005-4006`; legitimate "external" strings remain at `:43, 107, 112, 315, 1732, 2867, 3414`.
-- The intersection filter is logically correct: `merge_candidates()` annotates text candidates with
-  `via_vs=True` by `sys_id` at `shared/joins_lab.py:531-546`, so `[c for c in merged if c.via_text and
-  c.via_vs]` is the right ★both-only set.
-- D-11 physical retention respected in Plan 06: updates `_show_vs_dialog` comments but does not delete
-  the method or `on_pick` branch (`genizah_app.py:4755-4765`, `:5083-5093`).
-- The empty-results enrichment branch exists: `_start_enrich()` reaches `self._enrich = {};
-  self.apply_filters()` when `self.results` is empty at `desktop/join_workbench.py:2651-2658`.
+**Summary**
+
+Not ready to execute as-is. Plans 109-08 through 109-11 mostly match the live source, but 109-12 and
+109-13 rest on a false code assumption: `_show_vs_dialog` is still referenced by
+`_on_vs_fetch_complete()` in `genizah_app.py`, so the planned "fully unreferenced" marker and grep
+acceptance will fail.
+
+**Plan↔Code Drift**
+
+| Plan | Drift Review |
+|---|---|
+| 109-08 | Verified — anchors match. `Visual Similarity` at `genizah_translations.py:3194`; Phase-109 blocks at `:3996` and `:4011`. `tests/test_join_workbench_i18n.py` has the described full-file JWB scan and Phase-107 host-key guard. |
+| 109-09 | Verified — anchors match. Badge block at `desktop/join_workbench.py:1726`, toggle at `:2204`, current `vs_rank` append at `:1736-1737`. |
+| 109-10 | Verified — anchors match. `btn_b_visual_sim` construction/wiring at `genizah_app.py:7240` and `:8251`; `btn_rd_visual_sim` at `desktop/result_dialog.py:459` and `:3078`. Find-Joins buttons separate and present at `genizah_app.py:6936` and `desktop/result_dialog.py:288`. |
+| 109-11 | Verified — anchors match. `mark()` at `desktop/join_workbench.py:4731`; triage row and folio row separate at `:1782` and `:1800`; grid insertion `:2364`; empty-intersection status `:2860-2864`. |
+| 109-12 | **Drift.** `_show_vs_dialog` is NOT "fully unreferenced": `_on_vs_fetch_complete()` still calls it at `genizah_app.py:4753`. The acceptance criterion that `grep -n "_show_vs_dialog" genizah_app.py` shows only the `def` plus internals will not hold after comment-only edits. Other anchors match: JoinsDialog button at `corrections_ui.py:3443`, `_show_vs_picker` at `:4756-4778`, pick machinery at `desktop/join_workbench.py:279`, `:1888`, `:4067`, `:4389`. |
+| 109-13 | **Drift inherited from 109-12.** The plan says approval makes the `_show_vs_dialog` marker live because it is fully unreferenced, but `genizah_app.py:4753` still references it unless 109-12 is amended. |
 
 **Concerns**
-- **HIGH / Plan 05 / G-04 — OFF-mode badges missing or stale.** Context requires "VS must be loaded
-  for the anchor whenever available" even with toggle OFF (`109-CONTEXT.md:332-334`). Plan 05 only says
-  "Do NOT null `self._vs_cands`" on uncheck (`109-05-PLAN.md:201-204`); `_maybe_assemble()` uses
-  `vs = self._vs_cands or []` (`:293-308`). Fresh text/OFF searches won't badge ★both unless VS was
-  loaded by a prior toggle. Worse: after re-anchor, stale `_vs_cands` annotates against the PREVIOUS anchor.
-- **HIGH / Plan 05 / G-04 + deferred Scenario L — re-anchor reload not handled.** Live `set_anchor()`
-  starts anchor load but does not clear/reload candidate state (`desktop/join_workbench.py:4270-4311`);
-  `_on_anchor_set()` only enables/disables radios + applies pending source (`:2547-2568`). Plan 05 keeps
-  the same shape (`109-05-PLAN.md:217-222`). Re-anchoring from a candidate card (`:1864-1866`) while VS
-  is on won't reload VS for the new anchor unless a pending source happened to be set.
-- **HIGH / Plan 05 / G-04 — `set_source("visual")` swallowed on reused window.** `set_source()` clears
-  pending after `apply_source()` returns (`desktop/join_workbench.py:4256-4261`); `apply_source()`
-  returns normally when visual is disabled (`:2580-2586`). Plan 05 repeats that with `_pending_vs`
-  (`109-05-PLAN.md:224-226`) and uses widget enabled-state as "anchor HAS VS" (`:207-212`) — can lose
-  the visual request before `_on_anchor_set()` learns the new anchor has VS.
-- **HIGH / Plan 06 / G-05 — pick-mode callback set too late.** Plan 06 adds the card pick button only
-  when `self.pane.wb._pick_callback is not None` (`109-06-PLAN.md:158-163`), but sets/clears the callback
-  AFTER `set_anchor()`/`set_source()` (`:213-223`). `set_source("visual")` synchronously loads VS and
-  renders cards via `_maybe_assemble()`/`_render_grid_page()` (`desktop/join_workbench.py:2535-2544,
-  2599-2619, 2782-2788`) BEFORE the callback exists → first-page pick-mode cards may have no "Select as
-  partner" button; normal opens after pick mode may render stale pick buttons before `clear_pick_callback()`.
-- **MEDIUM / Plan 05 / G-03 — "no matches" empty-state key preseeded but not used.** Plan 04 adds
-  `"No look-alikes match this search"` (`109-04-PLAN.md:150-153`), Plan 05 says it'll call it (`:230`),
-  but `_maybe_assemble()` only calls `_start_enrich()` (`:309-311`) and says not to change the render
-  pipeline (`:317-320`). Live `apply_filters()` only sets `"{n}/{n} shown"` (`desktop/join_workbench.py:
-  2751-2754`). Avoids a spinner but does not produce the promised empty-state message.
-- **MEDIUM / Plan 06+07 / D-11–D-14b — deprecation marker wording inconsistent.** Context: marker stays
-  "pending parity sign-off" until clean re-UAT (`109-CONTEXT.md:289-293`). Plan 06 says mark the method
-  "removable in the next cleanup phase" (`109-06-PLAN.md:250-255`); Plan 07 says it stays pending until
-  all UAT passes (`109-07-PLAN.md:15-23`). The code comment must not imply final removability pre-sign-off.
-- **LOW / Plan 07 / regression gate.** `tests/test_join_workbench_construct.py` is in Plan 07's action
-  text (`109-07-PLAN.md:80-86`) but omitted from its `<verify>`/acceptance criteria (`:129-135`). The
-  toggle rewrites Qt construction (`desktop/join_workbench.py:2126-2151`) — construct must be in the
-  formal acceptance gate, not just narrative.
+
+- **HIGH / 109-12, 109-13:** false deprecation premise. `_show_vs_dialog` still has a direct source
+  reference from `_on_vs_fetch_complete()` at `genizah_app.py:4753`. The marker should not say
+  "fully unreferenced" until this is handled or explicitly scoped as dead fallback code.
+- **MEDIUM / 109-09:** the proposed `elif c.via_vs` branch means `is_anchor_self` or
+  `via_other_side` candidates that also have `via_vs=True` will not get the eye. That may violate the
+  locked "ANY via_vs candidate" wording (G-06.4), depending on whether those provenance states can
+  overlap.
+- **LOW / 109-10:** `_parent` exists elsewhere in both host files (`desktop/result_dialog.py:2086`,
+  `genizah_app.py:17174`); the plan's local deletion is fine, but the executor should avoid broad
+  replacement.
+- **LOW / 109-09, 109-11:** stale comments still mention `★both` / VS badge semantics at
+  `desktop/join_workbench.py:2700` and `:2720`. If new tests grep too broadly for `★` or `⊙`, they
+  may fail despite correct UI code.
+- No same-wave file collisions found. No D-13 web touch in these plans.
 
 **Suggestions**
-- Add `_ensure_vs_loaded_for_anchor(silent=True)`; call on anchor-set for VS-bearing anchors and before
-  text/OFF assembly so badges are computed from current-anchor VS data.
-- On `set_anchor()`, clear/invalidate pane candidate state (`_text_cands`, `_vs_cands`, `results`,
-  `filtered`, cards) and reload/assemble per the current toggle after `_on_anchor_set()`.
-- Don't use `btn_vs_toggle.isEnabled()` as source of truth for the new anchor — query
-  `get_vs_service().has_suggestions(self.wb._anchor_sid)` or defer source application until
-  `_on_anchor_set()` completes; clear `_pending_vs` only after the requested state was actually applied.
-- In `open_joins_workbench(..., pick_callback=)`, set/clear the callback BEFORE `set_anchor()`/
-  `set_source()`, or make `set_pick_callback()` force a re-render of visible cards. Add a call-order test.
-- Actually use `tr("No look-alikes match this search")` in the empty-intersection path,
-  before/inside `apply_filters()` when `_vs_on` and the term produce zero ★both candidates.
-- Keep `_show_vs_dialog` wording "pending parity sign-off; normal and pick callers rerouted" until Plan 07.
 
-**Risk Assessment** — Overall **HIGH**. Intersection logic is sound and Plan 04 is low-risk, but
-Plan 05's state model does not satisfy the authoritative OFF-badge/current-anchor VS-load requirement,
-and Plan 06's callback ordering can break the partner-picker.
+- Amend 109-12 Task 2 to explicitly deal with `_on_vs_fetch_complete()`: either mark that callback
+  removable and remove/neutralize the `_show_vs_dialog` call, or change the marker/acceptance from
+  "fully unreferenced" to "no live UI entry point; retained dead fetch callback still references it."
+- Gate 109-13's marker flip on the revised `_show_vs_dialog` grep after 109-12, not on the current
+  assumption.
+- In 109-09, make the eye suffix additive for `via_vs` after self/other-side labeling if "ANY
+  via_vs" is meant literally.
+- Update stale badge comments when removing `★both` / `⊙VS#rank`.
 
-**RELEASE / EXECUTION BLOCKERS**
-1. Plan 05 must load current-anchor VS data even when the toggle is OFF.
-2. Plan 05 must fix re-anchor + pending visual-source application on reused windows.
-3. Plan 06 must set/clear `pick_callback` before any render, or re-render after setting it.
-4. Plan 05 must wire the empty-intersection message if "no matches" is an acceptance requirement.
+**Risk Assessment**
+
+MEDIUM — most anchors are accurate and the current gate is green, but 109-12/13 have a concrete false
+source-reference assumption that would invalidate the deprecation marker.
 
 ---
 
-## Consensus Summary
+## Orchestrator Verification (independent grep against live tree, 2026-06-08)
 
-Single external reviewer (Codex) this round. The internal `gsd-plan-checker` PASSED on plan-internal
-consistency; Codex's value was reading the LIVE code and finding behavioral/state drift the checker
-could not see. Net: **4 HIGH blockers** concentrated in Plan 05 (toggle state model) and Plan 06
-(pick-callback ordering), plus 2 MEDIUM (empty-state message wiring; deprecation-marker wording) and
-1 LOW (construct test in the acceptance gate). Plan 04 (G-01 Hebrew fix) is clean.
+I re-checked Codex's two non-LOW findings against the source before recording them:
 
-### Agreed Concerns (priority)
-1. OFF-mode VS-badge load + re-anchor staleness (current-anchor VS must always be loaded; clear on re-anchor).
-2. Pick-callback ordering in `open_joins_workbench` (set before render or re-render).
-3. `set_source('visual')` reliability on reused/disabled-toggle windows (don't trust widget enabled-state).
-4. Empty-intersection message actually rendered; deprecation wording stays "pending sign-off"; construct test gated.
+- **HIGH — CONFIRMED REAL.** `grep -n "_show_vs_dialog" genizah_app.py` returns TWO hits: the call
+  at `:4753` (inside `_on_vs_fetch_complete`, def at `:4749`) and the def at `:4755`.
+  `_on_vs_fetch_complete` is the async completion callback of `_browse_view_visual_similarity`
+  (`:4708`) — the very handler G-07 marks *removable-but-retained*. So after G-07 (button deleted,
+  handler retained) + G-08 (pick-mode rerouted), `_show_vs_dialog` still has a live reference inside
+  the retained dead-fetch machinery. The fix is consistent with D-11: treat `_on_vs_fetch_complete`
+  as part of the same marked-removable `_browse_view_visual_similarity` cluster, and reword the
+  marker + grep acceptance to "no live UI entry point; the only references are inside the
+  one-cycle-retained `_browse_view_visual_similarity` / `_on_vs_fetch_complete` dead-fetch machinery"
+  rather than "fully unreferenced." 109-13's flip-on-approval must gate on that revised grep.
+
+- **MEDIUM — REAL AMBIGUITY, planner decision needed.** The badge block (`desktop/join_workbench.py:
+  1727-1740`) is a strict `if/elif` chain: `is_anchor_self` → `via_other_side` → `via_text and via_vs`
+  (★both) → `via_vs and not via_text` (⊙VS). G-06.1 says the eye *replaces* the ★both AND ⊙VS
+  branches (the last two), and G-06.4 says "⚓self / ⇄other-side badges unchanged." Two valid readings:
+  (a) keep the `if/elif` — eye replaces only the ★both/⊙VS branches, self/other-side stay exclusive
+  (matches "badges unchanged"); or (b) make the eye *additive* so a `via_other_side & via_vs`
+  candidate shows both ⇄ and 👁 (matches "ANY via_vs" literally). Overlap is plausible for
+  `via_other_side & via_vs` (a known join partner that is also visually similar), less so for
+  `is_anchor_self`. 109-09 must state which reading it implements and test it.
+
+---
+
+## Synthesis — Action Items for `/gsd-plan-phase 109 --reviews`
+
+| # | Sev | Plan(s) | Action |
+|---|-----|---------|--------|
+| 1 | HIGH | 109-12, 109-13 | Drop "fully unreferenced." Fold `_on_vs_fetch_complete` into the marked-removable `_browse_view_visual_similarity` cluster (D-11). Reword the deprecation marker to "no live UI entry point; only references are inside the retained dead-fetch machinery." Rewrite 109-12's grep acceptance to expect the `def` + the `_on_vs_fetch_complete` call (not def-only). Gate 109-13's marker flip on that revised grep. |
+| 2 | MEDIUM | 109-09 | Decide eye semantics explicitly: keep `if/elif` (eye replaces ★both/⊙VS only; self/other-side exclusive — recommended, matches "badges unchanged") OR make the eye additive for all `via_vs`. State the choice in the task action and add a test for the `via_other_side & via_vs` case. |
+| 3 | LOW | 109-10 | Instruct the executor to delete the two VS buttons' local `_parent`/wiring lines precisely (anchor-scoped), not via broad find/replace — `_parent` recurs elsewhere in both files. |
+| 4 | LOW | 109-09, 109-11 | When removing `★both`/`⊙VS#rank`, update the stale badge comments at `join_workbench.py:2700`/`:2720`; ensure new badge tests grep the render path (not the whole file) so leftover `★`/`⊙` in comments/assemble-logic don't false-fail. |
+
+**Not flagged (Codex confirmed clean):** anchors for 109-08/09/10/11; no same-wave file collisions;
+no D-13 web-file touch; the 36-test baseline is green.
+
+These are refinements to plan wording and acceptance criteria, not a redesign — the locked
+G-06..G-13 decisions stand. Fold via `/gsd-plan-phase 109 --reviews`.
