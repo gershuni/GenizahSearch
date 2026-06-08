@@ -1725,21 +1725,22 @@ if _QT_AVAILABLE:
 
             # 2. Shelfmark + provenance badge
             shelf_text = c.shelfmark
+            eye_badge = False
             if c.is_anchor_self:
                 shelf_text += tr("  ⚓ self")
             elif c.via_other_side:
                 shelf_text += tr("  ⇄ other side")
-            elif c.via_text and c.via_vs:
-                shelf_text += tr("  ★ both")
-            elif c.via_vs and not c.via_text:
-                badge = tr("  ⊙ VS")
-                if c.vs_rank is not None:   # Pitfall 2: guard None; vs_rank is rank, not score
-                    badge += f"#{c.vs_rank}"
-                shelf_text += badge
-            # review #6: ✎ text-only candidates render UNBADGED (CONTEXT ✎text RESOLVED 2026-06-07)
+            elif c.via_vs:
+                # G-06: ONE eye badge for any visual look-alike (intersection OR pure-VS).
+                # G-09: no rank. ★both / ⊙VS#rank are gone.
+                shelf_text += "  👁"
+                eye_badge = True
+            # G-06.4 / review #6: text-only candidates render UNBADGED.
             shelf_lbl = QLabel(shelf_text)
             shelf_lbl.setStyleSheet("font-weight:bold;font-size:12px;")
             shelf_lbl.setWordWrap(True)
+            if eye_badge:
+                shelf_lbl.setToolTip(tr("visual similarity"))   # G-06.2 (HE: דמיון חזותי, pre-seeded)
             lay.addWidget(shelf_lbl)
 
             # 3. Dimension / material evidence line (from pre-fetched enrich dict, RR-6)
@@ -2697,7 +2698,7 @@ if _QT_AVAILABLE:
 
             G-04 toggle model (Task 1/2):
               - toggle ON  + empty box -> pure VS (merge_candidates([], vs))
-              - toggle ON  + term      -> INTERSECTION only (★both: via_text AND via_vs)
+              - toggle ON  + term      -> INTERSECTION only (👁 eye: via_text AND via_vs)
               - toggle OFF             -> text-with-VS-badges; VS-only rows excluded
             Tracks _empty_intersection flag for MEDIUM-1 empty-state message in apply_filters.
             """
@@ -2717,7 +2718,7 @@ if _QT_AVAILABLE:
                     self._empty_intersection = True   # MEDIUM-1
             else:
                 # toggle OFF -> text-only rows, but text candidates that are ALSO VS look-alikes keep
-                # the VS/★both badge (G-04 bullet 4). merge_candidates annotates via_vs on text rows
+                # the VS/👁 eye badge (G-04 bullet 4). merge_candidates annotates via_vs on text rows
                 # that appear in vs; we then DROP VS-only rows.
                 merged_all = merge_candidates(text, vs)
                 merged = [c for c in merged_all if c.via_text]  # text-only + ★both, never VS-only

@@ -508,3 +508,79 @@ def test_set_pick_callback_rerenders():
     assert len(render_calls) == 2, (
         "HIGH-4: clear_pick_callback must call _rerender_candidate_cards() -> render_results()"
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 09 tests — Task 1: eye badge replaces ★both/⊙VS#rank (G-06/G-09)
+# ---------------------------------------------------------------------------
+
+
+def test_eye_badge_replaces_star_and_vs():
+    """G-06/G-09: static source scan confirms ★both/⊙VS#rank removed and eye 👁 + tooltip added."""
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+
+    # Old TR-wrapped badge literals must be gone
+    assert 'tr("  ★ both")' not in src, (
+        "G-06: tr('  ★ both') still present — ★both badge not removed"
+    )
+    assert 'tr("  ⊙ VS")' not in src, (
+        "G-06: tr('  ⊙ VS') still present — ⊙VS badge not removed"
+    )
+
+    # VS rank append must be gone (G-09)
+    assert 'f"#{c.vs_rank}"' not in src, (
+        "G-09: f'#{c.vs_rank}' rank append still present — vs_rank display not removed"
+    )
+    assert '#{c.vs_rank}' not in src, (
+        "G-09: #{c.vs_rank} rank append still present — vs_rank display not removed"
+    )
+
+    # Eye glyph must be present in the badge path
+    assert "👁" in src, (
+        "G-06: eye glyph 👁 not found in desktop/join_workbench.py — eye badge not added"
+    )
+
+    # The eye tooltip must route through tr("visual similarity") (pre-seeded by Plan 08)
+    assert 'tr("visual similarity")' in src, (
+        "G-06.2: tr('visual similarity') tooltip call not found — eye badge tooltip missing"
+    )
+
+    # setToolTip must use tr("visual similarity")
+    assert 'setToolTip(tr("visual similarity"))' in src, (
+        "G-06.2: setToolTip(tr('visual similarity')) not found — eye badge tooltip not wired"
+    )
+
+
+def test_eye_badge_precedence_after_self_otherside():
+    """G-06.4: branch order within the badge block: is_anchor_self BEFORE via_other_side BEFORE via_vs (eye).
+
+    Searches within the CandidateCard badge block only (anchored on 'Shelfmark + provenance badge'
+    comment) to avoid false matches from other uses of these field names elsewhere in the file.
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+
+    # Anchor the search to the badge block — the comment that introduces the block
+    badge_anchor = "# 2. Shelfmark + provenance badge"
+    anchor_pos = src.find(badge_anchor)
+    assert anchor_pos != -1, "Badge block anchor comment '# 2. Shelfmark + provenance badge' not found"
+
+    # Limit search to a window of 600 chars starting at the badge anchor
+    badge_block = src[anchor_pos:anchor_pos + 600]
+
+    # Find relative offsets within the badge block
+    offset_self = badge_block.find("c.is_anchor_self")
+    offset_other = badge_block.find("c.via_other_side")
+    offset_eye = badge_block.find("elif c.via_vs:")
+
+    assert offset_self != -1, "is_anchor_self not found in badge block"
+    assert offset_other != -1, "via_other_side not found in badge block"
+    assert offset_eye != -1, "elif c.via_vs: not found in badge block"
+
+    assert offset_self < offset_other, (
+        "G-06.4 precedence violated: is_anchor_self branch must appear BEFORE via_other_side branch"
+    )
+    assert offset_other < offset_eye, (
+        "G-06.4 precedence violated: via_other_side branch must appear BEFORE elif c.via_vs: (eye) branch"
+    )
