@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v8.0.0
 milestone_name: Joins Lab — Phases 106-110
 status: executing
-stopped_at: Phase 109 COMPLETE (VS merge & soft-retire; UAT approved, 3/3 SC verified) — ready for Phase 110
-last_updated: "2026-06-08T11:53:33.707Z"
+stopped_at: Phase 110 REFRAMED + context gathered — Component B deferred; Phase 110 = LOCAL-composition wiring + EXP-F3
+last_updated: "2026-06-08T13:30:23.644Z"
 last_activity: 2026-06-08
 progress:
   total_phases: 8
@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-02)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 110 — search-support: parallels seeding (JSA-01)
+**Current focus:** Phase 110 (REFRAMED 2026-06-08) — Composition/Parallels LOCAL corpus support (desktop) + EXP-F3; then `/release` v8.0.0. Component B (JSA-01/02/03 + JWB-05) DEFERRED to post-v8.0.0.
 
 ## Current Position
 
@@ -38,24 +38,20 @@ Last activity: 2026-06-08
 
 **Component B — Search-support algorithms (secondary, independent, both apps):** JSA-01 parallels seeded from anchor · JSA-02 corpus-driven suggest-then-search completion (first/last N words) · JSA-03 `[`/`]`-aware torn-word completion.
 
-**Deferred to Future (not v8.0.0):** JOINS-F1 relative-offset cross-line positional search (spike-gated) · JOINS-F2 Dicta/Sefaria citation-ID completion source · JOINS-F3 batch-export + persisted list re-import · JOINS-F4 auto-ranked finder (out) · EXP-F3 composition-report LOCAL export · PERF-F1 D-F12 search latency. One-click citations parked in `docs/FEATURE_IDEAS.md`.
+**REFRAMED 2026-06-08 (/gsd-discuss-phase 110):** Component B (JSA-01 anchor parallels seeding + JSA-02 corpus completion + JSA-03 torn-word completion + JWB-05 tear-side assist) is **DEFERRED to a post-v8.0.0 milestone**. Phase 110 repurposed → **Composition/Parallels LOCAL Corpus Support** (desktop): pre-search Genizah/Local/ALL selector on the composition tab (corpus orthogonal to mode; Lab Mode no longer hardwired to LOCAL) + LOCAL-aware `export_comp_report` (**EXP-F3 promoted** into v8.0.0). New reqs COMP-LOC-01/02. Un-gates the deferred Phase 104.
+
+**Deferred to Future (not v8.0.0):** Component B (JSA-01/02/03 + JWB-05, deferred 2026-06-08) · JOINS-F1 relative-offset cross-line positional search (spike-gated) · JOINS-F2 Dicta/Sefaria citation-ID completion source · JOINS-F3 batch-export + persisted list re-import · JOINS-F4 auto-ranked finder (out) · PERF-F1 D-F12 search latency. One-click citations parked in `docs/FEATURE_IDEAS.md`.
 
 ### Next
 
-1. ✅ **Genizah-scholar design-critique session — DONE (2026-06-03).** Ran as a throwaway-sketch
-   exploration; conclusions in `REQUIREMENTS.md` § Design-Critique Conclusions & Amendments.
-   Sketch preserved at tag `spike-002-joins-workbench` + `.planning/spikes/002-.../sketch/`.
+Phases 106–109 ✅ complete. Phase 110 context gathered (this session, reframed).
 
-2. ✅ **v8.0.0 Joins Lab roadmap — CREATED (2026-06-03).** Phases 106-110 in `ROADMAP.md`.
-3. **`/gsd-discuss-phase 106`** (user-led — do NOT auto-answer). Resolve the 7 deferrals
-   (REQUIREMENTS § Deferrals / discuss-phase questions) BEFORE the Phase 106 plan locks. The most
-   load-bearing for 106's scope: #1 join-model richness (confirm pairwise→group stays for v8), #3
-   builder depth (variation columns? raw-query preview? page-level Text START/END?), #6 JSA-02/03
-   keep-spike-cut (affects whether Phase 110 grows). #2/#4/#5/#7 bear more on 108/109 and the web
-   phase but should be acknowledged.
-
-4. **`/gsd-plan-phase 106`** → execute → verify; repeat down the chain 107 → 108 → 109 → 110. Web
-   Joins Lab UI is a LATER phase on the shared core (deferral #5).
+1. `/clear` then **`/gsd-plan-phase 110`** — plan the LOCAL-composition wiring + EXP-F3. CONTEXT.md
+   at `.planning/phases/110-composition-parallels-search-local-corpus-support-desktop/110-CONTEXT.md`
+   carries 6 research flags (RF-1 Lab-Mode reconciliation is load-bearing; RF-2 ALL-merge semantics).
+2. Execute → verify Phase 110.
+3. **`/release`** — ship **v8.0.0** (version-file bump + CHANGELOG `## [8.0.0]` + GitHub Release with
+   desktop installer happen here; web+desktop bundle).
 
 **Version decision RESOLVED:** ship as **v8.0.0** (closes the open decision from 2026-06-01). The actual version-file bump (`scripts/bump_version.py 8.0.0`, plus `_TARGET_VERSION` in `tests/test_release_artifacts.py` which the bumper misses, plus a `## [8.0.0]` CHANGELOG section folding the `[Unreleased]` rebrand note) happens at `/release` time — NOT now. Rebrand gotchas in memory `project_desktop_app_rebrand.md`.
 
@@ -94,7 +90,7 @@ Carried forward to v8.0.0+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular
 
 ## Session Continuity
 
-Last session: 2026-06-08T02:22:14.822Z
-Stopped at: Phase 109 gap-closure round 3 context gathered (G-06..G-13)
-Resume file: None
+Last session: 2026-06-08T13:30:23.634Z
+Stopped at: Phase 110 REFRAMED + context gathered — Component B deferred; Phase 110 = LOCAL-composition wiring + EXP-F3
+Resume file: .planning/phases/110-composition-parallels-search-local-corpus-support-desktop/110-CONTEXT.md
 Next step: /gsd-verify-work for Phase 108 (VALIDATION.md ready; nyquist_compliant + wave_0_complete = true).
