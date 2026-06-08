@@ -1156,11 +1156,11 @@ def test_compare_nav_hebrew_arrows_point_outward():
     import pathlib
     from genizah_translations import TRANSLATIONS
 
-    assert TRANSLATIONS.get("prev >") == "הקודם>", (
-        f'prev button HE must be "הקודם>" (arrow trailing, outer-right), got {TRANSLATIONS.get("prev >")!r}'
+    assert TRANSLATIONS.get("prev >") == "<הקודם", (
+        f'prev button HE must be "<הקודם", got {TRANSLATIONS.get("prev >")!r}'
     )
-    assert TRANSLATIONS.get("< next") == "<הבא", (
-        f'next button HE must be "<הבא" (arrow leading, outer-left), got {TRANSLATIONS.get("< next")!r}'
+    assert TRANSLATIONS.get("< next") == ">הבא", (
+        f'next button HE must be ">הבא", got {TRANSLATIONS.get("< next")!r}'
     )
 
     # The forced-LTR layout direction is what stops the brackets mirroring in the RTL UI.
