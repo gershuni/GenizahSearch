@@ -763,3 +763,50 @@ def test_vs_hint_and_combined_empty_strings_present():
     assert "vs_hint.setVisible" in src, (
         "G-13: vs_hint.setVisible not found — hint visibility not toggled based on _vs_on"
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 12 tests — Task 1: JoinsDialog VS button rerouted PLAIN + closes (G-08)
+# ---------------------------------------------------------------------------
+
+
+def test_joinsdialog_opens_plain_and_closes():
+    """G-08: _show_vs_picker opens the Workbench PLAIN (no pick_callback, no source='visual')
+    then closes the JoinsDialog (self.close()).
+
+    Static source scan of corrections_ui.py — keeps test headless (no Qt construction).
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "corrections_ui.py").read_text(encoding="utf-8")
+
+    # Find _show_vs_picker method body
+    method_start = src.find("def _show_vs_picker(")
+    assert method_start != -1, "_show_vs_picker method not found in corrections_ui.py"
+
+    # Find the next method definition after _show_vs_picker to bound the method body
+    next_def = src.find("\n    def ", method_start + 1)
+    assert next_def != -1, "Could not find end of _show_vs_picker method"
+    method_body = src[method_start:next_def]
+
+    # G-08: must NOT have pick_callback= in the call (no pick-back wiring)
+    assert "pick_callback=" not in method_body, (
+        "G-08: _show_vs_picker still passes pick_callback= to open_joins_workbench — "
+        "pick-back must be removed (reverses G-05)"
+    )
+
+    # G-08: must NOT have source=\"visual\" in the call (plain open, toggle OFF)
+    assert 'source="visual"' not in method_body, (
+        "G-08: _show_vs_picker still passes source='visual' to open_joins_workbench — "
+        "plain open (toggle OFF) must not force visual source"
+    )
+
+    # G-08: must call open_joins_workbench( — i.e., it still calls the function
+    assert "open_joins_workbench(" in method_body, (
+        "G-08: open_joins_workbench( not found in _show_vs_picker — method must still call it"
+    )
+
+    # G-08.2: must call self.close() to abandon the in-progress JoinsDialog
+    assert "self.close()" in method_body, (
+        "G-08.2: self.close() not found in _show_vs_picker — JoinsDialog must be closed "
+        "after opening the Workbench so the user works in the Lab"
+    )
