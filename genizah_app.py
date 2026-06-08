@@ -21490,6 +21490,102 @@ class GenizahGUI(QMainWindow):
 
         return sys_id, p_num, shelf, title
 
+    @staticmethod
+    def _comp_item_is_local(comp_item):
+        """Phase 110 UAT (Issue 1): True iff a composition item is a LOCAL hit.
+
+        LOCAL is detected by source/src_lbl == 'LOCAL' (PRIMARY) OR a 97-prefix
+        LOCAL sys_id (SECONDARY) — mirrors the regular-search _is_local_row
+        precedence at ~2660. Standard LOCAL comp hits carry src/src_lbl='LOCAL'
+        from the regular My-Library index; LAB-mode LOCAL hits are detected by
+        the sys_id namespace.
+        """
+        if not isinstance(comp_item, dict):
+            return False
+        _src = (
+            comp_item.get('source')
+            or comp_item.get('src_lbl')
+            or comp_item.get('src')
+            or (comp_item.get('display', {}) or {}).get('source', '')
+        )
+        if str(_src) == 'LOCAL':
+            return True
+        _sid = comp_item.get('sys_id') or (comp_item.get('display', {}) or {}).get('id', '')
+        try:
+            from shared.local_sys_id import is_local_sys_id as _is_local
+            return bool(_is_local(_sid))
+        except Exception:
+            return False
+
+    def _comp_local_display_fields(self, sys_id, carried_shelfmark=''):
+        """Phase 110 UAT (Issue 1): compute (shelfmark, library_display) for a
+        LOCAL composition item, mirroring the regular-search LOCAL display at
+        genizah_app.py ~17202-17222.
+
+        shelfmark = filename = basename(filepath); library = parent/folder
+        (basename(dirname(fp)) prefixed by basename(dirname(dirname(fp)))). When
+        the filepath is unavailable, fall back to the carried shelfmark field
+        (the LOCAL doc's shelfmark = filename), then sys_id. Reuses
+        _lookup_local_filepath (cache-first; the caller should batch-prime via
+        _prime_comp_local_filepath_cache).
+        """
+        fp = None
+        try:
+            fp = self._lookup_local_filepath(sys_id) if sys_id else None
+        except Exception:
+            fp = None
+        if fp:
+            _dir = os.path.dirname(fp)
+            _folder = os.path.basename(_dir)
+            _parent = os.path.basename(os.path.dirname(_dir))
+            shelf = os.path.basename(fp)
+            if _parent:
+                library_display = f"{_parent}/{_folder}"
+            else:
+                library_display = _folder
+        else:
+            # No filepath: fall back to the carried shelfmark (filename), then sys_id.
+            shelf = carried_shelfmark or sys_id or ''
+            library_display = ''
+        return shelf, library_display
+
+    def _prime_comp_local_filepath_cache(self, comp_items):
+        """Phase 110 UAT (Issue 1): batch-prime _local_filepath_cache for the
+        LOCAL composition items BEFORE rendering, so the comp display never calls
+        get_filepath() per row on the UI thread (mirrors _prime_local_filepath_cache
+        but for comp item shape: sys_id + source/src_lbl, not display.id).
+
+        Additive: merges into the existing cache (does not clobber a regular-search
+        prime). Safe no-op when there are no LOCAL comp hits / no indexer.
+        """
+        try:
+            local_ids = []
+            for it in (comp_items or []):
+                if self._comp_item_is_local(it):
+                    _sid = it.get('sys_id') or (it.get('display', {}) or {}).get('id', '')
+                    if _sid:
+                        local_ids.append(_sid)
+                # Also pull LOCAL sys_ids from nested pages (manuscript/part items).
+                for _p in (it.get('pages', []) or []):
+                    if self._comp_item_is_local(_p):
+                        _psid = _p.get('sys_id') or (_p.get('display', {}) or {}).get('id', '')
+                        if not _psid:
+                            _psid, _ = self.meta_mgr.parse_header_smart(_p.get('raw_header', ''))
+                        if _psid:
+                            local_ids.append(_psid)
+            local_ids = list({s for s in local_ids if s})
+            if not local_ids:
+                return
+            my_lib_tab = getattr(self, 'my_library_tab', None)
+            indexer = getattr(my_lib_tab, '_indexer', None) if my_lib_tab else None
+            if indexer is None or not hasattr(indexer, 'get_filepaths'):
+                return
+            if not isinstance(getattr(self, '_local_filepath_cache', None), dict):
+                self._local_filepath_cache = {}
+            self._local_filepath_cache.update(indexer.get_filepaths(local_ids))
+        except Exception:
+            pass
+
     def _item_matches_exclusion(self, item):
         # For Part items, check all folios in the Part
         item_type = item.get('type', '')
@@ -21966,6 +22062,10 @@ class GenizahGUI(QMainWindow):
             filtered_items = []
 
         result_count = len(items) + len(filtered_items)
+        # Phase 110 UAT (Issue 1): batch-prime LOCAL filepaths for the comp hits
+        # BEFORE grouping/rendering, so the comp tree + ResultDialog can render
+        # LOCAL rows as filename / parent-folder without per-row SQLite on the UI thread.
+        self._prime_comp_local_filepath_cache(list(items) + list(filtered_items) + list(known_raw))
         chunks_processed = self.comp_chunks_processed
         chunks_total = self.comp_chunks_total
 
@@ -22505,11 +22605,23 @@ class GenizahGUI(QMainWindow):
                         self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=True)
             elif item_type == 'manuscript':
                 sid = ms_item['sys_id']
-                shelf, t = self.meta_mgr.get_meta_for_id(sid)
-                if not shelf or shelf == "Unknown":
-                    header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-                    if header_shelf: shelf = header_shelf
-                library_code, library_full = get_library_info(sid)
+                # Phase 110 UAT (Issue 1): LOCAL comp manuscript rows mirror
+                # regular search — shelfmark = filename, Library = parent/folder
+                # (do NOT route through the Genizah meta path → "unknown").
+                _ms_is_local = self._comp_item_is_local(ms_item)
+                if _ms_is_local:
+                    shelf, _local_library_display = self._comp_local_display_fields(
+                        sid, ms_item.get('shelfmark', '')
+                    )
+                    t = ""
+                    library_code = _local_library_display
+                    library_full = _local_library_display
+                else:
+                    shelf, t = self.meta_mgr.get_meta_for_id(sid)
+                    if not shelf or shelf == "Unknown":
+                        header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+                        if header_shelf: shelf = header_shelf
+                    library_code, library_full = get_library_info(sid)
 
                 ms_node = QTreeWidgetItem(parent)
                 self._set_comp_tree_text(ms_node, 0, self._format_score_with_boundary(ms_item))
@@ -22518,7 +22630,7 @@ class GenizahGUI(QMainWindow):
                 self._set_comp_tree_text(ms_node, self.comp_col_library, library_code)
                 if library_full:
                     ms_node.setToolTip(self.comp_col_library, library_full)
-                self._set_comp_tree_text(ms_node, self.comp_col_title, _resolve_display_title(sid, t or "", compact=True))
+                self._set_comp_tree_text(ms_node, self.comp_col_title, _resolve_display_title(sid, t or "", compact=True) if not _ms_is_local else "")
                 self._set_comp_tree_text(ms_node, self.comp_col_sysid, sid)
                 make_checkable(ms_node)
                 ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
@@ -22823,11 +22935,23 @@ class GenizahGUI(QMainWindow):
                     self._set_comp_node_previews(page_node, p_item.get('source_ctx', ''), p_item.get('text', ''), p_item.get('highlight_pattern'), defer_widgets=defer_widgets)
         elif item_type == 'manuscript':
             sid = ms_item['sys_id']
-            shelf, t = self.meta_mgr.get_meta_for_id(sid)
-            if not shelf or shelf == "Unknown":
-                header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
-                if header_shelf: shelf = header_shelf
-            library_code, library_full = get_library_info(sid)
+            # Phase 110 UAT (Issue 1): LOCAL comp manuscript rows mirror regular
+            # search — shelfmark = filename, Library = parent/folder. Do NOT route
+            # through the Genizah meta path (which yields "unknown" for LOCAL).
+            _ms_is_local = self._comp_item_is_local(ms_item)
+            if _ms_is_local:
+                shelf, _local_library_display = self._comp_local_display_fields(
+                    sid, ms_item.get('shelfmark', '')
+                )
+                t = ""
+                library_code = _local_library_display
+                library_full = _local_library_display
+            else:
+                shelf, t = self.meta_mgr.get_meta_for_id(sid)
+                if not shelf or shelf == "Unknown":
+                    header_shelf = self.meta_mgr.get_shelfmark_from_header(ms_item.get('raw_header', ''))
+                    if header_shelf: shelf = header_shelf
+                library_code, library_full = get_library_info(sid)
 
             ms_node = QTreeWidgetItem(parent)
             self._set_comp_tree_text(ms_node, 0, str(int(ms_item.get('score', 0))))
@@ -22835,11 +22959,15 @@ class GenizahGUI(QMainWindow):
             self._set_comp_tree_text(ms_node, self.comp_col_library, library_code)
             if library_full:
                 ms_node.setToolTip(self.comp_col_library, library_full)
-            self._set_comp_tree_text(ms_node, self.comp_col_title, _resolve_display_title(sid, t or "", compact=True))
+            self._set_comp_tree_text(ms_node, self.comp_col_title, _resolve_display_title(sid, t or "", compact=True) if not _ms_is_local else "")
             self._set_comp_tree_text(ms_node, self.comp_col_sysid, sid)
             self._make_node_checkable(ms_node)
             ms_node.setData(0, Qt.ItemDataRole.UserRole, ms_item)
             self._apply_comp_printed_badge(ms_node, sid)
+            # Phase 110 UAT (Issue 1): Src cell shows LOCAL (blue) for LOCAL hits.
+            if _ms_is_local:
+                ms_node.setText(self.comp_col_src, 'LOCAL')
+                ms_node.setForeground(self.comp_col_src, QColor("#3498db"))
 
             pages = ms_item.get('pages', [])
             if len(pages) == 1:
@@ -25881,14 +26009,25 @@ class GenizahGUI(QMainWindow):
 
             raw_h = node_data.get('raw_header', '')
             sid, p_num, shelf, title = self._get_meta_for_header(raw_h)
-            
+
+            # Phase 110 UAT (Issue 1): LOCAL comp ResultDialog header mirrors
+            # regular search — shelfmark = filename, source 'LOCAL' (NOT the
+            # Genizah-meta "Unknown"). Detect via src_lbl/source/97-prefix sys_id.
+            _src_lbl = node_data.get('src_lbl', 'Genizah Lab')
+            if self._comp_item_is_local(node_data):
+                _local_shelf, _ = self._comp_local_display_fields(sid, node_data.get('shelfmark', ''))
+                if _local_shelf:
+                    shelf = _local_shelf
+                title = ''
+                _src_lbl = 'LOCAL'
+
             hl_pattern = node_data.get('highlight_pattern')
-            
+
             ready_item = {
                 'uid': node_data.get('uid', sid),
                 'raw_header': raw_h,
                 'text': node_data.get('text', ''),
-                'full_text': None, 
+                'full_text': None,
                 'source_ctx': node_data.get('source_ctx', ''),
                 'highlight_pattern': hl_pattern,
                 'display': {
@@ -25896,10 +26035,10 @@ class GenizahGUI(QMainWindow):
                     'shelfmark': shelf,
                     'title': title,
                     'img': p_num,
-                    'source': node_data.get('src_lbl', 'Genizah Lab')
+                    'source': _src_lbl
                 }
             }
-            
+
             flat_list.append(ready_item)
             
             if node is clicked_node:
@@ -25913,6 +26052,14 @@ class GenizahGUI(QMainWindow):
                 for p in pages:
                     raw_h = p.get('raw_header', '')
                     sid, p_num, shelf, title = self._get_meta_for_header(raw_h)
+                    # Phase 110 UAT (Issue 1): LOCAL page → filename / 'LOCAL'.
+                    _src_lbl = p.get('src_lbl', 'Genizah Lab')
+                    if self._comp_item_is_local(p):
+                        _local_shelf, _ = self._comp_local_display_fields(sid, p.get('shelfmark', ''))
+                        if _local_shelf:
+                            shelf = _local_shelf
+                        title = ''
+                        _src_lbl = 'LOCAL'
                     flat_list.append({
                         'uid': p.get('uid', sid),
                         'raw_header': raw_h,
@@ -25921,12 +26068,20 @@ class GenizahGUI(QMainWindow):
                         'source_ctx': p.get('source_ctx', ''),
                         'highlight_pattern': p.get('highlight_pattern'),
                         'display': {'id': sid, 'shelfmark': shelf, 'title': title,
-                                    'img': p_num, 'source': p.get('src_lbl', 'Genizah Lab')}
+                                    'img': p_num, 'source': _src_lbl}
                     })
             else:
                 # Single-page manuscript without pages array
                 raw_h = item_data.get('raw_header', '')
                 sid, p_num, shelf, title = self._get_meta_for_header(raw_h)
+                # Phase 110 UAT (Issue 1): LOCAL item → filename / 'LOCAL'.
+                _src_lbl = item_data.get('src_lbl', 'Genizah Lab')
+                if self._comp_item_is_local(item_data):
+                    _local_shelf, _ = self._comp_local_display_fields(sid, item_data.get('shelfmark', ''))
+                    if _local_shelf:
+                        shelf = _local_shelf
+                    title = ''
+                    _src_lbl = 'LOCAL'
                 flat_list.append({
                     'uid': item_data.get('uid', sid),
                     'raw_header': raw_h,
@@ -25935,7 +26090,7 @@ class GenizahGUI(QMainWindow):
                     'source_ctx': item_data.get('source_ctx', ''),
                     'highlight_pattern': item_data.get('highlight_pattern'),
                     'display': {'id': sid, 'shelfmark': shelf, 'title': title,
-                                'img': p_num, 'source': item_data.get('src_lbl', 'Genizah Lab')}
+                                'img': p_num, 'source': _src_lbl}
                 })
 
         def traverse_tree(node):

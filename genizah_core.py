@@ -9006,6 +9006,9 @@ class SearchEngine:
         # Single map for all results - track filtering status per uid
         doc_hits = defaultdict(lambda: {
             'head': '', 'src': '', 'content': '', 'matches': [], 'src_indices': set(),
+            # Phase 110 UAT (Issue 1): carry the LOCAL doc's shelfmark (filename)
+            # so build_items can emit it for the comp display. Empty for Genizah hits.
+            'shelfmark': '',
             'patterns': set(), 'boundary_chunk_scores': [], 'crossed_boundaries': set(),
             # Phase 77 D-13: per-chunk attribution mirrors lab_composition_search
             # at line 1366. Same tuple shape (chunk_index, chunk_text, score, snippet)
@@ -9236,6 +9239,16 @@ class SearchEngine:
                                             _rec_scl['filter_reason'] = 'high_frequency'
                                     _rec_scl['head'] = _doc_scl['full_header'][0]
                                     _rec_scl['src'] = _doc_scl['source'][0]
+                                    # Phase 110 UAT (Issue 1): carry the LOCAL
+                                    # doc's shelfmark (filename) through to the
+                                    # comp display so the manuscript row shows the
+                                    # filename, not "unknown". Tolerate a missing
+                                    # field (only the regular LOCAL schema has it).
+                                    try:
+                                        _shelf_scl = _doc_scl['shelfmark']
+                                        _rec_scl['shelfmark'] = _shelf_scl[0] if _shelf_scl else ''
+                                    except (KeyError, IndexError, TypeError):
+                                        _rec_scl['shelfmark'] = ''
                                     _rec_scl['content'] = _content_scl
                                     _orig_m_scl = _regex_scl.search(_content_scl)
                                     _ms_match_scl = _orig_m_scl or _regex_scl.search(_match_content_scl)
@@ -9374,6 +9387,10 @@ class SearchEngine:
                     'uid': uid,
                     'raw_header': data['head'],
                     'src_lbl': data['src'],
+                    # Phase 110 UAT (Issue 1): per-item shelfmark (filename) for
+                    # LOCAL comp hits; empty for Genizah (UI computes Genizah
+                    # shelfmark from raw_header via the Genizah meta path).
+                    'shelfmark': data.get('shelfmark', ''),
                     'source_ctx': "\n\n".join(src_snippets),
                     'text': "\n...\n".join(ms_snips),
                     'highlight_pattern': combined_pattern,
@@ -9526,7 +9543,13 @@ class SearchEngine:
                     'raw_header': rep_page['raw_header'],
                     'text': rep_page['text'],
                     'source_ctx': rep_page.get('source_ctx', ''),
-                    'highlight_pattern': rep_page.get('highlight_pattern', '')
+                    'highlight_pattern': rep_page.get('highlight_pattern', ''),
+                    # Phase 110 UAT (Issue 1): carry the representative page's source
+                    # label + shelfmark (filename) so the comp UI can render LOCAL
+                    # manuscript rows as filename / parent-folder (mirroring regular
+                    # search) instead of the Genizah-meta "unknown".
+                    'source': rep_page.get('src_lbl', ''),
+                    'shelfmark': rep_page.get('shelfmark', ''),
                 }
             manuscripts.append(manuscript_item)
 
