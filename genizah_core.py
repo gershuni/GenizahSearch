@@ -1402,7 +1402,8 @@ class LabEngine:
     def lab_composition_search(self, full_text, mode='variants', progress_callback=None, chunk_size=None,
                                 excluded_ids=None, filter_text=None, deep_scan=False, scan_limit=50000,
                                 boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
-                                min_boundary_matches=0, min_delimiter_distance=3):
+                                min_boundary_matches=0, min_delimiter_distance=3,
+                                corpus_scope: str = 'genizah'):
         """
         Scans a composition using Lab Mode.
         UPGRADES:
@@ -1417,9 +1418,20 @@ class LabEngine:
         - 'full': Regular search, track boundary matches for display
         - 'boundary': Only return results with boundary-crossing matches
         - 'combined': Full search with score boost for boundary matches
+
+        Phase 110 (COMP-LOC-01/02): corpus_scope selects which index loop runs —
+        'genizah' (Genizah lab loop only), 'local' (LOCAL LAB loop only), or 'all'
+        (both, merged into results_map). Corpus is orthogonal to mode (Lab Mode is
+        NOT hardwired to LOCAL).
         """
+        # Phase 110 C4: fail CLOSED — never expose LOCAL on a bad value.
+        if corpus_scope not in ('genizah', 'local', 'all'):
+            corpus_scope = 'genizah'
+        _local_lab_stale = False  # Phase 110 Round-2 #4: A2 default so EVERY return path carries it
+
         if not full_text:
-            return {'main': [], 'filtered': [], 'known': [], 'partial': False, 'boundary_stats': None}
+            return {'main': [], 'filtered': [], 'known': [], 'partial': False, 'boundary_stats': None,
+                    'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale}
 
         # Strip combining diacritical marks and geresh/gershayim from queries
         full_text = strip_search_diacritics(full_text)
@@ -1478,6 +1490,8 @@ class LabEngine:
 
         # (Part 2: Scanning) - wrapped in try/except to support partial results on cancel
         try:
+          # Phase 110: gate the Genizah lab loop — skipped on a LOCAL-only run.
+          if corpus_scope != 'local':
             for i, (token_start_idx, chunk_tokens, chunk_crossed_bounds) in enumerate(chunks_data):
                 chunks_processed = i
                 if progress_callback: progress_callback(i, total_chunks)
@@ -1606,7 +1620,30 @@ class LabEngine:
         # Phase 97 R-01: skip LOCAL LAB search if is_searchable gate is closed.
         _lab_tab = self._my_library_tab_ref() if getattr(self, "_my_library_tab_ref", None) is not None else None
         _lab_is_searchable = getattr(_lab_tab, "is_searchable", True) if _lab_tab is not None else True
-        if not was_interrupted and _lab_is_searchable and callable(_freshness_fn) and _freshness_fn():
+        # Phase 110: compute freshness ONCE (preserve D-37 try/except — never raise on
+        # the worker thread; never trigger a rebuild here).
+        _lab_fresh_lab = False
+        if callable(_freshness_fn):
+            try:
+                _lab_fresh_lab = bool(_freshness_fn())
+            except Exception as _lab_fresh_exc:
+                LOGGER.warning(
+                    "lab_composition_search: _check_local_lab_freshness raised %r — "
+                    "skipping LOCAL LAB extension (D-37 fallback).",
+                    _lab_fresh_exc,
+                )
+                _lab_fresh_lab = False
+        # Phase 110 A2 + M2: per-run stale verdict — stale ONLY when an index is present
+        # but not fresh (stale != no-index). Set the back-compat engine flag only then.
+        _local_index_present_lab = getattr(self, 'local_lab_searcher', None) is not None
+        _local_lab_stale = bool(
+            corpus_scope in ('local', 'all') and _local_index_present_lab and not _lab_fresh_lab
+        )
+        if _local_lab_stale:
+            self.local_lab_searcher_stale = True
+        # Phase 110: gate the LOCAL LAB loop on corpus_scope (skipped on a Genizah-only run).
+        if (not was_interrupted and corpus_scope != 'genizah' and _lab_is_searchable
+                and _lab_fresh_lab):
             try:
                 local_lab_index = getattr(self, "_local_lab_index", None)
                 local_lab_searcher = self.local_lab_searcher
@@ -1876,7 +1913,10 @@ class LabEngine:
             'known': known_list,
             'filtered': filtered_list,
             'partial': was_interrupted,
-            'boundary_stats': boundary_stats
+            'boundary_stats': boundary_stats,
+            # Phase 110 A2 + Round-2 #4: per-run scope + staleness verdict.
+            'corpus_scope': corpus_scope,
+            'local_lab_stale': _local_lab_stale,
         }
     
     @lru_cache(maxsize=10000)
@@ -7091,6 +7131,16 @@ class SearchEngine:
             weights are picked up via ``getattr`` and the hash matches what
             ``build_lab_side_index`` writes into ``.meta.json``.
         """
+        # Phase 110 RF-4: standard composition uses the LabEngine's hash;
+        # SearchEngine.dynamic_rank_map is always None → would never match
+        # .meta.json otherwise. The app injects
+        # searcher._lab_weights_hash_override = lab_engine._current_lab_weights_hash()
+        # (Plan 03 — at GenizahGUI init + after every LOCAL LAB rebuild) so the
+        # standard-composition freshness check compares against the SAME hash the
+        # index was built with, letting 'all'-scope LOCAL LAB hits through.
+        _override = getattr(self, '_lab_weights_hash_override', None)
+        if _override:
+            return _override
         import hashlib as _hashlib
         import json as _json
         # CR-01: use getattr defaults so missing attrs don't raise.
@@ -8892,7 +8942,8 @@ class SearchEngine:
     def search_composition_logic(self, full_text, chunk_size, max_freq, mode, filter_text=None, progress_callback=None,
                                    boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
                                    min_boundary_matches=0, min_delimiter_distance=3,
-                                   restrict_sys_ids: set = None):
+                                   restrict_sys_ids: set = None,
+                                   corpus_scope: str = 'genizah'):
         """
         Scans composition chunks against the index.
         Returns aggregated results with WIDE source context.
@@ -8901,7 +8952,16 @@ class SearchEngine:
         - 'full': Regular search, track boundary matches for display
         - 'boundary': Only return results with boundary-crossing matches
         - 'combined': Full search with score boost for boundary matches
+
+        Phase 110 (COMP-LOC-01/02): corpus_scope selects which index loop runs —
+        'genizah' (Genizah Tantivy loop only), 'local' (LOCAL LAB hook only), or 'all'
+        (both, merged into the same doc_hits accumulator — NOT RRF).
         """
+        # Phase 110 C4: fail CLOSED — never expose LOCAL on a bad value.
+        if corpus_scope not in ('genizah', 'local', 'all'):
+            corpus_scope = 'genizah'
+        _local_lab_stale = False  # Phase 110 Round-2 #4: A2 default so EVERY return path carries it
+
         # 1. Tokenize original text - track positions for preserving formatting
         token_matches = list(re.finditer(Config.WORD_TOKEN_PATTERN, full_text))
         tokens = [strip_nikud(m.group()) for m in token_matches]  # Strip nikud from tokens
@@ -8912,7 +8972,8 @@ class SearchEngine:
             filter_text = strip_nikud(filter_text)
 
         if len(tokens) < chunk_size:
-            return {'main': [], 'filtered': [], 'boundary_stats': None}
+            return {'main': [], 'filtered': [], 'boundary_stats': None,
+                    'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale}
 
         # Get boundary stats (includes parsed boundaries to avoid double parsing)
         boundary_stats = get_boundary_stats(full_text, boundary_delimiter, chunk_size, min_delimiter_distance)
@@ -8958,6 +9019,10 @@ class SearchEngine:
 
         # 2. Scan chunks (wrapped in try/except to support partial results on cancel)
         try:
+          # Phase 110: gate the Genizah Tantivy loop — skipped on a LOCAL-only run.
+          # doc_hits/was_cancelled/total_chunks are initialized ABOVE this branch (M1),
+          # so a corpus_scope='local' run never NameErrors on a loop-local variable.
+          if corpus_scope != 'local':
             for i, (token_idx, chunk, chunk_crossed_bounds) in enumerate(chunks_data):
                 if progress_callback: progress_callback(i, total_chunks)
 
@@ -9085,7 +9150,16 @@ class SearchEngine:
         # Phase 97 R-01: skip LOCAL LAB composition search if is_searchable gate closed.
         _scl_tab = self._my_library_tab_ref() if getattr(self, "_my_library_tab_ref", None) is not None else None
         _scl_is_searchable = getattr(_scl_tab, "is_searchable", True) if _scl_tab is not None else True
-        if not was_cancelled and _lab_fresh and _scl_is_searchable:
+        # Phase 110 A2 + M2: per-run stale verdict — stale ONLY when an index is present
+        # but not fresh (stale != no-index). Set the back-compat engine flag only then.
+        _local_index_present_scl = getattr(self, 'local_lab_searcher', None) is not None
+        _local_lab_stale = bool(
+            corpus_scope in ('local', 'all') and _local_index_present_scl and not _lab_fresh
+        )
+        if _local_lab_stale:
+            self.local_lab_searcher_stale = True
+        # Phase 110: gate the LOCAL LAB hook on corpus_scope (skipped on a Genizah-only run).
+        if not was_cancelled and corpus_scope != 'genizah' and _lab_fresh and _scl_is_searchable:
             try:
                 _local_lab_index_scl = getattr(self, "_local_lab_index", None)
                 _local_lab_searcher_scl = self.local_lab_searcher
@@ -9310,8 +9384,11 @@ class SearchEngine:
         main_list = [item for item in all_items if not item.get('is_filtered', False)]
         filtered_list = [item for item in all_items if item.get('is_filtered', False)]
 
-        return {'main': main_list, 'filtered': filtered_list, 'partial': was_cancelled, 'boundary_stats': boundary_stats}
-    
+        return {'main': main_list, 'filtered': filtered_list, 'partial': was_cancelled,
+                'boundary_stats': boundary_stats,
+                # Phase 110 A2 + Round-2 #4: per-run scope + staleness verdict.
+                'corpus_scope': corpus_scope, 'local_lab_stale': _local_lab_stale}
+
     def group_pages_by_manuscript(self, pages_list):
         """Aggregate individual page results into manuscript-level items.
 
