@@ -4,12 +4,12 @@ milestone: v8.0.0
 milestone_name: Joins Lab — Phases 106-110
 status: executing
 stopped_at: Phase 110 REFRAMED + context gathered — Component B deferred; Phase 110 = LOCAL-composition wiring + EXP-F3
-last_updated: "2026-06-08T13:30:23.644Z"
-last_activity: 2026-06-08
+last_updated: "2026-06-08T16:22:31.613Z"
+last_activity: 2026-06-08 -- Phase 110 planning complete
 progress:
   total_phases: 8
   completed_phases: 5
-  total_plans: 27
+  total_plans: 31
   completed_plans: 31
   percent: 100
 ---
@@ -30,7 +30,7 @@ Milestone: **v8.0.0 Dicta Rebrand & Joins Lab — STARTED 2026-06-02.** Folds th
 Phase: 110
 Plan: Not started
 Status: Ready to execute
-Last activity: 2026-06-08
+Last activity: 2026-06-08 -- Phase 110 planning complete
 
 ### Scope (locked 2026-06-02)
 
@@ -49,6 +49,7 @@ Phases 106–109 ✅ complete. Phase 110 context gathered (this session, reframe
 1. `/clear` then **`/gsd-plan-phase 110`** — plan the LOCAL-composition wiring + EXP-F3. CONTEXT.md
    at `.planning/phases/110-composition-parallels-search-local-corpus-support-desktop/110-CONTEXT.md`
    carries 6 research flags (RF-1 Lab-Mode reconciliation is load-bearing; RF-2 ALL-merge semantics).
+
 2. Execute → verify Phase 110.
 3. **`/release`** — ship **v8.0.0** (version-file bump + CHANGELOG `## [8.0.0]` + GitHub Release with
    desktop installer happen here; web+desktop bundle).
