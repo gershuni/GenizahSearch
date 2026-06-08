@@ -3923,9 +3923,10 @@ TRANSLATIONS.update({
 # All new tr() keys introduced by CompareDialog in desktop/join_workbench.py.
 TRANSLATIONS.update({
     # --- Navigation buttons (Feature 7: RTL-correct glyphs) ---
-    "prev >":                     "> הקודם",
+    # Round-4 UAT: arrow leads the label on BOTH buttons -> ">הקודם" / "<הבא" (was "> הקודם" / "הבא <").
+    "prev >":                     ">הקודם",
     "Previous candidate":         "מועמד קודם",
-    "< next":                     "הבא <",
+    "< next":                     "<הבא",
     "Next candidate":             "מועמד הבא",
 
     # --- Triage buttons (emoji + label) ---

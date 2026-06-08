@@ -1146,3 +1146,16 @@ def test_compare_zoom_is_client_side_scale_no_refetch():
     assert calls.get("setPixmap") and calls.get("resize") == (1250, 1000), (
         "label must be repainted and resized to the scaled pixmap for panning"
     )
+
+
+def test_compare_nav_hebrew_arrow_leads_label():
+    """Round-4: Hebrew prev/next compare buttons lead with the arrow (>הקודם / <הבא),
+    not trailing it. Pins Hillel's preference against an i18n re-sweep."""
+    from genizah_translations import TRANSLATIONS
+
+    assert TRANSLATIONS.get("prev >") == ">הקודם", (
+        f'prev button HE must be ">הקודם", got {TRANSLATIONS.get("prev >")!r}'
+    )
+    assert TRANSLATIONS.get("< next") == "<הבא", (
+        f'next button HE must be "<הבא", got {TRANSLATIONS.get("< next")!r}'
+    )
