@@ -612,3 +612,38 @@ def test_toggle_eye_and_checked_style():
         "G-12.1: no 'border' declaration found in the QPushButton:checked rule — "
         "ON state must have an explicit heavier/darker border"
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 10 tests — G-07: VS buttons removed, Find-Joins buttons survive
+# ---------------------------------------------------------------------------
+
+
+def test_browse_resultdialog_vs_buttons_removed():
+    """G-07: Static source scan asserts both VS buttons are gone and both Find-Joins buttons survive.
+
+    btn_b_visual_sim must be absent from genizah_app.py (removed in Plan 10 Task 1).
+    btn_rd_visual_sim must be absent from desktop/result_dialog.py (removed in Plan 10 Task 2).
+    btn_b_find_joins must still be present in genizah_app.py (untouched).
+    btn_rd_find_joins must still be present in desktop/result_dialog.py (untouched).
+    """
+    import pathlib
+    root = pathlib.Path(__file__).parent.parent
+    app_src = (root / "genizah_app.py").read_text(encoding="utf-8")
+    rd_src = (root / "desktop" / "result_dialog.py").read_text(encoding="utf-8")
+
+    # VS buttons must be gone
+    assert "btn_b_visual_sim" not in app_src, (
+        "G-07: btn_b_visual_sim still present in genizah_app.py — Browse VS button not removed"
+    )
+    assert "btn_rd_visual_sim" not in rd_src, (
+        "G-07: btn_rd_visual_sim still present in desktop/result_dialog.py — ResultDialog VS button not removed"
+    )
+
+    # Find-Joins buttons must survive
+    assert "btn_b_find_joins" in app_src, (
+        "G-07: btn_b_find_joins missing from genizah_app.py — Find Joins button incorrectly removed"
+    )
+    assert "btn_rd_find_joins" in rd_src, (
+        "G-07: btn_rd_find_joins missing from desktop/result_dialog.py — Find Joins button incorrectly removed"
+    )
