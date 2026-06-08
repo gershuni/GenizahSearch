@@ -1780,9 +1780,35 @@ if _QT_AVAILABLE:
             self._card_text_worker = None
             self._card_text_gen = 0
 
-            # 5. Triage row (Y / ? / N)
-            trow = QHBoxLayout()
-            trow.setSpacing(2)
+            # 5. Combined folio-nav + triage row (G-11): [▶ p.N ◀]  …(stretch)…  [Y][?][N]
+            # RR-12: None-page guard — default to 1 if c.page is None.
+            self._card_page = max(1, c.page or 1)
+            row = QHBoxLayout()
+            row.setSpacing(2)
+
+            # --- folio nav LEFT (Feature 7 RTL glyphs: PREV=▶, NEXT=◀) ---
+            self._folio_prev_btn = QPushButton("▶")
+            self._folio_prev_btn.setFixedSize(24, 22)
+            self._folio_prev_btn.setAccessibleName(tr("Previous folio"))
+            self._folio_prev_btn.setToolTip(tr("Previous folio"))
+            self._folio_prev_btn.clicked.connect(self._card_folio_prev)
+            row.addWidget(self._folio_prev_btn)
+
+            self._folio_lbl = QLabel(f"p.{self._card_page}")
+            self._folio_lbl.setStyleSheet("font-size:10px;color:#94a3b8;")
+            row.addWidget(self._folio_lbl)
+
+            self._folio_next_btn = QPushButton("◀")
+            self._folio_next_btn.setFixedSize(24, 22)
+            self._folio_next_btn.setAccessibleName(tr("Next folio"))
+            self._folio_next_btn.setToolTip(tr("Next folio"))
+            self._folio_next_btn.clicked.connect(self._card_folio_next)
+            row.addWidget(self._folio_next_btn)
+
+            # --- stretch pushes triage to the RIGHT ---
+            row.addStretch()
+
+            # --- triage RIGHT (Y / ? / N) ---
             for emoji, val, aname in (
                 ("Y", "yes", tr("Mark yes")),
                 ("?", "maybe", tr("Mark maybe")),
@@ -1794,37 +1820,9 @@ if _QT_AVAILABLE:
                 btn.clicked.connect(
                     lambda _checked=False, v=val, s=self.sid: self.pane.wb.mark(s, v)
                 )
-                trow.addWidget(btn)
-            trow.addStretch()
-            lay.addLayout(trow)
+                row.addWidget(btn)
 
-            # 5b. Per-card folio browse: ◀ p.N ▶ (Feature 3)
-            # Maintains a per-card current-page index; flips the card thumbnail in place.
-            # RR-12: None-page guard — default to 1 if c.page is None.
-            self._card_page = max(1, c.page or 1)
-            folio_row = QHBoxLayout()
-            folio_row.setSpacing(2)
-            # Feature 7: RTL-correct glyphs — PREV points right (▶), NEXT points left (◀)
-            self._folio_prev_btn = QPushButton("▶")
-            self._folio_prev_btn.setFixedSize(24, 22)
-            self._folio_prev_btn.setAccessibleName(tr("Previous folio"))
-            self._folio_prev_btn.setToolTip(tr("Previous folio"))
-            self._folio_prev_btn.clicked.connect(self._card_folio_prev)
-            folio_row.addWidget(self._folio_prev_btn)
-
-            self._folio_lbl = QLabel(f"p.{self._card_page}")
-            self._folio_lbl.setStyleSheet("font-size:10px;color:#94a3b8;")
-            folio_row.addWidget(self._folio_lbl)
-
-            self._folio_next_btn = QPushButton("◀")
-            self._folio_next_btn.setFixedSize(24, 22)
-            self._folio_next_btn.setAccessibleName(tr("Next folio"))
-            self._folio_next_btn.setToolTip(tr("Next folio"))
-            self._folio_next_btn.clicked.connect(self._card_folio_next)
-            folio_row.addWidget(self._folio_next_btn)
-
-            folio_row.addStretch()
-            lay.addLayout(folio_row)
+            lay.addLayout(row)
 
             # 6. Action row: ICON-ONLY buttons (adapted_decision 9)
             arow = QHBoxLayout()

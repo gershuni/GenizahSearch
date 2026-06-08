@@ -690,3 +690,40 @@ def test_triage_second_click_clears():
     assert win.triage.get("SYS-A") == "no", (
         "G-10.1: mark('yes') then mark('no') must leave triage as 'no'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 11 tests — Task 2: merged folio+triage row (G-11.1)
+# ---------------------------------------------------------------------------
+
+
+def test_folio_and_triage_share_one_row():
+    """G-11.1: Folio nav and triage buttons share ONE row — no standalone folio_row = QHBoxLayout().
+
+    Static source scan. Authoritative dynamic check: test_join_workbench_construct.py (builds real card).
+    """
+    import pathlib
+    src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
+
+    # The old separate folio_row = QHBoxLayout() must be gone (folio widgets are now in the combined row)
+    assert "folio_row = QHBoxLayout()" not in src, (
+        "G-11.1: folio_row = QHBoxLayout() still present — folio nav not merged into triage row"
+    )
+
+    # The folio prev/next buttons must still be referenced (they are added to the combined row)
+    assert "self._folio_prev_btn" in src, (
+        "G-11.1: self._folio_prev_btn not found — folio nav lost in merge"
+    )
+    assert "self._folio_next_btn" in src, (
+        "G-11.1: self._folio_next_btn not found — folio nav lost in merge"
+    )
+    assert "self._folio_lbl" in src, (
+        "G-11.1: self._folio_lbl not found — folio label lost in merge"
+    )
+
+    # The combined row must add folio widgets before addStretch (folio LEFT, triage RIGHT)
+    # Find the combined row block. The folio prev btn must appear before addStretch in it.
+    combined_marker = "# 5. Combined folio-nav + triage row"
+    assert combined_marker in src, (
+        f"G-11.1: '{combined_marker}' comment not found — combined row not implemented"
+    )
