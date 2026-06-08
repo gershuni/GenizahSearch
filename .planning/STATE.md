@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v8.0.0
 milestone_name: Joins Lab — Phases 106-110
 status: executing
-stopped_at: Phase 110 REFRAMED + context gathered — Component B deferred; Phase 110 = LOCAL-composition wiring + EXP-F3
-last_updated: "2026-06-08T16:22:31.613Z"
-last_activity: 2026-06-08 -- Phase 110 planning complete
+stopped_at: Phase 110 Plan 01 complete — Wave-0 test scaffold + D-08 i18n key; Plan 02 next
+last_updated: "2026-06-08T18:11:00.000Z"
+last_activity: 2026-06-08 -- Phase 110 Plan 01 executed (test scaffold)
 progress:
   total_phases: 8
   completed_phases: 5
-  total_plans: 31
-  completed_plans: 31
-  percent: 100
+  total_plans: 35
+  completed_plans: 32
+  percent: 91
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-02)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 110 (REFRAMED 2026-06-08) — Composition/Parallels LOCAL corpus support (desktop) + EXP-F3; then `/release` v8.0.0. Component B (JSA-01/02/03 + JWB-05) DEFERRED to post-v8.0.0.
+**Current focus:** Phase 110 — composition-parallels-search-local-corpus-support-desktop
 
 ## Current Position
 
 Milestone: **v8.0.0 Dicta Rebrand & Joins Lab — STARTED 2026-06-02.** Folds the delivered v7.17 cycle (the "Dicta Genizah Search Pro" rebrand + LOCAL "My Library" export, Phases 103 + 105) into the flagship v8.0.0 release, and adds **Joins Lab** — an interactive **human-in-the-loop** join-hunting workbench (Component A) + optional search-support algorithms (Component B), both apps. NO automated join-finder.
 
-Phase: 110
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-08 -- Phase 110 planning complete
+Phase: 110 (composition-parallels-search-local-corpus-support-desktop) — EXECUTING
+Plan: 2 of 4 (Plan 01 Wave-0 test scaffold complete)
+Status: Ready to execute Plan 02 (engine corpus_scope)
+Last activity: 2026-06-08 -- Phase 110 Plan 01 executed (test scaffold + D-08 i18n key)
 
 ### Scope (locked 2026-06-02)
 
@@ -91,7 +91,7 @@ Carried forward to v8.0.0+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular
 
 ## Session Continuity
 
-Last session: 2026-06-08T13:30:23.634Z
+Last session: 2026-06-08T18:04:53.874Z
 Stopped at: Phase 110 REFRAMED + context gathered — Component B deferred; Phase 110 = LOCAL-composition wiring + EXP-F3
-Resume file: .planning/phases/110-composition-parallels-search-local-corpus-support-desktop/110-CONTEXT.md
+Resume file: None
 Next step: /gsd-verify-work for Phase 108 (VALIDATION.md ready; nyquist_compliant + wave_0_complete = true).
