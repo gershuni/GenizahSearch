@@ -282,6 +282,26 @@ Record results as you work through the scenarios.
   literally; visual-order HE strings `הקודם>` (arrow trails, outer-right) and `<הבא` (arrow leads,
   outer-left). English keys unchanged. Gate: 59 passed.
 
+### F-R4-5 — Join Lab state not remembered on close/reopen or across restart — FIXED, re-test required
+
+- **Reported (2026-06-08, Hillel):** the Join Lab state (anchor/builders/triage) is not remembered
+  upon closing the Join Lab window, nor across restore sessions. "It was before." (Also: the
+  Compare next-button arrow should sit after the word — `הבא>`; prev stays `<הקודם`.)
+- **Root cause (session persistence):** `open_join_workbench` / `open_joins_workbench` recreated
+  the window whenever it was merely HIDDEN (`or not self._join_workbench.isVisible()`), discarding
+  the in-memory instance. Closing then reopening built a fresh EMPTY window, and `_save_session`
+  then serialized that empty window at app exit — so state was lost both on reopen and across
+  restart, defeating the Phase-108 Feature-7 persistence. (Pre-existing since Phase 107, surfaced
+  by heavy close/reopen during UAT.)
+- **Fix (commit `e94f6540`):** honor the documented D-02 "single reusable instance" — create the
+  window only when the instance is `None`; a hidden window is re-shown with its state intact. Disk
+  `restore_state` is gated to a freshly-created window so a reused instance is not clobbered. Plus
+  the Compare next arrow → `הבא>`.
+- **Regression guard (static):** the recreate-on-hidden anti-pattern is pinned out and the
+  fresh-only restore asserted. ruff clean; gate 54 passed; 6 Qt construct tests pass offscreen.
+- **Re-test:** open Join Lab, set an anchor + some triage, CLOSE the window, reopen (corner button)
+  → state is there; also confirm it survives an app restart (open Join Lab again after relaunch).
+
 ---
 
 ## Resume Signal
