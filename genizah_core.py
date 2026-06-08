@@ -1491,7 +1491,18 @@ class LabEngine:
         # (Part 2: Scanning) - wrapped in try/except to support partial results on cancel
         try:
           # Phase 110: gate the Genizah lab loop — skipped on a LOCAL-only run.
-          if corpus_scope != 'local':
+          # Phase 110 UAT (Issue 3): guard against an UNBUILT Genizah fingerprint
+          # LAB index. When Config.LAB_INDEX_DIR has never been built,
+          # self.lab_index / self.lab_searcher are None and a Lab-Mode + Genizah
+          # run (chunk_size>3) crashed with
+          # "'NoneType' object has no attribute 'parse_query'". Mirror the LOCAL
+          # LAB loop's existing None-guard below: skip the Genizah lab contribution
+          # gracefully (no Genizah-lab hits) — do NOT crash, do NOT build anything.
+          if corpus_scope != 'local' and (self.lab_index is None or self.lab_searcher is None):
+            LAB_LOGGER.info(
+                "lab_composition_search: Genizah LAB index not built — skipping Genizah lab loop"
+            )
+          if corpus_scope != 'local' and self.lab_index is not None and self.lab_searcher is not None:
             for i, (token_start_idx, chunk_tokens, chunk_crossed_bounds) in enumerate(chunks_data):
                 chunks_processed = i
                 if progress_callback: progress_callback(i, total_chunks)

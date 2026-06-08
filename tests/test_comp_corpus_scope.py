@@ -256,6 +256,41 @@ def test_lab_mode_not_hardwired_to_local():
 
 
 # ---------------------------------------------------------------------------
+# Phase 110 UAT (Issue 3) — Genizah Lab loop guard against an UNBUILT LAB index
+# ---------------------------------------------------------------------------
+
+def test_lab_comp_missing_lab_index_no_crash():
+    """Phase 110 UAT (Issue 3): a Lab-Mode + Genizah composition run with
+    chunk_size>3 must NOT crash when the Genizah fingerprint LAB index
+    (Config.LAB_INDEX_DIR) has never been built — i.e. self.lab_index /
+    self.lab_searcher are None.
+
+    Before the guard, the Genizah lab loop called self.lab_index.parse_query(...)
+    unconditionally → "'NoneType' object has no attribute 'parse_query'".
+    The guard skips the Genizah lab contribution gracefully and the method must
+    still return its normal result dict (carrying corpus_scope / local_lab_stale).
+    """
+    engine = _build_lab_engine()
+    # Simulate an unbuilt Genizah LAB index.
+    engine.lab_index = None
+    engine.lab_searcher = None
+
+    result = engine.lab_composition_search(
+        _SOURCE_TEXT, mode="variants", chunk_size=4, corpus_scope="genizah",
+    )
+    assert isinstance(result, dict), (
+        "an unbuilt Genizah LAB index must yield a dict, not raise "
+        "(no NoneType.parse_query crash)"
+    )
+    assert result.get("corpus_scope") == "genizah", (
+        "the result must still carry the corpus_scope payload key"
+    )
+    assert "local_lab_stale" in result, (
+        "the result must still carry the local_lab_stale payload key"
+    )
+
+
+# ---------------------------------------------------------------------------
 # COMP-LOC-02 — ALL merge, staleness payload, early-return payload, fail-closed
 # ---------------------------------------------------------------------------
 
