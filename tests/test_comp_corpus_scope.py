@@ -193,6 +193,24 @@ def test_lab_comp_local_skips_genizah_lab():
     )
 
 
+def test_lab_comp_local_searches_even_when_stale():
+    """Phase 110 UAT fix: a PRESENT-but-'stale' LOCAL LAB index is still SEARCHED.
+    The weights-hash freshness check is perpetually false-stale when the LabEngine's
+    dynamic_rank_map differs build-vs-search (see rebuild_local_lab_index docstring),
+    which previously suppressed ALL Lab+LOCAL results. Freshness is now advisory, NOT
+    a hard gate — the static fingerprint field is weights-independent, so an empty
+    result is worse than a slightly-stale one."""
+    engine = _build_lab_engine()
+    engine._check_local_lab_freshness = MagicMock(return_value=False)  # stale
+    engine.lab_composition_search(
+        _SOURCE_TEXT, mode="variants", chunk_size=4, corpus_scope="local",
+    )
+    assert engine.local_lab_searcher.search.call_count > 0, (
+        "a present LOCAL LAB index must be searched even when freshness reports stale "
+        "(freshness is advisory, not a hard gate)"
+    )
+
+
 def test_std_comp_genizah_skips_local_lab():
     """COMP-LOC-01: standard composition with corpus_scope='genizah' runs the
     Genizah Tantivy loop and NEVER reaches the LOCAL hook — neither the regular

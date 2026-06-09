@@ -1652,9 +1652,21 @@ class LabEngine:
         )
         if _local_lab_stale:
             self.local_lab_searcher_stale = True
-        # Phase 110: gate the LOCAL LAB loop on corpus_scope (skipped on a Genizah-only run).
+            LAB_LOGGER.info(
+                "lab_composition_search: LOCAL LAB weights-hash reports stale, but "
+                "searching the present index anyway (freshness is advisory, not a hard "
+                "gate — the static fingerprint field is weights-independent; an empty "
+                "result is worse than a slightly-stale one)."
+            )
+        # Phase 110 (UAT fix): gate the LOCAL LAB loop on corpus_scope + the index being
+        # PRESENT — NOT on `_lab_fresh_lab`. The weights-hash freshness check is perpetually
+        # false-stale when the LabEngine's dynamic_rank_map differs build-vs-search (see
+        # rebuild_local_lab_index docstring), which silently suppressed ALL Lab+LOCAL results.
+        # Freshness stays advisory (per-run `local_lab_stale` payload + the log above); the
+        # inner None-guard below keeps it crash-safe.
         if (not was_interrupted and corpus_scope != 'genizah' and _lab_is_searchable
-                and _lab_fresh_lab):
+                and getattr(self, 'local_lab_searcher', None) is not None
+                and getattr(self, '_local_lab_index', None) is not None):
             try:
                 local_lab_index = getattr(self, "_local_lab_index", None)
                 local_lab_searcher = self.local_lab_searcher
