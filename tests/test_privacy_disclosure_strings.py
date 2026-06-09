@@ -74,13 +74,22 @@ def test_about_dialog_contains_local_cache_disclosure_en():
 
 
 def test_about_dialog_contains_local_cache_disclosure_he():
-    """D-NEW-6: About dialog must contain Hebrew 'not encrypted' disclosure string."""
+    """D-NEW-6: the About dialog's Hebrew 'not encrypted / not uploaded' disclosure must ship.
+
+    Post the 2026-06 i18n audit, hardcoded Hebrew literals were moved out of genizah_app.py
+    into genizah_translations.py (the desktop About text renders the Hebrew via tr()), so the
+    phrase is accepted in either source file.
+    """
     app_src = (REPO_ROOT / "genizah_app.py").read_text(encoding="utf-8")
+    tr_src = (REPO_ROOT / "genizah_translations.py").read_text(encoding="utf-8")
+    combined = app_src + tr_src
     assert (
-        "לא מוצפן" in app_src
-        or "אינו מועלה" in app_src
-        or "אינו מוצפן" in app_src
+        "לא מוצפן" in combined
+        or "אינו מועלה" in combined
+        or "אינו מוצפן" in combined
+        or "לא הצפנה" in combined
     ), (
-        "About dialog (genizah_app.py) must include Hebrew disclosure phrase "
-        "(Phase 97 D-NEW-6): expected 'לא מוצפן' OR 'אינו מועלה'"
+        "Hebrew About-dialog cache disclosure missing (Phase 97 D-NEW-6): expected one of "
+        "'לא מוצפן' / 'אינו מועלה' / 'אינו מוצפן' / 'לא הצפנה' in genizah_app.py or "
+        "genizah_translations.py"
     )

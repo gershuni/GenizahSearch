@@ -282,3 +282,30 @@ def _refresh_local_indexer_for_local_indexer_tests(request):
             if hasattr(shared.local_indexer, _name) and hasattr(request.module, _name):
                 setattr(request.module, _name, getattr(shared.local_indexer, _name))
     yield
+
+
+# ---------------------------------------------------------------------------
+# Headless safety net: never let a modal QMessageBox.exec() hang the suite.
+#
+# The My Library confirm dialogs (remove-folder, Re-index All, the large-folder
+# ceiling warning) build a QMessageBox and call ``mb.exec()`` — switched from the
+# static ``QMessageBox.question(...)`` by the 2026-06 localize-buttons change
+# (commit 6d75ac58). With no display, a real ``exec()`` BLOCKS FOREVER and hangs
+# the whole pytest job (observed as a 30-min CI hang on test_local_ceiling_*).
+#
+# Default ``QMessageBox.exec`` to a non-destructive Cancel so no test can hang on
+# a modal. Tests that need a specific result (or want to capture the dialog text)
+# patch ``QMessageBox.exec`` themselves — their patch wins inside the test body.
+# ---------------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _no_blocking_modal_exec(monkeypatch):
+    try:
+        from PyQt6.QtWidgets import QMessageBox
+    except Exception:
+        return  # Qt not available in this environment — nothing to guard
+    monkeypatch.setattr(
+        QMessageBox,
+        "exec",
+        lambda self: QMessageBox.StandardButton.Cancel,
+        raising=False,
+    )

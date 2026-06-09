@@ -90,16 +90,16 @@ def test_prescan_warning_above_5000_files():
 
     called_with = {}
 
-    def fake_question(parent, title, text, buttons, default):
-        called_with["title"] = title
-        called_with["text"] = text
+    def fake_exec(self):
+        called_with["title"] = self.windowTitle()
+        called_with["text"] = self.text()
         return QMessageBox.StandardButton.Cancel  # user cancels
 
-    with mock.patch("desktop.my_library_tab.QMessageBox.question", side_effect=fake_question):
+    with mock.patch("desktop.my_library_tab.QMessageBox.exec", autospec=True, side_effect=fake_exec):
         result = tab._check_ceiling_single_folder("/some/folder")
 
     assert not result, "Should return False when user cancels"
-    assert "question" in str(fake_question)  # called
+    assert called_with, "confirm dialog must have been shown"
     assert "50,001" in called_with.get("text", ""), (
         f"Dialog text should contain formatted file count '50,001'; got: {called_with.get('text')}"
     )
@@ -115,12 +115,12 @@ def test_prescan_warning_above_2gb():
 
     called_with = {}
 
-    def fake_question(parent, title, text, buttons, default):
-        called_with["title"] = title
-        called_with["text"] = text
+    def fake_exec(self):
+        called_with["title"] = self.windowTitle()
+        called_with["text"] = self.text()
         return QMessageBox.StandardButton.Cancel
 
-    with mock.patch("desktop.my_library_tab.QMessageBox.question", side_effect=fake_question):
+    with mock.patch("desktop.my_library_tab.QMessageBox.exec", autospec=True, side_effect=fake_exec):
         result = tab._check_ceiling_single_folder("/some/folder")
 
     assert not result, "Should return False when user cancels"
@@ -153,7 +153,8 @@ def test_user_confirms_proceeds():
     tab = _make_tab(mock_idx)
 
     with mock.patch(
-        "desktop.my_library_tab.QMessageBox.question",
+        "desktop.my_library_tab.QMessageBox.exec",
+        autospec=True,
         return_value=QMessageBox.StandardButton.Yes,
     ):
         result = tab._check_ceiling_single_folder("/huge/folder")
@@ -200,13 +201,13 @@ def test_refresh_aggregates_prescan_across_all_folders():
 
     called_with = {}
 
-    def fake_question(parent, title, text, buttons, default):
-        called_with["title"] = title
-        called_with["text"] = text
+    def fake_exec(self):
+        called_with["title"] = self.windowTitle()
+        called_with["text"] = self.text()
         return QMessageBox.StandardButton.Cancel
 
     with mock.patch(
-        "desktop.my_library_tab.QMessageBox.question", side_effect=fake_question
+        "desktop.my_library_tab.QMessageBox.exec", autospec=True, side_effect=fake_exec
     ):
         result_b = tab_b._check_ceiling_refresh_aggregate()
 
@@ -281,17 +282,17 @@ def test_aggregate_both_thresholds_checked():
 
     called = []
 
-    def fake_question(parent, title, text, buttons, default):
-        called.append(text)
+    def fake_exec(self):
+        called.append(self.text())
         return QMessageBox.StandardButton.Cancel
 
     with mock.patch(
-        "desktop.my_library_tab.QMessageBox.question", side_effect=fake_question
+        "desktop.my_library_tab.QMessageBox.exec", autospec=True, side_effect=fake_exec
     ):
         result = tab._check_ceiling_refresh_aggregate()
 
     assert not result, "Should show dialog when file_count > 50,000"
-    assert called, "QMessageBox.question must have been called"
+    assert called, "the confirm dialog must have been shown"
 
 
 def test_aggregate_bytes_threshold_triggers():
@@ -309,14 +310,14 @@ def test_aggregate_bytes_threshold_triggers():
 
     called = []
 
-    def fake_question(parent, title, text, buttons, default):
-        called.append(text)
+    def fake_exec(self):
+        called.append(self.text())
         return QMessageBox.StandardButton.Cancel
 
     with mock.patch(
-        "desktop.my_library_tab.QMessageBox.question", side_effect=fake_question
+        "desktop.my_library_tab.QMessageBox.exec", autospec=True, side_effect=fake_exec
     ):
         result = tab._check_ceiling_refresh_aggregate()
 
     assert not result, "Should show dialog when total_bytes > 2 GB"
-    assert called, "QMessageBox.question must have been called"
+    assert called, "the confirm dialog must have been shown"
