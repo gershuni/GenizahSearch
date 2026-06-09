@@ -164,14 +164,39 @@ Ask: "Does this look right? Proceed with build and deploy?"
 
 ## Phase 6: Build (Desktop only — skip for web-only releases)
 
-1. Run `build_app.bat` — PyInstaller build (this takes several minutes)
-   - Run with timeout of 600000ms (10 min)
+> **Running `build_app.bat` reliably (learned the hard way — v8.0.0 burned ~5 failed
+> attempts).** A bare `cmd /c build_app.bat` from the PowerShell/Bash tool fails with
+> `'build_app.bat' is not recognized` for THREE compounding reasons, all defeated by the
+> invocation below:
+> 1. **Background tasks don't inherit the project CWD** — they start elsewhere, not the repo root.
+> 2. **PowerShell `Set-Location` only moves the *provider* location, NOT the process working
+>    directory** a spawned `cmd` inherits — you MUST also set `[Environment]::CurrentDirectory`.
+>    (`Start-Process -WorkingDirectory` is *ignored* when combined with output redirection —
+>    don't rely on it either.)
+> 3. This machine has **`NoDefaultCurrentDirectoryInExePath`** set, so `cmd` refuses to search
+>    the current dir for the batch file — you MUST pass the **explicit full path** to the `.bat`.
+>    (The `.bat` still uses relative paths internally — genizah_app.py, icon.ico, scripts\… —
+>    so the process CWD must ALSO be the repo root; that's why both pieces are needed.)
+>
+> **Proven invocation (PowerShell tool; OK to run in background):**
+> ```powershell
+> Set-Location -LiteralPath 'C:\Genizahsearch'; [Environment]::CurrentDirectory = 'C:\Genizahsearch'; cmd /c "C:\Genizahsearch\build_app.bat"; Write-Output "BUILD_EXIT=$LASTEXITCODE"
+> ```
+
+1. Run `build_app.bat` (via the invocation above) — PyInstaller build (several minutes)
    - Verify `dist/GenizahSearchPro/GenizahSearchPro.exe` exists after build
-2. Run Inno Setup CLI to create installer:
+   - **`build_app.bat` REGENERATES (clobbers) `GenizahSearchPro.spec`** every run (command-line
+     PyInstaller writes a fresh minimal spec, stripping the maintained `collect_all('pymupdf')`/
+     `collect_all('zstandard')`/`collect_all('lxml')` + `fitz`/`openpyxl`/`defusedxml`
+     hidden-imports). The build still works (PyInstaller contrib hooks collect those deps), but
+     **after the build run `git restore GenizahSearchPro.spec`** so the maintained spec is never
+     committed clobbered.
+2. Run Inno Setup CLI to create installer (same CWD caveat — full paths):
+   ```powershell
+   Set-Location -LiteralPath 'C:\Genizahsearch'; [Environment]::CurrentDirectory = 'C:\Genizahsearch'; & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' 'C:\Genizahsearch\CompileScriptGenizah.iss'; Write-Output "ISCC_EXIT=$LASTEXITCODE"
    ```
-   "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" CompileScriptGenizah.iss
-   ```
-   - Verify the output .exe installer was created
+   - Verify the output `.exe` installer was created (`dist/GenizahSearchPro_VX.Y.Z_Setup.exe`)
+   - (Inno compresses the ~2.3 GB payload with LZMA — allow ~5 min.)
 3. Report build output sizes to user
 
 ### Desktop Installer Test Gate
