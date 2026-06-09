@@ -596,29 +596,40 @@ class TestLabCompositionSearchLocalLab:
             "Option C callback wire-up missing: fingerprint_dyn_fn= not found in genizah_core.py"
         )
 
-    def test_search_composition_logic_extends_local_lab_query(self):
-        """I14: search_composition_logic contains the LOCAL LAB extension hook."""
+    def test_search_composition_logic_extends_regular_local_query(self):
+        """Phase 110 design correction (supersedes the original I14 LOCAL-LAB hook):
+        STANDARD search_composition_logic extends the REGULAR My-Library index
+        (``self.local_searcher`` / ``self.local_index``), NOT the LAB side-index. The
+        LAB side-index is Lab-Mode-only (see lab_composition_search). So the standard
+        path must reference ``self.local_searcher`` and must NOT reference
+        ``local_lab_searcher`` (that routing was the UAT bug the re-point fixed)."""
         src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "genizah_core.py")
         if not os.path.exists(src_path):
             pytest.skip("genizah_core.py not found")
         with open(src_path, "r", encoding="utf-8") as f:
             source = f.read()
 
-        # AST check: function search_composition_logic contains reference to local_lab_searcher
+        # AST check: search_composition_logic extends the REGULAR local index, not LAB.
         tree = ast.parse(source)
         found_fn = False
-        found_local_lab = False
+        uses_regular = False
+        uses_lab = False
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef) and node.name == "search_composition_logic":
                 found_fn = True
-                fn_source = ast.get_source_segment(source, node)
-                if fn_source and "local_lab_searcher" in fn_source:
-                    found_local_lab = True
+                fn_source = ast.get_source_segment(source, node) or ""
+                uses_regular = "self.local_searcher" in fn_source
+                uses_lab = "local_lab_searcher" in fn_source
                 break
 
         assert found_fn, "search_composition_logic function not found in genizah_core.py"
-        assert found_local_lab, (
-            "search_composition_logic does not reference local_lab_searcher (I14 extension missing)"
+        assert uses_regular, (
+            "search_composition_logic does not reference self.local_searcher — Phase 110: "
+            "standard composition must extend the REGULAR LOCAL index"
+        )
+        assert not uses_lab, (
+            "search_composition_logic must NOT reference local_lab_searcher — Phase 110 "
+            "design correction: the LAB side-index is Lab-Mode-only"
         )
 
     def test_lab_composition_search_extends_local_lab_query(self):
