@@ -536,7 +536,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 | 107. Desktop Join Workbench — Anchor, Entry, Actions & Join Model | v8.0.0 | 3/3 | Complete    | 2026-06-04 |
 | 108. Desktop Join Workbench — Builders, Candidates & Compare | v8.0.0 | 7/4 | Complete    | 2026-06-06 |
 | 109. Visual-Similarity Merge & Soft-Retire | v8.0.0 | 13/13 | Complete    | 2026-06-08 |
-| 110. Composition/Parallels — LOCAL Corpus Support (+EXP-F3) | v8.0.0 | 4/4 | Complete   | 2026-06-09 |
+| 110. Composition/Parallels — LOCAL Corpus Support (+EXP-F3) | v8.0.0 | 4/4 | Complete    | 2026-06-09 |
 | 103. Search-Results LOCAL Export | v7.17→v8.0.0 | 4/4 | Complete    | 2026-06-01 |
 | 104. Composition-Report LOCAL Export | v7.17 | 0/0 | ⏸ Deferred (no LOCAL comp-search UI) | - |
 | 105. Export UX Polish | v7.17 | 4/4 EXPUX | Implemented (tests green; UAT pending) | 2026-06-01 |

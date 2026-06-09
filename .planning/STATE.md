@@ -4,14 +4,14 @@ milestone: v8.0.0
 milestone_name: Joins Lab — Phases 106-110
 status: executing
 stopped_at: Phase 110 Plan 02 complete — composition engine corpus_scope + thread plumbing; Plan 03 next (UI selector + _lab_weights_hash_override injection)
-last_updated: "2026-06-08T18:13:40.252Z"
-last_activity: 2026-06-08 -- Phase 110 Plan 02 executed (engine corpus_scope; all 10 Wave-0 pure-engine tests green; comp threads plumbed)
+last_updated: "2026-06-09T02:39:13.863Z"
+last_activity: 2026-06-09
 progress:
   total_phases: 8
-  completed_phases: 5
-  total_plans: 35
-  completed_plans: 34
-  percent: 97
+  completed_phases: 6
+  total_plans: 31
+  completed_plans: 35
+  percent: 100
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-06-02)
 
 Milestone: **v8.0.0 Dicta Rebrand & Joins Lab — STARTED 2026-06-02.** Folds the delivered v7.17 cycle (the "Dicta Genizah Search Pro" rebrand + LOCAL "My Library" export, Phases 103 + 105) into the flagship v8.0.0 release, and adds **Joins Lab** — an interactive **human-in-the-loop** join-hunting workbench (Component A) + optional search-support algorithms (Component B), both apps. NO automated join-finder.
 
-Phase: 110 (composition-parallels-search-local-corpus-support-desktop) — EXECUTING
-Plan: 3 of 4 (Plans 01 Wave-0 scaffold + 02 engine corpus_scope complete)
+Phase: 110
+Plan: Not started
 Status: Ready to execute Plan 03 (desktop comp-tab Genizah/Local/ALL selector + _lab_weights_hash_override injection at GenizahGUI init + after LOCAL LAB rebuild)
-Last activity: 2026-06-08 -- Phase 110 Plan 02 executed (engine corpus_scope; all 10 Wave-0 pure-engine tests green; comp threads plumbed)
+Last activity: 2026-06-09
 
 ### Scope (locked 2026-06-02)
 
