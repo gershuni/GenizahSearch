@@ -211,6 +211,76 @@ def test_lab_comp_local_searches_even_when_stale():
     )
 
 
+def test_lab_search_genizah_skips_local():
+    """Phase 110 bug #2: regular Lab Mode word search with corpus_scope='genizah'
+    queries the Genizah lab searcher and NEVER the LOCAL LAB searcher."""
+    engine = _build_lab_engine()
+    engine.meta_mgr = MagicMock(name="meta_mgr")
+    engine.lab_search(_SOURCE_TEXT, mode="exact", corpus_scope="genizah")
+    assert engine.local_lab_searcher.search.call_count == 0, (
+        "lab_search corpus_scope='genizah' must NOT query the LOCAL LAB searcher"
+    )
+    assert engine.lab_searcher.search.call_count > 0, (
+        "lab_search corpus_scope='genizah' must query the Genizah lab searcher"
+    )
+
+
+def test_lab_search_local_skips_genizah():
+    """Phase 110 bug #2: regular Lab Mode word search with corpus_scope='local'
+    queries the LOCAL LAB searcher and NEVER the Genizah lab searcher. This is the
+    fix for "regular LOCAL LAB search gets the genizah results (and only them)"."""
+    engine = _build_lab_engine()
+    engine.meta_mgr = MagicMock(name="meta_mgr")
+    engine.lab_search(_SOURCE_TEXT, mode="exact", corpus_scope="local")
+    assert engine.lab_searcher.search.call_count == 0, (
+        "lab_search corpus_scope='local' must NOT query the Genizah lab searcher"
+    )
+    assert engine.local_lab_searcher.search.call_count > 0, (
+        "lab_search corpus_scope='local' must query the LOCAL LAB searcher"
+    )
+
+
+def test_lab_search_all_queries_both():
+    """Phase 110 bug #2: corpus_scope='all' queries BOTH lab searchers."""
+    engine = _build_lab_engine()
+    engine.meta_mgr = MagicMock(name="meta_mgr")
+    engine.lab_search(_SOURCE_TEXT, mode="exact", corpus_scope="all")
+    assert engine.lab_searcher.search.call_count > 0, (
+        "lab_search corpus_scope='all' must query the Genizah lab searcher"
+    )
+    assert engine.local_lab_searcher.search.call_count > 0, (
+        "lab_search corpus_scope='all' must query the LOCAL LAB searcher"
+    )
+
+
+def test_lab_search_thread_and_ui_wire_corpus_scope():
+    """Phase 110 bug #2 wiring guard: LabSearchThread must accept corpus_scope and
+    pass it to lab_search; genizah_app must read the corpus dropdown for the Lab
+    path (previously LabSearchThread had no corpus_scope param → always Genizah)."""
+    import inspect
+    import os
+    from genizah_core import LabEngine
+    from gui_threads import LabSearchThread
+
+    assert "corpus_scope" in inspect.signature(LabEngine.lab_search).parameters, (
+        "LabEngine.lab_search must accept corpus_scope"
+    )
+    assert "corpus_scope" in inspect.signature(LabSearchThread.__init__).parameters, (
+        "LabSearchThread.__init__ must accept corpus_scope"
+    )
+    import gui_threads as _gt
+    gt_src = inspect.getsource(_gt.LabSearchThread.run)
+    assert "corpus_scope=self.corpus_scope" in gt_src, (
+        "LabSearchThread.run must pass corpus_scope through to lab_search"
+    )
+    ga_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "genizah_app.py")
+    with open(ga_path, "r", encoding="utf-8") as f:
+        ga_src = f.read()
+    assert "LabSearchThread(" in ga_src and "corpus_scope=_lab_corpus_scope" in ga_src, (
+        "genizah_app must pass the corpus dropdown value into LabSearchThread"
+    )
+
+
 def test_std_comp_genizah_skips_local_lab():
     """COMP-LOC-01: standard composition with corpus_scope='genizah' runs the
     Genizah Tantivy loop and NEVER reaches the LOCAL hook — neither the regular

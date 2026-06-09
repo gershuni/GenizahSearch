@@ -492,6 +492,58 @@ class TestLabCompositionSearchLocalLab:
         # we test the logic helpers via a thin wrapper.
         pass
 
+    def test_reload_registers_tokenizers_so_fingerprint_query_parses(self, tmp_path, monkeypatch):
+        """Phase 110 UAT BLOCKER regression (root cause of "Lab+Local returns nothing").
+
+        reload_local_lab_index opens the LOCAL LAB index but MUST register the
+        'simple'/'whitespace' tokenizers the schema's fingerprint / fingerprint_dyn
+        / content / text_ngram fields declare. Without them, parse_query against
+        the simple-tokenized `fingerprint` field raises
+        ValueError('The tokenizer "simple" for the field "fingerprint" is unknown'),
+        which both lab_composition_search and lab_search swallow with
+        `except (ValueError, RuntimeError): continue` — silently dropping EVERY
+        chunk/candidate and returning ZERO LOCAL LAB hits. The Genizah lab index
+        never hit this because _reload_lab_index() calls _ensure_lab_tokenizers().
+
+        Guards BOTH reload sites (SearchEngine + LabEngine).
+        """
+        try:
+            import tantivy  # noqa
+        except ImportError:
+            pytest.skip("tantivy not available")
+        from genizah_core import Config, SearchEngine, LabEngine
+
+        indexer, index_dir, lab_index_dir, db_path = _make_local_indexer(str(tmp_path))
+        try:
+            _index_small_txt(indexer, str(tmp_path))
+            fp_dyn, fp_static, normalize = _make_dummy_callbacks()
+            indexer.build_lab_side_index(
+                lab_weights={"v": 1},
+                fingerprint_dyn_fn=fp_dyn,
+                fingerprint_static_fn=fp_static,
+                normalize_text_fn=normalize,
+                lab_schema_version=1,
+            )
+            # Point the reload methods at the freshly-built tmp LAB dir.
+            monkeypatch.setattr(Config, "LOCAL_LAB_INDEX_DIR", lab_index_dir)
+
+            for cls in (SearchEngine, LabEngine):
+                engine = object.__new__(cls)
+                engine.local_lab_searcher = None
+                engine._local_lab_index = None
+                engine._lab_local_meta = None
+                engine.reload_local_lab_index()
+                assert engine._local_lab_index is not None, (
+                    f"{cls.__name__}.reload_local_lab_index should open the built LAB index"
+                )
+                # The regression assertion: these must NOT raise the unknown-tokenizer
+                # ValueError. parse_query need not MATCH — only PARSE successfully.
+                for field in ("fingerprint", "fingerprint_dyn", "content"):
+                    q = engine._local_lab_index.parse_query(f"{field}:foo OR {field}:bar")
+                    assert q is not None, f"{cls.__name__}: parse_query on {field} failed"
+        finally:
+            indexer.close()
+
     def test_weights_hash_mismatch_triggers_stale_flag(self):
         """D-38: when stored weights_hash != current LAB weights hash,
         local_lab_searcher_stale is set True and local_lab_searcher is bypassed.

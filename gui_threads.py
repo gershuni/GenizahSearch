@@ -128,7 +128,8 @@ class LabSearchThread(QThread):
     status_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
 
-    def __init__(self, lab_engine, query, mode, gap=0, deep_scan=False, scan_limit=50000):
+    def __init__(self, lab_engine, query, mode, gap=0, deep_scan=False, scan_limit=50000,
+                 corpus_scope='genizah'):
         super().__init__()
         self.lab_engine = lab_engine
         self.query = query
@@ -136,6 +137,9 @@ class LabSearchThread(QThread):
         self.mode = mode
         self.deep_scan = deep_scan
         self.scan_limit = scan_limit
+        # Phase 110 (UAT bug #2): corpus selector — 'genizah'|'local'|'all'.
+        # Default 'genizah' so existing callers keep Genizah-only behavior.
+        self.corpus_scope = corpus_scope
 
     def run(self):
         _prevent_sleep()
@@ -153,7 +157,8 @@ class LabSearchThread(QThread):
                 progress_callback=cb,
                 gap=self.gap,
                 deep_scan=self.deep_scan,
-                scan_limit=self.scan_limit
+                scan_limit=self.scan_limit,
+                corpus_scope=self.corpus_scope
             )
             self.results_signal.emit(results)
         except Exception as e: self.error_signal.emit(str(e))

@@ -17009,7 +17009,13 @@ class GenizahGUI(QMainWindow):
             deep = self.chk_lab_deep.isChecked()
             limit = self.lab_engine.settings.lab_scan_limit
 
-            self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit)
+            # Phase 110 (UAT bug #2): Lab Mode honors the corpus selector too, so
+            # "Lab Mode + Local" searches the LOCAL LAB index (not Genizah). Read
+            # the same pre-search dropdown the standard SearchThread path reads.
+            _lab_corpus_scope = "genizah"
+            if hasattr(self, 'corpus_scope_combo'):
+                _lab_corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
+            self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit, corpus_scope=_lab_corpus_scope)
         else:
             text_position = [None, 'start', 'end', 'line_start', 'line_end'][self.text_position_combo.currentIndex()]
             # Phase 95 smoke-fix (item 2): read corpus scope from pre-search dropdown.
@@ -17217,6 +17223,16 @@ class GenizahGUI(QMainWindow):
                 try:
                     _fp = self._lookup_local_filepath(sid)
                     if _fp:
+                        # Phase 110 bug #2: prefer the real filename from the
+                        # canonical filepath. The regular LOCAL index stores the
+                        # basename in `shelfmark`, but the LOCAL LAB side-index
+                        # stores the sys_id there — so Lab-Mode LOCAL hits would
+                        # otherwise show the bare 97… sys_id. Deriving from the
+                        # filepath is identical to the basename for regular LOCAL
+                        # hits (no regression) and yields the filename for LAB hits.
+                        _basename = os.path.basename(_fp)
+                        if _basename:
+                            shelf = _basename
                         _dir = os.path.dirname(_fp)
                         _folder = os.path.basename(_dir)
                         _parent = os.path.basename(os.path.dirname(_dir))

@@ -786,6 +786,19 @@ class LabEngine:
                 from shared.local_indexer import build_local_lab_schema, LocalIndexer
                 schema = build_local_lab_schema()
                 local_lab_index = tantivy.Index(schema, path=Config.LOCAL_LAB_INDEX_DIR)
+                # Phase 110 UAT BLOCKER: the LOCAL LAB schema declares the
+                # fingerprint / fingerprint_dyn / content fields with
+                # tokenizer_name="simple" (and text_ngram with "whitespace").
+                # A freshly-opened tantivy.Index does NOT know those custom
+                # tokenizers, so EVERY parse_query against the fingerprint field
+                # raised ValueError('The tokenizer "simple" ... is unknown'),
+                # which lab_composition_search's `except (ValueError, RuntimeError):
+                # continue` swallowed — silently skipping every chunk and returning
+                # ZERO LOCAL LAB hits. The Genizah lab index never hit this because
+                # _reload_lab_index() calls _ensure_lab_tokenizers(); the LOCAL
+                # reload simply forgot to. Register them here, before any searcher
+                # query, exactly as _reload_lab_index does.
+                self._ensure_lab_tokenizers(local_lab_index)
                 self._local_lab_index = local_lab_index
                 self.local_lab_searcher = local_lab_index.searcher()
                 self._lab_local_meta = LocalIndexer.read_lab_meta(Config.LOCAL_LAB_INDEX_DIR)
@@ -1278,8 +1291,21 @@ class LabEngine:
         # Flatten for table display
         return final_text.replace("\n", " ").replace("\r", " ")
 
-    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0, deep_scan=False, scan_limit=50000):
-        if not self.lab_searcher: return []
+    def lab_search(self, query_str, mode='variants', progress_callback=None, gap=0, deep_scan=False, scan_limit=50000,
+                   corpus_scope: str = 'genizah'):
+        """Lab Mode (fingerprint) word search.
+
+        Phase 110 (UAT bug #2): honor the corpus selector — ``corpus_scope`` is
+        'genizah' (Genizah LAB index only, legacy default), 'local' (LOCAL LAB
+        side-index only), or 'all' (both, merged). Previously lab_search ignored
+        the selector entirely and always queried the Genizah LAB index, so a
+        regular Search-tab "Lab Mode + Local" run returned Genizah hits. Corpus
+        is orthogonal to mode (Lab Mode is NOT hardwired to LOCAL), mirroring the
+        composition path (lab_composition_search).
+        """
+        # Phase 110 C4: fail CLOSED — never expose LOCAL on a bad value.
+        if corpus_scope not in ('genizah', 'local', 'all'):
+            corpus_scope = 'genizah'
 
         # Strip combining diacritical marks and geresh/gershayim from query
         query_str = strip_search_diacritics(query_str)
@@ -1293,92 +1319,155 @@ class LabEngine:
         # 1. Prepare Fingerprints
         fp_str = text_to_fingerprint(query_str, freq_map=target_map)
         if not fp_str: return []
-        
-        query_fp_list = fp_str.split()
-        
-        # 2. Fetch Candidates
-        slop = max(50, int(self.settings.gap_penalty) * 10) 
 
-        query_obj = self._create_lab_query(fp_str, slop, field_name=target_field)
-        if not query_obj: return []
+        query_fp_list = fp_str.split()
+
+        # 2. Fetch Candidates
+        slop = max(50, int(self.settings.gap_penalty) * 10)
 
         results = []
         min_match_pct = self.settings.min_should_match
 
-        # 3. Process
-        if deep_scan:
-            # Use Deep Scan batched iterator
-            def batch_cb(*args):
-                if progress_callback:
-                    try:
-                        progress_callback(*args)
-                    except Exception:
-                        pass  # Progress callback optional — search proceeds without progress updates
+        # --- Shared per-doc processing (Genizah + LOCAL) ---
+        def _process_lab_doc(doc, is_local):
+            content = doc['content'][0]
+            uid = doc['unique_id'][0]
 
-            iterator = self._execute_batched_search(query_obj, progress_callback=batch_cb, limit_override=scan_limit)
-        else:
-            # Standard Fast Method
-            try:
-                # Limit 5000 for standard scan
-                res = self.lab_searcher.search(query_obj, 5000)
-                iterator = res.hits
-            except Exception as e:
-                LOGGER.debug('Batched search query failed, falling back to empty: %s', e)
-                iterator = []
+            # --- Core: Calculate Score & Find Matches ---
+            custom_score, matches, best_window = self._calculate_match_metrics(content, query_fp_list, query_str, freq_map=target_map)
 
-        for score, doc_addr in iterator:
-            try:
-                doc = self.lab_searcher.doc(doc_addr)
-                content = doc['content'][0]
-                uid = doc['unique_id'][0]
+            if custom_score < 15:
+                return
 
-                # --- Core: Calculate Score & Find Matches ---
-                custom_score, matches, best_window = self._calculate_match_metrics(content, query_fp_list, query_str, freq_map=target_map)
-                
-                if custom_score < 15: 
-                    continue
-                
-                # Filter by Percentage (Approximate)
-                if min_match_pct < 100:
-                    found_unique = set(m['fp'] for m in matches)
-                    needed_unique = set(query_fp_list)
-                    common = found_unique.intersection(needed_unique)
-                    if len(needed_unique) > 0 and (len(common) / len(needed_unique) * 100 < min_match_pct):
-                        continue
+            # Filter by Percentage (Approximate)
+            if min_match_pct < 100:
+                found_unique = set(m['fp'] for m in matches)
+                needed_unique = set(query_fp_list)
+                common = found_unique.intersection(needed_unique)
+                if len(needed_unique) > 0 and (len(common) / len(needed_unique) * 100 < min_match_pct):
+                    return
 
-                # --- Highlight Snippet ---
-                smart_snippet = self._generate_highlighted_snippet(content, matches, best_window)
-                html_snippet = smart_snippet # No HTML conversion needed, pure markers
+            # --- Highlight Snippet ---
+            smart_snippet = self._generate_highlighted_snippet(content, matches, best_window)
+            html_snippet = smart_snippet  # No HTML conversion needed, pure markers
 
-                start_idx, end_idx = best_window
-                relevant_matches = matches[start_idx : end_idx + 1]
-                
-                # Collect unique words found (e.g., "מאמתי", "קורין", "את", "שמע")
-                found_words = list(set(m['word'] for m in relevant_matches))
-                
-                # Sort by length descending (so "wordLong" matches before "word")
-                found_words.sort(key=len, reverse=True)
-                
-                # Create a regex OR pattern: (word1|word2|...)
-                # We use re.escape to handle any special chars in the text
-                highlight_regex_str = "|".join(make_mark_tolerant_pattern(re.escape(w)) for w in found_words) if found_words else ""
-                
-                # Populate display metadata correctly
-                display_meta = self.meta_mgr.get_display_data(doc['full_header'][0], doc['source'][0])
+            start_idx, end_idx = best_window
+            relevant_matches = matches[start_idx : end_idx + 1]
+            found_words = list(set(m['word'] for m in relevant_matches))
+            found_words.sort(key=len, reverse=True)
+            highlight_regex_str = "|".join(make_mark_tolerant_pattern(re.escape(w)) for w in found_words) if found_words else ""
 
+            full_header = doc['full_header'][0]
+            if is_local:
+                # Phase 110 bug #2: build the LOCAL hit shape the search-results
+                # renderer expects (load_next_batch reads display.source=='LOCAL'
+                # and resolves the filename/parent-folder from the canonical
+                # filepath). Parse sys_id + page from the LOCAL full_header
+                # ({sys_id}_LOCAL_P{page}_F{file_id}) — same as _build_local_result_dict.
+                sys_id = ""
+                p_num = "1"
+                _parts = full_header.split("_LOCAL_P")
+                if len(_parts) == 2:
+                    sys_id = _parts[0]
+                    p_num = _parts[1].split("_F")[0]
+                try:
+                    _shelf = doc['shelfmark'][0] if doc['shelfmark'] else sys_id
+                except Exception:
+                    _shelf = sys_id
+                display_meta = {
+                    "id": sys_id,
+                    "source": "LOCAL",
+                    "library_code": "LOCAL",
+                    "shelfmark": _shelf,
+                    "img": p_num,
+                }
                 results.append({
                     'sort_score': custom_score,
                     'display': display_meta,
                     'snippet': html_snippet,
                     'full_text': content,
                     'uid': uid,
-                    'raw_header': doc['full_header'][0],
+                    'raw_header': full_header,
+                    'raw_file_hl': smart_snippet,
+                    'highlight_pattern': highlight_regex_str,
+                    # LOCAL extras for ResultDialog / Browse / file-open actions
+                    'sys_id': sys_id,
+                    'p_num': p_num,
+                    'img': p_num,
+                    'full_header': full_header,
+                    'score': float(custom_score),
+                })
+            else:
+                # Populate display metadata correctly
+                display_meta = self.meta_mgr.get_display_data(full_header, doc['source'][0])
+                results.append({
+                    'sort_score': custom_score,
+                    'display': display_meta,
+                    'snippet': html_snippet,
+                    'full_text': content,
+                    'uid': uid,
+                    'raw_header': full_header,
                     'raw_file_hl': smart_snippet,
                     # This is the magic key for the Viewer:
-                    'highlight_pattern': highlight_regex_str 
+                    'highlight_pattern': highlight_regex_str
                 })
-            except Exception as e:
-                LAB_LOGGER.error(f"Error processing doc: {e}")
+
+        # 3. Process — Genizah LAB loop (skipped for corpus_scope='local', and
+        # gracefully skipped if the Genizah LAB index was never built).
+        if corpus_scope != 'local' and self.lab_searcher is not None and self.lab_index is not None:
+            query_obj = self._create_lab_query(fp_str, slop, field_name=target_field)
+            if query_obj:
+                if deep_scan:
+                    # Use Deep Scan batched iterator
+                    def batch_cb(*args):
+                        if progress_callback:
+                            try:
+                                progress_callback(*args)
+                            except Exception:
+                                pass  # Progress callback optional — search proceeds without progress updates
+
+                    iterator = self._execute_batched_search(query_obj, progress_callback=batch_cb, limit_override=scan_limit)
+                else:
+                    # Standard Fast Method
+                    try:
+                        # Limit 5000 for standard scan
+                        res = self.lab_searcher.search(query_obj, 5000)
+                        iterator = res.hits
+                    except Exception as e:
+                        LOGGER.debug('Batched search query failed, falling back to empty: %s', e)
+                        iterator = []
+
+                for score, doc_addr in iterator:
+                    try:
+                        _process_lab_doc(self.lab_searcher.doc(doc_addr), is_local=False)
+                    except Exception as e:
+                        LAB_LOGGER.error(f"Error processing doc: {e}")
+
+        # 3b. LOCAL LAB loop (corpus_scope 'local' or 'all'). Mirrors the LOCAL
+        # extension in lab_composition_search: query the LOCAL LAB side-index with
+        # the same fingerprint field, build LOCAL-shaped hits. The simple/whitespace
+        # tokenizers are registered by reload_local_lab_index (Phase 110 UAT fix) so
+        # parse_query on the fingerprint field no longer raises.
+        if (corpus_scope != 'genizah'
+                and getattr(self, 'local_lab_searcher', None) is not None
+                and getattr(self, '_local_lab_index', None) is not None):
+            _tab = self._my_library_tab_ref() if getattr(self, "_my_library_tab_ref", None) is not None else None
+            _searchable = getattr(_tab, "is_searchable", True) if _tab is not None else True
+            if _searchable:
+                try:
+                    _clauses = [f'{target_field}:{t}' for t in fp_str.split()]
+                    _core_query = " OR ".join(_clauses)
+                    _q_obj = self._local_lab_index.parse_query(_core_query)
+                    _res = self.local_lab_searcher.search(_q_obj, 5000)
+                    for _score, _doc_addr in _res.hits:
+                        try:
+                            _process_lab_doc(self.local_lab_searcher.doc(_doc_addr), is_local=True)
+                        except Exception as _e:
+                            LAB_LOGGER.error(f"Error processing LOCAL LAB doc: {_e}")
+                except (ValueError, RuntimeError):
+                    pass  # tokenizer/parse issue — skip LOCAL contribution gracefully
+                except Exception as _local_exc:
+                    LAB_LOGGER.warning("lab_search LOCAL LAB scan failed: %r", _local_exc)
 
         # 4. Sort & Dedup (Logic Fixed: Prioritize V0.8 over V0.7)
         v8_map = {r['uid']: r for r in results if r['display']['source'] == "V0.8"}
@@ -7120,6 +7209,23 @@ class SearchEngine:
                 from shared.local_indexer import build_local_lab_schema, LocalIndexer
                 schema = build_local_lab_schema()
                 local_lab_index = tantivy.Index(schema, path=Config.LOCAL_LAB_INDEX_DIR)
+                # Phase 110 UAT BLOCKER (mirror of LabEngine.reload_local_lab_index):
+                # the LOCAL LAB schema's fingerprint / fingerprint_dyn / content
+                # fields use tokenizer_name="simple" (text_ngram uses "whitespace").
+                # Without registering them on this freshly-opened Index, any
+                # parse_query against those fields raises
+                # ValueError('The tokenizer "simple" ... is unknown'). Register
+                # before creating the searcher / running any query.
+                for _tk_name, _tk in (
+                    ("simple", tantivy.Tokenizer.simple()),
+                    ("whitespace", tantivy.Tokenizer.whitespace()),
+                ):
+                    try:
+                        local_lab_index.register_tokenizer(
+                            _tk_name, tantivy.TextAnalyzerBuilder(_tk).build()
+                        )
+                    except Exception:
+                        pass  # May fail on reopen — non-fatal, like _ensure_lab_tokenizers
                 self.local_lab_searcher = local_lab_index.searcher()
                 # Phase 95 D-38: read .meta.json for weights_hash freshness check
                 self._lab_local_meta = LocalIndexer.read_lab_meta(Config.LOCAL_LAB_INDEX_DIR)
