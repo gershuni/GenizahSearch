@@ -105,10 +105,12 @@
         <li><a href="#pgp">Princeton Geniza Project (PGP) Data</a></li>
         <li><a href="#reading-desk">Reading Desk</a></li>
         <li><a href="#puzzle">Fragment Puzzle</a></li>
+        <li><a href="#joins-lab">Joins Lab</a></li>
         <li><a href="#community-publish">Community Publishing</a></li>
         <li><a href="#lab">Lab Mode</a></li>
-        <li><a href="#settings">Settings & About</a></li>
+        <li><a href="#my-library">My Library — Local Documents</a></li>
         <li><a href="#export">Exporting Data</a></li>
+        <li><a href="#settings">Settings & About</a></li>
     </ul>
     </div>
 
@@ -414,6 +416,72 @@
     </div>
 
     <div class="section">
+    <h2 id="joins-lab">Joins Lab</h2>
+    <p>The <b>Joins Lab</b> is a dedicated workspace for hunting <b>physical joins</b> — fragments that were
+    once part of the same leaf or codex and are now scattered across collections. You pin one fragment as the
+    <b>anchor</b>, then search for and triage candidate fragments against it, side by side.</p>
+
+    <h4>Opening the Joins Lab</h4>
+    <ul>
+        <li>The <b>Joins Lab</b> button in the top toolbar corner.</li>
+        <li>The <b>Find joins</b> button on the <b>Browse</b> tab.</li>
+        <li>From any search result or Browse page — an action opens the Lab anchored on that page.</li>
+    </ul>
+    <p>The window is <b>modeless</b>: it stays open alongside the main window, and you can re-anchor it on a new
+    fragment at any time without closing it.</p>
+
+    <h4>The anchor (left pane)</h4>
+    <p>The pinned fragment — its shelfmark, brief metadata, and page image. Use the folio arrows to page through
+    the anchor's images, and zoom in to inspect the script. <b>Known joins</b> for the anchor (saved by you or by
+    the community) are listed in a collapsible section.</p>
+
+    <h4>Building a query (right pane)</h4>
+    <p>Build a line-by-line query describing the text you expect on the joining fragment:</p>
+    <ul>
+        <li><b>+ Add Line</b> — add another manuscript line, and set how many lines to skip before it
+        (0 = the very next line).</li>
+        <li><b>+ or</b> — add an alternative word that may appear instead on the same line.</li>
+        <li><b>Line options (⚙)</b> — per-line modifiers: negation (−), plene/defective spelling (%),
+        prefixes (<code dir="ltr">#_</code>), suffixes (<code dir="ltr">_#</code>), wildcards (<code dir="ltr">*</code>),
+        and "starts line" / "ends line" position anchors.</li>
+        <li><b>Search options</b> — global toggles: spelling variants, Judeo-Arabic, flexible spacing, and
+        bidirectional matching.</li>
+        <li><b>Position</b> — restrict a line to the start or end of the page text.</li>
+        <li><b>Other side of the leaf (p ±1)</b> — also require or include text on the adjacent page;
+        <b>Narrow</b> keeps only candidates whose adjacent page also matches, <b>Widen</b> adds adjacent pages
+        as extra candidates.</li>
+        <li><b>Visual Similarity</b> — show only fragments that look alike, optionally combined with a text query.</li>
+    </ul>
+    <p class="box"><span class="highlight">⚠ About visual similarity:</span> the visual-similarity index covers
+    only about <b>half of the Genizah</b>, and the algorithm is not conclusive — so it can miss real matches.
+    <b>Do not assume that a fragment absent from the visual-similarity results is not a join.</b> Use visual
+    similarity to surface candidates, never to rule a fragment out.</p>
+    <p>Click <b>Find Candidates</b> to run the query.</p>
+
+    <h4>Triaging candidates</h4>
+    <p>Candidates appear as cards with their image and metadata. For each one you can:</p>
+    <ul>
+        <li>Mark <b>Yes</b> / <b>Maybe</b> / <b>No</b> to triage it, then filter the list by triage state.</li>
+        <li><b>Browse</b> — open the candidate in the Browse view.</li>
+        <li><b>Compare</b> — view it side by side with the anchor.</li>
+        <li><b>Re-anchor</b> — make the candidate the new anchor and keep hunting from there.</li>
+        <li><b>Add as Join</b> — record a confirmed join between the candidate and the anchor.</li>
+        <li><b>Add to Puzzle</b> — send the candidate, together with the anchor, to the Fragment Puzzle for
+        visual reassembly.</li>
+        <li><b>Add to list</b> — save it to one of your lists.</li>
+    </ul>
+    <p><b>Browse results</b> (the <b>◀ Browse results</b> button on the results toolbar) opens a compare window
+    that steps through the filtered candidates <b>one at a time</b>, each shown side by side with the anchor —
+    the fastest way to review a long candidate list. If exactly one candidate is selected it opens there;
+    otherwise it starts at the first result. This complements the per-card <b>Compare</b> action, which opens a
+    single candidate against the anchor.</p>
+    <p>A <b>⚠ size mismatch</b> note flags candidates whose physical dimensions differ from the anchor's, so you
+    can spot unlikely joins at a glance. Use the filter bar to narrow candidates by shelfmark, text, title,
+    material, dimensions, or triage state, and switch to a compact <b>Table view</b> when you have many results.
+    <b>Clear</b> resets the anchor, query, candidates, and triage state.</p>
+    </div>
+
+    <div class="section">
     <h2 id="community-publish">Community Publishing</h2>
     <p>Share your puzzle join reconstructions with the research community and browse joins published by other scholars.</p>
 
@@ -485,6 +553,69 @@
     </div>
 
     <div class="section">
+    <h2 id="my-library">My Library — Local Documents</h2>
+    <p>The <b>My Library</b> tab lets you index your own <code>.docx</code>, <code>.pdf</code>, <code>.txt</code>,
+    <code>.html</code>, <code>.xlsx</code>, and <code>.csv</code> files alongside the Genizah corpus.
+    Your personal documents appear inline in Search, Composition Search, and Parallels results with a
+    <code>LOCAL</code> badge and a three-state filter button.</p>
+
+    <h4>What gets indexed</h4>
+    <p>Word documents, PDF files (text-layer PDFs only — scanned PDFs without OCR are skipped), plain text files,
+    HTML files, Excel spreadsheets, and CSV files. The indexer skips other file types.</p>
+
+    <h4>Where data lives</h4>
+    <p><code dir="ltr">%LOCALAPPDATA%\GenizahSearchPro\Index\LocalIndex\</code> on Windows.</p>
+
+    <h4>Indexing large folders</h4>
+    <p>If you add a folder with many files, you'll be warned that indexing may take a long time. At any point
+    you can stop indexing and choose whether to cancel indexing for the files already scanned, keep the partial
+    results, or resume indexing.</p>
+
+    <h4>Adding, removing, and selecting folders and files to search</h4>
+    <p>You can add folders to your local library, remove them, and also choose which of the indexed files are
+    searched — by clicking the checkboxes next to each folder or file.</p>
+
+    <h4>Rebuilding the index</h4>
+    <p>Clicking <b>Refresh</b> rescans the selected folder and looks for new files to index. To rebuild the
+    index from scratch, click <b>Re-index All</b>. If you run into problems, you can click <b>Reset My Library</b>
+    and the index will be deleted entirely. In every case, your original files remain safe.</p>
+
+    <h4>Privacy</h4>
+    <p>Details of your local documents are <b>never</b> uploaded to GenizahSearch's servers. Three boundaries
+    enforce this:</p>
+    <ul>
+        <li>The <code dir="ltr">/api/search</code> endpoint filters out local items defensively.</li>
+        <li>Lists cloud sync is disabled entirely if every item in a list is local.</li>
+        <li>Corrections submission rejects local document IDs with a clear error.</li>
+    </ul>
+    <p><b>Note:</b> the indexed text is stored in a local index file in cleartext. Use OS-level disk encryption
+    (BitLocker / FileVault) if you need encryption.</p>
+
+    <h4>Pre-selection and post-search filtering</h4>
+    <p>Both regular Search and Composition Search include a button that lets you choose where the search runs:
+    Genizah, Local, or All. You can also use the three-state <b>Filter Local</b> button to show only local files,
+    only Genizah, or all results.</p>
+
+    <h4>Renaming your computer</h4>
+    <p><b>Note:</b> if you change your computer's name, the SQLite cache is invalidated and the next scan
+    re-extracts all files.</p>
+
+    <p><em>The My Library feature was inspired by Yehuda Seewald's GenizahLocal prototype.</em></p>
+    </div>
+
+    <div class="section">
+    <h2 id="export">Exporting Data</h2>
+    <p>At any stage, you can export results for external use:</p>
+    <ul>
+        <li><b>XLSX (Excel) — Research workbook:</b> a 4-sheet bilingual workbook (Search Results, Manuscripts, Bibliography, Credits and Info) with clickable image links per row and clickable PGP, Library Viewer, and GenizahSearch URLs per manuscript.</li>
+        <li><b>CSV:</b> Raw data format, suitable for importing into other databases.</li>
+        <li><b>TXT:</b> Simple readable text report.</li>
+        <li><b>DOCX (Word):</b> Microsoft Word document with formatted report.</li>
+    </ul>
+    <p><b>Note:</b> Export applies to selected results (checkboxes). If nothing is selected, the software exports all available results in the table.</p>
+    </div>
+
+    <div class="section">
     <h2 id="settings">Settings & About</h2>
     <p>The Settings tab provides configuration options and information about the application.</p>
 
@@ -502,55 +633,6 @@
 
     <h3>About</h3>
     <p>Contains information about the application, credits, data sources, and citation information. Use the "Copy" button to copy the recommended citation.</p>
-    </div>
-
-    <div class="section">
-    <h2 id="export">Exporting Data</h2>
-    <p>At any stage, you can export results for external use:</p>
-    <ul>
-        <li><b>XLSX (Excel) — Research workbook:</b> a 4-sheet bilingual workbook (Search Results, Manuscripts, Bibliography, Credits and Info) with clickable image links per row and clickable PGP, Library Viewer, and GenizahSearch URLs per manuscript.</li>
-        <li><b>CSV:</b> Raw data format, suitable for importing into other databases.</li>
-        <li><b>TXT:</b> Simple readable text report.</li>
-        <li><b>DOCX (Word):</b> Microsoft Word document with formatted report.</li>
-    </ul>
-    <p><b>Note:</b> Export applies to selected results (checkboxes). If nothing is selected, the software exports all available results in the table.</p>
-    </div>
-
-    <div class="section">
-    <h2 id="my-library">My Library — Local Documents</h2>
-    <p>The <b>My Library</b> tab lets you index your own <code>.docx</code>, <code>.pdf</code>, and <code>.txt</code>
-    files alongside the Genizah corpus. Your personal documents appear inline in Search, Composition Search,
-    and Parallels results with a <code>LOCAL</code> badge and a three-state filter button.</p>
-
-    <h4>What gets indexed</h4>
-    <p>Word documents, PDFs (text-layer PDFs only — scanned PDFs without OCR are skipped), and plain text files.
-    Other formats are ignored silently.</p>
-
-    <h4>Where data lives</h4>
-    <p><code>%LOCALAPPDATA%\GenizahSearchPro\Index\LocalIndex\</code> on Windows.
-    Portable installations keep their LOCAL data with the install folder.</p>
-
-    <h4>Privacy guarantee</h4>
-    <p>Your local documents are <b>NEVER</b> uploaded to GenizahSearch's servers. Three boundaries enforce this:</p>
-    <ul>
-        <li>The <code>/api/search</code> JSON endpoint drops LOCAL items defensively.</li>
-        <li>The Lists cloud sync aborts entirely if any list item is LOCAL.</li>
-        <li>The corrections submission rejects LOCAL document IDs with a clear error.</li>
-    </ul>
-    <p><b>Cleartext disclosure:</b> Your indexed text is stored on disk in cleartext inside the local index —
-    it is never uploaded to GenizahSearch's servers. Use OS-level disk encryption (BitLocker / FileVault)
-    if you need at-rest encryption.</p>
-
-    <h4>Three-state filter</h4>
-    <p>Each result surface (Search, Composition Search, Parallels) has a filter button cycling
-    <b>All</b> &rarr; <b>Only Local</b> &rarr; <b>No Local</b> &rarr; <b>All</b>.
-    The button is hidden when the current result set has no LOCAL hits.</p>
-
-    <h4>Hostname-rename caveat</h4>
-    <p>If you rename your computer's hostname, the SQLite cache is invalidated and the next scan
-    re-extracts all files. This is rare; documented for completeness.</p>
-
-    <p><em>My Library feature inspired by Yehuda Seewald's GenizahLocal prototype.</em></p>
     </div>
 </div>
 <!-- END_LANG_EN -->
@@ -577,10 +659,12 @@
         <li><a href="#pgp">מידע מפרויקט הגניזה של פרינסטון (PGP)</a></li>
         <li><a href="#reading-desk">שולחן קריאה (Reading Desk)</a></li>
         <li><a href="#puzzle">פאזל קטעים</a></li>
+        <li><a href="#joins-lab">מעבדת צירופים</a></li>
         <li><a href="#community-publish">פרסום לקהילה</a></li>
         <li><a href="#lab">מצב מעבדה</a></li>
-        <li><a href="#settings">הגדרות ואודות</a></li>
+        <li><a href="#my-library">הספרייה שלי — מסמכים מקומיים</a></li>
         <li><a href="#export">ייצוא נתונים</a></li>
+        <li><a href="#settings">הגדרות ואודות</a></li>
     </ul>
     </div>
 
@@ -778,7 +862,7 @@
         <li><b>חיפוש בטקסט:</b> הקלידו בשדה החיפוש כדי להדגיש טקסט תואם בזמן אמת בתוך כתב היד הנוכחי.</li>
         <li><b>מצא מקבילות:</b> שולח את טקסט העמוד הנוכחי ללשונית חיפוש חיבורים לאיתור מקבילות בכל הקורפוס.</li>
         <li><b>צפה בכתיב:</b> פותח את כתב היד בקטלוג המקוון של הספרייה הלאומית.</li>
-        <li><b>מידע PGP:</b> אם קיים מידע מפרויקט פרינסטון, יוצג פאנל מידע עם תעתוקים, תיאור, תגיות ותיארוך.</li>
+        <li><b>מידע PGP:</b> אם קיים מידע מפרויקט הגניזה של פרינסטון, יוצג פאנל מידע עם תעתוקים, תיאור, תגיות ותיארוך.</li>
     </ul>
     </div>
 
@@ -800,10 +884,10 @@
     <p>המערכת משלבת נתונים מפרויקט הגניזה של פרינסטון (Princeton Geniza Project) — מאגר מחקרי הכולל כ-36,000 מסמכים מקוטלגים עם תעתוקים, תרגומים, תיאורים ותיוג נושאי מפורט.</p>
 
     <h3>תג PGP בתוצאות חיפוש</h3>
-    <p>כתבי יד שקיים עליהם מידע מפרויקט פרינסטון מסומנים בתג ירוק "PGP" בתוצאות החיפוש, כך שתוכלו לזהות במהירות כתבי יד עם תעתוקים ומידע מחקרי נוסף.</p>
+    <p>כתבי יד שקיים עליהם מידע מפרויקט הגניזה של פרינסטון מסומנים בתג ירוק "PGP" בתוצאות החיפוש, כך שתוכלו לזהות במהירות כתבי יד עם תעתוקים ומידע מחקרי נוסף.</p>
 
     <h3>מידע PGP בעיון בכתב יד</h3>
-    <p>כאשר לכתב יד קיים מידע מפרויקט פרינסטון, מוצג פאנל מידע הכולל:</p>
+    <p>כאשר לכתב יד קיים מידע מפרויקט הגניזה של פרינסטון, מוצג פאנל מידע הכולל:</p>
     <ul>
         <li><b>סוג מסמך</b> ושפות (למשל: מכתב, ערבית-יהודית)</li>
         <li><b>תגיות נושא</b> — לחיצה על תגית מעבירה לחיפוש כל כתבי היד באותו נושא</li>
@@ -813,7 +897,7 @@
     </ul>
 
     <h3>תעתוקים ותרגומים</h3>
-    <p>כשקיימים תעתוקים או תרגומים של חוקרים מפרויקט פרינסטון, הם זמינים בבורר הגרסאות לצד התעתוק האוטומטי. המערכת מעדיפה אוטומטית תעתוק PGP (אם קיים) על פני הקריאה האוטומטית.</p>
+    <p>כשקיימים תעתוקים או תרגומים של חוקרים מפרויקט הגניזה של פרינסטון, הם זמינים בבורר הגרסאות לצד התעתוק האוטומטי. המערכת מעדיפה אוטומטית תעתוק PGP (אם קיים) על פני הקריאה האוטומטית.</p>
 
     <h3>חיפוש לפי תגיות</h3>
     <p>בחרו מצב <b>תגיות PGP</b> מתפריט מצבי החיפוש כדי לעיין בכתבי יד לפי נושא. התגיות מאורגנות בקטגוריות (סוגי מסמכים, משפט וחברה, רפואה, סחר ומסעות ועוד) ומוצגות בתפריט נפתח עם תרגום לעברית.</p>
@@ -879,6 +963,67 @@
 
     <h3>רקטו / ורסו</h3>
     <p>כפתור <b>הפיכת הפאזל</b> משקף את כל סידור הקנבס ומנווט כל קטע לצד ורסו (או רקטו), כדי שתוכלו לבחון את הצד ההפוך של צירוף משוחזר.</p>
+    </div>
+
+    <div class="section">
+    <h2 id="joins-lab">מעבדת צירופים</h2>
+    <p><b>מעבדת הצירופים</b> היא סביבת עבודה ייעודית לאיתור <b>צירופים פיזיים</b> — קטעים שהיו בעבר חלק מאותו
+    דף או כרך, וכיום מפוזרים בין אוספים שונים. אתם מקבעים קטע אחד כ<b>עוגן</b>, ואז מחפשים קטעים מועמדים
+    וממיינים אותם מולו, זה לצד זה.</p>
+
+    <h4>כיצד לפתוח את מעבדת הצירופים</h4>
+    <ul>
+        <li>כפתור <b>מעבדת צירופים</b> בפינת סרגל הכלים העליון.</li>
+        <li>כפתור <b>מצא צירופים</b> בלשונית <b>עיון</b>.</li>
+        <li>מכל תוצאת חיפוש או עמוד עיון — פעולה הפותחת את המעבדה כשהיא מעוגנת על אותו עמוד.</li>
+    </ul>
+    <p>החלון אינו מודאלי: הוא נשאר פתוח לצד החלון הראשי, ותוכלו לעגן אותו מחדש על קטע חדש בכל עת בלי
+    לסגור אותו.</p>
+
+    <h4>העוגן (פאנל ימני)</h4>
+    <p>הקטע המקובע — סימן המדף שלו, מטא-דאטה תמציתית, ותמונת העמוד. השתמשו בחצי הדפדוף כדי לעבור בין
+    תמונות העוגן, והגדילו כדי לבחון את הכתב. <b>צירופים ידועים</b> לעוגן (ששמרתם אתם או הקהילה) מופיעים
+    בקטע ניתן-לקיפול.</p>
+
+    <h4>בניית שאילתה (פאנל שמאלי)</h4>
+    <p>בנו שאילתה שורה-אחר-שורה המתארת את הטקסט שאתם מצפים למצוא בקטע המצורף:</p>
+    <ul>
+        <li><b>+ הוסף שורה</b> — הוסיפו שורת כתב יד נוספת, וקבעו כמה שורות לדלג לפניה (0 = השורה הבאה מיד).</li>
+        <li><b>+ או</b> — הוסיפו מילה חלופית שעשויה להופיע במקומה באותה שורה.</li>
+        <li><b>אפשרויות שורה (⚙)</b> — שינויים לכל שורה: שלילה (−), כתיב מלא/חסר (%),
+        תחיליות (<code dir="ltr">#_</code>), סופיות (<code dir="ltr">_#</code>), תווים כלליים (<code dir="ltr">*</code>),
+        ועוגני מיקום "תחילת שורה" / "סוף שורה".</li>
+        <li><b>אפשרויות חיפוש</b> — מתגים גלובליים: שינויי כתיב, יהודית-ערבית, ריווח גמיש, והתאמה דו-כיוונית.</li>
+        <li><b>מיקום</b> — הגבילו שורה לתחילת טקסט העמוד או לסופו.</li>
+        <li><b>הצד השני של הדף (p ±1)</b> — דרשו או כללו גם טקסט בעמוד שמנגד;
+        <b>צמצם</b> משאיר רק מועמדים שגם העמוד הסמוך שלהם תואם, <b>הרחב</b> מוסיף עמודים סמוכים כמועמדים נוספים.</li>
+        <li><b>דמיון חזותי</b> — הציגו רק קטעים הדומים חזותית, אפשר בשילוב עם שאילתת טקסט.</li>
+    </ul>
+    <p class="box"><span class="highlight">⚠ על אודות הדמיון החזותי:</span> מאגר הדמיון החזותי מכסה כיום רק
+    כמחצית מן הגניזה, והאלגוריתם אינו חד-משמעי — ולכן הוא עלול להחמיץ התאמות אמיתיות.
+    <b>אין להסיק שקטע שאינו מופיע בתוצאות הדמיון החזותי אינו צירוף.</b> השתמשו בדמיון החזותי כדי להעלות
+    מועמדים, ולעולם לא כדי לפסול קטע.</p>
+    <p>לחצו <b>מצא מועמדים</b> כדי להריץ את השאילתה.</p>
+
+    <h4>מיון מועמדים</h4>
+    <p>המועמדים מופיעים ככרטיסים עם תמונה ומטא-דאטה. עבור כל אחד תוכלו:</p>
+    <ul>
+        <li>לסמן <b>כן</b> / <b>אולי</b> / <b>לא</b> למיון, ואחר כך לסנן את הרשימה לפי מצב המיון.</li>
+        <li><b>עיון</b> — פתחו את המועמד בתצוגת העיון.</li>
+        <li><b>השווה</b> — הציגו אותו זה לצד זה עם העוגן.</li>
+        <li><b>עגן מחדש</b> — הפכו את המועמד לעוגן החדש והמשיכו לחפש ממנו.</li>
+        <li><b>הוסף כצירוף</b> — תעדו צירוף מאושר בין המועמד לעוגן.</li>
+        <li><b>הוסף לפאזל</b> — שלחו את המועמד, יחד עם העוגן, אל פאזל הקטעים להרכבה חזותית.</li>
+        <li><b>הוסף לרשימה</b> — שמרו אותו לאחת הרשימות שלכם.</li>
+    </ul>
+    <p><b>עיין בתוצאות</b> (כפתור <b>◀ עיין בתוצאות</b> בסרגל התוצאות) פותח חלון השוואה העובר על המועמדים
+    המסוננים <b>אחד-אחד</b>, כל אחד מוצג זה לצד זה עם העוגן — הדרך המהירה ביותר לסקור רשימת מועמדים ארוכה.
+    אם נבחר מועמד יחיד, החלון נפתח עליו; אחרת הוא מתחיל מן התוצאה הראשונה. זאת בנוסף לפעולת <b>השווה</b>
+    שבכל כרטיס, הפותחת מועמד יחיד מול העוגן.</p>
+    <p>הערת <b>⚠ אי-התאמת גודל</b> מסמנת מועמדים שמידותיהם הפיזיות שונות מאלו של העוגן, כדי שתוכלו לזהות
+    במהירות צירופים בלתי-סבירים. השתמשו בסרגל הסינון לצמצום המועמדים לפי סימן מדף, טקסט, כותרת, חומר,
+    מידות או מצב מיון, ועברו ל<b>תצוגת טבלה</b> קומפקטית כשיש הרבה תוצאות. <b>נקה</b> מאפס את העוגן,
+    השאילתה, המועמדים ומצב המיון.</p>
     </div>
 
     <div class="section">
@@ -953,6 +1098,67 @@
     </div>
 
     <div class="section">
+    <h2 id="my-library">הספרייה שלי — מסמכים מקומיים</h2>
+    <p>לשונית <b>הספרייה שלי</b> מאפשרת לכם לאנדקס קובצי <code dir="ltr">.docx</code>, <code dir="ltr">.pdf</code>,
+    <code dir="ltr">.txt</code>, <code dir="ltr">.html</code>, <code dir="ltr">.xlsx</code> ו-<code dir="ltr">.csv</code>
+    משלכם לצד קורפוס הגניזה. המסמכים האישיים שלכם מופיעים ישירות בתוצאות החיפוש, חיפוש חיבורים ומקבילות
+    עם תגית <code>LOCAL</code> וכפתור סינון תלת-מצבי.</p>
+
+    <h4>מה מאונדקס</h4>
+    <p>מסמכי Word, קובצי PDF (PDF עם שכבת טקסט בלבד — קובצי PDF סרוקים ללא OCR מדולגים),
+    קובצי טקסט רגיל, קובצי HTML, מסמכי אקסל וקובצי CSV. האינדקס מדלג על סוגי קבצים אחרים.</p>
+
+    <h4>היכן נשמרים הנתונים</h4>
+    <p><code dir="ltr">%LOCALAPPDATA%\GenizahSearchPro\Index\LocalIndex\</code> ב-Windows.</p>
+
+    <h4>אינדקס של תיקיות גדולות</h4>
+    <p>אם תוסיפו תיקייה מרובת קבצים, תקבלו אזהרה שהאינדוקס עלול לקחת זמן ממושך. בכל שלב תוכלו לעצור
+    את האינדוקס ולבחור אם לבטל את האינדוקס לקבצים שכבר נסרקו, להשאיר את התוצאות החלקיות,
+    או להמשיך בפעולת האינדוקס.</p>
+
+    <h4>הוספה, הסרה ובחירה של תיקיות וקבצים לחיפוש</h4>
+    <p>ניתן להוסיף תיקיות לספרייה המקומית, ניתן להסיר אותן, וניתן גם לבחור באילו מן הקבצים המאונדקסים
+    יתבצע החיפוש, על ידי לחיצה על תיבות הסימון ליד כל תיקייה או קובץ.</p>
+
+    <h4>בנייה מחדש של האינדקס</h4>
+    <p>לחיצה על "רענן" סורקת מחדש את התיקייה הנבחרת ומחפשת קבצים חדשים לאינדקס. אם ברצונכם לבנות
+    מחדש את האינדקס לחצו על "אנדקס מחדש את הכל". אם נתקלתם בבעיות, תוכלו ללחוץ על "אפס ספרייה שלי"
+    והאינדקס יימחק לחלוטין. בכל מצב, הקבצים המקוריים שלכם בטוחים.</p>
+
+    <h4>פרטיות</h4>
+    <p>פרטים על המסמכים המקומיים שלכם לעולם אינם מועלים לשרתי GenizahSearch. שלושה גבולות אוכפים זאת:</p>
+    <ul>
+        <li>נקודת הקצה <code dir="ltr">/api/search</code> מסננת פריטים מקומיים באופן הגנתי.</li>
+        <li>סנכרון ענן של רשימות מבוטל לחלוטין אם כל פריט ברשימה הוא מקומי.</li>
+        <li>הגשת תיקונים דוחה מזהי מסמך מקומי עם שגיאה ברורה.</li>
+    </ul>
+    <p>שימו לב: הטקסט המאונדקס נשמר בקובץ אינדקס מקומי בטקסט גלוי. השתמשו בהצפנת דיסק ברמת מערכת
+    ההפעלה (BitLocker / FileVault) אם נדרשת הצפנה.</p>
+
+    <h4>בחירה מראש וסינון לאחר החיפוש</h4>
+    <p>החיפוש הרגיל וחיפוש החיבורים כוללים כפתור המאפשר לכם לבחור היכן יתבצע החיפוש: גניזה, מקומי,
+    או הכול. ניתן גם להשתמש בכפתור הסינון התלת-מצבי "סנן מקומי", שיאפשר לכם להציג רק קבצים מקומיים,
+    רק גניזה, או כל התוצאות.</p>
+
+    <h4>שינוי שם מחשב</h4>
+    <p>שימו לב: אם תשנו את שם המחשב שלכם, מטמון ה-SQLite יתבטל והסריקה הבאה מחלצת מחדש את כל הקבצים.</p>
+
+    <p><em>תכונת הספרייה שלי נוצרה בהשראת אב-טיפוס GenizahLocal של יהודה זייבלד.</em></p>
+    </div>
+
+    <div class="section">
+    <h2 id="export">ייצוא נתונים</h2>
+    <p>בכל שלב ניתן לייצא את התוצאות לשימוש חיצוני:</p>
+    <ul>
+        <li><b><bdi dir="ltr">XLSX</bdi> (אקסל) — חוברת מחקרית:</b> חוברת דו-לשונית בת 4 גיליונות (תוצאות חיפוש, כתבי יד, ביבליוגרפיה, קרדיטים ומידע) עם קישורים לחיצים לתמונה בכל שורה וקישורים לחיצים ל-PGP, לצפייה בספרייה ול-GenizahSearch לכל כתב יד.</li>
+        <li><b><bdi dir="ltr">CSV</bdi>:</b> פורמט נתונים גולמי, מתאים לייבוא למסדי נתונים אחרים.</li>
+        <li><b><bdi dir="ltr">TXT</bdi>:</b> דוח טקסט פשוט וקריא.</li>
+        <li><b><bdi dir="ltr">DOCX</bdi> (וורד):</b> מסמך מעוצב של מייקרוסופט וורד.</li>
+    </ul>
+    <p><b>שימו לב:</b> הייצוא מתייחס לתוצאות שנבחרו (באמצעות תיבות הסימון). אם לא נבחר כלום, התוכנה תייצא את כל התוצאות הקיימות בטבלה.</p>
+    </div>
+
+    <div class="section">
     <h2 id="settings">הגדרות ואודות</h2>
     <p>לשונית ההגדרות מספקת אפשרויות תצורה ומידע על האפליקציה.</p>
 
@@ -970,54 +1176,6 @@
 
     <h3>אודות</h3>
     <p>מכיל מידע על האפליקציה, קרדיטים, מקורות נתונים ומידע לציטוט. השתמשו בכפתור "העתק" כדי להעתיק את הציטוט המומלץ.</p>
-    </div>
-
-    <div class="section">
-    <h2 id="export">ייצוא נתונים</h2>
-    <p>בכל שלב ניתן לייצא את התוצאות לשימוש חיצוני:</p>
-    <ul>
-        <li><b><bdi dir="ltr">XLSX</bdi> (אקסל) — חוברת מחקרית:</b> חוברת דו-לשונית בת 4 גיליונות (תוצאות חיפוש, כתבי יד, ביבליוגרפיה, קרדיטים ומידע) עם קישורים לחיצים לתמונה בכל שורה וקישורים לחיצים ל-PGP, לצפייה בספרייה ול-GenizahSearch לכל כתב יד.</li>
-        <li><b><bdi dir="ltr">CSV</bdi>:</b> פורמט נתונים גולמי, מתאים לייבוא למסדי נתונים אחרים.</li>
-        <li><b><bdi dir="ltr">TXT</bdi>:</b> דוח טקסט פשוט וקריא.</li>
-        <li><b><bdi dir="ltr">DOCX</bdi> (וורד):</b> מסמך מעוצב של מייקרוסופט וורד.</li>
-    </ul>
-    <p><b>שימו לב:</b> הייצוא מתייחס לתוצאות שנבחרו (באמצעות תיבות הסימון). אם לא נבחר כלום, התוכנה תייצא את כל התוצאות הקיימות בטבלה.</p>
-    </div>
-
-    <div class="section">
-    <h2 id="my-library">הספרייה שלי — מסמכים מקומיים</h2>
-    <p>לשונית <b>הספרייה שלי</b> מאפשרת לכם לאנדקס קובצי <code dir="ltr">.docx</code>, <code dir="ltr">.pdf</code>
-    ו-<code dir="ltr">.txt</code> משלכם לצד קורפוס הגניזה. המסמכים האישיים שלכם מופיעים ישירות
-    בתוצאות החיפוש, חיפוש חיבורים ומקבילות עם תגית <code>LOCAL</code> וכפתור סינון תלת-מצבי.</p>
-
-    <h4>מה מאונדקס</h4>
-    <p>מסמכי Word, קובצי PDF (PDF עם שכבת טקסט בלבד — קובצי PDF סרוקים ללא OCR מדולגים),
-    וקובצי טקסט רגיל. פורמטים אחרים מתעלמים בשקט.</p>
-
-    <h4>היכן נשמרים הנתונים</h4>
-    <p><code dir="ltr">%LOCALAPPDATA%\GenizahSearchPro\Index\LocalIndex\</code> ב-Windows.
-    התקנות ניידות שומרות את נתוני LOCAL עם תיקיית ההתקנה.</p>
-
-    <h4>ערבות פרטיות</h4>
-    <p>המסמכים המקומיים שלכם <b>לעולם אינם מועלים</b> לשרתי GenizahSearch. שלושה גבולות אוכפים זאת:</p>
-    <ul>
-        <li>נקודת הקצה <code dir="ltr">/api/search</code> מסננת פריטי LOCAL באופן הגנתי.</li>
-        <li>סנכרון ענן של רשימות מבוטל לחלוטין אם כל פריט ברשימה הוא LOCAL.</li>
-        <li>הגשת תיקונים דוחה מזהי מסמך LOCAL עם שגיאה ברורה.</li>
-    </ul>
-    <p><b>גילוי נאות:</b> הטקסט המאונדקס נשמר בקובץ אינדקס מקומי בטקסט גלוי — הוא לעולם לא מועלה לשרתי GenizahSearch.
-    השתמש בהצפנת דיסק ברמת מערכת ההפעלה (BitLocker / FileVault) אם נדרשת הצפנה במנוחה.</p>
-
-    <h4>סינון תלת-מצבי</h4>
-    <p>כל משטח תוצאות (חיפוש, חיפוש חיבורים, מקבילות) כולל כפתור סינון המחזר בין
-    <b>הכל</b> &larr; <b>רק מקומי</b> &larr; <b>ללא מקומי</b> &larr; <b>הכל</b>.
-    הכפתור מוסתר כאשר בסט התוצאות הנוכחי אין פגיעות LOCAL.</p>
-
-    <h4>אזהרת שינוי שם מחשב</h4>
-    <p>אם תשנו את שם המחשב שלכם, מטמון ה-SQLite מתבטל והסריקה הבאה מחלצת מחדש את כל הקבצים.
-    זה נדיר; מתועד לצורך שלמות.</p>
-
-    <p><em>תכונת הספרייה שלי בהשראת אב-טיפוס GenizahLocal של יהודה זיוואלד.</em></p>
     </div>
 </div>
 <!-- END_LANG_HE -->
