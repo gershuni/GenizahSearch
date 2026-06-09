@@ -2221,14 +2221,16 @@ class MyLibraryTab(QWidget):
         if not folder_path:
             return
 
-        reply = QMessageBox.question(
-            self,
-            tr("Remove folder"),
-            tr("Remove '{}' from My Library?\n\nAll indexed files from this folder will be removed from search results.").format(folder_path),
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+        mb = QMessageBox(self)
+        mb.setIcon(QMessageBox.Icon.Question)
+        mb.setWindowTitle(tr("Remove folder"))
+        mb.setText(tr("Remove '{}' from My Library?\n\nAll indexed files from this folder will be removed from search results.").format(folder_path))
+        mb.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        mb.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        # Localize the standard-button labels (Qt renders Yes/Cancel in English otherwise).
+        mb.button(QMessageBox.StandardButton.Yes).setText(tr("Yes"))
+        mb.button(QMessageBox.StandardButton.Cancel).setText(tr("Cancel"))
+        if mb.exec() != QMessageBox.StandardButton.Yes:
             return
 
         try:
@@ -2301,6 +2303,9 @@ class MyLibraryTab(QWidget):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
             mb.setDefaultButton(QMessageBox.StandardButton.No)
+            # Localize the standard-button labels (Qt renders Yes/No in English otherwise).
+            mb.button(QMessageBox.StandardButton.Yes).setText(tr("Yes"))
+            mb.button(QMessageBox.StandardButton.No).setText(tr("No"))
             if mb.exec() != QMessageBox.StandardButton.Yes:
                 return
             affected = self._indexer.mark_all_pending_for_reindex()
@@ -2648,14 +2653,16 @@ class MyLibraryTab(QWidget):
         formatted += "\n\n" + tr(
             "Performance may degrade. Do you want to continue?"
         )
-        reply = QMessageBox.question(
-            self,
-            title,
-            formatted,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        return reply == QMessageBox.StandardButton.Yes
+        mb = QMessageBox(self)
+        mb.setIcon(QMessageBox.Icon.Question)
+        mb.setWindowTitle(title)
+        mb.setText(formatted)
+        mb.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel)
+        mb.setDefaultButton(QMessageBox.StandardButton.Cancel)
+        # Localize the standard-button labels (Qt renders Yes/Cancel in English otherwise).
+        mb.button(QMessageBox.StandardButton.Yes).setText(tr("Yes"))
+        mb.button(QMessageBox.StandardButton.Cancel).setText(tr("Cancel"))
+        return mb.exec() == QMessageBox.StandardButton.Yes
 
     # ------------------------------------------------------------------
     # Folder list UI (D-40)
