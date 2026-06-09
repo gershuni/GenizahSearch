@@ -28,6 +28,7 @@ python -m PyInstaller --noconfirm --noconsole --onedir --clean ^
  --add-data "shared;shared" ^
  --add-data "libraries_translations.db;." ^
  --add-data "fist_data\fjms_enrichment.db;fist_data" ^
+ --add-data "fist_data\visual_similarity.db;fist_data" ^
  --add-data "fist_data\vs_manifest.txt;fist_data" ^
  --add-data "nli_data\nli_crossref.db;nli_data" ^
  --add-data "pgp_data\pgp.db;pgp_data" ^
