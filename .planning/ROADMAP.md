@@ -264,7 +264,7 @@ then `/release`.
 **Plans**: 4 plans
 - [x] 110-01-PLAN.md — Wave-0 test scaffolds (test_comp_corpus_scope.py + test_comp_export_local.py) + D-08 staleness i18n keys (EN+HE) [wave 1]
 - [x] 110-02-PLAN.md — corpus_scope gating on search_composition_logic + lab_composition_search, weights-hash override fix (RF-4), plumbed through both composition threads [wave 2]
-- [ ] 110-03-PLAN.md — composition-tab Genizah/Local/ALL selector + run_composition wiring + session persist + stale-LAB label + weights-hash injection + Lab decoupling (human-verify checkpoint) [wave 3]
+- [x] 110-03-PLAN.md — composition-tab Genizah/Local/ALL selector + run_composition wiring + session persist + stale-LAB label + weights-hash injection + Lab decoupling (human-verify checkpoint) [wave 3]
 - [x] 110-04-PLAN.md — EXP-F3: LOCAL-aware export_comp_report across xlsx/csv/txt/docx via Phase 103 helpers, Genizah-only cross-parity [wave 4]
 
 ---
@@ -536,7 +536,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 | 107. Desktop Join Workbench — Anchor, Entry, Actions & Join Model | v8.0.0 | 3/3 | Complete    | 2026-06-04 |
 | 108. Desktop Join Workbench — Builders, Candidates & Compare | v8.0.0 | 7/4 | Complete    | 2026-06-06 |
 | 109. Visual-Similarity Merge & Soft-Retire | v8.0.0 | 13/13 | Complete    | 2026-06-08 |
-| 110. Composition/Parallels — LOCAL Corpus Support (+EXP-F3) | v8.0.0 | 3/4 | In Progress|  |
+| 110. Composition/Parallels — LOCAL Corpus Support (+EXP-F3) | v8.0.0 | 4/4 | Complete   | 2026-06-09 |
 | 103. Search-Results LOCAL Export | v7.17→v8.0.0 | 4/4 | Complete    | 2026-06-01 |
 | 104. Composition-Report LOCAL Export | v7.17 | 0/0 | ⏸ Deferred (no LOCAL comp-search UI) | - |
 | 105. Export UX Polish | v7.17 | 4/4 EXPUX | Implemented (tests green; UAT pending) | 2026-06-01 |
