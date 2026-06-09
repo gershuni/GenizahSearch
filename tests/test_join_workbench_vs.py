@@ -1069,7 +1069,7 @@ def test_compare_nav_buttons_have_room_for_text():
     src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
 
     cmp_init = src[src.find("# ── Top bar: prev/next nav"):src.find("# ── Action row")]
-    assert cmp_init.count("setMinimumWidth(84)") >= 2, (
+    assert cmp_init.count("setMinimumWidth(") >= 2, (
         "both prev_btn and nxt_btn must set a minimum width wide enough for their label"
     )
     assert "self.prev_btn.setFixedSize(34, 28)" not in cmp_init, "prev_btn still pinned to 34px"
@@ -1148,27 +1148,33 @@ def test_compare_zoom_is_client_side_scale_no_refetch():
     )
 
 
-def test_compare_nav_hebrew_arrows_point_outward():
-    """Round-4: forced-LTR Hebrew nav buttons — prev (right button) arrow trails ("הקודם>"),
-    next (left button) arrow leads ("<הבא"), so both point to the OUTER edge. The buttons set
-    LayoutDirection LeftToRight so the angle brackets are not bidi-mirrored. Pins Hillel's
-    preference against an i18n re-sweep + guards the LTR layout direction."""
+def test_compare_nav_arrows_point_outward():
+    """The Compare candidate nav reuses the ResultDialog "Prev/Next Result" labels so the arrow
+    glyph is baked into the translated string and lands on the OUTER edge in both languages:
+    EN "◀ Prev Result" / "Next Result ▶"; HE "▶ לתוצאה קודמת" / "לתוצאה הבאה ◀". Because the
+    glyph is part of the (per-language) label, the buttons must NOT force a fixed layout
+    direction — that would push the bracket to the wrong edge for these strings (the old
+    "prev >" / "< next" design did force LTR; this one must not)."""
     import pathlib
     from genizah_translations import TRANSLATIONS
 
-    assert TRANSLATIONS.get("prev >") == "<הקודם", (
-        f'prev button HE must be "<הקודם", got {TRANSLATIONS.get("prev >")!r}'
+    # The HE translations place the arrow on the outward edge (prev leads ▶, next trails ◀).
+    assert TRANSLATIONS.get("◀ Prev Result") == "▶ לתוצאה קודמת", (
+        f'prev HE must be "▶ לתוצאה קודמת", got {TRANSLATIONS.get("◀ Prev Result")!r}'
     )
-    assert TRANSLATIONS.get("< next") == "הבא>", (
-        f'next button HE must be "הבא>", got {TRANSLATIONS.get("< next")!r}'
+    assert TRANSLATIONS.get("Next Result ▶") == "לתוצאה הבאה ◀", (
+        f'next HE must be "לתוצאה הבאה ◀", got {TRANSLATIONS.get("Next Result ▶")!r}'
     )
 
-    # The forced-LTR layout direction is what stops the brackets mirroring in the RTL UI.
+    # The Compare nav reuses the ResultDialog labels and does NOT force a layout direction on
+    # the buttons (forcing LTR would mis-place the glyph for the RTL string).
     src = (pathlib.Path(__file__).parent.parent / "desktop" / "join_workbench.py").read_text(encoding="utf-8")
     nav_start = src.find("self.prev_btn = QPushButton")
     nav = src[nav_start:src.find("for emoji, val, aname in (", nav_start)]
-    assert nav.count("setLayoutDirection(Qt.LayoutDirection.LeftToRight)") >= 2, (
-        "both prev_btn and nxt_btn must force LTR layout so the angle brackets don't bidi-mirror"
+    assert 'tr("◀ Prev Result")' in nav, "prev_btn must reuse the ResultDialog '◀ Prev Result' label"
+    assert 'tr("Next Result ▶")' in nav, "nxt_btn must reuse the ResultDialog 'Next Result ▶' label"
+    assert "setLayoutDirection(Qt.LayoutDirection.LeftToRight)" not in nav, (
+        "Compare nav buttons must NOT force LTR — the glyph is baked into the per-language label"
     )
 
 

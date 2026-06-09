@@ -644,7 +644,7 @@ def htmlify(text: str, pattern: Optional[str] = None) -> str:
     t = html.escape(text)
     t = t.replace("\n", "<br>")
     t = t.replace(MARK_A, "<b style='color:#dc2626'>").replace(MARK_B, "</b>")
-    return f"<div dir='rtl' style='text-align:right'>{t}</div>"
+    return f"<div dir='rtl'>{t}</div>"
 
 
 def snippet_html(text: str, pattern: Optional[str], max_lines: int = 8) -> str:

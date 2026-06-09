@@ -4,15 +4,32 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [8.0.0] - 2026-06-09 — Dicta Genizah Search Pro: Joins Lab & enhanced Local Library
+
+The first major release under the new desktop name **Dicta Genizah Search Pro**.
+Headlined by the **Joins Lab** — a dedicated workspace for hunting physical joins —
+and by extending **Composition Search** (and its export) to your own **Local
+Library**. The rebrand applies to the desktop app only; the web platform keeps the
+name **Dicta Genizah Search**. Also includes a web memory fix.
+
+### New Features
+
+- **Joins Lab (desktop)** — A dedicated workspace for hunting **physical joins**: fragments once part of the same leaf or codex, now scattered across collections. Pin a fragment as the **anchor**, build a line-by-line query for the text you expect on the joining fragment (with per-line modifiers — negation, plene/defective spelling, prefixes/suffixes, wildcards, position anchors — plus spelling-variant, Judeo-Arabic, flexible-spacing and bidirectional toggles), and triage candidates **Yes / Maybe / No**. Candidates can be browsed, compared side by side with the anchor, re-anchored, added as a confirmed join, sent to the Fragment Puzzle, or saved to a list. The window is **modeless** — it stays open beside the main window, can be re-anchored at any time, and remembers its state across restarts. Open it from the toolbar corner, the **Find joins** button on Browse, or any search result / Browse page. Built-in **Visual Similarity** surfaces look-alikes (alone or combined with a text query), and a **size-mismatch flag** marks candidates whose physical dimensions differ from the anchor's.
+- **Composition Search over your Local Library (desktop)** — The Composition tab now carries a corpus selector — **Genizah / Local / ALL** — so a composition search can run across your own indexed documents ("My Library"), the Genizah corpus, or both together. The choice persists across sessions.
+- **Local Library composition export (desktop)** — Exporting a composition run that includes Local hits now produces a LOCAL-aware report across **xlsx, CSV, TXT and DOCX** — local documents are shown by filename / parent folder with appropriate credits, and don't leak into Genizah-only metadata columns.
 
 ### Changed
 
 - **Desktop app renamed to "Dicta Genizah Search Pro"** — The desktop application's display name is now **Dicta Genizah Search Pro** everywhere it is shown to users: the window title, the About dialog (English + Hebrew), the updater dialog, the credits written into exported files (CSV / TXT / DOCX headers, the xlsx "Credits and Info" sheet, and the puzzle-image footer), the Windows executable metadata, and the installer (Start-menu / desktop shortcut and Add/Remove Programs). The web platform keeps its own name, **Dicta Genizah Search**. (Internal file names — `GenizahSearchPro.exe`, the installer artifact, and the data folders — are unchanged, so existing installs upgrade in place and auto-update keeps working.)
 
-### Fixed
+### Improvements
 
-- **Hebrew interface coverage** — Added Hebrew translations for ~250 interface strings that previously showed in English to Hebrew users across both apps: the Reading Desk, image-viewer and browse controls (rotate / zoom / fullscreen / page navigation / library image toggles), the Projects & Lists panel, cloud-sync and data-update dialogs, search/variant/measurement filter controls, corrections / discoveries / comments actions, and export prompts. Also fixed three places where Hebrew text leaked into the English interface (the Visual Similarity dialog header, the "copy info" labels for items not in a list, and the Parallels "Category:" label) and a Help-page link that pointed at a non-existent repository branch. Surfaced by a pre-release internationalization audit.
+- **Hebrew interface coverage** — Added Hebrew translations for ~250 interface strings that previously showed in English to Hebrew users across both apps: the Reading Desk, image-viewer and browse controls (rotate / zoom / fullscreen / page navigation / library image toggles), the Projects & Lists panel, cloud-sync and data-update dialogs, search/variant/measurement filter controls, corrections / discoveries / comments actions, and export prompts. The My Library confirm dialogs (e.g. remove folder) now show localized Yes / No / Cancel buttons. Surfaced by a pre-release internationalization audit.
+
+### Bug Fixes
+
+- **Hebrew text no longer leaks into the English interface** — Fixed three places where Hebrew strings appeared for English users: the Visual Similarity dialog header, the "copy info" labels for items not in a list, and the Parallels "Category:" label. Also fixed a Help-page link that pointed at a non-existent repository branch.
+- **Web: bounded the NLI metadata cache** — `MetadataManager.nli_cache` is now a thread-safe LRU with a fixed ceiling, so it can no longer grow without bound on the long-running web process.
 
 ---
 

@@ -1068,7 +1068,7 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                ui.label(tr('v7.15: PDF page images and Hebrew text fixes in My Library (desktop)')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
+                ui.label(tr('v8.0: Joins Lab — hunt physical joins, plus an expanded Local Library: more file types and Composition Search (desktop app)')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
                 def dismiss_whats_new():
                     # Explicit user dismiss (X button): persist the flag unconditionally.
                     safe_user_set('whats_new_dismissed', WHATS_NEW_VERSION)

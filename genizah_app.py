@@ -270,7 +270,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("Improved text processing in My Library — click Re-index All to enjoy the improvement"))
+        self.lbl_msg.setText(tr("New: Joins Lab for hunting physical joins, plus an expanded Local Library — more file types and Composition Search"))
         self.show()
 
     def on_learn_more(self):
@@ -304,40 +304,29 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("Hebrew text from PDF files in My Library is now processed so that letter-spacing used for emphasis no longer splits words into separate pieces."),
-            tr("Improved handling of maqaf hyphens and numbers."),
+            tr("Joins Lab \u2014 a dedicated workspace for hunting physical joins: pin a fragment as the anchor, build a line-by-line query for the joining fragment, and triage candidates Yes / Maybe / No."),
+            tr("Visual Similarity is built into the Lab \u2014 surface fragments that look alike, alone or combined with a text query."),
+            tr("Composition Search now runs over your Local Library too, and My Library searches more file types: xlsx, CSV, HTML."),
         ]
-        call_to_action = tr("To apply the improvement to your existing library, click \"Re-index All\" in the My Library tab.")
-        align = 'right' if is_heb else 'left'
-        dir_attr = "rtl" if is_heb else "ltr"
-        lines = ''.join(
-            f"<p dir='{dir_attr}' align='{align}' style='margin: 8px 0; text-align: {align};'>"
-            f"<b>\u2022 {item}</b></p>"
-            for item in items
-        )
-        cta_html = (
-            f"<p dir='{dir_attr}' align='{align}' "
-            f"style='margin: 16px 0 0 0; text-align: {align}; color: #065f46;'>"
-            f"{call_to_action}</p>"
-        )
-        features_html = (
-            f"<div dir='{dir_attr}' align='{align}' "
-            f"style='font-size: 14px; line-height: 1.8; text-align: {align};'>"
-            f"{lines}{cta_html}</div>"
-        )
+        bullet = "\u200f\u2022 " if is_heb else "\u2022 "
+        features_text = "\n\n".join(f"{bullet}{item}" for item in items)
 
-        features_label = QLabel(features_html)
+        features_label = QLabel()
+        features_label.setTextFormat(Qt.TextFormat.PlainText)
         features_label.setWordWrap(True)
-        features_label.setTextFormat(Qt.TextFormat.RichText)
+        features_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         if is_heb:
             features_label.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
             features_label.setAlignment(
-                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop
+                Qt.AlignmentFlag.AlignAbsolute
+                | Qt.AlignmentFlag.AlignRight
+                | Qt.AlignmentFlag.AlignTop
             )
         else:
             features_label.setAlignment(
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
             )
+        features_label.setText(features_text)
         layout.addWidget(features_label)
 
         layout.addStretch()

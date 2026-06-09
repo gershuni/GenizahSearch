@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 7.16.0
+# Dicta Genizah Search Pro 8.0.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,25 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 7.16.0?
+## What's New in Version 8.0.0?
+
+### v8.0.0: Dicta Genizah Search Pro — Joins Lab & enhanced Local Library
+
+The desktop app is now **Dicta Genizah Search Pro**. This release adds a dedicated
+workspace for **physical joins** and brings your own document library into
+Composition Search.
+
+- **Joins Lab (desktop)** — pin a fragment as the **anchor**, build a line-by-line
+  query for the joining fragment, and triage candidates **Yes / Maybe / No**.
+  Surface look-alikes with built-in **Visual Similarity**, flag size mismatches, and
+  send confirmed joins straight to the Fragment Puzzle. The window is modeless and
+  remembers its state across restarts.
+- **Enhanced Local Library (desktop)** — **Composition Search** now runs over your
+  own indexed documents (choose **Genizah / Local / ALL**), and My Library now
+  searches more file types — **xlsx, CSV, HTML**. Composition runs that include
+  local hits export correctly to xlsx / CSV / TXT / DOCX.
+- **Hebrew interface coverage** — ~250 more interface strings now appear in Hebrew
+  for Hebrew users across both apps.
 
 ### v7.16.0: Hebrew PDF Text Quality
 
@@ -371,7 +389,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V7.16.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V8.0.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

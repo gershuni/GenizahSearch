@@ -8,7 +8,7 @@
 ; place and hardcoded paths (e.g. C:\Program Files\Genizah Search Pro\_internal)
 ; keep resolving. Do NOT fold "Dicta" into this — it would orphan legacy paths.
 #define MyAppDirName "Genizah Search Pro"
-#define MyAppVersion "7.16.0"
+#define MyAppVersion "8.0.0"
 #define MyAppPublisher "Hillel Gershuni / Dicta"
 #define MyAppURL "https://www.GenizahSearch.com/"
 #define MyAppExeName "GenizahSearchPro.exe"
@@ -39,7 +39,7 @@ DisableDirPage=no
 ; Uncomment the following line to run in non administrative install mode (install for current user only).
 ;PrivilegesRequired=lowest
 OutputDir=C:\GenizahSearch\dist
-OutputBaseFilename=GenizahSearchPro_V7.16.0_Setup
+OutputBaseFilename=GenizahSearchPro_V8.0.0_Setup
 SetupIconFile=C:\GenizahSearch\icon.ico
 SolidCompression=yes
 WizardStyle=modern dynamic

@@ -40,6 +40,30 @@ __all__ = [
     "_DesktopSearchExecutor",
 ]
 
+
+def _force_rtl_right_align(browser) -> None:
+    """Render an RTL (Hebrew / Judeo-Arabic) transcription right-aligned in a QTextBrowser,
+    mirroring the ResultDialog manuscript text and the Joins Lab anchor.
+
+    Qt treats plain AlignRight as bidi/logical alignment for RTL rich text, which can paint
+    Hebrew at the physical left edge in short snippets. Use absolute right alignment and
+    re-apply after every setHtml/setPlainText call.
+    """
+    try:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtGui import QTextBlockFormat, QTextCursor
+        browser.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+        cursor = browser.textCursor()
+        cursor.select(QTextCursor.SelectionType.Document)
+        fmt = QTextBlockFormat()
+        fmt.setAlignment(Qt.AlignmentFlag.AlignAbsolute | Qt.AlignmentFlag.AlignRight)
+        cursor.mergeBlockFormat(fmt)
+        cursor.clearSelection()
+        browser.setTextCursor(cursor)
+    except (RuntimeError, ImportError):
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Result-dict accessors — transplanted verbatim from the spike sketch.
 # These are part of the workbench's PUBLIC test surface (the private _r_*
@@ -472,7 +496,7 @@ try:
         QCheckBox, QMenu, QComboBox, QListWidget, QListWidgetItem,
     )
     from PyQt6.QtCore import Qt, QThread, pyqtSignal
-    from PyQt6.QtGui import QPalette, QPixmap, QImage, QTextCursor, QTextBlockFormat
+    from PyQt6.QtGui import QPalette, QPixmap, QImage
     from desktop.image_loader import ImageLoaderThread
     from desktop.widgets.line_number_text_edit import apply_line_numbered_text
     from gui_threads import SearchThread
@@ -1804,6 +1828,7 @@ if _QT_AVAILABLE:
             self.snip.setFixedHeight(72)
             self.snip.setReadOnly(True)
             self.snip.setHtml(m.get("snippet_html") or "")
+            _force_rtl_right_align(self.snip)
             lay.addWidget(self.snip)
             # Feature 1: page-text worker ref (None until folio flip is requested)
             self._card_text_worker = None
@@ -1815,8 +1840,10 @@ if _QT_AVAILABLE:
             row = QHBoxLayout()
             row.setSpacing(2)
 
-            # --- folio nav LEFT (Feature 7 RTL glyphs: PREV=▶, NEXT=◀) ---
-            self._folio_prev_btn = QPushButton("▶")
+            # --- folio nav (Feature 7): glyphs point OUTWARD per language.
+            # RTL (HE): prev=▶ (right), next=◀ (left); LTR (EN): prev=◀, next=▶ ---
+            _is_rtl = (CURRENT_LANG == "he")
+            self._folio_prev_btn = QPushButton("▶" if _is_rtl else "◀")
             self._folio_prev_btn.setFixedSize(24, 22)
             self._folio_prev_btn.setAccessibleName(tr("Previous folio"))
             self._folio_prev_btn.setToolTip(tr("Previous folio"))
@@ -1827,7 +1854,7 @@ if _QT_AVAILABLE:
             self._folio_lbl.setStyleSheet("font-size:10px;color:#94a3b8;")
             row.addWidget(self._folio_lbl)
 
-            self._folio_next_btn = QPushButton("◀")
+            self._folio_next_btn = QPushButton("◀" if _is_rtl else "▶")
             self._folio_next_btn.setFixedSize(24, 22)
             self._folio_next_btn.setAccessibleName(tr("Next folio"))
             self._folio_next_btn.setToolTip(tr("Next folio"))
@@ -2092,6 +2119,7 @@ if _QT_AVAILABLE:
                         from shared.joins_lab import snippet_html
                         hi = snippet_html(txt, self.c.highlight_pattern, max_lines=6) if txt else ""
                         self.snip.setHtml(hi or "")
+                        _force_rtl_right_align(self.snip)
                     except RuntimeError:
                         pass
 
@@ -2127,6 +2155,7 @@ if _QT_AVAILABLE:
                         from shared.joins_lab import snippet_html
                         hi = snippet_html(txt, self.c.highlight_pattern, max_lines=6) if txt else ""
                         self.snip.setHtml(hi or "")   # ALWAYS set — empty resolves to "", never stuck on "loading…"
+                        _force_rtl_right_align(self.snip)
                     except RuntimeError:
                         pass
 
@@ -3093,7 +3122,11 @@ if _QT_AVAILABLE:
                     snip_lbl = QLabel()
                     snip_lbl.setTextFormat(Qt.TextFormat.RichText)
                     snip_lbl.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
-                    snip_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+                    snip_lbl.setAlignment(
+                        Qt.AlignmentFlag.AlignAbsolute
+                        | Qt.AlignmentFlag.AlignRight
+                        | Qt.AlignmentFlag.AlignVCenter
+                    )
                     snip_lbl.setWordWrap(False)
                     snip_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                     snip_lbl.setText(f'<span dir="rtl">{snip_html}</span>')
@@ -3700,25 +3733,27 @@ if _QT_AVAILABLE:
 
             # ── Top bar: prev/next nav + position label + Y/?/N triage ──────
             topbar = QHBoxLayout()
-            # Round-4: the toolbar stays RTL so prev sits on the RIGHT and next on the LEFT, but
-            # each nav button is forced to LTR internal layout so the angle bracket is NOT bidi-
-            # mirrored. With the visual-order strings ("הקודם>" / "<הבא") the arrow points to the
-            # OUTER edge of each button (prev → right, next → left) and the word sits inner.
-            self.prev_btn = QPushButton(tr("prev >"))
-            self.prev_btn.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+            # Candidate nav — mirror the ResultDialog "Prev/Next Result" bar exactly: the arrow
+            # glyph is baked into the (translated) label so it points OUTWARD in both LTR
+            # (EN: "◀ Prev Result" / "Next Result ▶") and RTL (HE: "▶ לתוצאה קודמת" /
+            # "לתוצאה הבאה ◀") once the dialog lays the buttons out by language. No forced layout
+            # direction — that would push the glyph to the wrong edge for these strings.
+            self.prev_btn = QPushButton(tr("◀ Prev Result"))
+            self.prev_btn.setAutoDefault(False)
             self.prev_btn.setFixedHeight(28)
-            self.prev_btn.setMinimumWidth(84)   # round-4: 34px clipped the label text
+            self.prev_btn.setMinimumWidth(110)
             self.prev_btn.setAccessibleName(tr("Previous candidate"))
             self.prev_btn.clicked.connect(lambda: self.step(-1))
             topbar.addWidget(self.prev_btn)
 
             self.pos_lbl = QLabel("")
+            self.pos_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             topbar.addWidget(self.pos_lbl, 1)
 
-            self.nxt_btn = QPushButton(tr("< next"))
-            self.nxt_btn.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+            self.nxt_btn = QPushButton(tr("Next Result ▶"))
+            self.nxt_btn.setAutoDefault(False)
             self.nxt_btn.setFixedHeight(28)
-            self.nxt_btn.setMinimumWidth(84)   # round-4: 34px clipped the label text
+            self.nxt_btn.setMinimumWidth(110)
             self.nxt_btn.setAccessibleName(tr("Next candidate"))
             self.nxt_btn.clicked.connect(lambda: self.step(1))
             topbar.addWidget(self.nxt_btn)
@@ -3804,16 +3839,18 @@ if _QT_AVAILABLE:
             dims_lbl.setVisible(False)
 
             # Per-pane folio browse + zoom row (Features 4+3)
-            # Feature 7: RTL glyphs — PREV points right (▶), NEXT points left (◀)
+            # Feature 7: glyphs point OUTWARD per language —
+            # RTL (HE): prev=▶ (right), next=◀ (left); LTR (EN): prev=◀, next=▶
+            _is_rtl = (CURRENT_LANG == "he")
             ctrl_row = QHBoxLayout()
             ctrl_row.setSpacing(2)
-            folio_prev = QPushButton("▶")
+            folio_prev = QPushButton("▶" if _is_rtl else "◀")
             folio_prev.setFixedSize(28, 22)
             folio_prev.setToolTip(tr("Previous folio"))
             folio_prev.setAccessibleName(tr("Previous folio"))
             folio_lbl = QLabel("p.1")
             folio_lbl.setStyleSheet(f"font-size:10px;color:{_META_COLOR};")
-            folio_next = QPushButton("◀")
+            folio_next = QPushButton("◀" if _is_rtl else "▶")
             folio_next.setFixedSize(28, 22)
             folio_next.setToolTip(tr("Next folio"))
             folio_next.setAccessibleName(tr("Next folio"))
@@ -3846,6 +3883,9 @@ if _QT_AVAILABLE:
 
             txt = QTextBrowser()
             txt.setReadOnly(True)
+            # RTL so apply_line_numbered_text puts the gutter on the right and the Hebrew
+            # transcription right-aligns, matching the ResultDialog + the anchor pane.
+            txt.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
 
             box.addWidget(shelf)
             box.addWidget(meta)
@@ -3970,6 +4010,7 @@ if _QT_AVAILABLE:
                         apply_line_numbered_text(
                             w, htmlify(txt, h), source_text=txt, is_html=True,
                         )
+                        _force_rtl_right_align(w)
                     except RuntimeError:
                         pass
 
@@ -4342,8 +4383,10 @@ if _QT_AVAILABLE:
 
             toolbar.addStretch()
 
-            # Feature 7: RTL glyphs — PREV points right (►), NEXT points left (◄)
-            self.btn_folio_prev = QPushButton("►")
+            # Feature 7: glyphs point OUTWARD per language —
+            # RTL (HE): prev=► (right), next=◄ (left); LTR (EN): prev=◄, next=►
+            _is_rtl = (CURRENT_LANG == "he")
+            self.btn_folio_prev = QPushButton("►" if _is_rtl else "◄")
             self.btn_folio_prev.setFixedWidth(30)
             self.btn_folio_prev.setAccessibleName(tr("Previous folio"))
             self.btn_folio_prev.clicked.connect(self._folio_prev)
@@ -4353,7 +4396,7 @@ if _QT_AVAILABLE:
             self.folio_counter.setStyleSheet("font-size:11px;color:#94a3b8;")
             toolbar.addWidget(self.folio_counter)
 
-            self.btn_folio_next = QPushButton("◄")
+            self.btn_folio_next = QPushButton("◄" if _is_rtl else "►")
             self.btn_folio_next.setFixedWidth(30)
             self.btn_folio_next.setAccessibleName(tr("Next folio"))
             self.btn_folio_next.clicked.connect(self._folio_next)
@@ -4892,20 +4935,12 @@ if _QT_AVAILABLE:
         def _right_align_anchor_text(self):
             """Force every block of the anchor transcription to right-align (RTL UAT).
 
-            htmlify already emits a right-aligned RTL div, but applying the block
-            format directly guarantees right alignment regardless of how Qt renders
-            the wrapper.
+            htmlify emits an RTL div; applying the block format directly guarantees
+            physical right alignment regardless of how Qt renders the wrapper. Shared
+            with the card snippet + Compare panes via the module-level helper so all
+            three transcription views align identically.
             """
-            try:
-                cursor = self.anchor_text_browser.textCursor()
-                cursor.select(QTextCursor.SelectionType.Document)
-                fmt = QTextBlockFormat()
-                fmt.setAlignment(Qt.AlignmentFlag.AlignRight)
-                cursor.mergeBlockFormat(fmt)
-                cursor.clearSelection()
-                self.anchor_text_browser.setTextCursor(cursor)
-            except RuntimeError:
-                pass
+            _force_rtl_right_align(self.anchor_text_browser)
 
         def _cancel_workers(self):
             """Best-effort cancel all in-flight workers.

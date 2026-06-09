@@ -2441,6 +2441,12 @@ TRANSLATIONS = {
 
     # --- What's New notifications ---
     "New Features!": "תכונות חדשות!",
+    # v8.0.0 — Joins Lab & enhanced Local Library
+    "v8.0: Joins Lab — hunt physical joins, plus an expanded Local Library: more file types and Composition Search (desktop app)": "v8.0: מעבדת צירופים — איתור צירופים פיזיים, והרחבת החיפוש בקבצים מקומיים לסוגי קבצים נוספים וגם לחיפוש חיבורים (אפליקציית שולחן העבודה)",
+    "New: Joins Lab for hunting physical joins, plus an expanded Local Library — more file types and Composition Search": "חדש: מעבדת צירופים לאיתור צירופים פיזיים, והרחבת החיפוש בקבצים מקומיים לסוגי קבצים נוספים וגם לחיפוש חיבורים",
+    "Joins Lab — a dedicated workspace for hunting physical joins: pin a fragment as the anchor, build a line-by-line query for the joining fragment, and triage candidates Yes / Maybe / No.": "מעבדת צירופים — מרחב עבודה ייעודי לאיתור צירופים פיזיים: קביעת קטע כעוגן, בניית שאילתה שורה-אחר-שורה לטקסט הצפוי בקטע המצורף, ומיון המועמדים (כן / אולי / לא).",
+    "Visual Similarity is built into the Lab — surface fragments that look alike, alone or combined with a text query.": "דמיון חזותי משולב במעבדה — הצגת קטעים הדומים חזותית, לבד או בשילוב עם שאילתת טקסט.",
+    "Composition Search now runs over your Local Library too, and My Library searches more file types: xlsx, CSV, HTML.": "ניתן לבצע גם חיפוש חיבורים בספרייה המקומית, וכן לחפש בסוגי קבצים נוספים: xlsx, csv, html",
     "v7.15: PDF page images and Hebrew text fixes in My Library (desktop)": "גרסה 7.15: תמונות עמודי PDF ותיקוני טקסט עברית ב\"הספרייה שלי\" (אפליקציית שולחן עבודה)",
     "v7.15: PDF page images in My Library, Hebrew text fixes, and a new Re-index All button": "גרסה 7.15: תמונות עמודי PDF ב\"הספרייה שלי\", תיקוני טקסט עברית, וכפתור 'אנדקס מחדש הכל'",
     "PDF page image in My Library: a LOCAL PDF search result now shows the original PDF page alongside the extracted text. Navigation between results and pages syncs the image automatically.": "תמונות עמודי PDF ב\"הספרייה שלי\" — תוצאת חיפוש בקובץ PDF מקומי מציגה כעת את עמוד ה-PDF המקורי לצד הטקסט שחולץ. הניווט בין תוצאות ובין עמודים מסנכרן את התמונה אוטומטית.",
