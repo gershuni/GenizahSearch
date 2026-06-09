@@ -111,7 +111,7 @@ requirement text is preserved in git history (prior `REQUIREMENTS.md`) and `MILE
   only LOCAL hits, **ALL** returns Genizah + LOCAL **merged**, **Genizah** is unchanged from today;
   results render into the existing composition results surface. A **stale LOCAL LAB index** surfaces a
   rebuild / staleness signal rather than silently omitting LOCAL composition hits.
-- [ ] **EXP-F3** *(promoted from Future)*: **Composition-report LOCAL export** — `export_comp_report`
+- [x] **EXP-F3** *(promoted from Future)*: **Composition-report LOCAL export** — `export_comp_report`
   (`genizah_app.py:20447`) becomes LOCAL-aware so a Local/ALL composition run exports LOCAL hits with
   local-meaningful columns (filename / folder / filepath / page / matched-text), reusing the Phase 103
   export helpers (`shared/export_dossier.py`, `shared/docx_export.py`). No longer gated — Phase 110
