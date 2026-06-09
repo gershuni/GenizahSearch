@@ -25,7 +25,6 @@ Covers:
 
 import csv
 import io
-import os
 
 import pytest
 
@@ -61,7 +60,7 @@ LOCAL_ID = "970000000100000001"
 GEN_ID = "990012345678901"
 LOCAL_FP = r"C:\books\hebrew\dusiach.pdf"  # contains os.sep
 LOCAL_FP_EVIL = "=cmd|calc"  # CSV formula-injection vector
-LOCAL_PARENT = os.path.basename(os.path.dirname(LOCAL_FP))  # "hebrew"
+LOCAL_PARENT = "hebrew"  # parent of LOCAL_FP; hardcoded — os.path can't split a Windows path on POSIX CI
 LOCAL_FNAME = "dusiach.pdf"
 
 
