@@ -2635,7 +2635,6 @@ def _build_search_results_xlsx_bytes(
     _domain_name_map = dict(domain_name_map or {})
 
     # Phase 103 (LEXP-03/04/05/D-14): LOCAL row partition helpers.
-    import os as _os
     _local_filepath_map = dict(local_filepath_map or {})
     _is_local_sys_id = None
     try:
@@ -2845,12 +2844,7 @@ def _build_search_results_xlsx_bytes(
             sid = _row_sys_id(r)
             filename = (r.get('display') or {}).get('shelfmark') or sid
             fp = _local_filepath_map.get(sid) or ''
-            parent_folder = ''
-            if fp:
-                try:
-                    parent_folder = _os.path.basename(_os.path.dirname(fp))
-                except Exception:
-                    parent_folder = ''
+            parent_folder = _local_parent_folder(fp)
             # D-02: chunk_locator VERBATIM when present; only the raw p_num fallback
             # gets a synthesized 'p. ' label (avoids 'p. 3' becoming 'page p. 3').
             page = r.get('chunk_locator') or (f"p. {r.get('p_num', '')}" if r.get('p_num') else '')
@@ -2964,7 +2958,6 @@ def _build_export_data_row(result_dict, filepath_fn=None):
 
     Returns (row: list[str], is_local: bool).
     """
-    import os as _os
     import re as _re
     d = result_dict.get('display') or {}
     sid = d.get('id', '')
@@ -2975,7 +2968,7 @@ def _build_export_data_row(result_dict, filepath_fn=None):
     if is_local:
         filename = d.get('shelfmark', '') or sid
         fp = (filepath_fn(sid) if callable(filepath_fn) else '') or ''
-        parent_folder = _os.path.basename(_os.path.dirname(fp)) if fp else ''
+        parent_folder = _local_parent_folder(fp)
         row = [
             sid,
             parent_folder,
@@ -3007,6 +3000,20 @@ def _csv_extra_cols(result_dict, filepath_fn=None, lang='en'):
     return ['', '']
 
 
+def _local_parent_folder(fp):
+    """Parent-folder name from a LOCAL filepath, separator-agnostic.
+
+    LOCAL paths are produced on the Windows desktop (backslash separators). ``os.path`` on a
+    POSIX host (CI / web export) cannot split a backslash path — ``os.path.dirname(r"C:\\a\\b.pdf")``
+    returns ``""`` there — so normalize both ``\\`` and ``/`` before splitting. Empty/None -> ''.
+    """
+    if not fp:
+        return ''
+    norm = str(fp).replace('\\', '/').rstrip('/')
+    parts = norm.split('/')
+    return parts[-2] if len(parts) >= 2 else ''
+
+
 def _format_txt_local_block(result_dict, filepath_fn=None, full_text=None):
     """Return the TXT block string for a LOCAL result (Phase 103 D-09).
 
@@ -3022,13 +3029,12 @@ def _format_txt_local_block(result_dict, filepath_fn=None, full_text=None):
     ``*`` markers stripped to match the existing LOCAL plain-text style);
     otherwise it falls back to the single-line ±60-char snippet.
     """
-    import os as _os
     from shared_export_utils import build_expanded_context
     d = result_dict.get('display') or {}
     sid = d.get('id') or result_dict.get('sys_id') or ''
     filename = d.get('shelfmark') or sid
     fp = (filepath_fn(sid) if callable(filepath_fn) else '') or ''
-    parent = _os.path.basename(_os.path.dirname(fp)) if fp else ''
+    parent = _local_parent_folder(fp)
     # D-02: chunk_locator verbatim ('p. 3' stays 'p. 3'); p_num fallback -> 'p. N'.
     # Wrapped as '({page})' so an already-formatted 'p. 3' is NOT double-prefixed
     # to '(page p. 3)'.
