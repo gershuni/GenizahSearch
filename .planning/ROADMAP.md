@@ -307,7 +307,7 @@ All v8.0.0 phases archived (see the collapsed milestone above + `milestones/v8.0
 
 No active backlog entries for future milestones.
 
-Next-milestone candidates: **D-F12** (regular Search ~8s wall-clock investigation), **D-F18** (context-menu LOCAL detection normalize through `display`), **EXPUX-01** dialog UI UAT, and the deferred **Component B** (JSA-01/02/03 + JWB-05) + **web Joins Lab UI** — see `docs/OPEN_ISSUES.md` and `milestones/v8.0.0-REQUIREMENTS.md`.
+Next-milestone candidates: **D-F12** (regular Search ~8s wall-clock investigation), **D-F18** (context-menu LOCAL detection normalize through `display`), and the deferred **Component B** (JSA-01/02/03 + JWB-05) + **web Joins Lab UI** — see `docs/OPEN_ISSUES.md` and `milestones/v8.0.0-REQUIREMENTS.md`. (EXPUX-01 + EXPUX-04 dialog UI UAT approved 2026-06-11.)
 
 ---
 

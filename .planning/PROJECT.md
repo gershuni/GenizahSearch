@@ -52,7 +52,7 @@ EXPUX 4 + JWB 9 + COMP-LOC 2 + EXP-F3 1).
   deferred Phase 104.
 - **Deferred by user decision (NOT gaps):** all of Component B (JSA-01 anchor parallels, JSA-02 corpus
   completion, JSA-03 torn-word completion, JWB-05 tear-side assist) + the web Joins Lab UI → post-v8.0.0
-  milestone. EXPUX-01 dialog UI UAT still pending.
+  milestone. (EXPUX-01 + EXPUX-04 dialog UI UAT approved 2026-06-11.)
 - **Open follow-ups (next-milestone candidates):** D-F12 (regular Search ~8s wall-clock, profile-first),
   D-F18 (context-menu LOCAL detection via `display`), `_show_vs_dialog`/JoinsDialog pick-machinery
   physical deletion (soft-retired this cycle), Phase 106/107 advisory code-review findings (WR-01/02).
@@ -390,8 +390,9 @@ The per-phase Current State notes below are retained as the milestone's executio
 **Carried-forward candidates (NOT yet scoped):**
 - **D-F12** — regular Search ~constant 8s wall-clock investigation (profile-first: instrument Tantivy candidate fetch → regex post-filter → enrichment → highlight build → return-to-UI; profile LOCAL-only / Genizah-unfiltered / Genizah-filtered; optimize the actual bottleneck — do NOT guess).
 - **D-F18** — context-menu LOCAL detection could normalize through `display` (P3, opportunistic when next editing `_show_results_context_menu`).
-- **EXPUX-01** — Open File/Folder export dialog UI UAT (implemented, tests green; UI walkthrough pending).
 - Soft-retired this cycle, physical deletion deferred to a cleanup phase: `_show_vs_dialog` + the JoinsDialog pick-machinery. Plus the Phase 106/107 advisory code-review findings (WR-01/02).
+
+(EXPUX-01 + EXPUX-04 dialog UI UAT were approved 2026-06-11 — no longer pending.)
 
 ### Out of Scope
 

@@ -1,6 +1,6 @@
 # Phase 105: Export UX Polish — Summary
 
-**Completed:** 2026-06-01 (implemented; UAT pending on the UI dialog)
+**Completed:** 2026-06-01 (implemented). **UAT APPROVED 2026-06-11** (EXPUX-01 + EXPUX-04 both confirmed by Hillel).
 **Milestone:** v7.17 LOCAL Export Support
 **Approach:** Implemented directly (4 well-scoped edits, 4 atomic commits + unit tests) — no formal PLAN.md. CONTEXT in `105-CONTEXT.md`.
 
@@ -22,9 +22,9 @@
 - 60 targeted tests green: `test_expux_local_credits.py` (8), `test_expux_expanded_context.py` (10), plus the full export regression set — `test_export_xlsx_cross_parity.py`, `test_local_export_non_regression.py` (LEXP-08), `test_local_export_csv_txt_docx.py`, `test_docx_export_block.py`, `test_export_dossier_local.py`, `test_smoke_round2_export_gaps.py`.
 - Broad sweep (`-k export/snippet/credit/docx/txt/csv/local_export/smoke/highlight`): 529 passed (1 pre-existing failure unrelated to Phase 105 — see below).
 
-## UAT pending
-- EXPUX-01: click Open File / Open Folder from a real export and confirm both launch correctly (Windows).
-- EXPUX-04: eyeball a DOCX + TXT export and confirm the fuller, highlighted passage reads well and the ~2000-char cap behaves on a large PDF page.
+## UAT — ✅ APPROVED 2026-06-11 (Hillel)
+- EXPUX-01: Open File / Open Folder from a real export both launch correctly (Windows). ✓
+- EXPUX-04: DOCX + TXT export — the fuller, highlighted passage reads well and the ~2000-char cap behaves on a large PDF page. ✓
 
 ## ⚠ Pre-existing issue surfaced (NOT Phase 105)
 `GenizahSearchPro.spec` has an **uncommitted working-copy edit (present before this session)** that removed `collect_all('pymupdf')` / `collect_all('zstandard')` / `collect_all('lxml')` and the hidden-imports list — `tests/test_local_pyinstaller_smoke.py::test_spec_file_collects_pymupdf` fails against it. Committed HEAD is correct. If shipped, the desktop installer breaks (`ModuleNotFoundError: fitz._fitz`). Restore with `git checkout GenizahSearchPro.spec`. Flagged for the user; out of Phase 105 scope.

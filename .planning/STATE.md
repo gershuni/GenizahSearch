@@ -45,7 +45,7 @@ Last activity: 2026-06-11
 tear-side assist) and the **web Joins Lab UI** (desktop-first per the Codex productionize critique).
 
 **Carried-forward candidates:** D-F12 (regular Search ~8s wall-clock, profile-first) · D-F18
-(context-menu LOCAL detection) · EXPUX-01 dialog UI UAT · `_show_vs_dialog`/JoinsDialog pick-machinery
+(context-menu LOCAL detection) · `_show_vs_dialog`/JoinsDialog pick-machinery
 physical deletion (soft-retired this cycle) · Phase 106/107 advisory code-review findings (WR-01/02) ·
 JOINS-F1 relative-offset positional search (spike-gated) · JOINS-F2 Dicta/Sefaria citation-ID source ·
 JOINS-F3 batch-export + persisted list re-import · JOINS-F4 auto-ranked finder (explicitly OUT). See
@@ -98,7 +98,7 @@ Carried forward to v8.0.0+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular
 ### Roadmap Evolution
 
 - v8.0.0 opened (2026-06-02): folds the delivered v7.17 cycle (rebrand + LOCAL export, Phases 103/105) into the flagship v8.0.0 release and adds **Joins Lab** (Spike 002, FEASIBLE / ~M). Two independent components — A: Join Workbench hub (primary); B: search-support algorithms (secondary). Both apps. Human-in-the-loop; the auto-ranked v7/v8 finder is explicitly OUT. **Roadmap deferred** until after a user-led Genizah-scholar design-critique session. Phase numbering will continue from 105.
-- Phases 103-105 (v7.17 cycle, now folded into v8.0.0): Phase 103 Search-results LOCAL export (LEXP-01/03–08, COMPLETE & verified); Phase 104 → DEFERRED to EXP-F3 (no LOCAL comp-search UI); Phase 105 Export UX Polish (EXPUX-01..04, implemented — EXPUX-01 dialog UAT pending). Desktop rebrand → "Dicta Genizah Search Pro" delivered as pre-release polish (commit `6e0c312d` + follow-ups).
+- Phases 103-105 (v7.17 cycle, now folded into v8.0.0): Phase 103 Search-results LOCAL export (LEXP-01/03–08, COMPLETE & verified); Phase 104 → DEFERRED to EXP-F3 (no LOCAL comp-search UI); Phase 105 Export UX Polish (EXPUX-01..04, implemented; EXPUX-01 + EXPUX-04 UI UAT approved 2026-06-11). Desktop rebrand → "Dicta Genizah Search Pro" delivered as pre-release polish (commit `6e0c312d` + follow-ups).
 - Phase 102 (v7.16) EXECUTED & CLOSED (commit `494c0c49`) + POST-102 de-space quality pass as NO-PHASE edits (D-F13b/c/d). Existing LOCAL libraries need one manual "Re-index All" (`extraction_format_version` 2→3).
 - Phase 110 Plan 02 (2026-06-08): composition engine `corpus_scope` landed. `search_composition_logic` + `lab_composition_search` accept `corpus_scope` as the LAST param (C3); fail-closed normalizer coerces unknown→`genizah` (C4); Genizah loop gated `!= 'local'`, LOCAL LAB loop/hook gated `!= 'genizah'`; per-run `local_lab_stale` + `corpus_scope` echoed on EVERY return dict incl. both early returns (A2 + Round-2 #4); stale≠no-index (M2). `SearchEngine._current_lab_weights_hash` now honors `_lab_weights_hash_override` (RF-4 — fixes all-scope LOCAL-LAB silent drop; Plan 03 injects the value). Composition merge stays score-interleaved — NO RRF (RF-2). Threads plumbed in gui_threads.py (default `'genizah'`). All 10 Wave-0 pure-engine tests green; 18 regression tests green; COMP-LOC-01/02 marked complete. Commits `80583a60`, `f44aa0ee`.
 
