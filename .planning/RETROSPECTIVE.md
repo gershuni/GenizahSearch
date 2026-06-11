@@ -306,6 +306,45 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 ---
 
+## Milestone: v8.0.0 — Dicta Rebrand & Joins Lab
+
+**Shipped:** 2026-06-09 | **Closed:** 2026-06-11 (retroactive)
+**Phases:** 7 (103, 105 folded from v7.17 + 106-110) | **Plans:** 31 formal (35 completed plan-equivalents)
+**Git:** 328 commits, 266 files, +55,320 / −785 | **Wall clock:** 2026-06-01 → 2026-06-09 (9 days)
+**Requirements:** 25 satisfied (BRAND 2 + LEXP 7 + EXPUX 4 + JWB 9 + COMP-LOC 2 + EXP-F3 1); Component B (JSA-01/02/03 + JWB-05) deferred by user decision
+
+### What Was Built
+- The flagship "Dicta Genizah Search Pro" release: desktop rebrand (display-only; binary identifiers unchanged so installs upgrade in place) + Search-results LOCAL export (XLSX/CSV/TXT/DOCX + bilingual "Local Documents" sheet) — folded from the v7.17 cycle.
+- **Joins Lab** (desktop): a web-reusable pure-logic shared core (`shared/joins_lab.py`, 66 tests) → desktop Join Workbench (anchor pane + line-by-line query builders for both sides of the leaf + deduped candidate grid/table + side-by-side Compare + pairwise→group join model + public action APIs) → Visual Similarity merged into the candidate surface (single 👁 badge + VS toggle; standalone VS dialog soft-retired).
+- Composition Search over the LOCAL corpus (Genizah/Local/ALL selector orthogonal to Lab mode) + LOCAL-aware composition export (EXP-F3, un-gated Phase 104).
+
+### What Worked
+- **Extract-pure-logic-first (Codex productionize critique)**: Phase 106's shared, unit-tested core (no PyQt, no direct `fist_data`, `SearchExecutor` adapter) carried Phases 107-110 cleanly and kept the web port a UI-only future task — the single best structural decision of the milestone.
+- **Throwaway sketch as executable spec**: the design-critique ran as a build-a-sketch exploration (tag `spike-002-joins-workbench`) instead of a paper roadmap; it unblocked + validated the roadmap and caught the inverted JWB-05 tear-side rule before any phase locked.
+- **Scope-cut to ship**: deferring all of Component B (2026-06-08) and repurposing Phase 110 to the LOCAL-composition wiring the user actually wanted let v8.0.0 ship on a clean line instead of stretching for the algorithmic half.
+- **Reusing the existing pairwise→group BFS** for the join model (no new schema) kept Phase 107 small.
+
+### What Was Inefficient
+- **Phase 108 & 109 churn**: 108 needed a full UI redesign + 3 polish rounds; 109 needed 13 plans (3 + 4 round-2 + 6 round-3) after UAT rejected the candidate surface twice. The candidate/badge UX was discovered through UAT, not specified up front — a lot of rework on the visual scheme (3 radios → toggle; ★/⊙/✎ badges → single 👁).
+- **Headless tests didn't catch Qt `__init__` ordering** — a construction crash slipped past parser-level tests; `test_join_workbench_construct.py` added after the fact.
+- **STATE.md drifted again**: `/release` shipped + tagged v8.0.0 but left STATE.md saying "Phase 110 Plan 03 next" — the close had to reconcile it retroactively (see Key Lessons).
+
+### Patterns Established
+- **Pure-core + adapter seam for cross-app features**: `SearchExecutor` Protocol lets the same logic drive desktop now and web later. The template for any future both-apps feature with heavy logic.
+- **Soft-retire (one-cycle deprecation)**: reach parity → reroute entry points → mark removable → physical deletion in a later cleanup phase (applied to the standalone VS dialog).
+- **Corpus orthogonal to mode**: the Genizah/Local/ALL selector is independent of the search MODE (standard vs Lab) — Lab is no longer hardwired to LOCAL.
+
+### Key Lessons
+1. **`/release` skips the GSD close ritual — FIFTH milestone in a row** (v7.13, v7.14, v7.15→missed, v7.16, now v8.0.0). The retrospective + MILESTONES entry + REQUIREMENTS archival + STATE reconciliation all had to run retroactively. This is now a standing pattern, not an anomaly — the fix is to wire the close into the release flow (or always run `/gsd-complete-milestone` in the same session as `/release`).
+2. **Specify the candidate/triage UX before building, or expect 2-3 UAT rejection rounds.** The visual scheme (badges, selector shape, triage glyphs) was the single biggest source of rework across 108-109; a sketch-validated visual spec up front would have collapsed the gap rounds.
+3. **Standard LOCAL composition must use the REGULAR My-Library index, not the LAB side-index** (LAB is opt-in only) — a load-bearing correction captured so it is not re-broken.
+
+### Cost Observations
+- Model mix: opus (planning + execution + close); Codex CLI for the productionize critique + pre-flight reviews
+- Notable: 9 days wall-clock for 7 phases, but Phases 108-109 (the candidate-hunt UI) consumed the bulk via UAT-driven gap rounds — plan count (31) understates the iteration; the redesign + polish summaries are the real signal.
+
+---
+
 ## Cross-Milestone Trends
 
 | Milestone | Phases | Plans | Days | Plans/Day | Key Theme |
@@ -327,8 +366,11 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 | v7.14 | 6 | 37 | 7 | 5.3 | My Library local document search |
 | v7.15 | 3 | 7 | 2 | 3.5 | My Library visual (PDF page image) |
 | v7.16 | 1* | 5 | 4 | 1.3 | Hebrew PDF text quality + freeze fixes |
+| v8.0.0 | 7 | 31 | 9 | 3.4 | Dicta rebrand + Joins Lab + LOCAL composition |
 
 *v7.16: 1 formal phase (102); most of the milestone was no-phase edit+test quality work (de-space follow-ups, UAT fixes, three search/startup freeze fixes) not captured by plan count.
+
+†v8.0.0: 7 phases counts the v7.17-folded 103/105 + Joins Lab 106-110; 31 formal plans understates iteration — Phases 108-109 added a full UI redesign + multiple UAT gap rounds (the redesign/polish summaries are the real signal).
 
 **Observations:**
 - v6.5.0 had the lowest plans/day ratio — reflects the large batch translation work (multi-day server jobs) and bug-fix tail
@@ -336,3 +378,5 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 - Quick tasks are an effective escape valve for urgent fixes during milestone execution
 - v7.8 shipped fastest per-plan (~14 hours wall clock for 9 plans) — scoped to structural changes with CI safety net as the first deliverable
 - v7.12 had the highest phase count (10) due to two emergency sub-phase insertions (92.1, 92.2) and two promoted backlog phases (999.1, 999.4). Per-phase plan count (2.8) was lower than v7.10 (4.6) reflecting vertically-integrated phase shape (one chokepoint per phase) vs horizontal-by-endpoint shape. Pattern: architectural milestones benefit from fewer-plans-per-phase + cross-AI review depth, not more plans.
+- v8.0.0's plans/day (3.4) is mid-pack but the metric hides where the time went: the two UI-heavy phases (108-109) consumed the milestone via UAT-driven redesign + gap rounds, while the pure-logic core (106) and the LOCAL-composition wiring (110) were fast and low-churn. **Confirms: front-loaded pure logic + adapter seam is cheap; the cost lives in the UX iteration loop.** Scope discipline (deferring Component B) was what let it close.
+- **The `/release`-skips-the-close drift is now a five-milestone pattern** (v7.13/v7.14/v7.15/v7.16/v8.0.0). It is no longer worth treating as an anomaly to "remember next time" — it should be automated into the release flow or always paired with `/gsd-complete-milestone` in the same session.

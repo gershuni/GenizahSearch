@@ -1,14 +1,14 @@
 ---
 gsd_state_version: 1.0
-milestone: v8.0.0
-milestone_name: Joins Lab — Phases 106-110
-status: executing
-stopped_at: Phase 110 Plan 02 complete — composition engine corpus_scope + thread plumbing; Plan 03 next (UI selector + _lab_weights_hash_override injection)
-last_updated: "2026-06-09T02:39:13.863Z"
-last_activity: 2026-06-09
+milestone: none
+milestone_name: "(between milestones — v8.0.0 shipped & closed)"
+status: milestone_complete
+stopped_at: v8.0.0 closed 2026-06-11 (retroactive); awaiting /gsd-new-milestone
+last_updated: "2026-06-11T00:00:00.000Z"
+last_activity: 2026-06-11
 progress:
-  total_phases: 8
-  completed_phases: 6
+  total_phases: 7
+  completed_phases: 7
   total_plans: 31
   completed_plans: 35
   percent: 100
@@ -18,49 +18,60 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-02)
+See: .planning/PROJECT.md (updated 2026-06-11 after v8.0.0 close)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 110 — composition-parallels-search-local-corpus-support-desktop
+**Current focus:** Between milestones — v8.0.0 shipped & closed. Run `/gsd-new-milestone` to start the next cycle.
 
 ## Current Position
 
-Milestone: **v8.0.0 Dicta Rebrand & Joins Lab — STARTED 2026-06-02.** Folds the delivered v7.17 cycle (the "Dicta Genizah Search Pro" rebrand + LOCAL "My Library" export, Phases 103 + 105) into the flagship v8.0.0 release, and adds **Joins Lab** — an interactive **human-in-the-loop** join-hunting workbench (Component A) + optional search-support algorithms (Component B), both apps. NO automated join-finder.
+**Between milestones.** v8.0.0 Dicta Rebrand & Joins Lab **shipped 2026-06-09** (both apps; tag
+`v8.0.0` @ `71e0912e`; GitHub Release with desktop installer) and was **closed 2026-06-11** via a
+retroactive `/gsd-complete-milestone` (the `/release` flow tagged + shipped but did not run the GSD
+close ritual). 7 phases (103, 105 + 106-110), 31 formal plans, 25 requirements satisfied.
 
-Phase: 110
-Plan: Not started
-Status: Ready to execute Plan 03 (desktop comp-tab Genizah/Local/ALL selector + _lab_weights_hash_override injection at GenizahGUI init + after LOCAL LAB rebuild)
-Last activity: 2026-06-09
-
-### Scope (locked 2026-06-02)
-
-**Component A — Join Workbench (primary, both apps):** JWB-01 dedicated tab/page · JWB-02 "Find joins" entry from desktop ResultDialog + Browse (web+desktop) + open-by-shelfmark · JWB-03 pinned anchor (image + numbered transcription) · JWB-04 show existing/known joins (PGP+FJMS+user+community) · JWB-05 conservative `[`/`]` tear-side assist (only when clear) · JWB-06 seed search from anchor into the existing search module (variants/fuzzy/Responsa/regex), editable · JWB-07 collect candidates to a list · JWB-08 side-by-side compare · JWB-09 act on confirmed join (joins button + export + add-to-list; optional Puzzle).
-
-**Component B — Search-support algorithms (secondary, independent, both apps):** JSA-01 parallels seeded from anchor · JSA-02 corpus-driven suggest-then-search completion (first/last N words) · JSA-03 `[`/`]`-aware torn-word completion.
-
-**REFRAMED 2026-06-08 (/gsd-discuss-phase 110):** Component B (JSA-01 anchor parallels seeding + JSA-02 corpus completion + JSA-03 torn-word completion + JWB-05 tear-side assist) is **DEFERRED to a post-v8.0.0 milestone**. Phase 110 repurposed → **Composition/Parallels LOCAL Corpus Support** (desktop): pre-search Genizah/Local/ALL selector on the composition tab (corpus orthogonal to mode; Lab Mode no longer hardwired to LOCAL) + LOCAL-aware `export_comp_report` (**EXP-F3 promoted** into v8.0.0). New reqs COMP-LOC-01/02. Un-gates the deferred Phase 104.
-
-**Deferred to Future (not v8.0.0):** Component B (JSA-01/02/03 + JWB-05, deferred 2026-06-08) · JOINS-F1 relative-offset cross-line positional search (spike-gated) · JOINS-F2 Dicta/Sefaria citation-ID completion source · JOINS-F3 batch-export + persisted list re-import · JOINS-F4 auto-ranked finder (out) · PERF-F1 D-F12 search latency. One-click citations parked in `docs/FEATURE_IDEAS.md`.
+Phase: — (none active)
+Plan: — (none active)
+Status: Milestone complete. Awaiting next milestone.
+Last activity: 2026-06-11
 
 ### Next
 
-Phases 106–109 ✅ complete. Phase 110 context gathered (this session, reframed).
+`/gsd-new-milestone` — start the next cycle (questioning → research → requirements → roadmap). A fresh
+`.planning/REQUIREMENTS.md` is created there (the v8.0.0 one was archived + removed at close).
 
-1. `/clear` then **`/gsd-plan-phase 110`** — plan the LOCAL-composition wiring + EXP-F3. CONTEXT.md
-   at `.planning/phases/110-composition-parallels-search-local-corpus-support-desktop/110-CONTEXT.md`
-   carries 6 research flags (RF-1 Lab-Mode reconciliation is load-bearing; RF-2 ALL-merge semantics).
+**Deferred to the next milestone (user decision 2026-06-08 — scope, not gaps):** all of **Component B**
+(JSA-01 anchor parallels seeding + JSA-02 corpus completion + JSA-03 torn-word completion + JWB-05
+tear-side assist) and the **web Joins Lab UI** (desktop-first per the Codex productionize critique).
 
-2. Execute → verify Phase 110.
-3. **`/release`** — ship **v8.0.0** (version-file bump + CHANGELOG `## [8.0.0]` + GitHub Release with
-   desktop installer happen here; web+desktop bundle).
+**Carried-forward candidates:** D-F12 (regular Search ~8s wall-clock, profile-first) · D-F18
+(context-menu LOCAL detection) · EXPUX-01 dialog UI UAT · `_show_vs_dialog`/JoinsDialog pick-machinery
+physical deletion (soft-retired this cycle) · Phase 106/107 advisory code-review findings (WR-01/02) ·
+JOINS-F1 relative-offset positional search (spike-gated) · JOINS-F2 Dicta/Sefaria citation-ID source ·
+JOINS-F3 batch-export + persisted list re-import · JOINS-F4 auto-ranked finder (explicitly OUT). See
+`.planning/milestones/v8.0.0-REQUIREMENTS.md` + `docs/OPEN_ISSUES.md` + `docs/FEATURE_IDEAS.md`.
 
-**Version decision RESOLVED:** ship as **v8.0.0** (closes the open decision from 2026-06-01). The actual version-file bump (`scripts/bump_version.py 8.0.0`, plus `_TARGET_VERSION` in `tests/test_release_artifacts.py` which the bumper misses, plus a `## [8.0.0]` CHANGELOG section folding the `[Unreleased]` rebrand note) happens at `/release` time — NOT now. Rebrand gotchas in memory `project_desktop_app_rebrand.md`.
-
-**Build prerequisite (Joins Lab):** the Tantivy index must carry `line_starts` / `line_ends` (older indexes raise a rebuild error at `genizah_core.py:8583`). Already satisfied on web + most desktop users; degrade gracefully for stragglers.
+**Build prerequisite (Joins Lab, still applies):** the Tantivy index must carry `line_starts` /
+`line_ends` (older indexes raise a rebuild error at `genizah_core.py:8583`). Already satisfied on web +
+most desktop users; degrade gracefully for stragglers.
 
 ## Deferred Items
 
-Items acknowledged and deferred at v7.16 milestone close on 2026-06-01 (`gsd-tools.cjs audit-open` reported 102 items; same historical accumulation as the v7.14/v7.15 closes — none are milestone blockers):
+Items acknowledged and deferred at **v8.0.0 milestone close on 2026-06-11** (`gsd-tools.cjs audit-open` reported **103 items** — the same historical accumulation as the v7.14/v7.15/v7.16 closes; none are v8.0.0 blockers):
+
+| Category | Count | Notes |
+|----------|-------|-------|
+| Debug sessions | 41 | Mostly diagnosed-not-closed, predating v8. `local-search-freeze-2026-05-31` actually RESOLVED (OPEN_ISSUES D-F23); tracker entry stale. |
+| "UAT gaps" | 2 | **False positives** — Phase 107 & 108 both `[passed]` with 0 pending scenarios (done; flag not flipped). |
+| Quick tasks | 53 | Historical backlog (oldest 2026-02). `/gsd-cleanup` candidate. |
+| Pending todos | 5 | server-side search+email; NLI MARC crawl; unified metadata text search; FIST gap-fill; migrate desktop corrections to shared service. |
+| Unimplemented seeds | 2 | SEED-001 server-side IIIF cache (dormant, blocked on NLI TOS); SEED-003 opt-in OCR extension (dormant). |
+
+Plus the v8.0.0 scope deferrals (NOT gaps — user decision 2026-06-08): all of **Component B** (JSA-01/02/03 + JWB-05) + the **web Joins Lab UI** → post-v8.0.0 milestone. Recommend a `/gsd-cleanup` pass on the historical backlog before the next milestone.
+
+---
+
+Items previously acknowledged and deferred at v7.16 milestone close on 2026-06-01 (`gsd-tools.cjs audit-open` reported 102 items; same historical accumulation as the v7.14/v7.15 closes — none are milestone blockers):
 
 | Category | Count | Notes |
 |----------|-------|-------|
@@ -74,6 +85,7 @@ Carried forward to v8.0.0+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular
 
 ## Recently Closed Milestones
 
+- **v8.0.0 Dicta Rebrand & Joins Lab** — shipped 2026-06-09 (both apps; tag `v8.0.0` @ `71e0912e`; GitHub Release with desktop installer), closed 2026-06-11 (retroactive GSD close — `/release` shipped + tagged but skipped the close ritual). 7 phases (103, 105 folded from v7.17 + 106-110 Joins Lab Component A), 31 formal plans, 25 requirements satisfied (BRAND 2 + LEXP 7 + EXPUX 4 + JWB 9 + COMP-LOC 2 + EXP-F3 1). 328 commits since `v7.16.0`; 266 files, +55,320/−785. Flagship "Dicta Genizah Search Pro" release: desktop rebrand (display-only) + LOCAL export + Joins Lab (human-in-the-loop join-hunting workbench, desktop) + Composition over the LOCAL corpus. Component B (JSA-01/02/03 + JWB-05) + web Joins Lab UI deferred to a post-v8.0.0 milestone. See `.planning/milestones/v8.0.0-ROADMAP.md` + `v8.0.0-REQUIREMENTS.md`.
 - **v7.17 (folded, NOT separately closed)** — the rebrand + LOCAL export work shipped under the v7.17 phase numbers (103, 105) but, per the 2026-06-02 decision, is **folded into v8.0.0** rather than tagged/closed as its own milestone. Phases 103/105 retained as delivered. No "v7.17" release tag will exist.
 - **v7.16 Hebrew PDF Text Quality** — shipped 2026-06-01 (v7.16.0, desktop); 1 formal phase (102, 5 plans) + no-phase de-space/UAT/freeze work; tag `v7.16.0` @ `ccb87c90`. LOCAL Hebrew PDF text-layer extraction rewrite, file-management actions for LOCAL hits, three search/startup freeze fixes. See `.planning/milestones/v7.16-ROADMAP.md`.
 - **v7.15 My Library Visual** — shipped 2026-05-28; 3 phases (99, 100, 101); 7 plans; 6/6 PDFIMG-*. PDF page image rendering in ResultDialog + Browse, RTL/bidi reflow fixes, "Re-index All" recovery button.
@@ -92,7 +104,7 @@ Carried forward to v8.0.0+ (logged in `docs/OPEN_ISSUES.md`): **D-F12** (regular
 
 ## Session Continuity
 
-Last session: 2026-06-08T18:13:00Z
-Stopped at: Phase 110 Plan 02 complete — composition engine corpus_scope + thread plumbing; Plan 03 next (UI selector + _lab_weights_hash_override injection)
+Last session: 2026-06-11 (v8.0.0 milestone close — retroactive)
+Stopped at: v8.0.0 closed — MILESTONES.md entry written; ROADMAP + REQUIREMENTS archived to `.planning/milestones/v8.0.0-*`; PROJECT.md evolved; REQUIREMENTS.md removed (git rm); RETROSPECTIVE.md updated; `v8.0.0` tag already existed (created at `/release`).
 Resume file: None
-Next step: /gsd-execute-phase 110 — Plan 03 (desktop comp-tab Genizah/Local/ALL selector wired to the two run_composition call sites + inject searcher._lab_weights_hash_override = lab_engine._current_lab_weights_hash() at GenizahGUI init and after every LOCAL LAB rebuild).
+Next step: /gsd-new-milestone — start the next milestone cycle (a fresh `.planning/REQUIREMENTS.md` is created there). Consider a `/gsd-cleanup` pass on the 103-item historical backlog first.

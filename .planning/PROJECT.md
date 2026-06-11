@@ -8,9 +8,15 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v8.0.0 Dicta Rebrand & Joins Lab
+## Shipped Milestone: v8.0.0 Dicta Rebrand & Joins Lab — ✅ SHIPPED 2026-06-09, CLOSED 2026-06-11
 
-**Goal:** Ship the flagship **v8.0.0** "Dicta Genizah Search Pro" release — the desktop rebrand (delivered) and LOCAL ("My Library") export support (delivered, Phases 103 + 105) bundled with the new **Joins Lab**: an interactive, **human-in-the-loop** join-hunting workbench (both apps) where a scholar keeps ONE anchor fragment in view (image + numbered transcription) and drives the app's EXISTING search tools to find the fragments that physically join it. There is NO automated join-finder — the scholar is the ranker and confirmer.
+> **CLOSED.** v8.0.0 shipped + tagged 2026-06-09 (`v8.0.0` @ `71e0912e`); the GSD milestone-close
+> ritual was run retroactively 2026-06-11. 25 requirements satisfied (BRAND 2 + LEXP 7 + EXPUX 4 +
+> JWB 9 + COMP-LOC 2 + EXP-F3 1). Component B (JSA-01/02/03 + JWB-05) + the web Joins Lab UI were
+> deferred to a post-v8.0.0 milestone by user decision (2026-06-08). Archive:
+> `.planning/milestones/v8.0.0-ROADMAP.md` + `v8.0.0-REQUIREMENTS.md`.
+
+**Goal (delivered):** Ship the flagship **v8.0.0** "Dicta Genizah Search Pro" release — the desktop rebrand (delivered) and LOCAL ("My Library") export support (delivered, Phases 103 + 105) bundled with the new **Joins Lab**: an interactive, **human-in-the-loop** join-hunting workbench (both apps) where a scholar keeps ONE anchor fragment in view (image + numbered transcription) and drives the app's EXISTING search tools to find the fragments that physically join it. There is NO automated join-finder — the scholar is the ranker and confirmer.
 
 **Bundles (already delivered, folded in from the v7.17 cycle):**
 - Desktop rebrand → "Dicta Genizah Search Pro" — display name only; binary identifiers unchanged so installs upgrade in place (commit `6e0c312d` + follow-ups).
@@ -21,6 +27,37 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - **Component B — Search-support algorithms (secondary, independent):** parallels seeded from the anchor; corpus-driven suggest-then-search completion (first/last N words); `[`/`]`-aware torn-word completion.
 
 **Key context:** The MVP rides existing primitives — line-start/line-end search, gap notation, parallels, the joins panel, the Fragment Puzzle (both apps), and the variant/fuzzy/Responsa/regex search module — so it is largely UI composition + seed helpers, not new search-engine work. No new index or sidecar (`line_starts`/`line_ends` already present on web + most desktop users). The slow research-only auto-ranked v7/v8 join finder is explicitly OUT of scope. Requirements (JWB-01..09, JSA-01..03) in `.planning/REQUIREMENTS.md`. **The roadmap is intentionally deferred pending a Genizah-scholar design-critique session that will pressure-test the design against the real material nature of the corpus before phases are locked.** Origin: Spike 002 (`.planning/spikes/002-assisted-join-workbench/SPIKE-FINDINGS.md`) + `docs/FEATURE_IDEAS.md` + `docs/archive/JOIN_FINDER_REPORT.md`.
+
+## Current State (v8.0.0 SHIPPED & CLOSED 2026-06-11)
+
+**v8.0.0 "Dicta Genizah Search Pro" shipped 2026-06-09** (both apps; tag `v8.0.0` @ `71e0912e`; GitHub
+Release with desktop installer). Milestone close run retroactively 2026-06-11. **7 phases** — 103 +
+105 (folded from the v7.17 cycle) + 106-110 (Joins Lab Component A). 328 commits since `v7.16.0`; 266
+files, +55,320 / −785; 2026-06-01 → 2026-06-09. **25 requirements satisfied** (BRAND 2 + LEXP 7 +
+EXPUX 4 + JWB 9 + COMP-LOC 2 + EXP-F3 1).
+
+- **Rebrand + LOCAL export (delivered, folded from v7.17):** desktop display name → "Dicta Genizah
+  Search Pro" (display-only; binary identifiers unchanged so installs upgrade in place); Search-results
+  LOCAL export across XLSX/CSV/TXT/DOCX with a bilingual "Local Documents" sheet + export UX polish.
+  Closes D-F17.
+- **Joins Lab (new, desktop):** Phase 106 shared core (`shared/joins_lab.py`, web-reusable, no PyQt /
+  no direct `fist_data`, `SearchExecutor` adapter) → Phases 107-108 desktop Join Workbench (anchor pane
+  + line-by-line query builders for both sides of the leaf + deduped candidate grid/table + side-by-side
+  Compare + pairwise→group join model + public action APIs) → Phase 109 Visual Similarity merged into
+  the candidate surface (single 👁 eye badge + VS toggle; standalone VS dialog soft-retired; "Find
+  Joins" is the single entry). Human-in-the-loop; the auto-ranked finder is OUT.
+- **Composition over the LOCAL corpus (Phase 110):** Genizah/Local/ALL selector on the composition tab,
+  orthogonal to Lab mode (standard LOCAL composition uses the REGULAR My-Library index, NOT the LAB
+  side-index; score-interleaved merge, no RRF) + LOCAL-aware `export_comp_report` (EXP-F3). Un-gated the
+  deferred Phase 104.
+- **Deferred by user decision (NOT gaps):** all of Component B (JSA-01 anchor parallels, JSA-02 corpus
+  completion, JSA-03 torn-word completion, JWB-05 tear-side assist) + the web Joins Lab UI → post-v8.0.0
+  milestone. EXPUX-01 dialog UI UAT still pending.
+- **Open follow-ups (next-milestone candidates):** D-F12 (regular Search ~8s wall-clock, profile-first),
+  D-F18 (context-menu LOCAL detection via `display`), `_show_vs_dialog`/JoinsDialog pick-machinery
+  physical deletion (soft-retired this cycle), Phase 106/107 advisory code-review findings (WR-01/02).
+
+The per-phase Current State notes below are retained as the milestone's execution history.
 
 ## Current State (v8.0.0 Joins Lab — Phase 109 visual-similarity merge & soft-retire complete 2026-06-08)
 
@@ -335,14 +372,26 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 - ✓ LOCAL ("My Library") export support (desktop): Search-results export across XLSX/CSV/TXT/DOCX emits local-meaningful columns (filename/folder/filepath/page/matched-text) for LOCAL hits, with a dedicated bilingual "Local Documents" xlsx sheet, LOCAL-excluded Genizah sub-sheets, single-table CSV/TXT/DOCX fallbacks, and a preserved Genizah cross-parity invariant (DOCX redesigned by design). Plus export UX polish (Open File/Folder dialog, LOCAL-only domain-warning + MiDRASH-credit suppression, capped full-text context in DOCX/TXT). Closes D-F17. -- v8.0.0 / folded v7.17 (Phases 103 + 105; LEXP-01/03–08, EXPUX-01–04)
 - ✓ Desktop rebrand → "Dicta Genizah Search Pro" (display name only — window title, About EN+HE, updater, exported-file credits, puzzle PNG footer, version metadata, installer, README/CHANGELOG, web download-page title; binary identifiers UNCHANGED so installs upgrade in place; web brand "Dicta Genizah Search" unchanged) + i18n gap closure (223 desktop+web gaps / 246 keys) -- v8.0.0 / folded v7.17 (BRAND-01/02; commit `6e0c312d` + follow-ups)
 
+- ✓ Joins Lab shared core (desktop; web-reusable): `shared/joins_lab.py` pure logic — anchor/candidate identity, line-by-line query composition into the engine's line-break syntax, cross-side `(sys_id, page±1)` membership, dedup/compaction, text/VS merge with provenance, self-match + snippet helpers — behind a `SearchExecutor` adapter, no PyQt / no direct `fist_data` (66 tests) -- v8.0.0 (Phase 106; foundational for JWB-10/11/12)
+- ✓ Joins Lab desktop Join Workbench: modeless anchor-pinned window opened via "Find joins" from ResultDialog + Browse + cold-start by shelfmark; anchor pane (image + numbered transcription, zoom/folio nav) + connected known-joins group (pairwise→group BFS, PGP+FJMS+user+community, no new schema); public action APIs (Browse / Puzzle / Add-to-List / Add-as-Join) -- v8.0.0 (Phase 107; JWB-01/02/03/04/09)
+- ✓ Joins Lab candidate hunt: a line-by-line query builder for BOTH sides of the leaf (per-row OR word-boxes + per-line ⚙ modifiers + global toggles + inline gap) driving the EXISTING engine; deduped one-per-image candidates in grid + 8-column table with Y/?/N triage + self-match readout + "include anchor" toggle; side-by-side anchor↔candidate Compare -- v8.0.0 (Phase 108; JWB-06 reframed/07/08/10/11 + text-combined JWB-12)
+- ✓ Joins Lab Visual Similarity merge: the candidate surface absorbed the visual-similarity look-alike source via the shared VS service; single 👁 eye badge (grid/table/Compare) + a single "Visual Similarity" toggle replaced the standalone VS dialog and the 3-radio selector; "Find Joins" is the single entry; standalone VS dialog soft-retired (one-cycle deprecation); enrichment batched -- v8.0.0 (Phase 109; JWB-12 unified sources + soft-retire)
+- ✓ Composition Search over the LOCAL corpus (desktop): pre-search Genizah/Local/ALL corpus selector on the composition/parallels tab, orthogonal to the composition MODE (Lab Mode no longer hardwired to LOCAL); standard LOCAL composition uses the REGULAR My-Library index (NOT the LAB side-index — LAB is opt-in only); score-interleaved merge (no RRF); stale-LAB rebuild signal -- v8.0.0 (Phase 110; COMP-LOC-01/02)
+- ✓ Composition-report LOCAL export (desktop): `export_comp_report` LOCAL-aware across xlsx/csv/txt/docx via the Phase 103 export helpers (filename/folder/filepath/page/matched-text columns) -- v8.0.0 (Phase 110; EXP-F3, promoted from Future)
+
 ### Active
 
-**Milestone v8.0.0 — Dicta Rebrand & Joins Lab (in progress).** The rebrand (display-only) and LOCAL export (Phases 103 + 105) are delivered and fold into the v8.0.0 release. The new build is **Joins Lab** — Component A (Join Workbench hub, primary) + Component B (search-support algorithms, secondary/independent), both apps, human-in-the-loop, NO auto-finder. Full requirements (JWB-01..09, JSA-01..03) in `.planning/REQUIREMENTS.md`. **Roadmap deferred pending a Genizah-scholar design-critique session.** Version decision RESOLVED → v8.0.0 (the actual version-file bump happens at `/release` time, not now).
+**No active milestone.** v8.0.0 shipped 2026-06-09 and closed 2026-06-11. The next milestone is not yet defined — run `/gsd-new-milestone` (questioning → research → requirements → roadmap). A fresh `.planning/REQUIREMENTS.md` is created there.
 
-Carried-forward candidates (NOT in v8.0.0 scope unless promoted):
+**Deferred to a post-v8.0.0 milestone (user decision 2026-06-08 — scope, not gaps):**
+- **Component B — Join Workbench search-support algorithms (both apps):** JSA-01 (seed parallels/composition from the anchor passage), JSA-02 (corpus-driven suggest-then-search completion of a torn line's first/last N words), JSA-03 (`[`/`]`-aware torn-word completion), and JWB-05 (conservative tear-side assist; corrected rule start-`]` = LEFT / end-`[` = RIGHT; "both edges torn" first-class; silent when unclear). These ride the completed Component A.
+- **Web Joins Lab UI** on the shared Phase-106 API (desktop-first per the Codex productionize critique; web parity timing is design deferral #5).
+
+**Carried-forward candidates (NOT yet scoped):**
 - **D-F12** — regular Search ~constant 8s wall-clock investigation (profile-first: instrument Tantivy candidate fetch → regex post-filter → enrichment → highlight build → return-to-UI; profile LOCAL-only / Genizah-unfiltered / Genizah-filtered; optimize the actual bottleneck — do NOT guess).
 - **D-F18** — context-menu LOCAL detection could normalize through `display` (P3, opportunistic when next editing `_show_results_context_menu`).
-- **EXP-F3** (was LEXP-02) — Composition-report LOCAL export, gated on a LOCAL composition-search UI.
+- **EXPUX-01** — Open File/Folder export dialog UI UAT (implemented, tests green; UI walkthrough pending).
+- Soft-retired this cycle, physical deletion deferred to a cleanup phase: `_show_vs_dialog` + the JoinsDialog pick-machinery. Plus the Phase 106/107 advisory code-review findings (WR-01/02).
 
 ### Out of Scope
 
@@ -441,8 +490,14 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | v7.16: diagnose perf freezes by measuring on real data + parallel Claude/Codex | Headless PyQt probes ruled out wrong hypotheses; Codex flagged the unprofiled post-checkpoint history write | ✓ Good — converged on the real root cause |
 | v7.17: LOCAL rows export as local columns (not excluded); mixed/ALL xlsx gets a dedicated "Local Documents" sheet | Genizah columns (shelfmark/IIIF/PGP/bibliography/domains) are meaningless for local files; a separate sheet keeps both shapes clean and preserves the Genizah cross-parity invariant | ✓ Good (Search-results, Phase 103) — Composition-report half deferred → EXP-F3 |
 | v8.0.0: fold the v7.17 cycle (rebrand + LOCAL export) INTO v8.0.0 rather than closing v7.17 separately | The rebrand is the flagship "Pro" bump; bundling the delivered LOCAL export + the new Joins Lab under one v8.0.0 milestone matches the project's own major-version convention (v5/v6/v7 marked milestones, not API breaks) and the user's milestone naming | ✓ Good — no "v7.17" in history; Phases 103/105 kept as delivered (no destructive phase-clear) |
-| v8.0.0: Joins Lab is human-in-the-loop (scholar = ranker), NOT the auto-ranked v7/v8 finder | The auto-finder is research-only (no code), slow (~90s/fragment), low-recall (≤47% R@50), and 40% of cases have no parallels; the scholar-driven workbench composes existing primitives and ships as ~M | — Pending (roadmap deferred to scholar-critique) |
-| v8.0.0: defer the roadmap until after a Genizah-scholar design-critique session | The user will role-play a scholar to pressure-test JWB/JSA against the real material nature before phases lock; hardening a roadmap first would be likely-throwaway churn | — Pending |
+| v8.0.0: Joins Lab is human-in-the-loop (scholar = ranker), NOT the auto-ranked v7/v8 finder | The auto-finder is research-only (no code), slow (~90s/fragment), low-recall (≤47% R@50), and 40% of cases have no parallels; the scholar-driven workbench composes existing primitives and ships as ~M | ✓ Good — Component A shipped (Phases 106-109), UAT-approved; auto-finder stayed OUT (JOINS-F4) |
+| v8.0.0: defer the roadmap until after a Genizah-scholar design-critique session | The user will role-play a scholar to pressure-test JWB/JSA against the real material nature before phases lock; hardening a roadmap first would be likely-throwaway churn | ✓ Good — critique run as a throwaway sketch (tag `spike-002-joins-workbench`); roadmap unblocked + validated; fixed the inverted JWB-05 tear-side rule |
+| v8.0.0: extract pure logic first (shared core, no PyQt / no direct `fist_data`, `SearchExecutor` adapter), desktop UI on top, web UI deferred | Codex productionize critique — building two UIs before the model stabilizes doubles QA; the core is web-reusable from Phase 106 | ✓ Good — `shared/joins_lab.py` (66 tests) carried Phases 107-110 cleanly; web UI deferred |
+| v8.0.0: join model reuses the existing pairwise→group BFS (no new schema) | Persist 2-fragment records via `corrections_client.create_join`; present groups via `JoinsManager.get_connected_fragments_by_id` transitive closure | ✓ Good — no schema change; richer N-fragment model stayed deferred (deferral #1) |
+| v8.0.0: merge Visual Similarity INTO the candidate surface; soft-retire the standalone VS dialog | One surface (text / VS / combined) beats two parallel discovery tools; "Find Joins" becomes the single entry | ✓ Good — single 👁 badge + VS toggle; `_show_vs_dialog` marked removable (physical deletion → cleanup phase) |
+| v8.0.0: defer ALL of Component B (JSA-01/02/03 + JWB-05) to ship the milestone | After Component A landed, the search-support algorithms were a clean cut line; repurposed Phase 110 to the LOCAL-composition wiring the user wanted before release | ✓ Good — v8.0.0 shipped on time; Component B re-enters scope post-v8.0.0 |
+| v8.0.0: standard (Lab-off) LOCAL composition uses the REGULAR My-Library index, NOT the LAB side-index | LAB is opt-in only; routing the default LOCAL comp path through LAB would introduce staleness on the common path | ✓ Good (load-bearing — do not re-break) — composition merge stays score-interleaved (no RRF); D-12 leak fixed in export prefetch + `group_composition_results` |
+| v8.0.0: rebrand is DISPLAY-only; binary identifier `GenizahSearchPro` unchanged | Installs must upgrade in place; renaming the exe/.spec/.iss/dist/auto-update would orphan existing installs | ✓ Good — shared xlsx credits got an `app_name` param; web brand unchanged |
 
 ## Evolution
 
@@ -462,7 +517,7 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-08 — **Phase 109 (visual-similarity merge & soft-retire) complete & verified** (3/3 SC; JWB-12 satisfied; UAT-approved after 3 gap rounds + a 6-finding round-4 polish loop incl. two QThread 0xC0000409 crash fixes + Join Lab session persistence; `_show_vs_dialog` marked removable, D-11). Next: `/gsd-discuss-phase 110` (search-support — parallels seeding, JSA-01). Prior entry: 2026-06-04 — **Phase 107 (desktop Joins Lab shell) complete & verified** (6/6 SC; UAT-approved after 3 rounds; `desktop/join_workbench.py` anchor shell + entry points + actions + pairwise→group join model; feature renamed "Joins Lab"). Next: `/gsd-discuss-phase 108`. Prior entry: 2026-06-03 — **Phase 106 (Joins Lab shared core) complete & verified** (6/6 SC; `shared/joins_lab.py` + 66 tests, web-reusable pure logic; foundational for JWB-10/11/12; UI in Phases 107-109). Next: `/gsd-discuss-phase 107`. Prior entry: Milestone **v8.0.0 Dicta Rebrand & Joins Lab** opened (folds the delivered v7.17 cycle — rebrand + LOCAL export, Phases 103/105 — into v8.0.0; version decision RESOLVED → v8.0.0). New build = **Joins Lab**: Component A (Join Workbench hub) + Component B (search-support algorithms), both apps, human-in-the-loop, NO auto-finder. Requirements written (JWB-01..09, JSA-01..03 in REQUIREMENTS.md). **Roadmap intentionally deferred** pending a Genizah-scholar design-critique session (user-led, fresh session) that will pressure-test the design against the real material nature before phases lock. Origin: Spike 002 SPIKE-FINDINGS.md + docs/FEATURE_IDEAS.md.*
+*Last updated: 2026-06-11 — **v8.0.0 Dicta Rebrand & Joins Lab milestone CLOSED** (retroactive — `/release` shipped + tagged `v8.0.0` @ `71e0912e` 2026-06-09 but did not run the GSD close ritual). Full evolution review done: 14 shipped requirements (JWB-01..12, COMP-LOC-01/02, EXP-F3) moved to Validated; Active cleared (no active milestone); 8 v8.0.0 Key Decisions logged/resolved; roadmap collapsed and archived to `.planning/milestones/v8.0.0-ROADMAP.md` + `v8.0.0-REQUIREMENTS.md`; `.planning/REQUIREMENTS.md` removed (fresh for next milestone). Component B (JSA-01/02/03 + JWB-05) + web Joins Lab UI deferred to a post-v8.0.0 milestone. NEXT: `/gsd-new-milestone`. Prior entry: 2026-06-08 — Phase 109 (visual-similarity merge & soft-retire) complete & verified (3/3 SC; JWB-12; `_show_vs_dialog` marked removable, D-11). Prior: 2026-06-04 — Phase 107 (desktop Joins Lab shell) complete (6/6 SC; pairwise→group join model; feature renamed "Joins Lab"). Prior: 2026-06-03 — Phase 106 (Joins Lab shared core) complete (6/6 SC; `shared/joins_lab.py` + 66 tests). Prior: Milestone v8.0.0 opened (folds the delivered v7.17 cycle — rebrand + LOCAL export, Phases 103/105 — into v8.0.0). Origin: Spike 002 SPIKE-FINDINGS.md + docs/FEATURE_IDEAS.md.*
 
 *Prior: 2026-06-01 — v7.16 Hebrew PDF Text Quality milestone CLOSED (1 formal phase 102 + no-phase de-space/UAT/freeze work; shipped v7.16.0 desktop, tag `v7.16.0` @ `ccb87c90`, GitHub Release with installer marked latest, CI green). LOCAL Hebrew PDF text-layer extraction rewritten (rawdict per-glyph, RTL-gated, Otsu de-space, Mn nikud), file-management actions for LOCAL hits, and three search/startup freeze fixes (778 MB history file, large-folder O(n²) startup, LAB-rebuild churn).*
 
