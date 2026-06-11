@@ -230,13 +230,16 @@ def main():
         print_status(True, "No outdated terms found")
 
     # 3. Check for stale documents
+    # NOTE: staleness is an INFORMATIONAL freshness reminder, not a CI failure.
+    # Docs cross the day threshold on a rolling calendar basis with no code
+    # change, so counting them toward the exit code turns the build red for the
+    # wrong reason. Printed below for visibility but excluded from total_issues.
     print("\n📅 Document Freshness")
     print("-" * 40)
     stale = check_stale_docs()
     if stale:
         for s in stale:
             print_warning(s)
-        total_issues += len(stale)
     else:
         print_status(True, f"All documents updated within {STALE_THRESHOLD_DAYS} days")
 
@@ -253,13 +256,17 @@ def main():
 
     # Summary
     print_header("Summary")
+    # total_issues counts only BLOCKING checks (missing / outdated / broken).
+    # Stale docs are reported separately as a non-blocking freshness reminder.
+    if stale:
+        print(f"ℹ️  {len(stale)} stale doc(s) over {STALE_THRESHOLD_DAYS} days "
+              f"(informational — does not fail CI)")
     if total_issues == 0:
-        print("✅ All checks passed! Documentation is healthy.")
+        print("✅ All blocking checks passed! Documentation is healthy.")
     else:
-        print(f"⚠️  Found {total_issues} issue(s) to review:")
+        print(f"❌ Found {total_issues} blocking issue(s):")
         print(f"   - Missing documents: {len(missing)}")
         print(f"   - Outdated terms: {len(outdated)}")
-        print(f"   - Stale documents: {len(stale)}")
         print(f"   - Broken links: {len(broken)}")
         print("\nReview docs/DOCUMENTATION_MAINTENANCE.md for guidance.")
 
