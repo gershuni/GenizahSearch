@@ -1060,8 +1060,17 @@ class LabEngine:
                     raise
                 except Exception:
                     pass  # Score extraction optional — result still usable without score
-                # Send text status for Label
-                progress_callback(f"Scanning items {i}-{min(i+BATCH_SIZE, total_hits)} / {total_hits}...")
+                # Send text status for Label.
+                # Same guard as the numeric call above: cancellation must propagate,
+                # but a callback that can't handle the single-string protocol must
+                # degrade to "no status text" — never abort a long deep-scan search
+                # (prod 2026-06-12: web two-arg callback raised TypeError here).
+                try:
+                    progress_callback(f"Scanning items {i}-{min(i+BATCH_SIZE, total_hits)} / {total_hits}...")
+                except (InterruptedError, KeyboardInterrupt):
+                    raise
+                except Exception:
+                    pass  # Status text optional — search proceeds without it
 
             for hit in batch:
                 yield hit

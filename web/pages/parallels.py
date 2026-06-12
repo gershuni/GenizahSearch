@@ -2134,10 +2134,20 @@ def create_parallels_page(initial_text: str = None):
         # Capture filter text in main thread to avoid closure issues in background thread
         captured_filter_text = get_filter_text()
 
-        def progress_cb(current, total):
+        def progress_cb(arg1, arg2=None):
+            # Dual-protocol callback, mirroring desktop gui_threads.LabCompositionThread.cb:
+            # the core emits BOTH (current:int, total:int) numeric progress AND a single
+            # (message:str) text status (genizah_core._execute_batched_search, deep-scan
+            # path). A two-required-args signature here crashed lab deep-scan searches
+            # with "missing 1 required positional argument: 'total'" (prod 2026-06-12).
             if p_state.is_cancelled:
                 raise InterruptedError("Search cancelled")
-            if total > 0:
+            if isinstance(arg1, str):
+                # Text status — ignore content; the numeric (i, total) call immediately
+                # precedes each string call and already drives the web progress UI.
+                return
+            current, total = arg1, arg2
+            if total is not None and total > 0:
                 p_state.progress = current / total
                 p_state.chunks_processed = current
                 p_state.chunks_total = total
