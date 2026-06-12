@@ -566,12 +566,14 @@ def _render_suggestion_row(
             ).classes('text-xs')
 
             # Real anchor: selectable text + browser-native Ctrl/Cmd-click and middle-click.
+            # Propagation must be stopped CLIENT-side (the row's _on_row_click would
+            # otherwise toggle expansion); GenericEventArguments has no stop_propagation.
             ui.link(
                 s['shelfmark'],
                 browse_url,
             ).classes('text-sm font-semibold').style(
                 'color: var(--primary-700); text-decoration: none; user-select: text;'
-            ).on('click', lambda e: e.stop_propagation()).tooltip(tr('Browse manuscript'))
+            ).on('click', js_handler='(e) => e.stopPropagation()').tooltip(tr('Browse manuscript'))
 
             # Domain
             ui.label(s.get('domain', '--')).classes('text-xs').style(
@@ -599,7 +601,7 @@ def _render_suggestion_row(
 
             # Action buttons
             with ui.link(target=browse_url, new_tab=True).classes('no-underline').on(
-                'click', lambda e: e.stop_propagation()
+                'click', js_handler='(e) => e.stopPropagation()'
             ).tooltip(tr('Browse manuscript')):
                 ui.button(icon='open_in_new').props('flat dense round size=sm')
 
