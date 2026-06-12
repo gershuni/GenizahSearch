@@ -4,6 +4,17 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Web Hotfix] - 2026-06-12 — Parallels Lab crash & link-click fixes
+
+Web-only deploy on top of v8.0.0 (no version bump, no installer). Two production bugs found in the live server log, both root-caused via `/gsd-debug` and cross-reviewed by Codex (gpt-5.5).
+
+### Bug Fixes
+
+- **Web: Lab deep-scan composition search no longer crashes** — Running a composition search in Lab mode with Deep Scan on the Parallels page aborted with "Parallels Error" as soon as the batched scan emitted its first text status. The core's progress callback uses a dual protocol — numeric `(current, total)` updates *and* single-string status messages — which the desktop has always handled but the web callback didn't (`TypeError: missing 1 required positional argument: 'total'`). The web callback now handles both protocols, and the core's string-status call is guarded so a misbehaving callback can degrade progress text but never abort a long search (cancellation still propagates). Regression tests pin the contract on both sides.
+- **Web: links inside clickable rows no longer trigger the parent's click action** — Four nested links called a non-existent server-side `stop_propagation()` (or had no shield at all), so every click logged an `AttributeError` *and* leaked through to the parent handler: the Visual Similarity dialog's shelfmark link and open-in-new button also toggled the row's expand/collapse, and the version selector's "View on PGP" links also switched the displayed version. Propagation is now stopped client-side (`js_handler`), preserving native link behavior (Ctrl/Cmd-click, middle-click, new tab). A static AST guard now forbids server-side `stop_propagation()` anywhere under `web/`.
+
+---
+
 ## [8.0.0] - 2026-06-09 — Dicta Genizah Search Pro: Joins Lab & enhanced Local Library
 
 The first major release under the new desktop name **Dicta Genizah Search Pro**.
