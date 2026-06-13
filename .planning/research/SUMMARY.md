@@ -1,174 +1,405 @@
 # Project Research Summary
 
-**Project:** Server-Side IIIF Image Cache (GenizahSearch v7.8)
-**Domain:** Image caching infrastructure for manuscript research platform
-**Researched:** 2026-04-03
-**Confidence:** MEDIUM (strong on architecture/features, significant unknown on NLI access strategy)
+**Project:** v8.1.0 Desktop Telemetry -- Dicta Genizah Search Pro
+**Domain:** Opt-in, privacy-first telemetry + crash reporting for a PyQt6 frozen-binary desktop app
+**Researched:** 2026-06-13
+**Confidence:** HIGH
+
+---
 
 ## Executive Summary
 
-This project adds a server-side image cache for ~815K NLI manuscript images (~86GB at 800px), served as static files by nginx to eliminate Python overhead and provide resilience against NLI downtime. The architecture is well-understood: flat JPEG files on EC2 disk, sharded by sys_id prefix, with nginx `try_files` serving cache hits and the existing Python proxy handling misses. The stack requires no new major dependencies -- aiohttp for the batch fetcher is the only addition, and it stays isolated in a server-only requirements file.
+Desktop telemetry for a privacy-sensitive scholarly tool is a well-understood pattern with one
+dominant correct approach: fire-and-forget event queue, opt-in consent default OFF, scrubbed
+crash payloads, and a single public chokepoint that structurally prevents PII from reaching the
+network. The infrastructure already exists -- `shared/posthog_server.py` was factored in Phase 98
+specifically to be web-independent and reusable. The v8.1.0 milestone requires zero new pip
+dependencies, zero spec-file changes, and no new PostHog SDK -- only three small additions to the
+existing queue module plus a new `desktop/telemetry.py` chokepoint module and wiring into
+`genizah_app.py`.
 
-However, the most critical finding from research is that NLI blocks ALL datacenter IP ranges (AWS, Cloudflare, etc.) at the network level -- not by headers, not by User-Agent, but by IP range. This was verified on 2026-03-17 and is the reason the browser extension architecture exists. This means the batch fetcher CANNOT run from EC2. It must run from a residential IP (home machine or university network) with results transferred to EC2 via rsync. This fundamentally reshapes the project: Phase 1 must validate the residential-IP fetching strategy and NLI rate tolerance before any infrastructure is built, and the project should seriously consider contacting NLI for bulk access permission before systematic downloading begins.
+The recommended approach is to build `desktop/telemetry.py` as the sole gated path to
+`shared/posthog_server.enqueue_event`, enforce this structurally via an AST CI guard (mirroring the
+Phase 87 `web/safe_storage.py` pattern), and persist consent state in `config.pkl` via the
+existing `load_app_config`/`save_app_config` interface. The event taxonomy is modest: session
+start/end, tab usage, search mode + corpus + result bucket, crash/error with scrubbed tracebacks,
+and a session-level performance summary. Hard privacy rules: no query text, no My Library paths or
+filenames, no exception message strings (type name only), no frame-local variables, no account
+linkage. These rules are enforced at three layers -- API design, `_scrub_props()`, and a static
+allowlist/forbidden-property CI test.
 
-The key risks are: (1) NLI IP blocking invalidating the fetch strategy, (2) legal/TOS exposure from bulk-downloading 815K images without permission, (3) storage estimate uncertainty (86GB is extrapolated from one test image), and (4) six independent image-loading codepaths in the codebase that all need consistent cache integration. Mitigations exist for all of these, but the NLI access question is a hard gate -- if residential IP fetching proves unreliable or gets blocked, the project falls back to organic-only caching (cache images as users browse them), which still delivers value but at a much slower fill rate.
+The primary risks are PII leakage via crash tracebacks, hook clobbering, and daemon-thread event
+loss at process exit. All three are addressed by Day 1 requirements in Phase 111: the scrubbing
+layer must exist before the first crash event is sent, the exception hook must wrap (not replace)
+the existing `_setup_crash_handler()`, and a flush helper must be called inside the exception hook
+and via `atexit` to ensure crash events survive the frozen-binary exit sequence.
+
+---
+
+## Resolved Cross-Document Discrepancy: Consent State Storage
+
+**ARCHITECTURE** researcher found (by direct grep of `genizah_app.py`, verified at lines
+2344-2378): zero `QSettings` instantiation in the main app code. Consent state should go in
+`config.pkl` via `load_app_config` / `save_app_config`.
+
+**PITFALLS** researcher referenced `QSettings("Dicta", "GenizahSearchPro")` (found at
+`desktop/my_library_tab.py` line 1047) and cautioned that any consent key MUST use that same
+organization/app string to avoid landing in a different registry hive.
+
+**Resolved decision: use `config.pkl` via `load_app_config` / `save_app_config`.**
+
+Rationale: `config.pkl` is the existing persistent preference store for language choice, variant
+settings, lab config path, and all other durable preferences. `QSettings` is used only in
+`desktop/my_library_tab.py` for that specific component. The PITFALLS concern about key mismatch
+applies to the QSettings-based approach, not config.pkl. Using `config.pkl` avoids the mismatch
+problem entirely. `session.json` is explicitly the wrong choice -- it is cleared by crash recovery
+and Reset My Library flows.
+
+**Flag for discussion:** If any future phase adds consent-state access from a component that cannot
+import `genizah_core`, the QSettings path would need reconsideration. For v8.1.0 all access paths
+run through `desktop/telemetry.py` which imports `genizah_core` normally -- no issue.
+
+---
 
 ## Key Findings
 
 ### Recommended Stack
 
-The stack is deliberately minimal, leveraging existing infrastructure. No new databases, no CDN, no message queue. See [STACK.md](STACK.md) for full rationale.
+The headline decision: **reuse `shared/posthog_server.py`; do NOT add the `posthog` SDK.**
+
+The SDK's `capture_exception_code_variables=True` feature sends frame-local variable values to
+PostHog before the `before_send` hook fires -- making it impossible to prevent query text and My
+Library paths from leaking via crash reports without patching the SDK itself. The SDK also adds
+one new transitive dependency (`backoff`) for no meaningful benefit at the ~1,800 events/day
+expected volume. The raw queue is already production-proven (Phase 98 NLI breaker telemetry),
+already points at the correct EU endpoint, and requires only three backward-compatible additions.
 
 **Core technologies:**
-- **aiohttp** (batch fetcher only): Async HTTP client for high-throughput IIIF downloads -- 2x faster than httpx for pure async workloads. Isolated in `scripts/requirements-batch.txt`, NOT in main requirements.txt
-- **Flat JPEG files on disk**: nginx serves directly via sendfile (zero-copy kernel path). SQLite BLOBs would force every image through Python, defeating the purpose
-- **nginx try_files**: Static file serving for cache hits, Python fallback for misses. 10K+ req/s vs ~200 req/s through NiceGUI
-- **SQLite manifest DB** (cache_status.db): Tracks cache state -- what is cached, when, file size, errors. Enables progress tracking and retry logic
-- **2-level directory sharding**: `nli/{prefix}/{sys_id}/page_{N}_{width}.jpg` -- prevents filesystem degradation from 815K files
 
-**Critical version note:** aiohttp 3.10+ required. No changes to main requirements.txt.
+- `shared/posthog_server.py` (existing, extend): fire-and-forget queue to EU PostHog -- already
+  production-proven, web-independent, zero new deps; needs `_telemetry_enabled` gate +
+  `_scrub_hook` + `set_default_distinct_id()`
+- `desktop/telemetry.py` (new module): single public chokepoint -- consent gate, scrubbing,
+  install-ID management, exception hooks, event helpers; AST guard prevents any other file under
+  `desktop/` from calling `enqueue_event` directly
+- `uuid.uuid4()` (stdlib): anonymous per-install identifier -- pure random, no MAC address, no
+  hardware linkage; minted only on opt-in, stored in `config.pkl` under `telemetry_install_id`
+- `sys.excepthook` + `threading.excepthook` + `faulthandler` (stdlib): layered crash coverage --
+  main thread, background Python threads, and native C-extension crashes; hooks WRAP the existing
+  `_setup_crash_handler()`, never replace it
+- `genizah_core.load_app_config` / `save_app_config` (existing): consent state persistence --
+  `telemetry_enabled` (bool), `telemetry_first_run_shown` (bool), `telemetry_install_id` (str
+  uuid4 hex) stored in `config.pkl`; survives crashes, updates, and session recovery
+
+**Net new pip dependencies: zero. Spec file changes: none.**
+
+The `phc_...` PostHog project API key is a write-only publishable key, safe to embed as a string
+constant in `desktop/telemetry.py` (the same practice used for the web app's `<script>` tag). A
+separate PostHog project for desktop telemetry is recommended to contain abuse blast radius.
 
 ### Expected Features
 
-See [FEATURES.md](FEATURES.md) for full landscape including resolution analysis.
+**Must have (table stakes -- P1, ship in v8.1.0):**
 
-**Must have (table stakes):**
-- Cache-first image serving (check disk before IIIF fetch)
-- Transparent fallback (cache miss still works via existing NLI proxy)
-- Batch fetching script with rate limiting and resumability
-- Priority ordering: NLI-only manuscripts first (~100-120K images with no alternative source)
-- Progress tracking via SQLite manifest
+- Opt-in consent dialog, bilingual EN+HE, default OFF, modal first-run, two equal-weight buttons
+- UUID generation only on opt-in; deleted (not just ignored) on opt-out
+- Settings/About toggle with immediate effect (checked at call site, not just startup)
+- `$process_person_profile: False` on every event (keeps events in PostHog anonymous tier, 4x
+  cheaper ingestion, no person profile ever created)
+- `desktop_session_start`, `desktop_tab_activated`, `desktop_search_executed` (mode + corpus +
+  result_count_bucket, no content)
+- `desktop_session_performance_summary` at app close -- aggregated per-session, not per-search
+  (reduces volume ~50x for heavy users; ~60-90 events/day vs ~1,500/day)
+- `desktop_crash` via `sys.excepthook` + `threading.excepthook` with scrubbed props (type name +
+  basename module + line number; no exception message string, no frame locals)
+- Static AST CI guard -- forbidden property names (`query`, `text`, `path`, `filename`,
+  `shelfmark`, etc.) blocked structurally
+- Privacy disclosure text, bilingual, inline in consent dialog
 
-**Should have (differentiators):**
-- Nginx direct-serve bypassing Python entirely (10-100x faster)
-- Read-through caching (user browse populates cache organically)
-- Multi-resolution tiers (800px batch-cached, 1200px on-demand)
-- Cache health dashboard for monitoring fill progress
+**Should have (differentiators -- P2, add in v8.1.x after validation):**
 
-**Defer (v2+):**
-- Desktop offline bundle download (complex UX for 86GB, needs substantial cache first)
-- Desktop selective download by saved lists
-- Cache warming by PostHog popularity data
-- Admin web UI for cache management (CLI scripts suffice)
+- `desktop_responsa_options` -- Responsa sub-option bitmask (expansion/fuzzy/Judeo-Arabic/spacing)
+- `desktop_joins_lab_action` -- Joins Lab adoption signal for Component B prioritization
+- `desktop_error` at high-value handled-error sites (LocalIndexerWorker, NLI fetch, export)
+- `desktop_export` -- format breakdown (xlsx/csv/txt/docx)
+
+**Defer to v2+:**
+
+- Re-ask consent if data categories expand materially
+- PostHog dashboard insights / aggregate session analysis (operational, no code change)
+- `desktop_puzzle_action` -- Puzzle is a secondary feature
+
+**Hard anti-features (never implement):**
+
+- Any query or search text in any event payload
+- My Library file paths, filenames, or document counts
+- Manuscript shelfmarks or sys_ids of opened results
+- Hardware fingerprinting (MAC, CPU ID, screen resolution)
+- Exception message string `str(exc_value)` -- commonly contains file paths and query content
+- Frame-local variable capture in any traceback payload
+- Supabase user ID or email as `distinct_id`
+- Always-on / opt-out default
 
 ### Architecture Approach
 
-The cache is a transparent layer between IIIF sources and consumers. nginx serves static JPEGs for cache hits; Python handles misses and writes through to disk. A shared `image_cache_service.py` provides path resolution for both web and desktop apps. See [ARCHITECTURE.md](ARCHITECTURE.md) for full component diagram and data flows.
+The architecture follows the Phase 87 `web/safe_storage.py` chokepoint pattern applied to
+telemetry: a single module is the only sanctioned path to the network, enforced by a CI AST test.
+`desktop/telemetry.py` exposes eight public callables; every call passes through `_scrub_props()`
+before reaching `shared/posthog_server.enqueue_event`. `SearchThread`, `CompositionThread`, and
+`LabSearchThread` emit a new `perf_signal(float, int)` Qt signal; the UI-thread handler calls
+`track_performance()` -- keeping telemetry always on the UI thread, consistent with all other
+result-handling in this codebase. Consent state lives in `config.pkl`; the first-run dialog fires
+from `GenizahGUI.__init__` post-show; the Settings/About toggle calls `set_consent()`.
 
 **Major components:**
-1. **Batch Fetcher** (`scripts/image_cache_fetcher.py`) -- runs from residential IP, fetches IIIF images, writes to disk, transfers to EC2
-2. **Image Cache Service** (`shared/image_cache_service.py`) -- deterministic path resolution from (sys_id, page, width), cache availability checks, shared between web/desktop
-3. **nginx static location** (`/cached-images/`) -- serves cached JPEGs directly, bypasses Python, immutable Cache-Control headers
-4. **Cache Status DB** (`image_cache/cache_status.db`) -- tracks cached images, fetch errors, progress state
-5. **Modified web/api.py** -- cache-through on miss (proxy from NLI AND write to disk simultaneously)
+
+1. `desktop/telemetry.py` (new) -- consent gate, scrubbing, install-ID, exception hooks, all
+   public event helpers; the ONLY file permitted to call `enqueue_event`
+2. `shared/posthog_server.py` (extend, 3 additions) -- `_telemetry_enabled` flag +
+   `set_telemetry_enabled()`, `_scrub_hook` + `register_scrub_hook()`,
+   `set_default_distinct_id()`; backward-compatible; existing callers unaffected
+3. `genizah_app.py` (wire) -- `install_exception_hooks()` after `_setup_crash_handler()`,
+   `show_first_run_prompt()` after `self.show()`, `track()` at action sites
+4. `gui_threads.py` (wire) -- `perf_signal = pyqtSignal(float, int)` + timing wrapper in
+   `SearchThread.run()`, `CompositionThread.run()`, `LabSearchThread.run()`
+5. `SettingsDialog._build_general_tab()` (wire) -- telemetry checkbox row, wired to `set_consent()`
+
+**Structural invariant:** The path to the network is always:
+```
+track() / track_error() / _capture_crash()
+    -> _scrub_props()  [always, internal]
+    -> enqueue_event()
+```
 
 ### Critical Pitfalls
 
-See [PITFALLS.md](PITFALLS.md) for all 15 pitfalls with detailed prevention strategies.
+All 13 pitfalls from PITFALLS.md target Phase 111. The five that must become explicit test
+requirements:
 
-1. **NLI blocks all datacenter IPs** -- Batch fetcher CANNOT run from EC2. Must use residential IP with rsync transfer to server. This is a verified hard block, not a rate limit. The entire browser extension was built to work around this. **Investigation phase must validate residential IP strategy before any infrastructure work.**
-2. **Legal/TOS risk of bulk downloading** -- 815K systematic downloads may violate NLI terms. Contact NLI proactively to request permission or a bulk export. If denied, fall back to organic-only caching (defensible as server-level browser caching).
-3. **Inode exhaustion** -- 815K files can exhaust ext4 inode budget before filling disk. Check `df -i` before starting; use hierarchical directory sharding; consider separate XFS volume.
-4. **Six independent image-loading codepaths** -- Browse, search, puzzle, reading desk, fullscreen viewer, and desktop all load images differently. Build unified `image_cache_service.py` BEFORE touching any individual codepath.
-5. **Storage estimate uncertainty** -- 86GB extrapolated from one test image. Sample 1000 diverse images during investigation to validate. Set disk alerts at 80%.
+1. **PII via traceback frame locals and exception message** -- Never include `str(exc_value)`.
+   Emit only `type(exc).__name__` + scrubbed module basename + line number. Apply `_scrub_props()`
+   BEFORE enqueuing (in the hook, not the drain thread). Strip frame `vars` entirely. Test: emit
+   a fake crash with a frame local containing a file path; verify PostHog payload contains no path.
+
+2. **Exception hook clobbering** -- Wrap, never replace. Capture `_prior_hook = sys.excepthook`
+   AFTER `_setup_crash_handler()` runs (line ~170 in `genizah_app.py`). Chain unconditionally at
+   end of wrapper. Guard entire hook body in `try/except Exception: pass`. Test: verify
+   `crash_log.txt` is still written after the telemetry hook is installed.
+
+3. **Pre-consent event firing** -- `is_enabled()` returns `False` when `telemetry_enabled` key is
+   absent from `config.pkl`. UUID not minted until `set_consent(True)`. Test: verify zero events
+   enqueued on a fresh `config.pkl` before the consent dialog is shown.
+
+4. **Daemon-thread event loss at process exit** -- `posthog_server.py` drain thread is a daemon
+   killed when the main thread exits. Add `_flush_before_exit(timeout=0.5)` called (a) from
+   `atexit` for clean exits and (b) from inside the exception hook after enqueueing the crash
+   event (`atexit` does not run on unhandled exceptions in CPython). Day 1 requirement. Test:
+   mock drain, enqueue 3 events, call `_flush_before_exit()`, verify all 3 POSTed.
+
+5. **Property allowlist violation** -- Static AST test modeled on `test_no_raw_storage_access.py`
+   scans all `track()` call sites under `desktop/` and asserts no forbidden property names appear.
+   Forbidden: `query`, `text`, `content`, `path`, `filename`, `shelfmark`, `sys_id`, `fl_id`,
+   `email`, `user_id`, `username`, `supabase_id`, `jwt`, `token`, `clean_query`, `query_text`.
+   Run in CI on Ubuntu + Windows.
+
+Additional pitfalls to address:
+
+- **`threading.excepthook` missing** (codebase grep: zero current hits) -- install it; covers
+  `SearchThread`, `LocalIndexerWorker`, `FolderWalkWorker` where most desktop crashes originate
+- **Opt-out queue race** -- on opt-out, drain and discard in-memory queue without sending
+- **PyInstaller SSL certs** -- verify `certifi` data files in `GenizahSearchPro.spec`; test on
+  clean Windows VM
+- **Offline degradation** -- `requests.post(timeout=(1.0, 2.0))` tuple; 5-failure backoff;
+  app starts normally with no network
+
+---
 
 ## Implications for Roadmap
 
-Based on combined research, the project should have 5 phases with a hard gate after Phase 1.
+The researchers proposed two decompositions. Both are presented; the roadmapper should choose.
 
-### Phase 1: Investigation and Validation
-**Rationale:** The NLI IP blocking discovery means NOTHING should be built until the fetching strategy is proven. This phase answers three existential questions before any code is written.
-**Delivers:** Validated fetch strategy, accurate storage estimates, NLI relationship clarity
-**Tasks:**
-- Test residential IP fetching from home machine (curl + small batch of 100 images)
-- Contact NLI about bulk access permission for academic research tool
-- Sample 1000 diverse images to validate 86GB storage estimate
-- Check EC2 inode budget (`df -i`) and plan volume strategy
-- Test Cambridge/Manchester/DPUL from EC2 (may not be blocked -- would change scope)
-**Avoids:** Pitfall 1 (datacenter IP block), Pitfall 5 (TOS risk), Pitfall 11 (storage estimate)
-**Gate:** If residential IP is blocked or NLI objects, pivot to organic-only caching (skip Phase 2, go directly to Phase 3 with read-through only)
+### Option A: 6-Phase Decomposition (recommended by ARCHITECTURE researcher)
 
-### Phase 2: Batch Fetcher and Transfer Pipeline
-**Rationale:** Once fetching is validated, build the pipeline that populates the cache. Runs from home machine, not EC2. This is the long-running background work (days/weeks).
-**Delivers:** Batch fetcher script, rsync transfer pipeline, cache_status.db with progress tracking
-**Addresses:** Batch fetching, rate limiting, priority ordering, progress tracking (FEATURES table stakes)
-**Uses:** aiohttp (STACK), priority queue pattern (ARCHITECTURE Pattern 3)
-**Avoids:** Pitfall 6 (FGP != FL ID -- must resolve via manifest), Pitfall 10 (residential IP rate limits -- conservative 1 req/3sec), Pitfall 15 (placeholder detection)
-**Key detail:** Two-pass architecture -- first resolve sys_id to FL IDs via IIIF manifests, then fetch images. Seed from existing `nli_fl_ids_cache.json`.
+Strict dependency ordering; each phase green before the next. Maximum testability isolation.
 
-### Phase 3: Web Integration (Cache-First Serving)
-**Rationale:** Can start in parallel with Phase 2 (even a partially populated cache delivers value). This is where users see the benefit.
-**Delivers:** Cache-first image serving, nginx static file serving, read-through caching on miss
-**Addresses:** Cache-first serving, nginx direct-serve, read-through caching (FEATURES table stakes + differentiators)
-**Implements:** Image Cache Service, nginx location block, modified api.py (ARCHITECTURE components 2, 3, 5)
-**Avoids:** Pitfall 3 (I/O starvation -- nginx serves, not Python), Pitfall 4 (partial cache UX -- unified fallback chain), Pitfall 9 (codepath fragmentation -- shared service first), Pitfall 13 (nginx route collision -- specific prefix, test matrix)
+**Phase 111 -- Foundation: `desktop/telemetry.py` + consent storage + scrubbing + flush**
+- Rationale: Everything else depends on `is_enabled()`, `track()`, and `_scrub_props()` existing
+- Delivers: consent gate, UUID lifecycle, `_scrub_props()`, `_flush_before_exit()`,
+  `set_consent()`, BASE_PROPS helper, 3 additions to `shared/posthog_server.py`
+- Avoids: Pitfalls 1 (PII via traceback), 3 (sync network in hook), 4 (pre-consent firing),
+  5 (opt-out race), 6 (non-anonymous UUID), 8 (property allowlist), 9 (daemon thread exit),
+  10 (PyInstaller SSL)
+- Tests: `test_telemetry_consent_gate.py`, `test_telemetry_scrubbing.py`,
+  `test_telemetry_no_direct_posthog.py` (AST guard)
+- Research flag: STANDARD PATTERNS -- no research-phase needed
 
-### Phase 4: Desktop Integration
-**Rationale:** Depends on Phase 3 (server endpoints must exist). Desktop benefits from server cache even without local download.
-**Delivers:** Desktop tries server cache URL before direct NLI, organic local caching as user browses
-**Addresses:** Desktop image loading improvement
-**Implements:** Modified genizah_core.py and gui_threads.py (ARCHITECTURE desktop components)
-**Note:** Defer bulk desktop download to v2+. Organic caching (save images as viewed) is simpler and proven by puzzle cache pattern.
+**Phase 112 -- Consent UX: first-run dialog + Settings toggle**
+- Rationale: Consent must be plumbable before any events can fire
+- Delivers: bilingual QDialog (default OFF, two buttons), `show_first_run_prompt()` wired into
+  `GenizahGUI.__init__`, checkbox row in `SettingsDialog._build_general_tab()`
+- Avoids: Pitfall 5 (opt-in defaults on), Pitfall 7 (re-prompts every launch), Pitfall 13
+  (bilingual disclosure)
+- Tests: dialog fires exactly once; Settings toggle calls `set_consent()`; config.pkl persists
+- Research flag: STANDARD PATTERNS
 
-### Phase 5: Monitoring and Polish
-**Rationale:** After cache is serving images, add observability and operational tooling.
-**Delivers:** Cache status endpoint, admin monitoring, documentation
-**Addresses:** Cache health dashboard (FEATURES differentiator)
+**Phase 113 -- Exception hooks**
+- Rationale: Hook installation is startup-time; must chain existing `_setup_crash_handler()`
+- Delivers: `install_exception_hooks()` (wraps `sys.excepthook` + installs
+  `threading.excepthook`), `faulthandler.enable()`, crash event scrubbing,
+  `_flush_before_exit()` called in hook
+- Avoids: Pitfall 2 (hook clobbering), Pitfall 3 (sync network in hook)
+- Tests: prior hook still runs; `crash_log.txt` written; enqueue non-blocking;
+  `KeyboardInterrupt` not captured; thread hook covers worker threads
+- Research flag: STANDARD PATTERNS
+
+**Phase 114 -- Usage events**
+- Rationale: Core feature-usage data; needs consent gate and scrubbing from Phases 111-112
+- Delivers: `desktop_session_start`, `desktop_tab_activated`, `desktop_search_executed`,
+  `desktop_joins_lab_action`, `desktop_my_library_action`; `track()` calls at action sites
+- Avoids: Pitfall 8 (volume blowup -- per-search events carry no duration, only mode/corpus/
+  result bucket; duration goes only to the session accumulator)
+- Tests: events gated on consent; scrubbing rules exercised; forbidden property names blocked
+- Research flag: STANDARD PATTERNS
+
+**Phase 115 -- Performance events**
+- Rationale: Independent of crash hooks; needs `track_performance()` from Phase 111
+- Delivers: `perf_signal = pyqtSignal(float, int)` on SearchThread/CompositionThread/
+  LabSearchThread; in-memory threading.Lock-protected session accumulator;
+  `desktop_session_performance_summary` at app close; `latency_bucket()` /
+  `result_count_bucket()` reused from `web/api_hardening.py`
+- Avoids: Pitfall 8 (session-summary approach: ~60-90 events/day vs ~1,500/day per-search)
+- Research flag: STANDARD PATTERNS
+
+**Phase 116 -- Privacy audit + CI gate**
+- Rationale: Validation phase; requires all prior phases to be wired
+- Delivers: full test suite exercise of every `track()` callsite with `is_enabled()` forced True;
+  AST guard confirmed green on Ubuntu + Windows CI; bilingual disclosure finalized;
+  PyInstaller SSL cert verification on clean VM
+- Research flag: STANDARD PATTERNS -- validation, not new development
+
+### Option B: 2-Phase Decomposition
+
+Faster delivery; less isolation.
+
+**Phase 111 -- Full infrastructure** (merges Options A 111 + 113 + 116):
+- `desktop/telemetry.py` scaffold + consent + scrubbing + flush + exception hooks + AST guard
+- All privacy-safety requirements before any events fire
+
+**Phase 112 -- Consent UX + usage events + performance** (merges Options A 112 + 114 + 115):
+- First-run dialog + Settings toggle + all event emission + performance summary
+
+**Recommendation:** Option A. The 6-phase structure matches the codebase's established GSD rhythm
+and gives natural UAT checkpoints. Phases 111-113 are safety-critical; shipping them independently
+reduces the risk of privacy regressions slipping in alongside UX work.
 
 ### Phase Ordering Rationale
 
-- **Investigation MUST come first** because the NLI IP block is a project-killing constraint. Building any infrastructure before validating the fetch strategy risks wasted work.
-- **Batch fetcher before web integration** because cache-first serving is most valuable with a populated cache. However, Phase 3 can START in parallel once Phase 2 is running -- read-through caching works with zero pre-populated images.
-- **Web before desktop** because desktop depends on server endpoints (`/cached-images/` URL), and web has higher traffic impact.
-- **Desktop bulk download deferred** because 86GB is a UX disaster (Pitfall 8) and organic caching is proven. Revisit when cache is substantially populated and user demand is clear.
+- **Phase 111 must be first** because `is_enabled()` and `_scrub_props()` are called by every
+  other phase. Building exception hooks before the consent gate exists would mean crash events
+  could fire before consent is recorded.
+- **`_flush_before_exit()` belongs in Phase 111**, not as a follow-up. Crash events are lost
+  without it, and flush is queue infrastructure, not UI.
+- **Consent UX (Phase 112) before exception hooks (Phase 113)** ensures the first event that
+  could fire (a crash on first run) is already gated.
+- **Usage events (Phase 114) before performance** because mode/corpus data is simpler to add
+  and validate without the timing infrastructure.
+- **Privacy audit (Phase 116) last** because it validates the entire stack.
 
 ### Research Flags
 
-Phases likely needing deeper research during planning:
-- **Phase 1 (Investigation):** This IS the research phase. No additional `/gsd:research-phase` needed -- the tasks are empirical validation (curl tests, NLI outreach, image sampling).
-- **Phase 2 (Batch Fetcher):** Needs research on optimal rsync/transfer patterns for 86GB of small files. Also needs FL ID resolution strategy (two-pass vs. inline).
+All 6 phases use standard, well-documented patterns. All integration points have been directly
+verified against real source files (exception hook lines 148-170, `config.pkl` lines 2344-2378,
+`SearchThread` lines 96-121, `SettingsDialog` line 2210). No `/gsd-research-phase` needed for
+any of these phases.
 
-Phases with standard patterns (skip research-phase):
-- **Phase 3 (Web Integration):** Well-documented nginx `try_files` pattern, existing puzzle cache proves the disk-cache approach, shared service layer is established project pattern.
-- **Phase 4 (Desktop Integration):** Minimal changes -- URL prefix swap in existing image loading threads. Follows established `gui_threads.py` patterns.
-- **Phase 5 (Monitoring):** Standard SQLite queries exposed via JSON endpoint. Trivial.
+---
+
+## Open Questions (carry into requirements discussion)
+
+1. **UUID retention on opt-out:** Delete UUID file on opt-out (current recommendation for full
+   anonymity signal), or retain so a user who opts back in keeps the same install identity?
+   FEATURES and ARCHITECTURE both recommend deletion. Confirm with user.
+
+2. **Prompt on upgrade vs. fresh install only:** Show first-run dialog for existing users
+   upgrading from v8.0.0? Current design: show once per config.pkl (i.e., existing users see it
+   on first v8.1.0 launch). Confirm with user before locking requirements.
+
+3. **`faulthandler` log path:** Recommend `%LOCALAPPDATA%\GenizahSearchPro\faulthandler.log`
+   resolved at runtime. Confirm path and whether to surface it in any "send logs" flow.
+
+4. **Performance accumulator vs. per-search sampling:** ARCHITECTURE researcher defaults to
+   1-in-3 per-search `track_performance()` emit; FEATURES researcher uses session-summary
+   aggregation. These are complementary -- session-summary is the right v8.1.0 answer;
+   `track_performance()` feeds the accumulator (no per-search PostHog duration event).
+   Clarify in requirements.
+
+5. **Web `search_executed` query-text property:** The web app currently sends
+   `query: clean_query[:100]` in its `search_executed` event -- a pre-existing privacy gap.
+   Not v8.1.0 scope but flag as a follow-up cleanup item.
+
+6. **Separate PostHog project for desktop:** PITFALLS researcher recommends a separate `phc_...`
+   key to contain abuse blast radius and prevent schema pollution. Confirm whether to use existing
+   project (id 134161) or create a new desktop-only project -- this determines which API key gets
+   embedded in `desktop/telemetry.py`.
+
+---
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Minimal new dependencies; aiohttp well-benchmarked; nginx static serving is textbook |
-| Features | HIGH | Feature landscape well-mapped against existing codebase; resolution analysis grounded in real test data |
-| Architecture | HIGH | Follows established project patterns (shared service layer, SQLite sidecars, nginx reverse proxy) |
-| Pitfalls | HIGH on #1 (IP block), MEDIUM on #5 (TOS) | NLI IP block is verified; TOS risk is judgment call requiring NLI outreach |
+| Stack | HIGH | All claims verified against real source files: `posthog_server.py`, `GenizahSearchPro.spec`, `requirements-lock.txt`, PyPI API. No inferences -- direct reads. |
+| Features | HIGH | Event taxonomy and property allowlists cross-verified against existing web instrumentation in `web/pages/search.py` and `web/api_hardening.py`. |
+| Architecture | HIGH | All integration points verified by direct file reads: `_setup_crash_handler()` lines 148-170, `load_app_config` lines 2344-2378, `SearchThread.run()` lines 96-121, `SettingsDialog._build_general_tab()` line 2210. `threading.excepthook` grep: zero hits. `QSettings` in `genizah_app.py` grep: zero hits. |
+| Pitfalls | HIGH | 13 pitfalls identified, all cross-referenced to specific lines in the real codebase. QSettings discrepancy between ARCHITECTURE and PITFALLS researchers is fully resolved above. |
 
-**Overall confidence:** MEDIUM -- the architecture and implementation patterns are solid, but the fundamental feasibility depends on NLI access strategy (residential IP + permission), which is unvalidated.
+**Overall confidence: HIGH**
 
 ### Gaps to Address
 
-- **NLI rate limits from residential IPs:** Unknown. Must be tested empirically during Phase 1. Conservative assumption: 1 req/3sec.
-- **Actual average image size:** 105KB is one data point. Need 1000-image sample to confirm 86GB estimate fits 150GB budget.
-- **NLI's position on bulk academic caching:** Unknown. Outreach during Phase 1 may yield permission, a bulk export, or a cease-and-desist. Plan for all three outcomes.
-- **Cambridge/Manchester/DPUL server-side accessibility:** Not tested from EC2. If these are NOT blocked (likely -- they don't show the same anti-scraping behavior as NLI), caching them from EC2 is straightforward and expands the cache beyond NLI-only.
-- **EC2 inode budget:** Not checked. Must verify during Phase 1 before committing to flat-file approach.
+- **PyInstaller SSL cert bundle:** Needs manual verification (run frozen `.exe` on a clean
+  Windows VM, confirm PostHog events received). Cannot be verified without a build. Make this
+  an explicit success criterion for Phase 116.
+- **`faulthandler` on Windows:** Behavior differs slightly from POSIX. Add to Phase 116 checklist
+  for explicit testing in the frozen binary.
+- **PostHog project selection:** If a separate desktop project is created, the `phc_...` key
+  embedded in `desktop/telemetry.py` differs from `POSTHOG_API_KEY` in the web env. Document
+  this clearly before implementation starts.
+
+---
 
 ## Sources
 
-### Primary (HIGH confidence)
-- Existing codebase: `web/api.py`, `shared/puzzle_image_service.py`, `shared/nli_crossref_service.py`, `web/services.py`
-- `docs/archive/plans/PUZZLE_IIIF_SERVER_SIDE_PROCESSING.md` -- verified NLI IP blocking (2026-03-17)
-- nginx official documentation -- static content serving, `try_files`, `alias` directives
-- IIIF Image API 2.1 specification -- canonical URI structure
+### Primary (HIGH confidence -- direct codebase reads)
+
+- `genizah_app.py` lines 148-170 -- `_setup_crash_handler()` and `sys.excepthook` chain
+- `genizah_app.py` lines 2344-2378 -- `Config.CONFIG_FILE` = `%LOCALAPPDATA%\GenizahSearchPro\config.pkl`
+- `genizah_app.py` line 2210 -- `SettingsDialog._build_general_tab()`
+- `shared/posthog_server.py` -- `Queue(maxsize=10000)` line 47; daemon thread line 132-133; EU endpoint line 44
+- `gui_threads.py` lines 96-121 -- `SearchThread.run()`
+- `desktop/my_library_tab.py` line 1047 -- `QSettings("Dicta", "GenizahSearchPro")`
+- `web/pages/search.py:4439` -- web `search_executed` sends `query: clean_query[:100]`
+- `web/api_hardening.py` -- `latency_bucket()`, `result_count_bucket()`
+- `GenizahSearchPro.spec` -- `('shared', 'shared')` in `datas`; no new spec changes needed
+- `requirements-lock.txt` -- `backoff` absent; confirms zero new deps
+- Codebase grep -- `threading.excepthook`: zero hits; `QSettings` in `genizah_app.py`: zero hits
+
+### Primary (HIGH confidence -- official documentation)
+
+- PostHog Python SDK PyPI `https://pypi.org/pypi/posthog/json` -- version 7.18.3; `backoff>=1.10.0` transitive dep confirmed
+- PostHog error tracking docs -- `capture_exception_code_variables` sends local vars before `before_send` fires
+- PostHog project API key safety -- write-only publishable key, safe to embed in distributed binary
+- PostHog anonymous events -- `$process_person_profile: False` semantics and anonymous-tier cost
+- Python docs: `sys.excepthook`, `threading.excepthook`, `faulthandler`, `uuid` -- all stdlib, Python 3.10+
+- GDPR Article 7 -- opt-in consent requirements; pre-checked checkboxes not valid
 
 ### Secondary (MEDIUM confidence)
-- aiohttp vs httpx benchmarks (multiple sources, Oct 2024)
-- IIIF community discussions on caching architecture
-- Storage estimate: 815K x 105KB = ~86GB (single test image extrapolation)
 
-### Tertiary (LOW confidence)
-- NLI rate limit tolerance from residential IPs (untested assumption)
-- NLI TOS position on academic bulk caching (unknown, requires outreach)
+- PyQt6 exception hook patterns (fman.io) -- slot exceptions suppressed by C++ layer; `sys.excepthook` alone insufficient
+- PyInstaller `certifi` bundle documentation -- must be explicitly included for `requests` SSL in frozen binaries
+- VSCode telemetry docs -- opt-out anti-pattern reference
+- Zotero privacy policy -- scholarly tool minimal-telemetry pattern
 
 ---
-*Research completed: 2026-04-03*
-*Ready for roadmap: yes (pending Phase 1 validation gate)*
+*Research completed: 2026-06-13*
+*Ready for roadmap: yes*

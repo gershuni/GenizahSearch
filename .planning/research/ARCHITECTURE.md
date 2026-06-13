@@ -1,422 +1,545 @@
-# Architecture Patterns: Server-Side IIIF Image Cache
+# Architecture Research
 
-**Domain:** Image caching infrastructure for manuscript research platform
-**Researched:** 2026-04-03
+**Domain:** Desktop telemetry integration (opt-in, privacy-preserving) into an existing PyQt6 app
+**Researched:** 2026-06-13
+**Confidence:** HIGH — all integration points verified against real source files
 
-## Recommended Architecture
+---
 
-### Overview
-
-Add a server-side image cache layer between IIIF sources (NLI, Cambridge, Manchester, JTS) and consumers (web browse, desktop browse, puzzle canvas). The cache sits on EC2 disk, served by nginx as static files for the hot path, with a Python batch fetcher populating the cache and a thin API for cache metadata/status.
-
-```
-                                    IIIF Sources
-                                    (NLI, CUL, Manchester, JTS)
-                                           |
-                                    [Batch Fetcher]
-                                    (scripts/image_cache_fetcher.py)
-                                           |
-                                           v
-     +----------------------------------+
-     |  EC2 Disk: /data/image_cache/    |
-     |  /{sys_id_prefix}/{sys_id}/      |
-     |  page_{N}_{width}.jpg            |
-     +----------------------------------+
-           |                    |
-     [nginx static]      [Python API]
-     /cached-images/     /api/cache_status
-           |                    |
-     +-----+----+         +----+----+
-     |          |          |        |
-   Web       Desktop    Admin    Batch
-   Browse    Browse     Page     Monitor
-```
-
-### Component Boundaries
-
-| Component | Responsibility | New/Modified | Communicates With |
-|-----------|---------------|--------------|-------------------|
-| **Batch Fetcher** (`scripts/image_cache_fetcher.py`) | NEW | Fetches IIIF images from NLI/CUL/etc, writes to disk | nli_crossref.db (read FL IDs), IIIF servers (fetch), disk cache (write), cache_status.db (track) |
-| **Cache Status DB** (`image_cache/cache_status.db`) | NEW | Tracks which images are cached, fetch timestamps, errors | Batch fetcher (write), cache service (read), admin page (read) |
-| **Image Cache Service** (`shared/image_cache_service.py`) | NEW | Resolves cache paths, checks availability, provides URLs | cache_status.db (read), nli_crossref.db (read FL IDs) |
-| **nginx static location** (`/cached-images/`) | NEW | Serves cached JPEG files directly, bypassing Python | EC2 disk (read), browser/desktop (serve) |
-| **web/services.py** (`get_thumbnail_url`, `get_full_image_url`) | MODIFIED | Returns cached URL when available, IIIF URL as fallback | image_cache_service (check), nli_crossref.db (FL IDs) |
-| **web/api.py** (`/api/nli_image_by_sysid`) | MODIFIED | Check disk cache before proxying to NLI | disk cache (read), NLI (fallback fetch) |
-| **web/pages/browse.py** | MODIFIED (minimal) | Consume new URL format from services.py | web/services.py |
-| **manuscript_viewer.js** | MODIFIED | Fallback chain: cached -> server proxy -> client IIIF | nginx cached-images, /api/nli_image_by_sysid |
-| **Desktop image loading** (`genizah_core.py`, `gui_threads.py`) | MODIFIED | Try server cache URL before direct NLI fetch | genizahsearch.com/cached-images/ (fetch) |
-| **Desktop bulk download** (new dialog/thread) | NEW | Download full cache to local disk for offline use | genizahsearch.com/api/cache_manifest (list), genizahsearch.com/cached-images/ (fetch) |
-| **Cache admin page** (`web/pages/admin_cache.py`) | NEW (optional) | Monitor cache fill progress, trigger priority fetches | cache_status.db (read), batch fetcher (control) |
-
-## Data Flow: Detailed Per Use Case
-
-### 1. Web Browse Image Load
-
-**Current flow:**
-```
-browse.py -> get_thumbnail_url(fl_id) -> direct NLI IIIF URL in <img src>
-  -> browser fetches from iiif.nli.org.il
-  -> on error: handleImageError() -> /api/nli_image_by_sysid (server proxy)
-  -> on error: client-side manifest fetch -> direct NLI URL with discovered FL ID
-```
-
-**New flow:**
-```
-browse.py -> image_cache_service.get_image_url(sys_id, page, width)
-  -> IF cached: returns /cached-images/{prefix}/{sys_id}/page_{N}_{width}.jpg
-     -> nginx serves static file (zero Python overhead)
-  -> IF not cached: returns /api/nli_image_by_sysid/{sys_id}?page={N}
-     -> api.py checks disk cache (belt-and-suspenders)
-     -> falls through to NLI proxy as today
-
-<img src> error fallback chain (manuscript_viewer.js):
-  1. /cached-images/{prefix}/{sys_id}/page_{N}_{width}.jpg (nginx static)
-  2. /api/nli_image_by_sysid/{sys_id}?page={N} (Python proxy, may also cache-fill on miss)
-  3. Client-side IIIF manifest fetch (existing handleImageError logic)
-```
-
-**Key change:** `web/services.py:get_thumbnail_url()` and `get_full_image_url()` gain a cache-aware variant. The BrowsePage dataclass gets `cached_thumb_url` and `cached_image_url` fields populated during Phase A (fast local check against cache_status.db or filesystem stat).
-
-### 2. Desktop Browse Image Load
-
-**Current flow:**
-```
-genizah_core.py:get_thumbnail() -> _fetch_fl_ids() from NLI IIIF manifest
-  -> _resolve_thumbnail(fl_ids) -> NLI IIIF URL
-  -> ImageLoaderThread fetches directly from iiif.nli.org.il
-```
-
-**New flow:**
-```
-genizah_core.py:get_thumbnail() -> check local cache dir first
-  -> IF local cache exists (bulk download): serve from disk
-  -> IF no local cache: try https://genizahsearch.com/cached-images/{prefix}/{sys_id}/page_0_400.jpg
-  -> IF server cache miss (404): fall back to direct NLI IIIF (existing path)
-```
-
-**Key change:** `ImageLoaderThread` in `gui_threads.py` gets a URL resolution step: try server cache URL first, fall back to NLI on 404. No structural change to the thread model -- just a URL prefix swap.
-
-### 3. Batch Fetch Job
+## System Overview
 
 ```
-scripts/image_cache_fetcher.py (runs as systemd service or cron on EC2)
-  |
-  1. Query nli_crossref.db for uncached sys_ids (JOIN against cache_status.db)
-  2. Sort by priority: NLI-only manuscripts first, then by popularity (PostHog optional)
-  3. For each sys_id:
-     a. Fetch FL IDs from nli_crossref.db (local, no network needed for NLI)
-        OR fetch IIIF manifest for non-NLI libraries
-     b. For each page/FL ID:
-        - Rate-limit: configurable delay (e.g., 200ms between requests)
-        - Fetch IIIF image: /full/{width},/0/default.jpg
-        - Write to disk: /data/image_cache/{prefix}/{sys_id}/page_{N}_{width}.jpg
-        - Update cache_status.db: (sys_id, page, width, fetched_at, size_bytes, source)
-     c. On failure: record error in cache_status.db, skip, continue
-  4. Log progress: images/hour, estimated completion, error rate
-  5. Graceful shutdown on SIGTERM
-
-Concurrency: single-threaded sequential fetch with configurable rate limit.
-  (Burst parallel fetching risks IP blocking from IIIF servers.)
+genizah_app.py (GenizahGUI, SettingsDialog, tab widgets)
+    |
+    |  <- consent gate (is_enabled check) --------------------------------+
+    |                                                                     |
+    v                                                                     |
+desktop/telemetry.py  [NEW] <- single public chokepoint                 |
+    |  track(event, **props)                                             |
+    |  track_performance(...)                                            |
+    |  track_error(context, exc)                                         |
+    |  is_enabled() -> bool                                              |
+    |  set_consent(bool)                                                 |
+    |  get_install_id() -> str | None                                    |
+    |  install_exception_hooks()                                         |
+    |  show_first_run_prompt(parent)                                     |
+    |  _scrub_props(props) -> props  [internal only]                    |
+    |                                                                     |
+    +-------> shared/posthog_server.py  [EXISTING]                      |
+                  enqueue_event(event, properties, distinct_id)          |
+                  fire-and-forget queue, daemon thread, EU endpoint      |
+                  Queue(maxsize=10000) [verified line 47]                |
+                      |                                                   |
+                      v                                                   |
+                PostHog EU (https://eu.i.posthog.com/capture)           |
+                project "Default project" (id: 134161), org "Dicta"    |
+                                                                         |
+genizah_core.load_app_config() / save_app_config()  [EXISTING] --------+
+    config.pkl in %LOCALAPPDATA%\GenizahSearchPro\ [verified line 2377]
+    telemetry_enabled | telemetry_first_run_shown | telemetry_install_id
 ```
 
-### 4. Cache Status Monitoring
+### Component Responsibilities
+
+| Component | Responsibility | File |
+|-----------|----------------|------|
+| `desktop/telemetry.py` | Single consent gate, scrubbing, install-ID, all public API | NEW |
+| `shared/posthog_server.py` | Thread-safe fire-and-forget queue + drain daemon | EXISTING |
+| `genizah_core.Config` | Canonical path: `Config.CONFIG_FILE` = `%LOCALAPPDATA%\GenizahSearchPro\config.pkl` | EXISTING |
+| `genizah_core.load_app_config / save_app_config` | Key-value pickle config store | EXISTING |
+| `_setup_crash_handler()` in `genizah_app.py` | Installs `sys.excepthook`; chains to `sys.__excepthook__` [lines 148-170] | EXISTING — extend, not replace |
+| `SettingsDialog._build_general_tab()` | UI for consent toggle (General tab) [line 2210] | EXISTING — add telemetry row |
+| `GenizahGUI.__init__` | App startup; first-run dialog trigger | EXISTING — add one call |
+| `SearchThread.run()` in `gui_threads.py` | Wraps `execute_search`; start/end timestamps [lines 96-121] | EXISTING — add perf timing |
+
+---
+
+## 1. Consent Chokepoint Design
+
+### Module placement: `desktop/telemetry.py` (NOT `shared/`)
+
+The `shared/` contract (verified against `shared/joins_lab.py` Phase 106 AST guard and the `shared/posthog_server.py` docstring) requires zero PyQt imports and web-reusability. The first-run consent dialog is a `QDialog` — it cannot live in `shared/`. Consent-state reads/writes call `genizah_core.load_app_config` / `save_app_config`, which are desktop-first. Placing the chokepoint in `desktop/` preserves the `shared/` boundary while still delegating network I/O to `shared/posthog_server.enqueue_event`.
+
+### Public API
+
+```python
+# desktop/telemetry.py
+
+def is_enabled() -> bool:
+    """Return True iff user has opted in AND an install_id exists."""
+
+def track(event: str, **props) -> None:
+    """Gate-check consent, scrub props, enqueue. Never raises. Non-blocking."""
+
+def track_performance(
+    event: str,
+    duration_ms: float,
+    result_count: int | None = None,
+    **extra_props,
+) -> None:
+    """Specialised track for timed operations. Applies sampling before enqueue."""
+
+def track_error(context: str, exc: Exception) -> None:
+    """Capture a handled (non-fatal) exception with context label.
+    context = 'pdf_extract' | 'nli_fetch' | 'local_index' | etc.
+    Never raises.
+    """
+
+def get_install_id() -> str | None:
+    """Return the persisted anonymous UUID, or None if not opted in."""
+
+def set_consent(enabled: bool) -> None:
+    """Persist consent flag. On True: mint install_id if absent.
+    On False: clear install_id from config.pkl."""
+
+def install_exception_hooks() -> None:
+    """Wrap existing sys.excepthook + install threading.excepthook.
+    Must be called AFTER _setup_crash_handler() so the chain is correct."""
+
+def show_first_run_prompt(parent_widget) -> None:
+    """Display the bilingual first-run consent dialog if not yet shown.
+    Marks telemetry_first_run_shown=True regardless of user's answer."""
+```
+
+All eight public callables are the ONLY sanctioned way to emit desktop telemetry. The scrubbing step (`_scrub_props`) is internal — callers cannot bypass it by reaching `shared/posthog_server` directly.
+
+---
+
+## 2. Anonymous Install ID
+
+### Storage location
+
+`genizah_core.load_app_config()` / `save_app_config()` reads and writes `Config.CONFIG_FILE` — which resolves to `%LOCALAPPDATA%\GenizahSearchPro\config.pkl` on a standard install (verified: `genizah_core.py` lines 2344-2378). This file already stores all other persistent preferences (variant settings, language choice, lab config path). It survives crashes and version upgrades.
+
+**No new file. No QSettings. No session.json.** The session store (`session.json` at `Config.SESSION_FILE`) is session-scoped and may be cleared on crash recovery — wrong store for permanent preferences.
+
+### Keys in config.pkl
+
+| Key | Type | Semantics |
+|-----|------|-----------|
+| `telemetry_enabled` | `bool` | User's opt-in choice; absent = not yet asked |
+| `telemetry_first_run_shown` | `bool` | Whether the first-run dialog has fired; absent = not yet |
+| `telemetry_install_id` | `str` (uuid4 hex) | Anonymous per-install identifier; absent until first opt-in |
+
+### Lifecycle
+
+- **First opt-in:** `uuid.uuid4().hex` minted inside `set_consent(True)` and written as `telemetry_install_id`.
+- **Subsequent calls:** `get_install_id()` reads from config.pkl; stable across restarts and upgrades.
+- **Opt-out:** `set_consent(False)` writes `telemetry_enabled=False` and **deletes** `telemetry_install_id`. Subsequent `track()` calls gate-check `is_enabled()` (reads `config.pkl`) and return immediately.
+- **distinct_id in PostHog:** the `telemetry_install_id` hex; never the user's Supabase UUID or email.
+- **ID is NOT minted at import time.** It does not exist until the user actively opts in.
+
+---
+
+## 3. Consent State Storage
+
+Both `telemetry_enabled` and `telemetry_first_run_shown` live in `config.pkl` — the single source of truth. No duplication in session.json, lang.pkl, or any other file.
+
+### First-run dialog trigger
+
+`GenizahGUI.__init__` (or its post-show hook, to avoid dialog-before-window) calls `desktop.telemetry.show_first_run_prompt(self)` once per app lifetime. The function:
+
+1. Reads `telemetry_first_run_shown` from `load_app_config()`.
+2. If falsy: shows a `QDialog` (bilingual EN/HE, default OFF, two buttons: opt in / decline). Privacy disclosure is inline — no external link required, consistent with the existing posture.
+3. Calls `set_consent(user_chose_yes)`.
+4. Writes `telemetry_first_run_shown = True` via `save_app_config` unconditionally. The dialog never fires again even if the user declined.
+
+### Settings toggle (existing `SettingsDialog`)
+
+`SettingsDialog._build_general_tab()` (verified: `genizah_app.py` line 2210, within class at line 2145) already snapshots `load_app_config()` on open and writes on OK/Cancel via `save_app_config`. A new checkbox row:
+- **On open:** `chk_telemetry.setChecked(cfg.get('telemetry_enabled', False))`
+- **On OK:** calls `desktop.telemetry.set_consent(chk_telemetry.isChecked())`
+- **On Cancel:** the existing `_on_cancel` snapshot-restore reverts it automatically (no special handling needed)
+
+---
+
+## 4. Global Exception Handling
+
+### Existing handler (verified)
+
+`genizah_app.py` lines 148-170 define `_setup_crash_handler()`, which:
+- Writes a full traceback to `crash_log.txt` adjacent to `genizah_app.py`.
+- Prints to stderr via `traceback.print_exception`.
+- Chains to `sys.__excepthook__` explicitly.
+- Is **installed at module-import time** (line 170), before `GenizahGUI` is constructed.
+
+`threading.excepthook` is **not** currently set (confirmed by grep: zero hits). The existing hook only covers the main thread.
+
+### Extension strategy: wrap, do not replace
+
+```python
+# desktop/telemetry.py
+
+def install_exception_hooks() -> None:
+    """Wrap existing sys.excepthook and install threading.excepthook.
+
+    Call from genizah_app.py AFTER _setup_crash_handler() (line ~171)
+    so _prior_hook captures the crash-log writer.
+    """
+    _prior_hook = sys.excepthook  # captures genizah_app's crash-log handler
+
+    def _telemetry_excepthook(exc_type, exc_value, exc_tb):
+        # 1. Telemetry (non-blocking enqueue only)
+        if is_enabled() and exc_type is not KeyboardInterrupt:
+            _capture_crash(exc_type, exc_value, exc_tb)
+        # 2. Chain: crash_log.txt + stderr + sys.__excepthook__
+        _prior_hook(exc_type, exc_value, exc_tb)
+
+    sys.excepthook = _telemetry_excepthook
+
+    # threading.excepthook covers QThread.run() exceptions that escape
+    # the per-thread try/except blocks (backstop for rare cases).
+    # Note: most QThread workers already have try/except + error_signal --
+    # this captures the ones that don't.
+    _prior_thread_hook = threading.excepthook
+
+    def _telemetry_threading_hook(args):
+        if is_enabled() and args.exc_type is not KeyboardInterrupt:
+            _capture_crash(args.exc_type, args.exc_value, args.exc_traceback)
+        _prior_thread_hook(args)
+
+    threading.excepthook = _telemetry_threading_hook
+```
+
+`install_exception_hooks()` is called in `genizah_app.py` immediately after `_setup_crash_handler()` (line ~172). The chain is then: `_telemetry_excepthook` → `_prior_hook` (crash_log.txt writer) → `sys.__excepthook__` (Python default).
+
+**Qt-level handler:** PyQt6's `sys.excepthook` wrapping is sufficient for exceptions propagating out of Qt slots. A `QApplication.notify` override is unnecessary and fragile — skip it.
+
+### Non-blocking invariant
+
+`_capture_crash()` executes only:
+1. `traceback.format_exception()` — pure Python string formatting.
+2. `_scrub_props()` — pure Python dict manipulation.
+3. `shared.posthog_server.enqueue_event()` — `put_nowait` onto an in-memory `queue.Queue`; returns immediately even on `queue.Full`.
+
+No network calls, no disk I/O, no locks inside the hook body.
+
+### Handled/non-fatal errors
+
+`track_error(context, exc)` is the public API for existing `try/except` sites. It is added selectively to high-value sites (PDF extractor, NLI fetch, local indexer errors). Which specific sites get it is a requirements-phase decision, not an architecture decision. The key structural rule: every call goes through `desktop/telemetry.track_error()`, never directly to `enqueue_event`.
+
+---
+
+## 5. Scrubbing Layer
+
+### Location and structural guarantee
+
+`desktop/telemetry.py::_scrub_props(props: dict) -> dict` — called internally by every public function before any data reaches `enqueue_event`. It is not in `__all__` and not exported. The path to the network is always:
 
 ```
-/api/cache_status -> JSON summary:
-  {
-    "total_images": 815000,
-    "cached_images": 342000,
-    "cache_percent": 42.0,
-    "disk_used_gb": 36.2,
-    "disk_free_gb": 113.8,
-    "fetcher_running": true,
-    "fetch_rate_per_hour": 4500,
-    "eta_hours": 105,
-    "last_error": "2026-04-03T14:22:00Z: NLI timeout on FL7734473",
-    "by_library": {
-      "CUL": {"total": 340000, "cached": 200000},
-      "JTS": {"total": 80000, "cached": 45000},
-      ...
+track() / track_performance() / track_error() / _capture_crash()
+    -> _scrub_props(props)  [always]
+    -> shared.posthog_server.enqueue_event(...)
+```
+
+There is no way to reach `enqueue_event` from desktop code without passing through `_scrub_props`. This is the structural invariant that makes the privacy guarantee hold even as new `track()` callsites are added in the future.
+
+### Scrubbing rules
+
+```python
+import re as _re
+
+# Windows path: C:\..., POSIX path: /home/..., bare filename: foo.pdf
+_PATH_RE = _re.compile(
+    r'[A-Za-z]:\\[^\s,\"\']+|/[^\s,\"\']{3,}|\S+\.\w{2,4}\b'
+)
+
+# Keys whose values are always dropped (even if not path-like)
+_BANNED_KEYS = frozenset({
+    'query', 'text', 'content', 'filename', 'path', 'filepath',
+    'frame_locals', 'traceback_raw', 'search_term', 'query_text',
+})
+
+def _scrub_props(props: dict) -> dict:
+    out = {}
+    for k, v in props.items():
+        if any(b in k.lower() for b in _BANNED_KEYS):
+            continue
+        if isinstance(v, str):
+            v = _PATH_RE.sub('[REDACTED]', v)
+            v = v[:500]
+        out[k] = v
+    return out
+```
+
+**Crash tracebacks specifically:** `_capture_crash()` uses `traceback.format_exception()`, then strips lines matching the frame-local pattern (`^\s+\w+ = ` — Python's "local variables" section in tracebacks printed by some formatters). The stripped, truncated string goes into props under key `traceback_scrubbed`. The key `traceback_raw` is in `_BANNED_KEYS` as defence-in-depth.
+
+### AST guard (CI test)
+
+`tests/test_telemetry_no_direct_posthog.py` — an AST-walk test that asserts no file under `desktop/` (except `desktop/telemetry.py` itself) imports `shared.posthog_server` or calls `enqueue_event` directly. This mirrors the `test_no_raw_storage_access.py` pattern from Phase 87 (`web/safe_storage.py` chokepoint).
+
+---
+
+## 6. Performance Sampling
+
+### Integration point: SearchThread.run() in gui_threads.py
+
+`SearchThread.run()` (verified: `gui_threads.py` lines 96-121) is the correct and only timing boundary for regular search. The pattern:
+
+```python
+# gui_threads.py — SearchThread.run() modification
+
+perf_signal = pyqtSignal(float, int)  # new signal: elapsed_ms, result_count
+
+def run(self):
+    _prevent_sleep()
+    _t0 = time.perf_counter()
+    try:
+        ...
+        results = self.searcher.execute_search(...)
+        _elapsed_ms = (time.perf_counter() - _t0) * 1000
+        self.results_signal.emit(results)
+        self.perf_signal.emit(_elapsed_ms, len(results))   # new
+    except InterruptedError:
+        self.results_signal.emit([])
+    except Exception as e:
+        self.error_signal.emit(str(e))
+    finally:
+        _allow_sleep()
+```
+
+The `perf_signal` connects in `GenizahGUI` to a handler that calls `desktop.telemetry.track_performance(...)`. The call is made on the **UI thread** (not the worker thread) via Qt signal delivery — consistent with all other result-handling callbacks in this codebase.
+
+**Same pattern for `CompositionThread` and `LabSearchThread`** (both in `gui_threads.py`) — add `perf_signal = pyqtSignal(float, int)` and identical timing wrapper in their `run()` methods.
+
+### Sampling within track_performance
+
+Heavy users run ~50 searches/day (stated requirement). At 30 such users that is ~1,500 performance events/day — manageable without sampling at PostHog's scale. However, `track_performance` applies a lightweight 1-in-N guard so future increases in user count do not require code changes:
+
+```python
+_PERF_SAMPLE_N = int(os.environ.get('TELEMETRY_PERF_SAMPLE_N', '3'))
+_perf_counter = 0  # module-level, GIL-safe
+
+def track_performance(event, duration_ms, result_count=None, **extra):
+    if not is_enabled():
+        return
+    global _perf_counter
+    _perf_counter = (_perf_counter + 1) % _PERF_SAMPLE_N
+    if _perf_counter != 0:
+        return
+    props = {
+        'duration_ms': round(duration_ms, 1),
+        'result_count': result_count,
+        'search_mode': extra.get('search_mode'),  # 'keyword'|'responsa'|'composition'|'parallels'
+        'corpus_scope': extra.get('corpus_scope'), # 'genizah'|'local'|'all'
     }
-  }
+    _emit(event, props)  # internal: _scrub_props -> enqueue_event
 ```
 
-Optional admin page at `/admin/cache` shows this visually. Low priority -- JSON endpoint suffices for monitoring.
+`_emit` is the private helper that calls `_scrub_props` then `enqueue_event` with the install ID as `distinct_id`.
 
-## Storage Layout
+---
 
-### Disk Path Structure
+## Data Flow Summary
+
+### Normal usage event
 
 ```
-/data/image_cache/
-  status.db                          # SQLite: cache tracking metadata
-  nli/                               # NLI-sourced images
-    00/                              # First 2 chars of sys_id (sharding)
-      003549876/                     # sys_id directory
-        page_0_800.jpg               # Page 0, 800px width
-        page_1_800.jpg               # Page 1, 800px width
-        page_0_400.jpg               # Page 0, 400px (thumbnail)
-    99/
-      997234561/
-        page_0_800.jpg
-  cambridge/                         # Cambridge CUDL images (future)
-    MS-TS-00012-00001/
-      page_0_800.jpg
+User action (tab switch, search mode, key dialog)
+    |
+    v  desktop.telemetry.track('tab_switched', tab='Browse by Shelfmark')
+desktop/telemetry.py::track()
+    |  1. is_enabled() -> False? return immediately
+    |  2. _scrub_props({'tab': 'Browse by Shelfmark'}) -> unchanged
+    |  3. _emit(): add app_version, os_version (module-level constants)
+    v
+shared/posthog_server.enqueue_event('tab_switched', props, install_id)
+    |  put_nowait -> Queue(maxsize=10000)
+    v
+posthog-shared-drain daemon -> POST eu.i.posthog.com/capture
 ```
 
-**Why this layout:**
-- **2-char prefix sharding**: Prevents any single directory from exceeding filesystem limits (~255K entries). With 253K distinct AlmaIds, even distribution means ~2,500 per shard bucket.
-- **sys_id as directory**: Natural grouping, easy to check "is this manuscript cached?" with a single stat().
-- **page_N_width.jpg naming**: Deterministic, no FL ID needed in path (FL IDs are an NLI implementation detail; sys_id is the stable identifier).
-- **Separate library dirs**: Different provenance, different update cycles, easy to cache Cambridge separately later.
+### Crash capture
 
-### Storage Estimates
-
-| Resolution | Per Image | 815K Images | 815K x 2 sizes | Notes |
-|------------|-----------|-------------|-----------------|-------|
-| 400px (thumb) | ~25 KB | ~20 GB | -- | Thumbnail for search results |
-| 800px (browse) | ~105 KB | ~86 GB | -- | Minimum for reading text |
-| 400 + 800 | -- | -- | ~106 GB | Both sizes cached |
-
-**Recommendation:** Cache 800px as primary (readable text), generate 400px thumbnails on-demand or in a second pass. 800px at ~86GB fits within 150GB with ~64GB headroom.
-
-### cache_status.db Schema
-
-```sql
-CREATE TABLE cached_images (
-    sys_id TEXT NOT NULL,
-    page_index INTEGER NOT NULL,
-    width INTEGER NOT NULL,
-    source TEXT NOT NULL DEFAULT 'nli',  -- 'nli', 'cambridge', 'manchester', 'jts'
-    fl_id TEXT,                          -- Original FL ID (for NLI provenance tracking)
-    size_bytes INTEGER,
-    fetched_at TEXT NOT NULL,            -- ISO 8601
-    PRIMARY KEY (sys_id, page_index, width, source)
-);
-
-CREATE TABLE fetch_errors (
-    sys_id TEXT NOT NULL,
-    page_index INTEGER NOT NULL,
-    source TEXT NOT NULL DEFAULT 'nli',
-    error_message TEXT,
-    failed_at TEXT NOT NULL,
-    retry_count INTEGER DEFAULT 0
-);
-
-CREATE TABLE fetch_progress (
-    key TEXT PRIMARY KEY,
-    value TEXT
-);
--- Keys: 'last_sys_id', 'total_fetched', 'start_time', 'fetcher_pid'
-
-CREATE INDEX idx_cached_sys ON cached_images(sys_id);
-CREATE INDEX idx_errors_retry ON fetch_errors(retry_count, failed_at);
+```
+Unhandled exception (any thread)
+    |
+    v
+sys.excepthook / threading.excepthook (telemetry wrapper)
+    |  1. is_enabled()? yes -> _capture_crash()
+    |     a. format + strip frame-locals + truncate to 2000 chars
+    |     b. _scrub_props() -> paths redacted, banned keys dropped
+    |     c. enqueue_event('app_crash', scrubbed_props, install_id)
+    |     <- RETURNS IMMEDIATELY (put_nowait, never blocks)
+    |  2. _prior_hook (crash_log.txt + stderr + sys.__excepthook__)
+    v
+sys.__excepthook__ (Python default)
 ```
 
-## Serving Architecture Decision: nginx Static Files
+### Consent state transitions
 
-**Decision: Serve cached images via nginx `location /cached-images/` block.**
+```
+First launch:
+    GenizahGUI.__init__ (post-show)
+        -> telemetry.show_first_run_prompt(self)
+            -> load_app_config()['telemetry_first_run_shown'] absent
+            -> show QDialog (bilingual, default OFF)
+            -> set_consent(True/False)
+                -> save_app_config({'telemetry_enabled': bool,
+                                    'telemetry_install_id': uuid4.hex  [if True]
+                                    OR delete key               [if False]})
+            -> save_app_config({'telemetry_first_run_shown': True})
 
-### Why nginx, not Python:
-
-| Factor | nginx Static | Python Endpoint |
-|--------|-------------|-----------------|
-| **Throughput** | 10K+ req/s, zero Python GIL contention | ~200 req/s through NiceGUI/Starlette, blocks event loop |
-| **Latency** | <1ms (sendfile syscall) | 5-50ms (Python overhead + async context) |
-| **Memory** | Zero per-request allocation | Python response objects per concurrent request |
-| **Cache headers** | Native `expires`, `Cache-Control`, `ETag` | Manual header management |
-| **Complexity** | 5 lines of nginx config | New API route + file reading + error handling |
-| **CDN-friendly** | Cloudflare caches `/cached-images/*` trivially | Need explicit cache rules |
-
-### nginx Config Addition
-
-```nginx
-# Add inside the server { } block, BEFORE the catch-all location / { }
-location /cached-images/ {
-    alias /data/image_cache/;
-    expires 30d;
-    add_header Cache-Control "public, immutable";
-    add_header Access-Control-Allow-Origin "*";
-    try_files $uri =404;
-
-    # Disable logging for cached images (high volume)
-    access_log off;
-
-    # Gzip off for JPEG (already compressed)
-    gzip off;
-
-    # Limit to GET/HEAD
-    limit_except GET HEAD { deny all; }
-}
+Settings toggle:
+    SettingsDialog._build_general_tab()
+        -> chk.setChecked(load_app_config().get('telemetry_enabled', False))
+    SettingsDialog.accept()
+        -> desktop.telemetry.set_consent(chk.isChecked())
+    SettingsDialog._on_cancel()
+        -> save_app_config(self._config_snapshot)  [already handles rollback]
 ```
 
-**Desktop access:** The desktop app fetches from `https://genizahsearch.com/cached-images/nli/{prefix}/{sys_id}/page_{N}_{width}.jpg` -- same URL, served by nginx, passes through Cloudflare CDN. No Python involvement.
+---
 
-### Python API Role (Complementary)
+## Recommended File Layout
 
-Python handles only:
-1. **`/api/nli_image_by_sysid`** (existing) -- modified to check disk cache before proxying to NLI. Acts as a warm-fill: if user requests an uncached image, Python proxies it AND writes to disk cache simultaneously.
-2. **`/api/cache_status`** (new) -- JSON cache statistics for monitoring.
-3. **`/api/cache_manifest`** (new, for desktop bulk download) -- Returns list of cached sys_ids + page counts for desktop download manager.
+```
+desktop/
+    telemetry.py          [NEW] - single consent chokepoint, scrubbing, public API
+    join_workbench.py     [existing]
+    my_library_tab.py     [existing]
+    ...
 
-## Patterns to Follow
-
-### Pattern 1: Cache-Through on Miss (Opportunistic Fill)
-**What:** When `/api/nli_image_by_sysid` fetches an image from NLI (cache miss), simultaneously write it to the disk cache so subsequent requests are served by nginx.
-**When:** Every NLI proxy request that succeeds.
-**Example:**
-```python
-# In web/api.py, nli_image_by_sysid handler
-if resp.status_code == 200 and len(resp.content) > min_size:
-    # Serve to client immediately
-    # Also write to disk cache (fire-and-forget)
-    _save_to_image_cache(sys_id, page, width, resp.content, suffix)
-    return Response(content=resp.content, ...)
+tests/
+    test_telemetry_consent_gate.py       [NEW] - is_enabled gate; opt-out clears ID
+    test_telemetry_scrubbing.py          [NEW] - _scrub_props rules; path patterns
+    test_telemetry_no_direct_posthog.py  [NEW] - AST guard: no direct enqueue_event
+    test_telemetry_exception_hooks.py    [NEW] - chain preserved; non-blocking
+    test_telemetry_performance_sampling.py [NEW] - 1-in-N gate; perf_signal timing
 ```
 
-### Pattern 2: Deterministic Path Resolution (No DB Lookup for Hot Path)
-**What:** The nginx URL for a cached image is computed purely from (sys_id, page_index, width) with no database query. The client can construct the URL and try it; nginx returns 404 if not cached, triggering the fallback chain.
-**When:** Every image load in browse and search.
-**Example:**
-```python
-def get_cached_image_url(sys_id: str, page: int = 0, width: int = 800) -> str:
-    prefix = sys_id[:2] if len(sys_id) >= 2 else '00'
-    return f"/cached-images/nli/{prefix}/{sys_id}/page_{page}_{width}.jpg"
-```
+---
 
-### Pattern 3: Priority Queue for Batch Fetcher
-**What:** Fetch NLI-only manuscripts first (those without Cambridge/Manchester/JTS alternatives), then CUL-only, then others.
-**When:** Batch fetcher ordering.
-**Rationale:** NLI-only manuscripts have zero fallback -- when NLI is down, these images are completely unavailable. Manuscripts with Cambridge/Manchester alternatives already have reliable image sources.
+## Build Order (Dependency-Ordered)
 
-### Pattern 4: Shared Service Layer (Consistent with Project Architecture)
-**What:** `shared/image_cache_service.py` provides cache path resolution and status queries used by both web and desktop.
-**When:** Both apps need to know if an image is cached and construct the correct URL.
-**Rationale:** Follows the established shared service pattern (document_service, fjms_service, nli_crossref_service, etc.).
+Each phase must be green before the next begins.
+
+### Phase 111 — Foundation: desktop/telemetry.py module + consent storage
+
+- `desktop/telemetry.py` scaffold with all eight public functions.
+- All functions return immediately if `not is_enabled()` (stubs for non-consent logic).
+- Consent + install-ID read/write against `config.pkl` via `load_app_config / save_app_config`.
+- `_scrub_props()` with full rules.
+- `test_telemetry_consent_gate.py`, `test_telemetry_scrubbing.py`, `test_telemetry_no_direct_posthog.py`.
+- **No UI wiring yet.**
+
+**Why first:** every other phase depends on `is_enabled()` and `track()` existing.
+
+### Phase 112 — Consent UX: first-run dialog + Settings toggle
+
+- `show_first_run_prompt()` implementation: bilingual `QDialog`, default OFF, two buttons.
+- Wired into `GenizahGUI.__init__` after `self.show()` or equivalent post-show hook.
+- Checkbox row added to `SettingsDialog._build_general_tab()`.
+- Tests: dialog fires exactly once; subsequent launches skip it; Settings toggle calls `set_consent`.
+
+**Why second:** consent must exist and be plumbable before any events can be emitted.
+
+### Phase 113 — Exception hooks
+
+- `install_exception_hooks()` implementation.
+- Called in `genizah_app.py` immediately after `_setup_crash_handler()` (line ~171).
+- Crash scrubbing: frame-local stripping + path redaction + 2000-char truncation.
+- `test_telemetry_exception_hooks.py`: prior hook still runs; enqueue is non-blocking; `KeyboardInterrupt` not captured.
+
+**Why third:** hooks are installed at startup; gate on `is_enabled()` from Phase 111.
+
+### Phase 114 — Usage events
+
+- `track()` calls added to high-value action sites in `genizah_app.py`: tab switches, search mode changes (keyword/Responsa/composition/parallels), Lab mode toggle, Joins Lab open, key dialog opens.
+- Session start/end events (`app_started` in `__init__`, `app_closed` in `GenizahGUI.closeEvent`).
+- App version + OS version set as module-level constants in `desktop/telemetry.py`, added to every event's properties automatically in `_emit()`.
+- Tests: events gated; scrubbing rules exercised on real callsite shapes.
+
+**Why fourth:** needs consent gate and scrubbing from Phases 111-112.
+
+### Phase 115 — Performance events
+
+- `perf_signal = pyqtSignal(float, int)` added to `SearchThread`, `CompositionThread`, `LabSearchThread`.
+- Timing wrapper (`time.perf_counter`) in each `run()` method.
+- UI-thread signal handlers in `GenizahGUI` call `track_performance()`.
+- `_PERF_SAMPLE_N = 3` default; env-var override.
+- `test_telemetry_performance_sampling.py`: timing wrapper measures elapsed; 1-in-3 sampling reduces emit count.
+
+**Why fifth:** independent of crash hooks; needs `track_performance()` from Phase 111.
+
+### Phase 116 — Privacy audit + CI gate
+
+- Test suite exercises every `track()` callsite with `is_enabled()` forced True and asserts no banned keys in queued payloads.
+- `test_telemetry_no_direct_posthog.py` AST guard confirmed green in CI matrix (Windows + Ubuntu).
+- `test_telemetry_scrubbing.py` covers all path pattern variants: Windows paths, POSIX paths, bare filenames, Hebrew + Latin mixed strings, Unicode filenames.
+- Bilingual privacy disclosure text finalized for first-run dialog and Settings tab.
+
+**Why last:** validation phase; requires all prior phases to be wired.
+
+---
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Serving Images Through Python
-**What:** Using a FastAPI/Starlette endpoint to read files from disk and return them.
-**Why bad:** Python GIL contention, event loop blocking on file I/O, 50x slower than nginx sendfile, NiceGUI server becomes the bottleneck for the most frequent request type (images).
-**Instead:** nginx `location /cached-images/` with `alias` directive. Python only handles the miss/fallback path.
+### Anti-Pattern 1: Calling enqueue_event from anywhere except desktop/telemetry.py
 
-### Anti-Pattern 2: Using FL IDs in Cache Paths
-**What:** Organizing cache by FL ID instead of sys_id.
-**Why bad:** FL IDs are NLI-internal identifiers that can change (manifest updates). sys_id is the stable manuscript identifier used throughout the app. FL ID paths would require a DB lookup to resolve what the user is viewing.
-**Instead:** Use `sys_id/page_N_width.jpg`. Store FL ID in cache_status.db for provenance tracking only.
+**What:** Importing `shared.posthog_server.enqueue_event` directly in `genizah_app.py`, `gui_threads.py`, or other desktop modules.
+**Why bad:** Bypasses the consent gate. A single forgotten `is_enabled()` check sends data after opt-out. The AST guard enforces this structurally.
+**Do this instead:** All callsites use `desktop.telemetry.track(...)` exclusively.
 
-### Anti-Pattern 3: Parallel Burst Fetching from NLI
-**What:** Running multiple threads/processes to speed up the batch fetch.
-**Why bad:** NLI rate-limits aggressively. Burst traffic from a single IP will get blocked, potentially for days. Other IIIF servers (Cambridge CUDL, Manchester LUNA) have similar policies.
-**Instead:** Single-threaded sequential fetch with 200-500ms delay between requests. At 200ms delay = 18K images/hour = ~45 hours for 815K images. Acceptable for a background job running over days.
+### Anti-Pattern 2: Installing a new sys.excepthook without chaining
 
-### Anti-Pattern 4: Cache Invalidation Complexity
-**What:** Building a sophisticated invalidation/refresh system.
-**Why bad:** IIIF images of historical manuscripts essentially never change. The underlying manuscripts are centuries old. Adding version checking, ETag validation, or periodic re-fetch adds complexity for near-zero benefit.
-**Instead:** Fetch once, keep forever. If an image genuinely changes (extremely rare), manual re-fetch for that sys_id via admin action.
+**What:** `sys.excepthook = my_new_hook` — replacing instead of wrapping.
+**Why bad:** The existing `_setup_crash_handler` crash-log write is lost. Exceptions stop printing to stderr. The chain to `sys.__excepthook__` is severed.
+**Do this instead:** Capture `sys.excepthook` after `_setup_crash_handler()` runs, wrap it, and call it unconditionally at the end of the wrapper.
 
-## Integration Points With Existing Code
+### Anti-Pattern 3: Placing consent state in session.json
 
-### Files to Modify
+**What:** Writing `telemetry_enabled` to `Config.SESSION_FILE`.
+**Why bad:** `session.json` is session-scoped — it is cleared on interrupted-search recovery and may be wiped on crash recovery. The user's consent preference would be silently lost.
+**Do this instead:** All telemetry preferences go in `config.pkl` via `load_app_config / save_app_config`, which is never touched by session recovery.
 
-| File | Change | Complexity |
-|------|--------|------------|
-| `web/services.py` | Add `get_cached_image_url()`, modify `get_thumbnail_url()`/`get_full_image_url()` to prefer cached URL | Low |
-| `web/api.py` | Add cache-through write in `nli_image_by_sysid`, add `/api/cache_status`, `/api/cache_manifest` | Medium |
-| `web/static/manuscript_viewer.js` | Add cached URL as first entry in `handleImageError` fallback chain | Low |
-| `genizah_core.py` | Add server cache URL as first try in `_resolve_thumbnail()` / desktop image loading | Low |
-| `gui_threads.py` | `ImageLoaderThread` tries server cache URL before direct NLI | Low |
-| nginx config on EC2 | Add `location /cached-images/` block | Low |
+### Anti-Pattern 4: Any blocking call inside an exception hook
 
-### New Files
+**What:** `requests.post()`, file I/O, or lock acquisition inside `_telemetry_excepthook`.
+**Why bad:** An exception hook runs in a failing program state. Blocking inside the hook can deadlock.
+**Do this instead:** The hook body does only: `is_enabled()` check + scrub/format props + `put_nowait` onto the queue. All network I/O stays in the daemon drain thread.
 
-| File | Purpose | Complexity |
-|------|---------|------------|
-| `shared/image_cache_service.py` | Cache path resolution, status queries, shared between web/desktop | Medium |
-| `scripts/image_cache_fetcher.py` | Batch fetch daemon, rate-limited, priority-ordered | Medium |
-| `scripts/image_cache_admin.py` | CLI tools: stats, re-fetch, purge (optional) | Low |
+### Anti-Pattern 5: Minting the install ID before consent is given
 
-### Files NOT Changed
+**What:** Creating a `uuid4` at import time or app startup, before the user has seen the dialog.
+**Why bad:** An ID that exists before consent undermines the "default OFF" posture.
+**Do this instead:** `uuid4` is minted inside `set_consent(True)` — only when the user actively opts in. `telemetry_install_id` does not exist in `config.pkl` until that moment.
 
-| File | Why |
-|------|-----|
-| `shared/puzzle_image_service.py` | Puzzle cache is a separate concern (background-removed PNGs, not raw JPEGs). No overlap. |
-| `shared/nli_crossref_service.py` | Read-only data source. Used by batch fetcher but not modified. |
-| `web/pages/browse.py` | Consumes URLs from services.py. If services.py returns a cached URL, browse.py uses it transparently. Minimal or zero changes needed. |
+---
 
-## Desktop Bulk Download Architecture
+## Integration Points
 
-For offline use, the desktop app can download the full image cache locally.
+### Internal boundaries
 
-```
-Desktop Settings -> "Download Image Cache" button
-  -> GET /api/cache_manifest -> JSON: [{sys_id, pages, total_bytes}, ...]
-  -> Download thread iterates:
-     For each sys_id in manifest:
-       For each page:
-         GET /cached-images/nli/{prefix}/{sys_id}/page_{N}_800.jpg
-         -> Write to {LOCALAPPDATA}/GenizahSearchPro/cache/images/nli/{prefix}/{sys_id}/...
-  -> Progress dialog: X of Y images, Z GB / N GB, ETA
-  -> Resumable: skip files that already exist locally + match expected size
-```
+| Boundary | Communication | Notes |
+|----------|---------------|-------|
+| `desktop/telemetry.py` -> `shared/posthog_server.py` | Direct call: `enqueue_event()` | Only boundary permitted; AST guard enforces |
+| `desktop/telemetry.py` -> `genizah_core` | `load_app_config()` / `save_app_config()` | No PyQt in `genizah_core`; safe call |
+| `genizah_app.py` -> `desktop/telemetry.py` | Import; `install_exception_hooks()` + `show_first_run_prompt()` at startup; `track()` at action sites | PyQt UI stays in `genizah_app.py`, not in `desktop/telemetry.py` |
+| `gui_threads.py` -> `genizah_app.py` | `perf_signal` Qt signal -> UI-thread slot -> `track_performance()` | Keeps threading clean; telemetry always called on UI thread |
 
-**Storage on user machine:** ~86GB for full 800px cache. Users can choose partial download (e.g., CUL only = ~35GB estimated). The desktop image loading path checks local cache before trying the server.
+### External services
 
-## Scalability Considerations
+| Service | Integration Pattern | Notes |
+|---------|---------------------|-------|
+| PostHog EU (`eu.i.posthog.com`) | Fire-and-forget via `shared/posthog_server` daemon | Existing project id 134161, org "Dicta". `POSTHOG_API_KEY` env var; publishable key embedded in binary is standard PostHog practice |
+| `config.pkl` (local disk) | `load_app_config()` / `save_app_config()` pickle RW | Lives in `%LOCALAPPDATA%\GenizahSearchPro\` on standard install; `Genizah_Index/` on portable. Never cleared by session recovery |
 
-| Concern | Current (0 cached) | At 100K cached | At 815K cached |
-|---------|--------------------|--------------------|---------------------|
-| Disk usage | 0 | ~10 GB | ~86 GB (800px only) |
-| nginx memory | Unchanged | Unchanged | Unchanged (sendfile) |
-| Fetch time (batch) | N/A | ~6 hours | ~45 hours (sequential 200ms) |
-| Browse latency (cache hit) | N/A | <5ms (nginx + disk) | <5ms |
-| Browse latency (cache miss) | 200-2000ms (NLI proxy) | Same | Rare |
-| Desktop download | N/A | ~1 hour (broadband) | ~12 hours (broadband) |
+---
 
-## Build Order (Dependency-Aware)
+## Confidence Assessment
 
-```
-Phase 1: Investigation & Foundation
-  - Rate limit testing (manual NLI fetch experiments)
-  - Create /data/image_cache/ directory structure on EC2
-  - Write shared/image_cache_service.py (path resolution, URL construction)
-  - Create cache_status.db schema
-  - Add nginx location block for /cached-images/
+| Area | Confidence | Basis |
+|------|------------|-------|
+| `desktop/` chokepoint placement | HIGH | `shared/` contract verified against `shared/joins_lab.py` AST guard + `shared/posthog_server.py` docstring |
+| `config.pkl` as consent store | HIGH | `genizah_core.py` lines 2344-2378 + 2871-2891 read directly; `SettingsDialog` already snapshots `load_app_config()` on open |
+| Existing crash handler exact shape | HIGH | `genizah_app.py` lines 148-170 read directly; chain sequence (`sys.__excepthook__`) confirmed |
+| No existing `threading.excepthook` | HIGH | Grep across entire codebase: zero hits |
+| `SearchThread` timing insertion point | HIGH | `gui_threads.py` lines 96-121 read directly; `perf_signal` pattern consistent with `results_signal` / `error_signal` |
+| No `QSettings` in codebase | HIGH | Grep across `genizah_app.py`: zero `QSettings` instantiation |
+| PostHog queue capacity sufficient | HIGH | `shared/posthog_server.py` line 47: `Queue(maxsize=10000)`; desktop volume (dozens of users x 50 searches/day) is far below this |
 
-Phase 2: Batch Fetcher
-  - Write scripts/image_cache_fetcher.py
-  - Priority ordering (NLI-only first)
-  - Rate limiting, error handling, progress tracking
-  - systemd unit file for running as background service
-  - Start fetching (runs for days in background)
-  Depends on: Phase 1 (disk layout, status DB)
+---
 
-Phase 3: Web Integration
-  - Modify web/services.py URL resolution (cached URL preference)
-  - Modify web/api.py with cache-through on miss
-  - Update manuscript_viewer.js fallback chain
-  - Add /api/cache_status endpoint
-  Depends on: Phase 1 (cache service), Phase 2 can run in parallel
-
-Phase 4: Desktop Integration
-  - Modify genizah_core.py to try server cache URL first
-  - Modify gui_threads.py ImageLoaderThread fallback
-  - Add /api/cache_manifest endpoint
-  - Desktop bulk download dialog + thread
-  Depends on: Phase 3 (server endpoints exist)
-
-Phase 5: Monitoring & Polish
-  - Cache status admin page (optional)
-  - Desktop download progress/resume UI
-  - Documentation
-  Depends on: Phases 3-4
-```
-
-## Sources
-
-- Existing codebase analysis: `web/api.py`, `shared/puzzle_image_service.py`, `shared/nli_crossref_service.py`, `web/services.py`, `web/static/manuscript_viewer.js`
-- `.planning/seeds/SEED-001-server-iiif-image-cache.md` -- seed exploration notes with storage estimates
-- `docs/guides/DEPLOYMENT_TECHNICAL.md` -- nginx config, EC2 deployment details
-- IIIF Image API specification for URL format: `{base}/{identifier}/full/{width},/0/default.jpg`
-- nginx documentation for `alias`, `try_files`, `sendfile` directives (HIGH confidence -- well-established patterns)
+*Architecture research for: v8.1.0 Desktop Telemetry integration into the existing PyQt6 + shared/ architecture*
+*Researched: 2026-06-13*
