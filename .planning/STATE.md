@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: none
-milestone_name: "(between milestones — v8.0.0 shipped & closed)"
-status: milestone_complete
-stopped_at: v8.0.0 closed 2026-06-11 (retroactive); awaiting /gsd-new-milestone
-last_updated: "2026-06-11T00:00:00.000Z"
-last_activity: 2026-06-11
+milestone: v8.1.0
+milestone_name: Desktop Telemetry
+status: planning
+last_updated: "2026-06-13T19:12:05.756Z"
+last_activity: 2026-06-13
 progress:
-  total_phases: 7
-  completed_phases: 7
-  total_plans: 31
-  completed_plans: 35
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,15 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-11 after v8.0.0 close)
 
 ## Current Position
 
-**Between milestones.** v8.0.0 Dicta Rebrand & Joins Lab **shipped 2026-06-09** (both apps; tag
-`v8.0.0` @ `71e0912e`; GitHub Release with desktop installer) and was **closed 2026-06-11** via a
-retroactive `/gsd-complete-milestone` (the `/release` flow tagged + shipped but did not run the GSD
-close ritual). 7 phases (103, 105 + 106-110), 31 formal plans, 25 requirements satisfied.
-
-Phase: — (none active)
-Plan: — (none active)
-Status: Milestone complete. Awaiting next milestone.
-Last activity: 2026-06-11
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-06-13 — Milestone v8.1.0 started
 
 ### Next
 

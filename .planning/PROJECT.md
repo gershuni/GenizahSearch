@@ -8,6 +8,20 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
+## Current Milestone: v8.1.0 Desktop Telemetry
+
+**Goal:** Add opt-in, privacy-preserving telemetry to the desktop app ("Dicta Genizah Search Pro") so real-world usage patterns, version adoption, performance, and crashes become visible in PostHog — without ever transmitting My Library data or search content.
+
+**Target features:**
+- **Opt-in consent** — bilingual first-run dialog (default **OFF** until the user consents) plus a Settings/About toggle to change anytime; an anonymous per-install UUID is minted only on opt-in (no PII, no account linkage).
+- **Usage analytics** (counts only, never content): *feature/tab usage* (which tabs, search modes — keyword/Responsa/composition/parallels — Joins Lab, Puzzle, key dialogs); *version & environment* (app-version adoption, OS version, active-user/session signals).
+- **Performance metrics** — search/indexing durations + result counts (**no query text**), kept lightweight and **sampled/aggregated** so heavy users (dozens of them at ~50 searches/day) don't flood the stream.
+- **Crash & error reporting** — global exception hook + handled-error capture with **scrubbed tracebacks** (file paths redacted, frame-local values stripped) so no My Library filenames or search terms can leak.
+- **Privacy guardrails** — a hard, tested rule that every payload excludes My Library paths/filenames/content and all search/query text; bilingual privacy disclosure consistent with the existing posture.
+- **Backend wiring** — reuse the existing web-independent `shared/posthog_server.py` fire-and-forget queue (EU PostHog; publishable project key embedded in the desktop binary). **Desktop-only** — the web app is already instrumented.
+
+**Key context:** The infrastructure groundwork already exists — `shared/posthog_server.py` was deliberately factored to be web-independent ("telemetry queue+daemon reusable by both layers"). Phase numbering continues from **111**. Requirements + roadmap being defined via `/gsd-new-milestone`.
+
 ## Shipped Milestone: v8.0.0 Dicta Rebrand & Joins Lab — ✅ SHIPPED 2026-06-09, CLOSED 2026-06-11
 
 > **CLOSED.** v8.0.0 shipped + tagged 2026-06-09 (`v8.0.0` @ `71e0912e`); the GSD milestone-close
@@ -381,7 +395,7 @@ The per-phase Current State notes below are retained as the milestone's executio
 
 ### Active
 
-**No active milestone.** v8.0.0 shipped 2026-06-09 and closed 2026-06-11. The next milestone is not yet defined — run `/gsd-new-milestone` (questioning → research → requirements → roadmap). A fresh `.planning/REQUIREMENTS.md` is created there.
+**Active milestone: v8.1.0 Desktop Telemetry** — defining requirements (see `.planning/REQUIREMENTS.md`). Opt-in PostHog telemetry on the desktop app: usage analytics (feature/tab usage + version/environment) + performance metrics + crash/error reporting, with a hard **no-My-Library / no-search-content** privacy rule, a first-run consent dialog + Settings toggle, an anonymous per-install UUID, and scrubbed crash tracebacks. Reuses the web-independent `shared/posthog_server.py` queue. **Desktop-only** (the web app is already instrumented). Phase numbering continues from 111.
 
 **Deferred to a post-v8.0.0 milestone (user decision 2026-06-08 — scope, not gaps):**
 - **Component B — Join Workbench search-support algorithms (both apps):** JSA-01 (seed parallels/composition from the anchor passage), JSA-02 (corpus-driven suggest-then-search completion of a torn line's first/last N words), JSA-03 (`[`/`]`-aware torn-word completion), and JWB-05 (conservative tear-side assist; corrected rule start-`]` = LEFT / end-`[` = RIGHT; "both edges torn" first-class; silent when unclear). These ride the completed Component A.
@@ -518,7 +532,9 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-11 — **v8.0.0 Dicta Rebrand & Joins Lab milestone CLOSED** (retroactive — `/release` shipped + tagged `v8.0.0` @ `71e0912e` 2026-06-09 but did not run the GSD close ritual). Full evolution review done: 14 shipped requirements (JWB-01..12, COMP-LOC-01/02, EXP-F3) moved to Validated; Active cleared (no active milestone); 8 v8.0.0 Key Decisions logged/resolved; roadmap collapsed and archived to `.planning/milestones/v8.0.0-ROADMAP.md` + `v8.0.0-REQUIREMENTS.md`; `.planning/REQUIREMENTS.md` removed (fresh for next milestone). Component B (JSA-01/02/03 + JWB-05) + web Joins Lab UI deferred to a post-v8.0.0 milestone. NEXT: `/gsd-new-milestone`. Prior entry: 2026-06-08 — Phase 109 (visual-similarity merge & soft-retire) complete & verified (3/3 SC; JWB-12; `_show_vs_dialog` marked removable, D-11). Prior: 2026-06-04 — Phase 107 (desktop Joins Lab shell) complete (6/6 SC; pairwise→group join model; feature renamed "Joins Lab"). Prior: 2026-06-03 — Phase 106 (Joins Lab shared core) complete (6/6 SC; `shared/joins_lab.py` + 66 tests). Prior: Milestone v8.0.0 opened (folds the delivered v7.17 cycle — rebrand + LOCAL export, Phases 103/105 — into v8.0.0). Origin: Spike 002 SPIKE-FINDINGS.md + docs/FEATURE_IDEAS.md.*
+*Last updated: 2026-06-13 — **v8.1.0 Desktop Telemetry milestone opened** via `/gsd-new-milestone`. Goal: opt-in, privacy-preserving PostHog telemetry on the desktop app (usage analytics + version/environment + performance + crash/error reporting), reusing the web-independent `shared/posthog_server.py` queue; hard no-My-Library / no-search-content rule; first-run consent dialog + Settings toggle; anonymous per-install UUID; scrubbed crash tracebacks. Desktop-only (web already instrumented). Phase numbering continues from 111. Requirements + roadmap being defined.*
+
+*Prior: 2026-06-11 — **v8.0.0 Dicta Rebrand & Joins Lab milestone CLOSED** (retroactive — `/release` shipped + tagged `v8.0.0` @ `71e0912e` 2026-06-09 but did not run the GSD close ritual). Full evolution review done: 14 shipped requirements (JWB-01..12, COMP-LOC-01/02, EXP-F3) moved to Validated; Active cleared (no active milestone); 8 v8.0.0 Key Decisions logged/resolved; roadmap collapsed and archived to `.planning/milestones/v8.0.0-ROADMAP.md` + `v8.0.0-REQUIREMENTS.md`; `.planning/REQUIREMENTS.md` removed (fresh for next milestone). Component B (JSA-01/02/03 + JWB-05) + web Joins Lab UI deferred to a post-v8.0.0 milestone. NEXT: `/gsd-new-milestone`. Prior entry: 2026-06-08 — Phase 109 (visual-similarity merge & soft-retire) complete & verified (3/3 SC; JWB-12; `_show_vs_dialog` marked removable, D-11). Prior: 2026-06-04 — Phase 107 (desktop Joins Lab shell) complete (6/6 SC; pairwise→group join model; feature renamed "Joins Lab"). Prior: 2026-06-03 — Phase 106 (Joins Lab shared core) complete (6/6 SC; `shared/joins_lab.py` + 66 tests). Prior: Milestone v8.0.0 opened (folds the delivered v7.17 cycle — rebrand + LOCAL export, Phases 103/105 — into v8.0.0). Origin: Spike 002 SPIKE-FINDINGS.md + docs/FEATURE_IDEAS.md.*
 
 *Prior: 2026-06-01 — v7.16 Hebrew PDF Text Quality milestone CLOSED (1 formal phase 102 + no-phase de-space/UAT/freeze work; shipped v7.16.0 desktop, tag `v7.16.0` @ `ccb87c90`, GitHub Release with installer marked latest, CI green). LOCAL Hebrew PDF text-layer extraction rewritten (rawdict per-glyph, RTL-gated, Otsu de-space, Mn nikud), file-management actions for LOCAL hits, and three search/startup freeze fixes (778 MB history file, large-folder O(n²) startup, LAB-rebuild churn).*
 
