@@ -142,7 +142,7 @@ _TRACK_FORBIDDEN_EVENTS: frozenset[str] = frozenset({
 _PATH_RE = re.compile(
     r'[A-Za-z]:\\\S+'            # Windows absolute path: C:\...
     r'|/\S{3,}'                   # POSIX absolute path: /home/... (>=3 chars after /)
-    r'|\S+\.\w{2,4}\b',           # bare filename: foo.pdf
+    r'|\S+\.[A-Za-z]\w{0,7}\b',   # bare filename: foo.pdf, data.sqlite3, notes.markdown
     re.UNICODE,
 )
 
@@ -185,6 +185,32 @@ def _is_banned_key(key: str) -> bool:
     return any(token in lower for token in _BANNED_KEY_SUBSTRINGS)
 
 
+def _scrub_value(v: object) -> object:
+    """Recursively scrub a single value — applies to all nesting levels (CR-01).
+
+    - str: cap length FIRST (WR-01 — prevents regex backtracking hang on crash path),
+           then redact Windows/POSIX paths and bare filenames, then redact Hebrew text.
+    - dict: drop banned keys, recursively scrub values.
+    - list/tuple: recursively scrub each element (returned as list).
+    - other: passed through unchanged (int, bool, float, None, etc.).
+
+    Pure function. Never raises.
+    """
+    if isinstance(v, str):
+        # WR-01: cap BEFORE running the regex so backtracking cost is bounded
+        v = v[:500]
+        v = _PATH_RE.sub('[REDACTED]', v)
+        if _HEBREW_TEXT_RE.search(v):
+            return '[REDACTED]'
+        return v
+    if isinstance(v, dict):
+        return {k: _scrub_value(val) for k, val in v.items()
+                if not _is_banned_key(k)}
+    if isinstance(v, (list, tuple)):
+        return [_scrub_value(x) for x in v]
+    return v
+
+
 def _scrub_props(props: dict) -> dict:
     """Structural scrubber — drop banned keys, redact path/Hebrew values, cap length.
 
@@ -193,17 +219,15 @@ def _scrub_props(props: dict) -> dict:
 
     Key-ban uses exact/token matching (not broad substring) so the allowlisted
     'context' key SURVIVES even though it contains 'text' as a substring.
+
+    CR-01 fix: delegates to _scrub_value() which recurses into dict/list/tuple values,
+    so nested PII in $set / $set_once payloads is also redacted at every nesting level.
     """
     out: dict = {}
     for k, v in props.items():
         if _is_banned_key(k):
             continue
-        if isinstance(v, str):
-            v = _PATH_RE.sub('[REDACTED]', v)
-            if _HEBREW_TEXT_RE.search(v):
-                v = '[REDACTED]'
-            v = v[:500]
-        out[k] = v
+        out[k] = _scrub_value(v)
     return out
 
 
@@ -265,8 +289,12 @@ def _wire_transport_config() -> None:
     """
     try:
         key = os.environ.get('GENIZAH_TELEMETRY_KEY') or _TELEMETRY_KEY_DEFAULT
+        # WR-05: treat placeholder as no key so events drop locally, not POSTed
+        # with a junk key until the real phc_... key lands before Phase 114.
+        if key == _TELEMETRY_KEY_DEFAULT:
+            key = None
         host = os.environ.get('GENIZAH_TELEMETRY_HOST') or None
-        set_capture_api_key(key or None)
+        set_capture_api_key(key)
         set_capture_host(host)
     except Exception:
         logger.debug('telemetry: _wire_transport_config silently failed', exc_info=True)
@@ -339,6 +367,8 @@ def set_consent(enabled: bool) -> None:
     On opt-out (CONSENT-06):
         - Sets telemetry_enabled=False
         - RETAINS telemetry_install_id (never deletes it)
+        - Clears IDENTIFIED_USER_KEY in config (WR-02 clean privacy boundary)
+        - Resets in-memory identity to anonymous (WR-02)
         - Drains the in-memory queue (CONSENT-08)
         - Clears the default distinct_id from the transport
 
@@ -363,6 +393,11 @@ def set_consent(enabled: bool) -> None:
             updates[CONSENT_TIMESTAMP_KEY] = datetime.now(timezone.utc).isoformat()
             updates[CONSENT_APP_VERSION_KEY] = _APP_VERSION
             updates[CONSENT_UI_VERSION_KEY] = '1'
+        else:
+            # WR-02: clear identified user from config on opt-out.
+            # CONSENT-06 only requires retaining telemetry_install_id, not the
+            # identified user -- opt-out is a clean privacy boundary.
+            updates[IDENTIFIED_USER_KEY] = None
         # CONSENT-06: do NOT include TELEMETRY_INSTALL_ID_KEY in updates on opt-out
         save_app_config(updates)
         with _enabled_lock:
@@ -375,6 +410,11 @@ def set_consent(enabled: bool) -> None:
             # Opt-out: drain queued events (CONSENT-08) and clear default distinct_id
             _drain_and_discard()
             set_default_distinct_id(None)
+            # WR-02: reset in-memory identity to anonymous so re-opt-in starts clean.
+            # _install_id is retained (CONSENT-06) but identity is wiped.
+            with _state_lock:
+                _identified = False
+                _current_distinct_id = _install_id
     except Exception:
         logger.debug('telemetry: set_consent silently failed', exc_info=True)
 
@@ -398,15 +438,20 @@ def _emit(event_value: str, props: dict, distinct_id: str | None = None) -> None
     """
     try:
         merged = dict(_BASE_PROPS())
-        # Add $process_person_profile based on identity state
+        # WR-04: read _identified AND _current_distinct_id in a SINGLE lock acquisition
+        # so an identify/reset on another thread cannot mislabel an event
+        # (e.g. identified=True paired with the old anonymous distinct_id).
         with _state_lock:
             identified = _identified
+            effective_id = distinct_id or _current_distinct_id or 'system'
         merged['$process_person_profile'] = identified
         merged.update(props)
+        # IN-02: re-apply the computed $process_person_profile AFTER merged.update(props)
+        # so a caller-supplied value cannot override it -- anonymous users must not
+        # force person-profile processing via track() kwargs.
+        merged['$process_person_profile'] = identified
         validated = _validate_props(merged)
         scrubbed = _scrub_props(validated)
-        with _state_lock:
-            effective_id = distinct_id or _current_distinct_id or 'system'
         enqueue_event(event_value, scrubbed, distinct_id=effective_id)
     except Exception:
         logger.debug('telemetry: _emit silently failed for %r', event_value, exc_info=True)
@@ -433,6 +478,10 @@ def track(event: 'str | DesktopEvent', **props) -> None:
         if isinstance(event, DesktopEvent):
             event_value = event.value
         else:
+            # IN-03: str(event) on an arbitrary object could produce surprising values,
+            # but the result is IMMEDIATELY re-validated against _VALID_EVENT_VALUES
+            # (the fixed DesktopEvent registry, PRIV-06). Only exact enum string values
+            # pass. Phase 113-115 authors must NOT bypass this check.
             event_value = str(event)
         # Reject if not a valid DesktopEvent value (PRIV-06)
         if event_value not in _VALID_EVENT_VALUES:
@@ -464,6 +513,7 @@ def track_performance(
         if isinstance(event, DesktopEvent):
             event_value = event.value
         else:
+            # IN-03: str() result is immediately re-validated against the fixed registry
             event_value = str(event)
         if event_value not in _VALID_EVENT_VALUES:
             logger.debug('telemetry: track_performance() rejected unknown event %r', event_value)
@@ -654,6 +704,7 @@ __all__ = [
     '_reset_for_tests',
     '_load_consent_state',
     '_wire_transport_config',
+    '_scrub_value',
     '_scrub_props',
     '_validate_props',
     '_emit',
@@ -672,12 +723,22 @@ if __name__ == '__main__':
     import sys
     if os.environ.get('GENIZAH_TELEMETRY_KEY'):
         print('telemetry: running self-test pipeline probe...')
-        set_consent(True)
-        run_selftest()
-        # Allow daemon thread to drain
-        import time
-        time.sleep(1.0)
-        print('telemetry: self-test complete (check PostHog for desktop_selftest event)')
+        # WR-03: do NOT persistently mutate real consent -- snapshot and restore
+        # so config.pkl is left untouched by a developer running the self-test.
+        # In-memory _enabled toggle lets the probe run without writing to disk.
+        prior_enabled = is_enabled()
+        try:
+            with _enabled_lock:
+                _enabled = True  # in-memory only, no config.pkl write
+            _wire_transport_config()  # apply the env key for this one run
+            run_selftest()
+            # Allow daemon thread to drain
+            import time
+            time.sleep(1.0)
+            print('telemetry: self-test complete (check PostHog for desktop_selftest event)')
+        finally:
+            with _enabled_lock:
+                _enabled = prior_enabled
     else:
         print('Set GENIZAH_TELEMETRY_KEY env var to run the self-test.', file=sys.stderr)
         sys.exit(1)
