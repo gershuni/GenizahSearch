@@ -88,7 +88,10 @@ See: .planning/milestones/v7.16-ROADMAP.md
   3. `_scrub_props()` strips banned keys, redacts path-like strings, and drops frame locals from any dict before it can reach `enqueue_event` — verified by unit tests with real Windows-path fixtures and Hebrew query strings.
   4. A static property allowlist rejects any property not on the list (including `hostname`, `username`, `executable path`, `cwd`, and all query/content-derived fields); event names are drawn exclusively from a fixed registry enum with no dynamic construction.
   5. `shared/posthog_server.py` gains backward-compatible additions (`_telemetry_enabled` gate, `_scrub_hook`, `set_default_distinct_id`, `_flush_before_exit`) without breaking its existing web/breaker consumers or the 5 test monkeypatches targeting `_event_queue`.
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 111-01-PLAN.md — `shared/posthog_server.py` neutral additions (set_default_distinct_id, register_scrub_hook, _flush_before_exit, _drain_and_discard) + INFRA-03 tests [Wave 1]
+- [ ] 111-02-PLAN.md — `desktop/telemetry.py` chokepoint: consent gate + config.pkl persistence + scrubber + property allowlist + DesktopEvent enum + 8 callables + identity hooks + self-test [Wave 2]
+- [ ] 111-03-PLAN.md — PRIV-03 chokepoint AST guard `tests/test_telemetry_no_direct_posthog.py` (landed early from Phase 116) [Wave 3]
 
 ### Phase 112: Consent UX
 **Goal**: The user can give or withdraw consent through a bilingual first-run dialog (shown exactly once, on first launch after updating to v8.1.0) and a Settings/About toggle; opting out immediately drains and discards any already-queued events; a bilingual privacy disclosure is reachable from both surfaces.
@@ -152,7 +155,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 111. Telemetry Foundation | v8.1.0 | 0/TBD | Not started | - |
+| 111. Telemetry Foundation | v8.1.0 | 0/3 | Planned | - |
 | 112. Consent UX | v8.1.0 | 0/TBD | Not started | - |
 | 113. Crash Reporting | v8.1.0 | 0/TBD | Not started | - |
 | 114. Usage Analytics | v8.1.0 | 0/TBD | Not started | - |
