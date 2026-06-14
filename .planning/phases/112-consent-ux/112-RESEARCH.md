@@ -635,17 +635,17 @@ The instance is reused (single construction). This confirms the snapshot is take
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **SettingsDialog `_open_settings_dialog` method**
+1. **SettingsDialog `_open_settings_dialog` method** — RESOLVED (non-blocking)
    - What we know: `self.settings_dialog = SettingsDialog(self)` at line 3438 (constructed once)
    - What's unclear: Whether `_open_settings_dialog` calls `.show()` or `.exec()` — this affects whether subsequent opens trigger any re-init
-   - Recommendation: Planner should read `_open_settings_dialog` at implementation time; if it uses `.exec()`, the dialog is modal and destroyed or hidden after close; if `.show()`, it persists. Either way the snapshot-strip approach is correct.
+   - Resolution: The snapshot-strip approach (D-07b) is correct **either way** — `.exec()` (modal, hidden/destroyed after close) or `.show()` (persists). Planner does not need the answer to plan correctly; executor reads `_open_settings_dialog` at implementation time as a sanity check. Does not block planning.
 
-2. **PrivacyDialog Hebrew text**
+2. **PrivacyDialog Hebrew text** — RESOLVED (deferred to translation workflow)
    - What we know: D-10 lists required content points in English
    - What's unclear: The exact Hebrew translation of the disclosure text
-   - Recommendation: Planner writes English text; Hebrew translation can be done by the implementer or via the project's existing translation workflow. Flag as a manual task in Wave 0.
+   - Resolution: Planner authors the English text and a best-effort Hebrew block; the canonical Hebrew translation runs through the project's existing translation workflow (flagged in Plan 01's `<output>`). This is an implementer/translation task, not an execution-blocking unknown.
 
 ---
 
