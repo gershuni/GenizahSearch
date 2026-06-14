@@ -5,6 +5,7 @@
 **Milestone goal:** Add opt-in, privacy-preserving telemetry to the desktop app ("Dicta Genizah Search Pro") so real-world usage, version adoption, performance, crashes, and **cross-surface (web↔desktop) per-user journeys** become visible in PostHog — without ever transmitting My Library data or search content. Desktop telemetry feeds the **existing shared web PostHog project** and is identity-aligned with the web app; **no web code change is required** (the web already identifies logged-in users).
 
 **Fixed constraints (user decisions — design within them):**
+
 - Opt-in only; default **OFF** until the user consents.
 - First-run consent dialog shown **on first launch after updating** (existing v8.0.0 users + fresh installs) + a Settings/About toggle.
 - **Identity-aligned with web:** logged-out users → anonymous per-install `uuid4` (opt-out **keeps the id**, stops emission); logged-in + consented users → `identify(distinct_id = Supabase user.id)` exactly matching `web/auth_state.py:160-170`, aliasing the per-install anon id on login, resetting to anonymous on logout. Desktop sends **only the user id** for identity (never email/name — web already attaches those); desktop never sends PII beyond that id.
@@ -26,7 +27,7 @@
 - [ ] **CONSENT-05**: An anonymous per-install identifier (uuid4) is minted on opt-in and used as the PostHog `distinct_id` for **logged-out** users; it is never derived from hardware/MAC. For **logged-in** users the `distinct_id` is the Supabase `user.id` (see IDENT-01). No hardware fingerprinting either way.
 - [ ] **CONSENT-06**: Opting out stops all event emission immediately; the per-install ID is **retained** on disk (not deleted) so re-opt-in preserves continuity.
 - [ ] **CONSENT-07**: Consent + identity state persists in the existing config store (`config.pkl` via `load_app_config`/`save_app_config`) — no new settings file, no `QSettings`.
-- [ ] **CONSENT-08**: Opting out not only stops new producers but also **drains/discards any already-queued, un-sent events** so nothing buffered before opt-out is transmitted afterward.
+- [x] **CONSENT-08**: Opting out not only stops new producers but also **drains/discards any already-queued, un-sent events** so nothing buffered before opt-out is transmitted afterward.
 
 ### Usage Analytics (USAGE)
 
@@ -73,9 +74,9 @@
 
 - [ ] **INFRA-01**: Desktop events go to the **existing shared web PostHog project** (id 134161, EU), reusing the web app's publishable (write-only) ingest key embedded in the desktop binary (overridable via `GENIZAH_TELEMETRY_KEY`/host). NO separate project. Web↔desktop separation is by `platform=desktop` + the `desktop_` event-name namespace (USAGE-05).
 - [ ] **INFRA-02**: A desktop telemetry chokepoint module (`desktop/telemetry.py`) exposes the only public API for emitting events (track / track_performance / consent / install-hooks), each internally consent-gated and scrubbed, delegating to `shared/posthog_server.enqueue_event`.
-- [ ] **INFRA-03**: `shared/posthog_server.py` gains backward-compatible additions only (consent-gate hook, `distinct_id` injection, flush-before-exit) without breaking its existing web/breaker consumers or the 5 test monkeypatches.
-- [ ] **INFRA-04**: Telemetry adds **zero** new pip dependencies and requires no PyInstaller spec changes beyond what's already bundled (reuse the raw queue; do NOT add the `posthog` SDK).
-- [ ] **INFRA-05**: Telemetry degrades silently and never blocks the UI thread when offline/air-gapped or when the key is absent (fire-and-forget; SSL certs verified in the frozen binary). Events are **memory-only** — never spooled to disk.
+- [x] **INFRA-03**: `shared/posthog_server.py` gains backward-compatible additions only (consent-gate hook, `distinct_id` injection, flush-before-exit) without breaking its existing web/breaker consumers or the 5 test monkeypatches.
+- [x] **INFRA-04**: Telemetry adds **zero** new pip dependencies and requires no PyInstaller spec changes beyond what's already bundled (reuse the raw queue; do NOT add the `posthog` SDK).
+- [x] **INFRA-05**: Telemetry degrades silently and never blocks the UI thread when offline/air-gapped or when the key is absent (fire-and-forget; SSL certs verified in the frozen binary). Events are **memory-only** — never spooled to disk.
 - [ ] **INFRA-06**: Operational runbook — the desktop PostHog project is isolated from the web project; the embedded ingest key is documented as write-only (treated as abuse-tolerant with a rotation procedure, not a secret); and both `get_dropped_event_count()` drop counters (`web.api_hardening` + `shared.posthog_server`) are monitored after launch.
 
 ---
@@ -130,7 +131,7 @@
 | CONSENT-05 | Phase 111 | Pending |
 | CONSENT-06 | Phase 111 | Pending |
 | CONSENT-07 | Phase 111 | Pending |
-| CONSENT-08 | Phase 112 | Pending |
+| CONSENT-08 | Phase 112 | Complete |
 | USAGE-01 | Phase 114 | Pending |
 | USAGE-02 | Phase 114 | Pending |
 | USAGE-03 | Phase 114 | Pending |
@@ -159,12 +160,13 @@
 | PRIV-06 | Phase 111 | Pending |
 | INFRA-01 | Phase 111 | Pending |
 | INFRA-02 | Phase 111 | Pending |
-| INFRA-03 | Phase 111 | Pending |
-| INFRA-04 | Phase 111 | Pending |
-| INFRA-05 | Phase 111 | Pending |
+| INFRA-03 | Phase 111 | Complete |
+| INFRA-04 | Phase 111 | Complete |
+| INFRA-05 | Phase 111 | Complete |
 | INFRA-06 | Phase 116 | Pending |
 
 **Coverage:**
+
 - v8.1.0 requirements: 40 total
 - Mapped to phases: 40/40 ✓
 - Unmapped: 0 ✓

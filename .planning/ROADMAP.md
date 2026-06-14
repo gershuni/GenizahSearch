@@ -79,83 +79,102 @@ See: .planning/milestones/v7.16-ROADMAP.md
 ## Phase Details
 
 ### Phase 111: Telemetry Foundation
+
 **Goal**: The `desktop/telemetry.py` chokepoint module exists with its full public API, consent state persists in `config.pkl`, the structural scrubber enforces no-PII at the network boundary, and the property/event allowlist prevents future accidental leaks — but no events fire yet because no producers are wired.
 **Depends on**: Nothing (no prior v8.1.0 phases)
 **Requirements**: CONSENT-01, CONSENT-05, CONSENT-06, CONSENT-07, INFRA-01, INFRA-02, INFRA-03, INFRA-04, INFRA-05, PRIV-01, PRIV-02, PRIV-06, IDENT-03, IDENT-04
 **Success Criteria** (what must be TRUE):
+
   1. `desktop/telemetry.py` is importable and exposes all eight public callables (`is_enabled`, `track`, `track_performance`, `track_error`, `get_install_id`, `set_consent`, `install_exception_hooks`, `show_first_run_prompt`) plus the identity hooks (`identify`/`reset` or equivalent); every call gate-checks `is_enabled()` and returns immediately when consent is absent or false — a fresh `config.pkl` emits zero events. Events target the shared web project (reused publishable key, env-overridable).
   2. `set_consent(True)` mints a UUID-v4 install ID and persists it in `config.pkl`; `set_consent(False)` stops emission immediately; the install ID is retained on disk (not deleted). `distinct_id` resolves to the **Supabase `user.id` when logged in**, else the per-install uuid; the `$identify`/alias/reset emission mechanism exists and is consent-gated (IDENT-04) though login/logout wiring lands in Phase 114.
   3. `_scrub_props()` strips banned keys, redacts path-like strings, and drops frame locals from any dict before it can reach `enqueue_event` — verified by unit tests with real Windows-path fixtures and Hebrew query strings.
   4. A static property allowlist rejects any property not on the list (including `hostname`, `username`, `executable path`, `cwd`, and all query/content-derived fields); event names are drawn exclusively from a fixed registry enum with no dynamic construction.
   5. `shared/posthog_server.py` gains backward-compatible NEUTRAL additions (`_scrub_hook`, `set_default_distinct_id`, `set_capture_api_key`/`set_capture_host`, `_flush_before_exit`) without breaking its existing web/breaker consumers or the 5 test monkeypatches targeting `_event_queue`. Per D-04 the module stays **UNGATED** — the consent gate (`is_enabled()`) lives only in `desktop/telemetry.py`; no global `_telemetry_enabled` gate is added to the shared module (that would suppress web/NLI-breaker telemetry by desktop consent).
+
 **Plans**: 3 plans
-- [ ] 111-01-PLAN.md — `shared/posthog_server.py` neutral additions (set_default_distinct_id, register_scrub_hook, _flush_before_exit, _drain_and_discard) + INFRA-03 tests [Wave 1]
+
+- [x] 111-01-PLAN.md — `shared/posthog_server.py` neutral additions (set_default_distinct_id, register_scrub_hook, _flush_before_exit, _drain_and_discard) + INFRA-03 tests [Wave 1]
 - [ ] 111-02-PLAN.md — `desktop/telemetry.py` chokepoint: consent gate + config.pkl persistence + scrubber + property allowlist + DesktopEvent enum + 8 callables + identity hooks + self-test [Wave 2]
 - [ ] 111-03-PLAN.md — PRIV-03 chokepoint AST guard `tests/test_telemetry_no_direct_posthog.py` (landed early from Phase 116) [Wave 3]
 
 ### Phase 112: Consent UX
+
 **Goal**: The user can give or withdraw consent through a bilingual first-run dialog (shown exactly once, on first launch after updating to v8.1.0) and a Settings/About toggle; opting out immediately drains and discards any already-queued events; a bilingual privacy disclosure is reachable from both surfaces.
 **Depends on**: Phase 111
 **Requirements**: CONSENT-02, CONSENT-03, CONSENT-04, CONSENT-08, PRIV-05
 **Success Criteria** (what must be TRUE):
+
   1. On first launch after upgrade (or fresh install), a bilingual EN/HE modal dialog appears with two equal-weight buttons (no pre-selection, no Enter-key shortcut defaulting to Accept) — pressing Enter without reading leaves the user opted out.
   2. The dialog fires exactly once across app restarts: after any choice, `telemetry_first_run_shown=True` is written to `config.pkl` unconditionally and subsequent launches skip the dialog entirely.
   3. The stored consent record includes the consent timestamp, app version, and consent-UI version, providing a lightweight audit trail.
   4. The Settings/About toggle reads and writes the same `telemetry_enabled` key as the first-run dialog; toggling off immediately purges any already-queued un-sent events so nothing buffered before opt-out is transmitted afterward.
   5. A bilingual (EN/HE) privacy disclosure explains what is collected, what is not (no search content, no My Library paths/filenames), who processes the data, and how to opt out — accessible from both the first-run dialog and the Settings toggle location.
+
 **Plans**: TBD
 **UI hint**: yes
 
 ### Phase 113: Crash Reporting
+
 **Goal**: Uncaught exceptions on any thread are captured, scrubbed, and enqueued non-blockingly before the existing crash-log handler runs; faulthandler captures native C-extension crashes to a local file; a bounded synchronous flush delivers the crash event before process exit; next-launch detection re-emits native crash signals after consent is confirmed.
 **Depends on**: Phase 112
 **Requirements**: CRASH-01, CRASH-02, CRASH-03, CRASH-04, CRASH-05, CRASH-06, CRASH-07
 **Success Criteria** (what must be TRUE):
+
   1. `install_exception_hooks()` wraps (never replaces) the existing `_setup_crash_handler()` so `crash_log.txt` continues to be written — verified by a test that raises an exception after hook installation and confirms both the PostHog enqueue and the crash-log file write occur.
   2. `threading.excepthook` is installed to capture QThread/worker exceptions (SearchThread, LocalIndexerWorker, FolderWalkWorker) that do not reach `sys.excepthook`; `KeyboardInterrupt` is explicitly excluded from both hooks.
   3. Crash events contain only exception type name, scrubbed module basename + line number, app version, and OS — no frame locals, no exception message string, no file paths, no query text — enforced by the Phase 111 scrubber applied inside the hook before enqueue.
   4. The exception hook body is non-blocking (executes only `traceback.format_exception` + scrub + `put_nowait`; no network I/O, no disk I/O, no lock acquisition) and is entirely wrapped in `try/finally` so the existing crash handler always runs even if the telemetry step throws.
   5. A bounded synchronous `_flush_before_exit(timeout=0.5)` is called inside the exception hook after enqueueing the crash event, and via `atexit` for clean exits, so crash events are not silently lost when the daemon drain thread is killed at process exit.
+
 **Plans**: TBD
 
 ### Phase 114: Usage Analytics
+
 **Goal**: The desktop app emits allowlisted usage events (session start/end, tab/surface activations, search mode and corpus enums) that enable DAU/MAU, version adoption, and feature-use measurement in PostHog — with no query content, no My Library data, and no environment identifiers beyond OS family/version.
 **Depends on**: Phase 112
 **Requirements**: USAGE-01, USAGE-02, USAGE-03, USAGE-04, USAGE-05, USAGE-06, IDENT-01, IDENT-02
 **Success Criteria** (what must be TRUE):
+
   0. On login the desktop calls `identify(distinct_id = Supabase user.id)` (exact match to `web/auth_state.py:160-170`) and aliases the prior anonymous per-install uuid (`$anon_distinct_id`); on logout it resets to the anonymous id. Only the user id is sent — never email/name. A logged-in researcher's web + desktop events merge into one person in the shared project.
   1. A session-start event fires once per process after consent is confirmed, carrying only allowlisted environment props: app version, OS family + version, Python/PyQt version, UI language — never hostname, machine name, username, executable path, or working directory.
   2. Feature usage events capture which tabs and key surfaces (Joins Lab, Fragment Puzzle, major dialogs) are opened as counts; no free-text or content properties appear on any event.
   3. Search executions are captured with `search_mode` (keyword/Responsa/composition/parallels) and `corpus_scope` (Genizah/Local/ALL) as fixed enum values — the query text, filter content, and exclusion list are structurally absent (not present in the event, not scrubbed away).
   4. Every event carries base properties (`platform=desktop`, `$process_person_profile=false`, `app_version`) applied through a single shared `_emit()` helper; no callsite adds these manually or bypasses the helper.
   5. Exactly one telemetry session ID is generated per process; all timestamps are UTC; performance durations use a monotonic clock; a crash-restart begins a fresh session without emitting a duplicate session-start for the crashed process.
+
 **Plans**: TBD
 
 ### Phase 115: Performance Metrics
+
 **Goal**: Search and indexing durations are measured on worker threads and accumulated into a per-session summary (aggregated result counts and latency buckets) that is flushed once at session close and periodically — never one event per search — so heavy users (~50 searches/day) do not flood the PostHog stream.
 **Depends on**: Phase 112
 **Requirements**: PERF-01, PERF-02, PERF-03
 **Success Criteria** (what must be TRUE):
+
   1. `SearchThread`, `CompositionThread`, and `LabSearchThread` each emit a `perf_signal(float, int)` Qt signal on completion carrying elapsed milliseconds and result count; the UI-thread handler calls `track_performance()` without exposing any query text.
   2. Result counts are reported exclusively as bounded buckets (e.g., 0 / 1-10 / 11-50 / 51-200 / 200+), never as raw integers that would create unbounded PostHog histogram cardinality.
   3. Performance data accumulates in a per-session in-memory summary (median/p95 + counts per search mode); the summary flushes as a single `desktop_session_performance_summary` event at app close and on a configurable periodic schedule — the default produces approximately tens of events per day for heavy users, not hundreds; sampling and flush interval are tunable via environment variable or config without a code change.
+
 **Plans**: TBD
 
 ### Phase 116: Privacy Audit + CI Gate
+
 **Goal**: The complete telemetry stack is validated end-to-end: the AST guard runs green in CI on both Ubuntu and Windows, automated tests prove that no forbidden field ever reaches `enqueue_event`, frozen-binary SSL and offline degradation are verified on a clean Windows machine, and the operational runbook documents the desktop PostHog project, embedded key posture, and drop-counter monitoring.
 **Depends on**: Phases 113, 114, 115
 **Requirements**: PRIV-03, PRIV-04, INFRA-06
 **Success Criteria** (what must be TRUE):
+
   1. The AST CI guard (`tests/test_telemetry_no_direct_posthog.py`, modeled on `test_no_raw_storage_access.py`) passes on both Ubuntu and Windows CI: no file under `desktop/` except `desktop/telemetry.py` imports `shared.posthog_server` or calls `enqueue_event` directly.
   2. Automated tests assert that representative crash tracebacks, My Library search scenarios, and composition searches never produce a PostHog payload containing any forbidden field — explicitly: My Library paths, filenames, query/search text, usernames, or hostnames — and that zero events are enqueued before consent is confirmed.
   3. The frozen `.exe` on a clean Windows machine (no Python installed) successfully delivers events to the desktop PostHog project (SSL cert bundle present and functional); with network disabled, the app starts normally and telemetry degrades silently with no dialog, no delay, and no crash.
+
 **Plans**: TBD
 
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 111. Telemetry Foundation | v8.1.0 | 0/3 | Planned | - |
+| 111. Telemetry Foundation | v8.1.0 | 1/3 | In Progress|  |
 | 112. Consent UX | v8.1.0 | 0/TBD | Not started | - |
 | 113. Crash Reporting | v8.1.0 | 0/TBD | Not started | - |
 | 114. Usage Analytics | v8.1.0 | 0/TBD | Not started | - |
