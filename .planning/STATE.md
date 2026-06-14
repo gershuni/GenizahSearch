@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.1.0
 milestone_name: Desktop Telemetry
-status: executing
-stopped_at: Completed 111-02-PLAN.md
-last_updated: "2026-06-14T09:50:30.491Z"
+status: verifying
+stopped_at: Completed 111-03-PLAN.md
+last_updated: "2026-06-14T09:55:32.924Z"
 last_activity: 2026-06-14
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
-  percent: 0
+  completed_plans: 3
+  percent: 17
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-11 after v8.0.0 close)
 
 Phase: 111 (telemetry-foundation) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-14
 
 Progress: [░░░░░░░░░░] 0%
@@ -66,8 +66,8 @@ None specific to v8.1.0 yet.
 
 ## Session Continuity
 
-Last session: 2026-06-14T09:50:30.486Z
-Stopped at: Completed 111-02-PLAN.md
+Last session: 2026-06-14T09:55:32.918Z
+Stopped at: Completed 111-03-PLAN.md
 Resume file: None
 Next step: `/gsd-plan-phase 111` — Telemetry Foundation
 
@@ -77,3 +77,8 @@ Next step: `/gsd-plan-phase 111` — Telemetry Foundation
 |-------|------|----------|-------|
 | Phase 111-telemetry-foundation P01 | 4min | 2 tasks | 2 files |
 | Phase 111-telemetry-foundation P02 | 9min | 3 tasks | 5 files |
+| Phase 111-telemetry-foundation P03 | 2min | 1 tasks | 1 files |
+
+## Decisions
+
+- [Phase 111-telemetry-foundation]: PRIV-03 AST guard delivered early in Phase 111-03 (vs Phase-116 slot) — no allowlist, absolute invariant, resolved-path exemption

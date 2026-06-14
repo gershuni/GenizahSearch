@@ -65,7 +65,7 @@
 
 - [x] **PRIV-01**: A single structural scrubber sanitizes every outgoing payload (drops banned keys, redacts path-like strings, strips frame locals, caps lengths) so the no-content/no-PII rule holds structurally — not by per-call discipline.
 - [x] **PRIV-02**: A telemetry property allowlist constrains which properties may be sent; anything not on the allowlist is dropped. The allowlist explicitly excludes environment identifiers (hostname/machine name, username, executable path, cwd) and any property derived from visible UI strings (window/tab titles, `QAction` text, recent-file labels) or file dialogs.
-- [ ] **PRIV-03**: A static AST CI guard (modeled on `tests/test_no_raw_storage_access.py`) enforces that `shared/posthog_server.enqueue_event` is reached **only** through the desktop telemetry chokepoint, so no call site can bypass the consent gate or scrubber.
+- [x] **PRIV-03**: A static AST CI guard (modeled on `tests/test_no_raw_storage_access.py`) enforces that `shared/posthog_server.enqueue_event` is reached **only** through the desktop telemetry chokepoint, so no call site can bypass the consent gate or scrubber.
 - [ ] **PRIV-04**: Automated tests assert that representative crash tracebacks and search / My-Library scenarios never emit any **forbidden field** — explicitly: My Library paths, filenames, query/search text, usernames, or hostnames — and that nothing is emitted before consent (CONSENT-01).
 - [ ] **PRIV-05**: The Help/About privacy disclosure is updated bilingually (EN/HE) to describe exactly what telemetry collects, that it is opt-in, how to turn it off, and that the anonymous install id is a pseudonymous identifier — consistent with the existing disclosure posture.
 - [x] **PRIV-06**: Event NAMES are drawn from a fixed registry/enum — no event name (and no property) is ever derived from query text, filenames, corpus/document labels, or visible UI strings. (Dynamic event names leak even when properties are scrubbed.)
@@ -154,7 +154,7 @@
 | CRASH-07 | Phase 113 | Pending |
 | PRIV-01 | Phase 111 | Complete |
 | PRIV-02 | Phase 111 | Complete |
-| PRIV-03 | Phase 116 | Pending |
+| PRIV-03 | Phase 116 | Complete |
 | PRIV-04 | Phase 116 | Pending |
 | PRIV-05 | Phase 112 | Pending |
 | PRIV-06 | Phase 111 | Complete |
