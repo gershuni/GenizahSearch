@@ -2,15 +2,15 @@
 
 **Defined:** 2026-06-14
 **Core Value:** Researchers can find what they need in the Genizah corpus
-**Milestone goal:** Add opt-in, privacy-preserving telemetry to the desktop app ("Dicta Genizah Search Pro") so real-world usage, version adoption, performance, and crashes become visible in PostHog — without ever transmitting My Library data or search content. **Desktop-only** (the web app is already instrumented).
+**Milestone goal:** Add opt-in, privacy-preserving telemetry to the desktop app ("Dicta Genizah Search Pro") so real-world usage, version adoption, performance, crashes, and **cross-surface (web↔desktop) per-user journeys** become visible in PostHog — without ever transmitting My Library data or search content. Desktop telemetry feeds the **existing shared web PostHog project** and is identity-aligned with the web app; **no web code change is required** (the web already identifies logged-in users).
 
 **Fixed constraints (user decisions — design within them):**
 - Opt-in only; default **OFF** until the user consents.
 - First-run consent dialog shown **on first launch after updating** (existing v8.0.0 users + fresh installs) + a Settings/About toggle.
-- **Anonymous** per-install ID (uuid4), no PII, no account linkage. Opt-out **keeps the ID** on disk but stops all emission.
+- **Identity-aligned with web:** logged-out users → anonymous per-install `uuid4` (opt-out **keeps the id**, stops emission); logged-in + consented users → `identify(distinct_id = Supabase user.id)` exactly matching `web/auth_state.py:160-170`, aliasing the per-install anon id on login, resetting to anonymous on logout. Desktop sends **only the user id** for identity (never email/name — web already attaches those); desktop never sends PII beyond that id.
 - HARD RULE: never transmit My Library data (paths/filenames/content) or any search/query content.
-- Reuse `shared/posthog_server.py` (fire-and-forget queue → EU PostHog); **do NOT add the `posthog` Python SDK**.
-- Events go to a **new desktop-only PostHog project** (separate from web project 134161).
+- Reuse `shared/posthog_server.py` (fire-and-forget queue → EU PostHog), incl. hand-rolled `$identify`/alias events; **do NOT add the `posthog` Python SDK**.
+- Events go to the **existing shared web PostHog project** (id 134161); web↔desktop separation is by a `platform=desktop` base prop + a `desktop_` event-name namespace (NOT a separate project). Reuse the web publishable key.
 - v8.1.0 captures **hard crashes only** (uncaught exceptions); handled/non-fatal error counting is deferred.
 
 ---
@@ -23,8 +23,8 @@
 - [ ] **CONSENT-02**: On first launch after updating to v8.1.0 (and on fresh installs), the user sees a bilingual (EN/HE) first-run consent dialog with an explicit, equal-weight yes/no choice (nothing pre-selected) that plainly states what is and is not collected.
 - [ ] **CONSENT-03**: The consent dialog is shown at most once — the choice and a "prompt shown" flag persist so it never re-prompts on later launches. The stored consent record also captures the consent timestamp, the app version, and the consent-UI version (lightweight audit trail).
 - [ ] **CONSENT-04**: User can turn telemetry on or off at any time from a Settings/About toggle that reads and writes the same consent source of truth as the first-run dialog.
-- [ ] **CONSENT-05**: An anonymous per-install identifier (uuid4) is minted only on opt-in and used as the PostHog `distinct_id`; it contains no PII and is never derived from hardware/MAC/account.
-- [ ] **CONSENT-06**: Opting out stops all event emission immediately; the install ID is **retained** on disk (not deleted) so re-opt-in preserves install continuity.
+- [ ] **CONSENT-05**: An anonymous per-install identifier (uuid4) is minted on opt-in and used as the PostHog `distinct_id` for **logged-out** users; it is never derived from hardware/MAC. For **logged-in** users the `distinct_id` is the Supabase `user.id` (see IDENT-01). No hardware fingerprinting either way.
+- [ ] **CONSENT-06**: Opting out stops all event emission immediately; the per-install ID is **retained** on disk (not deleted) so re-opt-in preserves continuity.
 - [ ] **CONSENT-07**: Consent + identity state persists in the existing config store (`config.pkl` via `load_app_config`/`save_app_config`) — no new settings file, no `QSettings`.
 - [ ] **CONSENT-08**: Opting out not only stops new producers but also **drains/discards any already-queued, un-sent events** so nothing buffered before opt-out is transmitted afterward.
 
@@ -34,8 +34,15 @@
 - [ ] **USAGE-02**: Feature usage is captured as counts — which tab/view and which key surfaces (Joins Lab, Fragment Puzzle, major dialogs) are opened — with no free-text or content properties.
 - [ ] **USAGE-03**: Search executions are captured with the search MODE (keyword/Responsa/composition/parallels) and corpus (Genizah/Local/ALL) as enums — never the query text or any My Library path/filename.
 - [ ] **USAGE-04**: An active-user/session signal is emitted so DAU/MAU and version adoption are derivable in PostHog.
-- [ ] **USAGE-05**: Every event carries base properties (`platform=desktop`, `$process_person_profile=false` so events stay anonymous-tier) applied through one shared helper.
+- [ ] **USAGE-05**: Every event carries base properties (`platform=desktop`, `app_version`) and a `desktop_` event-name namespace, applied through one shared helper so no callsite bypasses them. `$process_person_profile=false` is set for **anonymous (logged-out)** events; **identified** events use real person profiles (see IDENT-03).
 - [ ] **USAGE-06**: Session/clock correctness — exactly one telemetry session id per process; all timestamps UTC; performance durations measured from a monotonic clock; a crash-restart starts a fresh session without emitting a duplicate/ghost session-start for the crashed process.
+
+### Identity & Cross-Surface Journey (IDENT)
+
+- [ ] **IDENT-01**: A logged-in, consented desktop user is identified to PostHog with `distinct_id = Supabase user.id` — the **exact same value** the web app uses (`web/auth_state.py:160-170`) — so the same researcher's web and desktop activity merge into one person in the shared project. (A hash/derivation would NOT merge — it must be the raw id.)
+- [ ] **IDENT-02**: A logged-out user's anonymous per-install events are **aliased** to their account on login via `$identify` with `$anon_distinct_id = <per-install uuid>` (no pre-login history orphaned); on logout the desktop **resets to the anonymous per-install id** (mirrors web `posthog.reset()`).
+- [ ] **IDENT-03**: Desktop sends **only the user id** on identify — never email/name or other profile PII (web already attaches those to the shared person). Anonymous events stay `$process_person_profile=false`; identified events use real person profiles.
+- [ ] **IDENT-04**: `$identify`/alias/reset are emitted through the **same desktop chokepoint + raw `shared/posthog_server.py` queue** (hand-rolled events, no SDK) and are consent-gated exactly like all other emission (nothing fires before consent).
 
 ### Performance Metrics (PERF)
 
@@ -64,7 +71,7 @@
 
 ### Backend & Packaging (INFRA)
 
-- [ ] **INFRA-01**: A dedicated desktop-only PostHog project is used (separate from web project 134161), with its own publishable (write-only) ingest key embedded in the desktop binary.
+- [ ] **INFRA-01**: Desktop events go to the **existing shared web PostHog project** (id 134161, EU), reusing the web app's publishable (write-only) ingest key embedded in the desktop binary (overridable via `GENIZAH_TELEMETRY_KEY`/host). NO separate project. Web↔desktop separation is by `platform=desktop` + the `desktop_` event-name namespace (USAGE-05).
 - [ ] **INFRA-02**: A desktop telemetry chokepoint module (`desktop/telemetry.py`) exposes the only public API for emitting events (track / track_performance / consent / install-hooks), each internally consent-gated and scrubbed, delegating to `shared/posthog_server.enqueue_event`.
 - [ ] **INFRA-03**: `shared/posthog_server.py` gains backward-compatible additions only (consent-gate hook, `distinct_id` injection, flush-before-exit) without breaking its existing web/breaker consumers or the 5 test monkeypatches.
 - [ ] **INFRA-04**: Telemetry adds **zero** new pip dependencies and requires no PyInstaller spec changes beyond what's already bundled (reuse the raw queue; do NOT add the `posthog` SDK).
@@ -104,8 +111,9 @@
 | Adding the `posthog` Python SDK | Its `capture_exception_code_variables` ships frame-local values to PostHog **before** `before_send` scrubbing runs — a direct PII-leak risk for a search/My-Library app. The existing raw queue is sufficient and adds zero deps. |
 | Transmitting any My Library data or search/query content | Hard privacy invariant — structurally forbidden, not a feature to scope. |
 | Session replay / screen capture / autocapture | Inappropriate for a privacy-first scholarly desktop tool. |
-| Identified PostHog person profiles / account linkage | Anonymous-only (`$process_person_profile=false`); no PII, no login linkage. |
-| Web-side telemetry changes | Web is already instrumented; the `search_executed` query-text cleanup is tracked as WEB-F1, not this milestone. |
+| Sending email / name / profile PII from desktop | Desktop identifies logged-in users by the bare Supabase `user.id` only (IDENT-03); the web already attaches email/name to the shared person. Desktop adds no profile PII. |
+| Web-side telemetry code changes | None needed — the web already identifies logged-in users by `user.id` (`web/auth_state.py`), which is exactly what desktop aligns to. (The `search_executed` query-text cleanup is the optional WEB-F1 follow-up.) |
+| A separate desktop PostHog project | Reversed 2026-06-14 — desktop uses the shared web project so cross-surface journeys work and there's no org/billing friction (see `research/POSTHOG-PROJECT-DECISION.md`). |
 | Hardware/MAC-derived or registry-based install IDs | PII / fingerprinting risk; uuid4 in the config store is sufficient. |
 | Third-party ad / marketing SDKs | Anti-feature for this audience. |
 
@@ -129,6 +137,10 @@
 | USAGE-04 | Phase 114 | Pending |
 | USAGE-05 | Phase 114 | Pending |
 | USAGE-06 | Phase 114 | Pending |
+| IDENT-01 | Phase 114 | Pending |
+| IDENT-02 | Phase 114 | Pending |
+| IDENT-03 | Phase 111 | Pending |
+| IDENT-04 | Phase 111 | Pending |
 | PERF-01 | Phase 115 | Pending |
 | PERF-02 | Phase 115 | Pending |
 | PERF-03 | Phase 115 | Pending |
@@ -153,10 +165,10 @@
 | INFRA-06 | Phase 116 | Pending |
 
 **Coverage:**
-- v8.1.0 requirements: 36 total
-- Mapped to phases: 36/36 ✓
+- v8.1.0 requirements: 40 total
+- Mapped to phases: 40/40 ✓
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-14*
-*Last updated: 2026-06-14 — traceability populated after roadmap creation*
+*Last updated: 2026-06-14 — REVISED during Phase 111 discussion: reversed to ONE shared web PostHog project + web-aligned identity (new IDENT category, 4 reqs → 40 total); CONSENT-05 / USAGE-05 / INFRA-01 amended; Out-of-Scope updated. See `research/POSTHOG-PROJECT-DECISION.md`.*

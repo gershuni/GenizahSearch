@@ -1,8 +1,14 @@
 # Decision record — one PostHog project or two? (v8.1.0 Desktop Telemetry)
 
 **Date:** 2026-06-14
-**Decision:** **Separate desktop-only PostHog project** ("Dicta Genizah Desktop", EU), distinct from the web project (id 134161). **CONFIRMED.**
-**Status:** Re-confirmed after a Gemini recommendation to the contrary; validated by independent Codex review + user billing decision.
+**FINAL DECISION:** **ONE shared PostHog project** — desktop reuses the existing web project (id 134161, EU) + its publishable key, **identity-aligned** with the web app (logged-in users → same Supabase `user.id`). Web↔desktop separation by `platform=desktop` + a `desktop_` event-name namespace.
+**Status:** REVERSED from the initial "separate project" call after (a) the user invoked PostHog's documented guidance (separate by **environment**, not platform; keep apps + website in one production project) and (b) the decisive discovery that **the web app already `identify()`s logged-in users by `user.id`** (`web/auth_state.py:160-170`) — so a shared project delivers real cross-surface journeys with zero web changes. The "no identity to unify" argument that drove the initial separate call no longer holds.
+
+## What changed (the decisive fact)
+
+The initial analysis (below) recommended SEPARATE, resting heavily on "there's no shared identity to unify, so consolidation buys little." That premise was **wrong**: the web already calls `posthog.identify(user.id, {email,name})` on login and `posthog.reset()` on logout. Desktop identifying the *same* logged-in user by the *same* `user.id` makes web + desktop merge into one person — the exact cross-surface journey the user wants ("which user downloaded the app; what they search here vs there"). That, plus PostHog's own "one production project for apps + website" guidance, plus zero billing/PAYG friction, flips the verdict to **one shared project**. Desktop still sends no content and only the bare `user.id` for identity (no email/name from desktop).
+
+## Initial analysis (superseded — retained for history)
 
 ## Why this was reconsidered
 
@@ -10,7 +16,9 @@ A Gemini "PostHog Telemetry Architecture Recommendation" argued for **consolidat
 1. **Cross-platform journey tracking** — one researcher = one Distinct ID across web+desktop.
 2. **Billing friction** — a separate project "necessitates a new project with a payment method".
 
-## Verdict: keep them separate (Option A). Gemini's premises don't hold here.
+## Initial verdict (SUPERSEDED): keep them separate (Option A)
+
+> ⚠️ This was the FIRST-PASS verdict, before discovering the web already identifies users. The fact-check below is still accurate, but the conclusion was reversed — see "What changed" above. The billing fact-check remains useful; the identity fact-check was correct *only* for the original anonymous-no-linkage design, which we then changed.
 
 | Gemini claim | Reality for THIS project |
 |---|---|

@@ -63,7 +63,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 
 ### 🚧 v8.1.0 Desktop Telemetry (Phases 111-116)
 
-**Milestone goal:** Add opt-in, privacy-preserving telemetry to the desktop app ("Dicta Genizah Search Pro") so real-world usage, version adoption, performance, and crashes become visible in PostHog — without ever transmitting My Library data or search content. Desktop-only (web is already instrumented). Default OFF until the user consents.
+**Milestone goal:** Add opt-in, privacy-preserving telemetry to the desktop app ("Dicta Genizah Search Pro") so real-world usage, version adoption, performance, crashes, and cross-surface (web↔desktop) per-user journeys become visible in PostHog — without ever transmitting My Library data or search content. Desktop feeds the **existing shared web PostHog project** and is identity-aligned with the web app (logged-in users → same Supabase `user.id`); **no web code change required**. Default OFF until the user consents. (REVISED 2026-06-14 — see `.planning/research/POSTHOG-PROJECT-DECISION.md`.)
 
 **Foundation-first invariant:** No event can fire before the consent gate, scrubber, and property/event allowlist exist and are tested. Phases 113-115 all depend on Phase 111 being complete and green.
 
@@ -81,10 +81,10 @@ See: .planning/milestones/v7.16-ROADMAP.md
 ### Phase 111: Telemetry Foundation
 **Goal**: The `desktop/telemetry.py` chokepoint module exists with its full public API, consent state persists in `config.pkl`, the structural scrubber enforces no-PII at the network boundary, and the property/event allowlist prevents future accidental leaks — but no events fire yet because no producers are wired.
 **Depends on**: Nothing (no prior v8.1.0 phases)
-**Requirements**: CONSENT-01, CONSENT-05, CONSENT-06, CONSENT-07, INFRA-01, INFRA-02, INFRA-03, INFRA-04, INFRA-05, PRIV-01, PRIV-02, PRIV-06
+**Requirements**: CONSENT-01, CONSENT-05, CONSENT-06, CONSENT-07, INFRA-01, INFRA-02, INFRA-03, INFRA-04, INFRA-05, PRIV-01, PRIV-02, PRIV-06, IDENT-03, IDENT-04
 **Success Criteria** (what must be TRUE):
-  1. `desktop/telemetry.py` is importable and exposes all eight public callables (`is_enabled`, `track`, `track_performance`, `track_error`, `get_install_id`, `set_consent`, `install_exception_hooks`, `show_first_run_prompt`); every call gate-checks `is_enabled()` and returns immediately when consent is absent or false — a fresh `config.pkl` emits zero events.
-  2. `set_consent(True)` mints a UUID-v4 install ID and persists it in `config.pkl`; `set_consent(False)` stops emission immediately; the install ID is retained on disk (not deleted) so re-opt-in preserves continuity.
+  1. `desktop/telemetry.py` is importable and exposes all eight public callables (`is_enabled`, `track`, `track_performance`, `track_error`, `get_install_id`, `set_consent`, `install_exception_hooks`, `show_first_run_prompt`) plus the identity hooks (`identify`/`reset` or equivalent); every call gate-checks `is_enabled()` and returns immediately when consent is absent or false — a fresh `config.pkl` emits zero events. Events target the shared web project (reused publishable key, env-overridable).
+  2. `set_consent(True)` mints a UUID-v4 install ID and persists it in `config.pkl`; `set_consent(False)` stops emission immediately; the install ID is retained on disk (not deleted). `distinct_id` resolves to the **Supabase `user.id` when logged in**, else the per-install uuid; the `$identify`/alias/reset emission mechanism exists and is consent-gated (IDENT-04) though login/logout wiring lands in Phase 114.
   3. `_scrub_props()` strips banned keys, redacts path-like strings, and drops frame locals from any dict before it can reach `enqueue_event` — verified by unit tests with real Windows-path fixtures and Hebrew query strings.
   4. A static property allowlist rejects any property not on the list (including `hostname`, `username`, `executable path`, `cwd`, and all query/content-derived fields); event names are drawn exclusively from a fixed registry enum with no dynamic construction.
   5. `shared/posthog_server.py` gains backward-compatible additions (`_telemetry_enabled` gate, `_scrub_hook`, `set_default_distinct_id`, `_flush_before_exit`) without breaking its existing web/breaker consumers or the 5 test monkeypatches targeting `_event_queue`.
@@ -118,8 +118,9 @@ See: .planning/milestones/v7.16-ROADMAP.md
 ### Phase 114: Usage Analytics
 **Goal**: The desktop app emits allowlisted usage events (session start/end, tab/surface activations, search mode and corpus enums) that enable DAU/MAU, version adoption, and feature-use measurement in PostHog — with no query content, no My Library data, and no environment identifiers beyond OS family/version.
 **Depends on**: Phase 112
-**Requirements**: USAGE-01, USAGE-02, USAGE-03, USAGE-04, USAGE-05, USAGE-06
+**Requirements**: USAGE-01, USAGE-02, USAGE-03, USAGE-04, USAGE-05, USAGE-06, IDENT-01, IDENT-02
 **Success Criteria** (what must be TRUE):
+  0. On login the desktop calls `identify(distinct_id = Supabase user.id)` (exact match to `web/auth_state.py:160-170`) and aliases the prior anonymous per-install uuid (`$anon_distinct_id`); on logout it resets to the anonymous id. Only the user id is sent — never email/name. A logged-in researcher's web + desktop events merge into one person in the shared project.
   1. A session-start event fires once per process after consent is confirmed, carrying only allowlisted environment props: app version, OS family + version, Python/PyQt version, UI language — never hostname, machine name, username, executable path, or working directory.
   2. Feature usage events capture which tabs and key surfaces (Joins Lab, Fragment Puzzle, major dialogs) are opened as counts; no free-text or content properties appear on any event.
   3. Search executions are captured with `search_mode` (keyword/Responsa/composition/parallels) and `corpus_scope` (Genizah/Local/ALL) as fixed enum values — the query text, filter content, and exclusion list are structurally absent (not present in the event, not scrubbed away).

@@ -16,13 +16,20 @@ Requirements (from ROADMAP/REQUIREMENTS): CONSENT-01, CONSENT-05, CONSENT-06, CO
 <decisions>
 ## Implementation Decisions
 
-### PostHog Project & Key (operational)
-- **D-01:** Target is a NEW desktop-only PostHog project — **"Dicta Genizah Desktop"**, EU host — separate from the web project (id 134161). **Decision re-confirmed 2026-06-14** after a Gemini doc challenged it (recommended consolidating into the web project) — both the Gemini-rebuttal and an independent Codex review landed on KEEP SEPARATE (see `.planning/research/POSTHOG-PROJECT-DECISION.md`). Deciding reasons: (a) no real cross-platform identity to unify (anonymous per-install uuid4 + `$process_person_profile=false` + no account linkage + web uses a separate browser anon-id); (b) clean "this project never holds content" invariant (the web project already carries query text — WEB-F1); (c) isolated desktop volume/quota monitoring.
-- **D-01a:** Two operational prerequisites for creating the project, both DEFERRED to **before Phase 114** (NOT blockers for 111, which fires no real events): (1) **the Dicta org is on the free 1-project plan** (verified via MCP: 1 project, 1 member) → creating a 2nd project requires **upgrading the org to pay-as-you-go** (card on file; desktop volume stays inside the free monthly allowance so ~$0 — user accepted this 2026-06-14); (2) **the PostHog MCP cannot create projects** (no `project-create`/`team-create`/`environment-create` tool; the create API needs an org-write personal key the MCP's OAuth key lacks) → create via the PostHog UI or REST with a personal key.
+### PostHog Project & Key (REVERSED 2026-06-14 → ONE shared project)
+- **D-01:** Desktop sends to the **EXISTING shared web PostHog project** (id 134161, EU) — **NOT a separate project.** This reverses the earlier separate-project decision after the user invoked PostHog's own guidance (separate by ENVIRONMENT, not platform; keep apps + website in one production project) AND the fact that **the web already identifies logged-in users** (so a shared project yields real cross-surface journeys). Full rationale + the Gemini/Codex back-and-forth: `.planning/research/POSTHOG-PROJECT-DECISION.md`. Consequences: no new project, **no pay-as-you-go upgrade**, no deferred project creation, no MCP-can't-create-it problem.
+- **D-01a:** Desktop embeds the **same publishable key the web app already uses** (`web/main.py:801` `_posthog_key`; already public in the web JS bundle). Web↔desktop separation in analysis is by the `platform=desktop` base property (USAGE-05) + a `desktop_` event-name namespace (D-07) — NOT by project.
 - **D-02:** Phase 111 builds against the env override with a **placeholder** publishable-key constant; the real `phc_...` key drops in before 114.
 
+### Identity & Cross-Surface Journey (NEW 2026-06-14 — reverses "anonymous, no account linkage")
+- **D-07:** Desktop telemetry is **identity-aligned with the web app** so a logged-in researcher's web + desktop activity links in the shared project. Match `web/auth_state.py:160-170` EXACTLY: on login, `identify(distinct_id = supabase user.id)`; on logout, reset to anonymous. The web uses the raw **Supabase `user.id` (UUID)** as `distinct_id` — desktop MUST use the same value (a hash would NOT merge). Logged-OUT users → anonymous per-install `uuid4`; on login, emit `$identify` with `$anon_distinct_id = <per-install uuid>` to **alias/merge** the anonymous history into the person. All via the raw `shared/posthog_server.py` queue (hand-rolled `$identify`/alias events) — still **no SDK**.
+- **D-08:** Desktop sends **only the `user.id` for identity — NOT email/name.** The web already attaches email/name to the shared person profile; desktop adds no new PII. Desktop still NEVER sends My Library/search content. So the desktop's per-payload guarantee = "no content; identity = the bare Supabase user id."
+- **D-09:** Person-profile handling is split: anonymous (logged-out) events keep `$process_person_profile=false` (anonymous tier); identified (logged-in) events use real PostHog person profiles (required for journey stitching). This **amends** the old blanket `$process_person_profile=false` rule (USAGE-05).
+- **D-10:** Every desktop event carries `platform=desktop` + uses a `desktop_` event-name namespace prefix, so events never collide with web event names and analysis can filter/break-down by platform within the shared project.
+- **Observation (out of scope, flag only):** the web identifies real users (email/name) with **no opt-in consent gate**, while desktop is opt-in. A future "web consent gate" could harmonize this; not part of v8.1.0.
+
 ### Key Configuration
-- **D-03:** The publishable key + host live as a **module constant in `desktop/telemetry.py`**, overridable via env: `GENIZAH_TELEMETRY_KEY` (+ a host override var, e.g. `GENIZAH_TELEMETRY_HOST`). This lets dev/staging builds target a test project and enables the self-test (D-06). The publishable/project key is **write-only → safe to embed in the binary and commit** (the web app already exposes its key publicly). NEVER embed a personal `phx_` key or the web project's key.
+- **D-03:** The publishable key + host live as a **module constant in `desktop/telemetry.py`** = the **existing web project key** (`web/main.py:801`), overridable via env: `GENIZAH_TELEMETRY_KEY` (+ host var `GENIZAH_TELEMETRY_HOST`) for dev/staging targeting + the self-test (D-06). The publishable/project key is **write-only → safe to embed & commit** (web already exposes it). NEVER embed a personal `phx_` key.
 
 ### Consent-Gate Placement (architecture — LOAD-BEARING)
 - **D-04:** The consent gate lives **ONLY in `desktop/telemetry.py`**. `shared/posthog_server.py` stays **UNGATED** so the existing web / NLI-circuit-breaker telemetry is unaffected. `posthog_server` gains only **neutral, backward-compatible additions** (default-`distinct_id` setter, `_flush_before_exit`, an **optional** scrub hook, opt-out queue-drain helper) that change nothing for existing callers or the 5 test monkeypatches targeting `_event_queue`. **This reconciles ROADMAP Phase-111 SC#5** — its `_telemetry_enabled` wording must NOT become a hard global gate inside the shared module (that would suppress web breaker telemetry by desktop consent). Desktop consent is enforced desktop-side, before `enqueue_event` is ever called.
@@ -56,6 +63,8 @@ Requirements (from ROADMAP/REQUIREMENTS): CONSENT-01, CONSENT-05, CONSENT-06, CO
 - `genizah_core.py` — `Config` (~L2344-2378) + `load_app_config`/`save_app_config` (~L2871-2891) = the `config.pkl` store for consent/uuid (verify line numbers).
 - `genizah_app.py:148-170` — existing `_setup_crash_handler` (relevant to Phase 113; the hook must chain, not replace — noted here for awareness).
 - `web/analytics.py` — how web emits PostHog (parity awareness; web is browser-side).
+- `web/auth_state.py:160-170` — **the identity contract to match**: web `posthog.identify(user.id, {email,name})` on login + `posthog.reset()` on logout. Desktop MUST use the same `supabase user.id` as `distinct_id` (D-07).
+- `web/main.py:798-802` — web `posthog.init(_posthog_key, {api_host:'https://eu.i.posthog.com'})`; `_posthog_key` is the shared publishable key the desktop reuses (D-01a/D-03).
 - `tests/test_no_raw_storage_access.py` — the AST-guard pattern to mirror for PRIV-03.
 - `shared/joins_lab.py` + its Phase-106 AST import guard — precedent for a shared pure module + structural guard.
 </canonical_refs>
@@ -83,15 +92,19 @@ Requirements (from ROADMAP/REQUIREMENTS): CONSENT-01, CONSENT-05, CONSENT-06, CO
 <specifics>
 ## Specific Ideas
 
-- PostHog project name: **"Dicta Genizah Desktop"** (EU), separate from web project 134161.
-- Env override vars: `GENIZAH_TELEMETRY_KEY` (+ a host var) — drives both dev/staging targeting and the D-06 self-test.
+- PostHog target: the **existing shared web project** (id 134161, EU); reuse the web publishable key (`web/main.py:801`).
+- Identity: `distinct_id = supabase user.id` for logged-in users (match `web/auth_state.py`); anonymous per-install uuid4 otherwise, aliased on login.
+- Env override vars: `GENIZAH_TELEMETRY_KEY` (+ host var) — dev/staging targeting + the D-06 self-test.
 - Self-test entry: a `--telemetry-selftest` CLI flag (dev-gated), never in the normal user path.
+- Discipline replacing "separate project": `platform=desktop` base prop + `desktop_` event-name namespace.
 </specifics>
 
 <deferred>
 ## Deferred Ideas
 
-- **Real PostHog project + key creation** — operational; before Phase 114 wires the first real events: (1) upgrade the Dicta org to pay-as-you-go (free plan caps at 1 project), then (2) create "Dicta Genizah Desktop" via the PostHog UI or REST with a personal key (the MCP can't), and (3) drop its publishable `phc_...` key into the `desktop/telemetry.py` constant.
+- **(No project creation needed)** — reusing the shared web project removes the create/upgrade/key-drop steps entirely. The web's publishable key is reused as the `desktop/telemetry.py` constant.
+- **Web consent gate** (observation, out of scope) — web identifies real users without an opt-in gate; a future harmonization could add one.
+- **WEB-F1** (strip web `search_executed` query text) — now nice-to-have for the shared project, but it's a web-side change and stays in Future; the shared project already carries web PII/content regardless, so the desktop guarantee is per-payload (desktop sends none), not project-wide.
 - Everything in Phases 112–116 (consent UX, exception hooks, usage/perf events, CI privacy gate) — out of this phase by the foundation-first design.
 
 ### Reviewed Todos (not folded)
