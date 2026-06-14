@@ -174,7 +174,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 111. Telemetry Foundation | v8.1.0 | 3/3 | Complete   | 2026-06-14 |
+| 111. Telemetry Foundation | v8.1.0 | 3/3 | Complete    | 2026-06-14 |
 | 112. Consent UX | v8.1.0 | 0/TBD | Not started | - |
 | 113. Crash Reporting | v8.1.0 | 0/TBD | Not started | - |
 | 114. Usage Analytics | v8.1.0 | 0/TBD | Not started | - |
