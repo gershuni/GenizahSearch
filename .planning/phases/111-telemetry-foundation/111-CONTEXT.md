@@ -17,7 +17,8 @@ Requirements (from ROADMAP/REQUIREMENTS): CONSENT-01, CONSENT-05, CONSENT-06, CO
 ## Implementation Decisions
 
 ### PostHog Project & Key (operational)
-- **D-01:** Target is a NEW desktop-only PostHog project — **"Dicta Genizah Desktop"**, EU host — separate from the web project (id 134161). **The PostHog MCP cannot create projects** (verified: no `project-create`/`team-create`/`environment-create` tool exists; the create API needs a personal key with org-write scope the MCP's OAuth key lacks). **Project creation is DEFERRED** — created via the PostHog UI or REST (with a personal key) **before Phase 114's first real events**. It is NOT a blocker for 111 because 111 fires no real events.
+- **D-01:** Target is a NEW desktop-only PostHog project — **"Dicta Genizah Desktop"**, EU host — separate from the web project (id 134161). **Decision re-confirmed 2026-06-14** after a Gemini doc challenged it (recommended consolidating into the web project) — both the Gemini-rebuttal and an independent Codex review landed on KEEP SEPARATE (see `.planning/research/POSTHOG-PROJECT-DECISION.md`). Deciding reasons: (a) no real cross-platform identity to unify (anonymous per-install uuid4 + `$process_person_profile=false` + no account linkage + web uses a separate browser anon-id); (b) clean "this project never holds content" invariant (the web project already carries query text — WEB-F1); (c) isolated desktop volume/quota monitoring.
+- **D-01a:** Two operational prerequisites for creating the project, both DEFERRED to **before Phase 114** (NOT blockers for 111, which fires no real events): (1) **the Dicta org is on the free 1-project plan** (verified via MCP: 1 project, 1 member) → creating a 2nd project requires **upgrading the org to pay-as-you-go** (card on file; desktop volume stays inside the free monthly allowance so ~$0 — user accepted this 2026-06-14); (2) **the PostHog MCP cannot create projects** (no `project-create`/`team-create`/`environment-create` tool; the create API needs an org-write personal key the MCP's OAuth key lacks) → create via the PostHog UI or REST with a personal key.
 - **D-02:** Phase 111 builds against the env override with a **placeholder** publishable-key constant; the real `phc_...` key drops in before 114.
 
 ### Key Configuration
@@ -90,7 +91,7 @@ Requirements (from ROADMAP/REQUIREMENTS): CONSENT-01, CONSENT-05, CONSENT-06, CO
 <deferred>
 ## Deferred Ideas
 
-- **Real PostHog project + key creation** — operational; do it (UI or REST with a personal key) before Phase 114 wires the first real events. The MCP can't do it.
+- **Real PostHog project + key creation** — operational; before Phase 114 wires the first real events: (1) upgrade the Dicta org to pay-as-you-go (free plan caps at 1 project), then (2) create "Dicta Genizah Desktop" via the PostHog UI or REST with a personal key (the MCP can't), and (3) drop its publishable `phc_...` key into the `desktop/telemetry.py` constant.
 - Everything in Phases 112–116 (consent UX, exception hooks, usage/perf events, CI privacy gate) — out of this phase by the foundation-first design.
 
 ### Reviewed Todos (not folded)
