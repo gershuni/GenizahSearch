@@ -762,21 +762,16 @@ def enqueue_event(
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **`_APP_VERSION` import path**
-   - What we know: `version.py` exists and `scripts/bump_version.py` updates it; `genizah_app.py` imports it.
-   - What's unclear: whether `desktop/telemetry.py` can `from version import __version__` without triggering any import cycle at frozen-binary startup.
-   - Recommendation: verify at plan time with a one-line check; if circular, use `genizah_core` constant or lazy-read from the binary's version file.
+1. **`_APP_VERSION` import path** — **RESOLVED:** `from version import APP_VERSION` is safe. `version.py` has no imports (PATTERNS.md verified — two-line file), so there is no circular-import risk at frozen-binary startup; `genizah_app.py:28` already imports it the same way. No fallback needed.
+   - What we knew: `version.py` exists and `scripts/bump_version.py` updates it; `genizah_app.py` imports it.
 
-2. **`_drain_and_discard` vs CONSENT-08 phasing**
-   - What we know: CONSENT-08 ("opt-out drains/discards queued events") is assigned to Phase 112 in REQUIREMENTS.md traceability, but the drain mechanism (`_drain_and_discard`) must exist in `shared/posthog_server.py` by Phase 111 for Phase 112 to call it.
-   - What's unclear: should Phase 111 also wire the `set_consent(False)` → `_drain_and_discard()` call, or leave the call site for Phase 112?
-   - Recommendation: Phase 111 defines `_drain_and_discard` in `shared/posthog_server.py` AND calls it from `set_consent(False)` in `desktop/telemetry.py`. This is safe since Phase 112 is the first time an actual user will opt out (no consent UX exists until Phase 112). Calling `_drain_and_discard()` when the queue is empty is a no-op.
+2. **`_drain_and_discard` vs CONSENT-08 phasing** — **RESOLVED:** Phase 111 defines `_drain_and_discard` in `shared/posthog_server.py` (Plan 01) AND wires the `set_consent(False)` → `_drain_and_discard()` call in `desktop/telemetry.py` (Plan 02). Safe because Phase 112 is the first time a real user can opt out (no consent UX exists until 112), and a drain on an empty queue is a no-op.
+   - What we knew: CONSENT-08 is assigned to Phase 112 in REQUIREMENTS.md traceability, but the drain mechanism must exist in `shared/posthog_server.py` by Phase 111 for Phase 112 to call it.
 
-3. **`$identify` event in `DesktopEvent` enum**
-   - What we know: `identify()` must emit PostHog's protocol event `'$identify'` (literal string). This is NOT a `desktop_`-prefixed name. But PRIV-06 says all event names come from the fixed registry.
-   - Recommendation: `DesktopEvent` includes `IDENTIFY = '$identify'` as a special-case member (the `$` prefix is PostHog's convention for protocol events). The guard in `track()` enforces the enum; `identify()` uses `DesktopEvent.IDENTIFY.value` directly so it's traceable but not a free-floating string.
+3. **`$identify` event in `DesktopEvent` enum** — **RESOLVED:** `DesktopEvent` includes `IDENTIFY = '$identify'` as a special-case member (the `$` prefix is PostHog's protocol-event convention, intentionally NOT a `desktop_`-prefixed name). `track()` enforces the enum; `identify()` uses `DesktopEvent.IDENTIFY.value` directly so the protocol event stays traceable rather than a free-floating string (Plan 02 Task 3).
+   - What we knew: `identify()` must emit PostHog's protocol event `'$identify'` (literal string) while PRIV-06 requires all event names come from the fixed registry.
 
 ---
 
