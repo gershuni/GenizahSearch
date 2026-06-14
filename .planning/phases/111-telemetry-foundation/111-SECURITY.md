@@ -54,6 +54,10 @@ created: 2026-06-14
 | T-111-18 | Spoofing / Tampering | `$identify` emitted via generic `track()` without `$anon_distinct_id` | mitigate | `track()` rejects `$identify` via `_TRACK_FORBIDDEN_EVENTS` (`telemetry.py:129-135,491`); only `identify()` calls `enqueue_event(DesktopEvent.IDENTIFY.value, ...)` directly (`telemetry.py:582`) with `$anon_distinct_id` set | closed |
 | T-111-19 | Tampering | over-broad basename exemption letting future `desktop/widgets/telemetry.py` bypass guard | mitigate | Exemption uses `path.resolve() == CHOKEPOINT` where `CHOKEPOINT = (DESKTOP_DIR / 'telemetry.py').resolve()` (`test_telemetry_no_direct_posthog.py:34,162`); `test_skip_is_by_resolved_path_not_basename` (line 280) pins this | closed |
 | T-111-SC | Tampering | npm/pip/cargo supply-chain installs | mitigate | Zero new third-party packages in all three plans (all SUMMARY `tech-stack.added: []`); `desktop/telemetry.py` imports only stdlib + `genizah_core`/`version`/`shared.posthog_server`; `shared/posthog_server.py` adds only stdlib (`time`, `typing.Callable`); `requests` was pre-existing | closed |
+| T-111-20 | Information Disclosure | path scrubber missed path forms (spaces / UNC) | mitigate | **(Codex review F2)** `_PATH_RE` rewritten: UNC branch + `_PATH_TAIL` consuming single internal spaces so `C:\Users\Jane Doe\…` and `\\server\share\…` redact fully; `tests/test_telemetry_codex_review_fixes.py::test_*_path_*` | closed |
+| T-111-21 | Information Disclosure | `context` free-text escape hatch through the allowlist | mitigate | **(Codex review F4)** `_safe_context()` restricts `context` to an identifier-shaped code (≤64 chars); prose/Hebrew/paths/over-long → `'unregistered'`; applied in `_emit` post-scrub; `test_safe_context_*` + `test_track_error_context_collapsed_end_to_end` | closed |
+| T-111-22 | Repudiation | import-time key wiring bypassed consent for the ungated shared transport (NLI breaker) | mitigate | **(Codex review F1)** Unconditional import-time `_wire_transport_config()` removed; key wired only on consented launch / opt-in and revoked on opt-out (`set_capture_api_key(None)`); `test_key_not_wired_on_unconsented_launch`, `test_opt_out_revokes_transport_key` | closed |
+| T-111-23 | Repudiation | opt-out not fail-closed (persist-before-flip race + swallowed write failure) | mitigate | **(Codex review F5)** `set_consent(False)` shuts gate + clears key + drains BEFORE disk write; verifies persistence (read-back) and WARNs on failure; `test_opt_out_shuts_gate_before_persisting`, `test_opt_out_failed_persist_is_not_silent` | closed |
 
 *Status: open · closed*
 *Disposition: mitigate (implementation required) · accept (documented risk) · transfer (third-party)*
@@ -65,6 +69,8 @@ created: 2026-06-14
 | Risk ID | Threat Ref | Rationale | Accepted By | Date |
 |---------|------------|-----------|-------------|------|
 | AR-111-01 | T-111-12 | The embedded desktop publishable key (`phc_...`) is write-only (capture-only, no read access) and is already public in the web JS bundle. PostHog publishable keys are designed to be public. The key is NOT a personal secret key (`phx_`). Abuse (inflating fake events) is tolerable — PostHog provides project-level dashboards and the data is internal analytics only, not user-facing data. Key rotation procedure is documented in INFRA-06 (Phase 116). Acceptance criteria: key type is `phc_` (publishable), never `phx_` (personal); rotation plan exists. | gsd-security-auditor / Hillel Gershuni | 2026-06-14 |
+| AR-111-02 | Codex F3 | `identify()` passes `user_id` straight to PostHog as `distinct_id` unvalidated. By design the sole caller (desktop login) passes the Supabase `user.id` — an opaque UUID — so practical leak risk is low. Hardening (validate opaque-ID shape / hash) **deferred**; tracked in `docs/OPEN_ISSUES.md`. Revisit when `identify()` is wired (Phase 114). | Hillel Gershuni | 2026-06-14 |
+| AR-111-03 | Codex F6 | The transport substitutes the desktop default distinct_id for `'system'` events, tagging ungated NLI-breaker operational events with the user's install_id. Applies only post-opt-in (consent granted), and with F1 fixed those events fire only under consent. Minor data-modeling issue; **deferred** (`docs/OPEN_ISSUES.md`). | Hillel Gershuni | 2026-06-14 |
 
 *Accepted risks do not resurface in future audit runs.*
 
@@ -75,6 +81,7 @@ created: 2026-06-14
 | Audit Date | Threats Total | Closed | Open | Run By |
 |------------|---------------|--------|------|--------|
 | 2026-06-14 | 20 | 20 | 0 | gsd-security-auditor (claude-sonnet-4-6) |
+| 2026-06-14 | 24 | 24 | 0 | Codex external review (gpt-5.5) + Claude fix pass — added T-111-20..23 (F1/F2/F4/F5 fixed); F3/F6 deferred as AR-111-02/03 |
 
 ---
 

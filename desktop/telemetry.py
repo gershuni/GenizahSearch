@@ -139,10 +139,22 @@ _TRACK_FORBIDDEN_EVENTS: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 
 # Pre-compiled at module import time (performance: crash hooks must be fast)
+# F2/Codex review: the old `\S+` patterns stopped at the first space and had no
+# UNC branch, so paths with spaces ("C:\Users\Jane Doe\Notes") were only
+# PARTIALLY redacted (the username/folder after the space leaked) and
+# "\\server\share\..." survived whole. A path TAIL now consumes single internal
+# spaces (folder/file names like "Jane Doe") but stops at a DOUBLE space,
+# control char, or end-of-string. Over-redacting a little trailing prose after a
+# path is acceptable; leaking a username/folder is not. The alternation is
+# unambiguous (\S vs a single space) so there is no catastrophic backtracking,
+# and values are length-capped before this runs (WR-01).
+_PATH_TAIL = r'(?:\S| (?! ))*'
 _PATH_RE = re.compile(
-    r'[A-Za-z]:\\\S+'            # Windows absolute path: C:\...
-    r'|/\S{3,}'                   # POSIX absolute path: /home/... (>=3 chars after /)
-    r'|\S+\.[A-Za-z]\w{0,7}\b',   # bare filename: foo.pdf, data.sqlite3, notes.markdown
+    r'[A-Za-z]:[\\/]' + _PATH_TAIL              # Windows drive: C:\Users\Jane Doe\...
+    + r'|\\\\[^\\/\s]+[\\/]' + _PATH_TAIL        # UNC: \\server\share\...
+    + r'|(?<![\w.])/[^\s/]{2,}/' + _PATH_TAIL    # POSIX dir: /home/jane/My Notes/...
+    + r'|/\S{3,}'                                # POSIX no-space fallback (>=3 chars)
+    + r'|\S+\.[A-Za-z]\w{0,7}\b',                # bare filename: foo.pdf, notes.markdown
     re.UNICODE,
 )
 
@@ -266,6 +278,30 @@ def _validate_props(props: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Context-code guard (F4 / Codex review)
+# ---------------------------------------------------------------------------
+# 'context' is the ONE allowlisted free-text property, but _scrub_value only
+# redacts paths + Hebrew + length — so English / Judeo-Arabic / transliterated
+# private text (e.g. a search query "Maimonides rent letter") would otherwise
+# reach PostHog. A legitimate context is a static machine code like
+# 'search_tab.run_query'; enforce that shape and collapse anything else to
+# 'unregistered'. This guards every emit path (track_error AND track(context=)).
+_MAX_CONTEXT_LEN = 64
+# Identifier-shaped code: letters/digits with . _ - separators only. No '/' (it
+# would let a relative path like 'etc/passwd' survive), no spaces, no Hebrew.
+_CONTEXT_RE = re.compile(r'[A-Za-z0-9]+(?:[._\-][A-Za-z0-9]+)*\Z')
+
+
+def _safe_context(value: object) -> str:
+    """Return value if it is an identifier-shaped code, else 'unregistered'."""
+    if (isinstance(value, str)
+            and 0 < len(value) <= _MAX_CONTEXT_LEN
+            and _CONTEXT_RE.match(value)):
+        return value
+    return 'unregistered'
+
+
+# ---------------------------------------------------------------------------
 # Base props helper
 # ---------------------------------------------------------------------------
 def _BASE_PROPS() -> dict:
@@ -312,19 +348,24 @@ def _load_consent_state() -> None:
     global _enabled, _install_id, _current_distinct_id, _identified
     try:
         cfg = load_app_config()
+        enabled = bool(cfg.get(TELEMETRY_ENABLED_KEY, False))
         with _enabled_lock:
-            _enabled = bool(cfg.get(TELEMETRY_ENABLED_KEY, False))
+            _enabled = enabled
         with _state_lock:
             _install_id = cfg.get(TELEMETRY_INSTALL_ID_KEY)
-            _identified_user = cfg.get(IDENTIFIED_USER_KEY)
-            _identified = bool(_identified_user)
-            _current_distinct_id = _identified_user or _install_id
-        # Wire default distinct_id into the transport if we have one and are enabled
-        if _install_id:
-            with _enabled_lock:
-                enabled = _enabled
-            if enabled:
-                set_default_distinct_id(_current_distinct_id)
+            identified_user = cfg.get(IDENTIFIED_USER_KEY)
+            _identified = bool(identified_user)
+            _current_distinct_id = identified_user or _install_id
+            distinct_id = _current_distinct_id
+        # F1/Codex: wire the capture key ONLY on a consented launch (never at
+        # import). The shared transport is intentionally ungated, so a key wired
+        # before opt-in would let ungated emitters (e.g. the NLI circuit-breaker,
+        # reachable from the desktop via genizah_core) POST without consent. The
+        # key is revoked again on opt-out (set_consent(False)).
+        if enabled:
+            _wire_transport_config()
+            if distinct_id:
+                set_default_distinct_id(distinct_id)
     except Exception:
         logger.debug('telemetry: _load_consent_state silently failed', exc_info=True)
 
@@ -376,11 +417,12 @@ def set_consent(enabled: bool) -> None:
     """
     global _enabled, _install_id, _current_distinct_id, _identified
     try:
-        updates: dict = {TELEMETRY_ENABLED_KEY: enabled}
         if enabled:
-            # Wire transport first so any test that checks ph._api_key_override
-            # after set_consent(True) sees the key.
+            # --- OPT-IN ---
+            # Wire transport first so a test checking ph._api_key_override after
+            # set_consent(True) sees the key.
             _wire_transport_config()
+            updates: dict = {TELEMETRY_ENABLED_KEY: True}
             with _state_lock:
                 local_install_id = _install_id
             if not local_install_id:
@@ -393,28 +435,47 @@ def set_consent(enabled: bool) -> None:
             updates[CONSENT_TIMESTAMP_KEY] = datetime.now(timezone.utc).isoformat()
             updates[CONSENT_APP_VERSION_KEY] = _APP_VERSION
             updates[CONSENT_UI_VERSION_KEY] = '1'
-        else:
-            # WR-02: clear identified user from config on opt-out.
-            # CONSENT-06 only requires retaining telemetry_install_id, not the
-            # identified user -- opt-out is a clean privacy boundary.
-            updates[IDENTIFIED_USER_KEY] = None
-        # CONSENT-06: do NOT include TELEMETRY_INSTALL_ID_KEY in updates on opt-out
-        save_app_config(updates)
-        with _enabled_lock:
-            _enabled = enabled
-        if enabled:
+            # Persist BEFORE flipping the in-memory gate (opt-in fail-safe: do not
+            # promise telemetry we cannot honor on the next launch).
+            save_app_config(updates)
+            with _enabled_lock:
+                _enabled = True
             with _state_lock:
                 distinct_id = _current_distinct_id or _install_id
             set_default_distinct_id(distinct_id)
         else:
-            # Opt-out: drain queued events (CONSENT-08) and clear default distinct_id
-            _drain_and_discard()
+            # --- OPT-OUT (fail-closed; F5/Codex) ---
+            # 1. Shut the gate and cut the transport IN MEMORY first, so a
+            #    concurrent track() can no longer pass is_enabled() and the
+            #    ungated shared transport (NLI breaker) can no longer POST —
+            #    BEFORE any slow/failable disk I/O.
+            with _enabled_lock:
+                _enabled = False
             set_default_distinct_id(None)
-            # WR-02: reset in-memory identity to anonymous so re-opt-in starts clean.
-            # _install_id is retained (CONSENT-06) but identity is wiped.
+            set_capture_api_key(None)   # F1: revoke the key so ungated emitters stop
+            set_capture_host(None)
+            # 2. Discard anything already queued (CONSENT-08) — no POST.
+            _drain_and_discard()
+            # 3. Reset in-memory identity to anonymous (WR-02). _install_id is
+            #    RETAINED (CONSENT-06) but identity is wiped so re-opt-in is clean.
             with _state_lock:
                 _identified = False
                 _current_distinct_id = _install_id
+            # 4. Persist the opt-out LAST. CONSENT-06: do NOT write
+            #    TELEMETRY_INSTALL_ID_KEY. save_app_config swallows write errors,
+            #    so verify the flag actually landed — a failed opt-out that leaves
+            #    config enabled for the next launch must not be silent (F5).
+            save_app_config({TELEMETRY_ENABLED_KEY: False, IDENTIFIED_USER_KEY: None})
+            try:
+                persisted = bool(load_app_config().get(TELEMETRY_ENABLED_KEY, False))
+            except Exception:
+                persisted = False
+            if persisted:
+                logger.warning(
+                    'telemetry: opt-out may not have persisted to config — '
+                    'telemetry is disabled in-memory for this session and will '
+                    're-check consent on next launch'
+                )
     except Exception:
         logger.debug('telemetry: set_consent silently failed', exc_info=True)
 
@@ -452,6 +513,15 @@ def _emit(event_value: str, props: dict, distinct_id: str | None = None) -> None
         merged['$process_person_profile'] = identified
         validated = _validate_props(merged)
         scrubbed = _scrub_props(validated)
+        # F4/Codex: 'context' is the lone allowlisted free-text key. _safe_context
+        # is its DEDICATED scrubber — it permits only an identifier-shaped code
+        # and collapses anything else (prose, Hebrew, paths, over-long) to
+        # 'unregistered'. Apply it AFTER _scrub_props, sourced from the pre-scrub
+        # value, so a legitimate dotted code like 'search_tab.run' is not mangled
+        # into [REDACTED] by the generic path/filename redactor. Covers
+        # track_error AND any track(..., context=) callsite in Phases 112-115.
+        if 'context' in validated:
+            scrubbed['context'] = _safe_context(validated['context'])
         enqueue_event(event_value, scrubbed, distinct_id=effective_id)
     except Exception:
         logger.debug('telemetry: _emit silently failed for %r', event_value, exc_info=True)
@@ -667,10 +737,13 @@ def _reset_for_tests() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Module initialization — wire transport then load consent state
+# Module initialization — load consent state (which wires the key IFF consented)
 # ---------------------------------------------------------------------------
-_wire_transport_config()   # REVIEWS HIGH-1: desktop key reaches transport at import
-_load_consent_state()      # Populates _enabled/_install_id/_current_distinct_id
+# F1/Codex: do NOT wire the capture key unconditionally at import. The shared
+# transport is ungated, so a key present before opt-in would let ungated
+# emitters (NLI circuit-breaker) POST without consent. _load_consent_state()
+# wires the key only when the persisted consent flag is True.
+_load_consent_state()      # Populates _enabled/_install_id/_current_distinct_id (+ wires key iff consented)
 
 
 # ---------------------------------------------------------------------------
