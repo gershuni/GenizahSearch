@@ -26,10 +26,9 @@
 - **v7.15 My Library Visual** -- Phases 99-101 (shipped 2026-05-28). See `milestones/v7.15-ROADMAP.md`
 - **v7.16 Hebrew PDF Text Quality** -- Phase 102 + no-phase quality work (shipped 2026-06-01). See `milestones/v7.16-ROADMAP.md`
 - **v8.0.0 Dicta Rebrand & Joins Lab** -- BRAND (no-phase) + Phases 103, 105 (folded from v7.17; Phase 104 → EXP-F3) + Phases 106-110 Joins Lab (shipped 2026-06-09; closed 2026-06-11). Component B (JSA-01/02/03 + JWB-05) + web Joins Lab UI deferred post-v8.0.0. See `milestones/v8.0.0-ROADMAP.md`
+- 🚧 **v8.1.0 Desktop Telemetry** -- Phases 111-116 (in progress)
 
 ## Phases
-
-_No active phases — v8.0.0 shipped 2026-06-09 and closed 2026-06-11. Next milestone TBD (run `/gsd-new-milestone`)._
 
 <details>
 <summary>✅ v8.0.0 Dicta Rebrand & Joins Lab (Phases 103, 105 + 106-110) — SHIPPED 2026-06-09, closed 2026-06-11</summary>
@@ -60,258 +59,101 @@ See: .planning/milestones/v7.16-ROADMAP.md
 
 </details>
 
-<details>
-<summary>✅ v7.14 My Library — Local Document Search (Phases 95-98) — SHIPPED 2026-05-24, closed 2026-05-27</summary>
-
-See: .planning/milestones/v7.14-ROADMAP.md
-
-6 phases (95, 96, 97, 97.2 INSERTED, 97.3 INSERTED, 98), 37 plans. Desktop-first "My Library" tab indexing user folders of `.docx`/`.pdf`/`.txt`/`.html`/`.xlsx`/`.csv` into a separate Tantivy side-index merged into Search/Composition/Parallels via RRF k=60 POST-dedup, with a `LOCAL` badge, a corpus selector, and three cloud-write gates keeping personal corpora off the cloud. Public v7.14.0 release 2026-05-24 (Phase 95 MVP + Phase 96 completion). Internal hotfix chain through 2026-05-27: Phase 97 (scale to 13K files / 43 GB + `.html`/`.xlsx`/`.csv` + atomic rebuild + crash recovery), Phase 97.2 INSERTED (recovery cascade + Reset My Library), Phase 97.3 INSERTED (mega-folder UI-thread stability). Phase 98 (web infra) added a shared NLI circuit breaker wired into all 10 NLI/IIIF fetch sites, dropping worst-case per-request blocking 45s → ~9s (closes the 2026-05-25 production hang). v7.12 multitenant invariants preserved (zero raw `app.storage.user` under `web/`; LOCAL never reaches web/API/Supabase).
-
-</details>
-
-<details>
-<summary>v7.13 Research-Grade Downloads & PGP Filter (Phases 93-94) -- BOTH PHASES COMPLETE (Phase 93 2026-05-19; Phase 94 2026-05-21; milestone closeable)</summary>
-
-See: .planning/milestones/v7.13-ROADMAP.md
-
-2 phases, 5 plans (Phase 93: 1; Phase 94: 4 waves), 14/14 requirements satisfied (5 PGP-FILTER + 9 EXPORT-META). Both phases promoted from backlog (999.2 + 999.3). Phase 93 (PGP Filter on `/search`, web-only) shipped 2026-05-19 with 4/5 PGP-FILTER reqs directly satisfied; PGP-FILTER-03 (chip) superseded by user smoke direction (colored button label already conveys state). Phase 94 (Research-Grade Export Metadata, web + desktop xlsx) shipped 2026-05-21 after a 4-wave implementation (94-01 shared dossier primitives → 94-02 web state plumbing + JSON envelope → 94-03 web xlsx restructure → 94-04 desktop xlsx parity + smoke verification + docs closeout). The final workbook is 4-sheet (`Search Results` + `Manuscripts` + `Bibliography` + `Credits and Info`) bilingual (lang='he' produces Hebrew sheet titles + headers + Hebrew-preferred metadata, lang='en' produces English everywhere) with clickable Manuscripts URLs, deduped Domains, int Image/Page values, and a 4th Credits-and-Info sheet carrying search metadata + GenizahSearch.com hyperlink + Creator credit — refined across 6 rounds of smoke-verification patches (bilingual headers + source-language metadata + sheet rename + 4th sheet + label realignment + clickable URLs + Domains dedupe + Image/Page int coercion). On web only, JSON gains 3 additive per-item flags (`has_pgp`, `is_printed`, `domains`) with envelope `schema_version` unchanged; desktop has no JSON export. CONTEXT D-04 was REVERSED 2026-05-20 for the row content layer only (the D-02 transcription-text prohibition + D-10 parallels-envelope strip + conditional RTL view-direction are UNCHANGED). v7.12 multitenant invariants carry forward (zero raw `app.storage.user` under `web/`; allowlist still `[]`).
-
-</details>
-
-<details>
-<summary>v1 External Data Integration (Phases 1-7) -- SHIPPED 2026-02-07</summary>
-
-See: .planning/milestones/v1-ROADMAP.md
-
-9 phases (including inserted 7.1, 7.2), 18 plans, 173 min total execution.
-Imported 7,090 PGP documents with 9,364 transcription/translation sources.
-Full PGP feature set in web app.
-
-</details>
-
-<details>
-<summary>v5.6.0 Desktop Parity & PGP Integration (Phases 8-12) -- SHIPPED 2026-02-09</summary>
-
-See: .planning/milestones/v5.6.0-ROADMAP.md
-
-5 phases, 25 plans, ~134 min total execution.
-Desktop PGP feature parity, Virtual Reading Desk, 35,839 PGP documents imported.
-Phase 13 (Transcription Search) deferred -- index build too slow for desktop.
-
-</details>
-
-<details>
-<summary>v5.7.0 Responsa Search (Phases 14-17) -- SHIPPED 2026-02-10</summary>
-
-See: .planning/milestones/v5.7.0-ROADMAP.md
-
-4 phases, 14 plans.
-Responsa Project-style advanced search with syntax parsing, JA expansion, tabular query builder, explosion guards.
-25/25 requirements satisfied. 221 automated Responsa tests.
-
-</details>
-
-<details>
-<summary>v5.7.2 Cleanup, Normalization & Sections (Phases 18-21) -- SHIPPED 2026-02-11</summary>
-
-See: .planning/milestones/v5.7.2-ROADMAP.md
-
-4 phases, 11 plans.
-Dead AI code removed, Unicode search normalization, full green test suite (447 tests),
-structural HTML section parser for PGP transcriptions.
-13/13 requirements satisfied.
-
-</details>
-
-<details>
-<summary>v5.7.3 Pending Corrections Visibility (Phases 22-24) -- SHIPPED 2026-02-11</summary>
-
-See: .planning/milestones/v5.7.3-ROADMAP.md
-
-3 phases, 3 plans.
-Pending corrections visible as selectable version in web and desktop version selectors.
-Shared corrections service, amber styling (web), emoji labels (desktop).
-6/6 requirements satisfied. 20 milestone-specific tests.
-
-</details>
-
-<details>
-<summary>v5.8.0 FJMS Integration (Phases 25-28) -- SHIPPED 2026-02-15</summary>
-
-See: .planning/milestones/v5.8.0-ROADMAP.md
-
-4 phases, 12 plans.
-FJMS scholarly metadata (domains, joins, catalog) integrated via SQLite sidecar.
-Domain filtering, scientific joins with scholar attribution, catalog enrichment in both apps.
-19/19 requirements satisfied. 38+ tests covering service layer and integration.
-
-</details>
-
-<details>
-<summary>v5.9.0 Multi-Source Image & Metadata Integration (Phases 29-34) -- SHIPPED 2026-02-16</summary>
-
-See: .planning/milestones/v5.9.0-ROADMAP.md
-
-6 phases, 22 plans (including 3 gap closure plans), 76 commits.
-NLI crossref sidecar (815K records), Cambridge IIIF (141K), Manchester LUNA (28K), JTS/Princeton Figgy (453).
-Multi-source image viewing with folio navigation, bibliography (542K), catalog refs (64K), physical metadata.
-11/14 requirements satisfied, 1 invalidated (FGP!=FL), 2 deferred (REL-01/REL-02).
-
-</details>
-
-<details>
-<summary>v6.0.0 Local Data Architecture (Phases 35-40) -- SHIPPED 2026-02-22</summary>
-
-See: .planning/milestones/v6.0.0-ROADMAP.md
-
-6 phases, 21 plans (8 core + 8 bug-fix/cleanup + 5 performance optimization), 155 commits.
-PGP data migrated to local pgp.db sidecar (147MB). FJMS catalog descriptions expanded (4 new tables, ~1.7M rows).
-Desktop offline PGP browsing. All desktop crashes fixed. Paginated search (PAGE_SIZE=50).
-Performance: parallel NLI fetch, browse crossref parallelization, FL ID index, variant cache unification.
-14/14 requirements satisfied (audit passed).
-
-</details>
-
-<details>
-<summary>v6.1.0 Catalog Browse & Navigation (Phase 41) -- SHIPPED 2026-02-27</summary>
-
-1 phase, 4 plans.
-Faceted browsing by domain hierarchy, author, and work title in both apps.
-FIST v5.0.0 enrichment (genizah_persons, genizah_titles, code_values), FTS5+domain text filter,
-cross-links between browse and catalog browse pages. 72 tests.
-
-</details>
-
-<details>
-<summary>v6.5.0 Search UX & Filtered Search (Phases 42-46) -- SHIPPED 2026-03-14</summary>
-
-See: .planning/milestones/v6.5.0-ROADMAP.md
-
-5 phases, 26 plans, 244 commits.
-Search UX overhaul (timer, ETA, partial results, printed filter), session persistence,
-Hebrew library names, bidirectional filtered search (domain/author/work/date/material),
-~580K Dicta translations for multilingual access. Origin: power user feedback letter (17 requests).
-
-</details>
-
-<details>
-<summary>v7.0.0 Fragment Puzzle (Phases 47-52) -- SHIPPED 2026-03-17</summary>
-
-6 phases, 15 plans.
-Visual jigsaw tool for assembling physical joins from manuscript fragment images with background removal,
-DPI calibration, recto/verso views, join document persistence, and community publishing --
-in both web (NiceGUI + Fabric.js) and desktop (PyQt6 + QGraphicsScene).
-
-</details>
-
-<details>
-<summary>v7.1.0 FIST Gap Fill (Phase 53) -- SHIPPED 2026-03-19</summary>
-
-1 phase, 2 plans.
-Added 38,673 Genizah manuscripts from FIST.db that were missing from libraries.csv.
-Browsable with images and FJMS enrichment. Metadata search guard fix. 7 new library codes.
-
-</details>
-
-<details>
-<summary>v7.6 Search Refinement & Scholarly Joins (Phases 54-57) -- SHIPPED 2026-03-31</summary>
-
-See: .planning/milestones/v7.6-ROADMAP.md
-
-5 phases (+ 55.1 inserted), 17 plans, 206 commits, 151 files changed (+28K/-3.7K lines).
-Manuscript dimensions display + filtering, search within results with breadcrumb chain,
-exclude known manuscripts (lists/files/paste), FIST visual similarity browse + search mode,
-lightweight browse first-render. 14/14 requirements satisfied.
-
-</details>
-
-<details>
-<summary>v7.7 Volume-Aware Browse (Phases 58-61) -- SHIPPED 2026-04-01</summary>
-
-4 phases, 8 plans, 13 commits.
-Fixed multi-IE image/text mismatch for 3,193 manuscripts (1.5%) by making search->browse->paging
-IE-aware across both apps. IE volume data infrastructure, web + desktop volume selector dropdown,
-per-IE paging, volume-correct images for external providers (Manchester/Oxford/Cambridge/JTS),
-auto-default to external sources when NLI is down, session persistence for active volume,
-community writes (corrections/comments) include IE context.
-
-</details>
-
-<details>
-<summary>v7.8 Structural Foundation (Phases 63-66) -- SHIPPED 2026-04-15</summary>
-
-See: .planning/milestones/v7.8-ROADMAP.md
-
-4 phases, 9 plans, 64 commits, 173 files changed (+6,269/-828 lines).
-CI safety net with GitHub Actions (Ubuntu + Windows matrix, ruff + check_docs + pytest),
-two-file dependency pinning (14 direct + 115 transitive), Supabase auth migration
-(gotrue -> supabase_auth, PKCE-only OAuth), 205+ silent exception handlers audited across
-76 first-party files, isolated NiceGUI monkey-patches with version guards, repo root
-cleanup (.gitignore 50->126 lines, untracked root 67->1), documentation refresh
-(CODE_INDEX, OPEN_ISSUES, DEVELOPER_GUIDE). 12/12 requirements satisfied.
-Zero user-visible behavior changes.
-
-</details>
-
-<details>
-<summary>v7.9 Decomposition (Phases 67-76) -- COMPLETE 2026-04-17</summary>
-
-10 phases, 23 plans.
-Decomposition of largest source files into focused modules. Desktop split: ResultDialog,
-filter/scholarly dialogs, image viewers (ManuscriptViewerWidget, FullscreenImageWindow),
-puzzle canvas, VS cache, widgets extracted into desktop/ package. Web split:
-search.py -> search_state.py + search_results.py; browse.py -> browse_state.py + browse_enrichment.py.
-Page-scoped state refactor reducing app.storage.user sprawl. Back-navigation state-loss bugfix
-(regression from 2026-03-27 commit 829cd7cf). Zero user-visible behavior change except the
-back-nav bugfix.
-
-</details>
-
-<details>
-<summary>v7.10 Search API (Phases 77-83) -- SHIPPED 2026-05-05</summary>
-
-See: .planning/milestones/v7.10-ROADMAP.md
-
-8 phases (77, 78, 79, 80, 81A, 81B, 82, 83), 37 plans.
-Public HTTP/JSON research-automation API over the Genizah corpus: `/api/search` (keyword/Responsa/title/shelfmark with rate limiting, mode gating, error envelope), `/api/browse` (stateless drill-down returning text + metadata + image URLs), `/api/parallels` (composition matching). Security hardening (XFF spoofing, fail-closed filter validation, MAX_EXPANDED_TERMS=500, HMAC-hashed PostHog telemetry). OpenAPI auto-generated at `/api/openapi.json` + Swagger at `/api/docs`. Reference Claude skill `cairo-genizah-research` (file-locked token-bucket throttling, browse-honesty annotations). 36/36 in-traceability requirements + 8 PUBLIC-* satisfied (deployed to production 2026-05-05). Web-only release: no git tag, no GitHub Release.
-
-</details>
-
-<details>
-<summary>v7.11 CUDL Coverage & Synthetic Inventories (Phases 84-86) -- SHIPPED 2026-05-12</summary>
-
-3 phases, 14 plans (84: 5/5, 85: 5/5, 86: 4/5 executed + optional release plan).
-FIST-CUDL bridge (shared/fist_cudl_bridge.py + shared/shelfmark_bridge.py) with normalizers for Mosseri label form, Cambridge Or. numeric collapse, CUL slash/comma/dot/leading-zero fixes; 6 wiring call sites. Synthetic libraries.csv infrastructure: is_synthetic_sys_id helper, Option-2 18-digit format, browse hide-NLI gates, is_synthetic on API responses, corrections-write reject. 108 image-bearing synthetic manuscripts injected (101 CUL + 7 Mosseri). T-S NS 329.96 (originating case) resolved. 5-tier CUDL coverage audit (96.23% phase84_hit, 0.08% synthetic, 1.13% residue needing human-in-loop). Deploy posture codified: scp DBs FIRST, then push code.
-
-</details>
-
-<details>
-<summary>v7.12 Multitenant Architecture (Path B) (Phases 87-92 + 92.1 + 92.2 + promoted 999.1/999.4) -- SHIPPED 2026-05-18</summary>
-
-See: .planning/milestones/v7.12-ROADMAP.md
-
-10 phases (87, 88, 89, 90, 91, 92, 92.1 INSERTED, 92.2 INSERTED, 999.1 promoted, 999.4 promoted), 28 plans, 49/49 requirements satisfied (38 v7.12 core + 11 promoted backlog).
-Refactored GenizahSearch's web layer off the desktop-inherited single-user mental model. 131 raw `app.storage.user` accesses migrated through `web/safe_storage.py` chokepoint with allowlist driven to 0 entries. State separation by deletion (10 AppState mirror fields gone), per-request `UserListsManager`, request-scoped auth with NO `set_session()` mid-flight (Codex constraint at `gotrue_client.py:713` respected), `_session_uuid`-keyed refresh locks, real server-side `sign_out` revocation. Phase 92.1 (INSERTED) closed P0 RLS-reachability regression by migrating 12 reader call sites from anonymous singleton to `get_user_client()`. Phase 92.2 (INSERTED) closed `/lists` 36s warm-render regression via task-scoped `WeakKeyDictionary` memo (19.3x mean speedup). 5-surface SWEEP audit clean. `docs/guides/MULTITENANT.md` shipped as architecture reference. Promoted backlog: Phase 999.1 (search-result folio chip parity) + Phase 999.4 (line-number gutter in both apps).
-
-</details>
+---
+
+### 🚧 v8.1.0 Desktop Telemetry (Phases 111-116)
+
+**Milestone goal:** Add opt-in, privacy-preserving telemetry to the desktop app ("Dicta Genizah Search Pro") so real-world usage, version adoption, performance, and crashes become visible in PostHog — without ever transmitting My Library data or search content. Desktop-only (web is already instrumented). Default OFF until the user consents.
+
+**Foundation-first invariant:** No event can fire before the consent gate, scrubber, and property/event allowlist exist and are tested. Phases 113-115 all depend on Phase 111 being complete and green.
+
+## Summary Checklist
+
+- [ ] **Phase 111: Telemetry Foundation** - `desktop/telemetry.py` chokepoint + consent storage + structural scrubber + property/event allowlist + flush infrastructure (no events fire yet)
+- [ ] **Phase 112: Consent UX** - Bilingual first-run dialog + Settings toggle + opt-out queue drain + bilingual privacy disclosure
+- [ ] **Phase 113: Crash Reporting** - Exception hooks (chained, non-blocking) + faulthandler + scrubbed crash payloads + bounded synchronous flush + next-launch native-crash detection
+- [ ] **Phase 114: Usage Analytics** - Session-start, feature/tab usage, search mode+corpus enums, active-user signal, base props, session/clock correctness
+- [ ] **Phase 115: Performance Metrics** - Search/indexing durations, result-count buckets, per-session summary with periodic+close flush, configurable sampling
+- [ ] **Phase 116: Privacy Audit + CI Gate** - AST guard in CI, forbidden-field tests, frozen-binary SSL/offline self-test, operational runbook
+
+## Phase Details
+
+### Phase 111: Telemetry Foundation
+**Goal**: The `desktop/telemetry.py` chokepoint module exists with its full public API, consent state persists in `config.pkl`, the structural scrubber enforces no-PII at the network boundary, and the property/event allowlist prevents future accidental leaks — but no events fire yet because no producers are wired.
+**Depends on**: Nothing (no prior v8.1.0 phases)
+**Requirements**: CONSENT-01, CONSENT-05, CONSENT-06, CONSENT-07, INFRA-01, INFRA-02, INFRA-03, INFRA-04, INFRA-05, PRIV-01, PRIV-02, PRIV-06
+**Success Criteria** (what must be TRUE):
+  1. `desktop/telemetry.py` is importable and exposes all eight public callables (`is_enabled`, `track`, `track_performance`, `track_error`, `get_install_id`, `set_consent`, `install_exception_hooks`, `show_first_run_prompt`); every call gate-checks `is_enabled()` and returns immediately when consent is absent or false — a fresh `config.pkl` emits zero events.
+  2. `set_consent(True)` mints a UUID-v4 install ID and persists it in `config.pkl`; `set_consent(False)` stops emission immediately; the install ID is retained on disk (not deleted) so re-opt-in preserves continuity.
+  3. `_scrub_props()` strips banned keys, redacts path-like strings, and drops frame locals from any dict before it can reach `enqueue_event` — verified by unit tests with real Windows-path fixtures and Hebrew query strings.
+  4. A static property allowlist rejects any property not on the list (including `hostname`, `username`, `executable path`, `cwd`, and all query/content-derived fields); event names are drawn exclusively from a fixed registry enum with no dynamic construction.
+  5. `shared/posthog_server.py` gains backward-compatible additions (`_telemetry_enabled` gate, `_scrub_hook`, `set_default_distinct_id`, `_flush_before_exit`) without breaking its existing web/breaker consumers or the 5 test monkeypatches targeting `_event_queue`.
+**Plans**: TBD
+
+### Phase 112: Consent UX
+**Goal**: The user can give or withdraw consent through a bilingual first-run dialog (shown exactly once, on first launch after updating to v8.1.0) and a Settings/About toggle; opting out immediately drains and discards any already-queued events; a bilingual privacy disclosure is reachable from both surfaces.
+**Depends on**: Phase 111
+**Requirements**: CONSENT-02, CONSENT-03, CONSENT-04, CONSENT-08, PRIV-05
+**Success Criteria** (what must be TRUE):
+  1. On first launch after upgrade (or fresh install), a bilingual EN/HE modal dialog appears with two equal-weight buttons (no pre-selection, no Enter-key shortcut defaulting to Accept) — pressing Enter without reading leaves the user opted out.
+  2. The dialog fires exactly once across app restarts: after any choice, `telemetry_first_run_shown=True` is written to `config.pkl` unconditionally and subsequent launches skip the dialog entirely.
+  3. The stored consent record includes the consent timestamp, app version, and consent-UI version, providing a lightweight audit trail.
+  4. The Settings/About toggle reads and writes the same `telemetry_enabled` key as the first-run dialog; toggling off immediately purges any already-queued un-sent events so nothing buffered before opt-out is transmitted afterward.
+  5. A bilingual (EN/HE) privacy disclosure explains what is collected, what is not (no search content, no My Library paths/filenames), who processes the data, and how to opt out — accessible from both the first-run dialog and the Settings toggle location.
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 113: Crash Reporting
+**Goal**: Uncaught exceptions on any thread are captured, scrubbed, and enqueued non-blockingly before the existing crash-log handler runs; faulthandler captures native C-extension crashes to a local file; a bounded synchronous flush delivers the crash event before process exit; next-launch detection re-emits native crash signals after consent is confirmed.
+**Depends on**: Phase 112
+**Requirements**: CRASH-01, CRASH-02, CRASH-03, CRASH-04, CRASH-05, CRASH-06, CRASH-07
+**Success Criteria** (what must be TRUE):
+  1. `install_exception_hooks()` wraps (never replaces) the existing `_setup_crash_handler()` so `crash_log.txt` continues to be written — verified by a test that raises an exception after hook installation and confirms both the PostHog enqueue and the crash-log file write occur.
+  2. `threading.excepthook` is installed to capture QThread/worker exceptions (SearchThread, LocalIndexerWorker, FolderWalkWorker) that do not reach `sys.excepthook`; `KeyboardInterrupt` is explicitly excluded from both hooks.
+  3. Crash events contain only exception type name, scrubbed module basename + line number, app version, and OS — no frame locals, no exception message string, no file paths, no query text — enforced by the Phase 111 scrubber applied inside the hook before enqueue.
+  4. The exception hook body is non-blocking (executes only `traceback.format_exception` + scrub + `put_nowait`; no network I/O, no disk I/O, no lock acquisition) and is entirely wrapped in `try/finally` so the existing crash handler always runs even if the telemetry step throws.
+  5. A bounded synchronous `_flush_before_exit(timeout=0.5)` is called inside the exception hook after enqueueing the crash event, and via `atexit` for clean exits, so crash events are not silently lost when the daemon drain thread is killed at process exit.
+**Plans**: TBD
+
+### Phase 114: Usage Analytics
+**Goal**: The desktop app emits allowlisted usage events (session start/end, tab/surface activations, search mode and corpus enums) that enable DAU/MAU, version adoption, and feature-use measurement in PostHog — with no query content, no My Library data, and no environment identifiers beyond OS family/version.
+**Depends on**: Phase 112
+**Requirements**: USAGE-01, USAGE-02, USAGE-03, USAGE-04, USAGE-05, USAGE-06
+**Success Criteria** (what must be TRUE):
+  1. A session-start event fires once per process after consent is confirmed, carrying only allowlisted environment props: app version, OS family + version, Python/PyQt version, UI language — never hostname, machine name, username, executable path, or working directory.
+  2. Feature usage events capture which tabs and key surfaces (Joins Lab, Fragment Puzzle, major dialogs) are opened as counts; no free-text or content properties appear on any event.
+  3. Search executions are captured with `search_mode` (keyword/Responsa/composition/parallels) and `corpus_scope` (Genizah/Local/ALL) as fixed enum values — the query text, filter content, and exclusion list are structurally absent (not present in the event, not scrubbed away).
+  4. Every event carries base properties (`platform=desktop`, `$process_person_profile=false`, `app_version`) applied through a single shared `_emit()` helper; no callsite adds these manually or bypasses the helper.
+  5. Exactly one telemetry session ID is generated per process; all timestamps are UTC; performance durations use a monotonic clock; a crash-restart begins a fresh session without emitting a duplicate session-start for the crashed process.
+**Plans**: TBD
+
+### Phase 115: Performance Metrics
+**Goal**: Search and indexing durations are measured on worker threads and accumulated into a per-session summary (aggregated result counts and latency buckets) that is flushed once at session close and periodically — never one event per search — so heavy users (~50 searches/day) do not flood the PostHog stream.
+**Depends on**: Phase 112
+**Requirements**: PERF-01, PERF-02, PERF-03
+**Success Criteria** (what must be TRUE):
+  1. `SearchThread`, `CompositionThread`, and `LabSearchThread` each emit a `perf_signal(float, int)` Qt signal on completion carrying elapsed milliseconds and result count; the UI-thread handler calls `track_performance()` without exposing any query text.
+  2. Result counts are reported exclusively as bounded buckets (e.g., 0 / 1-10 / 11-50 / 51-200 / 200+), never as raw integers that would create unbounded PostHog histogram cardinality.
+  3. Performance data accumulates in a per-session in-memory summary (median/p95 + counts per search mode); the summary flushes as a single `desktop_session_performance_summary` event at app close and on a configurable periodic schedule — the default produces approximately tens of events per day for heavy users, not hundreds; sampling and flush interval are tunable via environment variable or config without a code change.
+**Plans**: TBD
+
+### Phase 116: Privacy Audit + CI Gate
+**Goal**: The complete telemetry stack is validated end-to-end: the AST guard runs green in CI on both Ubuntu and Windows, automated tests prove that no forbidden field ever reaches `enqueue_event`, frozen-binary SSL and offline degradation are verified on a clean Windows machine, and the operational runbook documents the desktop PostHog project, embedded key posture, and drop-counter monitoring.
+**Depends on**: Phases 113, 114, 115
+**Requirements**: PRIV-03, PRIV-04, INFRA-06
+**Success Criteria** (what must be TRUE):
+  1. The AST CI guard (`tests/test_telemetry_no_direct_posthog.py`, modeled on `test_no_raw_storage_access.py`) passes on both Ubuntu and Windows CI: no file under `desktop/` except `desktop/telemetry.py` imports `shared.posthog_server` or calls `enqueue_event` directly.
+  2. Automated tests assert that representative crash tracebacks, My Library search scenarios, and composition searches never produce a PostHog payload containing any forbidden field — explicitly: My Library paths, filenames, query/search text, usernames, or hostnames — and that zero events are enqueued before consent is confirmed.
+  3. The frozen `.exe` on a clean Windows machine (no Python installed) successfully delivers events to the desktop PostHog project (SSL cert bundle present and functional); with network disabled, the app starts normally and telemetry degrades silently with no dialog, no delay, and no crash.
+**Plans**: TBD
 
 ## Progress
 
-All v8.0.0 phases archived (see the collapsed milestone above + `milestones/v8.0.0-ROADMAP.md`). No active phases — the next milestone's phases will populate this table after `/gsd-new-milestone`.
-
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 106-110 (Joins Lab) + 103/105 (LOCAL export) | v8.0.0 | 31/31 | ✅ Archived | 2026-06-09 |
-
-## Backlog
-
-No active backlog entries for future milestones.
-
-Next-milestone candidates: **D-F12** (regular Search ~8s wall-clock investigation), **D-F18** (context-menu LOCAL detection normalize through `display`), and the deferred **Component B** (JSA-01/02/03 + JWB-05) + **web Joins Lab UI** — see `docs/OPEN_ISSUES.md` and `milestones/v8.0.0-REQUIREMENTS.md`. (EXPUX-01 + EXPUX-04 dialog UI UAT approved 2026-06-11.)
-
----
-
-*Roadmap created: 2026-02-09*
-*Last updated: 2026-06-11 — **v8.0.0 milestone CLOSED** (retroactive — `/release` shipped + tagged `v8.0.0` 2026-06-09 but did not run the GSD close). Phases 103, 105, 106-110 archived to `milestones/v8.0.0-ROADMAP.md`; requirements to `milestones/v8.0.0-REQUIREMENTS.md`; expanded phase detail collapsed into the milestone grouping above. Component B (JSA-01/02/03 + JWB-05) + web Joins Lab UI deferred to a post-v8.0.0 milestone.*
-*Prior update: 2026-06-08 — **Phase 110 REFRAMED** (discuss-phase): was "Search-Support — Parallels Seeding (JSA-01)"; per user decision **all of Component B (JSA-01/02/03 + JWB-05) deferred to a post-v8.0.0 milestone**. Phase 110 became **Composition/Parallels — LOCAL Corpus Support** (desktop): pre-search Genizah/Local/ALL selector on the composition tab (corpus orthogonal to mode; Lab Mode no longer hardwired to LOCAL) + LOCAL-aware `export_comp_report` (EXP-F3 promoted from Future). Un-gated the deferred Phase 104. New reqs COMP-LOC-01/02.*
-*Prior update: 2026-06-03 — **v8.0.0 Joins Lab roadmap created**: Phases 106-110 added; Codex extract-pure-logic-first sequence; web UI deferred to a later phase; v7.17 folded into v8.0.0 (Phases 103/105 delivered); validated sketch preserved as the executable spec at tag `spike-002-joins-workbench`.*
+| 111. Telemetry Foundation | v8.1.0 | 0/TBD | Not started | - |
+| 112. Consent UX | v8.1.0 | 0/TBD | Not started | - |
+| 113. Crash Reporting | v8.1.0 | 0/TBD | Not started | - |
+| 114. Usage Analytics | v8.1.0 | 0/TBD | Not started | - |
+| 115. Performance Metrics | v8.1.0 | 0/TBD | Not started | - |
+| 116. Privacy Audit + CI Gate | v8.1.0 | 0/TBD | Not started | - |

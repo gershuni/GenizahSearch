@@ -113,22 +113,50 @@
 
 ## Traceability
 
-Which phases cover which requirements. Updated during roadmap creation.
-
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONSENT-01..08 | TBD | Pending |
-| USAGE-01..06 | TBD | Pending |
-| PERF-01..03 | TBD | Pending |
-| CRASH-01..07 | TBD | Pending |
-| PRIV-01..06 | TBD | Pending |
-| INFRA-01..06 | TBD | Pending |
+| CONSENT-01 | Phase 111 | Pending |
+| CONSENT-02 | Phase 112 | Pending |
+| CONSENT-03 | Phase 112 | Pending |
+| CONSENT-04 | Phase 112 | Pending |
+| CONSENT-05 | Phase 111 | Pending |
+| CONSENT-06 | Phase 111 | Pending |
+| CONSENT-07 | Phase 111 | Pending |
+| CONSENT-08 | Phase 112 | Pending |
+| USAGE-01 | Phase 114 | Pending |
+| USAGE-02 | Phase 114 | Pending |
+| USAGE-03 | Phase 114 | Pending |
+| USAGE-04 | Phase 114 | Pending |
+| USAGE-05 | Phase 114 | Pending |
+| USAGE-06 | Phase 114 | Pending |
+| PERF-01 | Phase 115 | Pending |
+| PERF-02 | Phase 115 | Pending |
+| PERF-03 | Phase 115 | Pending |
+| CRASH-01 | Phase 113 | Pending |
+| CRASH-02 | Phase 113 | Pending |
+| CRASH-03 | Phase 113 | Pending |
+| CRASH-04 | Phase 113 | Pending |
+| CRASH-05 | Phase 113 | Pending |
+| CRASH-06 | Phase 113 | Pending |
+| CRASH-07 | Phase 113 | Pending |
+| PRIV-01 | Phase 111 | Pending |
+| PRIV-02 | Phase 111 | Pending |
+| PRIV-03 | Phase 116 | Pending |
+| PRIV-04 | Phase 116 | Pending |
+| PRIV-05 | Phase 112 | Pending |
+| PRIV-06 | Phase 111 | Pending |
+| INFRA-01 | Phase 111 | Pending |
+| INFRA-02 | Phase 111 | Pending |
+| INFRA-03 | Phase 111 | Pending |
+| INFRA-04 | Phase 111 | Pending |
+| INFRA-05 | Phase 111 | Pending |
+| INFRA-06 | Phase 116 | Pending |
 
 **Coverage:**
 - v8.1.0 requirements: 36 total
-- Mapped to phases: 0 (roadmap pending) ⚠️
-- Unmapped: 36 ⚠️
+- Mapped to phases: 36/36 ✓
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-14*
-*Last updated: 2026-06-14 after initial definition (v8.1.0 Desktop Telemetry)*
+*Last updated: 2026-06-14 — traceability populated after roadmap creation*
