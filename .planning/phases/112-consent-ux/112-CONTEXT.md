@@ -32,6 +32,9 @@ Requirements (from ROADMAP/REQUIREMENTS): CONSENT-02, CONSENT-03, CONSENT-04, CO
 - **D-04:** It must **not stack on top of** the interrupted-indexing recovery modal ("התאוששות מאינדוקס שהופסק") or the sync prompt — those first-launch modals resolve **first**, then the consent modal shows. (Both are `QDialog.exec()` nested loops; a naïve `singleShot(0)` can fire *inside* a recovery modal's loop and stack two modals — planner must sequence so consent shows only after they close.)
 - **D-05:** Shown **exactly once**, gated on `FIRST_RUN_SHOWN_KEY`. After any choice (Accept, Decline, or close/Escape), `FIRST_RUN_SHOWN_KEY=True` is written unconditionally; later launches skip it. Closing the dialog without choosing = opted out (consent stays False/default).
 
+### First-run dialog — tone / framing
+- **D-11 (added 2026-06-14, user directive):** The first-run consent dialog is worded as a **personal, first-person appeal from the developer** (Hillel / Dicta) — NOT an impersonal product/legal notice. The emotional core of the copy is: *"I realized that seeing how the app is actually used is what helps me know what to change and fix."* The plain what-IS / what-is-NOT-collected statement (CONSENT-02 requirement) and the "Learn more" → `PrivacyDialog` link are still present; the personal voice is the framing around them. **Scope:** applies to the **first-run dialog only**. The `PrivacyDialog` and the About-tab disclosure stay in neutral, factual disclosure voice (they are reference text, not an appeal). Exact wording + whether to sign with a name remain word-level discretion within this framing.
+
 ### Settings toggle — placement + apply semantics
 - **D-06:** Toggle lives in **SettingsDialog → General tab → Preferences group**, as a checkbox alongside Desktop Notifications / Show Translations (e.g. "Help improve the app — send anonymous usage data"), with a **"Privacy details" link** beside it that opens the PrivacyDialog (D-07).
 - **D-07a:** **Confirm-on-change → immediate-apply.** Flipping the checkbox first shows a small confirm ("telemetry will start / stop now"); on confirm, it calls `set_consent(...)` **immediately** (not staged). On cancel-of-confirm, the checkbox reverts to its prior visual state with no `set_consent` call.
@@ -43,7 +46,7 @@ Requirements (from ROADMAP/REQUIREMENTS): CONSENT-02, CONSENT-03, CONSENT-04, CO
 - **D-10:** Disclosure content must cover, bilingually: **what is collected** (anonymous usage/feature counts, version/OS, performance buckets, crash signals — counts only), **what is NOT** (no search/query content, no My Library file paths or filenames, no email/name beyond the bare Supabase user id when logged in), **who processes it** (PostHog, EU region + Dicta), **how to opt out** (the Settings toggle), and that the **install id is a pseudonymous identifier**. Consistent with the existing "Local Index Cache Privacy" posture already in the About tab.
 
 ### Claude's Discretion (within the locked SC + decisions above)
-- Exact EN/HE button labels (must be equal-weight, no default — e.g. "Enable" / "Not now"); the one-line summary shown **inline** in the first-run dialog vs deferred to "Learn more" (SC#5 wants enough in-dialog that the disclosure is *reachable*, not necessarily fully inline).
+- Exact EN/HE button labels (must be equal-weight, no default — e.g. "Enable" / "Not now"); the one-line summary shown **inline** in the first-run dialog vs deferred to "Learn more" (SC#5 wants enough in-dialog that the disclosure is *reachable*, not necessarily fully inline). **NOTE:** the first-run dialog's *framing* is no longer discretionary — D-11 locks it to a personal first-person appeal from the developer; only exact wording + optional name sign-off remain word-level discretion.
 - Stacked-vertical vs two-column visual layout of the bilingual text.
 - The exact `PrivacyDialog` copy (within D-10's required points).
 - **PRIV-05 satisfaction breadth:** the canonical full text lives in `PrivacyDialog`; planner should also add a brief telemetry-privacy pointer + link in the **About tab** (and optionally a Help.html section) so the existing disclosure posture stays consistent — discretion on exactly where, as long as a logged-in user reading About/Help can discover the telemetry disclosure.
@@ -102,6 +105,7 @@ Requirements (from ROADMAP/REQUIREMENTS): CONSENT-02, CONSENT-03, CONSENT-04, CO
 ## Specific Ideas
 
 - First-run dialog: two equal-weight buttons, no default, no Enter-shortcut; Enter/Escape/close ⇒ opted out. "Learn more" opens `PrivacyDialog`.
+- First-run dialog copy is a **personal first-person appeal from the developer** (D-11). Gist: *"I realized that seeing how the app is actually used is what helps me know what to change and fix."* Still states what-IS / what-is-NOT collected inline; full disclosure in `PrivacyDialog`. (PrivacyDialog + About stay neutral/factual.)
 - Toggle label tenor: "Help improve the app — send anonymous usage data" (EN) + Hebrew equivalent; "Privacy details" link beside it.
 - Confirm-on-change microcopy: a short "telemetry will start/stop now" confirm before `set_consent()` fires.
 - Disclosure must explicitly state: no search/query content, no My Library paths/filenames; PostHog (EU) + Dicta as processors; opt-out via Settings; pseudonymous install id.
