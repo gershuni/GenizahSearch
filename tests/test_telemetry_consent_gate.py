@@ -166,7 +166,6 @@ def test_consent_audit_fields_written():
 # ---------------------------------------------------------------------------
 def test_opt_out_drains_queue():
     import desktop.telemetry as tel
-    from desktop.telemetry import DesktopEvent
 
     # Opt-in and directly enqueue an event to simulate queued events
     tel.set_consent(True)

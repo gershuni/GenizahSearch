@@ -8,8 +8,8 @@ Design invariants:
 - NEVER raises into the caller (crash hooks depend on this — CRASH-05).
 - NEVER mutates os.environ (D-04).
 - NEVER sends email/name in identify (D-08).
-- NEVER includes str(exc) in error payloads (CRASH-04).
-- NEVER uses uuid.uuid1() — always uuid.uuid4() (CONSENT-05).
+- NEVER includes exception message text in error payloads (CRASH-04).
+- Always uuid.uuid4() for install ID — never MAC-based UUID variants (CONSENT-05).
 - UUID minted ONLY inside set_consent(True), never at import time.
 
 Public API:
@@ -484,7 +484,7 @@ def track_error(context: str, exc: Exception) -> None:
     """Gate-checked error event. Phase 113 wires producers.
 
     Emits DesktopEvent.CRASH with context + exc_type ONLY.
-    NEVER includes str(exc) (CRASH-04 — exception messages may contain
+    NEVER includes exception message text (CRASH-04 — messages may contain
     query text, file paths, or Hebrew content).
     Never raises.
     """
