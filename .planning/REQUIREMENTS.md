@@ -20,13 +20,13 @@
 
 ### Consent & Identity (CONSENT)
 
-- [ ] **CONSENT-01**: Telemetry is OFF by default — **no event of any kind (session/usage/perf/crash) is enqueued before consent state has been loaded and is true.** Startup order guarantees the consent gate is resolved before any producer can fire (proven by test, see PRIV-04).
+- [x] **CONSENT-01**: Telemetry is OFF by default — **no event of any kind (session/usage/perf/crash) is enqueued before consent state has been loaded and is true.** Startup order guarantees the consent gate is resolved before any producer can fire (proven by test, see PRIV-04).
 - [ ] **CONSENT-02**: On first launch after updating to v8.1.0 (and on fresh installs), the user sees a bilingual (EN/HE) first-run consent dialog with an explicit, equal-weight yes/no choice (nothing pre-selected) that plainly states what is and is not collected.
 - [ ] **CONSENT-03**: The consent dialog is shown at most once — the choice and a "prompt shown" flag persist so it never re-prompts on later launches. The stored consent record also captures the consent timestamp, the app version, and the consent-UI version (lightweight audit trail).
 - [ ] **CONSENT-04**: User can turn telemetry on or off at any time from a Settings/About toggle that reads and writes the same consent source of truth as the first-run dialog.
-- [ ] **CONSENT-05**: An anonymous per-install identifier (uuid4) is minted on opt-in and used as the PostHog `distinct_id` for **logged-out** users; it is never derived from hardware/MAC. For **logged-in** users the `distinct_id` is the Supabase `user.id` (see IDENT-01). No hardware fingerprinting either way.
-- [ ] **CONSENT-06**: Opting out stops all event emission immediately; the per-install ID is **retained** on disk (not deleted) so re-opt-in preserves continuity.
-- [ ] **CONSENT-07**: Consent + identity state persists in the existing config store (`config.pkl` via `load_app_config`/`save_app_config`) — no new settings file, no `QSettings`.
+- [x] **CONSENT-05**: An anonymous per-install identifier (uuid4) is minted on opt-in and used as the PostHog `distinct_id` for **logged-out** users; it is never derived from hardware/MAC. For **logged-in** users the `distinct_id` is the Supabase `user.id` (see IDENT-01). No hardware fingerprinting either way.
+- [x] **CONSENT-06**: Opting out stops all event emission immediately; the per-install ID is **retained** on disk (not deleted) so re-opt-in preserves continuity.
+- [x] **CONSENT-07**: Consent + identity state persists in the existing config store (`config.pkl` via `load_app_config`/`save_app_config`) — no new settings file, no `QSettings`.
 - [x] **CONSENT-08**: Opting out not only stops new producers but also **drains/discards any already-queued, un-sent events** so nothing buffered before opt-out is transmitted afterward.
 
 ### Usage Analytics (USAGE)
@@ -42,8 +42,8 @@
 
 - [ ] **IDENT-01**: A logged-in, consented desktop user is identified to PostHog with `distinct_id = Supabase user.id` — the **exact same value** the web app uses (`web/auth_state.py:160-170`) — so the same researcher's web and desktop activity merge into one person in the shared project. (A hash/derivation would NOT merge — it must be the raw id.)
 - [ ] **IDENT-02**: A logged-out user's anonymous per-install events are **aliased** to their account on login via `$identify` with `$anon_distinct_id = <per-install uuid>` (no pre-login history orphaned); on logout the desktop **resets to the anonymous per-install id** (mirrors web `posthog.reset()`).
-- [ ] **IDENT-03**: Desktop sends **only the user id** on identify — never email/name or other profile PII (web already attaches those to the shared person). Anonymous events stay `$process_person_profile=false`; identified events use real person profiles.
-- [ ] **IDENT-04**: `$identify`/alias/reset are emitted through the **same desktop chokepoint + raw `shared/posthog_server.py` queue** (hand-rolled events, no SDK) and are consent-gated exactly like all other emission (nothing fires before consent).
+- [x] **IDENT-03**: Desktop sends **only the user id** on identify — never email/name or other profile PII (web already attaches those to the shared person). Anonymous events stay `$process_person_profile=false`; identified events use real person profiles.
+- [x] **IDENT-04**: `$identify`/alias/reset are emitted through the **same desktop chokepoint + raw `shared/posthog_server.py` queue** (hand-rolled events, no SDK) and are consent-gated exactly like all other emission (nothing fires before consent).
 
 ### Performance Metrics (PERF)
 
@@ -63,17 +63,17 @@
 
 ### Privacy Guardrails (PRIV)
 
-- [ ] **PRIV-01**: A single structural scrubber sanitizes every outgoing payload (drops banned keys, redacts path-like strings, strips frame locals, caps lengths) so the no-content/no-PII rule holds structurally — not by per-call discipline.
-- [ ] **PRIV-02**: A telemetry property allowlist constrains which properties may be sent; anything not on the allowlist is dropped. The allowlist explicitly excludes environment identifiers (hostname/machine name, username, executable path, cwd) and any property derived from visible UI strings (window/tab titles, `QAction` text, recent-file labels) or file dialogs.
+- [x] **PRIV-01**: A single structural scrubber sanitizes every outgoing payload (drops banned keys, redacts path-like strings, strips frame locals, caps lengths) so the no-content/no-PII rule holds structurally — not by per-call discipline.
+- [x] **PRIV-02**: A telemetry property allowlist constrains which properties may be sent; anything not on the allowlist is dropped. The allowlist explicitly excludes environment identifiers (hostname/machine name, username, executable path, cwd) and any property derived from visible UI strings (window/tab titles, `QAction` text, recent-file labels) or file dialogs.
 - [ ] **PRIV-03**: A static AST CI guard (modeled on `tests/test_no_raw_storage_access.py`) enforces that `shared/posthog_server.enqueue_event` is reached **only** through the desktop telemetry chokepoint, so no call site can bypass the consent gate or scrubber.
 - [ ] **PRIV-04**: Automated tests assert that representative crash tracebacks and search / My-Library scenarios never emit any **forbidden field** — explicitly: My Library paths, filenames, query/search text, usernames, or hostnames — and that nothing is emitted before consent (CONSENT-01).
 - [ ] **PRIV-05**: The Help/About privacy disclosure is updated bilingually (EN/HE) to describe exactly what telemetry collects, that it is opt-in, how to turn it off, and that the anonymous install id is a pseudonymous identifier — consistent with the existing disclosure posture.
-- [ ] **PRIV-06**: Event NAMES are drawn from a fixed registry/enum — no event name (and no property) is ever derived from query text, filenames, corpus/document labels, or visible UI strings. (Dynamic event names leak even when properties are scrubbed.)
+- [x] **PRIV-06**: Event NAMES are drawn from a fixed registry/enum — no event name (and no property) is ever derived from query text, filenames, corpus/document labels, or visible UI strings. (Dynamic event names leak even when properties are scrubbed.)
 
 ### Backend & Packaging (INFRA)
 
-- [ ] **INFRA-01**: Desktop events go to the **existing shared web PostHog project** (id 134161, EU), reusing the web app's publishable (write-only) ingest key embedded in the desktop binary (overridable via `GENIZAH_TELEMETRY_KEY`/host). NO separate project. Web↔desktop separation is by `platform=desktop` + the `desktop_` event-name namespace (USAGE-05).
-- [ ] **INFRA-02**: A desktop telemetry chokepoint module (`desktop/telemetry.py`) exposes the only public API for emitting events (track / track_performance / consent / install-hooks), each internally consent-gated and scrubbed, delegating to `shared/posthog_server.enqueue_event`.
+- [x] **INFRA-01**: Desktop events go to the **existing shared web PostHog project** (id 134161, EU), reusing the web app's publishable (write-only) ingest key embedded in the desktop binary (overridable via `GENIZAH_TELEMETRY_KEY`/host). NO separate project. Web↔desktop separation is by `platform=desktop` + the `desktop_` event-name namespace (USAGE-05).
+- [x] **INFRA-02**: A desktop telemetry chokepoint module (`desktop/telemetry.py`) exposes the only public API for emitting events (track / track_performance / consent / install-hooks), each internally consent-gated and scrubbed, delegating to `shared/posthog_server.enqueue_event`.
 - [x] **INFRA-03**: `shared/posthog_server.py` gains backward-compatible additions only (consent-gate hook, `distinct_id` injection, flush-before-exit) without breaking its existing web/breaker consumers or the 5 test monkeypatches.
 - [x] **INFRA-04**: Telemetry adds **zero** new pip dependencies and requires no PyInstaller spec changes beyond what's already bundled (reuse the raw queue; do NOT add the `posthog` SDK).
 - [x] **INFRA-05**: Telemetry degrades silently and never blocks the UI thread when offline/air-gapped or when the key is absent (fire-and-forget; SSL certs verified in the frozen binary). Events are **memory-only** — never spooled to disk.
@@ -124,13 +124,13 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CONSENT-01 | Phase 111 | Pending |
+| CONSENT-01 | Phase 111 | Complete |
 | CONSENT-02 | Phase 112 | Pending |
 | CONSENT-03 | Phase 112 | Pending |
 | CONSENT-04 | Phase 112 | Pending |
-| CONSENT-05 | Phase 111 | Pending |
-| CONSENT-06 | Phase 111 | Pending |
-| CONSENT-07 | Phase 111 | Pending |
+| CONSENT-05 | Phase 111 | Complete |
+| CONSENT-06 | Phase 111 | Complete |
+| CONSENT-07 | Phase 111 | Complete |
 | CONSENT-08 | Phase 112 | Complete |
 | USAGE-01 | Phase 114 | Pending |
 | USAGE-02 | Phase 114 | Pending |
@@ -140,8 +140,8 @@
 | USAGE-06 | Phase 114 | Pending |
 | IDENT-01 | Phase 114 | Pending |
 | IDENT-02 | Phase 114 | Pending |
-| IDENT-03 | Phase 111 | Pending |
-| IDENT-04 | Phase 111 | Pending |
+| IDENT-03 | Phase 111 | Complete |
+| IDENT-04 | Phase 111 | Complete |
 | PERF-01 | Phase 115 | Pending |
 | PERF-02 | Phase 115 | Pending |
 | PERF-03 | Phase 115 | Pending |
@@ -152,14 +152,14 @@
 | CRASH-05 | Phase 113 | Pending |
 | CRASH-06 | Phase 113 | Pending |
 | CRASH-07 | Phase 113 | Pending |
-| PRIV-01 | Phase 111 | Pending |
-| PRIV-02 | Phase 111 | Pending |
+| PRIV-01 | Phase 111 | Complete |
+| PRIV-02 | Phase 111 | Complete |
 | PRIV-03 | Phase 116 | Pending |
 | PRIV-04 | Phase 116 | Pending |
 | PRIV-05 | Phase 112 | Pending |
-| PRIV-06 | Phase 111 | Pending |
-| INFRA-01 | Phase 111 | Pending |
-| INFRA-02 | Phase 111 | Pending |
+| PRIV-06 | Phase 111 | Complete |
+| INFRA-01 | Phase 111 | Complete |
+| INFRA-02 | Phase 111 | Complete |
 | INFRA-03 | Phase 111 | Complete |
 | INFRA-04 | Phase 111 | Complete |
 | INFRA-05 | Phase 111 | Complete |

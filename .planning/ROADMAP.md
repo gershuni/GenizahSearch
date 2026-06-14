@@ -94,7 +94,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 **Plans**: 3 plans
 
 - [x] 111-01-PLAN.md — `shared/posthog_server.py` neutral additions (set_default_distinct_id, register_scrub_hook, _flush_before_exit, _drain_and_discard) + INFRA-03 tests [Wave 1]
-- [ ] 111-02-PLAN.md — `desktop/telemetry.py` chokepoint: consent gate + config.pkl persistence + scrubber + property allowlist + DesktopEvent enum + 8 callables + identity hooks + self-test [Wave 2]
+- [x] 111-02-PLAN.md — `desktop/telemetry.py` chokepoint: consent gate + config.pkl persistence + scrubber + property allowlist + DesktopEvent enum + 8 callables + identity hooks + self-test [Wave 2]
 - [ ] 111-03-PLAN.md — PRIV-03 chokepoint AST guard `tests/test_telemetry_no_direct_posthog.py` (landed early from Phase 116) [Wave 3]
 
 ### Phase 112: Consent UX
@@ -174,7 +174,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 111. Telemetry Foundation | v8.1.0 | 1/3 | In Progress|  |
+| 111. Telemetry Foundation | v8.1.0 | 2/3 | In Progress|  |
 | 112. Consent UX | v8.1.0 | 0/TBD | Not started | - |
 | 113. Crash Reporting | v8.1.0 | 0/TBD | Not started | - |
 | 114. Usage Analytics | v8.1.0 | 0/TBD | Not started | - |
