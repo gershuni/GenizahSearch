@@ -15,8 +15,6 @@ import ast
 import inspect
 import os
 import sys
-import textwrap
-import types
 
 import pytest
 

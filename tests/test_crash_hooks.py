@@ -17,7 +17,6 @@ import sys
 import pytest
 
 import desktop.telemetry as tel
-import shared.posthog_server as ph
 
 
 # ---------------------------------------------------------------------------
