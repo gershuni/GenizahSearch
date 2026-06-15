@@ -34,7 +34,7 @@
 - [x] **USAGE-01**: A session-start event records ONLY allowlisted environment properties — app version, OS family + version, Python/PyQt version, UI language (EN/HE). Explicitly **never** hostname/machine name, username, executable path, or working directory.
 - [x] **USAGE-02**: Feature usage is captured as counts — which tab/view and which key surfaces (Joins Lab, Fragment Puzzle, major dialogs) are opened — with no free-text or content properties.
 - [x] **USAGE-03**: Search executions are captured with the search MODE (keyword/Responsa/composition/parallels) and corpus (Genizah/Local/ALL) as enums — never the query text or any My Library path/filename.
-- [ ] **USAGE-04**: An active-user/session signal is emitted so DAU/MAU and version adoption are derivable in PostHog.
+- [x] **USAGE-04**: An active-user/session signal is emitted so DAU/MAU and version adoption are derivable in PostHog.
 - [x] **USAGE-05**: Every event carries base properties (`platform=desktop`, `app_version`) and a `desktop_` event-name namespace, applied through one shared helper so no callsite bypasses them. `$process_person_profile=false` is set for **anonymous (logged-out)** events; **identified** events use real person profiles (see IDENT-03).
 - [x] **USAGE-06**: Session/clock correctness — exactly one telemetry session id per process; all timestamps UTC; performance durations measured from a monotonic clock; a crash-restart starts a fresh session without emitting a duplicate/ghost session-start for the crashed process.
 
@@ -135,7 +135,7 @@
 | USAGE-01 | Phase 114 | Complete |
 | USAGE-02 | Phase 114 | Complete |
 | USAGE-03 | Phase 114 | Complete |
-| USAGE-04 | Phase 114 | Pending |
+| USAGE-04 | Phase 114 | Complete |
 | USAGE-05 | Phase 114 | Complete |
 | USAGE-06 | Phase 114 | Complete |
 | IDENT-01 | Phase 114 | Complete |
