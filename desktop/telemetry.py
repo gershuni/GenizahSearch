@@ -709,12 +709,26 @@ def install_exception_hooks() -> None:
     # Phase 113 implementation
 
 
-def show_first_run_prompt() -> None:
-    """Display the first-run consent prompt. Implemented in Phase 112.
+def show_first_run_prompt(parent=None) -> None:
+    """Display the first-run consent prompt. Never raises.
 
-    No-op in Phase 111. Never raises.
+    Gates on FIRST_RUN_SHOWN_KEY so it shows at most once.  The dialog's
+    single done() finalizer (Plan 01) writes FIRST_RUN_SHOWN_KEY=True and
+    calls set_consent() on every exit path — this function only gates + shows.
+
+    Args:
+        parent: Optional QWidget parent for the dialog (passed from the
+                startup hook in genizah_app.py).
     """
-    # Phase 112 implementation
+    try:
+        cfg = load_app_config()
+        if cfg.get(FIRST_RUN_SHOWN_KEY, False):
+            return  # already shown — D-05 gate; never show twice
+        from desktop.consent_dialog import ConsentDialog  # lazy import — keeps Qt out of headless tests
+        dlg = ConsentDialog(parent)
+        dlg.exec()
+    except Exception:
+        logger.debug('telemetry: show_first_run_prompt failed', exc_info=True)
 
 
 # ---------------------------------------------------------------------------
