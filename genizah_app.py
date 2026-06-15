@@ -3924,17 +3924,33 @@ class GenizahGUI(QMainWindow):
             self._refresh_community_panels()
             # Enable cloud sync for lists after successful login
             self._enable_lists_cloud_sync()
+            # D-13: mid-session explicit login → identify(_uuid) via shared path
+            try:
+                self._sync_telemetry_identity()
+            except Exception:
+                pass
 
     def _show_register_dialog(self):
         dialog = RegisterDialog(self, self.corrections_client)
         if dialog.exec():
             self._update_corner_login_state()
             self._refresh_community_panels()
+            # D-13: registration also logs the user in → identify via shared path
+            try:
+                self._sync_telemetry_identity()
+            except Exception:
+                pass
 
     def _do_logout(self):
         # Disable cloud sync before logout
         self._disable_lists_cloud_sync()
         self.corrections_client.logout()
+        # D-13: reset identity on logout (mirrors web posthog.reset())
+        try:
+            from desktop import telemetry
+            telemetry.reset_identity()
+        except Exception:
+            pass
         self._update_corner_login_state()
         self._refresh_community_panels()
         QMessageBox.information(self, tr("Logged Out"), tr("You have been logged out."))
@@ -26458,6 +26474,21 @@ class GenizahGUI(QMainWindow):
             logger.error("Failed to check interrupted search: %s", e)
 
     def closeEvent(self, event):
+        # Phase 114 D-09/D-15: set shutdown flag first so Plan-02 search/comp emit
+        # guards (REVIEWS HIGH-2) and session_end exactly-once guard both see it
+        # before any subsequent teardown fires events.
+        self._app_shutting_down = True
+        # Phase 114 D-15: best-effort session_end exactly once on clean exit.
+        try:
+            from desktop import telemetry
+            if not getattr(self, '_session_end_emitted', False):
+                self._session_end_emitted = True
+                telemetry.track(
+                    telemetry.DesktopEvent.SESSION_END,
+                    session_id=getattr(self, '_session_id', ''),
+                )
+        except Exception:
+            pass
         # Phase 96 bug #2 fix: flush pending debounce timer in the unified opt-out
         # tree BEFORE _save_session() runs. The 150ms QTimer.singleShot is silently
         # abandoned on Qt event-loop shutdown, so opt-out changes made in the last

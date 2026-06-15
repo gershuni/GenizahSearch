@@ -142,8 +142,7 @@ def _drain_all_events() -> list[dict]:
 
 def test_coordinator_consent_off_emits_nothing(monkeypatch, _reset_telemetry_state):
     """With consent OFF, the coordinator emits nothing."""
-    import desktop.telemetry as tel
-    # consent stays False
+    # consent stays False (no set_consent call)
     gui = _make_gui_stub(monkeypatch, _reset_telemetry_state)
     gui._run_startup_telemetry_coordinator()
     assert ph._event_queue.empty(), "coordinator must emit nothing when consent is OFF"
@@ -344,7 +343,6 @@ class _FakeGui:
 
     def closeEvent_telemetry_part(self):
         """Execute only the telemetry parts of closeEvent (not the Qt thread teardown)."""
-        import genizah_app as app
         # Set shutdown flag + emit session_end (replicate the relevant closeEvent snippet)
         self._app_shutting_down = True
         try:
