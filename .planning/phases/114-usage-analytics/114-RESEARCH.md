@@ -704,27 +704,76 @@ Config check: `workflow.nyquist_validation` not explicitly false — Validation 
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **`lab_mode` in `search_mode` vs separate prop**
-   - What we know: `_ALLOWED_PROPS` does not include `lab_mode` as a boolean.
-   - What's unclear: Whether to encode Lab mode as `lab_keyword`/`lab_variants`/etc. (single prop) or as `search_mode=keyword` + `lab_mode=True` (two props, but `lab_mode` needs adding to `_ALLOWED_PROPS`).
-   - Recommendation: Encode as `'lab_' + mode` in `search_mode` — one prop, no allowlist change needed.
+All four open questions were resolved by grepping the LIVE codebase during the
+plan-revision pass (2026-06-15). Evidence and the chosen wiring are recorded inline.
 
-2. **Composition search telemetry wiring point**
-   - What we know: Composition runs via `run_composition()` which spawns `CompositionThread`. Completion signal is `scan_finished_signal`. There is no `on_composition_finished` analog to `on_search_finished` visible in the code scanned.
-   - What's unclear: The exact method name that handles composition completion.
-   - Recommendation: Planner should grep for `scan_finished_signal.connect` to find the handler and wire there.
+### 1. `lab_mode` in `search_mode` vs separate prop — RESOLVED
+- **Resolution:** Encode Lab mode as a `'lab_' + mode` prefix on the `search_mode`
+  value (e.g. `'lab_keyword'`, `'lab_variants'`). One prop, NO `_ALLOWED_PROPS`
+  change (the allowlist gates the KEY `search_mode`, not the value). This is what
+  Plan 02 Task 2 implements (`_search_mode_enum = f'lab_{_mode_key}' if _is_lab else _mode_key`).
+- **Evidence:** `self.btn_lab_mode_toggle` (regular search) and
+  `self.btn_lab_mode_toggle_comp` (composition) decide LabSearchThread / LabCompositionThread
+  vs the standard thread. `_ALLOWED_PROPS` already contains `search_mode` (no value validation).
 
-3. **Parallels search — is there a separate flow?**
-   - What we know: USAGE-03 says capture "Responsa/composition/parallels" modes.
-   - What's unclear: How parallels search is initiated (separate button/tab?).
-   - Recommendation: Planner should grep `parallels` in `genizah_app.py` to find the dispatch point.
+### 2. Composition search telemetry wiring point — RESOLVED
+- **Resolution:** Composition runs via `run_composition()` (`genizah_app.py:22341`),
+  which spawns `CompositionThread` (standard, `gui_threads.py:168`) or
+  `LabCompositionThread` (`gui_threads.py:227`). BOTH emit completion via
+  `scan_finished_signal` (`gui_threads.py:222` / `:289`), wired at
+  `genizah_app.py:22461` and `:22487-22488` to the single handler
+  **`on_comp_scan_finished(result_obj)`** (`genizah_app.py:22591`).
+  - **Per-run object** is created in `run_composition()` AFTER the effective mode is
+    read (`idx = self.comp_mode_combo.currentIndex()` at `:22388`) and the corpus
+    scope is read (`_comp_scope = self.comp_corpus_scope_combo.currentData() or 'genizah'`
+    at `:22424-22427`). `search_mode` comes from a static index→enum map on the
+    composition mode combo: `{0:'comp_exact', 1:'comp_variants', 2:'comp_fuzzy'}`
+    (the combo has exactly 3 entries — `comp_mode_combo.addItems([tr("Exact"), tr("Variants"), tr("Fuzzy")])`
+    at `:6787`; labels are translated → forbidden as values, D-05). Lab composition
+    prefixes `'lab_'` (`btn_lab_mode_toggle_comp.isChecked()` at `:22430`).
+  - **Single emit** at the TOP of `on_comp_scan_finished` (`:22591`). Completed vs
+    cancelled is detected from the result object itself: `result_obj.get('partial', False)`
+    (`:22600-22602`) — a user cancel sets `comp_thread.cancel_flag = True` and the
+    thread STILL emits `scan_finished_signal` with `partial=True` partial results
+    (`:22208-22213` toggle-button cancel; `:22220-22224` Escape `cancel_composition`).
+    So `action = 'cancelled' if is_partial else 'completed'`; completed runs carry
+    `result_count_bucket` (bucketed `len(items)+len(filtered_items)`), cancelled runs do NOT.
+  - **Shutdown is naturally excluded:** closeEvent (`:26391-26396`) calls
+    `comp_thread.terminate()` directly — NO `scan_finished_signal` fires on shutdown,
+    so `on_comp_scan_finished` is never reached during app exit. The per-run `emitted`
+    guard provides defence-in-depth.
 
-4. **`session_end` wiring — closeEvent vs atexit**
-   - What we know: D-15 says best-effort on clean exit with exactly-once guard. `atexit` flush is already registered (via `install_exception_hooks()`). `closeEvent` is the Qt-level shutdown hook.
-   - What's unclear: Whether `closeEvent` in `GenizahGUI` currently exists and where.
-   - Recommendation: Wire `session_end` in `closeEvent()` with an `_app_shutting_down` flag that also prevents the shutdown `stop_search()` from being counted as user cancellation.
+### 3. Parallels search — is there a separate flow? — RESOLVED (NO separate dispatch)
+- **Resolution:** Parallels has **NO separate search dispatch or completion handler.**
+  The "🔍 Parallels" button (`btn_find_parallels`, `genizah_app.py:7122-7124`) calls
+  **`browse_search_parallels()`** (`:10897`), which gathers the manuscript's text and
+  calls **`send_result_to_composition(...)`** (`:20258`). That method only populates
+  `comp_text_area`, sets the title, switches to the composition tab, and focuses the
+  text area (`:20263-20288`) — it does NOT start a search. The user then presses
+  "Analyze Composition", which runs the SAME `run_composition()` path.
+- **Consequence:** Parallels is a "seed the composition tab" action, not a distinct
+  search flow. It is therefore covered by the composition `desktop_search_executed`
+  wiring (Q2) — the resulting run emits `search_mode='comp_*'`. No separate
+  `parallels` enum value or handler is wired, because there is no separate run to
+  instrument. (The `_catalog_parallels_in_results` button at `:11274` likewise routes
+  through the composition path.) This is stated explicitly per the BLOCKER-1/2
+  instruction to surface a non-existent flow rather than silently drop it.
+- **Evidence:** `grep -ni parallels genizah_app.py` → only the seed/UI entry points
+  (`browse_search_parallels`, `_catalog_parallels_in_results`, LOCAL-filter buttons);
+  `grep -i parallels gui_threads.py` → **zero matches** (no ParallelsThread).
+
+### 4. `session_end` wiring — closeEvent vs atexit — RESOLVED
+- **Resolution:** Wire `desktop_session_end` in `GenizahGUI.closeEvent`
+  (`genizah_app.py:26351`) with a `_session_end_emitted` exactly-once guard (D-15),
+  and set `self._app_shutting_down = True` at the TOP of closeEvent so the shutdown
+  thread-kill path is NOT counted as a user search cancellation (D-09). This is
+  Plan 01 Task 3. The `atexit` flush registered via `install_exception_hooks()`
+  remains the delivery mechanism for the queued event; the `_session_end_emitted`
+  guard makes a future atexit-side emit idempotent.
+- **Evidence:** `GenizahGUI.closeEvent` confirmed at `:26351` (the closeEvent at
+  `:568` belongs to a different dialog class — do NOT touch it).
 
 ---
 
