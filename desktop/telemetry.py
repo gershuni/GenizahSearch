@@ -68,10 +68,22 @@ _OS_VERSION: str = platform.release() or 'unknown'  # e.g. '10', '11', '5.15.0-7
 
 # ---------------------------------------------------------------------------
 # Embedded publishable-key constant (D-03).
-# Overridable via GENIZAH_TELEMETRY_KEY env var.
-# Real phc_... key drops in before Phase 114; placeholder is safe to embed.
+# Overridable via GENIZAH_TELEMETRY_KEY (all builds) or POSTHOG_API_KEY
+# (source/dev runs only) — see _wire_transport_config for the resolution order.
+# Desktop reuses the SHARED PostHog project (segmented by 'platform': 'desktop'),
+# NOT a separate project (INFRA-01 reversed 2026-06-15). The real phc_ ingestion
+# key — the same publishable key the web app already exposes in client JS — is
+# baked into _TELEMETRY_KEY_DEFAULT at build/release time so the shipped .exe
+# sends without any env var.
+#
+# _UNFILLED_KEY_SENTINEL is a FIXED literal meaning "no real key embedded yet".
+# It MUST stay distinct from _TELEMETRY_KEY_DEFAULT's eventual real value: the
+# "drop locally" guard in _wire_transport_config compares against the sentinel,
+# so comparing against the mutable constant would null out the real key once it
+# is baked in (Codex 2026-06-15 #1 — release-blocker).
 # ---------------------------------------------------------------------------
-_TELEMETRY_KEY_DEFAULT: str = '<embedded-placeholder>'
+_UNFILLED_KEY_SENTINEL: str = '<embedded-placeholder>'
+_TELEMETRY_KEY_DEFAULT: str = _UNFILLED_KEY_SENTINEL
 
 # ---------------------------------------------------------------------------
 # config.pkl key-name constants (define once, shared across Phases 111-116)
@@ -361,11 +373,37 @@ def _wire_transport_config() -> None:
     Never raises.
     """
     try:
-        key = os.environ.get('GENIZAH_TELEMETRY_KEY') or _TELEMETRY_KEY_DEFAULT
-        # WR-05: treat placeholder as no key so events drop locally, not POSTed
-        # with a junk key until the real phc_... key lands before Phase 114.
-        if key == _TELEMETRY_KEY_DEFAULT:
+        # Key resolution order:
+        #   1. GENIZAH_TELEMETRY_KEY  — explicit override, honored in ALL builds
+        #      (tests / one-off dev / intentional debug against a chosen project).
+        #   2. POSTHOG_API_KEY        — the SHARED project ingestion key (the same phc_
+        #      key the web app uses). Honored ONLY in source/dev runs, NEVER in a
+        #      frozen .exe: an end-user machine could carry a stray POSTHOG_API_KEY
+        #      pointing at a foreign project (Codex 2026-06-15 #3). Desktop reuses the
+        #      existing project, segmented by the 'platform': 'desktop' base prop
+        #      (INFRA-01 reversed 2026-06-15).
+        #   3. _TELEMETRY_KEY_DEFAULT — embedded publishable key for the shipped binary.
+        # Use ONLY a phc_ INGESTION key — never POSTHOG_PERSONAL_API_KEY (phx_,
+        # account-level read/management scope; must never reach a distributable).
+        import sys as _sys
+        _frozen = bool(getattr(_sys, 'frozen', False))
+        key = os.environ.get('GENIZAH_TELEMETRY_KEY')
+        if not key and not _frozen:
+            key = os.environ.get('POSTHOG_API_KEY')
+        if not key:
+            key = _TELEMETRY_KEY_DEFAULT
+        # Unfilled sentinel -> no key, so events drop locally instead of being
+        # POSTed with a junk key (shipped binary before the real key is baked in).
+        if key == _UNFILLED_KEY_SENTINEL:
             key = None
+        # Accept only a phc_ project/ingestion token. Reject phx_ (personal key) and
+        # any other shape — never POST with a non-ingestion key (Codex 2026-06-15 #4).
+        # Do not log key material.
+        if key and not key.startswith('phc_'):
+            logger.debug('telemetry: refusing non-phc_ capture key — not wiring')
+            key = None
+        # Default host is eu.i.posthog.com (matches the EU project); override only
+        # if the project ever moves regions.
         host = os.environ.get('GENIZAH_TELEMETRY_HOST') or None
         set_capture_api_key(key)
         set_capture_host(host)
