@@ -188,7 +188,6 @@ def test_done_finalizer_writes_flag_on_escape(monkeypatch, _reset_telemetry_stat
 
     dlg = _make_consent_dialog()
     # Simulate Escape: _accepted_telemetry stays False; call reject() which calls done(Rejected)
-    from PyQt6.QtWidgets import QDialog
     dlg.reject()  # Escape routes through reject()
 
     import genizah_core
@@ -437,7 +436,9 @@ def test_privacy_dialog_constructs_bilingual():
     _skip_if_no_qt()
     from desktop.consent_dialog import PrivacyDialog
 
-    dlg = PrivacyDialog()
+    # bilingual=True is the one-time startup mode (ConsentDialog "Learn more"),
+    # which stacks EN+HE. Settings/About open it single-language per UI.
+    dlg = PrivacyDialog(bilingual=True)
     html = dlg._build_html()
 
     assert 'PostHog' in html, "PrivacyDialog must mention PostHog as data processor"
@@ -566,11 +567,12 @@ def test_settings_toggle_applies_on_confirm(monkeypatch):
     fake_cfg = {}
     monkeypatch.setattr(genizah_app, 'load_app_config', lambda: dict(fake_cfg))
     monkeypatch.setattr(genizah_core, 'save_app_config', lambda d: fake_cfg.update(d))
-    # Patch QMessageBox.question to return Yes (auto-confirm)
-    monkeypatch.setattr(
-        QMessageBox, 'question',
-        staticmethod(lambda *a, **kw: QMessageBox.StandardButton.Yes)
-    )
+    # The confirm now uses a QMessageBox instance (localized Yes/No buttons).
+    # Patch exec() to click the Yes button (sets clickedButton) and return.
+    def _fake_exec_yes(box_self):
+        box_self.button(QMessageBox.StandardButton.Yes).click()
+        return QMessageBox.StandardButton.Yes.value
+    monkeypatch.setattr(QMessageBox, 'exec', _fake_exec_yes)
 
     class _FakeMainWin:
         def _on_language_combo_changed(self, idx):
@@ -629,11 +631,12 @@ def test_settings_toggle_reverts_on_cancel_confirm(monkeypatch):
     fake_cfg = {}
     monkeypatch.setattr(genizah_app, 'load_app_config', lambda: dict(fake_cfg))
     monkeypatch.setattr(genizah_core, 'save_app_config', lambda d: fake_cfg.update(d))
-    # Patch QMessageBox.question to return No (cancel confirm)
-    monkeypatch.setattr(
-        QMessageBox, 'question',
-        staticmethod(lambda *a, **kw: QMessageBox.StandardButton.No)
-    )
+    # The confirm now uses a QMessageBox instance (localized Yes/No buttons).
+    # Patch exec() to click the No button (sets clickedButton) and return.
+    def _fake_exec_no(box_self):
+        box_self.button(QMessageBox.StandardButton.No).click()
+        return QMessageBox.StandardButton.No.value
+    monkeypatch.setattr(QMessageBox, 'exec', _fake_exec_no)
 
     class _FakeMainWin:
         def _on_language_combo_changed(self, idx):

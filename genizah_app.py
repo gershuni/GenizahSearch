@@ -2321,13 +2321,13 @@ class SettingsDialog(QDialog):
         from desktop.telemetry import is_enabled as _tel_is_enabled, set_consent as _tel_set_consent  # noqa: PLC0415
         from desktop.consent_dialog import PrivacyDialog  # noqa: PLC0415
 
+        # UI-language single string (only the one-time startup consent dialog is
+        # bilingual; Settings follows CURRENT_LANG).
+        _he_tel = CURRENT_LANG == 'he'
         self.chk_telemetry = QCheckBox(
+            "עזרו לשפר את האפליקציה — שליחת נתוני שימוש תוך שמירה על הפרטיות"
+            if _he_tel else
             "Help improve the app — send privacy-preserving usage data"
-            " / עזרו לשפר"
-            " את האפליקציה"
-            " — שליחת"
-            " נתוני שימוש"
-            " שומרי-פרטיות"
         )
         # Pitfall 5: block signals during initial setChecked to prevent spurious
         # stateChanged on dialog open.
@@ -2343,35 +2343,52 @@ class SettingsDialog(QDialog):
             prior = _tel_is_enabled()
             if new_val == prior:
                 return
+            _he = CURRENT_LANG == 'he'
             if new_val:
-                title = "Enable telemetry? / הפעל טלמטריה?"
-                msg = (
-                    "Privacy-preserving usage data will start being sent now.\n"
-                    "You can turn this off at any time in Settings.\n\n"
-                    "נתוני שימוש"
-                    " שומרי-פרטיות"
-                    " יתחילו להישלח"
-                    " כעת.\n"
-                    "אפשר לכבות"
-                    " בכל עת בהגדרות."
-                )
+                if _he:
+                    title = "הפעלת טלמטריה?"
+                    msg = (
+                        "נתוני שימוש יתחילו להישלח כעת, תוך שמירה על הפרטיות.\n"
+                        "אפשר לכבות בכל עת בהגדרות."
+                    )
+                else:
+                    title = "Enable telemetry?"
+                    msg = (
+                        "Privacy-preserving usage data will start being sent now.\n"
+                        "You can turn this off at any time in Settings."
+                    )
             else:
-                title = "Disable telemetry? / כביית טלמטריה?"
-                msg = (
-                    "Privacy-preserving usage data collection will stop now.\n"
-                    "Queued events will be discarded immediately.\n\n"
-                    "איסוף נתוני"
-                    " שימוש"
-                    " שומרי-פרטיות"
-                    " יפסק כעת.\n"
-                    "אירועים בתור"
-                    " יימחקו מיד."
-                )
-            reply = QMessageBox.question(
-                self, title, msg,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                if _he:
+                    title = "כיבוי טלמטריה?"
+                    msg = (
+                        "איסוף נתוני השימוש ייפסק כעת.\n"
+                        "אירועים בתור יימחקו מיד."
+                    )
+                else:
+                    title = "Disable telemetry?"
+                    msg = (
+                        "Privacy-preserving usage data collection will stop now.\n"
+                        "Queued events will be discarded immediately."
+                    )
+            # Build an instance (not the static question()) so the Yes/No buttons
+            # can be localized — Qt ships English standard-button text; tr() maps
+            # "Yes"/"No" → "כן"/"לא" in the Hebrew UI.
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Question)
+            box.setWindowTitle(title)
+            box.setText(msg)
+            box.setStandardButtons(
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-            if reply == QMessageBox.StandardButton.Yes:
+            box.setDefaultButton(QMessageBox.StandardButton.No)
+            _yes_btn = box.button(QMessageBox.StandardButton.Yes)
+            _no_btn = box.button(QMessageBox.StandardButton.No)
+            if _yes_btn is not None:
+                _yes_btn.setText(tr("Yes"))
+            if _no_btn is not None:
+                _no_btn.setText(tr("No"))
+            box.exec()
+            if box.standardButton(box.clickedButton()) == QMessageBox.StandardButton.Yes:
                 _tel_set_consent(new_val)  # D-08: sole write path
             else:
                 # D-07a: revert visual, do NOT call set_consent
@@ -2381,7 +2398,7 @@ class SettingsDialog(QDialog):
 
         self.chk_telemetry.stateChanged.connect(_on_telemetry_changed)
 
-        btn_privacy = QPushButton("Privacy details / פרטי פרטיות")
+        btn_privacy = QPushButton("פרטיות" if _he_tel else "Privacy details")
         btn_privacy.setFlat(True)
         btn_privacy.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_privacy.setStyleSheet("color: #2563eb; text-decoration: underline; border: none;")
@@ -2605,44 +2622,49 @@ class SettingsDialog(QDialog):
         browser.setStyleSheet("border: none; background: transparent;")
         layout.addWidget(browser)
 
-        # REVIEWS HIGH-4 / PRIV-05: Language-agnostic bilingual telemetry disclosure block.
-        # Rendered BELOW the About QTextBrowser for ALL languages (EN and HE users).
-        # NOT inside about_html_en or tr("ABOUT_HTML") — a single widget independent of
-        # CURRENT_LANG, so there is no translation drift and HE users see it too.
-        telemetry_disclosure_html = f"""
+        # PRIV-05: telemetry disclosure block below the About QTextBrowser.
+        # Single-language per UI (CURRENT_LANG) — only the one-time startup consent
+        # dialog is bilingual; Settings/About follow the interface language.
+        _tel_style = """
         <style>
-            h3 {{ margin-bottom: 2px; margin-top: 8px; font-size: 12px; }}
-            p {{ margin-top: 3px; margin-bottom: 3px; line-height: 1.4; font-size: 11px; }}
-            ul {{ margin: 3px 0; padding-left: 18px; font-size: 11px; }}
+            h3 { margin-bottom: 2px; margin-top: 8px; font-size: 12px; }
+            p { margin-top: 3px; margin-bottom: 3px; line-height: 1.4; font-size: 11px; }
+            ul { margin: 3px 0; padding-left: 18px; font-size: 11px; }
         </style>
+        """
+        if CURRENT_LANG == 'he':
+            telemetry_disclosure_html = _tel_style + f"""
+        <div dir='rtl' style='font-family: Arial; font-size: 11px; color: {self._text};'>
+            <hr style='border:0; border-top:1px solid {self._border}; margin: 4px 0 8px 0;'>
+            <h3 style='font-size:12px;'>טלמטריית שימוש</h3>
+            <p>האפליקציה שולחת באופן אופציונלי <b>נתוני שימוש</b> (תוך שמירה על הפרטיות) לשיפורה.
+            טלמטריה היא <b>הצטרפות בלבד</b> — שום דבר לא נשלח אלא אם כן תפעילו זאת
+            בהגדרות &larr; כללי &larr; העדפות.</p>
+            <p><b>מה נשלח:</b> ספירות תכונות (ללא תוכן), גרסת האפליקציה ומערכת ההפעלה,
+            קטגוריות זמן תגובה, סימני קריסה (סוג השגיאה בלבד).</p>
+            <p><b>מה לעולם לא נשלח:</b> שאילתות החיפוש שלכם, נתיבי קבצים ושמות קבצים
+            מ&#x2018;הספרייה שלי&#x2019;, שמכם או כתובת הדוא&#x05F4;ל. כשאתם מחוברים,
+            המזהה היחיד הוא ה-<code>user.id</code> הפסאודו-אנונימי של Supabase — כמו באתר.</p>
+            <p>הנתונים מעובדים על ידי
+            <a href='https://posthog.com/privacy'>PostHog</a> (אזור האיחוד האירופי) ודיקטה.</p>
+        </div>
+        """
+        else:
+            telemetry_disclosure_html = _tel_style + f"""
         <div dir='ltr' style='font-family: Arial; font-size: 11px; color: {self._text};'>
             <hr style='border:0; border-top:1px solid {self._border}; margin: 4px 0 8px 0;'>
             <h3 style='font-size:12px;'>Usage Telemetry</h3>
-            <p>This app optionally collects <b>privacy-preserving usage data</b> to help improve it.
+            <p>This app optionally sends <b>privacy-preserving usage data</b> to help improve it.
             Telemetry is <b>opt-in only</b> — nothing is sent unless you enable it in Settings
             &rarr; General &rarr; Preferences.</p>
-            <p><b>What IS collected:</b> feature counts (no content), app &amp; OS version,
+            <p><b>What IS sent:</b> feature counts (no content), app &amp; OS version,
             performance timing buckets, crash signals (exception type only).</p>
-            <p><b>What is NEVER collected:</b> your search queries, My Library file paths or
+            <p><b>What is NEVER sent:</b> your search queries, My Library file paths or
             filenames, your name or email. When signed in, the only identity attached is your
             bare Supabase <code>user.id</code> — a pseudonymous identifier, the same one
             the website already uses.</p>
             <p>Data is processed by
             <a href='https://posthog.com/privacy'>PostHog</a> (EU region) and Dicta.</p>
-        </div>
-        <div dir='rtl' style='font-family: Arial; font-size: 11px; color: {self._text};
-                               margin-top: 8px;'>
-            <h3 style='font-size:12px;'>טלמטריית שימוש</h3>
-            <p>האפליקציה אוספת באופן אופציונלי <b>נתוני שימוש שומרי-פרטיות</b> לשיפורה.
-            טלמטריה היא <b>הצטרפות בלבד</b> — שום דבר לא נשלח אלא אם כן תפעילו זאת
-            בהגדרות &larr; כללי &larr; העדפות.</p>
-            <p><b>מה נאסף:</b> ספירות תכונות (ללא תוכן), גרסת האפליקציה ומערכת ההפעלה,
-            קטגוריות זמן תגובה, סימני קריסה (סוג השגיאה בלבד).</p>
-            <p><b>מה לעולם לא נאסף:</b> שאילתות החיפוש שלכם, נתיבי קבצים ושמות קבצים
-            מ&#x2018;הספרייה שלי&#x2019;, שמכם או כתובת הדוא&#x05F4;ל. כשאתם מחוברים,
-            המזהה היחיד הוא ה-<code>user.id</code> הפסאודו-אנונימי של Supabase — כמו באתר.</p>
-            <p>הנתונים מעובדים על ידי
-            <a href='https://posthog.com/privacy'>PostHog</a> (אזור האיחוד האירופי) ודיקטה.</p>
         </div>
         """
         tel_browser = QTextBrowser()
@@ -2654,7 +2676,7 @@ class SettingsDialog(QDialog):
 
         # "Privacy details" button to open the canonical bilingual PrivacyDialog (PRIV-05)
         from desktop.consent_dialog import PrivacyDialog  # noqa: PLC0415
-        btn_privacy_about = QPushButton("Privacy details / פרטי פרטיות")
+        btn_privacy_about = QPushButton("פרטיות" if CURRENT_LANG == 'he' else "Privacy details")
         btn_privacy_about.setFlat(True)
         btn_privacy_about.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_privacy_about.setStyleSheet("color: #2563eb; text-decoration: underline; border: none;")

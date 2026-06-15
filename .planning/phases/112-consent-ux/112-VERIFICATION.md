@@ -120,5 +120,23 @@ No gaps found. All 5/5 success criteria are verified in the codebase. The 34-tes
 
 ---
 
+## Post-UAT Update (2026-06-15, /gsd-verify-work)
+
+Manual UAT (`112-UAT.md`) ran 9 user-facing tests — **9/9 passed, 0 issues**. This confirms all 4 "Human Verification Required" items above (first-run-once, modal reschedule guard, post-consent checkbox state, Hebrew rendering).
+
+During UAT the user directed copy/UX refinements that **supersede** some descriptions above:
+
+- **Settings + About telemetry surfaces are now single-language per UI** (`CURRENT_LANG`), NOT bilingual. Only the one-time startup `ConsentDialog` (and the `PrivacyDialog` it opens via "Learn more") remains bilingual. This supersedes Truth #5 / PRIV-05 and the About-tab "language-agnostic bilingual block" wording — the About-tab disclosure now renders a single language.
+- `PrivacyDialog(parent, bilingual=False)` — new parameter. Startup passes `bilingual=True` (EN + HE stacked, Hebrew first, `(English below)` header); Settings/About use the default (single UI language). `test_privacy_dialog_constructs_bilingual` updated to construct with `bilingual=True`.
+- **Consent copy rewritten** (friendlier first-person appeal; signed `Hillel Gershuni, Dicta, gershuni@gmail.com`); both dialogs reordered Hebrew-first.
+- **Hebrew wording**: "שומרי-פרטיות" → "תוך שמירה על הפרטיות" / "שאינם פוגעים בפרטיות"; "פרטי פרטיות" → "פרטיות"; typo "כביית" → "כיבוי". English "privacy-preserving" unchanged.
+- **Settings confirm Yes/No localized** to כן/לא via an instance `QMessageBox` + `tr()` (the static `QMessageBox.question()` cannot relabel). Decision read via `box.standardButton(box.clickedButton())`; the two toggle tests now patch `QMessageBox.exec`.
+
+Post-refinement checks: `test_telemetry_consent_ux.py` + `test_telemetry_no_direct_posthog.py` = **23 passed**; ruff clean on all three files; About-tab build smoke (EN + HE) OK; wording grep gates hold (0 "anonymous usage data", 0 raw telemetry `save_app_config`).
+
+_Status remains: passed._
+
+---
+
 _Verified: 2026-06-15T08:30:00Z_
 _Verifier: Claude (gsd-verifier)_

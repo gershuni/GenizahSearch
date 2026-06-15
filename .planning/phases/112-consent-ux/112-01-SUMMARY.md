@@ -113,3 +113,12 @@ Files verified:
 Commits verified:
 - `3e23f4b3` — test(112-01): add Wave 0 consent UX test suite
 - `77390514` — feat(112-01): add ConsentDialog + PrivacyDialog (bilingual, single done() finalizer)
+
+## Post-UAT Refinements (2026-06-15)
+
+Following manual UAT (`112-UAT.md`, 9/9 passed), the user directed copy + behavior changes to this plan's dialogs:
+
+- **ConsentDialog message rewritten** (EN + HE) to a friendlier first-person appeal; signature is now `Hillel Gershuni, Dicta, gershuni@gmail.com`. Order reversed to **Hebrew-first** with a muted `(English below)` header. The ConsentDialog stays bilingual (one-time startup only).
+- **PrivacyDialog gained a `bilingual` parameter** (default `False`). The startup "Learn more" path passes `bilingual=True` (EN + HE stacked, Hebrew first); Settings/About open it **single-language per `CURRENT_LANG`**. Disclosure copy updated ("What is sent / not sent"; opt-out section shortened). Hebrew now uses "שאינם פוגעים בפרטיות" rather than "שומרי-פרטיות"; English keeps "privacy-preserving". `test_privacy_dialog_constructs_bilingual` now constructs with `bilingual=True`.
+
+Post-refinement checks: 23 telemetry tests pass, ruff clean, wording grep gates hold.

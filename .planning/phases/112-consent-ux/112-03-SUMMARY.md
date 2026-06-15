@@ -148,5 +148,17 @@ Tests verified:
 - `pytest tests/test_telemetry_no_direct_posthog.py -x -q` → 6 passed
 
 ---
+
+## Post-UAT Refinements (2026-06-15)
+
+Following manual UAT (`112-UAT.md`, 9/9 passed), the Settings/About telemetry surfaces were changed from bilingual to **single-language per UI** — only the one-time startup consent dialog stays bilingual:
+
+- Checkbox label, the confirm dialog, and both "Privacy details" buttons now render in `CURRENT_LANG` only. Hebrew label/button is "פרטיות" (was "פרטי פרטיות"); the checkbox uses "תוך שמירה על הפרטיות" (was "שומרי-פרטיות"); typo "כביית" → "כיבוי".
+- **About-tab disclosure block is now single-language per UI** — this supersedes the original "language-agnostic bilingual block rendered for ALL languages" design (REVIEWS HIGH-4 / PRIV-05). It renders the Hebrew block for a Hebrew UI and the English block otherwise.
+- **Confirm dialog Yes/No localized to כן/לא**: switched from the static `QMessageBox.question()` (which cannot relabel standard buttons) to a `QMessageBox` instance with `tr("Yes")`/`tr("No")` button labels; the decision is read via `box.standardButton(box.clickedButton())`. The two toggle tests now patch `QMessageBox.exec` instead of `.question`.
+
+Post-refinement checks: 23 telemetry tests pass, ruff clean, About-tab build smoke (EN + HE) OK, wording grep gates hold.
+
+---
 *Phase: 112-consent-ux*
 *Completed: 2026-06-15*

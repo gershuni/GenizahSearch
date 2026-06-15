@@ -126,34 +126,34 @@ class ConsentDialog(QDialog):
     @staticmethod
     def _build_message_html() -> str:
         en_copy = (
-            "Hi — I build Dicta Genizah Search Pro. I've found that seeing how the app is "
-            "actually used is what tells me what to fix and what to improve next.<br><br>"
-            "If you're willing, the app can send <b>privacy-preserving usage data</b>: which "
-            "features are used, the app version and OS, performance timings, and crash signals "
-            "— counts only. It <b>never</b> sends your searches or texts, never any file names "
-            "or paths from My Library, and never your name or email. If you're signed in, the "
-            "only identity attached is the same pseudonymous account id the website already "
-            "uses (your Supabase user&nbsp;id) — nothing more.<br><br>"
-            "You can turn this on or off anytime in Settings.<br><br>"
-            "<i>— Hillel Gershuni, Dicta</i>"
+            "Hi. My name is Hillel Gershuni, and under the gracious auspices of Dicta "
+            "I'm constantly building and improving Dicta Genizah Search Pro. I'm glad to "
+            "receive your feedback — suggestions, complaints, and bugs — and in order to "
+            "improve the software I'd now like to collect data about how it is used.<br><br>"
+            "If you agree, the software will send <b>general data</b> (such as which features "
+            "you use, your software version and operating system, performance metrics, and "
+            "the like — <b>not</b> search content or your personal library). You can withdraw "
+            "your consent at any time in Settings.<br><br>"
+            "Oh, and regardless — you're always welcome to email me and tell me how it's "
+            "going with the software.<br><br>"
+            "<i>Hillel Gershuni, Dicta, gershuni@gmail.com</i>"
         )
         he_copy = (
-            "שלום — אני בונה את Dicta Genizah Search Pro. גיליתי שדווקא לראות איך האפליקציה "
-            "באמת בשימוש הוא מה שעוזר לי לדעת מה לתקן ומה לשפר הלאה.<br><br>"
-            "אם תסכימו, האפליקציה יכולה לשלוח <b>נתוני שימוש שומרי-פרטיות</b>: אילו תכונות "
-            "בשימוש, גרסת האפליקציה ומערכת ההפעלה, מדדי ביצועים וסימני קריסה — ספירות בלבד. "
-            "לעולם לא נשלחים החיפושים או הטקסטים שלכם, אף פעם לא שמות או נתיבים של קבצים "
-            "מ&#x2018;הספרייה שלי&#x2019;, ולעולם לא השם או הדוא&#x05F4;ל שלכם. אם אתם "
-            "מחוברים, המזהה היחיד שמצורף הוא אותו מזהה פסאודו-אנונימי שהאתר כבר משתמש בו "
-            "(מזהה ה-Supabase שלכם) — וזה הכול.<br><br>"
-            "אפשר להפעיל או לכבות זאת בכל עת בהגדרות.<br><br>"
-            "<i>— הלל גרשוני, דיקטה</i>"
+            "היי. שמי הוא הלל גרשוני, ובחסותה האדיבה של דיקטה אני בונה ומשפר כל הזמן את "
+            "Dicta Genizah Search Pro. אני שמח לקבל מכם משוב – הצעות, תלונות ובאגים – וכדי "
+            "לשפר את התוכנה אני רוצה כעת לאסוף נתונים על השימוש בה.<br><br>"
+            "אם תסכימו, התוכנה תשלח <b>נתונים כלליים</b> (כגון באילו תכונות אתם משתמשים, מהי "
+            "גרסת התוכנה ומערכת ההפעלה שלכם, מדדי ביצועים וכיוצא בזה — לא תוכני חיפוש או "
+            "ספרייה אישית). אפשר לבטל את ההסכמה בכל רגע בהגדרות.<br><br>"
+            "אה, ובלי קשר אתם מוזמנים תמיד לשלוח לי מייל ולספר איך הולך עם התוכנה.<br><br>"
+            "<i>הלל גרשוני, דיקטה, gershuni@gmail.com</i>"
         )
         return (
             "<html><body style='font-size: 13px;'>"
-            f"<div dir='ltr' style='margin-bottom: 16px;'>{en_copy}</div>"
+            "<div dir='ltr' style='font-size: 11px; color: #888; margin-bottom: 6px;'>(English below)</div>"
+            f"<div dir='rtl' style='margin-bottom: 16px;'>{he_copy}</div>"
             "<hr style='border: 0; border-top: 1px solid #ddd; margin: 8px 0;'>"
-            f"<div dir='rtl' style='margin-top: 8px;'>{he_copy}</div>"
+            f"<div dir='ltr' style='margin-top: 8px;'>{en_copy}</div>"
             "</body></html>"
         )
 
@@ -172,8 +172,8 @@ class ConsentDialog(QDialog):
         self.reject()  # routes through done(Rejected)
 
     def _on_learn_more(self) -> None:
-        """Open the full bilingual privacy disclosure."""
-        dlg = PrivacyDialog(self)
+        """Open the full bilingual privacy disclosure (startup flow — bilingual)."""
+        dlg = PrivacyDialog(self, bilingual=True)
         dlg.exec()
 
     # ------------------------------------------------------------------
@@ -232,9 +232,17 @@ class PrivacyDialog(QDialog):
     (RESEARCH Open Question 2).  English copy is authoritative.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, bilingual=False):
         super().__init__(parent)
-        self.setWindowTitle("Privacy / פרטיות")
+        # bilingual=True ONLY from the one-time startup consent flow (ConsentDialog
+        # "Learn more"). Everywhere else (Settings → Privacy details, About tab) the
+        # dialog follows the UI language — single-language per CURRENT_LANG.
+        self._bilingual = bilingual
+        self._he = genizah_core.CURRENT_LANG == 'he'
+        if bilingual:
+            self.setWindowTitle("Privacy / פרטיות")
+        else:
+            self.setWindowTitle("פרטיות" if self._he else "Privacy")
         self.setModal(True)
         self.resize(620, 540)
         self.setWindowFlags(
@@ -251,7 +259,11 @@ class PrivacyDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 16)
         layout.setSpacing(12)
 
-        title_lbl = QLabel("Privacy Details / פרטי פרטיות")
+        if bilingual:
+            _title_text = "Privacy / פרטיות"
+        else:
+            _title_text = "פרטיות" if self._he else "Privacy"
+        title_lbl = QLabel(_title_text)
         title_lbl.setStyleSheet("font-size: 15px; font-weight: bold;")
         layout.addWidget(title_lbl)
 
@@ -260,7 +272,11 @@ class PrivacyDialog(QDialog):
         browser.setHtml(self._build_html())
         layout.addWidget(browser)
 
-        btn_close = QPushButton("Close / סגור")
+        if bilingual:
+            _close_text = "Close / סגור"
+        else:
+            _close_text = "סגור" if self._he else "Close"
+        btn_close = QPushButton(_close_text)
         btn_close.clicked.connect(self.accept)
         close_row = QHBoxLayout()
         close_row.addStretch()
@@ -272,17 +288,17 @@ class PrivacyDialog(QDialog):
         fg = self._text
 
         en_html = """
-<p>Dicta Genizah Search Pro optionally collects <b>privacy-preserving usage data</b>
-to help improve the app. Telemetry is opt-in only — nothing is sent unless you enable it
-in Settings.</p>
-<h3 style='margin-top:0;'>What is collected</h3>
+<p>To help improve Dicta Genizah Search Pro, you can allow it to send
+<b>privacy-preserving usage data</b> — data that does not compromise your privacy.
+Nothing is sent unless you enable it in Settings.</p>
+<h3 style='margin-top:0;'>What is sent</h3>
 <ul>
-  <li>Which features are used (feature counts only — no content)</li>
+  <li>Which features are used (no usage content)</li>
   <li>App version and operating system</li>
   <li>Performance timing buckets (aggregated, not per-search)</li>
-  <li>Crash signals (exception type only — <b>never</b> exception message text)</li>
+  <li>Crash signals (exception type only — <b>never</b> the exception message text)</li>
 </ul>
-<h3>What is NOT collected</h3>
+<h3>What is NOT sent</h3>
 <ul>
   <li>Your search queries or text content</li>
   <li>My Library file paths, filenames, or document content</li>
@@ -298,26 +314,24 @@ PostHog is an open-source analytics platform; data is stored in the EU
 and governed by their <a href='https://posthog.com/privacy'>privacy policy</a>.</p>
 <h3>The install id</h3>
 <p>A random pseudonymous install identifier (UUID) is generated when you first opt in.
-It is retained locally if you later opt out, so a future re-opt-in preserves continuity.
+It is retained locally even if you later opt out, so a future re-opt-in preserves continuity.
 It is never linked to your name, email, or any personal account.</p>
 <h3>How to opt out</h3>
 <p>Open <b>Settings → General → Preferences</b> and uncheck
-<i>Help improve the app</i>. Opting out immediately stops all data collection
-and discards any queued events.</p>
-<p>Telemetry is <b>opt-in only</b> — nothing is sent unless you explicitly enable it.</p>
+<i>Help improve the app</i>. Opting out takes effect immediately.</p>
 """
 
         he_html = """
-<p>Dicta Genizah Search Pro אוספת באופן אופציונלי <b>נתוני שימוש שומרי-פרטיות</b>
-לשיפור האפליקציה. טלמטריה היא הצטרפות בלבד — שום דבר לא נשלח אלא אם כן תפעילו זאת בהגדרות.</p>
-<h3 style='margin-top:0;'>מה נאסף</h3>
+<p>לשם שיפור Dicta Genizah Search Pro, ניתן לאפשר לה לשלוח נתוני שימוש שאינם
+פוגעים בפרטיות המשתמש. שום דבר לא נשלח אלא אם כן תפעילו זאת בהגדרות.</p>
+<h3 style='margin-top:0;'>מה נשלח</h3>
 <ul>
-  <li>אילו תכונות בשימוש (ספירות בלבד — ללא תוכן)</li>
+  <li>אילו תכונות בשימוש (ללא תוכן השימוש)</li>
   <li>גרסת האפליקציה ומערכת ההפעלה</li>
   <li>קטגוריות זמן תגובה (מצטברות, לא לפי חיפוש)</li>
-  <li>סימני קריסה (סוג השגיאה בלבד — <b>ללא</b> טקסט הודעת השגיאה)</li>
+  <li>סימני קריסה (סוג השגיאה בלבד, ללא טקסט הודעת השגיאה)</li>
 </ul>
-<h3>מה לא נאסף</h3>
+<h3>מה לא נשלח</h3>
 <ul>
   <li>שאילתות החיפוש שלכם או תכני הטקסט</li>
   <li>נתיבי קבצים, שמות קבצים או תוכן מסמכים מ&#x2018;הספרייה שלי&#x2019;</li>
@@ -336,15 +350,27 @@ PostHog הוא פלטפורמת אנליטיקה קוד-פתוח; הנתונים
 הוא לעולם אינו מקושר לשם, לדוא&#x05F4;ל או לחשבון אישי כלשהו.</p>
 <h3>כיצד לבטל את ההסכמה</h3>
 <p>פתחו את <b>הגדרות → כללי → העדפות</b> ובטלו את הסימון של
-<i>עזרו לשפר את האפליקציה</i>. הביטול מיידי — כל איסוף הנתונים נפסק
-ואירועים בתור מוחקים.</p>
-<p>טלמטריה היא <b>הצטרפות בלבד</b> — שום דבר לא נשלח אלא אם כן אתם מפעילים זאת.</p>
+<i>עזרו לשפר את האפליקציה</i>. הביטול נכנס לתוקף מיידית.</p>
 """
+
+        en_block = f"<div dir='ltr' style='margin-bottom:20px;'>{en_html}</div>"
+        he_block = f"<div dir='rtl' style='margin-top:12px;'>{he_html}</div>"
+        # bilingual=True (startup) shows both stacked, Hebrew first; otherwise
+        # follow UI language.
+        if getattr(self, '_bilingual', False):
+            body = (
+                "<div dir='ltr' style='font-size:11px; color:#888; margin-bottom:6px;'>(English below)</div>"
+                + he_block
+                + "<hr style='border:0; border-top:1px solid #aaa; margin:12px 0;'>"
+                + en_block
+            )
+        elif getattr(self, '_he', False):
+            body = he_block
+        else:
+            body = en_block
 
         return (
             f"<html><body style='background:{bg}; color:{fg}; font-size:13px;'>"
-            f"<div dir='ltr' style='margin-bottom:20px;'>{en_html}</div>"
-            "<hr style='border:0; border-top:1px solid #aaa; margin:12px 0;'>"
-            f"<div dir='rtl' style='margin-top:12px;'>{he_html}</div>"
+            f"{body}"
             "</body></html>"
         )
