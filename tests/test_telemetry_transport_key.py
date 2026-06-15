@@ -27,6 +27,9 @@ def _wire_and_capture(monkeypatch, *, frozen=False, **env):
     captured: dict = {}
     monkeypatch.setattr(tel, 'set_capture_api_key', lambda k: captured.__setitem__('key', k))
     monkeypatch.setattr(tel, 'set_capture_host', lambda h: captured.__setitem__('host', h))
+    # Neutralize the INFRA-F2 hook registration side-effect — these tests assert key
+    # resolution only, and the real register_scrub_hook mutates a posthog_server global.
+    monkeypatch.setattr(tel, 'register_scrub_hook', lambda fn: None)
 
     for var in ('GENIZAH_TELEMETRY_KEY', 'POSTHOG_API_KEY', 'GENIZAH_TELEMETRY_HOST'):
         monkeypatch.delenv(var, raising=False)

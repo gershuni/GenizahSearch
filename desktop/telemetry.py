@@ -46,6 +46,7 @@ from shared.posthog_server import (
     set_default_distinct_id,
     set_capture_api_key,
     set_capture_host,
+    register_scrub_hook,
     _drain_and_discard,
     send_crash_event_direct,  # Phase 113: module-top import (REVIEWS HIGH-2 — no in-hook import)
 )
@@ -364,6 +365,37 @@ def _BASE_PROPS() -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Shared-queue scrub hook (INFRA-F2 / Codex 2026-06-15 #2)
+# ---------------------------------------------------------------------------
+def _desktop_default_props_hook(payload: dict) -> 'dict | None':
+    """Tag EVERY event leaving this desktop process via the shared queue.
+
+    Registered into shared.posthog_server (via register_scrub_hook) while desktop
+    consent is active. shared-module emitters — notably shared/nli_circuit_breaker's
+    nli_breaker_opened/closed — call enqueue_event directly, bypassing _emit(), so
+    without this hook they would reach the SHARED project untagged and could attach a
+    person profile to the desktop install_id. This hook guarantees:
+      - platform='desktop'              (so web vs desktop stays separable)
+      - $process_person_profile=False   (infra/anon events create no person)
+
+    Fill-when-absent ONLY: an explicit value set by desktop's own _emit() path always
+    wins, so identified usage events (Phase 114 IDENT) are unaffected. Runs before
+    _event_queue.put_nowait (raw data never enters the queue). Never raises — on any
+    error the payload is returned unchanged (defence-in-depth must not drop telemetry).
+    """
+    try:
+        props = payload.get('properties')
+        if not isinstance(props, dict):
+            props = {}
+        props.setdefault('platform', 'desktop')
+        props.setdefault('$process_person_profile', False)
+        payload['properties'] = props
+    except Exception:
+        pass
+    return payload
+
+
+# ---------------------------------------------------------------------------
 # Transport config wiring (REVIEWS HIGH-1)
 # ---------------------------------------------------------------------------
 def _wire_transport_config() -> None:
@@ -412,6 +444,10 @@ def _wire_transport_config() -> None:
         host = os.environ.get('GENIZAH_TELEMETRY_HOST') or None
         set_capture_api_key(key)
         set_capture_host(host)
+        # INFRA-F2: while a real key is wired (consent on), tag every shared-queue
+        # event (incl. shared-module emitters that bypass _emit) as platform=desktop.
+        # Cleared when no key is wired so nothing tags events that won't be sent.
+        register_scrub_hook(_desktop_default_props_hook if key else None)
     except Exception:
         logger.debug('telemetry: _wire_transport_config silently failed', exc_info=True)
 
@@ -548,6 +584,7 @@ def set_consent(enabled: bool) -> None:
             set_default_distinct_id(None)
             set_capture_api_key(None)   # F1: revoke the key so ungated emitters stop
             set_capture_host(None)
+            register_scrub_hook(None)   # INFRA-F2: drop the desktop tagging hook on opt-out
             # 2. Discard anything already queued (CONSENT-08) — no POST.
             _drain_and_discard()
             # 3. Reset in-memory identity to anonymous (WR-02). _install_id is
