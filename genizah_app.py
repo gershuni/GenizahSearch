@@ -2175,8 +2175,27 @@ class SettingsDialog(QDialog):
         self._cit_bg = '#1e2a36' if self._is_dark else '#eef3f8'
         self._cit_border = '#2c3e50' if self._is_dark else '#c8d6e0'
 
-        # Snapshot config on open so Cancel can restore it
-        self._config_snapshot = dict(load_app_config())
+        # Snapshot config on open so Cancel can restore it.
+        # D-07b / T-112-CancelDesync: telemetry keys are stripped from the snapshot
+        # so that save_app_config(self._config_snapshot) in _on_cancel cannot
+        # overwrite them. save_app_config is additive-merge (genizah_core.py:2882-2890:
+        # cfg.update(new_data) — keys absent from new_data are left untouched),
+        # so omitted keys remain whatever set_consent() last wrote. DO NOT "fix" this
+        # back to a full dict() — the strip is intentional.
+        from desktop.telemetry import (  # noqa: PLC0415
+            TELEMETRY_ENABLED_KEY, FIRST_RUN_SHOWN_KEY as _FRSKEY,
+            TELEMETRY_INSTALL_ID_KEY, CONSENT_TIMESTAMP_KEY,
+            CONSENT_APP_VERSION_KEY, CONSENT_UI_VERSION_KEY, IDENTIFIED_USER_KEY,
+        )
+        _TELEMETRY_SNAPSHOT_EXCLUDE = frozenset({
+            TELEMETRY_ENABLED_KEY, _FRSKEY, TELEMETRY_INSTALL_ID_KEY,
+            CONSENT_TIMESTAMP_KEY, CONSENT_APP_VERSION_KEY,
+            CONSENT_UI_VERSION_KEY, IDENTIFIED_USER_KEY,
+        })
+        self._config_snapshot = {
+            k: v for k, v in load_app_config().items()
+            if k not in _TELEMETRY_SNAPSHOT_EXCLUDE
+        }
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)

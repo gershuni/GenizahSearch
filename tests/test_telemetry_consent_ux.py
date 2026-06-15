@@ -222,6 +222,61 @@ def test_done_finalizer_writes_flag_on_close(monkeypatch, _reset_telemetry_state
     assert consent_calls == [False], f"set_consent(False) expected on X-close; got {consent_calls}"
 
 
+def test_settings_cancel_does_not_desync_telemetry(_reset_telemetry_state):
+    """D-07b / T-112-CancelDesync: Cancel in SettingsDialog must NOT overwrite
+    telemetry keys that set_consent() already wrote to config.pkl.
+
+    Simulates the exact fix in SettingsDialog.__init__: the snapshot is built by
+    stripping the 7 telemetry key constants from the full config dict, then
+    save_app_config(snapshot) is called (as _on_cancel does). Since save_app_config
+    is additive-merge, the telemetry keys NOT in the snapshot are left untouched.
+
+    After opt-in followed by a snapshot-restore that omits telemetry keys,
+    load_app_config()[TELEMETRY_ENABLED_KEY] must still be True (no desync).
+    """
+    import desktop.telemetry as tel
+    from desktop.telemetry import (
+        TELEMETRY_ENABLED_KEY, FIRST_RUN_SHOWN_KEY,
+        TELEMETRY_INSTALL_ID_KEY, CONSENT_TIMESTAMP_KEY,
+        CONSENT_APP_VERSION_KEY, CONSENT_UI_VERSION_KEY, IDENTIFIED_USER_KEY,
+    )
+    import genizah_core
+
+    _TELEMETRY_SNAPSHOT_EXCLUDE = frozenset({
+        TELEMETRY_ENABLED_KEY, FIRST_RUN_SHOWN_KEY, TELEMETRY_INSTALL_ID_KEY,
+        CONSENT_TIMESTAMP_KEY, CONSENT_APP_VERSION_KEY,
+        CONSENT_UI_VERSION_KEY, IDENTIFIED_USER_KEY,
+    })
+
+    # Step 1: opt in (simulates user flipping toggle in Settings)
+    tel.set_consent(True)
+    cfg_after_consent = genizah_core.load_app_config()
+    assert cfg_after_consent.get(TELEMETRY_ENABLED_KEY) is True, (
+        "Precondition: set_consent(True) must write TELEMETRY_ENABLED_KEY=True"
+    )
+
+    # Step 2: build a snapshot as SettingsDialog.__init__ does (strip telemetry keys)
+    full_cfg = genizah_core.load_app_config()
+    snapshot = {k: v for k, v in full_cfg.items() if k not in _TELEMETRY_SNAPSHOT_EXCLUDE}
+    assert TELEMETRY_ENABLED_KEY not in snapshot, (
+        "Snapshot must not contain TELEMETRY_ENABLED_KEY (D-07b strip)"
+    )
+
+    # Step 3: simulate _on_cancel restoring the snapshot (additive-merge)
+    genizah_core.save_app_config(snapshot)
+
+    # Step 4: verify telemetry state is NOT desynced — engine wrote True; disk must still be True
+    cfg_after_cancel = genizah_core.load_app_config()
+    assert cfg_after_cancel.get(TELEMETRY_ENABLED_KEY) is True, (
+        "After snapshot restore, TELEMETRY_ENABLED_KEY must remain True "
+        "(save_app_config is additive-merge — omitted keys are preserved). "
+        "T-112-CancelDesync."
+    )
+    assert tel.is_enabled() is True, (
+        "is_enabled() must still return True after snapshot restore (no engine desync)"
+    )
+
+
 def test_optout_drains_queue(_reset_telemetry_state):
     """CONSENT-08 verification: set_consent(False) drains any queued events.
 
