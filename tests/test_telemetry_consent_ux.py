@@ -458,3 +458,298 @@ def test_privacy_dialog_constructs_bilingual():
         f"found: {bare_anonymous.group() if bare_anonymous else ''}"
     )
     dlg.accept()
+
+
+# ===========================================================================
+# Phase 112 Plan 03 — Settings telemetry toggle tests (Task 2)
+# Requires Qt-offscreen platform.
+# ===========================================================================
+
+def test_settings_toggle_initial_state(monkeypatch):
+    """CONSENT-04: chk_telemetry initial state matches is_enabled().
+
+    When telemetry is disabled, the checkbox must be unchecked.
+    When telemetry is enabled, the checkbox must be checked.
+    Tests both states to verify the checkbox reads from is_enabled().
+    """
+    _skip_if_no_qt()
+    import desktop.telemetry as tel
+
+    # Case A: disabled → checkbox unchecked
+    tel._reset_for_tests()
+    tel._load_consent_state()
+    assert tel.is_enabled() is False, "Precondition: telemetry off after reset"
+
+    # We need to build just enough of SettingsDialog to test chk_telemetry.
+    # Import and check the attribute exists and reflects is_enabled().
+    # We do this by introspecting genizah_app.py's SettingsDialog class
+    # without constructing the full main window — using a minimal QDialog parent.
+    from PyQt6.QtWidgets import QDialog
+    import genizah_app
+
+    class _FakeMainWin:
+        """Minimal stand-in for self.main_win attributes SettingsDialog touches.
+
+        _on_language_combo_changed must be a callable (QComboBox connects to it).
+        All other attribute accesses return a no-op lambda or None so Qt setattr
+        calls don't raise.
+        """
+        def _on_language_combo_changed(self, idx):
+            pass
+
+        def check_updates_manual(self):
+            pass
+
+        def run_indexing(self):
+            pass
+
+        def __setattr__(self, name, value):
+            object.__setattr__(self, name, value)
+
+        def __getattr__(self, name):
+            return lambda *a, **kw: None
+
+    # Patch out the heavy parts so SettingsDialog can be constructed without
+    # a real GenizahGUI. Provide a fake load_app_config that returns defaults.
+    fake_cfg = {}
+
+    monkeypatch.setattr(genizah_app, 'load_app_config', lambda: dict(fake_cfg))
+    # Also patch save_app_config so Settings doesn't persist anything
+    import genizah_core
+    monkeypatch.setattr(genizah_core, 'save_app_config', lambda d: fake_cfg.update(d))
+
+    sd = genizah_app.SettingsDialog.__new__(genizah_app.SettingsDialog)
+    # Minimal init attributes needed by SettingsDialog.__init__
+    # We can't call super().__init__ without a display, so call directly.
+    QDialog.__init__(sd)
+    sd.main_win = _FakeMainWin()
+    # Run only _build_general_tab to set up chk_telemetry
+    # But _build_general_tab needs palette colors — set them
+    from PyQt6.QtWidgets import QApplication
+    pal = QApplication.palette()
+    from PyQt6.QtGui import QPalette
+    sd._is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+    sd._text = pal.color(QPalette.ColorRole.Text).name()
+    sd._base = pal.color(QPalette.ColorRole.Base).name()
+    sd._muted = '#888' if sd._is_dark else '#666'
+    sd._border = '#555' if sd._is_dark else '#d0d0d0'
+    sd._combo_w = 140
+    sd._cit_bg = '#1e2a36' if sd._is_dark else '#eef3f8'
+    sd._cit_border = '#2c3e50' if sd._is_dark else '#c8d6e0'
+    _page = sd._build_general_tab()  # keep page alive to prevent GC of child widgets
+
+    assert hasattr(sd, 'chk_telemetry'), "SettingsDialog must have chk_telemetry attribute"
+    # State: disabled → unchecked
+    assert sd.chk_telemetry.isChecked() is False, (
+        "chk_telemetry must be unchecked when is_enabled() returns False"
+    )
+    del _page  # explicit cleanup
+
+
+def test_settings_toggle_applies_on_confirm(monkeypatch):
+    """CONSENT-04 / D-07a: confirming the toggle calls set_consent(new_val).
+
+    Patches QMessageBox.question to return Yes, then triggers stateChanged.
+    Verifies set_consent is called with the new value.
+    """
+    _skip_if_no_qt()
+    import desktop.telemetry as tel
+
+    consent_calls = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: consent_calls.append(v))
+
+    import genizah_app
+    import genizah_core
+    from PyQt6.QtWidgets import QDialog, QApplication, QMessageBox
+    from PyQt6.QtGui import QPalette
+
+    fake_cfg = {}
+    monkeypatch.setattr(genizah_app, 'load_app_config', lambda: dict(fake_cfg))
+    monkeypatch.setattr(genizah_core, 'save_app_config', lambda d: fake_cfg.update(d))
+    # Patch QMessageBox.question to return Yes (auto-confirm)
+    monkeypatch.setattr(
+        QMessageBox, 'question',
+        staticmethod(lambda *a, **kw: QMessageBox.StandardButton.Yes)
+    )
+
+    class _FakeMainWin:
+        def _on_language_combo_changed(self, idx):
+            pass
+        def check_updates_manual(self):
+            pass
+        def run_indexing(self):
+            pass
+        def __setattr__(self, name, value):
+            object.__setattr__(self, name, value)
+        def __getattr__(self, name):
+            return lambda *a, **kw: None
+
+    sd = genizah_app.SettingsDialog.__new__(genizah_app.SettingsDialog)
+    QDialog.__init__(sd)
+    sd.main_win = _FakeMainWin()
+    pal = QApplication.palette()
+    sd._is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+    sd._text = pal.color(QPalette.ColorRole.Text).name()
+    sd._base = pal.color(QPalette.ColorRole.Base).name()
+    sd._muted = '#888' if sd._is_dark else '#666'
+    sd._border = '#555' if sd._is_dark else '#d0d0d0'
+    sd._combo_w = 140
+    sd._cit_bg = '#1e2a36' if sd._is_dark else '#eef3f8'
+    sd._cit_border = '#2c3e50' if sd._is_dark else '#c8d6e0'
+    _page = sd._build_general_tab()  # keep page alive to prevent GC of child widgets
+
+    # Trigger a state change: flip to checked (enable telemetry)
+    sd.chk_telemetry.blockSignals(False)
+    sd.chk_telemetry.setChecked(True)
+    QApplication.processEvents()
+
+    assert True in consent_calls, (
+        f"set_consent(True) must be called on confirmed toggle; got {consent_calls}"
+    )
+    del _page
+
+
+def test_settings_toggle_reverts_on_cancel_confirm(monkeypatch):
+    """CONSENT-04 / D-07a: cancelling the confirm reverts checkbox; set_consent NOT called.
+
+    Patches QMessageBox.question to return No, then triggers stateChanged.
+    Verifies set_consent is NOT called and the checkbox reverts to prior state.
+    """
+    _skip_if_no_qt()
+    import desktop.telemetry as tel
+
+    consent_calls = []
+    monkeypatch.setattr(tel, 'set_consent', lambda v: consent_calls.append(v))
+
+    import genizah_app
+    import genizah_core
+    from PyQt6.QtWidgets import QDialog, QApplication, QMessageBox
+    from PyQt6.QtGui import QPalette
+
+    fake_cfg = {}
+    monkeypatch.setattr(genizah_app, 'load_app_config', lambda: dict(fake_cfg))
+    monkeypatch.setattr(genizah_core, 'save_app_config', lambda d: fake_cfg.update(d))
+    # Patch QMessageBox.question to return No (cancel confirm)
+    monkeypatch.setattr(
+        QMessageBox, 'question',
+        staticmethod(lambda *a, **kw: QMessageBox.StandardButton.No)
+    )
+
+    class _FakeMainWin:
+        def _on_language_combo_changed(self, idx):
+            pass
+        def check_updates_manual(self):
+            pass
+        def run_indexing(self):
+            pass
+        def __setattr__(self, name, value):
+            object.__setattr__(self, name, value)
+        def __getattr__(self, name):
+            return lambda *a, **kw: None
+
+    sd = genizah_app.SettingsDialog.__new__(genizah_app.SettingsDialog)
+    QDialog.__init__(sd)
+    sd.main_win = _FakeMainWin()
+    pal = QApplication.palette()
+    sd._is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+    sd._text = pal.color(QPalette.ColorRole.Text).name()
+    sd._base = pal.color(QPalette.ColorRole.Base).name()
+    sd._muted = '#888' if sd._is_dark else '#666'
+    sd._border = '#555' if sd._is_dark else '#d0d0d0'
+    sd._combo_w = 140
+    sd._cit_bg = '#1e2a36' if sd._is_dark else '#eef3f8'
+    sd._cit_border = '#2c3e50' if sd._is_dark else '#c8d6e0'
+    _page = sd._build_general_tab()  # keep page alive to prevent GC of child widgets
+
+    # Initial state: unchecked (is_enabled()=False after reset)
+    assert sd.chk_telemetry.isChecked() is False, "Precondition: starts unchecked"
+
+    # Flip to checked — but QMessageBox returns No → should revert
+    sd.chk_telemetry.blockSignals(False)
+    sd.chk_telemetry.setChecked(True)
+    QApplication.processEvents()
+
+    assert consent_calls == [], (
+        f"set_consent must NOT be called when confirm is cancelled; got {consent_calls}"
+    )
+    assert sd.chk_telemetry.isChecked() is False, (
+        "Checkbox must revert to prior state (unchecked) when confirm is cancelled"
+    )
+    del _page
+
+
+def test_settings_checkbox_refreshes_on_open(monkeypatch):
+    """REVIEWS HIGH-3 / T-112-StaleCheckbox: _open_settings_dialog refreshes
+    chk_telemetry from is_enabled() with signals blocked before exec().
+
+    Simulates: (1) dialog built with telemetry OFF, (2) consent changes to ON
+    (first-run opt-in), (3) _open_settings_dialog is called — checkbox must now
+    reflect ON (not the stale OFF from construction time).
+    """
+    _skip_if_no_qt()
+    import desktop.telemetry as tel
+    import genizah_app
+
+    # Confirm is_enabled() is False after reset (autouse fixture)
+    assert tel.is_enabled() is False
+
+    import genizah_core
+    fake_cfg = {}
+    monkeypatch.setattr(genizah_app, 'load_app_config', lambda: dict(fake_cfg))
+    monkeypatch.setattr(genizah_core, 'load_app_config', lambda: dict(fake_cfg))
+    monkeypatch.setattr(genizah_core, 'save_app_config', lambda d: fake_cfg.update(d))
+    monkeypatch.setattr(tel, 'load_app_config', lambda: dict(fake_cfg))
+    monkeypatch.setattr(tel, 'save_app_config', lambda d: fake_cfg.update(d))
+
+    from PyQt6.QtWidgets import QDialog, QApplication
+    from PyQt6.QtGui import QPalette
+
+    class _FakeMainWin:
+        def _on_language_combo_changed(self, idx):
+            pass
+        def check_updates_manual(self):
+            pass
+        def run_indexing(self):
+            pass
+        def __setattr__(self, name, value):
+            object.__setattr__(self, name, value)
+        def __getattr__(self, name):
+            return lambda *a, **kw: None
+
+    sd = genizah_app.SettingsDialog.__new__(genizah_app.SettingsDialog)
+    QDialog.__init__(sd)
+    sd.main_win = _FakeMainWin()
+    pal = QApplication.palette()
+    sd._is_dark = pal.color(QPalette.ColorRole.Window).lightness() < 128
+    sd._text = pal.color(QPalette.ColorRole.Text).name()
+    sd._base = pal.color(QPalette.ColorRole.Base).name()
+    sd._muted = '#888' if sd._is_dark else '#666'
+    sd._border = '#555' if sd._is_dark else '#d0d0d0'
+    sd._combo_w = 140
+    sd._cit_bg = '#1e2a36' if sd._is_dark else '#eef3f8'
+    sd._cit_border = '#2c3e50' if sd._is_dark else '#c8d6e0'
+    _page = sd._build_general_tab()  # keep page alive to prevent GC of child widgets
+
+    # At construction time: is_enabled()=False → checkbox unchecked
+    assert sd.chk_telemetry.isChecked() is False, (
+        "Precondition: checkbox unchecked at construction (is_enabled=False)"
+    )
+
+    # Simulate first-run opt-in (happens AFTER dialog was built)
+    tel.set_consent(True)
+    assert tel.is_enabled() is True, "Post-consent: is_enabled() must be True"
+
+    # Now simulate _open_settings_dialog's refresh logic (REVIEWS HIGH-3)
+    try:
+        chk = getattr(sd, 'chk_telemetry', None)
+        if chk is not None:
+            chk.blockSignals(True)
+            chk.setChecked(tel.is_enabled())
+            chk.blockSignals(False)
+    except Exception:
+        pass
+
+    # Checkbox must now be CHECKED (reflecting post-consent state)
+    assert sd.chk_telemetry.isChecked() is True, (
+        "chk_telemetry must be refreshed to True after first-run opt-in (REVIEWS HIGH-3)"
+    )

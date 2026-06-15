@@ -2313,7 +2313,86 @@ class SettingsDialog(QDialog):
         trans_row.addStretch()
         layout.addLayout(trans_row)
 
-        layout.addSpacing(12)
+        layout.addSpacing(4)
+
+        # Telemetry toggle (Phase 112, CONSENT-04)
+        # D-08: consent routes ONLY through set_consent() — never raw save_app_config.
+        # D-07a: confirm-on-change → immediate set_consent(); revert on cancel-of-confirm.
+        from desktop.telemetry import is_enabled as _tel_is_enabled, set_consent as _tel_set_consent  # noqa: PLC0415
+        from desktop.consent_dialog import PrivacyDialog  # noqa: PLC0415
+
+        self.chk_telemetry = QCheckBox(
+            "Help improve the app — send privacy-preserving usage data"
+            " / עזרו לשפר"
+            " את האפליקציה"
+            " — שליחת"
+            " נתוני שימוש"
+            " שומרי-פרטיות"
+        )
+        # Pitfall 5: block signals during initial setChecked to prevent spurious
+        # stateChanged on dialog open.
+        self.chk_telemetry.blockSignals(True)
+        self.chk_telemetry.setChecked(_tel_is_enabled())
+        self.chk_telemetry.blockSignals(False)
+
+        def _on_telemetry_changed(state):
+            new_val = (state == 2)
+            prior = _tel_is_enabled()
+            if new_val == prior:
+                return
+            if new_val:
+                title = "Enable telemetry? / הפעל טלמטריה?"
+                msg = (
+                    "Privacy-preserving usage data will start being sent now.\n"
+                    "You can turn this off at any time in Settings.\n\n"
+                    "נתוני שימוש"
+                    " שומרי-פרטיות"
+                    " יתחילו להישלח"
+                    " כעת.\n"
+                    "אפשר לכבות"
+                    " בכל עת בהגדרות."
+                )
+            else:
+                title = "Disable telemetry? / כביית טלמטריה?"
+                msg = (
+                    "Privacy-preserving usage data collection will stop now.\n"
+                    "Queued events will be discarded immediately.\n\n"
+                    "איסוף נתוני"
+                    " שימוש"
+                    " שומרי-פרטיות"
+                    " יפסק כעת.\n"
+                    "אירועים בתור"
+                    " יימחקו מיד."
+                )
+            reply = QMessageBox.question(
+                self, title, msg,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                _tel_set_consent(new_val)  # D-08: sole write path
+            else:
+                # D-07a: revert visual, do NOT call set_consent
+                self.chk_telemetry.blockSignals(True)
+                self.chk_telemetry.setChecked(prior)
+                self.chk_telemetry.blockSignals(False)
+
+        self.chk_telemetry.stateChanged.connect(_on_telemetry_changed)
+
+        btn_privacy = QPushButton("Privacy details / פרטי פרטיות")
+        btn_privacy.setFlat(True)
+        btn_privacy.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_privacy.setStyleSheet("color: #2563eb; text-decoration: underline; border: none;")
+        btn_privacy.clicked.connect(lambda: PrivacyDialog(self).exec())
+
+        telemetry_row = QHBoxLayout()
+        telemetry_row.addWidget(self.chk_telemetry)
+        telemetry_row.addSpacing(8)
+        telemetry_row.addWidget(btn_privacy)
+        telemetry_row.addStretch()
+        layout.addLayout(telemetry_row)
+        layout.addSpacing(4)
+
+        layout.addSpacing(8)
 
         # — Updates —
         sep1 = QFrame(); sep1.setFrameShape(QFrame.Shape.HLine)
@@ -15579,7 +15658,22 @@ class GenizahGUI(QMainWindow):
         dialog.exec()
 
     def _open_settings_dialog(self):
-        """Open the settings dialog."""
+        """Open the settings dialog.
+
+        REVIEWS HIGH-3 / T-112-StaleCheckbox: SettingsDialog is built ONCE at
+        startup (before the first-run consent prompt). Refresh chk_telemetry from
+        is_enabled() with signals blocked before every exec() so a first-run opt-in
+        is never displayed stale.
+        """
+        try:
+            from desktop.telemetry import is_enabled as _tel_is_enabled  # noqa: PLC0415
+            chk = getattr(self.settings_dialog, 'chk_telemetry', None)
+            if chk is not None:
+                chk.blockSignals(True)
+                chk.setChecked(_tel_is_enabled())
+                chk.blockSignals(False)
+        except Exception:  # noqa: BLE001
+            pass  # never block opening Settings on attribute or import error
         self.settings_dialog.exec()
 
     def _on_language_combo_changed(self, index):
