@@ -13,11 +13,13 @@ files_reviewed_list:
   - tests/test_crash_priority_send.py
   - tests/test_native_crash.py
 findings:
-  critical: 1
+  critical: 0
   warning: 4
   info: 3
   total: 8
+critical_resolved: 1
 status: issues_found
+resolution_note: "CR-01 fixed in 0db270a3 (carve-out + full-path regression test)."
 ---
 
 # Phase 113: Code Review Report
@@ -62,6 +64,9 @@ payload tests assert on `_make_crash_props` output BEFORE the scrubber runs).
 ## Critical Issues
 
 ### CR-01: Path scrubber destroys `exc_module` and `error_fingerprint` in every in-app crash payload
+
+> **✅ RESOLVED (0db270a3):** Verified live (`exc_module: 'genizah_app.py' → '[REDACTED]'`, `error_fingerprint → '[REDACTED]:42'`). Fixed via Option A — `_emit_crash_direct` restores `exc_module`/`error_fingerprint` from the pre-scrub `validated` dict after `_scrub_props` (mirrors the `context` carve-out in `_emit`; both keys are trusted: basename + `type:basename:lineno`, never a path). Added `test_emit_crash_direct_preserves_inapp_module_and_fingerprint` driving the full emit path (post-scrub assertion).
+
 
 **File:** `desktop/telemetry.py:838-936` (`_make_crash_props` produces a `.py`
 basename; `_emit_crash_direct` then runs it through `_scrub_props` at line 932)
