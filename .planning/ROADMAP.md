@@ -113,7 +113,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 **Plans**: 3 plans
 
 - [x] 112-01-PLAN.md — Wave 0 test scaffold + `desktop/consent_dialog.py` (ConsentDialog + PrivacyDialog: bilingual, no-default buttons, flag-on-all-exit-paths) [Wave 1]
-- [ ] 112-02-PLAN.md — Fill `show_first_run_prompt()` stub + recovery-safe startup hook (chained after citation reminder) [Wave 2]
+- [x] 112-02-PLAN.md — Fill `show_first_run_prompt()` stub + recovery-safe startup hook (chained after citation reminder) [Wave 2]
 - [ ] 112-03-PLAN.md — Settings telemetry toggle (confirm-on-change → set_consent) + snapshot exemption (D-07b) + About-tab disclosure [Wave 3]
 
 **UI hint**: yes
@@ -180,7 +180,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 111. Telemetry Foundation | v8.1.0 | 3/3 | Complete    | 2026-06-14 |
-| 112. Consent UX | v8.1.0 | 1/3 | In Progress|  |
+| 112. Consent UX | v8.1.0 | 2/3 | In Progress|  |
 | 113. Crash Reporting | v8.1.0 | 0/TBD | Not started | - |
 | 114. Usage Analytics | v8.1.0 | 0/TBD | Not started | - |
 | 115. Performance Metrics | v8.1.0 | 0/TBD | Not started | - |
