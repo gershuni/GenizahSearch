@@ -3669,6 +3669,102 @@ class GenizahGUI(QMainWindow):
         """
         return bool(getattr(self, '_telemetry_session_started', False))
 
+    def _emit_feature_opened(self, *, feature_name=None, dialog_name=None, action=None) -> None:
+        """Centralized desktop_feature_opened producer (D-03 / D-04 / REVIEWS MEDIUM-9).
+
+        All feature/dialog/export opens call this helper so the gate, try/except,
+        and track() call are in one place.  The AST guard (D-17) inspects argument
+        expressions here — all values must be hardcoded string constants.
+
+        FIRST guard: _telemetry_ready() (REVIEWS MEDIUM-9).  Subsequent gates are
+        inside track() (consent gate) and the structural scrubber.
+        """
+        if not self._telemetry_ready():
+            return
+        try:
+            from desktop import telemetry
+            props: dict = {'session_id': getattr(self, '_session_id', '')}
+            if feature_name is not None:
+                props['feature_name'] = feature_name
+            if dialog_name is not None:
+                props['dialog_name'] = dialog_name
+            if action is not None:
+                props['action'] = action
+            telemetry.track(telemetry.DesktopEvent.FEATURE_OPENED, **props)
+        except Exception:
+            pass  # telemetry is best-effort; never raise into caller
+
+    # Static map from export format string → action constant (D-04: values never from UI)
+    _EXPORT_ACTION_BY_FMT = {
+        'xlsx': 'export_xlsx',
+        'csv': 'export_csv',
+        'txt': 'export_txt',
+        'docx': 'export_docx',
+    }
+
+    def _setup_active_ping(self) -> None:
+        """Wire daily active-user heartbeat (D-16 / USAGE-04).
+
+        Fires at most once per UTC day, only when the app is active/resumed,
+        and NOT on the same UTC day as session_start (avoids double-count).
+        Uses QTimer (5-min periodic check) + applicationStateChanged for
+        sleep/resume awareness (not a naive 24h QTimer).
+        """
+        self._last_ping_date_utc: str | None = None
+        self._ping_check_timer = QTimer(self)
+        self._ping_check_timer.setInterval(5 * 60 * 1000)  # 5 minutes
+        self._ping_check_timer.timeout.connect(self._maybe_emit_active_ping)
+        self._ping_check_timer.start()
+        try:
+            QApplication.instance().applicationStateChanged.connect(
+                self._on_app_state_changed
+            )
+        except Exception:
+            pass  # applicationStateChanged not available on all Qt builds
+
+    def _on_app_state_changed(self, state) -> None:
+        """Focus/resume handler — fires heartbeat on app activation."""
+        from PyQt6.QtCore import Qt
+        if state == Qt.ApplicationState.ApplicationActive:
+            self._maybe_emit_active_ping()
+
+    def _maybe_emit_active_ping(self) -> None:
+        """Emit desktop_active_ping at most once per UTC day, active-only (USAGE-04 / D-16).
+
+        Guards (in order — MEDIUM-9 first):
+        1. _telemetry_ready() — coordinator must have run (REVIEWS MEDIUM-9)
+        2. is_enabled() — consent gate
+        3. today != _session_start_date_utc — NOT on launch day (D-16 no double-count)
+        4. _last_ping_date_utc != today — at most once per UTC day
+        5. ApplicationActive — only when app is in active/resumed state
+        """
+        try:
+            if not self._telemetry_ready():
+                return
+            from desktop import telemetry
+            from datetime import datetime, timezone
+            from PyQt6.QtCore import Qt
+            if not telemetry.is_enabled():
+                return
+            today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+            # D-16: not on the same UTC day as session_start (no launch-day double-count)
+            if today == getattr(self, '_session_start_date_utc', today):
+                return
+            # At most once per UTC day
+            if getattr(self, '_last_ping_date_utc', None) == today:
+                return
+            # Only when app is active (belt-and-braces with state signal)
+            app = QApplication.instance()
+            if app is not None and app.applicationState() != Qt.ApplicationState.ApplicationActive:
+                return
+            self._last_ping_date_utc = today
+            telemetry.track(
+                telemetry.DesktopEvent.ACTIVE_PING,
+                session_id=getattr(self, '_session_id', ''),
+            )
+        except Exception:
+            pass  # heartbeat is best-effort; never raise
+
     def _check_shelfmark_completer_ready(self):
         if self.meta_mgr and len(self.meta_mgr.csv_bank) > 0:
             if self.setup_shelfmark_completer():
@@ -9430,6 +9526,8 @@ class GenizahGUI(QMainWindow):
             if not self._browse_catalog_detail:
                 return
         shelf = self.meta_mgr.get_meta_for_id(self.current_browse_sid)[0] if self.current_browse_sid else ''
+        # D-03: FJMS catalog feature_opened — Browse-tab open path (REVIEWS MEDIUM-6)
+        self._emit_feature_opened(dialog_name='fjms_catalog')
         dlg = FjmsCatalogDialog(
             self._browse_catalog_detail,
             sys_id=self.current_browse_sid or '',
@@ -15771,6 +15869,8 @@ class GenizahGUI(QMainWindow):
 
     def _open_puzzle_window(self):
         """Open the puzzle canvas window (or bring existing one to front)."""
+        # D-03: Fragment Puzzle feature_opened (explicit open path — corner button / menu)
+        self._emit_feature_opened(feature_name='fragment_puzzle')
         if self._puzzle_window is None or sip.isdeleted(self._puzzle_window):
             self._puzzle_window = PuzzleCanvasWindow(self)
         self._puzzle_window.show()
@@ -15779,6 +15879,10 @@ class GenizahGUI(QMainWindow):
 
     def add_to_puzzle(self, sys_id, shelfmark, folio_label=None, fl_id=None):
         """Add a fragment to the puzzle canvas. Opens puzzle window if needed."""
+        # D-03: Fragment Puzzle feature_opened (add-fragment path — REVIEWS MEDIUM-7).
+        # A single user gesture calls either _open_puzzle_window OR add_to_puzzle (not both),
+        # so instrumenting both does not double-count a single open (T-114-13).
+        self._emit_feature_opened(feature_name='fragment_puzzle')
         if self._puzzle_window is None or sip.isdeleted(self._puzzle_window):
             self._puzzle_window = PuzzleCanvasWindow(self)
         if fl_id:
@@ -15817,6 +15921,8 @@ class GenizahGUI(QMainWindow):
         synchronous search on the UI thread — Feature 7).
         """
         from desktop.join_workbench import JoinWorkbenchWindow  # lazy import (desktop-only)
+        # D-03: Joins Lab feature_opened telemetry (no-arg launcher path)
+        self._emit_feature_opened(feature_name='joins_lab')
         # D-02: SINGLE reusable instance. Only build a new window when none exists — a merely
         # HIDDEN window (closed via X) is re-shown with its in-memory state (anchor, builders,
         # triage, results) intact. Recreating on `not isVisible()` discarded that state and then
@@ -15847,6 +15953,14 @@ class GenizahGUI(QMainWindow):
         pick_callback: optional callable(sys_id, shelfmark) for pick-mode (G-05 / Plan 06).
         """
         from desktop.join_workbench import JoinWorkbenchWindow  # lazy import (desktop-only)
+        # D-03: Emit feature_opened BEFORE opening the window — hardcoded constants only (D-04).
+        # source in ('visual', 'combined') = live Visual-Similarity activation (REVIEWS MEDIUM-7).
+        # source == 'text' (default) = ordinary anchor open → Joins Lab.
+        # These two are mutually exclusive; a single user gesture calls only one (T-114-13).
+        if source in ('visual', 'combined'):
+            self._emit_feature_opened(dialog_name='visual_similarity')
+        else:
+            self._emit_feature_opened(feature_name='joins_lab')
         # D-02: SINGLE reusable instance — reuse a hidden (closed) window so its state survives;
         # set_anchor below re-anchors it. (Recreating on `not isVisible()` lost the prior state.)
         if self._join_workbench is None:
@@ -20658,8 +20772,12 @@ class GenizahGUI(QMainWindow):
         filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)", 'docx': "Word (*.docx)"}
         selected_filter = filters.get(fmt, "All Files (*.*)")
 
+        # D-03: emit export dialog open BEFORE the save dialog (no no-data guard here — MEDIUM-8)
+        self._emit_feature_opened(dialog_name='export')
         path, _ = QFileDialog.getSaveFileName(self, tr("Export Results"), default_path, selected_filter)
         if not path: return
+        # D-03: emit export action AFTER path is chosen (cancelled save → no action emit — MEDIUM-8)
+        self._emit_feature_opened(action=self._EXPORT_ACTION_BY_FMT.get(fmt))
 
         # Prepare tabular data
         headers = [tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Title"), tr("Image/Page"), tr("Source"), tr("Snippet")]
@@ -21182,8 +21300,12 @@ class GenizahGUI(QMainWindow):
         filters = {'xlsx': "Excel (*.xlsx)", 'csv': "CSV (*.csv)", 'txt': "Text (*.txt)", 'docx': "Word (*.docx)"}
         selected_filter = filters.get(fmt, "All Files (*.*)")
 
+        # D-03: emit export dialog open AFTER no-data guard and BEFORE save dialog (MEDIUM-8)
+        self._emit_feature_opened(dialog_name='export')
         path, _ = QFileDialog.getSaveFileName(self, tr("Save Report"), default_path, selected_filter)
         if not path: return
+        # D-03: emit export action AFTER path is chosen (cancelled save → no action emit — MEDIUM-8)
+        self._emit_feature_opened(action=self._EXPORT_ACTION_BY_FMT.get(fmt))
 
         # Phase 110 (5a): a LOCAL-only comp export omits the MiDRASH/Stökl/Zenodo
         # data-source credits (meaningless for the user's own documents).

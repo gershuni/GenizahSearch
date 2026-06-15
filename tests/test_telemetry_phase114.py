@@ -1364,16 +1364,16 @@ def test_export_dialog_emit_placement_in_source(monkeypatch, _reset_telemetry_st
 
 
 def test_export_action_map_helper(monkeypatch, _reset_telemetry_state):
-    """_export_action_for_fmt or _EXPORT_ACTION_BY_FMT must map fmt→action correctly (D-04)."""
+    """_EXPORT_ACTION_BY_FMT class attribute must map all 4 formats to action constants (D-04)."""
     import genizah_app as app
-    import inspect
 
-    export_src = inspect.getsource(app.GenizahGUI.export_results)
-    # The static map must exist and map the four formats correctly
-    assert 'export_xlsx' in export_src, "export_results must reference 'export_xlsx' action"
-    assert 'export_csv' in export_src, "export_results must reference 'export_csv' action"
-    assert 'export_txt' in export_src, "export_results must reference 'export_txt' action"
-    assert 'export_docx' in export_src, "export_results must reference 'export_docx' action"
+    # The static map must exist on GenizahGUI and contain all 4 formats
+    fmt_map = getattr(app.GenizahGUI, '_EXPORT_ACTION_BY_FMT', None)
+    assert fmt_map is not None, "_EXPORT_ACTION_BY_FMT must exist on GenizahGUI"
+    assert fmt_map.get('xlsx') == 'export_xlsx', "xlsx must map to 'export_xlsx'"
+    assert fmt_map.get('csv') == 'export_csv', "csv must map to 'export_csv'"
+    assert fmt_map.get('txt') == 'export_txt', "txt must map to 'export_txt'"
+    assert fmt_map.get('docx') == 'export_docx', "docx must map to 'export_docx'"
 
 
 def test_emit_feature_opened_consent_gate(monkeypatch, _reset_telemetry_state):

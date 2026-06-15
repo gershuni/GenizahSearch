@@ -48,6 +48,17 @@ class ResultDialog(QDialog):
     def __init__(self, parent, all_results, current_index, meta_mgr, searcher):
         super().__init__(parent)
         self._app = parent
+        # D-03: result_detail feature_opened — single canonical construction site (covers all 6
+        # ResultDialog(...) construction sites in genizah_app.py).  Session_id via parent attr.
+        try:
+            from desktop import telemetry
+            telemetry.track(
+                telemetry.DesktopEvent.FEATURE_OPENED,
+                dialog_name='result_detail',
+                session_id=getattr(parent, '_session_id', ''),
+            )
+        except Exception:
+            pass  # telemetry is best-effort; never block ResultDialog init
 
         # Phase 100 (REVIEWS HIGH-1): per-dialog controller scope so this dialog's
         # PDF render state is isolated from Browse's on the shared PdfImageController.
@@ -2878,6 +2889,17 @@ class ResultDialog(QDialog):
         if not self._rd_catalog_detail:
             return
         shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
+        # D-03: FJMS catalog feature_opened — ResultDialog open path (REVIEWS MEDIUM-6).
+        # The Browse-tab path emits from _show_fjms_catalog_dialog in genizah_app.py.
+        try:
+            from desktop import telemetry
+            telemetry.track(
+                telemetry.DesktopEvent.FEATURE_OPENED,
+                dialog_name='fjms_catalog',
+                session_id=getattr(self._app, '_session_id', ''),
+            )
+        except Exception:
+            pass  # telemetry is best-effort; never block dialog open
         from desktop.dialogs_scholarly import FjmsCatalogDialog
         dlg = FjmsCatalogDialog(
             self._rd_catalog_detail,
