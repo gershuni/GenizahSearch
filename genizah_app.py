@@ -17531,6 +17531,11 @@ class GenizahGUI(QMainWindow):
             if self.search_thread.isRunning():
                 self.search_thread.terminate()
                 self.search_thread.wait()
+        # Phase 114 USAGE-03: emit cancelled telemetry on user-stop.
+        # _app_shutting_down guard (REVIEWS HIGH-2) is the first line of
+        # _emit_search_telemetry, so this is safe to call unconditionally.
+        # emitted guard prevents double-emit if on_search_finished also fires.
+        self._emit_search_telemetry('cancelled')
         self.reset_ui()
 
     def reset_ui(self):
@@ -17963,6 +17968,10 @@ class GenizahGUI(QMainWindow):
                     self._zero_result_back_btn.setVisible(True)
             if hasattr(self, '_update_search_within_btn'):
                 self._update_search_within_btn()
+            # Phase 114 USAGE-03: emit telemetry for zero-result searches.
+            # 'completed' + result_count=0 → bucket='0' (WARNING-4 / D-07 zero-result rate).
+            # _app_shutting_down guard is first-line inside _emit_search_telemetry (REVIEWS HIGH-2).
+            self._emit_search_telemetry('cancelled' if was_cancelled else 'completed', 0)
             return
 
         self.last_results = results
@@ -18092,6 +18101,10 @@ class GenizahGUI(QMainWindow):
             self.statusBar().showMessage(
                 f"{tr('Search completed in')} {elapsed_str} \u2014 {len(results)} {tr('Results')}{partial_tag}", 0
             )
+        # Phase 114 USAGE-03: emit telemetry for non-empty search completion.
+        # _app_shutting_down guard is first-line inside _emit_search_telemetry (REVIEWS HIGH-2).
+        # emitted guard prevents double-emit if stop_search already fired (D-09).
+        self._emit_search_telemetry('cancelled' if was_cancelled else 'completed', len(results))
 
     # ---- Phase 55: Refinement chain methods ----
 
