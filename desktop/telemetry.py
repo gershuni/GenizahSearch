@@ -155,6 +155,9 @@ class DesktopEvent(str, enum.Enum):
     SEARCH_EXECUTED = 'desktop_search_executed'
     FEATURE_OPENED = 'desktop_feature_opened'
 
+    # Active user (Phase 114)
+    ACTIVE_PING    = 'desktop_active_ping'
+
     # Performance (Phase 115)
     SESSION_PERF   = 'desktop_session_performance_summary'
 
