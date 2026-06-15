@@ -42,13 +42,13 @@ Progress: [███████░░░] 67%
 - **UUID lifecycle**: minted inside `set_consent(True)` only — never at import time, never before user opts in. Always `uuid.uuid4()`, never `uuid1()` (MAC-based).
 - **Crash hook**: wraps (chains) existing `_setup_crash_handler()` via `try/finally` — never replaces it. `crash_log.txt` must keep working after hooks are installed.
 - **No `posthog` SDK**: reuse `shared/posthog_server.py` fire-and-forget queue only. Zero new pip deps, no spec-file changes.
-- **Separate desktop PostHog project** (INFRA-01): distinct from web project 134161. The embedded write-only key is treated as abuse-tolerant (publishable), not a secret.
+- **Reuse the SHARED PostHog project** (INFRA-01 — FINAL 2026-06-14 per `.planning/research/POSTHOG-PROJECT-DECISION.md`; wired into code 2026-06-15, re-Codex-reviewed): desktop reuses the existing web project (id 134161, EU), **identity-aligned** with web (logged-in → Supabase `user.id`, IDENT-01..04 in Phase 114; logged-out → anon uuid4), web↔desktop separated by `platform: 'desktop'` + the `desktop_` event-name namespace. Uses the existing web publishable key (`web/main.py` `_posthog_key`, sourced from `POSTHOG_API_KEY` — already public in web client JS, so embedding in the .exe adds no new exposure). Key resolution in `_wire_transport_config` (2026-06-15): `GENIZAH_TELEMETRY_KEY` (all builds) → `POSTHOG_API_KEY` (source/dev only — a frozen .exe ignores it) → embedded `_TELEMETRY_KEY_DEFAULT` (baked at build; stays `_UNFILLED_KEY_SENTINEL` until then → drop locally). Accept only phc_; NEVER `POSTHOG_PERSONAL_API_KEY` (phx_). Default host already eu.i.posthog.com.
 - **Session summary for perf** (PERF-03): aggregated per-session flush, not per-search events. ~tens/day target for heavy users, not ~50/day × dozens.
 
 ### Blockers/Concerns
 
 - PyInstaller SSL cert bundle for `certifi` needs manual verification on a clean Windows VM (Phase 116 success criterion 3).
-- New desktop PostHog project must be created and its `phc_...` key obtained before Phase 111 implementation starts (INFRA-01 — the key gets embedded in `desktop/telemetry.py`).
+- **Embed the real phc_ key at build/release time** into `_TELEMETRY_KEY_DEFAULT` (it stays `_UNFILLED_KEY_SENTINEL` until then → events drop locally). The shipped .exe can't read env vars on an end user's machine, so the key MUST be baked in for production telemetry to flow. This is the true prerequisite behind both 113-HUMAN-UAT items.
 
 ### Pending Todos
 
@@ -63,6 +63,9 @@ None specific to v8.1.0 yet.
 | CRASH-F1 | "Send logs" flow for local faulthandler log | Future | v8.1.0 |
 | WEB-F1 | Clean web `search_executed` query-text property (privacy gap) | Future | v8.1.0 (web follow-up) |
 | FLAG-F1 | PostHog feature flags / remote config on desktop | Future | v8.1.0 |
+| INFRA-F2 | Shared-emitter chokepoint tagging — `shared/nli_circuit_breaker.py` emits `nli_breaker_opened/closed` directly via `shared.posthog_server` with no `platform` tag / no `$process_person_profile=False`; in the shared project these can't be segmented by platform (Codex 2026-06-15 #2) | Phase 116 (privacy audit + CI chokepoint gate) | v8.1.0 |
+| INFRA-F3 | Identity hygiene — `$process_person_profile=False` on anonymous desktop events (already in IDENT-01..04 scope); Codex 2026-06-15 add: avoid bare `system` crash distinct_id (use `desktop:system` or drop) | Phase 114 (IDENT-01..04) | v8.1.0 |
+| INFRA-F4 | Shared-project guardrails — platform filter on web insights, separate web/desktop dashboards, flag/experiment namespacing, MTU monitoring, release test "embedded key + no env → used" (Codex 2026-06-15) | Phase 116 + ops | v8.1.0 |
 
 ## Session Continuity
 
