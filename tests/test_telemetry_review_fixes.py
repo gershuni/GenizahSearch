@@ -255,14 +255,21 @@ def test_wr02_identified_user_key_cleared_on_opt_out():
 # ---------------------------------------------------------------------------
 
 def test_wr05_placeholder_key_resolves_to_none(monkeypatch):
-    """WR-05: with no real key, _wire_transport_config must pass None to set_capture_api_key."""
+    """WR-05: with no real key embedded, _wire_transport_config passes None to set_capture_api_key.
+
+    The real phc_ key is now baked into _TELEMETRY_KEY_DEFAULT (2026-06-15), so this test
+    simulates an unbaked build by setting the default back to the unfilled sentinel and
+    clearing both env keys — the sentinel must still resolve to None (events drop locally).
+    """
     import desktop.telemetry as tel
 
     monkeypatch.delenv('GENIZAH_TELEMETRY_KEY', raising=False)
+    monkeypatch.delenv('POSTHOG_API_KEY', raising=False)
+    monkeypatch.setattr(tel, '_TELEMETRY_KEY_DEFAULT', tel._UNFILLED_KEY_SENTINEL)
     tel._wire_transport_config()
 
     assert ph._api_key_override is None, (
-        f"Placeholder key must NOT be passed to set_capture_api_key -- got {ph._api_key_override!r}"
+        f"Unfilled sentinel must NOT be passed to set_capture_api_key -- got {ph._api_key_override!r}"
     )
 
 
@@ -286,10 +293,12 @@ def test_wr05_consent_granted_with_placeholder_no_post(monkeypatch):
     import desktop.telemetry as tel
 
     monkeypatch.delenv('GENIZAH_TELEMETRY_KEY', raising=False)
+    monkeypatch.delenv('POSTHOG_API_KEY', raising=False)
+    monkeypatch.setattr(tel, '_TELEMETRY_KEY_DEFAULT', tel._UNFILLED_KEY_SENTINEL)
     tel.set_consent(True)
 
     assert ph._api_key_override is None, (
-        "After set_consent(True) with placeholder key, api_key_override must be None -- "
+        "After set_consent(True) with no real key embedded, api_key_override must be None -- "
         "no outbound POST should occur with a junk key"
     )
 
