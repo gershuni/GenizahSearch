@@ -131,7 +131,11 @@ See: .planning/milestones/v7.16-ROADMAP.md
   4. The exception hook body is non-blocking (executes only `traceback.format_exception` + scrub + `put_nowait`; no network I/O, no disk I/O, no lock acquisition) and is entirely wrapped in `try/finally` so the existing crash handler always runs even if the telemetry step throws.
   5. A bounded synchronous `_flush_before_exit(timeout=0.5)` is called inside the exception hook after enqueueing the crash event, and via `atexit` for clean exits, so crash events are not silently lost when the daemon drain thread is killed at process exit.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+- [ ] 113-01-PLAN.md — `send_crash_event_direct()` neutral priority POST in posthog_server (D-06) + Wave 0 crash test scaffolds [Wave 1]
+- [ ] 113-02-PLAN.md — lock-free crash primitives (`_is_enabled_nolock`/`_crash_distinct_id`/recursion guard) + frame-walk payload builder + `_ALLOWED_PROPS` reconciliation (D-05/D-07) [Wave 2]
+- [ ] 113-03-PLAN.md — faulthandler lifecycle + chained `install_exception_hooks()` + atexit + genizah_app.py wiring (D-02/D-03/D-08) [Wave 3]
 
 ### Phase 114: Usage Analytics
 
@@ -181,7 +185,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 |-------|-----------|----------------|--------|-----------|
 | 111. Telemetry Foundation | v8.1.0 | 3/3 | Complete    | 2026-06-14 |
 | 112. Consent UX | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
-| 113. Crash Reporting | v8.1.0 | 0/TBD | Not started | - |
+| 113. Crash Reporting | v8.1.0 | 0/3 | Planned | - |
 | 114. Usage Analytics | v8.1.0 | 0/TBD | Not started | - |
 | 115. Performance Metrics | v8.1.0 | 0/TBD | Not started | - |
 | 116. Privacy Audit + CI Gate | v8.1.0 | 0/TBD | Not started | - |
