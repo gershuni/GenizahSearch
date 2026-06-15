@@ -2336,7 +2336,10 @@ class SettingsDialog(QDialog):
         self.chk_telemetry.blockSignals(False)
 
         def _on_telemetry_changed(state):
-            new_val = (state == 2)
+            # Read the widget directly rather than interpreting `state` as int 2 —
+            # PyQt6's stateChanged may deliver a Qt.CheckState enum in newer bindings,
+            # where `state == 2` is False even when checked (WR-01, privacy-critical).
+            new_val = self.chk_telemetry.isChecked()
             prior = _tel_is_enabled()
             if new_val == prior:
                 return
@@ -15847,12 +15850,23 @@ class GenizahGUI(QMainWindow):
             if _load_cfg().get(FIRST_RUN_SHOWN_KEY, False):
                 return  # already shown — double-gate (D-05)
             if QApplication.activeModalWidget() is not None:
-                # A modal is open — defer and try again shortly
-                QTimer.singleShot(300, self._maybe_show_first_run_prompt)
+                # A modal is open — defer and try again shortly, but bound the
+                # poll so a long-lived modal (e.g. Index Missing on a fresh
+                # install) can't spin an unbounded UI-thread reschedule loop
+                # (CR-01). If the cap is hit, leave FIRST_RUN_SHOWN_KEY unset so
+                # the prompt is simply re-attempted on the next launch.
+                self._first_run_retry = getattr(self, '_first_run_retry', 0) + 1
+                if self._first_run_retry <= 200:  # ~60s at 300ms
+                    QTimer.singleShot(300, self._maybe_show_first_run_prompt)
+                else:
+                    logger.debug(
+                        "first-run consent prompt deferred to next launch: "
+                        "a modal stayed open past the retry cap")
                 return
             show_first_run_prompt(self)
         except Exception:
-            pass  # never block startup
+            # Never block startup; log at debug rather than swallowing silently (WR-04).
+            logger.debug("first-run consent prompt gate failed", exc_info=True)
 
     # --- HELP TEXTS ---
     def open_help_center(self, anchor=None):
