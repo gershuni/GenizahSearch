@@ -775,6 +775,82 @@ plan-revision pass (2026-06-15). Evidence and the chosen wiring are recorded inl
 - **Evidence:** `GenizahGUI.closeEvent` confirmed at `:26351` (the closeEvent at
   `:568` belongs to a different dialog class — do NOT touch it).
 
+
+### 5. REVIEWS-pass live-wiring additions (2026-06-15) — RESOLVED
+All cited paths re-verified by grep against the LIVE code during the REVIEWS revision pass.
+
+- **PGP-Tags search BYPASSES `start_search` (REVIEWS HIGH-1).** `toggle_search()`
+  (`genizah_app.py:17140`) returns early for `MODE_PGP_TAGS` (`:17142-17144`) and
+  dispatches via `_execute_tag_search()` (`:18659`), which spawns `PGPTagSearchWorker`
+  and connects `.finished` → `_on_tag_search_results(self, tag, results)` (`:18671`/`:18674`).
+  This path NEVER reaches `start_search()`/`on_search_finished`, so the `{7:'pgp_tags'}`
+  entry in the regular `_SEARCH_MODE_ENUM` is dead for that mode. Wiring: per-run object
+  `self._current_pgp_tag_search_run = {'mode':'pgp_tags','corpus':'genizah','emitted':False}`
+  in `_execute_tag_search` (before worker start); emit exactly-once in
+  `_on_tag_search_results` BEFORE each of its three outcome returns (no-results :18676,
+  no-local :18693, success ending :18748). `search_mode='pgp_tags'`/`corpus_scope='genizah'`
+  HARDCODED; the `tag` argument (search term) MUST NEVER appear in a telemetry value (D-04).
+  Plan 02 Task 4.
+
+- **Regular-search shutdown leak (REVIEWS HIGH-2).** `closeEvent` (`:26351`) sets
+  `search_thread.cancel_flag = True` DIRECTLY at `:26384-26389` — it does NOT call
+  `stop_search()` — so the thread's `InterruptedError` → `results_signal.emit([])`
+  (`gui_threads.py:116`) can be DELIVERED to `on_search_finished` AFTER `session_end`.
+  Wiring: `if getattr(self, '_app_shutting_down', False): return` as the FIRST line of
+  `_emit_search_telemetry` (mirroring `_emit_comp_search_telemetry`). Plan 02 Tasks 2/3.
+
+- **Programmatic tab changes beyond restore (REVIEWS MEDIUM-5).** Many code-driven
+  `self.tabs.setCurrentWidget/setCurrentIndex` sites fire `currentChanged` →
+  `_on_tab_changed` and are NOT user navigation: `send_result_to_composition` (`:20287`),
+  `_search_by_pgp_tag` (`:18753`), catalog nav (`:12171`/`:12191`), plus Browse/search jumps
+  (`:5524`, `:5553`, `:5974`, `:9586`, `:12232`, `:13838`, `:13899`, `:15548`, `:15583`,
+  `:16926`, `:17955`, `:19520`, `:19775`, `:20150`). Wiring: a short-lived
+  `_programmatic_tab_change` flag set around code-driven changes via a single
+  `_set_active_tab(target)` helper; `_on_tab_changed` gates on `_restoring_session` AND
+  `_programmatic_tab_change` (restore sites :25620/:26251/:26345 stay covered by
+  `_restoring_session`). Plan 02 Task 1.
+
+- **FJMS catalog opens from TWO live sites (REVIEWS MEDIUM-6).** Besides the Browse-tab
+  `FjmsCatalogDialog` at `genizah_app.py:9249`, `ResultDialog._show_rd_catalog`
+  (`desktop/result_dialog.py:2866`) constructs its own `FjmsCatalogDialog` at `:2882`.
+  Both emit `dialog_name='fjms_catalog'` (ResultDialog one self-contained, using
+  `getattr(self._app,'_session_id','')`). Plan 03 Task 1.
+
+- **Fragment Puzzle opens from TWO live sites (REVIEWS MEDIUM-7).** `_open_puzzle_window`
+  (`:15588`) is the explicit-open entry; `add_to_puzzle` (`:15596`) ALSO creates
+  `PuzzleCanvasWindow(self)` and shows it at `:15619-15621` (called from Browse/ResultDialog/
+  lists/VS "Add to puzzle"). Both emit `feature_name='fragment_puzzle'`; a single user
+  gesture hits only one, so no double-count. Plan 03 Task 1.
+
+- **Export emit placement (REVIEWS MEDIUM-8).** `export_results` (`:20342`) has the save
+  dialog at `:20353` + `if not path: return` at `:20354` (NO no-data guard before it).
+  `export_comp_report` (`:20761`) has a NO-DATA early-return at `:20782-20784` BEFORE its
+  save dialog (`:20877`) + `if not path: return` (`:20878`). Wiring: emit `dialog_name='export'`
+  when the dialog actually opens (after the no-data return for comp, before the dialog), and
+  `action='export_*'` ONLY after a path is chosen (after `if not path: return`) — never on a
+  no-data early-return or a cancelled dialog. Plan 03 Task 1.
+
+- **Startup producer race (REVIEWS MEDIUM-9).** `on_startup_finished` enables UI buttons at
+  `:3491-3494` BEFORE the 700ms coordinator runs. Wiring: Plan 01 adds `_telemetry_ready()`
+  (True only after the coordinator's session_start branch set `_session_id`); EVERY usage
+  producer (tab/regular-search/pgp-tags/composition/feature_opened/heartbeat) short-circuits
+  on it.
+
+- **Re-opt-in identity (REVIEWS HIGH-4).** The Settings Yes branch calls
+  `_tel_set_consent(new_val)` at `:2401`. Wiring: Plan 01 splits `_sync_telemetry_identity`
+  (always re-identifies the logged-in `_uuid` when consent is true) from the one-shot
+  session_start; the coordinator runs identity-sync UNCONDITIONALLY before the
+  `_telemetry_session_started` guard, and the opt-in path re-invokes the coordinator.
+
+- **AST-guard re-scope (REVIEWS HIGH-3 / LOW-10).** The D-17 guard inspects ONLY
+  telemetry-call argument/keyword expressions (not whole functions) so it does NOT
+  false-flag `on_search_finished` (`query_input.text()`/`gap_input.text()`), `export_results`
+  (`mode_combo.currentText()`), and `export_comp_report` (`comp_text_area.toPlainText()`/
+  `comp_mode_combo.currentText()`), which use those accessors for NON-telemetry work. It also
+  folds in an identify()-callsite check (flag any identify arg that is not a `_uuid`/uuid
+  source) so `identify(user.id)`/`getattr(user,'id')`/alias drift is caught statically
+  (replacing the regex-fragile grep). Plan 03 Task 3.
+
 ---
 
 ## Assumptions Log
