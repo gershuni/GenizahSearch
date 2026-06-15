@@ -420,3 +420,113 @@ def test_session_end_exactly_once_guard(monkeypatch, _reset_telemetry_state):
     assert session_end_count == 1, (
         f"session_end must fire exactly once, got {session_end_count}"
     )
+
+
+# ===========================================================================
+# Task 1 (Wave 2): desktop_tab_activated — user-only, hardcoded tab_name enum
+# ===========================================================================
+
+def _make_tab_gui_stub(monkeypatch):
+    """Build a minimal stub for _on_tab_changed telemetry tests."""
+    import types
+    import genizah_app as app
+
+    gui = types.SimpleNamespace()
+    gui._restoring_session = False
+    gui._programmatic_tab_change = False
+    gui._telemetry_session_started = True  # ready
+    gui._session_id = 'tab-test-session'
+
+    # Minimal tabs stub so existing _on_tab_changed body (community/catalog lazy-load) won't crash
+    tabs_stub = types.SimpleNamespace()
+    tabs_stub.widget = lambda index: None  # returns None — no community/catalog matches
+    gui.tabs = tabs_stub
+
+    gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
+    gui._on_tab_changed = lambda index: app.GenizahGUI._on_tab_changed(gui, index)
+    return gui
+
+
+def test_tab_activated_user_switch_emits_correct_tab_name(monkeypatch, _reset_telemetry_state):
+    """User tab switch emits desktop_tab_activated with hardcoded tab_name constant."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_tab_gui_stub(monkeypatch)
+    gui._on_tab_changed(0)  # search tab
+
+    events = _drain_all_events()
+    tab_events = [e for e in events if e['event'] == 'desktop_tab_activated']
+    assert len(tab_events) == 1, "user tab switch must emit desktop_tab_activated"
+    assert tab_events[0]['properties']['tab_name'] == 'search'
+
+    # Also test index 6 → my_library
+    gui._on_tab_changed(6)
+    events2 = _drain_all_events()
+    tab_events2 = [e for e in events2 if e['event'] == 'desktop_tab_activated']
+    assert len(tab_events2) == 1
+    assert tab_events2[0]['properties']['tab_name'] == 'my_library'
+
+
+def test_tab_activated_suppressed_during_restore(monkeypatch, _reset_telemetry_state):
+    """_restoring_session=True suppresses desktop_tab_activated (D-02)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_tab_gui_stub(monkeypatch)
+    gui._restoring_session = True
+    gui._on_tab_changed(0)
+
+    events = _drain_all_events()
+    tab_events = [e for e in events if e['event'] == 'desktop_tab_activated']
+    assert len(tab_events) == 0, "restore-driven tab change must NOT emit tab_activated"
+
+
+def test_tab_activated_suppressed_programmatic(monkeypatch, _reset_telemetry_state):
+    """_programmatic_tab_change=True suppresses desktop_tab_activated (REVIEWS MEDIUM-5)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_tab_gui_stub(monkeypatch)
+    gui._programmatic_tab_change = True
+    gui._on_tab_changed(1)
+
+    events = _drain_all_events()
+    tab_events = [e for e in events if e['event'] == 'desktop_tab_activated']
+    assert len(tab_events) == 0, "programmatic tab change must NOT emit tab_activated"
+
+
+def test_tab_activated_suppressed_when_not_ready(monkeypatch, _reset_telemetry_state):
+    """_telemetry_ready()=False suppresses desktop_tab_activated (REVIEWS MEDIUM-9)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_tab_gui_stub(monkeypatch)
+    gui._telemetry_session_started = False  # not ready yet
+
+    gui._on_tab_changed(0)
+
+    events = _drain_all_events()
+    tab_events = [e for e in events if e['event'] == 'desktop_tab_activated']
+    assert len(tab_events) == 0, "tab_activated must not emit before _telemetry_ready()"
+
+
+def test_tab_activated_out_of_range_index_no_emit(monkeypatch, _reset_telemetry_state):
+    """Out-of-range tab index emits nothing (no crash)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_tab_gui_stub(monkeypatch)
+    gui._on_tab_changed(99)  # out of range
+
+    events = _drain_all_events()
+    tab_events = [e for e in events if e['event'] == 'desktop_tab_activated']
+    assert len(tab_events) == 0, "out-of-range index must not emit"
+
+
+def test_set_active_tab_helper_exists(monkeypatch, _reset_telemetry_state):
+    """GenizahGUI._set_active_tab method exists for programmatic tab change suppression."""
+    import genizah_app as app
+    assert hasattr(app.GenizahGUI, '_set_active_tab'), (
+        "_set_active_tab must exist on GenizahGUI for REVIEWS MEDIUM-5 guard"
+    )
