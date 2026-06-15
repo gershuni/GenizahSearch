@@ -169,6 +169,15 @@ def _setup_crash_handler():
 
 _setup_crash_handler()
 
+# Phase 113: install telemetry crash hooks (chained AFTER _setup_crash_handler so
+# _prior_excepthook captures the crash-log writer, not the bare sys.__excepthook__).
+# Best-effort: never blocks startup (D-08).
+try:
+    from desktop import telemetry as _telemetry
+    _telemetry.install_exception_hooks()
+except Exception:
+    pass  # crash hooks are best-effort; never block app startup
+
 
 class UpdateNotificationBar(QFrame):
     """A narrow notification bar at the top of the screen."""
