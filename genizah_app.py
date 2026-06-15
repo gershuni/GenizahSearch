@@ -3341,6 +3341,10 @@ class GenizahGUI(QMainWindow):
             # One-time citation reminder (shown once per installation)
             if not cfg.get('citation_reminder_seen', False):
                 QTimer.singleShot(500, self._show_citation_reminder)
+                # consent is chained at the end of _show_citation_reminder
+            else:
+                # Installs that already saw the citation: still show consent if not yet seen
+                QTimer.singleShot(500, self._maybe_show_first_run_prompt)
 
             # Restore session state (deferred slightly so all widgets are settled)
             QTimer.singleShot(200, self._restore_session)
@@ -15649,6 +15653,33 @@ class GenizahGUI(QMainWindow):
         msg.button(QMessageBox.StandardButton.Ok).setText(tr('Got it'))
         msg.exec()
         save_app_config({'citation_reminder_seen': True})
+        self._maybe_show_first_run_prompt()
+
+    def _maybe_show_first_run_prompt(self):
+        """Gate for the one-time first-run consent dialog.
+
+        Called either chained from _show_citation_reminder (new installs) or
+        from a QTimer.singleShot in on_startup_finished (installs that already
+        saw the citation reminder).  Never blocks startup — wrapped in
+        try/except.
+
+        Modal stacking guard (REVIEWS MED): if another modal is currently open
+        (QApplication.activeModalWidget() is not None), reschedule via
+        QTimer.singleShot so we never stack on top of Settings, an
+        index-missing dialog, the recovery modal, or any future sync prompt.
+        """
+        try:
+            from genizah_core import load_app_config as _load_cfg
+            from desktop.telemetry import FIRST_RUN_SHOWN_KEY, show_first_run_prompt
+            if _load_cfg().get(FIRST_RUN_SHOWN_KEY, False):
+                return  # already shown — double-gate (D-05)
+            if QApplication.activeModalWidget() is not None:
+                # A modal is open — defer and try again shortly
+                QTimer.singleShot(300, self._maybe_show_first_run_prompt)
+                return
+            show_first_run_prompt(self)
+        except Exception:
+            pass  # never block startup
 
     # --- HELP TEXTS ---
     def open_help_center(self, anchor=None):
