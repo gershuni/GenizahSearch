@@ -56,8 +56,8 @@
 - [ ] **CRASH-01**: Uncaught main-thread exceptions are captured via `sys.excepthook`, **chaining to (never replacing)** the existing `_setup_crash_handler` (`genizah_app.py:148-170`) so `crash_log.txt` keeps working. The telemetry step runs in a `try/finally` such that a telemetry failure can never suppress the existing crash-log handler.
 - [ ] **CRASH-02**: Uncaught worker/QThread exceptions are captured via `threading.excepthook` (currently uninstalled) and Qt-slot exceptions via a `QApplication.notify` override.
 - [ ] **CRASH-03**: Native crashes (C extensions — Tantivy/PyMuPDF) are captured to a local log via `faulthandler` — local file only, not transmitted.
-- [ ] **CRASH-04**: Crash events contain only the exception type name, a scrubbed/sanitized stack location, app version, and OS — never frame locals, exception-message strings, file paths, filenames, or query text.
-- [ ] **CRASH-05**: The exception hooks are non-blocking (enqueue only, no network I/O in the hook), re-entrancy-safe, and respect the consent gate using a **cached** consent value (no disk read / settings init inside the hook) so the gate itself cannot throw during crash handling.
+- [x] **CRASH-04**: Crash events contain only the exception type name, a scrubbed/sanitized stack location, app version, and OS — never frame locals, exception-message strings, file paths, filenames, or query text.
+- [x] **CRASH-05**: The exception hooks are non-blocking (enqueue only, no network I/O in the hook), re-entrancy-safe, and respect the consent gate using a **cached** consent value (no disk read / settings init inside the hook) so the gate itself cannot throw during crash handling.
 - [x] **CRASH-06**: The final crash event is delivered via a **bounded synchronous flush** before process exit (and gets priority over a full queue) so the fire-and-forget daemon-thread queue does not silently drop the one event the milestone most needs.
 - [ ] **CRASH-07**: A native/hard crash that cannot emit at crash time (segfault from a C extension caught only by `faulthandler`'s local log) is detected on the **next launch** and emitted once (after consent), so native crashes are not invisible.
 
@@ -148,8 +148,8 @@
 | CRASH-01 | Phase 113 | Pending |
 | CRASH-02 | Phase 113 | Pending |
 | CRASH-03 | Phase 113 | Pending |
-| CRASH-04 | Phase 113 | Pending |
-| CRASH-05 | Phase 113 | Pending |
+| CRASH-04 | Phase 113 | Complete |
+| CRASH-05 | Phase 113 | Complete |
 | CRASH-06 | Phase 113 | Complete |
 | CRASH-07 | Phase 113 | Pending |
 | PRIV-01 | Phase 111 | Complete |

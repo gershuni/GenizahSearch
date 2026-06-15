@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v8.1.0
 milestone_name: Desktop Telemetry
 status: executing
-stopped_at: Completed 113-01-PLAN.md
-last_updated: "2026-06-15T09:27:14.649Z"
+stopped_at: Completed 113-02-PLAN.md
+last_updated: "2026-06-15T09:41:58.588Z"
 last_activity: 2026-06-15
 progress:
   total_phases: 6
   completed_phases: 2
   total_plans: 9
-  completed_plans: 7
+  completed_plans: 8
   percent: 33
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-06-11 after v8.0.0 close)
 ## Current Position
 
 Phase: 113 (crash-reporting) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-06-15
 
@@ -66,8 +66,8 @@ None specific to v8.1.0 yet.
 
 ## Session Continuity
 
-Last session: 2026-06-15T09:27:14.641Z
-Stopped at: Completed 113-01-PLAN.md
+Last session: 2026-06-15T09:41:58.578Z
+Stopped at: Completed 113-02-PLAN.md
 Resume file: None
 Next step: Execute Phase 112 Plan 02
 
@@ -82,9 +82,11 @@ Next step: Execute Phase 112 Plan 02
 | Phase 112-consent-ux P02 | 8min | 2 tasks | 2 files |
 | Phase 112-consent-ux P03 | 30min | 3 tasks | 2 files |
 | Phase 113-crash-reporting P01 | 5min | 2 tasks | 6 files |
+| Phase 113-crash-reporting P02 | 15min | 2 tasks | 4 files |
 
 ## Decisions
 
 - [Phase 111-telemetry-foundation]: PRIV-03 AST guard delivered early in Phase 111-03 (vs Phase-116 slot) — no allowlist, absolute invariant, resolved-path exemption
 - [Phase ?]: show_first_run_prompt() lazy-imports ConsentDialog; chained from _show_citation_reminder for strict ordering; activeModalWidget reschedule guard added
 - [Phase ?]: [Phase 113-01]: send_crash_event_direct reads lock-free snapshot globals — no _capture_config_lock in crash path (D-05/REVIEWS HIGH-1)
+- [Phase ?]: Phase 113-02: module-top send_crash_event_direct import requires monkeypatching tel.send_crash_event_direct in tests, not ph

@@ -134,7 +134,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 **Plans**: 3 plans
 
 - [x] 113-01-PLAN.md — `send_crash_event_direct()` neutral priority POST in posthog_server (D-06) + Wave 0 crash test scaffolds [Wave 1]
-- [ ] 113-02-PLAN.md — lock-free crash primitives (`_is_enabled_nolock`/`_crash_distinct_id`/recursion guard) + frame-walk payload builder + `_ALLOWED_PROPS` reconciliation (D-05/D-07) [Wave 2]
+- [x] 113-02-PLAN.md — lock-free crash primitives (`_is_enabled_nolock`/`_crash_distinct_id`/recursion guard) + frame-walk payload builder + `_ALLOWED_PROPS` reconciliation (D-05/D-07) [Wave 2]
 - [ ] 113-03-PLAN.md — faulthandler lifecycle + chained `install_exception_hooks()` + atexit + genizah_app.py wiring (D-02/D-03/D-08) [Wave 3]
 
 ### Phase 114: Usage Analytics
@@ -185,7 +185,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 |-------|-----------|----------------|--------|-----------|
 | 111. Telemetry Foundation | v8.1.0 | 3/3 | Complete    | 2026-06-14 |
 | 112. Consent UX | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
-| 113. Crash Reporting | v8.1.0 | 1/3 | In Progress|  |
+| 113. Crash Reporting | v8.1.0 | 2/3 | In Progress|  |
 | 114. Usage Analytics | v8.1.0 | 0/TBD | Not started | - |
 | 115. Performance Metrics | v8.1.0 | 0/TBD | Not started | - |
 | 116. Privacy Audit + CI Gate | v8.1.0 | 0/TBD | Not started | - |
