@@ -537,3 +537,160 @@ def test_set_active_tab_helper_exists(monkeypatch, _reset_telemetry_state):
     assert hasattr(app.GenizahGUI, '_set_active_tab'), (
         "_set_active_tab must exist on GenizahGUI for REVIEWS MEDIUM-5 guard"
     )
+
+
+# ===========================================================================
+# Task 2: Per-run search state object + _emit_search_telemetry
+# ===========================================================================
+
+def _make_search_emit_stub(monkeypatch, *, telemetry_ready=True, app_shutting_down=False,
+                           mode='keyword', corpus='genizah'):
+    """Build a minimal stub for _emit_search_telemetry unit tests.
+
+    Provides a pre-populated _current_search_run dict and patches the drain thread.
+    """
+    import types
+    import genizah_app as app
+    import shared.posthog_server as ph_mod
+
+    monkeypatch.setattr(ph_mod, '_start_drain_thread_once', lambda: None)
+
+    gui = types.SimpleNamespace()
+    gui._telemetry_session_started = telemetry_ready
+    gui._app_shutting_down = app_shutting_down
+    gui._session_id = 'search-test-session'
+    gui._current_search_run = {'mode': mode, 'corpus': corpus, 'emitted': False}
+
+    gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
+    gui._emit_search_telemetry = lambda action, result_count=None: (
+        app.GenizahGUI._emit_search_telemetry(gui, action, result_count)
+    )
+    return gui
+
+
+def test_search_emit_completed_enqueues_event(monkeypatch, _reset_telemetry_state):
+    """_emit_search_telemetry('completed', 0) enqueues one desktop_search_executed event."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_search_emit_stub(monkeypatch, mode='keyword', corpus='genizah')
+    gui._emit_search_telemetry('completed', 0)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1, "completed emit must enqueue exactly one desktop_search_executed"
+    props = search_events[0]['properties']
+    assert props['action'] == 'completed'
+    assert props['search_mode'] == 'keyword'
+    assert props['corpus_scope'] == 'genizah'
+    assert 'result_count_bucket' in props, "completed emit must include result_count_bucket"
+    assert props['result_count_bucket'] == '0', "count 0 must bucket to '0'"
+
+
+def test_search_emit_bucket_mapping(monkeypatch, _reset_telemetry_state):
+    """Result count bucketing: 0→'0', 5→'1-9', 42→'10-99', 250→'100+'."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    for count, expected_bucket in [(0, '0'), (5, '1-9'), (42, '10-99'), (250, '100+')]:
+        monkeypatch.setattr(ph, '_event_queue',
+                            __import__('queue').Queue(maxsize=10000))
+        gui = _make_search_emit_stub(monkeypatch, mode='keyword', corpus='genizah')
+        gui._emit_search_telemetry('completed', count)
+        events = _drain_all_events()
+        search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+        assert len(search_events) == 1, f"count={count}: expected 1 event"
+        bucket = search_events[0]['properties'].get('result_count_bucket')
+        assert bucket == expected_bucket, (
+            f"count={count}: expected bucket '{expected_bucket}', got '{bucket}'"
+        )
+
+
+def test_search_emit_cancelled_no_bucket(monkeypatch, _reset_telemetry_state):
+    """Cancelled run emits action='cancelled' with NO result_count_bucket (D-08)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_search_emit_stub(monkeypatch)
+    gui._emit_search_telemetry('cancelled')
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1, "cancelled emit must enqueue one event"
+    props = search_events[0]['properties']
+    assert props['action'] == 'cancelled'
+    assert 'result_count_bucket' not in props, (
+        "cancelled run must NOT include result_count_bucket (D-08)"
+    )
+
+
+def test_search_emit_exactly_once(monkeypatch, _reset_telemetry_state):
+    """Second call on same run is suppressed by the emitted guard (D-09)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_search_emit_stub(monkeypatch)
+    gui._emit_search_telemetry('completed', 5)
+    gui._emit_search_telemetry('completed', 5)  # second call — must be no-op
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1, (
+        f"_emit_search_telemetry must fire exactly once per run, got {len(search_events)}"
+    )
+
+
+def test_search_emit_shutdown_guard(monkeypatch, _reset_telemetry_state):
+    """_emit_search_telemetry emits NOTHING when _app_shutting_down=True (REVIEWS HIGH-2)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_search_emit_stub(monkeypatch, app_shutting_down=True)
+    gui._emit_search_telemetry('completed', 0)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 0, (
+        "first-line _app_shutting_down guard must suppress emit during app shutdown (REVIEWS HIGH-2)"
+    )
+
+
+def test_search_emit_ready_gate(monkeypatch, _reset_telemetry_state):
+    """_emit_search_telemetry emits NOTHING when _telemetry_ready() False (REVIEWS MEDIUM-9)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_search_emit_stub(monkeypatch, telemetry_ready=False)
+    gui._emit_search_telemetry('completed', 0)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 0, (
+        "_emit_search_telemetry must not emit before _telemetry_ready() (REVIEWS MEDIUM-9)"
+    )
+
+
+def test_search_emit_mode_is_hardcoded_enum(monkeypatch, _reset_telemetry_state):
+    """search_mode value is a hardcoded enum string, not a translated combo label."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    # Test Lab variants mode (confirming lab_ prefix)
+    gui = _make_search_emit_stub(monkeypatch, mode='lab_variants', corpus='local')
+    gui._emit_search_telemetry('completed', 1)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1
+    props = search_events[0]['properties']
+    assert props['search_mode'] == 'lab_variants', (
+        "search_mode must be the hardcoded enum value 'lab_variants'"
+    )
+    assert props['corpus_scope'] == 'local', (
+        "corpus_scope must reflect currentData() code, not translated label"
+    )
+    # Translated labels must never appear
+    for forbidden in ('Variants', 'וריאנטים', 'Lab Mode', 'מצב מעבדה'):
+        assert props.get('search_mode') != forbidden, (
+            f"search_mode must not be translated label '{forbidden}'"
+        )
