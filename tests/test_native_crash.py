@@ -12,7 +12,6 @@ No `qtbot` parameter is used anywhere in this file (repo is pytest-qt-FREE;
 REVIEWS MEDIUM-6).
 """
 
-import os
 import pytest
 
 import desktop.telemetry as tel

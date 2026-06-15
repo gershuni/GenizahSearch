@@ -489,6 +489,11 @@ def set_consent(enabled: bool) -> None:
             # the crash hook can read the identity without acquiring _state_lock.
             # Plain global write — no lock needed (GIL-atomic str assignment).
             _crash_distinct_id = distinct_id
+            # Phase 113 Plan 03 D-03: emit any pending native crash now that consent
+            # is True and _crash_distinct_id is populated. _emit_pending_native_crash
+            # is exactly-once (clears _pending_native_crash before emitting). No-op
+            # if no prior native crash was detected at startup.
+            _emit_pending_native_crash()
         else:
             # --- OPT-OUT (fail-closed; F5/Codex) ---
             # 1. Shut the gate and cut the transport IN MEMORY first, so a
@@ -936,8 +941,132 @@ def _emit_crash_direct(
 
 
 # ---------------------------------------------------------------------------
-# Phase 112/113 stubs — implemented in later phases.
-# Present here so ROADMAP SC#1 import check (8-callable surface) passes.
+# Phase 113 Plan 03 — native crash detection helpers (D-02 / D-03)
+# ---------------------------------------------------------------------------
+
+# Fixed enum mapping from faulthandler first-line prefixes to safe labels.
+# D-02: raw dump text is NEVER transmitted — only these fixed enum values.
+# Verified prefixes from RESEARCH Q3 (lowercase — _classify_native_crash lowercases first).
+_NATIVE_CRASH_LABELS: dict[str, str] = {
+    'windows fatal exception: access violation':    'access_violation',
+    'windows fatal exception: stack overflow':      'stack_overflow',
+    'windows fatal exception: int divide by zero':  'abort',
+    'windows fatal exception: float divide by zero': 'abort',
+    'segmentation fault':                           'segmentation_fault',
+    'aborted':                                      'abort',
+    'floating-point exception':                     'abort',
+    'bus error':                                    'abort',
+    'fatal python error:':                          'unknown_native',
+}
+
+
+def _classify_native_crash(text: str) -> str:
+    """Map faulthandler dump first-line to a fixed enum label.
+
+    Never returns raw text — only one of {segmentation_fault, access_violation,
+    abort, stack_overflow, unknown_native} (D-02). Anything unrecognized or
+    empty → 'unknown_native'.
+    """
+    if not text or not text.strip():
+        return 'unknown_native'
+    first_line = text.splitlines()[0].lower().strip()
+    for prefix, label in _NATIVE_CRASH_LABELS.items():
+        if first_line.startswith(prefix):
+            return label
+    return 'unknown_native'
+
+
+def _emit_native_crash(label: str) -> None:
+    """Emit a desktop_prior_crash event with the classified native crash label.
+
+    Lock-free: reads only _crash_distinct_id (plain global), _BASE_PROPS()
+    (module-level constants only). Never raises.
+    """
+    try:
+        if not _is_enabled_nolock():
+            return
+        distinct_id: str = _crash_distinct_id or 'system'
+        props: dict = dict(_BASE_PROPS())           # includes os_family/os_version (CRASH-04)
+        props['fatal_error'] = label                # fixed enum label, never raw text (D-02)
+        validated = _validate_props(props)
+        scrubbed = _scrub_props(validated)
+        # send_crash_event_direct imported at module top (REVIEWS HIGH-2)
+        send_crash_event_direct(
+            DesktopEvent.PRIOR_CRASH.value, scrubbed, distinct_id, timeout=0.5
+        )
+    except Exception:
+        pass  # best-effort; never raises
+
+
+def _emit_pending_native_crash() -> None:
+    """Emit held pending native crash exactly once when consent becomes True.
+
+    Called from set_consent(True) AFTER _enabled is flipped True and
+    _crash_distinct_id is populated. The exactly-once guarantee:
+    clear _pending_native_crash BEFORE emitting, not after (race-safe under GIL).
+    Never raises.
+    """
+    global _pending_native_crash
+    label = _pending_native_crash
+    if label is None:
+        return
+    _pending_native_crash = None    # clear BEFORE emit — exactly-once
+    _emit_native_crash(label)
+
+
+def _setup_faulthandler() -> None:
+    """Read + classify previous faulthandler dump, then enable for this run. D-03.
+
+    ORDERING INVARIANT: read BEFORE faulthandler.enable() — opening the file
+    for write first would erase last-run evidence.
+
+    STEP 1: read prior content before enable
+    STEP 2: classify + emit-or-hold-pending
+    STEP 3: (re)open the file 'w' for this run's handle, then enable
+
+    The 'w' open in STEP 3 intentionally truncates the prior content. This is
+    CORRECT per CONTEXT D-03: the prior label is already captured in memory in
+    STEP 2 (or already emitted), and the pending label survives in-memory until
+    set_consent(True) fires that session. No file-preservation path is needed
+    or added — pending is memory-only by design (REVIEWS PASS2).
+
+    Best-effort: any exception silently drops faulthandler capture for this
+    run; startup is never blocked (CRASH-03).
+    """
+    global _faulthandler_handle, _pending_native_crash
+    try:
+        import faulthandler
+        from genizah_core import Config  # lazy — avoids circular at module level
+        dump_path = os.path.join(Config.INDEX_DIR, 'faulthandler_dump.txt')
+
+        # STEP 1: read prior content BEFORE enabling (opening 'w' erases evidence)
+        prior_dump_text: str = ''
+        try:
+            if os.path.exists(dump_path):
+                with open(dump_path, 'r', encoding='utf-8', errors='replace') as _f:
+                    prior_dump_text = _f.read().strip()
+        except OSError:
+            pass
+
+        # STEP 2: classify + emit or hold pending
+        if prior_dump_text:
+            label = _classify_native_crash(prior_dump_text)
+            if _is_enabled_nolock():
+                _emit_native_crash(label)
+            else:
+                _pending_native_crash = label   # hold; emit on set_consent(True)
+
+        # STEP 3: (re)open for THIS run — truncates last run's content.
+        # The module global keeps the handle alive for the process lifetime
+        # (Pitfall 2: GC closes the handle if it's a local variable).
+        _faulthandler_handle = open(dump_path, 'w', encoding='utf-8')
+        faulthandler.enable(file=_faulthandler_handle, all_threads=True)
+    except Exception:
+        pass  # faulthandler is best-effort; failure must never block startup
+
+
+# ---------------------------------------------------------------------------
+# Phase 112/113 — install_exception_hooks (filled in Plan 03)
 # ---------------------------------------------------------------------------
 
 def install_exception_hooks() -> None:
@@ -1138,6 +1267,12 @@ __all__ = [
     '_EXCLUDED_PATH_SEGMENTS',
     '_GENERIC_BASENAMES',
     '_TRACK_FORBIDDEN_EVENTS',
+    # Phase 113 Plan 03 — native crash helpers
+    '_NATIVE_CRASH_LABELS',
+    '_classify_native_crash',
+    '_emit_native_crash',
+    '_emit_pending_native_crash',
+    '_setup_faulthandler',
 ]
 
 
