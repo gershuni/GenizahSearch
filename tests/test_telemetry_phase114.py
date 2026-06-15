@@ -838,3 +838,138 @@ def test_on_search_finished_shutdown_guard_via_emit(monkeypatch, _reset_telemetr
     assert len(search_events) == 0, (
         "REVIEWS HIGH-2: _emit_search_telemetry first-guard must suppress emit during shutdown"
     )
+
+
+# ===========================================================================
+# Task 4: PGP-Tags search telemetry (_execute_tag_search / _on_tag_search_results)
+# ===========================================================================
+
+def _make_pgp_tag_stub(monkeypatch, *, telemetry_ready=True, app_shutting_down=False):
+    """Build a stub for _emit_pgp_tag_search_telemetry unit tests."""
+    import types
+    import genizah_app as app
+
+    gui = types.SimpleNamespace()
+    gui._telemetry_session_started = telemetry_ready
+    gui._app_shutting_down = app_shutting_down
+    gui._session_id = 'pgp-tag-session'
+    # _current_pgp_tag_search_run will be set by _execute_tag_search after wiring;
+    # for unit tests we set it directly
+    gui._current_pgp_tag_search_run = {'mode': 'pgp_tags', 'corpus': 'genizah', 'emitted': False}
+
+    gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
+    gui._emit_pgp_tag_search_telemetry = lambda action, result_count=None: (
+        app.GenizahGUI._emit_pgp_tag_search_telemetry(gui, action, result_count)
+    )
+    return gui
+
+
+def test_pgp_tag_search_telemetry_method_exists(monkeypatch, _reset_telemetry_state):
+    """_emit_pgp_tag_search_telemetry must exist on GenizahGUI (RED before Task 4 GREEN)."""
+    import genizah_app as app
+    assert hasattr(app.GenizahGUI, '_emit_pgp_tag_search_telemetry'), (
+        "_emit_pgp_tag_search_telemetry must exist on GenizahGUI (REVIEWS HIGH-1)"
+    )
+
+
+def test_pgp_tag_search_run_initialized(monkeypatch, _reset_telemetry_state):
+    """_execute_tag_search creates _current_pgp_tag_search_run with mode='pgp_tags'."""
+    import genizah_app as app
+    import inspect
+    execute_src = inspect.getsource(app.GenizahGUI._execute_tag_search)
+    assert '_current_pgp_tag_search_run' in execute_src, (
+        "_execute_tag_search must create self._current_pgp_tag_search_run (RED before Task 4)"
+    )
+    assert "'pgp_tags'" in execute_src, (
+        "_current_pgp_tag_search_run must have mode='pgp_tags' (hardcoded D-05)"
+    )
+
+
+def test_pgp_tag_emit_success_path(monkeypatch, _reset_telemetry_state):
+    """Success path emits action='completed' search_mode='pgp_tags' with correct bucket."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_pgp_tag_stub(monkeypatch)
+    gui._emit_pgp_tag_search_telemetry('completed', 7)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1
+    props = search_events[0]['properties']
+    assert props['search_mode'] == 'pgp_tags', (
+        "PGP-tags emit must use hardcoded 'pgp_tags' mode (D-05 / REVIEWS HIGH-1)"
+    )
+    assert props['corpus_scope'] == 'genizah', (
+        "PGP-tags corpus is always 'genizah' (no corpus selector on this path)"
+    )
+    assert props['action'] == 'completed'
+    assert props['result_count_bucket'] == '1-9', "7 results must bucket to '1-9'"
+
+
+def test_pgp_tag_emit_no_tag_text_in_props(monkeypatch, _reset_telemetry_state):
+    """The tag search term must NEVER appear in any telemetry property (D-04 / REVIEWS HIGH-1)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_pgp_tag_stub(monkeypatch)
+    # A real PGP tag — must not appear in any property value
+    sensitive_tag = 'Marriage document'
+    gui._current_pgp_tag_search_run = {'mode': 'pgp_tags', 'corpus': 'genizah', 'emitted': False}
+    gui._emit_pgp_tag_search_telemetry('completed', 3)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1
+    props = search_events[0]['properties']
+    for key, val in props.items():
+        assert val != sensitive_tag, (
+            f"Tag text '{sensitive_tag}' must NOT appear in telemetry props (D-04)"
+        )
+
+
+def test_pgp_tag_emit_zero_result_completed(monkeypatch, _reset_telemetry_state):
+    """No-results tag search emits action='completed' bucket='0' (D-07)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_pgp_tag_stub(monkeypatch)
+    gui._emit_pgp_tag_search_telemetry('completed', 0)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1
+    props = search_events[0]['properties']
+    assert props['action'] == 'completed'
+    assert props['result_count_bucket'] == '0'
+
+
+def test_pgp_tag_emit_exactly_once(monkeypatch, _reset_telemetry_state):
+    """emitted guard prevents double-emit on same _current_pgp_tag_search_run (D-09)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_pgp_tag_stub(monkeypatch)
+    gui._emit_pgp_tag_search_telemetry('completed', 5)
+    gui._emit_pgp_tag_search_telemetry('completed', 5)  # second call — must be no-op
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1, (
+        f"_emit_pgp_tag_search_telemetry must fire exactly once per run, got {len(search_events)}"
+    )
+
+
+def test_pgp_tag_emit_ready_gate(monkeypatch, _reset_telemetry_state):
+    """_emit_pgp_tag_search_telemetry emits nothing when _telemetry_ready() False (REVIEWS MEDIUM-9)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_pgp_tag_stub(monkeypatch, telemetry_ready=False)
+    gui._emit_pgp_tag_search_telemetry('completed', 3)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 0, (
+        "_emit_pgp_tag_search_telemetry must not emit before _telemetry_ready()"
+    )
