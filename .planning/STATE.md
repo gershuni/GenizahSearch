@@ -63,7 +63,7 @@ None specific to v8.1.0 yet.
 | CRASH-F1 | "Send logs" flow for local faulthandler log | Future | v8.1.0 |
 | WEB-F1 | Clean web `search_executed` query-text property (privacy gap) | Future | v8.1.0 (web follow-up) |
 | FLAG-F1 | PostHog feature flags / remote config on desktop | Future | v8.1.0 |
-| INFRA-F2 | Shared-emitter chokepoint tagging — `shared/nli_circuit_breaker.py` emits `nli_breaker_opened/closed` directly via `shared.posthog_server` with no `platform` tag / no `$process_person_profile=False`; in the shared project these can't be segmented by platform (Codex 2026-06-15 #2) | Phase 116 (privacy audit + CI chokepoint gate) | v8.1.0 |
+| INFRA-F2 | ~~Shared-emitter chokepoint tagging~~ **DONE 2026-06-15:** desktop registers `_desktop_default_props_hook` (via `register_scrub_hook`) while consent is on → every shared-queue event (incl. `nli_breaker_opened/closed`) gets `platform=desktop` + `$process_person_profile=False` (fill-when-absent). Verified live + `tests/test_telemetry_shared_emitter_tagging.py`. | — | v8.1.0 |
 | INFRA-F3 | Identity hygiene — `$process_person_profile=False` on anonymous desktop events (already in IDENT-01..04 scope); Codex 2026-06-15 add: avoid bare `system` crash distinct_id (use `desktop:system` or drop) | Phase 114 (IDENT-01..04) | v8.1.0 |
 | INFRA-F4 | Shared-project guardrails — platform filter on web insights, separate web/desktop dashboards, flag/experiment namespacing, MTU monitoring, release test "embedded key + no env → used" (Codex 2026-06-15) | Phase 116 + ops | v8.1.0 |
 
