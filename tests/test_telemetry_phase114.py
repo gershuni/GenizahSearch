@@ -973,3 +973,162 @@ def test_pgp_tag_emit_ready_gate(monkeypatch, _reset_telemetry_state):
     assert len(search_events) == 0, (
         "_emit_pgp_tag_search_telemetry must not emit before _telemetry_ready()"
     )
+
+
+# ===========================================================================
+# Task 5: Composition + parallels telemetry (run_composition / on_comp_scan_finished)
+# ===========================================================================
+
+def _make_comp_emit_stub(monkeypatch, *, telemetry_ready=True, app_shutting_down=False,
+                          mode='comp_exact', corpus='genizah'):
+    """Build a minimal stub for _emit_comp_search_telemetry unit tests."""
+    import types
+    import genizah_app as app
+
+    gui = types.SimpleNamespace()
+    gui._telemetry_session_started = telemetry_ready
+    gui._app_shutting_down = app_shutting_down
+    gui._session_id = 'comp-test-session'
+    gui._current_comp_search_run = {'mode': mode, 'corpus': corpus, 'emitted': False}
+
+    gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
+    gui._emit_comp_search_telemetry = lambda action, result_count=None: (
+        app.GenizahGUI._emit_comp_search_telemetry(gui, action, result_count)
+    )
+    return gui
+
+
+def test_comp_emit_method_exists(monkeypatch, _reset_telemetry_state):
+    """_emit_comp_search_telemetry must exist on GenizahGUI (RED before Task 5 GREEN)."""
+    import genizah_app as app
+    assert hasattr(app.GenizahGUI, '_emit_comp_search_telemetry'), (
+        "_emit_comp_search_telemetry must exist on GenizahGUI (Task 5)"
+    )
+
+
+def test_comp_emit_completed_enqueues_event(monkeypatch, _reset_telemetry_state):
+    """_emit_comp_search_telemetry('completed', 12) enqueues desktop_search_executed."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_comp_emit_stub(monkeypatch, mode='comp_variants', corpus='genizah')
+    gui._emit_comp_search_telemetry('completed', 12)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1
+    props = search_events[0]['properties']
+    assert props['search_mode'] == 'comp_variants'
+    assert props['corpus_scope'] == 'genizah'
+    assert props['action'] == 'completed'
+    assert props['result_count_bucket'] == '10-99', "12 results must bucket to '10-99'"
+
+
+def test_comp_mode_mapping(monkeypatch, _reset_telemetry_state):
+    """Composition mode map: 0→'comp_exact', 1→'comp_variants', 2→'comp_fuzzy'."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    for mode_val, expected_mode in [
+        ('comp_exact', 'comp_exact'),
+        ('comp_variants', 'comp_variants'),
+        ('comp_fuzzy', 'comp_fuzzy'),
+        ('lab_comp_exact', 'lab_comp_exact'),
+    ]:
+        monkeypatch.setattr(ph, '_event_queue', __import__('queue').Queue(maxsize=10000))
+        gui = _make_comp_emit_stub(monkeypatch, mode=mode_val, corpus='genizah')
+        gui._emit_comp_search_telemetry('completed', 1)
+        events = _drain_all_events()
+        search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+        assert len(search_events) == 1, f"mode={mode_val}: expected 1 event"
+        assert search_events[0]['properties']['search_mode'] == expected_mode
+
+
+def test_comp_emit_cancelled_no_bucket(monkeypatch, _reset_telemetry_state):
+    """Cancelled comp run emits action='cancelled' with NO result_count_bucket (D-08)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_comp_emit_stub(monkeypatch)
+    gui._emit_comp_search_telemetry('cancelled')
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1
+    props = search_events[0]['properties']
+    assert props['action'] == 'cancelled'
+    assert 'result_count_bucket' not in props, (
+        "cancelled comp run must NOT include result_count_bucket (D-08)"
+    )
+
+
+def test_comp_emit_exactly_once(monkeypatch, _reset_telemetry_state):
+    """emitted guard prevents double-emit on same _current_comp_search_run (D-09)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_comp_emit_stub(monkeypatch)
+    gui._emit_comp_search_telemetry('completed', 5)
+    gui._emit_comp_search_telemetry('completed', 5)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1, (
+        f"_emit_comp_search_telemetry must fire exactly once, got {len(search_events)}"
+    )
+
+
+def test_comp_emit_shutdown_guard(monkeypatch, _reset_telemetry_state):
+    """_emit_comp_search_telemetry emits NOTHING when _app_shutting_down=True (REVIEWS HIGH-2).
+
+    This covers the cooperative-interrupt window where closeEvent requestsInterruption(),
+    the comp thread finishes, emits scan_finished_signal → on_comp_scan_finished fires,
+    but _app_shutting_down=True suppresses the emit.
+    """
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_comp_emit_stub(monkeypatch, app_shutting_down=True)
+    gui._emit_comp_search_telemetry('cancelled', 5)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 0, (
+        "cooperative-interrupt window: _app_shutting_down=True must suppress comp telemetry"
+    )
+
+
+def test_comp_emit_ready_gate(monkeypatch, _reset_telemetry_state):
+    """_emit_comp_search_telemetry emits nothing when _telemetry_ready() False (REVIEWS MEDIUM-9)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_comp_emit_stub(monkeypatch, telemetry_ready=False)
+    gui._emit_comp_search_telemetry('completed', 3)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 0
+
+
+def test_run_composition_creates_comp_run_object(monkeypatch, _reset_telemetry_state):
+    """run_composition must create _current_comp_search_run with a comp_* mode (source check)."""
+    import genizah_app as app
+    import inspect
+    run_src = inspect.getsource(app.GenizahGUI.run_composition)
+    assert '_current_comp_search_run' in run_src, (
+        "run_composition must create self._current_comp_search_run (Task 5 RED)"
+    )
+    assert '_COMP_SEARCH_MODE_ENUM' in run_src or "'comp_exact'" in run_src, (
+        "run_composition must use hardcoded comp_* mode enum (D-05)"
+    )
+
+
+def test_on_comp_scan_finished_wires_emit(monkeypatch, _reset_telemetry_state):
+    """on_comp_scan_finished must call self._emit_comp_search_telemetry (source check)."""
+    import genizah_app as app
+    import inspect
+    finished_src = inspect.getsource(app.GenizahGUI.on_comp_scan_finished)
+    assert '_emit_comp_search_telemetry' in finished_src, (
+        "on_comp_scan_finished must call self._emit_comp_search_telemetry (Task 5 RED)"
+    )
