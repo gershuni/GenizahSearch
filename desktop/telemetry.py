@@ -1070,17 +1070,31 @@ def _setup_faulthandler() -> None:
 # ---------------------------------------------------------------------------
 
 def install_exception_hooks() -> None:
-    """Install crash-capture exception hooks. Idempotent. Never raises.
+    """Install crash-capture exception hooks + faulthandler. Idempotent. Never raises.
 
-    Wraps sys.excepthook and threading.excepthook to capture uncaught
-    exceptions. KeyboardInterrupt and SystemExit are excluded (SC#2).
-    The existing hook chain (crash_log.txt writer) is preserved — telemetry
-    is inserted as the outermost wrapper and always calls the prior hook.
+    Wraps sys.excepthook and threading.excepthook to capture uncaught exceptions.
+    KeyboardInterrupt and SystemExit are excluded (SC#2).
+    The existing hook chain (crash_log.txt writer set up by _setup_crash_handler) is
+    preserved — telemetry is inserted as the outermost wrapper and ALWAYS calls the
+    prior hook, even if the telemetry step raises (SC#1).
 
-    Captures _prior_excepthook and _prior_threading_hook module globals so
-    _reset_for_tests() can restore the original hooks (REVIEWS MEDIUM-8).
+    Captures the CURRENT sys.excepthook and threading.excepthook (not
+    threading.__excepthook__) into the _prior_excepthook / _prior_threading_hook globals
+    so _reset_for_tests() can restore them (REVIEWS MEDIUM-7 / MEDIUM-8).
 
-    Phase 113 Plan 03 will add faulthandler + atexit wiring here.
+    Registers an atexit flush INSIDE this function — desktop-side only (D-08). The
+    web process imports shared.posthog_server (which has no atexit.register) and must
+    not trigger a desktop exit-flush on web server restart (T-113-08-WEBEXIT).
+
+    SC#5 / CRASH-06 reconciliation (REVIEWS HIGH-4 — option (a), direct-send supersedes):
+    The crash event is delivered by the lock-free send_crash_event_direct inside
+    _emit_crash_direct BEFORE the hook returns — no hook-time _flush_before_exit call
+    is needed or safe (_flush_before_exit takes _capture_config_lock via _resolve_api_key,
+    posthog_server.py:288, violating D-05's lock-free invariant for the crash path).
+    The atexit _atexit_flush (~1.5s, clean-exit only) covers QUEUED non-crash events on
+    a normal shutdown. This satisfies CRASH-06 ("crash event prioritized over full queue")
+    via the direct send, and SC#5 ("bounded flush before exit") via direct-send + atexit.
+
     Never raises.
     """
     global _hooks_installed, _prior_excepthook, _prior_threading_hook
@@ -1088,29 +1102,40 @@ def install_exception_hooks() -> None:
     import threading as _threading
     try:
         if _hooks_installed:
-            return  # idempotency guard (D-08)
+            return  # idempotency guard (D-08) — also prevents double atexit registration
         _hooks_installed = True
 
-        # Capture prior hooks BEFORE wrapping — so _reset_for_tests can restore.
-        # This captures the crash-log writer installed by _setup_crash_handler()
-        # (when called from genizah_app.py after _setup_crash_handler has run).
+        # Capture prior hooks BEFORE wrapping so _reset_for_tests can restore.
+        # Called from genizah_app.py AFTER _setup_crash_handler(), so _prior_excepthook
+        # captures the crash-log writer, not bare sys.__excepthook__.
+        # REVIEWS MEDIUM-7: capture the CURRENT threading.excepthook, NOT
+        # threading.__excepthook__ — so an already-installed non-default hook is chained
+        # exactly once and not skipped.
         _prior_excepthook = _sys.excepthook
-        _prior_threading_hook = _threading.excepthook
+        _prior_threading_hook = _threading.excepthook  # CURRENT hook, not __excepthook__
 
         # 1. Wrap sys.excepthook: telemetry → crash_log.txt writer → sys.__excepthook__
         prior_sys_hook = _prior_excepthook
 
         def _telemetry_excepthook(exc_type, exc_value, exc_tb):
+            # Telemetry step in try/except — a failure here MUST NOT suppress the chain
+            # (SC#1). The prior hook is called UNCONDITIONALLY after the try/except.
+            # Do NOT call _flush_before_exit here — it takes _capture_config_lock via
+            # _resolve_api_key (deadlock risk, REVIEWS HIGH-4 / D-05). The crash event
+            # is already delivered by send_crash_event_direct inside _emit_crash_direct.
             try:
                 if exc_type is not KeyboardInterrupt and exc_type is not SystemExit:
                     _emit_crash_direct(exc_type, exc_tb, is_background=False)
             except Exception:
                 pass
-            prior_sys_hook(exc_type, exc_value, exc_tb)  # always chain (SC#1)
+            prior_sys_hook(exc_type, exc_value, exc_tb)  # UNCONDITIONAL chain (SC#1)
 
         _sys.excepthook = _telemetry_excepthook
 
-        # 2. threading.excepthook — covers worker threads (CRASH-02)
+        # 2. threading.excepthook — covers worker threads (CRASH-02).
+        # Captures the CURRENT hook (REVIEWS MEDIUM-7) — an existing non-default hook
+        # installed before telemetry (e.g. by a test or a prior framework) is chained
+        # exactly once, not replaced by threading.__excepthook__.
         prior_thread_hook = _prior_threading_hook
 
         def _telemetry_threading_hook(args):
@@ -1123,9 +1148,31 @@ def install_exception_hooks() -> None:
 
         _threading.excepthook = _telemetry_threading_hook
 
-        # Phase 113 Plan 03 will add:
-        # 3. _setup_faulthandler() — native crash detection
-        # 4. atexit.register(_atexit_flush) — clean-exit flush
+        # 3. faulthandler — native C-extension crash detection (D-02 / D-03)
+        _setup_faulthandler()
+
+        # 4. atexit flush for clean exits — registered HERE, NOT in shared/posthog_server
+        # (D-08 — the web process imports posthog_server; registering there would fire
+        # on every web server restart, T-113-08-WEBEXIT).
+        # The _hooks_installed guard above ensures exactly-one registration across
+        # repeated install calls (REVIEWS MEDIUM-8, T-113-08-DUPATEXIT).
+        import atexit as _atexit
+
+        def _atexit_flush():
+            """Flush the in-memory PostHog queue on a clean exit (~1.5s budget).
+
+            This is the ONLY path that calls _flush_before_exit — it is safe on the
+            clean-exit atexit path because _capture_config_lock is not held by any
+            crash hook at process teardown time. The crash event itself is already
+            delivered by the lock-free send_crash_event_direct (REVIEWS HIGH-4).
+            """
+            try:
+                from shared.posthog_server import _flush_before_exit
+                _flush_before_exit(1.5)   # ~1.5s clean-exit budget (crash path stays 0.5s)
+            except Exception:
+                pass
+
+        _atexit.register(_atexit_flush)
 
     except Exception:
         logger.debug('telemetry: install_exception_hooks failed', exc_info=True)

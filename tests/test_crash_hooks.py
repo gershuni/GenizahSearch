@@ -596,8 +596,6 @@ def test_atexit_registered_inside_install():
     Verify by AST inspection that install_exception_hooks contains an atexit.register call.
     Also verify shared/posthog_server.py contains NO atexit.register.
     """
-    import ast
-
     # Check install_exception_hooks has atexit.register
     src = inspect.getsource(tel.install_exception_hooks)
     assert 'atexit' in src, (
