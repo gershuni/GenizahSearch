@@ -71,7 +71,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 
 - [x] **Phase 111: Telemetry Foundation** - `desktop/telemetry.py` chokepoint + consent storage + structural scrubber + property/event allowlist + flush infrastructure (no events fire yet) (completed 2026-06-14)
 - [x] **Phase 112: Consent UX** - Bilingual first-run dialog + Settings toggle + opt-out queue drain + bilingual privacy disclosure (completed 2026-06-15)
-- [ ] **Phase 113: Crash Reporting** - Exception hooks (chained, non-blocking) + faulthandler + scrubbed crash payloads + bounded synchronous flush + next-launch native-crash detection
+- [x] **Phase 113: Crash Reporting** - Exception hooks (chained, non-blocking) + faulthandler + scrubbed crash payloads + bounded synchronous flush + next-launch native-crash detection (completed 2026-06-15)
 - [ ] **Phase 114: Usage Analytics** - Session-start, feature/tab usage, search mode+corpus enums, active-user signal, base props, session/clock correctness
 - [ ] **Phase 115: Performance Metrics** - Search/indexing durations, result-count buckets, per-session summary with periodic+close flush, configurable sampling
 - [ ] **Phase 116: Privacy Audit + CI Gate** - AST guard in CI, forbidden-field tests, frozen-binary SSL/offline self-test, operational runbook
@@ -135,7 +135,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 
 - [x] 113-01-PLAN.md — `send_crash_event_direct()` neutral priority POST in posthog_server (D-06) + Wave 0 crash test scaffolds [Wave 1]
 - [x] 113-02-PLAN.md — lock-free crash primitives (`_is_enabled_nolock`/`_crash_distinct_id`/recursion guard) + frame-walk payload builder + `_ALLOWED_PROPS` reconciliation (D-05/D-07) [Wave 2]
-- [ ] 113-03-PLAN.md — faulthandler lifecycle + chained `install_exception_hooks()` + atexit + genizah_app.py wiring (D-02/D-03/D-08) [Wave 3]
+- [x] 113-03-PLAN.md — faulthandler lifecycle + chained `install_exception_hooks()` + atexit + genizah_app.py wiring (D-02/D-03/D-08) [Wave 3]
 
 ### Phase 114: Usage Analytics
 
@@ -185,7 +185,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 |-------|-----------|----------------|--------|-----------|
 | 111. Telemetry Foundation | v8.1.0 | 3/3 | Complete    | 2026-06-14 |
 | 112. Consent UX | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
-| 113. Crash Reporting | v8.1.0 | 2/3 | In Progress|  |
+| 113. Crash Reporting | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
 | 114. Usage Analytics | v8.1.0 | 0/TBD | Not started | - |
 | 115. Performance Metrics | v8.1.0 | 0/TBD | Not started | - |
 | 116. Privacy Audit + CI Gate | v8.1.0 | 0/TBD | Not started | - |
