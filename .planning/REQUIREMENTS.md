@@ -21,8 +21,8 @@
 ### Consent & Identity (CONSENT)
 
 - [x] **CONSENT-01**: Telemetry is OFF by default — **no event of any kind (session/usage/perf/crash) is enqueued before consent state has been loaded and is true.** Startup order guarantees the consent gate is resolved before any producer can fire (proven by test, see PRIV-04).
-- [ ] **CONSENT-02**: On first launch after updating to v8.1.0 (and on fresh installs), the user sees a bilingual (EN/HE) first-run consent dialog with an explicit, equal-weight yes/no choice (nothing pre-selected) that plainly states what is and is not collected.
-- [ ] **CONSENT-03**: The consent dialog is shown at most once — the choice and a "prompt shown" flag persist so it never re-prompts on later launches. The stored consent record also captures the consent timestamp, the app version, and the consent-UI version (lightweight audit trail).
+- [x] **CONSENT-02**: On first launch after updating to v8.1.0 (and on fresh installs), the user sees a bilingual (EN/HE) first-run consent dialog with an explicit, equal-weight yes/no choice (nothing pre-selected) that plainly states what is and is not collected.
+- [x] **CONSENT-03**: The consent dialog is shown at most once — the choice and a "prompt shown" flag persist so it never re-prompts on later launches. The stored consent record also captures the consent timestamp, the app version, and the consent-UI version (lightweight audit trail).
 - [ ] **CONSENT-04**: User can turn telemetry on or off at any time from a Settings/About toggle that reads and writes the same consent source of truth as the first-run dialog.
 - [x] **CONSENT-05**: An anonymous per-install identifier (uuid4) is minted on opt-in and used as the PostHog `distinct_id` for **logged-out** users; it is never derived from hardware/MAC. For **logged-in** users the `distinct_id` is the Supabase `user.id` (see IDENT-01). No hardware fingerprinting either way.
 - [x] **CONSENT-06**: Opting out stops all event emission immediately; the per-install ID is **retained** on disk (not deleted) so re-opt-in preserves continuity.
@@ -67,7 +67,7 @@
 - [x] **PRIV-02**: A telemetry property allowlist constrains which properties may be sent; anything not on the allowlist is dropped. The allowlist explicitly excludes environment identifiers (hostname/machine name, username, executable path, cwd) and any property derived from visible UI strings (window/tab titles, `QAction` text, recent-file labels) or file dialogs.
 - [x] **PRIV-03**: A static AST CI guard (modeled on `tests/test_no_raw_storage_access.py`) enforces that `shared/posthog_server.enqueue_event` is reached **only** through the desktop telemetry chokepoint, so no call site can bypass the consent gate or scrubber.
 - [ ] **PRIV-04**: Automated tests assert that representative crash tracebacks and search / My-Library scenarios never emit any **forbidden field** — explicitly: My Library paths, filenames, query/search text, usernames, or hostnames — and that nothing is emitted before consent (CONSENT-01).
-- [ ] **PRIV-05**: The Help/About privacy disclosure is updated bilingually (EN/HE) to describe exactly what telemetry collects, that it is opt-in, how to turn it off, and that the anonymous install id is a pseudonymous identifier — consistent with the existing disclosure posture.
+- [x] **PRIV-05**: The Help/About privacy disclosure is updated bilingually (EN/HE) to describe exactly what telemetry collects, that it is opt-in, how to turn it off, and that the anonymous install id is a pseudonymous identifier — consistent with the existing disclosure posture.
 - [x] **PRIV-06**: Event NAMES are drawn from a fixed registry/enum — no event name (and no property) is ever derived from query text, filenames, corpus/document labels, or visible UI strings. (Dynamic event names leak even when properties are scrubbed.)
 
 ### Backend & Packaging (INFRA)
@@ -125,8 +125,8 @@
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | CONSENT-01 | Phase 111 | Complete |
-| CONSENT-02 | Phase 112 | Pending |
-| CONSENT-03 | Phase 112 | Pending |
+| CONSENT-02 | Phase 112 | Complete |
+| CONSENT-03 | Phase 112 | Complete |
 | CONSENT-04 | Phase 112 | Pending |
 | CONSENT-05 | Phase 111 | Complete |
 | CONSENT-06 | Phase 111 | Complete |
@@ -156,7 +156,7 @@
 | PRIV-02 | Phase 111 | Complete |
 | PRIV-03 | Phase 116 | Complete |
 | PRIV-04 | Phase 116 | Pending |
-| PRIV-05 | Phase 112 | Pending |
+| PRIV-05 | Phase 112 | Complete |
 | PRIV-06 | Phase 111 | Complete |
 | INFRA-01 | Phase 111 | Complete |
 | INFRA-02 | Phase 111 | Complete |
