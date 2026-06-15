@@ -22646,6 +22646,41 @@ class GenizahGUI(QMainWindow):
         # 16. Save the cleared state
         self._schedule_session_save()
 
+    def _emit_comp_search_telemetry(self, action: str, result_count=None) -> None:
+        """Emit desktop_search_executed for a composition search run (Phase 114 USAGE-03).
+
+        Mirrors _emit_search_telemetry in structure. Composition runs go through
+        run_composition → on_comp_scan_finished; they NEVER reach on_search_finished.
+
+        First-line _app_shutting_down guard (REVIEWS HIGH-2) covers the cooperative-interrupt
+        window: closeEvent calls requestInterruption() → the comp thread may cooperatively
+        finish inside the ~2s wait → on_comp_scan_finished fires → we suppress the emit
+        because _app_shutting_down=True at the TOP of closeEvent (Plan 01).
+        """
+        # Guard 1 — MUST be first (REVIEWS HIGH-2, cooperative-interrupt window)
+        if getattr(self, '_app_shutting_down', False):
+            return
+        # Guard 2 — producer gate (REVIEWS MEDIUM-9)
+        if not self._telemetry_ready():
+            return
+        try:
+            run = getattr(self, '_current_comp_search_run', None)
+            if run is None or run.get('emitted'):
+                return
+            run['emitted'] = True
+            props = {
+                'search_mode': run['mode'],
+                'corpus_scope': run['corpus'],
+                'action': action,
+                'session_id': getattr(self, '_session_id', ''),
+            }
+            if action == 'completed' and result_count is not None:
+                props['result_count_bucket'] = _telemetry_result_bucket(result_count)
+            from desktop import telemetry
+            telemetry.track(telemetry.DesktopEvent.SEARCH_EXECUTED, **props)
+        except Exception:
+            pass
+
     def run_composition(self, custom_text=None):
         """
         Main entry point for Composition Search.
@@ -22733,6 +22768,23 @@ class GenizahGUI(QMainWindow):
             (self.comp_corpus_scope_combo.currentData() or 'genizah')
             if hasattr(self, 'comp_corpus_scope_combo') else 'genizah'
         )
+
+        # Phase 114 USAGE-03: create composition per-run telemetry object.
+        # _COMP_SEARCH_MODE_ENUM maps the 3 comp_mode_combo entries to hardcoded
+        # enum strings (D-05 — NEVER comp_mode_combo.currentText() which is translated).
+        _COMP_SEARCH_MODE_ENUM = {0: 'comp_exact', 1: 'comp_variants', 2: 'comp_fuzzy'}
+        _comp_mode_key = _COMP_SEARCH_MODE_ENUM.get(idx, 'comp_exact')
+        _comp_is_lab = bool(
+            getattr(self, 'btn_lab_mode_toggle_comp', None)
+            and self.btn_lab_mode_toggle_comp.isChecked()
+        )
+        _comp_mode_enum = f'lab_{_comp_mode_key}' if _comp_is_lab else _comp_mode_key
+        # D-04: corpus from currentData() (fixed code), NEVER currentText() (translated label)
+        self._current_comp_search_run = {
+            'mode': _comp_mode_enum,
+            'corpus': _comp_scope,
+            'emitted': False,
+        }
 
         # 1. נתיב מעבדה (LAB MODE)
         if self.btn_lab_mode_toggle_comp.isChecked():
@@ -22946,6 +22998,16 @@ class GenizahGUI(QMainWindow):
 
         # Toast notification when app is not focused
         self._notify_search_complete(result_count, '', search_type='composition')
+
+        # Phase 114 USAGE-03: emit composition search telemetry.
+        # is_partial=True → user cancelled (comp cancel sets cancel_flag; thread emits partial=True).
+        # _app_shutting_down guard (REVIEWS HIGH-2) is the first line of _emit_comp_search_telemetry
+        # and suppresses the emit during the cooperative-interrupt shutdown window.
+        # Placed BEFORE the no-results return so zero-result completed comp still emits (D-07).
+        self._emit_comp_search_telemetry(
+            'cancelled' if is_partial else 'completed',
+            result_count,
+        )
 
         manuscripts = self.searcher.group_pages_by_manuscript(items)
         filtered_manuscripts = self.searcher.group_pages_by_manuscript(filtered_items)

@@ -750,8 +750,6 @@ def test_on_search_finished_wires_emit_for_empty_cancelled(monkeypatch, _reset_t
 
     Fails RED because on_search_finished doesn't call _emit_search_telemetry yet.
     """
-    import genizah_app as app
-
     gui = _make_wiring_stub(monkeypatch)
     gui._search_was_cancelled = True
 
@@ -776,7 +774,6 @@ def test_on_search_finished_zero_result_completed_not_cancelled(monkeypatch, _re
     import desktop.telemetry as tel
     tel.set_consent(True)
 
-    import genizah_app as app
     gui = _make_wiring_stub(monkeypatch)
     gui._search_was_cancelled = False
 
