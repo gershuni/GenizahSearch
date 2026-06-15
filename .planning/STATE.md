@@ -48,7 +48,7 @@ Progress: [███████░░░] 67%
 ### Blockers/Concerns
 
 - PyInstaller SSL cert bundle for `certifi` needs manual verification on a clean Windows VM (Phase 116 success criterion 3).
-- **Embed the real phc_ key at build/release time** into `_TELEMETRY_KEY_DEFAULT` (it stays `_UNFILLED_KEY_SENTINEL` until then → events drop locally). The shipped .exe can't read env vars on an end user's machine, so the key MUST be baked in for production telemetry to flow. This is the true prerequisite behind both 113-HUMAN-UAT items.
+- ~~Embed the real phc_ key~~ **DONE (2026-06-15):** the publishable shared-project key `phc_CGTsV72…` is now baked into `_TELEMETRY_KEY_DEFAULT`, so a shipped .exe emits without any env var (guarded by `test_embedded_default_is_a_real_phc_key` + `test_frozen_build_uses_embedded_key`). Remaining gate for the two 113-HUMAN-UAT items is now ONLY the packaged .exe build (deferred to /release / Phase 116).
 
 ### Pending Todos
 

@@ -92,3 +92,18 @@ def test_baked_in_real_key_survives_drop_guard(monkeypatch):
     # No env, source run -> falls through to the embedded default.
     captured = _wire_and_capture(monkeypatch)
     assert captured['key'] == 'phc_real_embedded_release_key'
+
+
+def test_embedded_default_is_a_real_phc_key():
+    """The shipped binary must carry a real phc_ key, not the unfilled placeholder.
+    Guards against an accidental revert of _TELEMETRY_KEY_DEFAULT to the sentinel."""
+    assert tel._TELEMETRY_KEY_DEFAULT != tel._UNFILLED_KEY_SENTINEL
+    assert tel._TELEMETRY_KEY_DEFAULT.startswith('phc_')
+
+
+def test_frozen_build_uses_embedded_key(monkeypatch):
+    """Codex release test: a frozen .exe with no env vars wires the embedded phc_ key
+    (proves production telemetry flows without relying on an end-user env var)."""
+    captured = _wire_and_capture(monkeypatch, frozen=True)
+    assert captured['key'] == tel._TELEMETRY_KEY_DEFAULT
+    assert captured['key'].startswith('phc_')

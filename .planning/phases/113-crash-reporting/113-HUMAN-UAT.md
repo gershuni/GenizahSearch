@@ -22,7 +22,7 @@ reason: "Requires a packaged PyInstaller .exe; deferred to /release / Phase 116 
 expected: Force a genuine native crash (e.g. a segfault in a C extension), relaunch the app, and confirm exactly one `desktop_prior_crash` event is emitted after consent is confirmed, carrying a fixed-enum `fatal_error` label (never raw faulthandler dump text). Requires a manual crash-then-relaunch cycle that cannot be exercised in the dev pytest harness.
 result: blocked
 blocked_by: release-build
-reason: "Requires a packaged build + the real desktop PostHog key (INFRA-01 — embedded key is still '<embedded-placeholder>', which drops events locally). Deferred to /release / Phase 116 (user decision 2026-06-15)."
+reason: "Real shared-project key now baked into _TELEMETRY_KEY_DEFAULT (2026-06-15), so the key prerequisite is resolved. Remaining gate is ONLY a packaged build + a forced native crash. Deferred to /release / Phase 116 (user decision 2026-06-15)."
 
 ## Summary
 

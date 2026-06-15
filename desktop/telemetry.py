@@ -77,13 +77,18 @@ _OS_VERSION: str = platform.release() or 'unknown'  # e.g. '10', '11', '5.15.0-7
 # sends without any env var.
 #
 # _UNFILLED_KEY_SENTINEL is a FIXED literal meaning "no real key embedded yet".
-# It MUST stay distinct from _TELEMETRY_KEY_DEFAULT's eventual real value: the
-# "drop locally" guard in _wire_transport_config compares against the sentinel,
-# so comparing against the mutable constant would null out the real key once it
-# is baked in (Codex 2026-06-15 #1 — release-blocker).
+# It MUST stay distinct from _TELEMETRY_KEY_DEFAULT's real value: the "drop
+# locally" guard in _wire_transport_config compares against the sentinel, so
+# comparing against the mutable constant would null out the real key once it is
+# baked in (Codex 2026-06-15 #1 — release-blocker).
+#
+# _TELEMETRY_KEY_DEFAULT is the SHARED project's publishable phc_ ingestion key —
+# the same key the web app exposes in client JS (web/main.py _posthog_key). It is
+# publishable by design (write-only, abuse-tolerant), so embedding it in the
+# distributed binary adds no new exposure. NEVER put a personal phx_ key here.
 # ---------------------------------------------------------------------------
 _UNFILLED_KEY_SENTINEL: str = '<embedded-placeholder>'
-_TELEMETRY_KEY_DEFAULT: str = _UNFILLED_KEY_SENTINEL
+_TELEMETRY_KEY_DEFAULT: str = 'phc_CGTsV72FpOzKDrosXvnSD2t3giKNkjirI2migZCe0j7'
 
 # ---------------------------------------------------------------------------
 # config.pkl key-name constants (define once, shared across Phases 111-116)
