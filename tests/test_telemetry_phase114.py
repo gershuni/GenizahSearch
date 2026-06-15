@@ -1129,3 +1129,493 @@ def test_on_comp_scan_finished_wires_emit(monkeypatch, _reset_telemetry_state):
     assert '_emit_comp_search_telemetry' in finished_src, (
         "on_comp_scan_finished must call self._emit_comp_search_telemetry (Task 5 RED)"
     )
+
+
+# ===========================================================================
+# Wave 3, Task 1: desktop_feature_opened producers (D-03 surfaces)
+# ===========================================================================
+
+def _make_feature_emit_stub(monkeypatch, *, telemetry_ready=True):
+    """Build a minimal stub for _emit_feature_opened unit tests."""
+    import types
+    import genizah_app as app
+    import shared.posthog_server as ph_mod
+
+    monkeypatch.setattr(ph_mod, '_start_drain_thread_once', lambda: None)
+
+    gui = types.SimpleNamespace()
+    gui._telemetry_session_started = telemetry_ready
+    gui._app_shutting_down = False
+    gui._session_id = 'feature-test-session'
+
+    gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
+    gui._emit_feature_opened = lambda **kwargs: (
+        app.GenizahGUI._emit_feature_opened(gui, **kwargs)
+    )
+    return gui
+
+
+def test_emit_feature_opened_method_exists(monkeypatch, _reset_telemetry_state):
+    """_emit_feature_opened must exist on GenizahGUI (Task 1 RED)."""
+    import genizah_app as app
+    assert hasattr(app.GenizahGUI, '_emit_feature_opened'), (
+        "_emit_feature_opened must exist on GenizahGUI (D-03 centralized helper)"
+    )
+
+
+def test_emit_feature_opened_joins_lab(monkeypatch, _reset_telemetry_state):
+    """_emit_feature_opened(feature_name='joins_lab') enqueues one desktop_feature_opened."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_feature_emit_stub(monkeypatch)
+    gui._emit_feature_opened(feature_name='joins_lab')
+
+    events = _drain_all_events()
+    feature_events = [e for e in events if e['event'] == 'desktop_feature_opened']
+    assert len(feature_events) == 1, "joins_lab emit must enqueue one desktop_feature_opened"
+    assert feature_events[0]['properties']['feature_name'] == 'joins_lab'
+
+
+def test_emit_feature_opened_fragment_puzzle(monkeypatch, _reset_telemetry_state):
+    """_emit_feature_opened(feature_name='fragment_puzzle') enqueues desktop_feature_opened."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_feature_emit_stub(monkeypatch)
+    gui._emit_feature_opened(feature_name='fragment_puzzle')
+
+    events = _drain_all_events()
+    feature_events = [e for e in events if e['event'] == 'desktop_feature_opened']
+    assert len(feature_events) == 1
+    assert feature_events[0]['properties']['feature_name'] == 'fragment_puzzle'
+
+
+def test_emit_feature_opened_fjms_catalog(monkeypatch, _reset_telemetry_state):
+    """_emit_feature_opened(dialog_name='fjms_catalog') enqueues desktop_feature_opened."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_feature_emit_stub(monkeypatch)
+    gui._emit_feature_opened(dialog_name='fjms_catalog')
+
+    events = _drain_all_events()
+    feature_events = [e for e in events if e['event'] == 'desktop_feature_opened']
+    assert len(feature_events) == 1
+    assert feature_events[0]['properties']['dialog_name'] == 'fjms_catalog'
+
+
+def test_emit_feature_opened_result_detail(monkeypatch, _reset_telemetry_state):
+    """_emit_feature_opened(dialog_name='result_detail') enqueues desktop_feature_opened."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_feature_emit_stub(monkeypatch)
+    gui._emit_feature_opened(dialog_name='result_detail')
+
+    events = _drain_all_events()
+    feature_events = [e for e in events if e['event'] == 'desktop_feature_opened']
+    assert len(feature_events) == 1
+    assert feature_events[0]['properties']['dialog_name'] == 'result_detail'
+
+
+def test_emit_feature_opened_visual_similarity(monkeypatch, _reset_telemetry_state):
+    """_emit_feature_opened(dialog_name='visual_similarity') enqueues desktop_feature_opened."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_feature_emit_stub(monkeypatch)
+    gui._emit_feature_opened(dialog_name='visual_similarity')
+
+    events = _drain_all_events()
+    feature_events = [e for e in events if e['event'] == 'desktop_feature_opened']
+    assert len(feature_events) == 1
+    assert feature_events[0]['properties']['dialog_name'] == 'visual_similarity'
+
+
+def test_emit_feature_opened_ready_gate(monkeypatch, _reset_telemetry_state):
+    """With _telemetry_ready() False, _emit_feature_opened emits nothing (REVIEWS MEDIUM-9)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_feature_emit_stub(monkeypatch, telemetry_ready=False)
+    gui._emit_feature_opened(feature_name='joins_lab')
+
+    events = _drain_all_events()
+    feature_events = [e for e in events if e['event'] == 'desktop_feature_opened']
+    assert len(feature_events) == 0, (
+        "_emit_feature_opened must not emit before _telemetry_ready() (REVIEWS MEDIUM-9)"
+    )
+
+
+def test_both_puzzle_paths_emit_in_source(monkeypatch, _reset_telemetry_state):
+    """Both _open_puzzle_window AND add_to_puzzle must call _emit_feature_opened (source check).
+
+    REVIEWS MEDIUM-7: both open paths must emit feature_name='fragment_puzzle'.
+    """
+    import genizah_app as app
+    import inspect
+
+    puzzle_src = inspect.getsource(app.GenizahGUI._open_puzzle_window)
+    assert '_emit_feature_opened' in puzzle_src, (
+        "_open_puzzle_window must call self._emit_feature_opened(feature_name='fragment_puzzle')"
+    )
+
+    add_src = inspect.getsource(app.GenizahGUI.add_to_puzzle)
+    assert '_emit_feature_opened' in add_src, (
+        "add_to_puzzle must call self._emit_feature_opened(feature_name='fragment_puzzle') "
+        "(REVIEWS MEDIUM-7: second live open path)"
+    )
+
+
+def test_live_vs_path_emits_visual_similarity(monkeypatch, _reset_telemetry_state):
+    """open_joins_workbench with source='visual' must emit dialog_name='visual_similarity'
+    in source (static check — live path in open_joins_workbench, not dead handler).
+
+    BLOCKER: VS event must NOT come from _browse_view_visual_similarity (dead) or
+    _show_vs_dialog (dead, leaks shelfmark).
+    """
+    import genizah_app as app
+    import inspect
+
+    workbench_src = inspect.getsource(app.GenizahGUI.open_joins_workbench)
+    assert "'visual_similarity'" in workbench_src, (
+        "open_joins_workbench must emit dialog_name='visual_similarity' for source='visual'/'combined'"
+    )
+    assert 'visual' in workbench_src, (
+        "open_joins_workbench must branch on source in ('visual', 'combined') for VS emit"
+    )
+
+    # Negative: dead handler must NOT contain the VS emit
+    try:
+        dead_src = inspect.getsource(app.GenizahGUI._browse_view_visual_similarity)
+        assert "'visual_similarity'" not in dead_src, (
+            "_browse_view_visual_similarity is DEAD and must NOT contain a VS telemetry emit"
+        )
+    except (AttributeError, OSError):
+        pass  # If method doesn't exist, that's also fine
+
+
+def test_vs_source_text_emits_joins_lab_not_vs(monkeypatch, _reset_telemetry_state):
+    """open_joins_workbench source check: source='text' path uses 'joins_lab' not 'visual_similarity'.
+
+    The two events must be mutually exclusive per the source guard (no double-count).
+    """
+    import genizah_app as app
+    import inspect
+
+    # The function must contain 'joins_lab' (the else branch)
+    workbench_src = inspect.getsource(app.GenizahGUI.open_joins_workbench)
+    assert "'joins_lab'" in workbench_src, (
+        "open_joins_workbench must emit feature_name='joins_lab' for source='text' path"
+    )
+
+
+def test_fjms_catalog_result_dialog_path_in_source(monkeypatch, _reset_telemetry_state):
+    """desktop/result_dialog.py _show_rd_catalog must contain 'fjms_catalog' emit (source check).
+
+    REVIEWS MEDIUM-6: both Browse-tab AND ResultDialog paths must emit fjms_catalog.
+    """
+    import ast
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parent.parent
+    rd_path = repo_root / 'desktop' / 'result_dialog.py'
+    src = rd_path.read_text(encoding='utf-8')
+    assert 'fjms_catalog' in src, (
+        "desktop/result_dialog.py must emit dialog_name='fjms_catalog' in _show_rd_catalog "
+        "(REVIEWS MEDIUM-6: second live FJMS catalog open path)"
+    )
+
+
+def test_result_detail_in_result_dialog_init(monkeypatch, _reset_telemetry_state):
+    """desktop/result_dialog.py ResultDialog.__init__ must emit 'result_detail' (source check)."""
+    import ast
+    from pathlib import Path
+
+    repo_root = Path(__file__).resolve().parent.parent
+    rd_path = repo_root / 'desktop' / 'result_dialog.py'
+    src = rd_path.read_text(encoding='utf-8')
+    assert 'result_detail' in src, (
+        "desktop/result_dialog.py ResultDialog.__init__ must emit dialog_name='result_detail'"
+    )
+
+
+def test_export_dialog_emit_placement_in_source(monkeypatch, _reset_telemetry_state):
+    """export_results and export_comp_report must contain 'export' emit and action emit (source check).
+
+    REVIEWS MEDIUM-8: dialog emit BEFORE save dialog, action emit AFTER path chosen (no cancel count).
+    """
+    import genizah_app as app
+    import inspect
+
+    export_src = inspect.getsource(app.GenizahGUI.export_results)
+    assert "'export'" in export_src or 'dialog_name' in export_src, (
+        "export_results must emit dialog_name='export'"
+    )
+    assert 'export_xlsx' in export_src or '_EXPORT_ACTION_BY_FMT' in export_src, (
+        "export_results must emit action='export_xlsx' (or use _EXPORT_ACTION_BY_FMT map)"
+    )
+
+    comp_src = inspect.getsource(app.GenizahGUI.export_comp_report)
+    assert "'export'" in comp_src or 'dialog_name' in comp_src, (
+        "export_comp_report must emit dialog_name='export'"
+    )
+
+
+def test_export_action_map_helper(monkeypatch, _reset_telemetry_state):
+    """_export_action_for_fmt or _EXPORT_ACTION_BY_FMT must map fmt→action correctly (D-04)."""
+    import genizah_app as app
+    import inspect
+
+    export_src = inspect.getsource(app.GenizahGUI.export_results)
+    # The static map must exist and map the four formats correctly
+    assert 'export_xlsx' in export_src, "export_results must reference 'export_xlsx' action"
+    assert 'export_csv' in export_src, "export_results must reference 'export_csv' action"
+    assert 'export_txt' in export_src, "export_results must reference 'export_txt' action"
+    assert 'export_docx' in export_src, "export_results must reference 'export_docx' action"
+
+
+def test_emit_feature_opened_consent_gate(monkeypatch, _reset_telemetry_state):
+    """With consent OFF, _emit_feature_opened enqueues nothing (consent gate in track())."""
+    import desktop.telemetry as tel
+    # consent is OFF by default
+
+    gui = _make_feature_emit_stub(monkeypatch)
+    gui._emit_feature_opened(feature_name='joins_lab')
+
+    events = _drain_all_events()
+    feature_events = [e for e in events if e['event'] == 'desktop_feature_opened']
+    assert len(feature_events) == 0, (
+        "_emit_feature_opened must emit nothing when consent is OFF"
+    )
+
+
+# ===========================================================================
+# Wave 3, Task 2: Focus-aware daily active-user heartbeat (desktop_active_ping)
+# ===========================================================================
+
+def _make_ping_stub(monkeypatch, *, telemetry_ready=True, app_active=True,
+                    today='2026-06-16', session_start_date='2026-06-15',
+                    last_ping=None):
+    """Build a minimal stub for _maybe_emit_active_ping tests.
+
+    Mocks out QApplication.instance() and datetime.now() so tests are
+    deterministic without a real Qt event loop.
+    """
+    import types
+    import genizah_app as app
+    import shared.posthog_server as ph_mod
+    from unittest.mock import MagicMock, patch
+
+    monkeypatch.setattr(ph_mod, '_start_drain_thread_once', lambda: None)
+
+    gui = types.SimpleNamespace()
+    gui._telemetry_session_started = telemetry_ready
+    gui._app_shutting_down = False
+    gui._session_id = 'ping-test-session'
+    gui._session_start_date_utc = session_start_date
+    gui._last_ping_date_utc = last_ping
+
+    gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
+
+    # Patch QApplication.instance() to return a mock with applicationState()
+    mock_app = MagicMock()
+    from PyQt6.QtCore import Qt
+    if app_active:
+        mock_app.applicationState.return_value = Qt.ApplicationState.ApplicationActive
+    else:
+        mock_app.applicationState.return_value = Qt.ApplicationState.ApplicationInactive
+
+    # We need to monkeypatch within the genizah_app module scope
+    import genizah_app as app_mod
+    from PyQt6.QtWidgets import QApplication
+    monkeypatch.setattr(QApplication, 'instance', staticmethod(lambda: mock_app))
+
+    # Patch datetime.now to return a fixed 'today'
+    import datetime as dt_mod
+    original_dt = dt_mod.datetime
+
+    class FakeDatetime(original_dt):
+        @classmethod
+        def now(cls, tz=None):
+            # Return a fixed date
+            return original_dt(2026, 6, 16, 12, 0, 0, tzinfo=tz)
+
+    monkeypatch.setattr(dt_mod, 'datetime', FakeDatetime)
+
+    def _do_emit(**kwargs):
+        return app.GenizahGUI._maybe_emit_active_ping(gui)
+
+    gui._maybe_emit_active_ping = lambda: app.GenizahGUI._maybe_emit_active_ping(gui)
+    return gui
+
+
+def test_active_ping_method_exists(monkeypatch, _reset_telemetry_state):
+    """_setup_active_ping, _on_app_state_changed, _maybe_emit_active_ping must exist."""
+    import genizah_app as app
+    assert hasattr(app.GenizahGUI, '_setup_active_ping'), (
+        "_setup_active_ping must exist on GenizahGUI (Task 2)"
+    )
+    assert hasattr(app.GenizahGUI, '_on_app_state_changed'), (
+        "_on_app_state_changed must exist on GenizahGUI (Task 2 focus-awareness)"
+    )
+    assert hasattr(app.GenizahGUI, '_maybe_emit_active_ping'), (
+        "_maybe_emit_active_ping must exist on GenizahGUI (Task 2)"
+    )
+
+
+def test_active_ping_fires_when_conditions_met(monkeypatch, _reset_telemetry_state):
+    """_maybe_emit_active_ping emits ACTIVE_PING when all 3 guards pass:
+    - today != session_start_date_utc (D-16)
+    - _last_ping_date_utc != today (at-most-once-per-day)
+    - app is active (ApplicationActive)
+    """
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_ping_stub(
+        monkeypatch,
+        telemetry_ready=True,
+        app_active=True,
+        today='2026-06-16',
+        session_start_date='2026-06-15',
+        last_ping=None,
+    )
+    gui._maybe_emit_active_ping()
+
+    events = _drain_all_events()
+    ping_events = [e for e in events if e['event'] == 'desktop_active_ping']
+    assert len(ping_events) == 1, (
+        "_maybe_emit_active_ping must emit exactly one ACTIVE_PING when conditions met"
+    )
+    assert gui._last_ping_date_utc == '2026-06-16', (
+        "_last_ping_date_utc must be updated to today after emit"
+    )
+
+
+def test_active_ping_not_on_session_start_day(monkeypatch, _reset_telemetry_state):
+    """D-16: heartbeat must NOT fire on the same UTC day as session_start."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_ping_stub(
+        monkeypatch,
+        telemetry_ready=True,
+        app_active=True,
+        today='2026-06-16',
+        session_start_date='2026-06-16',  # SAME day as "today"
+        last_ping=None,
+    )
+    gui._maybe_emit_active_ping()
+
+    events = _drain_all_events()
+    ping_events = [e for e in events if e['event'] == 'desktop_active_ping']
+    assert len(ping_events) == 0, (
+        "_maybe_emit_active_ping must NOT emit on same UTC day as session_start (D-16)"
+    )
+
+
+def test_active_ping_at_most_once_per_day(monkeypatch, _reset_telemetry_state):
+    """_maybe_emit_active_ping emits NOTHING if already pinged today."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_ping_stub(
+        monkeypatch,
+        telemetry_ready=True,
+        app_active=True,
+        today='2026-06-16',
+        session_start_date='2026-06-15',
+        last_ping='2026-06-16',  # already pinged today
+    )
+    gui._maybe_emit_active_ping()
+
+    events = _drain_all_events()
+    ping_events = [e for e in events if e['event'] == 'desktop_active_ping']
+    assert len(ping_events) == 0, (
+        "_maybe_emit_active_ping must emit NOTHING when already pinged today (at-most-once-per-day)"
+    )
+
+
+def test_active_ping_not_when_app_inactive(monkeypatch, _reset_telemetry_state):
+    """_maybe_emit_active_ping emits NOTHING when app is not in ApplicationActive state."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_ping_stub(
+        monkeypatch,
+        telemetry_ready=True,
+        app_active=False,  # app NOT active
+        today='2026-06-16',
+        session_start_date='2026-06-15',
+        last_ping=None,
+    )
+    gui._maybe_emit_active_ping()
+
+    events = _drain_all_events()
+    ping_events = [e for e in events if e['event'] == 'desktop_active_ping']
+    assert len(ping_events) == 0, (
+        "_maybe_emit_active_ping must NOT emit when app is not active (active-only guard)"
+    )
+
+
+def test_active_ping_ready_gate(monkeypatch, _reset_telemetry_state):
+    """_maybe_emit_active_ping emits NOTHING when _telemetry_ready() False (REVIEWS MEDIUM-9)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_ping_stub(
+        monkeypatch,
+        telemetry_ready=False,  # NOT ready
+        app_active=True,
+        today='2026-06-16',
+        session_start_date='2026-06-15',
+        last_ping=None,
+    )
+    gui._maybe_emit_active_ping()
+
+    events = _drain_all_events()
+    ping_events = [e for e in events if e['event'] == 'desktop_active_ping']
+    assert len(ping_events) == 0, (
+        "_maybe_emit_active_ping must not emit before _telemetry_ready() (REVIEWS MEDIUM-9)"
+    )
+
+
+def test_active_ping_consent_gate(monkeypatch, _reset_telemetry_state):
+    """_maybe_emit_active_ping emits NOTHING when consent OFF."""
+    import desktop.telemetry as tel
+    # consent is OFF by default
+
+    gui = _make_ping_stub(
+        monkeypatch,
+        telemetry_ready=True,
+        app_active=True,
+        today='2026-06-16',
+        session_start_date='2026-06-15',
+        last_ping=None,
+    )
+    gui._maybe_emit_active_ping()
+
+    events = _drain_all_events()
+    ping_events = [e for e in events if e['event'] == 'desktop_active_ping']
+    assert len(ping_events) == 0, (
+        "_maybe_emit_active_ping must emit NOTHING when consent OFF"
+    )
+
+
+def test_applicationstate_changed_wired_in_source(monkeypatch, _reset_telemetry_state):
+    """_setup_active_ping must wire applicationStateChanged (focus/resume awareness).
+
+    D-16: NOT a naive 24h QTimer — must respond to focus/resume.
+    """
+    import genizah_app as app
+    import inspect
+
+    setup_src = inspect.getsource(app.GenizahGUI._setup_active_ping)
+    assert 'applicationStateChanged' in setup_src, (
+        "_setup_active_ping must connect applicationStateChanged (D-16 focus/resume awareness)"
+    )
+    assert '_maybe_emit_active_ping' in setup_src, (
+        "_setup_active_ping must connect QTimer timeout to _maybe_emit_active_ping"
+    )
