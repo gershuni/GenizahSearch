@@ -26,7 +26,18 @@ from desktop.telemetry import DesktopEvent
 # ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def _reset_telemetry_state(monkeypatch):
-    """Reset desktop.telemetry + posthog_server state before/after each test."""
+    """Reset desktop.telemetry + posthog_server state before/after each test.
+
+    Drain-thread isolation strategy (Phase 114 task 2):
+    The posthog_server drain daemon thread starts lazily and once started, reads
+    _event_queue as a module-level global on every iteration.  When the autouse
+    fixture monkeypatches _event_queue → fresh_q, the running daemon thread will
+    begin consuming from fresh_q before tests can assert on it.
+
+    Fix: also patch enqueue_event to bypass _start_drain_thread_once entirely,
+    putting directly into fresh_q.  The daemon thread (if alive) stays blocked
+    on the previous queue object it last tried to get() from.
+    """
     fake_config: dict = {}
 
     def fake_load_app_config():
@@ -46,6 +57,10 @@ def _reset_telemetry_state(monkeypatch):
     ph._reset_for_tests()
     fresh_q: queue.Queue = queue.Queue(maxsize=10000)
     monkeypatch.setattr(ph, '_event_queue', fresh_q)
+
+    # Prevent the drain daemon thread from consuming test events.
+    # Patch _start_drain_thread_once to no-op so no new thread is started.
+    monkeypatch.setattr(ph, '_start_drain_thread_once', lambda: None)
 
     tel._reset_for_tests()
     tel._load_consent_state()

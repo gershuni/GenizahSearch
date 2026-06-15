@@ -3275,6 +3275,21 @@ def _format_txt_genizah_block(result_dict, full_text=None):
     return f"=== {d.get('shelfmark', '')} | {d.get('title', '')} ===\n{snippet}"
 
 
+def _telemetry_result_bucket(count: int) -> str:
+    """Coarse result-count bucket for Phase 114 telemetry (D-07/D-08).
+
+    Shared by _emit_search_telemetry, _emit_pgp_tag_search_telemetry,
+    and _emit_comp_search_telemetry.
+    """
+    if count == 0:
+        return '0'
+    if count < 10:
+        return '1-9'
+    if count < 100:
+        return '10-99'
+    return '100+'
+
+
 class GenizahGUI(QMainWindow):
     """Main application window orchestrating search, browsing, and indexing."""
     browse_thumb_resolved = pyqtSignal(str, object)
@@ -17353,6 +17368,29 @@ class GenizahGUI(QMainWindow):
             modes = ['literal', 'variants', None, 'fuzzy', 'Regex', 'Title', 'Shelfmark']
             mode = modes[mode_idx] if mode_idx < len(modes) else 'literal'
 
+        # Phase 114 D-05: hardcoded search mode enum map — NEVER mode_combo.currentText()
+        _SEARCH_MODE_ENUM = {
+            0: 'keyword', 1: 'variants', 2: 'responsa', 3: 'fuzzy',
+            4: 'regex', 5: 'title', 6: 'shelfmark', 7: 'pgp_tags',
+        }
+        _mode_key = _SEARCH_MODE_ENUM.get(mode_idx, 'keyword')
+        _is_lab = bool(
+            getattr(self, 'btn_lab_mode_toggle', None)
+            and self.btn_lab_mode_toggle.isChecked()
+        )
+        _search_mode_enum = f'lab_{_mode_key}' if _is_lab else _mode_key
+        # D-04: corpus from currentData() (fixed code), NEVER currentText() (translated label)
+        _corpus = (
+            (self.corpus_scope_combo.currentData() or 'genizah')
+            if hasattr(self, 'corpus_scope_combo')
+            else 'genizah'
+        )
+        self._current_search_run = {
+            'mode': _search_mode_enum,
+            'corpus': _corpus,
+            'emitted': False,
+        }
+
         # Update variant level and max changes from UI before search
         if mode == 'variants' and self.var_mgr:
             pairs_count = self._get_current_variant_pairs_count()
@@ -17448,6 +17486,42 @@ class GenizahGUI(QMainWindow):
 
         self.search_thread.error_signal.connect(self.on_error)
         self.search_thread.start()
+
+    def _emit_search_telemetry(self, action: str, result_count=None) -> None:
+        """Emit desktop_search_executed for a regular search run (Phase 114 USAGE-03).
+
+        FIRST-LINE shutdown guard (REVIEWS HIGH-2): suppresses the post-session-end
+        delivery path where closeEvent sets cancel_flag directly → queued
+        results_signal.emit([]) → on_search_finished fires after session_end.
+
+        Guards (in order):
+        1. _app_shutting_down → return immediately (HIGH-2)
+        2. _telemetry_ready() → return if session not started (MEDIUM-9)
+        3. _current_search_run None or already emitted → return (D-09 exactly-once)
+        """
+        # Guard 1 — MUST be first (REVIEWS HIGH-2)
+        if getattr(self, '_app_shutting_down', False):
+            return
+        # Guard 2 — producer gate (REVIEWS MEDIUM-9)
+        if not self._telemetry_ready():
+            return
+        try:
+            run = getattr(self, '_current_search_run', None)
+            if run is None or run.get('emitted'):
+                return
+            run['emitted'] = True
+            props = {
+                'search_mode': run['mode'],
+                'corpus_scope': run['corpus'],
+                'action': action,
+                'session_id': getattr(self, '_session_id', ''),
+            }
+            if action == 'completed' and result_count is not None:
+                props['result_count_bucket'] = _telemetry_result_bucket(result_count)
+            from desktop import telemetry
+            telemetry.track(telemetry.DesktopEvent.SEARCH_EXECUTED, **props)
+        except Exception:
+            pass
 
     def stop_search(self):
         if self.search_thread.isRunning():
