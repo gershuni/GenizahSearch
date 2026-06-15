@@ -309,3 +309,59 @@ def _no_blocking_modal_exec(monkeypatch):
         lambda self: QMessageBox.StandardButton.Cancel,
         raising=False,
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 113 (Plan 01): crash-LOCAL reset fixture (NOT global autouse — REVIEWS MEDIUM-5).
+#
+# This fixture is NON-autouse and OPT-IN.  Crash test files request it via a
+# small module-level autouse wrapper:
+#
+#   @pytest.fixture(autouse=True)
+#   def _use(crash_telemetry_state): yield
+#
+# This keeps the reset local to each crash test module without adding a second
+# project-wide autouse that would break unrelated config tests.
+#
+# What it does:
+# - Replaces load_app_config / save_app_config with an in-memory dict on both
+#   genizah_core AND desktop.telemetry (so config.pkl is never touched)
+# - Resets shared.posthog_server state via _reset_for_tests()
+# - Replaces _event_queue with a fresh per-test queue (10 000-slot cap)
+# - Resets desktop.telemetry state via _reset_for_tests() then re-runs
+#   _load_consent_state() against the empty in-memory config
+# - Teardown resets both modules so no state leaks to the next test
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def crash_telemetry_state(monkeypatch):
+    """Crash-test-LOCAL state reset (non-global, opt-in). See Phase 113 Plan 01."""
+    import queue as _queue
+
+    fake_config: dict = {}
+
+    def fake_load_app_config():
+        return dict(fake_config)
+
+    def fake_save_app_config(new_data: dict):
+        fake_config.update(new_data)
+
+    import genizah_core
+    monkeypatch.setattr(genizah_core, 'load_app_config', fake_load_app_config)
+    monkeypatch.setattr(genizah_core, 'save_app_config', fake_save_app_config)
+
+    import desktop.telemetry as _tel
+    monkeypatch.setattr(_tel, 'load_app_config', fake_load_app_config)
+    monkeypatch.setattr(_tel, 'save_app_config', fake_save_app_config)
+
+    import shared.posthog_server as _ph
+    _ph._reset_for_tests()
+    fresh_q: _queue.Queue = _queue.Queue(maxsize=10000)
+    monkeypatch.setattr(_ph, '_event_queue', fresh_q)
+
+    _tel._reset_for_tests()
+    _tel._load_consent_state()
+
+    yield fake_config
+
+    _tel._reset_for_tests()
+    _ph._reset_for_tests()
