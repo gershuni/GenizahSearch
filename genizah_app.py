@@ -2399,6 +2399,11 @@ class SettingsDialog(QDialog):
             box.exec()
             if box.standardButton(box.clickedButton()) == QMessageBox.StandardButton.Yes:
                 _tel_set_consent(new_val)  # D-08: sole write path
+                # D-13/HIGH-4: mid-session opt-in — re-run coordinator so
+                # identify fires for the logged-in user and session_start fires
+                # (once) before any subsequent usage event.
+                if new_val:
+                    self._run_startup_telemetry_coordinator()
             else:
                 # D-07a: revert visual, do NOT call set_consent
                 self.chk_telemetry.blockSignals(True)
@@ -3541,8 +3546,109 @@ class GenizahGUI(QMainWindow):
             # Restore session state (deferred slightly so all widgets are settled)
             QTimer.singleShot(200, self._restore_session)
 
+            # Phase 114: startup telemetry coordinator — fires after session-restore (200ms)
+            # and consent-dialog (500ms) timers have resolved.  Idempotent; best-effort.
+            QTimer.singleShot(700, self._run_startup_telemetry_coordinator)
+
         except Exception as e:
             QMessageBox.critical(self, tr("Fatal Error"), tr("Failed to finalize initialization:\n{}").format(e))
+
+    # ---------------------------------------------------------------------------
+    # Phase 114 — telemetry identity lifecycle + session foundation
+    # ---------------------------------------------------------------------------
+
+    def _sync_telemetry_identity(self) -> None:
+        """Reconcile PostHog identity against the live Supabase session.
+
+        Always-runs portion of the coordinator (NOT guarded by
+        _telemetry_session_started).  Re-runs on every coordinator call so a
+        mid-session opt-out→opt-in re-identifies the logged-in _uuid before
+        any usage event fires (REVIEWS HIGH-4 / D-13).
+
+        Call path: _run_startup_telemetry_coordinator (unconditionally before
+        the session_start one-shot guard), _show_login_dialog success block,
+        _show_register_dialog success block.
+        """
+        try:
+            from desktop import telemetry
+            if not telemetry.is_enabled():
+                return  # consent gate — safe no-op for opted-out callers
+            user = getattr(self.corrections_client, 'current_user', None)
+            stored_uuid = telemetry.load_app_config().get(telemetry.IDENTIFIED_USER_KEY)
+            if user is not None and getattr(user, '_uuid', None):
+                telemetry.identify(user._uuid)      # D-10: _uuid ONLY, NEVER .id
+            elif stored_uuid:
+                telemetry.reset_identity()          # D-12: stale IDENTIFIED_USER_KEY
+        except Exception:
+            pass  # identity sync is best-effort; never raise into caller
+
+    def _run_startup_telemetry_coordinator(self) -> None:
+        """Single boot/opt-in sequence: consent → identity-sync → session_start.
+
+        D-12: Centralised coordinator — called once from on_startup_finished
+        (700ms defer) and re-called on every opt-in event so mid-session
+        re-opt-in re-identifies the logged-in user (REVIEWS HIGH-4).
+        D-14: Exactly one session_id per process; crash-restart = fresh session.
+        D-11: identify() BEFORE track(SESSION_START).
+        REVIEWS MEDIUM-9: sets _telemetry_session_started so _telemetry_ready()
+        returns True only after this branch completes.
+        """
+        try:
+            from desktop import telemetry
+            if not telemetry.is_enabled():
+                return  # consent not granted
+
+            # Step 1: Always-runs identity reconcile (HIGH-4 — runs BEFORE the
+            # session_start one-shot guard so a re-opt-in re-identifies the
+            # logged-in _uuid even though _telemetry_session_started is already True).
+            self._sync_telemetry_identity()
+
+            # Step 2: One-shot session_start guard (D-14)
+            if getattr(self, '_telemetry_session_started', False):
+                return  # session_start already fired — identity-sync already re-ran above
+
+            self._telemetry_session_started = True
+
+            # Step 3: Mint per-process session_id (D-14)
+            import uuid
+            from datetime import datetime, timezone
+            self._session_id = uuid.uuid4().hex
+
+            now_utc = datetime.now(timezone.utc)
+            self._session_start_date_utc = now_utc.strftime('%Y-%m-%d')
+
+            # Step 4: Emit session_start after identity resolves (D-11)
+            import sys
+            from PyQt6 import QtCore
+            telemetry.track(
+                telemetry.DesktopEvent.SESSION_START,
+                session_id=self._session_id,
+                ui_language='he' if CURRENT_LANG == 'he' else 'en',
+                python_version=(
+                    f'{sys.version_info.major}.{sys.version_info.minor}'
+                    f'.{sys.version_info.micro}'
+                ),
+                pyqt_version=QtCore.PYQT_VERSION_STR,
+            )
+
+            # Step 5: Wire daily active-user heartbeat (D-16, Plan 03 adds the method)
+            if hasattr(self, '_setup_active_ping'):
+                self._setup_active_ping()
+
+        except Exception:
+            pass  # coordinator is best-effort; never raise into caller
+
+    def _telemetry_ready(self) -> bool:
+        """Producer gate: True only after the coordinator's session_start branch ran.
+
+        REVIEWS MEDIUM-9: all usage producers (tab, search, feature_opened,
+        heartbeat) short-circuit `if not self._telemetry_ready(): return` so
+        no usage event can fire before self._session_id is guaranteed set.
+
+        Identity-only callers (login/logout) do NOT use this gate — they call
+        identify/reset_identity directly and are independently consent-gated.
+        """
+        return bool(getattr(self, '_telemetry_session_started', False))
 
     def _check_shelfmark_completer_ready(self):
         if self.meta_mgr and len(self.meta_mgr.csv_bank) > 0:
@@ -15895,6 +16001,9 @@ class GenizahGUI(QMainWindow):
                         "a modal stayed open past the retry cap")
                 return
             show_first_run_prompt(self)
+            # D-13/HIGH-4: after the first-run consent dialog closes, re-run
+            # the coordinator so identify + session_start fire if user opted in.
+            self._run_startup_telemetry_coordinator()
         except Exception:
             # Never block startup; log at debug rather than swallowing silently (WR-04).
             logger.debug("first-run consent prompt gate failed", exc_info=True)

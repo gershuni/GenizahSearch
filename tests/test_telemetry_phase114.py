@@ -244,9 +244,18 @@ def test_coordinator_stale_identity_triggers_reset(monkeypatch, _reset_telemetry
 def test_reopt_in_reidentifies_without_second_session_start(monkeypatch, _reset_telemetry_state):
     """HIGH-4: mid-session opt-out→opt-in re-identifies logged-in _uuid.
 
-    After opt-out→opt-in:
-    - At least 2 x $identify events with distinct_id == _uuid (one per opt-in)
-    - Exactly 1 x desktop_session_start across the whole sequence
+    Sequence:
+    1. consent ON → coordinator runs → identify(_uuid) + session_start fire
+    2. consent OFF → set_consent(False) only; do NOT reset module state
+    3. consent ON → coordinator re-runs:
+       - _sync_telemetry_identity UNCONDITIONALLY before the session_start guard
+         → a second $identify fires for the logged-in _uuid
+       - session_start one-shot guard (_telemetry_session_started=True) suppresses
+         a second session_start
+
+    Asserts:
+    - >= 2 x $identify with distinct_id == _uuid
+    - exactly 1 x desktop_session_start
     """
     import desktop.telemetry as tel
     tel.set_consent(True)
@@ -254,53 +263,42 @@ def test_reopt_in_reidentifies_without_second_session_start(monkeypatch, _reset_
     user = _FakeUser('user-reopt-uuid-xyz')
     gui = _make_gui_stub(monkeypatch, _reset_telemetry_state, user=user)
 
-    # First opt-in: coordinator runs, identify + session_start fire
+    # Step 1: First opt-in — coordinator runs, identify + session_start fire
     gui._run_startup_telemetry_coordinator()
+    events_first = _drain_all_events()
 
-    # Opt-out
-    tel.set_consent(False)
-    # Clear queue to isolate post-opt-out events
-    _drain_all_events()
-
-    # Opt-in again: re-run coordinator
-    tel.set_consent(True)
-    tel._load_consent_state()  # simulate re-enabled state
-    gui._run_startup_telemetry_coordinator()
-
-    # Re-drain all events accumulated after second opt-in
-    events_after = _drain_all_events()
-    # Plus we need the first batch — run from scratch to count total
-    # Restart the whole sequence with a fresh queue to get total counts
-    ph._reset_for_tests()
-    fresh_q: queue.Queue = queue.Queue(maxsize=10000)
-    import shared.posthog_server as ph2
-    ph2._event_queue = fresh_q
-
-    tel._reset_for_tests()
-    tel._load_consent_state()
-    tel.set_consent(True)
-
-    gui2 = _make_gui_stub(monkeypatch, _reset_telemetry_state, user=user)
-    gui2._run_startup_telemetry_coordinator()  # first opt-in
-
-    tel.set_consent(False)
-
-    tel.set_consent(True)
-    tel._load_consent_state()
-    gui2._run_startup_telemetry_coordinator()  # re-opt-in
-
-    all_events = _drain_all_events()
-    identify_count = sum(
-        1 for e in all_events
+    identify_first = [
+        e for e in events_first
         if e['event'] == '$identify' and e.get('distinct_id') == 'user-reopt-uuid-xyz'
-    )
-    session_start_count = sum(1 for e in all_events if e['event'] == 'desktop_session_start')
+    ]
+    session_start_first = [e for e in events_first if e['event'] == 'desktop_session_start']
+    assert len(identify_first) == 1, "First opt-in must emit one $identify"
+    assert len(session_start_first) == 1, "First opt-in must emit one session_start"
 
-    assert identify_count >= 2, (
-        f"Expected >= 2 $identify events with _uuid on re-opt-in, got {identify_count}"
+    # Step 2: opt-out (do NOT reset telemetry module state — that's what a real opt-out does)
+    tel.set_consent(False)
+    _drain_all_events()  # discard any identity_reset events
+
+    # Step 3: opt-in again — re-run coordinator
+    tel.set_consent(True)
+    tel._load_consent_state()
+    gui._run_startup_telemetry_coordinator()
+    events_second = _drain_all_events()
+
+    # _sync_telemetry_identity ran unconditionally, so a second $identify fires
+    identify_second = [
+        e for e in events_second
+        if e['event'] == '$identify' and e.get('distinct_id') == 'user-reopt-uuid-xyz'
+    ]
+    # session_start must NOT fire again (_telemetry_session_started already True)
+    session_start_second = [e for e in events_second if e['event'] == 'desktop_session_start']
+
+    assert len(identify_second) >= 1, (
+        f"Re-opt-in must re-emit $identify (got {len(identify_second)}) — "
+        "_sync_telemetry_identity must run unconditionally before the session_start guard"
     )
-    assert session_start_count == 1, (
-        f"Expected exactly 1 session_start, got {session_start_count} (no duplicate on re-opt-in)"
+    assert len(session_start_second) == 0, (
+        f"Re-opt-in must NOT emit a second session_start (got {len(session_start_second)})"
     )
 
 
