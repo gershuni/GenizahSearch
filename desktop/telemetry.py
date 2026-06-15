@@ -930,6 +930,16 @@ def _emit_crash_direct(
         merged.update(props)
         validated = _validate_props(merged)
         scrubbed = _scrub_props(validated)
+        # CR-01: exc_module / error_fingerprint are produced by trusted code.
+        # _make_crash_props emits ONLY a basename (never a path) and a fixed
+        # "{exc_type}:{basename}:{lineno}" fingerprint. The generic value scrubber's
+        # bare-filename branch would redact every "*.py" basename to [REDACTED],
+        # collapsing all in-app crashes to "[REDACTED]:<lineno>" and destroying crash
+        # grouping (D-07 — the deliverable). Restore them from the pre-scrub payload,
+        # mirroring the 'context' carve-out in _emit().
+        for _trusted_key in ('exc_module', 'error_fingerprint'):
+            if _trusted_key in validated:
+                scrubbed[_trusted_key] = validated[_trusted_key]
         # send_crash_event_direct imported at module top (REVIEWS HIGH-2)
         send_crash_event_direct(
             DesktopEvent.CRASH.value, scrubbed, distinct_id, timeout=0.5

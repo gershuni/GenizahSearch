@@ -284,3 +284,51 @@ def test_no_str_exc_in_emit_crash():
         assert 'str(exc' not in code_text, (
             f"{func_name} calls str(exc...) — exception message must never be read (D-07)"
         )
+
+
+# ---------------------------------------------------------------------------
+# CR-01 regression — full _emit_crash_direct path must NOT scrub the trusted
+# crash keys (exc_module / error_fingerprint).
+#
+# The generic value scrubber's bare-filename branch (\S+\.[A-Za-z]\w{0,7}\b)
+# matches any "*.py" basename and would redact it to [REDACTED], collapsing
+# every in-app crash to fingerprint "[REDACTED]:<lineno>" and destroying crash
+# grouping (D-07 — the phase deliverable). Every other payload assertion checks
+# _make_crash_props OUTPUT (pre-scrub); this test captures what actually reaches
+# send_crash_event_direct (post-scrub), which is where the defect lived.
+# ---------------------------------------------------------------------------
+def test_emit_crash_direct_preserves_inapp_module_and_fingerprint(monkeypatch):
+    """CR-01: scrubbed crash payload keeps the in-app basename + fingerprint intact."""
+    desktop_dir = os.path.dirname(os.path.abspath(tel.__file__))
+    fake_app_file = os.path.join(desktop_dir, 'fake_app_module.py')
+
+    tb = _make_tb_in_file(fake_app_file)
+    if tb is None:
+        pytest.skip("Could not create traceback from desktop/ path")
+
+    # Enable the lock-free crash path and give it a distinct id.
+    monkeypatch.setattr(tel, '_enabled', True)
+    monkeypatch.setattr(tel, '_crash_distinct_id', 'crash-test-id')
+
+    captured: dict = {}
+
+    def _fake_send(event, props, distinct_id=None, **kwargs):
+        captured['event'] = event
+        captured['props'] = dict(props)
+        captured['distinct_id'] = distinct_id
+
+    monkeypatch.setattr(tel, 'send_crash_event_direct', _fake_send)
+
+    tel._emit_crash_direct(ValueError, tb, is_background=False)
+
+    assert captured, "send_crash_event_direct was never called"
+    props = captured['props']
+    # Pre-fix, the scrubber turned these into '[REDACTED]' / '[REDACTED]:<lineno>'.
+    assert props.get('exc_module') == 'fake_app_module.py', (
+        f"in-app exc_module was scrubbed away: {props.get('exc_module')!r}"
+    )
+    fp = props.get('error_fingerprint', '')
+    assert fp.startswith('ValueError:fake_app_module.py:'), (
+        f"error_fingerprint was scrubbed: {fp!r}"
+    )
+    assert '[REDACTED]' not in fp, f"fingerprint still contains [REDACTED]: {fp!r}"
