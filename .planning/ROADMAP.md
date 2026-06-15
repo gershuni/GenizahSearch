@@ -152,7 +152,8 @@ See: .planning/milestones/v7.16-ROADMAP.md
   5. Exactly one telemetry session ID is generated per process; all timestamps are UTC; performance durations use a monotonic clock; a crash-restart begins a fresh session without emitting a duplicate session-start for the crashed process.
 
 **Plans**: 3 plans
-- [ ] 114-01-PLAN.md — Identity coordinator + session_start/session_end + login/logout/opt-in identity wiring + ACTIVE_PING enum
+
+- [x] 114-01-PLAN.md — Identity coordinator + session_start/session_end + login/logout/opt-in identity wiring + ACTIVE_PING enum
 - [ ] 114-02-PLAN.md — desktop_tab_activated (user-only) + desktop_search_executed (exactly-once, mode/corpus/bucket enums)
 - [ ] 114-03-PLAN.md — desktop_feature_opened + focus-aware daily active_ping heartbeat + D-17 producer-layer AST guard
 
@@ -189,6 +190,6 @@ See: .planning/milestones/v7.16-ROADMAP.md
 | 111. Telemetry Foundation | v8.1.0 | 3/3 | Complete    | 2026-06-14 |
 | 112. Consent UX | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
 | 113. Crash Reporting | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
-| 114. Usage Analytics | v8.1.0 | 0/3 | Planned | - |
+| 114. Usage Analytics | v8.1.0 | 1/3 | In Progress|  |
 | 115. Performance Metrics | v8.1.0 | 0/TBD | Not started | - |
 | 116. Privacy Audit + CI Gate | v8.1.0 | 0/TBD | Not started | - |
