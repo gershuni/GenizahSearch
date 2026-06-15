@@ -18915,6 +18915,40 @@ class GenizahGUI(QMainWindow):
                 self.tag_search_combo.addItem(display, en_tag)
         self.tag_search_combo.blockSignals(False)
 
+    def _emit_pgp_tag_search_telemetry(self, action: str, result_count=None) -> None:
+        """Emit desktop_search_executed for a PGP-tags search run (Phase 114 USAGE-03).
+
+        Mirrors _emit_search_telemetry in structure. The PGP-tags path bypasses
+        start_search/on_search_finished entirely (REVIEWS HIGH-1), so it needs its
+        own per-run object (_current_pgp_tag_search_run) and emit helper.
+
+        search_mode is always the hardcoded 'pgp_tags' literal (D-05).
+        The `tag` argument from _on_tag_search_results is NEVER passed here (D-04).
+        """
+        # Guard 1 — MUST be first (REVIEWS HIGH-2, mirrors _emit_search_telemetry)
+        if getattr(self, '_app_shutting_down', False):
+            return
+        # Guard 2 — producer gate (REVIEWS MEDIUM-9)
+        if not self._telemetry_ready():
+            return
+        try:
+            run = getattr(self, '_current_pgp_tag_search_run', None)
+            if run is None or run.get('emitted'):
+                return
+            run['emitted'] = True
+            props = {
+                'search_mode': run['mode'],   # always 'pgp_tags' (hardcoded D-05)
+                'corpus_scope': run['corpus'],  # always 'genizah'
+                'action': action,
+                'session_id': getattr(self, '_session_id', ''),
+            }
+            if action == 'completed' and result_count is not None:
+                props['result_count_bucket'] = _telemetry_result_bucket(result_count)
+            from desktop import telemetry
+            telemetry.track(telemetry.DesktopEvent.SEARCH_EXECUTED, **props)
+        except Exception:
+            pass
+
     def _execute_tag_search(self):
         """Execute a search by PGP tag from the dropdown."""
         tag = self.tag_search_combo.currentData()
@@ -18923,6 +18957,11 @@ class GenizahGUI(QMainWindow):
             tag = self.tag_search_combo.currentText().strip()
         if not tag:
             return
+        # Phase 114 USAGE-03: create per-run telemetry object BEFORE starting worker.
+        # search_mode is the hardcoded 'pgp_tags' literal (D-05 / REVIEWS HIGH-1).
+        # corpus is hardcoded 'genizah' — there is no corpus selector on the PGP-tags path.
+        # The `tag` string is NEVER stored here (D-04 — the tag is the search term).
+        self._current_pgp_tag_search_run = {'mode': 'pgp_tags', 'corpus': 'genizah', 'emitted': False}
         self.status_label.setText(tr("Searching tag: {}...").format(tag))
         if self._pgp_tag_search_worker and self._pgp_tag_search_worker.isRunning():
             self._pgp_tag_search_worker.wait()
@@ -18933,6 +18972,9 @@ class GenizahGUI(QMainWindow):
     def _on_tag_search_results(self, tag, results):
         """Handle tag search results - display in results table."""
         if not results:
+            # Phase 114 USAGE-03: zero-result completed tag search (D-07).
+            # `tag` is the search term — MUST NOT appear in props (D-04).
+            self._emit_pgp_tag_search_telemetry('completed', 0)
             self.status_label.setText(tr("No results for tag: {}").format(tag))
             self.last_results = []
             self.results_loaded = 0
@@ -18950,6 +18992,9 @@ class GenizahGUI(QMainWindow):
                 valid_results.append(r)
 
         if not valid_results:
+            # Phase 114 USAGE-03: no-local-match branch — still a completed search, 0 surfaced.
+            # emitted guard ensures this fires only if the empty-results branch didn't.
+            self._emit_pgp_tag_search_telemetry('completed', 0)
             self.status_label.setText(tr("No local results for tag: {}").format(tag))
             return
 
@@ -19005,6 +19050,10 @@ class GenizahGUI(QMainWindow):
 
         self.load_next_batch()
         self.status_label.setText(tr("Tag: {} - {} results").format(tag, len(formatted)))
+        # Phase 114 USAGE-03: emit search telemetry for the success path.
+        # `tag` and `len(formatted)` are safe; only the bucket is included, not the count (D-04).
+        # The tag text itself MUST NOT appear in any prop — only len(formatted) → bucket.
+        self._emit_pgp_tag_search_telemetry('completed', len(formatted))
 
 
     def _search_by_pgp_tag(self, tag):
