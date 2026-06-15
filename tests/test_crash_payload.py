@@ -10,9 +10,6 @@ REVIEWS MEDIUM-6).
 
 import pytest
 
-import desktop.telemetry as tel
-import shared.posthog_server as ph
-
 
 # ---------------------------------------------------------------------------
 # Module-level autouse wrapper — opt-in to crash_telemetry_state fixture.

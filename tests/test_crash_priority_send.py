@@ -169,23 +169,42 @@ def test_direct_send_never_raises_on_post_error(monkeypatch):
 
 
 def test_direct_send_lock_free_static():
-    """REVIEWS HIGH-1 static: send_crash_event_direct source contains no lock-taking symbols.
+    """REVIEWS HIGH-1 static: send_crash_event_direct body contains no lock-taking symbols.
 
-    Verifies that the implementation does not call _resolve_api_key,
-    _resolve_capture_url, or reference _capture_config_lock — all of which
-    acquire _capture_config_lock and would deadlock if a crash happens while
-    that lock is held (D-05 / REVIEWS HIGH-1).
+    Verifies that the CODE (non-docstring) of send_crash_event_direct does not
+    call _resolve_api_key, _resolve_capture_url, reference _capture_config_lock,
+    or touch _event_queue — all of which acquire locks or are the queue that must
+    be bypassed (D-05 / REVIEWS HIGH-1).
     """
-    src = inspect.getsource(ph.send_crash_event_direct)
-    assert '_resolve_api_key' not in src, (
-        'send_crash_event_direct must NOT call _resolve_api_key (acquires _capture_config_lock)'
+    import ast
+    import textwrap
+
+    full_src = inspect.getsource(ph.send_crash_event_direct)
+    # Strip the docstring: parse the function, locate its body statements, skip
+    # the first if it is an Expr(Constant) node (the docstring).
+    tree = ast.parse(textwrap.dedent(full_src))
+    func_def = tree.body[0]
+    assert isinstance(func_def, ast.FunctionDef)
+    body_stmts = func_def.body
+    # Drop leading docstring node
+    if body_stmts and isinstance(body_stmts[0], ast.Expr) and isinstance(
+        getattr(body_stmts[0], 'value', None), ast.Constant
+    ):
+        body_stmts = body_stmts[1:]
+    # Re-unparse only the body (code, no docstring)
+    body_src = '\n'.join(ast.unparse(stmt) for stmt in body_stmts)
+
+    assert '_resolve_api_key' not in body_src, (
+        'send_crash_event_direct body must NOT call _resolve_api_key '
+        '(acquires _capture_config_lock)'
     )
-    assert '_resolve_capture_url' not in src, (
-        'send_crash_event_direct must NOT call _resolve_capture_url (acquires _capture_config_lock)'
+    assert '_resolve_capture_url' not in body_src, (
+        'send_crash_event_direct body must NOT call _resolve_capture_url '
+        '(acquires _capture_config_lock)'
     )
-    assert '_capture_config_lock' not in src, (
-        'send_crash_event_direct must NOT reference _capture_config_lock'
+    assert '_capture_config_lock' not in body_src, (
+        'send_crash_event_direct body must NOT reference _capture_config_lock'
     )
-    assert '_event_queue' not in src, (
-        'send_crash_event_direct must NOT reference _event_queue'
+    assert '_event_queue' not in body_src, (
+        'send_crash_event_direct body must NOT reference _event_queue'
     )

@@ -8,12 +8,7 @@ No `qtbot` parameter is used anywhere in this file (repo is pytest-qt-FREE;
 REVIEWS MEDIUM-6).
 """
 
-import sys
-
 import pytest
-
-import desktop.telemetry as tel
-import shared.posthog_server as ph
 
 
 # ---------------------------------------------------------------------------

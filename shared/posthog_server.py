@@ -75,6 +75,15 @@ _api_key_override: str | None = None
 _host_override: str | None = None
 _capture_config_lock = threading.Lock()
 
+# Phase 113 crash-path snapshot globals (D-05 / REVIEWS HIGH-1).
+# These are PLAIN module globals — written under _capture_config_lock by the
+# two setters below, but READ WITHOUT ANY LOCK by send_crash_event_direct().
+# This is intentional: the crash path must never acquire a lock that a failing
+# thread could already hold (deadlock risk). Plain global reads are GIL-atomic
+# in CPython. Worst case on a very narrow race: stale-but-valid prior values.
+_crash_api_key_snapshot: str = ''
+_crash_capture_url_snapshot: str = ''
+
 
 def get_dropped_event_count() -> int:
     """Return the count of events dropped due to queue saturation (queue.Full).
@@ -123,10 +132,15 @@ def set_capture_api_key(key: str | None) -> None:
 
     Pass None to revert to the env-variable-only resolution (web behavior).
     Thread-safe via _capture_config_lock.
+
+    Phase 113 (D-05): also writes _crash_api_key_snapshot so the lock-free
+    crash path always sees a current value without acquiring any lock.
     """
-    global _api_key_override
+    global _api_key_override, _crash_api_key_snapshot
     with _capture_config_lock:
         _api_key_override = key
+        # Mirror the _resolve_api_key formula — crash path reads this without a lock.
+        _crash_api_key_snapshot = (key or os.environ.get('POSTHOG_API_KEY', '')).strip()
 
 
 def set_capture_host(host: str | None) -> None:
@@ -136,10 +150,15 @@ def set_capture_host(host: str | None) -> None:
     Does NOT affect the web server which hard-codes eu.i.posthog.com in its own
     client-side JS init.
     Thread-safe via _capture_config_lock.
+
+    Phase 113 (D-05): also writes _crash_capture_url_snapshot so the lock-free
+    crash path always sees a current URL without acquiring any lock.
     """
-    global _host_override
+    global _host_override, _crash_capture_url_snapshot
     with _capture_config_lock:
         _host_override = host
+        # Mirror the _resolve_capture_url formula — crash path reads this without a lock.
+        _crash_capture_url_snapshot = f"{(host or POSTHOG_HOST).rstrip('/')}/capture"
 
 
 def _resolve_api_key() -> str:
@@ -312,15 +331,17 @@ def _flush_before_exit(timeout: float = 0.5) -> None:
 
 
 def _reset_for_tests() -> None:
-    """Test seam — drain queue + reset drop counter + clear Phase 111 globals.
+    """Test seam — drain queue + reset drop counter + clear Phase 111/113 globals.
 
     NOT for production use. Clears: _dropped_events, _default_distinct_id,
-    _scrub_hook, _api_key_override, _host_override. Does NOT stop the drain thread
-    (Python threads aren't cleanly stoppable without flags; the daemon dies with
-    the process). Tests that need queue isolation should monkeypatch _event_queue
-    or assert via the drop counter.
+    _scrub_hook, _api_key_override, _host_override, _crash_api_key_snapshot,
+    _crash_capture_url_snapshot. Does NOT stop the drain thread (Python threads
+    aren't cleanly stoppable without flags; the daemon dies with the process).
+    Tests that need queue isolation should monkeypatch _event_queue or assert
+    via the drop counter.
     """
     global _dropped_events, _default_distinct_id, _scrub_hook, _api_key_override, _host_override
+    global _crash_api_key_snapshot, _crash_capture_url_snapshot
     # Drain queue
     while True:
         try:
@@ -337,6 +358,53 @@ def _reset_for_tests() -> None:
     with _capture_config_lock:
         _api_key_override = None
         _host_override = None
+    # Phase 113 additions: clear crash-path snapshot globals (plain assignment, no lock needed)
+    _crash_api_key_snapshot = ''
+    _crash_capture_url_snapshot = ''
+
+
+def send_crash_event_direct(
+    event: str,
+    properties: dict,
+    distinct_id: str,
+    timeout: float = 0.5,
+) -> None:
+    """Synchronous, priority POST for crash events (D-06 / CRASH-06).
+
+    Bypasses _event_queue entirely — crash events are NEVER subject to FIFO
+    ordering or daemon-thread drain timing. Even if the queue is saturated
+    with older events, this function delivers the crash event immediately.
+
+    LOCK-FREE end-to-end (D-05 / REVIEWS HIGH-1):
+    Reads api_key and url from _crash_api_key_snapshot / _crash_capture_url_snapshot
+    as PLAIN global reads — no lock, no _resolve_api_key(), no _resolve_capture_url().
+    These snapshots are written by set_capture_api_key() / set_capture_host() under
+    their existing _capture_config_lock, but the crash path reads them without any
+    lock. CPython's GIL ensures a str variable read is atomic. A crash while
+    _capture_config_lock is held cannot deadlock this path.
+
+    Does NOT touch: _event_queue, _default_distinct_id_lock, _scrub_hook_lock,
+    _capture_config_lock, drain thread. Web callers never call this function.
+
+    Never raises — all exceptions are swallowed (fire-and-forget in crash context).
+    """
+    try:
+        api_key = _crash_api_key_snapshot   # plain global read — no lock (D-05)
+        if not api_key:
+            return
+        url = _crash_capture_url_snapshot   # plain global read — no lock (D-05)
+        if not url:
+            return
+        payload = {
+            'api_key': api_key,
+            'event': event,
+            'distinct_id': distinct_id,
+            'properties': dict(properties) if properties else {},
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+        }
+        requests.post(url, json=payload, timeout=timeout)
+    except Exception:
+        pass  # fire-and-forget in crash context — never raise
 
 
 __all__ = [
@@ -352,4 +420,6 @@ __all__ = [
     'set_capture_host',
     '_flush_before_exit',
     '_drain_and_discard',
+    # Phase 113 addition:
+    'send_crash_event_direct',
 ]
