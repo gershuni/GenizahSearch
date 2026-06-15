@@ -33,6 +33,7 @@ from __future__ import annotations
 import enum
 import logging
 import os
+import platform
 import re
 import threading
 import uuid
@@ -46,6 +47,7 @@ from shared.posthog_server import (
     set_capture_api_key,
     set_capture_host,
     _drain_and_discard,
+    send_crash_event_direct,  # Phase 113: module-top import (REVIEWS HIGH-2 — no in-hook import)
 )
 
 logger = logging.getLogger(__name__)
@@ -54,6 +56,15 @@ logger = logging.getLogger(__name__)
 # Internal version constant (used in consent audit + BASE_PROPS)
 # ---------------------------------------------------------------------------
 _APP_VERSION: str = APP_VERSION
+
+# ---------------------------------------------------------------------------
+# OS constants — computed ONCE at import time (lock-free; no per-call syscall).
+# Used by _BASE_PROPS() to satisfy CRASH-04/SC#3/D-02 (OS in crash payloads).
+# These are module-level constants; _emit_crash_direct and _emit_native_crash
+# inherit OS props for free via their dict(_BASE_PROPS()) merge.
+# ---------------------------------------------------------------------------
+_OS_FAMILY: str = platform.system() or 'unknown'   # e.g. 'Windows', 'Linux', 'Darwin'
+_OS_VERSION: str = platform.release() or 'unknown'  # e.g. '10', '11', '5.15.0-73-generic'
 
 # ---------------------------------------------------------------------------
 # Embedded publishable-key constant (D-03).
@@ -82,6 +93,19 @@ _install_id: str | None = None
 _current_distinct_id: str | None = None
 _identified: bool = False
 _state_lock = threading.Lock()  # guards _install_id, _current_distinct_id, _identified
+
+# ---------------------------------------------------------------------------
+# Phase 113 crash-hook globals — read lock-free in the crash hook (D-05)
+# All are plain module globals; CPython GIL ensures atomic bool/str reads.
+# ---------------------------------------------------------------------------
+_crash_distinct_id: str | None = None   # snapshot; written by set_consent/identity, read without lock
+_in_crash_hook: bool = False            # recursion guard; plain bool is GIL-safe for single-thread re-entrancy
+_hooks_installed: bool = False          # idempotency guard for install_exception_hooks()
+_faulthandler_handle = None             # kept open for whole process lifetime (D-03)
+_pending_native_crash: str | None = None  # held when prior native crash but consent not yet True (D-03)
+_last_reported_tb_id: int | None = None   # lock-free traceback dedup (D-08 / REVIEWS PASS2)
+_prior_excepthook = None                  # captured at install time; restored by _reset_for_tests (MEDIUM-8)
+_prior_threading_hook = None              # captured at install time; restored by _reset_for_tests (MEDIUM-8)
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +282,9 @@ _ALLOWED_PROPS: frozenset[str] = frozenset({
     'feature_name', 'dialog_name', 'action',
     # Crash (Phase 113+)
     'exc_type', 'exc_module', 'exc_lineno',
-    'traceback_scrubbed', 'thread_name',
+    'error_fingerprint',    # "{exc_type}:{exc_module}:{exc_lineno}" (D-07)
+    'is_background_thread', # bool; True when emitted from threading.excepthook (D-07)
+    'fatal_error',          # fixed enum label for native crashes (D-02; desktop_prior_crash only)
     # Perf (Phase 115+)
     'duration_ms', 'result_count', 'sample_n',
     # Context label (allowlisted explicitly — survives _scrub_props)
@@ -305,8 +331,19 @@ def _safe_context(value: object) -> str:
 # Base props helper
 # ---------------------------------------------------------------------------
 def _BASE_PROPS() -> dict:
-    """Return the platform + app_version base properties added to every event."""
-    return {'platform': 'desktop', 'app_version': _APP_VERSION}
+    """Return the platform + app_version + OS base properties added to every event.
+
+    RESEARCH A1 invariant (lock-free): reads ONLY module-level constants
+    (_APP_VERSION, _OS_FAMILY, _OS_VERSION) — no _state_lock acquired.
+    If identity state is ever added here, a _crash_base_props() reading only
+    constants must replace it in the crash path (_emit_crash_direct).
+    """
+    return {
+        'platform': 'desktop',
+        'app_version': _APP_VERSION,
+        'os_family': _OS_FAMILY,
+        'os_version': _OS_VERSION,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +382,7 @@ def _load_consent_state() -> None:
     On first run config is empty; _enabled stays False and _install_id stays None.
     Never raises — all exceptions are swallowed per CRASH-05 contract.
     """
-    global _enabled, _install_id, _current_distinct_id, _identified
+    global _enabled, _install_id, _current_distinct_id, _identified, _crash_distinct_id
     try:
         cfg = load_app_config()
         enabled = bool(cfg.get(TELEMETRY_ENABLED_KEY, False))
@@ -366,6 +403,10 @@ def _load_consent_state() -> None:
             _wire_transport_config()
             if distinct_id:
                 set_default_distinct_id(distinct_id)
+                # REVIEWS HIGH-3: populate crash snapshot so a crash before any
+                # set_consent() call on a persisted-consent launch emits with the
+                # correct identity (not 'system'). Plain assignment — no lock needed.
+                _crash_distinct_id = distinct_id
     except Exception:
         logger.debug('telemetry: _load_consent_state silently failed', exc_info=True)
 
@@ -404,6 +445,7 @@ def set_consent(enabled: bool) -> None:
         - Writes consent audit fields (timestamp, app_version, ui_ver)
         - Wires the transport key/host (REVIEWS HIGH-1)
         - Sets the default distinct_id in the transport
+        - Populates _crash_distinct_id snapshot (Phase 113 D-05)
 
     On opt-out (CONSENT-06):
         - Sets telemetry_enabled=False
@@ -415,7 +457,7 @@ def set_consent(enabled: bool) -> None:
 
     Never raises.
     """
-    global _enabled, _install_id, _current_distinct_id, _identified
+    global _enabled, _install_id, _current_distinct_id, _identified, _crash_distinct_id
     try:
         if enabled:
             # --- OPT-IN ---
@@ -443,6 +485,10 @@ def set_consent(enabled: bool) -> None:
             with _state_lock:
                 distinct_id = _current_distinct_id or _install_id
             set_default_distinct_id(distinct_id)
+            # Phase 113 D-05 / REVIEWS HIGH-3: populate crash distinct_id snapshot so
+            # the crash hook can read the identity without acquiring _state_lock.
+            # Plain global write — no lock needed (GIL-atomic str assignment).
+            _crash_distinct_id = distinct_id
         else:
             # --- OPT-OUT (fail-closed; F5/Codex) ---
             # 1. Shut the gate and cut the transport IN MEMORY first, so a
@@ -461,6 +507,10 @@ def set_consent(enabled: bool) -> None:
             with _state_lock:
                 _identified = False
                 _current_distinct_id = _install_id
+                local_install_id_for_crash = _install_id
+            # Phase 113: on opt-out, reset crash snapshot to anonymous install_id
+            # (mirrors the anonymous reset — no lock needed).
+            _crash_distinct_id = local_install_id_for_crash
             # 4. Persist the opt-out LAST. CONSENT-06: do NOT write
             #    TELEMETRY_INSTALL_ID_KEY. save_app_config swallows write errors,
             #    so verify the flag actually landed — a failed opt-out that leaves
@@ -485,11 +535,14 @@ def set_consent(enabled: bool) -> None:
 # ---------------------------------------------------------------------------
 def _set_current_distinct_id(distinct_id: str, anonymous: bool) -> None:
     """Update module-level identity state and the transport default."""
-    global _current_distinct_id, _identified
+    global _current_distinct_id, _identified, _crash_distinct_id
     with _state_lock:
         _current_distinct_id = distinct_id
         _identified = not anonymous
     set_default_distinct_id(distinct_id)
+    # Phase 113 D-05: mirror write to lock-free crash snapshot.
+    # Plain assignment — GIL-atomic, no lock needed.
+    _crash_distinct_id = distinct_id
 
 
 def _emit(event_value: str, props: dict, distinct_id: str | None = None) -> None:
@@ -697,16 +750,256 @@ def run_selftest() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Phase 113 crash-path helpers — lock-free consent + payload building (D-05/D-07)
+# ---------------------------------------------------------------------------
+
+def _is_enabled_nolock() -> bool:
+    """Lock-free consent read for crash hooks (D-05 / SC#4).
+
+    Reads _enabled directly (no lock). Safe: CPython GIL ensures a bool read is
+    atomic. threading.excepthook runs on the FAILING thread — if that thread held
+    _enabled_lock we would deadlock. Worst case: stale False-negative (miss one
+    event); stale True-positive is impossible (opt-out clears the key first).
+    """
+    return _enabled  # direct global read, GIL-safe
+
+
+# ---------------------------------------------------------------------------
+# In-app frame classifier for crash payload (D-07 / REVIEWS MEDIUM-9 + PASS2)
+#
+# Classification approach (all paths resolved via os.path.realpath at import):
+#   _APP_SOURCE_ROOTS: ONLY desktop/ and shared/ — NOT the repo root.
+#     (The repo root contains .venv/ and venv/; using it would misclassify
+#     third-party frames under venv/Lib/site-packages/ as in-app — MEDIUM-9)
+#   _APP_SOURCE_FILES: explicit realpaths of top-level app modules in the repo
+#     root (genizah_app.py, genizah_core.py, gui_threads.py). Matched by exact
+#     path, so sibling venv/ files under the same root are never swept in.
+#   _EXCLUDED_PATH_SEGMENTS: path substrings that force 'external' regardless
+#     of the above — defense-in-depth against any edge case.
+#   _GENERIC_BASENAMES: names that recur across many packages and must never be
+#     a distinguishing in-app module.
+# ---------------------------------------------------------------------------
+_TELEMETRY_DIR = os.path.dirname(os.path.abspath(__file__))    # desktop/
+_SHARED_DIR = os.path.normpath(os.path.join(_TELEMETRY_DIR, '..', 'shared'))
+_REPO_ROOT = os.path.normpath(os.path.join(_TELEMETRY_DIR, '..'))
+_APP_SOURCE_ROOTS: tuple[str, ...] = (
+    os.path.realpath(_TELEMETRY_DIR),   # desktop/
+    os.path.realpath(_SHARED_DIR),      # shared/
+)
+_APP_SOURCE_FILES: frozenset[str] = frozenset(
+    os.path.realpath(os.path.join(_REPO_ROOT, name))
+    for name in ('genizah_app.py', 'genizah_core.py', 'gui_threads.py')
+)
+_EXCLUDED_PATH_SEGMENTS: tuple[str, ...] = (
+    'site-packages',
+    os.sep + '.venv' + os.sep,
+    os.sep + 'venv' + os.sep,
+    '/.venv/',
+    '/venv/',
+)
+_GENERIC_BASENAMES: frozenset[str] = frozenset({'__init__.py', '__main__.py'})
+
+
+def _is_in_app_frame(co_filename: str) -> bool:
+    """Return True if co_filename resolves to an in-app source file.
+
+    In-app means ALL of:
+    - Resolved path is under one of _APP_SOURCE_ROOTS, OR equals a member of
+      _APP_SOURCE_FILES
+    - Resolved path contains NONE of _EXCLUDED_PATH_SEGMENTS (defense-in-depth)
+    - Basename is NOT in _GENERIC_BASENAMES
+    Pure function, never raises.
+    """
+    try:
+        resolved = os.path.realpath(co_filename)
+        basename = os.path.basename(resolved)
+        if basename in _GENERIC_BASENAMES:
+            return False
+        # Force-external if path contains a venv/site-packages segment
+        for seg in _EXCLUDED_PATH_SEGMENTS:
+            if seg in resolved:
+                return False
+        # Check membership in app source roots or app source files
+        if resolved in _APP_SOURCE_FILES:
+            return True
+        for root in _APP_SOURCE_ROOTS:
+            if resolved == root or resolved.startswith(root + os.sep):
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _make_crash_props(
+    exc_type: type,
+    exc_tb,         # TracebackType | None
+    is_background: bool,
+) -> dict:
+    """Build crash payload by walking the traceback — no format_exception, no str(exc).
+
+    Finds the innermost IN-APP frame (resolved co_filename under _APP_SOURCE_ROOTS
+    or in _APP_SOURCE_FILES, excluding _EXCLUDED_PATH_SEGMENTS and _GENERIC_BASENAMES).
+    Falls back to the deepest frame with error_module='external'.
+    Returns exactly five keys: exc_type, exc_module, exc_lineno, error_fingerprint,
+    is_background_thread. All five are in _ALLOWED_PROPS (D-07).
+    Never raises.
+    """
+    try:
+        in_app_frame = None
+        deepest_frame = None
+        frame = exc_tb
+        while frame is not None:
+            deepest_frame = frame
+            if _is_in_app_frame(frame.tb_frame.f_code.co_filename):
+                in_app_frame = frame  # keep walking — want INNERMOST in-app frame
+            frame = frame.tb_next
+
+        error_module: str = 'external'
+        error_line: int = 0
+
+        if in_app_frame is not None:
+            # In-app frame found: transmit only the basename (never the full path)
+            error_module = os.path.basename(in_app_frame.tb_frame.f_code.co_filename)
+            error_line = in_app_frame.tb_lineno
+        elif deepest_frame is not None:
+            # No in-app frame: fallback is deepest frame, still classified as 'external'
+            error_line = deepest_frame.tb_lineno
+
+        error_type: str = exc_type.__name__ if exc_type else 'UnknownException'
+        fingerprint: str = f'{error_type}:{error_module}:{error_line}'
+
+        return {
+            'exc_type': error_type,
+            'exc_module': error_module,
+            'exc_lineno': error_line,
+            'error_fingerprint': fingerprint,
+            'is_background_thread': is_background,
+        }
+    except Exception:
+        return {
+            'exc_type': 'UnknownException',
+            'exc_module': 'external',
+            'exc_lineno': 0,
+            'error_fingerprint': 'UnknownException:external:0',
+            'is_background_thread': is_background,
+        }
+
+
+def _emit_crash_direct(
+    exc_type: type,
+    exc_tb,         # TracebackType | None
+    is_background: bool,
+) -> None:
+    """Lock-free crash emission (D-05, SC#4). Call ONLY from sys/threading excepthook.
+
+    Uses module-top imported send_crash_event_direct (REVIEWS HIGH-2 — no in-
+    function import, which could take the import lock on a failing thread).
+    Reads consent via _is_enabled_nolock() (GIL-safe bool read, no lock).
+    Reads distinct_id from _crash_distinct_id snapshot (plain global, no lock).
+    Dedups duplicate reports for the same traceback via _last_reported_tb_id
+    (D-08 / REVIEWS PASS2 — lock-free id(exc_tb) guard).
+
+    NOTE: _BASE_PROPS() reads only module-level constants (verified: 'platform' +
+    _APP_VERSION + _OS_FAMILY + _OS_VERSION). No _state_lock acquired.
+    Confirmed at the _BASE_PROPS() definition above. If identity state is ever
+    added there, a _crash_base_props() reading only constants must replace it here.
+    """
+    global _in_crash_hook, _last_reported_tb_id
+    if _in_crash_hook:
+        return  # recursion guard (D-05 — crash inside crash handler must not loop)
+    _in_crash_hook = True
+    try:
+        if not _is_enabled_nolock():
+            return
+        # D-08 / REVIEWS PASS2: lock-free traceback-id dedup.
+        # Slot/excepthook double-delivery for the same exception can fire the hook
+        # twice with the same traceback object. Check id(exc_tb) to emit exactly once.
+        if exc_tb is not None:
+            tb_id = id(exc_tb)
+            if tb_id == _last_reported_tb_id:
+                return  # already reported this exact traceback
+            _last_reported_tb_id = tb_id  # record BEFORE sending
+        distinct_id: str = _crash_distinct_id or 'system'
+        props = _make_crash_props(exc_type, exc_tb, is_background)
+        merged = dict(_BASE_PROPS())          # no lock — reads only constants
+        merged.update(props)
+        validated = _validate_props(merged)
+        scrubbed = _scrub_props(validated)
+        # send_crash_event_direct imported at module top (REVIEWS HIGH-2)
+        send_crash_event_direct(
+            DesktopEvent.CRASH.value, scrubbed, distinct_id, timeout=0.5
+        )
+    except Exception:
+        pass  # hook body MUST never raise (SC#4)
+    finally:
+        _in_crash_hook = False
+
+
+# ---------------------------------------------------------------------------
 # Phase 112/113 stubs — implemented in later phases.
 # Present here so ROADMAP SC#1 import check (8-callable surface) passes.
 # ---------------------------------------------------------------------------
 
 def install_exception_hooks() -> None:
-    """Install crash-capture exception hooks. Implemented in Phase 113.
+    """Install crash-capture exception hooks. Idempotent. Never raises.
 
-    Consent-gated no-op in Phase 111. Never raises.
+    Wraps sys.excepthook and threading.excepthook to capture uncaught
+    exceptions. KeyboardInterrupt and SystemExit are excluded (SC#2).
+    The existing hook chain (crash_log.txt writer) is preserved — telemetry
+    is inserted as the outermost wrapper and always calls the prior hook.
+
+    Captures _prior_excepthook and _prior_threading_hook module globals so
+    _reset_for_tests() can restore the original hooks (REVIEWS MEDIUM-8).
+
+    Phase 113 Plan 03 will add faulthandler + atexit wiring here.
+    Never raises.
     """
-    # Phase 113 implementation
+    global _hooks_installed, _prior_excepthook, _prior_threading_hook
+    import sys as _sys
+    import threading as _threading
+    try:
+        if _hooks_installed:
+            return  # idempotency guard (D-08)
+        _hooks_installed = True
+
+        # Capture prior hooks BEFORE wrapping — so _reset_for_tests can restore.
+        # This captures the crash-log writer installed by _setup_crash_handler()
+        # (when called from genizah_app.py after _setup_crash_handler has run).
+        _prior_excepthook = _sys.excepthook
+        _prior_threading_hook = _threading.excepthook
+
+        # 1. Wrap sys.excepthook: telemetry → crash_log.txt writer → sys.__excepthook__
+        prior_sys_hook = _prior_excepthook
+
+        def _telemetry_excepthook(exc_type, exc_value, exc_tb):
+            try:
+                if exc_type is not KeyboardInterrupt and exc_type is not SystemExit:
+                    _emit_crash_direct(exc_type, exc_tb, is_background=False)
+            except Exception:
+                pass
+            prior_sys_hook(exc_type, exc_value, exc_tb)  # always chain (SC#1)
+
+        _sys.excepthook = _telemetry_excepthook
+
+        # 2. threading.excepthook — covers worker threads (CRASH-02)
+        prior_thread_hook = _prior_threading_hook
+
+        def _telemetry_threading_hook(args):
+            try:
+                if args.exc_type is not KeyboardInterrupt and args.exc_type is not SystemExit:
+                    _emit_crash_direct(args.exc_type, args.exc_traceback, is_background=True)
+            except Exception:
+                pass
+            prior_thread_hook(args)  # always chain
+
+        _threading.excepthook = _telemetry_threading_hook
+
+        # Phase 113 Plan 03 will add:
+        # 3. _setup_faulthandler() — native crash detection
+        # 4. atexit.register(_atexit_flush) — clean-exit flush
+
+    except Exception:
+        logger.debug('telemetry: install_exception_hooks failed', exc_info=True)
 
 
 def show_first_run_prompt(parent=None) -> None:
@@ -739,15 +1032,51 @@ def _reset_for_tests() -> None:
     """Reset all module-level state to defaults. NOT for production use.
 
     Called by test fixtures (same convention as posthog_server._reset_for_tests).
-    Resets: _enabled, _install_id, _current_distinct_id, _identified.
+    Resets: _enabled, _install_id, _current_distinct_id, _identified (Phase 111);
+    _crash_distinct_id, _in_crash_hook, _hooks_installed, _pending_native_crash,
+    _last_reported_tb_id (Phase 113).
+
+    REVIEWS MEDIUM-8: also restores sys.excepthook and threading.excepthook to
+    their pre-install values (if _prior_excepthook/_prior_threading_hook were
+    captured by install_exception_hooks) so test suites don't accumulate hook
+    wrappers across test functions.
     """
     global _enabled, _install_id, _current_distinct_id, _identified
-    with _enabled_lock:
-        _enabled = False
-    with _state_lock:
-        _install_id = None
+    global _crash_distinct_id, _in_crash_hook, _hooks_installed, _pending_native_crash
+    global _last_reported_tb_id, _prior_excepthook, _prior_threading_hook
+    import sys as _sys
+    # Use try/except for the locked sections — during tests that mock the lock
+    # objects with FailLock, acquiring the lock would raise; fall back to direct
+    # assignment (acceptable since tests run single-threaded).
+    try:
+        with _enabled_lock:
+            _enabled = False
+    except Exception:
+        _enabled = False  # direct fallback when lock is mocked
+    try:
+        with _state_lock:
+            _install_id = None
+            _current_distinct_id = None
+            _identified = False
+    except Exception:
+        _install_id = None           # direct fallback when lock is mocked
         _current_distinct_id = None
         _identified = False
+    # Phase 113 globals (no locks — plain bool/str/int)
+    _crash_distinct_id = None
+    _in_crash_hook = False
+    _pending_native_crash = None
+    _last_reported_tb_id = None
+    # REVIEWS MEDIUM-8: restore sys.excepthook and threading.excepthook
+    # to their pre-install state so hooks don't accumulate across test functions.
+    if _prior_excepthook is not None:
+        _sys.excepthook = _prior_excepthook
+    if _prior_threading_hook is not None:
+        import threading as _threading
+        _threading.excepthook = _prior_threading_hook
+    _prior_excepthook = None
+    _prior_threading_hook = None
+    _hooks_installed = False  # reset AFTER hook restoration
 
 
 # ---------------------------------------------------------------------------
@@ -799,6 +1128,15 @@ __all__ = [
     '_ALLOWED_PROPS',
     '_BANNED_KEYS',
     '_VALID_EVENT_VALUES',
+    # Phase 113 crash-path (test seam — internal)
+    '_is_enabled_nolock',
+    '_make_crash_props',
+    '_emit_crash_direct',
+    '_is_in_app_frame',
+    '_APP_SOURCE_ROOTS',
+    '_APP_SOURCE_FILES',
+    '_EXCLUDED_PATH_SEGMENTS',
+    '_GENERIC_BASENAMES',
     '_TRACK_FORBIDDEN_EVENTS',
 ]
 

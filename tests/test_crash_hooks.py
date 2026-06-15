@@ -55,7 +55,9 @@ def test_hook_acquires_no_locks(monkeypatch):
     monkeypatch.setattr(tel, '_crash_distinct_id', 'test-uuid')
 
     sent = []
-    monkeypatch.setattr(ph, 'send_crash_event_direct',
+    # Monkeypatch on tel (the module-top import binding) — not ph.send_crash_event_direct,
+    # which is a different name binding from the imported-at-top reference in tel.
+    monkeypatch.setattr(tel, 'send_crash_event_direct',
                         lambda ev, props, did, timeout=0.5: sent.append(ev))
 
     # Must not raise — lock acquisition would raise AssertionError
@@ -74,7 +76,7 @@ def test_recursion_guard(monkeypatch):
     With guard False → assert one send and guard reset to False afterward.
     """
     sent = []
-    monkeypatch.setattr(ph, 'send_crash_event_direct',
+    monkeypatch.setattr(tel, 'send_crash_event_direct',
                         lambda ev, props, did, timeout=0.5: sent.append(ev))
     monkeypatch.setattr(tel, '_enabled', True)
     monkeypatch.setattr(tel, '_crash_distinct_id', 'test-uuid')
@@ -199,7 +201,7 @@ def test_base_props_includes_os(monkeypatch):
     def capture_send(ev, props, did, timeout=0.5):
         captured.append(props)
 
-    monkeypatch.setattr(ph, 'send_crash_event_direct', capture_send)
+    monkeypatch.setattr(tel, 'send_crash_event_direct', capture_send)
     monkeypatch.setattr(tel, '_enabled', True)
     monkeypatch.setattr(tel, '_crash_distinct_id', 'test-uuid')
 
@@ -221,7 +223,7 @@ def test_duplicate_traceback_deduped(monkeypatch):
     yields exactly ONE send; with a DIFFERENT traceback yields a second send.
     """
     sent = []
-    monkeypatch.setattr(ph, 'send_crash_event_direct',
+    monkeypatch.setattr(tel, 'send_crash_event_direct',
                         lambda ev, props, did, timeout=0.5: sent.append(ev))
     monkeypatch.setattr(tel, '_enabled', True)
     monkeypatch.setattr(tel, '_crash_distinct_id', 'test-uuid')
