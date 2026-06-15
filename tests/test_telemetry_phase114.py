@@ -1316,7 +1316,6 @@ def test_fjms_catalog_result_dialog_path_in_source(monkeypatch, _reset_telemetry
 
     REVIEWS MEDIUM-6: both Browse-tab AND ResultDialog paths must emit fjms_catalog.
     """
-    import ast
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -1330,7 +1329,6 @@ def test_fjms_catalog_result_dialog_path_in_source(monkeypatch, _reset_telemetry
 
 def test_result_detail_in_result_dialog_init(monkeypatch, _reset_telemetry_state):
     """desktop/result_dialog.py ResultDialog.__init__ must emit 'result_detail' (source check)."""
-    import ast
     from pathlib import Path
 
     repo_root = Path(__file__).resolve().parent.parent
@@ -1378,9 +1376,7 @@ def test_export_action_map_helper(monkeypatch, _reset_telemetry_state):
 
 def test_emit_feature_opened_consent_gate(monkeypatch, _reset_telemetry_state):
     """With consent OFF, _emit_feature_opened enqueues nothing (consent gate in track())."""
-    import desktop.telemetry as tel
-    # consent is OFF by default
-
+    # consent is OFF by default (no set_consent call)
     gui = _make_feature_emit_stub(monkeypatch)
     gui._emit_feature_opened(feature_name='joins_lab')
 
@@ -1406,7 +1402,7 @@ def _make_ping_stub(monkeypatch, *, telemetry_ready=True, app_active=True,
     import types
     import genizah_app as app
     import shared.posthog_server as ph_mod
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import MagicMock
 
     monkeypatch.setattr(ph_mod, '_start_drain_thread_once', lambda: None)
 
@@ -1427,8 +1423,6 @@ def _make_ping_stub(monkeypatch, *, telemetry_ready=True, app_active=True,
     else:
         mock_app.applicationState.return_value = Qt.ApplicationState.ApplicationInactive
 
-    # We need to monkeypatch within the genizah_app module scope
-    import genizah_app as app_mod
     from PyQt6.QtWidgets import QApplication
     monkeypatch.setattr(QApplication, 'instance', staticmethod(lambda: mock_app))
 
@@ -1443,9 +1437,6 @@ def _make_ping_stub(monkeypatch, *, telemetry_ready=True, app_active=True,
             return original_dt(2026, 6, 16, 12, 0, 0, tzinfo=tz)
 
     monkeypatch.setattr(dt_mod, 'datetime', FakeDatetime)
-
-    def _do_emit(**kwargs):
-        return app.GenizahGUI._maybe_emit_active_ping(gui)
 
     gui._maybe_emit_active_ping = lambda: app.GenizahGUI._maybe_emit_active_ping(gui)
     return gui
@@ -1584,9 +1575,7 @@ def test_active_ping_ready_gate(monkeypatch, _reset_telemetry_state):
 
 def test_active_ping_consent_gate(monkeypatch, _reset_telemetry_state):
     """_maybe_emit_active_ping emits NOTHING when consent OFF."""
-    import desktop.telemetry as tel
-    # consent is OFF by default
-
+    # consent is OFF by default (no set_consent call)
     gui = _make_ping_stub(
         monkeypatch,
         telemetry_ready=True,
