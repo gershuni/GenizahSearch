@@ -2601,6 +2601,66 @@ class SettingsDialog(QDialog):
         browser.setOpenExternalLinks(True)
         browser.setStyleSheet("border: none; background: transparent;")
         layout.addWidget(browser)
+
+        # REVIEWS HIGH-4 / PRIV-05: Language-agnostic bilingual telemetry disclosure block.
+        # Rendered BELOW the About QTextBrowser for ALL languages (EN and HE users).
+        # NOT inside about_html_en or tr("ABOUT_HTML") — a single widget independent of
+        # CURRENT_LANG, so there is no translation drift and HE users see it too.
+        telemetry_disclosure_html = f"""
+        <style>
+            h3 {{ margin-bottom: 2px; margin-top: 8px; font-size: 12px; }}
+            p {{ margin-top: 3px; margin-bottom: 3px; line-height: 1.4; font-size: 11px; }}
+            ul {{ margin: 3px 0; padding-left: 18px; font-size: 11px; }}
+        </style>
+        <div dir='ltr' style='font-family: Arial; font-size: 11px; color: {self._text};'>
+            <hr style='border:0; border-top:1px solid {self._border}; margin: 4px 0 8px 0;'>
+            <h3 style='font-size:12px;'>Usage Telemetry</h3>
+            <p>This app optionally collects <b>privacy-preserving usage data</b> to help improve it.
+            Telemetry is <b>opt-in only</b> — nothing is sent unless you enable it in Settings
+            &rarr; General &rarr; Preferences.</p>
+            <p><b>What IS collected:</b> feature counts (no content), app &amp; OS version,
+            performance timing buckets, crash signals (exception type only).</p>
+            <p><b>What is NEVER collected:</b> your search queries, My Library file paths or
+            filenames, your name or email. When signed in, the only identity attached is your
+            bare Supabase <code>user.id</code> — a pseudonymous identifier, the same one
+            the website already uses.</p>
+            <p>Data is processed by
+            <a href='https://posthog.com/privacy'>PostHog</a> (EU region) and Dicta.</p>
+        </div>
+        <div dir='rtl' style='font-family: Arial; font-size: 11px; color: {self._text};
+                               margin-top: 8px;'>
+            <h3 style='font-size:12px;'>טלמטריית שימוש</h3>
+            <p>האפליקציה אוספת באופן אופציונלי <b>נתוני שימוש שומרי-פרטיות</b> לשיפורה.
+            טלמטריה היא <b>הצטרפות בלבד</b> — שום דבר לא נשלח אלא אם כן תפעילו זאת
+            בהגדרות &larr; כללי &larr; העדפות.</p>
+            <p><b>מה נאסף:</b> ספירות תכונות (ללא תוכן), גרסת האפליקציה ומערכת ההפעלה,
+            קטגוריות זמן תגובה, סימני קריסה (סוג השגיאה בלבד).</p>
+            <p><b>מה לעולם לא נאסף:</b> שאילתות החיפוש שלכם, נתיבי קבצים ושמות קבצים
+            מ&#x2018;הספרייה שלי&#x2019;, שמכם או כתובת הדוא&#x05F4;ל. כשאתם מחוברים,
+            המזהה היחיד הוא ה-<code>user.id</code> הפסאודו-אנונימי של Supabase — כמו באתר.</p>
+            <p>הנתונים מעובדים על ידי
+            <a href='https://posthog.com/privacy'>PostHog</a> (אזור האיחוד האירופי) ודיקטה.</p>
+        </div>
+        """
+        tel_browser = QTextBrowser()
+        tel_browser.setHtml(telemetry_disclosure_html)
+        tel_browser.setOpenExternalLinks(True)
+        tel_browser.setStyleSheet("border: none; background: transparent;")
+        tel_browser.setMaximumHeight(200)
+        layout.addWidget(tel_browser)
+
+        # "Privacy details" button to open the canonical bilingual PrivacyDialog (PRIV-05)
+        from desktop.consent_dialog import PrivacyDialog  # noqa: PLC0415
+        btn_privacy_about = QPushButton("Privacy details / פרטי פרטיות")
+        btn_privacy_about.setFlat(True)
+        btn_privacy_about.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_privacy_about.setStyleSheet("color: #2563eb; text-decoration: underline; border: none;")
+        btn_privacy_about.clicked.connect(lambda: PrivacyDialog(self).exec())
+        privacy_row = QHBoxLayout()
+        privacy_row.addWidget(btn_privacy_about)
+        privacy_row.addStretch()
+        layout.addLayout(privacy_row)
+
         return page
 
     # ── Helpers ───────────────────────────────────────────────────
