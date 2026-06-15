@@ -23,7 +23,7 @@
 - [x] **CONSENT-01**: Telemetry is OFF by default — **no event of any kind (session/usage/perf/crash) is enqueued before consent state has been loaded and is true.** Startup order guarantees the consent gate is resolved before any producer can fire (proven by test, see PRIV-04).
 - [x] **CONSENT-02**: On first launch after updating to v8.1.0 (and on fresh installs), the user sees a bilingual (EN/HE) first-run consent dialog with an explicit, equal-weight yes/no choice (nothing pre-selected) that plainly states what is and is not collected.
 - [x] **CONSENT-03**: The consent dialog is shown at most once — the choice and a "prompt shown" flag persist so it never re-prompts on later launches. The stored consent record also captures the consent timestamp, the app version, and the consent-UI version (lightweight audit trail).
-- [ ] **CONSENT-04**: User can turn telemetry on or off at any time from a Settings/About toggle that reads and writes the same consent source of truth as the first-run dialog.
+- [x] **CONSENT-04**: User can turn telemetry on or off at any time from a Settings/About toggle that reads and writes the same consent source of truth as the first-run dialog.
 - [x] **CONSENT-05**: An anonymous per-install identifier (uuid4) is minted on opt-in and used as the PostHog `distinct_id` for **logged-out** users; it is never derived from hardware/MAC. For **logged-in** users the `distinct_id` is the Supabase `user.id` (see IDENT-01). No hardware fingerprinting either way.
 - [x] **CONSENT-06**: Opting out stops all event emission immediately; the per-install ID is **retained** on disk (not deleted) so re-opt-in preserves continuity.
 - [x] **CONSENT-07**: Consent + identity state persists in the existing config store (`config.pkl` via `load_app_config`/`save_app_config`) — no new settings file, no `QSettings`.
@@ -127,7 +127,7 @@
 | CONSENT-01 | Phase 111 | Complete |
 | CONSENT-02 | Phase 112 | Complete |
 | CONSENT-03 | Phase 112 | Complete |
-| CONSENT-04 | Phase 112 | Pending |
+| CONSENT-04 | Phase 112 | Complete |
 | CONSENT-05 | Phase 111 | Complete |
 | CONSENT-06 | Phase 111 | Complete |
 | CONSENT-07 | Phase 111 | Complete |

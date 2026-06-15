@@ -70,7 +70,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 ## Summary Checklist
 
 - [x] **Phase 111: Telemetry Foundation** - `desktop/telemetry.py` chokepoint + consent storage + structural scrubber + property/event allowlist + flush infrastructure (no events fire yet) (completed 2026-06-14)
-- [ ] **Phase 112: Consent UX** - Bilingual first-run dialog + Settings toggle + opt-out queue drain + bilingual privacy disclosure
+- [x] **Phase 112: Consent UX** - Bilingual first-run dialog + Settings toggle + opt-out queue drain + bilingual privacy disclosure (completed 2026-06-15)
 - [ ] **Phase 113: Crash Reporting** - Exception hooks (chained, non-blocking) + faulthandler + scrubbed crash payloads + bounded synchronous flush + next-launch native-crash detection
 - [ ] **Phase 114: Usage Analytics** - Session-start, feature/tab usage, search mode+corpus enums, active-user signal, base props, session/clock correctness
 - [ ] **Phase 115: Performance Metrics** - Search/indexing durations, result-count buckets, per-session summary with periodic+close flush, configurable sampling
@@ -114,7 +114,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 
 - [x] 112-01-PLAN.md — Wave 0 test scaffold + `desktop/consent_dialog.py` (ConsentDialog + PrivacyDialog: bilingual, no-default buttons, flag-on-all-exit-paths) [Wave 1]
 - [x] 112-02-PLAN.md — Fill `show_first_run_prompt()` stub + recovery-safe startup hook (chained after citation reminder) [Wave 2]
-- [ ] 112-03-PLAN.md — Settings telemetry toggle (confirm-on-change → set_consent) + snapshot exemption (D-07b) + About-tab disclosure [Wave 3]
+- [x] 112-03-PLAN.md — Settings telemetry toggle (confirm-on-change → set_consent) + snapshot exemption (D-07b) + About-tab disclosure [Wave 3]
 
 **UI hint**: yes
 
@@ -180,7 +180,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 111. Telemetry Foundation | v8.1.0 | 3/3 | Complete    | 2026-06-14 |
-| 112. Consent UX | v8.1.0 | 2/3 | In Progress|  |
+| 112. Consent UX | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
 | 113. Crash Reporting | v8.1.0 | 0/TBD | Not started | - |
 | 114. Usage Analytics | v8.1.0 | 0/TBD | Not started | - |
 | 115. Performance Metrics | v8.1.0 | 0/TBD | Not started | - |
