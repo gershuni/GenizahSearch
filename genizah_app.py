@@ -3431,6 +3431,10 @@ class GenizahGUI(QMainWindow):
         # the 'ask' prompt from appearing and erasing persisted opt-outs.
         # _restore_session() resets this to False in its finally block.
         self._restoring_session = True
+        # Phase 114 REVIEWS MEDIUM-5: flag for code-driven programmatic tab changes
+        # (setCurrentWidget/setCurrentIndex navigation jumps) so _on_tab_changed
+        # can suppress telemetry for non-user navigation.
+        self._programmatic_tab_change = False
 
         self.init_ui()
 
@@ -3889,9 +3893,52 @@ class GenizahGUI(QMainWindow):
         else:
             self.corner_login_btn.setText(tr("Login"))
 
+    def _set_active_tab(self, target) -> None:
+        """Set the active tab programmatically without emitting telemetry.
+
+        Phase 114 REVIEWS MEDIUM-5: code-driven navigation jumps (send_result_to_composition,
+        _search_by_pgp_tag, catalog nav, etc.) must NOT emit desktop_tab_activated.
+        Use this helper instead of bare self.tabs.setCurrentWidget/setCurrentIndex for
+        all programmatic (non-user-click) tab switches.
+        """
+        self._programmatic_tab_change = True
+        try:
+            if isinstance(target, int):
+                self.tabs.setCurrentIndex(target)
+            else:
+                self.tabs.setCurrentWidget(target)
+        finally:
+            self._programmatic_tab_change = False
+
     def _on_tab_changed(self, index):
         """Handle tab change events."""
         logger.debug("_on_tab_changed called with index=%s", index)
+        # Phase 114 D-01/D-02/MEDIUM-5/MEDIUM-9: emit desktop_tab_activated only for
+        # genuine user-initiated tab switches (not restore, not programmatic code jumps).
+        if (self._telemetry_ready()
+                and not getattr(self, '_restoring_session', True)
+                and not getattr(self, '_programmatic_tab_change', False)):
+            try:
+                from desktop import telemetry
+                _TAB_NAME_MAP = {
+                    0: 'search',
+                    1: 'composition',
+                    2: 'browse_shelfmark',
+                    3: 'browse_catalog',
+                    4: 'lists',
+                    5: 'community',
+                    6: 'my_library',
+                }
+                tab_name = _TAB_NAME_MAP.get(index)
+                if tab_name is not None:
+                    # D-04: hardcoded constant — NEVER tabText() (translated EN/HE)
+                    telemetry.track(
+                        telemetry.DesktopEvent.TAB_ACTIVATED,
+                        tab_name=tab_name,
+                        session_id=getattr(self, '_session_id', ''),
+                    )
+            except Exception:
+                pass
         try:
             current_widget = self.tabs.widget(index)
             logger.debug("current_widget=%s", current_widget)
@@ -5643,7 +5690,7 @@ class GenizahGUI(QMainWindow):
             self.pre_search_restrict_sys_ids = partners
 
         # Switch to search tab
-        self.tabs.setCurrentIndex(0)
+        self._set_active_tab(0)
 
         # Show VS breadcrumb
         self._update_vs_breadcrumb()
@@ -5672,7 +5719,7 @@ class GenizahGUI(QMainWindow):
         self.pre_search_restrict_sys_ids = partners
 
         # Switch to search tab, set Shelfmark mode with * query
-        self.tabs.setCurrentIndex(0)
+        self._set_active_tab(0)
         self.mode_combo.setCurrentIndex(6)  # Shelfmark (#)
         self.query_input.setText('*')
         self._update_vs_breadcrumb()
@@ -6093,7 +6140,7 @@ class GenizahGUI(QMainWindow):
         """Navigate to browse tab for this document."""
         self.browse_sys_input.setText(sys_id)
         self._set_last_browse_field("sys")
-        self.tabs.setCurrentWidget(self.browse_tab)
+        self._set_active_tab(self.browse_tab)
         self.browse_load()
 
     def _context_submit_correction(self, doc_id, shelfmark):
@@ -9705,7 +9752,7 @@ class GenizahGUI(QMainWindow):
             self._catalog_populate_tree()
 
         # Switch to catalog browse tab
-        self.tabs.setCurrentWidget(self.catalog_browse_tab)
+        self._set_active_tab(self.catalog_browse_tab)
 
         # If domain specified, select it in the tree (deferred if tree still loading)
         if domain:
@@ -12290,7 +12337,7 @@ class GenizahGUI(QMainWindow):
                 date_to=filters.get('date_to'),
             )
         self._update_filter_chip_bar()
-        self.tabs.setCurrentIndex(0)  # Switch to search tab
+        self._set_active_tab(0)  # Switch to search tab
 
     def _catalog_parallels_in_results(self):
         """Navigate to composition tab with browse filters as pre-search filters."""
@@ -12310,7 +12357,7 @@ class GenizahGUI(QMainWindow):
                 date_to=filters.get('date_to'),
             )
         self._update_filter_chip_bar()
-        self.tabs.setCurrentIndex(1)  # Switch to composition tab
+        self._set_active_tab(1)  # Switch to composition tab
 
     def _catalog_view_result(self, index):
         """Double-click result row: open ResultDialog with prev/next navigation."""
@@ -12351,7 +12398,7 @@ class GenizahGUI(QMainWindow):
             return
         sys_id = item.data(Qt.ItemDataRole.UserRole)
         if sys_id:
-            self.tabs.setCurrentWidget(self.browse_tab)
+            self._set_active_tab(self.browse_tab)
             self.browse_sys_input.setText(str(sys_id))
             self.browse_load()
 
@@ -13957,7 +14004,7 @@ class GenizahGUI(QMainWindow):
             return
 
         # Switch to browse tab and load the manuscript
-        self.tabs.setCurrentWidget(self.browse_tab)
+        self._set_active_tab(self.browse_tab)
         self.browse_sys_input.setText(sys_id)
         self._set_last_browse_field("sys")
         self.browse_load()
@@ -14018,7 +14065,7 @@ class GenizahGUI(QMainWindow):
 
     def _browse_document_by_shelfmark(self, shelfmark, page_num=1):
         """Browse a document by shelfmark in the Browse tab."""
-        self.tabs.setCurrentWidget(self.browse_tab)
+        self._set_active_tab(self.browse_tab)
         self.browse_shelf_input.setText(shelfmark)
         self._set_last_browse_field("shelf")
         self.browse_load()
@@ -15667,7 +15714,7 @@ class GenizahGUI(QMainWindow):
             self.browse_shelf_input.setText(shelfmark)
             self._set_last_browse_field("shelf")
             self.browse_load()
-            self.tabs.setCurrentWidget(self.browse_tab)
+            self._set_active_tab(self.browse_tab)
 
     def _copy_join_shelfmarks(self, frag_a, frag_b):
         """Copy join shelfmarks to clipboard."""
@@ -15702,7 +15749,7 @@ class GenizahGUI(QMainWindow):
             self.browse_shelf_input.setText(shelfmark)
             self._set_last_browse_field("shelf")
             self.browse_load()
-            self.tabs.setCurrentWidget(self.browse_tab)
+            self._set_active_tab(self.browse_tab)
 
         dialog = JoinsFeedDialog(self, self.corrections_client, on_browse=browse_shelfmark)
         dialog.exec()
@@ -17048,7 +17095,7 @@ class GenizahGUI(QMainWindow):
         """Navigate to search tab with domain context (exclusions cleared)."""
         self._domain_exclusions = set()  # Clear exclusions when navigating from browse
         self._update_domain_filter_label()
-        self.tabs.setCurrentWidget(self.search_tab)
+        self._set_active_tab(self.search_tab)
         # Note: domain will appear in post-search filter after user runs a search
 
     # --- Composition Domain Filter ---
@@ -18077,7 +18124,7 @@ class GenizahGUI(QMainWindow):
         self.query_input.selectAll()
         # Ensure search tab is active
         if hasattr(self, 'tabs'):
-            self.tabs.setCurrentIndex(0)
+            self._set_active_tab(0)
 
     def _exit_refine_mode(self):
         """D-02a: Cancel refine mode without search."""
@@ -18875,7 +18922,7 @@ class GenizahGUI(QMainWindow):
 
     def _search_by_pgp_tag(self, tag):
         """Entry point for searching by PGP tag (from browse/result dialog links)."""
-        self.tabs.setCurrentWidget(self.search_tab)
+        self._set_active_tab(self.search_tab)
         # Switch to PGP Tags mode
         self.mode_combo.setCurrentIndex(self.MODE_PGP_TAGS)
         if hasattr(self, 'tag_search_combo'):
@@ -19642,7 +19689,7 @@ class GenizahGUI(QMainWindow):
             self.browse_shelf_input.clear()        # Clear stale shelfmark
             self._set_last_browse_field("sys")     # Force sys_id priority
         self.browse_sys_input.setText(sid)
-        self.tabs.setCurrentWidget(self.browse_tab)
+        self._set_active_tab(self.browse_tab)
         # Phase 95 D-27 / Bug-4 fix: LOCAL hits render via _open_local_browse;
         # Genizah hits restore the image pane and use the normal browse_load path.
         try:
@@ -19897,7 +19944,7 @@ class GenizahGUI(QMainWindow):
         self._local_browse_current_p_num = initial_p
 
         # 4. Switch tabs.
-        self.tabs.setCurrentWidget(self.browse_tab)
+        self._set_active_tab(self.browse_tab)
 
         # 5. Hide the image pane (D-27 — LOCAL has no images).
         self._set_browse_image_pane_visible(False)
@@ -20272,7 +20319,7 @@ class GenizahGUI(QMainWindow):
         except Exception:
             pass
         self.browse_fl_input.setText("")
-        self.tabs.setCurrentWidget(self.browse_tab)
+        self._set_active_tab(self.browse_tab)
         # Phase 100 (PDFIMG-04/05 / D-08): reveal the image pane + render for LOCAL PDF;
         # cancel the 'browse' render scope + keep the pane hidden for any non-PDF LOCAL file.
         controller = getattr(self, '_pdf_image_controller', None)
@@ -20409,7 +20456,7 @@ class GenizahGUI(QMainWindow):
                 entries.append(sys_id)
                 self.set_excluded_entries("\n".join(entries))
                 
-        self.tabs.setCurrentWidget(self.composition_tab)
+        self._set_active_tab(self.composition_tab)
         self.comp_text_area.setFocus()
 
     def _sanitize_for_excel(self, text):
@@ -25742,7 +25789,7 @@ class GenizahGUI(QMainWindow):
         self._comp_printed_filter_state = state.get('printed_filter', 'all')
 
         # Switch to composition tab so the user sees the (re-run) search.
-        self.tabs.setCurrentWidget(self.composition_tab)
+        self._set_active_tab(self.composition_tab)
 
         results = state.get('results', [])
         filtered = state.get('filtered_results', [])

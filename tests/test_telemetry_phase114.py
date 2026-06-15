@@ -430,6 +430,13 @@ def _make_tab_gui_stub(monkeypatch):
     """Build a minimal stub for _on_tab_changed telemetry tests."""
     import types
     import genizah_app as app
+    import shared.posthog_server as ph_mod
+
+    # Prevent the drain daemon thread from consuming events before the test checks
+    # the queue.  The drain thread is started lazily by enqueue_event →
+    # _start_drain_thread_once().  We replace it with a no-op for these tests so
+    # events remain in the queue long enough to assert on.
+    monkeypatch.setattr(ph_mod, '_start_drain_thread_once', lambda: None)
 
     gui = types.SimpleNamespace()
     gui._restoring_session = False
