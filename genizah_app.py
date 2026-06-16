@@ -15912,17 +15912,24 @@ class GenizahGUI(QMainWindow):
     # Phase 107: Join Workbench host methods                              #
     # ------------------------------------------------------------------ #
 
-    def open_join_workbench(self):
+    def open_join_workbench(self, *, emit_telemetry: bool = True):
         """Open the Join Lab (no anchor required). Restores last session state if available.
 
         Called by the corner_joins_btn (Feature 6) and used as the new no-arg launcher.
         If persisted join_lab state exists with a non-empty anchor, restore_state() is called
         to rebuild input + defer the search to the background worker (hard constraint: no
         synchronous search on the UI thread — Feature 7).
+
+        emit_telemetry: pass False for restore/programmatic opens (CR-114-05) to suppress
+        the ghost desktop_feature_opened event from deferred session-restore calls.
+        Default True keeps all user-gesture callers emitting normally.
         """
         from desktop.join_workbench import JoinWorkbenchWindow  # lazy import (desktop-only)
-        # D-03: Joins Lab feature_opened telemetry (no-arg launcher path)
-        self._emit_feature_opened(feature_name='joins_lab')
+        # D-03: Joins Lab feature_opened telemetry (no-arg launcher path).
+        # CR-114-05: gated on emit_telemetry so deferred restore (emit_telemetry=False)
+        # does NOT fabricate a user-gesture event.
+        if emit_telemetry:
+            self._emit_feature_opened(feature_name='joins_lab')
         # D-02: SINGLE reusable instance. Only build a new window when none exists — a merely
         # HIDDEN window (closed via X) is re-shown with its in-memory state (anchor, builders,
         # triage, results) intact. Recreating on `not isVisible()` discarded that state and then
@@ -26809,7 +26816,9 @@ class GenizahGUI(QMainWindow):
             if jl_state.get('open') and jl_state.get('anchor', {}).get('sys_id'):
                 def _restore_join_lab(jls=jl_state):
                     try:
-                        self.open_join_workbench()
+                        # CR-114-05: pass emit_telemetry=False so the deferred restore
+                        # does not fabricate a ghost desktop_feature_opened event.
+                        self.open_join_workbench(emit_telemetry=False)
                         if self._join_workbench is not None:
                             self._join_workbench.restore_state(jls)
                     except Exception as exc:
@@ -26868,7 +26877,11 @@ class GenizahGUI(QMainWindow):
                     self.comp_text_area.setPlainText(interrupted['source_text'])
                     if interrupted.get('title'):
                         self.comp_title_input.setText(interrupted['title'])
-                    self.tabs.setCurrentWidget(self.composition_tab)
+                    # CR-114-06: use _set_active_tab so _on_tab_changed does not count
+                    # this restore-driven switch as a user tab activation.
+                    # At this point _restoring_session is already False (set in the
+                    # finally at :26799), so only _programmatic_tab_change suppresses.
+                    self._set_active_tab(self.composition_tab)
                     QTimer.singleShot(500, self.toggle_composition)
                 clear_interrupted_flag()
         except Exception as e:

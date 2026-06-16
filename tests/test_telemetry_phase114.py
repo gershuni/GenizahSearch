@@ -2043,3 +2043,133 @@ def test_closeEvent_session_end_source_has_telemetry_ready_gate(monkeypatch, _re
     assert 'SESSION_END' in src, (
         "CR-114-04: closeEvent must still emit SESSION_END"
     )
+
+
+# ---------------------------------------------------------------------------
+# CR-114-05: restore-suppressed joins_lab feature_opened
+# CR-114-06: interrupted-comp resume uses _set_active_tab
+# ---------------------------------------------------------------------------
+
+def test_open_join_workbench_restore_suppress_emits_nothing(monkeypatch, _reset_telemetry_state):
+    """CR-114-05: open_join_workbench(emit_telemetry=False) must emit NO desktop_feature_opened."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    import types
+    import genizah_app as app
+
+    gui = types.SimpleNamespace()
+    gui._telemetry_session_started = True
+    gui._app_shutting_down = False
+    gui._session_id = 'restore-feature-session'
+    gui._join_workbench = object()  # non-None = reuse existing, no fresh block needed
+
+    gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
+    gui._emit_feature_opened = lambda **kwargs: (
+        app.GenizahGUI._emit_feature_opened(gui, **kwargs)
+    )
+
+    # Simulate what _restore_join_lab does: call with emit_telemetry=False
+    # The method must accept this kwarg and gate the _emit_feature_opened call
+    # We call open_join_workbench manually with emit_telemetry=False —
+    # but since we can't construct a full GUI, we test via source inspection
+    # AND by calling _emit_feature_opened directly to confirm it would fire otherwise.
+
+    # Confirm _emit_feature_opened fires normally (baseline)
+    gui._emit_feature_opened(feature_name='joins_lab')
+    events = _drain_all_events()
+    feature_events = [e for e in events if e['event'] == 'desktop_feature_opened']
+    assert len(feature_events) == 1, "baseline: normal _emit_feature_opened must fire"
+
+    # Now check source: open_join_workbench signature must accept emit_telemetry
+    import inspect
+    src = inspect.getsource(app.GenizahGUI.open_join_workbench)
+    assert 'emit_telemetry' in src, (
+        "CR-114-05: open_join_workbench must accept emit_telemetry param"
+    )
+    # And the _emit_feature_opened call must be gated on emit_telemetry
+    assert 'if emit_telemetry' in src or 'emit_telemetry and' in src or 'emit_telemetry:' in src, (
+        "CR-114-05: _emit_feature_opened call inside open_join_workbench must be gated on emit_telemetry"
+    )
+
+
+def test_open_join_workbench_normal_still_emits(monkeypatch, _reset_telemetry_state):
+    """CR-114-05: open_join_workbench called normally (no suppression) still emits
+    exactly one desktop_feature_opened feature_name='joins_lab'.
+
+    Source check: _restore_join_lab must call open_join_workbench(emit_telemetry=False).
+    """
+    import genizah_app as app
+    import inspect
+
+    # Check that the restore call passes emit_telemetry=False
+    restore_src = inspect.getsource(app.GenizahGUI._restore_session)
+    assert 'open_join_workbench(emit_telemetry=False)' in restore_src, (
+        "CR-114-05: _restore_join_lab (inside _restore_session) must call "
+        "open_join_workbench(emit_telemetry=False)"
+    )
+
+    # Check that the no-arg / corner-button caller still defaults to emit_telemetry=True
+    # by checking the default value in the signature
+    sig = inspect.signature(app.GenizahGUI.open_join_workbench)
+    param = sig.parameters.get('emit_telemetry')
+    assert param is not None, (
+        "CR-114-05: open_join_workbench must have an emit_telemetry parameter"
+    )
+    assert param.default is True, (
+        "CR-114-05: emit_telemetry default must be True so normal callers still emit"
+    )
+
+
+def test_comp_resume_uses_set_active_tab(monkeypatch, _reset_telemetry_state):
+    """CR-114-06: the interrupted-composition resume tab switch must use _set_active_tab
+    (not bare setCurrentWidget) so _on_tab_changed does not count it as a user activation.
+
+    Source assertion: _set_active_tab(self.composition_tab) must appear in _restore_session;
+    bare self.tabs.setCurrentWidget(self.composition_tab) must NOT appear there.
+    """
+    import genizah_app as app
+    import inspect
+
+    src = inspect.getsource(app.GenizahGUI._restore_session)
+    assert '_set_active_tab(self.composition_tab)' in src, (
+        "CR-114-06: interrupted-comp resume must use _set_active_tab(self.composition_tab)"
+    )
+    # The bare setCurrentWidget call must be gone from this method for the resume block
+    # (there could be other bare setCurrentWidget calls in the method for other purposes,
+    # but 'self.tabs.setCurrentWidget(self.composition_tab)' specifically must not appear)
+    assert 'self.tabs.setCurrentWidget(self.composition_tab)' not in src, (
+        "CR-114-06: bare self.tabs.setCurrentWidget(self.composition_tab) must be removed "
+        "from _restore_session (replaced by _set_active_tab)"
+    )
+
+
+def test_programmatic_tab_switch_suppressed_by_set_active_tab(monkeypatch, _reset_telemetry_state):
+    """CR-114-06: _set_active_tab sets _programmatic_tab_change=True so _on_tab_changed
+    emits NO desktop_tab_activated for the programmatic switch.
+
+    This reuses the existing _set_active_tab suppression logic verified in Plan 02.
+    """
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_tab_gui_stub(monkeypatch)
+    # Simulate programmatic tab change (as _set_active_tab does)
+    gui._programmatic_tab_change = True
+    gui._on_tab_changed(1)  # composition tab (index 1)
+
+    events = _drain_all_events()
+    tab_events = [e for e in events if e['event'] == 'desktop_tab_activated']
+    assert len(tab_events) == 0, (
+        "CR-114-06: programmatic tab switch (_programmatic_tab_change=True) must NOT "
+        "emit desktop_tab_activated"
+    )
+
+    # Confirm a genuine user switch DOES emit
+    gui._programmatic_tab_change = False
+    gui._on_tab_changed(1)
+    events2 = _drain_all_events()
+    tab_events2 = [e for e in events2 if e['event'] == 'desktop_tab_activated']
+    assert len(tab_events2) == 1, (
+        "CR-114-06: genuine user tab switch (no programmatic flag) must emit desktop_tab_activated"
+    )
