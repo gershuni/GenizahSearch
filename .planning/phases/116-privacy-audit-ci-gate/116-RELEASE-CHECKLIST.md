@@ -51,6 +51,35 @@ until the UAT landed. UAT Test 1 (delivery + privacy) has now PASSED.
 - [ ] Mark Phase 116 complete: `gsd-sdk query phase.complete 116` (updates ROADMAP/STATE) — or via
       `/gsd-complete-milestone`.
 
+### 2.5 Desktop advertising: public API + AI skill (NEW — added 2026-06-16, bundle into this release)
+User decision (2026-06-16): advertise the public Search API + the `cairo-genizah-research` AI
+skill **to desktop users**, folded into THIS v8.1.0 release (NOT a standalone commit — bundling
+here avoids What's-New version-coordination churn and ships the Help content in the same exe).
+Author this BEFORE the build (step 4) so it ships. Bilingual EN + HE, **skill-first** angle.
+- [ ] **Persistent Help section** — add a "Public API & AI Tools" section to the desktop Help
+      (bundled Help.html via `HelpDialog` / `open_help_center`, ~`genizah_app.py:1456`/`:16248`).
+      MIRROR the EXISTING **web** Help "Public API & AI Tools" section (search `web/` — likely
+      `web/pages/help.py`/help component) so desktop ↔ web copy + public URLs stay consistent.
+      Match the Help file's existing section/anchor structure + bilingual mechanism.
+- [ ] **One-time What's New line** — fold a single line into the **v8.1.0** What's New (the same
+      block step 3 drafts; do NOT create a separate version for it). Bilingual.
+- [ ] **Angle = SKILL-FIRST:** lead with "Use Dicta Genizah Search from Claude / AI agents" —
+      the `cairo-genizah-research` skill (conversationally find parallels / candidate witnesses /
+      piyyut-responsa matches with browse-grounded justifications; audience = non-developer
+      researchers). THEN a shorter "For developers" API pointer: `POST /api/search`,
+      `POST /api/parallels`, `GET /api/browse`; OpenAPI at `/api/openapi.json`; contract in
+      `docs/SEARCH_API.md` + the public docs page the web Help links to. Do NOT invent copy/URLs —
+      pull from the web Help section. Provide REAL Hebrew, not placeholders. Display name
+      "Dicta Genizah Search Pro"; do NOT rename the binary.
+- [ ] **Out of scope (do NOT do here):** any web-side advertising; any anti-bot / rate-limit /
+      Cloudflare / API-key work. Site is already behind Cloudflare → edge bot-fight + a rate rule
+      on `/api/*` is a future toggle if the API is ever advertised publicly; light vs heavy-mode
+      (fuzzy/parallels) rate differentiation is the natural next web-side step (see quick task
+      260616-p9x heavy-tier work).
+- [ ] **Verify:** `HelpDialog` still constructs/loads (offscreen test:
+      `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen ...`); the new Help section + What's New line
+      present in BOTH languages; `ruff` clean on touched `.py`; `check_docs` passes (PYTHONUTF8=1).
+
 ### 3. Version bump (REQUIRED — this is a milestone release)
 - [ ] `python scripts/bump_version.py 8.1.0` (updates version.py, version_info.txt,
       CompileScriptGenizah.iss, README header). Current version is **8.0.0**.
