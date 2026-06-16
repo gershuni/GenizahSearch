@@ -779,7 +779,8 @@ class LabRebuildWorker(QThread):
     the tab reloads the searchers on the UI thread when it finishes.
     """
 
-    finished_signal = pyqtSignal()
+    # Phase 115: (elapsed_ms, total_docs) — total_docs is 0 (unknown sentinel, D-02)
+    finished_signal = pyqtSignal(float, int)
     error_signal = pyqtSignal(str)
 
     def __init__(self, search_engine, indexer, lab_engine) -> None:
@@ -789,9 +790,13 @@ class LabRebuildWorker(QThread):
         self._lab = lab_engine
 
     def run(self) -> None:
+        _t0 = time.monotonic()   # Phase 115: Pitfall 2 — timing starts before any work
         try:
             self._search.rebuild_local_lab_index(self._indexer, lab_engine=self._lab)
-            self.finished_signal.emit()
+            elapsed_ms = (time.monotonic() - _t0) * 1000.0
+            # No doc count from rebuild; 0 is the documented unknown sentinel (D-02).
+            # doc_count_bucket will be '0' — acceptable per the plan spec.
+            self.finished_signal.emit(elapsed_ms, 0)
         except Exception as exc:  # noqa: BLE001
             logger.warning("LabRebuildWorker: LOCAL LAB rebuild failed: %s", exc)
             self.error_signal.emit(str(exc))
@@ -1215,7 +1220,7 @@ class MyLibraryTab(QWidget):
             )
             return False
 
-    def _on_lab_rebuild_finished(self) -> None:
+    def _on_lab_rebuild_finished(self, elapsed_ms: float, total_docs: int) -> None:
         """Background LAB rebuild done — reload searchers on the UI thread so the
         freshly built index is visible in the live session."""
         self._lab_rebuild_worker = None
@@ -1225,6 +1230,25 @@ class MyLibraryTab(QWidget):
             logger.warning(
                 "MyLibraryTab._on_lab_rebuild_finished: reload failed: %s", exc
             )
+        # Phase 115 D-01/D-02: emit indexing-duration telemetry for LAB rebuild.
+        # operation_kind='lab_rebuild' is a literal constant (D-02/D-04).
+        try:
+            from desktop import telemetry  # lazy import — telemetry is optional
+            if telemetry.is_enabled():
+                _doc_count_bucket = (
+                    '0' if total_docs == 0 else
+                    '1-9' if total_docs < 10 else
+                    '10-99' if total_docs < 100 else
+                    '100+'
+                )
+                telemetry.track_performance(
+                    telemetry.DesktopEvent.INDEXING_COMPLETE,
+                    duration_ms=elapsed_ms,
+                    operation_kind=telemetry._normalize_operation_kind('lab_rebuild'),
+                    doc_count_bucket=_doc_count_bucket,
+                )
+        except Exception:  # noqa: BLE001
+            pass  # telemetry is best-effort; never raise
 
     def _on_lab_rebuild_error(self, msg: str) -> None:
         """Background LAB rebuild failed — log and clear the handle."""
