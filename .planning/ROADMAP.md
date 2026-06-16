@@ -191,7 +191,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 
 - [x] 116-01-PLAN.md — PRIV-04 forbidden-field + pre-consent zero-emit scrubber-unit tests (`tests/test_telemetry_priv04.py`) + verify PRIV-03 AST guard green [Wave 1]
 - [ ] 116-02-PLAN.md — `--telemetry-selftest` / `--telemetry-selftest-offline` headless CLI flag in `genizah_app.py` + clean-VM SSL/offline HUMAN-UAT (SC#3, closes Phase 114 live-delivery UAT) [Wave 1]
-- [ ] 116-03-PLAN.md — `docs/guides/TELEMETRY_RUNBOOK.md` (INFRA-06/D-08) + REQUIREMENTS.md INFRA-06 amendment (D-07) + milestone-exit regression gate (D-10) [Wave 1]
+- [x] 116-03-PLAN.md — `docs/guides/TELEMETRY_RUNBOOK.md` (INFRA-06/D-08) + REQUIREMENTS.md INFRA-06 amendment (D-07) + milestone-exit regression gate (D-10) [Wave 1]
 
 ## Progress
 
@@ -202,4 +202,4 @@ See: .planning/milestones/v7.16-ROADMAP.md
 | 113. Crash Reporting | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
 | 114. Usage Analytics | v8.1.0 | 4/4 | Complete   | 2026-06-16 |
 | 115. Performance Metrics | v8.1.0 | 4/4 | Complete    | 2026-06-16 |
-| 116. Privacy Audit + CI Gate | v8.1.0 | 1/3 | In Progress|  |
+| 116. Privacy Audit + CI Gate | v8.1.0 | 2/3 | In Progress|  |
