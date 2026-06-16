@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v8.1.0
 milestone_name: Desktop Telemetry
 status: verifying
-stopped_at: Completed Phase 114-02 usage-analytics producers
-last_updated: "2026-06-16T02:59:55.028Z"
+stopped_at: Phase 115 context gathered
+last_updated: "2026-06-16T04:05:52.627Z"
 last_activity: 2026-06-16
 progress:
   total_phases: 6
@@ -69,9 +69,9 @@ None specific to v8.1.0 yet.
 
 ## Session Continuity
 
-Last session: 2026-06-16T02:59:55.022Z
-Stopped at: Completed Phase 114-04 gap-closure (CR-114-01..06 Codex findings)
-Resume file: None
+Last session: 2026-06-16T04:05:52.618Z
+Stopped at: Phase 115 context gathered
+Resume file: .planning/phases/115-performance-metrics/115-CONTEXT.md
 Next step: Phase 114 complete — proceed to Phase 115
 
 ## Performance Metrics
