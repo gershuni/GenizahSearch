@@ -344,12 +344,23 @@ _MAX_CONTEXT_LEN = 64
 # Identifier-shaped code: letters/digits with . _ - separators only. No '/' (it
 # would let a relative path like 'etc/passwd' survive), no spaces, no Hebrew.
 _CONTEXT_RE = re.compile(r'[A-Za-z0-9]+(?:[._\-][A-Za-z0-9]+)*\Z')
-# Filename-extension shape: a dot followed by 1-8 letters/digits (no underscore/hyphen),
-# anchored at end-of-string. Used to reject 'manuscript_notes.docx' / 'report.pdf' /
-# 'notes.txt' that otherwise pass _CONTEXT_RE (PRIV-04: filenames must not ride through
-# the lone allowlisted free-text key). Legitimate dotted codes like 'search_tab.run_query'
-# have a final segment containing '_' and thus do NOT match this pattern.
-_CONTEXT_FILENAME_RE = re.compile(r'\.[A-Za-z][A-Za-z0-9]{0,7}\Z')
+# Known file extensions. If a _CONTEXT_RE-shaped value's final dotted segment is a real
+# file extension (case-insensitive), the value is a FILENAME, not a code label, and must
+# collapse to 'unregistered' (PRIV-04: filenames must not ride through the lone allowlisted
+# free-text key). A curated set — NOT a broad "any short dotted token" shape — because a
+# loose shape also collapses legitimate dotted code labels whose final segment is a
+# method-ish word ('search_tab.run', 'app.crash'), which existing telemetry contexts use.
+# A real My-Library/document/data/archive filename leak always carries a real extension;
+# method-ish final segments ('run', 'crash', 'run_query', 'open') are not in this set.
+_CONTEXT_FILE_EXTENSIONS = frozenset({
+    'pdf', 'doc', 'docx', 'txt', 'rtf', 'odt', 'tex', 'epub', 'mobi', 'djvu',
+    'xls', 'xlsx', 'csv', 'tsv', 'ods', 'ppt', 'pptx',
+    'html', 'htm', 'xml', 'json', 'md', 'yaml', 'yml',
+    'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tif', 'tiff', 'webp', 'svg', 'heic', 'ico',
+    'zip', 'rar', '7z', 'gz', 'tar', 'bz2',
+    'mp3', 'mp4', 'wav', 'mov', 'avi', 'mkv', 'flac',
+    'db', 'sqlite', 'pkl', 'bak', 'dat', 'exe', 'dll', 'msi',
+})
 
 
 def _safe_context(value: object) -> str:
@@ -359,17 +370,18 @@ def _safe_context(value: object) -> str:
     - is a str
     - is non-empty and at most _MAX_CONTEXT_LEN chars
     - matches _CONTEXT_RE (identifier-shape: letters/digits with . _ - separators)
-    - does NOT look like a filename extension (PRIV-04 hardening): if the final
-      dotted segment is a bare 1-8 letter/digit token (e.g. '.docx', '.pdf', '.txt'),
-      the value is collapsed to 'unregistered'. Legitimate codes like
-      'search_tab.run_query' have underscores in the final segment and are NOT rejected.
+    - does NOT look like a filename (PRIV-04 hardening): if the value's final dotted
+      segment is a known file extension (e.g. '.docx', '.pdf', '.txt', '.xlsx'), it is
+      a filename and collapses to 'unregistered'. Legitimate dotted code labels whose
+      final segment is a method-ish word ('search_tab.run', 'app.crash',
+      'search_tab.run_query') are NOT file extensions and are preserved.
     """
     if (isinstance(value, str)
             and 0 < len(value) <= _MAX_CONTEXT_LEN
             and _CONTEXT_RE.match(value)):
-        # PRIV-04: reject filename-extension-shaped contexts so a bare filename like
+        # PRIV-04: reject filename-shaped contexts so a bare filename like
         # 'manuscript_notes.docx' cannot ride through the lone allowlisted free-text key.
-        if _CONTEXT_FILENAME_RE.search(value):
+        if '.' in value and value.rsplit('.', 1)[1].lower() in _CONTEXT_FILE_EXTENSIONS:
             return 'unregistered'
         return value
     return 'unregistered'
