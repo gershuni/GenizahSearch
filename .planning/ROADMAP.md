@@ -197,5 +197,5 @@ See: .planning/milestones/v7.16-ROADMAP.md
 | 112. Consent UX | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
 | 113. Crash Reporting | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
 | 114. Usage Analytics | v8.1.0 | 4/4 | Complete   | 2026-06-16 |
-| 115. Performance Metrics | v8.1.0 | 4/4 | Complete   | 2026-06-16 |
+| 115. Performance Metrics | v8.1.0 | 4/4 | Complete    | 2026-06-16 |
 | 116. Privacy Audit + CI Gate | v8.1.0 | 0/TBD | Not started | - |
