@@ -3714,6 +3714,9 @@ class GenizahGUI(QMainWindow):
         self._ping_check_timer = QTimer(self)
         self._ping_check_timer.setInterval(5 * 60 * 1000)  # 5 minutes
         self._ping_check_timer.timeout.connect(self._maybe_emit_active_ping)
+        # Phase 115: reuse the same 5-min timer for periodic perf flush (D-04/KQ-4).
+        # No second QTimer needed — telemetry.flush_perf_if_due() applies the 30-min gate.
+        self._ping_check_timer.timeout.connect(self._maybe_flush_perf_summary)
         self._ping_check_timer.start()
         try:
             QApplication.instance().applicationStateChanged.connect(
@@ -3727,6 +3730,7 @@ class GenizahGUI(QMainWindow):
         from PyQt6.QtCore import Qt
         if state == Qt.ApplicationState.ApplicationActive:
             self._maybe_emit_active_ping()
+            self._maybe_flush_perf_summary()  # Phase 115: also check perf flush on resume (D-04)
 
     def _maybe_emit_active_ping(self) -> None:
         """Emit desktop_active_ping at most once per UTC day, active-only (USAGE-04 / D-16).
@@ -3764,6 +3768,36 @@ class GenizahGUI(QMainWindow):
             )
         except Exception:
             pass  # heartbeat is best-effort; never raise
+
+    def _maybe_flush_perf_summary(self) -> None:
+        """Periodically flush the per-session perf accumulator (Phase 115 D-04/D-05/KQ-4).
+
+        Called on the 5-min _ping_check_timer.timeout AND on focus/resume via
+        _on_app_state_changed. The 30-min active-use interval gate lives in
+        telemetry.flush_perf_if_due() (D-05 env-tunable, validated reader from plan 02).
+
+        Guards mirror _maybe_emit_active_ping() (D-04):
+        1. _telemetry_ready() — coordinator must have run
+        2. is_enabled() — consent gate
+        3. not _app_shutting_down — close flush handles the exit path
+        4. ApplicationActive — only flush when app is active
+        5. Interval check delegated to telemetry.flush_perf_if_due()
+        """
+        try:
+            if not self._telemetry_ready():
+                return
+            from desktop import telemetry
+            from PyQt6.QtCore import Qt
+            if not telemetry.is_enabled():
+                return
+            if getattr(self, '_app_shutting_down', False):
+                return  # close flush handles this
+            app = QApplication.instance()
+            if app is not None and app.applicationState() != Qt.ApplicationState.ApplicationActive:
+                return
+            telemetry.flush_perf_if_due()
+        except Exception:
+            pass  # perf flush is best-effort; never raise
 
     def _check_shelfmark_completer_ready(self):
         if self.meta_mgr and len(self.meta_mgr.csv_bank) > 0:
@@ -26970,6 +27004,17 @@ class GenizahGUI(QMainWindow):
                     telemetry.DesktopEvent.SESSION_END,
                     session_id=self._session_id,
                 )
+        except Exception:
+            pass
+        # Phase 115 PERF-03: flush perf accumulator at close (D-09/KQ-5).
+        # Placed AFTER SESSION_END so the perf summary event shares the same session_id.
+        # The Phase-113 _atexit_flush drains the queue — no extra flush needed here.
+        # _perf_flushed_on_close ensures at-most-once even if closeEvent fires twice.
+        try:
+            from desktop import telemetry
+            if self._telemetry_ready() and not getattr(self, '_perf_flushed_on_close', False):
+                self._perf_flushed_on_close = True
+                telemetry.flush_perf_unconditionally()
         except Exception:
             pass
         # Phase 96 bug #2 fix: flush pending debounce timer in the unified opt-out
