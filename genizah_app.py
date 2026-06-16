@@ -17679,11 +17679,19 @@ class GenizahGUI(QMainWindow):
         """Clear all search state and start fresh."""
         # 1. Stop any running search thread
         if getattr(self, 'search_thread', None) and self.search_thread.isRunning():
+            # CR-114-02: mirror stop_search — set _search_was_cancelled BEFORE cancel_flag
+            # so any cooperative on_search_finished sees the cancellation flag.
+            self._search_was_cancelled = True
             self.search_thread.cancel_flag = True
             self.search_thread.wait(3000)
             if self.search_thread.isRunning():
                 self.search_thread.terminate()
                 self.search_thread.wait()
+            # Emit the cancelled event for this run.  The per-run emitted guard inside
+            # _emit_search_telemetry makes this exactly-once even if a cooperative
+            # on_search_finished also fires for the same run.
+            # Cancelled runs carry NO result_count_bucket (D-08).
+            self._emit_search_telemetry('cancelled')
 
         # 2. Reset search UI state
         self.reset_ui()
@@ -19049,6 +19057,12 @@ class GenizahGUI(QMainWindow):
             run = getattr(self, '_current_pgp_tag_search_run', None)
             if run is None or run.get('emitted'):
                 return
+            # CR-114-01: token guard — a stale queued slot from a superseded PGP worker
+            # carries the OLD run's token.  If the run's token doesn't match the live
+            # _pgp_tag_active_token, this slot is stale: return without marking emitted
+            # so the real live completion can still fire.
+            if run.get('token') != getattr(self, '_pgp_tag_active_token', None):
+                return
             run['emitted'] = True
             props = {
                 'search_mode': run['mode'],   # always 'pgp_tags' (hardcoded D-05)
@@ -19071,14 +19085,29 @@ class GenizahGUI(QMainWindow):
             tag = self.tag_search_combo.currentText().strip()
         if not tag:
             return
+        # CR-114-01: drain + disconnect the previous worker BEFORE installing the new run
+        # object so that a stale queued .finished slot cannot mark the new run emitted.
+        # The wait() blocks the UI thread until the old worker exits; the subsequent
+        # finished.disconnect() prevents its queued slot from ever reaching us again.
+        if self._pgp_tag_search_worker and self._pgp_tag_search_worker.isRunning():
+            self._pgp_tag_search_worker.wait()
+        if self._pgp_tag_search_worker is not None:
+            try:
+                self._pgp_tag_search_worker.finished.disconnect(self._on_tag_search_results)
+            except (RuntimeError, TypeError):
+                pass
+        # Mint a new per-run token and install the run object AFTER the drain.
+        self._pgp_tag_run_seq = getattr(self, '_pgp_tag_run_seq', 0) + 1
+        self._pgp_tag_active_token = self._pgp_tag_run_seq
         # Phase 114 USAGE-03: create per-run telemetry object BEFORE starting worker.
         # search_mode is the hardcoded 'pgp_tags' literal (D-05 / REVIEWS HIGH-1).
         # corpus is hardcoded 'genizah' — there is no corpus selector on the PGP-tags path.
         # The `tag` string is NEVER stored here (D-04 — the tag is the search term).
-        self._current_pgp_tag_search_run = {'mode': 'pgp_tags', 'corpus': 'genizah', 'emitted': False}
+        self._current_pgp_tag_search_run = {
+            'mode': 'pgp_tags', 'corpus': 'genizah', 'emitted': False,
+            'token': self._pgp_tag_active_token,
+        }
         self.status_label.setText(tr("Searching tag: {}...").format(tag))
-        if self._pgp_tag_search_worker and self._pgp_tag_search_worker.isRunning():
-            self._pgp_tag_search_worker.wait()
         self._pgp_tag_search_worker = PGPTagSearchWorker(tag)
         self._pgp_tag_search_worker.finished.connect(self._on_tag_search_results)
         self._pgp_tag_search_worker.start()

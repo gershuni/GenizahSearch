@@ -1608,3 +1608,209 @@ def test_applicationstate_changed_wired_in_source(monkeypatch, _reset_telemetry_
     assert '_maybe_emit_active_ping' in setup_src, (
         "_setup_active_ping must connect QTimer timeout to _maybe_emit_active_ping"
     )
+
+
+# ===========================================================================
+# Phase 114 Plan 04: CR-114-01..06 gap-closure regression tests
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# CR-114-01: PGP-tag per-run token guard (stale-slot cannot mutate live run)
+# ---------------------------------------------------------------------------
+
+def _make_pgp_tag_token_stub(monkeypatch):
+    """Stub for CR-114-01 token-guard tests.
+
+    Sets up _current_pgp_tag_search_run with a token so _emit_pgp_tag_search_telemetry
+    can be called in token-guard tests.
+    """
+    import types
+    import genizah_app as app
+
+    gui = types.SimpleNamespace()
+    gui._telemetry_session_started = True
+    gui._app_shutting_down = False
+    gui._session_id = 'pgp-token-session'
+    gui._pgp_tag_active_token = 2  # live token for run B
+    gui._current_pgp_tag_search_run = {
+        'mode': 'pgp_tags', 'corpus': 'genizah', 'emitted': False, 'token': 2
+    }
+    gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
+    gui._emit_pgp_tag_search_telemetry = lambda action, result_count=None: (
+        app.GenizahGUI._emit_pgp_tag_search_telemetry(gui, action, result_count)
+    )
+    return gui
+
+
+def test_pgp_tag_stale_slot_does_not_mark_new_run_emitted(monkeypatch, _reset_telemetry_state):
+    """CR-114-01: a stale _on_tag_search_results slot (token mismatch) must NOT mark the
+    live run emitted and must NOT enqueue an event attributed to the new run.
+
+    Simulate: live run has token=2; stale slot fires with a run that was
+    pre-installed with token=1 (old run) — the active token was already bumped to 2.
+    The emit helper reads _pgp_tag_active_token and compares to run['token'];
+    if they don't match it returns early (stale slot protection).
+    """
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    import types
+    import genizah_app as app
+
+    gui = types.SimpleNamespace()
+    gui._telemetry_session_started = True
+    gui._app_shutting_down = False
+    gui._session_id = 'pgp-stale-session'
+    gui._pgp_tag_active_token = 2  # live token is now 2 (new run B)
+    # Stale slot manipulates the run object as if it were run A (token=1)
+    gui._current_pgp_tag_search_run = {
+        'mode': 'pgp_tags', 'corpus': 'genizah', 'emitted': False, 'token': 1
+    }
+    gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
+    gui._emit_pgp_tag_search_telemetry = lambda action, result_count=None: (
+        app.GenizahGUI._emit_pgp_tag_search_telemetry(gui, action, result_count)
+    )
+
+    # Stale slot calls emit — should be suppressed (token mismatch: run['token']=1 vs active=2)
+    gui._emit_pgp_tag_search_telemetry('completed', 5)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 0, (
+        "CR-114-01: stale slot (token mismatch) must NOT emit desktop_search_executed"
+    )
+    # Also assert run is NOT marked emitted (so the real new completion can still fire)
+    assert gui._current_pgp_tag_search_run['emitted'] is False, (
+        "CR-114-01: stale slot must NOT mark the live run['emitted']=True"
+    )
+
+
+def test_pgp_tag_token_match_emits_exactly_once(monkeypatch, _reset_telemetry_state):
+    """CR-114-01: when token matches the active token, exactly one event fires (normal path)."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_pgp_tag_token_stub(monkeypatch)
+    # Both tokens are 2 — live completion for run B
+    gui._emit_pgp_tag_search_telemetry('completed', 10)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1, (
+        "CR-114-01: matching token must emit exactly one desktop_search_executed"
+    )
+    props = search_events[0]['properties']
+    assert props['search_mode'] == 'pgp_tags', "search_mode must always be 'pgp_tags'"
+    assert 'result_count_bucket' in props, "completed run must carry result_count_bucket"
+
+
+def test_pgp_tag_execute_drains_previous_worker_before_run_object(monkeypatch, _reset_telemetry_state):
+    """CR-114-01: _execute_tag_search source must drain/disconnect the previous worker
+    BEFORE installing the new run object — so the stale slot can never mutate the live run.
+
+    Source assertion: 'finished.disconnect' must appear BEFORE '_current_pgp_tag_search_run = '
+    in _execute_tag_search.
+    """
+    import genizah_app as app
+    import inspect
+
+    src = inspect.getsource(app.GenizahGUI._execute_tag_search)
+    assert 'finished.disconnect' in src, (
+        "CR-114-01: _execute_tag_search must disconnect the previous worker's .finished signal"
+    )
+    assert '_pgp_tag_active_token' in src or '_pgp_tag_run_seq' in src, (
+        "CR-114-01: _execute_tag_search must set the active token for run-token tracking"
+    )
+    # Drain (disconnect) must come BEFORE the new run object assignment
+    disconnect_pos = src.index('finished.disconnect')
+    run_obj_pos = src.index('_current_pgp_tag_search_run =')
+    assert disconnect_pos < run_obj_pos, (
+        "CR-114-01: previous-worker drain (disconnect) must precede new run-object assignment"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CR-114-02: regular Search _reset_search emits cancelled exactly once
+# ---------------------------------------------------------------------------
+
+def _make_reset_search_stub(monkeypatch):
+    """Build a minimal stub for _reset_search / _emit_search_telemetry tests."""
+    import types
+    import genizah_app as app
+
+    gui = types.SimpleNamespace()
+    gui._telemetry_session_started = True
+    gui._app_shutting_down = False
+    gui._session_id = 'reset-search-session'
+    gui._search_was_cancelled = False
+    gui._current_search_run = {'mode': 'keyword', 'corpus': 'genizah', 'emitted': False}
+    gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
+    gui._emit_search_telemetry = lambda action, result_count=None: (
+        app.GenizahGUI._emit_search_telemetry(gui, action, result_count)
+    )
+    return gui
+
+
+def test_reset_search_cancel_emits_cancelled_once(monkeypatch, _reset_telemetry_state):
+    """CR-114-02: _reset_search-style cancel (isRunning branch) emits exactly ONE
+    desktop_search_executed action='cancelled', no result_count_bucket.
+    """
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_reset_search_stub(monkeypatch)
+    # Simulate the _reset_search cancel: set _search_was_cancelled=True then emit
+    gui._search_was_cancelled = True
+    gui._emit_search_telemetry('cancelled')
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1, (
+        f"CR-114-02: _reset_search cancel must emit exactly one desktop_search_executed, got {len(search_events)}"
+    )
+    props = search_events[0]['properties']
+    assert props['action'] == 'cancelled', "CR-114-02: action must be 'cancelled'"
+    assert 'result_count_bucket' not in props, (
+        "CR-114-02: cancelled run must NOT include result_count_bucket (D-08)"
+    )
+
+
+def test_reset_search_cancel_no_double_emit(monkeypatch, _reset_telemetry_state):
+    """CR-114-02: after _reset_search emits 'cancelled', a subsequent on_search_finished
+    does NOT double-emit (emitted guard prevents phantom 'completed' action='completed').
+    """
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_reset_search_stub(monkeypatch)
+    # First emit from the cancel path
+    gui._search_was_cancelled = True
+    gui._emit_search_telemetry('cancelled')
+    # Subsequent call from on_search_finished (which might see was_cancelled=False after a race)
+    gui._emit_search_telemetry('completed', 0)
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1, (
+        f"CR-114-02: emitted guard must prevent double-emit after _reset_search cancel, got {len(search_events)}"
+    )
+    assert search_events[0]['properties']['action'] == 'cancelled', (
+        "CR-114-02: the only event must be the 'cancelled' one, not a phantom 'completed'"
+    )
+
+
+def test_reset_search_source_sets_cancelled_flag(monkeypatch, _reset_telemetry_state):
+    """CR-114-02: _reset_search source code must set _search_was_cancelled=True
+    and call _emit_search_telemetry('cancelled') inside the isRunning() cancel branch
+    — mirrors stop_search exactly.
+    """
+    import genizah_app as app
+    import inspect
+
+    src = inspect.getsource(app.GenizahGUI._reset_search)
+    assert '_search_was_cancelled = True' in src, (
+        "CR-114-02: _reset_search must set _search_was_cancelled=True (mirrors stop_search)"
+    )
+    assert "_emit_search_telemetry('cancelled')" in src, (
+        "CR-114-02: _reset_search must call _emit_search_telemetry('cancelled')"
+    )
