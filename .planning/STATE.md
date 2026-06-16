@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v8.1.0
 milestone_name: Desktop Telemetry
-status: executing
-stopped_at: Phase 116 Plan 02 — Tasks 1-2 complete; Task 3 checkpoint (HUMAN-UAT at /release)
+status: awaiting_human_uat
+stopped_at: Phase 116 — all plan code complete + verified (human_needed); awaiting release-time clean-VM SSL HUMAN-UAT (116-HUMAN-UAT.md / 116-02 Task 3)
 last_updated: "2026-06-16T12:00:00Z"
 last_activity: 2026-06-16
 progress:
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md (updated 2026-06-11 after v8.0.0 close)
 
 ## Current Position
 
-Phase: 116 (privacy-audit-ci-gate) — EXECUTING
-Plan: 3 of 3
-Status: Ready to execute
+Phase: 116 (privacy-audit-ci-gate) — CODE COMPLETE, AWAITING HUMAN-UAT
+Plan: 3 of 3 executed (116-01 ✓, 116-03 ✓, 116-02 code-complete; Task 3 = release-time HUMAN-UAT)
+Status: human_needed — verifier passed all automated checks; clean no-Python Windows VM SSL self-test (SSL_OK) pending at /release. PRIV-04/INFRA-06 stay Pending until that UAT lands (by design).
 Last activity: 2026-06-16
 
 Progress: [███████░░░] 67%
