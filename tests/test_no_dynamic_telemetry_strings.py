@@ -27,6 +27,9 @@ TARGET_FILES = [
     REPO_ROOT / 'genizah_app.py',
     REPO_ROOT / 'gui_threads.py',
     REPO_ROOT / 'desktop' / 'result_dialog.py',
+    # Phase 115 REVIEWS finding 7: scan indexing telemetry call sites in my_library_tab.py.
+    # track_performance(INDEXING_COMPLETE, ...) and accumulate_performance(...) land in plan 04.
+    REPO_ROOT / 'desktop' / 'my_library_tab.py',
 ]
 
 # Forbidden method names that must never appear as ARGUMENTS to telemetry calls (D-04).
@@ -57,6 +60,11 @@ def _is_telemetry_call(node: ast.Call) -> bool:
         '_emit_pgp_tag_search_telemetry',
         '_emit_feature_opened',
         'track',
+        # Phase 115 REVIEWS finding 7: recognize Phase 115 perf emission call sites so
+        # track_performance(INDEXING_COMPLETE, ...) and accumulate_performance(...) in
+        # desktop/my_library_tab.py are inspected for forbidden UI accessor arguments.
+        'track_performance',
+        'accumulate_performance',
     })
     func = node.func
     if isinstance(func, ast.Attribute):
@@ -274,15 +282,45 @@ def test_lint_rejects_identify_non_uuid():
     )
 
 
+def test_lint_rejects_perf_accessor_violation():
+    """Phase 115 REVIEWS finding 7: extended EMIT_HELPERS recognizes track_performance.
+
+    A synthetic track_performance(..., operation_kind=w.currentText()) MUST be flagged.
+    This proves the extended detector is non-vacuous — it actually inspects
+    track_performance and accumulate_performance call argument subtrees.
+    """
+    synthetic = textwrap.dedent("""\
+        def bad_indexing_telemetry(w, telemetry):
+            telemetry.track_performance(
+                'desktop_indexing_complete',
+                operation_kind=w.currentText(),
+            )
+    """)
+    tree = ast.parse(synthetic)
+    visitor = _ForbiddenAccessorInTelemetryArgsVisitor()
+    visitor.visit(tree)
+    assert visitor.violations, (
+        "AST visitor failed to detect currentText() inside track_performance() argument — "
+        "EMIT_HELPERS must include 'track_performance' (Phase 115 REVIEWS finding 7)."
+    )
+    assert any('currentText' in desc for _, desc in visitor.violations), (
+        f"Expected 'currentText' in violation descriptions, got: {visitor.violations}"
+    )
+
+
 def test_no_dynamic_telemetry_strings_in_producers():
     """Production guard: scan TARGET_FILES for forbidden-accessor-in-telemetry-arg violations.
 
-    All Phase 114 producers (genizah_app.py, gui_threads.py, desktop/result_dialog.py) must
-    pass because they use only hardcoded string constants / the static _EXPORT_ACTION_BY_FMT
-    map / user._uuid in telemetry/identify call arguments.
+    Phase 114 producers (genizah_app.py, gui_threads.py, desktop/result_dialog.py) plus
+    Phase 115 producer (desktop/my_library_tab.py — REVIEWS finding 7) must pass because
+    they use only hardcoded string constants / the static _EXPORT_ACTION_BY_FMT map /
+    user._uuid in telemetry/identify call arguments.
 
     on_search_finished / export_results / export_comp_report are NOT false-flagged because
     the guard is telemetry-argument-scoped (REVIEWS HIGH-3).
+
+    my_library_tab.py passes now because Phase 115 plan 04 call sites do not exist yet;
+    they will land clean (literal constants for operation_kind, no forbidden accessors).
     """
     violations = []
     for path in TARGET_FILES:
