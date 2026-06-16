@@ -19,6 +19,13 @@ jobs:
 
   tests:
     needs: lint-and-docs
+    env:
+      # PyQt6 tests (e.g. desktop-telemetry consent dialogs) construct a real
+      # QApplication and dispatch widget events. Without a platform plugin the
+      # headless Linux runner falls back to xcb (no display) and segfaults
+      # (exit 139). 'offscreen' is the documented headless mode — see the
+      # test docstrings and CLAUDE.md (GITHUB_ACTIONS is auto-set by the runner).
+      QT_QPA_PLATFORM: offscreen
     strategy:
       matrix:
         include:
