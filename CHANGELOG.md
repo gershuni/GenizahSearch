@@ -4,6 +4,26 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased] — Web platform changes (since v8.0.0)
+
+Web-only changes deployed to genizahsearch.com ahead of the next tagged release (the web platform deploys continuously, with no installer / version bump). Recorded here so the next release's notes account for them. Originated from a PostHog usage review.
+
+### New Features
+
+- **Public Search API — `fuzzy` search mode** — `POST /api/search` now accepts `search_mode: "fuzzy"` (approximate / maximum-variant matching), previously available only on `/api/parallels`. It is the slowest mode and is bounded by the new core timeout (below).
+
+### Improvements
+
+- **Public Search API rate limit raised 30 → 120 requests/minute per endpoint** (per IP; `/api/search`, `/api/browse`, `/api/parallels` each keep an independent bucket), so API-driven research no longer hits the throttle under normal use. The bundled `cairo-genizah-research` skill's self-throttle rose 24 → 96 rpm to match.
+- **`/api/search` core-execution timeout** — the search now runs in a thread-pool worker wrapped in a configurable wall-clock timeout (`SEARCH_API_CORE_TIMEOUT`, default 30s); a query that exceeds it returns a `504 core_timeout` envelope instead of tying up the server. This also moves search execution off the event loop, improving responsiveness during slow queries across all modes.
+- **"What's New" and OCR-disclaimer banners** — converted from inline page bars to fixed-position toasts (so they never shift page content), with auto-dismiss extended from 10s to 30s for comfortable reading.
+
+### Bug Fixes
+
+- **Eliminated severe layout shift (CLS) on Search, Parallels and the home page** — these scored a Cumulative Layout Shift p75 of ~0.9 (well into "poor"; also a Google ranking signal) while Browse was unaffected. Three causes fixed: top-of-page banners that deleted themselves on a timer (reflowing the whole page), result thumbnails that reserved width but not height (jumping as images loaded), and async-populated containers (Parallels results, home "Recent activity") that grew from zero height. All now reserve their space.
+
+---
+
 ## [Web Hotfix] - 2026-06-12 — Parallels Lab crash & link-click fixes
 
 Web-only deploy on top of v8.0.0 (no version bump, no installer). Two production bugs found in the live server log, both root-caused via `/gsd-debug` and cross-reviewed by Codex (gpt-5.5).
