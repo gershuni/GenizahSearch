@@ -811,6 +811,11 @@ POSTHOG_SCRIPT = f'''
             // Filter out localhost / dev traffic
             opt_out_capturing_by_default: ['localhost', '127.0.0.1'].includes(location.hostname),
         }});
+        // Web<->desktop separation on the SHARED PostHog project (id 134161): stamp every
+        // web event with platform=web (super-property, persisted), symmetric with the desktop
+        // app's platform=desktop. Lets a single `platform` breakdown read "web vs desktop"
+        // instead of "(not set) vs desktop". Applies to all events incl. autocapture/$pageview.
+        posthog.register({{platform: 'web'}});
     }}
     if (window.requestIdleCallback) {{ requestIdleCallback(_phInit); }}
     else {{ setTimeout(_phInit, 2000); }}
