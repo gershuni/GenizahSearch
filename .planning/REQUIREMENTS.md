@@ -47,9 +47,9 @@
 
 ### Performance Metrics (PERF)
 
-- [ ] **PERF-01**: Search and indexing durations are measured (e.g. a perf signal on the search/composition worker threads) without capturing any query text.
-- [ ] **PERF-02**: Result counts are reported as bounded buckets, not raw content-tied values.
-- [ ] **PERF-03**: Performance data is aggregated into a per-session summary (e.g. median/p95 + counts) flushed once at session end plus a periodic flush — not one event per search — and the sampling/aggregation parameters are configurable (env/config) so volume can be tuned without a code change. (Target: ~tens/day, not ~50/day × dozens of users.)
+- [x] **PERF-01**: Search and indexing durations are measured (e.g. a perf signal on the search/composition worker threads) without capturing any query text.
+- [x] **PERF-02**: Result counts are reported as bounded buckets, not raw content-tied values.
+- [x] **PERF-03**: Performance data is aggregated into a per-session summary (e.g. median/p95 + counts) flushed once at session end plus a periodic flush — not one event per search — and the sampling/aggregation parameters are configurable (env/config) so volume can be tuned without a code change. (Target: ~tens/day, not ~50/day × dozens of users.)
 
 ### Crash Reporting (CRASH)
 
@@ -142,9 +142,9 @@
 | IDENT-02 | Phase 114 | Complete |
 | IDENT-03 | Phase 111 | Complete |
 | IDENT-04 | Phase 111 | Complete |
-| PERF-01 | Phase 115 | Pending |
-| PERF-02 | Phase 115 | Pending |
-| PERF-03 | Phase 115 | Pending |
+| PERF-01 | Phase 115 | Complete |
+| PERF-02 | Phase 115 | Complete |
+| PERF-03 | Phase 115 | Complete |
 | CRASH-01 | Phase 113 | Complete |
 | CRASH-02 | Phase 113 | Complete |
 | CRASH-03 | Phase 113 | Complete |
