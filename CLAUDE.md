@@ -141,7 +141,7 @@ POSTHOG_IP_SALT=xxx (optional - HMAC salt for hashing client IPs; auto-generated
 
 # Search API (Phase 77-83 public HTTP/JSON API over the corpus)
 SEARCH_API_MODE=open                  # open | localhost-only | disabled (flippable per request, no restart)
-SEARCH_API_RATE_LIMIT=30              # per-IP requests/minute; shared ceiling but each endpoint has its own bucket
+SEARCH_API_RATE_LIMIT=120             # per-IP requests/minute; shared ceiling but each endpoint has its own bucket (raised 30->120 in 2026-06 for API research)
 SEARCH_API_POSTHOG_SAMPLE_N=1         # capture every Nth API request to PostHog
 SEARCH_API_BROWSE_TIMEOUT=1.0         # per-source enrichment timeout (PGP/FJMS/NLI), seconds
 SEARCH_API_BROWSE_CORE_TIMEOUT=2.0    # core BrowsePage fetch timeout, seconds
@@ -149,7 +149,7 @@ SEARCH_API_BROWSE_TEXT_CAP=4000       # default char cap for transcription text;
 
 # Skill-side (cairo-genizah-research skill consumer)
 GENIZAH_API_BASE=https://genizahsearch.com    # overrides --base-url CLI flag (env wins)
-GENIZAH_SKILL_REQ_PER_MIN=24                  # skill self-throttle, leaves 6 rpm headroom under server's 30 rpm
+GENIZAH_SKILL_REQ_PER_MIN=96                  # skill self-throttle, leaves 24 rpm headroom under server's 120 rpm
 
 # Phase 98 NLI Resilience env knobs (added 2026-05-25)
 NLI_CIRCUIT_THRESHOLD=3               # Consecutive failures to trip the shared circuit breaker

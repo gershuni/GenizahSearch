@@ -225,7 +225,7 @@ GenizahSearch now exposes a public HTTP/JSON research-automation API over the Ge
 - **Interactive Swagger UI at `/api/docs`** — try-it-now endpoint explorer
 - **Stability commitment** — additive changes any time; breaking changes only on major-version releases announced in `CHANGELOG.md`
 - **Reference Claude skill** — `skills/cairo-genizah-research/` demonstrates search → browse → rank with throttling and citation guidance
-- **Per-IP rate limiting** — 30 req/min per endpoint by default (configurable via `SEARCH_API_RATE_LIMIT`)
+- **Per-IP rate limiting** — 120 req/min per endpoint by default (configurable via `SEARCH_API_RATE_LIMIT`)
 
 See [docs/SEARCH_API.md](docs/SEARCH_API.md) for the full reference, curl examples, error codes, env vars, attribution policy, and citation guidance.
 
@@ -375,7 +375,7 @@ Parallel detection based on **Shmidman, Koppel, and Porat (2016)**.
 
 ## API
 
-GenizahSearch exposes a public HTTP/JSON API for research automation: keyword/Responsa search (`POST /api/search`), single-manuscript drill-down (`GET /api/browse`), and composition-parallels detection (`POST /api/parallels`). All endpoints are anonymous and rate-limited (30 req/min per endpoint per IP in the default public deployment) and return JSON in a uniform envelope.
+GenizahSearch exposes a public HTTP/JSON API for research automation: keyword/Responsa search (`POST /api/search`), single-manuscript drill-down (`GET /api/browse`), and composition-parallels detection (`POST /api/parallels`). All endpoints are anonymous and rate-limited (120 req/min per endpoint per IP in the default public deployment) and return JSON in a uniform envelope.
 
 Full reference, curl examples, and interactive Swagger UI: [docs/SEARCH_API.md](docs/SEARCH_API.md) · [genizahsearch.com/api/docs](https://genizahsearch.com/api/docs).
 

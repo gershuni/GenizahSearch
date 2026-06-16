@@ -150,6 +150,6 @@ Common codes the skill encounters:
 
 ## Rate limits
 
-Per-endpoint independent buckets, server enforces 30 rpm per IP per bucket
-(Phase 78/79/80 HARDEN-01, D-05). Skill self-throttles to 24 rpm per bucket
-(6 rpm headroom; SKILL-06).
+Per-endpoint independent buckets, server enforces 120 rpm per IP per bucket
+(Phase 78/79/80 HARDEN-01, D-05; raised 30->120 in 2026-06). Skill
+self-throttles to 96 rpm per bucket (24 rpm headroom; SKILL-06).

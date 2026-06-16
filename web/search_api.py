@@ -61,21 +61,21 @@ logger = logging.getLogger(__name__)
 
 
 # Module-level RateLimiter; Phases 79/80 import this same instance.
-_rate_limiter = RateLimiter(default_limit=30)
+_rate_limiter = RateLimiter(default_limit=120)
 
 # Phase 79 D-18: SEPARATE per-IP bucket from /api/search.
 # Same SEARCH_API_RATE_LIMIT env-var ceiling -- RateLimiter._current_limit() reads
 # the env on every check(). A client doing search-once + browse-N-times does NOT
 # exhaust the search bucket. (R-10: aggregate per-IP allowance is roughly 2x the
 # ceiling -- captured as monitoring obligation, no contract change in v7.10.)
-_browse_rate_limiter = RateLimiter(default_limit=30)
+_browse_rate_limiter = RateLimiter(default_limit=120)
 
 # Phase 80 D-05: SEPARATE per-IP bucket from /api/search and /api/browse.
 # Same SEARCH_API_RATE_LIMIT env-var ceiling — RateLimiter._current_limit()
 # reads the env on every check(). A client doing search-once + browse-N-times
 # + parallels-once does NOT exhaust the search or browse buckets. Independence
 # is verified by tests/test_parallels_api.py::test_parallels_rate_limit_independence.
-_parallels_rate_limiter = RateLimiter(default_limit=30)
+_parallels_rate_limiter = RateLimiter(default_limit=120)
 
 
 # ---------------------------------------------------------------------------

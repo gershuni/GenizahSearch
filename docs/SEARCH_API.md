@@ -700,14 +700,14 @@ Every server-side var that affects the three endpoints, plus the two skill-side 
 | Var | Default | Scope | Notes |
 | --- | ------- | ----- | ----- |
 | `SEARCH_API_MODE` | `open` | server | Values: `open` \| `localhost-only` \| `disabled`. Flippable per request without restart (`enforce_mode_gate` re-reads env every call). Applies to `/api/search`, `/api/browse`, `/api/parallels` only. |
-| `SEARCH_API_RATE_LIMIT` | `30` | server | Per-IP requests per minute. **Shared ceiling but each endpoint has an independent bucket** — Phase 80 D-05 makes `/api/search` + `/api/browse` + `/api/parallels` run three separate rate-limiter instances reading the same env var, so a client doing search+browse+parallels gets approximately 3× the per-IP allowance of one endpoint alone. Verified by `tests/test_parallels_api.py::test_parallels_rate_limit_independence`. |
+| `SEARCH_API_RATE_LIMIT` | `120` | server | Per-IP requests per minute (raised from `30` in 2026-06 to support API-driven research). **Shared ceiling but each endpoint has an independent bucket** — Phase 80 D-05 makes `/api/search` + `/api/browse` + `/api/parallels` run three separate rate-limiter instances reading the same env var, so a client doing search+browse+parallels gets approximately 3× the per-IP allowance of one endpoint alone. Verified by `tests/test_parallels_api.py::test_parallels_rate_limit_independence`. |
 | `SEARCH_API_BROWSE_TIMEOUT` | `1.0` | server | Per-source enrichment timeout for `/api/browse` PGP/FJMS/NLI fetches, in seconds. Hitting it produces an `enrichment_timeout` warning (response is still 200). |
 | `SEARCH_API_BROWSE_CORE_TIMEOUT` | `2.0` | server | Core BrowsePage fetch timeout for `/api/browse`, in seconds. Phase 79 R-01 added this to prevent executor pinning on a hung Tantivy reader; hitting it produces a 504 `core_timeout` envelope. |
 | `SEARCH_API_BROWSE_TEXT_CAP` | `4000` | server | Default character cap for transcription text on `/api/browse`. Per-request override via `?text_cap=N`, bounded `[100, 10000]`. |
 | `SEARCH_API_POSTHOG_SAMPLE_N` | `1` | server | Capture every Nth request to PostHog. `1` = every request. Applies to all three search-helper endpoints. |
 | `POSTHOG_IP_SALT` | auto-generated | server | HMAC salt for hashing client IPs in server-side PostHog events. Optional, but production should set explicitly so hashes survive restarts. |
 | `GENIZAH_API_BASE` | `https://genizahsearch.com` | skill | Base URL for all skill API calls. Per Phase 81B D-09, precedence is **env var > `--base-url` CLI flag > default** — an inversion of typical CLI convention; the env var ALWAYS wins. |
-| `GENIZAH_SKILL_REQ_PER_MIN` | `24` | skill | Per-bucket throttle ceiling for the skill's token-bucket. Default leaves 6 rpm headroom under the server's 30 rpm `SEARCH_API_RATE_LIMIT`. |
+| `GENIZAH_SKILL_REQ_PER_MIN` | `96` | skill | Per-bucket throttle ceiling for the skill's token-bucket. Default leaves 24 rpm headroom under the server's 120 rpm `SEARCH_API_RATE_LIMIT`. |
 
 The CLAUDE.md env-var block at [CLAUDE.md](../CLAUDE.md) currently documents all seven
 server-side vars; the two skill-side vars are documented in

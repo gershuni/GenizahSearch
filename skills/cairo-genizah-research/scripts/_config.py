@@ -54,10 +54,11 @@ def state_path(filename: str) -> Path:
 def get_rpm() -> int:
     """Effective requests-per-minute per bucket.
 
-    Default 24 — leaves 6 rpm headroom under the server's 30 rpm ceiling
-    (Phase 78 HARDEN-01). Override via GENIZAH_SKILL_REQ_PER_MIN env var.
+    Default 96 — leaves 24 rpm headroom under the server's 120 rpm ceiling
+    (Phase 78 HARDEN-01; raised from 24/30 in 2026-06 to support API-driven
+    research). Override via GENIZAH_SKILL_REQ_PER_MIN env var.
     """
-    return int(os.environ.get("GENIZAH_SKILL_REQ_PER_MIN", "24"))
+    return int(os.environ.get("GENIZAH_SKILL_REQ_PER_MIN", "96"))
 
 
 def get_burst() -> int:

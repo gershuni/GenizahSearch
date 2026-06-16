@@ -44,7 +44,7 @@ Set env vars in your shell or Claude Code config:
 |----------|---------|---------|
 | `GENIZAH_API_BASE` | `https://genizahsearch.com` | Base URL (env wins over `--base-url`). |
 | `GENIZAH_TOP_N` | `10` | Top-N for drill-down (bounded [1, 25]). |
-| `GENIZAH_SKILL_REQ_PER_MIN` | `24` | Throttle ceiling per endpoint. |
+| `GENIZAH_SKILL_REQ_PER_MIN` | `96` | Throttle ceiling per endpoint. |
 | `GENIZAH_SKILL_BURST` | `5` | Token-bucket burst. |
 
 For local development against a dev server: `export GENIZAH_API_BASE=http://localhost:8080`.

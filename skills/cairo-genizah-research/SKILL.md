@@ -48,7 +48,7 @@ on every script invocation. v7.10 acceptance run targets Claude Code.
 |----------|---------|---------|
 | `GENIZAH_API_BASE` | `https://genizahsearch.com` | Base URL for all API calls. |
 | `GENIZAH_TOP_N` | `10` | Top-N candidates to drill via /api/browse (bounded [1, 25]). |
-| `GENIZAH_SKILL_REQ_PER_MIN` | `24` | Throttle ceiling per endpoint bucket. |
+| `GENIZAH_SKILL_REQ_PER_MIN` | `96` | Throttle ceiling per endpoint bucket. |
 | `GENIZAH_SKILL_BURST` | `5` | Token-bucket burst capacity. |
 
 **API Documentation:** Full public API reference at [`docs/SEARCH_API.md`](../../docs/SEARCH_API.md) · Interactive: [genizahsearch.com/api/docs](https://genizahsearch.com/api/docs)
@@ -154,13 +154,13 @@ Error code → plain-text mapping:
 ## Throttle (SKILL-06)
 
 All scripts share `scripts/throttle.py` with three independent token buckets:
-`search`, `browse`, `parallels`. Default 24 rpm per bucket; burst 5. State
+`search`, `browse`, `parallels`. Default 96 rpm per bucket; burst 5. State
 persists in `state/throttle.json` under a file lock. You do not call the
 throttle directly — every endpoint script acquires its bucket internally.
 
 Workload sizing: a typical scholarly query with 3 phrases + top-10 drill-down
 is ~3 search calls + ~10 browse calls = ~13 requests. Comfortably under the
-server's 30 rpm per bucket. A heavier query (5 phrases + top-25 + tier-2
+server's 120 rpm per bucket. A heavier query (5 phrases + top-25 + tier-2
 shelfmark resolution for 3 known witnesses) is ~5 + 25 + 3 = ~33 requests
 spread across two buckets — still safe with throttle pacing.
 
