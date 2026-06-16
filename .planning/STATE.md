@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v8.1.0
 milestone_name: Desktop Telemetry
 status: executing
-stopped_at: Phase 116 context gathered
-last_updated: "2026-06-16T11:09:12.791Z"
+stopped_at: Phase 116 Plan 02 — Tasks 1-2 complete; Task 3 checkpoint (HUMAN-UAT at /release)
+last_updated: "2026-06-16T12:00:00Z"
 last_activity: 2026-06-16
 progress:
   total_phases: 6
@@ -47,7 +47,7 @@ Progress: [███████░░░] 67%
 
 ### Blockers/Concerns
 
-- PyInstaller SSL cert bundle for `certifi` needs manual verification on a clean Windows VM (Phase 116 success criterion 3).
+- PyInstaller SSL cert bundle for `certifi` needs manual verification on a clean Windows VM (Phase 116 success criterion 3). CODE IS COMPLETE (send_selftest_event_sync + --telemetry-selftest flag); the HUMAN-UAT (Task 3) is deferred to /release time. INFRA-06 NOT yet complete.
 - ~~Embed the real phc_ key~~ **DONE (2026-06-15):** the publishable shared-project key `phc_CGTsV72…` is now baked into `_TELEMETRY_KEY_DEFAULT`, so a shipped .exe emits without any env var (guarded by `test_embedded_default_is_a_real_phc_key` + `test_frozen_build_uses_embedded_key`). Remaining gate for the two 113-HUMAN-UAT items is now ONLY the packaged .exe build (deferred to /release / Phase 116).
 
 ### Pending Todos
@@ -72,7 +72,7 @@ None specific to v8.1.0 yet.
 Last session: 2026-06-16T11:09:12.785Z
 Stopped at: Phase 116 context gathered
 Resume file: None
-Next step: Phase 114 complete — proceed to Phase 115
+Next step: Phase 116 Plan 02 Tasks 1-2 complete; Task 3 HUMAN-UAT deferred to /release (clean no-Python Windows VM: --telemetry-selftest -> SSL_OK + PostHog 134161 event; INFRA-06 NOT yet complete)
 
 ## Performance Metrics
 
@@ -92,6 +92,7 @@ Next step: Phase 114 complete — proceed to Phase 115
 | Phase 114-usage-analytics P114-04 | 7min | 3 tasks | 2 files |
 | Phase 115-performance-metrics P03 | 30min | 3 tasks | 2 files |
 | Phase 116-privacy-audit-ci-gate P01 | 3min | 3 tasks | 2 files |
+| Phase 116-privacy-audit-ci-gate P02 | 15min | 2 tasks (Task 3 deferred) | 2 files |
 
 ## Decisions
 
