@@ -49,14 +49,12 @@ class ResultDialog(QDialog):
         super().__init__(parent)
         self._app = parent
         # D-03: result_detail feature_opened — single canonical construction site (covers all 6
-        # ResultDialog(...) construction sites in genizah_app.py).  Session_id via parent attr.
+        # ResultDialog(...) construction sites in genizah_app.py). Routed through the host's gated
+        # _emit_feature_opened() (WR-01 / T-114-03): a ResultDialog opened in the ~700ms startup
+        # window before the telemetry coordinator fires must NOT emit an orphan event with
+        # session_id='' — the host's _telemetry_ready() gate + correct session_id apply there.
         try:
-            from desktop import telemetry
-            telemetry.track(
-                telemetry.DesktopEvent.FEATURE_OPENED,
-                dialog_name='result_detail',
-                session_id=getattr(parent, '_session_id', ''),
-            )
+            self._app._emit_feature_opened(dialog_name='result_detail')
         except Exception:
             pass  # telemetry is best-effort; never block ResultDialog init
 
@@ -2891,13 +2889,10 @@ class ResultDialog(QDialog):
         shelf = self.meta_mgr.get_meta_for_id(self.current_sys_id)[0] if self.current_sys_id else ''
         # D-03: FJMS catalog feature_opened — ResultDialog open path (REVIEWS MEDIUM-6).
         # The Browse-tab path emits from _show_fjms_catalog_dialog in genizah_app.py.
+        # Routed through the host's gated _emit_feature_opened() (WR-01 / T-114-03) so the
+        # _telemetry_ready() gate + correct session_id apply (no orphan empty-session events).
         try:
-            from desktop import telemetry
-            telemetry.track(
-                telemetry.DesktopEvent.FEATURE_OPENED,
-                dialog_name='fjms_catalog',
-                session_id=getattr(self._app, '_session_id', ''),
-            )
+            self._app._emit_feature_opened(dialog_name='fjms_catalog')
         except Exception:
             pass  # telemetry is best-effort; never block dialog open
         from desktop.dialogs_scholarly import FjmsCatalogDialog
