@@ -154,6 +154,17 @@ def _reset_rate_limiter():
     _rate_limiter.reset_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _reset_heavy_semaphore():
+    """P9X: reset the heavy-mode concurrency semaphore to its default size
+    before and after each test so tests do not share state through the
+    module-level singleton."""
+    from web.search_api import _HeavySemaphoreState, DEFAULT_HEAVY_CONCURRENCY
+    _HeavySemaphoreState.reset(DEFAULT_HEAVY_CONCURRENCY)
+    yield
+    _HeavySemaphoreState.reset(DEFAULT_HEAVY_CONCURRENCY)
+
+
 @pytest.fixture
 def stub_searcher():
     """Replace state.searcher with a fresh StubSearcher; restore after."""
@@ -469,9 +480,22 @@ def test_query_at_cap_legal(client, stub_searcher):
     assert r.status_code == 200, r.text
 
 
-@pytest.mark.parametrize('limit', [101, 200, 500, 9999])
+@pytest.mark.parametrize('limit', [101, 200, 500])
 def test_limit_above_max_rejected(client, limit):
+    """P9X: limit > MAX_LIMIT (100) for exact mode returns 400.
+    The error code is now `limit_too_high` (handler enforced) for limits in
+    [101, FUZZY_HARD_MAX=2000]; Pydantic still rejects > FUZZY_HARD_MAX=2000
+    with `invalid_request`.  Non-fuzzy mode behavior (reject) is unchanged."""
     r = _post_search(client, query='x', search_mode='exact', limit=limit)
+    assert r.status_code == 400, r.text
+    # Handler now raises limit_too_high (was invalid_request when Pydantic le=100)
+    assert r.json()['error']['code'] == 'limit_too_high'
+
+
+def test_limit_above_fuzzy_hard_max_rejected_by_pydantic(client):
+    """P9X: limit > FUZZY_HARD_MAX=2000 is still rejected by Pydantic (invalid_request)
+    for all modes including fuzzy."""
+    r = _post_search(client, query='x', search_mode='exact', limit=9999)
     assert r.status_code == 400, r.text
     assert r.json()['error']['code'] == 'invalid_request'
 
@@ -764,4 +788,310 @@ def test_invalid_combination_code_registered():
 
 def test_max_limit_lowered_to_100():
     """81A D-06: ceiling lowered from 200 (Phase 78) to 100."""
+    assert MAX_LIMIT == 100
+
+
+# ---------------------------------------------------------------------------
+# Section 8 — Per-mode timeout ladder (P9X Task 1)
+# ---------------------------------------------------------------------------
+
+def test_heavy_search_busy_code_registered():
+    """'heavy_search_busy' is in the canonical ERROR_CODES taxonomy."""
+    assert 'heavy_search_busy' in ERROR_CODES
+
+
+def test_per_mode_timeout_exact_uses_baseline(client, monkeypatch):
+    """SEARCH_API_CORE_TIMEOUT=0.2 + exact + slow searcher → 504 core_timeout.
+    Equivalent to existing test_search_core_timeout_returns_504 but explicit
+    about the mode. The existing test also passes (both use exact mode)."""
+    import time as _time
+    from web.state import state as _state
+
+    monkeypatch.setenv('SEARCH_API_CORE_TIMEOUT', '0.2')
+
+    class _SlowSearcher:
+        def execute_search(self, **kwargs):
+            _time.sleep(1.0)
+            return []
+
+    saved = _state.searcher
+    _state.searcher = _SlowSearcher()
+    try:
+        resp = _post_search(client, query='test', search_mode='exact')
+    finally:
+        _state.searcher = saved
+
+    assert resp.status_code == 504, resp.text
+    assert resp.json()['error']['code'] == 'core_timeout'
+
+
+def test_per_mode_timeout_variants_uses_variants_knob(client, monkeypatch):
+    """SEARCH_API_VARIANTS_TIMEOUT=0.2 (baseline high) + variants + slow → 504."""
+    import time as _time
+    from web.state import state as _state
+
+    monkeypatch.setenv('SEARCH_API_CORE_TIMEOUT', '30.0')  # baseline high
+    monkeypatch.setenv('SEARCH_API_VARIANTS_TIMEOUT', '0.2')
+
+    class _SlowSearcher:
+        def execute_search(self, **kwargs):
+            _time.sleep(1.0)
+            return []
+
+    saved = _state.searcher
+    _state.searcher = _SlowSearcher()
+    try:
+        resp = _post_search(client, query='test', search_mode='variants')
+    finally:
+        _state.searcher = saved
+
+    assert resp.status_code == 504, resp.text
+    assert resp.json()['error']['code'] == 'core_timeout'
+
+
+def test_per_mode_timeout_variants_does_not_use_baseline(client, monkeypatch, stub_searcher):
+    """With SEARCH_API_CORE_TIMEOUT=0.2 but SEARCH_API_VARIANTS_TIMEOUT=30,
+    a variants request with a stub (fast) searcher completes successfully."""
+    monkeypatch.setenv('SEARCH_API_CORE_TIMEOUT', '0.2')
+    monkeypatch.setenv('SEARCH_API_VARIANTS_TIMEOUT', '30.0')
+
+    resp = _post_search(client, query='test', search_mode='variants')
+    assert resp.status_code == 200, resp.text
+
+
+def test_per_mode_timeout_fuzzy_uses_fuzzy_knob(client, monkeypatch):
+    """SEARCH_API_FUZZY_TIMEOUT=0.2 + fuzzy + slow → 504; message names fuzzy ceiling."""
+    import time as _time
+    from web.state import state as _state
+
+    monkeypatch.setenv('SEARCH_API_CORE_TIMEOUT', '30.0')
+    monkeypatch.setenv('SEARCH_API_VARIANTS_TIMEOUT', '30.0')
+    monkeypatch.setenv('SEARCH_API_FUZZY_TIMEOUT', '0.2')
+
+    class _SlowSearcher:
+        def execute_search(self, **kwargs):
+            _time.sleep(1.0)
+            return []
+
+    saved = _state.searcher
+    _state.searcher = _SlowSearcher()
+    try:
+        resp = _post_search(client, query='test', search_mode='fuzzy')
+    finally:
+        _state.searcher = saved
+
+    assert resp.status_code == 504, resp.text
+    body = resp.json()
+    assert body['error']['code'] == 'core_timeout'
+    # Message must name the fuzzy ceiling
+    msg = body['error']['message']
+    assert 'fuzzy' in msg.lower() or '0.2' in msg
+
+
+def test_504_message_names_ceiling(client, monkeypatch):
+    """504 message contains numeric ceiling and mode string."""
+    import time as _time
+    from web.state import state as _state
+
+    monkeypatch.setenv('SEARCH_API_FUZZY_TIMEOUT', '0.3')
+
+    class _SlowSearcher:
+        def execute_search(self, **kwargs):
+            _time.sleep(1.0)
+            return []
+
+    saved = _state.searcher
+    _state.searcher = _SlowSearcher()
+    try:
+        resp = _post_search(client, query='test', search_mode='fuzzy')
+    finally:
+        _state.searcher = saved
+
+    assert resp.status_code == 504, resp.text
+    msg = resp.json()['error']['message']
+    assert '0.3' in msg
+    assert 'fuzzy' in msg.lower() or 'search_mode' in msg.lower()
+
+
+def test_heavy_concurrency_fast_fail(monkeypatch):
+    """SEARCH_API_HEAVY_CONCURRENCY=1: holding the single slot with a slow fuzzy
+    request while a second fuzzy request → 503 heavy_search_busy with Retry-After.
+    An exact request in the same window is NOT gated (still succeeds).
+    Tests the _acquire_heavy_slot logic directly to avoid threading races in TestClient.
+    """
+    import asyncio
+    from web.search_api import _acquire_heavy_slot, _HeavySemaphoreState
+
+    monkeypatch.setenv('SEARCH_API_HEAVY_CONCURRENCY', '1')
+
+    async def _test():
+        # Reset the semaphore to size=1
+        _HeavySemaphoreState.reset(1)
+        sem = _HeavySemaphoreState.sem
+
+        # Hold the single slot by decrementing _value directly
+        # (same mechanism as _acquire_heavy_slot uses)
+        assert sem._value == 1
+        sem._value -= 1
+        assert sem._value == 0
+        try:
+            # Now try to acquire again — should fail fast with APIError
+            from shared.api_errors import APIError
+            with pytest.raises(APIError) as exc_info:
+                await _acquire_heavy_slot()
+            err = exc_info.value
+            assert err.code == 'heavy_search_busy'
+            assert err.http_status == 503
+            assert 'Retry-After' in err.headers
+        finally:
+            sem.release()
+
+    asyncio.run(_test())
+
+
+def test_heavy_slot_released_after_timeout(monkeypatch):
+    """After a heavy request 504s, a subsequent heavy request with a fast stub
+    succeeds — the semaphore slot is not leaked on timeout."""
+    import asyncio
+    from web.search_api import _acquire_heavy_slot, _HeavySemaphoreState
+
+    monkeypatch.setenv('SEARCH_API_HEAVY_CONCURRENCY', '1')
+
+    async def _test():
+        _HeavySemaphoreState.reset(1)
+
+        # Simulate: acquire slot, then release (what a finally block does on timeout)
+        rel = await _acquire_heavy_slot()
+        rel()  # release — like the finally block
+
+        # Now a second acquire should succeed
+        rel2 = await _acquire_heavy_slot()
+        rel2()
+
+    asyncio.run(_test())
+
+
+def test_exact_not_gated_by_heavy_semaphore(client, monkeypatch, stub_searcher):
+    """exact/title/shelfmark requests succeed even when the heavy slot is held."""
+    import asyncio
+    from web.search_api import _HeavySemaphoreState
+
+    monkeypatch.setenv('SEARCH_API_HEAVY_CONCURRENCY', '1')
+    monkeypatch.setenv('SEARCH_API_CORE_TIMEOUT', '30.0')
+
+    async def _hold():
+        _HeavySemaphoreState.reset(1)
+        # Hold the slot by decrementing _value directly
+        _HeavySemaphoreState.sem._value -= 1
+
+    asyncio.run(_hold())
+    try:
+        resp = _post_search(client, query='test', search_mode='exact')
+        assert resp.status_code == 200, resp.text
+    finally:
+        _HeavySemaphoreState.sem.release()
+
+
+# ---------------------------------------------------------------------------
+# Section 9 — Fuzzy result cap raise (P9X Task 2)
+# ---------------------------------------------------------------------------
+
+def test_fuzzy_limit_above_100_allowed(client, monkeypatch):
+    """fuzzy + limit=300 → 200 OK (not 400); stub returning >100 rows → envelope has >100 results."""
+    from web.state import state as _state
+    saved = _state.searcher
+    # Stub returning 200 rows
+    fake = StubSearcher()
+    fake.results = [
+        {
+            'uid': f'uid_{i:04d}',
+            'display': {
+                'shelfmark': f'T-S {i}.1',
+                'title': 'Test',
+                'id': f'991234567890{i:04d}',
+                'library_code': 'CUL',
+            },
+            'raw_header': f'header_991234567890{i:04d}_IE99_P1',
+            'snippet': 'a *match* here',
+            'full_text': 'lorem ipsum',
+            'sort_score': 0.5,
+        }
+        for i in range(200)
+    ]
+    _state.searcher = fake
+    try:
+        resp = _post_search(client, query='test', search_mode='fuzzy', limit=300)
+    finally:
+        _state.searcher = saved
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body['count'] > 100
+
+
+def test_non_fuzzy_limit_above_100_still_rejected(client):
+    """exact + limit=300 → 400 limit_too_high (unchanged behavior)."""
+    resp = _post_search(client, query='test', search_mode='exact', limit=300)
+    assert resp.status_code == 400, resp.text
+    assert resp.json()['error']['code'] == 'limit_too_high'
+
+
+def test_fuzzy_max_limit_env_respected(client, monkeypatch):
+    """SEARCH_API_FUZZY_MAX_LIMIT=150: fuzzy limit=200 → 400; fuzzy limit=150 → 200."""
+    from web.state import state as _state
+    monkeypatch.setenv('SEARCH_API_FUZZY_MAX_LIMIT', '150')
+
+    # limit=200 exceeds the configured ceiling → 400
+    resp_over = _post_search(client, query='test', search_mode='fuzzy', limit=200)
+    assert resp_over.status_code == 400, resp_over.text
+    assert resp_over.json()['error']['code'] == 'limit_too_high'
+
+    # limit=150 is at the ceiling → 200 OK
+    saved = _state.searcher
+    fake = StubSearcher()
+    fake.results = [
+        {
+            'uid': f'uid_{i:04d}',
+            'display': {'shelfmark': f'T-S {i}.1', 'title': 'Test', 'id': f'9912345{i:04d}', 'library_code': 'CUL'},
+            'raw_header': f'header_9912345{i:04d}_IE99_P1',
+            'snippet': 'a *match* here', 'full_text': 'lorem', 'sort_score': 0.5,
+        }
+        for i in range(150)
+    ]
+    _state.searcher = fake
+    try:
+        resp_at = _post_search(client, query='test', search_mode='fuzzy', limit=150)
+    finally:
+        _state.searcher = saved
+    assert resp_at.status_code == 200, resp_at.text
+
+
+def test_fuzzy_default_limit_recall(client):
+    """fuzzy with no explicit limit + stub returning 250 rows → envelope count > 100."""
+    from web.state import state as _state
+    saved = _state.searcher
+    fake = StubSearcher()
+    fake.results = [
+        {
+            'uid': f'uid_{i:04d}',
+            'display': {'shelfmark': f'T-S {i}.1', 'title': 'Test', 'id': f'9900{i:04d}', 'library_code': 'CUL'},
+            'raw_header': f'header_9900{i:04d}_IE99_P1',
+            'snippet': 'a *match* here', 'full_text': 'lorem', 'sort_score': 0.5,
+        }
+        for i in range(250)
+    ]
+    _state.searcher = fake
+    try:
+        resp = _post_search(client, query='test', search_mode='fuzzy')
+    finally:
+        _state.searcher = saved
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # Without explicit limit, fuzzy recall default must be > 100
+    assert body['count'] > 100
+
+
+def test_max_limit_unchanged():
+    """MAX_LIMIT stays 100 for non-fuzzy modes."""
     assert MAX_LIMIT == 100

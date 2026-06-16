@@ -92,6 +92,17 @@ def clean_env(monkeypatch):
     _parallels_rate_limiter.reset_for_tests()
 
 
+@pytest.fixture(autouse=True)
+def _reset_heavy_semaphore():
+    """P9X: reset the heavy-mode concurrency semaphore to its default size
+    before and after each test so tests do not share state through the
+    module-level singleton."""
+    from web.search_api import _HeavySemaphoreState, DEFAULT_HEAVY_CONCURRENCY
+    _HeavySemaphoreState.reset(DEFAULT_HEAVY_CONCURRENCY)
+    yield
+    _HeavySemaphoreState.reset(DEFAULT_HEAVY_CONCURRENCY)
+
+
 def _make_main_row(uid='IE99_P3_FL12345', sys_id='99001', score=5.0, chunk_index=0):
     """Build one search_composition_logic row matching the post-Plan-77-05 shape."""
     return {
@@ -720,6 +731,68 @@ def test_parallels_statelessness_two_identical_posts(client, mock_searcher, clea
     b1.pop('generated_at', None)
     b2.pop('generated_at', None)
     assert b1 == b2, f'stateless contract broken: {b1!r} != {b2!r}'
+
+
+# ---------------------------------------------------------------------------
+# P9X Task 1 — Parallels timeout + heavy concurrency (2)
+# ---------------------------------------------------------------------------
+
+def test_parallels_timeout_uses_parallels_knob(client, clean_env, monkeypatch):
+    """SEARCH_API_PARALLELS_TIMEOUT=0.2 + slow composition stub → 504 core_timeout."""
+    import asyncio
+    import time as _time
+
+    monkeypatch.setenv('SEARCH_API_PARALLELS_TIMEOUT', '0.2')
+
+    # Patch fetch_parallels_results to be a slow coroutine
+    async def _slow_parallels(**kwargs):
+        await asyncio.sleep(1.0)
+        from shared.parallels_service import ParallelsResultBundle
+        return ParallelsResultBundle(
+            main_results=[], filtered_results=[],
+            boundary_options={'boundary_mode': 'full', 'boundary_delimiter': '\n',
+                              'boundary_boost': 1.5, 'min_boundary_matches': 0,
+                              'min_delimiter_distance': 3},
+            truncated_to_200=False,
+        )
+
+    monkeypatch.setattr('web.search_api.fetch_parallels_results', _slow_parallels)
+
+    r = client.post('/api/parallels', json={'text': 'hello world', 'mode': 'exact'})
+    assert r.status_code == 504, r.text
+    assert r.json()['error']['code'] == 'core_timeout'
+
+
+def test_parallels_heavy_concurrency_fast_fail(monkeypatch):
+    """Second concurrent parallels request → 503 heavy_search_busy.
+    Tests _acquire_heavy_slot directly (avoids threading races in TestClient)."""
+    import asyncio
+    import pytest
+
+    monkeypatch.setenv('SEARCH_API_HEAVY_CONCURRENCY', '1')
+
+    from web.search_api import _acquire_heavy_slot, _HeavySemaphoreState
+    from shared.api_errors import APIError
+
+    async def _test():
+        _HeavySemaphoreState.reset(1)
+        sem = _HeavySemaphoreState.sem
+        # Hold the single slot by decrementing _value directly
+        # (same mechanism as _acquire_heavy_slot uses)
+        assert sem._value == 1
+        sem._value -= 1
+        assert sem._value == 0
+        try:
+            with pytest.raises(APIError) as exc_info:
+                await _acquire_heavy_slot()
+            err = exc_info.value
+            assert err.code == 'heavy_search_busy'
+            assert err.http_status == 503
+            assert 'Retry-After' in err.headers
+        finally:
+            sem.release()
+
+    asyncio.run(_test())
 
 
 # ---------------------------------------------------------------------------

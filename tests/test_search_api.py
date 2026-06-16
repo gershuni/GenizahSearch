@@ -244,11 +244,14 @@ def test_extra_top_level_key_rejected(client, populated_state, clean_env):
 
 
 def test_limit_too_high(client, populated_state, clean_env):
-    """81A D-06: MAX_LIMIT lowered 200 -> 100; Pydantic Field(le=100) rejects via
-    envelope wrapper as HTTP 400 invalid_request (NOT 422, NOT limit_too_high)."""
+    """MAX_LIMIT=100 still enforced for non-fuzzy modes.
+    P9X: the Pydantic Field upper bound is now 2000 (FUZZY_HARD_MAX) so the
+    handler catches limit>MAX_LIMIT for non-fuzzy modes and returns
+    `limit_too_high` (was `invalid_request` via Pydantic Field(le=100)).
+    The 400 status and limit=100 boundary are unchanged."""
     r = client.post('/api/search', json={'query': 'x', 'search_mode': 'exact', 'limit': 101})
     assert r.status_code == 400, r.json()
-    assert r.json()['error']['code'] == 'invalid_request'
+    assert r.json()['error']['code'] == 'limit_too_high'
 
 
 def test_limit_zero_returns_invalid_request(client, populated_state, clean_env):

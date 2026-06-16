@@ -191,8 +191,13 @@ class SearchRequest(BaseModel):
     limit: int = Field(
         default=50,
         ge=1,
-        le=100,
-        description="Max results to return. Bounded [1, 100]. Default 50.",
+        le=2000,  # Hard max — per-mode ceiling enforced in handler (fuzzy: FUZZY_HARD_MAX=2000; others: MAX_LIMIT=100)
+        description=(
+            "Max results to return. For non-fuzzy modes bounded [1, 100]. "
+            "For fuzzy mode, may be up to SEARCH_API_FUZZY_MAX_LIMIT (default 500, "
+            "hard max 2000). Default 50 (fuzzy with no explicit limit applies a "
+            "wider recall-oriented default)."
+        ),
     )
     filters: Optional[FiltersModel] = Field(
         default=None,
@@ -248,6 +253,134 @@ _SEARCH_MODE_TO_INTERNAL = {
 # the event loop for its full duration. Re-read per request via _read_timeout so
 # prod can flip SEARCH_API_CORE_TIMEOUT without a restart.
 DEFAULT_SEARCH_CORE_TIMEOUT = 30.0
+
+# P9X per-mode timeout ladder: heavy modes get their own ceiling env knobs.
+# All are re-read per request (via _read_timeout inside helper functions).
+DEFAULT_VARIANTS_TIMEOUT = 60.0
+DEFAULT_FUZZY_TIMEOUT = 300.0
+DEFAULT_PARALLELS_TIMEOUT = 300.0
+DEFAULT_HEAVY_CONCURRENCY = 2
+HEAVY_SEARCH_MODES = frozenset({'variants', 'fuzzy'})
+
+# P9X fuzzy result-cap ceiling.  MAX_LIMIT stays 100 for non-fuzzy modes.
+DEFAULT_FUZZY_MAX_LIMIT = 500
+FUZZY_HARD_MAX = 2000      # absolute cap so payload stays sane
+
+
+def _resolve_search_timeout(search_mode: str) -> tuple:
+    """Return (ceiling_seconds, env_var_name) for the given search_mode.
+
+    Re-reads the env on every call (no caching) so prod can flip timeouts
+    without a restart. responsa and interactive modes use the baseline knob.
+    """
+    if search_mode == 'variants':
+        return (
+            _read_timeout('SEARCH_API_VARIANTS_TIMEOUT', DEFAULT_VARIANTS_TIMEOUT),
+            'SEARCH_API_VARIANTS_TIMEOUT',
+        )
+    if search_mode == 'fuzzy':
+        return (
+            _read_timeout('SEARCH_API_FUZZY_TIMEOUT', DEFAULT_FUZZY_TIMEOUT),
+            'SEARCH_API_FUZZY_TIMEOUT',
+        )
+    # exact, title, shelfmark, responsa — all use the interactive baseline.
+    return (
+        _read_timeout('SEARCH_API_CORE_TIMEOUT', DEFAULT_SEARCH_CORE_TIMEOUT),
+        'SEARCH_API_CORE_TIMEOUT',
+    )
+
+
+def _resolve_parallels_timeout() -> float:
+    """Return the parallels ceiling (re-read per request)."""
+    return _read_timeout('SEARCH_API_PARALLELS_TIMEOUT', DEFAULT_PARALLELS_TIMEOUT)
+
+
+def _resolve_fuzzy_max_limit() -> int:
+    """Return the fuzzy result-cap ceiling (re-read per request, no import caching)."""
+    raw = os.environ.get('SEARCH_API_FUZZY_MAX_LIMIT')
+    if raw:
+        try:
+            val = int(raw)
+            return max(1, min(val, FUZZY_HARD_MAX))
+        except (ValueError, TypeError):
+            pass
+    return min(DEFAULT_FUZZY_MAX_LIMIT, FUZZY_HARD_MAX)
+
+
+class _HeavySemaphoreState:
+    """Module-level mutable state for the heavy-mode concurrency semaphore.
+
+    asyncio.Semaphore is fixed-size at construction.  We keep the semaphore
+    plus a record of its configured capacity so we can rebuild it when the
+    env changes AND the semaphore is fully idle (all slots free).
+
+    All accesses are on the event-loop thread (the semaphore is an asyncio
+    primitive), so no thread lock is needed around the rebuild.
+    """
+    sem: asyncio.Semaphore = asyncio.Semaphore(DEFAULT_HEAVY_CONCURRENCY)
+    _capacity: int = DEFAULT_HEAVY_CONCURRENCY
+
+    @classmethod
+    def reset(cls, capacity: int) -> None:
+        """Rebuild the semaphore to the given capacity.  Only safe to call
+        when the semaphore is fully idle (tests use this directly)."""
+        cls.sem = asyncio.Semaphore(capacity)
+        cls._capacity = capacity
+
+
+async def _acquire_heavy_slot():
+    """Acquire one slot from the heavy-mode semaphore.
+
+    Re-reads SEARCH_API_HEAVY_CONCURRENCY on every call; rebuilds the
+    semaphore if the configured size changed AND it is currently fully idle.
+
+    Returns:
+        A zero-argument callable that releases the slot.  Callers MUST
+        invoke this in a ``finally`` block so a timeout/exception cannot
+        strand a slot.
+
+    Raises:
+        APIError('heavy_search_busy', ..., 503): if no slot is available
+            right now (non-blocking acquire failed).
+    """
+    # Re-read the desired concurrency from env.
+    raw = os.environ.get('SEARCH_API_HEAVY_CONCURRENCY')
+    desired = DEFAULT_HEAVY_CONCURRENCY
+    if raw:
+        try:
+            desired = max(1, int(raw))
+        except (ValueError, TypeError):
+            pass
+
+    # Rebuild semaphore only when the size changed AND it is fully idle
+    # (no held slots — _value == capacity).  If partially held, keep the
+    # current semaphore so we never strand held slots.
+    if desired != _HeavySemaphoreState._capacity:
+        current_value = _HeavySemaphoreState.sem._value  # type: ignore[attr-defined]
+        if current_value == _HeavySemaphoreState._capacity:
+            _HeavySemaphoreState.reset(desired)
+
+    sem = _HeavySemaphoreState.sem
+    # Non-blocking: check _value > 0 and decrement atomically on the event loop.
+    # asyncio is single-threaded so this is safe without a lock.
+    # We do NOT use asyncio.wait_for(sem.acquire(), timeout=0) because in
+    # Python 3.11 that always raises TimeoutError before the coroutine runs
+    # even one step, regardless of slot availability (the coroutine is
+    # cancelled before its first step when timeout=0).
+    if sem._value > 0:  # type: ignore[attr-defined]
+        sem._value -= 1  # type: ignore[attr-defined]
+    else:
+        raise APIError(
+            'heavy_search_busy',
+            'heavy search concurrency limit reached; retry shortly',
+            http_status=503,
+            headers={'Retry-After': '5'},
+        )
+
+    def _release():
+        sem.release()
+
+    return _release
 
 # Phase 79 D-11 / R-08 -- transcription char cap.
 DEFAULT_BROWSE_TEXT_CAP = 4000
@@ -813,10 +946,15 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     f'limit must be positive (submitted {req.limit})',
                     http_status=400,
                 )
-            if req.limit > MAX_LIMIT:
+            # P9X: fuzzy has a separate (higher) ceiling; all other modes keep MAX_LIMIT=100.
+            effective_max = (
+                _resolve_fuzzy_max_limit() if req.search_mode == 'fuzzy' else MAX_LIMIT
+            )
+            if req.limit > effective_max:
                 raise APIError(
                     'limit_too_high',
-                    f'limit exceeds max (max {MAX_LIMIT}; submitted {req.limit})',
+                    f'limit exceeds max for search_mode={req.search_mode!r} '
+                    f'(max {effective_max}; submitted {req.limit})',
                     http_status=400,
                 )
 
@@ -900,10 +1038,14 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     )
                     return res, _consume_last_responsa_downgrade(), _consume_meta_inner()
 
-                core_timeout = _read_timeout(
-                    'SEARCH_API_CORE_TIMEOUT', DEFAULT_SEARCH_CORE_TIMEOUT,
-                )
+                # P9X per-mode timeout: variants/fuzzy get heavier ceilings.
+                core_timeout, timeout_env = _resolve_search_timeout(req.search_mode)
                 loop = asyncio.get_event_loop()
+
+                # P9X heavy-mode concurrency gate (variants/fuzzy only).
+                _heavy_release = None
+                if req.search_mode in HEAVY_SEARCH_MODES:
+                    _heavy_release = await _acquire_heavy_slot()
                 try:
                     results, downgrade_msg, cascade_meta = await asyncio.wait_for(
                         loop.run_in_executor(None, _run_search_sync),
@@ -911,19 +1053,36 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     )
                 except asyncio.TimeoutError:
                     logger.warning(
-                        'search core_timeout after %ss (mode=%s)',
-                        core_timeout, internal_mode,
+                        'search core_timeout after %ss (search_mode=%s, env=%s)',
+                        core_timeout, req.search_mode, timeout_env,
                     )
                     raise APIError(
                         'core_timeout',
-                        f'search did not complete within {core_timeout}s; '
+                        f'search did not complete within {core_timeout}s '
+                        f'(search_mode={req.search_mode}); '
                         f'try a narrower query or a faster search_mode',
                         http_status=504,
                     )
+                finally:
+                    if _heavy_release is not None:
+                        _heavy_release()
                 total = len(results)
 
             # 8. Cap results.
-            results = results[:req.limit]
+            # P9X: for fuzzy, if the client did NOT supply `limit` (Pydantic
+            # filled the default of 50), widen to a recall-oriented default so
+            # an agent that just sets search_mode=fuzzy gets wider recall.
+            # Detect "limit not supplied" by checking the raw body dict.
+            _fuzzy_recall_default = 250  # wider default when client omits limit
+            if (
+                req.search_mode == 'fuzzy'
+                and isinstance(body, dict)
+                and 'limit' not in body
+            ):
+                effective_limit = min(_resolve_fuzzy_max_limit(), _fuzzy_recall_default)
+            else:
+                effective_limit = req.limit
+            results = results[:effective_limit]
             result_count = len(results)
 
             # 8a. R2-#1 / 81A: downgrade_msg + cascade_meta were captured inside
@@ -974,7 +1133,9 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 'responsa_options_effective': effective_dict,
                 'gap': req.gap,
                 'limit': req.limit,
-                'limit_effective': min(req.limit, MAX_LIMIT),
+                # P9X: reflect the actual effective limit applied (fuzzy may have
+                # a wider cap, or a widened recall default when limit was omitted).
+                'limit_effective': effective_limit if req.search_mode == 'fuzzy' else min(req.limit, MAX_LIMIT),
                 'filters': filters_dict,
             }
 
@@ -1341,14 +1502,34 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 truncated_to_200=False,
             )
         else:
-            bundle = await fetch_parallels_results(
-                text=text,
-                chunk_size=req.chunk_size,
-                mode=req.mode,
-                max_freq=req.max_freq,
-                boundary_mode=req.boundary_mode,
-                restrict_sys_ids=restrict_sys_ids,
-            )
+            # P9X: parallels are always heavy — gate on the concurrency budget
+            # and wrap the fetch in a timeout.
+            parallels_ceiling = _resolve_parallels_timeout()
+            _par_release = await _acquire_heavy_slot()
+            try:
+                bundle = await asyncio.wait_for(
+                    fetch_parallels_results(
+                        text=text,
+                        chunk_size=req.chunk_size,
+                        mode=req.mode,
+                        max_freq=req.max_freq,
+                        boundary_mode=req.boundary_mode,
+                        restrict_sys_ids=restrict_sys_ids,
+                    ),
+                    timeout=parallels_ceiling,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    'parallels core_timeout after %ss', parallels_ceiling,
+                )
+                raise APIError(
+                    'core_timeout',
+                    f'parallels did not complete within {parallels_ceiling}s; '
+                    f'try a shorter text or smaller chunk_size',
+                    http_status=504,
+                )
+            finally:
+                _par_release()
 
         # 7. Surface group-cap warning (D-07).
         if bundle.truncated_to_200:

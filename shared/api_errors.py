@@ -42,6 +42,8 @@ ERROR_CODES = frozenset({
     # Phase 80 (/api/parallels) additions:
     'composition_required',     # D-06: text.strip() empty
     'composition_too_long',     # D-06: len(text.strip()) > COMPOSITION_LENGTH_CAP (20000)
+    # P9X heavy-mode concurrency additions:
+    'heavy_search_busy',        # 503 — heavy-mode concurrency budget (SEARCH_API_HEAVY_CONCURRENCY) exhausted; fail-fast, Retry-After set
 })
 
 # Surfaced in top-level `warnings: []` arrays (D-07), NOT as errors.
