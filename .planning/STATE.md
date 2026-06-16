@@ -4,8 +4,8 @@ milestone: v8.1.0
 milestone_name: Desktop Telemetry
 status: executing
 stopped_at: Phase 115 context gathered
-last_updated: "2026-06-16T05:55:14.178Z"
-last_activity: 2026-06-16 -- Phase 115 planning complete
+last_updated: "2026-06-16T07:34:53.410Z"
+last_activity: 2026-06-16 -- Phase 115 execution started
 progress:
   total_phases: 6
   completed_phases: 4
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-11 after v8.0.0 close)
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 114 — usage-analytics
+**Current focus:** Phase 115 — performance-metrics
 
 ## Current Position
 
-Phase: 115
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-16 -- Phase 115 planning complete
+Phase: 115 (performance-metrics) — EXECUTING
+Plan: 1 of 4
+Status: Executing Phase 115
+Last activity: 2026-06-16 -- Phase 115 execution started
 
 Progress: [███████░░░] 67%
 
