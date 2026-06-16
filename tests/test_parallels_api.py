@@ -740,7 +740,6 @@ def test_parallels_statelessness_two_identical_posts(client, mock_searcher, clea
 def test_parallels_timeout_uses_parallels_knob(client, clean_env, monkeypatch):
     """SEARCH_API_PARALLELS_TIMEOUT=0.2 + slow composition stub → 504 core_timeout."""
     import asyncio
-    import time as _time
 
     monkeypatch.setenv('SEARCH_API_PARALLELS_TIMEOUT', '0.2')
 
@@ -772,7 +771,6 @@ def test_parallels_heavy_concurrency_fast_fail(monkeypatch):
     monkeypatch.setenv('SEARCH_API_HEAVY_CONCURRENCY', '1')
 
     from web.search_api import _acquire_heavy_slot, _HeavySemaphoreState
-    from shared.api_errors import APIError
 
     async def _test():
         _HeavySemaphoreState.reset(1)
@@ -793,6 +791,72 @@ def test_parallels_heavy_concurrency_fast_fail(monkeypatch):
             sem.release()
 
     asyncio.run(_test())
+
+
+def test_parallels_heavy_slot_held_until_task_completes(bare_app, mock_searcher, clean_env, monkeypatch):
+    """REGRESSION (Codex HIGH, parallels parity): a /api/parallels request that
+    times out must hold its heavy slot until the composition task ACTUALLY
+    finishes — not release it when asyncio.wait returns. A concurrent parallels
+    request in that window must get 503; the slot frees only after the task
+    completes."""
+    import asyncio
+    import httpx
+    from shared.parallels_service import ParallelsResultBundle
+    from web.search_api import _HeavySemaphoreState, DEFAULT_HEAVY_CONCURRENCY
+
+    monkeypatch.setenv('SEARCH_API_RATE_LIMIT', '9999')
+    monkeypatch.setenv('SEARCH_API_HEAVY_CONCURRENCY', '1')
+    monkeypatch.setenv('SEARCH_API_PARALLELS_TIMEOUT', '0.3')
+    _parallels_rate_limiter.reset_for_tests()
+    _HeavySemaphoreState.reset(1)
+
+    def _empty_bundle():
+        return ParallelsResultBundle(
+            main_results=[], filtered_results=[],
+            boundary_options={'boundary_mode': 'full', 'boundary_delimiter': '\n',
+                              'boundary_boost': 1.5, 'min_boundary_matches': 0,
+                              'min_delimiter_distance': 3},
+            truncated_to_200=False,
+        )
+
+    async def _run():
+        blocker = asyncio.Event()
+
+        async def _blocking_parallels(**kwargs):
+            # Blocks the composition task (awaiting on the loop) until released.
+            await blocker.wait()
+            return _empty_bundle()
+
+        monkeypatch.setattr('web.search_api.fetch_parallels_results', _blocking_parallels)
+
+        transport = httpx.ASGITransport(app=bare_app)
+        async with httpx.AsyncClient(transport=transport, base_url='http://t') as ac:
+            # A: acquires the only slot, blocks in the task, 504s at 0.3s.
+            task_a = asyncio.create_task(
+                ac.post('/api/parallels', json={'text': 'hello world', 'mode': 'exact'})
+            )
+            await asyncio.sleep(0.8)  # A trips its 0.3s timeout; task still blocked
+            # B: second parallels while A's task still holds the slot → 503.
+            resp_b = await ac.post(
+                '/api/parallels', json={'text': 'other text', 'mode': 'exact'}
+            )
+            assert resp_b.status_code == 503, resp_b.text
+            assert resp_b.json()['error']['code'] == 'heavy_search_busy'
+            # Unblock A's task → it completes → done-callback releases the slot.
+            blocker.set()
+            resp_a = await task_a
+            assert resp_a.status_code == 504, resp_a.text
+            assert resp_a.json()['error']['code'] == 'core_timeout'
+            await asyncio.sleep(0.1)
+            resp_c = await ac.post(
+                '/api/parallels', json={'text': 'third text', 'mode': 'exact'}
+            )
+            assert resp_c.status_code == 200, resp_c.text
+
+    try:
+        asyncio.run(_run())
+    finally:
+        _HeavySemaphoreState.reset(DEFAULT_HEAVY_CONCURRENCY)
 
 
 # ---------------------------------------------------------------------------

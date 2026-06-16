@@ -764,7 +764,7 @@ These run in a thread-pool worker (one slow query blocks ONE worker thread, not 
 | parallels | `SEARCH_API_PARALLELS_TIMEOUT` | 300 s | `SEARCH_API_HEAVY_CONCURRENCY` | 2 |
 | interactive (exact/title/shelfmark/responsa) | `SEARCH_API_CORE_TIMEOUT` | 30 s | — (no cap) | — |
 
-**Concurrency budget:** A module-level `asyncio.Semaphore` gates heavy-mode requests. When all `SEARCH_API_HEAVY_CONCURRENCY` slots are occupied, a new heavy request fails immediately with **503 `heavy_search_busy` + `Retry-After: 5`** instead of queuing and potentially starving the threadpool. The slot is ALWAYS released in a `finally` block — a timeout or exception cannot strand a slot.
+**Concurrency budget:** A module-level `asyncio.Semaphore` gates heavy-mode requests. When all `SEARCH_API_HEAVY_CONCURRENCY` slots are occupied, a new heavy request fails immediately with **503 `heavy_search_busy` + `Retry-After: 5`** instead of queuing and potentially starving the threadpool. The slot is released from the worker future's **done-callback**, i.e. when the underlying search/composition thread *actually finishes* — not merely when the request's awaiter returns. This matters on the timeout path: `run_in_executor` cannot cancel a running thread, so a 504'd heavy query keeps occupying its worker; holding the slot until true completion (rather than releasing it the moment the timeout fires) prevents re-admitting heavy work past the budget. A timeout or exception therefore cannot strand a slot, and cannot prematurely free one either.
 
 Interactive modes (exact/title/shelfmark/responsa) are NOT gated by this semaphore and always proceed with their own 30 s baseline.
 

@@ -1538,31 +1538,41 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # completion, so no finally release is needed.
             parallels_ceiling = _resolve_parallels_timeout()
             _par_release = await _acquire_heavy_slot()
-            _par_task = asyncio.ensure_future(
-                fetch_parallels_results(
-                    text=text,
-                    chunk_size=req.chunk_size,
-                    mode=req.mode,
-                    max_freq=req.max_freq,
-                    boundary_mode=req.boundary_mode,
-                    restrict_sys_ids=restrict_sys_ids,
+            try:
+                _par_task = asyncio.ensure_future(
+                    fetch_parallels_results(
+                        text=text,
+                        chunk_size=req.chunk_size,
+                        mode=req.mode,
+                        max_freq=req.max_freq,
+                        boundary_mode=req.boundary_mode,
+                        restrict_sys_ids=restrict_sys_ids,
+                    )
                 )
-            )
-            _par_task.add_done_callback(lambda _t, _r=_par_release: _r())
-            _done, _pending = await asyncio.wait(
-                {_par_task}, timeout=parallels_ceiling,
-            )
-            if _par_task in _pending:
-                logger.warning(
-                    'parallels core_timeout after %ss', parallels_ceiling,
+                # Hand the slot to the task's done-callback (sole releaser): it
+                # fires on success, exception, or post-timeout completion, so the
+                # budget is held for the task's TRUE lifetime.
+                _par_task.add_done_callback(lambda _t, _r=_par_release: _r())
+                _par_release = None  # ownership -> done-callback
+                _done, _pending = await asyncio.wait(
+                    {_par_task}, timeout=parallels_ceiling,
                 )
-                raise APIError(
-                    'core_timeout',
-                    f'parallels did not complete within {parallels_ceiling}s; '
-                    f'try a shorter text or smaller chunk_size',
-                    http_status=504,
-                )
-            bundle = _par_task.result()
+                if _par_task in _pending:
+                    logger.warning(
+                        'parallels core_timeout after %ss', parallels_ceiling,
+                    )
+                    raise APIError(
+                        'core_timeout',
+                        f'parallels did not complete within {parallels_ceiling}s; '
+                        f'try a shorter text or smaller chunk_size',
+                        http_status=504,
+                    )
+                bundle = _par_task.result()
+            finally:
+                # Safety net: only fires if the slot was acquired but never handed
+                # to the done-callback (e.g. ensure_future raised before transfer).
+                if _par_release is not None:
+                    _par_release()
 
         # 7. Surface group-cap warning (D-07).
         if bundle.truncated_to_200:
