@@ -150,6 +150,21 @@ class TestTelemetrySelftestCliBlock:
         with open('genizah_app.py', encoding='utf-8') as fh:
             return fh.read()
 
+    @pytest.fixture(scope='class')
+    def block(self, src):
+        """The FULL --telemetry-selftest __main__ block.
+
+        Bounded by the start of the next block (the --self-test-pymupdf guard) or
+        QApplication construction — whichever comes first — so the slice includes
+        the block's `finally` clause (WR-02: a fixed +N window truncated the tail,
+        which is exactly where a set_consent / drop-counter regression would hide).
+        """
+        guard = src.index('if "--telemetry-selftest" in sys.argv')
+        qapp = src.index('app = QApplication(sys.argv)')
+        nxt = src.find('if "--self-test-pymupdf" in sys.argv', guard)
+        end = nxt if (nxt != -1 and nxt < qapp) else qapp
+        return src[guard:end]
+
     def test_block_present_with_all_four_tokens(self, src):
         assert '--telemetry-selftest' in src
         for token in ('SSL_OK', 'SSL_FAIL', 'NO_KEY', 'OFFLINE_OK'):
@@ -160,15 +175,11 @@ class TestTelemetrySelftestCliBlock:
         qapp = src.index('app = QApplication(sys.argv)')  # the __main__ construction
         assert guard < qapp, 'self-test block must run before QApplication construction'
 
-    def test_block_uses_in_memory_consent_toggle_not_set_consent(self, src):
-        guard = src.index('if "--telemetry-selftest" in sys.argv')
-        block = src[guard:guard + 1600]
+    def test_block_uses_in_memory_consent_toggle_not_set_consent(self, block):
         assert '_enabled_lock' in block, 'must toggle consent in-memory under _enabled_lock'
         assert 'set_consent(' not in block, 'must NOT persist consent to config.pkl'
 
-    def test_signal_driven_by_sync_helper_not_drop_counter(self, src):
-        guard = src.index('if "--telemetry-selftest" in sys.argv')
-        block = src[guard:guard + 1600]
+    def test_signal_driven_by_sync_helper_not_drop_counter(self, block):
         assert 'send_selftest_event_sync' in block
         assert 'get_dropped_event_count' not in block, (
             'SSL_OK / exit-0 must be driven by the synchronous helper, '

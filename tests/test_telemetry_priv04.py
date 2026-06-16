@@ -55,6 +55,21 @@ def _reset_telemetry_state(monkeypatch):
     fresh_q: queue.Queue = queue.Queue(maxsize=10000)
     monkeypatch.setattr(ph, '_event_queue', fresh_q)
 
+    # WR-01 hardening: these tests call set_consent(True), which wires the REAL
+    # embedded publishable phc_ key via _wire_transport_config. Without this guard,
+    # track() would (a) start the shared drain daemon, which races the test's
+    # _event_queue.get() and can STEAL the captured event (flaky queue.Empty), and
+    # (b) POST real test events to PRODUCTION PostHog (project 134161). Neutralize
+    # BOTH: never start the daemon (the captured event stays in fresh_q for the
+    # test's .get()), and make the transport a hard no-op so no payload can ever
+    # leave the test process — even via a daemon left running by an earlier file.
+    monkeypatch.setattr(ph, '_start_drain_thread_once', lambda: None)
+
+    def _no_network_post(*_args, **_kwargs):  # pragma: no cover - guard only
+        raise AssertionError('telemetry tests must never POST to production PostHog')
+
+    monkeypatch.setattr('shared.posthog_server.requests.post', _no_network_post)
+
     tel._reset_for_tests()
     tel._load_consent_state()
 
