@@ -4,13 +4,15 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased] — Web platform changes (since v8.0.0)
+## [8.1.0] - 2026-06-16 — Desktop Telemetry & API Enhancements
 
-Web-only changes deployed to genizahsearch.com ahead of the next tagged release (the web platform deploys continuously, with no installer / version bump). Recorded here so the next release's notes account for them. Originated from a PostHog usage review.
+This release adds **opt-in, privacy-respecting telemetry** to the desktop app, brings the **public Search API and the Cairo Genizah Research AI skill** to desktop users (a new Help section + a What's New note), and bundles the **public Search API enhancements** below that were deployed continuously to the web platform since v8.0.0. The desktop app is **Dicta Genizah Search Pro**; the web platform keeps the name **Dicta Genizah Search**.
 
 ### New Features
 
-- **Public Search API — `fuzzy` search mode** — `POST /api/search` now accepts `search_mode: "fuzzy"` (approximate / maximum-variant matching), previously available only on `/api/parallels`. It is the slowest mode and is bounded by the new core timeout (below).
+- **Use Dicta Genizah Search from Claude and AI agents (desktop)** — The desktop app now advertises the **Cairo Genizah Research** skill and the public API. Drive the search engine conversationally from Claude — or other AI engines, including local ones — to find phrases, parallels and candidate witnesses (for a phrase, piyyut, responsum, letter or composition), returning the transcription text, library attribution and image links. A new bilingual "Public API & AI Tools" section in the desktop Help documents the skill and the developer API.
+- **Opt-in desktop telemetry (desktop)** — You can now consent to anonymous usage statistics and crash reports that help improve the app. It is **off by default**; a one-time consent prompt appears on the first launch after updating, and the choice can be changed anytime in Settings/About. Telemetry uses an anonymous identifier and **never** transmits search queries or any "My Library" content (file paths, names or text).
+- **Public Search API — `fuzzy` search mode (web)** — `POST /api/search` now accepts `search_mode: "fuzzy"` (approximate / maximum-variant matching), previously available only on `/api/parallels`. It is the slowest mode and is bounded by the new core timeout (below).
 
 ### Improvements
 
@@ -25,6 +27,10 @@ Web-only changes deployed to genizahsearch.com ahead of the next tagged release 
 ### Bug Fixes
 
 - **Eliminated severe layout shift (CLS) on Search, Parallels and the home page** — these scored a Cumulative Layout Shift p75 of ~0.9 (well into "poor"; also a Google ranking signal) while Browse was unaffected. Three causes fixed: top-of-page banners that deleted themselves on a timer (reflowing the whole page), result thumbnails that reserved width but not height (jumping as images loaded), and async-populated containers (Parallels results, home "Recent activity") that grew from zero height. All now reserve their space.
+
+### Internal
+
+- Web analytics events are now tagged with a `platform=web` super-property so desktop and web usage can be compared in PostHog (the desktop telemetry above sends `platform=desktop`).
 
 ---
 

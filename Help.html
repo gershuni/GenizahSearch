@@ -108,6 +108,7 @@
         <li><a href="#joins-lab">Joins Lab</a></li>
         <li><a href="#community-publish">Community Publishing</a></li>
         <li><a href="#lab">Lab Mode</a></li>
+        <li><a href="#api">Public API & AI Tools</a></li>
         <li><a href="#my-library">My Library — Local Documents</a></li>
         <li><a href="#export">Exporting Data</a></li>
         <li><a href="#settings">Settings & About</a></li>
@@ -553,6 +554,34 @@
     </div>
 
     <div class="section">
+    <h2 id="api">Public API & AI Tools</h2>
+    <p>Dicta Genizah Search exposes a public HTTP/JSON API so that researchers and AI
+    tools can work with the corpus programmatically. There are two ways to use it: a
+    ready-made AI skill for conversational research, and the raw API for developers.</p>
+
+    <h3>Use it from Claude and other AI agents</h3>
+    <p>A ready-to-use <b>Cairo Genizah Research</b> skill lets you drive the search
+    engine from Claude in plain language. Ask it to search intelligently for phrases or
+    parallels — candidate witnesses for a phrase, piyyut, responsum, letter, or
+    composition — and it returns a ranked list together with the transcription text,
+    library attribution, and image links, so you can review and display the results
+    without leaving the conversation. You can also point other AI engines, including
+    local ones, at the same skill.</p>
+    <p>The skill is available here:
+    <a href="https://github.com/gershuni/GenizahSearch/tree/master-main/skills/cairo-genizah-research" dir="ltr">github.com/gershuni/GenizahSearch &rarr; skills/cairo-genizah-research</a>.</p>
+
+    <h3>For developers</h3>
+    <p>The same data is available directly over a public HTTP/JSON API:</p>
+    <ul>
+        <li><code dir="ltr">POST /api/search</code> — text search across the corpus.</li>
+        <li><code dir="ltr">GET /api/browse</code> — fetch the transcription, metadata, and image for a manuscript.</li>
+        <li><code dir="ltr">POST /api/parallels</code> — find Genizah manuscripts containing chunks that match a long source text.</li>
+    </ul>
+    <p>The full API is described by an OpenAPI schema at
+    <a href="https://genizahsearch.com/api/openapi.json" dir="ltr">genizahsearch.com/api/openapi.json</a>.</p>
+    </div>
+
+    <div class="section">
     <h2 id="my-library">My Library — Local Documents</h2>
     <p>The <b>My Library</b> tab lets you index your own <code>.docx</code>, <code>.pdf</code>, <code>.txt</code>,
     <code>.html</code>, <code>.xlsx</code>, and <code>.csv</code> files alongside the Genizah corpus.
@@ -662,6 +691,7 @@
         <li><a href="#joins-lab">מעבדת צירופים</a></li>
         <li><a href="#community-publish">פרסום לקהילה</a></li>
         <li><a href="#lab">מצב מעבדה</a></li>
+        <li><a href="#api">ממשק API וכלי בינה מלאכותית</a></li>
         <li><a href="#my-library">הספרייה שלי — מסמכים מקומיים</a></li>
         <li><a href="#export">ייצוא נתונים</a></li>
         <li><a href="#settings">הגדרות ואודות</a></li>
@@ -1095,6 +1125,32 @@
         <li><b>קנס מרחק:</b> מפחית ניקוד למילים שנמצאו רחוק זו מזו.</li>
         <li><b>קנס על מילים חוזרות:</b> מפחית ניקוד למילים המופיעות בטקסט יותר פעמים מאשר בשאילתא.</li>
     </ul>
+    </div>
+
+    <div class="section">
+    <h2 id="api">ממשק API וכלי בינה מלאכותית</h2>
+    <p>מערכת Dicta Genizah Search מציעה ממשק HTTP/JSON ציבורי, כדי שחוקרים וכלי בינה מלאכותית
+    יוכלו לעבוד עם הקורפוס באופן תכנותי. ישנן שתי דרכים להשתמש בו: סקיל מוכן למחקר בשיחה חופשית,
+    וממשק ה-API הגולמי למפתחים.</p>
+
+    <h3>שימוש מתוך קלוד וסוכני בינה מלאכותית אחרים</h3>
+    <p>סקיל <b>Cairo Genizah Research</b> מוכן לשימוש מאפשר לכם להפעיל את מנוע החיפוש מתוך קלוד
+    בשפה טבעית. בקשו ממנו לחפש באופן חכם ביטויים או מקבילות — עדי נוסח אפשריים לביטוי, פיוט, תשובה,
+    מכתב או חיבור — והוא יחזיר רשימה מדורגת ובה הטקסט מתוך עמוד העיון, ייחוס לספרייה וקישורי תמונה,
+    כך שתוכלו לעיין בתוצאות ולהציגן בלי לצאת מן השיחה. תוכלו להפנות גם מנועי בינה מלאכותית מקומיים
+    אחרים לסקיל זה.</p>
+    <p>הסקיל זמין כאן:
+    <a href="https://github.com/gershuni/GenizahSearch/tree/master-main/skills/cairo-genizah-research" dir="ltr">github.com/gershuni/GenizahSearch &rarr; skills/cairo-genizah-research</a>.</p>
+
+    <h3>למפתחים</h3>
+    <p>אותם נתונים זמינים ישירות דרך ממשק HTTP/JSON ציבורי:</p>
+    <ul>
+        <li><code dir="ltr">POST /api/search</code> — חיפוש טקסטואלי בקורפוס.</li>
+        <li><code dir="ltr">GET /api/browse</code> — טעינת תעתיק, מטא-נתונים ותמונה של כתב יד.</li>
+        <li><code dir="ltr">POST /api/parallels</code> — מציאת כתבי יד מהגניזה הכוללים מקטעים תואמים לטקסט מקור ארוך.</li>
+    </ul>
+    <p>המבנה המלא של הממשק מתועד בסכמת OpenAPI בכתובת
+    <a href="https://genizahsearch.com/api/openapi.json" dir="ltr">genizahsearch.com/api/openapi.json</a>.</p>
     </div>
 
     <div class="section">

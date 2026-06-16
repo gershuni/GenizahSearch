@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 8.0.0
+# Dicta Genizah Search Pro 8.1.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,28 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 8.0.0?
+## What's New in Version 8.1.0?
+
+### v8.1.0: Desktop Telemetry & API Enhancements
+
+This release brings the **public Search API and the Cairo Genizah Research AI skill**
+to desktop users, adds **opt-in, privacy-respecting telemetry**, and ships a round of
+**public Search API enhancements** on the web.
+
+- **Use Dicta Genizah Search from Claude and AI agents** — A new bilingual
+  **Public API & AI Tools** section in the desktop Help advertises the
+  **Cairo Genizah Research** skill: drive the search engine conversationally from
+  Claude (or other AI engines, including local ones) to find phrases, parallels and
+  candidate witnesses, with transcription text, library attribution and image links.
+  For developers, the public HTTP/JSON API (`POST /api/search`, `POST /api/parallels`,
+  `GET /api/browse`; OpenAPI at `/api/openapi.json`) gives programmatic access.
+- **Opt-in desktop telemetry** — Consent to anonymous usage statistics and crash
+  reports that help improve the app. It is **off by default**, asks once on first
+  launch after updating, can be changed anytime in Settings/About, and **never**
+  transmits your searches or any "My Library" content.
+- **Public Search API enhancements (web)** — a usable `fuzzy` search mode, the per-IP
+  rate limit raised to 120 req/min per endpoint, per-mode timeout tiering, a heavy-mode
+  concurrency cap with `503` fast-fail, and a higher fuzzy result cap (default 500).
 
 ### v8.0.0: Dicta Genizah Search Pro — Joins Lab & enhanced Local Library
 
@@ -389,7 +410,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V8.0.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V8.1.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

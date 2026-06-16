@@ -66,7 +66,7 @@
 - [x] **PRIV-01**: A single structural scrubber sanitizes every outgoing payload (drops banned keys, redacts path-like strings, strips frame locals, caps lengths) so the no-content/no-PII rule holds structurally — not by per-call discipline.
 - [x] **PRIV-02**: A telemetry property allowlist constrains which properties may be sent; anything not on the allowlist is dropped. The allowlist explicitly excludes environment identifiers (hostname/machine name, username, executable path, cwd) and any property derived from visible UI strings (window/tab titles, `QAction` text, recent-file labels) or file dialogs.
 - [x] **PRIV-03**: A static AST CI guard (modeled on `tests/test_no_raw_storage_access.py`) enforces that `shared/posthog_server.enqueue_event` is reached **only** through the desktop telemetry chokepoint, so no call site can bypass the consent gate or scrubber.
-- [ ] **PRIV-04**: Automated tests assert that representative crash tracebacks and search / My-Library scenarios never emit any **forbidden field** — explicitly: My Library paths, filenames, query/search text, usernames, or hostnames — and that nothing is emitted before consent (CONSENT-01).
+- [x] **PRIV-04**: Automated tests assert that representative crash tracebacks and search / My-Library scenarios never emit any **forbidden field** — explicitly: My Library paths, filenames, query/search text, usernames, or hostnames — and that nothing is emitted before consent (CONSENT-01).
 - [x] **PRIV-05**: The Help/About privacy disclosure is updated bilingually (EN/HE) to describe exactly what telemetry collects, that it is opt-in, how to turn it off, and that the anonymous install id is a pseudonymous identifier — consistent with the existing disclosure posture.
 - [x] **PRIV-06**: Event NAMES are drawn from a fixed registry/enum — no event name (and no property) is ever derived from query text, filenames, corpus/document labels, or visible UI strings. (Dynamic event names leak even when properties are scrubbed.)
 
@@ -77,7 +77,7 @@
 - [x] **INFRA-03**: `shared/posthog_server.py` gains backward-compatible additions only (consent-gate hook, `distinct_id` injection, flush-before-exit) without breaking its existing web/breaker consumers or the 5 test monkeypatches.
 - [x] **INFRA-04**: Telemetry adds **zero** new pip dependencies and requires no PyInstaller spec changes beyond what's already bundled (reuse the raw queue; do NOT add the `posthog` SDK).
 - [x] **INFRA-05**: Telemetry degrades silently and never blocks the UI thread when offline/air-gapped or when the key is absent (fire-and-forget; SSL certs verified in the frozen binary). Events are **memory-only** — never spooled to disk.
-- [ ] **INFRA-06**: Operational runbook — the shared PostHog project (id 134161, EU) separates desktop events by `platform=desktop` + the `desktop_` event-name namespace (NOT an isolated project); the embedded ingest key is documented as write-only (treated as abuse-tolerant with a rotation procedure, not a secret); and both `get_dropped_event_count()` drop counters (`web.api_hardening` + `shared.posthog_server`) are monitored after launch. *(AMENDED 2026-06-16: the prior "isolated project" wording was stale since the 2026-06-14 reversal — see `.planning/research/POSTHOG-PROJECT-DECISION.md`.)*
+- [x] **INFRA-06**: Operational runbook — the shared PostHog project (id 134161, EU) separates desktop events by `platform=desktop` + the `desktop_` event-name namespace (NOT an isolated project); the embedded ingest key is documented as write-only (treated as abuse-tolerant with a rotation procedure, not a secret); and both `get_dropped_event_count()` drop counters (`web.api_hardening` + `shared.posthog_server`) are monitored after launch. *(AMENDED 2026-06-16: the prior "isolated project" wording was stale since the 2026-06-14 reversal — see `.planning/research/POSTHOG-PROJECT-DECISION.md`.)*
 
 ---
 
@@ -155,7 +155,7 @@
 | PRIV-01 | Phase 111 | Complete |
 | PRIV-02 | Phase 111 | Complete |
 | PRIV-03 | Phase 116 | Complete |
-| PRIV-04 | Phase 116 | Pending |
+| PRIV-04 | Phase 116 | Complete |
 | PRIV-05 | Phase 112 | Complete |
 | PRIV-06 | Phase 111 | Complete |
 | INFRA-01 | Phase 111 | Complete |
@@ -163,7 +163,7 @@
 | INFRA-03 | Phase 111 | Complete |
 | INFRA-04 | Phase 111 | Complete |
 | INFRA-05 | Phase 111 | Complete |
-| INFRA-06 | Phase 116 | Pending |
+| INFRA-06 | Phase 116 | Complete |
 
 **Coverage:**
 
@@ -174,3 +174,4 @@
 ---
 *Requirements defined: 2026-06-14*
 *Last updated: 2026-06-14 — REVISED during Phase 111 discussion: reversed to ONE shared web PostHog project + web-aligned identity (new IDENT category, 4 reqs → 40 total); CONSENT-05 / USAGE-05 / INFRA-01 amended; Out-of-Scope updated. See `research/POSTHOG-PROJECT-DECISION.md`.*
+*Milestone-verification pass: 2026-06-16 — flipped PRIV-04 + INFRA-06 Pending → Complete on gathered evidence (green scrubber/selftest suites + UAT Test 1 on-the-wire privacy pass in prod PostHog 134161). All 40 v8.1.0 requirements now Complete. The clean-VM SSL_OK gate (INFRA-05/SC#3) runs at the release build.*

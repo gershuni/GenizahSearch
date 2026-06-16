@@ -279,7 +279,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Joins Lab for hunting physical joins, plus an expanded Local Library — more file types and Composition Search"))
+        self.lbl_msg.setText(tr("New: Experiment with GenizahSearch using AI tools and the public API."))
         self.show()
 
     def on_learn_more(self):
@@ -313,9 +313,9 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("Joins Lab \u2014 a dedicated workspace for hunting physical joins: pin a fragment as the anchor, build a line-by-line query for the joining fragment, and triage candidates Yes / Maybe / No."),
-            tr("Visual Similarity is built into the Lab \u2014 surface fragments that look alike, alone or combined with a text query."),
-            tr("Composition Search now runs over your Local Library too, and My Library searches more file types: xlsx, CSV, HTML."),
+            tr("Use the Claude skill to intelligently search for phrases or parallels and surface images and information \u2014 you can also point other AI engines, including local ones, at the same skill. See Help \u2192 Public API & AI Tools."),
+            tr("A public HTTP/JSON API (POST /api/search, POST /api/parallels, GET /api/browse) gives programmatic access to the corpus, documented by an OpenAPI schema."),
+            tr("Data collection \u2014 with your consent, the app can collect general usage data and crash reports, without compromising the privacy of your searches or your personal data, to help improve the app."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)
