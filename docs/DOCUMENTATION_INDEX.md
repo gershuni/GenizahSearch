@@ -1,6 +1,6 @@
 # GenizahSearch Documentation Index
 
-> Last updated: 2026-03-26
+> Last updated: 2026-06-16
 
 This directory contains all project documentation, organized by category.
 
@@ -77,6 +77,7 @@ docs/
 - **[DEPLOYMENT_TECHNICAL.md](guides/DEPLOYMENT_TECHNICAL.md)** - Technical deployment and configuration
 - **[SUPABASE_GUIDE.md](guides/SUPABASE_GUIDE.md)** - Working with the Supabase database
 - **[MULTITENANT.md](guides/MULTITENANT.md)** - v7.12 Path B multitenant architecture reference (safe_storage chokepoint, _session_uuid, request-scoped auth, deletion-not-migration discipline, tutorial for adding new per-user state values). Required reading for any developer extending web/ code that touches user-scoped state.
+- **[TELEMETRY_RUNBOOK.md](guides/TELEMETRY_RUNBOOK.md)** - Desktop telemetry operational guide (shared PostHog project, key rotation, drop counters, self-test flag, opt-out behavior)
 
 ---
 
