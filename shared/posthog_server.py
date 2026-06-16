@@ -407,6 +407,53 @@ def send_crash_event_direct(
         pass  # fire-and-forget in crash context — never raise
 
 
+def send_selftest_event_sync(timeout: float = 2.0) -> str:
+    """Synchronous, return-valued self-test POST — SSL/delivery probe for the frozen exe.
+
+    Performs EXACTLY ONE synchronous requests.post and returns a status token:
+      'SSL_OK'       — HTTP 2xx response received (certifi + TLS chain working)
+      'SSL_FAIL'     — any exception (SSLError, ConnectionError, Timeout, etc.)
+                       OR a non-2xx HTTP status code; leading token is always 'SSL_FAIL'
+      'NO_KEY'       — no phc_ key is configured; returns WITHOUT any network call
+                       (distinct signal from a real SSL failure — Pitfall 4 / REVIEWS HIGH #1)
+
+    Design contract:
+      - NEVER raises — returns the failure token instead.
+      - NEVER touches _event_queue, _dropped_events, or the daemon thread.
+        (The drop counter counts queue.Full ONLY and is NOT a delivery signal.)
+      - Resolves key + URL via _resolve_api_key() / _resolve_capture_url() so a key
+        set via set_capture_api_key() (desktop startup: _wire_transport_config) is
+        honored in addition to POSTHOG_API_KEY env.
+      - This is a self-test UTILITY, not a new telemetry producer.  There is no
+        chokepoint machinery, no scrub hook, no queue — one POST, one return.
+
+    Phase 116: used by genizah_app.py --telemetry-selftest to prove certifi/SSL
+    ships inside the frozen binary (ROADMAP SC#3).  The HUMAN-UAT on a clean
+    no-Python Windows VM (Task 3 / D-06) is the gold-standard proof.
+    """
+    api_key = _resolve_api_key()
+    if not api_key:
+        return 'NO_KEY'
+    url = _resolve_capture_url()
+    payload = {
+        'api_key': api_key,
+        'event': 'desktop_selftest',
+        'distinct_id': 'system',
+        'properties': {
+            'platform': 'desktop',
+            '$process_person_profile': False,
+        },
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=timeout)
+        if 200 <= resp.status_code < 300:
+            return 'SSL_OK'
+        return f'SSL_FAIL {resp.status_code}'
+    except Exception as exc:
+        return f'SSL_FAIL {exc!r}'
+
+
 __all__ = [
     'POSTHOG_HOST',
     'POSTHOG_CAPTURE_URL',
@@ -422,4 +469,6 @@ __all__ = [
     '_drain_and_discard',
     # Phase 113 addition:
     'send_crash_event_direct',
+    # Phase 116 addition:
+    'send_selftest_event_sync',
 ]
