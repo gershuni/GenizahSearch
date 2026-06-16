@@ -72,7 +72,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 - [x] **Phase 111: Telemetry Foundation** - `desktop/telemetry.py` chokepoint + consent storage + structural scrubber + property/event allowlist + flush infrastructure (no events fire yet) (completed 2026-06-14)
 - [x] **Phase 112: Consent UX** - Bilingual first-run dialog + Settings toggle + opt-out queue drain + bilingual privacy disclosure (completed 2026-06-15)
 - [x] **Phase 113: Crash Reporting** - Exception hooks (chained, non-blocking) + faulthandler + scrubbed crash payloads + bounded synchronous flush + next-launch native-crash detection (completed 2026-06-15)
-- [x] **Phase 114: Usage Analytics** - Session-start, feature/tab usage, search mode+corpus enums, active-user signal, base props, session/clock correctness (completed 2026-06-15)
+- [x] **Phase 114: Usage Analytics** - Session-start, feature/tab usage, search mode+corpus enums, active-user signal, base props, session/clock correctness (completed 2026-06-15; gap-closure 114-04 for 6 Codex findings 2026-06-16)
 - [ ] **Phase 115: Performance Metrics** - Search/indexing durations, result-count buckets, per-session summary with periodic+close flush, configurable sampling
 - [ ] **Phase 116: Privacy Audit + CI Gate** - AST guard in CI, forbidden-field tests, frozen-binary SSL/offline self-test, operational runbook
 
@@ -151,11 +151,12 @@ See: .planning/milestones/v7.16-ROADMAP.md
   4. Every event carries base properties (`platform=desktop`, `$process_person_profile=false`, `app_version`) applied through a single shared `_emit()` helper; no callsite adds these manually or bypasses the helper.
   5. Exactly one telemetry session ID is generated per process; all timestamps are UTC; performance durations use a monotonic clock; a crash-restart begins a fresh session without emitting a duplicate session-start for the crashed process.
 
-**Plans**: 3 plans
+**Plans**: 4 plans (3 + 1 gap-closure)
 
 - [x] 114-01-PLAN.md — Identity coordinator + session_start/session_end + login/logout/opt-in identity wiring + ACTIVE_PING enum
 - [x] 114-02-PLAN.md — desktop_tab_activated (user-only) + desktop_search_executed (exactly-once, mode/corpus/bucket enums)
 - [x] 114-03-PLAN.md — desktop_feature_opened + focus-aware daily active_ping heartbeat + D-17 producer-layer AST guard
+- [ ] 114-04-PLAN.md — gap closure: 6 Codex code-review findings (CR-114-01..06 — PGP-tag stale-slot/worker-drain, regular+comp "New"-reset cancelled emit, session_end gating, restore-suppressed joins_lab feature_opened, comp-resume programmatic tab switch)
 
 ### Phase 115: Performance Metrics
 
@@ -190,6 +191,6 @@ See: .planning/milestones/v7.16-ROADMAP.md
 | 111. Telemetry Foundation | v8.1.0 | 3/3 | Complete    | 2026-06-14 |
 | 112. Consent UX | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
 | 113. Crash Reporting | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
-| 114. Usage Analytics | v8.1.0 | 3/3 | Complete    | 2026-06-16 |
+| 114. Usage Analytics | v8.1.0 | 3/3 + 0/1 gap | Gap closure planned | 2026-06-16 |
 | 115. Performance Metrics | v8.1.0 | 0/TBD | Not started | - |
 | 116. Privacy Audit + CI Gate | v8.1.0 | 0/TBD | Not started | - |
