@@ -36,6 +36,7 @@ import os
 import platform
 import re
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -159,7 +160,8 @@ class DesktopEvent(str, enum.Enum):
     ACTIVE_PING    = 'desktop_active_ping'
 
     # Performance (Phase 115)
-    SESSION_PERF   = 'desktop_session_performance_summary'
+    SESSION_PERF      = 'desktop_session_performance_summary'
+    INDEXING_COMPLETE = 'desktop_indexing_complete'
 
     # Self-test (D-06, dev only)
     SELFTEST       = 'desktop_selftest'
@@ -306,10 +308,14 @@ _ALLOWED_PROPS: frozenset[str] = frozenset({
     'error_fingerprint',    # "{exc_type}:{exc_module}:{exc_lineno}" (D-07)
     'is_background_thread', # bool; True when emitted from threading.excepthook (D-07)
     'fatal_error',          # fixed enum label for native crashes (D-02; desktop_prior_crash only)
-    # Perf (Phase 115+)
+    # Perf (Phase 115+) — existing
     'duration_ms', 'result_count', 'sample_n',
     # Context label (allowlisted explicitly — survives _scrub_props)
     'context',
+    # Phase 115 NEW additions:
+    'perf_summary',       # top-level container key for nested per-mode stats dict (D-07/KQ-8)
+    'operation_kind',     # indexing event: enum literal ('initial_scan' etc.) (D-02)
+    'doc_count_bucket',   # indexing event: coarse doc count bucket (D-02/KQ-6)
 })
 
 
@@ -590,6 +596,10 @@ def set_consent(enabled: bool) -> None:
             register_scrub_hook(None)   # INFRA-F2: drop the desktop tagging hook on opt-out
             # 2. Discard anything already queued (CONSENT-08) — no POST.
             _drain_and_discard()
+            # 2b. Clear the in-memory perf accumulator (CONSENT-08 parity with queue drain).
+            # Prevents stale pre-opt-out window from being flushed on a later re-opt-in
+            # (REVIEWS finding 1 / T-115-PRIV-4).
+            _clear_perf_accumulator()
             # 3. Reset in-memory identity to anonymous (WR-02). _install_id is
             #    RETAINED (CONSENT-06) but identity is wiped so re-opt-in is clean.
             with _state_lock:
@@ -1336,6 +1346,9 @@ def _reset_for_tests() -> None:
     _in_crash_hook = False
     _pending_native_crash = None
     _last_reported_tb_id = None
+    # Phase 115 perf-accumulator globals (no locks — UI-thread-only writes).
+    # Use _clear_perf_accumulator() as the single source of truth for zeroing all three.
+    _clear_perf_accumulator()
     # REVIEWS MEDIUM-8: restore sys.excepthook and threading.excepthook
     # to their pre-install state so hooks don't accumulate across test functions.
     if _prior_excepthook is not None:
@@ -1346,6 +1359,274 @@ def _reset_for_tests() -> None:
     _prior_excepthook = None
     _prior_threading_hook = None
     _hooks_installed = False  # reset AFTER hook restoration
+
+
+# ---------------------------------------------------------------------------
+# Phase 115 — performance accumulator globals + helpers
+# ---------------------------------------------------------------------------
+# Written from UI thread only (Qt signal-slot guarantee). No lock needed.
+_perf_accumulator: dict = {}   # key: mode_str → {'durations_ms': [], 'result_counts': [], ...}
+_perf_last_flush_time: float = 0.0   # time.monotonic() of last flush; 0.0 = never flushed
+_perf_sample_counter: int = 0        # incremented per accumulate_performance() call; sample_n gate
+
+def _clear_perf_accumulator() -> None:
+    """Zero the three performance-accumulator globals. Never raises (CONSENT-08 parity).
+
+    Called from set_consent(False) alongside _drain_and_discard() to prevent stale
+    pre-opt-out window from being flushed on a later re-opt-in (REVIEWS finding 1).
+    Also called from _reset_for_tests() as the single source of truth.
+    """
+    global _perf_accumulator, _perf_last_flush_time, _perf_sample_counter
+    try:
+        _perf_accumulator = {}
+        _perf_last_flush_time = 0.0
+        _perf_sample_counter = 0
+    except Exception:
+        logger.debug('telemetry: _clear_perf_accumulator() silently failed', exc_info=True)
+
+
+# Fixed allowed sets for normalizer functions (REVIEWS finding 3).
+# Normalized mode values from Phase-114 D-05 search-mode map (genizah_app.py:17493-17496)
+# + composition modes + lab mode. Any unknown → 'unknown' (never verbatim free-string).
+_PERF_ALLOWED_MODES: frozenset[str] = frozenset({
+    'keyword', 'variants', 'responsa', 'fuzzy', 'regex', 'title', 'shelfmark', 'pgp_tags',
+    'comp_exact', 'comp_variants', 'comp_fuzzy', 'lab_comp_exact',
+    'lab_variants',
+})
+_PERF_ALLOWED_CORPUS: frozenset[str] = frozenset({'genizah', 'local', 'all'})
+_PERF_ALLOWED_OPERATION_KIND: frozenset[str] = frozenset({
+    'initial_scan', 'incremental_add', 'reindex_all', 'lab_rebuild',
+})
+_PERF_ALLOWED_FLUSH_REASON: frozenset[str] = frozenset({'periodic', 'close', 'manual'})
+
+
+def _normalize_mode(v: object) -> str:
+    """Normalize mode to a fixed allowed set; unknown → 'unknown'. Never raises."""
+    try:
+        s = str(v)
+        return s if s in _PERF_ALLOWED_MODES else 'unknown'
+    except Exception:
+        return 'unknown'
+
+
+def _normalize_corpus(v: object) -> str:
+    """Normalize corpus_scope to {genizah, local, all}; unknown → 'unknown'. Never raises."""
+    try:
+        s = str(v)
+        return s if s in _PERF_ALLOWED_CORPUS else 'unknown'
+    except Exception:
+        return 'unknown'
+
+
+def _normalize_operation_kind(v: object) -> str:
+    """Normalize operation_kind to the fixed indexing set; unknown → 'unknown'. Never raises."""
+    try:
+        s = str(v)
+        return s if s in _PERF_ALLOWED_OPERATION_KIND else 'unknown'
+    except Exception:
+        return 'unknown'
+
+
+def _normalize_flush_reason(v: object) -> str:
+    """Normalize flush_reason to {periodic, close, manual}; unknown → 'unknown'. Never raises."""
+    try:
+        s = str(v)
+        return s if s in _PERF_ALLOWED_FLUSH_REASON else 'unknown'
+    except Exception:
+        return 'unknown'
+
+
+def _perf_env_int(name: str, default: int, minimum: int) -> int:
+    """Validated env-int reader for perf knobs (REVIEWS finding 8).
+
+    Returns default when absent or non-numeric (int() raises).
+    Clamps the parsed value UP to minimum if below it (sample_n<1 → 1).
+    Never raises.
+    """
+    try:
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        parsed = int(raw)
+        return max(parsed, minimum)
+    except Exception:
+        return default
+
+
+def _perf_env_float(name: str, default: float, minimum_exclusive: float) -> float:
+    """Validated env-float reader for perf knobs (REVIEWS finding 8).
+
+    Returns default when absent or non-numeric.
+    Returns default when value <= minimum_exclusive (flush_interval <= 0 → default).
+    Never raises.
+    """
+    try:
+        raw = os.environ.get(name)
+        if raw is None:
+            return default
+        parsed = float(raw)
+        if parsed <= minimum_exclusive:
+            return default
+        return parsed
+    except Exception:
+        return default
+
+
+def _percentile(durations: 'list[float]', p: float) -> float:
+    """Exact percentile over a list of floats. Returns 0.0 for empty input. Never raises."""
+    try:
+        if not durations:
+            return 0.0
+        s = sorted(durations)
+        idx = min(int(p * len(s)), len(s) - 1)
+        return s[idx]
+    except Exception:
+        return 0.0
+
+
+def accumulate_performance(
+    elapsed_ms: float,
+    result_count: int,
+    mode: str,
+    corpus_scope: str,
+) -> None:
+    """Accumulate one completed-search perf record into the in-memory summary.
+
+    Called from the UI thread (Qt perf_signal slot). Never emits — only
+    _flush_perf_summary emits. Never raises. Respects GENIZAH_PERF_SAMPLE_N env knob.
+    Consent gate: is_enabled() first (Pitfall 7).
+    """
+    try:
+        if not is_enabled():
+            return
+        # Normalize inputs FIRST — normalized values become accumulator keys (REVIEWS finding 3).
+        # An out-of-set value becomes 'unknown' so no free-string can ever become a nested key.
+        mode = _normalize_mode(mode)
+        corpus_scope = _normalize_corpus(corpus_scope)
+        # Sampling gate (REVIEWS finding 8 — validated env reader, never bare int()).
+        global _perf_sample_counter
+        _perf_sample_counter += 1
+        sample_n = _perf_env_int('GENIZAH_PERF_SAMPLE_N', default=1, minimum=1)
+        if sample_n > 1 and (_perf_sample_counter % sample_n) != 1:
+            return  # skip this sample
+        entry = _perf_accumulator.setdefault(mode, {
+            'durations_ms': [],
+            'result_counts': [],
+            'zero_result_count': 0,
+            'corpus_counts': {'genizah': 0, 'local': 0, 'all': 0, 'unknown': 0},
+        })
+        entry['durations_ms'].append(float(elapsed_ms))
+        entry['result_counts'].append(int(result_count))
+        if result_count == 0:
+            entry['zero_result_count'] += 1
+        # corpus_scope is already normalized to one of genizah/local/all/unknown
+        entry['corpus_counts'][corpus_scope] = entry['corpus_counts'].get(corpus_scope, 0) + 1
+    except Exception:
+        logger.debug('telemetry: accumulate_performance() silently failed', exc_info=True)
+
+
+def _flush_perf_summary(flush_reason: str = 'periodic') -> None:
+    """Build and emit desktop_session_performance_summary, then reset accumulator (D-06).
+
+    Called from genizah_app.py flush helpers (UI thread). Never raises.
+    flush_reason: 'periodic' | 'close' | 'manual' — normalized, rides the 'action' key.
+    Attaches session_id (from _current_distinct_id or _install_id — REVIEWS finding 4).
+    """
+    try:
+        if not is_enabled():
+            return
+        if not _perf_accumulator:
+            return  # nothing to flush
+        flush_reason = _normalize_flush_reason(flush_reason)
+        perf_summary: dict = {}
+        for mode_key, entry in _perf_accumulator.items():
+            durs = entry['durations_ms']
+            counts = entry['result_counts']
+            if not durs:
+                continue
+            # Coarse result-count bucket distribution (D-03 scheme — 0/1-9/10-99/100+).
+            # Inlined here to avoid importing genizah_app (circular import).
+            # Canonical scheme: genizah_app._telemetry_result_bucket(); keep in sync.
+            bucket_0 = bucket_1_9 = bucket_10_99 = bucket_100plus = 0
+            for rc in counts:
+                if rc == 0:
+                    bucket_0 += 1
+                elif rc < 10:
+                    bucket_1_9 += 1
+                elif rc < 100:
+                    bucket_10_99 += 1
+                else:
+                    bucket_100plus += 1
+            perf_summary[mode_key] = {
+                'count':             len(durs),
+                'median_ms':         round(_percentile(durs, 0.5), 1),
+                'p95_ms':            round(_percentile(durs, 0.95), 1),
+                'min_ms':            round(min(durs), 1),
+                'max_ms':            round(max(durs), 1),
+                'zero_result_count': entry['zero_result_count'],
+                'bucket_0':          bucket_0,
+                'bucket_1_9':        bucket_1_9,
+                'bucket_10_99':      bucket_10_99,
+                'bucket_100plus':    bucket_100plus,
+                'corpus_genizah':    entry['corpus_counts'].get('genizah', 0),
+                'corpus_local':      entry['corpus_counts'].get('local', 0),
+                'corpus_all':        entry['corpus_counts'].get('all', 0),
+            }
+        if not perf_summary:
+            _perf_accumulator.clear()
+            return
+        # Attach session_id — reuse _current_distinct_id (same value SESSION_END uses).
+        # With lock for thread safety; falls back to _install_id if distinct_id not set.
+        try:
+            with _state_lock:
+                sid = _current_distinct_id or _install_id or ''
+        except Exception:
+            sid = ''
+        sample_n = _perf_env_int('GENIZAH_PERF_SAMPLE_N', default=1, minimum=1)
+        track_performance(
+            DesktopEvent.SESSION_PERF,
+            duration_ms=0.0,    # not meaningful for summary; required by track_performance sig
+            perf_summary=perf_summary,
+            session_id=sid,
+            sample_n=sample_n,
+            action=flush_reason,   # 'action' already allowlisted; reuse for flush_reason (KQ-8)
+        )
+        # D-06: reset so next window is independent (no double-count across flush intervals)
+        _perf_accumulator.clear()
+        global _perf_last_flush_time
+        _perf_last_flush_time = time.monotonic()
+    except Exception:
+        logger.debug('telemetry: _flush_perf_summary() silently failed', exc_info=True)
+
+
+def flush_perf_if_due(flush_interval_secs: float = 1800.0) -> None:
+    """Flush the perf accumulator only if enough time has elapsed (D-04/D-05 periodic).
+
+    Called from GenizahGUI._maybe_flush_perf_summary() on the UI thread.
+    Default interval 1800s (30 min); override via GENIZAH_PERF_FLUSH_INTERVAL env var.
+    Never raises.
+    """
+    try:
+        interval = _perf_env_float(
+            'GENIZAH_PERF_FLUSH_INTERVAL',
+            default=flush_interval_secs,
+            minimum_exclusive=0.0,
+        )
+        if time.monotonic() - _perf_last_flush_time >= interval:
+            _flush_perf_summary(flush_reason='periodic')
+    except Exception:
+        logger.debug('telemetry: flush_perf_if_due() silently failed', exc_info=True)
+
+
+def flush_perf_unconditionally() -> None:
+    """Flush the perf accumulator regardless of elapsed time (D-09 close flush).
+
+    Called from GenizahGUI.closeEvent() on the UI thread. Never raises.
+    """
+    try:
+        _flush_perf_summary(flush_reason='close')
+    except Exception:
+        logger.debug('telemetry: flush_perf_unconditionally() silently failed', exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1372,6 +1653,11 @@ __all__ = [
     'identify',
     'reset_identity',
     'run_selftest',
+    # Phase 115 public perf API
+    'accumulate_performance',
+    'flush_perf_if_due',
+    'flush_perf_unconditionally',
+    '_clear_perf_accumulator',
     # Phase stubs
     'install_exception_hooks',
     'show_first_run_prompt',
