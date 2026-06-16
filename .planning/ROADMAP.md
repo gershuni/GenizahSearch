@@ -172,7 +172,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 **Plans**: 4 plans
 
 - [x] 115-01-PLAN.md — Wave 0 test scaffold (`tests/test_telemetry_phase115.py`: 8 cases + autouse reset fixture) [Wave 0]
-- [ ] 115-02-PLAN.md — `desktop/telemetry.py` accumulator + flush: `accumulate_performance`/`_flush_perf_summary`/`flush_perf_if_due`/`flush_perf_unconditionally` + `INDEXING_COMPLETE` enum + 3 allowlist keys + `_reset_for_tests` extension [Wave 1]
+- [x] 115-02-PLAN.md — `desktop/telemetry.py` accumulator + flush: `accumulate_performance`/`_flush_perf_summary`/`flush_perf_if_due`/`flush_perf_unconditionally` + `INDEXING_COMPLETE` enum + 3 allowlist keys + `_reset_for_tests` extension [Wave 1]
 - [ ] 115-03-PLAN.md — search-thread producers: `perf_signal(float,int)` on 4 threads + `_on_perf_signal` slot + active_ping-mirrored periodic flush + close flush [Wave 2]
 - [ ] 115-04-PLAN.md — indexing-duration producers: timed `LocalIndexerWorker` + `LabRebuildWorker` → `desktop_indexing_complete` event (operation_kind + doc_count_bucket) [Wave 2]
 
@@ -197,5 +197,5 @@ See: .planning/milestones/v7.16-ROADMAP.md
 | 112. Consent UX | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
 | 113. Crash Reporting | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
 | 114. Usage Analytics | v8.1.0 | 4/4 | Complete   | 2026-06-16 |
-| 115. Performance Metrics | v8.1.0 | 1/4 | In Progress|  |
+| 115. Performance Metrics | v8.1.0 | 2/4 | In Progress|  |
 | 116. Privacy Audit + CI Gate | v8.1.0 | 0/TBD | Not started | - |
