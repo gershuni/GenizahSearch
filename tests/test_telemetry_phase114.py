@@ -1649,20 +1649,23 @@ def _make_pgp_tag_token_stub(monkeypatch):
         'mode': 'pgp_tags', 'corpus': 'genizah', 'emitted': False, 'token': 2
     }
     gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
-    gui._emit_pgp_tag_search_telemetry = lambda action, result_count=None: (
-        app.GenizahGUI._emit_pgp_tag_search_telemetry(gui, action, result_count)
+    gui._emit_pgp_tag_search_telemetry = lambda action, result_count=None, token=None: (
+        app.GenizahGUI._emit_pgp_tag_search_telemetry(gui, action, result_count, token=token)
     )
     return gui
 
 
 def test_pgp_tag_stale_slot_does_not_mark_new_run_emitted(monkeypatch, _reset_telemetry_state):
-    """CR-114-01: a stale _on_tag_search_results slot (token mismatch) must NOT mark the
-    live run emitted and must NOT enqueue an event attributed to the new run.
+    """CR-114-01: a stale _on_tag_search_results slot carries the OLD run's token (bound at
+    connect time via lambda capture). When it fires AFTER a newer run is installed, the emit
+    helper compares the SLOT's token to the live _pgp_tag_active_token and returns early — it
+    must NOT emit and must NOT mark the live (new) run emitted, so the new run's real completion
+    can still fire.
 
-    Simulate: live run has token=2; stale slot fires with a run that was
-    pre-installed with token=1 (old run) — the active token was already bumped to 2.
-    The emit helper reads _pgp_tag_active_token and compares to run['token'];
-    if they don't match it returns early (stale slot protection).
+    This exercises the REAL production mechanism (passed-in slot token vs live active token),
+    not the impossible run['token'] != active desync the prior version hand-constructed —
+    in production _current_pgp_tag_search_run IS the live run, so its own token always equals
+    the active token (Codex CR-114-01: the old run['token'] guard was dead code).
     """
     import desktop.telemetry as tel
     tel.set_consent(True)
@@ -1674,38 +1677,45 @@ def test_pgp_tag_stale_slot_does_not_mark_new_run_emitted(monkeypatch, _reset_te
     gui._telemetry_session_started = True
     gui._app_shutting_down = False
     gui._session_id = 'pgp-stale-session'
-    gui._pgp_tag_active_token = 2  # live token is now 2 (new run B)
-    # Stale slot manipulates the run object as if it were run A (token=1)
+    # Live state = run B: active token 2, the installed run object carries token 2 (lockstep).
+    gui._pgp_tag_active_token = 2
     gui._current_pgp_tag_search_run = {
-        'mode': 'pgp_tags', 'corpus': 'genizah', 'emitted': False, 'token': 1
+        'mode': 'pgp_tags', 'corpus': 'genizah', 'emitted': False, 'token': 2
     }
     gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
-    gui._emit_pgp_tag_search_telemetry = lambda action, result_count=None: (
-        app.GenizahGUI._emit_pgp_tag_search_telemetry(gui, action, result_count)
+    gui._emit_pgp_tag_search_telemetry = lambda action, result_count=None, token=None: (
+        app.GenizahGUI._emit_pgp_tag_search_telemetry(gui, action, result_count, token=token)
     )
 
-    # Stale slot calls emit — should be suppressed (token mismatch: run['token']=1 vs active=2)
-    gui._emit_pgp_tag_search_telemetry('completed', 5)
+    # Stale slot from the superseded worker A fires with its bound token=1 (old run).
+    gui._emit_pgp_tag_search_telemetry('completed', 999, token=1)
 
     events = _drain_all_events()
     search_events = [e for e in events if e['event'] == 'desktop_search_executed']
     assert len(search_events) == 0, (
-        "CR-114-01: stale slot (token mismatch) must NOT emit desktop_search_executed"
+        "CR-114-01: stale slot (bound token 1 != live active 2) must NOT emit"
     )
-    # Also assert run is NOT marked emitted (so the real new completion can still fire)
     assert gui._current_pgp_tag_search_run['emitted'] is False, (
         "CR-114-01: stale slot must NOT mark the live run['emitted']=True"
     )
 
+    # The live slot for run B then fires with its matching bound token=2 → emits exactly once.
+    gui._emit_pgp_tag_search_telemetry('completed', 5, token=2)
+    live_events = [e for e in _drain_all_events() if e['event'] == 'desktop_search_executed']
+    assert len(live_events) == 1, (
+        "CR-114-01: live slot (matching token) must emit exactly once after the stale skip"
+    )
+    assert gui._current_pgp_tag_search_run['emitted'] is True
+
 
 def test_pgp_tag_token_match_emits_exactly_once(monkeypatch, _reset_telemetry_state):
-    """CR-114-01: when token matches the active token, exactly one event fires (normal path)."""
+    """CR-114-01: when the slot's bound token matches the active token, exactly one event fires."""
     import desktop.telemetry as tel
     tel.set_consent(True)
 
     gui = _make_pgp_tag_token_stub(monkeypatch)
-    # Both tokens are 2 — live completion for run B
-    gui._emit_pgp_tag_search_telemetry('completed', 10)
+    # Slot's bound token (2) matches the live active token (2) — live completion for run B.
+    gui._emit_pgp_tag_search_telemetry('completed', 10, token=2)
 
     events = _drain_all_events()
     search_events = [e for e in events if e['event'] == 'desktop_search_executed']
@@ -1739,6 +1749,39 @@ def test_pgp_tag_execute_drains_previous_worker_before_run_object(monkeypatch, _
     run_obj_pos = src.index('_current_pgp_tag_search_run =')
     assert disconnect_pos < run_obj_pos, (
         "CR-114-01: previous-worker drain (disconnect) must precede new run-object assignment"
+    )
+
+
+def test_pgp_tag_connect_binds_token_and_slot_threads_it(monkeypatch, _reset_telemetry_state):
+    """CR-114-01 (wiring): the connect site must bind the run token into a lambda and
+    _on_tag_search_results must thread that token into the emit helper — otherwise the
+    token guard is dead code (the defect Codex flagged: comparing the live run's own token
+    is a no-op). Proves the mechanism is reachable end-to-end, not just present in the helper.
+    """
+    import genizah_app as app
+    import inspect
+
+    exec_src = inspect.getsource(app.GenizahGUI._execute_tag_search)
+    # The .finished connection must be a lambda that captures the active token (default-arg
+    # binding `t=`), NOT a bare bound-method connect (which would read the live token at
+    # call time and never distinguish a stale slot).
+    assert 'lambda' in exec_src and '_on_tag_search_results' in exec_src, (
+        "CR-114-01: _execute_tag_search must connect .finished via a token-capturing lambda"
+    )
+    assert '_pgp_tag_active_token' in exec_src and 't=' in exec_src, (
+        "CR-114-01: the connect lambda must bind the active token (t=...) at connect time"
+    )
+
+    slot_src = inspect.getsource(app.GenizahGUI._on_tag_search_results)
+    assert 'token=token' in slot_src, (
+        "CR-114-01: _on_tag_search_results must thread its bound token into "
+        "_emit_pgp_tag_search_telemetry(..., token=token)"
+    )
+
+    emit_src = inspect.getsource(app.GenizahGUI._emit_pgp_tag_search_telemetry)
+    assert 'token != getattr(self' in emit_src or 'token != self._pgp_tag_active_token' in emit_src, (
+        "CR-114-01: emit helper must compare the PASSED-IN token to the live active token, "
+        "not the live run's own token (dead-code guard)"
     )
 
 

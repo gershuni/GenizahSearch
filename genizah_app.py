@@ -19044,7 +19044,7 @@ class GenizahGUI(QMainWindow):
                 self.tag_search_combo.addItem(display, en_tag)
         self.tag_search_combo.blockSignals(False)
 
-    def _emit_pgp_tag_search_telemetry(self, action: str, result_count=None) -> None:
+    def _emit_pgp_tag_search_telemetry(self, action: str, result_count=None, token=None) -> None:
         """Emit desktop_search_executed for a PGP-tags search run (Phase 114 USAGE-03).
 
         Mirrors _emit_search_telemetry in structure. The PGP-tags path bypasses
@@ -19064,11 +19064,15 @@ class GenizahGUI(QMainWindow):
             run = getattr(self, '_current_pgp_tag_search_run', None)
             if run is None or run.get('emitted'):
                 return
-            # CR-114-01: token guard — a stale queued slot from a superseded PGP worker
-            # carries the OLD run's token.  If the run's token doesn't match the live
-            # _pgp_tag_active_token, this slot is stale: return without marking emitted
-            # so the real live completion can still fire.
-            if run.get('token') != getattr(self, '_pgp_tag_active_token', None):
+            # CR-114-01: token guard — the calling _on_tag_search_results slot carries the
+            # token BOUND AT connect time (lambda capture in _execute_tag_search), passed in
+            # as `token`. A stale slot from a superseded worker therefore carries an OLD token;
+            # if it no longer matches the live _pgp_tag_active_token this slot is stale → return
+            # WITHOUT marking the live run emitted, so the real live completion can still fire.
+            # (Comparing the live run's OWN token would be a no-op: _current_pgp_tag_search_run
+            # IS the live run, so run['token'] always equals the active token — the bug Codex
+            # CR-114-01 flagged. The slot-bound token is the only value that distinguishes runs.)
+            if token is not None and token != getattr(self, '_pgp_tag_active_token', None):
                 return
             run['emitted'] = True
             props = {
@@ -19093,14 +19097,18 @@ class GenizahGUI(QMainWindow):
         if not tag:
             return
         # CR-114-01: drain + disconnect the previous worker BEFORE installing the new run
-        # object so that a stale queued .finished slot cannot mark the new run emitted.
-        # The wait() blocks the UI thread until the old worker exits; the subsequent
-        # finished.disconnect() prevents its queued slot from ever reaching us again.
+        # object. wait() blocks the UI thread until the old worker exits; disconnect() drops
+        # its slot. But Qt may ALREADY have posted the old worker's finished QMetaCallEvent
+        # before wait() returns, and disconnect does not reliably cancel an already-posted
+        # queued call — so the disconnect is belt-and-suspenders only. The LOAD-BEARING guard
+        # is the per-run token captured into the connect-time lambda below: a stale slot carries
+        # the OLD token and is skipped in _emit_pgp_tag_search_telemetry. disconnect() (all slots)
+        # is used because the slot is now a lambda, not the bound method.
         if self._pgp_tag_search_worker and self._pgp_tag_search_worker.isRunning():
             self._pgp_tag_search_worker.wait()
         if self._pgp_tag_search_worker is not None:
             try:
-                self._pgp_tag_search_worker.finished.disconnect(self._on_tag_search_results)
+                self._pgp_tag_search_worker.finished.disconnect()
             except (RuntimeError, TypeError):
                 pass
         # Mint a new per-run token and install the run object AFTER the drain.
@@ -19116,15 +19124,24 @@ class GenizahGUI(QMainWindow):
         }
         self.status_label.setText(tr("Searching tag: {}...").format(tag))
         self._pgp_tag_search_worker = PGPTagSearchWorker(tag)
-        self._pgp_tag_search_worker.finished.connect(self._on_tag_search_results)
+        # CR-114-01: bind THIS run's token into the slot so a stale slot from a superseded
+        # worker carries its OLD token and is skipped by the emit helper's token guard.
+        _tel_tok = self._pgp_tag_active_token
+        self._pgp_tag_search_worker.finished.connect(
+            lambda tag, results, t=_tel_tok: self._on_tag_search_results(tag, results, t)
+        )
         self._pgp_tag_search_worker.start()
 
-    def _on_tag_search_results(self, tag, results):
-        """Handle tag search results - display in results table."""
+    def _on_tag_search_results(self, tag, results, token=None):
+        """Handle tag search results - display in results table.
+
+        `token` is the per-run token bound at connect time (CR-114-01) — threaded into the
+        emit helper so a stale slot from a superseded PGP-tag worker is skipped.
+        """
         if not results:
             # Phase 114 USAGE-03: zero-result completed tag search (D-07).
             # `tag` is the search term — MUST NOT appear in props (D-04).
-            self._emit_pgp_tag_search_telemetry('completed', 0)
+            self._emit_pgp_tag_search_telemetry('completed', 0, token=token)
             self.status_label.setText(tr("No results for tag: {}").format(tag))
             self.last_results = []
             self.results_loaded = 0
@@ -19144,7 +19161,7 @@ class GenizahGUI(QMainWindow):
         if not valid_results:
             # Phase 114 USAGE-03: no-local-match branch — still a completed search, 0 surfaced.
             # emitted guard ensures this fires only if the empty-results branch didn't.
-            self._emit_pgp_tag_search_telemetry('completed', 0)
+            self._emit_pgp_tag_search_telemetry('completed', 0, token=token)
             self.status_label.setText(tr("No local results for tag: {}").format(tag))
             return
 
@@ -19203,7 +19220,7 @@ class GenizahGUI(QMainWindow):
         # Phase 114 USAGE-03: emit search telemetry for the success path.
         # `tag` and `len(formatted)` are safe; only the bucket is included, not the count (D-04).
         # The tag text itself MUST NOT appear in any prop — only len(formatted) → bucket.
-        self._emit_pgp_tag_search_telemetry('completed', len(formatted))
+        self._emit_pgp_tag_search_telemetry('completed', len(formatted), token=token)
 
 
     def _search_by_pgp_tag(self, tag):
