@@ -18,14 +18,14 @@ result: [pending]
 
 ### 2. Consent disclosure accuracy (WR-04)
 expected: Decide on `desktop/consent_dialog.py` lines 306-308 (EN) and 339-340 (HE), which currently say "bare Supabase `user.id`" while the code sends `user._uuid` (the raw Supabase UUID string). Either reword to "Supabase account identifier (UUID)" or accept the existing wording with a documented rationale. The behavior is privacy-correct; only the disclosure text is potentially misleading.
-result: [pending]
+result: passed — reworded both EN and HE disclosure to "Supabase account identifier (a UUID)" in commit f7bf67e4; ruff clean, 28 consent tests pass.
 
 ## Summary
 
 total: 2
-passed: 0
+passed: 1
 issues: 0
-pending: 2
+pending: 1
 skipped: 0
 blocked: 0
 
