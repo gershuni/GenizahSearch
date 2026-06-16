@@ -1063,8 +1063,13 @@ def create_layout():
     if safe_user_get('whats_new_dismissed') != WHATS_NEW_VERSION:
         banner_dir = 'rtl' if rtl_mode else 'ltr'
         with content_col:
-            with ui.element('div').classes('w-full mx-auto max-w-5xl px-4 py-2 flex items-center gap-3 mt-2').style(
-                f'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); border-radius: 6px; direction: {banner_dir};'
+            # Fixed-position toast (out of document flow): showing and the 10s
+            # auto-dismiss never reflow page content, so this no longer causes CLS.
+            with ui.element('div').classes('px-4 py-2 flex items-center gap-3').style(
+                f'position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); '
+                f'z-index: 2000; max-width: 90vw; background: var(--bg-tertiary); '
+                f'border: 1px solid var(--border-light); border-radius: 8px; '
+                f'box-shadow: 0 4px 16px rgba(0,0,0,0.18); direction: {banner_dir};'
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')

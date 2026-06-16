@@ -692,7 +692,7 @@ def create_result_card(search_state, refs, index, result):
                         ui.html(
                             f'<img src="{_img_url}" '
                             f'onerror="this.style.display=\'none\'" '
-                            f'style="width: 200px; max-height: 250px; object-fit: contain; border-radius: 8px;" />',
+                            f'style="width: 200px; height: 250px; object-fit: contain; border-radius: 8px;" />',
                             sanitize=False
                         )
 

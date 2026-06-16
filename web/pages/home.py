@@ -29,8 +29,13 @@ def create_page():
         from web.safe_storage import safe_user_get as _safe_get, safe_user_set as _safe_set
         if not _safe_get('ocr_disclaimer_dismissed', False):
             banner_dir = 'rtl' if is_rtl() else 'ltr'
-            with ui.element('div').classes('w-full px-4 py-2 flex items-center gap-3').style(
-                f'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); direction: {banner_dir};'
+            # Fixed-position toast (out of document flow) so show/auto-dismiss
+            # never reflow content (CLS). Stacked above the global What's New toast.
+            with ui.element('div').classes('px-4 py-2 flex items-center gap-3').style(
+                f'position: fixed; bottom: 74px; left: 50%; transform: translateX(-50%); '
+                f'z-index: 2000; max-width: 90vw; background: var(--bg-tertiary); '
+                f'border: 1px solid var(--border-light); border-radius: 8px; '
+                f'box-shadow: 0 4px 16px rgba(0,0,0,0.18); direction: {banner_dir};'
             ) as ocr_banner:
                 ui.icon('psychology').classes('text-base').style('color: var(--primary-600);')
                 ui.label(tr('Computer-read manuscripts; expect some reading errors!')).classes('text-xs flex-1').style('color: var(--text-secondary);')
@@ -79,7 +84,7 @@ def create_page():
                     def mini_stat(icon, value_fn, label):
                         with ui.row().classes('items-center gap-1'):
                             ui.icon(icon).classes('text-base').style('color: var(--primary-600);')
-                            val_label = ui.label('...').classes('text-sm font-bold').style('color: var(--text-primary);')
+                            val_label = ui.label('...').classes('text-sm font-bold').style('color: var(--text-primary); min-width: 3.5rem; display: inline-block;')
                             ui.label(label).classes('text-xs').style('color: var(--text-muted);')
 
                             def refresh():
@@ -452,8 +457,9 @@ def create_page():
                     'click', lambda: ui.navigate.to('/lists')
                 )
 
-            # Recent items container
-            recent_container = ui.row().classes('w-full gap-4 flex-wrap')
+            # Recent items container (min-height reserves space so the async
+            # 0.3s load doesn't shift the System Status section below it — CLS).
+            recent_container = ui.row().classes('w-full gap-4 flex-wrap').style('min-height: 120px;')
 
             def load_recent():
                 recent_container.clear()

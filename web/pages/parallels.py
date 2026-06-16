@@ -1328,7 +1328,7 @@ def create_parallels_page(initial_text: str = None):
                         'flat round dense disable'
                     ).tooltip(tr('Export JSON'))
 
-            results_container = ui.column().classes('w-full gap-4')
+            results_container = ui.column().classes('w-full gap-4').style('min-height: 300px;')
 
     # === Logic ===
 
