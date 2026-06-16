@@ -432,7 +432,12 @@ def send_selftest_event_sync(timeout: float = 2.0) -> str:
     no-Python Windows VM (Task 3 / D-06) is the gold-standard proof.
     """
     api_key = _resolve_api_key()
-    if not api_key:
+    # NO_KEY means "no usable phc_ ingestion key" (per the docstring contract). Reject an
+    # empty key AND any non-phc_ token (e.g. a stray POSTHOG_API_KEY=phx_ personal key that
+    # _resolve_api_key would otherwise fall back to) WITHOUT a network call — never POST a
+    # non-ingestion key in the payload. Mirrors _wire_transport_config's phc_-only gate
+    # (Codex 116 review HIGH).
+    if not api_key or not api_key.startswith('phc_'):
         return 'NO_KEY'
     url = _resolve_capture_url()
     payload = {

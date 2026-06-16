@@ -82,6 +82,26 @@ class TestSendSelftestEventSync:
         monkeypatch.setattr('shared.posthog_server.requests.post', _explode)
         assert ph.send_selftest_event_sync() == 'NO_KEY'
 
+    def test_phx_env_key_returns_no_key_without_network(self, monkeypatch):
+        """A stray POSTHOG_API_KEY=phx_ (personal key) must NOT be POSTed: a non-phc_
+        token resolves to NO_KEY without any network call (Codex 116 review HIGH —
+        the doc contract says NO_KEY == no phc_ key)."""
+        monkeypatch.setenv('POSTHOG_API_KEY', 'phx_secret_personal_key')
+        monkeypatch.setattr('shared.posthog_server.requests.post', _explode)
+        assert ph.send_selftest_event_sync() == 'NO_KEY'
+
+    def test_junk_env_key_returns_no_key_without_network(self, monkeypatch):
+        """A non-phc_ junk POSTHOG_API_KEY must NOT be POSTed."""
+        monkeypatch.setenv('POSTHOG_API_KEY', 'not-a-key')
+        monkeypatch.setattr('shared.posthog_server.requests.post', _explode)
+        assert ph.send_selftest_event_sync() == 'NO_KEY'
+
+    def test_non_phc_override_returns_no_key_without_network(self, monkeypatch):
+        """A non-phc_ override wired via set_capture_api_key must NOT be POSTed."""
+        ph.set_capture_api_key('not_phc')
+        monkeypatch.setattr('shared.posthog_server.requests.post', _explode)
+        assert ph.send_selftest_event_sync() == 'NO_KEY'
+
     def test_2xx_returns_ssl_ok(self, monkeypatch):
         ph.set_capture_api_key('phc_x')
         recorder = _PostRecorder(status_code=200)

@@ -347,19 +347,40 @@ _CONTEXT_RE = re.compile(r'[A-Za-z0-9]+(?:[._\-][A-Za-z0-9]+)*\Z')
 # Known file extensions. If a _CONTEXT_RE-shaped value's final dotted segment is a real
 # file extension (case-insensitive), the value is a FILENAME, not a code label, and must
 # collapse to 'unregistered' (PRIV-04: filenames must not ride through the lone allowlisted
-# free-text key). A curated set — NOT a broad "any short dotted token" shape — because a
+# free-text key). A curated denylist — NOT a broad "any short dotted token" shape — because a
 # loose shape also collapses legitimate dotted code labels whose final segment is a
-# method-ish word ('search_tab.run', 'app.crash'), which existing telemetry contexts use.
-# A real My-Library/document/data/archive filename leak always carries a real extension;
-# method-ish final segments ('run', 'crash', 'run_query', 'open') are not in this set.
+# method-ish word ('search_tab.run', 'app.crash'), and the established
+# tests/test_telemetry_codex_review_fixes.py::test_safe_context_preserves_code_labels contract
+# REQUIRES those dotted labels to survive verbatim. A pure label allowlist is not viable here:
+# `context` has ZERO production producers today (it is forward-looking defense-in-depth; grep
+# confirms no track_error()/track(context=) callsite outside this module), so there is no real
+# label set to enumerate. DEFENSE-IN-DEPTH POSTURE (Codex 116 review BLOCKER-1): this denylist is
+# the LAST line, not the only one — the PRIMARY structural guard against dynamic user content
+# (real query text / real My-Library filenames are runtime values) reaching ANY telemetry arg is
+# the D-17 producer-layer AST guard tests/test_no_dynamic_telemetry_strings.py (forbids
+# text()/selectedFiles()/currentText()/... at telemetry callsites), plus the recursive
+# _scrub_value path-redactor on every key EXCEPT context. The residual (a hardcoded-literal
+# filename with an extension not listed below, passed on `context` by a future producer) is
+# accepted. The set covers the My-Library document types + common document/data/image/archive/
+# code/log file extensions a real filename would carry.
 _CONTEXT_FILE_EXTENSIONS = frozenset({
-    'pdf', 'doc', 'docx', 'txt', 'rtf', 'odt', 'tex', 'epub', 'mobi', 'djvu',
-    'xls', 'xlsx', 'csv', 'tsv', 'ods', 'ppt', 'pptx',
-    'html', 'htm', 'xml', 'json', 'md', 'yaml', 'yml',
+    # documents
+    'pdf', 'doc', 'docx', 'txt', 'text', 'rtf', 'odt', 'tex', 'epub', 'mobi', 'azw', 'azw3',
+    'djvu', 'pages', 'md', 'markdown', 'rst',
+    # spreadsheets / presentations
+    'xls', 'xlsx', 'xlsm', 'csv', 'tsv', 'ods', 'ppt', 'pptx', 'key', 'numbers',
+    # web / markup / config / data
+    'html', 'htm', 'xml', 'json', 'jsonl', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf',
+    'sql', 'parquet', 'bib', 'ris', 'eml', 'msg', 'vcf', 'ics',
+    # images
     'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tif', 'tiff', 'webp', 'svg', 'heic', 'ico',
-    'zip', 'rar', '7z', 'gz', 'tar', 'bz2',
-    'mp3', 'mp4', 'wav', 'mov', 'avi', 'mkv', 'flac',
-    'db', 'sqlite', 'pkl', 'bak', 'dat', 'exe', 'dll', 'msi',
+    'jp2', 'j2k', 'jpx', 'psd', 'raw',
+    # archives
+    'zip', 'rar', '7z', 'gz', 'tar', 'bz2', 'xz', 'tgz',
+    # media
+    'mp3', 'mp4', 'wav', 'mov', 'avi', 'mkv', 'flac', 'ogg', 'm4a', 'webm',
+    # data / binaries / logs
+    'db', 'sqlite', 'sqlite3', 'pkl', 'bak', 'dat', 'log', 'exe', 'dll', 'msi', 'bin',
 })
 
 

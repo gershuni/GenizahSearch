@@ -32,6 +32,14 @@ import shared.posthog_server as ph
 # ---------------------------------------------------------------------------
 # Autouse fixture -- copied VERBATIM from tests/test_telemetry_review_fixes.py
 # ---------------------------------------------------------------------------
+# Private capture queue. The autouse fixture intercepts `desktop.telemetry.enqueue_event`
+# so the scrubbed payload lands HERE — a queue the shared drain daemon never reads —
+# making the assertions deterministic regardless of any daemon a prior test file left
+# running (Codex 116 review MEDIUM). `_emit()` performs ALL scrubbing BEFORE calling
+# enqueue_event, so the captured `properties` are exactly what would reach the network.
+_CAPTURED: queue.Queue = queue.Queue()
+
+
 @pytest.fixture(autouse=True)
 def _reset_telemetry_state(monkeypatch):
     """Reset desktop.telemetry + posthog_server state before/after each test."""
@@ -55,14 +63,26 @@ def _reset_telemetry_state(monkeypatch):
     fresh_q: queue.Queue = queue.Queue(maxsize=10000)
     monkeypatch.setattr(ph, '_event_queue', fresh_q)
 
-    # WR-01 hardening: these tests call set_consent(True), which wires the REAL
-    # embedded publishable phc_ key via _wire_transport_config. Without this guard,
-    # track() would (a) start the shared drain daemon, which races the test's
-    # _event_queue.get() and can STEAL the captured event (flaky queue.Empty), and
-    # (b) POST real test events to PRODUCTION PostHog (project 134161). Neutralize
-    # BOTH: never start the daemon (the captured event stays in fresh_q for the
-    # test's .get()), and make the transport a hard no-op so no payload can ever
-    # leave the test process — even via a daemon left running by an earlier file.
+    # Deterministic capture + production-POST guard (Codex 116 review WR-01 + MEDIUM):
+    # these tests call set_consent(True), which wires the REAL embedded publishable phc_
+    # key. Intercept desktop.telemetry.enqueue_event so the (already-scrubbed) payload lands
+    # in a PRIVATE queue (_CAPTURED) the shared drain daemon NEVER reads. This eliminates
+    # BOTH the daemon-steal race (even from a daemon a prior test file left running, which
+    # the per-test _event_queue monkeypatch could NOT isolate) AND any chance of a real POST
+    # to production PostHog (project 134161). Belt-and-suspenders: never start a new daemon,
+    # and hard-fail requests.post so no payload can leave the process by any path.
+    global _CAPTURED
+    _CAPTURED = queue.Queue()
+
+    def _capture_enqueue(event, properties, *, distinct_id=None):
+        _CAPTURED.put({
+            'event': event,
+            'distinct_id': distinct_id,
+            'properties': properties,
+            'timestamp': '1970-01-01T00:00:00+00:00',
+        })
+
+    monkeypatch.setattr(tel, 'enqueue_event', _capture_enqueue)
     monkeypatch.setattr(ph, '_start_drain_thread_once', lambda: None)
 
     def _no_network_post(*_args, **_kwargs):  # pragma: no cover - guard only
@@ -107,7 +127,7 @@ def test_priv04_my_library_path_not_in_payload():
         path=needle,
     )
 
-    payload = ph._event_queue.get(timeout=1.0)
+    payload = _CAPTURED.get(timeout=1.0)
     props = payload['properties']
     serialized = _serialized(payload)
 
@@ -139,7 +159,7 @@ def test_priv04_filename_key_dropped():
         search_mode='keyword',
     )
 
-    payload = ph._event_queue.get(timeout=1.0)
+    payload = _CAPTURED.get(timeout=1.0)
     props = payload['properties']
     serialized = _serialized(payload)
 
@@ -170,7 +190,7 @@ def test_priv04_hebrew_query_context_unregistered():
         search_mode='keyword',
     )
 
-    payload = ph._event_queue.get(timeout=1.0)
+    payload = _CAPTURED.get(timeout=1.0)
     props = payload['properties']
     serialized = _serialized(payload)
 
@@ -201,7 +221,7 @@ def test_priv04_hebrew_value_redacted_on_scrub_path():
         **{'$set': {'h': needle}},
     )
 
-    payload = ph._event_queue.get(timeout=1.0)
+    payload = _CAPTURED.get(timeout=1.0)
     props = payload['properties']
     serialized = _serialized(payload)
 
@@ -230,7 +250,7 @@ def test_priv04_filename_shaped_context_not_leaked():
         search_mode='keyword',
     )
 
-    payload = ph._event_queue.get(timeout=1.0)
+    payload = _CAPTURED.get(timeout=1.0)
     props = payload['properties']
     serialized = _serialized(payload)
 
@@ -264,7 +284,7 @@ def test_priv04_track_error_path_context_and_message_not_leaked():
         exc=ValueError(f'failed reading {message_needle}'),
     )
 
-    payload = ph._event_queue.get(timeout=1.0)
+    payload = _CAPTURED.get(timeout=1.0)
     props = payload['properties']
     serialized = _serialized(payload)
 
@@ -299,7 +319,7 @@ def test_priv04_crash_forbidden_fields_dropped():
         traceback_raw=r'Traceback...C:\Users\gersh\x.py',
     )
 
-    payload = ph._event_queue.get(timeout=1.0)
+    payload = _CAPTURED.get(timeout=1.0)
     props = payload['properties']
     serialized = _serialized(payload)
 
@@ -335,7 +355,7 @@ def test_priv04_hostname_username_dropped():
         search_mode='keyword',
     )
 
-    payload = ph._event_queue.get(timeout=1.0)
+    payload = _CAPTURED.get(timeout=1.0)
     props = payload['properties']
     serialized = _serialized(payload)
 
@@ -377,7 +397,7 @@ def test_priv04_pre_consent_zero_emit_all_entry_points():
     tel.track_performance(tel.DesktopEvent.SESSION_PERF, duration_ms=100.0)
     tel.track_error('ctx', ValueError('test'))
 
-    assert ph._event_queue.empty(), (
+    assert _CAPTURED.empty(), (
         "ZERO events must be enqueued before consent across all three entry points "
         "(track / track_performance / track_error) — CONSENT-01 / D-02"
     )
