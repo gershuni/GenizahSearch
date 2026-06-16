@@ -27483,6 +27483,50 @@ def resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 if __name__ == "__main__":
+    # Phase 116 — telemetry pipeline + SSL self-test (D-04/D-05).
+    # MUST be checked BEFORE QApplication construction so the EXE runs
+    # headlessly (no Qt event loop, no GUI side effects, no config.pkl write).
+    if "--telemetry-selftest" in sys.argv or "--telemetry-selftest-offline" in sys.argv:
+        import desktop.telemetry as _tel
+        import shared.posthog_server as _ph
+
+        _offline = "--telemetry-selftest-offline" in sys.argv
+        _prior_enabled = _tel.is_enabled()
+        try:
+            with _tel._enabled_lock:
+                _tel._enabled = True  # in-memory only — NEVER call set_consent (D-04/D-05)
+            _tel._wire_transport_config()
+
+            if _offline:
+                # OFFLINE arm: no network call, no enqueue.
+                # Proves the no-GUI / no-config-write / fast-return code path ran.
+                # OFFLINE_OK is a SMOKE token (not a delivery proof).
+                # Real offline degradation is proven by the D-06 HUMAN-UAT
+                # (normal launch with adapter disabled — silent + usable).
+                print("OFFLINE_OK")
+                sys.exit(0)
+            else:
+                # ONLINE arm: ONE synchronous POST via send_selftest_event_sync().
+                # SSL_OK/exit-0 is driven SOLELY by the HTTP-2xx return — the
+                # queue-saturation drop counter is NOT the delivery signal (REVIEWS HIGH #1).
+                _result = _ph.send_selftest_event_sync()
+                if _result == "SSL_OK":
+                    print("SSL_OK")
+                    sys.exit(0)
+                elif _result.startswith("NO_KEY"):
+                    print(f"NO_KEY: no phc_ key configured ({_result})", file=sys.stderr)
+                    sys.exit(2)
+                else:
+                    # SSL_FAIL ... (leading token is SSL_FAIL)
+                    print(_result, file=sys.stderr)
+                    sys.exit(1)
+        except Exception as _e:
+            print(f"SSL_FAIL: {_e!r}", file=sys.stderr)
+            sys.exit(1)
+        finally:
+            with _tel._enabled_lock:
+                _tel._enabled = _prior_enabled
+
     # Phase 95 HIGH-5 review fix — PyInstaller packaging self-test.
     # MUST be checked BEFORE QApplication construction so the EXE runs
     # headlessly (no Qt event loop, no GUI side effects).
