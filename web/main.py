@@ -1084,20 +1084,20 @@ def create_layout():
                 ui.button(icon='close', on_click=dismiss_whats_new).props(f'flat dense round size=xs aria-label="{tr("Dismiss")}"')
                 # Use asyncio instead of ui.timer — ui.timer binds to the banner
                 # slot and raises 'parent_slot has been deleted' RuntimeError in
-                # journalctl when the user navigates away before the 10s fires.
+                # journalctl when the user navigates away before the 30s fires.
                 def _auto_dismiss_whats_new():
                     # Only persist the dismissed flag when the banner is still
                     # alive and we successfully hide it. If the user navigated
                     # away before the timer fired, .delete() raises and we must
                     # not mark the banner as "seen" — otherwise leaving within
-                    # the first 10s permanently hides the banner on reload.
+                    # the first 30s permanently hides the banner on reload.
                     try:
                         whats_new_banner.delete()
                     except Exception:
                         return
                     safe_user_set('whats_new_dismissed', WHATS_NEW_VERSION)
                 try:
-                    asyncio.get_event_loop().call_later(10.0, _auto_dismiss_whats_new)
+                    asyncio.get_event_loop().call_later(30.0, _auto_dismiss_whats_new)
                 except RuntimeError:
                     pass  # No running loop in this context
 

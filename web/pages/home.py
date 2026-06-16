@@ -53,16 +53,16 @@ def create_page():
                 # before the auto-dismiss fires.
                 def _auto_dismiss_ocr():
                     # Persist the dismissed flag only if the banner is still alive
-                    # and we actually hide it. If the user left /home before 10s,
+                    # and we actually hide it. If the user left /home before 30s,
                     # .delete() raises and we must not mark the disclaimer as seen
-                    # Otherwise navigating away inside 10s permanently hides it.
+                    # Otherwise navigating away inside 30s permanently hides it.
                     try:
                         ocr_banner.delete()
                     except Exception:
                         return
                     _safe_set('ocr_disclaimer_dismissed', True)
                 try:
-                    asyncio.get_event_loop().call_later(10.0, _auto_dismiss_ocr)
+                    asyncio.get_event_loop().call_later(30.0, _auto_dismiss_ocr)
                 except RuntimeError:
                     pass
 
