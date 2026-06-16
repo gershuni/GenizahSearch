@@ -17606,6 +17606,15 @@ class GenizahGUI(QMainWindow):
              self.search_thread.status_signal.connect(self.status_label.setText)
 
         self.search_thread.error_signal.connect(self.on_error)
+        # Phase 115 PERF-01: connect perf_signal with mode/corpus bound at thread start
+        # (REVIEWS finding 2 — capture at thread-start when _current_search_run is fresh,
+        # NOT at signal-delivery time when it may be stale from a prior run).
+        _perf_mode = self._current_search_run.get('mode', 'unknown')
+        _perf_corpus = self._current_search_run.get('corpus', 'genizah')
+        if hasattr(self.search_thread, 'perf_signal'):
+            self.search_thread.perf_signal.connect(
+                lambda ms, rc, m=_perf_mode, c=_perf_corpus: self._on_perf_signal(ms, rc, m, c)
+            )
         self.search_thread.start()
 
     def _emit_search_telemetry(self, action: str, result_count=None) -> None:
@@ -17641,6 +17650,33 @@ class GenizahGUI(QMainWindow):
                 props['result_count_bucket'] = _telemetry_result_bucket(result_count)
             from desktop import telemetry
             telemetry.track(telemetry.DesktopEvent.SEARCH_EXECUTED, **props)
+        except Exception:
+            pass
+
+    def _on_perf_signal(self, elapsed_ms: float, result_count: int, mode: str, corpus_scope: str) -> None:
+        """UI-thread slot for all four search thread perf_signal emissions (Phase 115 PERF-01).
+
+        Feeds the in-memory perf accumulator. NEVER emits directly — accumulate only.
+        mode/corpus_scope are captured at thread start via default-arg closure and arrive
+        as bound arguments — this slot NEVER reads _current_search_run or
+        _current_comp_search_run at signal time (REVIEWS finding 2: stale run-state hazard).
+
+        Guard ordering mirrors _emit_search_telemetry() (shutdown first — REVIEWS HIGH-2).
+        """
+        # Guard 1 — shutdown flag (mirrors _emit_search_telemetry() REVIEWS HIGH-2)
+        if getattr(self, '_app_shutting_down', False):
+            return
+        # Guard 2 — session must be started
+        if not self._telemetry_ready():
+            return
+        try:
+            from desktop import telemetry
+            telemetry.accumulate_performance(
+                elapsed_ms=elapsed_ms,
+                result_count=result_count,
+                mode=str(mode),
+                corpus_scope=str(corpus_scope),
+            )
         except Exception:
             pass
 
@@ -23030,12 +23066,21 @@ class GenizahGUI(QMainWindow):
                  self.comp_thread.finished_signal.connect(self.on_comp_search_finished)
 
         self.comp_thread.progress_signal.connect(self.on_comp_progress)
-        
+
         if hasattr(self.comp_thread, 'status_signal'):
              self.comp_thread.status_signal.connect(self.on_comp_status_update)
-             
+
         self.comp_thread.error_signal.connect(self.on_comp_error)
-        
+
+        # Phase 115 PERF-01: connect perf_signal with mode/corpus bound at thread start
+        # (REVIEWS finding 2 — capture at thread-start when _current_comp_search_run is fresh).
+        _comp_perf_mode = self._current_comp_search_run.get('mode', 'unknown')
+        _comp_perf_corpus = self._current_comp_search_run.get('corpus', 'genizah')
+        if hasattr(self.comp_thread, 'perf_signal'):
+            self.comp_thread.perf_signal.connect(
+                lambda ms, rc, m=_comp_perf_mode, c=_comp_perf_corpus: self._on_perf_signal(ms, rc, m, c)
+            )
+
         self.comp_thread.start()
 
     def on_comp_display_mode_changed(self, _checked):
