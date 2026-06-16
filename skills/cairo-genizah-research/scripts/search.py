@@ -1,6 +1,6 @@
 """POST /api/search transport. Emits JSON envelope to stdout.
 
-Usage: python search.py --query "ויאמר" --search-mode exact --limit 10
+Usage: python search.py --query "ויאמר" --search-mode exact [--limit N]
                         [--gap N] [--filters-json '{"library":["CUL"]}']
                         [--responsa-options-json '{"variants":true}']
                         [--base-url URL]
@@ -42,7 +42,7 @@ def call_search(
     *,
     query: str,
     search_mode: str = "exact",
-    limit: int = 10,
+    limit: int | None = None,
     gap: int = 0,
     filters: dict | None = None,
     responsa_options: dict | None = None,
@@ -55,6 +55,11 @@ def call_search(
     error envelope matching shared/api_errors.py shape. Never raises.
 
     GENIZAH_API_BASE env var overrides base_url per D-09.
+
+    limit defaults to None: when omitted, the request carries no `limit` key
+    so the SERVER applies its per-mode default (50 for non-fuzzy; a wider
+    recall default ~250 for fuzzy via SEARCH_API_FUZZY_MAX_LIMIT). Passing an
+    explicit limit overrides that — required to exceed 100 on fuzzy.
 
     timeout default is 320s (slightly above the server's heaviest ceiling of
     300s for fuzzy/parallels) so the server's 504 core_timeout envelope is
@@ -74,8 +79,11 @@ def call_search(
         "search_mode": search_mode,
         "query": query,
         "gap": gap,
-        "limit": limit,
     }
+    # Omit `limit` entirely when unset so the server's per-mode default applies
+    # (esp. fuzzy's wider recall default — sending a value here would suppress it).
+    if limit is not None:
+        body["limit"] = limit
     if filters:
         body["filters"] = filters
     if responsa_options:
@@ -106,10 +114,10 @@ def call_search(
             }
         }
 
-    # On 429, surface Retry-After if present so callers can observe it.
-    if resp.status_code == 429 and "Retry-After" in resp.headers:
-        if isinstance(data, dict) and "error" in data:
-            data["error"]["retry_after"] = resp.headers["Retry-After"]
+    # Surface Retry-After when present so callers can honor the server's
+    # backoff hint — applies to BOTH 429 rate_limited AND 503 heavy_search_busy.
+    if "Retry-After" in resp.headers and isinstance(data, dict) and "error" in data:
+        data["error"]["retry_after"] = resp.headers["Retry-After"]
 
     return data
 
@@ -127,11 +135,12 @@ def _main(argv: list[str] | None = None) -> int:
         help="Search mode (default: exact)",
     )
     p.add_argument(
-        "--limit", type=int, default=10,
+        "--limit", type=int, default=None,
         help=(
-            "Max results. Non-fuzzy modes: 1-100. "
-            "Fuzzy mode: 1-500 (server default) or up to 2000 (SEARCH_API_FUZZY_MAX_LIMIT). "
-            "Fuzzy with no explicit limit auto-widens to 250 server-side."
+            "Max results. When omitted, the server's per-mode default applies "
+            "(50 for non-fuzzy; ~250 recall default for fuzzy). "
+            "Non-fuzzy modes accept 1-100; fuzzy accepts up to 2000 "
+            "(SEARCH_API_FUZZY_MAX_LIMIT, server default 500)."
         ),
     )
     p.add_argument("--gap", type=int, default=0, help="Token gap for phrase search")

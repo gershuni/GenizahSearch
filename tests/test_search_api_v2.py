@@ -992,6 +992,117 @@ def test_exact_not_gated_by_heavy_semaphore(client, monkeypatch, stub_searcher):
         _HeavySemaphoreState.sem.release()
 
 
+def test_heavy_slot_held_until_worker_completes(stub_meta_mgr, monkeypatch):
+    """REGRESSION (Codex HIGH): a heavy search that hits its timeout must KEEP
+    its concurrency slot until the worker thread ACTUALLY finishes — not release
+    it the moment asyncio.wait returns. Otherwise a 504'd search keeps occupying
+    a threadpool worker while new heavy work is admitted past the budget,
+    defeating the saturation guard.
+
+    Exercises the real /api/search path with httpx.ASGITransport:
+      A) fuzzy request blocks in the worker and 504s at the short timeout;
+      B) a second fuzzy request, fired while A's worker is STILL running, must
+         get 503 heavy_search_busy (slot still held by the zombie worker);
+      C) after A's worker completes, the slot frees and a third fuzzy 200s.
+    """
+    import asyncio
+    import threading
+    import httpx
+    from fastapi import FastAPI
+    from web.search_api import (
+        init_search_api,
+        _HeavySemaphoreState,
+        DEFAULT_HEAVY_CONCURRENCY,
+    )
+    from web.state import state as _state
+
+    monkeypatch.setenv('SEARCH_API_HEAVY_CONCURRENCY', '1')
+    monkeypatch.setenv('SEARCH_API_FUZZY_TIMEOUT', '0.3')
+    monkeypatch.setenv('SEARCH_API_MODE', 'open')
+    monkeypatch.setenv('SEARCH_API_RATE_LIMIT', '9999')
+
+    gate = threading.Event()
+
+    class _BlockingSearcher:
+        def execute_search(self, **kwargs):
+            # Blocks the worker thread (NOT the event loop) until released.
+            gate.wait(timeout=10)
+            return []
+
+    bare = FastAPI()
+    init_search_api(app_override=bare)
+    saved = _state.searcher
+    _state.searcher = _BlockingSearcher()
+    _HeavySemaphoreState.reset(1)
+
+    async def _run():
+        transport = httpx.ASGITransport(app=bare)
+        async with httpx.AsyncClient(transport=transport, base_url='http://t') as ac:
+            # A: fuzzy — acquires the only slot, blocks in the worker, 504s at 0.3s.
+            task_a = asyncio.create_task(
+                ac.post('/api/search', json={'query': 'aaa', 'search_mode': 'fuzzy'})
+            )
+            # Let A trip its 0.3s timeout while the worker stays blocked on `gate`.
+            await asyncio.sleep(0.8)
+            # B: second fuzzy while A's zombie worker still holds the slot → 503.
+            resp_b = await ac.post(
+                '/api/search', json={'query': 'bbb', 'search_mode': 'fuzzy'}
+            )
+            assert resp_b.status_code == 503, resp_b.text
+            assert resp_b.json()['error']['code'] == 'heavy_search_busy'
+            assert 'Retry-After' in resp_b.headers
+            # Unblock A's worker → it completes → done-callback releases the slot.
+            gate.set()
+            resp_a = await task_a
+            assert resp_a.status_code == 504, resp_a.text
+            assert resp_a.json()['error']['code'] == 'core_timeout'
+            # Let the done-callback run on the loop, then the slot is free again.
+            await asyncio.sleep(0.1)
+            resp_c = await ac.post(
+                '/api/search', json={'query': 'ccc', 'search_mode': 'fuzzy'}
+            )
+            assert resp_c.status_code == 200, resp_c.text
+
+    try:
+        asyncio.run(_run())
+    finally:
+        gate.set()
+        _state.searcher = saved
+        _HeavySemaphoreState.reset(DEFAULT_HEAVY_CONCURRENCY)
+
+
+def test_heavy_semaphore_resize_does_not_strand_held_slot(monkeypatch):
+    """Shrinking SEARCH_API_HEAVY_CONCURRENCY (2->1) while a slot is held must
+    NOT rebuild the semaphore — a rebuild would strand the in-flight slot. The
+    resize only takes effect once the semaphore is fully idle."""
+    import asyncio
+    from shared.api_errors import APIError
+    from web.search_api import _acquire_heavy_slot, _HeavySemaphoreState
+
+    async def _test():
+        monkeypatch.setenv('SEARCH_API_HEAVY_CONCURRENCY', '2')
+        _HeavySemaphoreState.reset(2)
+
+        rel1 = await _acquire_heavy_slot()           # capacity 2, one held
+        monkeypatch.setenv('SEARCH_API_HEAVY_CONCURRENCY', '1')  # shrink request
+        rel2 = await _acquire_heavy_slot()           # NOT idle -> no rebuild
+        assert _HeavySemaphoreState._capacity == 2, 'must not rebuild while held'
+
+        with pytest.raises(APIError) as exc:         # both old slots taken
+            await _acquire_heavy_slot()
+        assert exc.value.code == 'heavy_search_busy'
+
+        rel1()
+        rel2()                                        # fully idle now
+        rel3 = await _acquire_heavy_slot()           # idle -> rebuild to 1
+        assert _HeavySemaphoreState._capacity == 1
+        with pytest.raises(APIError):                 # capacity 1 -> full
+            await _acquire_heavy_slot()
+        rel3()
+
+    asyncio.run(_test())
+
+
 # ---------------------------------------------------------------------------
 # Section 9 — Fuzzy result cap raise (P9X Task 2)
 # ---------------------------------------------------------------------------

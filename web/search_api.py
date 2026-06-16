@@ -1053,23 +1053,42 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 if req.search_mode in HEAVY_SEARCH_MODES:
                     _heavy_release = await _acquire_heavy_slot()
                 try:
-                    results, downgrade_msg, cascade_meta = await asyncio.wait_for(
-                        loop.run_in_executor(None, _run_search_sync),
-                        timeout=core_timeout,
+                    # The heavy slot must stay held for the WORKER's TRUE
+                    # lifetime, not merely until the awaiter returns.
+                    # run_in_executor cannot cancel a running thread, so on a
+                    # timeout the search keeps occupying a threadpool worker.
+                    # We use asyncio.wait (which, unlike wait_for, does NOT
+                    # cancel the future on timeout) and release the slot from
+                    # the future's done-callback — so the budget is freed only
+                    # when the thread actually finishes. Releasing in a plain
+                    # finally would recycle the slot while a timed-out search
+                    # still runs, re-admitting heavy work past the budget and
+                    # defeating the saturation guard (the NLI-hang lesson).
+                    _search_fut = loop.run_in_executor(None, _run_search_sync)
+                    if _heavy_release is not None:
+                        _search_fut.add_done_callback(
+                            lambda _f, _r=_heavy_release: _r()
+                        )
+                        _heavy_release = None  # ownership -> done-callback
+                    _done, _pending = await asyncio.wait(
+                        {_search_fut}, timeout=core_timeout,
                     )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        'search core_timeout after %ss (search_mode=%s, env=%s)',
-                        core_timeout, req.search_mode, timeout_env,
-                    )
-                    raise APIError(
-                        'core_timeout',
-                        f'search did not complete within {core_timeout}s '
-                        f'(search_mode={req.search_mode}); '
-                        f'try a narrower query or a faster search_mode',
-                        http_status=504,
-                    )
+                    if _search_fut in _pending:
+                        logger.warning(
+                            'search core_timeout after %ss (search_mode=%s, env=%s)',
+                            core_timeout, req.search_mode, timeout_env,
+                        )
+                        raise APIError(
+                            'core_timeout',
+                            f'search did not complete within {core_timeout}s '
+                            f'(search_mode={req.search_mode}); '
+                            f'try a narrower query or a faster search_mode',
+                            http_status=504,
+                        )
+                    results, downgrade_msg, cascade_meta = _search_fut.result()
                 finally:
+                    # Safety net: only fires if a slot was acquired but never
+                    # handed to a done-callback (e.g. executor dispatch failed).
                     if _heavy_release is not None:
                         _heavy_release()
                 total = len(results)
@@ -1509,22 +1528,31 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             )
         else:
             # P9X: parallels are always heavy — gate on the concurrency budget
-            # and wrap the fetch in a timeout.
+            # and wrap the fetch in a timeout. As with /api/search, the slot is
+            # held for the work's TRUE lifetime: asyncio.wait does not cancel
+            # the task on timeout, and the slot is released from the task's
+            # done-callback, so a timed-out composition keeps its budget until
+            # it actually finishes (releasing early would re-admit heavy work
+            # past the budget — the NLI-hang lesson). The done-callback is the
+            # SOLE releaser; it fires on success, exception, or post-timeout
+            # completion, so no finally release is needed.
             parallels_ceiling = _resolve_parallels_timeout()
             _par_release = await _acquire_heavy_slot()
-            try:
-                bundle = await asyncio.wait_for(
-                    fetch_parallels_results(
-                        text=text,
-                        chunk_size=req.chunk_size,
-                        mode=req.mode,
-                        max_freq=req.max_freq,
-                        boundary_mode=req.boundary_mode,
-                        restrict_sys_ids=restrict_sys_ids,
-                    ),
-                    timeout=parallels_ceiling,
+            _par_task = asyncio.ensure_future(
+                fetch_parallels_results(
+                    text=text,
+                    chunk_size=req.chunk_size,
+                    mode=req.mode,
+                    max_freq=req.max_freq,
+                    boundary_mode=req.boundary_mode,
+                    restrict_sys_ids=restrict_sys_ids,
                 )
-            except asyncio.TimeoutError:
+            )
+            _par_task.add_done_callback(lambda _t, _r=_par_release: _r())
+            _done, _pending = await asyncio.wait(
+                {_par_task}, timeout=parallels_ceiling,
+            )
+            if _par_task in _pending:
                 logger.warning(
                     'parallels core_timeout after %ss', parallels_ceiling,
                 )
@@ -1534,8 +1562,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     f'try a shorter text or smaller chunk_size',
                     http_status=504,
                 )
-            finally:
-                _par_release()
+            bundle = _par_task.result()
 
         # 7. Surface group-cap warning (D-07).
         if bundle.truncated_to_200:

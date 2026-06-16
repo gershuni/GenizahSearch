@@ -102,10 +102,10 @@ def call_parallels(
             }
         }
 
-    # Surface Retry-After on 429
-    if resp.status_code == 429 and "Retry-After" in resp.headers:
-        if isinstance(data, dict) and "error" in data:
-            data["error"]["retry_after"] = resp.headers["Retry-After"]
+    # Surface Retry-After when present so callers can honor the server's
+    # backoff hint — applies to BOTH 429 rate_limited AND 503 heavy_search_busy.
+    if "Retry-After" in resp.headers and isinstance(data, dict) and "error" in data:
+        data["error"]["retry_after"] = resp.headers["Retry-After"]
 
     return data
 
