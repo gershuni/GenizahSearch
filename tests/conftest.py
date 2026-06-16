@@ -73,6 +73,28 @@ if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
 
 
 # ---------------------------------------------------------------------------
+# GUI test split (CI Qt-segfault fix).
+#
+# PyQt6 tests that construct a real QApplication and dispatch widget events
+# (sendEvent / processEvents / closeEvent) accumulate process-global Qt state.
+# Run alongside the full suite, they tip over into SIGSEGV (exit 139) on the
+# headless Linux runner after ~3000 prior tests — see the `feedback_full_suite
+# _testing_windows` lesson. QApplication is a process singleton and Qt teardown
+# across thousands of tests is unreliable, so the robust fix is process
+# isolation: the main `tests` CI job runs `-m "not gui"` (bulk suite, one
+# process) and a dedicated `gui-tests` job runs `-m gui` in a FRESH process.
+#
+# Files are auto-marked `gui` below (centralized here, mirroring the
+# collect_ignore_glob list above) so individual test files need no edits and
+# the set is auditable in one place. Add event-dispatching dialog test files
+# here as later telemetry phases (116+) introduce them.
+# ---------------------------------------------------------------------------
+_GUI_TEST_FILES = {
+    "test_telemetry_consent_ux.py",
+}
+
+
+# ---------------------------------------------------------------------------
 # Phase 85 (Plan 85-03 + 85-02): pin `scripts` to the root namespace package.
 #
 # Both `C:/Genizahsearch/scripts/` (root, namespace package) and
@@ -117,9 +139,16 @@ def pytest_addoption(parser):
 
 
 def pytest_collection_modifyitems(config, items):
+    import pytest as _pytest
+    # Auto-apply the `gui` marker to event-dispatching PyQt6 dialog tests so the
+    # main `tests` CI job can deselect them (-m "not gui") and the dedicated
+    # `gui-tests` job runs them in a fresh process (-m gui). Applied before the
+    # scale early-return so the marker holds regardless of --run-scale.
+    for item in items:
+        if Path(str(item.fspath)).name in _GUI_TEST_FILES:
+            item.add_marker(_pytest.mark.gui)
     if config.getoption("--run-scale"):
         return  # run everything including scale tests
-    import pytest as _pytest
     skip_scale = _pytest.mark.skip(reason="scale test; use --run-scale to enable")
     for item in items:
         if "scale" in item.keywords:

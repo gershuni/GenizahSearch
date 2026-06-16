@@ -45,7 +45,41 @@ jobs:
       - run: pip install -r requirements-lock.txt
       # pytest and ruff are CI-only dev tools, not runtime deps
       - run: pip install pytest
-      - run: pytest tests/
+      # `-m "not gui"` deselects PyQt6 event-dispatching dialog tests (auto-marked
+      # `gui` in tests/conftest.py). Run together in this one process they tip the
+      # accumulated Qt state into SIGSEGV (exit 139) after ~3000 tests. They run
+      # in their own fresh process in the `gui-tests` job below.
+      - run: pytest tests/ -m "not gui"
+
+  gui-tests:
+    needs: lint-and-docs
+    env:
+      # Same headless-Qt requirement as the `tests` job: these tests construct a
+      # real QApplication and dispatch widget events; offscreen is the documented
+      # headless mode. Running them in a SEPARATE job = a fresh process with clean
+      # process-global Qt state, which avoids the full-suite accumulation segfault.
+      QT_QPA_PLATFORM: offscreen
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: '3.11'
+          - os: windows-latest
+            python-version: '3.11'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Qt runtime deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - run: pip install -r requirements-lock.txt
+      - run: pip install pytest
+      # Fresh process, only the gui-marked tests. -m gui selects the event-
+      # dispatching PyQt6 dialog tests auto-marked in tests/conftest.py.
+      - run: pytest tests/ -m gui
 
   slow-tests:
     needs: lint-and-docs
