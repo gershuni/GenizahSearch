@@ -111,7 +111,8 @@ _enabled_lock = threading.Lock()
 _install_id: str | None = None
 _current_distinct_id: str | None = None
 _identified: bool = False
-_state_lock = threading.Lock()  # guards _install_id, _current_distinct_id, _identified
+_session_id: str = ''  # per-process session UUID (set by genizah_app at session start — WR-01)
+_state_lock = threading.Lock()  # guards _install_id, _current_distinct_id, _identified, _session_id
 
 # ---------------------------------------------------------------------------
 # Phase 113 crash-hook globals — read lock-free in the crash hook (D-05)
@@ -1320,7 +1321,7 @@ def _reset_for_tests() -> None:
     captured by install_exception_hooks) so test suites don't accumulate hook
     wrappers across test functions.
     """
-    global _enabled, _install_id, _current_distinct_id, _identified
+    global _enabled, _install_id, _current_distinct_id, _identified, _session_id
     global _crash_distinct_id, _in_crash_hook, _hooks_installed, _pending_native_crash
     global _last_reported_tb_id, _prior_excepthook, _prior_threading_hook
     import sys as _sys
@@ -1337,10 +1338,12 @@ def _reset_for_tests() -> None:
             _install_id = None
             _current_distinct_id = None
             _identified = False
+            _session_id = ''
     except Exception:
         _install_id = None           # direct fallback when lock is mocked
         _current_distinct_id = None
         _identified = False
+        _session_id = ''
     # Phase 113 globals (no locks — plain bool/str/int)
     _crash_distinct_id = None
     _in_crash_hook = False
@@ -1390,8 +1393,13 @@ def _clear_perf_accumulator() -> None:
 # + composition modes + lab mode. Any unknown → 'unknown' (never verbatim free-string).
 _PERF_ALLOWED_MODES: frozenset[str] = frozenset({
     'keyword', 'variants', 'responsa', 'fuzzy', 'regex', 'title', 'shelfmark', 'pgp_tags',
-    'comp_exact', 'comp_variants', 'comp_fuzzy', 'lab_comp_exact',
-    'lab_variants',
+    'comp_exact', 'comp_variants', 'comp_fuzzy',
+    # WR-02: producers prepend 'lab_' to the base mode when the LAB toggle is on
+    # (genizah_app.py:17536 / :23031). All 11 lab_* combinations must be allowed or
+    # they collapse to 'unknown' and lose per-mode attribution for LAB users.
+    'lab_keyword', 'lab_variants', 'lab_responsa', 'lab_fuzzy', 'lab_regex',
+    'lab_title', 'lab_shelfmark', 'lab_pgp_tags',
+    'lab_comp_exact', 'lab_comp_variants', 'lab_comp_fuzzy',
 })
 _PERF_ALLOWED_CORPUS: frozenset[str] = frozenset({'genizah', 'local', 'all'})
 _PERF_ALLOWED_OPERATION_KIND: frozenset[str] = frozenset({
@@ -1525,6 +1533,18 @@ def accumulate_performance(
         logger.debug('telemetry: accumulate_performance() silently failed', exc_info=True)
 
 
+def set_session_id(session_id: str) -> None:
+    """Record the per-process session UUID so the perf summary's session_id matches
+    session_start/session_end (WR-01). Called by genizah_app at session mint. Never raises.
+    """
+    global _session_id
+    try:
+        with _state_lock:
+            _session_id = str(session_id) if session_id else ''
+    except Exception:
+        _session_id = str(session_id) if session_id else ''
+
+
 def _flush_perf_summary(flush_reason: str = 'periodic') -> None:
     """Build and emit desktop_session_performance_summary, then reset accumulator (D-06).
 
@@ -1575,11 +1595,12 @@ def _flush_perf_summary(flush_reason: str = 'periodic') -> None:
         if not perf_summary:
             _perf_accumulator.clear()
             return
-        # Attach session_id — reuse _current_distinct_id (same value SESSION_END uses).
-        # With lock for thread safety; falls back to _install_id if distinct_id not set.
+        # Attach the per-process session_id so this summary joins to session_start /
+        # session_end (WR-01). Falls back to the distinct/install id if the session id
+        # was never set (e.g. a flush before session mint, or in tests).
         try:
             with _state_lock:
-                sid = _current_distinct_id or _install_id or ''
+                sid = _session_id or _current_distinct_id or _install_id or ''
         except Exception:
             sid = ''
         sample_n = _perf_env_int('GENIZAH_PERF_SAMPLE_N', default=1, minimum=1)

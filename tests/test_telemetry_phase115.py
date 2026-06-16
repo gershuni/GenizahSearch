@@ -259,7 +259,9 @@ def test_perf_summary_buckets_only(_reset_telemetry_state):
         assert not (0x0590 <= code <= 0x05FF), (
             f"Hebrew character {char!r} found in perf summary payload (PERF-02 privacy)"
         )
-    assert ':\\' not in payload_repr and '/' not in payload_repr or True  # path check is best-effort
+    assert ':\\' not in payload_repr and '/' not in payload_repr, (
+        f"Path-like string found in perf summary payload (PERF-02 privacy): {payload_repr!r}"
+    )
 
 
 # ===========================================================================

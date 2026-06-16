@@ -3632,6 +3632,9 @@ class GenizahGUI(QMainWindow):
             import uuid
             from datetime import datetime, timezone
             self._session_id = uuid.uuid4().hex
+            # WR-01: share the per-process session_id with telemetry so the perf
+            # summary (desktop_session_performance_summary) joins to session_start/end.
+            telemetry.set_session_id(self._session_id)
 
             now_utc = datetime.now(timezone.utc)
             self._session_start_date_utc = now_utc.strftime('%Y-%m-%d')
