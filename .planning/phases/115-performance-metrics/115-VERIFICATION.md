@@ -1,9 +1,10 @@
 ---
 phase: 115-performance-metrics
 verified: 2026-06-16T12:00:00Z
-status: human_needed
+status: passed
 score: 3/3 must-haves verified
 overrides_applied: 0
+resolution: "All 4 human-verification items resolved 2026-06-16 (user approved 'fix all 3'). (1)+(2) 11 phase-115 + 290-test prior-phase telemetry/crash/posthog regression run GREEN under headless Qt by the orchestrator. (3) WR-02 fixed: 9 missing lab_* modes added to _PERF_ALLOWED_MODES. (4) WR-01 fixed: perf summary session_id now sources the per-process _session_id via telemetry.set_session_id() at session mint, joinable to session_start/end. WR-04 dead path-leak assertion also made real. Commit b1902213; ruff clean."
 human_verification:
   - test: "Run the full 17-test Phase 115 suite under headless Qt"
     expected: "All 17 tests pass (GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_telemetry_phase115.py tests/test_no_dynamic_telemetry_strings.py -v)"
@@ -24,8 +25,8 @@ human_verification:
 **Phase Goal:** Search and indexing durations are measured on worker threads and accumulated into a per-session summary (aggregated result counts and latency buckets) that is flushed once at session close and periodically — never one event per search — so heavy users (~50 searches/day) do not flood the PostHog stream.
 
 **Verified:** 2026-06-16T12:00:00Z
-**Status:** human_needed
-**Re-verification:** No — initial verification
+**Status:** passed (human items resolved 2026-06-16 — see frontmatter `resolution`)
+**Re-verification:** Yes — human-needed items closed by fixing WR-01/WR-02/WR-04 (commit b1902213)
 
 ---
 

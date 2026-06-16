@@ -1,5 +1,5 @@
 ---
-status: partial
+status: resolved
 phase: 115-performance-metrics
 source: [115-VERIFICATION.md, 115-REVIEW.md]
 started: "2026-06-16"
@@ -8,33 +8,35 @@ updated: "2026-06-16"
 
 ## Current Test
 
-[awaiting human disposition of code-review warnings]
+[all items resolved — user approved "fix all 3"]
 
 ## Tests
 
 ### 1. Phase 115 test suite + regression pass
-expected: `GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen python -m pytest tests/test_telemetry_phase115.py` → 11 pass; full prior-phase telemetry/crash/posthog regression → all pass.
-result: passed (orchestrator ran during execution — 11/11 phase115 + 17 incl. guard, and 273 passed / 1 xpassed regression)
+expected: phase115 suite + full prior-phase telemetry/crash/posthog regression pass under headless Qt.
+result: passed — 11/11 phase115 (17 incl. guard); 290 passed / 1 xpassed across the full telemetry/crash/posthog regression after the WR fixes.
 
 ### 2. WR-02 — LAB search/comp modes collapse to 'unknown'
-expected: Decide whether `_PERF_ALLOWED_MODES` should include the 9 missing `lab_*` modes (`lab_keyword`, `lab_fuzzy`, `lab_responsa`, `lab_regex`, `lab_title`, `lab_shelfmark`, `lab_pgp_tags`, `lab_comp_variants`, `lab_comp_fuzzy`) so LAB perf data is attributed per mode, or accept the `'unknown'` collapse for v8.1.0 (LAB is lightly used). Data-quality issue, not privacy/safety.
-result: [pending]
+expected: decide expand allowlist vs accept collapse.
+result: resolved — FIXED. Added the 9 missing `lab_*` modes to `_PERF_ALLOWED_MODES` (lab_keyword, lab_responsa, lab_fuzzy, lab_regex, lab_title, lab_shelfmark, lab_pgp_tags, lab_comp_variants, lab_comp_fuzzy). LAB searches now keep per-mode attribution. Commit b1902213.
 
 ### 3. WR-01 — perf summary session_id cannot join to session_start/session_end
-expected: Decide whether to plumb the per-process `self._session_id` into `_flush_perf_summary` (so `desktop_session_performance_summary.session_id` matches `session_start`/`session_end`), or accept the install-id value for v8.1.0. Fixing also corrects the wrong inline comment at `telemetry.py:~1578`.
-result: [pending]
+expected: decide plumb per-process _session_id vs accept install-id.
+result: resolved — FIXED. `_flush_perf_summary` now sources `_session_id` (set by genizah_app at session mint via `telemetry.set_session_id`), joinable to session_start/end; falls back to distinct/install id. Wrong inline comment corrected. Commit b1902213.
 
 ### 4. WR-04 — dead path-leak assertion in test
-expected: Fix the tautological `assert (':\\' not in payload_repr and '/' not in payload_repr) or True` in `tests/test_telemetry_phase115.py` (~line 262) so the path-leak privacy check actually fails on a leak.
-result: [pending]
+expected: fix the tautological assertion.
+result: resolved — FIXED. `test_perf_summary_buckets_only` now asserts `':\\' not in payload_repr and '/' not in payload_repr` (no `or True`), so a leaked path fails the test. Commit b1902213.
 
 ## Summary
 
 total: 4
-passed: 1
+passed: 4
 issues: 0
-pending: 3
+pending: 0
 skipped: 0
 blocked: 0
 
 ## Gaps
+
+None — all items resolved by fixing WR-01/WR-02/WR-04 (commit b1902213).
