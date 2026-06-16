@@ -353,29 +353,35 @@ async def _acquire_heavy_slot():
             pass
 
     # Rebuild semaphore only when the size changed AND it is fully idle
-    # (no held slots — _value == capacity).  If partially held, keep the
-    # current semaphore so we never strand held slots.
+    # (no held slots).  If partially held, keep the current semaphore so we
+    # never strand held slots.  "Fully idle" means the counter is back at
+    # capacity; asyncio exposes no public API for that, so we read the
+    # internal counter defensively via getattr — if the attribute is ever
+    # renamed/removed, current_value is None, we skip the rebuild, and the
+    # gate keeps working at the old capacity (fail-safe, never raises).
     if desired != _HeavySemaphoreState._capacity:
-        current_value = _HeavySemaphoreState.sem._value  # type: ignore[attr-defined]
+        current_value = getattr(_HeavySemaphoreState.sem, '_value', None)
         if current_value == _HeavySemaphoreState._capacity:
             _HeavySemaphoreState.reset(desired)
 
     sem = _HeavySemaphoreState.sem
-    # Non-blocking: check _value > 0 and decrement atomically on the event loop.
-    # asyncio is single-threaded so this is safe without a lock.
-    # We do NOT use asyncio.wait_for(sem.acquire(), timeout=0) because in
-    # Python 3.11 that always raises TimeoutError before the coroutine runs
-    # even one step, regardless of slot availability (the coroutine is
-    # cancelled before its first step when timeout=0).
-    if sem._value > 0:  # type: ignore[attr-defined]
-        sem._value -= 1  # type: ignore[attr-defined]
-    else:
+    # Non-blocking acquire via the public API.  On a single-threaded event
+    # loop, sem.locked() (True iff no slot is free) followed by sem.acquire()
+    # cannot race: when not locked, acquire() decrements the counter and
+    # returns WITHOUT awaiting a Future, so the loop never switches between
+    # the check and the acquire.  release() in the returned callable keeps the
+    # acquire/release pair symmetric (no manual counter manipulation).
+    # We do NOT use asyncio.wait_for(sem.acquire(), timeout=0): in Python 3.11
+    # that always raises TimeoutError before the coroutine runs a single step,
+    # regardless of slot availability.
+    if sem.locked():
         raise APIError(
             'heavy_search_busy',
             'heavy search concurrency limit reached; retry shortly',
             http_status=503,
             headers={'Retry-After': '5'},
         )
+    await sem.acquire()
 
     def _release():
         sem.release()
