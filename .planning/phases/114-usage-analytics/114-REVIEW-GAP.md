@@ -11,8 +11,18 @@ findings:
   warning: 2
   info: 2
   total: 5
-status: issues_found
+status: resolved
+resolution: "BLOCKER (CR-114-01 dead-code token guard) fixed in commit 7e7236b7; WARNINGs assessed (see Resolution note). Re-verified: 95 tests pass, D-17 guard green, ruff clean."
 ---
+
+> **RESOLUTION (2026-06-16, commit `7e7236b7`):** The BLOCKER — CR-114-01's token guard
+> compared the LIVE run's own `run['token']` to the active token (always equal → dead code) —
+> was fixed by binding the run token into the `.finished` connect lambda and comparing that
+> slot-bound token to the live active token in the emit helper. The vacuous regression test
+> was rewritten to exercise the real passed-token mismatch, and an end-to-end wiring source-check
+> was added. The two WARNINGs (vacuous test → fixed alongside; composition cancel shares the
+> token-less structure but its worker is interrupt-cooperative, not signal-queued, so the same
+> stale-slot race does not apply — assessed, no change needed). 95 phase-114/guard tests pass.
 
 # Phase 114: Gap-Closure Code Review Report (CR-114-01..06)
 
