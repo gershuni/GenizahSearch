@@ -303,9 +303,9 @@ Nothing is sent unless you enable it in Settings.</p>
   <li>Your search queries or text content</li>
   <li>My Library file paths, filenames, or document content</li>
   <li>Your name or email address</li>
-  <li>When you are signed in: the only identity attached is your bare Supabase
-      <code>user.id</code> — a pseudonymous identifier, the same one the website
-      already uses. No additional personal data is ever added.</li>
+  <li>When you are signed in: the only identity attached is your Supabase
+      account identifier (a <code>UUID</code>) — a pseudonymous identifier, the
+      same one the website already uses. No additional personal data is ever added.</li>
 </ul>
 <h3>Who processes the data</h3>
 <p>Usage data is processed by
@@ -336,7 +336,7 @@ It is never linked to your name, email, or any personal account.</p>
   <li>שאילתות החיפוש שלכם או תכני הטקסט</li>
   <li>נתיבי קבצים, שמות קבצים או תוכן מסמכים מ&#x2018;הספרייה שלי&#x2019;</li>
   <li>שמכם או כתובת הדוא&#x05F4;ל שלכם</li>
-  <li>כשאתם מחוברים: המזהה היחיד המצורף הוא ה-<code>user.id</code> של Supabase שלכם
+  <li>כשאתם מחוברים: המזהה היחיד המצורף הוא מזהה החשבון שלכם ב-Supabase (מסוג <code>UUID</code>)
       — מזהה פסאודו-אנונימי, אותו מזהה שהאתר כבר משתמש בו. לא מתווסף שום מידע אישי נוסף.</li>
 </ul>
 <h3>מי מעבד את הנתונים</h3>
