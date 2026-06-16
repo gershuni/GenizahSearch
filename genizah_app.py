@@ -22697,6 +22697,11 @@ class GenizahGUI(QMainWindow):
             if self.comp_thread.isRunning():
                 self.comp_thread.terminate()
                 self.comp_thread.wait()
+            # CR-114-03: emit the cancelled event for the run that was interrupted.
+            # The per-run emitted flag in _emit_comp_search_telemetry makes this
+            # exactly-once even if a cooperative on_comp_scan_finished also fires.
+            # Cancelled runs carry NO result_count_bucket (D-08).
+            self._emit_comp_search_telemetry('cancelled')
 
         # 2. Stop any running grouping thread
         if getattr(self, 'group_thread', None) and self.group_thread.isRunning():
@@ -26875,13 +26880,20 @@ class GenizahGUI(QMainWindow):
         # before any subsequent teardown fires events.
         self._app_shutting_down = True
         # Phase 114 D-15: best-effort session_end exactly once on clean exit.
+        # CR-114-04: gate on _telemetry_ready() AND a truthy _session_id so an app
+        # close before the ~700ms startup coordinator runs never emits an orphan
+        # session_end with session_id='' (same class as WR-01 / REVIEWS MEDIUM-9).
         try:
             from desktop import telemetry
-            if not getattr(self, '_session_end_emitted', False):
+            if (
+                self._telemetry_ready()
+                and getattr(self, '_session_id', '')
+                and not getattr(self, '_session_end_emitted', False)
+            ):
                 self._session_end_emitted = True
                 telemetry.track(
                     telemetry.DesktopEvent.SESSION_END,
-                    session_id=getattr(self, '_session_id', ''),
+                    session_id=self._session_id,
                 )
         except Exception:
             pass

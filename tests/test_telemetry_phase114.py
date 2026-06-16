@@ -356,17 +356,28 @@ class _FakeGui:
         import genizah_app as app
         return app.GenizahGUI._sync_telemetry_identity(self)
 
+    def _telemetry_ready(self) -> bool:
+        """Mirror GenizahGUI._telemetry_ready for closeEvent gate tests."""
+        return bool(getattr(self, '_telemetry_session_started', False))
+
     def closeEvent_telemetry_part(self):
-        """Execute only the telemetry parts of closeEvent (not the Qt thread teardown)."""
-        # Set shutdown flag + emit session_end (replicate the relevant closeEvent snippet)
+        """Execute only the telemetry parts of closeEvent (not the Qt thread teardown).
+
+        CR-114-04: mirrors the gated session_end block — only emits when
+        _telemetry_ready() is True AND _session_id is truthy.
+        """
         self._app_shutting_down = True
         try:
             import desktop.telemetry as tel
-            if not getattr(self, '_session_end_emitted', False):
+            if (
+                self._telemetry_ready()
+                and getattr(self, '_session_id', '')
+                and not getattr(self, '_session_end_emitted', False)
+            ):
                 self._session_end_emitted = True
                 tel.track(
                     tel.DesktopEvent.SESSION_END,
-                    session_id=getattr(self, '_session_id', ''),
+                    session_id=self._session_id,
                 )
         except Exception:
             pass
@@ -408,8 +419,9 @@ def test_session_end_fires_on_close(monkeypatch, _reset_telemetry_state):
     """closeEvent emits exactly one desktop_session_end."""
     import desktop.telemetry as tel
     tel.set_consent(True)
-    # Set up a session_id to carry
+    # Set up a session_id to carry; _telemetry_session_started=True so _telemetry_ready() passes
     gui = _FakeGui()
+    gui._telemetry_session_started = True
     gui._session_id = 'close-session-xyz'
 
     gui.closeEvent_telemetry_part()
@@ -425,6 +437,7 @@ def test_session_end_exactly_once_guard(monkeypatch, _reset_telemetry_state):
     tel.set_consent(True)
 
     gui = _FakeGui()
+    gui._telemetry_session_started = True
     gui._session_id = 'close-session-guard'
 
     gui.closeEvent_telemetry_part()
@@ -1813,4 +1826,220 @@ def test_reset_search_source_sets_cancelled_flag(monkeypatch, _reset_telemetry_s
     )
     assert "_emit_search_telemetry('cancelled')" in src, (
         "CR-114-02: _reset_search must call _emit_search_telemetry('cancelled')"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CR-114-03: composition _reset_composition emits cancelled exactly once
+# ---------------------------------------------------------------------------
+
+def test_reset_composition_cancel_emits_cancelled_once(monkeypatch, _reset_telemetry_state):
+    """CR-114-03: _reset_composition cancel branch emits exactly ONE
+    desktop_search_executed action='cancelled', no result_count_bucket.
+    """
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_comp_emit_stub(monkeypatch, mode='comp_exact', corpus='genizah')
+    # Simulate the _reset_composition cancel: call _emit_comp_search_telemetry('cancelled')
+    # as the fix will do inside the isRunning() branch
+    gui._emit_comp_search_telemetry('cancelled')
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1, (
+        f"CR-114-03: _reset_composition cancel must emit exactly one event, got {len(search_events)}"
+    )
+    props = search_events[0]['properties']
+    assert props['action'] == 'cancelled', "CR-114-03: action must be 'cancelled'"
+    assert 'result_count_bucket' not in props, (
+        "CR-114-03: cancelled comp run must NOT include result_count_bucket (D-08)"
+    )
+
+
+def test_reset_composition_cancel_no_double_emit_via_on_comp_finished(monkeypatch, _reset_telemetry_state):
+    """CR-114-03: after _reset_composition emits 'cancelled', a cooperative
+    on_comp_scan_finished does NOT double-emit (emitted guard prevents second event).
+    """
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _make_comp_emit_stub(monkeypatch)
+    # First emit from _reset_composition cancel branch
+    gui._emit_comp_search_telemetry('cancelled')
+    # Cooperative on_comp_scan_finished fires with partial=True (same run, emitted=True now)
+    gui._emit_comp_search_telemetry('cancelled')
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 1, (
+        f"CR-114-03: emitted guard must prevent double-emit after _reset_composition cancel, got {len(search_events)}"
+    )
+
+
+def test_reset_composition_no_active_thread_emits_nothing(monkeypatch, _reset_telemetry_state):
+    """CR-114-03: _reset_composition with no active comp run emits nothing.
+
+    The fix calls _emit_comp_search_telemetry only inside the isRunning() branch.
+    When there is no run object, the emit helper returns early (run is None guard).
+    """
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    import types
+    import genizah_app as app
+
+    gui = types.SimpleNamespace()
+    gui._telemetry_session_started = True
+    gui._app_shutting_down = False
+    gui._session_id = 'comp-no-active-session'
+    gui._current_comp_search_run = None  # no active run
+    gui._telemetry_ready = lambda: app.GenizahGUI._telemetry_ready(gui)
+    gui._emit_comp_search_telemetry = lambda action, result_count=None: (
+        app.GenizahGUI._emit_comp_search_telemetry(gui, action, result_count)
+    )
+
+    # No active run → emit helper returns early
+    gui._emit_comp_search_telemetry('cancelled')
+
+    events = _drain_all_events()
+    search_events = [e for e in events if e['event'] == 'desktop_search_executed']
+    assert len(search_events) == 0, (
+        "CR-114-03: with no _current_comp_search_run, _emit_comp_search_telemetry must emit nothing"
+    )
+
+
+def test_reset_composition_source_calls_emit_cancelled(monkeypatch, _reset_telemetry_state):
+    """CR-114-03: _reset_composition source must call _emit_comp_search_telemetry('cancelled')
+    inside the comp_thread isRunning() cancel branch.
+    """
+    import genizah_app as app
+    import inspect
+
+    src = inspect.getsource(app.GenizahGUI._reset_composition)
+    assert "_emit_comp_search_telemetry('cancelled')" in src, (
+        "CR-114-03: _reset_composition must call _emit_comp_search_telemetry('cancelled')"
+    )
+
+
+# ---------------------------------------------------------------------------
+# CR-114-04: session_end gated on _telemetry_ready() AND truthy _session_id
+# ---------------------------------------------------------------------------
+
+class _FakeGuiWithReadyGate(_FakeGui):
+    """Extends _FakeGui to support _telemetry_ready() for CR-114-04 tests."""
+
+    def _telemetry_ready(self) -> bool:
+        return bool(getattr(self, '_telemetry_session_started', False))
+
+    def closeEvent_telemetry_part(self):
+        """Replicate the CR-114-04-fixed closeEvent session_end block."""
+        self._app_shutting_down = True
+        try:
+            import desktop.telemetry as tel
+            if (
+                self._telemetry_ready()
+                and getattr(self, '_session_id', '')
+                and not getattr(self, '_session_end_emitted', False)
+            ):
+                self._session_end_emitted = True
+                tel.track(
+                    tel.DesktopEvent.SESSION_END,
+                    session_id=self._session_id,
+                )
+        except Exception:
+            pass
+
+
+def test_session_end_gated_emits_with_ready_and_session_id(monkeypatch, _reset_telemetry_state):
+    """CR-114-04: session_end fires when _telemetry_ready()=True AND _session_id truthy."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _FakeGuiWithReadyGate()
+    gui._telemetry_session_started = True
+    gui._session_id = 'gated-session-xyz'
+
+    gui.closeEvent_telemetry_part()
+
+    events = _drain_all_events()
+    session_end_events = [e for e in events if e['event'] == 'desktop_session_end']
+    assert len(session_end_events) == 1, (
+        "CR-114-04: session_end must fire exactly once when telemetry ready + session_id present"
+    )
+    assert session_end_events[0]['properties']['session_id'] == 'gated-session-xyz'
+
+
+def test_session_end_suppressed_when_not_ready(monkeypatch, _reset_telemetry_state):
+    """CR-114-04: session_end must NOT fire if _telemetry_ready()=False
+    (coordinator hasn't run yet — startup window).
+    """
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _FakeGuiWithReadyGate()
+    gui._telemetry_session_started = False  # coordinator not done
+    gui._session_id = 'orphan-session-abc'
+
+    gui.closeEvent_telemetry_part()
+
+    events = _drain_all_events()
+    session_end_events = [e for e in events if e['event'] == 'desktop_session_end']
+    assert len(session_end_events) == 0, (
+        "CR-114-04: session_end must NOT fire when _telemetry_ready()=False (orphan prevention)"
+    )
+
+
+def test_session_end_suppressed_when_session_id_empty(monkeypatch, _reset_telemetry_state):
+    """CR-114-04: session_end must NOT fire if _session_id is empty/missing,
+    even when _telemetry_ready()=True — prevents orphan session_id='' event.
+    """
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _FakeGuiWithReadyGate()
+    gui._telemetry_session_started = True
+    gui._session_id = ''  # empty session_id
+
+    gui.closeEvent_telemetry_part()
+
+    events = _drain_all_events()
+    session_end_events = [e for e in events if e['event'] == 'desktop_session_end']
+    assert len(session_end_events) == 0, (
+        "CR-114-04: session_end must NOT fire when _session_id is empty (no orphan event)"
+    )
+
+
+def test_session_end_gated_exactly_once_guard_preserved(monkeypatch, _reset_telemetry_state):
+    """CR-114-04: the _session_end_emitted exactly-once guard still works after the gate."""
+    import desktop.telemetry as tel
+    tel.set_consent(True)
+
+    gui = _FakeGuiWithReadyGate()
+    gui._telemetry_session_started = True
+    gui._session_id = 'guard-session-abc'
+
+    gui.closeEvent_telemetry_part()
+    gui.closeEvent_telemetry_part()  # second close — must be suppressed
+
+    events = _drain_all_events()
+    session_end_count = sum(1 for e in events if e['event'] == 'desktop_session_end')
+    assert session_end_count == 1, (
+        f"CR-114-04: _session_end_emitted guard must prevent double-emit, got {session_end_count}"
+    )
+
+
+def test_closeEvent_session_end_source_has_telemetry_ready_gate(monkeypatch, _reset_telemetry_state):
+    """CR-114-04: GenizahGUI.closeEvent source must contain _telemetry_ready()
+    guard around the SESSION_END track.
+    """
+    import genizah_app as app
+    import inspect
+
+    src = inspect.getsource(app.GenizahGUI.closeEvent)
+    assert '_telemetry_ready()' in src, (
+        "CR-114-04: closeEvent must gate session_end on _telemetry_ready() (WR-01 analog)"
+    )
+    assert 'SESSION_END' in src, (
+        "CR-114-04: closeEvent must still emit SESSION_END"
     )
