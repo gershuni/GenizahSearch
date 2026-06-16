@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v8.1.0
 milestone_name: Desktop Telemetry
-status: awaiting_human_uat
-stopped_at: Phase 116 — all plan code complete + verified (human_needed); awaiting release-time clean-VM SSL HUMAN-UAT (116-HUMAN-UAT.md / 116-02 Task 3)
+status: ready_to_close_and_release
+stopped_at: "Phase 116 done (code + UAT delivery/privacy PASS, Codex-reviewed, dashboards built). NEXT SESSION: close v8.1.0 milestone + release — follow .planning/phases/116-privacy-audit-ci-gate/116-RELEASE-CHECKLIST.md"
 last_updated: "2026-06-16T12:00:00Z"
 last_activity: 2026-06-16
 progress:
@@ -25,9 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-11 after v8.0.0 close)
 
 ## Current Position
 
-Phase: 116 (privacy-audit-ci-gate) — CODE COMPLETE, AWAITING HUMAN-UAT
-Plan: 3 of 3 executed (116-01 ✓, 116-03 ✓, 116-02 code-complete; Task 3 = release-time HUMAN-UAT)
-Status: human_needed — verifier passed all automated checks; clean no-Python Windows VM SSL self-test (SSL_OK) pending at /release. PRIV-04/INFRA-06 stay Pending until that UAT lands (by design).
+Phase: 116 (privacy-audit-ci-gate) — DONE; v8.1.0 READY TO CLOSE + RELEASE
+Plan: 3 of 3 executed (116-01 ✓, 116-02 ✓ code, 116-03 ✓). Codex-reviewed; UAT delivery+privacy PASS.
+Status: ready_to_close_and_release — **NEXT SESSION: follow `.planning/phases/116-privacy-audit-ci-gate/116-RELEASE-CHECKLIST.md`** (pre-flight gates → flip PRIV-04/INFRA-06 to Complete → bump_version 8.1.0 [+ _TARGET_VERSION] → build exe [restore .spec after build_app.bat] → clean-VM SSL_OK → deploy web platform=web → /release [both] → /gsd-complete-milestone).
+Open: clean-no-Python-VM SSL_OK + offline arm (116-HUMAN-UAT Test 2 — naturally done during the release build; user accepted current state). Dashboards built (Desktop 752803 / Web 752805 / Comparison 752806).
 Last activity: 2026-06-16
 
 Progress: [███████░░░] 67%
