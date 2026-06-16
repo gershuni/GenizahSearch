@@ -3,6 +3,7 @@
 # gui_threads.py
 import ctypes
 import platform
+import time
 import requests
 from PyQt6.QtCore import QThread, pyqtSignal
 from genizah_core import SearchEngine, Indexer, MetadataManager, VariantManager, get_logger
@@ -83,6 +84,9 @@ class SearchThread(QThread):
     results_signal = pyqtSignal(list)
     progress_signal = pyqtSignal(int, int)
     error_signal = pyqtSignal(str)
+    # Phase 115: performance signal — (elapsed_ms: float, result_count: int)
+    # (float, int) is distinct from progress_signal's (int, int) — no confusion possible.
+    perf_signal = pyqtSignal(float, int)
     def __init__(self, searcher, query, mode, gap, exclude_words=None, responsa_options=None, restrict_sys_ids=None, text_position=None, corpus_scope="all"):
         super().__init__()
         self.searcher = searcher; self.query = query; self.mode = mode; self.gap = gap
@@ -95,6 +99,7 @@ class SearchThread(QThread):
 
     def run(self):
         _prevent_sleep()
+        t0 = time.perf_counter()  # Phase 115: must be first line (Pitfall 2); perf_counter for sub-ms resolution on Windows
         try:
             def cb(curr, total):
                 if self.cancel_flag:
@@ -113,8 +118,10 @@ class SearchThread(QThread):
             )
 
             self.results_signal.emit(results)
+            # Phase 115: emit perf signal — ONLY on success path (D-08 / Pitfall 3)
+            self.perf_signal.emit((time.perf_counter() - t0) * 1000.0, len(results))
         except InterruptedError:
-            # Emit empty list -- partial results not available from execute_search
+            # Cancelled — do NOT emit perf_signal (Pitfall 3 / D-08 "completed runs only")
             self.results_signal.emit([])
         except Exception as e: self.error_signal.emit(str(e))
         finally:
@@ -127,6 +134,8 @@ class LabSearchThread(QThread):
     progress_signal = pyqtSignal(int, int) # Not fully utilized yet but good for future
     status_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
+    # Phase 115: performance signal — (elapsed_ms: float, result_count: int)
+    perf_signal = pyqtSignal(float, int)
 
     def __init__(self, lab_engine, query, mode, gap=0, deep_scan=False, scan_limit=50000,
                  corpus_scope='genizah'):
@@ -143,6 +152,7 @@ class LabSearchThread(QThread):
 
     def run(self):
         _prevent_sleep()
+        t0 = time.perf_counter()  # Phase 115: must be first line (Pitfall 2); perf_counter for sub-ms resolution on Windows
         try:
             # Helper to handle different callback signatures
             def cb(arg1, arg2=None):
@@ -161,6 +171,8 @@ class LabSearchThread(QThread):
                 corpus_scope=self.corpus_scope
             )
             self.results_signal.emit(results)
+            # Phase 115: emit perf signal — ONLY on success path (D-08 / Pitfall 3)
+            self.perf_signal.emit((time.perf_counter() - t0) * 1000.0, len(results))
         except Exception as e: self.error_signal.emit(str(e))
         finally:
             _allow_sleep()
@@ -172,6 +184,8 @@ class CompositionThread(QThread):
     status_signal = pyqtSignal(str)
     scan_finished_signal = pyqtSignal(object) # Changed from list to object to support dict return
     error_signal = pyqtSignal(str)
+    # Phase 115: performance signal — (elapsed_ms: float, result_count: int)
+    perf_signal = pyqtSignal(float, int)
 
     def __init__(self, searcher, text, chunk, freq, mode, filter_text=None, threshold=5,
                  boundary_mode='full', boundary_delimiter='\n', boundary_boost=1.5,
@@ -200,6 +214,7 @@ class CompositionThread(QThread):
 
     def run(self):
         _prevent_sleep()
+        t0 = time.perf_counter()  # Phase 115: must be first line (Pitfall 2); perf_counter for sub-ms resolution on Windows
         try:
             self.status_signal.emit("Scanning chunks...")
             def cb(curr, total):
@@ -220,6 +235,13 @@ class CompositionThread(QThread):
                 corpus_scope=self.corpus_scope
             )
             self.scan_finished_signal.emit(result)
+            # Phase 115: emit perf signal — ONLY on success path (D-08 / Pitfall 3)
+            # Count = len(main)+len(filtered) to match on_comp_scan_finished at genizah_app.py:23157
+            _rc = (
+                (len(result.get('main', [])) + len(result.get('filtered', [])))
+                if isinstance(result, dict) else len(result)
+            )
+            self.perf_signal.emit((time.perf_counter() - t0) * 1000.0, _rc)
         except Exception as e: self.error_signal.emit(str(e))
         finally:
             _allow_sleep()
@@ -231,6 +253,8 @@ class LabCompositionThread(QThread):
     status_signal = pyqtSignal(str)
     scan_finished_signal = pyqtSignal(object)
     error_signal = pyqtSignal(str)
+    # Phase 115: performance signal — (elapsed_ms: float, result_count: int)
+    perf_signal = pyqtSignal(float, int)
 
     def __init__(self, lab_engine, text, mode, chunk_size=None, excluded_ids=None, filter_text=None,
                  deep_scan=False, scan_limit=50000, boundary_mode='full', boundary_delimiter='\n',
@@ -258,6 +282,7 @@ class LabCompositionThread(QThread):
 
     def run(self):
         _prevent_sleep()
+        t0 = time.perf_counter()  # Phase 115: must be first line (Pitfall 2); perf_counter for sub-ms resolution on Windows
         try:
             self.status_signal.emit("Lab Mode: Broad-to-Narrow Scan...")
 
@@ -287,6 +312,13 @@ class LabCompositionThread(QThread):
                 corpus_scope=self.corpus_scope
             )
             self.scan_finished_signal.emit(result)
+            # Phase 115: emit perf signal — ONLY on success path (D-08 / Pitfall 3)
+            # Count = len(main)+len(filtered) to match on_comp_scan_finished at genizah_app.py:23157
+            _rc = (
+                (len(result.get('main', [])) + len(result.get('filtered', [])))
+                if isinstance(result, dict) else len(result)
+            )
+            self.perf_signal.emit((time.perf_counter() - t0) * 1000.0, _rc)
         except Exception as e: self.error_signal.emit(str(e))
         finally:
             _allow_sleep()
