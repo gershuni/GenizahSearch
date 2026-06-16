@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v8.1.0
 milestone_name: Desktop Telemetry
 status: executing
-stopped_at: Phase 115 context gathered
-last_updated: "2026-06-16T08:40:19.788Z"
+stopped_at: Phase 116 context gathered
+last_updated: "2026-06-16T08:59:22.378Z"
 last_activity: 2026-06-16
 progress:
   total_phases: 6
@@ -69,9 +69,9 @@ None specific to v8.1.0 yet.
 
 ## Session Continuity
 
-Last session: 2026-06-16T08:14:28.688Z
-Stopped at: Phase 115 context gathered
-Resume file: None
+Last session: 2026-06-16T08:59:22.372Z
+Stopped at: Phase 116 context gathered
+Resume file: .planning/phases/116-privacy-audit-ci-gate/116-CONTEXT.md
 Next step: Phase 114 complete — proceed to Phase 115
 
 ## Performance Metrics
