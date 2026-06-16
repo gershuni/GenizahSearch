@@ -41,9 +41,13 @@ Notes:
   `invalid_request` ("unknown field 'mode' — use search_mode instead").
 - `search_mode` enum has **6 values** (Phase 81A D-09 dropped `regex`):
   `exact | variants | responsa | title | shelfmark | fuzzy`. `fuzzy` is the
-  approximate / maximum-variant tier (slowest; subject to SEARCH_API_CORE_TIMEOUT).
+  approximate / maximum-variant tier (slowest; bounded by `SEARCH_API_FUZZY_TIMEOUT` ~300s,
+  NOT the 30s interactive baseline). Expect long runtime for multi-word fuzzy queries.
 - `responsa_options` only with `search_mode: "responsa"`; otherwise 400 `invalid_combination`.
-- `limit` ceiling 100 (Phase 81A D-05).
+- `limit` ceiling: **100** for non-fuzzy modes (Phase 81A D-05 unchanged). **500** (default,
+  configurable via `SEARCH_API_FUZZY_MAX_LIMIT`, max 2000) for `fuzzy` mode — set a higher
+  limit when recall is important (e.g. agent searching for a rare name). Fuzzy with no explicit
+  limit widens to 250 automatically.
 - `regex_pattern_too_long` error code is NOT in v7.10 (deferred with regex mode).
 
 ## POST /api/search response
@@ -139,7 +143,8 @@ See `shared/api_errors.py` (in the GenizahSearch repo) for the canonical list.
 Common codes the skill encounters:
 
 - `rate_limited` (HTTP 429 + Retry-After header)
-- `core_timeout` (HTTP 504; Tantivy/csv_bank hung)
+- `heavy_search_busy` (HTTP 503 + Retry-After: 5 — heavy-mode concurrency budget exhausted; retry shortly)
+- `core_timeout` (HTTP 504; per-mode ceiling exceeded — exact/title/shelfmark/responsa: 30s, variants: 60s, fuzzy: 300s, parallels: 300s)
 - `manuscript_page_not_found` (HTTP 404)
 - `locator_conflict` (HTTP 400)
 - `invalid_request` (HTTP 400; e.g. unknown field, including legacy `mode`)

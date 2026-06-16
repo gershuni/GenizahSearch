@@ -9,6 +9,15 @@ Per SKILL-01 / D-09: GENIZAH_API_BASE env var overrides --base-url.
 This INVERTS the typical CLI convention — env wins.
 
 Valid search_mode values: exact | variants | responsa | title | shelfmark | fuzzy
+
+Runtime notes:
+- fuzzy mode is the slowest (variants_maximum tier); the server allows up to
+  ~300s (SEARCH_API_FUZZY_TIMEOUT). Client timeout default is 320s so the
+  server's 504 core_timeout envelope wins instead of a socket-level timeout.
+- fuzzy limit ceiling is SEARCH_API_FUZZY_MAX_LIMIT (server default 500); pass
+  a higher --limit for recall-critical queries (max 2000).
+- If a heavy-mode (variants/fuzzy) request hits the server's concurrency cap,
+  the server returns 503 heavy_search_busy + Retry-After; handle by retrying.
 """
 from __future__ import annotations
 import argparse
@@ -38,7 +47,7 @@ def call_search(
     filters: dict | None = None,
     responsa_options: dict | None = None,
     base_url: str | None = None,
-    timeout: float = 30.0,
+    timeout: float = 320.0,
 ) -> dict:
     """POST /api/search and return the parsed JSON response dict.
 
@@ -46,6 +55,12 @@ def call_search(
     error envelope matching shared/api_errors.py shape. Never raises.
 
     GENIZAH_API_BASE env var overrides base_url per D-09.
+
+    timeout default is 320s (slightly above the server's heaviest ceiling of
+    300s for fuzzy/parallels) so the server's 504 core_timeout envelope is
+    returned rather than a client-side socket timeout. For interactive modes
+    (exact/title/shelfmark/responsa) the server responds within 30s; the
+    higher default never causes a problem in practice.
     """
     if search_mode not in SEARCH_MODES:
         return {
@@ -111,7 +126,14 @@ def _main(argv: list[str] | None = None) -> int:
         dest="search_mode",
         help="Search mode (default: exact)",
     )
-    p.add_argument("--limit", type=int, default=10, help="Max results (1-100)")
+    p.add_argument(
+        "--limit", type=int, default=10,
+        help=(
+            "Max results. Non-fuzzy modes: 1-100. "
+            "Fuzzy mode: 1-500 (server default) or up to 2000 (SEARCH_API_FUZZY_MAX_LIMIT). "
+            "Fuzzy with no explicit limit auto-widens to 250 server-side."
+        ),
+    )
     p.add_argument("--gap", type=int, default=0, help="Token gap for phrase search")
     p.add_argument(
         "--filters-json",

@@ -176,10 +176,10 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
 | Name | Type | Constraint | Default | Notes |
 | ---- | ---- | ---------- | ------- | ----- |
 | `query` | string | 1..1000 chars (post-strip; empty → `query_required`; over cap → `query_too_long`) | required | `QUERY_LENGTH_CAP=1000` |
-| `search_mode` | enum | `exact \| variants \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `fuzzy` (added 2026-06) is the approximate / maximum-variant tier — the slowest mode, bounded by `SEARCH_API_CORE_TIMEOUT` |
+| `search_mode` | enum | `exact \| variants \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `fuzzy` (added 2026-06) is the approximate / maximum-variant tier — bounded by `SEARCH_API_FUZZY_TIMEOUT` (~300s), not the interactive 30s baseline |
 | `responsa_options` | object \| null | valid only when `search_mode="responsa"` | `null` | see sub-table below |
 | `gap` | integer | must be `0` when `search_mode in {title, shelfmark}` | `0` | proximity slop for keyword search |
-| `limit` | integer | `1..100` (`MAX_LIMIT=100`, lowered from 200 per Phase 81A D-06) | `50` | |
+| `limit` | integer | `1..100` for non-fuzzy modes (`MAX_LIMIT=100`); `1..SEARCH_API_FUZZY_MAX_LIMIT` (default 500, max 2000) for `fuzzy` | `50` (fuzzy with no explicit limit widens to a recall-oriented default of 250) | P9X: fuzzy recall-over-precision — non-fuzzy boundary unchanged |
 | `filters` | object \| null | all sub-fields nullable; unknown filter keys → 400 `unknown_filter_key`; unknown values → 400 `unresolvable_filter_value` | `null` | `domains`, `authors`, `works`, `materials` (string lists); `date_from`, `date_to` (int years) |
 
 ### `responsa_options` sub-fields
@@ -640,17 +640,18 @@ public API surface — renaming any is a breaking change).
 | `invalid_mode` | 400 | reserved (mode validation) |
 | `query_required` | 400 | post-strip empty `query` |
 | `query_too_long` | 400 | `len(query) > 1000` |
-| `limit_too_high` | 400 | `req.limit > 100` (also enforced by Pydantic `Field(le=100)` first; defense-in-depth) |
+| `limit_too_high` | 400 | `req.limit > MAX_LIMIT` (100) for non-fuzzy modes, or `req.limit > SEARCH_API_FUZZY_MAX_LIMIT` for fuzzy. Pydantic still rejects `limit > 2000` (FUZZY_HARD_MAX) with `invalid_request`. |
 | `unknown_filter_key` | 400 | filter key not in known set |
 | `unresolvable_filter_value` | 400 | filter value not in vocabulary |
 | `filter_vocabulary_unavailable` | 503 | vocabulary loader failed (Phase 78 R2-#3 fail-closed) |
 | `rate_limited` | 429 + `Retry-After` | per-IP sliding window exhausted on the endpoint's own bucket |
+| `heavy_search_busy` | 503 + `Retry-After` | heavy-mode (variants/fuzzy/parallels) concurrency budget (`SEARCH_API_HEAVY_CONCURRENCY`, default 2) exhausted; fail-fast instead of queueing unboundedly; retry shortly |
 | `disabled` | 503 | `SEARCH_API_MODE=disabled` |
 | `localhost_only` | 403 | `SEARCH_API_MODE=localhost-only` and request from non-loopback |
 | `internal_error` | 500 | unhandled exception in handler |
 | `locator_conflict` | 400 | uid malformed; uid disagrees with sys_id/p_num/fl_id/volume_ie |
 | `manuscript_page_not_found` | 404 | core fetch returned `bundle.page is None`; or post-resolution `bundle.page.uid != requested_uid` |
-| `core_timeout` | 504 | `/api/browse`: core BrowsePage fetch exceeded `SEARCH_API_BROWSE_CORE_TIMEOUT` (default 2.0s). `/api/search`: `execute_search` exceeded `SEARCH_API_CORE_TIMEOUT` (default 30.0s) — most likely a slow `fuzzy`/`variants` query |
+| `core_timeout` | 504 | `/api/browse`: BrowsePage exceeded `SEARCH_API_BROWSE_CORE_TIMEOUT` (2.0s). `/api/search`: per-mode ceiling exceeded — exact/title/shelfmark/responsa→30s (`SEARCH_API_CORE_TIMEOUT`), variants→60s (`SEARCH_API_VARIANTS_TIMEOUT`), fuzzy→300s (`SEARCH_API_FUZZY_TIMEOUT`). `/api/parallels`→300s (`SEARCH_API_PARALLELS_TIMEOUT`). Message names the ceiling and mode. |
 | `composition_required` | 400 | `text.strip()` empty |
 | `composition_too_long` | 400 | `len(text.strip()) > 20000` |
 
@@ -703,7 +704,12 @@ Every server-side var that affects the three endpoints, plus the two skill-side 
 | `SEARCH_API_RATE_LIMIT` | `120` | server | Per-IP requests per minute (raised from `30` in 2026-06 to support API-driven research). **Shared ceiling but each endpoint has an independent bucket** — Phase 80 D-05 makes `/api/search` + `/api/browse` + `/api/parallels` run three separate rate-limiter instances reading the same env var, so a client doing search+browse+parallels gets approximately 3× the per-IP allowance of one endpoint alone. Verified by `tests/test_parallels_api.py::test_parallels_rate_limit_independence`. |
 | `SEARCH_API_BROWSE_TIMEOUT` | `1.0` | server | Per-source enrichment timeout for `/api/browse` PGP/FJMS/NLI fetches, in seconds. Hitting it produces an `enrichment_timeout` warning (response is still 200). |
 | `SEARCH_API_BROWSE_CORE_TIMEOUT` | `2.0` | server | Core BrowsePage fetch timeout for `/api/browse`, in seconds. Phase 79 R-01 added this to prevent executor pinning on a hung Tantivy reader; hitting it produces a 504 `core_timeout` envelope. |
-| `SEARCH_API_CORE_TIMEOUT` | `30.0` | server | Core `execute_search` timeout for `/api/search`, in seconds (added 2026-06). The search runs in a thread-pool worker wrapped in `asyncio.wait_for`; exceeding it returns a 504 `core_timeout` envelope instead of pinning the event loop. Mainly bounds the slow `fuzzy`/`variants` tiers. Re-read per request. |
+| `SEARCH_API_CORE_TIMEOUT` | `30.0` | server | Interactive baseline timeout for `/api/search` (exact/title/shelfmark/responsa modes), in seconds. Re-read per request. |
+| `SEARCH_API_VARIANTS_TIMEOUT` | `60.0` | server | Heavy-tier timeout for `/api/search` with `search_mode=variants`, in seconds. Re-read per request. |
+| `SEARCH_API_FUZZY_TIMEOUT` | `300.0` | server | Heavy-tier timeout for `/api/search` with `search_mode=fuzzy`, in seconds. Fuzzy (variants_maximum) is inherently slow. Re-read per request. |
+| `SEARCH_API_PARALLELS_TIMEOUT` | `300.0` | server | Timeout for `/api/parallels` composition search, in seconds. Re-read per request. |
+| `SEARCH_API_HEAVY_CONCURRENCY` | `2` | server | Maximum simultaneous in-flight heavy requests (variants/fuzzy/parallels). Beyond this, new requests fail fast with 503 `heavy_search_busy` + `Retry-After: 5`. Re-read per request (semaphore rebuilt when config changes and all slots are free). |
+| `SEARCH_API_FUZZY_MAX_LIMIT` | `500` | server | Result-count ceiling for `fuzzy` mode (recall over precision). Bounded `[1, 2000]` (FUZZY_HARD_MAX). Non-fuzzy modes keep MAX_LIMIT=100. Re-read per request. |
 | `SEARCH_API_BROWSE_TEXT_CAP` | `4000` | server | Default character cap for transcription text on `/api/browse`. Per-request override via `?text_cap=N`, bounded `[100, 10000]`. |
 | `SEARCH_API_POSTHOG_SAMPLE_N` | `1` | server | Capture every Nth request to PostHog. `1` = every request. Applies to all three search-helper endpoints. |
 | `POSTHOG_IP_SALT` | auto-generated | server | HMAC salt for hashing client IPs in server-side PostHog events. Optional, but production should set explicitly so hashes survive restarts. |
@@ -741,6 +747,29 @@ The `SEARCH_API_MODE` env var gates all three endpoints uniformly:
 `enforce_mode_gate(request)` re-reads the env var on every call, so the value can be
 flipped at runtime without a restart.
 
+## Heavy-Search Tier
+
+Certain search classes are inherently slow:
+
+- **variants** — morphological expansion (30+ variant pairs)
+- **fuzzy** — full Tantivy edit-distance + variants_maximum tier
+- **/api/parallels** — multi-minute sliding-window composition matching
+
+These run in a thread-pool worker (one slow query blocks ONE worker thread, not the event loop), so the risk is threadpool starvation rather than event-loop blocking. They are governed by a separate tier:
+
+| Mode | Timeout knob | Default | Budget knob | Default |
+| ---- | ------------ | ------- | ----------- | ------- |
+| `variants` | `SEARCH_API_VARIANTS_TIMEOUT` | 60 s | `SEARCH_API_HEAVY_CONCURRENCY` | 2 |
+| `fuzzy` | `SEARCH_API_FUZZY_TIMEOUT` | 300 s | `SEARCH_API_HEAVY_CONCURRENCY` | 2 |
+| parallels | `SEARCH_API_PARALLELS_TIMEOUT` | 300 s | `SEARCH_API_HEAVY_CONCURRENCY` | 2 |
+| interactive (exact/title/shelfmark/responsa) | `SEARCH_API_CORE_TIMEOUT` | 30 s | — (no cap) | — |
+
+**Concurrency budget:** A module-level `asyncio.Semaphore` gates heavy-mode requests. When all `SEARCH_API_HEAVY_CONCURRENCY` slots are occupied, a new heavy request fails immediately with **503 `heavy_search_busy` + `Retry-After: 5`** instead of queuing and potentially starving the threadpool. The slot is ALWAYS released in a `finally` block — a timeout or exception cannot strand a slot.
+
+Interactive modes (exact/title/shelfmark/responsa) are NOT gated by this semaphore and always proceed with their own 30 s baseline.
+
+All knobs are re-read per request and can be flipped without a restart.
+
 ## Statelessness Contract
 
 The three search-helper endpoints have ZERO references to `state.last_results`,
@@ -756,6 +785,13 @@ docstrings in [web/search_api.py](../web/search_api.py).
 - Not a write API. All three endpoints are read-only over the public corpus.
 - Not a bulk-export interface. For full-corpus access, use the [interactive search](https://genizahsearch.com) directly or contact the project for the underlying transcription dataset (see [Attribution & Citation](#attribution--citation)).
 - Not a long-running job runner. Composition-parallels requests run synchronously within the request timeout; a future async-job API may ship in v7.11+.
+
+## Deferred Follow-Ups (NOT in P9X)
+
+The following improvements are documented here as future work but are NOT implemented in this change:
+
+1. **Async job pattern**: `POST /api/search` (heavy mode) → `202 + job_id` → poll `GET /api/jobs/{id}`. This is the right long-term solution for multi-minute queries but is a larger surface (job store, polling contract, skill client changes). The current per-mode timeout tiering + fail-fast 503 buys correctness now with minimal surface area.
+2. **Index-time skeleton / matres-lectionis normalization**: Would improve fuzzy PRECISION (fewer noise hits) and could allow lowering `SEARCH_API_FUZZY_TIMEOUT`, but requires an index rebuild and core search changes — out of scope for an API-layer hardening pass.
 
 ## See Also
 
