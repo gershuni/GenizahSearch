@@ -176,7 +176,7 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
 | Name | Type | Constraint | Default | Notes |
 | ---- | ---- | ---------- | ------- | ----- |
 | `query` | string | 1..1000 chars (post-strip; empty → `query_required`; over cap → `query_too_long`) | required | `QUERY_LENGTH_CAP=1000` |
-| `search_mode` | enum | `exact \| variants \| responsa \| title \| shelfmark` | required | `regex` was intentionally dropped per Phase 81A D-09; `fuzzy` is intentionally not present (it is a `/api/parallels` mode only) |
+| `search_mode` | enum | `exact \| variants \| responsa \| title \| shelfmark \| fuzzy` | required | `regex` was intentionally dropped per Phase 81A D-09. `fuzzy` (added 2026-06) is the approximate / maximum-variant tier — the slowest mode, bounded by `SEARCH_API_CORE_TIMEOUT` |
 | `responsa_options` | object \| null | valid only when `search_mode="responsa"` | `null` | see sub-table below |
 | `gap` | integer | must be `0` when `search_mode in {title, shelfmark}` | `0` | proximity slop for keyword search |
 | `limit` | integer | `1..100` (`MAX_LIMIT=100`, lowered from 200 per Phase 81A D-06) | `50` | |
@@ -559,7 +559,7 @@ The parallels response echoes exactly six keys (no more, no fewer). Explicitly N
 use `mode`. This is intentional v7.10 debt locked by Phase 81A D-07: renaming the parallels
 field would have broken Phase 80 tests with no consumer-visible benefit, since the
 parallels enum is a different set of values (`exact | variants | fuzzy`) than the search
-enum (`exact | variants | responsa | title | shelfmark`). Future versions may unify the
+enum (`exact | variants | responsa | title | shelfmark | fuzzy`). Future versions may unify the
 field name; consumers should code defensively against both names.
 
 The two enums share only `exact` and `variants`. A consumer must use the correct field
@@ -650,7 +650,7 @@ public API surface — renaming any is a breaking change).
 | `internal_error` | 500 | unhandled exception in handler |
 | `locator_conflict` | 400 | uid malformed; uid disagrees with sys_id/p_num/fl_id/volume_ie |
 | `manuscript_page_not_found` | 404 | core fetch returned `bundle.page is None`; or post-resolution `bundle.page.uid != requested_uid` |
-| `core_timeout` | 504 | core BrowsePage fetch exceeded `SEARCH_API_BROWSE_CORE_TIMEOUT` (default 2.0s) |
+| `core_timeout` | 504 | `/api/browse`: core BrowsePage fetch exceeded `SEARCH_API_BROWSE_CORE_TIMEOUT` (default 2.0s). `/api/search`: `execute_search` exceeded `SEARCH_API_CORE_TIMEOUT` (default 30.0s) — most likely a slow `fuzzy`/`variants` query |
 | `composition_required` | 400 | `text.strip()` empty |
 | `composition_too_long` | 400 | `len(text.strip()) > 20000` |
 
@@ -703,6 +703,7 @@ Every server-side var that affects the three endpoints, plus the two skill-side 
 | `SEARCH_API_RATE_LIMIT` | `120` | server | Per-IP requests per minute (raised from `30` in 2026-06 to support API-driven research). **Shared ceiling but each endpoint has an independent bucket** — Phase 80 D-05 makes `/api/search` + `/api/browse` + `/api/parallels` run three separate rate-limiter instances reading the same env var, so a client doing search+browse+parallels gets approximately 3× the per-IP allowance of one endpoint alone. Verified by `tests/test_parallels_api.py::test_parallels_rate_limit_independence`. |
 | `SEARCH_API_BROWSE_TIMEOUT` | `1.0` | server | Per-source enrichment timeout for `/api/browse` PGP/FJMS/NLI fetches, in seconds. Hitting it produces an `enrichment_timeout` warning (response is still 200). |
 | `SEARCH_API_BROWSE_CORE_TIMEOUT` | `2.0` | server | Core BrowsePage fetch timeout for `/api/browse`, in seconds. Phase 79 R-01 added this to prevent executor pinning on a hung Tantivy reader; hitting it produces a 504 `core_timeout` envelope. |
+| `SEARCH_API_CORE_TIMEOUT` | `30.0` | server | Core `execute_search` timeout for `/api/search`, in seconds (added 2026-06). The search runs in a thread-pool worker wrapped in `asyncio.wait_for`; exceeding it returns a 504 `core_timeout` envelope instead of pinning the event loop. Mainly bounds the slow `fuzzy`/`variants` tiers. Re-read per request. |
 | `SEARCH_API_BROWSE_TEXT_CAP` | `4000` | server | Default character cap for transcription text on `/api/browse`. Per-request override via `?text_cap=N`, bounded `[100, 10000]`. |
 | `SEARCH_API_POSTHOG_SAMPLE_N` | `1` | server | Capture every Nth request to PostHog. `1` = every request. Applies to all three search-helper endpoints. |
 | `POSTHOG_IP_SALT` | auto-generated | server | HMAC salt for hashing client IPs in server-side PostHog events. Optional, but production should set explicitly so hashes survive restarts. |

@@ -145,6 +145,7 @@ SEARCH_API_RATE_LIMIT=120             # per-IP requests/minute; shared ceiling b
 SEARCH_API_POSTHOG_SAMPLE_N=1         # capture every Nth API request to PostHog
 SEARCH_API_BROWSE_TIMEOUT=1.0         # per-source enrichment timeout (PGP/FJMS/NLI), seconds
 SEARCH_API_BROWSE_CORE_TIMEOUT=2.0    # core BrowsePage fetch timeout, seconds
+SEARCH_API_CORE_TIMEOUT=30.0          # /api/search execute_search timeout, seconds -> 504 core_timeout (guards slow fuzzy/variants; runs in executor off the event loop)
 SEARCH_API_BROWSE_TEXT_CAP=4000       # default char cap for transcription text; ?text_cap=N override bounded [100, 10000]
 
 # Skill-side (cairo-genizah-research skill consumer)

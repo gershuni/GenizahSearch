@@ -28,6 +28,7 @@ session-scoped surfaces (last results, current search query, storage user,
 or request cookies).
 """
 
+import asyncio
 import logging
 import os
 import re as _re
@@ -52,7 +53,7 @@ from web.api_hardening import (
 # Concern #3: APIError from neutral location.
 from shared.api_errors import APIError
 # Phase 79 imports.
-from shared.browse_service import fetch_browse_bundle
+from shared.browse_service import fetch_browse_bundle, _read_timeout
 from shared.search_serializer import serialize_browse_payload, serialize_parallels_payload
 # Phase 80 imports.
 from shared.parallels_service import fetch_parallels_results, ParallelsResultBundle
@@ -175,9 +176,9 @@ class SearchRequest(BaseModel):
         ...,
         description="Search query string. Max 1000 chars after stripping. Empty after strip -> 400 query_required.",
     )
-    search_mode: Literal['exact', 'variants', 'responsa', 'title', 'shelfmark'] = Field(
+    search_mode: Literal['exact', 'variants', 'responsa', 'title', 'shelfmark', 'fuzzy'] = Field(
         ...,
-        description="Search mode: 'exact' (literal), 'variants' (morphological), 'responsa' (Responsa Project style), 'title' (FJMS title metadata), 'shelfmark' (call number lookup).",
+        description="Search mode: 'exact' (literal), 'variants' (morphological), 'responsa' (Responsa Project style), 'title' (FJMS title metadata), 'shelfmark' (call number lookup), 'fuzzy' (approximate / maximum variant expansion — slowest mode).",
     )
     responsa_options: Optional[ResponsaOptions] = Field(
         default=None,
@@ -238,7 +239,15 @@ _SEARCH_MODE_TO_INTERNAL = {
     'responsa':  'Responsa',
     'title':     'Title',
     'shelfmark': 'Shelfmark',
+    'fuzzy':     'fuzzy',
 }
+
+# Core-search wall-clock timeout (2026-06): execute_search runs in a thread-pool
+# worker wrapped in asyncio.wait_for, so a slow query (especially the
+# 'fuzzy'/variants_maximum tier) returns a 504 'core_timeout' instead of pinning
+# the event loop for its full duration. Re-read per request via _read_timeout so
+# prod can flip SEARCH_API_CORE_TIMEOUT without a restart.
+DEFAULT_SEARCH_CORE_TIMEOUT = 30.0
 
 # Phase 79 D-11 / R-08 -- transcription char cap.
 DEFAULT_BROWSE_TEXT_CAP = 4000
@@ -856,37 +865,71 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             # 6. Statelessness check (D-20). Forbidden reads — none below.
 
             # 7. Execute search OR short-circuit on empty intersection.
+            #
+            # execute_search runs in a thread-pool worker wrapped in
+            # asyncio.wait_for (SEARCH_API_CORE_TIMEOUT) so a slow query — esp.
+            # the 'fuzzy'/variants_maximum tier — returns 504 'core_timeout'
+            # instead of pinning the event loop for its full duration.
+            #
+            # R2-#1 / 81A thread-local note: execute_search sets the responsa
+            # downgrade signals on the THREAD it runs on. We consume them INSIDE
+            # the worker closure (same thread) and hand them back — reading the
+            # thread-locals on the event-loop thread after the executor hop would
+            # see an empty (wrong-thread) signal.
+            downgrade_msg = None
+            cascade_meta = None
             if short_circuit_empty:
                 results = []
                 total = 0
             else:
                 internal_mode = _SEARCH_MODE_TO_INTERNAL[req.search_mode]
-                results = state.searcher.execute_search(
-                    query_str=query,
-                    mode=internal_mode,
-                    gap=req.gap,
-                    progress_callback=None,
-                    exclude_words=None,
-                    responsa_options=responsa_options,
-                    restrict_sys_ids=restrict_sys_ids,
-                    text_position=None,
-                ) or []
+
+                def _run_search_sync():
+                    res = state.searcher.execute_search(
+                        query_str=query,
+                        mode=internal_mode,
+                        gap=req.gap,
+                        progress_callback=None,
+                        exclude_words=None,
+                        responsa_options=responsa_options,
+                        restrict_sys_ids=restrict_sys_ids,
+                        text_position=None,
+                    ) or []
+                    from genizah_core import (
+                        _consume_last_responsa_downgrade_meta as _consume_meta_inner,
+                    )
+                    return res, _consume_last_responsa_downgrade(), _consume_meta_inner()
+
+                core_timeout = _read_timeout(
+                    'SEARCH_API_CORE_TIMEOUT', DEFAULT_SEARCH_CORE_TIMEOUT,
+                )
+                loop = asyncio.get_event_loop()
+                try:
+                    results, downgrade_msg, cascade_meta = await asyncio.wait_for(
+                        loop.run_in_executor(None, _run_search_sync),
+                        timeout=core_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        'search core_timeout after %ss (mode=%s)',
+                        core_timeout, internal_mode,
+                    )
+                    raise APIError(
+                        'core_timeout',
+                        f'search did not complete within {core_timeout}s; '
+                        f'try a narrower query or a faster search_mode',
+                        http_status=504,
+                    )
                 total = len(results)
 
             # 8. Cap results.
             results = results[:req.limit]
             result_count = len(results)
 
-            # 8a. R2-#1: consume the thread-local downgrade signal here, on
-            # the success path. The defensive consume in `finally` below
-            # handles the exception path. Reading on success first means we
-            # still surface the downgrade warning correctly.
-            downgrade_msg = _consume_last_responsa_downgrade()
-            # 81A — drain the structured-meta channel adjacent to the legacy
-            # string channel. Both feed the request-echo block below
-            # (cascade_meta populates responsa_options_effective when set).
-            from genizah_core import _consume_last_responsa_downgrade_meta as _consume_meta
-            cascade_meta = _consume_meta()
+            # 8a. R2-#1 / 81A: downgrade_msg + cascade_meta were captured inside
+            # the executor worker above (where execute_search set the
+            # thread-locals); the short-circuit branch leaves them None. The
+            # defensive drains in `finally` below still guard the exception path.
 
             # 9. Lift cascade-downgrade warning.
             #    R2-#1 + Concern #6: read the thread-local meta channel FIRST

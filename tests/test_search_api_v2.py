@@ -6,7 +6,7 @@ to migrate Phase 78 hardening tests from the old `mode` field to `search_mode`;
 this file owns the new contract surface tests (Sections 1-7 below).
 
 Regex is intentionally absent from the v7.10 enum (D-09 — deferred to v7.11).
-The 5 valid search_mode values are: exact, variants, responsa, title, shelfmark.
+The 6 valid search_mode values are: exact, variants, responsa, title, shelfmark, fuzzy.
 
 Sections:
     1. search_mode value coverage (AC2; two layers — stub + real-index)
@@ -48,7 +48,7 @@ from shared.api_errors import ERROR_CODES  # noqa: E402
 # Constants
 # ---------------------------------------------------------------------------
 
-SEARCH_MODES = ['exact', 'variants', 'responsa', 'title', 'shelfmark']
+SEARCH_MODES = ['exact', 'variants', 'responsa', 'title', 'shelfmark', 'fuzzy']
 
 # Concrete fixture queries per AC2 — picked so a real Tantivy index would
 # return ≥1 result. Layer-2 tests are skipped in environments without an
@@ -59,6 +59,7 @@ QUERIES_PER_MODE = {
     'responsa':  'שאלה',
     'title':     'ברכת המזון',
     'shelfmark': 'T-S 12.123',
+    'fuzzy':     'ברכת המזון',
 }
 
 # Internal `mode` argument to SearchEngine.execute_search per
@@ -69,6 +70,7 @@ EXPECTED_INTERNAL_MODE = {
     'responsa': 'Responsa',
     'title': 'Title',
     'shelfmark': 'Shelfmark',
+    'fuzzy': 'fuzzy',
 }
 
 REQUEST_ECHO_KEYS = {
@@ -264,6 +266,39 @@ def test_search_mode_exact_vs_variants_behavioral_difference(client, stub_search
     assert stub_searcher.calls[0]['mode'] == 'exact'
     assert stub_searcher.calls[1]['mode'] == 'variants'
     assert stub_searcher.calls[0]['mode'] != stub_searcher.calls[1]['mode']
+
+
+def test_search_fuzzy_translates_to_internal_fuzzy(client, stub_searcher):
+    """'fuzzy' search_mode reaches the engine as internal mode 'fuzzy' (the
+    variants_maximum tier the core already handles)."""
+    r = _post_search(client, query='ברכת המזון', search_mode='fuzzy')
+    assert r.status_code == 200, r.text
+    assert stub_searcher.calls[-1]['mode'] == 'fuzzy'
+
+
+def test_search_core_timeout_returns_504(client, monkeypatch):
+    """A core search exceeding SEARCH_API_CORE_TIMEOUT returns a 504
+    'core_timeout' envelope instead of pinning the event loop. The slow query
+    runs in a thread-pool worker; asyncio.wait_for trips the timeout."""
+    import time as _time
+    from web.state import state as _state
+
+    monkeypatch.setenv('SEARCH_API_CORE_TIMEOUT', '0.2')
+
+    class _SlowSearcher:
+        def execute_search(self, **kwargs):
+            _time.sleep(1.0)
+            return []
+
+    saved = _state.searcher
+    _state.searcher = _SlowSearcher()
+    try:
+        resp = _post_search(client, query='ברכת המזון', search_mode='exact')
+    finally:
+        _state.searcher = saved
+
+    assert resp.status_code == 504, resp.text
+    assert resp.json()['error']['code'] == 'core_timeout'
 
 
 @pytest.mark.parametrize('search_mode', SEARCH_MODES)
@@ -694,7 +729,7 @@ def test_posthog_event_search_mode_value_null_on_pydantic_rejection(
     assert props.get('responsa_options_count') == 0
 
 
-@pytest.mark.parametrize('bad_mode', ['regex', 'NOT_A_MODE', 'fuzzy', 'EXACT', ''])
+@pytest.mark.parametrize('bad_mode', ['regex', 'NOT_A_MODE', 'EXACT', ''])
 def test_posthog_search_mode_value_null_on_unknown_enum_value(
     client, captured_events, bad_mode,
 ):

@@ -27,7 +27,7 @@ HTTP 429 carries `Retry-After: <seconds>` header.
 
 ```json
 {
-  "search_mode": "exact" | "variants" | "responsa" | "title" | "shelfmark",
+  "search_mode": "exact" | "variants" | "responsa" | "title" | "shelfmark" | "fuzzy",
   "query": "<1-1000 chars>",
   "gap": 0,
   "limit": 10,
@@ -39,8 +39,9 @@ HTTP 429 carries `Retry-After: <seconds>` header.
 Notes:
 - Phase 81A REPLACED the old `mode` field. `mode` is hard-rejected with
   `invalid_request` ("unknown field 'mode' — use search_mode instead").
-- `search_mode` enum has **5 values** (Phase 81A D-09 dropped `regex`):
-  `exact | variants | responsa | title | shelfmark`.
+- `search_mode` enum has **6 values** (Phase 81A D-09 dropped `regex`):
+  `exact | variants | responsa | title | shelfmark | fuzzy`. `fuzzy` is the
+  approximate / maximum-variant tier (slowest; subject to SEARCH_API_CORE_TIMEOUT).
 - `responsa_options` only with `search_mode: "responsa"`; otherwise 400 `invalid_combination`.
 - `limit` ceiling 100 (Phase 81A D-05).
 - `regex_pattern_too_long` error code is NOT in v7.10 (deferred with regex mode).
