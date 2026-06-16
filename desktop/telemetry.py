@@ -344,13 +344,33 @@ _MAX_CONTEXT_LEN = 64
 # Identifier-shaped code: letters/digits with . _ - separators only. No '/' (it
 # would let a relative path like 'etc/passwd' survive), no spaces, no Hebrew.
 _CONTEXT_RE = re.compile(r'[A-Za-z0-9]+(?:[._\-][A-Za-z0-9]+)*\Z')
+# Filename-extension shape: a dot followed by 1-8 letters/digits (no underscore/hyphen),
+# anchored at end-of-string. Used to reject 'manuscript_notes.docx' / 'report.pdf' /
+# 'notes.txt' that otherwise pass _CONTEXT_RE (PRIV-04: filenames must not ride through
+# the lone allowlisted free-text key). Legitimate dotted codes like 'search_tab.run_query'
+# have a final segment containing '_' and thus do NOT match this pattern.
+_CONTEXT_FILENAME_RE = re.compile(r'\.[A-Za-z][A-Za-z0-9]{0,7}\Z')
 
 
 def _safe_context(value: object) -> str:
-    """Return value if it is an identifier-shaped code, else 'unregistered'."""
+    """Return value if it is an identifier-shaped code, else 'unregistered'.
+
+    A value passes if it:
+    - is a str
+    - is non-empty and at most _MAX_CONTEXT_LEN chars
+    - matches _CONTEXT_RE (identifier-shape: letters/digits with . _ - separators)
+    - does NOT look like a filename extension (PRIV-04 hardening): if the final
+      dotted segment is a bare 1-8 letter/digit token (e.g. '.docx', '.pdf', '.txt'),
+      the value is collapsed to 'unregistered'. Legitimate codes like
+      'search_tab.run_query' have underscores in the final segment and are NOT rejected.
+    """
     if (isinstance(value, str)
             and 0 < len(value) <= _MAX_CONTEXT_LEN
             and _CONTEXT_RE.match(value)):
+        # PRIV-04: reject filename-extension-shaped contexts so a bare filename like
+        # 'manuscript_notes.docx' cannot ride through the lone allowlisted free-text key.
+        if _CONTEXT_FILENAME_RE.search(value):
+            return 'unregistered'
         return value
     return 'unregistered'
 
