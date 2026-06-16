@@ -464,7 +464,11 @@ if "--telemetry-selftest" in sys.argv:
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> Both resolved inline with concrete recommendations; the Phase 116 plans implement them
+> (116-02: `SSL_FAIL` for the no-key/drop path; offline arm skips the POST, network-disabled
+> run is the D-06 HUMAN-UAT).
 
 1. **Output token when key is sentinel (not baked)**
    - What we know: `_TELEMETRY_KEY_DEFAULT` is baked with the real `phc_` key as of 2026-06-15.
