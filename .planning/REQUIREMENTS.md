@@ -77,7 +77,7 @@
 - [x] **INFRA-03**: `shared/posthog_server.py` gains backward-compatible additions only (consent-gate hook, `distinct_id` injection, flush-before-exit) without breaking its existing web/breaker consumers or the 5 test monkeypatches.
 - [x] **INFRA-04**: Telemetry adds **zero** new pip dependencies and requires no PyInstaller spec changes beyond what's already bundled (reuse the raw queue; do NOT add the `posthog` SDK).
 - [x] **INFRA-05**: Telemetry degrades silently and never blocks the UI thread when offline/air-gapped or when the key is absent (fire-and-forget; SSL certs verified in the frozen binary). Events are **memory-only** — never spooled to disk.
-- [ ] **INFRA-06**: Operational runbook — the desktop PostHog project is isolated from the web project; the embedded ingest key is documented as write-only (treated as abuse-tolerant with a rotation procedure, not a secret); and both `get_dropped_event_count()` drop counters (`web.api_hardening` + `shared.posthog_server`) are monitored after launch.
+- [ ] **INFRA-06**: Operational runbook — the shared PostHog project (id 134161, EU) separates desktop events by `platform=desktop` + the `desktop_` event-name namespace (NOT an isolated project); the embedded ingest key is documented as write-only (treated as abuse-tolerant with a rotation procedure, not a secret); and both `get_dropped_event_count()` drop counters (`web.api_hardening` + `shared.posthog_server`) are monitored after launch. *(AMENDED 2026-06-16: the prior "isolated project" wording was stale since the 2026-06-14 reversal — see `.planning/research/POSTHOG-PROJECT-DECISION.md`.)*
 
 ---
 
