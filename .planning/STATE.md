@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.1.0
 milestone_name: Desktop Telemetry
-status: ready_to_close_and_release
-stopped_at: "Phase 116 done (code + UAT delivery/privacy PASS, Codex-reviewed, dashboards built). NEXT SESSION: close v8.1.0 milestone + release — follow .planning/phases/116-privacy-audit-ci-gate/116-RELEASE-CHECKLIST.md"
-last_updated: "2026-06-16T12:00:00Z"
+status: closing_and_releasing
+stopped_at: "v8.1.0 close+release IN PROGRESS — pre-flight gates GREEN (ruff/check_docs/241-test regression), PRIV-04+INFRA-06 flipped to Complete, Phase 116 marked complete. NEXT: run /release [both] (it owns version bump + What's New + build + deploy + GitHub release), then /gsd-complete-milestone. Follow 116-RELEASE-CHECKLIST.md."
+last_updated: "2026-06-16T15:00:42.215Z"
 last_activity: 2026-06-16
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 20
-  completed_plans: 19
-  percent: 83
+  completed_plans: 20
+  percent: 100
 ---
 
 # Project State
@@ -25,13 +25,13 @@ See: .planning/PROJECT.md (updated 2026-06-11 after v8.0.0 close)
 
 ## Current Position
 
-Phase: 116 (privacy-audit-ci-gate) — DONE; v8.1.0 READY TO CLOSE + RELEASE
-Plan: 3 of 3 executed (116-01 ✓, 116-02 ✓ code, 116-03 ✓). Codex-reviewed; UAT delivery+privacy PASS.
-Status: ready_to_close_and_release — **NEXT SESSION: follow `.planning/phases/116-privacy-audit-ci-gate/116-RELEASE-CHECKLIST.md`** (pre-flight gates → flip PRIV-04/INFRA-06 to Complete → bump_version 8.1.0 [+ _TARGET_VERSION] → build exe [restore .spec after build_app.bat] → clean-VM SSL_OK → deploy web platform=web → /release [both] → /gsd-complete-milestone).
+Phase: 116 (privacy-audit-ci-gate) — COMPLETE (3/3 plans). v8.1.0 all 6 phases done; CLOSE+RELEASE in progress.
+Plan: All executed. 116-01 ✓, 116-02 ✓ (clean-VM SSL HUMAN-UAT runs at release build), 116-03 ✓.
+Status: closing_and_releasing — follow `.planning/phases/116-privacy-audit-ci-gate/116-RELEASE-CHECKLIST.md`. DONE: pre-flight gates GREEN (ruff clean on tracked files / check_docs pass / 241-test milestone-exit regression pass); PRIV-04+INFRA-06 flipped Pending→Complete (all 40 reqs Complete); Phase 116 marked complete. NEXT: run **/release [both]** — it owns the version bump to 8.1.0 (NOTE: also bump `_TARGET_VERSION` in tests/test_release_artifacts.py — bump_version.py misses it) + What's New drafting + CHANGELOG + build exe [restore .spec after build_app.bat; clean-VM SSL_OK runs here] + web deploy (platform=web commit 36ae3fe7) + GitHub release. THEN run /gsd-complete-milestone explicitly (/release skips the GSD milestone-close ritual).
 Open: clean-no-Python-VM SSL_OK + offline arm (116-HUMAN-UAT Test 2 — naturally done during the release build; user accepted current state). Dashboards built (Desktop 752803 / Web 752805 / Comparison 752806).
-Last activity: 2026-06-16
+Last activity: 2026-06-16 - Completed quick task 260616-p9x: per-mode Search API timeout tiering + heavy-mode concurrency cap + fuzzy result-cap raise
 
-Progress: [███████░░░] 67%
+Progress: [██████████] 100%
 
 ## Accumulated Context
 
@@ -54,6 +54,12 @@ Progress: [███████░░░] 67%
 ### Pending Todos
 
 None specific to v8.1.0 yet.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260616-p9x | Per-mode Search API timeout tiering + heavy-mode concurrency cap + fuzzy result-cap raise | 2026-06-16 | e4f315af | [260616-p9x-per-mode-timeout-tiering-concurrency-cap](./quick/260616-p9x-per-mode-timeout-tiering-concurrency-cap/) |
 
 ## Deferred Items
 
