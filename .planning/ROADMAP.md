@@ -156,7 +156,7 @@ See: .planning/milestones/v7.16-ROADMAP.md
 - [x] 114-01-PLAN.md — Identity coordinator + session_start/session_end + login/logout/opt-in identity wiring + ACTIVE_PING enum
 - [x] 114-02-PLAN.md — desktop_tab_activated (user-only) + desktop_search_executed (exactly-once, mode/corpus/bucket enums)
 - [x] 114-03-PLAN.md — desktop_feature_opened + focus-aware daily active_ping heartbeat + D-17 producer-layer AST guard
-- [ ] 114-04-PLAN.md — gap closure: 6 Codex code-review findings (CR-114-01..06 — PGP-tag stale-slot/worker-drain, regular+comp "New"-reset cancelled emit, session_end gating, restore-suppressed joins_lab feature_opened, comp-resume programmatic tab switch)
+- [x] 114-04-PLAN.md — gap closure: 6 Codex code-review findings (CR-114-01..06 — PGP-tag stale-slot/worker-drain, regular+comp "New"-reset cancelled emit, session_end gating, restore-suppressed joins_lab feature_opened, comp-resume programmatic tab switch)
 
 ### Phase 115: Performance Metrics
 
@@ -191,6 +191,6 @@ See: .planning/milestones/v7.16-ROADMAP.md
 | 111. Telemetry Foundation | v8.1.0 | 3/3 | Complete    | 2026-06-14 |
 | 112. Consent UX | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
 | 113. Crash Reporting | v8.1.0 | 3/3 | Complete   | 2026-06-15 |
-| 114. Usage Analytics | v8.1.0 | 3/3 + 0/1 gap | Gap closure planned | 2026-06-16 |
+| 114. Usage Analytics | v8.1.0 | 4/4 | Complete   | 2026-06-16 |
 | 115. Performance Metrics | v8.1.0 | 0/TBD | Not started | - |
 | 116. Privacy Audit + CI Gate | v8.1.0 | 0/TBD | Not started | - |

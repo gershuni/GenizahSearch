@@ -4,13 +4,13 @@ milestone: v8.1.0
 milestone_name: Desktop Telemetry
 status: verifying
 stopped_at: Completed Phase 114-02 usage-analytics producers
-last_updated: "2026-06-16T02:02:54.141Z"
+last_updated: "2026-06-16T02:59:55.028Z"
 last_activity: 2026-06-16
 progress:
   total_phases: 6
   completed_phases: 4
-  total_plans: 12
-  completed_plans: 12
+  total_plans: 13
+  completed_plans: 13
   percent: 67
 ---
 
@@ -69,10 +69,10 @@ None specific to v8.1.0 yet.
 
 ## Session Continuity
 
-Last session: 2026-06-15T20:04:52.531Z
-Stopped at: Completed Phase 114-02 usage-analytics producers
+Last session: 2026-06-16T02:59:55.022Z
+Stopped at: Completed Phase 114-04 gap-closure (CR-114-01..06 Codex findings)
 Resume file: None
-Next step: Execute Phase 112 Plan 02
+Next step: Phase 114 complete — proceed to Phase 115
 
 ## Performance Metrics
 
@@ -89,6 +89,7 @@ Next step: Execute Phase 112 Plan 02
 | Phase Phase 113-crash-reporting PP03 | 25min | 3 tasks | 4 files |
 | Phase 114-usage-analytics P02 | 35min | 5 tasks | 2 files |
 | Phase 114-usage-analytics P03 | 30min | 3 tasks | 4 files |
+| Phase 114-usage-analytics P114-04 | 7min | 3 tasks | 2 files |
 
 ## Decisions
 
@@ -97,3 +98,7 @@ Next step: Execute Phase 112 Plan 02
 - [Phase ?]: [Phase 113-01]: send_crash_event_direct reads lock-free snapshot globals — no _capture_config_lock in crash path (D-05/REVIEWS HIGH-1)
 - [Phase ?]: Phase 113-02: module-top send_crash_event_direct import requires monkeypatching tel.send_crash_event_direct in tests, not ph
 - [Phase ?]: Phase 114-02: _telemetry_result_bucket module-level; corpus_scope via currentData(); drain thread isolation in autouse fixture; _app_shutting_down first-guard in all 3 emit helpers
+- [Phase 114-04]: CR-114-01: PGP-tag per-run token (_pgp_tag_run_seq) + drain+disconnect before run-object install closes stale-slot race
+- [Phase 114-04]: CR-114-02/03: _reset_search/_reset_composition now emit cancelled in the isRunning() branch (mirror stop_search pattern)
+- [Phase 114-04]: CR-114-04: closeEvent session_end gated on _telemetry_ready() AND truthy _session_id — orphan session_end='' prevented
+- [Phase 114-04]: CR-114-05: open_join_workbench(emit_telemetry=False) for restore suppression; CR-114-06: comp-resume uses _set_active_tab
