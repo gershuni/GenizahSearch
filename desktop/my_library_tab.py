@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import time
 from typing import Optional
 
 from PyQt6.QtCore import (
@@ -717,10 +718,18 @@ class LocalIndexerWorker(QThread):
     # Phase 97.3 R97.3-E (D-07) — phase status text (bilingual).
     status_updated = pyqtSignal(str)
 
-    def __init__(self, indexer: LocalIndexer) -> None:
+    def __init__(
+        self,
+        indexer: LocalIndexer,
+        operation_kind: str = 'incremental_add',
+        # initial_scan reserved for a future first-scan-detection pass
+        # (REVIEWS finding 10); not populated in v8.1.0.
+    ) -> None:
         super().__init__()
         self._indexer = indexer
         self._cancel_requested = False
+        self._elapsed_ms: float = 0.0          # populated in run(), read in UI-thread slot
+        self._operation_kind: str = operation_kind   # literal constant from caller (D-02)
 
     def cancel(self) -> None:
         """Set the cooperative cancel flag (D-24)."""
@@ -728,6 +737,7 @@ class LocalIndexerWorker(QThread):
 
     def run(self) -> None:  # noqa: PLR0912
         try:
+            _t0 = time.monotonic()       # Phase 115: Pitfall 2 — must be first line (before any work)
             # Wire up per-file progress callbacks into the indexer
             def _on_progress(current: int, total: int, filename: str) -> None:
                 self.progress_updated.emit(current, total, filename)
@@ -747,6 +757,7 @@ class LocalIndexerWorker(QThread):
             result = self._indexer.scan_all(
                 cancel_check=lambda: self._cancel_requested
             )
+            self._elapsed_ms = (time.monotonic() - _t0) * 1000.0   # Phase 115: store for UI-thread slot
             self.finished_signal.emit(result)
         except Exception as exc:  # noqa: BLE001
             logger.exception("LocalIndexerWorker: unhandled error")
@@ -1648,15 +1659,22 @@ class MyLibraryTab(QWidget):
     # Worker lifecycle
     # ------------------------------------------------------------------
 
-    def _start_worker(self, toast_on_complete: bool = False) -> None:
+    def _start_worker(
+        self,
+        toast_on_complete: bool = False,
+        operation_kind: str = 'incremental_add',
+    ) -> None:
         """Acquire mutex and start LocalIndexerWorker; queue if mutex held (D-25)."""
         if self._indexer is None:
             return
 
         if not self._indexer_mutex.tryLock():
-            # Mutex held — queue this action (collapse if already queued)
-            self._queued_action = lambda: self._start_worker(
-                toast_on_complete=toast_on_complete
+            # Mutex held — queue this action (collapse if already queued).
+            # Phase 115 REVIEWS finding 6: bind operation_kind as default arg so a
+            # queued reindex_all is not silently re-tagged incremental_add when it runs.
+            self._queued_action = lambda ok=operation_kind: self._start_worker(
+                toast_on_complete=toast_on_complete,
+                operation_kind=ok,
             )
             return
 
@@ -1683,7 +1701,7 @@ class MyLibraryTab(QWidget):
         if hasattr(self, '_unified_tree'):
             self._unified_tree.reset_for_scan()
 
-        self._worker = LocalIndexerWorker(self._indexer)
+        self._worker = LocalIndexerWorker(self._indexer, operation_kind=operation_kind)
         self._worker.progress_updated.connect(self._on_progress_updated)
         self._worker.file_finished.connect(self._on_file_finished)
         # Phase 97.3 R97.3-E (D-07): forward worker phase text to status bar.
@@ -1715,6 +1733,13 @@ class MyLibraryTab(QWidget):
         self._btn_remove.setEnabled(True)
         self._btn_reindex_all.setEnabled(True)
         self._btn_cancel.setEnabled(False)
+        # Phase 115 REVIEWS finding 6: stash elapsed_ms and operation_kind from the
+        # JUST-FINISHED worker into locals BEFORE self._worker = None.  The end-of-method
+        # _queued_action() dispatch can re-enter _start_worker() and overwrite worker-level
+        # state before we emit — reading from the worker's own attributes here ensures we
+        # report the correct run's metadata.
+        _elapsed_ms = getattr(self._worker, '_elapsed_ms', 0.0)
+        _operation_kind = getattr(self._worker, '_operation_kind', 'incremental_add')
         self._worker = None
         # Phase 97.2 R97.2-E — re-enable Reset now that scan is done (subject
         # to the start_recovery_probe re-check inside _update_reset_button_state).
@@ -1827,6 +1852,29 @@ class MyLibraryTab(QWidget):
                 logger.warning("Phase 96 D-F1 prune-on-rescan failed: %s", exc)
             except Exception:
                 pass
+
+        # Phase 115 D-01/D-02: emit indexing-duration telemetry using the stashed locals.
+        # Placed AFTER all UI teardown (unblocks UI first) and BEFORE _queued_action dispatch
+        # so the emit uses the just-finished run's context and is not interleaved with the
+        # queued worker re-entry (REVIEWS finding 6).
+        try:
+            from desktop import telemetry  # lazy import — telemetry is optional
+            if telemetry.is_enabled():
+                _total_indexed = result.get('indexed', 0)
+                _doc_count_bucket = (
+                    '0' if _total_indexed == 0 else
+                    '1-9' if _total_indexed < 10 else
+                    '10-99' if _total_indexed < 100 else
+                    '100+'
+                )
+                telemetry.track_performance(
+                    telemetry.DesktopEvent.INDEXING_COMPLETE,
+                    duration_ms=_elapsed_ms,
+                    operation_kind=telemetry._normalize_operation_kind(_operation_kind),
+                    doc_count_bucket=_doc_count_bucket,
+                )
+        except Exception:  # noqa: BLE001
+            pass  # telemetry is best-effort; never raise
 
         # Process any queued action
         if self._queued_action is not None:
@@ -2325,7 +2373,7 @@ class MyLibraryTab(QWidget):
                 "MyLibraryTab._on_reindex_all_clicked: flip-to-pending failed: %s", exc
             )
             return
-        self._start_worker(toast_on_complete=False)
+        self._start_worker(toast_on_complete=False, operation_kind='reindex_all')
 
     def _on_cancel_clicked(self) -> None:
         """Phase 97 U-02 — 3-button Cancel modal: Discard / Keep partial / Resume indexing.
