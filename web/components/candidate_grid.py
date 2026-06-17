@@ -31,7 +31,7 @@ from nicegui import ui
 
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from web.services import is_oxford_manuscript, get_oxford_direct_image_url
-from web.translations import tr, get_language, is_rtl
+from web.translations import tr, get_language
 
 
 # ---------------------------------------------------------------------------
