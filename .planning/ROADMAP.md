@@ -84,7 +84,13 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
   4. A scholar types text into the minimal anchor-side line builder, triggers a search, and sees a deduped one-per-image candidate grid with thumbnail and key metadata — the compose + execute + dedup pipeline is wired end-to-end.
   5. The `safe_storage` schema for Joins Lab state is defined and versioned (schema-version invalidation field present); all state reads/writes go through `safe_user_*` helpers; the page loads for two different anonymous sessions without any state bleed between them.
   6. The deep-link URL contract is explicit and documented: anchor identified by `sys_id` (with optional shelfmark / `fl_id` / page / `volume_ie`); `/search`, `/browse`, and cold-start all resolve the same anchor; builder/candidate/triage state is not encoded in the URL (device-local only).
-**Plans**: TBD
+**Plans**: 6 plans (2 waves)
+- [ ] 117-01-PLAN.md — WebSearchExecutor adapter (wraps state.searcher off-loop, not /api/search) + Protocol & off-loop-guard CI tests [Wave 1]
+- [ ] 117-02-PLAN.md — Versioned `joins_lab` safe_storage schema + invalidation / round-trip / no-state-bleed tests [Wave 1]
+- [ ] 117-03-PLAN.md — Extract per-provider image-URL resolver + promote RTL transcription helper from browse.py (browse stays green) [Wave 1]
+- [ ] 117-05-PLAN.md — Read-only candidate grid component (thumbnail + shelfmark + library chip + title + View-in-Browse) [Wave 1]
+- [ ] 117-06-PLAN.md — AnchorViewer component (image zoom/pan + folio nav + RTL transcription, proxy-only, idempotent head HTML) [Wave 2]
+- [ ] 117-04-PLAN.md — /joins-lab route + cold-start + builder + off-loop search → compose → dedup → grid + anchor persistence [Wave 2]
 **UI hint**: yes
 
 ### Phase 118: Joins, Entry & Full Builders
@@ -146,7 +152,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 117. Vertical Spine | 0/TBD | Not started | - |
+| 117. Vertical Spine | 0/6 | Planned (6 plans, 2 waves) | - |
 | 118. Joins, Entry & Full Builders | 0/TBD | Not started | - |
 | 119. Candidates, Compare & Visual Similarity | 0/TBD | Not started | - |
 | 120. Actions & Persistence | 0/TBD | Not started | - |
