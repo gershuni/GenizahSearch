@@ -26,18 +26,17 @@
 - **v7.15 My Library Visual** -- Phases 99-101 (shipped 2026-05-28). See `milestones/v7.15-ROADMAP.md`
 - **v7.16 Hebrew PDF Text Quality** -- Phase 102 + no-phase quality work (shipped 2026-06-01). See `milestones/v7.16-ROADMAP.md`
 - **v8.0.0 Dicta Rebrand & Joins Lab** -- BRAND (no-phase) + Phases 103, 105 (folded from v7.17; Phase 104 → EXP-F3) + Phases 106-110 Joins Lab (shipped 2026-06-09; closed 2026-06-11). Component B (JSA-01/02/03 + JWB-05) + web Joins Lab UI deferred post-v8.0.0. See `milestones/v8.0.0-ROADMAP.md`
-- **v8.1.0 Desktop Telemetry** -- Phases 111-116 (shipped 2026-06-16). See `milestones/v8.1.0-ROADMAP.md`
+- **v8.1.0 Desktop Telemetry** -- Phases 111-116 (shipped 2026-06-16; closed 2026-06-16). See `milestones/v8.1.0-ROADMAP.md`
+- 🚧 **v8.2.0 Web Joins Lab** -- Phases 117-121 (in progress)
 
 ## Phases
 
 <details>
-<summary>✅ v8.1.0 Desktop Telemetry (Phases 111-116) — SHIPPED 2026-06-16</summary>
+<summary>✅ v8.1.0 Desktop Telemetry (Phases 111-116) — SHIPPED 2026-06-16, closed 2026-06-16</summary>
 
 See: .planning/milestones/v8.1.0-ROADMAP.md
 
-6 phases (111-116), 20 plans, 32 tasks. Git range `v8.0.0` → `v8.1.0` (228 commits); 316 files, +40,844 / −1,907; 2026-06-11 → 2026-06-16.
-
-Opt-in, privacy-preserving desktop telemetry → the shared web PostHog project (id 134161, EU), identity-aligned with web (`platform=desktop`); default OFF, bilingual consent, never search/My-Library content (enforced by the `desktop/telemetry.py` chokepoint + scrubber + property allowlist + fixed event registry + CI AST guard). Phases: 111 foundation (`desktop/telemetry.py` + neutral `shared/posthog_server.py` additions, no `posthog` SDK), 112 consent UX, 113 crash reporting (chained `sys`/`threading` hooks + faulthandler), 114 usage analytics (web-aligned identity → Supabase `_uuid`), 115 performance summaries (bucketed, per-session flush), 116 privacy audit + CI gate + frozen-exe `SSL_OK`. Also bundled into the release: desktop "Public API & AI Tools" advertising + web public-Search-API enhancements (quick task 260616-p9x) + the `platform=web` super-property. Tagged `v8.1.0` @ `e7382977` (both apps; GitHub Release with installer; web deployed). Closed 2026-06-16.
+6 phases (111-116), 20 plans, 32 tasks. Opt-in, privacy-preserving desktop telemetry for "Dicta Genizah Search Pro" — anonymous usage analytics, crash reports, and per-session performance summaries flow to the shared web PostHog project (id 134161, EU), identity-aligned with the web app (logged-in users → same Supabase `user.id`), split by `platform=desktop`. Default OFF until the user consents via a bilingual first-run dialog; never transmits search content or My Library data. Also bundled: desktop "Public API & AI Tools" advertising and web Search API enhancements (quick task 260616-p9x) + the `platform=web` super-property.
 
 </details>
 
@@ -46,26 +45,109 @@ Opt-in, privacy-preserving desktop telemetry → the shared web PostHog project 
 
 See: .planning/milestones/v8.0.0-ROADMAP.md
 
-7 phases — 103 + 105 (folded from the v7.17 cycle) + 106-110 (Joins Lab Component A). Phase 104 deferred → EXP-F3 (delivered in 110). 31 formal plans (35 completed plan-equivalents incl. 108 redesign/polish + 109 gap rounds). Git range `v7.16.0` → `v8.0.0` (328 commits); 266 files, +55,320 / −785; 2026-06-01 → 2026-06-09.
-
-The flagship **"Dicta Genizah Search Pro"** release: the desktop **rebrand** (display-only; binary identifiers unchanged so installs upgrade in place) + LOCAL ("My Library") **export** support (Phases 103 + 105, closes D-F17) + the new **Joins Lab** — an interactive, human-in-the-loop join-hunting workbench (desktop). Phase 106 shared core (`shared/joins_lab.py`, web-reusable, no PyQt / no direct `fist_data`, `SearchExecutor` adapter); Phases 107-108 the desktop Join Workbench (anchor pane + line-by-line query builders for both sides of the leaf + deduped candidate grid/table + side-by-side Compare + pairwise→group join model + public action APIs); Phase 109 merged Visual Similarity into the candidate surface (single 👁 eye badge + Visual Similarity toggle; standalone VS dialog soft-retired; "Find Joins" is the single entry); Phase 110 added Composition Search over the LOCAL corpus (Genizah/Local/ALL selector orthogonal to Lab mode; standard LOCAL composition uses the REGULAR My-Library index not the LAB side-index; score-interleaved merge, no RRF) + LOCAL-aware `export_comp_report` (EXP-F3). 25 requirements satisfied (BRAND 2 + LEXP 7 + EXPUX 4 + JWB 9 + COMP-LOC 2 + EXP-F3 1). **Deferred by user decision (2026-06-08):** all of Component B (JSA-01/02/03 + JWB-05) and the web Joins Lab UI → post-v8.0.0. Tagged `v8.0.0` @ `71e0912e` (both apps; GitHub Release with installer). Close ritual run retroactively 2026-06-11.
+7 phases — 103 + 105 (folded from the v7.17 cycle) + 106-110 (Joins Lab Component A). 25 requirements satisfied (BRAND 2 + LEXP 7 + EXPUX 4 + JWB 9 + COMP-LOC 2 + EXP-F3 1). Desktop Joins Lab: shared core (`shared/joins_lab.py`) + anchor pane + line-by-line query builders for both sides of the leaf + deduped candidate grid/table + side-by-side Compare + pairwise→group join model + Visual Similarity toggle. Component B (JSA-01/02/03 + JWB-05) and web Joins Lab UI deferred.
 
 </details>
 
-<details>
-<summary>✅ v7.16 Hebrew PDF Text Quality (Phase 102 + no-phase quality work) — SHIPPED 2026-06-01</summary>
+---
 
-See: .planning/milestones/v7.16-ROADMAP.md
+### 🚧 v8.2.0 Web Joins Lab (Phases 117-121)
 
-1 formal phase (102, 5 plans) + post-phase no-phase quality work. Rewrote the LOCAL ("My Library") Hebrew PDF text-layer extractor onto a `page.get_text("rawdict")` per-glyph foundation (`shared/local_indexer_rtl.py`): RTL-gated reorder (Meiri core, no LTR regression), Unicode-`Mn` nikud/maqaf classification, per-line 1-D Otsu word-gap de-space, `_ltr_damage_guard` RTL-trust fix, corrupt_encoding detection; `extraction_format_version` 2→3. Emphasis letter-spacing no longer shatters Hebrew words (אוצר הגאונים single-letter tokens 73.5%→~3-5%) and tight typesetting no longer fuses phrases (רביצקי 15.8%→0.07%). No-phase work bundled: de-space follow-ups (D-F13b/c/d), LOCAL UAT extraction fixes (HTML/xlsx/CSV + folder opt-out cascade BLOCKER, D-F19..D-F22/D-F25), file-management actions for LOCAL hits (D-F24), and three search/startup freeze fixes (D-F23: 778 MB `search_history.json`, large-folder O(n²) startup, LAB-rebuild churn). Shipped v7.16.0 desktop-only (tag `v7.16.0`, GitHub Release with installer, CI green).
+**Milestone goal:** Port the desktop Joins Lab (Component A) to the web at full parity — a human-in-the-loop join-hunting workbench where a scholar pins one anchor fragment (image + numbered transcription) and drives GenizahSearch's existing search tools to find the fragments that physically join it. Rides the complete, web-reusable `shared/joins_lab.py` core (v8.0.0 Phase 106). Human-in-the-loop only — no automated join-finder. Bilingual from line one. Persistence device-local (browser-session, server-side via `safe_storage`) for anonymous users with no login wall.
 
-</details>
+**Hard constraints across all phases:**
+- All per-user state through `web/safe_storage.py` chokepoint (zero raw `app.storage.user`, CI-guarded by `tests/test_no_raw_storage_access.py`)
+- All NLI/IIIF image fetches through existing per-provider proxies + Phase-98 circuit breaker (never unguarded)
+- Search always off the event loop (`run.io_bound`-style); event loop never blocked
+- Bilingual EN/HE with correct RTL layout throughout
+- No new Supabase schema; no automated join-finder
 
-<details>
-<summary>✅ v7.15 My Library Visual (Phases 99-101) — SHIPPED 2026-05-28</summary>
+## Summary Checklist
 
-- [x] Phase 99: PDF Page Renderer (2/2 plans) — completed 2026-05-27
-- [x] Phase 100: LOCAL PDF Image in ResultDialog + Browse (3/3 plans) — completed 2026-05-27
-- [x] Phase 101: LOCAL PDF Text Extraction RTL Fix + Phase 100 Remnant Cleanup (2/2 plans + UAT follow-ons) — completed 2026-05-28
+- [ ] **Phase 117: Vertical Spine** - `/joins-lab` route + safe_storage schema + `WebSearchExecutor` adapter (off-loop) + anchor image/transcription + minimal anchor-side builder + search → candidate grid. Proves the riskiest seam (FND-01 adapter) end-to-end.
+- [ ] **Phase 118: Joins, Entry & Full Builders** - Known-joins group (PGP + FJMS + user + community, multitenant-safe) + "Find joins" from `/search` and `/browse` + other-side builder with web page contract + per-line modifiers + global toggles (variants/JA/spacing/bidirectional) applied correctly.
+- [ ] **Phase 119: Candidates, Compare & Visual Similarity** - Full candidate surface (grid+table, sys_id-keyed triage, self-match, filters, pagination, off-loop enrichment) + side-by-side Compare (per-pane zoom/nav, verdict sync) + VS toggle (merge look-alikes, eye badge everywhere).
+- [ ] **Phase 120: Actions & Persistence** - Add-as-Join (login-gated) + bulk puzzle handoff + add-to-list / export + builder/triage/view state survive refresh (server-side per-session, re-run on restore) + clear/reset.
+- [ ] **Phase 121: i18n Polish** - Complete bilingual EN/HE coverage + RTL layout verification + Hebrew-leak audit across all surfaces.
 
-</details>
+## Phase Details
+
+### Phase 117: Vertical Spine
+
+**Goal**: Scholars can navigate to `/joins-lab`, load an anchor fragment by shelfmark or sys_id, see its image and numbered transcription, type lines into a minimal query builder, run a search, and see a deduped candidate grid — all without login, all with state correctly isolated through `safe_storage`. This end-to-end working slice proves the riskiest seam (the `WebSearchExecutor` adapter) at the start of the milestone.
+**Depends on**: Nothing (first phase of this milestone)
+**Requirements**: FND-01, FND-02, FND-03, FND-06, FND-08, ANC-01, ANC-02, ANC-03, BLD-01, BLD-05, CND-01, CND-02
+**Success Criteria** (what must be TRUE):
+  1. A scholar opens `/joins-lab?sys_id=T-S+12.123` (or equivalent shelfmark param) in a browser without logging in and sees the anchor fragment's image with zoom/pan controls and folio navigation — loaded through the existing per-provider image-proxy resolution (NLI/Oxford/Cambridge/Manchester/JTS), never via a direct unguarded IIIF URL.
+  2. The anchor pane shows the fragment's transcription as right-aligned (RTL) numbered lines alongside the image.
+  3. The `WebSearchExecutor` adapter satisfies the `shared/joins_lab.py` `SearchExecutor` Protocol by wrapping `state.searcher.execute_search` directly off the event loop (`run.io_bound`-style with timeout, cancellation, and stale-generation handling); a CI test asserts no raw `app.storage.user` access is added under `web/` (`tests/test_no_raw_storage_access.py` allowlist stays `[]`), and a second CI test asserts the search call is not made on the event loop.
+  4. A scholar types text into the minimal anchor-side line builder, triggers a search, and sees a deduped one-per-image candidate grid with thumbnail and key metadata — the compose + execute + dedup pipeline is wired end-to-end.
+  5. The `safe_storage` schema for Joins Lab state is defined and versioned (schema-version invalidation field present); all state reads/writes go through `safe_user_*` helpers; the page loads for two different anonymous sessions without any state bleed between them.
+  6. The deep-link URL contract is explicit and documented: anchor identified by `sys_id` (with optional shelfmark / `fl_id` / page / `volume_ie`); `/search`, `/browse`, and cold-start all resolve the same anchor; builder/candidate/triage state is not encoded in the URL (device-local only).
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 118: Joins, Entry & Full Builders
+
+**Goal**: Scholars see the anchor's known scientific joins (PGP + FJMS + user + community) as a connected group, can reach the Joins Lab directly from `/search` cards and `/browse`, and can build complete line-by-line queries for BOTH sides of the leaf — with per-line modifiers and global toggles that are never silently dropped.
+**Depends on**: Phase 117
+**Requirements**: ANC-04, ANC-05, FND-04, FND-05, BLD-02, BLD-03, BLD-04
+**Success Criteria** (what must be TRUE):
+  1. The anchor pane displays known joins as a connected group with per-join source attribution (PGP / FJMS / user-submitted / community), using the pairwise→group BFS model (no new schema).
+  2. The known-joins display is multitenant-safe: only public/confirmed joins appear in the process-global path (or the cache is user/status-aware and isolated), so User A's unconfirmed (creator-only, RLS-scoped) proposed joins cannot appear in User B's session.
+  3. "Find joins" actions appear on `/search` result cards and on `/browse` and open the Joins Lab pre-loaded with that fragment as the anchor, satisfying the FND-08 deep-link contract (sys_id param; `volume_ie` passed for multi-IE manuscripts; no builder/triage state in the URL).
+  4. The other-side builder drives `resolve_other_side_pages` over a web-defined page contract (`p_num`-based not internal index, multi-IE-aware, defined behavior for unknown total-page counts and sparse/metadata-only pages); cross-side narrow/widen via `apply_cross_side` produces a proper subset (AND narrow) or superset (OR widen) of the anchor-only search.
+  5. Per-line modifiers (line-start ⊢ / line-end ⊣ / plene-defective) on either side hoist into the Responsa-syntax forms `compose()` recognises; global toggles (variants, Judeo-Arabic, flexible spacing, bidirectional) apply to BOTH sides via a `_merge_globals`-equivalent (since `compose()` hardcodes JA/flex/bidirectional false) — a test enables each toggle and asserts the executed query string changes.
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 119: Candidates, Compare & Visual Similarity
+
+**Goal**: Scholars can work a large candidate set efficiently — grid/table with persistent triage, filters, bounded rendering, off-loop enrichment — pull up a side-by-side Compare of anchor vs candidate, and toggle Visual Similarity to merge FIST look-alikes, with look-alikes badged consistently everywhere.
+**Depends on**: Phase 117
+**Requirements**: CND-03, CND-04, CND-05, CND-06, CND-07, CND-08, CMP-01, CMP-02, CMP-03, VSM-01, VSM-02
+**Success Criteria** (what must be TRUE):
+  1. The candidate surface offers grid and table views (table sortable, multi-select); triage verdicts and eye badges show consistently in both simultaneously — switching view never resets or hides per-candidate state.
+  2. Triage verdicts (Yes / Maybe / No) are keyed by `sys_id`, reflected immediately in grid and table, and cleared on re-anchor; a self-match banner appears when `detect_self_match` finds the anchor among its own candidates.
+  3. Candidate filters (material / dimensions / size-mismatch / triage state) narrow the display (persisting across grid/table, matching desktop Phase-108 semantics); a result cap and/or pagination prevents unbounded render, and neither the render loop nor enrichment blocks the NiceGUI event loop.
+  4. Candidate metadata (shelfmark / title / library / material / dimensions / thumbnail) is enriched asynchronously off the event loop, in batches, with image/network lookups through the Phase-98 NLI circuit breaker — an NLI outage degrades thumbnails gracefully without stalling the surface.
+  5. Opening Compare from any candidate (grid card, table row, or shortcut) shows a side-by-side anchor↔candidate panel (image + numbered transcription) with independent per-pane zoom and folio navigation; recording a Y/?/N verdict in Compare syncs back to the `sys_id`-keyed triage in grid and table with no refresh.
+  6. A single Visual Similarity (👁) toggle merges FIST look-alikes for the loaded anchor via the web VS-service adapter + `merge_candidates` (off = text-only; on = merged / intersection); it tracks the loaded anchor sid so look-alikes invalidate on re-anchor, has explicit disabled / no-data / empty-intersection states, and badges look-alikes consistently across grid, table, and Compare.
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 120: Actions & Persistence
+
+**Goal**: Scholars can act on confirmed candidates (add-as-join, add anchor+candidates to the Puzzle, add-to-list / export) and find their builder inputs, triage, filters, and view restored on return — search re-run from persisted inputs — with a clear/reset escape hatch.
+**Depends on**: Phase 118, Phase 119
+**Requirements**: ACT-01, ACT-02, ACT-03, PST-01, PST-02, PST-03
+**Success Criteria** (what must be TRUE):
+  1. The "Add as Join" action connects to the existing pairwise-join community-write path (login-gated): an unauthenticated scholar sees a login prompt (not a silent failure or error page), and after login the new join appears in the anchor's known-joins group.
+  2. The "Add to Puzzle" action sends the anchor AND all selected candidates to `/puzzle` via a NEW multi-fragment bulk staging payload/API (the prior `/puzzle?add=` accepted one fragment at a time); the anchor is always included regardless of which candidates are selected.
+  3. The "Add to List" action adds selected candidates to a saved list (login-gated cloud write via the existing `/lists`); an "Export" action produces a downloadable CSV or XLSX of the candidate set with shelfmark, library, triage verdict, and key metadata columns.
+  4. After a page refresh (or return to `/joins-lab` in the same browser session without logging in), the anchor, builder inputs (line text, modifiers, global toggles), triage verdicts, active filter, and view mode are all restored; the search is automatically re-run from the persisted inputs (not a stale result blob) — consistent with the desktop `join_workbench` restore pattern.
+  5. Persistence uses server-side per-browser-session state through `web/safe_storage.py` (`safe_user_*`, keyed by the NiceGUI session cookie); the stored schema has an explicit version field for clean invalidation; the payload contains no `full_text` / image / result blobs (size cap enforced) and never leaks across sessions; a "Clear / Reset" control wipes all Joins Lab working state, and a test confirms the `safe_storage` keys are empty after reset.
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 121: i18n Polish
+
+**Goal**: Every visible string in the Joins Lab is available in both English and Hebrew; RTL layout is correct throughout — anchor transcription, builder rows, candidate grid/table, Compare panes, dialogs and toasts; no Hebrew string leaks to the English interface and no English string to the Hebrew interface.
+**Depends on**: Phases 117, 118, 119, 120
+**Requirements**: FND-07
+**Success Criteria** (what must be TRUE):
+  1. Every UI string in the Joins Lab — labels, buttons, tooltips, toasts, error messages, placeholders — has both an EN and HE key in the project's `tr()` system; switching the app language updates all Joins Lab strings without a page reload.
+  2. The Hebrew-interface layout is fully RTL: anchor transcription right-aligned, builder rows right-to-left, candidate grid/table headers + cells in RTL, Compare panes mirrored, no element clipped or overlapping from a direction mismatch.
+  3. A static / AST audit confirms no raw Hebrew string literal appears in the Joins Lab page/component Python files outside the `tr()` system — every Hebrew string goes through `tr()` so it cannot leak into the English interface.
+**Plans**: TBD
+**UI hint**: yes
+
+## Progress
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 117. Vertical Spine | 0/TBD | Not started | - |
+| 118. Joins, Entry & Full Builders | 0/TBD | Not started | - |
+| 119. Candidates, Compare & Visual Similarity | 0/TBD | Not started | - |
+| 120. Actions & Persistence | 0/TBD | Not started | - |
+| 121. i18n Polish | 0/TBD | Not started | - |

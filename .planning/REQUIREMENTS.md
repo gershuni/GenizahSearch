@@ -105,13 +105,49 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (filled by `/gsd:new-milestone` roadmapper) | — | Pending |
+| FND-01 | Phase 117 | Pending |
+| FND-02 | Phase 117 | Pending |
+| FND-03 | Phase 117 | Pending |
+| FND-04 | Phase 118 | Pending |
+| FND-05 | Phase 118 | Pending |
+| FND-06 | Phase 117 | Pending |
+| FND-07 | Phase 121 | Pending |
+| FND-08 | Phase 117 | Pending |
+| ANC-01 | Phase 117 | Pending |
+| ANC-02 | Phase 117 | Pending |
+| ANC-03 | Phase 117 | Pending |
+| ANC-04 | Phase 118 | Pending |
+| ANC-05 | Phase 118 | Pending |
+| BLD-01 | Phase 117 | Pending |
+| BLD-02 | Phase 118 | Pending |
+| BLD-03 | Phase 118 | Pending |
+| BLD-04 | Phase 118 | Pending |
+| BLD-05 | Phase 117 | Pending |
+| CND-01 | Phase 117 | Pending |
+| CND-02 | Phase 117 | Pending |
+| CND-03 | Phase 119 | Pending |
+| CND-04 | Phase 119 | Pending |
+| CND-05 | Phase 119 | Pending |
+| CND-06 | Phase 119 | Pending |
+| CND-07 | Phase 119 | Pending |
+| CND-08 | Phase 119 | Pending |
+| CMP-01 | Phase 119 | Pending |
+| CMP-02 | Phase 119 | Pending |
+| CMP-03 | Phase 119 | Pending |
+| VSM-01 | Phase 119 | Pending |
+| VSM-02 | Phase 119 | Pending |
+| ACT-01 | Phase 120 | Pending |
+| ACT-02 | Phase 120 | Pending |
+| ACT-03 | Phase 120 | Pending |
+| PST-01 | Phase 120 | Pending |
+| PST-02 | Phase 120 | Pending |
+| PST-03 | Phase 120 | Pending |
 
 **Coverage:**
 - v1 requirements: 37 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 37 ⚠️ (resolved at roadmap creation)
+- Mapped to phases: 37 (complete)
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-17*
-*Last updated: 2026-06-17 after milestone v8.2.0 definition + Codex pre-lock critique*
+*Last updated: 2026-06-17 — traceability table filled at roadmap creation*

@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v8.2.0
 milestone_name: Web Joins Lab
 status: planning
-last_updated: "2026-06-17T11:45:48.142Z"
+last_updated: "2026-06-17T12:00:00.000Z"
 last_activity: 2026-06-17
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,109 +17,82 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-11 after v8.0.0 close)
+See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 116 — privacy-audit-ci-gate
+**Current focus:** Phase 117 — vertical-spine (not yet started)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: Not started (roadmap created, awaiting plan-phase 117)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-17 — Milestone v8.2.0 started
+Status: Roadmap created 2026-06-17
+Last activity: 2026-06-17 — Roadmap for v8.2.0 Web Joins Lab created (5 phases, 37 requirements mapped)
 
 ## Accumulated Context
 
-### Key Decisions (v8.1.0)
+### Key Decisions (v8.2.0)
 
-- **Foundation-first invariant**: no event can fire before Phase 111 (consent gate + scrubber + allowlist) is complete and tested. Phases 113-115 all depend on Phase 111.
-- **Consent storage**: `config.pkl` via `load_app_config`/`save_app_config` — NOT `QSettings`, NOT `session.json`. `session.json` is cleared by crash recovery.
-- **Opt-out keeps install ID on disk** (per user decision — CONSENT-06). Re-opt-in preserves install continuity. `CONSENT-F1` (reset ID affordance) deferred.
-- **UUID lifecycle**: minted inside `set_consent(True)` only — never at import time, never before user opts in. Always `uuid.uuid4()`, never `uuid1()` (MAC-based).
-- **Crash hook**: wraps (chains) existing `_setup_crash_handler()` via `try/finally` — never replaces it. `crash_log.txt` must keep working after hooks are installed.
-- **No `posthog` SDK**: reuse `shared/posthog_server.py` fire-and-forget queue only. Zero new pip deps, no spec-file changes.
-- **Reuse the SHARED PostHog project** (INFRA-01 — FINAL 2026-06-14 per `.planning/research/POSTHOG-PROJECT-DECISION.md`; wired into code 2026-06-15, re-Codex-reviewed): desktop reuses the existing web project (id 134161, EU), **identity-aligned** with web (logged-in → Supabase `user.id`, IDENT-01..04 in Phase 114; logged-out → anon uuid4), web↔desktop separated by `platform: 'desktop'` + the `desktop_` event-name namespace. Uses the existing web publishable key (`web/main.py` `_posthog_key`, sourced from `POSTHOG_API_KEY` — already public in web client JS, so embedding in the .exe adds no new exposure). Key resolution in `_wire_transport_config` (2026-06-15): `GENIZAH_TELEMETRY_KEY` (all builds) → `POSTHOG_API_KEY` (source/dev only — a frozen .exe ignores it) → embedded `_TELEMETRY_KEY_DEFAULT` (baked at build; stays `_UNFILLED_KEY_SENTINEL` until then → drop locally). Accept only phc_; NEVER `POSTHOG_PERSONAL_API_KEY` (phx_). Default host already eu.i.posthog.com.
-- **Session summary for perf** (PERF-03): aggregated per-session flush, not per-search events. ~tens/day target for heavy users, not ~50/day × dozens.
+- **Vertical spine first (Phase 117):** The `WebSearchExecutor` adapter is the riskiest seam — it wraps `state.searcher.execute_search` directly, off the event loop, NOT `/api/search` (which omits `text_position`/`corpus_scope`). Phase 117 proves this seam end-to-end before building the full feature surface.
+- **Build order (5 phases, condensed from an initial 9 per user request 2026-06-17 — spine kept thin):** Spine (117) → Joins, Entry & Full Builders (118) → Candidates, Compare & Visual Similarity (119) → Actions & Persistence (120) → i18n Polish (121).
+- **Persistence = server-side per-session, NOT browser localStorage:** `web/safe_storage.py` wraps server-side `app.storage.user` (NiceGUI session cookie). `browser` = small encrypted cookie; `client` dies on refresh; `tab` is volatile per-tab. Decision: use `safe_user_*` helpers (survives refresh for anonymous users, keyed by session cookie). Persist inputs + triage only; re-run search on restore (avoids search-history payload-bloat class of bug).
+- **Phase 87 invariant preserved throughout:** Zero raw `app.storage.user` accesses; `tests/test_no_raw_storage_access.py` allowlist stays `[]`; CI-guarded on every phase.
+- **No new Supabase schema this milestone:** Known-joins leverage existing pairwise-join path + BFS group; cross-device sync deferred to PST-F1 (future).
+- **ANC-05 multitenant known-joins safety:** `fetch_connected_fragments` has a process-global cache — Phase 118 must surface only public/confirmed joins or implement user/status-aware cache isolation to prevent User A's unconfirmed joins leaking to User B.
+- **ACT-02 bulk puzzle handoff:** `/puzzle?add=` currently accepts one `sys_id` — Phase 120 ships a bulk staging payload/API so anchor + selected candidates open together.
+- **Image resolution:** All images through existing per-provider proxies (NLI, Oxford, Cambridge, Manchester, JTS) + Phase-98 circuit breaker. No direct unguarded IIIF fetches.
+- **Web-only milestone:** No GitHub Release (desktop-poll prompt avoidance per project convention). Version bumps but no GitHub Release object.
 
 ### Blockers/Concerns
 
-- PyInstaller SSL cert bundle for `certifi` needs manual verification on a clean Windows VM (Phase 116 success criterion 3). CODE IS COMPLETE (send_selftest_event_sync + --telemetry-selftest flag); the HUMAN-UAT (Task 3) is deferred to /release time. INFRA-06 NOT yet complete.
-- ~~Embed the real phc_ key~~ **DONE (2026-06-15):** the publishable shared-project key `phc_CGTsV72…` is now baked into `_TELEMETRY_KEY_DEFAULT`, so a shipped .exe emits without any env var (guarded by `test_embedded_default_is_a_real_phc_key` + `test_frozen_build_uses_embedded_key`). Remaining gate for the two 113-HUMAN-UAT items is now ONLY the packaged .exe build (deferred to /release / Phase 116).
+None at roadmap creation. Phase 117 first plan will address the `WebSearchExecutor` adapter design in detail.
 
 ### Pending Todos
 
-None specific to v8.1.0 yet.
+None yet. Begin with `/gsd:plan-phase 117`.
 
 ### Quick Tasks Completed
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
-| 260616-p9x | Per-mode Search API timeout tiering + heavy-mode concurrency cap + fuzzy result-cap raise | 2026-06-16 | e4f315af | [260616-p9x-per-mode-timeout-tiering-concurrency-cap](./quick/260616-p9x-per-mode-timeout-tiering-concurrency-cap/) |
+| (none yet) | — | — | — | — |
 
 ## Deferred Items
 
+Items carried forward from v8.1.0:
+
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| CONSENT-F1 | "Reset telemetry id" affordance in Settings | Future | v8.1.0 (user chose keep-id-on-opt-out) |
-| ERR-01 | Handled/non-fatal error counting at high-value sites | Future | v8.1.0 (hard crashes only in this milestone) |
+| CONSENT-F1 | "Reset telemetry id" affordance in Settings | Future | v8.1.0 |
+| ERR-01 | Handled/non-fatal error counting at high-value sites | Future | v8.1.0 |
 | CRASH-F1 | "Send logs" flow for local faulthandler log | Future | v8.1.0 |
-| WEB-F1 | Clean web `search_executed` query-text property (privacy gap) | Future | v8.1.0 (web follow-up) |
+| WEB-F1 | Clean web `search_executed` query-text property (privacy gap) | Future | v8.1.0 |
 | FLAG-F1 | PostHog feature flags / remote config on desktop | Future | v8.1.0 |
-| INFRA-F2 | ~~Shared-emitter chokepoint tagging~~ **DONE 2026-06-15:** desktop registers `_desktop_default_props_hook` (via `register_scrub_hook`) while consent is on → every shared-queue event (incl. `nli_breaker_opened/closed`) gets `platform=desktop` + `$process_person_profile=False` (fill-when-absent). Verified live + `tests/test_telemetry_shared_emitter_tagging.py`. | — | v8.1.0 |
-| INFRA-F3 | Identity hygiene — `$process_person_profile=False` on anonymous desktop events (already in IDENT-01..04 scope); Codex 2026-06-15 add: avoid bare `system` crash distinct_id (use `desktop:system` or drop) | Phase 114 (IDENT-01..04) | v8.1.0 |
-| INFRA-F4 | Shared-project guardrails — platform filter on web insights, separate web/desktop dashboards, flag/experiment namespacing, MTU monitoring, release test "embedded key + no env → used" (Codex 2026-06-15) | Phase 116 + ops | v8.1.0 |
-
-### Acknowledged at v8.1.0 close (audit-open, 2026-06-16)
-
-Pre-close `gsd-sdk query audit-open` surfaced open GSD artifacts; user chose **Acknowledge all & close**. Recorded as deferred (not blocking — v8.1.0 shipped + CI-green):
-
-| Category | Count | Note |
-|----------|-------|------|
-| Debug sessions | 41 | Cross-milestone debris (`phase12-*`, `domain-filter-dialog-lag`, `reading-desk-*`, etc.) — mostly `diagnosed`/`unknown`, never flipped to resolved. Candidates for `/gsd:cleanup`. |
-| Quick tasks | 50 | Historical backlog spanning the whole project. |
-| UAT gaps | 3 | Phases 113/114/116 (`partial`) — the live-PostHog delivery + clean-VM SSL items, **functionally satisfied this release** (UAT Test 1 PASS in prod PostHog 134161 + `SSL_OK` on the frozen v8.1.0 exe) but the GSD UAT files weren't flipped. |
-| Verification gaps | 3 | Phases 113/114/116 (`human_needed`) — the expected gate that the live UAT above closed; status not flipped. |
+| PST-F1 | Cloud cross-device sync of Joins Lab candidate lists / triage | Future | v8.2.0 (desktop is local-only; nothing to sync with yet) |
+| D-F12 | Regular Search ~8s wall-clock (profile-first) | Future | v8.1.0 |
+| D-F18 | Context-menu LOCAL detection via `display` | Future | v8.0.0 |
+| JSA-01 | Anchor parallels seeding (Component B) | Future | v8.0.0 |
+| JSA-02 | Corpus-driven suggest-then-search completion (Component B) | Future | v8.0.0 |
+| JSA-03 | Torn-word completion (Component B) | Future | v8.0.0 |
+| JWB-05 | Tear-side assist (Component B) | Future | v8.0.0 |
 
 ## Session Continuity
 
-Last session: 2026-06-16T11:09:12.785Z
-Stopped at: Phase 116 context gathered
+Last session: 2026-06-17 (roadmap creation)
+Stopped at: Roadmap created, files written
 Resume file: None
-Next step: Phase 116 Plan 02 Tasks 1-2 complete; Task 3 HUMAN-UAT deferred to /release (clean no-Python Windows VM: --telemetry-selftest -> SSL_OK + PostHog 134161 event; INFRA-06 NOT yet complete)
+Next step: `/gsd:plan-phase 117` (Vertical Spine)
 
 ## Performance Metrics
 
 | Phase | Plan | Duration | Notes |
 |-------|------|----------|-------|
-| Phase 111-telemetry-foundation P01 | 4min | 2 tasks | 2 files |
-| Phase 111-telemetry-foundation P02 | 9min | 3 tasks | 5 files |
-| Phase 111-telemetry-foundation P03 | 2min | 1 tasks | 1 files |
-| Phase 112-consent-ux P01 | 25min | 2 tasks | 2 files |
-| Phase 112-consent-ux P02 | 8min | 2 tasks | 2 files |
-| Phase 112-consent-ux P03 | 30min | 3 tasks | 2 files |
-| Phase 113-crash-reporting P01 | 5min | 2 tasks | 6 files |
-| Phase 113-crash-reporting P02 | 15min | 2 tasks | 4 files |
-| Phase Phase 113-crash-reporting PP03 | 25min | 3 tasks | 4 files |
-| Phase 114-usage-analytics P02 | 35min | 5 tasks | 2 files |
-| Phase 114-usage-analytics P03 | 30min | 3 tasks | 4 files |
-| Phase 114-usage-analytics P114-04 | 7min | 3 tasks | 2 files |
-| Phase 115-performance-metrics P03 | 30min | 3 tasks | 2 files |
-| Phase 116-privacy-audit-ci-gate P01 | 3min | 3 tasks | 2 files |
-| Phase 116-privacy-audit-ci-gate P02 | 15min | 2 tasks (Task 3 deferred) | 2 files |
+| (none yet) | — | — | — |
 
 ## Decisions
 
-- [Phase 111-telemetry-foundation]: PRIV-03 AST guard delivered early in Phase 111-03 (vs Phase-116 slot) — no allowlist, absolute invariant, resolved-path exemption
-- [Phase ?]: show_first_run_prompt() lazy-imports ConsentDialog; chained from _show_citation_reminder for strict ordering; activeModalWidget reschedule guard added
-- [Phase ?]: [Phase 113-01]: send_crash_event_direct reads lock-free snapshot globals — no _capture_config_lock in crash path (D-05/REVIEWS HIGH-1)
-- [Phase ?]: Phase 113-02: module-top send_crash_event_direct import requires monkeypatching tel.send_crash_event_direct in tests, not ph
-- [Phase ?]: Phase 114-02: _telemetry_result_bucket module-level; corpus_scope via currentData(); drain thread isolation in autouse fixture; _app_shutting_down first-guard in all 3 emit helpers
-- [Phase 114-04]: CR-114-01: PGP-tag per-run token (_pgp_tag_run_seq) + drain+disconnect before run-object install closes stale-slot race
-- [Phase 114-04]: CR-114-02/03: _reset_search/_reset_composition now emit cancelled in the isRunning() branch (mirror stop_search pattern)
-- [Phase 114-04]: CR-114-04: closeEvent session_end gated on _telemetry_ready() AND truthy _session_id — orphan session_end='' prevented
-- [Phase 114-04]: CR-114-05: open_join_workbench(emit_telemetry=False) for restore suppression; CR-114-06: comp-resume uses _set_active_tab
+(Accumulated during execution — none yet at roadmap creation)
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd:new-milestone
+- Run `/gsd:plan-phase 117` to plan the Vertical Spine
