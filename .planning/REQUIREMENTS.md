@@ -41,7 +41,7 @@ Requirements for this milestone. Each maps to a roadmap phase.
 ### Candidate Surface (CND)
 
 - [ ] **CND-01**: Candidates render deduped to one entry per image/fragment (`dedup_candidates`).
-- [ ] **CND-02**: User can view candidates in a grid surface (thumbnail + key metadata + per-card actions).
+- [x] **CND-02**: User can view candidates in a grid surface (thumbnail + key metadata + per-card actions).
 - [ ] **CND-03**: User can view candidates in a table surface (sortable columns, multi-select).
 - [ ] **CND-04**: User can triage each candidate Yes / Maybe / No; triage is keyed by `sys_id`, reflected consistently across grid, table, and Compare, and resets on re-anchor.
 - [ ] **CND-05**: The Lab surfaces a self-match readout when the anchor appears in its own candidate results (`detect_self_match`).
@@ -124,7 +124,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | BLD-04 | Phase 118 | Pending |
 | BLD-05 | Phase 117 | Pending |
 | CND-01 | Phase 117 | Pending |
-| CND-02 | Phase 117 | Pending |
+| CND-02 | Phase 117 | Complete |
 | CND-03 | Phase 119 | Pending |
 | CND-04 | Phase 119 | Pending |
 | CND-05 | Phase 119 | Pending |
