@@ -76,6 +76,11 @@ Items carried forward from v8.1.0:
 | JSA-02 | Corpus-driven suggest-then-search completion (Component B) | Future | v8.0.0 |
 | JSA-03 | Torn-word completion (Component B) | Future | v8.0.0 |
 | JWB-05 | Tear-side assist (Component B) | Future | v8.0.0 |
+| JL-UAT1 | Candidate cards: larger image + expandable text snippet | Phase 119 (candidate surface) | v8.2.0 P117 UAT |
+| JL-UAT2 | Search progress bar / ETA for long searches | Phase 119/120 | v8.2.0 P117 UAT |
+| JL-UAT3 | Long/common-phrase search drops the websocket ("Connection Lost" → reconnect → restored-session). Known GIL/event-loop limitation shared with `/search`; proper fix = the already-deferred async-job pattern (CLAUDE.md). Not a 117-spine blocker. | Future (async-job) | v8.2.0 P117 UAT |
+| JL-UAT4 | Stop search + return partial results | Phase 120 (actions) | v8.2.0 P117 UAT |
+| JL-UAT5 | Joins Lab pane-width tuning / resizable panes | Phase 119/121 polish | v8.2.0 P117 UAT |
 
 ## Session Continuity
 
