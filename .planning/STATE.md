@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v8.2.0
 milestone_name: Web Joins Lab
 status: executing
-stopped_at: Completed Phase 117 Plan 03 — browse extraction complete
-last_updated: "2026-06-17T17:40:00.766Z"
+stopped_at: Completed Phase 117 Plan 06 — AnchorViewer component complete
+last_updated: "2026-06-17T18:20:00.000Z"
 last_activity: 2026-06-17
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 6
-  completed_plans: 4
-  percent: 0
+  completed_plans: 6
+  percent: 20
 ---
 
 # Project State
@@ -25,9 +25,9 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: 117 (vertical-spine) — EXECUTING
-Plan: 5 of 6
-Status: Ready to execute
+Phase: 117 (vertical-spine) — COMPLETE
+Plan: 6 of 6 (all plans complete)
+Status: Phase complete — ready for Phase 118
 Last activity: 2026-06-17
 
 ## Accumulated Context
@@ -102,7 +102,9 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 - [Phase ?]: Versioned safe_storage schema for joins_lab
 - [Phase ?]: 117-03: resolve_image_url must be fed from web.services.BrowsePage (service.get_browse_page), not narrow Protocol dict (HIGH-1)
 - [Phase ?]: 117-03: resolve_external_images lazy-imports web.state.state.meta_mgr; accepts meta_mgr= param for testability; one source of truth for D-10 external-image enrichment
+- **117-06:** AnchorViewer factored with public _resolve_off_loop() + _build_img_html() sync methods for headless testability (no NiceGUI render harness needed in tests)
+- **117-06:** Browse_resolver + external_resolver constructor params enable injection in tests without live AppState
 
 ## Operator Next Steps
 
-- Run `/gsd-execute-phase 117 --plan 02` to execute Plan 02 (safe_storage schema)
+- Phase 117 is COMPLETE (all 6 plans done). Run `/gsd-discuss-phase 118` to start Phase 118 (Joins, Entry & Full Builders).

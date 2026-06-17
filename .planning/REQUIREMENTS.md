@@ -24,7 +24,7 @@ Requirements for this milestone. Each maps to a roadmap phase.
 
 ### Anchor Pane (ANC)
 
-- [ ] **ANC-01**: The anchor pane shows the pinned fragment's image with zoom/pan and folio (page) navigation.
+- [x] **ANC-01**: The anchor pane shows the pinned fragment's image with zoom/pan and folio (page) navigation.
 - [x] **ANC-02**: Anchor (and Compare) images load through the **existing per-provider image-proxy resolution** used by `/browse` (NLI, Oxford, Cambridge, Manchester, JTS) — reusing those endpoints and the Phase-98 NLI circuit breaker — rather than inventing direct image URLs. No unguarded NLI/IIIF fetch.
 - [x] **ANC-03**: The anchor pane shows the fragment's transcription as right-aligned (RTL) numbered lines.
 - [ ] **ANC-04**: The anchor pane shows known joins (PGP + FJMS + user + community) as a connected group with source attribution.
@@ -113,7 +113,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | FND-06 | Phase 117 | Complete |
 | FND-07 | Phase 121 | Pending |
 | FND-08 | Phase 117 | Pending |
-| ANC-01 | Phase 117 | Pending |
+| ANC-01 | Phase 117 | Complete |
 | ANC-02 | Phase 117 | Complete |
 | ANC-03 | Phase 117 | Complete |
 | ANC-04 | Phase 118 | Pending |

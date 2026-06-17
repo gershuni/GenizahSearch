@@ -65,7 +65,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 ## Summary Checklist
 
-- [ ] **Phase 117: Vertical Spine** - `/joins-lab` route + safe_storage schema + `WebSearchExecutor` adapter (off-loop) + anchor image/transcription + minimal anchor-side builder + search → candidate grid. Proves the riskiest seam (FND-01 adapter) end-to-end.
+- [x] **Phase 117: Vertical Spine** - `/joins-lab` route + safe_storage schema + `WebSearchExecutor` adapter (off-loop) + anchor image/transcription + minimal anchor-side builder + search → candidate grid. Proves the riskiest seam (FND-01 adapter) end-to-end. **COMPLETE 2026-06-17**
 - [ ] **Phase 118: Joins, Entry & Full Builders** - Known-joins group (PGP + FJMS + user + community, multitenant-safe) + "Find joins" from `/search` and `/browse` + other-side builder with web page contract + per-line modifiers + global toggles (variants/JA/spacing/bidirectional) applied correctly.
 - [ ] **Phase 119: Candidates, Compare & Visual Similarity** - Full candidate surface (grid+table, sys_id-keyed triage, self-match, filters, pagination, off-loop enrichment) + side-by-side Compare (per-pane zoom/nav, verdict sync) + VS toggle (merge look-alikes, eye badge everywhere).
 - [ ] **Phase 120: Actions & Persistence** - Add-as-Join (login-gated) + bulk puzzle handoff + add-to-list / export + builder/triage/view state survive refresh (server-side per-session, re-run on restore) + clear/reset.
@@ -93,8 +93,8 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 - [x] 117-02-PLAN.md — Versioned `joins_lab` safe_storage schema + invalidation / round-trip / no-state-bleed tests [Wave 1]
 - [x] 117-03-PLAN.md — Extract per-provider image-URL resolver + promote RTL transcription helper from browse.py (browse stays green) [Wave 1]
 - [x] 117-05-PLAN.md — Read-only candidate grid component (thumbnail + shelfmark + library chip + title + View-in-Browse) [Wave 1]
-- [ ] 117-06-PLAN.md — AnchorViewer component (image zoom/pan + folio nav + RTL transcription, proxy-only, idempotent head HTML) [Wave 2]
-- [ ] 117-04-PLAN.md — /joins-lab route + cold-start + builder + off-loop search → compose → dedup → grid + anchor persistence [Wave 2]
+- [x] 117-06-PLAN.md — AnchorViewer component (image zoom/pan + folio nav + RTL transcription, proxy-only, idempotent head HTML) [Wave 2]
+- [x] 117-04-PLAN.md — /joins-lab route + cold-start + builder + off-loop search → compose → dedup → grid + anchor persistence [Wave 2]
 
 **UI hint**: yes
 
