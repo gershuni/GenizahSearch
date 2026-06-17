@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v8.1.0
 milestone_name: Desktop Telemetry
-status: closing_and_releasing
-stopped_at: "v8.1.0 close+release IN PROGRESS — pre-flight gates GREEN (ruff/check_docs/241-test regression), PRIV-04+INFRA-06 flipped to Complete, Phase 116 marked complete. NEXT: run /release [both] (it owns version bump + What's New + build + deploy + GitHub release), then /gsd-complete-milestone. Follow 116-RELEASE-CHECKLIST.md."
-last_updated: "2026-06-16T15:00:42.215Z"
-last_activity: 2026-06-16
+status: Awaiting next milestone
+stopped_at: Phase 116 context gathered
+last_updated: "2026-06-16T19:37:09.386Z"
+last_activity: 2026-06-16 — Milestone v8.1.0 completed and archived
 progress:
   total_phases: 6
   completed_phases: 6
@@ -25,13 +25,10 @@ See: .planning/PROJECT.md (updated 2026-06-11 after v8.0.0 close)
 
 ## Current Position
 
-Phase: 116 (privacy-audit-ci-gate) — COMPLETE (3/3 plans). v8.1.0 all 6 phases done; CLOSE+RELEASE in progress.
-Plan: All executed. 116-01 ✓, 116-02 ✓ (clean-VM SSL HUMAN-UAT runs at release build), 116-03 ✓.
-Status: closing_and_releasing — follow `.planning/phases/116-privacy-audit-ci-gate/116-RELEASE-CHECKLIST.md`. DONE: pre-flight gates GREEN (ruff clean on tracked files / check_docs pass / 241-test milestone-exit regression pass); PRIV-04+INFRA-06 flipped Pending→Complete (all 40 reqs Complete); Phase 116 marked complete. NEXT: run **/release [both]** — it owns the version bump to 8.1.0 (NOTE: also bump `_TARGET_VERSION` in tests/test_release_artifacts.py — bump_version.py misses it) + What's New drafting + CHANGELOG + build exe [restore .spec after build_app.bat; clean-VM SSL_OK runs here] + web deploy (platform=web commit 36ae3fe7) + GitHub release. THEN run /gsd-complete-milestone explicitly (/release skips the GSD milestone-close ritual).
-Open: clean-no-Python-VM SSL_OK + offline arm (116-HUMAN-UAT Test 2 — naturally done during the release build; user accepted current state). Dashboards built (Desktop 752803 / Web 752805 / Comparison 752806).
-Last activity: 2026-06-16 - Completed quick task 260616-p9x: per-mode Search API timeout tiering + heavy-mode concurrency cap + fuzzy result-cap raise
-
-Progress: [██████████] 100%
+Phase: Milestone v8.1.0 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-06-16 — Milestone v8.1.0 completed and archived
 
 ## Accumulated Context
 
@@ -74,6 +71,17 @@ None specific to v8.1.0 yet.
 | INFRA-F3 | Identity hygiene — `$process_person_profile=False` on anonymous desktop events (already in IDENT-01..04 scope); Codex 2026-06-15 add: avoid bare `system` crash distinct_id (use `desktop:system` or drop) | Phase 114 (IDENT-01..04) | v8.1.0 |
 | INFRA-F4 | Shared-project guardrails — platform filter on web insights, separate web/desktop dashboards, flag/experiment namespacing, MTU monitoring, release test "embedded key + no env → used" (Codex 2026-06-15) | Phase 116 + ops | v8.1.0 |
 
+### Acknowledged at v8.1.0 close (audit-open, 2026-06-16)
+
+Pre-close `gsd-sdk query audit-open` surfaced open GSD artifacts; user chose **Acknowledge all & close**. Recorded as deferred (not blocking — v8.1.0 shipped + CI-green):
+
+| Category | Count | Note |
+|----------|-------|------|
+| Debug sessions | 41 | Cross-milestone debris (`phase12-*`, `domain-filter-dialog-lag`, `reading-desk-*`, etc.) — mostly `diagnosed`/`unknown`, never flipped to resolved. Candidates for `/gsd:cleanup`. |
+| Quick tasks | 50 | Historical backlog spanning the whole project. |
+| UAT gaps | 3 | Phases 113/114/116 (`partial`) — the live-PostHog delivery + clean-VM SSL items, **functionally satisfied this release** (UAT Test 1 PASS in prod PostHog 134161 + `SSL_OK` on the frozen v8.1.0 exe) but the GSD UAT files weren't flipped. |
+| Verification gaps | 3 | Phases 113/114/116 (`human_needed`) — the expected gate that the live UAT above closed; status not flipped. |
+
 ## Session Continuity
 
 Last session: 2026-06-16T11:09:12.785Z
@@ -112,3 +120,7 @@ Next step: Phase 116 Plan 02 Tasks 1-2 complete; Task 3 HUMAN-UAT deferred to /r
 - [Phase 114-04]: CR-114-02/03: _reset_search/_reset_composition now emit cancelled in the isRunning() branch (mirror stop_search pattern)
 - [Phase 114-04]: CR-114-04: closeEvent session_end gated on _telemetry_ready() AND truthy _session_id — orphan session_end='' prevented
 - [Phase 114-04]: CR-114-05: open_join_workbench(emit_telemetry=False) for restore suppression; CR-114-06: comp-resume uses _set_active_tab
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd:new-milestone

@@ -1,5 +1,27 @@
 # Project Milestones: GenizahSearch
 
+## v8.1.0 Desktop Telemetry (Shipped: 2026-06-16)
+
+**Phases completed:** 6 phases (111-116), 20 plans, 32 tasks
+**Git range:** `v8.0.0` → `v8.1.0` (228 commits)
+**Scope:** 316 files changed, +40,844 / −1,907
+**Timeline:** 2026-06-11 → 2026-06-16 (6 days)
+**App releases:** v8.1.0 (2026-06-16, both apps), tagged `v8.1.0` @ `e7382977` (GitHub Release with desktop installer); web deployed (platform=web)
+**Known deferred items at close:** see STATE.md "Deferred Items" — milestone follow-ups (CONSENT-F1/ERR-01/CRASH-F1/WEB-F1/FLAG-F1/INFRA-F3/F4) plus an acknowledged cross-milestone audit backlog (41 debug sessions, 50 quick tasks; 3 UAT + 3 verification gaps for phases 113/114/116 functionally satisfied this release).
+
+**Delivered:** Opt-in, privacy-preserving telemetry for the desktop app ("Dicta Genizah Search Pro") — anonymous usage analytics, crash reporting, and per-session performance summaries flow to the shared web PostHog project (id 134161, EU), identity-aligned with the web app (logged-in users → same Supabase `user.id`) and split by `platform=desktop`. Default OFF until the user consents via a bilingual first-run dialog; **never** transmits search content or any My Library data (paths/filenames/text), enforced structurally by the `desktop/telemetry.py` chokepoint + scrubber + property allowlist + fixed event-name registry + a CI AST guard. Also bundled into the v8.1.0 release: desktop **"Public API & AI Tools" advertising** (a bilingual Help section + What's New line for the public Search API + `cairo-genizah-research` skill) and a round of **web public-Search-API enhancements** (quick task 260616-p9x — usable fuzzy mode, 120 rpm rate limit, per-mode timeout tiering, heavy-mode concurrency cap, higher fuzzy result cap) + the `platform=web` super-property.
+
+**Key accomplishments:**
+
+- **Telemetry foundation (Phase 111)** — `desktop/telemetry.py` chokepoint: consent gate + uuid4 install-id lifecycle in `config.pkl`, structural PII scrubber, property allowlist, fixed `DesktopEvent` registry, hand-rolled `$identify`; 6 backward-compatible neutral additions to `shared/posthog_server.py` (no `posthog` SDK, zero new deps).
+- **Consent UX (Phase 112)** — bilingual EN/HE first-run dialog (Enter cannot opt in; all exit paths persist the shown-flag), Settings/About toggle with opt-out queue drain, and a bilingual privacy disclosure.
+- **Crash + usage + performance producers (Phases 113–115)** — chained non-blocking `sys`/`threading` exception hooks + faulthandler + scrubbed crash payloads; session/tab/feature/search-mode+corpus usage events with web-aligned identity (logged-in → Supabase `_uuid`); per-session performance summaries (bucketed counts, monotonic timing) flushed periodically and at close — never one event per search.
+- **Privacy audit + CI gate (Phase 116)** — AST guard (only `desktop/telemetry.py` reaches PostHog) green on Ubuntu+Windows CI; forbidden-field + pre-consent zero-emit tests; frozen-binary `--telemetry-selftest` → `SSL_OK` confirmed on the v8.1.0 exe; operational runbook.
+- **Desktop API + AI-skill advertising** — bilingual "Public API & AI Tools" Help section (Help.html `id="api"`) + a v8.1.0 What's New line, skill-first (`cairo-genizah-research`).
+- **Web Search API enhancements** — usable fuzzy mode, 120 rpm/endpoint, per-mode timeout tiering, heavy-mode `503` concurrency cap, higher fuzzy result cap; `platform=web` tag for desktop↔web analytics comparison.
+
+---
+
 ## v8.0.0 Dicta Rebrand & Joins Lab (Shipped: 2026-06-09; closed 2026-06-11)
 
 **Phases completed:** 7 phases — 103 + 105 (folded from the v7.17 cycle) + 106, 107, 108, 109, 110 (Joins Lab Component A). Phase 104 deferred → EXP-F3 (delivered in 110).

@@ -345,6 +345,41 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 
 ---
 
+## Milestone: v8.1.0 — Desktop Telemetry
+
+**Shipped:** 2026-06-16
+**Phases:** 6 (111-116) | **Plans:** 20
+
+### What Was Built
+Opt-in, privacy-preserving telemetry for the desktop app, flowing to the shared web PostHog project (`platform=desktop`, identity-aligned with web): consent foundation + chokepoint/scrubber/allowlist (111), bilingual consent UX (112), crash reporting (113), usage analytics (114), per-session performance summaries (115), and a privacy-audit CI gate + frozen-exe SSL self-test (116). The release also bundled desktop "Public API & AI Tools" advertising and a round of web public-Search-API enhancements (quick task 260616-p9x) + the `platform=web` tag.
+
+### What Worked
+- **Foundation-first sequencing.** Phase 111 (consent gate + scrubber + allowlist + AST guard) shipped with ZERO event producers; every later phase wired producers behind an already-proven privacy boundary. No producer could leak before the boundary existed and was tested.
+- **Structural privacy, not reviewed privacy.** A single chokepoint (`desktop/telemetry.py`) + property allowlist + fixed event-name registry + a CI AST guard make "no search/My-Library content" an invariant, not a discipline. Codex's "add value validators" pushback was correctly rebutted — content is a runtime value from accessors the D-17 guard already forbids as telemetry args.
+- **Adversarial review on the FIXES, not just the code.** The Phase 114 gap-closure caught a "VERIFIED present" symbol that was dead code (a stale-slot guard comparing a run's token to itself) only because an adversarial reviewer ran on the fix diff — the presence-checking verifier had rubber-stamped it.
+- **Cross-AI review throughout** (Codex on requirements, plans, and code) surfaced real privacy blockers (scrubber not recursing into `$set`; self-test accepting a `phx_` key).
+
+### What Was Inefficient
+- **A landmine in test infra:** telemetry tests that call `set_consent(True)` + `track()` POST to PRODUCTION PostHog and race the drain daemon (the real key is baked in source). Only `test_telemetry_priv04.py` was hardened; the systemic fixture cleanup is deferred — a latent flakiness/noise source.
+- **Two PostHog-project reversals** during Phase 111 discussion (separate → separate-reconfirmed → one shared) cost cycles, though the final identity-aligned decision was right.
+- The clean-no-Python-VM SSL test stayed a release-time HUMAN-UAT; the frozen-exe local `SSL_OK` was accepted as sufficient.
+
+### Patterns Established
+- **Telemetry chokepoint + AST guard** mirrors the v7.12 `safe_storage` chokepoint — a structural invariant enforced in CI is the project's go-to for "this class of data must never reach that boundary."
+- **Bundle low-coordination ride-alongs into the release, not separate versions** — the desktop API/skill advertising + the web API quick task shipped under v8.1.0 to avoid What's-New version churn.
+
+### Key Lessons
+- **Send the Supabase `_uuid`, never the compat `.id` hash** — identity alignment with web is load-bearing and silently fails (merges with nothing) if the wrong field is sent.
+- **No `posthog` SDK for a content-handling app** — `capture_exception_code_variables` ships frame locals before scrubbing.
+- **The `/release`-skips-close drift was finally broken** — this milestone ran `/gsd-complete-milestone` in the SAME session as the release, ending the five-milestone retroactive-reconciliation pattern (the line-382 lesson was applied, not just recorded).
+
+### Cost Observations
+- Model mix: opus (planning + execution + close); Codex CLI for requirements/plan/code cross-review across every phase.
+- Sessions: multi-session milestone (2026-06-11 → 2026-06-16, 6 days); 228 commits.
+- Notable: a privacy-foundation milestone where the expensive part was getting the invariant + identity model right (two project reversals, several Codex-caught privacy blockers), not the producer wiring — which was fast once the boundary was proven.
+
+---
+
 ## Cross-Milestone Trends
 
 | Milestone | Phases | Plans | Days | Plans/Day | Key Theme |
@@ -367,6 +402,7 @@ Refactored GenizahSearch's web layer off the desktop-inherited single-user menta
 | v7.15 | 3 | 7 | 2 | 3.5 | My Library visual (PDF page image) |
 | v7.16 | 1* | 5 | 4 | 1.3 | Hebrew PDF text quality + freeze fixes |
 | v8.0.0 | 7 | 31 | 9 | 3.4 | Dicta rebrand + Joins Lab + LOCAL composition |
+| v8.1.0 | 6 | 20 | 6 | 3.3 | Desktop telemetry (opt-in, privacy-preserving) |
 
 *v7.16: 1 formal phase (102); most of the milestone was no-phase edit+test quality work (de-space follow-ups, UAT fixes, three search/startup freeze fixes) not captured by plan count.
 
