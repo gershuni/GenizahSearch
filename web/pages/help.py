@@ -106,7 +106,7 @@ The application fetches metadata and images from:
 
         modes_data = [
             ('Exact (=)', 'Matches only the exact word or sequence of words as typed. To search with gaps between words, fill in the "Gap" field with the desired number.'),
-            ('Variants (?, ??, ???)', 'Accounts for common letter substitutions in these texts (e.g., Dalet/Resh, He/Het, Vav/Yod). At the basic level (?) substitutions are limited; extended (??) adds pairs like Qof/Kaf, Tet/Tav; maximum (???) provides full flexibility but is slower. You can also control the number of changes per word (\u00d71 strict, \u00d72 balanced, \u00d73 lenient). In the general settings you can switch the level selector from a dropdown to a slider.'),
+            ('Variants (?)', 'Accounts for common letter substitutions in these texts (e.g., Dalet/Resh, He/Het, Vav/Yod). By default a **slider** controls how much flexibility is allowed \u2014 raising it adds more letter-pairs (from limited substitutions, through pairs like Qof/Kaf and Tet/Tav, up to maximum flexibility), giving broader recall but slower, noisier results. A separate **Num Changes** control sets the number of changes per word (\u00d71 strict, \u00d72 balanced \u2014 the default, \u00d73 lenient). In the general settings you can switch the level selector from the slider to preset buttons (Basic, Extended, Maximum).'),
             ('\U0001F195 Responsa Project (R)', 'Search syntax inspired by the Bar-Ilan Responsa Project, with prefix/suffix expansion, wildcards, spelling variants, and proximity gaps. Also includes a convenient and flexible tabular query builder. Familiar to Responsa Project users; easy to learn for newcomers. See [Responsa-Style Search](#help-responsa) below.'),
             ('Fuzzy (~)', 'Uses [Levenshtein distance](https://en.wikipedia.org/wiki/Levenshtein_distance) to find similar words even with decoding errors.'),
             ('Regex (/)', 'Advanced search for experienced users. Example: \\b\u05d0[\u05d0-\u05ea]{3}\\b finds 4-letter words starting with Aleph.'),
@@ -120,6 +120,11 @@ The application fetches metadata and images from:
                 with ui.row().classes('gap-2'):
                     ui.label(f'\u2022 {mode}:').classes('font-bold min-w-40').style('color: var(--primary-700);')
                     ui.markdown(desc).style('color: var(--text-secondary);')
+
+        h3('Text Position (for join detection)', classes='text-lg font-semibold mb-2 mt-2', style='color: var(--text-primary);')
+        ui.markdown('''
+The **Advanced** search options include a **Text Position** selector \u2014 *Anywhere*, *Start of text*, *End of text*, *Line starts*, or *Line ends* \u2014 that works in **every search mode**. It is especially useful for **finding joins** between fragments. For example, if you have part of a phrase at the start of a torn fragment, you can search for the rest of the phrase restricted to the *start* of fragments \u2014 or the *end* of fragments if you are looking for the preceding page of the manuscript. Responsa mode adds finer per-word and per-line control (see [Responsa-Style Search](#help-responsa) below).
+        ''').style('color: var(--text-secondary);')
 
     # === Responsa-Style Search ===
     with ui.card().classes('w-full p-6'):
@@ -146,7 +151,8 @@ This mode offers two search methods inspired by the Bar-Ilan Responsa Project: a
             ('word*', 'Wildcard after', '\u05e9\u05dc\u05d5\u05dd* \u2192 \u05e9\u05dc\u05d5\u05de\u05d5\u05ea...'),
             ('%word', 'Plene/defective spelling (insert/remove \u05d5/\u05d9)', '%\u05e9\u05dc\u05d5\u05dd \u2192 \u05e9\u05dc\u05d5\u05dd, \u05e9\u05dc\u05dd'),
             ('(a/b)', 'OR alternatives', '(\u05e9\u05dc\u05d5\u05dd/\u05e9\u05dc\u05d5\u05de\u05d5\u05ea)'),
-            ('[N]', 'Gap of N words', '\u05e9\u05dc\u05d5\u05dd [3] \u05e2\u05d5\u05dc\u05dd'),
+            ('[N]', 'Gap of N words', '\u05e8\u05d0\u05d5\u05d1\u05df [3] \u05e9\u05de\u05e2\u05d5\u05df'),
+            ('[|N]', 'Gap of N lines (between line groups)', '\u05e8\u05d0\u05d5\u05d1\u05df [|2] \u05e9\u05de\u05e2\u05d5\u05df'),
         ]
 
         with ui.element('table').classes('w-full mb-4').style('border-collapse: collapse;'):
@@ -192,15 +198,13 @@ This mode offers two search methods inspired by the Bar-Ilan Responsa Project: a
 
         h3('Line & Text Position Search', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary);')
         ui.markdown('''
-Use the **position dropdown** (in Advanced Options) to constrain where matches appear within a manuscript: **Start of text**, **End of text**, **Line starts**, or **Line ends**.
+In addition to the **Text Position** selector available in every mode (see [Search](#help-search) above), **Responsa mode** supports fine-grained line positioning **per word** and **per line**:
+- **|word** — the word must appear at the **start** of a line
+- **word|** — the word must appear at the **end** of a line
+- **|** (between words) — a **line break**: the following words must start on a new line
+- **[|N]** — a **gap of N lines**: skip N lines between line groups. For example `ראובן [|2] שמעון` finds *ראובן*, then *שמעון* **two lines later**.
 
-This is especially useful for **detecting joins** between fragments — if you know how a manuscript ends, search for those words at "End of text" to find potential continuations.
-
-In **Responsa mode**, position constraints can also be applied **per word** using the checkboxes in the Tabular Query Builder:
-- **|word** — word must appear at the start of a line
-- **word|** — word must appear at the end of a line
-
-Combined with line-break syntax (`|` between words), you can build multi-line positional queries — for example, find specific words at the end of one line and other words at the beginning of a line several lines later.
+These positional operators are ideal for **join detection** — build a multi-line query matching how one fragment ends and how the joining fragment begins. The **Tabular Query Builder** provides a visual interface for constructing them.
         ''').style('color: var(--text-secondary);')
 
     # === Advanced Filters ===
@@ -641,36 +645,7 @@ with browse text, library attribution, and image URLs.
             h2('My Library — Local Documents', classes='text-xl font-bold', style='color: var(--text-primary);')
 
         ui.markdown('''
-The **My Library** tab (desktop app only) lets you index your own `.docx`, `.pdf`,
-and `.txt` files alongside the Genizah corpus. Your personal documents appear inline
-in Search, Composition Search, and Parallels results with a `LOCAL` badge and a
-three-state filter button.
-
-**What gets indexed:** Word documents, PDFs (text-layer PDFs only — scanned PDFs
-without OCR are skipped), and plain text files. Other formats are ignored silently.
-
-**Where data lives:** `%LOCALAPPDATA%\\GenizahSearchPro\\Index\\LocalIndex\\`
-on Windows. Portable installations keep their LOCAL data with the install folder.
-
-**Privacy guarantee:** Your local documents are NEVER uploaded to
-GenizahSearch's servers. Three boundaries enforce this:
-- The `/api/search` JSON endpoint drops LOCAL items defensively.
-- The Lists cloud sync aborts entirely if any list item is LOCAL.
-- The corrections submission rejects LOCAL document IDs with a clear error.
-
-Your indexed text is stored on disk inside `local_index.sqlite3` (located inside
-the LOCAL index folder). The text is compressed with **zstd** for space savings —
-zstd is compression, not encryption; the stored text is cleartext and is
-**never uploaded** to GenizahSearch's servers. Use OS-level disk encryption
-(BitLocker / FileVault) if you need at-rest encryption.
-
-**Three-state filter:** Each result surface (Search, Composition Search, Parallels)
-has a filter button cycling All → Only Local → No Local → All. The button is hidden
-when the current result set has no LOCAL hits.
-
-**Hostname-rename caveat:** If you rename your computer's hostname, the SQLite cache
-is invalidated and the next scan re-extracts all files. This is rare; documented for
-completeness.
+In the **[downloadable desktop app](/download)** you can run all the search modes over your own local files too (`.docx`, `.pdf`, `.txt`, `.html`, `.xlsx`, and `.csv`).
 
 *My Library feature inspired by Yehuda Seewald's GenizahLocal prototype.*
         ''').style('color: var(--text-secondary);')
@@ -757,7 +732,7 @@ def _create_hebrew_content():
 
         modes_data = [
             ('מדויק (=)', 'מוצא רק את המילה או את רצף המילים בדיוק כפי שנכתבו. לחיפוש עם פערים בין המילים יש למלא את התיבה "מרווח" במספר הרצוי.'),
-            ('וריאנטים (?, ??, ???)', 'מתחשב בחילופי אותיות נפוצים בטקסטים אלו (למשל: ד/ר, ה/ח, ו/י). ברמה הבסיסית (?) החילופים מצומצמים; ברמה המורחבת (??) מתווספים חילופים כמו ק/כ, ט/ת; ברמה המרבית (???) גמישות מירבית, איטית יותר. ניתן לשלוט גם במספר השינויים למילה (×1 מחמיר, ×2 מאוזן, ×3 מקל). בהגדרות הכלליות ניתן להחליף את בחירת הרמה מתפריט לסליידר.'),
+            ('וריאנטים (?)', 'מתחשב בחילופי אותיות נפוצים בטקסטים אלו (למשל: ד/ר, ה/ח, ו/י). כברירת מחדל **מחוון** (סליידר) קובע את מידת הגמישות — הגדלת הערך מוסיפה עוד זוגות אותיות (מחילופים מצומצמים, דרך זוגות כמו ק/כ ו-ט/ת, ועד גמישות מרבית), ומרחיבה את כמות התוצאות אך איטית ורועשת יותר. פקד **מספר שינויים** נפרד קובע את מספר השינויים למילה (×1 מחמיר, ×2 מאוזן — ברירת המחדל, ×3 מקל). בהגדרות הכלליות ניתן להחליף את בחירת הרמה מהמחוון לכפתורי קביעה מראש (בסיסי, מורחב, מרבי).'),
             ('\U0001F195 פרויקט השו"ת (R)', 'חיפוש בתחביר בסגנון החיפוש המתקדם של פרויקט השו"ת של אוניברסיטת בר-אילן, עם הרחבת תחיליות/סיומות, תווים כלליים, חלופות כתיב ומרווחים. כולל גם בונה שאילתות טבלאי נוח וגמיש. מוכר למשתמשי פרויקט השו"ת; קל ללמוד גם למי שלא מכיר. ראו [חיפוש בסגנון פרויקט השו"ת](#help-responsa) להלן.'),
             ('עמום (~)', 'משתמש ב[מרחק לווינשטיין](https://he.wikipedia.org/wiki/%D7%9E%D7%A8%D7%97%D7%A7_%D7%9C%D7%95%D7%99%D7%A0%D7%A9%D7%98%D7%99%D7%99%D7%9F) למציאת מילים דומות גם עם שגיאות פענוח.'),
             ('ביטוי רגולרי (/)', 'חיפוש מתקדם למשתמשים מנוסים. דוגמה: \\bא[א-ת]{3}\\b מוצא מילים בנות 4 אותיות המתחילות באל"ף. תוכלו להיעזר במנוע הבינה המלאכותית המועדף עליכם כדי לבנות ביטוי רגולרי המתאים לצרכיכם.'),
@@ -771,6 +746,11 @@ def _create_hebrew_content():
                 with ui.row().classes('gap-2 w-full').style('direction: rtl;'):
                     ui.label(f'• {mode}:').classes('font-bold min-w-40').style('color: var(--primary-700);')
                     ui.markdown(desc).style('color: var(--text-secondary);')
+
+        h3('מיקום בטקסט (לאיתור צירופים)', classes='text-lg font-semibold mb-2 mt-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
+        ui.markdown('''
+תחת **אפשרויות מתקדמות** קיים בורר **מיקום בטקסט** — *בכל מקום*, *תחילת הטקסט*, *סוף הטקסט*, *תחילת שורות* או *סוף שורות* — הפועל ב**כל מצבי החיפוש**. הוא שימושי במיוחד ל**איתור צירופים** בין קטעים. לדוגמה, אם יש ברשותכם חלק של ביטוי בתחילת קטע קרוע, תוכלו לחפש את החלק השני של הביטוי רק בתחילתם של קטעים, או בסופם של קטעים אם אתם מחפשים את העמוד הקודם בכתב היד. מצב פרויקט השו"ת מוסיף שליטה עדינה יותר ברמת המילה והשורה (ראו [חיפוש בסגנון פרויקט השו"ת](#help-responsa) להלן).
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Responsa-Style Search ===
     with ui.card().classes('w-full p-6'):
@@ -797,7 +777,8 @@ def _create_hebrew_content():
             ('מילה*', 'תו כללי אחרי', 'שלום* \u2190 שלומות...'),
             ('%מילה', 'כתיב מלא/חסר (הוספת/הסרת ו/י)', '%שלום \u2190 שלום, שלם'),
             ('(א/ב)', 'חלופות OR', '(שלום/שלומות)'),
-            ('[N]', 'מרווח של N מילים', 'שלום [3] עולם'),
+            ('[N]', 'מרווח של N מילים', 'ראובן [3] שמעון'),
+            ('[|N]', 'מרווח של N שורות (בין קבוצות שורה)', 'ראובן [|2] שמעון'),
         ]
 
         # Render as a compact table
@@ -841,6 +822,17 @@ def _create_hebrew_content():
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
 
         ui.markdown('*הערה:* כאשר שאילתא מתרחבת מעבר ל-500 מונחים, המערכת מורידה אוטומטית אפשרויות (וריאנטים, ערבית-יהודית, כתיב וכו\') כדי לשמור על מהירות, ומציגה התראה בהתאם.', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+        h3('חיפוש לפי מיקום בשורה/טקסט', classes='text-lg font-semibold mb-2 mt-4', style='color: var(--text-primary); direction: rtl; text-align: right;')
+        ui.markdown('''
+בנוסף לבורר **מיקום בטקסט** הזמין בכל מצב (ראו [חיפוש](#help-search) למעלה), מצב **פרויקט השו"ת** תומך במיקום מדויק **לכל מילה** ו**לכל שורה**:
+- **|מילה** — המילה חייבת להופיע ב**תחילת** שורה
+- **מילה|** — המילה חייבת להופיע ב**סוף** שורה
+- **|** (בין מילים) — **מעבר שורה**: המילים הבאות חייבות להתחיל בשורה חדשה
+- **[|N]** — **מרווח של N שורות**: דילוג על N שורות בין קבוצות שורה. למשל `ראובן [|2] שמעון` מאתר את *ראובן*, ואת *שמעון* **שתי שורות לאחר מכן**.
+
+אופרטורים אלה אידיאליים ל**איתור צירופים** — ניתן לבנות שאילתה רב-שורתית התואמת לאופן שבו קטע אחד מסתיים ולאופן שבו הקטע המצטרף מתחיל. **בונה השאילתות הטבלאי** מספק ממשק חזותי לבנייתם.
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === Advanced Filters ===
     with ui.card().classes('w-full p-6'):
@@ -1255,32 +1247,7 @@ def _create_hebrew_content():
             h2('הספרייה שלי — מסמכים מקומיים', classes='text-xl font-bold', style='color: var(--text-primary); direction: rtl; text-align: right;')
 
         ui.markdown('''
-לשונית **הספרייה שלי** (באפליקציה לשולחן העבודה בלבד) מאפשרת לכם לאנדקס קובצי `.docx`, `.pdf`
-ו-`.txt` משלכם לצד קורפוס הגניזה. המסמכים האישיים שלכם מופיעים ישירות בתוצאות החיפוש,
-חיפוש חיבורים ומקבילות עם תגית `LOCAL` וכפתור סינון תלת-מצבי.
-
-**מה מאונדקס:** מסמכי Word, קובצי PDF (PDF עם שכבת טקסט בלבד — קובצי PDF סרוקים ללא OCR
-מדולגים), וקובצי טקסט רגיל. פורמטים אחרים מתעלמים בשקט.
-
-**היכן נשמרים הנתונים:** `%LOCALAPPDATA%\\GenizahSearchPro\\Index\\LocalIndex\\`
-ב-Windows. התקנות ניידות שומרות את נתוני LOCAL עם תיקיית ההתקנה.
-
-**ערבות פרטיות:** המסמכים המקומיים שלכם לעולם אינם מועלים לשרתי GenizahSearch.
-שלושה גבולות אוכפים זאת:
-- נקודת הקצה `/api/search` מסננת פריטי LOCAL באופן הגנתי.
-- סנכרון ענן של רשימות מבוטל לחלוטין אם כל פריט ברשימה הוא LOCAL.
-- הגשת תיקונים דוחה מזהי מסמך LOCAL עם שגיאה ברורה.
-
-הטקסט המאונדקס נשמר בקובץ `local_index.sqlite3` בתיקיית האינדקס המקומי.
-הטקסט דחוס באמצעות **zstd** לחיסכון במקום — zstd הוא דחיסה, לא הצפנה; הטקסט המאוחסן אינו מוצפן (לא מוצפן)
-והוא לעולם לא מועלה לשרתי GenizahSearch.
-השתמש בהצפנת דיסק ברמת מערכת ההפעלה (BitLocker / FileVault) אם נדרשת הצפנה במנוחה.
-
-**סינון תלת-מצבי:** כל משטח תוצאות (חיפוש, חיפוש חיבורים, מקבילות) כולל כפתור סינון
-המחזר בין הכל ← רק מקומי ← ללא מקומי ← הכל. הכפתור מוסתר כאשר בסט התוצאות הנוכחי אין פגיעות LOCAL.
-
-**אזהרת שינוי שם מחשב:** אם תשנו את שם המחשב שלכם, מטמון ה-SQLite מתבטל
-והסריקה הבאה מחלצת מחדש את כל הקבצים. זה נדיר; מתועד לצורך שלמות.
+[בגרסת התוכנה להורדה](/download) תוכלו להשתמש בסוגי החיפוש השונים גם בתוך קבצים מקומיים (.docx, .pdf, .txt, .html, .xlsx ו-.csv).
 
 *תכונת הספרייה שלי בהשראת אב-טיפוס GenizahLocal של יהודה זייבלד.*
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
