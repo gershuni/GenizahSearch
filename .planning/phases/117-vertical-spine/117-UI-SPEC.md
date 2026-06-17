@@ -118,12 +118,14 @@ Within the `/joins-lab` content area on wide screens:
 
 Aligns with existing `web/static/common.css` and `web/pages/browse.py` transcription rendering.
 
+Exactly **2 font weights** are used across the entire phase: **400 regular** and **600 semibold**. Visual hierarchy is driven by size, never by adding a third weight tier — the 20px Display heading is distinguished from labels by size alone, not by going bolder.
+
 | Role | Size | Weight | Line Height | Font |
 |------|------|--------|-------------|------|
 | Body (EN labels, metadata, helper text) | 14px (0.875rem / `text-sm`) | 400 regular | 1.5 | Inter / system-ui |
-| Label (section headers, button text, form labels) | 14px (0.875rem / `text-sm`) | 600 semibold (`font-medium` in Tailwind = 500; `font-semibold` = 600) | 1.3 | Inter / system-ui |
+| Label (section headers, button text, form labels) | 14px (0.875rem / `text-sm`) | 600 semibold (`font-semibold` in Tailwind = 600; do NOT use `font-medium` = 500) | 1.3 | Inter / system-ui |
 | Heading (anchor pane title, section headings) | 16px (1rem / `text-base`) | 600 semibold | 1.2 | Inter / system-ui |
-| Display (cold-start empty state heading) | 20px (1.25rem / `text-xl`) | 700 bold | 1.2 | Inter / system-ui |
+| Display (cold-start empty state heading) | 20px (1.25rem / `text-xl`) | 600 semibold | 1.2 | Inter / system-ui |
 
 **RTL Hebrew transcription (ANC-03):**
 
@@ -136,10 +138,11 @@ Aligns with existing `web/static/common.css` and `web/pages/browse.py` transcrip
 **Builder textarea:**
 
 - Font size: 16px (`text-base`) — matches existing search input in `web/pages/search.py` (`text-lg` class, ≈1.125rem; use `text-base` here as textarea content is user-typed lines, not a prominent search bar)
+- Weight: 400 regular (user-typed content)
 - Direction: RTL (`direction: rtl; text-align: right`) — transcription lines are Hebrew
 - Font: David, Frank Ruehl, Noto Sans Hebrew, serif — same as transcription display
 
-**Source:** `web/static/common.css` sidebar nav (font-size 0.7rem labels, font-weight 600 active), `web/pages/browse.py:46` transcription defaults, `web/pages/search.py` (text-sm, text-lg patterns). 4-size/2-weight contract enforced.
+**Source:** `web/static/common.css` sidebar nav (font-size 0.7rem labels, font-weight 600 active), `web/pages/browse.py:46` transcription defaults, `web/pages/search.py` (text-sm, text-lg patterns). 4-size / **2-weight (400 + 600)** contract enforced.
 
 ---
 
@@ -224,7 +227,7 @@ Bilingual: all strings via `tr()`. EN copy is canonical below; HE translations g
 |---------|---------|-------|
 | Page title (browser tab) | Joins Lab \| Dicta Genizah Search | Set via `history.replaceState` pattern from `browse.py` |
 | Sidebar nav label | Joins Lab | Short; matches style of "Search", "Browse" entries |
-| Empty state heading | Pin an Anchor Fragment | 20px bold, centered |
+| Empty state heading | Pin an Anchor Fragment | 20px semibold, centered |
 | Empty state body | Enter a shelfmark or fragment ID to begin hunting for physical joins. | 14px regular, centered, max-width 480px |
 | Smart box placeholder | Shelfmark or fragment ID (e.g. T-S 12.123) | RTL-safe: placeholder in EN/HE per app language |
 | Smart box placeholder (HE) | סימת מדף או מזהה קטע (למשל T-S 12.123) | via `tr()` |
@@ -241,6 +244,19 @@ Bilingual: all strings via `tr()`. EN copy is canonical below; HE translations g
 | Candidate card "open in browse" link | View in Browse | Per-card link; `--primary-700` color |
 | Last anchor restored toast | Restored your last anchor: (shelfmark) | Auto-dismiss 5s; shown when bare `/joins-lab` restores from `safe_storage` |
 | Loading anchor indicator | Loading fragment… | Skeleton label; brief |
+
+### Icon-only control tooltips (visible affordance + accessibility)
+
+Every icon-only control carries BOTH a visible `ui.tooltip()` (sighted hover) AND an `aria-label` (screen readers). The tooltip text equals the aria-label.
+
+| Control | Icon | Tooltip / aria-label (EN) |
+|---------|------|---------------------------|
+| Zoom in | `add` | Zoom in |
+| Zoom out | `remove` | Zoom out |
+| Reset zoom | `fit_screen` | Reset zoom |
+| Previous folio | `chevron_left` | Previous folio |
+| Next folio | `chevron_right` | Next folio |
+| Anchor expand/collapse (narrow) | `expand_more` / `expand_less` | Show anchor / Hide anchor |
 
 **Destructive actions in Phase 117:** None. There are no delete, clear, or irreversible operations in this phase. (Clear/reset is Phase 120.)
 
@@ -273,13 +289,13 @@ Bilingual: all strings via `tr()`. EN copy is canonical below; HE translations g
 
 ### Anchor pane folio navigation
 
-- Previous / Next folio buttons: same icon style as `/browse` (`chevron_left` / `chevron_right`, flat, round).
-- Zoom controls: zoom_in (`add`), zoom_out (`remove`), zoom_reset (`fit_screen`) — matching `browse.py:1388`.
+- Previous / Next folio buttons: same icon style as `/browse` (`chevron_left` / `chevron_right`, flat, round). Each has a visible tooltip (see icon-only control table) and an `aria-label`.
+- Zoom controls: zoom_in (`add`), zoom_out (`remove`), zoom_reset (`fit_screen`) — matching `browse.py:1388`. Each has a visible tooltip and an `aria-label`.
 - Touch target: minimum 44px on all zoom/nav controls.
 
 ### Anchor pane collapse (narrow screens)
 
-- Expand/collapse toggle: `expand_more` / `expand_less` icon, flat button, right of the shelfmark chip.
+- Expand/collapse toggle: `expand_more` / `expand_less` icon, flat button, right of the shelfmark chip. Visible tooltip "Show anchor" / "Hide anchor" + matching `aria-label`.
 - Collapsed height: 48px (shelfmark chip + toggle button).
 - Expanded: full image viewer at 100% viewport width.
 
@@ -358,8 +374,7 @@ No third-party component registries. All UI is NiceGUI + Quasar + existing proje
 
 - All interactive elements: `aria-label` via `.props(f'aria-label="{tr(...)}"')` — matches existing pattern in `web/main.py:938`.
 - Builder textarea: `aria-label` = `tr("Search lines — one line per row")`.
-- Folio nav buttons: `aria-label` = `tr("Previous folio")` / `tr("Next folio")`.
-- Zoom buttons: `aria-label` = `tr("Zoom in")` / `tr("Zoom out")` / `tr("Reset zoom")`.
+- All icon-only controls (zoom, folio nav, anchor collapse) carry BOTH a visible `ui.tooltip()` AND an `aria-label` — see the "Icon-only control tooltips" table in the Copywriting Contract for exact copy.
 - Candidate cards: each card is a `ui.card()` with an implicit semantic role; the "View in Browse" link is the primary keyboard-accessible action.
 - Color contrast: all text uses `--text-primary` (#1e293b on #ffffff = 16.1:1) or `--text-secondary` (#475569 on #ffffff = 7.5:1) — both WCAG AA.
 - RTL: the entire page toggles direction with `resolved_lang == 'he'` via the existing `rtl_mode` convention.
@@ -381,4 +396,5 @@ No third-party component registries. All UI is NiceGUI + Quasar + existing proje
 
 *Phase: 117-vertical-spine*
 *UI-SPEC created: 2026-06-17*
+*Revised: 2026-06-17 — checker fixes: Display weight 700→600 (now exactly 2 weights: 400/600); added visible tooltips for icon-only zoom/nav/collapse controls (Dimension 2 flag).*
 *Sources: 117-CONTEXT.md (15 decisions used), REQUIREMENTS.md (FND/ANC/BLD/CND requirements), web/static/common.css (color tokens, typography), web/pages/browse.py (viewer, transcription), web/pages/search_results.py (card pattern), web/main.py (layout, spacing, sidebar), web/pages/search.py (typography classes). User input: 0 questions needed — all answered by upstream artifacts.*
