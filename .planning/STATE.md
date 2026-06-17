@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v8.2.0
 milestone_name: Web Joins Lab
 status: executing
-stopped_at: Phase 117 UI-SPEC approved
-last_updated: "2026-06-17T17:19:37.627Z"
+stopped_at: Completed Phase 117 Plan 03 — browse extraction complete
+last_updated: "2026-06-17T17:31:08.345Z"
 last_activity: 2026-06-17
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 6
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 117 (vertical-spine) — EXECUTING
-Plan: 3 of 6
+Plan: 4 of 6
 Status: Ready to execute
 Last activity: 2026-06-17
 
@@ -79,8 +79,8 @@ Items carried forward from v8.1.0:
 
 ## Session Continuity
 
-Last session: 2026-06-17T17:19:37.621Z
-Stopped at: Phase 117 UI-SPEC approved
+Last session: 2026-06-17T17:31:08.340Z
+Stopped at: Completed Phase 117 Plan 03 — browse extraction complete
 Resume file: None
 Next step: `/gsd:plan-phase 117` (Vertical Spine)
 
@@ -91,6 +91,7 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 | (none yet) | — | — | — |
 | Phase 117-vertical-spine P01 | 25min | 3 tasks | 3 files |
 | Phase 117-vertical-spine P02 | 2min | 2 tasks | 2 files |
+| Phase 117-vertical-spine P03 | 30min | 3 tasks | 6 files |
 
 ## Decisions
 
@@ -99,6 +100,8 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 - **117-01:** Off-loop AST guard (SC#3) scoped to `web/pages/joins_lab.py` only — adapter excluded since its sync methods run inside `run.io_bound` dispatched by joins_lab.py; scanning the adapter would produce false V2 violations
 - **117-01:** `get_browse_page` stays NARROW — returns SearchEngine text/nav dict only, no image enrichment (HIGH-1); AnchorViewer uses a SEPARATE rich resolver in Plan 06
 - [Phase ?]: Versioned safe_storage schema for joins_lab
+- [Phase ?]: 117-03: resolve_image_url must be fed from web.services.BrowsePage (service.get_browse_page), not narrow Protocol dict (HIGH-1)
+- [Phase ?]: 117-03: resolve_external_images lazy-imports web.state.state.meta_mgr; accepts meta_mgr= param for testability; one source of truth for D-10 external-image enrichment
 
 ## Operator Next Steps
 

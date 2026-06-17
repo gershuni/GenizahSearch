@@ -25,8 +25,8 @@ Requirements for this milestone. Each maps to a roadmap phase.
 ### Anchor Pane (ANC)
 
 - [ ] **ANC-01**: The anchor pane shows the pinned fragment's image with zoom/pan and folio (page) navigation.
-- [ ] **ANC-02**: Anchor (and Compare) images load through the **existing per-provider image-proxy resolution** used by `/browse` (NLI, Oxford, Cambridge, Manchester, JTS) — reusing those endpoints and the Phase-98 NLI circuit breaker — rather than inventing direct image URLs. No unguarded NLI/IIIF fetch.
-- [ ] **ANC-03**: The anchor pane shows the fragment's transcription as right-aligned (RTL) numbered lines.
+- [x] **ANC-02**: Anchor (and Compare) images load through the **existing per-provider image-proxy resolution** used by `/browse` (NLI, Oxford, Cambridge, Manchester, JTS) — reusing those endpoints and the Phase-98 NLI circuit breaker — rather than inventing direct image URLs. No unguarded NLI/IIIF fetch.
+- [x] **ANC-03**: The anchor pane shows the fragment's transcription as right-aligned (RTL) numbered lines.
 - [ ] **ANC-04**: The anchor pane shows known joins (PGP + FJMS + user + community) as a connected group with source attribution.
 - [ ] **ANC-05**: Known-joins display is multitenant-safe — it surfaces only public/confirmed joins (or is user/status-aware cache-isolated), so the process-global join cache can never leak one user's unconfirmed (creator-only, RLS-scoped) joins to another user.
 
@@ -114,8 +114,8 @@ Which phases cover which requirements. Populated during roadmap creation.
 | FND-07 | Phase 121 | Pending |
 | FND-08 | Phase 117 | Pending |
 | ANC-01 | Phase 117 | Pending |
-| ANC-02 | Phase 117 | Pending |
-| ANC-03 | Phase 117 | Pending |
+| ANC-02 | Phase 117 | Complete |
+| ANC-03 | Phase 117 | Complete |
 | ANC-04 | Phase 118 | Pending |
 | ANC-05 | Phase 118 | Pending |
 | BLD-01 | Phase 117 | Pending |
