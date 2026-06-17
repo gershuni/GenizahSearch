@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v8.1.0
-milestone_name: Desktop Telemetry
-status: Awaiting next milestone
-stopped_at: Phase 116 context gathered
-last_updated: "2026-06-16T19:37:09.386Z"
-last_activity: 2026-06-16 — Milestone v8.1.0 completed and archived
+milestone: v8.2.0
+milestone_name: Web Joins Lab
+status: planning
+last_updated: "2026-06-17T11:45:48.142Z"
+last_activity: 2026-06-17
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 20
-  completed_plans: 20
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-06-11 after v8.0.0 close)
 
 ## Current Position
 
-Phase: Milestone v8.1.0 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-16 — Milestone v8.1.0 completed and archived
+Status: Defining requirements
+Last activity: 2026-06-17 — Milestone v8.2.0 started
 
 ## Accumulated Context
 
