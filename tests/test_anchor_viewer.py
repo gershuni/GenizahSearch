@@ -464,3 +464,51 @@ class TestDefaultResolverWiring:
 
         v = _make_viewer(browse_resolver=None, external_resolver=None)
         assert v._browse_resolver == get_service().get_browse_page
+
+
+# ─── Regression: viewer assets must inject at build, not dynamically (UAT) ────
+
+class TestViewerAssetInjection:
+    """Guards the zoom/pan fix.
+
+    A <script> injected via add_head_html into an already-live SPA page does
+    NOT execute, so AnchorViewer (constructed dynamically on a user click) must
+    NOT inject the viewer JS itself — the page builder calls
+    inject_viewer_assets() at initial render instead. These tests pin both
+    halves so a refactor can't silently reintroduce dead zoom.
+    """
+
+    def test_inject_viewer_assets_adds_head_html(self):
+        from unittest.mock import patch
+        with patch("web.components.anchor_viewer.ui") as mock_ui:
+            from web.components.anchor_viewer import inject_viewer_assets, _VIEWER_HEAD
+            inject_viewer_assets()
+            mock_ui.add_head_html.assert_called_once_with(_VIEWER_HEAD)
+
+    def test_constructing_viewer_does_not_inject_head_html(self):
+        # The dynamic path must NOT call add_head_html (its <script> wouldn't run).
+        from unittest.mock import patch, MagicMock
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+        with (
+            patch("web.components.anchor_viewer.ui") as mock_ui,
+            patch("web.components.anchor_viewer.run"),
+        ):
+            for attr in (
+                "column", "row", "element", "html", "button", "icon",
+                "label", "tooltip", "add_head_html", "run_javascript",
+            ):
+                factory = MagicMock(return_value=mock_element)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+            from web.components.anchor_viewer import AnchorViewer
+            AnchorViewer(
+                sys_id="990025143260205171",
+                browse_resolver=lambda *a, **kw: None,
+                external_resolver=lambda *a, **kw: {},
+            )
+            mock_ui.add_head_html.assert_not_called()

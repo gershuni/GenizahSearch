@@ -74,7 +74,11 @@ _VIEWER_HEAD = '''
     .anchor-viewer-container .image-container {
         position: relative;
         width: 100%;
-        height: 65vh;
+        /* Hug the image instead of forcing a tall 65vh box (which left big
+           empty striped bands around landscape double-folio scans). */
+        height: auto;
+        max-height: 72vh;
+        min-height: 200px;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -99,7 +103,7 @@ _VIEWER_HEAD = '''
     /* Loading skeleton */
     .anchor-viewer-skeleton {
         width: 100%;
-        height: 65vh;
+        height: 52vh;
         background: linear-gradient(90deg, #2a2a2a 25%, #333 37%, #2a2a2a 63%);
         background-size: 400% 100%;
         animation: anchor-skeleton-shine 1.6s ease infinite;
@@ -134,7 +138,9 @@ _VIEWER_HEAD = '''
         border-radius: 0 0 8px 8px;
     }
 
-    /* Transcription panel */
+    /* Transcription panel — light cream background, so force DARK text.
+       Without this the body inherited the dark-theme's light text colour
+       and rendered white-on-cream (illegible). */
     .anchor-transcription-panel {
         background: linear-gradient(to bottom, #fffef5, #fff9e6);
         border: 1px solid #e8e4d4;
@@ -143,6 +149,11 @@ _VIEWER_HEAD = '''
         overflow-y: auto;
         padding: 20px 24px;
         margin-top: 8px;
+        color: #2d2d2d;
+    }
+    .anchor-transcription-panel .line-numbered-body-row,
+    .anchor-transcription-panel .transcription-text {
+        color: #2d2d2d;
     }
 </style>
 <svg style="position:absolute;width:0;height:0">
@@ -155,6 +166,21 @@ _VIEWER_HEAD = '''
   </filter>
 </svg>
 '''
+
+
+def inject_viewer_assets() -> None:
+    """Inject the manuscriptViewer JS + CSS into the page ``<head>``.
+
+    CRITICAL: call this during INITIAL page render (at the top of the page
+    builder), NOT lazily when an AnchorViewer is constructed in response to a
+    user click. ``<script>`` tags added to an already-live NiceGUI SPA page via
+    ``ui.add_head_html`` do NOT execute (only ``<style>`` applies) — so a
+    dynamically-constructed viewer would render its image and CSS but
+    ``window.manuscriptViewer`` would never be created and zoom/pan would be
+    dead. The ``window._msViewerLoaded`` guard makes repeat calls safe, so a
+    page hosting two viewers (Phase 119 Compare) can call this once at build.
+    """
+    ui.add_head_html(_VIEWER_HEAD)
 
 
 # ============================================================================
@@ -222,9 +248,13 @@ class AnchorViewer:
         self._transcription_container: Optional[Any] = None
         self._prev_btn: Optional[Any] = None
         self._next_btn: Optional[Any] = None
+        self._zoom_label: Optional[Any] = None
 
-        # Inject head HTML with idempotency guard (safe to call multiple times)
-        ui.add_head_html(_VIEWER_HEAD)
+        # NOTE: the manuscriptViewer JS/CSS is injected by inject_viewer_assets()
+        # at PAGE-BUILD time (see web/pages/joins_lab.py), NOT here — a viewer
+        # constructed dynamically (on a user click) cannot execute a freshly
+        # injected <script>. Calling it here too would only duplicate the CSS
+        # and never run the script. See inject_viewer_assets() docstring.
 
         # Build the component UI
         self._build_ui()
@@ -236,27 +266,41 @@ class AnchorViewer:
     def zoom_in(self) -> None:
         """Increase zoom by 0.25, clamped at 4.0."""
         self._zoom = min(self._zoom + 0.25, 4.0)
-        ui.run_javascript(
-            f"if(window.manuscriptViewer) {{ "
-            f"window.manuscriptViewer.state.scale = {self._zoom}; "
-            f"window.manuscriptViewer.applyTransform(); "
-            f"window.manuscriptViewer.updateLabel(); }}"
-        )
+        self._apply_zoom()
 
     def zoom_out(self) -> None:
         """Decrease zoom by 0.25, clamped at 0.25."""
         self._zoom = max(self._zoom - 0.25, 0.25)
-        ui.run_javascript(
-            f"if(window.manuscriptViewer) {{ "
-            f"window.manuscriptViewer.state.scale = {self._zoom}; "
-            f"window.manuscriptViewer.applyTransform(); "
-            f"window.manuscriptViewer.updateLabel(); }}"
-        )
+        self._apply_zoom()
 
     def zoom_reset(self) -> None:
         """Reset zoom to 1.0 and reset the viewer pan/rotation."""
         self._zoom = 1.0
         ui.run_javascript("if(window.manuscriptViewer) window.manuscriptViewer.reset();")
+        self._apply_zoom()
+
+    def _apply_zoom(self) -> None:
+        """Push the current zoom level to the client.
+
+        Mirrors browse.py's proven path: drive the shared ``manuscriptViewer``
+        via ``update(scale, rotation)`` (which sets the scale and re-applies the
+        transform). The % label is updated SERVER-SIDE here rather than relying
+        on the viewer's JS ``updateLabel()`` selector. A direct-transform
+        fallback keeps zoom working even if the viewer object never initialised.
+        """
+        if self._zoom_label is not None:
+            self._zoom_label.set_text(f"{int(self._zoom * 100)}%")
+        ui.run_javascript(
+            "(function(){"
+            "  var mv = window.manuscriptViewer;"
+            "  if (mv && typeof mv.update === 'function') {"
+            f"    mv.update({self._zoom}, (mv.state ? mv.state.rotation : 0));"
+            "  } else {"
+            "    var im = document.querySelector('.anchor-viewer-container .zoomable-image');"
+            f"    if (im) im.style.transform = 'translate(0px,0px) scale({self._zoom})';"
+            "  }"
+            "})();"
+        )
 
     # ──────────────────────────────────────────────────────────────────────────
     # Testable sync resolution core (no run.io_bound, no NiceGUI)
@@ -352,6 +396,11 @@ class AnchorViewer:
         """Build the full AnchorViewer component (image + controls + transcription)."""
         rtl = is_rtl()
         direction_class = "flex-row-reverse" if rtl else "flex-row"
+        # Direction-aware folio arrows (ANC-01 / D-02): in RTL, "previous"
+        # points right and "next" points left to match Hebrew reading order
+        # (LTR keeps the conventional ‹ prev / next ›).
+        prev_icon = "chevron_right" if rtl else "chevron_left"
+        next_icon = "chevron_left" if rtl else "chevron_right"
 
         with ui.column().classes("anchor-viewer-container w-full gap-0"):
             # Image container (shows skeleton initially)
@@ -366,7 +415,7 @@ class AnchorViewer:
                 # Folio navigation group
                 with ui.row().classes("gap-1 items-center"):
                     self._prev_btn = (
-                        ui.button(icon="chevron_left", on_click=self._on_prev_folio)
+                        ui.button(icon=prev_icon, on_click=self._on_prev_folio)
                         .props(f'flat round dense aria-label="{tr("Previous folio")}"')
                         .classes("text-white min-h-[44px] min-w-[44px]")
                     )
@@ -375,7 +424,7 @@ class AnchorViewer:
                     self._page_label = ui.label("…").classes("text-white text-sm px-2")
 
                     self._next_btn = (
-                        ui.button(icon="chevron_right", on_click=self._on_next_folio)
+                        ui.button(icon=next_icon, on_click=self._on_next_folio)
                         .props(f'flat round dense aria-label="{tr("Next folio")}"')
                         .classes("text-white min-h-[44px] min-w-[44px]")
                     )
@@ -390,7 +439,9 @@ class AnchorViewer:
                     )
                     ui.tooltip(tr("Zoom out")).bind_visibility_from(_zoom_out_btn)
 
-                    ui.label("100%").classes("zoom-level-label text-white text-sm px-1")
+                    self._zoom_label = ui.label("100%").classes(
+                        "zoom-level-label text-white text-sm px-1"
+                    )
 
                     _zoom_in_btn = (
                         ui.button(icon="add", on_click=self.zoom_in)

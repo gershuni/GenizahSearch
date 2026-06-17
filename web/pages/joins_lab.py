@@ -52,7 +52,7 @@ from typing import Optional
 from nicegui import run, ui
 
 from shared.joins_lab import BuilderRow, SideQuery, compose, dedup_candidates
-from web.components.anchor_viewer import AnchorViewer
+from web.components.anchor_viewer import AnchorViewer, inject_viewer_assets
 from web.components.candidate_grid import create_candidate_grid
 from web.joins_executor import WebSearchExecutor
 from web.joins_lab_storage import read_anchor, write_anchor
@@ -209,6 +209,12 @@ def create_joins_lab_page(
     Phase 87 invariant: zero raw ``app.storage.user`` — all per-user state
     through ``web.joins_lab_storage`` helpers.
     """
+    # Inject the manuscriptViewer JS/CSS at PAGE-BUILD time (initial render) so
+    # the <script> actually executes. AnchorViewer is constructed dynamically on
+    # "Load Anchor", and scripts injected into a live SPA page do not run — so
+    # the viewer MUST be created here, before any anchor loads (zoom/pan fix).
+    inject_viewer_assets()
+
     # -----------------------------------------------------------------------
     # Per-render transient state (mutable-dict containers — NOT safe_storage;
     # these are per-render closures, not per-user persisted values)
