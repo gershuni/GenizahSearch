@@ -56,7 +56,7 @@ from web.components.anchor_viewer import AnchorViewer
 from web.components.candidate_grid import create_candidate_grid
 from web.joins_executor import WebSearchExecutor
 from web.joins_lab_storage import read_anchor, write_anchor
-from web.services import service
+from web.services import get_service
 from web.state import state
 from web.translations import is_rtl, tr
 
@@ -123,7 +123,7 @@ def lines_to_side_query(text: str) -> SideQuery:
     Returns a SideQuery (may have zero rows if all lines are blank).
     """
     rows = tuple(
-        BuilderRow(term=line)
+        BuilderRow(term=line.strip())
         for line in text.splitlines()
         if line.strip()
     )
@@ -351,7 +351,7 @@ def create_joins_lab_page(
             return query
         # Shelfmark resolution (I/O-bound SQLite — off the event loop)
         results, _ = await run.io_bound(
-            lambda: service.search_by_shelfmark(query, limit=20)
+            lambda: get_service().search_by_shelfmark(query, limit=20)
         )
         if results:
             return results[0].sys_id
