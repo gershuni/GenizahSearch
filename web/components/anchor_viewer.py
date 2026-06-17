@@ -195,8 +195,12 @@ class AnchorViewer:
         # Inject real defaults lazily so the module can be imported without
         # a live AppState (test safety).
         if browse_resolver is None:
-            from web.services import service as _svc
-            browse_resolver = _svc.get_browse_page
+            # web/services.py exposes the singleton via get_service() — there is
+            # no module-level `service` symbol (browse.py binds `service =
+            # get_service()` the same way). Importing `service` directly raised
+            # ImportError at runtime only, since every unit test injects a resolver.
+            from web.services import get_service
+            browse_resolver = get_service().get_browse_page
         if external_resolver is None:
             external_resolver = resolve_external_images
 

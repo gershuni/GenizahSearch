@@ -438,3 +438,29 @@ class TestOxfordBranch:
         if resolved["has_image"]:
             # Either direct Bodleian or /api/oxford_image — not NLI IIIF
             assert "iiif.nli.org.il" not in img_url
+
+
+# ─── Regression: default resolver wiring (UAT 2026-06-17) ─────────────────────
+
+class TestDefaultResolverWiring:
+    """Guards the lazy default ``browse_resolver`` import in ``__init__``.
+
+    Every other test injects ``browse_resolver``, so the default fallback was
+    never exercised by the suite. It imported a non-existent symbol
+    (``from web.services import service``) and raised ImportError only at
+    runtime, the first time a real anchor was loaded in the browser. The fix
+    binds ``get_service().get_browse_page`` (the same accessor browse.py uses).
+    """
+
+    def test_default_browse_resolver_binds_without_import_error(self):
+        # browse_resolver=None + external_resolver=None → __init__ resolves the
+        # real defaults. This MUST NOT raise ImportError.
+        v = _make_viewer(browse_resolver=None, external_resolver=None)
+        assert callable(v._browse_resolver)
+        assert callable(v._external_resolver)
+
+    def test_default_browse_resolver_is_service_get_browse_page(self):
+        from web.services import get_service
+
+        v = _make_viewer(browse_resolver=None, external_resolver=None)
+        assert v._browse_resolver == get_service().get_browse_page
