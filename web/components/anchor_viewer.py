@@ -206,6 +206,12 @@ class AnchorViewer:
         # Per-instance zoom state (mirrors browse.py state.zoom_level)
         self._zoom: float = 1.0
 
+        # Latest-wins folio-navigation generation (WR-03): a newer
+        # update_content() supersedes any in-flight one so rapid prev/next
+        # clicks can never render a stale folio. Mirrors the search path's
+        # generation-counter discipline (web/pages/joins_lab.py).
+        self._nav_gen: int = 0
+
         # UI element references set during _build_ui()
         self._image_container: Optional[Any] = None
         self._controls_row: Optional[Any] = None
@@ -357,8 +363,8 @@ class AnchorViewer:
                 with ui.row().classes("gap-1 items-center"):
                     self._prev_btn = (
                         ui.button(icon="chevron_left", on_click=self._on_prev_folio)
-                        .props(f'flat round dense min-h-[44px] min-w-[44px] aria-label="{tr("Previous folio")}"')
-                        .classes("text-white")
+                        .props(f'flat round dense aria-label="{tr("Previous folio")}"')
+                        .classes("text-white min-h-[44px] min-w-[44px]")
                     )
                     ui.tooltip(tr("Previous folio")).bind_visibility_from(self._prev_btn)
 
@@ -366,8 +372,8 @@ class AnchorViewer:
 
                     self._next_btn = (
                         ui.button(icon="chevron_right", on_click=self._on_next_folio)
-                        .props(f'flat round dense min-h-[44px] min-w-[44px] aria-label="{tr("Next folio")}"')
-                        .classes("text-white")
+                        .props(f'flat round dense aria-label="{tr("Next folio")}"')
+                        .classes("text-white min-h-[44px] min-w-[44px]")
                     )
                     ui.tooltip(tr("Next folio")).bind_visibility_from(self._next_btn)
 
@@ -375,8 +381,8 @@ class AnchorViewer:
                 with ui.row().classes("gap-1 items-center"):
                     _zoom_out_btn = (
                         ui.button(icon="remove", on_click=self.zoom_out)
-                        .props(f'flat round dense min-h-[44px] min-w-[44px] aria-label="{tr("Zoom out")}"')
-                        .classes("text-white")
+                        .props(f'flat round dense aria-label="{tr("Zoom out")}"')
+                        .classes("text-white min-h-[44px] min-w-[44px]")
                     )
                     ui.tooltip(tr("Zoom out")).bind_visibility_from(_zoom_out_btn)
 
@@ -384,15 +390,15 @@ class AnchorViewer:
 
                     _zoom_in_btn = (
                         ui.button(icon="add", on_click=self.zoom_in)
-                        .props(f'flat round dense min-h-[44px] min-w-[44px] aria-label="{tr("Zoom in")}"')
-                        .classes("text-white")
+                        .props(f'flat round dense aria-label="{tr("Zoom in")}"')
+                        .classes("text-white min-h-[44px] min-w-[44px]")
                     )
                     ui.tooltip(tr("Zoom in")).bind_visibility_from(_zoom_in_btn)
 
                     _zoom_reset_btn = (
                         ui.button(icon="fit_screen", on_click=self.zoom_reset)
-                        .props(f'flat round dense min-h-[44px] min-w-[44px] aria-label="{tr("Reset zoom")}"')
-                        .classes("text-white")
+                        .props(f'flat round dense aria-label="{tr("Reset zoom")}"')
+                        .classes("text-white min-h-[44px] min-w-[44px]")
                     )
                     ui.tooltip(tr("Reset zoom")).bind_visibility_from(_zoom_reset_btn)
 
@@ -425,6 +431,11 @@ class AnchorViewer:
             p_num:      Target page number (1-based).  None = use direction only.
             direction:  +1 = next folio, -1 = prev folio, 0 = stay / explicit p_num.
         """
+        # Latest-wins guard (WR-03): claim a generation token; a newer
+        # navigation started after this one supersedes it.
+        self._nav_gen += 1
+        my_gen = self._nav_gen
+
         # Show loading skeleton while resolving
         self._show_loading()
 
@@ -440,6 +451,10 @@ class AnchorViewer:
             return self._resolve_off_loop(p_num=_p_num, direction=_direction)
 
         result = await run.io_bound(_resolve)
+
+        # Discard stale results: a newer navigation began while we awaited.
+        if my_gen != self._nav_gen:
+            return
 
         if result is None:
             self._show_boundary()

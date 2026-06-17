@@ -25,6 +25,7 @@ SCOPE LOCK (D-14):
 """
 from __future__ import annotations
 
+import json
 from typing import Optional, Callable
 
 from nicegui import ui
@@ -202,7 +203,13 @@ def _create_candidate_card(cand, on_browse_click: Optional[Callable] = None) -> 
                     # Caller provided a Python handler (for testing / customisation).
                     ui.link(tr("View in Browse"), "#").style(
                         "color: var(--primary-700); font-size: 0.85rem;"
-                    ).on("click", js_handler=f"() => {{ window.location.href='{browse_url}'; }}")
+                    ).on(
+                        "click",
+                        # WR-04: json.dumps yields a safely-escaped JS string literal,
+                        # so a sys_id/URL containing a quote cannot break out of the
+                        # handler (defense-in-depth; sys_ids are internal IDs).
+                        js_handler=f"() => {{ window.location.href={json.dumps(browse_url)}; }}",
+                    )
                 else:
                     ui.link(tr("View in Browse"), browse_url).style(
                         "color: var(--primary-700); font-size: 0.85rem;"
@@ -246,10 +253,11 @@ def create_candidate_grid(
                 "text-base font-semibold"
             )
 
-            # Responsive 2-column grid: single column on narrow (<640px).
-            with ui.grid(columns=2).classes("w-full gap-3").style(
-                "@media (max-width:639px) { grid-template-columns: 1fr; }"
-            ):
+            # Responsive grid (WR-02): single column on narrow (<640px), two
+            # columns at the Tailwind `sm` breakpoint (>=640px). An @media rule
+            # cannot live inside an inline style attribute, so the collapse is
+            # driven by Tailwind responsive grid classes instead (D-03).
+            with ui.grid().classes("w-full gap-3 grid grid-cols-1 sm:grid-cols-2"):
                 for cand in candidates:
                     _create_candidate_card(cand, on_browse_click=on_browse_click)
 
