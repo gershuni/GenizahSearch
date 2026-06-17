@@ -617,8 +617,9 @@
         <li>Lists cloud sync is disabled entirely if every item in a list is local.</li>
         <li>Corrections submission rejects local document IDs with a clear error.</li>
     </ul>
-    <p><b>Note:</b> the indexed text is stored in a local index file in cleartext. Use OS-level disk encryption
-    (BitLocker / FileVault) if you need encryption.</p>
+    <p><b>Note:</b> the indexed text is stored in <code dir="ltr">local_index.sqlite3</code> inside your LOCAL
+    index folder, compressed with <b>zstd</b> (compression, <b>not encryption</b>) — the stored text is cleartext.
+    Use OS-level disk encryption (BitLocker / FileVault) if you need encryption.</p>
 
     <h4>Pre-selection and post-search filtering</h4>
     <p>Both regular Search and Composition Search include a button that lets you choose where the search runs:
@@ -1188,7 +1189,8 @@
         <li>סנכרון ענן של רשימות מבוטל לחלוטין אם כל פריט ברשימה הוא מקומי.</li>
         <li>הגשת תיקונים דוחה מזהי מסמך מקומי עם שגיאה ברורה.</li>
     </ul>
-    <p>שימו לב: הטקסט המאונדקס נשמר בקובץ אינדקס מקומי בטקסט גלוי. השתמשו בהצפנת דיסק ברמת מערכת
+    <p>שימו לב: הטקסט המאונדקס נשמר בקובץ <code dir="ltr">local_index.sqlite3</code> בתיקיית האינדקס המקומי,
+    דחוס באמצעות <b>zstd</b> (דחיסה, לא הצפנה) — הטקסט המאוחסן אינו מוצפן. השתמשו בהצפנת דיסק ברמת מערכת
     ההפעלה (BitLocker / FileVault) אם נדרשת הצפנה.</p>
 
     <h4>בחירה מראש וסינון לאחר החיפוש</h4>
