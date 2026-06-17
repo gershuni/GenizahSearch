@@ -13,7 +13,7 @@ Requirements for this milestone. Each maps to a roadmap phase.
 
 ### Foundation & Entry (FND)
 
-- [ ] **FND-01**: A web `SearchExecutor` adapter implements the `shared/joins_lab.py` Protocol (`execute_search` / `get_browse_page` / `get_meta_for_id` / `get_library_for_id`) by wrapping the web search engine **directly** (`state.searcher.execute_search` — NOT `/api/search`, which omits `text_position`/`corpus_scope` and caps modes). Search runs **off the event loop** (`run.io_bound`-style, as `web/pages/search.py` does) with timeout, cancellation, and stale-generation (latest-wins) handling — the NiceGUI event loop is never blocked. No search logic re-implemented.
+- [x] **FND-01**: A web `SearchExecutor` adapter implements the `shared/joins_lab.py` Protocol (`execute_search` / `get_browse_page` / `get_meta_for_id` / `get_library_for_id`) by wrapping the web search engine **directly** (`state.searcher.execute_search` — NOT `/api/search`, which omits `text_position`/`corpus_scope` and caps modes). Search runs **off the event loop** (`run.io_bound`-style, as `web/pages/search.py` does) with timeout, cancellation, and stale-generation (latest-wins) handling — the NiceGUI event loop is never blocked. No search logic re-implemented.
 - [ ] **FND-02**: User can open the Joins Lab at a dedicated `/joins-lab` web route.
 - [ ] **FND-03**: User can cold-start the Joins Lab by entering a shelfmark or sys_id (no prior search required).
 - [ ] **FND-04**: User can launch the Joins Lab on a specific fragment via a "Find joins" action on `/search` result cards.
@@ -105,7 +105,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FND-01 | Phase 117 | Pending |
+| FND-01 | Phase 117 | Complete |
 | FND-02 | Phase 117 | Pending |
 | FND-03 | Phase 117 | Pending |
 | FND-04 | Phase 118 | Pending |
@@ -144,6 +144,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | PST-03 | Phase 120 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 37 total
 - Mapped to phases: 37 (complete)
 - Unmapped: 0

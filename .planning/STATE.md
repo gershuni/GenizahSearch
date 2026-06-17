@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v8.2.0
 milestone_name: Web Joins Lab
 status: executing
-stopped_at: Phase 117 UI-SPEC approved
-last_updated: "2026-06-17T15:37:55.474Z"
-last_activity: 2026-06-17 -- Phase 117 planning complete
+stopped_at: Phase 117 Plan 01 complete — ready for Plan 02
+last_updated: "2026-06-17T17:14:18.110Z"
+last_activity: 2026-06-17
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 6
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 117 — vertical-spine (not yet started)
+**Current focus:** Phase 117 — vertical-spine
 
 ## Current Position
 
-Phase: Not started (roadmap created, awaiting plan-phase 117)
-Plan: —
+Phase: 117 (vertical-spine) — EXECUTING
+Plan: 2 of 6
 Status: Ready to execute
-Last activity: 2026-06-17 -- Phase 117 planning complete
+Last activity: 2026-06-17
 
 ## Accumulated Context
 
@@ -79,9 +79,9 @@ Items carried forward from v8.1.0:
 
 ## Session Continuity
 
-Last session: 2026-06-17T14:06:31.879Z
+Last session: 2026-06-17T17:14:18.104Z
 Stopped at: Phase 117 UI-SPEC approved
-Resume file: .planning/phases/117-vertical-spine/117-UI-SPEC.md
+Resume file: None
 Next step: `/gsd:plan-phase 117` (Vertical Spine)
 
 ## Performance Metrics
@@ -89,11 +89,15 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 | Phase | Plan | Duration | Notes |
 |-------|------|----------|-------|
 | (none yet) | — | — | — |
+| Phase 117-vertical-spine P01 | 25min | 3 tasks | 3 files |
 
 ## Decisions
 
-(Accumulated during execution — none yet at roadmap creation)
+- **117-01:** WebSearchExecutor has no `__init__`; reads AppState singleton at call time — web AppState is process-global, ready by handler invocation time (mirrors desktop pattern but without per-instance injection)
+- **117-01:** `execute_search` uses plain `except Exception: return []` (not InterruptedError re-raise) — SearchEngine catches InterruptedError internally and returns partial results; Plan 04 discards via stale-generation guard
+- **117-01:** Off-loop AST guard (SC#3) scoped to `web/pages/joins_lab.py` only — adapter excluded since its sync methods run inside `run.io_bound` dispatched by joins_lab.py; scanning the adapter would produce false V2 violations
+- **117-01:** `get_browse_page` stays NARROW — returns SearchEngine text/nav dict only, no image enrichment (HIGH-1); AnchorViewer uses a SEPARATE rich resolver in Plan 06
 
 ## Operator Next Steps
 
-- Run `/gsd:plan-phase 117` to plan the Vertical Spine
+- Run `/gsd-execute-phase 117 --plan 02` to execute Plan 02 (safe_storage schema)

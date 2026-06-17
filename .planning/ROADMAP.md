@@ -56,6 +56,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 **Milestone goal:** Port the desktop Joins Lab (Component A) to the web at full parity — a human-in-the-loop join-hunting workbench where a scholar pins one anchor fragment (image + numbered transcription) and drives GenizahSearch's existing search tools to find the fragments that physically join it. Rides the complete, web-reusable `shared/joins_lab.py` core (v8.0.0 Phase 106). Human-in-the-loop only — no automated join-finder. Bilingual from line one. Persistence device-local (browser-session, server-side via `safe_storage`) for anonymous users with no login wall.
 
 **Hard constraints across all phases:**
+
 - All per-user state through `web/safe_storage.py` chokepoint (zero raw `app.storage.user`, CI-guarded by `tests/test_no_raw_storage_access.py`)
 - All NLI/IIIF image fetches through existing per-provider proxies + Phase-98 circuit breaker (never unguarded)
 - Search always off the event loop (`run.io_bound`-style); event loop never blocked
@@ -78,19 +79,23 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 **Depends on**: Nothing (first phase of this milestone)
 **Requirements**: FND-01, FND-02, FND-03, FND-06, FND-08, ANC-01, ANC-02, ANC-03, BLD-01, BLD-05, CND-01, CND-02
 **Success Criteria** (what must be TRUE):
+
   1. A scholar opens `/joins-lab?sys_id=T-S+12.123` (or equivalent shelfmark param) in a browser without logging in and sees the anchor fragment's image with zoom/pan controls and folio navigation — loaded through the existing per-provider image-proxy resolution (NLI/Oxford/Cambridge/Manchester/JTS), never via a direct unguarded IIIF URL.
   2. The anchor pane shows the fragment's transcription as right-aligned (RTL) numbered lines alongside the image.
   3. The `WebSearchExecutor` adapter satisfies the `shared/joins_lab.py` `SearchExecutor` Protocol by wrapping `state.searcher.execute_search` directly off the event loop (`run.io_bound`-style with timeout, cancellation, and stale-generation handling); a CI test asserts no raw `app.storage.user` access is added under `web/` (`tests/test_no_raw_storage_access.py` allowlist stays `[]`), and a second CI test asserts the search call is not made on the event loop.
   4. A scholar types text into the minimal anchor-side line builder, triggers a search, and sees a deduped one-per-image candidate grid with thumbnail and key metadata — the compose + execute + dedup pipeline is wired end-to-end.
   5. The `safe_storage` schema for Joins Lab state is defined and versioned (schema-version invalidation field present); all state reads/writes go through `safe_user_*` helpers; the page loads for two different anonymous sessions without any state bleed between them.
   6. The deep-link URL contract is explicit and documented: anchor identified by `sys_id` (with optional shelfmark / `fl_id` / page / `volume_ie`); `/search`, `/browse`, and cold-start all resolve the same anchor; builder/candidate/triage state is not encoded in the URL (device-local only).
+
 **Plans**: 6 plans (2 waves)
-- [ ] 117-01-PLAN.md — WebSearchExecutor adapter (wraps state.searcher off-loop, not /api/search) + Protocol & off-loop-guard CI tests [Wave 1]
+
+- [x] 117-01-PLAN.md — WebSearchExecutor adapter (wraps state.searcher off-loop, not /api/search) + Protocol & off-loop-guard CI tests [Wave 1]
 - [ ] 117-02-PLAN.md — Versioned `joins_lab` safe_storage schema + invalidation / round-trip / no-state-bleed tests [Wave 1]
 - [ ] 117-03-PLAN.md — Extract per-provider image-URL resolver + promote RTL transcription helper from browse.py (browse stays green) [Wave 1]
 - [ ] 117-05-PLAN.md — Read-only candidate grid component (thumbnail + shelfmark + library chip + title + View-in-Browse) [Wave 1]
 - [ ] 117-06-PLAN.md — AnchorViewer component (image zoom/pan + folio nav + RTL transcription, proxy-only, idempotent head HTML) [Wave 2]
 - [ ] 117-04-PLAN.md — /joins-lab route + cold-start + builder + off-loop search → compose → dedup → grid + anchor persistence [Wave 2]
+
 **UI hint**: yes
 
 ### Phase 118: Joins, Entry & Full Builders
@@ -99,11 +104,13 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 **Depends on**: Phase 117
 **Requirements**: ANC-04, ANC-05, FND-04, FND-05, BLD-02, BLD-03, BLD-04
 **Success Criteria** (what must be TRUE):
+
   1. The anchor pane displays known joins as a connected group with per-join source attribution (PGP / FJMS / user-submitted / community), using the pairwise→group BFS model (no new schema).
   2. The known-joins display is multitenant-safe: only public/confirmed joins appear in the process-global path (or the cache is user/status-aware and isolated), so User A's unconfirmed (creator-only, RLS-scoped) proposed joins cannot appear in User B's session.
   3. "Find joins" actions appear on `/search` result cards and on `/browse` and open the Joins Lab pre-loaded with that fragment as the anchor, satisfying the FND-08 deep-link contract (sys_id param; `volume_ie` passed for multi-IE manuscripts; no builder/triage state in the URL).
   4. The other-side builder drives `resolve_other_side_pages` over a web-defined page contract (`p_num`-based not internal index, multi-IE-aware, defined behavior for unknown total-page counts and sparse/metadata-only pages); cross-side narrow/widen via `apply_cross_side` produces a proper subset (AND narrow) or superset (OR widen) of the anchor-only search.
   5. Per-line modifiers (line-start ⊢ / line-end ⊣ / plene-defective) on either side hoist into the Responsa-syntax forms `compose()` recognises; global toggles (variants, Judeo-Arabic, flexible spacing, bidirectional) apply to BOTH sides via a `_merge_globals`-equivalent (since `compose()` hardcodes JA/flex/bidirectional false) — a test enables each toggle and asserts the executed query string changes.
+
 **Plans**: TBD
 **UI hint**: yes
 
@@ -113,12 +120,14 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 **Depends on**: Phase 117
 **Requirements**: CND-03, CND-04, CND-05, CND-06, CND-07, CND-08, CMP-01, CMP-02, CMP-03, VSM-01, VSM-02
 **Success Criteria** (what must be TRUE):
+
   1. The candidate surface offers grid and table views (table sortable, multi-select); triage verdicts and eye badges show consistently in both simultaneously — switching view never resets or hides per-candidate state.
   2. Triage verdicts (Yes / Maybe / No) are keyed by `sys_id`, reflected immediately in grid and table, and cleared on re-anchor; a self-match banner appears when `detect_self_match` finds the anchor among its own candidates.
   3. Candidate filters (material / dimensions / size-mismatch / triage state) narrow the display (persisting across grid/table, matching desktop Phase-108 semantics); a result cap and/or pagination prevents unbounded render, and neither the render loop nor enrichment blocks the NiceGUI event loop.
   4. Candidate metadata (shelfmark / title / library / material / dimensions / thumbnail) is enriched asynchronously off the event loop, in batches, with image/network lookups through the Phase-98 NLI circuit breaker — an NLI outage degrades thumbnails gracefully without stalling the surface.
   5. Opening Compare from any candidate (grid card, table row, or shortcut) shows a side-by-side anchor↔candidate panel (image + numbered transcription) with independent per-pane zoom and folio navigation; recording a Y/?/N verdict in Compare syncs back to the `sys_id`-keyed triage in grid and table with no refresh.
   6. A single Visual Similarity (👁) toggle merges FIST look-alikes for the loaded anchor via the web VS-service adapter + `merge_candidates` (off = text-only; on = merged / intersection); it tracks the loaded anchor sid so look-alikes invalidate on re-anchor, has explicit disabled / no-data / empty-intersection states, and badges look-alikes consistently across grid, table, and Compare.
+
 **Plans**: TBD
 **UI hint**: yes
 
@@ -128,11 +137,13 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 **Depends on**: Phase 118, Phase 119
 **Requirements**: ACT-01, ACT-02, ACT-03, PST-01, PST-02, PST-03
 **Success Criteria** (what must be TRUE):
+
   1. The "Add as Join" action connects to the existing pairwise-join community-write path (login-gated): an unauthenticated scholar sees a login prompt (not a silent failure or error page), and after login the new join appears in the anchor's known-joins group.
   2. The "Add to Puzzle" action sends the anchor AND all selected candidates to `/puzzle` via a NEW multi-fragment bulk staging payload/API (the prior `/puzzle?add=` accepted one fragment at a time); the anchor is always included regardless of which candidates are selected.
   3. The "Add to List" action adds selected candidates to a saved list (login-gated cloud write via the existing `/lists`); an "Export" action produces a downloadable CSV or XLSX of the candidate set with shelfmark, library, triage verdict, and key metadata columns.
   4. After a page refresh (or return to `/joins-lab` in the same browser session without logging in), the anchor, builder inputs (line text, modifiers, global toggles), triage verdicts, active filter, and view mode are all restored; the search is automatically re-run from the persisted inputs (not a stale result blob) — consistent with the desktop `join_workbench` restore pattern.
   5. Persistence uses server-side per-browser-session state through `web/safe_storage.py` (`safe_user_*`, keyed by the NiceGUI session cookie); the stored schema has an explicit version field for clean invalidation; the payload contains no `full_text` / image / result blobs (size cap enforced) and never leaks across sessions; a "Clear / Reset" control wipes all Joins Lab working state, and a test confirms the `safe_storage` keys are empty after reset.
+
 **Plans**: TBD
 **UI hint**: yes
 
@@ -142,9 +153,11 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 **Depends on**: Phases 117, 118, 119, 120
 **Requirements**: FND-07
 **Success Criteria** (what must be TRUE):
+
   1. Every UI string in the Joins Lab — labels, buttons, tooltips, toasts, error messages, placeholders — has both an EN and HE key in the project's `tr()` system; switching the app language updates all Joins Lab strings without a page reload.
   2. The Hebrew-interface layout is fully RTL: anchor transcription right-aligned, builder rows right-to-left, candidate grid/table headers + cells in RTL, Compare panes mirrored, no element clipped or overlapping from a direction mismatch.
   3. A static / AST audit confirms no raw Hebrew string literal appears in the Joins Lab page/component Python files outside the `tr()` system — every Hebrew string goes through `tr()` so it cannot leak into the English interface.
+
 **Plans**: TBD
 **UI hint**: yes
 
@@ -152,7 +165,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 117. Vertical Spine | 0/6 | Planned (6 plans, 2 waves) | - |
+| 117. Vertical Spine | 1/6 | In Progress|  |
 | 118. Joins, Entry & Full Builders | 0/TBD | Not started | - |
 | 119. Candidates, Compare & Visual Similarity | 0/TBD | Not started | - |
 | 120. Actions & Persistence | 0/TBD | Not started | - |
