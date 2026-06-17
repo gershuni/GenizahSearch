@@ -42,6 +42,9 @@ def _warn_bridge_import_failed(exc: Exception) -> None:
 # Re-export the old private name so existing call sites and tests keep working unchanged.
 from web.components.typography import render_line_numbered_html as _render_line_numbered_html
 
+# Phase 117 Plan 03: per-provider image-URL resolution extracted to web/components/image_resolution.py.
+from web.components.image_resolution import resolve_image_url
+
 
 from web.safe_storage import safe_user_get, safe_user_set
 from web.services import (
@@ -3482,129 +3485,40 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                     is_oxford = is_oxford_manuscript(page.shelfmark, page.library_code)
 
 
-                # Choose image endpoint based on source
-                # Prioritize page-specific fl_id over sys_id for correct page images
-                # Add cache-buster to force image refresh on page navigation
-                cache_bust_value = f"_cb={page.p_num}" if page.p_num else ""
-                cache_bust_api = f"&{cache_bust_value}" if cache_bust_value else ""
-                cache_bust_direct = f"?{cache_bust_value}" if cache_bust_value else ""
+                # Phase 117 Plan 03: image-URL resolution delegated to the shared helper
+                # (web/components/image_resolution.py) so anchor pane + Compare can reuse it.
+                # The _has_*_images flags and active_source auto-default logic live in
+                # resolve_image_url; browse reads them back from the returned dict.
+                _img_result = resolve_image_url(
+                    sys_id=page.sys_id,
+                    p_num=page.p_num,
+                    is_oxford=is_oxford,
+                    shelfmark=page.shelfmark,
+                    volume_suffix=page.volume_suffix,
+                    cambridge_images=page.cambridge_images,
+                    external_provider=page.external_provider,
+                    cambridge_alignment=page.cambridge_alignment,
+                    volumes=page.volumes,
+                    total_pages=page.total_pages,
+                    active_source=state.active_source,
+                    source_user_override=state.source_user_override,
+                )
+                img_url = _img_result['img_url']
+                has_image = _img_result['has_image']
+                state.active_source = _img_result['active_source']
+                fallback_url = None
 
-                # Page index (0-based) for multi-page manuscripts
+                # page_idx still needed below for NLI viewer deep-link JS
                 page_idx = max(0, page.p_num - 1)
 
-                # NLI IIIF base URL for direct browser access (bypasses server blocking)
-                NLI_IIIF_BASE = "https://iiif.nli.org.il/IIIFv21"
-
-                if is_oxford and page.sys_id and state.active_source != 'nli':
-                    has_image = True
-                    # For multi-IE Oxford manuscripts, each volume = next folio in sequence
-                    # e.g., d.50/19 Volume 1 = folio 19, Volume 2 = folio 20
-                    # Oxford folios have 2 sides (recto 'a' + verso 'b'), so offset by
-                    # number of preceding volumes, not pages.
-                    _ox_folio_offset = max(0, (page.volume_suffix or 1) - 1)
-                    # Prefer direct Bodleian URL in browser to avoid production /api proxy failures.
-                    oxford_direct = get_oxford_direct_image_url(page.shelfmark, page_idx, folio_offset=_ox_folio_offset)
-                    if oxford_direct:
-                        img_url = f"{oxford_direct}{cache_bust_direct}"
-                    else:
-                        # Fallback to proxy when direct URL cannot be derived from shelfmark.
-                        img_url = f"/api/oxford_image/{page.sys_id}?page={page_idx}{cache_bust_api}"
-                    fallback_url = None
-                elif page.sys_id:
-                    # Use server-side NLI proxy for ALL NLI items
-                    # This works reliably for all collections (Cambridge, Russian, etc.)
-                    # Direct browser requests to NLI are blocked for some collections
-                    has_image = True
-                    _suffix_param = f'&suffix={page.volume_suffix}' if page.volume_suffix > 1 else ''
-                    # Phase 85 D-06/D-08: synthetic sys_ids skip the NLI image proxy.
-                    # If a CUDL manifest is available the cambridge auto-default
-                    # below switches active_source='cambridge' which routes to
-                    # /api/cambridge_image/. If no CUDL, has_image is forced
-                    # False so the <img> doesn't render with a 204-only URL.
-                    if is_synthetic_sys_id(page.sys_id):
-                        if not page.cambridge_images:
-                            has_image = False
-                            img_url = ''
-                        else:
-                            img_url = ''  # will be reset by cambridge branch below
-                    else:
-                        img_url = f"/api/nli_image_by_sysid/{page.sys_id}?page={page_idx}{_suffix_param}{cache_bust_api}"
-                    fallback_url = None
-
-                # External source override: if user switched to Cambridge/Manchester/JTS/Oxford and images are available
+                # Reconstruct the external-source flags needed for the source-chip UI
+                # (these were formerly computed inline above; now derived from page fields
+                # after active_source has been set by resolve_image_url).
                 _has_ext_images = bool(page.cambridge_images)
-                _has_cambridge_images = _has_ext_images and page.external_provider not in ('manchester', 'jts')
+                _has_cambridge_images = _has_ext_images and (page.external_provider or '') not in ('manchester', 'jts')
                 _has_manchester_images = _has_ext_images and page.external_provider == 'manchester'
                 _has_jts_images = _has_ext_images and page.external_provider == 'jts'
-                # Oxford manuscripts always have a Bodleian direct/proxy path — treat
-                # it as an external source like Cambridge/JTS so the user can switch
-                # between it and the NLI IIIF view of the same manuscript.
                 _has_oxford_images = bool(is_oxford and page.sys_id)
-
-                # Auto-default to external sources when available (before image URL construction)
-                # When NLI IIIF is down, these ensure images load from alternate providers
-                # Phase 85 D-08: synthetic sys_ids with a CUDL manifest default
-                # to Cambridge as the image source (no NLI attempted at all).
-                _is_synth = is_synthetic_sys_id(page.sys_id)
-                if _is_synth and _has_cambridge_images and state.active_source == 'nli' and not state.source_user_override:
-                    state.active_source = 'cambridge'
-                if _has_jts_images and state.active_source == 'nli' and not state.source_user_override:
-                    state.active_source = 'jts'
-                if _has_manchester_images and state.active_source == 'nli' and not state.source_user_override:
-                    state.active_source = 'manchester'
-                if _has_oxford_images and state.active_source == 'nli' and not state.source_user_override:
-                    state.active_source = 'oxford'
-                # 260419-cfx / 260421-aln: only auto-default to Cambridge CUDL
-                # when the per-position (folio,side) verdict from
-                # classify_cambridge_alignment says 'aligned'. A 'misaligned'
-                # verdict (count or position mismatch) OR a missing verdict
-                # entry (CUDL+NLI both present but not yet classified) keeps
-                # NLI as default — positional CUDL mapping is unreliable in
-                # those cases. User can still switch manually via the source
-                # toggle. For legacy/backward compat, also accept a match when
-                # the verdict is absent but CUDL count matches total_pages
-                # (e.g. pages loaded before enrich_metadata finished).
-                _cam_verdict = (page.cambridge_alignment or {}).get('verdict') if page.cambridge_alignment else None
-                _cam_safe_default = (
-                    _has_cambridge_images
-                    and (
-                        _cam_verdict == 'aligned'
-                        or (
-                            _cam_verdict is None
-                            and page.total_pages
-                            and len(page.cambridge_images or []) == page.total_pages
-                        )
-                    )
-                )
-                if _cam_safe_default and state.active_source == 'nli' and not state.source_user_override:
-                    state.active_source = 'cambridge'
-
-                if state.active_source == 'cambridge' and _has_cambridge_images and not is_oxford:
-                    has_image = True
-                    img_url = f"/api/cambridge_image/{page.sys_id}?page={page_idx}{cache_bust_api}"
-                    fallback_url = None
-
-                # Manchester source override
-                if state.active_source == 'manchester' and _has_manchester_images and not is_oxford:
-                    has_image = True
-                    # For multi-IE manuscripts, Manchester canvases span all volumes
-                    # sequentially. Compute absolute canvas index by adding preceding
-                    # volumes' transcription page counts as offset.
-                    _manch_page_idx = page_idx
-                    if page.volume_suffix and page.volume_suffix > 1 and page.volumes:
-                        _vol_offset = 0
-                        for v in page.volumes:
-                            if v.get('suffix', 1) < page.volume_suffix:
-                                _vol_offset += v.get('transcription_pages', 0)
-                        _manch_page_idx = page_idx + _vol_offset
-                    img_url = f"/api/manchester_image/{page.sys_id}?page={_manch_page_idx}{cache_bust_api}"
-                    fallback_url = None
-
-                # JTS source override
-                if state.active_source == 'jts' and _has_jts_images and not is_oxford:
-                    has_image = True
-                    img_url = f"/api/jts_image/{page.sys_id}?page={page_idx}{cache_bust_api}"
-                    fallback_url = None
 
                 # Header bar with folio info, navigation, controls
                 # Determine effective image count and folio data

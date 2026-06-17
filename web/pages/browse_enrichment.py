@@ -237,31 +237,31 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
             except Exception as e:
                 logger.error("Browse enrichment crossref error: %s", e)
 
-            # External images from nli_cache (populated by enrich_metadata)
-            if _sys_id and hasattr(state_mod.meta_mgr, 'nli_cache'):
-                cached = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
-                if not cached.get('images_ext'):
-                    # nli_cache not yet populated — call enrich_metadata to resolve
-                    # Manchester/Cambridge/JTS images from crossref sidecar + IIIF
-                    try:
-                        state_mod.meta_mgr.enrich_metadata(_sys_id)
-                        cached = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
-                    except Exception as e:
-                        logger.warning("Browse enrichment enrich_metadata error: %s", e)
-                result['cambridge_images'] = cached.get('images_ext', [])
-                result['external_provider'] = cached.get('external_provider', '')
-                result['cambridge_alignment'] = cached.get('cambridge_alignment')
+            # External images from nli_cache (populated by enrich_metadata).
+            # Phase 117 Plan 03: delegated to the shared resolve_external_images helper
+            # (web/components/image_resolution.py) — one source of truth for D-10.
+            # This runs inside _browse_enrich_sync which is already under run.io_bound
+            # (browse_enrichment.py:269), so the I/O constraint is satisfied.
+            if _sys_id:
+                from web.components.image_resolution import resolve_external_images
+                _ext = resolve_external_images(_sys_id, meta_mgr=state_mod.meta_mgr)
+                result['cambridge_images'] = _ext['cambridge_images']
+                result['external_provider'] = _ext['external_provider']
+                result['cambridge_alignment'] = _ext['cambridge_alignment']
                 # Phase 84 follow-up: propagate external_url back from nli_cache when
                 # the MARC branch (line 192-199 above) didn't set one. enrich_metadata
                 # may have resolved it via the bridge supplement (Cambridge for
                 # CUDL-only rows like Mosseri). Without this, pg.external_url stays
                 # empty for Mosseri/CUL-CUDL rows and the browse "View on CUDL" link
                 # falls through to a lossy shelfmark-slug fallback that 404s.
-                if not result.get('external_url') and cached.get('external_url'):
-                    cached_url = cached.get('external_url') or ''
-                    if 'cudl.lib.cam.ac.uk' in cached_url.lower():
-                        result['is_cambridge'] = True
-                    result['external_url'] = cached_url
+                # (Read back the post-enrich nli_cache entry for the external_url field.)
+                if not result.get('external_url') and hasattr(state_mod.meta_mgr, 'nli_cache'):
+                    _cached_after = state_mod.meta_mgr.nli_cache.get(_sys_id, {})
+                    if _cached_after.get('external_url'):
+                        cached_url = _cached_after.get('external_url') or ''
+                        if 'cudl.lib.cam.ac.uk' in cached_url.lower():
+                            result['is_cambridge'] = True
+                        result['external_url'] = cached_url
 
             return result
 
