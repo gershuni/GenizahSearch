@@ -1139,6 +1139,7 @@ def create_layout():
                     ('/catalog-browse', 'category', tr('Browse by Identification'), None),
                     ('/discoveries', 'lightbulb', tr('Community'), None),
                     ('/lists', 'star', tr('My Lists'), None),
+                    ('/joins-lab', 'join_inner', tr('Joins Lab'), None),
                 ]
                 if WEB_PUZZLE_ENABLED:
                     nav_items.append(('/puzzle', 'extension', tr('Fragment Puzzle'), None))
@@ -1797,6 +1798,47 @@ def browse_page_route(sys_id: str = None, highlight: str = None, fl_id: str = No
     with content:
         from web.pages.browse import create_browse_page
         create_browse_page(initial_sys_id=sys_id, highlight=highlight, initial_fl_id=fl_id, initial_page=page, initial_shelfmark=shelfmark if sys_id is None or sys_id != (shelfmark or '').strip() else None, initial_volume_ie=volume_ie)
+
+@ui.page('/joins-lab', title='Joins Lab | Dicta Genizah Search')
+def joins_lab_page_route(
+    sys_id: str = None,
+    shelfmark: str = None,
+    fl_id: str = None,
+    page: int = None,
+    volume_ie: str = None,
+):
+    """Joins Lab vertical spine page route.
+
+    FND-08 URL contract:
+      - sys_id:     Primary anchor identifier (Alma system number, e.g. '990001234').
+                    When present, the page loads this manuscript as the anchor directly.
+      - shelfmark:  Human-readable shelfmark (e.g. 'T-S 12.123').  Resolved to sys_id
+                    when sys_id is absent; sys_id wins if both are present.
+      - fl_id:      Optional folio/leaf identifier (e.g. 'T-S 12.123.1r') — forwarded
+                    to AnchorViewer for precise folio selection.
+      - page:       Optional 1-based page/image number hint — forwarded to AnchorViewer.
+      - volume_ie:  Optional volume IE identifier for multi-volume manuscripts.
+
+    Builder/candidate/triage state is NEVER in the URL — it is device-local
+    (safe_storage, keyed by NiceGUI session cookie).  Only the anchor identity
+    is carried in the URL.
+    """
+    safe_user_set('current_page', '/joins-lab')
+    ui.add_head_html(ANALYTICS_SCRIPT)
+    ui.add_head_html(POSTHOG_SCRIPT)
+    ui.add_head_html(COMMON_STYLES)
+    ui.add_head_html(apply_theme_immediately())
+    content = create_layout()
+    with content:
+        from web.pages.joins_lab import create_joins_lab_page
+        create_joins_lab_page(
+            initial_sys_id=sys_id,
+            initial_shelfmark=shelfmark,
+            initial_fl_id=fl_id,
+            initial_page=page,
+            initial_volume_ie=volume_ie,
+        )
+
 
 @ui.page('/catalog-browse', title='Catalog Browse | עיון בקטלוג — Dicta Genizah Search')
 def catalog_browse_page_route(
