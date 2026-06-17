@@ -1078,7 +1078,12 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                ui.label(tr('New: Experiment with GenizahSearch using AI tools and the public API.')).classes('text-xs flex-1 truncate').style('color: var(--text-secondary);')
+                # Link the descriptive text to the Help page's "Public API & AI
+                # Tools" section (anchor name="help-api" in web/pages/help.py).
+                ui.link(
+                    tr('New: Experiment with GenizahSearch using AI tools and the public API.'),
+                    '/help#help-api',
+                ).classes('text-xs flex-1 truncate text-primary hover:underline')
                 def dismiss_whats_new():
                     # Explicit user dismiss (X button): persist the flag unconditionally.
                     safe_user_set('whats_new_dismissed', WHATS_NEW_VERSION)
