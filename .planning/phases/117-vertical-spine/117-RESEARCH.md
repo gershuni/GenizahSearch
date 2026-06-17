@@ -682,34 +682,31 @@ The two-anonymous-session no-state-bleed test for the full NiceGUI context requi
 
 ## Assumptions Log
 
-| # | Claim | Section | Risk if Wrong |
-|---|-------|---------|---------------|
-| A1 | `state.searcher.get_browse_page` signature matches Protocol (has `volume_ie`, `allow_cross` params) | WebSearchExecutor adapter | adapter compiles but Protocol compliance check fails at runtime; need to inspect `genizah_core.SearchEngine.get_browse_page` |
-| A2 | `state.meta_mgr.get_meta_for_id(sys_id)` returns `(shelfmark, title)` tuple | WebSearchExecutor adapter | method may not exist or return different shape; inspect `genizah_core.MetadataManager` |
-| A3 | `state.meta_mgr.get_library_for_id(sys_id)` exists | WebSearchExecutor adapter | method may be named differently; inspect MetadataManager |
-| A4 | NiceGUI `add_head_html` deduplicates identical content within a single page render | anchor_viewer.py extraction | if it doesn't deduplicate, Phase 119 Compare will double-inject viewer JS |
-| A5 | `_render_line_numbered_html` has no hidden dependency on `BrowseState` or other browse globals | RTL transcription import | if it imports browse-internal state, the function cannot be cleanly imported |
+| # | Claim | Section | Risk if Wrong | Resolution |
+|---|-------|---------|---------------|------------|
+| A1 | `state.searcher.get_browse_page` signature matches Protocol (has `volume_ie`, `allow_cross` params) | WebSearchExecutor adapter | adapter compiles but Protocol compliance check fails at runtime | RESOLVED (planning, 2026-06-17): `SearchEngine.get_browse_page` at `genizah_core.py:9869` has signature `(sys_id, p_num=None, next_prev=0, absolute_index=None, allow_cross=False, volume_ie=None)` — matches Protocol exactly. Owner: `state.searcher`. |
+| A2 | `state.meta_mgr.get_meta_for_id(sys_id)` returns `(shelfmark, title)` tuple | WebSearchExecutor adapter | method may not exist or return different shape | RESOLVED (planning, 2026-06-17): `MetadataManager.get_meta_for_id` at `genizah_core.py:3968` returns `(shelf, title)`. Owner: `state.meta_mgr`. |
+| A3 | `state.meta_mgr.get_library_for_id(sys_id)` exists | WebSearchExecutor adapter | method may be named differently | RESOLVED (planning, 2026-06-17): `MetadataManager.get_library_for_id` at `genizah_core.py:4004` returns library code or `''`. Owner: `state.meta_mgr`. `execute_search` is at `genizah_core.py:8600` on `state.searcher`. |
+| A4 | NiceGUI `add_head_html` deduplicates identical content within a single page render | anchor_viewer.py extraction | if it doesn't deduplicate, Phase 119 Compare will double-inject viewer JS | RESOLVED (planning): not relying on NiceGUI dedup — Plan 06 adds an explicit JS `window._msViewerLoaded` idempotency guard (Open Question 2). |
+| A5 | `_render_line_numbered_html` has no hidden dependency on `BrowseState` or other browse globals | RTL transcription import | if it imports browse-internal state, the function cannot be cleanly imported | RESOLVED (planning): verified pure (internal `import html` escape, no browse globals); Plan 03 promotes it to `web/components/typography.py` (Open Question 1). |
 
-**Verification needed (A1–A3):** Inspect `genizah_core.py` `MetadataManager.get_meta_for_id`, `get_library_for_id`, and `SearchEngine.get_browse_page` method signatures before writing the adapter.
+**Verification (A1–A3):** COMPLETE — inspected `genizah_core.py` during planning (`get_meta_for_id`:3968, `get_library_for_id`:4004 on MetadataManager; `execute_search`:8600, `get_browse_page`:9869 on SearchEngine). Recorded in Plan 117-01 `<interfaces>` block.
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **`_render_line_numbered_html` placement**
+1. **`_render_line_numbered_html` placement** — RESOLVED in Plan 117-03 Task 1.
    - What we know: it is at `browse.py:41`, pure function, no external dependencies visible in the function body.
-   - What's unclear: whether there is an implicit dependency on browse-level imports that would make the import path `web.pages.browse._render_line_numbered_html` fragile.
-   - Recommendation: move the function to `web/components/typography.py` during this phase (it's already a "typography" concern) and update the import in `browse.py`. This eliminates the fragility and pays off for Phase 119 Compare.
+   - Resolution: Plan 117-03 Task 1 moves the function to `web/components/typography.py` as a public `render_line_numbered_html` and re-exports the old private name from `browse.py` (keeps `tests/test_line_numbers_web.py` green). Verified pure during planning — no browse-global dependency.
 
-2. **`manuscriptViewer` head HTML duplication guard**
+2. **`manuscriptViewer` head HTML duplication guard** — RESOLVED in Plan 117-06 Task 1.
    - What we know: Phase 119 will instantiate two `AnchorViewer` components on the same page.
-   - What's unclear: NiceGUI's exact behavior with `add_head_html` called twice with the same content.
-   - Recommendation: add a JS-side idempotency guard (`if (!window._msViewerLoaded) { ...; window._msViewerLoaded = true; }`) in the head HTML block.
+   - Resolution: Plan 117-06 Task 1 adds a JS-side idempotency guard (`if (!window._msViewerLoaded) { ...; window._msViewerLoaded = true; }`) in the head HTML block; does not rely on NiceGUI's content-hash dedup.
 
-3. **`get_browse_page` / `get_meta_for_id` / `get_library_for_id` on MetadataManager**
-   - What we know: the Protocol declares these 4 methods; the desktop `_DesktopSearchExecutor` wraps `self._searcher` and `self._meta_mgr`.
-   - What's unclear: whether `meta_mgr` in the web (`state.meta_mgr`) has identical method signatures to what the desktop uses, or whether `get_browse_page` is on `searcher` not `meta_mgr`.
-   - Recommendation: before finalizing the adapter, grep for `def get_browse_page` and `def get_meta_for_id` in `genizah_core.py` to confirm which object owns each method.
+3. **`get_browse_page` / `get_meta_for_id` / `get_library_for_id` ownership** — RESOLVED during planning (A1–A3).
+   - What we know: the Protocol declares 4 methods; the desktop `_DesktopSearchExecutor` wraps `self._searcher` and `self._meta_mgr`.
+   - Resolution: grepped `genizah_core.py` — `execute_search` (8600) + `get_browse_page` (9869) on `SearchEngine` (`state.searcher`); `get_meta_for_id` (3968) + `get_library_for_id` (4004) on `MetadataManager` (`state.meta_mgr`). Recorded in Plan 117-01 `<interfaces>` block; the adapter wires accordingly.
 
 ---
 
@@ -831,6 +828,7 @@ The test strategy: use a `FakeSearchExecutor` (already exists in `tests/test_joi
 - `tests/test_no_raw_storage_access.py` — allowlist [] invariant, AST scanner [VERIFIED: codebase read, full file]
 - `web/pages/parallels.py:2140–2152` — progress_cb dual-protocol guard [VERIFIED: codebase grep]
 - `genizah_core.py:1055–1073` — _execute_batched_search dual progress_callback protocol [VERIFIED: codebase read]
+- `genizah_core.py:3968, 4004, 8600, 9869` — get_meta_for_id / get_library_for_id (MetadataManager) + execute_search / get_browse_page (SearchEngine) ownership + signatures [VERIFIED: codebase read during planning, A1–A3 resolved]
 - `.planning/phases/117-vertical-spine/117-CONTEXT.md` — 16 locked decisions [VERIFIED: file read]
 - `.planning/phases/117-vertical-spine/117-UI-SPEC.md` — layout architecture, component inventory, copywriting, color/typography tokens [VERIFIED: file read]
 - `.planning/REQUIREMENTS.md` — FND/ANC/BLD/CND requirements [VERIFIED: file read]
@@ -844,7 +842,7 @@ The test strategy: use a `FakeSearchExecutor` (already exists in `tests/test_joi
 - `web/components/` directory listing — confirms no `anchor_viewer.py` or `candidate_grid.py` yet exists [VERIFIED: bash ls]
 
 ### Tertiary (LOW confidence)
-- A1–A3 in Assumptions Log: `get_browse_page`/`get_meta_for_id`/`get_library_for_id` signatures — not directly verified in `genizah_core.py` during this research session (deferred to planner's Wave 0 verification step)
+- (none remaining — A1–A3 promoted to HIGH after planning-time verification of `genizah_core.py` method signatures)
 
 ---
 
@@ -854,7 +852,8 @@ The test strategy: use a `FakeSearchExecutor` (already exists in `tests/test_joi
 - Standard stack: HIGH — all libraries are existing codebase code, no new packages
 - Architecture: HIGH — verified patterns from production code; off-loop model confirmed
 - Pitfalls: HIGH — Pitfalls 1 and 4 are verified from production bugs/CI guards; others are reasoned from codebase structure
-- Adapter Protocol compliance (A1–A3): LOW — method names on `genizah_core.MetadataManager` not confirmed
+- Adapter Protocol compliance (A1–A3): HIGH (was LOW) — method names/signatures/ownership confirmed in `genizah_core.py` during planning
 
 **Research date:** 2026-06-17
 **Valid until:** 2026-07-17 (stable codebase; safe_storage and search patterns are load-bearing and unlikely to change)
+**Updated:** 2026-06-17 — A1–A3 + Open Questions 1–3 marked RESOLVED after plan-phase verification (gsd-checker documentation-hygiene warning).
