@@ -165,7 +165,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 117. Vertical Spine | 4/6 | In Progress|  |
+| 117. Vertical Spine | 6/6 | Complete   | 2026-06-17 |
 | 118. Joins, Entry & Full Builders | 0/TBD | Not started | - |
 | 119. Candidates, Compare & Visual Similarity | 0/TBD | Not started | - |
 | 120. Actions & Persistence | 0/TBD | Not started | - |

@@ -14,13 +14,13 @@ Requirements for this milestone. Each maps to a roadmap phase.
 ### Foundation & Entry (FND)
 
 - [x] **FND-01**: A web `SearchExecutor` adapter implements the `shared/joins_lab.py` Protocol (`execute_search` / `get_browse_page` / `get_meta_for_id` / `get_library_for_id`) by wrapping the web search engine **directly** (`state.searcher.execute_search` — NOT `/api/search`, which omits `text_position`/`corpus_scope` and caps modes). Search runs **off the event loop** (`run.io_bound`-style, as `web/pages/search.py` does) with timeout, cancellation, and stale-generation (latest-wins) handling — the NiceGUI event loop is never blocked. No search logic re-implemented.
-- [ ] **FND-02**: User can open the Joins Lab at a dedicated `/joins-lab` web route.
-- [ ] **FND-03**: User can cold-start the Joins Lab by entering a shelfmark or sys_id (no prior search required).
+- [x] **FND-02**: User can open the Joins Lab at a dedicated `/joins-lab` web route.
+- [x] **FND-03**: User can cold-start the Joins Lab by entering a shelfmark or sys_id (no prior search required).
 - [ ] **FND-04**: User can launch the Joins Lab on a specific fragment via a "Find joins" action on `/search` result cards.
 - [ ] **FND-05**: User can launch the Joins Lab on a specific fragment via a "Find joins" action on `/browse`.
 - [x] **FND-06**: The Joins Lab works without login (no auth wall); every per-user state access goes through `web/safe_storage.py` (zero raw `app.storage.user`, preserving the Phase 87 CI-guarded invariant — `tests/test_no_raw_storage_access.py`, allowlist `[]`).
 - [ ] **FND-07**: The entire Joins Lab UI is bilingual (EN/HE) with correct RTL layout, consistent with the rest of the web app.
-- [ ] **FND-08**: The entry/deep-link URL contract is explicit — anchor identified by `sys_id` (with shelfmark / `fl_id` / page / `volume_ie` where relevant) so `/search`, `/browse`, and cold-start all resolve the same anchor (incl. multi-IE volumes). The deep link carries the anchor (and optional initial VS mode) only; builder/candidate/triage state is device-local, NOT encoded in shareable URLs.
+- [x] **FND-08**: The entry/deep-link URL contract is explicit — anchor identified by `sys_id` (with shelfmark / `fl_id` / page / `volume_ie` where relevant) so `/search`, `/browse`, and cold-start all resolve the same anchor (incl. multi-IE volumes). The deep link carries the anchor (and optional initial VS mode) only; builder/candidate/triage state is device-local, NOT encoded in shareable URLs.
 
 ### Anchor Pane (ANC)
 
@@ -32,15 +32,15 @@ Requirements for this milestone. Each maps to a roadmap phase.
 
 ### Query Builders (BLD)
 
-- [ ] **BLD-01**: User can build a line-by-line query for the anchor side — rows of OR-grouped word-boxes corresponding to manuscript lines.
+- [x] **BLD-01**: User can build a line-by-line query for the anchor side — rows of OR-grouped word-boxes corresponding to manuscript lines.
 - [ ] **BLD-02**: User can build a line-by-line query for the OTHER side of the leaf with cross-side narrow/widen (`apply_cross_side`), over a web-defined page contract: which page identifier feeds `resolve_other_side_pages` (`p_num` vs internal index), multi-IE (`volume_ie`) behavior, unknown total-page counts, and sparse / metadata-only pages.
 - [ ] **BLD-03**: User can set per-line modifiers (line-start ⊢ / line-end ⊣, plene/defective, etc.) on any builder row.
 - [ ] **BLD-04**: User can set global search toggles (variants, Judeo-Arabic, flexible spacing, bidirectional) and an inline gap; these are applied to BOTH sides via the `_merge_globals`-equivalent before/around `compose()` (which hardcodes JA/flex/bidirectional to false) — so a toggle is never silently dropped.
-- [ ] **BLD-05**: Running a built query composes into the engine's syntax (`compose`) and executes against the web search engine via the FND-01 adapter, returning candidates.
+- [x] **BLD-05**: Running a built query composes into the engine's syntax (`compose`) and executes against the web search engine via the FND-01 adapter, returning candidates.
 
 ### Candidate Surface (CND)
 
-- [ ] **CND-01**: Candidates render deduped to one entry per image/fragment (`dedup_candidates`).
+- [x] **CND-01**: Candidates render deduped to one entry per image/fragment (`dedup_candidates`).
 - [x] **CND-02**: User can view candidates in a grid surface (thumbnail + key metadata + per-card actions).
 - [ ] **CND-03**: User can view candidates in a table surface (sortable columns, multi-select).
 - [ ] **CND-04**: User can triage each candidate Yes / Maybe / No; triage is keyed by `sys_id`, reflected consistently across grid, table, and Compare, and resets on re-anchor.
@@ -106,24 +106,24 @@ Which phases cover which requirements. Populated during roadmap creation.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | FND-01 | Phase 117 | Complete |
-| FND-02 | Phase 117 | Pending |
-| FND-03 | Phase 117 | Pending |
+| FND-02 | Phase 117 | Complete |
+| FND-03 | Phase 117 | Complete |
 | FND-04 | Phase 118 | Pending |
 | FND-05 | Phase 118 | Pending |
 | FND-06 | Phase 117 | Complete |
 | FND-07 | Phase 121 | Pending |
-| FND-08 | Phase 117 | Pending |
+| FND-08 | Phase 117 | Complete |
 | ANC-01 | Phase 117 | Complete |
 | ANC-02 | Phase 117 | Complete |
 | ANC-03 | Phase 117 | Complete |
 | ANC-04 | Phase 118 | Pending |
 | ANC-05 | Phase 118 | Pending |
-| BLD-01 | Phase 117 | Pending |
+| BLD-01 | Phase 117 | Complete |
 | BLD-02 | Phase 118 | Pending |
 | BLD-03 | Phase 118 | Pending |
 | BLD-04 | Phase 118 | Pending |
-| BLD-05 | Phase 117 | Pending |
-| CND-01 | Phase 117 | Pending |
+| BLD-05 | Phase 117 | Complete |
+| CND-01 | Phase 117 | Complete |
 | CND-02 | Phase 117 | Complete |
 | CND-03 | Phase 119 | Pending |
 | CND-04 | Phase 119 | Pending |

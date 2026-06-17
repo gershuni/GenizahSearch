@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v8.2.0
 milestone_name: Web Joins Lab
-status: executing
-stopped_at: Completed Phase 117 Plan 06 — AnchorViewer component complete
-last_updated: "2026-06-17T18:20:00.000Z"
+status: verifying
+stopped_at: Completed Phase 117 Plan 04 — /joins-lab vertical spine integration complete
+last_updated: "2026-06-17T18:50:00.000Z"
 last_activity: 2026-06-17
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 6
   completed_plans: 6
   percent: 20
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md
 
 Phase: 117 (vertical-spine) — COMPLETE
 Plan: 6 of 6 (all plans complete)
-Status: Phase complete — ready for Phase 118
+Status: Phase complete — ready for verification
 Last activity: 2026-06-17
 
 ## Accumulated Context
@@ -92,6 +92,7 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 | Phase 117-vertical-spine P01 | 25min | 3 tasks | 3 files |
 | Phase 117-vertical-spine P02 | 2min | 2 tasks | 2 files |
 | Phase 117-vertical-spine P03 | 30min | 3 tasks | 6 files |
+| Phase 117-vertical-spine P04 | 40min | 4 tasks | 3 files |
 
 ## Decisions
 
@@ -104,7 +105,11 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 - [Phase ?]: 117-03: resolve_external_images lazy-imports web.state.state.meta_mgr; accepts meta_mgr= param for testability; one source of truth for D-10 external-image enrichment
 - **117-06:** AnchorViewer factored with public _resolve_off_loop() + _build_img_html() sync methods for headless testability (no NiceGUI render harness needed in tests)
 - **117-06:** Browse_resolver + external_resolver constructor params enable injection in tests without live AppState
+- **117-04:** use `get_service()` pattern (not module-level `service`) for shelfmark resolution — matches browse.py:521 convention; `web.services` exports `get_service()` factory, not a `service` instance
+- **117-04:** `lines_to_side_query` must pass `line.strip()` to `BuilderRow(term=)` — both the empty-filter and the term must use the stripped value (bug caught by test)
+- **117-04:** AnchorViewer instantiated WITHOUT executor= (HIGH-1 honored); self-resolves rich BrowsePage via service.get_browse_page()
+- **117-04:** D-06 login gate: logged-in path shows placeholder dialog pointing to /lists (full list picker is Phase 120 scope); anonymous path shows explicit login prompt
 
 ## Operator Next Steps
 
-- Phase 117 is COMPLETE (all 6 plans done). Run `/gsd-discuss-phase 118` to start Phase 118 (Joins, Entry & Full Builders).
+- Phase 117 is COMPLETE (all 6 plans + integration plan 04 done). Run `/gsd-discuss-phase 118` to start Phase 118 (Joins, Entry & Full Builders).
