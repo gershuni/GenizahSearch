@@ -2457,6 +2457,25 @@ TRANSLATIONS = {
     "Fuzzy search is slower and uses more server resources.":
         "חיפוש עמום איטי יותר ועמוס יותר על השרת.",
     "↕ gap": "↕ מרווח",
+    # New Search (reset) button + mode/syntax info popup (Phase 118 UAT)
+    "New Search — clear the query and results (keeps the anchor)":
+        "חיפוש חדש — ניקוי השאילתה והתוצאות (העוגן נשמר)",
+    "About search modes & syntax": "אודות מצבי החיפוש והתחביר",
+    "Search modes & syntax": "מצבי חיפוש ותחביר",
+    "Your query always runs as Responsa syntax (shown in the collapsed search bar). "
+    "The mode only controls spelling-variant expansion:":
+        "השאילתה תמיד מורצת בתחביר בסגנון פרויקט השו״ת (המוצג בשורת החיפוש המכווצת). "
+        "המצב קובע רק את הרחבת וריאנטי הכתיב:",
+    "Exact — match your words as written, no variants. This is the raw Responsa query.":
+        "מדויק — התאמה למילים כפי שנכתבו, ללא וריאנטים. זוהי שאילתת החיפוש הגולמית.",
+    "Variants — also match common spelling variants of each word.":
+        "וריאנטים — התאמה גם לווריאנטי כתיב נפוצים של כל מילה.",
+    "Fuzzy — the widest variant net; slowest.":
+        "עמום — הרשת הרחבה ביותר של וריאנטים; האיטי ביותר.",
+    "You can type Responsa operators directly in a word box (space = sequence, "
+    "a/b = alternatives); the gear menu adds the #, %, *, − modifiers.":
+        "ניתן להקליד אופרטורים של חיפוש בסגנון פרויקט השו״ת ישירות בתיבת מילה (רווח = רצף, א/ב = חלופות); "
+        "תפריט גלגל השיניים מוסיף את הסימנים #, %, *, −.",
 
     # --- Wildcard rewrite notice ---
     "*word* rewritten as #word# (prefix + suffix expansion)":

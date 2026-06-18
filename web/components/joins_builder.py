@@ -495,8 +495,12 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
         # placeholder shows ONLY on the lone wide box and is dropped once there are
         # multiple word boxes (UAT: box sizing + alt-text).
         single_word = len(lines_state[li]['words']) == 1
+        # A lone box takes the FULL row width (flex-basis 100%) so the long
+        # explanatory placeholder is never clipped (UAT: "alt-text partially not
+        # seen"); the "+ Add word" button wraps below it. Once a second word is
+        # added the boxes trim to word-width.
         col_style = (
-            'flex: 1 1 auto; min-width: 280px; max-width: 100%;' if single_word
+            'flex: 1 1 100%; min-width: 280px; max-width: 100%;' if single_word
             else 'min-width: 80px; max-width: 180px;'
         )
         with ui.column().classes('items-center gap-0').style(col_style):
@@ -680,6 +684,10 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
 
     # ---- build the widget -----------------------------------------------
 
+    # Initialized to None so _reset() can reference it even when the Text
+    # Position control is not rendered (allow_page_position=False, other side).
+    text_pos_select = None
+
     with ui.column().classes('w-full gap-3') as container:
 
         # Header row: Text Position (prominent) + mode selector
@@ -736,6 +744,36 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
                     )
                     mode_btns[mode_val] = b
 
+                # Info popup — answers "what syntax is this?". The query ALWAYS
+                # runs as Responsa syntax (compose() sets responsa_mode=True); the
+                # mode only controls variant expansion, so 'Exact' IS the raw
+                # Responsa query.
+                with ui.button(icon='help_outline').props('flat dense round size=sm').style(
+                    'color: var(--text-muted);'
+                ).tooltip(tr('About search modes & syntax')):
+                    with ui.menu(), ui.card().classes('p-3 gap-1').style('max-width: 340px;'):
+                        ui.label(tr('Search modes & syntax')).classes('text-sm font-bold')
+                        ui.label(tr(
+                            'Your query always runs as Responsa syntax (shown in the '
+                            'collapsed search bar). The mode only controls spelling-variant '
+                            'expansion:'
+                        )).classes('text-xs')
+                        ui.label('• ' + tr(
+                            'Exact — match your words as written, no variants. This is the '
+                            'raw Responsa query.'
+                        )).classes('text-xs')
+                        ui.label('• ' + tr(
+                            'Variants — also match common spelling variants of each word.'
+                        )).classes('text-xs')
+                        ui.label('• ' + tr('Fuzzy — the widest variant net; slowest.')).classes(
+                            'text-xs'
+                        )
+                        ui.label(tr(
+                            'You can type Responsa operators directly in a word box '
+                            '(space = sequence, a/b = alternatives); the gear menu adds the '
+                            '#, %, *, − modifiers.'
+                        )).classes('text-xs').style('color: var(--text-muted);')
+
             # Fuzzy hint (shown only when fuzzy selected)
             fuzzy_hint = ui.label(
                 tr('Fuzzy search is slower and uses more server resources.')
@@ -749,6 +787,26 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
         lines_container['el'] = lines_area
         _render_all(lines_area)
 
+    # ---- reset (New Search) ---------------------------------------------
+
+    def _reset() -> None:
+        """Reset the builder to one empty line / Exact / Anywhere (New Search).
+
+        Clears all typed words, modifiers and line anchors, restores the default
+        mode (Exact) and Text Position (Anywhere), and re-renders the lines area.
+        Used by the page-level "New Search" button (parity with /search reset).
+        """
+        lines_state.clear()
+        lines_state.append(_default_line())
+        mode_state['mode'] = 'exact'
+        text_position_state['value'] = 'anywhere'
+        _sym_rows.clear()
+        if lines_container['el'] is not None:
+            _render_all(lines_container['el'])
+        _set_mode('exact')  # refresh mode-button visuals + fuzzy hint
+        if allow_page_position and text_pos_select is not None:
+            text_pos_select.value = 'anywhere'
+
     # ---- return handle dict ---------------------------------------------
 
     return {
@@ -758,4 +816,5 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
         'get_text_position': _get_text_position,
         'get_summary': _get_summary,
         'is_empty': _is_empty,
+        'reset': _reset,
     }

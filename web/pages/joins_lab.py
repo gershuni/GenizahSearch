@@ -561,6 +561,12 @@ def create_joins_lab_page(
 
         with ui.row().classes('gap-2 items-center'):
             search_btn = ui.button(tr('Run Search')).props('color=primary unelevated icon=search')
+            # New Search (reset) — parity with /search's restart_alt button. Clears
+            # both builders + results but KEEPS the loaded anchor ("Change anchor"
+            # switches fragments). Wired below, next to the other handlers.
+            new_search_btn = ui.button(icon='restart_alt').props('flat dense round').tooltip(
+                tr('New Search — clear the query and results (keeps the anchor)')
+            )
             search_status = ui.label('').classes('text-sm').style(
                 'color: var(--text-secondary); display: none;'
             )
@@ -803,8 +809,48 @@ def create_joins_lab_page(
         builder_area.set_visibility(False)
         empty_state.set_visibility(True)
 
+    def _reset_search() -> None:
+        """New Search (parity with /search): clear both builders + results.
+
+        Resets the anchor builder (one empty line / Exact / Anywhere), the
+        other-side builder + its toggles, the global option toggles, and the
+        candidate grid — but KEEPS the loaded anchor. Use "Change anchor" to
+        switch fragments. Mirrors the restart_alt reset on /search.
+        """
+        # Anchor builder back to clean defaults
+        anchor_builder['reset']()
+
+        # Other side: uncheck + hide + reset combine + clear its builder.
+        # Programmatic .value set fires on_value_change (hides the controls via
+        # _on_other_side_toggle / updates _other_side['combine']) but NOT the raw
+        # .on('update:model-value') handlers — so set explicit state too.
+        _other_side['enabled'] = False
+        _other_side['combine'] = 'AND'
+        other_side_cb.value = False
+        combine_select.value = 'AND'
+        other_side_controls.set_visibility(False)
+        _ob = _other_side.get('builder')
+        if _ob is not None:
+            _ob['reset']()
+
+        # Global toggles (flex_cb/bidir_cb use raw .on() — update state manually)
+        _global_opts['flex_spacing'] = False
+        _global_opts['bidirectional'] = False
+        flex_cb.value = False
+        bidir_cb.value = False
+
+        # Results + builder visibility
+        candidates_container.clear()
+        summary_bar_container.set_visibility(False)
+        anchor_builder['container'].set_visibility(True)
+        advanced_options_container.set_visibility(True)
+        _builder_vis['expanded'] = True
+        search_status.set_text('')
+        search_status.style('display: none;')
+
     load_btn.on('click', _on_load_btn_click)
     change_anchor_btn.on('click', _on_change_anchor)
+    new_search_btn.on('click', _reset_search)
     anchor_input.on('keydown.enter', _on_load_btn_click)
     lists_btn.on('click', _on_lists_btn_click)
 
