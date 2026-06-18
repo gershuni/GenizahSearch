@@ -372,10 +372,11 @@ def create_joins_lab_page(
             tr('Change anchor'), icon='swap_horiz'
         ).props('flat dense').classes('self-start')
 
-        # Anchor builder (BLD-03) — replaces Phase-117 textarea (:333-340)
+        # Anchor builder (BLD-03) — replaces Phase-117 textarea (:333-340).
+        # create_joins_builder() builds its container with `with ui.column() as
+        # container:`, so calling it inside this `with builder_area:` block mounts
+        # the container here automatically — no manual reparenting needed.
         anchor_builder = create_joins_builder(allow_page_position=True)
-        # Mount the builder's container into the page
-        builder_area.add(anchor_builder['container'])
 
         # Summary bar (D-14) — shown when builder is collapsed after a search
         # Tracks visibility state in a mutable dict so the close-over callbacks
@@ -468,10 +469,11 @@ def create_joins_lab_page(
                             lambda e: _other_side.update({'combine': e.args}),
                         )
 
-                    # Other-side builder (allow_page_position=False — no Text Position)
+                    # Other-side builder (allow_page_position=False — no Text Position).
+                    # Built inside this `with other_side_controls:` block, so its
+                    # container mounts here automatically (no manual reparenting).
                     other_builder = create_joins_builder(allow_page_position=False)
                     _other_side['builder'] = other_builder
-                    other_side_controls.add(other_builder['container'])
 
                 def _on_other_side_toggle(e) -> None:
                     enabled = bool(e.args)
