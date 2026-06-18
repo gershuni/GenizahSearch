@@ -393,7 +393,8 @@ def create_joins_button(
     pgpid: int = None,
     on_navigate: Optional[Callable[[str], None]] = None,
     on_view_all: Optional[Callable[[List[Dict], Optional[int]], None]] = None,
-    size: str = "sm"
+    size: str = "sm",
+    find_joins_url: Optional[str] = None,
 ):
     """
     Create a joins button that shows count and opens the joins panel.
@@ -405,6 +406,10 @@ def create_joins_button(
         on_navigate: Callback when user clicks to navigate to another fragment
         on_view_all: Callback(fragment_details, pgpid) to enter joined view mode
         size: Button size (sm, md, lg)
+        find_joins_url: Optional deep link to /joins-lab (FND-04/05).
+            When provided and joins exist: the dialog gains a "Find more joins" button.
+            When provided and NO joins: the button recolors to neutral and clicking
+            goes straight to the Lab in a new tab (D-19).
 
     Returns:
         The button element
@@ -417,9 +422,17 @@ def create_joins_button(
         """Load the count of connected fragments."""
         data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id, pgpid=pgpid)
         join_count['value'] = data.get('total_fragments', 1)
-        # Update button style if we have joins - make it prominent
-        if button_ref['btn'] and join_count['value'] > 1:
-            button_ref['btn'].props('color=green').classes('bg-green-100 ring-2 ring-green-500', remove='text-green-700')
+        total = join_count['value']
+        if button_ref['btn']:
+            if total > 1:
+                # Joins exist — prominent green recolor; keep dialog-opening click
+                button_ref['btn'].props('color=green').classes('bg-green-100 ring-2 ring-green-500', remove='text-green-700')
+            elif find_joins_url:
+                # No joins, but find_joins_url provided — D-19 recolor + redirect to Lab
+                button_ref['btn'].props(remove='color=green')
+                button_ref['btn'].classes('text-neutral-500', remove='text-green-700 bg-green-100 ring-2 ring-green-500')
+                button_ref['btn'].tooltip(tr('Find Joins in the Joins Lab'))
+                button_ref['btn'].on('click', lambda: ui.navigate.to(find_joins_url, new_tab=True))
 
     def open_joins_panel():
         """Open the joins panel dialog."""
@@ -428,7 +441,8 @@ def create_joins_button(
             document_id=document_id,
             pgpid=pgpid,
             on_navigate=on_navigate,
-            on_view_all=on_view_all
+            on_view_all=on_view_all,
+            find_joins_url=find_joins_url,
         )
 
     # Create the button
@@ -458,7 +472,8 @@ def create_joins_dialog(
     document_id: str = None,
     pgpid: int = None,
     on_navigate: Optional[Callable[[str], None]] = None,
-    on_view_all: Optional[Callable[[List[Dict], Optional[int]], None]] = None
+    on_view_all: Optional[Callable[[List[Dict], Optional[int]], None]] = None,
+    find_joins_url: Optional[str] = None,
 ):
     """
     Create a dialog showing connected fragments and allowing new joins.
@@ -469,6 +484,9 @@ def create_joins_dialog(
         pgpid: PGP document ID (avoids redundant Supabase lookup)
         on_navigate: Callback when navigating to another fragment
         on_view_all: Callback(fragment_details, pgpid) to enter joined view mode
+        find_joins_url: Optional deep link to /joins-lab (FND-04/05).
+            When provided and joins exist, adds a "Find more joins" button below
+            "View All Fragments" so the user can continue searching in the Lab.
     """
     dialog = ui.dialog()
 
@@ -733,6 +751,19 @@ def create_joins_dialog(
                         tr('View All Fragments'), icon='auto_stories',
                         on_click=handle_view_all
                     ).props('outline color=green').classes('w-full')
+
+                # Find more joins button (D-19, FND-04/05) — only when Lab URL provided and joins exist
+                if find_joins_url and total > 1:
+                    def _open_lab():
+                        dialog.close()
+                        ui.navigate.to(find_joins_url, new_tab=True)
+
+                    ui.button(
+                        tr('Find more joins'), icon='science',
+                        on_click=_open_lab
+                    ).props('flat color=primary').classes('w-full').tooltip(
+                        tr('Go to Joins Lab to find more joins')
+                    )
 
                 # Add new join button
                 ui.separator().classes('my-2')
