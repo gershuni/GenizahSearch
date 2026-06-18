@@ -523,7 +523,6 @@ class TestFolioBoundary:
     """
 
     def _viewer_with_async_run(self, browse_resolver):
-        import asyncio
         from unittest.mock import patch, MagicMock
 
         mock_element = MagicMock()
