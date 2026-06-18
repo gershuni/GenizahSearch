@@ -38,16 +38,21 @@ expected: Summary bar is bilingual (tr() applied). Auto-collapse works. Edit re-
 result: [pending]
 
 ### 6. Global toggle wiring end-to-end: flexible spacing → responsa_options (BLD-04)
-Toggle 'Flexible spacing' ON in the Advanced options. Run a search. Check server logs or the network inspector to confirm the executed responsa_options contain `flex_spacing=True`.
+Toggle 'Flexible spacing' ON in the Advanced options (now shown inline, #1). Run a search. Check server logs or the network inspector to confirm the executed responsa_options contain `flex_spacing=True`.
 expected: `flex_spacing` in the search options is True when the toggle is checked.
+result: [pending]
+
+### 7. Word-level builder redesign (#5, Phase 118-06)
+Build a query using the new word boxes: type a word, set a modifier on it (e.g. prefix) and confirm the responsa symbol (e.g. `#_`) appears beneath the box with a tooltip. Click '+ Add word' to add a second word with a gap box; click '+ Add line' for a second line; set line-start ⊢ / line-end ⊣ on a line. Run the search.
+expected: per-word modifiers render as symbols with tooltips; word gaps and line gaps both take effect; line ⊢/⊣ anchors apply to the line's first/last word; the executed query matches the built structure; no crash on any modifier/gap/add/remove action.
 result: [pending]
 
 ## Summary
 
-total: 6
+total: 7
 passed: 0
 issues: 0
-pending: 6
+pending: 7
 skipped: 0
 blocked: 0
 
