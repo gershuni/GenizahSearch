@@ -326,10 +326,18 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
                 f'width: 56px; border-color: {border_color};'
             )
 
-            def _on_gap_change(v, i=idx):
-                rows_state[i]['gap_to_next'] = int(v or 0)
-                # Re-render to update border color
-                _render_rows(rows_container['el'])
+            def _on_gap_change(v, i=idx, el=gap_input):
+                # WR-05: update ONLY this gap input's border color in place.
+                # Previously this re-rendered ALL rows (_render_rows), which
+                # destroyed and recreated every term ui.input mid-edit — causing
+                # focus loss and dropping unsynced keystrokes in sibling inputs.
+                try:
+                    gap = int(v or 0)
+                except (TypeError, ValueError):
+                    gap = 0
+                rows_state[i]['gap_to_next'] = gap
+                color = 'var(--border-focus)' if gap > 0 else 'var(--neutral-300)'
+                el.style(f'width: 56px; border-color: {color};')
 
             gap_input.on('update:model-value', lambda e, i=idx: _on_gap_change(e.args, i))
 
