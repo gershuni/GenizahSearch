@@ -1,12 +1,22 @@
 # -*- coding: utf-8 -*-
-"""Joins Lab page — /joins-lab vertical spine (Phase 117, Plan 04).
+"""Joins Lab page — /joins-lab (Phase 117 spine + Phase 118 full builders).
 
-This module wires all Wave-1 pieces into the working end-to-end slice:
-  anchor pane (AnchorViewer) + minimal textarea builder + off-loop search
-  (compose -> execute -> dedup_candidates) + read-only candidate grid +
-  safe_storage anchor persistence (D-13).
+Phase 118 extends the Phase-117 vertical spine with:
+  - _merge_globals_web (BLD-04): re-injects flex_spacing + bidirectional into
+    compose()-produced ``ro`` dicts on BOTH the anchor side and the other side.
+  - create_joins_builder (BLD-03): replaces the Phase-117 textarea with the
+    row-based line-builder widget (Text Position + Exact/Variants/Fuzzy mode).
+  - Other-side builder (BLD-02): second create_joins_builder inside Advanced
+    search options; drives apply_cross_side over the web page contract (p_num
+    not internal_index, total_pages=0→None, multi-IE volume_ie) off the loop.
+  - Known-joins group (ANC-04): fetch_connected_fragments(confirmed_only=True)
+    dispatched via run.io_bound from load_anchor; renders via
+    render_known_joins_group below the transcription in the sticky pane.
+  - Auto-collapse summary bar (D-14): on non-empty Run Search, the builder
+    collapses to a summary bar; Edit button re-expands it.
 
-Requirements satisfied: FND-02, FND-03, FND-08, BLD-01, BLD-05, CND-01.
+Requirements satisfied: FND-02, FND-03, FND-08, BLD-01..BLD-05, CND-01,
+ANC-04, ANC-05.
 
 SECURITY & MULTITENANT INVARIANTS
 -----------------------------------
@@ -15,19 +25,18 @@ SECURITY & MULTITENANT INVARIANTS
 - All image fetches through existing per-provider proxy endpoints + Phase-98
   NLI circuit breaker — never a direct IIIF URL (ANC-02, D-11).
 - Off-loop: ``executor.execute_search`` ONLY inside the sync
-  ``run_search_core`` closure dispatched via ``run.io_bound`` (MEDIUM-4,
-  SC#3; ``tests/test_joins_lab_off_loop.py`` enforces this statically).
+  ``run_search_core`` closure and ``apply_cross_side`` ONLY inside the sync
+  ``run_cross_side_core`` closure, both dispatched via ``run.io_bound``
+  (MEDIUM-4, SC#3; ``tests/test_joins_lab_off_loop.py`` enforces this
+  statically).
 - ``asyncio.wait_for`` timeout bounds each search (HIGH-3, T-117-12).
 - Latest-wins cancellation: a new Run Search click cancels the in-flight
   asyncio.Task so rapid re-runs show only the latest result (HIGH-3).
 - Stale-generation discard: ``_should_apply_results`` ensures a
-  cooperatively-cancelled run's partial results (the core catches
-  InterruptedError and returns partial results — genizah_core.py:9000/:9071)
-  never update the UI (HIGH-3, third SC#3 leg).
+  cooperatively-cancelled run's partial results never update the UI (HIGH-3).
 - Cooperative worker cancellation: the per-generation ``_make_progress_cb``
   raises ``InterruptedError`` when superseded, aborting the core scan loop
-  early and freeing the run.io_bound worker thread (MEDIUM, mirroring
-  search.py:4055-4058 and parallels.py:2143).
+  early (MEDIUM, mirroring search.py:4055-4058 and parallels.py:2143).
 
 NOTE — "Choose from my lists" login gate (D-06, LOCKED DECISION)
 -----------------------------------------------------------------
@@ -48,12 +57,16 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Optional
+from urllib.parse import quote
 
 from nicegui import run, ui
 
-from shared.joins_lab import BuilderRow, SideQuery, compose, dedup_candidates
+from shared.joins_lab import BuilderRow, SideQuery, apply_cross_side, compose, dedup_candidates
 from web.components.anchor_viewer import AnchorViewer, inject_viewer_assets
 from web.components.candidate_grid import create_candidate_grid
+from web.components.joins_builder import create_joins_builder
+from web.components.joins_panel import fetch_connected_fragments
+from web.components.known_joins_group import render_known_joins_group
 from web.joins_executor import WebSearchExecutor
 from web.joins_lab_storage import read_anchor, write_anchor
 from web.services import get_service
@@ -77,6 +90,25 @@ Phase 118+ can expose it as an env knob if needed.
 # ---------------------------------------------------------------------------
 # Pure module-level helpers (importable without NiceGUI — tested headlessly)
 # ---------------------------------------------------------------------------
+
+
+def _merge_globals_web(ro: dict, global_opts: dict) -> dict:
+    """Re-inject flex_spacing + bidirectional into a compose()-produced ro.
+
+    compose() at shared/joins_lab.py:741-749 hardcodes ja/flex_spacing/
+    bidirectional=False. This step pulls the actual UI-toggle state back in
+    (BLD-04 / D-11 / RR-14 parity with desktop/join_workbench.py:2475-2489).
+
+    ja intentionally excluded — stays False per D-10 (user decision to drop JA).
+    variants flows via SideQuery.variants and is NOT touched here.
+
+    Applied to BOTH the anchor ro (after compose(anchor_side)) and the other-side
+    b_ro (inside run_cross_side_core after compose(other_side)). Mirrors the
+    desktop pattern: desktop/join_workbench.py:2519 (anchor) and :2580 (other-side).
+    """
+    ro['flex_spacing'] = global_opts.get('flex_spacing', False)
+    ro['bidirectional'] = global_opts.get('bidirectional', False)
+    return ro
 
 
 def decide_initial_anchor(
@@ -121,6 +153,9 @@ def lines_to_side_query(text: str) -> SideQuery:
     ``line_end=False``, ``gap_to_next=0``, ``page_position=None``.
 
     Returns a SideQuery (may have zero rows if all lines are blank).
+
+    Kept for import-compat with tests/test_joins_lab_page.py that may import it.
+    The Phase-118 builder replaces its usage in execute_joins_search.
     """
     rows = tuple(
         BuilderRow(term=line.strip())
@@ -224,6 +259,13 @@ def create_joins_lab_page(
     _is_running: dict = {'value': False}
     _current_task: dict = {'task': None}  # in-flight asyncio.Task (for cancel)
 
+    # Global options toggles — shared between both sides (D-11)
+    # Mutable dict so closures see current values.
+    _global_opts: dict = {'flex_spacing': False, 'bidirectional': False}
+
+    # Other-side state (D-13, UI-SPEC §3)
+    _other_side: dict = {'enabled': False, 'builder': None, 'combine': 'AND'}
+
     # One WebSearchExecutor per page render (used for SEARCH only —
     # NOT for anchor image data; AnchorViewer resolves its own rich BrowsePage,
     # HIGH-1).
@@ -302,10 +344,13 @@ def create_joins_lab_page(
         candidates_container = ui.column().classes('w-full gap-2')
 
     # -----------------------------------------------------------------------
-    # AnchorViewer placeholder (populated when anchor loads)
+    # AnchorViewer placeholder + Known-Joins container (populated when anchor loads)
     # -----------------------------------------------------------------------
     with anchor_pane:
         anchor_viewer_container = ui.column().classes('w-full gap-2 anchor-viewer-container')
+        # Known-joins group (ANC-04) — below the transcription in the sticky pane
+        # (UI-SPEC §4)
+        known_joins_container = ui.column().classes('w-full')
 
     # -----------------------------------------------------------------------
     # Narrow-screen collapsible anchor strip (D-03)
@@ -316,7 +361,7 @@ def create_joins_lab_page(
     )
 
     # -----------------------------------------------------------------------
-    # Builder: textarea + Run Search button (BLD-01, D-08/D-09)
+    # Builder: row-based builder (BLD-03) + Advanced options + Run Search
     # Built inside builder_area (populated after anchor load).
     # -----------------------------------------------------------------------
     with builder_area:
@@ -327,22 +372,119 @@ def create_joins_lab_page(
             tr('Change anchor'), icon='swap_horiz'
         ).props('flat dense').classes('self-start')
 
-        ui.label(tr('Search lines')).classes('text-sm font-semibold').style(
-            'color: var(--text-secondary); letter-spacing: 0.05em; text-transform: uppercase;'
-        )
-        search_textarea = ui.textarea(
-            placeholder=tr('Type manuscript lines, one per line')
-        ).props(
-            'aria-label="' + tr('Search lines -- one line per row') + '" rows=5 outlined'
-        ).classes('w-full').style(
-            'direction: rtl; text-align: right;'
-            ' font-family: "Noto Sans Hebrew", "SBL Hebrew", serif;'
-        )
+        # Anchor builder (BLD-03) — replaces Phase-117 textarea (:333-340)
+        anchor_builder = create_joins_builder(allow_page_position=True)
+        # Mount the builder's container into the page
+        builder_area.add(anchor_builder['container'])
 
-        search_btn = ui.button(tr('Run Search')).props('color=primary unelevated icon=search')
-        search_status = ui.label('').classes('text-sm').style(
-            'color: var(--text-secondary); display: none;'
+        # Summary bar (D-14) — shown when builder is collapsed after a search
+        # Tracks visibility state in a mutable dict so the close-over callbacks
+        # can update it.
+        _builder_vis: dict = {'expanded': True}
+        summary_bar_container = ui.row().classes('w-full items-center gap-2 px-1').style(
+            'background: var(--bg-tertiary); border: 1px solid var(--border-light);'
+            ' border-radius: 6px; padding: 6px 10px;'
         )
+        summary_bar_container.set_visibility(False)
+
+        with summary_bar_container:
+            _summary_label = ui.label('').classes('text-sm flex-grow').style(
+                'color: var(--text-secondary);'
+            )
+            ui.button(
+                icon='edit', on_click=lambda: _expand_builder()
+            ).props('flat dense size=sm').tooltip(tr('Edit search'))
+
+        def _collapse_builder(summary_text: str) -> None:
+            """Collapse the builder to the summary bar (D-14)."""
+            anchor_builder['container'].set_visibility(False)
+            _summary_label.set_text(summary_text)
+            summary_bar_container.set_visibility(True)
+            _builder_vis['expanded'] = False
+
+        def _expand_builder() -> None:
+            """Re-expand the builder from the summary bar (D-14 Edit button)."""
+            summary_bar_container.set_visibility(False)
+            anchor_builder['container'].set_visibility(True)
+            _builder_vis['expanded'] = True
+
+        # Advanced search options disclosure (D-12, UI-SPEC §3)
+        with ui.expansion(tr('Advanced search options'), icon='tune').classes('w-full').style(
+            'background: var(--bg-tertiary); border: 1px solid var(--border-light);'
+            ' border-radius: 8px;'
+        ):
+            with ui.column().classes('gap-3 w-full p-2'):
+                # Global toggles: Flexible spacing + Bidirectional ONLY (D-10, no JA)
+                ui.label(tr('Global options')).classes('text-xs font-semibold uppercase').style(
+                    'color: var(--text-secondary); letter-spacing: 0.05em;'
+                )
+                with ui.row().classes('gap-4'):
+                    flex_cb = ui.checkbox(
+                        tr('Flexible spacing'),
+                        value=_global_opts['flex_spacing'],
+                    )
+                    flex_cb.on(
+                        'update:model-value',
+                        lambda e: _global_opts.update({'flex_spacing': bool(e.args)}),
+                    )
+                    bidir_cb = ui.checkbox(
+                        tr('Bidirectional'),
+                        value=_global_opts['bidirectional'],
+                    )
+                    bidir_cb.on(
+                        'update:model-value',
+                        lambda e: _global_opts.update({'bidirectional': bool(e.args)}),
+                    )
+
+                # Other-side builder (D-13, UI-SPEC §3)
+                ui.separator()
+                ui.label(tr('Other side of the leaf')).classes('text-xs font-semibold uppercase').style(
+                    'color: var(--text-secondary); letter-spacing: 0.05em;'
+                )
+                other_side_cb = ui.checkbox(
+                    tr('Search the other side of the leaf'),
+                    value=False,
+                )
+
+                # Other-side controls container (shown/hidden by checkbox)
+                other_side_controls = ui.column().classes('gap-2 w-full')
+                other_side_controls.set_visibility(False)
+
+                with other_side_controls:
+                    # Combine mode: Narrow (AND) / Widen (OR), default AND
+                    with ui.row().classes('items-center gap-2'):
+                        ui.label(tr('Combine mode')).classes('text-xs').style(
+                            'color: var(--text-secondary);'
+                        )
+                        combine_select = ui.select(
+                            options={
+                                'AND': tr('Narrow (AND)'),
+                                'OR': tr('Widen (OR)'),
+                            },
+                            value='AND',
+                        ).props('outlined dense').classes('w-36')
+                        combine_select.on(
+                            'update:model-value',
+                            lambda e: _other_side.update({'combine': e.args}),
+                        )
+
+                    # Other-side builder (allow_page_position=False — no Text Position)
+                    other_builder = create_joins_builder(allow_page_position=False)
+                    _other_side['builder'] = other_builder
+                    other_side_controls.add(other_builder['container'])
+
+                def _on_other_side_toggle(e) -> None:
+                    enabled = bool(e.args)
+                    _other_side['enabled'] = enabled
+                    other_side_controls.set_visibility(enabled)
+
+                other_side_cb.on('update:model-value', _on_other_side_toggle)
+
+        with ui.row().classes('gap-2 items-center'):
+            search_btn = ui.button(tr('Run Search')).props('color=primary unelevated icon=search')
+            search_status = ui.label('').classes('text-sm').style(
+                'color: var(--text-secondary); display: none;'
+            )
 
     # -----------------------------------------------------------------------
     # Async helpers
@@ -370,6 +512,56 @@ def create_joins_lab_page(
             return results[0].sys_id
         return None
 
+    async def _load_known_joins(sys_id: str, shelfmark: str, pgpid: Optional[int] = None) -> None:
+        """Fetch confirmed-only joins for the anchor; render in known_joins_container.
+
+        ANC-04 / ANC-05: uses the confirmed-only path from Plan 02 (status='confirmed'
+        + ':confirmed' cache key + community merge). The fetch is I/O-bound (Supabase
+        + SQLite) so it MUST be dispatched via run.io_bound.
+
+        Re-anchor callback: calls load_anchor (does NOT reset builder state — D-16).
+        Open-in-browse callback: navigates to /browse?shelfmark=... (same tab).
+        """
+        known_joins_container.clear()
+        with known_joins_container:
+            spinner = ui.spinner(size='sm').style('color: var(--text-muted);')
+
+        try:
+            data = await run.io_bound(
+                fetch_connected_fragments,
+                shelfmark=shelfmark,
+                document_id=sys_id,
+                pgpid=pgpid,
+                confirmed_only=True,
+                force_refresh=False,
+            )
+        except Exception:
+            known_joins_container.clear()
+            with known_joins_container:
+                ui.label(tr('Could not load joins. Check your connection.')).classes(
+                    'text-xs'
+                ).style('color: var(--text-muted);')
+            return
+
+        def _on_reanchor(member_sys_id: str, member_shelfmark: str) -> None:
+            """Re-anchor to a known-join member (D-16: does NOT clear builder state)."""
+            asyncio.ensure_future(load_anchor(member_sys_id, show_restored_toast=False))
+
+        def _on_open_browse(member_shelfmark: str) -> None:
+            """Open a known-join member in Browse (same tab)."""
+            sm_encoded = quote(member_shelfmark, safe='')
+            ui.navigate.to(f'/browse?shelfmark={sm_encoded}')
+
+        known_joins_container.clear()
+        with known_joins_container:
+            render_known_joins_group(
+                data,
+                current_shelfmark=shelfmark,
+                current_sys_id=sys_id,
+                on_reanchor=_on_reanchor,
+                on_open_browse=_on_open_browse,
+            )
+
     async def load_anchor(
         sys_id: str,
         fl_id: Optional[str] = None,
@@ -385,6 +577,9 @@ def create_joins_lab_page(
 
         HIGH-1: AnchorViewer resolves its own rich BrowsePage via
         service.get_browse_page() — do NOT pass executor or image data here.
+
+        ANC-04: after building the AnchorViewer, fetches and renders the
+        confirmed-only known-joins group (via _load_known_joins).
         """
         _anchor_state['sys_id'] = sys_id
         _anchor_state['fl_id'] = fl_id
@@ -417,6 +612,23 @@ def create_joins_lab_page(
 
         if show_restored_toast:
             ui.notify(tr('Restored your last anchor'), timeout=4000, type='info')
+
+        # ANC-04: resolve the shelfmark for known-joins (best-effort)
+        # Prefer whatever AnchorViewer may have surfaced; fall back to executor.
+        shelfmark: str = ''
+        try:
+            # get_meta_for_id is blocking I/O — must be called inside run.io_bound
+            # CORRECT await precedence: await the coroutine FIRST, THEN unpack
+            # the (shelfmark, meta) tuple (do NOT write `await run.io_bound(...)[0]`
+            # which subscripts the coroutine before awaiting it — Plan 04 precedence
+            # bug flagged by Codex).
+            meta_result = await run.io_bound(lambda: executor.get_meta_for_id(sys_id))
+            shelfmark, _ = meta_result
+        except Exception:
+            shelfmark = ''
+
+        # Fire-and-forget the known-joins load (non-blocking for the anchor swap)
+        asyncio.ensure_future(_load_known_joins(sys_id, shelfmark))
 
     async def _on_load_btn_click() -> None:
         """Handle the Load Anchor button / Enter key in the smart box."""
@@ -482,8 +694,12 @@ def create_joins_lab_page(
         anchor_input.value = ''
         error_label.style('display: none;')
         anchor_viewer_container.clear()
+        known_joins_container.clear()
         candidates_container.clear()
-        search_textarea.value = ''
+        # Restore the builder to visible (cancel any collapse)
+        anchor_builder['container'].set_visibility(True)
+        summary_bar_container.set_visibility(False)
+        _builder_vis['expanded'] = True
         builder_area.set_visibility(False)
         empty_state.set_visibility(True)
 
@@ -512,6 +728,19 @@ def create_joins_lab_page(
         MEDIUM cooperative worker cancel: the per-generation progress_cb raises
         InterruptedError when superseded, aborting the core scan loop early and
         freeing the run.io_bound worker THREAD (not just the asyncio wrapper).
+
+        BLD-03/BLD-04 additions:
+          - Reads from anchor_builder (not the Phase-117 textarea)
+          - Text Position routing: 'line_start'/'line_end' go directly to
+            execute_search(text_position=...) — NOT into SideQuery (would raise
+            ValueError at shared/joins_lab.py:67-71)
+          - _merge_globals_web(ro, _global_opts) applied after compose() to
+            re-inject flex_spacing + bidirectional (BLD-04)
+
+        BLD-02 addition (cross-side block):
+          - Other-side builder drives apply_cross_side via run_cross_side_core
+            dispatched via run.io_bound (CI guard; literal function name)
+          - _merge_globals_web applied to b_ro inside run_cross_side_core too
         """
         # Step 1: Bump generation FIRST (latest-wins counter).
         _search_generation['value'] += 1
@@ -528,34 +757,68 @@ def create_joins_lab_page(
             prev.cancel()
 
         # Step 3: Validate inputs
-        side = lines_to_side_query(search_textarea.value or '')
-        if not side.rows:
+        if anchor_builder['is_empty']():
+            ui.notify(
+                tr('Enter at least one search line to run'),
+                type='warning',
+            )
             return
+
+        side = anchor_builder['build_side_query']()
+        if side is None or not side.rows:
+            ui.notify(
+                tr('Enter at least one search line to run'),
+                type='warning',
+            )
+            return
+
         if not state.is_ready():
             ui.notify(tr('Engine not ready.'), type='warning')
             return
 
-        query_str, responsa_options, page_position = compose(side)
+        # BLD-03: Text Position routing (Pitfall 3 — SideQuery only accepts
+        # None/'start'/'end'; 'line_start'/'line_end' bypass SideQuery and go
+        # directly to execute_search(text_position=...)).
+        tp_val = anchor_builder['get_text_position']()
+        if tp_val in ('line_start', 'line_end'):
+            direct_text_position: Optional[str] = tp_val
+        else:
+            direct_text_position = None  # 'anywhere'/'start'/'end' via compose()
+
+        # BLD-03: mode from the builder
+        mode_str = anchor_builder['get_mode']()
+
+        query_str, ro, page_position = compose(side)
+
+        # BLD-04: re-inject flex_spacing + bidirectional from the UI toggles
+        # (compose() hardcodes both to False at shared/joins_lab.py:741-749)
+        _merge_globals_web(ro, _global_opts)
+
         if not query_str:
             return
 
-        # Step 4: UI — loading state
+        # Step 4: UI — loading state; collapse builder to summary bar (D-14)
         _is_running['value'] = True
         search_btn.props('loading=true disabled=true')
         candidates_container.clear()
         search_status.set_text(tr('Searching...'))
         search_status.style('display: block;')
 
+        # D-14: auto-collapse builder to summary bar on search
+        _collapse_builder(anchor_builder['get_summary']())
+
         # Step 5: Build the sync closure (MEDIUM-4: execute_search appears ONLY
         # here, inside the synchronous function that is passed to run.io_bound).
+        # CI guard (tests/test_joins_lab_off_loop.py): the LITERAL name
+        # "run_search_core" MUST be the first positional arg to run.io_bound.
         def run_search_core():
             return executor.execute_search(
                 query_str,
-                mode='exact',
+                mode=mode_str,
                 gap=0,
                 progress_callback=_make_progress_cb(my_gen, _search_generation),
-                responsa_options=responsa_options,
-                text_position=page_position,
+                responsa_options=ro,
+                text_position=(direct_text_position or page_position),
                 corpus_scope='genizah',
             )
 
@@ -577,10 +840,6 @@ def create_joins_lab_page(
         except asyncio.CancelledError:
             # The asyncio.wait_for wrapper was cancelled by a newer search click
             # (latest-wins path).  The newer run owns the UI — return quietly.
-            # NOTE (MEDIUM): a COOPERATIVELY cancelled run does NOT surface as
-            # CancelledError — the core catches InterruptedError internally and
-            # returns PARTIAL results normally.  This branch handles ONLY the
-            # asyncio-layer cancel from prev.cancel() above.
             return
 
         except Exception as exc:
@@ -604,15 +863,81 @@ def create_joins_lab_page(
         if not _should_apply_results(my_gen, _search_generation):
             return
 
-        # Step 8: Dedup + render
+        # Step 8: Dedup anchor results
         anchor_sid = _anchor_state.get('sys_id') or ''
-        candidates, anchor_matched = dedup_candidates(raw_results, anchor_sid)
+        base_candidates, anchor_matched = dedup_candidates(raw_results, anchor_sid)
 
+        # ---------------------------------------------------------------
+        # BLD-02: Cross-side block — if other-side builder is enabled and
+        # has content, run apply_cross_side via run_cross_side_core off the
+        # event loop (CI guard: literal name "run_cross_side_core" MUST be
+        # the first positional arg to run.io_bound).
+        # ---------------------------------------------------------------
+        final_candidates = base_candidates  # default: no cross-side filtering
+
+        if _other_side['enabled'] and _other_side['builder'] is not None:
+            other_side_sq = _other_side['builder']['build_side_query']()
+            if other_side_sq is not None and other_side_sq.rows:
+                # Snapshot inputs that are safe to read on the event loop
+                _combine_mode_snap = _other_side['combine']
+                _other_sq_snap = other_side_sq   # SideQuery is immutable (frozen dataclass)
+                _base_snapshot = list(base_candidates)
+                _global_opts_snap = dict(_global_opts)
+
+                # CI guard (tests/test_joins_lab_off_loop.py): the sync closure
+                # named EXACTLY "run_cross_side_core" MUST be the first positional
+                # arg to run.io_bound.  apply_cross_side is I/O-bound (calls
+                # execute_search internally) and must NOT run on the event loop.
+                # Per the plan, compose + _merge_globals_web both run INSIDE this
+                # closure so the full b_ro lifecycle is off the event loop.
+                def run_cross_side_core():
+                    b_query, b_ro, _ = compose(_other_sq_snap)
+                    # BLD-04: re-inject flex_spacing + bidirectional into b_ro
+                    # (Pitfall 2 — compose() hardcodes flex/bidir=False on b_ro also)
+                    _merge_globals_web(b_ro, _global_opts_snap)
+                    return apply_cross_side(
+                        executor,
+                        _base_snapshot,
+                        b_query,
+                        b_ro,
+                        _combine_mode_snap,
+                    )
+
+                cross_coro = run.io_bound(run_cross_side_core)
+                cross_task = asyncio.ensure_future(
+                    asyncio.wait_for(cross_coro, timeout=_SEARCH_TIMEOUT_SECONDS)
+                )
+                # Update _current_task so a cancellation also covers the cross-side leg
+                _current_task['task'] = cross_task
+
+                try:
+                    merge_result = await cross_task
+                    # Re-check stale generation after the second await
+                    if not _should_apply_results(my_gen, _search_generation):
+                        return
+                    final_candidates = list(merge_result.candidates)
+                except asyncio.TimeoutError:
+                    search_status.set_text(
+                        tr('Other-side search timed out.')
+                    )
+                    final_candidates = list(base_candidates)
+                except asyncio.CancelledError:
+                    return
+                except Exception as exc:
+                    logger.exception('Joins Lab cross-side error: %s', exc)
+                    ui.notify(
+                        tr('Could not resolve the other side of this leaf. '
+                           'Try navigating to a specific folio first.'),
+                        type='warning',
+                    )
+                    final_candidates = list(base_candidates)
+
+        # Step 9: Render final candidates
         candidates_container.clear()
         search_status.style('display: none;')
         with candidates_container:
-            if candidates:
-                create_candidate_grid(candidates)
+            if final_candidates:
+                create_candidate_grid(final_candidates)
             else:
                 ui.label(tr('No candidates found. Try different lines.')).style(
                     'color: var(--text-secondary);'
