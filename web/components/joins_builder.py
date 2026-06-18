@@ -150,6 +150,22 @@ def _text_position_options() -> dict:
     return {k: tr(_TEXT_POSITION_LABEL_KEYS[k]) for k in _TEXT_POSITION_KEYS}
 
 
+def _coerce_text_position(v) -> str:
+    """Normalize a Text-Position value to a known option KEY string.
+
+    A Quasar dict-options ``q-select`` can deliver its raw ``update:model-value``
+    payload as the option OBJECT ``{'label': ..., 'value': ...}`` rather than the
+    bare key. If that object reaches ``_TEXT_POSITION_LABEL_KEYS.get(tp, tp)`` it
+    raises ``TypeError: unhashable type: 'dict'`` (a dict can't be a dict key),
+    500-ing the search handler the moment the user picks any non-default position.
+    Coerce defensively so neither the summary bar nor ``_build_sq`` can ever see a
+    non-string here; anything unrecognized falls back to ``'anywhere'``.
+    """
+    if isinstance(v, dict):
+        v = v.get('value', 'anywhere')
+    return v if v in _TEXT_POSITION_KEYS else 'anywhere'
+
+
 _MODIFIER_KEYS = [
     ('line_start',       lambda: tr('Line start (⊢)')),
     ('line_end',         lambda: tr('Line end (⊣)')),
@@ -188,7 +204,9 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
         return mode_state['mode']
 
     def _get_text_position() -> str:
-        return text_position_state['value']
+        # Always return a known KEY string — see _coerce_text_position (guards the
+        # "unhashable type: 'dict'" crash if a Quasar option object slips in).
+        return _coerce_text_position(text_position_state['value'])
 
     def _is_empty() -> bool:
         return not any(rs.get('term', '').strip() for rs in rows_state)
@@ -368,10 +386,16 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
                         value=text_position_state['value'],
                     ).props('outlined dense').classes('w-40')
 
-                    def _on_tp_change(v):
-                        text_position_state['value'] = v
-
-                    text_pos_select.on('update:model-value', lambda e: _on_tp_change(e.args))
+                    # Read the element's normalized `.value` (the option KEY), NOT the
+                    # raw `update:model-value` payload (`e.args`) — for a dict-options
+                    # select the latter is the Quasar option object {'label','value'},
+                    # a dict, which breaks _TEXT_POSITION_LABEL_KEYS.get(tp). Coerce as
+                    # a belt-and-braces guard.
+                    text_pos_select.on_value_change(
+                        lambda: text_position_state.update(
+                            value=_coerce_text_position(text_pos_select.value)
+                        )
+                    )
 
             # Mode selector: Exact / Variants / Fuzzy  (flat toggle buttons)
             with ui.row().classes('items-center gap-1'):
