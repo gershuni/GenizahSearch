@@ -677,7 +677,7 @@ def create_result_card(search_state, refs, index, result):
                     on_click=_open_joins_for_card,
                 ).props('flat round dense size=sm').style(
                     'color: var(--neutral-400);'
-                ).tooltip(tr('Joins'))
+                ).tooltip(tr('Find Joins in the Joins Lab'))
 
                 async def _load_card_joins_count(s=sys_id, sm=shelfmark,
                                                  btn=joins_btn, ref=_joins_icon_ref):
@@ -695,10 +695,28 @@ def create_result_card(search_state, refs, index, result):
                     except Exception:
                         pass  # Icon stays neutral; acts as straight-to-Lab on failure
 
+                # Defer the joins-presence hint off the initial render. Use
+                # asyncio.call_later (NOT ui.timer): a card cleared by a new
+                # search before this fires would otherwise raise 'parent_slot
+                # has been deleted' inside NiceGUI's timer machinery (BEFORE the
+                # callback body runs, so an inner try/except can't catch it).
+                _card_client = ui.context.client
+
+                def _schedule_card_joins_count(_run=_load_card_joins_count, _client=_card_client):
+                    async def _runner():
+                        try:
+                            with _client:
+                                await _run()
+                        except RuntimeError:
+                            pass  # card slot deleted (navigation / new search) — benign
+                        except Exception:
+                            pass  # joins-presence hint is best-effort
+                    asyncio.ensure_future(_runner())
+
                 try:
-                    ui.timer(0.15, _load_card_joins_count, once=True)
+                    asyncio.get_event_loop().call_later(0.15, _schedule_card_joins_count)
                 except RuntimeError:
-                    pass  # NiceGUI lifecycle guard (card deleted before timer fires)
+                    pass  # NiceGUI lifecycle guard (no running loop / card gone)
 
         # Snippet — enrich with earlier chain terms if refinement is active
         if snippet:

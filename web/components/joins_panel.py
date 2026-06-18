@@ -463,11 +463,14 @@ def create_joins_button(
                 # Joins exist — prominent green recolor; keep dialog-opening click
                 button_ref['btn'].props('color=green').classes('bg-green-100 ring-2 ring-green-500', remove='text-green-700')
             elif find_joins_url:
-                # No joins, but find_joins_url provided — D-19 recolor + redirect to Lab
+                # No joins, but find_joins_url provided — D-19 recolor + tooltip.
+                # The click stays bound to open_joins_panel (single handler — a
+                # second .on('click') would double-fire); the dialog's no-joins
+                # branch now carries the visible "Find Joins in the Joins Lab"
+                # button, so the entry point is never lost.
                 button_ref['btn'].props(remove='color=green')
                 button_ref['btn'].classes('text-neutral-500', remove='text-green-700 bg-green-100 ring-2 ring-green-500')
                 button_ref['btn'].tooltip(tr('Find Joins in the Joins Lab'))
-                button_ref['btn'].on('click', lambda: ui.navigate.to(find_joins_url, new_tab=True))
 
     def open_joins_panel():
         """Open the joins panel dialog."""
@@ -488,12 +491,20 @@ def create_joins_button(
 
     button_ref['btn'] = btn
 
-    # Load count in background
+    # Load count in background. Re-enter the captured client context so the
+    # recolor/tooltip mutations AND fetch_connected_fragments' safe_storage reads
+    # run under a valid UI context (otherwise: 'app.storage.user can only be used
+    # within a UI context' noise).
+    _btn_client = ui.context.client
+
     def _safe_load_count():
         try:
-            load_count()
+            with _btn_client:
+                load_count()
         except RuntimeError:
-            pass  # Parent element was deleted (NiceGUI timer lifecycle)
+            pass  # Parent element was deleted / client torn down (NiceGUI lifecycle)
+        except Exception:
+            pass  # joins-count hint is best-effort
 
     # Use call_later instead of ui.timer to avoid parent_slot RuntimeError
     # when content_container.clear() destroys the timer's parent element
@@ -566,6 +577,19 @@ def create_joins_dialog(
                         ui.icon('link_off', size='3rem').classes('text-gray-300')
                         ui.label(tr('No joins yet')).classes('text-gray-500 mt-2')
                         ui.label(f"{shelfmark}").classes('font-medium text-gray-700 mt-1')
+                        # FND-04/05 (D-19): never a dead-end — offer a visible Lab
+                        # entry point even with zero known joins.
+                        if find_joins_url:
+                            def _open_lab_no_joins():
+                                dialog.close()
+                                ui.navigate.to(find_joins_url, new_tab=True)
+
+                            ui.button(
+                                tr('Find Joins in the Joins Lab'), icon='science',
+                                on_click=_open_lab_no_joins
+                            ).props('flat color=primary').classes('mt-4').tooltip(
+                                tr('Go to Joins Lab to find more joins')
+                            )
                 else:
                     # Show cluster info
                     ui.label(f"{tr('This fragment is part of a group of')} {total}:").classes(

@@ -1302,5 +1302,23 @@ def create_joins_lab_page(
             )
 
     # Defer the initial async resolution so it runs after the page handler
-    # returns (NiceGUI-safe pattern — do NOT block the page handler).
-    ui.timer(0.05, callback=_bootstrap_anchor, once=True)
+    # returns (do NOT block the page handler). asyncio.call_later (NOT ui.timer):
+    # if the visitor navigates away within the delay, a ui.timer fires on a
+    # deleted slot and raises 'parent_slot has been deleted' in NiceGUI's timer
+    # machinery; re-entering the captured client context here is slot-safe and
+    # swallows the teardown race.
+    _page_client = ui.context.client
+
+    def _schedule_bootstrap() -> None:
+        async def _runner() -> None:
+            try:
+                with _page_client:
+                    await _bootstrap_anchor()
+            except RuntimeError as exc:
+                if 'slot' not in str(exc) and 'deleted' not in str(exc):
+                    logger.error('joins-lab bootstrap error: %s', exc)
+            except Exception:
+                logger.exception('joins-lab bootstrap error')
+        asyncio.ensure_future(_runner())
+
+    asyncio.get_event_loop().call_later(0.05, _schedule_bootstrap)
