@@ -289,6 +289,16 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
       rendered as responsa symbols beneath the box with hover tooltips.
       Line-level anchors (⊢/⊣) are PER LINE, not per word.
     """
+    # The Genizah corpus is Hebrew / Judeo-Arabic, so the word boxes must read
+    # right-to-left in EVERY UI language (the search term is Hebrew even when the
+    # interface is English). A wrapper-level style(direction:rtl) does not reach the
+    # native <input>, and an inline input-style can lose to Quasar's LTR defaults on
+    # an LTR page — so force it with a scoped !important rule on the native control.
+    ui.add_css(
+        '.jl-word-rtl .q-field__native, .jl-word-rtl input, .jl-word-rtl textarea'
+        ' { direction: rtl !important; text-align: right !important; }'
+    )
+
     # Mutable in-memory state (closure-local, not app.storage.user - Phase 87 invariant)
     lines_state: list = [_default_line()]
     mode_state: dict = {'mode': 'exact'}
@@ -487,7 +497,7 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
             # reach the native input). Wrapper keeps direction:rtl for placeholder.
             term_input = ui.input(placeholder=placeholder).props(
                 'outlined dense input-style="direction: rtl; text-align: right;"'
-            ).classes('w-full').style(
+            ).classes('w-full jl-word-rtl').style(
                 'direction: rtl;'
                 ' font-family: "Noto Sans Hebrew", "SBL Hebrew", serif; font-size: 1rem;'
             )
