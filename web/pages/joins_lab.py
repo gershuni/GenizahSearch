@@ -111,6 +111,42 @@ def _merge_globals_web(ro: dict, global_opts: dict) -> dict:
     return ro
 
 
+def _coerce_combine_mode(v) -> str:
+    """Normalize a Combine-mode value to 'AND' or 'OR'.
+
+    Same Quasar dict-options ``q-select`` hazard as Text Position: the raw
+    ``update:model-value`` payload is the option OBJECT ``{'label','value'}``, a
+    dict, not the bare key. A dict here silently mis-routes ``apply_cross_side``
+    (neither 'AND' nor 'OR'). Coerce defensively; unknown -> 'AND' (narrow default).
+    """
+    if isinstance(v, dict):
+        v = v.get('value', 'AND')
+    return v if v in ('AND', 'OR') else 'AND'
+
+
+def build_collapsed_summary(
+    anchor_summary: str,
+    other_enabled: bool,
+    other_summary: Optional[str],
+    combine_mode: str,
+) -> str:
+    """Compose the collapsed summary-bar text (D-14), incl. the other side.
+
+    When the other-side search is enabled AND has content, append a compact
+    other-side segment (combine mode + the other-side builder's own summary) so
+    the collapsed bar reflects the FULL two-sided query, not just the anchor side.
+    All literals go through tr() (bilingual; the default UI is Hebrew).
+    """
+    if not other_enabled or not other_summary:
+        return anchor_summary
+    combine_label = (
+        tr('Narrow (AND)') if _coerce_combine_mode(combine_mode) == 'AND'
+        else tr('Widen (OR)')
+    )
+    other_seg = tr('Other side') + ': ' + combine_label + ' · ' + other_summary
+    return anchor_summary + '   ⇄   ' + other_seg
+
+
 def decide_initial_anchor(
     initial_sys_id: Optional[str],
     initial_shelfmark: Optional[str],
@@ -397,8 +433,14 @@ def create_joins_lab_page(
             ).props('flat dense size=sm').tooltip(tr('Edit search'))
 
         def _collapse_builder(summary_text: str) -> None:
-            """Collapse the builder to the summary bar (D-14)."""
+            """Collapse the builder to the summary bar (D-14).
+
+            Also hides the inline Advanced options (#2) so the other-side search
+            compacts away with the anchor builder — the summary bar carries the
+            other-side info instead.
+            """
             anchor_builder['container'].set_visibility(False)
+            advanced_options_container.set_visibility(False)
             _summary_label.set_text(summary_text)
             summary_bar_container.set_visibility(True)
             _builder_vis['expanded'] = False
@@ -407,80 +449,86 @@ def create_joins_lab_page(
             """Re-expand the builder from the summary bar (D-14 Edit button)."""
             summary_bar_container.set_visibility(False)
             anchor_builder['container'].set_visibility(True)
+            advanced_options_container.set_visibility(True)
             _builder_vis['expanded'] = True
 
-        # Advanced search options disclosure (D-12, UI-SPEC §3)
-        with ui.expansion(tr('Advanced search options'), icon='tune').classes('w-full').style(
+        # Search options (D-12, UI-SPEC §3) — INLINE, not hidden in an expansion
+        # (#1): the global toggles + other-side toggle fit on a compact wrap-row, so
+        # they are always visible. The whole container collapses with the builder
+        # after a search (see _collapse_builder, #2).
+        advanced_options_container = ui.column().classes('w-full gap-2').style(
             'background: var(--bg-tertiary); border: 1px solid var(--border-light);'
-            ' border-radius: 8px;'
-        ):
-            with ui.column().classes('gap-3 w-full p-2'):
-                # Global toggles: Flexible spacing + Bidirectional ONLY (D-10, no JA)
-                ui.label(tr('Global options')).classes('text-xs font-semibold uppercase').style(
-                    'color: var(--text-secondary); letter-spacing: 0.05em;'
+            ' border-radius: 8px; padding: 8px;'
+        )
+        with advanced_options_container:
+            # One compact row: section header + global toggles + other-side toggle.
+            # Checkboxes are self-labelled, so no separate sub-headers are needed
+            # (keeps everything on one line on wide screens; wraps on narrow).
+            with ui.row().classes('items-center gap-4 flex-wrap'):
+                ui.label(tr('Advanced search options')).classes(
+                    'text-xs font-semibold uppercase'
+                ).style('color: var(--text-secondary); letter-spacing: 0.05em;')
+                flex_cb = ui.checkbox(
+                    tr('Flexible spacing'),
+                    value=_global_opts['flex_spacing'],
                 )
-                with ui.row().classes('gap-4'):
-                    flex_cb = ui.checkbox(
-                        tr('Flexible spacing'),
-                        value=_global_opts['flex_spacing'],
-                    )
-                    flex_cb.on(
-                        'update:model-value',
-                        lambda e: _global_opts.update({'flex_spacing': bool(e.args)}),
-                    )
-                    bidir_cb = ui.checkbox(
-                        tr('Bidirectional'),
-                        value=_global_opts['bidirectional'],
-                    )
-                    bidir_cb.on(
-                        'update:model-value',
-                        lambda e: _global_opts.update({'bidirectional': bool(e.args)}),
-                    )
-
-                # Other-side builder (D-13, UI-SPEC §3)
-                ui.separator()
-                ui.label(tr('Other side of the leaf')).classes('text-xs font-semibold uppercase').style(
-                    'color: var(--text-secondary); letter-spacing: 0.05em;'
+                flex_cb.on(
+                    'update:model-value',
+                    lambda e: _global_opts.update({'flex_spacing': bool(e.args)}),
+                )
+                bidir_cb = ui.checkbox(
+                    tr('Bidirectional'),
+                    value=_global_opts['bidirectional'],
+                )
+                bidir_cb.on(
+                    'update:model-value',
+                    lambda e: _global_opts.update({'bidirectional': bool(e.args)}),
                 )
                 other_side_cb = ui.checkbox(
                     tr('Search the other side of the leaf'),
                     value=False,
                 )
 
-                # Other-side controls container (shown/hidden by checkbox)
-                other_side_controls = ui.column().classes('gap-2 w-full')
-                other_side_controls.set_visibility(False)
+            # Other-side controls container (shown/hidden by checkbox)
+            other_side_controls = ui.column().classes('gap-2 w-full')
+            other_side_controls.set_visibility(False)
 
-                with other_side_controls:
-                    # Combine mode: Narrow (AND) / Widen (OR), default AND
-                    with ui.row().classes('items-center gap-2'):
-                        ui.label(tr('Combine mode')).classes('text-xs').style(
-                            'color: var(--text-secondary);'
+            with other_side_controls:
+                # Combine mode: Narrow (AND) / Widen (OR), default AND
+                with ui.row().classes('items-center gap-2'):
+                    ui.label(tr('Combine mode')).classes('text-xs').style(
+                        'color: var(--text-secondary);'
+                    )
+                    combine_select = ui.select(
+                        options={
+                            'AND': tr('Narrow (AND)'),
+                            'OR': tr('Widen (OR)'),
+                        },
+                        value='AND',
+                    ).props('outlined dense').classes('w-36')
+                    # Store the element's normalized `.value` (the option KEY) via
+                    # on_value_change — NOT the raw `update:model-value` payload,
+                    # which for a dict-options select is the Quasar option object
+                    # {'label','value'} (a dict) and silently mis-routes
+                    # apply_cross_side. _coerce_combine_mode is belt-and-braces.
+                    combine_select.on_value_change(
+                        lambda: _other_side.update(
+                            combine=_coerce_combine_mode(combine_select.value)
                         )
-                        combine_select = ui.select(
-                            options={
-                                'AND': tr('Narrow (AND)'),
-                                'OR': tr('Widen (OR)'),
-                            },
-                            value='AND',
-                        ).props('outlined dense').classes('w-36')
-                        combine_select.on(
-                            'update:model-value',
-                            lambda e: _other_side.update({'combine': e.args}),
-                        )
+                    )
 
-                    # Other-side builder (allow_page_position=False — no Text Position).
-                    # Built inside this `with other_side_controls:` block, so its
-                    # container mounts here automatically (no manual reparenting).
-                    other_builder = create_joins_builder(allow_page_position=False)
-                    _other_side['builder'] = other_builder
+                # Other-side builder (allow_page_position=False — no Text Position).
+                # Built inside this `with other_side_controls:` block, so its
+                # container mounts here automatically (no manual reparenting).
+                other_builder = create_joins_builder(allow_page_position=False)
+                _other_side['builder'] = other_builder
 
-                def _on_other_side_toggle(e) -> None:
-                    enabled = bool(e.args)
-                    _other_side['enabled'] = enabled
-                    other_side_controls.set_visibility(enabled)
+            def _on_other_side_toggle(e) -> None:
+                enabled = bool(e.args)
+                _other_side['enabled'] = enabled
+                other_side_controls.set_visibility(enabled)
 
-                other_side_cb.on('update:model-value', _on_other_side_toggle)
+            other_side_cb.on('update:model-value', _on_other_side_toggle)
 
         with ui.row().classes('gap-2 items-center'):
             search_btn = ui.button(tr('Run Search')).props('color=primary unelevated icon=search')
@@ -840,8 +888,21 @@ def create_joins_lab_page(
         search_status.set_text(tr('Searching...'))
         search_status.style('display: block;')
 
-        # D-14: auto-collapse builder to summary bar on search
-        _collapse_builder(anchor_builder['get_summary']())
+        # D-14: auto-collapse builder to summary bar on search. The collapsed bar
+        # now also carries the other-side search info (#2) when it is enabled and
+        # has content, so the compacted view reflects the full two-sided query.
+        _ob = _other_side.get('builder')
+        _other_summary = None
+        if _other_side.get('enabled') and _ob is not None:
+            _osq = _ob['build_side_query']()
+            if _osq is not None and _osq.rows:
+                _other_summary = _ob['get_summary']()
+        _collapse_builder(build_collapsed_summary(
+            anchor_builder['get_summary'](),
+            bool(_other_side.get('enabled')),
+            _other_summary,
+            _other_side.get('combine', 'AND'),
+        ))
 
         # WR-01: a SINGLE outer try/finally wraps BOTH the anchor leg and the
         # cross-side leg so the loading affordance (button + _is_running) is held
@@ -921,7 +982,7 @@ def create_joins_lab_page(
                 other_side_sq = _other_side['builder']['build_side_query']()
                 if other_side_sq is not None and other_side_sq.rows:
                     # Snapshot inputs that are safe to read on the event loop
-                    _combine_mode_snap = _other_side['combine']
+                    _combine_mode_snap = _coerce_combine_mode(_other_side['combine'])
                     _other_sq_snap = other_side_sq   # SideQuery is immutable (frozen dataclass)
                     _base_snapshot = list(base_candidates)
                     _global_opts_snap = dict(_global_opts)
