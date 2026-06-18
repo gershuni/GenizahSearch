@@ -111,7 +111,13 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
   4. The other-side builder drives `resolve_other_side_pages` over a web-defined page contract (`p_num`-based not internal index, multi-IE-aware, defined behavior for unknown total-page counts and sparse/metadata-only pages); cross-side narrow/widen via `apply_cross_side` produces a proper subset (AND narrow) or superset (OR widen) of the anchor-only search.
   5. Per-line modifiers (line-start ⊢ / line-end ⊣ / plene-defective) on either side hoist into the Responsa-syntax forms `compose()` recognises; global toggles (variants, Judeo-Arabic, flexible spacing, bidirectional) apply to BOTH sides via a `_merge_globals`-equivalent (since `compose()` hardcodes JA/flex/bidirectional false) — a test enables each toggle and asserts the executed query string changes.
 
-**Plans**: TBD
+**Plans**: 5 plans (3 waves)
+
+- [ ] 118-01-PLAN.md — Wave-0 scaffolds: 5 RED test stubs + `fragment_joins.status` schema probe [Wave 0]
+- [ ] 118-02-PLAN.md — ANC-04/ANC-05: confirmed-only isolated-cache join path + source-badged known-joins group component [Wave 1]
+- [ ] 118-03-PLAN.md — BLD-03: line-builder widget (per-row modifiers + gap + prominent Text Position + Exact/Variants/Fuzzy) [Wave 1]
+- [ ] 118-04-PLAN.md — Integration: `_merge_globals_web` (BLD-04) + other-side cross-side (BLD-02) + known-joins wiring (ANC-04) into `/joins-lab` [Wave 2]
+- [ ] 118-05-PLAN.md — FND-04/FND-05: "Find joins" entry from `/search` cards + Quick View + `/browse` (new-tab deep link) [Wave 2]
 **UI hint**: yes
 
 ### Phase 119: Candidates, Compare & Visual Similarity
@@ -166,7 +172,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 117. Vertical Spine | 6/6 | Complete    | 2026-06-18 |
-| 118. Joins, Entry & Full Builders | 0/TBD | Not started | - |
+| 118. Joins, Entry & Full Builders | 0/5 | Not started | - |
 | 119. Candidates, Compare & Visual Similarity | 0/TBD | Not started | - |
 | 120. Actions & Persistence | 0/TBD | Not started | - |
 | 121. i18n Polish | 0/TBD | Not started | - |
