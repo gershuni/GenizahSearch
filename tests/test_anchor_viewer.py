@@ -39,6 +39,9 @@ def _make_page(
     external_provider: str = "",
     cambridge_alignment: Optional[Dict] = None,
     volumes: Optional[List] = None,
+    current_idx: Optional[int] = None,
+    library_name: str = "Cambridge University Library",
+    title: str = "Liturgical fragment",
 ) -> SimpleNamespace:
     """Build a fake BrowsePage-like object suitable for injection as browse_resolver result.
 
@@ -46,6 +49,10 @@ def _make_page(
     service.get_browse_page() behaviour (it does NOT populate external-provider
     fields). The Cambridge wiring test intentionally passes empty cambridge_images
     here and lets the external_resolver supply them.
+
+    current_idx is the DENSE 1-based ordinal the core returns (new_idx + 1); it
+    defaults to p_num for the simple contiguous case the tests use. The real
+    BrowsePage always carries current_idx, library_name and title.
     """
     return SimpleNamespace(
         sys_id=sys_id,
@@ -55,11 +62,14 @@ def _make_page(
         shelfmark=shelfmark,
         is_oxford=is_oxford,
         library_code=library_code,
+        library_name=library_name,
+        title=title,
         volume_suffix=volume_suffix,
         cambridge_images=cambridge_images if cambridge_images is not None else [],
         external_provider=external_provider,
         cambridge_alignment=cambridge_alignment,
         volumes=volumes or [],
+        current_idx=current_idx if current_idx is not None else p_num,
     )
 
 
@@ -588,6 +598,49 @@ class TestFolioBoundary:
             asyncio.run(v.update_content(direction=-1))  # boundary
             # A boundary nav with a prior image notifies and keeps the view.
             assert mock_ui.notify.called, "boundary nav should notify, not blow away the view"
+        finally:
+            for c in ctxs:
+                c.stop()
+
+    def test_sequential_next_passes_current_folio_pnum(self):
+        """Regression (UAT round 3): the stateless core needs the CURRENT folio's
+        p_num to navigate. Before the fix, nav passed p_num=None so the core
+        always restarted from index 0 — the viewer could only ever reach folio 2
+        ('advance once, then stuck, then no more folios'). Here a stateful fake
+        mimics the real core (index(p_num)+direction) over a 4-folio manuscript;
+        sequential Next must walk 1→2→3→4 and Prev must step back.
+        """
+        import asyncio
+        pages = [1, 2, 3, 4]
+        calls = []
+
+        def resolver(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            calls.append((p_num, direction))
+            idx = pages.index(p_num) if p_num in pages else 0
+            new_idx = idx + direction
+            if new_idx < 0 or new_idx >= len(pages):
+                return None  # boundary
+            return _make_page(
+                p_num=pages[new_idx],
+                total_pages=len(pages),
+                current_idx=new_idx + 1,
+            )
+
+        v, mock_ui, ctxs = self._viewer_with_async_run(resolver)
+        try:
+            asyncio.run(v.update_content(p_num=None))     # initial → folio 1
+            assert v._p_num == 1
+            asyncio.run(v.update_content(direction=+1))   # → folio 2
+            assert v._p_num == 2
+            asyncio.run(v.update_content(direction=+1))   # → folio 3 (the regression)
+            assert v._p_num == 3, f"second Next stuck at folio {v._p_num} (nav bug)"
+            asyncio.run(v.update_content(direction=+1))   # → folio 4
+            assert v._p_num == 4
+            v._next_btn.set_enabled.assert_called_with(False)  # last folio
+            # The 2nd Next MUST forward the current folio (p_num=2), not None/1.
+            assert (2, +1) in calls, f"current-folio p_num not forwarded: {calls}"
+            asyncio.run(v.update_content(direction=-1))   # back → folio 3
+            assert v._p_num == 3
         finally:
             for c in ctxs:
                 c.stop()

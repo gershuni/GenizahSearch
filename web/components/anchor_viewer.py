@@ -249,6 +249,10 @@ class AnchorViewer:
         self._prev_btn: Optional[Any] = None
         self._next_btn: Optional[Any] = None
         self._zoom_label: Optional[Any] = None
+        # Info header (shelfmark + library + title) — populated by update_content.
+        self._info_header: Optional[Any] = None
+        self._shelfmark_label: Optional[Any] = None
+        self._meta_label: Optional[Any] = None
         # Last successfully-rendered image URL — used to restore the view when a
         # folio navigation hits a boundary / sparse page (don't destroy the view).
         self._last_img_url: Optional[str] = None
@@ -398,6 +402,25 @@ class AnchorViewer:
     def _build_ui(self) -> None:
         """Build the full AnchorViewer component (image + controls + transcription)."""
         with ui.column().classes("anchor-viewer-container w-full gap-0"):
+            # Info header — shelfmark (identifier) + library + title. Populated
+            # by update_content. Uses theme CSS vars so it stays legible in both
+            # light and dark themes, and follows the page RTL direction so Hebrew
+            # library/title metadata reads correctly under a Hebrew UI.
+            self._info_header = ui.column().classes("anchor-info-header w-full gap-0").style(
+                "padding: 2px 4px 6px;"
+            )
+            with self._info_header:
+                self._shelfmark_label = (
+                    ui.label("").classes("text-base font-semibold").style(
+                        "color: var(--text-primary); line-height: 1.3;"
+                    )
+                )
+                self._meta_label = (
+                    ui.label("").classes("text-xs").style(
+                        "color: var(--text-secondary); line-height: 1.3;"
+                    )
+                )
+
             # Image container (shows skeleton initially)
             self._image_container = ui.element("div").classes("image-container relative")
             with self._image_container:
@@ -500,8 +523,17 @@ class AnchorViewer:
         if direction != 0:
             self._zoom = 1.0
 
-        # Capture resolution params for the worker closure
-        _p_num = p_num
+        # Capture resolution params for the worker closure.
+        #
+        # NAVIGATION FIX (UAT round 3): the core get_browse_page is STATELESS —
+        # to move by ``direction`` it must be told the CURRENT folio so it can
+        # compute ``index(p_num) + direction``. An explicit ``p_num`` (initial
+        # load / jump-to-page) wins; otherwise navigate RELATIVE to the folio we
+        # are currently showing (``self._p_num``). This mirrors the proven
+        # /browse path (web/pages/browse.py:792-798). Without it every prev/next
+        # restarted from index 0, so the viewer could only ever reach folio 2
+        # ("advance once, then stuck, then 'no more folios'").
+        _p_num = p_num if p_num is not None else self._p_num
         _direction = direction
 
         def _resolve() -> Optional[tuple]:
@@ -534,13 +566,32 @@ class AnchorViewer:
         else:
             self._page_label.set_text(str(page.p_num))
 
+        # Info header — shelfmark + library + title. These come already
+        # localized from get_browse_page() (via get_language()), so the library
+        # name and title render in Hebrew under a Hebrew UI with no extra
+        # translation. The shelfmark is a language-neutral identifier.
+        if self._shelfmark_label is not None:
+            self._shelfmark_label.set_text(page.shelfmark or page.sys_id or "")
+        if self._meta_label is not None:
+            meta_bits = [
+                b for b in (
+                    getattr(page, "library_name", "") or "",
+                    getattr(page, "title", "") or "",
+                )
+                if b
+            ]
+            self._meta_label.set_text(" · ".join(meta_bits))
+
         # Disable nav at the boundaries so the user cannot navigate off either
-        # end (prev before folio 1, next past the last folio when known).
+        # end. Use current_idx (the DENSE 1-based ordinal in the page list), not
+        # p_num — p_num can be sparse/non-contiguous, which would mis-compute the
+        # boundary. Mirrors /browse (browse.py:3774 / :3827).
+        cur_idx = getattr(page, "current_idx", 0) or 0
         if self._prev_btn is not None:
-            self._prev_btn.set_enabled(page.p_num > 1)
+            self._prev_btn.set_enabled(cur_idx > 1)
         if self._next_btn is not None:
             self._next_btn.set_enabled(
-                not page.total_pages or page.p_num < page.total_pages
+                not page.total_pages or cur_idx < page.total_pages
             )
 
         # Render image or error placeholder
