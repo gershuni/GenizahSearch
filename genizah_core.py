@@ -36,7 +36,7 @@ class SafeRotatingFileHandler(RotatingFileHandler):
             else:
                 raise
 from typing import Mapping, List, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 import itertools
 import json
@@ -6081,6 +6081,10 @@ class LineGroup:
     components: List['ResponsaComponent']
     line_start: bool = False   # First word must be at start of line
     line_end: bool = False     # Last word must be at end of line
+    # Per-pair word gaps WITHIN the line: word_gaps[i] is the gap (from a [N]
+    # token) between component i and component i+1; None/0 = adjacent. len ==
+    # len(components) - 1 when populated (CR HIGH-6).
+    word_gaps: List[Optional[int]] = field(default_factory=list)
 
 
 def _parse_line_break_query(query_str: str):
@@ -6112,12 +6116,22 @@ def _parse_line_break_query(query_str: str):
         nonlocal current_tokens, current_line_start, current_line_end, pending_line_gap
         if not current_tokens:
             return
-        # Parse tokens through Responsa pipeline
+        # Parse tokens through Responsa pipeline. [N] word-gap tokens are captured
+        # as the gap between the previous and next word (CR HIGH-6) — previously
+        # they were dropped, so word gaps silently had no effect in line mode.
         comps = []
+        word_gaps = []          # gap BEFORE each component after the first
+        pending_word_gap = None
         for t in current_tokens:
-            if _GAP_TOKEN_RE.match(t):
-                continue  # word-gaps within a line group are ignored
-            comps.append(_parse_single_token(t))
+            gm = _GAP_TOKEN_RE.match(t)
+            if gm:
+                pending_word_gap = int(gm.group(1))
+                continue
+            comp = _parse_single_token(t)
+            if comps:
+                word_gaps.append(pending_word_gap)
+            comps.append(comp)
+            pending_word_gap = None
         if comps:
             if groups:
                 line_gaps.append(pending_line_gap)
@@ -6125,6 +6139,7 @@ def _parse_line_break_query(query_str: str):
                 components=comps,
                 line_start=current_line_start,
                 line_end=current_line_end,
+                word_gaps=word_gaps,
             ))
         current_tokens = []
         current_line_start = False
@@ -8228,13 +8243,31 @@ class SearchEngine:
         Each group becomes a line pattern, joined by newline separators with gap support.
         Returns compiled regex or None.
         """
+        def _line_word_sep(gap):
+            """Separator between two words on the SAME line (never crosses \\n).
+
+            gap None/0 -> adjacent words (whitespace only). gap N>0 -> up to N
+            intervening words on the line (CR HIGH-6 — [N] word gaps in line mode).
+            """
+            if not gap:
+                return r'[^\S\n]+'
+            return r'(?:[^\S\n]+\S+){0,' + str(int(gap)) + r'}[^\S\n]+'
+
         line_patterns = []
         for gi, group in enumerate(line_groups):
-            # Build per-component alternatives
-            comp_parts = []
+            # Build per-component alternatives, tracking the [N] word gap that
+            # precedes each part so the separators below can honor it.
+            comp_parts = []  # list of (pattern, gap_before)
+            grp_word_gaps = getattr(group, 'word_gaps', None) or []
             for ci, word_set in enumerate(expanded_groups[gi]):
+                gap_before = (
+                    grp_word_gaps[ci - 1]
+                    if ci > 0 and (ci - 1) < len(grp_word_gaps)
+                    else None
+                )
                 # Check if component has a wildcard — dispatch to wildcard regex builder
                 comp = group.components[ci] if ci < len(group.components) else None
+                pat = None
                 if comp and comp.wildcard:
                     comp_dict = {
                         'wildcard': comp.wildcard,
@@ -8242,16 +8275,15 @@ class SearchEngine:
                         'regex_terms': sorted(word_set, key=len, reverse=True),
                         'original_words': comp.words,
                     }
-                    wc_pat = _build_wildcard_regex(comp_dict)
-                    if wc_pat:
-                        comp_parts.append(wc_pat)
-                        continue
+                    pat = _build_wildcard_regex(comp_dict)
                 # Plain word path (non-wildcard or wildcard fallback)
-                sorted_words = sorted(word_set, key=len, reverse=True)
-                escaped = [make_mark_tolerant_pattern(re.escape(w)) for w in sorted_words]
-                if not escaped:
-                    continue
-                comp_parts.append(f"({'|'.join(escaped)})")
+                if pat is None:
+                    sorted_words = sorted(word_set, key=len, reverse=True)
+                    escaped = [make_mark_tolerant_pattern(re.escape(w)) for w in sorted_words]
+                    if not escaped:
+                        continue
+                    pat = f"({'|'.join(escaped)})"
+                comp_parts.append((pat, gap_before))
 
             if not comp_parts:
                 continue
@@ -8261,10 +8293,12 @@ class SearchEngine:
             is_last_end = group.line_end
 
             if len(comp_parts) == 1:
-                word_pat = comp_parts[0]
+                word_pat = comp_parts[0][0]
             else:
-                # Multiple words on same line: join with flexible spacing
-                word_pat = r'[^\S\n]+'.join(comp_parts)
+                # Multiple words on same line: join with per-pair gap separators
+                word_pat = comp_parts[0][0]
+                for pat, gap_before in comp_parts[1:]:
+                    word_pat += _line_word_sep(gap_before) + pat
 
             if is_first_start and is_last_end:
                 # Entire line must be just these words
@@ -8311,6 +8345,15 @@ class SearchEngine:
         if not self.searcher:
             return []
         opts = responsa_options or {}
+
+        # CR HIGH-5: the whole-query Text Position 'line_start'/'line_end' applies
+        # to the FIRST / LAST line group in a line-break query. The line-break path
+        # previously ignored text_position entirely, so the dropdown silently did
+        # nothing once a query became multi-line.
+        if text_position == 'line_start' and line_groups:
+            line_groups[0].line_start = True
+        elif text_position == 'line_end' and line_groups:
+            line_groups[-1].line_end = True
 
         # Expand each component in each group
         expanded_groups = []
