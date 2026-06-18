@@ -597,6 +597,19 @@ def create_joins_lab_page(
         empty_state.set_visibility(False)
         builder_area.set_visibility(True)
 
+        # WR-02: on every anchor swap (including the known-joins re-anchor pin),
+        # clear the stale candidate grid from the PREVIOUS anchor and restore the
+        # builder to its expanded state (hiding the collapsed summary bar left
+        # behind by the previous search). Per D-16 we preserve the TYPED builder
+        # rows — this only resets candidate output + builder visibility, never the
+        # row content. (_on_change_anchor resets the same state on the manual
+        # "Change anchor" path; the re-anchor path previously did not.)
+        candidates_container.clear()
+        anchor_builder['container'].set_visibility(True)
+        summary_bar_container.set_visibility(False)
+        _builder_vis['expanded'] = True
+        search_status.style('display: none;')
+
         # Update anchor chip label (narrow screens)
         anchor_chip_label.set_text(sys_id)
 
