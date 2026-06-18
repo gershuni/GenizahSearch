@@ -465,9 +465,6 @@ def create_joins_lab_page(
             # Checkboxes are self-labelled, so no separate sub-headers are needed
             # (keeps everything on one line on wide screens; wraps on narrow).
             with ui.row().classes('items-center gap-4 flex-wrap'):
-                ui.label(tr('Advanced search options')).classes(
-                    'text-xs font-semibold uppercase'
-                ).style('color: var(--text-secondary); letter-spacing: 0.05em;')
                 flex_cb = ui.checkbox(
                     tr('Flexible spacing'),
                     value=_global_opts['flex_spacing'],
@@ -523,12 +520,14 @@ def create_joins_lab_page(
                 other_builder = create_joins_builder(allow_page_position=False)
                 _other_side['builder'] = other_builder
 
-            def _on_other_side_toggle(e) -> None:
-                enabled = bool(e.args)
+            def _on_other_side_toggle() -> None:
+                # Read the checkbox's own .value (reliable bool) via on_value_change
+                # — hides the other-side module again when unchecked.
+                enabled = bool(other_side_cb.value)
                 _other_side['enabled'] = enabled
                 other_side_controls.set_visibility(enabled)
 
-            other_side_cb.on('update:model-value', _on_other_side_toggle)
+            other_side_cb.on_value_change(_on_other_side_toggle)
 
         with ui.row().classes('gap-2 items-center'):
             search_btn = ui.button(tr('Run Search')).props('color=primary unelevated icon=search')

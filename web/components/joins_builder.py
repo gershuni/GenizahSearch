@@ -116,6 +116,20 @@ def _normalize_word_mods(mods: dict) -> dict:
     return {k: bool(mods.get(k, False)) for k in keys}
 
 
+def _toggle_line_anchor(line: dict, which: str) -> None:
+    """Toggle a line's 'line_start'/'line_end' anchor in place, mutually exclusive.
+
+    ⊢ and ⊣ are exclusive (a line is anchored to its start OR its end, not both),
+    and either can be cleared (clicking the active one turns it off → both off).
+    Selecting one clears the other.
+    """
+    other = 'line_end' if which == 'line_start' else 'line_start'
+    new_val = not line.get(which, False)
+    line[which] = new_val
+    if new_val:
+        line[other] = False
+
+
 # ---------------------------------------------------------------------------
 # Lines-with-words -> SideQuery converter (word-level model, Phase 118-06)
 # ---------------------------------------------------------------------------
@@ -371,43 +385,39 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
                 ui.label(str(li + 1)).classes('text-xs w-5 text-right shrink-0').style(
                     'color: var(--text-muted);'
                 )
-                # Line-start ⊢ toggle
-                ls_active = line.get('line_start', False)
-                ls_style = (
-                    'color: var(--primary-600); font-weight:bold;' if ls_active
-                    else 'color: var(--text-muted);'
-                )
-                ls_btn = ui.button('⊢').props('flat dense size=sm').style(ls_style)
+                # Line-start ⊢ / line-end ⊣ anchors — mutually-exclusive toggles
+                # shown with a selected (filled) state. Clicking the active one
+                # clears it (both may be off); selecting one clears the other. They
+                # map to the | pipe on the line's first/last word in compose().
+                ls_btn = ui.button('⊢').props('dense size=sm')
                 ls_btn.tooltip(tr('Line starts here'))
-
-                def _toggle_line_start(i=li, btn=ls_btn):
-                    lines_state[i]['line_start'] = not lines_state[i].get('line_start', False)
-                    active = lines_state[i]['line_start']
-                    btn.style(
-                        'color: var(--primary-600); font-weight:bold;' if active
-                        else 'color: var(--text-muted);'
-                    )
-
-                ls_btn.on('click', lambda i=li: _toggle_line_start(i))
-
-                # Line-end ⊣ toggle
-                le_active = line.get('line_end', False)
-                le_style = (
-                    'color: var(--primary-600); font-weight:bold;' if le_active
-                    else 'color: var(--text-muted);'
-                )
-                le_btn = ui.button('⊣').props('flat dense size=sm').style(le_style)
+                le_btn = ui.button('⊣').props('dense size=sm')
                 le_btn.tooltip(tr('Line ends here'))
 
-                def _toggle_line_end(i=li, btn=le_btn):
-                    lines_state[i]['line_end'] = not lines_state[i].get('line_end', False)
-                    active = lines_state[i]['line_end']
-                    btn.style(
-                        'color: var(--primary-600); font-weight:bold;' if active
-                        else 'color: var(--text-muted);'
-                    )
+                def _style_anchor(btn, active):
+                    # Filled primary = selected; flat = unselected.
+                    if active:
+                        btn.props(remove='flat')
+                        btn.props('unelevated color=primary')
+                    else:
+                        btn.props(remove='unelevated color=primary')
+                        btn.props('flat')
 
+                def _refresh_anchors(i=li, lb=ls_btn, eb=le_btn):
+                    _style_anchor(lb, bool(lines_state[i].get('line_start', False)))
+                    _style_anchor(eb, bool(lines_state[i].get('line_end', False)))
+
+                def _toggle_line_start(i=li):
+                    _toggle_line_anchor(lines_state[i], 'line_start')
+                    _refresh_anchors(i)
+
+                def _toggle_line_end(i=li):
+                    _toggle_line_anchor(lines_state[i], 'line_end')
+                    _refresh_anchors(i)
+
+                ls_btn.on('click', lambda i=li: _toggle_line_start(i))
                 le_btn.on('click', lambda i=li: _toggle_line_end(i))
+                _refresh_anchors(li)  # set initial selected visuals
 
                 # Gap to next line (only show if not last line)
                 if li < len(lines_state) - 1:
@@ -472,10 +482,13 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
                 if allow_page_position
                 else tr('Words on this side (space = sequence, a/b = alternatives)')
             )
+            # RTL: `input-style` targets the inner <input> so typed Hebrew flows
+            # right-to-left (a wrapper-level `style(direction:rtl)` alone does NOT
+            # reach the native input). Wrapper keeps direction:rtl for placeholder.
             term_input = ui.input(placeholder=placeholder).props(
-                'outlined dense'
+                'outlined dense input-style="direction: rtl; text-align: right;"'
             ).classes('w-full').style(
-                'direction: rtl; text-align: right;'
+                'direction: rtl;'
                 ' font-family: "Noto Sans Hebrew", "SBL Hebrew", serif; font-size: 1rem;'
             )
             term_input.value = word.get('term', '')
