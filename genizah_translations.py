@@ -2425,6 +2425,39 @@ TRANSLATIONS = {
     "Plene/defective spelling tooltip": "כתיב מלא/חסר (ו/י)",
     "Negation tooltip": "שלילה — הוצא מילה זו",
 
+    # --- Phase 118-06 word-box builder — symbol table + UI labels (BLD-03) ---
+    # Modifier labels (shown in per-word modifier menus)
+    "Prefix": "קידומת",
+    "Suffix": "סיומת",
+    "Plene / defective": "מלא/חסר",
+    "Wildcard before": "תו כללי לפני",
+    "Wildcard after": "תו כללי אחרי",
+    "Negation": "שלילה",
+    # Modifier symbol tooltips (shown on hover over symbol indicators beneath word boxes)
+    "May carry a prefix": "יכול לשאת קידומת",
+    "May carry a suffix": "יכול לשאת סיומת",
+    "Plene / defective spelling variants": "וריאנטים מלא/חסר",
+    "Must NOT appear": "חייב להיות נעדר",
+    # Line-level anchor labels + tooltips
+    "Line start (⊢)": "תחילת שורה (⊢)",
+    "Line end (⊣)": "סוף שורה (⊣)",
+    "Line starts here": "השורה מתחילה כאן",
+    "Line ends here": "השורה מסתיימת כאן",
+    # Word-box UI action labels
+    "+ Add word": "+ הוסף מילה",
+    "+ Add line": "+ הוסף שורה",
+    "Remove word": "הסר מילה",
+    "Remove line": "הסר שורה",
+    "Word options": "אפשרויות מילה",
+    # Misc builder labels
+    "Words on this line (space = sequence, a/b = alternatives)":
+        "מילים בשורה זו (רווח = רצף, א/ב = חלופות)",
+    "Words on this side (space = sequence, a/b = alternatives)":
+        "מילים בצד זה (רווח = רצף, א/ב = חלופות)",
+    "Fuzzy search is slower and uses more server resources.":
+        "חיפוש עמום איטי יותר ועמוס יותר על השרת.",
+    "↕ gap": "↕ מרווח",
+
     # --- Wildcard rewrite notice ---
     "*word* rewritten as #word# (prefix + suffix expansion)":
         "*word* שוכתב כ-#word# (הרחבת קידומות + סיומות)",
