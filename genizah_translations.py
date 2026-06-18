@@ -2463,15 +2463,17 @@ TRANSLATIONS = {
     "About search modes & syntax": "אודות מצבי החיפוש והתחביר",
     "Search modes & syntax": "מצבי חיפוש ותחביר",
     "Your query always runs as Responsa syntax (shown in the collapsed search bar). "
-    "The mode only controls spelling-variant expansion:":
+    "The mode controls how each word is matched:":
         "השאילתה תמיד מורצת בתחביר בסגנון פרויקט השו״ת (המוצג בשורת החיפוש המכווצת). "
-        "המצב קובע רק את הרחבת וריאנטי הכתיב:",
-    "Exact — match your words as written, no variants. This is the raw Responsa query.":
-        "מדויק — התאמה למילים כפי שנכתבו, ללא וריאנטים. זוהי שאילתת החיפוש הגולמית.",
-    "Variants — also match common spelling variants of each word.":
-        "וריאנטים — התאמה גם לווריאנטי כתיב נפוצים של כל מילה.",
-    "Fuzzy — the widest variant net; slowest.":
-        "עמום — הרשת הרחבה ביותר של וריאנטים; האיטי ביותר.",
+        "המצב קובע כיצד כל מילה מותאמת:",
+    "Exact — match each word as written, no expansion. This is the raw Responsa query.":
+        "מדויק — התאמה לכל מילה כפי שנכתבה, ללא הרחבה. זוהי שאילתת החיפוש הגולמית.",
+    "Variants — also match known spelling variants of each word.":
+        "וריאנטים — התאמה גם לווריאנטי כתיב ידועים של כל מילה.",
+    "Fuzzy — approximate matching: finds words within 1–2 letter changes "
+    "(typos, missing or swapped letters), independent of the variant tables. Slowest.":
+        "עמום — התאמה מקורבת: מאתר מילים במרחק עריכה של 1–2 אותיות "
+        "(שגיאות כתיב, אותיות חסרות או מוחלפות), ללא תלות בטבלאות הווריאנטים. האיטי ביותר.",
     "You can type Responsa operators directly in a word box (space = sequence, "
     "a/b = alternatives); the gear menu adds the #, %, *, − modifiers.":
         "ניתן להקליד אופרטורים של חיפוש בסגנון פרויקט השו״ת ישירות בתיבת מילה (רווח = רצף, א/ב = חלופות); "

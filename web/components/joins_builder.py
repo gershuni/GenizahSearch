@@ -755,19 +755,20 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
                         ui.label(tr('Search modes & syntax')).classes('text-sm font-bold')
                         ui.label(tr(
                             'Your query always runs as Responsa syntax (shown in the '
-                            'collapsed search bar). The mode only controls spelling-variant '
-                            'expansion:'
+                            'collapsed search bar). The mode controls how each word is matched:'
                         )).classes('text-xs')
                         ui.label('• ' + tr(
-                            'Exact — match your words as written, no variants. This is the '
+                            'Exact — match each word as written, no expansion. This is the '
                             'raw Responsa query.'
                         )).classes('text-xs')
                         ui.label('• ' + tr(
-                            'Variants — also match common spelling variants of each word.'
+                            'Variants — also match known spelling variants of each word.'
                         )).classes('text-xs')
-                        ui.label('• ' + tr('Fuzzy — the widest variant net; slowest.')).classes(
-                            'text-xs'
-                        )
+                        ui.label('• ' + tr(
+                            'Fuzzy — approximate matching: finds words within 1–2 letter changes '
+                            '(typos, missing or swapped letters), independent of the variant '
+                            'tables. Slowest.'
+                        )).classes('text-xs')
                         ui.label(tr(
                             'You can type Responsa operators directly in a word box '
                             '(space = sequence, a/b = alternatives); the gear menu adds the '
