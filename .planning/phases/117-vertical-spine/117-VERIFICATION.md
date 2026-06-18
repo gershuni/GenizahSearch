@@ -1,8 +1,10 @@
 ---
 phase: 117-vertical-spine
 verified: 2026-06-17T19:30:00Z
-status: human_needed
-score: 5/6 must-haves verified
+human_confirmed: 2026-06-18T03:40:00Z
+status: verified
+score: 6/6 must-haves verified (4/4 human-UAT tests passed after fixes)
+human_uat: 117-HUMAN-UAT.md (status: passed — user approved 2026-06-18)
 overrides_applied: 0
 human_verification:
   - test: "Open /joins-lab?sys_id=<known id> in a browser and confirm the anchor image renders with zoom/pan controls, previous/next folio navigation, and RTL numbered transcription alongside the image."

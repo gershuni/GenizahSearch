@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v8.2.0
 milestone_name: Web Joins Lab
 status: verifying
-stopped_at: Completed Phase 117 Plan 04 — /joins-lab vertical spine integration complete
-last_updated: "2026-06-17T18:50:00.000Z"
-last_activity: 2026-06-17
+stopped_at: Completed Phase 117 Plan 03 — browse extraction complete
+last_updated: "2026-06-18T03:36:43.399Z"
+last_activity: 2026-06-18
 progress:
   total_phases: 5
   completed_phases: 1
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: 117 (vertical-spine) — COMPLETE
-Plan: 6 of 6 (all plans complete)
+Phase: 118
+Plan: Not started
 Status: Phase complete — ready for verification
-Last activity: 2026-06-17
+Last activity: 2026-06-18
 
 ## Accumulated Context
 
@@ -78,9 +78,10 @@ Items carried forward from v8.1.0:
 | JWB-05 | Tear-side assist (Component B) | Future | v8.0.0 |
 | JL-UAT1 | Candidate cards: larger image + expandable text snippet | Phase 119 (candidate surface) | v8.2.0 P117 UAT |
 | JL-UAT2 | Search progress bar / ETA for long searches | Phase 119/120 | v8.2.0 P117 UAT |
-| JL-UAT3 | Long/common-phrase search drops the websocket ("Connection Lost" → reconnect → restored-session). Known GIL/event-loop limitation shared with `/search`; proper fix = the already-deferred async-job pattern (CLAUDE.md). Not a 117-spine blocker. | Future (async-job) | v8.2.0 P117 UAT |
+| JL-UAT3 | Long/common-phrase search drops the websocket ("Connection Lost" → reconnect → restored-session). TWO distinct causes: (a) search-compute GIL starvation (known, shared with `/search`; proper fix = deferred async-job pattern); (b) rendering ALL candidates at once (a 782-hit "פזורה" search completed, then the card flood dropped the socket). Cause (b) MITIGATED in P117 (`cad43f8e`): `candidate_grid.cap_candidates` renders at most 200 (app-wide `[:200]` convention) + truncation notice. Cause (a) still future. | (a) Future async-job / (b) MITIGATED P117 | v8.2.0 P117 UAT |
 | JL-UAT4 | Stop search + return partial results | Phase 120 (actions) | v8.2.0 P117 UAT |
 | JL-UAT5 | Joins Lab pane-width tuning / resizable panes | Phase 119/121 polish | v8.2.0 P117 UAT |
+| JL-UAT6 | Candidate pagination / lazy-loading (full solution above the interim 200-cap render limit) — load-more / virtualized grid so all hits are reachable | Phase 119 (candidate surface) | v8.2.0 P117 UAT |
 
 ## Session Continuity
 

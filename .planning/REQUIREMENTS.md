@@ -142,6 +142,10 @@ Which phases cover which requirements. Populated during roadmap creation.
 | PST-01 | Phase 120 | Pending |
 | PST-02 | Phase 120 | Pending |
 | PST-03 | Phase 120 | Pending |
+| JSA-01 | — | Deferred (Component B, future milestone) |
+| JSA-02 | — | Deferred (Component B, future milestone) |
+| JSA-03 | — | Deferred (Component B, future milestone) |
+| JWB-05 | — | Deferred (Component B, future milestone) |
 
 **Coverage:**
 
