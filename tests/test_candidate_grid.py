@@ -292,6 +292,55 @@ class TestModuleConstants:
 
 
 # ===========================================================================
+# Tests: cap_candidates (WebSocket-safety render cap)
+# ===========================================================================
+
+class TestCapCandidates:
+    """The render cap prevents a common-term search (700+ hits) from dropping
+    the NiceGUI websocket ('Connection Lost' + session reset)."""
+
+    cap_candidates = staticmethod(cgrid.cap_candidates)
+
+    def _cands(self, n: int) -> list:
+        return [_Cand(sys_id=str(i), page=1) for i in range(n)]
+
+    def test_cap_constant_is_200(self):
+        assert cgrid._MAX_RENDERED_CANDIDATES == 200
+
+    def test_under_cap_returns_all(self):
+        cands = self._cands(50)
+        to_render, total = self.cap_candidates(cands)
+        assert total == 50
+        assert len(to_render) == 50
+        assert to_render is cands  # no copy when under the cap
+
+    def test_exactly_at_cap_returns_all(self):
+        cands = self._cands(200)
+        to_render, total = self.cap_candidates(cands)
+        assert total == 200
+        assert len(to_render) == 200
+
+    def test_over_cap_truncates_but_reports_full_total(self):
+        # The 782-candidate "פזורה" case from UAT.
+        cands = self._cands(782)
+        to_render, total = self.cap_candidates(cands)
+        assert total == 782, "header must show the FULL count"
+        assert len(to_render) == 200, "only the cap is rendered"
+        assert to_render == cands[:200]
+
+    def test_custom_cap(self):
+        cands = self._cands(10)
+        to_render, total = self.cap_candidates(cands, max_rendered=3)
+        assert total == 10
+        assert len(to_render) == 3
+
+    def test_empty_list(self):
+        to_render, total = self.cap_candidates([])
+        assert total == 0
+        assert to_render == []
+
+
+# ===========================================================================
 # Tests: Library chip gating
 # ===========================================================================
 

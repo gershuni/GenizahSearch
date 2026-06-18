@@ -42,6 +42,16 @@ from web.translations import tr, get_language
 _TITLE_TRUNCATE_AT = 80
 """Characters at which to truncate candidate titles before appending '...'."""
 
+_MAX_RENDERED_CANDIDATES = 200
+"""Hard cap on how many candidate cards are rendered at once.
+
+WebSocket safety: each card pushes an image element + proxy fetch, so rendering
+hundreds at once (a common-term search can return 700+) overruns the NiceGUI
+websocket — the connection drops ("Connection Lost") and the session resets.
+This mirrors the app-wide ``render_results[:200]`` convention. True pagination /
+lazy-loading is Phase 119 (Candidates surface); this is the interim safety net.
+"""
+
 _PLACEHOLDER_STYLE = (
     "width:48px; height:48px; background:var(--bg-tertiary); "
     "border-radius:4px; display:flex; align-items:center; "
@@ -114,6 +124,26 @@ def _truncate_title(title: str, max_chars: int = _TITLE_TRUNCATE_AT) -> str:
     if len(title) > max_chars:
         return title[:max_chars] + "..."
     return title
+
+
+def cap_candidates(
+    candidates: list,
+    max_rendered: int = _MAX_RENDERED_CANDIDATES,
+) -> tuple:
+    """Decide how many candidate cards to render (WebSocket-safety cap).
+
+    Pure helper (headlessly testable) so the render-cap decision is not buried
+    in the NiceGUI render path.
+
+    Returns:
+        (to_render, total) where ``to_render`` is the (possibly sliced) list and
+        ``total`` is the full count.  ``len(to_render) < total`` signals the
+        caller to show a "showing first N" truncation notice.
+    """
+    total = len(candidates)
+    if total > max_rendered:
+        return candidates[:max_rendered], total
+    return candidates, total
 
 
 # ---------------------------------------------------------------------------
@@ -248,17 +278,32 @@ def create_candidate_grid(
                 tr("No candidates found. Try different lines or broader terms.")
             ).classes("text-sm").style("color: var(--text-secondary);")
         else:
-            # Section header with count
-            ui.label(f"{tr('Candidates')} ({len(candidates)})").classes(
+            # WebSocket-safety cap (see _MAX_RENDERED_CANDIDATES): render at most
+            # N cards so a common-term search (700+ hits) cannot drop the socket.
+            to_render, total = cap_candidates(candidates)
+
+            # Section header shows the FULL count (not the rendered subset).
+            ui.label(f"{tr('Candidates')} ({total})").classes(
                 "text-base font-semibold"
             )
+
+            # Truncation notice when the cap kicked in. Phase 121 (i18n Polish)
+            # supplies the Hebrew key for this {n} template, like every other
+            # joins-lab string; until then it follows the page-wide EN fallback.
+            if len(to_render) < total:
+                ui.label(
+                    tr(
+                        "Showing the first {n} results — "
+                        "refine your search to narrow them down."
+                    ).format(n=len(to_render))
+                ).classes("text-sm").style("color: var(--text-secondary);")
 
             # Responsive grid (WR-02): single column on narrow (<640px), two
             # columns at the Tailwind `sm` breakpoint (>=640px). An @media rule
             # cannot live inside an inline style attribute, so the collapse is
             # driven by Tailwind responsive grid classes instead (D-03).
             with ui.grid().classes("w-full gap-3 grid grid-cols-1 sm:grid-cols-2"):
-                for cand in candidates:
+                for cand in to_render:
                     _create_candidate_card(cand, on_browse_click=on_browse_click)
 
     return outer
