@@ -58,13 +58,13 @@ Source: `web/static/common.css` — body `line-height: 1.6`, font-family Inter.
 | Role | Size | Weight | Line Height |
 |------|------|--------|-------------|
 | Body | 14px (0.875rem) | 400 (regular) | 1.5 |
-| Label / caption | 12px (0.75rem) | 600 (semibold) | 1.4 |
+| Label / caption | 12px (0.75rem) | 700 (bold) | 1.4 |
 | Builder row input | 16px (1rem) | 400 (regular) | 1.5 — RTL, Hebrew serif |
 | Section heading | 13px (0.8rem) uppercase | 700 (bold) | 1.2 — matches existing `SEARCH LINES` label pattern |
 
 **Hebrew text:** `font-family: 'Noto Sans Hebrew', 'SBL Hebrew', serif` on all builder row inputs and the known-joins transcription fragments (matching the existing `search_textarea` style in joins_lab.py:339 and the `result-snippet` class).
 
-**Weights used:** Regular (400) + Semibold/Bold (600/700). No additional weights introduced.
+**Weights used:** Regular (400) + Bold (700). Exactly 2 weights. No additional weights introduced.
 
 ---
 
@@ -110,7 +110,7 @@ All components referenced here are NiceGUI / Quasar built-ins or existing projec
 
 **Shape:** Vertical stack of builder rows. Each row:
 - A full-width `ui.input` (outlined, RTL, Hebrew serif, 16px) with placeholder `tr('Words on this line (space = sequence, a/b = alternatives)')`.
-- A "more" affordance: flat icon button `icon=tune` (dense, 24px) opening a `ui.menu` popover with the per-line modifier toggles: Line-start (⊢), Line-end (⊣), Plene/Defective, Prefix, Suffix, Wildcard, Negation. Each modifier is a `ui.checkbox` with its label. Popover closes on outside click.
+- A "more" affordance: flat icon button `icon=tune` (dense, 24px) opening a `ui.menu` popover with the per-line modifier toggles: Line-start (⊢), Line-end (⊣), Plene/Defective, Prefix, Suffix, Wildcard, Negation. Each modifier is a `ui.checkbox` with its label. Popover closes on outside click. The `tune` button carries a `ui.tooltip` with label `tr('Line options')` (Hebrew: equivalent via `tr()`).
 - An "×" remove button (flat, dense, `icon=close`, `color=negative`) — not shown on the last remaining row.
 - A row number label (right-aligned, 12px, `--text-muted`) showing the line index (`1`, `2`, ...).
 
@@ -122,7 +122,7 @@ All components referenced here are NiceGUI / Quasar built-ins or existing projec
 **Add row button:** Below the last row: `ui.button(tr('+ Add line'), icon=add)` — flat, small, `--text-secondary` color.
 
 **Text Position control (D-08, prominent placement):**
-- A `ui.select` with the 5 options from `web/pages/search.py:646-655`: Anywhere / Start / End / Line Start / Line End — placed directly above the builder rows with a label `tr('Text Position')` (12px semibold uppercase). Not buried in advanced.
+- A `ui.select` with the 5 options from `web/pages/search.py:646-655`: Anywhere / Start / End / Line Start / Line End — placed directly above the builder rows with a label `tr('Text Position')` (12px bold uppercase). Not buried in advanced.
 
 **Mode selector (D-09):**
 - A `ui.button_group` or three flat `ui.button` toggles: Exact / Variants / Fuzzy.
@@ -133,7 +133,7 @@ All components referenced here are NiceGUI / Quasar built-ins or existing projec
 
 On search start, the builder area collapses to a single `ui.row` summary bar:
 - Content: `"{mode} · {N} lines · Text Position: {position} · {toggles}"` — e.g. `"Variants · 3 lines · Text Position: line ends · flex-spacing on"`.
-- An "Edit" flat button (`icon=edit`, `color=primary`) on the trailing end re-expands the builder.
+- An "Edit" flat button (`icon=edit`, `color=primary`) on the trailing end re-expands the builder. The Edit button carries a `ui.tooltip` with label `tr('Edit search')` (Hebrew: equivalent via `tr()`).
 - Background: `--bg-tertiary`, border: `--border-light`, border-radius: 8px, padding: 8px 16px (sm/md).
 - The summary text is 14px body weight 400, `--text-primary`.
 
@@ -141,7 +141,7 @@ On search start, the builder area collapses to a single `ui.row` summary bar:
 
 #### 3. Advanced Search Options Disclosure (D-12)
 
-A `ui.expansion_item` with header label `tr('Advanced search options')` (label 13px semibold), collapsed by default. Contains:
+A `ui.expansion_item` with header label `tr('Advanced search options')` (label 13px bold), collapsed by default. Contains:
 - **Global toggles (D-10/D-11):** Two `ui.checkbox` controls — Flexible Spacing (`tr('Flexible spacing')`), Bidirectional (`tr('Bidirectional')`). Judeo-Arabic is NOT surfaced (D-10 divergence — intentional, no toggle).
 - **Other-side builder (BLD-02, D-13):** A `ui.checkbox` labelled `tr('Search the other side of the leaf')` — OFF by default. When checked, expands to reveal the full other-side builder (same row-based widget as the anchor side, but `allow_page_position=False`) plus a Narrow/Widen combine mode select: `tr('Narrow (AND)')` / `tr('Widen (OR)')` defaulting to Narrow.
 
@@ -155,7 +155,7 @@ The disclosure panel background is `--bg-tertiary`, 1px border `--border-light`,
 
 **Member row layout (compact, 36px):** Each join member is a `ui.row` containing:
 - Source attribution badge: outlined Quasar badge (12px), color per source badge map above.
-- Shelfmark label: 13px, `--text-primary`, font-weight 600.
+- Shelfmark label: 13px, `--text-primary`, font-weight 700.
 - Two action icon buttons on the trailing end:
   - Re-anchor: `icon=push_pin` (flat, dense, 20px) — tooltip `tr('Re-anchor to this fragment')`.
   - Open in Browse: `icon=open_in_new` (flat, dense, 20px) — tooltip `tr('View in Browse')`.
@@ -213,6 +213,8 @@ All strings go through `tr()` for bilingual EN/HE support from line one (per ROA
 | Collapsed summary bar (example) | "Variants · 3 lines · Text Position: line ends · flex-spacing on" | Claude's discretion wording confirmed in D-14 |
 | Empty builder guard tooltip | "Enter at least one search line to run" | On disabled Run Search |
 | Other-side builder placeholder | "Words on this side (space = sequence, a/b = alternatives)" | Same syntax as anchor side |
+| Edit search tooltip | "Edit search" | On the ✎ edit icon button in the collapsed summary bar |
+| Line options tooltip | "Line options" | On the `tune` icon button on each builder row; signals the per-row modifier popover |
 
 **Error states:**
 | Error | Copy |
@@ -232,12 +234,12 @@ All strings go through `tr()` for bilingual EN/HE support from line one (per ROA
 
 1. **Default state:** Builder is expanded, showing the Text Position select, mode selector, at least one empty builder row, the advanced disclosure (collapsed), and the "Run Search" button.
 2. **On "Run Search" click (non-empty builder):** Builder area auto-collapses to the summary bar. Candidates load below. The summary bar is always visible during search and after.
-3. **On "Edit" click in summary bar:** Builder re-expands to full form with the prior values intact.
+3. **On "Edit" click in summary bar:** Builder re-expands to full form with the prior values intact. The Edit button tooltip reads `tr('Edit search')`.
 4. **On "Run Search" click (empty builder):** Button is disabled; tooltip explains why. No collapse.
 
 ### Builder: per-row modifier popover
 
-1. User clicks the `tune` icon on a row.
+1. User clicks the `tune` icon on a row. The `tune` button tooltip reads `tr('Line options')`.
 2. A `ui.menu` opens anchored to that icon, listing all modifier checkboxes.
 3. Active modifiers display a small colored indicator dot on the `tune` icon (using `--primary-600`) so the user can see a row has modifiers without opening the popover.
 4. Popover closes on outside click or Escape key.
@@ -319,6 +321,7 @@ All strings go through `tr()` for bilingual EN/HE support from line one (per ROA
 │  ┌─────────────────────────────────────────────────────────────┐   │
 │  │  Variants · 2 lines · Text Position: line ends              │ ✎ │
 │  └─────────────────────────────────────────────────────────────┘   │
+│                    tooltip: "Edit search" ↑                         │
 │                                                                      │
 │  CANDIDATE GRID (Phase 117 — unchanged in Phase 118)                │
 └─────────────────────────────────────────────────────────────────────┘
@@ -368,6 +371,8 @@ No third-party component registries are used. All UI is NiceGUI built-ins (`ui.*
 | Source badge colors | This spec (Claude's discretion) | Parity with `badge_for_source` desktop |
 | Copywriting: builder placeholder, gap label, summary bar | This spec (Claude's discretion from D-04/D-07/D-14) | |
 | Error copy for anchor/other-side/joins-fetch/timeout | This spec (default from project patterns) | |
+| Typography: 2 weights only (400 + 700) | Checker revision 2026-06-18 | Fixed from 3 weights (400/600/700) — all 600/semibold usages consolidated to 700/bold |
+| Tooltips on tune icon + edit icon | Checker revision 2026-06-18 | Added tr('Line options') + tr('Edit search') to copywriting contract and interaction spec |
 
 ---
 
