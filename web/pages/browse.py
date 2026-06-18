@@ -3900,13 +3900,18 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                     enrichment_refs['navigate_to_shelfmark'] = navigate_to_shelfmark
                                     if state.enrichment_loaded:
                                         pgpid_for_joins = state.pgp_metadata.get('pgpid') if state.pgp_metadata else None
+                                        # FND-05 (D-19): build Lab deep link; append volume_ie for multi-IE
+                                        _joins_lab_url = f'/joins-lab?sys_id={page.sys_id}'
+                                        if page.volume_ie:
+                                            _joins_lab_url += f'&volume_ie={page.volume_ie}'
                                         with joins_el:
                                             create_joins_button(
                                                 shelfmark=page.shelfmark,
                                                 document_id=page.sys_id,
                                                 pgpid=pgpid_for_joins,
                                                 on_navigate=navigate_to_shelfmark,
-                                                on_view_all=enter_joined_view
+                                                on_view_all=enter_joined_view,
+                                                find_joins_url=_joins_lab_url,
                                             )
 
                             # "Add to View" button -- start or extend reading desk with current manuscript
