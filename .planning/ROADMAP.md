@@ -114,7 +114,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 **Plans**: 5 plans (3 waves)
 
 - [x] 118-01-PLAN.md — Wave-0 scaffolds: 5 RED test stubs + `fragment_joins.status` schema probe [Wave 0]
-- [ ] 118-02-PLAN.md — ANC-04/ANC-05: confirmed-only isolated-cache join path + source-badged known-joins group component [Wave 1]
+- [x] 118-02-PLAN.md — ANC-04/ANC-05: confirmed-only isolated-cache join path + source-badged known-joins group component [Wave 1]
 - [ ] 118-03-PLAN.md — BLD-03: line-builder widget (per-row modifiers + gap + prominent Text Position + Exact/Variants/Fuzzy) [Wave 1]
 - [ ] 118-04-PLAN.md — Integration: `_merge_globals_web` (BLD-04) + other-side cross-side (BLD-02) + known-joins wiring (ANC-04) into `/joins-lab` [Wave 2]
 - [ ] 118-05-PLAN.md — FND-04/FND-05: "Find joins" entry from `/search` cards + Quick View + `/browse` (new-tab deep link) [Wave 2]
@@ -173,7 +173,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 117. Vertical Spine | 6/6 | Complete    | 2026-06-18 |
-| 118. Joins, Entry & Full Builders | 1/5 | In Progress|  |
+| 118. Joins, Entry & Full Builders | 2/5 | In Progress|  |
 | 119. Candidates, Compare & Visual Similarity | 0/TBD | Not started | - |
 | 120. Actions & Persistence | 0/TBD | Not started | - |
 | 121. i18n Polish | 0/TBD | Not started | - |
