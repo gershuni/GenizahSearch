@@ -117,6 +117,9 @@ class Candidate:
     is_anchor_self: bool = False
     vs_rank: Optional[int] = None
     vs_score: Optional[float] = None   # None == "no VS data" (NOT 0.0 dissimilar) — RESEARCH Pitfall 6
+    # Multi-IE volume id (NLI). Forwarded to get_browse_page so cross-side page
+    # totals / neighbor text resolve against the correct volume (CR HIGH-4).
+    volume_ie: Optional[str] = None
 
     @property
     def key(self) -> tuple:
@@ -124,6 +127,12 @@ class Candidate:
 
         page is None for VS-only rows (uid='{sid}|vs') — dedup key is (sys_id, None),
         so only one VS-only candidate per sys_id survives.
+
+        NOTE: volume_ie is intentionally NOT part of the key — the (sys_id, page)
+        contract is relied on by the desktop merge + existing tests. Multi-IE
+        volumes that reuse page numbers under one sys_id can still conflate here
+        (accepted limitation; rare, and a key change would be a breaking contract
+        change across both apps).
         """
         return (self.sys_id, self.page)
 
@@ -274,6 +283,7 @@ def normalize_candidate(res: dict) -> Candidate:
         is_anchor_self=bool(res.get("_is_anchor_self")),
         vs_rank=res.get("vs_rank"),
         vs_score=res.get("svm_score"),
+        volume_ie=res.get("volume_ie") or d.get("volume_ie"),
     )
 
 
@@ -348,6 +358,7 @@ def apply_cross_side(
     b_responsa_options: dict,
     combine: str,
     anchor_pattern: Optional[str] = None,
+    progress_callback=None,
 ) -> "MergeResult":
     """I/O-bound orchestrator for cross-side AND/OR membership (SC#2).
 
@@ -361,6 +372,11 @@ def apply_cross_side(
     Failure in any executor call degrades gracefully to fewer/no candidates rather than
     raising (T-106-05 mitigation). corpus_scope='genizah' is passed explicitly.
 
+    progress_callback (CR HIGH-3): forwarded to the query-B execute_search so a
+    superseded cross-side scan is cooperatively cancellable (the engine catches the
+    InterruptedError the callback raises and returns early, freeing the worker
+    thread). None for the desktop path, which does not supersede mid-scan.
+
     Returns MergeResult(candidates=tuple, note=str).
     """
     # 1) Run query B through the engine → b_set of (sid, page)
@@ -370,6 +386,7 @@ def apply_cross_side(
                 b_query,
                 "exact",
                 0,
+                progress_callback=progress_callback,
                 responsa_options=b_responsa_options,
                 corpus_scope="genizah",
             )
@@ -379,10 +396,18 @@ def apply_cross_side(
         bres = []
 
     b_set = set()
+    # Learn each sid's volume_ie so get_browse_page resolves the right volume for
+    # multi-IE manuscripts (CR HIGH-4). Prefer query-B results, fall back to base.
+    vol_by_sid: dict = {}
     for r in bres:
         c = normalize_candidate(r)
         if c.sys_id and c.page is not None:
             b_set.add((c.sys_id, c.page))
+        if c.sys_id and c.volume_ie and c.sys_id not in vol_by_sid:
+            vol_by_sid[c.sys_id] = c.volume_ie
+    for c in base:
+        if getattr(c, "sys_id", None) and getattr(c, "volume_ie", None) and c.sys_id not in vol_by_sid:
+            vol_by_sid[c.sys_id] = c.volume_ie
 
     # 2) total_pages cache: per-sid, fetched lazily from get_browse_page(sid, 1)
     _totals_cache: dict = {}
@@ -391,9 +416,13 @@ def apply_cross_side(
         if sid not in _totals_cache:
             t = None
             try:
-                page_data = executor.get_browse_page(sid, 1)
+                page_data = executor.get_browse_page(sid, 1, volume_ie=vol_by_sid.get(sid))
                 if page_data is not None:
-                    t = page_data.get("total_pages")
+                    raw = page_data.get("total_pages")
+                    # CR HIGH-4: total_pages<=0 (or missing) means "unknown", NOT a
+                    # cap of zero. Treating 0 as a hard upper bound dropped EVERY OR
+                    # neighbor (n >= 1 > 0), silently disabling OR synthesis.
+                    t = raw if (isinstance(raw, int) and raw > 0) else None
             except Exception:
                 t = None
             _totals_cache[sid] = t
@@ -428,7 +457,7 @@ def apply_cross_side(
             # Synthesize a neighbor result dict (sketch _make_neighbor_result shape)
             txt = ""
             try:
-                page_data = executor.get_browse_page(sid, n)
+                page_data = executor.get_browse_page(sid, n, volume_ie=vol_by_sid.get(sid))
                 if page_data is not None:
                     txt = page_data.get("text", "") or ""
             except Exception:
@@ -454,6 +483,7 @@ def apply_cross_side(
                 "full_text": txt,
                 "uid": f"{sid}|{n}",
                 "highlight_pattern": anchor_pattern,
+                "volume_ie": vol_by_sid.get(sid),
                 "_via_other_side": True,
             }
             out.append(normalize_candidate(neighbor_res))

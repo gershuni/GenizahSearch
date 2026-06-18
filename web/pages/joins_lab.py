@@ -314,6 +314,9 @@ def create_joins_lab_page(
     # -----------------------------------------------------------------------
     _anchor_state: dict = {'sys_id': None, 'fl_id': None, 'volume_ie': None}
     _search_generation: dict = {'value': 0}
+    # Bumped on every anchor swap so a slow known-joins fetch for a prior anchor
+    # cannot render under a newer one (MED, CR fire-and-forget guard).
+    _anchor_generation: dict = {'value': 0}
     _is_running: dict = {'value': False}
     _current_task: dict = {'task': None}  # in-flight asyncio.Task (for cancel)
 
@@ -622,16 +625,24 @@ def create_joins_lab_page(
             return results[0].sys_id
         return None
 
-    async def _load_known_joins(sys_id: str, shelfmark: str, pgpid: Optional[int] = None) -> None:
+    async def _load_known_joins(
+        sys_id: str, shelfmark: str, pgpid: Optional[int] = None, anchor_gen: int = 0
+    ) -> None:
         """Fetch confirmed-only joins for the anchor; render in known_joins_container.
 
         ANC-04 / ANC-05: uses the confirmed-only path from Plan 02 (status='confirmed'
         + ':confirmed' cache key + community merge). The fetch is I/O-bound (Supabase
         + SQLite) so it MUST be dispatched via run.io_bound.
 
+        MED (CR): this is fire-and-forget; ``anchor_gen`` is the anchor generation
+        captured at dispatch. Every UI mutation below is guarded so a slow fetch for
+        a PRIOR anchor cannot clear/render under a newer one.
+
         Re-anchor callback: calls load_anchor (does NOT reset builder state — D-16).
         Open-in-browse callback: navigates to /browse?shelfmark=... (same tab).
         """
+        if anchor_gen != _anchor_generation['value']:
+            return
         known_joins_container.clear()
         with known_joins_container:
             spinner = ui.spinner(size='sm').style('color: var(--text-muted);')
@@ -646,11 +657,17 @@ def create_joins_lab_page(
                 force_refresh=False,
             )
         except Exception:
+            if anchor_gen != _anchor_generation['value']:
+                return
             known_joins_container.clear()
             with known_joins_container:
                 ui.label(tr('Could not load joins. Check your connection.')).classes(
                     'text-xs'
                 ).style('color: var(--text-muted);')
+            return
+
+        # A newer anchor superseded this fetch while it was in flight — discard.
+        if anchor_gen != _anchor_generation['value']:
             return
 
         def _on_reanchor(member_sys_id: str, member_shelfmark: str) -> None:
@@ -703,6 +720,10 @@ def create_joins_lab_page(
         # anchor (the candidate grid is cleared below; without this a slow prior
         # search could repopulate it under the new anchor).
         _cancel_current_search()
+        # MED (CR): new anchor generation — supersedes any in-flight known-joins
+        # fetch for the previous anchor (see _load_known_joins guard).
+        _anchor_generation['value'] += 1
+        _my_anchor_gen = _anchor_generation['value']
         _anchor_state['sys_id'] = sys_id
         _anchor_state['fl_id'] = fl_id
         _anchor_state['volume_ie'] = volume_ie
@@ -762,8 +783,10 @@ def create_joins_lab_page(
         except Exception:
             shelfmark = ''
 
-        # Fire-and-forget the known-joins load (non-blocking for the anchor swap)
-        asyncio.ensure_future(_load_known_joins(sys_id, shelfmark))
+        # Fire-and-forget the known-joins load (non-blocking for the anchor swap).
+        # Pass the captured anchor generation so a slow fetch for THIS anchor is
+        # discarded if a newer anchor is loaded before it returns (MED, CR).
+        asyncio.ensure_future(_load_known_joins(sys_id, shelfmark, anchor_gen=_my_anchor_gen))
 
     async def _on_load_btn_click() -> None:
         """Handle the Load Anchor button / Enter key in the smart box."""
@@ -1128,6 +1151,9 @@ def create_joins_lab_page(
                             b_query,
                             b_ro,
                             _combine_mode_snap,
+                            # CR HIGH-3: make the query-B scan cooperatively
+                            # cancellable when a newer search supersedes this run.
+                            progress_callback=_make_progress_cb(my_gen, _search_generation),
                         )
 
                     cross_coro = run.io_bound(run_cross_side_core)
@@ -1144,8 +1170,13 @@ def create_joins_lab_page(
                             return
                         final_candidates = list(merge_result.candidates)
                     except asyncio.TimeoutError:
-                        search_status.set_text(
-                            tr('Other-side search timed out.')
+                        # MED (CR): the final render hides search_status immediately,
+                        # so surface the other-side timeout as a persistent notify
+                        # instead (otherwise the user sees base candidates with no clue
+                        # the other-side leg failed).
+                        ui.notify(
+                            tr('Other-side search timed out — showing this-side results only.'),
+                            type='warning',
                         )
                         final_candidates = list(base_candidates)
                     except asyncio.CancelledError:
