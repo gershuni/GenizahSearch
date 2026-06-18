@@ -2492,28 +2492,10 @@ TRANSLATIONS = {
     "main search bar (Fuzzy = approximate, within 1–2 letter changes; Regex = a regular expression).":
         "מדויק / וריאנטים / עמום / ביטוי רגולרי — שורת טקסט חופשי אחת שמחפשת כמו שורת החיפוש "
         "הראשית (עמום = מקורב, במרחק 1–2 אותיות; ביטוי רגולרי = regex).",
-    "Type your search — behaves like the main search bar":
-        "הקלידו את החיפוש — מתנהג כמו שורת החיפוש הראשית",
     "Search in Responsa syntax": "חיפוש בתחביר השו״ת",
     "Responsa syntax": "תחביר השו״ת",
     "Space separates words; click the gear icon for the same options per word.":
         "רווח מפריד בין מילים; לחצו על סמל גלגל השיניים לאותן אפשרויות לכל מילה.",
-    # Per-mode placeholders + tooltips for the single-line input
-    "Exact search — words as typed": "חיפוש מדויק — המילים כפי שהוקלדו",
-    "Matches the words exactly as written, with no spelling variants.":
-        "התאמה למילים בדיוק כפי שנכתבו, ללא וריאנטי כתיב.",
-    "Variants search — also matches spelling variants":
-        "חיפוש וריאנטים — מתאים גם לווריאנטי כתיב",
-    "Matches each word plus its common spelling variants (plene/defective, etc.).":
-        "התאמה לכל מילה וגם לווריאנטי הכתיב הנפוצים שלה (מלא/חסר וכו׳).",
-    "Fuzzy search — approximate matches": "חיפוש עמום — התאמות מקורבות",
-    "Finds words within 1–2 letter changes (typos, missing or swapped letters). Slower.":
-        "מאתר מילים במרחק 1–2 אותיות (שגיאות כתיב, אותיות חסרות או מוחלפות). איטי יותר.",
-    "Regular expression — e.g. אמ.*רבי": "ביטוי רגולרי — לדוגמה אמ.*רבי",
-    "Type a regular expression over the text. Example: "
-    "אמ.*רבי finds אמ then רבי with anything between.":
-        "הקלידו ביטוי רגולרי על הטקסט. דוגמה: "
-        "אמ.*רבי מאתר אמ ואז רבי עם כל דבר ביניהם.",
     "with variants": "עם וריאנטים",
     "exact": "מדויק",
     # Run / reset / anchor controls
