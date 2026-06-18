@@ -68,9 +68,13 @@ def _apply_modifiers_to_term(term: str, mods: dict) -> str:
     if not t:
         return t
 
-    # Determine if this is a slash-group (multi-token alternative expression)
-    # e.g. 'א/ב' is a slash-group; '(א/ב)' is already wrapped (skip)
-    is_group = '/' in t and not t.startswith('(')
+    # Determine if this is a slash-group (multi-token alternative expression).
+    # has_slash_group: ANY '/' makes it a slash group — including an ALREADY-wrapped
+    # '(א/ב)'. is_group (whether WE need to add parens) excludes the pre-wrapped
+    # form. The wildcard-prefix RR-13 guard must key off has_slash_group, not
+    # is_group, or '*' wrongly applies to a pre-wrapped '(א/ב)' (CR LOW).
+    has_slash_group = '/' in t
+    is_group = has_slash_group and not t.startswith('(')
     wrapped = f'({t})' if is_group else t
 
     if mods.get('negation'):
@@ -83,7 +87,7 @@ def _apply_modifiers_to_term(term: str, mods: dict) -> str:
     if mods.get('suffix'):
         wrapped = f'{wrapped}#'
     # wildcard_prefix NOT supported on slash-groups (RR-13 parity - parser limitation)
-    if mods.get('wildcard_prefix') and not is_group:
+    if mods.get('wildcard_prefix') and not has_slash_group:
         wrapped = f'*{wrapped}'
     if mods.get('wildcard_suffix'):
         wrapped = f'{wrapped}*'
@@ -372,6 +376,9 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
         Do NOT call this on every keystroke (Guardrail 3 - WR-05).
         """
         parent_el.clear()
+        # LOW (CR): drop stale symbol-row references from the prior render so the
+        # registry doesn't retain detached elements after each structural rebuild.
+        _sym_rows.clear()
         with parent_el:
             for li in range(len(lines_state)):
                 _render_line(li)

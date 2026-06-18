@@ -332,6 +332,25 @@ def create_joins_lab_page(
         if _submit_ref['fn'] is not None:
             await _submit_ref['fn']()
 
+    def _cancel_current_search() -> None:
+        """Supersede any in-flight search (CR HIGH-1).
+
+        Bumps the generation counter (so a still-running run's results are
+        discarded by ``_should_apply_results``), cancels the in-flight task, and
+        clears the loading affordance. Called from New Search, Change anchor, and
+        every anchor swap so a search started for a PRIOR builder/anchor state can
+        never repopulate the candidate grid after a reset. ``search_btn`` is
+        late-bound — this only ever runs after the full page is built.
+        """
+        _search_generation['value'] += 1
+        task = _current_task.get('task')
+        if task is not None and not task.done():
+            task.cancel()
+        _current_task['task'] = None
+        if _is_running['value']:
+            _is_running['value'] = False
+            search_btn.props(remove='loading disabled')
+
     # One WebSearchExecutor per page render (used for SEARCH only —
     # NOT for anchor image data; AnchorViewer resolves its own rich BrowsePage,
     # HIGH-1).
@@ -674,6 +693,10 @@ def create_joins_lab_page(
         # (known_joins_group._render_member_row), so this is belt-and-braces.
         if not sys_id:
             return
+        # CR HIGH-1: an anchor swap supersedes any search in flight for the old
+        # anchor (the candidate grid is cleared below; without this a slow prior
+        # search could repopulate it under the new anchor).
+        _cancel_current_search()
         _anchor_state['sys_id'] = sys_id
         _anchor_state['fl_id'] = fl_id
         _anchor_state['volume_ie'] = volume_ie
@@ -797,6 +820,8 @@ def create_joins_lab_page(
         Does NOT clear the persisted anchor (D-13) — picking a new one overwrites
         it via load_anchor. Full clear/reset is Phase 120.
         """
+        # CR HIGH-1: cancel any in-flight search before tearing down the builder.
+        _cancel_current_search()
         anchor_input.value = ''
         error_label.style('display: none;')
         anchor_viewer_container.clear()
@@ -817,6 +842,10 @@ def create_joins_lab_page(
         candidate grid — but KEEPS the loaded anchor. Use "Change anchor" to
         switch fragments. Mirrors the restart_alt reset on /search.
         """
+        # CR HIGH-1: supersede any in-flight search so its results cannot land in
+        # the freshly-cleared grid.
+        _cancel_current_search()
+
         # Anchor builder back to clean defaults
         anchor_builder['reset']()
 
@@ -888,21 +917,14 @@ def create_joins_lab_page(
             dispatched via run.io_bound (CI guard; literal function name)
           - _merge_globals_web applied to b_ro inside run_cross_side_core too
         """
-        # Step 1: Bump generation FIRST (latest-wins counter).
-        _search_generation['value'] += 1
-        my_gen = _search_generation['value']
+        # CR HIGH-2: validate / build / compose BEFORE bumping the generation or
+        # cancelling the in-flight task. An early return here (empty input, engine
+        # not ready, compose() ValueError) must NOT supersede a running search —
+        # otherwise the older run's finally would see a stale generation and never
+        # clear the loading affordance. The latest-wins bump+cancel happens only
+        # once we know a real replacement search will start (just below compose()).
 
-        # Step 2: Cancel any in-flight search task (latest-wins).
-        # NOTE (MEDIUM): prev.cancel() cancels the asyncio.wait_for wrapper
-        # ONLY — it does NOT stop the already-running run.io_bound worker thread
-        # (Python threads cannot be force-killed).  True worker cancellation is
-        # achieved cooperatively via the bumped _search_generation making the OLD
-        # search's progress_cb raise InterruptedError (see _make_progress_cb).
-        prev = _current_task['task']
-        if prev and not prev.done():
-            prev.cancel()
-
-        # Step 3: Validate inputs
+        # Step 1: Validate inputs
         if anchor_builder['is_empty']():
             ui.notify(
                 tr('Enter at least one search line to run'),
@@ -955,6 +977,17 @@ def create_joins_lab_page(
 
         if not query_str:
             return
+
+        # Step 2 (CR HIGH-2): a real search WILL start — NOW supersede any in-flight
+        # run (latest-wins). prev.cancel() cancels the asyncio.wait_for wrapper only;
+        # the already-running run.io_bound worker thread is aborted cooperatively via
+        # the bumped _search_generation making the OLD search's progress_cb raise
+        # InterruptedError (see _make_progress_cb).
+        _search_generation['value'] += 1
+        my_gen = _search_generation['value']
+        prev = _current_task['task']
+        if prev and not prev.done():
+            prev.cancel()
 
         # Step 4: UI — loading state; collapse builder to summary bar (D-14)
         _is_running['value'] = True

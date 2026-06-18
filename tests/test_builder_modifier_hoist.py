@@ -150,3 +150,17 @@ def test_wildcard_prefix_not_applied_to_slash_group():
     assert not result.startswith('*'), (
         f"wildcard_prefix must not apply to slash-groups, got: {result!r}"
     )
+
+
+def test_wildcard_prefix_not_applied_to_prewrapped_slash_group():
+    """CR LOW: an ALREADY-wrapped slash-group '(א/ב)' must also be exempt.
+
+    The guard keyed off is_group (which excludes the pre-wrapped form), so '*'
+    wrongly applied to '(א/ב)'. It must key off has_slash_group ('/' anywhere).
+    """
+    fn = _get_apply_modifiers()
+    result = fn('(א/ב)', {'wildcard_prefix': True})
+    assert not result.startswith('*'), (
+        f"wildcard_prefix must not apply to pre-wrapped slash-groups, got: {result!r}"
+    )
+    assert result == '(א/ב)', result
