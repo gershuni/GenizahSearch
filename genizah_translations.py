@@ -2411,6 +2411,10 @@ TRANSLATIONS = {
     "End of text": "סוף טקסט",
     "Line starts": "תחילת שורה",
     "Line ends": "סוף שורה",
+    # --- Phase 118 Joins Lab builder collapsed-summary bar (WR-04) ---
+    "{n} line": "שורה אחת",
+    "{n} lines": "{n} שורות",
+    "Text Position: {pos}": "מיקום בטקסט: {pos}",
     "Constrain matches to text boundaries (for join detection)": "הגבל התאמות לגבולות טקסט (לזיהוי צירופים)",
     "Position:": "מיקום:",
     "Processing": "מעבד תוצאות",

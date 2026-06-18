@@ -194,20 +194,22 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
         return not any(rs.get('term', '').strip() for rs in rows_state)
 
     def _get_summary() -> str:
-        mode = _get_mode().capitalize()
+        # WR-04: every literal here must go through tr() — the collapsed summary
+        # bar is shown after EVERY search (joins_lab._collapse_builder), and the
+        # default UI is Hebrew. Mode/Text-Position labels reuse the same English
+        # keys translated elsewhere; pluralization uses singular/plural tr() keys.
+        _mode_label_keys = {'exact': 'Exact', 'variants': 'Variants', 'fuzzy': 'Fuzzy'}
+        mode_raw = _get_mode()
+        mode = tr(_mode_label_keys.get(mode_raw, mode_raw.capitalize()))
         n = len(rows_state)
-        lines_label = f'{n} line' if n == 1 else f'{n} lines'
+        lines_label = (
+            tr('{n} line').format(n=n) if n == 1
+            else tr('{n} lines').format(n=n)
+        )
         if allow_page_position:
             tp = _get_text_position()
-            tp_label_map = {
-                'anywhere': 'Anywhere',
-                'start': 'Start of text',
-                'end': 'End of text',
-                'line_start': 'Line starts',
-                'line_end': 'Line ends',
-            }
-            pos_label = tp_label_map.get(tp, tp)
-            return f'{mode} · {lines_label} · Text Position: {pos_label}'
+            pos_label = tr(_TEXT_POSITION_LABEL_KEYS.get(tp, tp))
+            return f'{mode} · {lines_label} · ' + tr('Text Position: {pos}').format(pos=pos_label)
         return f'{mode} · {lines_label}'
 
     def _build_sq() -> Optional[SideQuery]:
