@@ -27,15 +27,15 @@ Requirements for this milestone. Each maps to a roadmap phase.
 - [x] **ANC-01**: The anchor pane shows the pinned fragment's image with zoom/pan and folio (page) navigation.
 - [x] **ANC-02**: Anchor (and Compare) images load through the **existing per-provider image-proxy resolution** used by `/browse` (NLI, Oxford, Cambridge, Manchester, JTS) — reusing those endpoints and the Phase-98 NLI circuit breaker — rather than inventing direct image URLs. No unguarded NLI/IIIF fetch.
 - [x] **ANC-03**: The anchor pane shows the fragment's transcription as right-aligned (RTL) numbered lines.
-- [ ] **ANC-04**: The anchor pane shows known joins (PGP + FJMS + user + community) as a connected group with source attribution.
-- [ ] **ANC-05**: Known-joins display is multitenant-safe — it surfaces only public/confirmed joins (or is user/status-aware cache-isolated), so the process-global join cache can never leak one user's unconfirmed (creator-only, RLS-scoped) joins to another user.
+- [x] **ANC-04**: The anchor pane shows known joins (PGP + FJMS + user + community) as a connected group with source attribution.
+- [x] **ANC-05**: Known-joins display is multitenant-safe — it surfaces only public/confirmed joins (or is user/status-aware cache-isolated), so the process-global join cache can never leak one user's unconfirmed (creator-only, RLS-scoped) joins to another user.
 
 ### Query Builders (BLD)
 
 - [x] **BLD-01**: User can build a line-by-line query for the anchor side — rows of OR-grouped word-boxes corresponding to manuscript lines.
-- [ ] **BLD-02**: User can build a line-by-line query for the OTHER side of the leaf with cross-side narrow/widen (`apply_cross_side`), over a web-defined page contract: which page identifier feeds `resolve_other_side_pages` (`p_num` vs internal index), multi-IE (`volume_ie`) behavior, unknown total-page counts, and sparse / metadata-only pages.
-- [ ] **BLD-03**: User can set per-line modifiers (line-start ⊢ / line-end ⊣, plene/defective, etc.) on any builder row.
-- [ ] **BLD-04**: User can set global search toggles (variants, Judeo-Arabic, flexible spacing, bidirectional) and an inline gap; these are applied to BOTH sides via the `_merge_globals`-equivalent before/around `compose()` (which hardcodes JA/flex/bidirectional to false) — so a toggle is never silently dropped.
+- [x] **BLD-02**: User can build a line-by-line query for the OTHER side of the leaf with cross-side narrow/widen (`apply_cross_side`), over a web-defined page contract: which page identifier feeds `resolve_other_side_pages` (`p_num` vs internal index), multi-IE (`volume_ie`) behavior, unknown total-page counts, and sparse / metadata-only pages.
+- [x] **BLD-03**: User can set per-line modifiers (line-start ⊢ / line-end ⊣, plene/defective, etc.) on any builder row.
+- [x] **BLD-04**: User can set global search toggles (variants, Judeo-Arabic, flexible spacing, bidirectional) and an inline gap; these are applied to BOTH sides via the `_merge_globals`-equivalent before/around `compose()` (which hardcodes JA/flex/bidirectional to false) — so a toggle is never silently dropped.
 - [x] **BLD-05**: Running a built query composes into the engine's syntax (`compose`) and executes against the web search engine via the FND-01 adapter, returning candidates.
 
 ### Candidate Surface (CND)
@@ -116,12 +116,12 @@ Which phases cover which requirements. Populated during roadmap creation.
 | ANC-01 | Phase 117 | Complete |
 | ANC-02 | Phase 117 | Complete |
 | ANC-03 | Phase 117 | Complete |
-| ANC-04 | Phase 118 | Pending |
-| ANC-05 | Phase 118 | Pending |
+| ANC-04 | Phase 118 | Complete |
+| ANC-05 | Phase 118 | Complete |
 | BLD-01 | Phase 117 | Complete |
-| BLD-02 | Phase 118 | Pending |
-| BLD-03 | Phase 118 | Pending |
-| BLD-04 | Phase 118 | Pending |
+| BLD-02 | Phase 118 | Complete |
+| BLD-03 | Phase 118 | Complete |
+| BLD-04 | Phase 118 | Complete |
 | BLD-05 | Phase 117 | Complete |
 | CND-01 | Phase 117 | Complete |
 | CND-02 | Phase 117 | Complete |
