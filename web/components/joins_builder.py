@@ -128,13 +128,27 @@ def build_side_query(
 # NiceGUI widget factory
 # ---------------------------------------------------------------------------
 
-_TEXT_POSITION_OPTIONS = {
-    'anywhere': tr('Anywhere'),
-    'start': tr('Start of text'),
-    'end': tr('End of text'),
-    'line_start': tr('Line starts'),
-    'line_end': tr('Line ends'),
+# WR-03: Text Position labels must be resolved at REQUEST time (inside
+# create_joins_builder), NOT at module import. tr() reads the process-global
+# _current_lang set per-request by web/main.py; a module-level dict freezes the
+# labels at the import-time default ('he'), so an English visitor would see
+# Hebrew labels that never update. The English KEYS are stable and used for
+# state/routing; only the displayed VALUES need deferred tr(). (See _MODIFIER_KEYS
+# below, which already defers tr() via lambda for the same reason.)
+_TEXT_POSITION_KEYS = ['anywhere', 'start', 'end', 'line_start', 'line_end']
+_TEXT_POSITION_LABEL_KEYS = {
+    'anywhere': 'Anywhere',
+    'start': 'Start of text',
+    'end': 'End of text',
+    'line_start': 'Line starts',
+    'line_end': 'Line ends',
 }
+
+
+def _text_position_options() -> dict:
+    """Build the Text Position {value: label} options at request time (WR-03)."""
+    return {k: tr(_TEXT_POSITION_LABEL_KEYS[k]) for k in _TEXT_POSITION_KEYS}
+
 
 _MODIFIER_KEYS = [
     ('line_start',       lambda: tr('Line start (⊢)')),
@@ -340,7 +354,7 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
                         'color: var(--text-secondary); letter-spacing: 0.05em;'
                     )
                     text_pos_select = ui.select(
-                        options=_TEXT_POSITION_OPTIONS,
+                        options=_text_position_options(),
                         value=text_position_state['value'],
                     ).props('outlined dense').classes('w-40')
 
