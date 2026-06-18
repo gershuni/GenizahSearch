@@ -2479,6 +2479,87 @@ TRANSLATIONS = {
         "ניתן להקליד אופרטורים של חיפוש בסגנון פרויקט השו״ת ישירות בתיבת מילה (רווח = רצף, א/ב = חלופות); "
         "תפריט גלגל השיניים מוסיף את הסימנים #, %, *, −.",
 
+    # --- Joins Lab page + search-type selector — full HE i18n sweep (Phase 118) ---
+    "Responsa-style": "בסגנון השו״ת",
+    "Search type": "סוג חיפוש",
+    "Search types": "סוגי חיפוש",
+    "About search types": "אודות סוגי החיפוש",
+    "Responsa-style — the structured builder: build the line word-by-word with gaps, "
+    "line anchors and per-word modifiers. Turn on Variants to also match spelling variants.":
+        "בסגנון השו״ת — הבנאי המובנה: בניית השורה מילה-אחר-מילה עם מרווחים, עוגני שורה "
+        "ומשַני-מילה. הפעילו \"וריאנטים\" כדי להתאים גם לווריאנטי כתיב.",
+    "Exact / Variants / Fuzzy / Regex — a single free-text line that searches like the "
+    "main search bar (Fuzzy = approximate, within 1–2 letter changes; Regex = a regular expression).":
+        "מדויק / וריאנטים / עמום / ביטוי רגולרי — שורת טקסט חופשי אחת שמחפשת כמו שורת החיפוש "
+        "הראשית (עמום = מקורב, במרחק 1–2 אותיות; ביטוי רגולרי = regex).",
+    "Type your search — behaves like the main search bar":
+        "הקלידו את החיפוש — מתנהג כמו שורת החיפוש הראשית",
+    "with variants": "עם וריאנטים",
+    "exact": "מדויק",
+    # Run / reset / anchor controls
+    "Run Search": "הרצת חיפוש",
+    "Load Anchor": "טעינת עוגן",
+    "Change anchor": "החלפת עוגן",
+    "Edit search": "עריכת החיפוש",
+    "Pin an Anchor Fragment": "קביעת קטע עוגן",
+    "Enter a shelfmark or fragment ID to begin hunting for physical joins.":
+        "הזינו סימן או מזהה קטע כדי להתחיל באיתור צירופים פיזיים.",
+    "Shelfmark or fragment ID (e.g. T-S 12.123)": "סימן או מזהה קטע (לדוגמה T-S 12.123)",
+    "Restored your last anchor": "העוגן האחרון שלך שוחזר",
+    # Advanced options + other side
+    "Flexible spacing": "ריווח גמיש",
+    "Search the other side of the leaf": "חיפוש בצד השני של הדף",
+    "Other side": "הצד השני",
+    "Combine mode": "אופן השילוב",
+    "Narrow (AND)": "צמצום (AND)",
+    "Widen (OR)": "הרחבה (OR)",
+    # Lists / sign-in (D-06)
+    "Choose from my lists": "בחירה מהרשימות שלי",
+    "Sign in to access your saved research lists": "התחברו כדי לגשת לרשימות המחקר השמורות שלכם",
+    "Sign in to access your saved research lists.": "התחברו כדי לגשת לרשימות המחקר השמורות שלכם.",
+    "Sign in required": "נדרשת התחברות",
+    "Sign in": "התחברות",
+    "Full list picker is available in the next phase. Go to /lists to pick a fragment, "
+    "then return here.":
+        "בורר הרשימות המלא יהיה זמין בשלב הבא. עברו אל /lists כדי לבחור קטע, ואז חזרו לכאן.",
+    # Validation / status / error toasts
+    "Enter at least one search line to run": "יש להזין לפחות שורת חיפוש אחת",
+    "Enter a search query to run": "יש להזין שאילתת חיפוש",
+    "Text Position requires content on that line. Add a word to the first/last line "
+    "or set Text Position to Anywhere.":
+        "מיקום בטקסט מחייב תוכן באותה שורה. הוסיפו מילה לשורה הראשונה/אחרונה "
+        "או הגדירו את מיקום הטקסט ל\"בכל מקום\".",
+    "Search timed out. Try fewer or shorter lines.":
+        "החיפוש חרג מהזמן המוקצב. נסו פחות שורות או שורות קצרות יותר.",
+    "Search failed. Check your connection and try again.":
+        "החיפוש נכשל. בדקו את החיבור ונסו שוב.",
+    "Other-side search timed out — showing this-side results only.":
+        "חיפוש הצד השני חרג מהזמן — מוצגות תוצאות הצד הזה בלבד.",
+    "Could not resolve the other side of this leaf. Try navigating to a specific folio first.":
+        "לא ניתן לזהות את הצד השני של הדף. נסו לנווט תחילה לדף מסוים.",
+    "No candidates found. Try different lines.": "לא נמצאו מועמדים. נסו שורות אחרות.",
+    "Fragment not found. Check the shelfmark and try again.":
+        "הקטע לא נמצא. בדקו את הסימן ונסו שוב.",
+    "Could not load joins. Check your connection.":
+        "לא ניתן לטעון צירופים. בדקו את החיבור.",
+    # Anchor viewer
+    "No more folios in this direction": "אין דפים נוספים בכיוון זה",
+    "Fragment not found": "הקטע לא נמצא",
+    # Candidate grid
+    "Candidates": "מועמדים",
+    "No candidates found. Try different lines or broader terms.":
+        "לא נמצאו מועמדים. נסו שורות אחרות או מונחים רחבים יותר.",
+    "Showing the first {n} results — refine your search to narrow them down.":
+        "מוצגות {n} התוצאות הראשונות — דייקו את החיפוש כדי לצמצם אותן.",
+    # Known-joins group
+    "Re-anchor to this fragment": "קביעת קטע זה כעוגן",
+    "No known joins": "אין צירופים ידועים",
+    "Only confirmed public joins are shown": "מוצגים רק צירופים ציבוריים מאומתים",
+    # Joins panel (cross-links into the Lab)
+    "Find Joins in the Joins Lab": "איתור צירופים במעבדת הצירופים",
+    "Go to Joins Lab to find more joins": "עברו למעבדת הצירופים לאיתור צירופים נוספים",
+    "Find more joins": "איתור צירופים נוספים",
+
     # --- Wildcard rewrite notice ---
     "*word* rewritten as #word# (prefix + suffix expansion)":
         "*word* שוכתב כ-#word# (הרחבת קידומות + סיומות)",
