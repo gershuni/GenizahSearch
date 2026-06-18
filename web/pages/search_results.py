@@ -646,13 +646,27 @@ def create_result_card(search_state, refs, index, result):
 
                 _joins_icon_ref = {'has_joins': False}
 
+                # WR-06: thread the result's pgpid through to create_joins_dialog
+                # so fetch_connected_fragments does not have to resolve it from
+                # document_id via an extra Supabase round-trip on every open. Use
+                # the same translation_data lookup the rest of this module uses
+                # (e.g. the PGP report button at :548). None when unavailable —
+                # the dialog then falls back to the document_id resolution path.
+                _joins_pgpid = None
+                try:
+                    _td = search_state.translation_data.get(sys_id, {}) if sys_id else {}
+                    _joins_pgpid = _td.get('pgpid')
+                except Exception:
+                    _joins_pgpid = None
+
                 def _open_joins_for_card(s=sys_id, sm=shelfmark, url=_joins_url,
-                                         ref=_joins_icon_ref):
+                                         ref=_joins_icon_ref, pid=_joins_pgpid):
                     """D-21: joins exist → open dialog; none → open Lab in new tab."""
                     if ref['has_joins']:
                         create_joins_dialog(
                             shelfmark=sm,
                             document_id=s,
+                            pgpid=pid,
                             find_joins_url=url,
                         )
                     else:
