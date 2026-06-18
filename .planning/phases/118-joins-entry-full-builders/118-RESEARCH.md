@@ -281,10 +281,14 @@ In the web page closure, a `_global_opts` dict captures the toggle state:
 _global_opts = {'flex_spacing': False, 'bidirectional': False}
 # (ja stays False always per D-10; variants flows via SideQuery.variants)
 
-def _merge_globals_web(ro: dict) -> dict:
+# CANONICAL FORM (matches PATTERNS.md, the Wave-0 tests, and the plans):
+# _merge_globals_web(ro: dict, global_opts: dict) -> dict  — two-arg, importable, side-agnostic.
+# The one-arg closure variant below is illustrative only; IMPLEMENT THE TWO-ARG FORM
+# (see this file's "### `_merge_globals_web` (BLD-04 re-injection)" code example).
+def _merge_globals_web(ro: dict, global_opts: dict) -> dict:
     """Re-inject flex_spacing + bidirectional into a compose()-produced ro."""
-    ro['flex_spacing'] = _global_opts.get('flex_spacing', False)
-    ro['bidirectional'] = _global_opts.get('bidirectional', False)
+    ro['flex_spacing'] = global_opts.get('flex_spacing', False)
+    ro['bidirectional'] = global_opts.get('bidirectional', False)
     # ja stays False per D-10 — do not merge it
     return ro
 ```
@@ -294,7 +298,7 @@ This must be called in the search closure (inside the `run.io_bound` sync functi
 ```python
 def run_search_core():
     query_str, ro, page_position = compose(anchor_side)
-    _merge_globals_web(ro)  # BLD-04: re-inject flex/bidir
+    _merge_globals_web(ro, _global_opts)  # BLD-04: re-inject flex/bidir
     return executor.execute_search(
         query_str, mode=mode_str, gap=0,
         responsa_options=ro,
@@ -308,7 +312,7 @@ And for the other-side search:
 ```python
 def run_cross_side_core():
     b_query, b_ro, _b_pos = compose(other_side)
-    _merge_globals_web(b_ro)  # BLD-04: re-inject into other side too
+    _merge_globals_web(b_ro, _global_opts)  # BLD-04: re-inject into other side too
     return apply_cross_side(executor, base_candidates, b_query, b_ro, combine)
 ```
 
@@ -396,7 +400,7 @@ async def execute_joins_search() -> None:
 
         def run_cross_side_core():
             b_query, b_ro, _ = compose(other_side)
-            _merge_globals_web(b_ro)   # BLD-04
+            _merge_globals_web(b_ro, _global_opts)   # BLD-04
             return apply_cross_side(
                 executor, list(base_candidates),
                 b_query, b_ro, combine_mode
@@ -563,7 +567,7 @@ async execute_joins_search():
     # Phase 1: anchor side
     bump generation
     compose(anchor_side) → (query_str, ro, page_position)
-    _merge_globals_web(ro)          ← BLD-04
+    _merge_globals_web(ro, _global_opts)          ← BLD-04
     def run_search_core():
         executor.execute_search(query_str, mode, 0, responsa_options=ro, text_position=page_position, corpus_scope='genizah')
     raw = await asyncio.wait_for(run.io_bound(run_search_core), timeout=120)
@@ -573,7 +577,7 @@ async execute_joins_search():
     # Phase 2: other-side (if enabled and non-empty)
     if other_side_enabled and other_side.rows:
         compose(other_side) → (_b_str, b_ro, _)
-        _merge_globals_web(b_ro)    ← BLD-04 for OTHER side too
+        _merge_globals_web(b_ro, _global_opts)    ← BLD-04 for OTHER side too
         combine = 'AND' | 'OR'
         def run_cross_side_core():
             return apply_cross_side(executor, list(base_candidates), _b_str, b_ro, combine)
@@ -641,7 +645,7 @@ async def _load_known_joins(sys_id: str, shelfmark: str, pgpid: Optional[int]) -
 
 ### Pitfall 2: Missing `_merge_globals_web` on the other-side `b_ro`
 **What goes wrong:** Calling `_merge_globals_web` only on the anchor `ro` leaves `flex_spacing=False, bidirectional=False` in `b_ro`. The toggle appears to work (anchor side is correct) but the other-side query silently ignores the toggles.
-**How to avoid:** Call `_merge_globals_web(b_ro)` after `compose(other_side)`, BEFORE passing `b_ro` to `apply_cross_side`.
+**How to avoid:** Call `_merge_globals_web(b_ro, _global_opts)` after `compose(other_side)`, BEFORE passing `b_ro` to `apply_cross_side`.
 **Warning signs:** Toggling Flex-spacing changes anchor results but NOT other-side behavior.
 
 ### Pitfall 3: `SideQuery.page_position` ValueError for `line_start`/`line_end`
