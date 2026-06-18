@@ -147,6 +147,28 @@ def build_collapsed_summary(
     return anchor_summary + '   ⇄   ' + other_seg
 
 
+def build_collapsed_query_text(
+    anchor_query: Optional[str],
+    other_query: Optional[str] = None,
+) -> str:
+    """Build the collapsed-bar text from the ACTUAL composed responsa query strings.
+
+    Shows what the engine will run — the anchor side first, then the other side
+    after ' || ' when present, each wrapped in quotes. e.g.::
+
+        "אמר [|3] %רבי" || "*עקיבא"
+
+    The query strings come straight from shared.joins_lab.compose(), so the bar
+    reflects the real line-break / gap / modifier syntax (not a paraphrase).
+    """
+    parts = []
+    if anchor_query:
+        parts.append(f'"{anchor_query}"')
+    if other_query:
+        parts.append(f'"{other_query}"')
+    return ' || '.join(parts)
+
+
 def decide_initial_anchor(
     initial_sys_id: Optional[str],
     initial_shelfmark: Optional[str],
@@ -302,6 +324,14 @@ def create_joins_lab_page(
     # Other-side state (D-13, UI-SPEC §3)
     _other_side: dict = {'enabled': False, 'builder': None, 'combine': 'AND'}
 
+    # Enter-to-search: the builders are created before execute_joins_search is
+    # defined, so wire the word-box Enter key through a mutable ref set later.
+    _submit_ref: dict = {'fn': None}
+
+    async def _trigger_search() -> None:
+        if _submit_ref['fn'] is not None:
+            await _submit_ref['fn']()
+
     # One WebSearchExecutor per page render (used for SEARCH only —
     # NOT for anchor image data; AnchorViewer resolves its own rich BrowsePage,
     # HIGH-1).
@@ -412,7 +442,7 @@ def create_joins_lab_page(
         # create_joins_builder() builds its container with `with ui.column() as
         # container:`, so calling it inside this `with builder_area:` block mounts
         # the container here automatically — no manual reparenting needed.
-        anchor_builder = create_joins_builder(allow_page_position=True)
+        anchor_builder = create_joins_builder(allow_page_position=True, on_submit=_trigger_search)
 
         # Summary bar (D-14) — shown when builder is collapsed after a search
         # Tracks visibility state in a mutable dict so the close-over callbacks
@@ -517,7 +547,7 @@ def create_joins_lab_page(
                 # Other-side builder (allow_page_position=False — no Text Position).
                 # Built inside this `with other_side_controls:` block, so its
                 # container mounts here automatically (no manual reparenting).
-                other_builder = create_joins_builder(allow_page_position=False)
+                other_builder = create_joins_builder(allow_page_position=False, on_submit=_trigger_search)
                 _other_side['builder'] = other_builder
 
             def _on_other_side_toggle() -> None:
@@ -887,21 +917,21 @@ def create_joins_lab_page(
         search_status.set_text(tr('Searching...'))
         search_status.style('display: block;')
 
-        # D-14: auto-collapse builder to summary bar on search. The collapsed bar
-        # now also carries the other-side search info (#2) when it is enabled and
-        # has content, so the compacted view reflects the full two-sided query.
+        # D-14 (#2): auto-collapse the builder to the summary bar, showing the
+        # ACTUAL composed responsa query string the engine will run — anchor side,
+        # then the other side after ' || ' when enabled. `query_str` is the anchor
+        # query composed above; compose the other side here for display.
+        _other_query = None
         _ob = _other_side.get('builder')
-        _other_summary = None
         if _other_side.get('enabled') and _ob is not None:
             _osq = _ob['build_side_query']()
             if _osq is not None and _osq.rows:
-                _other_summary = _ob['get_summary']()
-        _collapse_builder(build_collapsed_summary(
-            anchor_builder['get_summary'](),
-            bool(_other_side.get('enabled')),
-            _other_summary,
-            _other_side.get('combine', 'AND'),
-        ))
+                try:
+                    _bq, _, _ = compose(_osq)
+                except ValueError:
+                    _bq = None
+                _other_query = _bq or None
+        _collapse_builder(build_collapsed_query_text(query_str, _other_query))
 
         # WR-01: a SINGLE outer try/finally wraps BOTH the anchor leg and the
         # cross-side leg so the loading affordance (button + _is_running) is held
@@ -1054,6 +1084,7 @@ def create_joins_lab_page(
                 _is_running['value'] = False
                 search_btn.props(remove='loading disabled')
 
+    _submit_ref['fn'] = execute_joins_search  # enables Enter-to-search in word boxes
     search_btn.on('click', execute_joins_search)
 
     # -----------------------------------------------------------------------

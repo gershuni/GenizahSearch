@@ -264,7 +264,7 @@ _LINE_MOD_TABLE = [
 ]
 
 
-def create_joins_builder(allow_page_position: bool = True) -> dict:
+def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> dict:
     """Factory: creates and mounts the Joins Lab word-box line-builder widget.
 
     Returns a handle dict with:
@@ -525,6 +525,10 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
                 lines_state[i]['words'][j]['term'] = v
 
             term_input.on('update:model-value', lambda e, i=li, j=wi: _on_term_change(e.args, i, j))
+            # Enter in any word box runs the search (parity with the Run Search
+            # button). on_submit is the page's (async) search trigger.
+            if on_submit is not None:
+                term_input.on('keydown.enter', on_submit)
 
             # Modifier row: tune icon + optional remove-word
             with ui.row().classes('items-center gap-1 justify-center'):
