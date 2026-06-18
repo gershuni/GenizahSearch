@@ -466,9 +466,14 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
                 else:
                     remove_line_btn.on('click', lambda i=li: _remove_line(i))
 
-            # Words row: each word = text input + modifier menu + symbol indicators
-            # Between words: gap-to-next-word box
-            with ui.row().classes('items-start gap-2 flex-wrap'):
+            # Words row: each word = text input + modifier menu + symbol indicators.
+            # Between words: gap-to-next-word box. The row flows RIGHT-TO-LEFT
+            # (direction:rtl, every UI language) so the FIRST word sits rightmost and
+            # each '+ Add word' appears to its LEFT — Hebrew reading order. DOM order
+            # stays word0, gap0, word1, ... so query/compose order is unaffected.
+            with ui.row().classes('items-start gap-2 flex-wrap jl-words-row').style(
+                'direction: rtl;'
+            ):
                 for wi in range(len(words)):
                     _render_word_unit(li, wi)
                     if wi < len(words) - 1:
