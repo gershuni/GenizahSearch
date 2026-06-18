@@ -29,7 +29,7 @@ import os
 _CACHE_TTL = int(os.environ.get('JOINS_CACHE_TTL', '30'))
 
 
-def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pgpid: int = None, force_refresh: bool = False) -> Dict:
+def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pgpid: int = None, force_refresh: bool = False, confirmed_only: bool = False) -> Dict:
     """
     Fetch all fragments connected to the given shelfmark or document_id.
     Merges user-created pairwise joins (fragment_joins table) with PGP
@@ -43,12 +43,19 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
         document_id: System ID of the document (sys_id)
         pgpid: PGP document ID (avoids redundant Supabase lookup)
         force_refresh: Force cache bypass
+        confirmed_only: When True, use status='confirmed' filter (ANC-05 / D-17 / T-118-01)
+            and a separate ':confirmed' cache key so the Lab path result never contaminates
+            the browse-dialog full-joins cache. Also merges community puzzle joins (ANC-04).
 
     Returns:
         Dict with fragments, joins, total_fragments, total_joins, fragment_details
     """
-    # Build cache key (include pgpid for proper cache separation)
-    cache_key = f"doc:{document_id}:pgp:{pgpid}" if document_id else f"shelf:{shelfmark}:pgp:{pgpid}"
+    # Build cache key (include pgpid for proper cache separation).
+    # ANC-05 / D-17 / T-118-01: confirmed_only path uses a ':confirmed' suffix so it
+    # is stored in an isolated key — a confirmed-only result can NEVER poison the
+    # browse-dialog full-joins cache (which uses the unconfirmed key).
+    base_key = f"doc:{document_id}:pgp:{pgpid}" if document_id else f"shelf:{shelfmark}:pgp:{pgpid}"
+    cache_key = f"{base_key}:confirmed" if confirmed_only else base_key
 
     # Check cache (unless force refresh)
     if not force_refresh:
@@ -59,9 +66,16 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                     return cached_data
 
     try:
-        # Fetch user joins from Supabase
+        # Fetch user joins from Supabase.
+        # ANC-05 (D-17): on the confirmed_only (Lab) path, pass status='confirmed' so
+        # that any user's unconfirmed (proposed) joins are excluded at the query layer.
+        # RLS is USING(true) — all rows are publicly readable; the app-layer filter is
+        # the sole mechanism that prevents cross-user join leaks (T-118-01).
         if document_id:
-            joins = get_fragment_joins(fragment_sys_id=document_id)
+            if confirmed_only:
+                joins = get_fragment_joins(fragment_sys_id=document_id, status='confirmed')
+            else:
+                joins = get_fragment_joins(fragment_sys_id=document_id)
         elif shelfmark:
             # Try to find by shelfmark in the joins
             joins = get_fragment_joins()
@@ -238,6 +252,72 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                     })
         except Exception as e:
             logger.error("FJMS joins merge error: %s", e)
+
+        # --- Merge community puzzle joins (ANC-04 / D-15 — Lab path only) ---
+        # Only on the confirmed_only path so the browse dialog community section
+        # (create_joins_dialog :671-742) is unaffected (T-118-09: is_published=True only).
+        if confirmed_only and WEB_PUZZLE_ENABLED and document_id:
+            try:
+                client = get_client()
+                pjf_resp = client.table('published_join_fragments').select(
+                    'join_id, shelfmark'
+                ).eq('sys_id', document_id).execute()
+                if pjf_resp.data:
+                    join_ids = list(set(r['join_id'] for r in pjf_resp.data))
+                    pj_resp = client.table('published_joins').select(
+                        'id, user_id, title, shelfmarks, thumbnail_path, created_at'
+                    ).in_('id', join_ids).eq('is_published', True).execute()
+                    pj_rows = pj_resp.data or []
+                    # Anchor shelfmark upper for comparison
+                    anchor_upper = shelfmark.upper() if shelfmark else ''
+                    for pj in pj_rows:
+                        pj_shelfmarks = pj.get('shelfmarks', []) or []
+                        for member_shelfmark in pj_shelfmarks:
+                            if not member_shelfmark:
+                                continue
+                            # Skip the anchor itself
+                            if member_shelfmark.upper() == anchor_upper:
+                                continue
+                            # Try to resolve sys_id for this member shelfmark
+                            member_sys_id = None
+                            if state.meta_mgr:
+                                try:
+                                    _resolved, _ = state.meta_mgr.get_meta_for_id(member_shelfmark)
+                                    if _resolved and _resolved != 'Unknown':
+                                        # meta_mgr.get_meta_for_id takes a sys_id, not shelfmark;
+                                        # we can only resolve if this is already a sys_id
+                                        pass
+                                except Exception:
+                                    pass
+                            if member_shelfmark.upper() in fragments_upper:
+                                # Merge 'community' into existing formatted join
+                                for existing_join in formatted_joins:
+                                    if existing_join.get('fragment_b', '').upper() == member_shelfmark.upper():
+                                        existing_sources = existing_join.get('sources', [])
+                                        if 'community' not in existing_sources:
+                                            existing_sources.append('community')
+                                        existing_join['sources'] = existing_sources
+                                        break
+                            else:
+                                # New member from community puzzle join
+                                fragments_set.add(member_shelfmark)
+                                fragments_upper.add(member_shelfmark.upper())
+                                if member_shelfmark.upper() not in details_upper:
+                                    fragment_details.append({
+                                        'shelfmark': member_shelfmark,
+                                        'document_id': member_sys_id or '',
+                                    })
+                                    details_upper.add(member_shelfmark.upper())
+                                formatted_joins.append({
+                                    'id': None,
+                                    'fragment_a': shelfmark or '',
+                                    'fragment_b': member_shelfmark,
+                                    'relationship_type': 'community_puzzle',
+                                    'sources': ['community'],
+                                    'notes': pj.get('title', ''),
+                                })
+            except Exception as e:
+                logger.error("Community puzzle joins merge error: %s", e)
 
         # Ensure current shelfmark is in fragments_set
         if shelfmark and shelfmark.upper() not in fragments_upper:
