@@ -788,7 +788,20 @@ def create_joins_lab_page(
         # BLD-03: mode from the builder
         mode_str = anchor_builder['get_mode']()
 
-        query_str, ro, page_position = compose(side)
+        # CR-01: compose() raises ValueError when page_position='start'/'end'
+        # but the anchoring (first/last) row is empty — reachable when the user
+        # clears row 1 but types in row 2 (the empty-builder guard does NOT
+        # trip). Surface a friendly notify instead of letting it bubble out of
+        # the click handler (silent broken search + server exception).
+        try:
+            query_str, ro, page_position = compose(side)
+        except ValueError:
+            ui.notify(
+                tr('Text Position requires content on that line. '
+                   'Add a word to the first/last line or set Text Position to Anywhere.'),
+                type='warning',
+            )
+            return
 
         # BLD-04: re-inject flex_spacing + bidirectional from the UI toggles
         # (compose() hardcodes both to False at shared/joins_lab.py:741-749)
