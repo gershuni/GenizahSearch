@@ -293,6 +293,7 @@ def create_joins_builder(
     allow_page_position: bool = True,
     on_submit=None,
     show_search_type: bool = True,
+    on_type_change=None,
 ) -> dict:
     """Factory: creates and mounts the Joins Lab word-box line-builder widget.
 
@@ -577,15 +578,10 @@ def create_joins_builder(
             else 'min-width: 80px; max-width: 180px;'
         )
         with ui.column().classes('items-center gap-0').style(col_style):
-            # Word text input (RTL)
-            if single_word:
-                placeholder = (
-                    tr('Words on this line (space = sequence, a/b = alternatives)')
-                    if allow_page_position
-                    else tr('Words on this side (space = sequence, a/b = alternatives)')
-                )
-            else:
-                placeholder = ''
+            # Word text input (RTL). The lone box shows the short "Search in Responsa
+            # syntax" placeholder; the detailed syntax help lives in the tooltip
+            # below (UAT: shorter alt-text + explanatory tooltip).
+            placeholder = tr('Search in Responsa syntax') if single_word else ''
             # RTL: `input-style` targets the inner <input> so typed Hebrew flows
             # right-to-left (a wrapper-level `style(direction:rtl)` alone does NOT
             # reach the native input). Wrapper keeps direction:rtl for placeholder.
@@ -595,6 +591,11 @@ def create_joins_builder(
                 'direction: rtl;'
                 ' font-family: "Noto Sans Hebrew", "SBL Hebrew", serif; font-size: 1rem;'
             )
+            term_input.tooltip(tr(
+                'Type words to match on this line. Space = a sequence of words; '
+                'a/b = alternatives. Click the gear icon on a word for options '
+                '(prefix, plene/defective, wildcard, negation).'
+            ))
             term_input.value = word.get('term', '')
 
             def _on_term_change(v, i=li, j=wi):
@@ -762,26 +763,23 @@ def create_joins_builder(
     # Text Position, etc.). Reassigned inside the `with` block below; the closures
     # resolve them at call time.
     text_pos_select = None
-    variants_cb = None
     single_input = None
     responsa_container = None
     single_container = None
-    type_hint = None
     type_btns: dict = {}
 
     def _apply_type_visibility() -> None:
         """Show the structured builder for Responsa-style; the single-line input
-        for the simple modes. Variants checkbox is Responsa-style only; the Fuzzy
-        slowness hint shows for single-line Fuzzy only."""
+        for the simple modes. Notifies the page (on_type_change) so it can hide the
+        Responsa-only options (Variants / Flexible spacing / Bidirectional) outside
+        Responsa-style."""
         is_resp = (search_type_state['type'] == 'responsa')
         if responsa_container is not None:
             responsa_container.set_visibility(is_resp)
         if single_container is not None:
             single_container.set_visibility(not is_resp)
-        if variants_cb is not None:
-            variants_cb.set_visibility(is_resp)
-        if type_hint is not None:
-            type_hint.set_visibility(search_type_state['type'] == 'fuzzy')
+        if on_type_change is not None:
+            on_type_change(search_type_state['type'])
 
     def _set_search_type(t: str) -> None:
         search_type_state['type'] = t
@@ -803,9 +801,6 @@ def create_joins_builder(
             # builder is fixed to Responsa-style (show_search_type=False).
             if show_search_type:
                 with ui.row().classes('items-center gap-1'):
-                    ui.label(tr('Search type')).classes('text-xs font-bold uppercase').style(
-                        'color: var(--text-secondary); letter-spacing: 0.05em; margin-right: 4px;'
-                    )
                     for tv in _SEARCH_TYPES:
                         is_active = (tv == search_type_state['type'])
                         btn_props = 'color=primary' if is_active else 'flat'
@@ -831,11 +826,8 @@ def create_joins_builder(
                                 '1–2 letter changes; Regex = a regular expression).'
                             )).classes('text-xs')
 
-            # Variants toggle (Responsa-style only — hidden in single-line modes)
-            variants_cb = ui.checkbox(tr('Variants'), value=variants_state['on'])
-            variants_cb.on_value_change(
-                lambda: variants_state.update(on=bool(variants_cb.value))
-            )
+            # (Variants moved to the page's options area — set via set_variants;
+            #  shown only in Responsa-style mode.)
 
             # Text Position — applies to ALL types (full join workflow is kept in
             # single-line modes too, D-Q1).
@@ -857,11 +849,6 @@ def create_joins_builder(
                             value=_coerce_text_position(text_pos_select.value)
                         )
                     )
-
-            # Fuzzy slowness hint (single-line Fuzzy only)
-            type_hint = ui.label(
-                tr('Fuzzy search is slower and uses more server resources.')
-            ).classes('text-xs').style('color: var(--text-muted);')
 
         # Responsa-style structured builder (lines area, re-rendered on add/remove)
         responsa_container = ui.column().classes('w-full gap-0')
@@ -908,8 +895,6 @@ def create_joins_builder(
         _sym_rows.clear()
         if lines_container['el'] is not None:
             _render_all(lines_container['el'])
-        if variants_cb is not None:
-            variants_cb.value = False
         if single_input is not None:
             single_input.value = ''
         if allow_page_position and text_pos_select is not None:
@@ -924,6 +909,10 @@ def create_joins_builder(
                 btn.props('flat')
         _apply_type_visibility()
 
+    def _set_variants(on: bool) -> None:
+        """Set the Responsa-style Variants flag (the page owns the checkbox now)."""
+        variants_state['on'] = bool(on)
+
     # ---- return handle dict ---------------------------------------------
 
     return {
@@ -936,4 +925,5 @@ def create_joins_builder(
         'get_summary': _get_summary,
         'is_empty': _is_empty,
         'reset': _reset,
+        'set_variants': _set_variants,
     }

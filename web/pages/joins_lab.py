@@ -460,11 +460,25 @@ def create_joins_lab_page(
             tr('Change anchor'), icon='swap_horiz'
         ).props('flat dense').classes('self-start')
 
+        # Responsa-only options row (Variants / Flexible spacing / Bidirectional)
+        # lives in the options area below; it is hidden outside Responsa-style mode.
+        # The builder notifies us of type changes via on_type_change.
+        _responsa_opts_ref: dict = {'el': None}
+
+        def _on_search_type_change(t: str) -> None:
+            el = _responsa_opts_ref['el']
+            if el is not None:
+                el.set_visibility(t == 'responsa')
+
         # Anchor builder (BLD-03) — replaces Phase-117 textarea (:333-340).
         # create_joins_builder() builds its container with `with ui.column() as
         # container:`, so calling it inside this `with builder_area:` block mounts
         # the container here automatically — no manual reparenting needed.
-        anchor_builder = create_joins_builder(allow_page_position=True, on_submit=_trigger_search)
+        anchor_builder = create_joins_builder(
+            allow_page_position=True,
+            on_submit=_trigger_search,
+            on_type_change=_on_search_type_change,
+        )
 
         # Summary bar (D-14) — shown when builder is collapsed after a search
         # Tracks visibility state in a mutable dict so the close-over callbacks
@@ -513,26 +527,44 @@ def create_joins_lab_page(
             ' border-radius: 8px; padding: 8px;'
         )
         with advanced_options_container:
-            # One compact row: section header + global toggles + other-side toggle.
-            # Checkboxes are self-labelled, so no separate sub-headers are needed
-            # (keeps everything on one line on wide screens; wraps on narrow).
+            # One compact row: Responsa-only options + the always-visible other-side
+            # toggle. Checkboxes are self-labelled (no sub-headers needed).
             with ui.row().classes('items-center gap-4 flex-wrap'):
-                flex_cb = ui.checkbox(
-                    tr('Flexible spacing'),
-                    value=_global_opts['flex_spacing'],
-                )
-                flex_cb.on(
-                    'update:model-value',
-                    lambda e: _global_opts.update({'flex_spacing': bool(e.args)}),
-                )
-                bidir_cb = ui.checkbox(
-                    tr('Bidirectional'),
-                    value=_global_opts['bidirectional'],
-                )
-                bidir_cb.on(
-                    'update:model-value',
-                    lambda e: _global_opts.update({'bidirectional': bool(e.args)}),
-                )
+                # Responsa-style-only options (Variants / Flexible spacing /
+                # Bidirectional). Hidden in the single-line modes via
+                # _on_search_type_change (those modes search like the main bar and
+                # have no responsa_options). Variants drives BOTH builders.
+                responsa_opts_row = ui.row().classes('items-center gap-4 flex-wrap')
+                _responsa_opts_ref['el'] = responsa_opts_row
+                with responsa_opts_row:
+                    variants_cb = ui.checkbox(tr('Variants'), value=False)
+
+                    def _on_variants_change() -> None:
+                        on = bool(variants_cb.value)
+                        anchor_builder['set_variants'](on)
+                        _ob = _other_side.get('builder')
+                        if _ob is not None and 'set_variants' in _ob:
+                            _ob['set_variants'](on)
+
+                    variants_cb.on_value_change(_on_variants_change)
+
+                    flex_cb = ui.checkbox(
+                        tr('Flexible spacing'),
+                        value=_global_opts['flex_spacing'],
+                    )
+                    flex_cb.on(
+                        'update:model-value',
+                        lambda e: _global_opts.update({'flex_spacing': bool(e.args)}),
+                    )
+                    bidir_cb = ui.checkbox(
+                        tr('Bidirectional'),
+                        value=_global_opts['bidirectional'],
+                    )
+                    bidir_cb.on(
+                        'update:model-value',
+                        lambda e: _global_opts.update({'bidirectional': bool(e.args)}),
+                    )
+
                 other_side_cb = ui.checkbox(
                     tr('Search the other side of the leaf'),
                     value=False,
@@ -891,13 +923,17 @@ def create_joins_lab_page(
         if _ob is not None:
             _ob['reset']()
 
-        # Global toggles (flex_cb/bidir_cb use raw .on() — update state manually)
+        # Responsa options (Variants / flex / bidi). variants_cb.on_value_change
+        # fires on programmatic set → resets both builders' variants; flex/bidir use
+        # raw .on() so update their state manually.
+        variants_cb.value = False
         _global_opts['flex_spacing'] = False
         _global_opts['bidirectional'] = False
         flex_cb.value = False
         bidir_cb.value = False
 
-        # Results + builder visibility
+        # Results + builder visibility (anchor_builder.reset() restored type to
+        # Responsa-style, so the responsa-only options row is shown again).
         candidates_container.clear()
         summary_bar_container.set_visibility(False)
         anchor_builder['container'].set_visibility(True)

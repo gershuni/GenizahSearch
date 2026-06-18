@@ -123,19 +123,37 @@ def test_fuzzy_type_is_simple_not_responsa():
     assert q == {'kind': 'simple', 'mode': 'fuzzy', 'query': 'עקיבא'}
 
 
-def test_variants_checkbox_sets_side_variants():
-    from nicegui import ui
+def test_set_variants_sets_side_variants():
+    # Variants moved to the page's options area; the builder exposes set_variants().
     handle, root = _build()
-    # type a structured word so build_side_query yields a non-empty SideQuery
     wi = _word_inputs(root)
     assert _fire_model_change(wi[0], 'אמר')
-    # find + check the Variants checkbox
-    cbs = [el for el in _walk(root) if isinstance(el, ui.checkbox) and el.text == tr('Variants')]
-    assert cbs, 'Variants checkbox expected'
-    cbs[0].set_value(True)
+    handle['set_variants'](True)
     q = handle['build_query']()
     assert q['kind'] == 'responsa'
     assert q['side'] is not None and q['side'].variants is True
+    handle['set_variants'](False)
+    assert handle['build_query']()['side'].variants is False
+
+
+def test_builder_has_no_inline_variants_checkbox():
+    from nicegui import ui
+    handle, root = _build()
+    cbs = [el for el in _walk(root) if isinstance(el, ui.checkbox) and el.text == tr('Variants')]
+    assert not cbs, 'Variants checkbox must live in the page options, not the builder'
+
+
+def test_on_type_change_callback_fires():
+    from nicegui import ui
+    seen = []
+    col = ui.column()
+    with col:
+        h = create_joins_builder(allow_page_position=True, on_type_change=seen.append)
+    # construction reports the initial type
+    assert seen and seen[-1] == 'responsa'
+    btns = [el for el in _walk(col) if isinstance(el, ui.button) and el.text == tr('Fuzzy')]
+    assert _fire_click(btns[0])
+    assert seen[-1] == 'fuzzy'
 
 
 def test_single_input_distinct_class_from_word_boxes():
