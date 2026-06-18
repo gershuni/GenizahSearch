@@ -183,12 +183,18 @@ def _render_member_row(
                 on_open_browse(sm)
             return _do
 
-        ui.button(
-            icon='push_pin',
-            on_click=_make_reanchor(),
-        ).props('flat dense').classes('text-gray-500').tooltip(
-            tr('Re-anchor to this fragment')
-        )
+        # CR-02: only render the re-anchor pin when a sys_id was resolved.
+        # Community members whose shelfmark could not be mapped to a sys_id
+        # have member_sys_id='' — re-anchoring to an empty sys_id would corrupt
+        # the stored anchor. Such members are still reachable via the
+        # open-in-browse icon below.
+        if member_sys_id:
+            ui.button(
+                icon='push_pin',
+                on_click=_make_reanchor(),
+            ).props('flat dense').classes('text-gray-500').tooltip(
+                tr('Re-anchor to this fragment')
+            )
         ui.button(
             icon='open_in_new',
             on_click=_make_browse(),

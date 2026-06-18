@@ -29,6 +29,44 @@ import os
 _CACHE_TTL = int(os.environ.get('JOINS_CACHE_TTL', '30'))
 
 
+def _resolve_shelfmark_to_sys_id(member_shelfmark: str) -> Optional[str]:
+    """Resolve a shelfmark string to a sys_id via the in-memory csv_bank.
+
+    CR-02/IN-01: this replaces a dead no-op resolution block that called
+    ``state.meta_mgr.get_meta_for_id(shelfmark)`` (which actually takes a
+    sys_id, not a shelfmark) and discarded the result. That left community
+    members with an empty sys_id, which corrupted the re-anchor pin.
+
+    Uses the same normalization the rest of this module already applies to
+    csv_bank lookups (strip non-word chars, lowercase, drop a leading 'ms').
+    Returns the resolved sys_id, or None when no match is found (the caller
+    falls back to open-in-browse only).
+    """
+    if not member_shelfmark:
+        return None
+    if not state.meta_mgr or not hasattr(state.meta_mgr, 'csv_bank'):
+        return None
+    try:
+        import re
+        target = re.sub(r'[^\w]', '', member_shelfmark).lower()
+        if target.startswith('ms'):
+            target = target[2:]
+        if not target:
+            return None
+        for sys_id, meta in state.meta_mgr.csv_bank.items():
+            shelf = meta.get('shelfmark', '')
+            if not shelf:
+                continue
+            norm = re.sub(r'[^\w]', '', shelf).lower()
+            if norm.startswith('ms'):
+                norm = norm[2:]
+            if norm and norm == target:
+                return sys_id
+    except Exception:
+        return None
+    return None
+
+
 def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pgpid: int = None, force_refresh: bool = False, confirmed_only: bool = False) -> Dict:
     """
     Fetch all fragments connected to the given shelfmark or document_id.
@@ -278,17 +316,14 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                             # Skip the anchor itself
                             if member_shelfmark.upper() == anchor_upper:
                                 continue
-                            # Try to resolve sys_id for this member shelfmark
-                            member_sys_id = None
-                            if state.meta_mgr:
-                                try:
-                                    _resolved, _ = state.meta_mgr.get_meta_for_id(member_shelfmark)
-                                    if _resolved and _resolved != 'Unknown':
-                                        # meta_mgr.get_meta_for_id takes a sys_id, not shelfmark;
-                                        # we can only resolve if this is already a sys_id
-                                        pass
-                                except Exception:
-                                    pass
+                            # CR-02/IN-01: resolve the member shelfmark → sys_id
+                            # via the in-memory csv_bank (NO Supabase round-trip).
+                            # The previous block called get_meta_for_id(shelfmark)
+                            # — which takes a sys_id, not a shelfmark — and discarded
+                            # the result (`pass`), so member_sys_id was always None.
+                            # That empty sys_id then flowed through the known-joins
+                            # re-anchor pin and corrupted the stored anchor.
+                            member_sys_id = _resolve_shelfmark_to_sys_id(member_shelfmark)
                             if member_shelfmark.upper() in fragments_upper:
                                 # Merge 'community' into existing formatted join
                                 for existing_join in formatted_joins:

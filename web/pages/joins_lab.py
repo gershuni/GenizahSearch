@@ -581,6 +581,14 @@ def create_joins_lab_page(
         ANC-04: after building the AnchorViewer, fetches and renders the
         confirmed-only known-joins group (via _load_known_joins).
         """
+        # CR-02: defensive guard — never re-anchor to an empty sys_id. A
+        # community known-join member that could not be resolved to a sys_id
+        # would otherwise set _anchor_state['sys_id']='', build an
+        # AnchorViewer(sys_id=''), and persist write_anchor('') — corrupting the
+        # stored anchor. The known-joins pin is also hidden in that case
+        # (known_joins_group._render_member_row), so this is belt-and-braces.
+        if not sys_id:
+            return
         _anchor_state['sys_id'] = sys_id
         _anchor_state['fl_id'] = fl_id
         _anchor_state['volume_ie'] = volume_ie
