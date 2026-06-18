@@ -2,23 +2,30 @@
 """Joins Lab line-builder widget (web, Phase 118 BLD-03).
 
 Provides:
-  _apply_modifiers_to_term(term, mods) → str
-      Pure helper: applies per-row modifier flags to a user-typed term before
+  _apply_modifiers_to_term(term, mods) -> str
+      Pure helper: applies per-word modifier flags to a user-typed term before
       constructing a BuilderRow. Desktop parity (RR-13): wildcard_prefix is NOT
       applied to slash-groups (multi-token terms containing '/').
 
-  build_side_query(rows_state, variants, page_position) → Optional[SideQuery]
-      Converts a list of row-state dicts into a SideQuery.
-      Returns None when all rows are empty (empty-builder guard).
+  build_side_query(lines_state, variants, page_position) -> Optional[SideQuery]
+      Converts a lines-with-words state list into a SideQuery.
+      Each entry in lines_state:
+        {
+          'words': [{'term': str, 'mods': dict, 'gap_to_next_word': int}, ...],
+          'line_start': bool,
+          'line_end': bool,
+          'gap_to_next_line': int,
+        }
+      Returns None when no word in any line has a non-empty term.
 
-  create_joins_builder(allow_page_position=True) → dict
+  create_joins_builder(allow_page_position=True) -> dict
       NiceGUI factory producing a widget handle dict with:
-        build_side_query()    → Optional[SideQuery]
-        get_mode()            → str ('exact'|'variants'|'fuzzy')
-        get_text_position()   → str (one of 5 option values)
-        get_summary()         → str (human-readable for collapsed summary bar)
-        is_empty()            → bool
-        container             (NiceGUI element — mount point for the page)
+        build_side_query()    -> Optional[SideQuery]
+        get_mode()            -> str ('exact'|'variants'|'fuzzy')
+        get_text_position()   -> str (one of 5 option values)
+        get_summary()         -> str (human-readable for collapsed summary bar)
+        is_empty()            -> bool
+        container             (NiceGUI element - mount point for the page)
 
 No raw app.storage.user access. All per-user state is closure-local (Phase 87 invariant).
 """
@@ -37,7 +44,7 @@ from web.translations import tr
 # ---------------------------------------------------------------------------
 
 def _apply_modifiers_to_term(term: str, mods: dict) -> str:
-    """Apply per-row modifier flags to a user-typed term.
+    """Apply per-word modifier flags to a user-typed term.
 
     Desktop parity: desktop/join_workbench.py:1272-1347 (RR-13 rules).
 
@@ -46,15 +53,15 @@ def _apply_modifiers_to_term(term: str, mods: dict) -> str:
       - '/' inside a term makes it a slash-group (wrapped in parens)
 
     Modifier application order (mirrors genizah_core.py:6014-6027):
-      negation → returns '-{wrapped}' immediately (overrides all other mods)
+      negation -> returns '-{wrapped}' immediately (overrides all other mods)
       else:
-        plene         → '%' prefix
-        prefix        → '#' prefix
-        suffix        → '#' suffix (appended)
-        wildcard_prefix → '*' prefix  (ONLY when NOT a slash-group — RR-13)
-        wildcard_suffix → '*' suffix (appended)
+        plene         -> '%' prefix
+        prefix        -> '#' prefix
+        suffix        -> '#' suffix (appended)
+        wildcard_prefix -> '*' prefix  (ONLY when NOT a slash-group - RR-13)
+        wildcard_suffix -> '*' suffix (appended)
 
-    line_start / line_end are NOT text transforms — they become BuilderRow flags
+    line_start / line_end are NOT text transforms - they become BuilderRow flags
     and are handled in build_side_query().
     """
     t = term.strip()
@@ -75,7 +82,7 @@ def _apply_modifiers_to_term(term: str, mods: dict) -> str:
         wrapped = f'#{wrapped}'
     if mods.get('suffix'):
         wrapped = f'{wrapped}#'
-    # wildcard_prefix NOT supported on slash-groups (RR-13 parity — parser limitation)
+    # wildcard_prefix NOT supported on slash-groups (RR-13 parity - parser limitation)
     if mods.get('wildcard_prefix') and not is_group:
         wrapped = f'*{wrapped}'
     if mods.get('wildcard_suffix'):
@@ -85,32 +92,90 @@ def _apply_modifiers_to_term(term: str, mods: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Row-state → SideQuery converter
+# Word/line model helpers
+# ---------------------------------------------------------------------------
+
+def _default_word() -> dict:
+    """Return a new default word-state dict."""
+    return {'term': '', 'mods': {}, 'gap_to_next_word': 0}
+
+
+def _default_line() -> dict:
+    """Return a new default line-state dict (one empty word)."""
+    return {
+        'words': [_default_word()],
+        'line_start': False,
+        'line_end': False,
+        'gap_to_next_line': 0,
+    }
+
+
+def _normalize_word_mods(mods: dict) -> dict:
+    """Return a mods dict with all expected keys present (defaulting to False)."""
+    keys = ('prefix', 'suffix', 'plene', 'wildcard_prefix', 'wildcard_suffix', 'negation')
+    return {k: bool(mods.get(k, False)) for k in keys}
+
+
+# ---------------------------------------------------------------------------
+# Lines-with-words -> SideQuery converter (word-level model, Phase 118-06)
 # ---------------------------------------------------------------------------
 
 def build_side_query(
-    rows_state: list,
+    lines_state: list,
     variants: bool,
     page_position: Optional[str],
 ) -> Optional[SideQuery]:
-    """Build a SideQuery from a list of row-state dicts.
+    """Build a SideQuery from a list of line-state dicts.
 
-    Each entry in rows_state: {'term': str, 'mods': dict, 'gap_to_next': int}
+    Each entry in lines_state:
+      {
+        'words': [
+          {'term': str, 'mods': dict, 'gap_to_next_word': int},
+          ...
+        ],
+        'line_start': bool,
+        'line_end': bool,
+        'gap_to_next_line': int,
+      }
 
-    page_position must be None, 'start', or 'end' — the caller is responsible
-    for NOT passing 'line_start' or 'line_end' here; those bypass SideQuery
-    and go directly to execute_search(text_position=...) in Plan 04.
+    For each line: hoist each word via _apply_modifiers_to_term, join them with
+    [N] word-gap tokens (gap > 0) or plain space (gap == 0), then build ONE
+    BuilderRow(term=line_term, line_start=..., line_end=..., gap_to_next=...).
 
-    Returns None when all rows have empty terms (empty-builder guard).
+    Returns None when no word in any line has a non-empty stripped term.
     """
     builder_rows = []
-    for rs in rows_state:
-        hoisted = _apply_modifiers_to_term(rs.get('term', ''), rs.get('mods', {}))
+    for line in lines_state:
+        words = line.get('words', [])
+        hoisted_parts = []
+        for w in words:
+            h = _apply_modifiers_to_term(w.get('term', ''), w.get('mods', {}))
+            hoisted_parts.append((h, int(w.get('gap_to_next_word', 0) or 0)))
+
+        # Build the line term: join words with [N] gap tokens or spaces
+        # Each element is (hoisted_term, gap_to_next) where gap applies AFTER this word
+        line_tokens = []
+        for i, (h, gap) in enumerate(hoisted_parts):
+            if h:  # skip empty words
+                line_tokens.append(h)
+                # If not last word and there is a gap, emit [N] gap marker
+                if i < len(hoisted_parts) - 1:
+                    next_gap = gap
+                    if next_gap > 0:
+                        line_tokens.append(f'[{next_gap}]')
+
+        if not line_tokens:
+            # Entire line is empty - still create a BuilderRow with empty term
+            # (empty-builder guard below will catch it)
+            line_term = ''
+        else:
+            line_term = ' '.join(line_tokens)
+
         builder_rows.append(BuilderRow(
-            term=hoisted,
-            line_start=rs.get('mods', {}).get('line_start', False),
-            line_end=rs.get('mods', {}).get('line_end', False),
-            gap_to_next=int(rs.get('gap_to_next', 0) or 0),
+            term=line_term,
+            line_start=bool(line.get('line_start', False)),
+            line_end=bool(line.get('line_end', False)),
+            gap_to_next=int(line.get('gap_to_next_line', 0) or 0),
         ))
 
     # Empty-builder guard: if no row has a non-empty stripped term, return None
@@ -166,35 +231,52 @@ def _coerce_text_position(v) -> str:
     return v if v in _TEXT_POSITION_KEYS else 'anywhere'
 
 
-_MODIFIER_KEYS = [
-    ('line_start',       lambda: tr('Line start (⊢)')),
-    ('line_end',         lambda: tr('Line end (⊣)')),
-    ('plene',            lambda: tr('Plene / defective')),
-    ('prefix',           lambda: tr('Prefix')),
-    ('suffix',           lambda: tr('Suffix')),
-    ('wildcard_prefix',  lambda: tr('Wildcard prefix')),
-    ('wildcard_suffix',  lambda: tr('Wildcard suffix')),
-    ('negation',         lambda: tr('Negation')),
+# Per-WORD modifier symbol table (BLD-03 symbol indicators)
+# Each entry: (mod_key, symbol, tr_label_key, tr_tooltip_key)
+_WORD_MOD_TABLE = [
+    ('prefix',          '#_',  lambda: tr('Prefix'),           lambda: tr('May carry a prefix')),
+    ('suffix',          '_#',  lambda: tr('Suffix'),           lambda: tr('May carry a suffix')),
+    ('plene',           '%',   lambda: tr('Plene / defective'), lambda: tr('Plene / defective spelling variants')),
+    ('wildcard_prefix', '*_',  lambda: tr('Wildcard before'),  lambda: tr('Wildcard before')),
+    ('wildcard_suffix', '_*',  lambda: tr('Wildcard after'),   lambda: tr('Wildcard after')),
+    ('negation',        '−',   lambda: tr('Negation'),         lambda: tr('Must NOT appear')),
+]
+
+# Line-level modifiers (anchor toggles shown per-line)
+# (mod_key, symbol, tr_label_key, tr_tooltip_key)
+_LINE_MOD_TABLE = [
+    ('line_start', '⊢', lambda: tr('Line start (⊢)'), lambda: tr('Line starts here')),
+    ('line_end',   '⊣', lambda: tr('Line end (⊣)'),   lambda: tr('Line ends here')),
 ]
 
 
 def create_joins_builder(allow_page_position: bool = True) -> dict:
-    """Factory: creates and mounts the Joins Lab line-builder widget.
+    """Factory: creates and mounts the Joins Lab word-box line-builder widget.
 
     Returns a handle dict with:
-      container          — the top-level NiceGUI element (mount point)
-      build_side_query() — builds a SideQuery from current state
-      get_mode()         — 'exact' | 'variants' | 'fuzzy'
-      get_text_position() — one of 'anywhere'|'start'|'end'|'line_start'|'line_end'
-      get_summary()      — human-readable summary string for the collapsed bar
-      is_empty()         — True when all builder rows are blank
+      container           - the top-level NiceGUI element (mount point)
+      build_side_query()  - builds a SideQuery from current state
+      get_mode()          - 'exact' | 'variants' | 'fuzzy'
+      get_text_position() - one of 'anywhere'|'start'|'end'|'line_start'|'line_end'
+      get_summary()       - human-readable summary string for the collapsed bar
+      is_empty()          - True when all builder rows are blank
 
     When allow_page_position=False (other side, D-13 parity):
       - Text Position control is hidden
       - build_side_query() always passes page_position=None
+
+    Word model (Phase 118-06 BLD-03):
+      lines_state is a list of LINE dicts; each line has:
+        - 'words': list of word dicts {'term': str, 'mods': dict, 'gap_to_next_word': int}
+        - 'line_start': bool (line anchor - line start ⊢)
+        - 'line_end': bool (line anchor - line end ⊣)
+        - 'gap_to_next_line': int
+      Each word box carries its OWN modifiers (prefix/suffix/plene/wildcard/negation)
+      rendered as responsa symbols beneath the box with hover tooltips.
+      Line-level anchors (⊢/⊣) are PER LINE, not per word.
     """
-    # Mutable in-memory state (closure-local, not app.storage.user — Phase 87 invariant)
-    rows_state: list = [{'term': '', 'mods': {}, 'gap_to_next': 0}]
+    # Mutable in-memory state (closure-local, not app.storage.user - Phase 87 invariant)
+    lines_state: list = [_default_line()]
     mode_state: dict = {'mode': 'exact'}
     text_position_state: dict = {'value': 'anywhere'}
 
@@ -204,25 +286,28 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
         return mode_state['mode']
 
     def _get_text_position() -> str:
-        # Always return a known KEY string — see _coerce_text_position (guards the
+        # Always return a known KEY string - see _coerce_text_position (guards the
         # "unhashable type: 'dict'" crash if a Quasar option object slips in).
         return _coerce_text_position(text_position_state['value'])
 
     def _is_empty() -> bool:
-        return not any(rs.get('term', '').strip() for rs in rows_state)
+        for line in lines_state:
+            for w in line.get('words', []):
+                if w.get('term', '').strip():
+                    return False
+        return True
 
     def _get_summary() -> str:
-        # WR-04: every literal here must go through tr() — the collapsed summary
+        # WR-04: every literal here must go through tr() - the collapsed summary
         # bar is shown after EVERY search (joins_lab._collapse_builder), and the
-        # default UI is Hebrew. Mode/Text-Position labels reuse the same English
-        # keys translated elsewhere; pluralization uses singular/plural tr() keys.
+        # default UI is Hebrew.
         _mode_label_keys = {'exact': 'Exact', 'variants': 'Variants', 'fuzzy': 'Fuzzy'}
         mode_raw = _get_mode()
         mode = tr(_mode_label_keys.get(mode_raw, mode_raw.capitalize()))
-        n = len(rows_state)
+        n_lines = len(lines_state)
         lines_label = (
-            tr('{n} line').format(n=n) if n == 1
-            else tr('{n} lines').format(n=n)
+            tr('{n} line').format(n=n_lines) if n_lines == 1
+            else tr('{n} lines').format(n=n_lines)
         )
         if allow_page_position:
             tp = _get_text_position()
@@ -234,9 +319,9 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
         """Build SideQuery from current widget state.
 
         Text position routing:
-          'start'/'end'       → page_position in SideQuery
-          'anywhere'          → page_position=None
-          'line_start'/'line_end' → page_position=None here; Plan 04 passes
+          'start'/'end'       -> page_position in SideQuery
+          'anywhere'          -> page_position=None
+          'line_start'/'line_end' -> page_position=None here; Plan 04 passes
                                     these directly to execute_search(text_position=...)
         """
         if not allow_page_position:
@@ -249,38 +334,139 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
                 page_pos = None  # 'anywhere' / 'line_start' / 'line_end' handled by Plan 04
 
         variants = (_get_mode() == 'variants')
-        return build_side_query(rows_state, variants, page_pos)
+        return build_side_query(lines_state, variants, page_pos)
 
-    # ---- row rendering --------------------------------------------------
+    # ---- row / word rendering -------------------------------------------
 
-    # Container for the rows section (re-rendered on add/remove)
-    rows_container: dict = {'el': None}
+    # Container for the lines section (re-rendered on structural add/remove)
+    lines_container: dict = {'el': None}
 
-    def _render_rows(parent_el) -> None:
-        """Render all builder rows inside parent_el, clearing it first."""
+    def _render_all(parent_el) -> None:
+        """Render all lines inside parent_el, clearing it first.
+
+        Only called on STRUCTURAL changes (add/remove word or line).
+        Do NOT call this on every keystroke (Guardrail 3 - WR-05).
+        """
         parent_el.clear()
         with parent_el:
-            for i in range(len(rows_state)):
-                _render_row(i)
-                if i < len(rows_state) - 1:
-                    _render_gap_control(i)
-            # Add line button
+            for li in range(len(lines_state)):
+                _render_line(li)
+            # Add-line button (global)
             ui.button(tr('+ Add line'), icon='add').props('flat small').classes(
                 'text-xs mt-2'
             ).style('color: var(--text-secondary);').on(
-                'click', lambda: _add_row()
+                'click', lambda: _add_line()
             )
 
-    def _render_row(idx: int) -> None:
-        """Render one builder row at index idx."""
-        rs = rows_state[idx]
-        with ui.row().classes('w-full items-center gap-2'):
-            # Row number label (right-aligned, 12px, muted)
-            ui.label(str(idx + 1)).classes('text-xs w-5 text-right shrink-0').style(
-                'color: var(--text-muted);'
-            )
+    def _render_line(li: int) -> None:
+        """Render one line and its words."""
+        line = lines_state[li]
+        words = line['words']
 
-            # Main text input (RTL, Hebrew serif, outlined)
+        with ui.column().classes('w-full gap-1 border-b pb-2 mb-1').style(
+            'border-color: var(--neutral-200);'
+        ):
+            # Line header: line number + ⊢/⊣ toggles + gap-to-next + remove-line
+            with ui.row().classes('items-center gap-2 w-full'):
+                ui.label(str(li + 1)).classes('text-xs w-5 text-right shrink-0').style(
+                    'color: var(--text-muted);'
+                )
+                # Line-start ⊢ toggle
+                ls_active = line.get('line_start', False)
+                ls_style = (
+                    'color: var(--primary-600); font-weight:bold;' if ls_active
+                    else 'color: var(--text-muted);'
+                )
+                ls_btn = ui.button('⊢').props('flat dense size=sm').style(ls_style)
+                ls_btn.tooltip(tr('Line starts here'))
+
+                def _toggle_line_start(i=li, btn=ls_btn):
+                    lines_state[i]['line_start'] = not lines_state[i].get('line_start', False)
+                    active = lines_state[i]['line_start']
+                    btn.style(
+                        'color: var(--primary-600); font-weight:bold;' if active
+                        else 'color: var(--text-muted);'
+                    )
+
+                ls_btn.on('click', lambda i=li: _toggle_line_start(i))
+
+                # Line-end ⊣ toggle
+                le_active = line.get('line_end', False)
+                le_style = (
+                    'color: var(--primary-600); font-weight:bold;' if le_active
+                    else 'color: var(--text-muted);'
+                )
+                le_btn = ui.button('⊣').props('flat dense size=sm').style(le_style)
+                le_btn.tooltip(tr('Line ends here'))
+
+                def _toggle_line_end(i=li, btn=le_btn):
+                    lines_state[i]['line_end'] = not lines_state[i].get('line_end', False)
+                    active = lines_state[i]['line_end']
+                    btn.style(
+                        'color: var(--primary-600); font-weight:bold;' if active
+                        else 'color: var(--text-muted);'
+                    )
+
+                le_btn.on('click', lambda i=li: _toggle_line_end(i))
+
+                # Gap to next line (only show if not last line)
+                if li < len(lines_state) - 1:
+                    gap_val = line.get('gap_to_next_line', 0)
+                    border_color = 'var(--border-focus)' if gap_val > 0 else 'var(--neutral-300)'
+                    with ui.row().classes('items-center gap-1'):
+                        ui.label(tr('↕ gap')).classes('text-xs').style(
+                            'color: var(--text-tertiary);'
+                        )
+                        gap_input = ui.number(
+                            value=gap_val,
+                            min=0, max=20, step=1,
+                        ).props('outlined dense').style(
+                            f'width: 56px; border-color: {border_color};'
+                        )
+
+                        def _on_line_gap_change(v, i=li, el=gap_input):
+                            try:
+                                gap = int(v or 0)
+                            except (TypeError, ValueError):
+                                gap = 0
+                            lines_state[i]['gap_to_next_line'] = gap
+                            color = 'var(--border-focus)' if gap > 0 else 'var(--neutral-300)'
+                            el.style(f'width: 56px; border-color: {color};')
+
+                        gap_input.on(
+                            'update:model-value',
+                            lambda e, i=li: _on_line_gap_change(e.args, i),
+                        )
+
+                # Remove line button
+                remove_line_btn = ui.button(icon='remove').props('flat dense size=sm color=negative')
+                remove_line_btn.tooltip(tr('Remove line'))
+                if len(lines_state) <= 1:
+                    remove_line_btn.set_visibility(False)
+                else:
+                    remove_line_btn.on('click', lambda i=li: _remove_line(i))
+
+            # Words row: each word = text input + modifier menu + symbol indicators
+            # Between words: gap-to-next-word box
+            with ui.row().classes('items-start gap-2 flex-wrap'):
+                for wi in range(len(words)):
+                    _render_word_unit(li, wi)
+                    if wi < len(words) - 1:
+                        _render_word_gap(li, wi)
+
+                # Add-word button
+                ui.button(tr('+ Add word'), icon='add').props('flat dense size=sm').classes(
+                    'text-xs self-center'
+                ).style('color: var(--text-secondary);').on(
+                    'click', lambda i=li: _add_word(i)
+                )
+
+    def _render_word_unit(li: int, wi: int) -> None:
+        """Render one word box (text input + modifier menu + symbol indicators)."""
+        word = lines_state[li]['words'][wi]
+
+        with ui.column().classes('items-center gap-0').style('min-width: 80px; max-width: 180px;'):
+            # Word text input (RTL)
             placeholder = (
                 tr('Words on this line (space = sequence, a/b = alternatives)')
                 if allow_page_position
@@ -288,87 +474,159 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
             )
             term_input = ui.input(placeholder=placeholder).props(
                 'outlined dense'
-            ).classes('flex-grow').style(
+            ).classes('w-full').style(
                 'direction: rtl; text-align: right;'
                 ' font-family: "Noto Sans Hebrew", "SBL Hebrew", serif; font-size: 1rem;'
             )
-            term_input.value = rs.get('term', '')
+            term_input.value = word.get('term', '')
 
-            def _on_term_change(v, i=idx):
-                rows_state[i]['term'] = v
+            def _on_term_change(v, i=li, j=wi):
+                # WR-05: update ONLY state; do NOT re-render (Guardrail 3)
+                lines_state[i]['words'][j]['term'] = v
 
-            term_input.on('update:model-value', lambda e, i=idx: _on_term_change(e.args, i))
+            term_input.on('update:model-value', lambda e, i=li, j=wi: _on_term_change(e.args, i, j))
 
-            # Tune icon button → per-row modifier popover
-            has_active_mod = any(rs.get('mods', {}).get(k, False) for k, _ in _MODIFIER_KEYS)
-            tune_style = (
-                'color: var(--primary-600);' if has_active_mod else 'color: var(--text-secondary);'
-            )
-            with ui.button(icon='tune').props('flat dense size=sm').style(
-                tune_style
-            ).tooltip(tr('Line options')) as _tune_btn:
-                with ui.menu():
-                    for mod_key, mod_label_fn in _MODIFIER_KEYS:
-                        cb = ui.checkbox(
-                            mod_label_fn(),
-                            value=rs.get('mods', {}).get(mod_key, False),
-                        )
+            # Modifier row: tune icon + optional remove-word
+            with ui.row().classes('items-center gap-1 justify-center'):
+                # Tune button -> per-word modifier menu
+                mods = word.get('mods', {})
+                has_active = any(mods.get(k, False) for k, _, _, _ in _WORD_MOD_TABLE)
+                tune_style = (
+                    'color: var(--primary-600);' if has_active else 'color: var(--text-muted);'
+                )
+                with ui.button(icon='tune').props('flat dense size=xs').style(
+                    tune_style
+                ).tooltip(tr('Word options')) as _tune_btn:
+                    with ui.menu():
+                        for mod_key, symbol, mod_label_fn, _ in _WORD_MOD_TABLE:
+                            cb = ui.checkbox(
+                                f'{symbol} {mod_label_fn()}',
+                                value=bool(mods.get(mod_key, False)),
+                            )
 
-                        def _on_mod_change(v, i=idx, k=mod_key):
-                            if 'mods' not in rows_state[i]:
-                                rows_state[i]['mods'] = {}
-                            rows_state[i]['mods'][k] = bool(v)
+                            def _on_mod_change(v, i=li, j=wi, k=mod_key, tbtn=_tune_btn):
+                                if 'mods' not in lines_state[i]['words'][j]:
+                                    lines_state[i]['words'][j]['mods'] = {}
+                                lines_state[i]['words'][j]['mods'][k] = bool(v)
+                                # Update tune button color in place (Guardrail 3)
+                                active = any(
+                                    lines_state[i]['words'][j]['mods'].get(mk, False)
+                                    for mk, _, _, _ in _WORD_MOD_TABLE
+                                )
+                                tbtn.style(
+                                    'color: var(--primary-600);' if active
+                                    else 'color: var(--text-muted);'
+                                )
+                                # Refresh symbol row in place
+                                _refresh_symbol_row(i, j)
 
-                        cb.on('update:model-value', lambda e, i=idx, k=mod_key: _on_mod_change(e.args, i, k))
+                            cb.on('update:model-value', lambda e, i=li, j=wi, k=mod_key: _on_mod_change(e.args, i, j, k))
 
-            # Remove button — hidden when only one row remains
-            remove_btn = ui.button(icon='close').props('flat dense size=sm color=negative')
-            if len(rows_state) <= 1:
-                remove_btn.set_visibility(False)
-            else:
-                remove_btn.on('click', lambda i=idx: _remove_row(i))
+                # Remove word button (hidden when only one word in the line)
+                remove_btn = ui.button(icon='close').props('flat dense size=xs color=negative')
+                remove_btn.tooltip(tr('Remove word'))
+                if len(lines_state[li]['words']) <= 1:
+                    remove_btn.set_visibility(False)
+                else:
+                    remove_btn.on('click', lambda i=li, j=wi: _remove_word(i, j))
 
-    def _render_gap_control(idx: int) -> None:
-        """Render the gap control between row idx and idx+1."""
-        rs = rows_state[idx]
-        gap_val = rs.get('gap_to_next', 0)
+            # Symbol indicators beneath the word box (active modifiers as symbols)
+            # Stored reference so we can refresh in place (Guardrail 3)
+            sym_row_key = f'sym_{li}_{wi}'
+            _sym_rows[sym_row_key] = _build_symbol_row(li, wi)
+
+    def _build_symbol_row(li: int, wi: int):
+        """Build (and return) the symbol indicator row for word (li, wi)."""
+        word = lines_state[li]['words'][wi]
+        mods = word.get('mods', {})
+        active_syms = [
+            (symbol, tooltip_fn())
+            for mod_key, symbol, _, tooltip_fn in _WORD_MOD_TABLE
+            if mods.get(mod_key, False)
+        ]
+        with ui.row().classes('items-center gap-1 justify-center').style(
+            'min-height: 18px; flex-wrap: nowrap;'
+        ) as sym_row:
+            for symbol, tip in active_syms:
+                ui.label(symbol).classes('text-xs').style(
+                    'color: var(--primary-600); font-weight: bold; cursor: default;'
+                ).tooltip(tip)
+        return sym_row
+
+    # Registry for symbol rows so we can refresh them in place
+    _sym_rows: dict = {}
+
+    def _refresh_symbol_row(li: int, wi: int) -> None:
+        """Refresh the symbol indicator row for word (li, wi) in place (Guardrail 3)."""
+        key = f'sym_{li}_{wi}'
+        existing = _sym_rows.get(key)
+        if existing is None:
+            return
+        # Clear and rebuild inside the existing container
+        existing.clear()
+        word = lines_state[li]['words'][wi]
+        mods = word.get('mods', {})
+        active_syms = [
+            (symbol, tooltip_fn())
+            for mod_key, symbol, _, tooltip_fn in _WORD_MOD_TABLE
+            if mods.get(mod_key, False)
+        ]
+        with existing:
+            for symbol, tip in active_syms:
+                ui.label(symbol).classes('text-xs').style(
+                    'color: var(--primary-600); font-weight: bold; cursor: default;'
+                ).tooltip(tip)
+
+    def _render_word_gap(li: int, wi: int) -> None:
+        """Render the gap-to-next-word control between word wi and wi+1 in line li."""
+        word = lines_state[li]['words'][wi]
+        gap_val = int(word.get('gap_to_next_word', 0) or 0)
         border_color = 'var(--border-focus)' if gap_val > 0 else 'var(--neutral-300)'
-        with ui.row().classes('items-center gap-2 py-1'):
-            ui.label(tr('↕ gap')).classes('text-xs').style(
-                'color: var(--text-tertiary);'
+        with ui.column().classes('items-center gap-0 self-center'):
+            ui.label(tr('Gap')).classes('text-xs').style(
+                'color: var(--text-tertiary); font-size: 10px;'
             )
             gap_input = ui.number(
                 value=gap_val,
                 min=0, max=20, step=1,
             ).props('outlined dense').style(
-                f'width: 56px; border-color: {border_color};'
+                f'width: 52px; border-color: {border_color};'
             )
 
-            def _on_gap_change(v, i=idx, el=gap_input):
-                # WR-05: update ONLY this gap input's border color in place.
-                # Previously this re-rendered ALL rows (_render_rows), which
-                # destroyed and recreated every term ui.input mid-edit — causing
-                # focus loss and dropping unsynced keystrokes in sibling inputs.
+            def _on_word_gap_change(v, i=li, j=wi, el=gap_input):
+                # WR-05: update state + gap border only (no full re-render)
                 try:
                     gap = int(v or 0)
                 except (TypeError, ValueError):
                     gap = 0
-                rows_state[i]['gap_to_next'] = gap
+                lines_state[i]['words'][j]['gap_to_next_word'] = gap
                 color = 'var(--border-focus)' if gap > 0 else 'var(--neutral-300)'
-                el.style(f'width: 56px; border-color: {color};')
+                el.style(f'width: 52px; border-color: {color};')
 
-            gap_input.on('update:model-value', lambda e, i=idx: _on_gap_change(e.args, i))
+            gap_input.on(
+                'update:model-value',
+                lambda e, i=li, j=wi: _on_word_gap_change(e.args, i, j),
+            )
 
-    # ---- add / remove row -----------------------------------------------
+    # ---- add / remove word + line ----------------------------------------
 
-    def _add_row():
-        rows_state.append({'term': '', 'mods': {}, 'gap_to_next': 0})
-        _render_rows(rows_container['el'])
+    def _add_word(li: int):
+        lines_state[li]['words'].append(_default_word())
+        _render_all(lines_container['el'])
 
-    def _remove_row(idx: int):
-        if len(rows_state) > 1:
-            rows_state.pop(idx)
-        _render_rows(rows_container['el'])
+    def _remove_word(li: int, wi: int):
+        if len(lines_state[li]['words']) > 1:
+            lines_state[li]['words'].pop(wi)
+        _render_all(lines_container['el'])
+
+    def _add_line():
+        lines_state.append(_default_line())
+        _render_all(lines_container['el'])
+
+    def _remove_line(li: int):
+        if len(lines_state) > 1:
+            lines_state.pop(li)
+        _render_all(lines_container['el'])
 
     # ---- build the widget -----------------------------------------------
 
@@ -387,10 +645,10 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
                     ).props('outlined dense').classes('w-40')
 
                     # Read the element's normalized `.value` (the option KEY), NOT the
-                    # raw `update:model-value` payload (`e.args`) — for a dict-options
+                    # raw `update:model-value` payload (`e.args`) - for a dict-options
                     # select the latter is the Quasar option object {'label','value'},
                     # a dict, which breaks _TEXT_POSITION_LABEL_KEYS.get(tp). Coerce as
-                    # a belt-and-braces guard.
+                    # a belt-and-braces guard (WR-03).
                     text_pos_select.on_value_change(
                         lambda: text_position_state.update(
                             value=_coerce_text_position(text_pos_select.value)
@@ -436,10 +694,10 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
             )
             fuzzy_hint.set_visibility(mode_state['mode'] == 'fuzzy')
 
-        # Rows area (re-rendered as rows are added/removed)
-        rows_area = ui.column().classes('w-full gap-0')
-        rows_container['el'] = rows_area
-        _render_rows(rows_area)
+        # Lines area (re-rendered as lines/words are added/removed)
+        lines_area = ui.column().classes('w-full gap-0')
+        lines_container['el'] = lines_area
+        _render_all(lines_area)
 
     # ---- return handle dict ---------------------------------------------
 
