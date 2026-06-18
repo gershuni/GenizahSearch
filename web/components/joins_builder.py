@@ -267,13 +267,46 @@ _LINE_MOD_TABLE = [
     ('line_end',   '⊣', lambda: tr('Line end (⊣)'),   lambda: tr('Line ends here')),
 ]
 
+# Search-type selector (D-Q1 redesign). 'responsa' shows the structured
+# multi-line word builder (Responsa-style, with a Variants toggle); the others
+# collapse to a single free-text line that runs the STANDARD search path (so
+# Fuzzy is real edit-distance and Regex is a real regex — see CR HIGH-7).
+_SEARCH_TYPES = ['responsa', 'exact', 'variants', 'fuzzy', 'regex']
+_SEARCH_TYPE_LABEL_KEYS = {
+    'responsa': 'Responsa-style',
+    'exact': 'Exact',
+    'variants': 'Variants',
+    'fuzzy': 'Fuzzy',
+    'regex': 'Regex',
+}
+# Single-line type -> engine mode string for execute_search(mode=...).
+# 'regex' -> 'Regex' (the engine checks the capitalized literal).
+_SIMPLE_TYPE_TO_ENGINE_MODE = {
+    'exact': 'exact',
+    'variants': 'variants',
+    'fuzzy': 'fuzzy',
+    'regex': 'Regex',
+}
 
-def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> dict:
+
+def create_joins_builder(
+    allow_page_position: bool = True,
+    on_submit=None,
+    show_search_type: bool = True,
+) -> dict:
     """Factory: creates and mounts the Joins Lab word-box line-builder widget.
+
+    show_search_type (D-Q1): when True (the main anchor-side builder) the widget
+    shows the segmented search-type selector (Responsa-style | Exact | Variants |
+    Fuzzy | Regex). When False (the other-side builder) the type is fixed to
+    'responsa' (structured builder + Variants checkbox only — no single-line modes).
 
     Returns a handle dict with:
       container           - the top-level NiceGUI element (mount point)
-      build_side_query()  - builds a SideQuery from current state
+      build_side_query()  - builds a SideQuery from current state (None unless
+                            the active type is 'responsa')
+      build_query()       - unified query descriptor (responsa | simple)
+      get_search_type()   - 'responsa'|'exact'|'variants'|'fuzzy'|'regex'
       get_mode()          - 'exact' | 'variants' | 'fuzzy'
       get_text_position() - one of 'anywhere'|'start'|'end'|'line_start'|'line_end'
       get_summary()       - human-readable summary string for the collapsed bar
@@ -299,19 +332,30 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
     # native <input>, and an inline input-style can lose to Quasar's LTR defaults on
     # an LTR page — so force it with a scoped !important rule on the native control.
     ui.add_css(
-        '.jl-word-rtl .q-field__native, .jl-word-rtl input, .jl-word-rtl textarea'
+        '.jl-rtl-field .q-field__native, .jl-rtl-field input, .jl-rtl-field textarea'
         ' { direction: rtl !important; text-align: right !important; }'
     )
 
     # Mutable in-memory state (closure-local, not app.storage.user - Phase 87 invariant)
     lines_state: list = [_default_line()]
-    mode_state: dict = {'mode': 'exact'}
+    # search_type: 'responsa' (structured builder) | single-line standard modes.
+    search_type_state: dict = {'type': 'responsa'}
+    variants_state: dict = {'on': False}        # Variants toggle for Responsa-style
+    single_query_state: dict = {'text': ''}     # the single free-text line query
     text_position_state: dict = {'value': 'anywhere'}
 
     # ---- internal helpers -----------------------------------------------
 
+    def _get_search_type() -> str:
+        return search_type_state['type']
+
     def _get_mode() -> str:
-        return mode_state['mode']
+        # Back-compat "mode" accessor. Responsa-style maps to 'variants' when the
+        # Variants box is on, else 'exact'; single-line types return themselves.
+        t = search_type_state['type']
+        if t == 'responsa':
+            return 'variants' if variants_state['on'] else 'exact'
+        return t
 
     def _get_text_position() -> str:
         # Always return a known KEY string - see _coerce_text_position (guards the
@@ -319,6 +363,9 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
         return _coerce_text_position(text_position_state['value'])
 
     def _is_empty() -> bool:
+        # Single-line modes are empty iff the free-text box is blank.
+        if search_type_state['type'] != 'responsa':
+            return not single_query_state['text'].strip()
         for line in lines_state:
             for w in line.get('words', []):
                 if w.get('term', '').strip():
@@ -329,40 +376,59 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
         # WR-04: every literal here must go through tr() - the collapsed summary
         # bar is shown after EVERY search (joins_lab._collapse_builder), and the
         # default UI is Hebrew.
-        _mode_label_keys = {'exact': 'Exact', 'variants': 'Variants', 'fuzzy': 'Fuzzy'}
-        mode_raw = _get_mode()
-        mode = tr(_mode_label_keys.get(mode_raw, mode_raw.capitalize()))
+        t = search_type_state['type']
+        type_label = tr(_SEARCH_TYPE_LABEL_KEYS.get(t, t.capitalize()))
+        tp_seg = ''
+        if allow_page_position:
+            tp = _get_text_position()
+            pos_label = tr(_TEXT_POSITION_LABEL_KEYS.get(tp, tp))
+            tp_seg = ' · ' + tr('Text Position: {pos}').format(pos=pos_label)
+        if t != 'responsa':
+            return f'{type_label}{tp_seg}'
+        # Responsa-style: show variants state + line count
+        var_label = tr('with variants') if variants_state['on'] else tr('exact')
         n_lines = len(lines_state)
         lines_label = (
             tr('{n} line').format(n=n_lines) if n_lines == 1
             else tr('{n} lines').format(n=n_lines)
         )
-        if allow_page_position:
-            tp = _get_text_position()
-            pos_label = tr(_TEXT_POSITION_LABEL_KEYS.get(tp, tp))
-            return f'{mode} · {lines_label} · ' + tr('Text Position: {pos}').format(pos=pos_label)
-        return f'{mode} · {lines_label}'
+        return f'{type_label} ({var_label}) · {lines_label}{tp_seg}'
 
     def _build_sq() -> Optional[SideQuery]:
-        """Build SideQuery from current widget state.
+        """Build SideQuery from the structured (Responsa-style) state.
+
+        Returns None when the active type is NOT 'responsa' (single-line modes do
+        not produce a SideQuery; the page reads build_query() instead).
 
         Text position routing:
           'start'/'end'       -> page_position in SideQuery
           'anywhere'          -> page_position=None
-          'line_start'/'line_end' -> page_position=None here; Plan 04 passes
-                                    these directly to execute_search(text_position=...)
+          'line_start'/'line_end' -> page_position=None here; the page passes these
+                                    directly to execute_search(text_position=...)
         """
+        if search_type_state['type'] != 'responsa':
+            return None
         if not allow_page_position:
             page_pos = None
         else:
             tp = _get_text_position()
-            if tp in ('start', 'end'):
-                page_pos = tp
-            else:
-                page_pos = None  # 'anywhere' / 'line_start' / 'line_end' handled by Plan 04
+            page_pos = tp if tp in ('start', 'end') else None
+        return build_side_query(lines_state, variants_state['on'], page_pos)
 
-        variants = (_get_mode() == 'variants')
-        return build_side_query(lines_state, variants, page_pos)
+    def _build_query() -> dict:
+        """Unified query descriptor (D-Q1).
+
+        responsa -> {'kind': 'responsa', 'side': SideQuery | None}
+        simple   -> {'kind': 'simple', 'mode': <engine mode>, 'query': str}
+        """
+        t = search_type_state['type']
+        if t == 'responsa':
+            return {'kind': 'responsa', 'side': _build_sq()}
+        return {
+            'kind': 'simple',
+            'mode': _SIMPLE_TYPE_TO_ENGINE_MODE.get(t, 'exact'),
+            'query': single_query_state['text'].strip(),
+        }
 
     # ---- row / word rendering -------------------------------------------
 
@@ -525,7 +591,7 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
             # reach the native input). Wrapper keeps direction:rtl for placeholder.
             term_input = ui.input(placeholder=placeholder).props(
                 'outlined dense input-style="direction: rtl; text-align: right;"'
-            ).classes('w-full jl-word-rtl').style(
+            ).classes('w-full jl-word-rtl jl-rtl-field').style(
                 'direction: rtl;'
                 ' font-family: "Noto Sans Hebrew", "SBL Hebrew", serif; font-size: 1rem;'
             )
@@ -691,14 +757,88 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
 
     # ---- build the widget -----------------------------------------------
 
-    # Initialized to None so _reset() can reference it even when the Text
-    # Position control is not rendered (allow_page_position=False, other side).
+    # Pre-declared so _set_search_type / _apply_type_visibility / _reset can
+    # reference them even when a control is not rendered (other-side builder, no
+    # Text Position, etc.). Reassigned inside the `with` block below; the closures
+    # resolve them at call time.
     text_pos_select = None
+    variants_cb = None
+    single_input = None
+    responsa_container = None
+    single_container = None
+    type_hint = None
+    type_btns: dict = {}
+
+    def _apply_type_visibility() -> None:
+        """Show the structured builder for Responsa-style; the single-line input
+        for the simple modes. Variants checkbox is Responsa-style only; the Fuzzy
+        slowness hint shows for single-line Fuzzy only."""
+        is_resp = (search_type_state['type'] == 'responsa')
+        if responsa_container is not None:
+            responsa_container.set_visibility(is_resp)
+        if single_container is not None:
+            single_container.set_visibility(not is_resp)
+        if variants_cb is not None:
+            variants_cb.set_visibility(is_resp)
+        if type_hint is not None:
+            type_hint.set_visibility(search_type_state['type'] == 'fuzzy')
+
+    def _set_search_type(t: str) -> None:
+        search_type_state['type'] = t
+        for tv, btn in type_btns.items():
+            if tv == t:
+                btn.props('color=primary')
+                btn.props(remove='flat')
+            else:
+                btn.props(remove='color=primary')
+                btn.props('flat')
+        _apply_type_visibility()
 
     with ui.column().classes('w-full gap-3') as container:
 
-        # Header row: Text Position (prominent) + mode selector
+        # Header row: search-type selector + Variants toggle + Text Position
         with ui.row().classes('w-full items-center gap-4 flex-wrap'):
+
+            # Search-type segmented selector (main builder only). The other-side
+            # builder is fixed to Responsa-style (show_search_type=False).
+            if show_search_type:
+                with ui.row().classes('items-center gap-1'):
+                    ui.label(tr('Search type')).classes('text-xs font-bold uppercase').style(
+                        'color: var(--text-secondary); letter-spacing: 0.05em; margin-right: 4px;'
+                    )
+                    for tv in _SEARCH_TYPES:
+                        is_active = (tv == search_type_state['type'])
+                        btn_props = 'color=primary' if is_active else 'flat'
+                        b = ui.button(tr(_SEARCH_TYPE_LABEL_KEYS[tv])).props(
+                            f'{btn_props} size=sm'
+                        ).on('click', lambda t=tv: _set_search_type(t))
+                        type_btns[tv] = b
+
+                    # Info popup — explains the search types.
+                    with ui.button(icon='help_outline').props('flat dense round size=sm').style(
+                        'color: var(--text-muted);'
+                    ).tooltip(tr('About search types')):
+                        with ui.menu(), ui.card().classes('p-3 gap-1').style('max-width: 360px;'):
+                            ui.label(tr('Search types')).classes('text-sm font-bold')
+                            ui.label('• ' + tr(
+                                'Responsa-style — the structured builder: build the line '
+                                'word-by-word with gaps, line anchors and per-word modifiers. '
+                                'Turn on Variants to also match spelling variants.'
+                            )).classes('text-xs')
+                            ui.label('• ' + tr(
+                                'Exact / Variants / Fuzzy / Regex — a single free-text line that '
+                                'searches like the main search bar (Fuzzy = approximate, within '
+                                '1–2 letter changes; Regex = a regular expression).'
+                            )).classes('text-xs')
+
+            # Variants toggle (Responsa-style only — hidden in single-line modes)
+            variants_cb = ui.checkbox(tr('Variants'), value=variants_state['on'])
+            variants_cb.on_value_change(
+                lambda: variants_state.update(on=bool(variants_cb.value))
+            )
+
+            # Text Position — applies to ALL types (full join workflow is kept in
+            # single-line modes too, D-Q1).
             if allow_page_position:
                 with ui.column().classes('gap-1'):
                     ui.label(tr('Text Position')).classes('text-xs font-bold uppercase').style(
@@ -708,118 +848,89 @@ def create_joins_builder(allow_page_position: bool = True, on_submit=None) -> di
                         options=_text_position_options(),
                         value=text_position_state['value'],
                     ).props('outlined dense').classes('w-40')
-
                     # Read the element's normalized `.value` (the option KEY), NOT the
-                    # raw `update:model-value` payload (`e.args`) - for a dict-options
-                    # select the latter is the Quasar option object {'label','value'},
-                    # a dict, which breaks _TEXT_POSITION_LABEL_KEYS.get(tp). Coerce as
-                    # a belt-and-braces guard (WR-03).
+                    # raw `update:model-value` payload — for a dict-options select that
+                    # is the Quasar option object {'label','value'}, a dict, which breaks
+                    # _TEXT_POSITION_LABEL_KEYS.get(tp). Coerce as belt-and-braces (WR-03).
                     text_pos_select.on_value_change(
                         lambda: text_position_state.update(
                             value=_coerce_text_position(text_pos_select.value)
                         )
                     )
 
-            # Mode selector: Exact / Variants / Fuzzy  (flat toggle buttons)
-            with ui.row().classes('items-center gap-1'):
-                ui.label(tr('Mode')).classes('text-xs font-bold uppercase').style(
-                    'color: var(--text-secondary); letter-spacing: 0.05em; margin-right: 4px;'
-                )
-
-                mode_btns: dict = {}
-
-                def _set_mode(m: str):
-                    mode_state['mode'] = m
-                    for mm, btn in mode_btns.items():
-                        if mm == m:
-                            btn.props('color=primary')
-                        else:
-                            btn.props(remove='color=primary')
-                            btn.props('flat')
-                    # Show/hide fuzzy hint
-                    fuzzy_hint.set_visibility(m == 'fuzzy')
-
-                for mode_val, mode_label in [
-                    ('exact',    tr('Exact')),
-                    ('variants', tr('Variants')),
-                    ('fuzzy',    tr('Fuzzy')),
-                ]:
-                    is_active = (mode_val == mode_state['mode'])
-                    btn_props = 'color=primary' if is_active else 'flat'
-                    b = ui.button(mode_label).props(f'{btn_props} size=sm').on(
-                        'click', lambda m=mode_val: _set_mode(m)
-                    )
-                    mode_btns[mode_val] = b
-
-                # Info popup — answers "what syntax is this?". The query ALWAYS
-                # runs as Responsa syntax (compose() sets responsa_mode=True); the
-                # mode only controls variant expansion, so 'Exact' IS the raw
-                # Responsa query.
-                with ui.button(icon='help_outline').props('flat dense round size=sm').style(
-                    'color: var(--text-muted);'
-                ).tooltip(tr('About search modes & syntax')):
-                    with ui.menu(), ui.card().classes('p-3 gap-1').style('max-width: 340px;'):
-                        ui.label(tr('Search modes & syntax')).classes('text-sm font-bold')
-                        ui.label(tr(
-                            'Your query always runs as Responsa syntax (shown in the '
-                            'collapsed search bar). The mode controls how each word is matched:'
-                        )).classes('text-xs')
-                        ui.label('• ' + tr(
-                            'Exact — match each word as written, no expansion. This is the '
-                            'raw Responsa query.'
-                        )).classes('text-xs')
-                        ui.label('• ' + tr(
-                            'Variants — also match known spelling variants of each word.'
-                        )).classes('text-xs')
-                        ui.label('• ' + tr(
-                            'Fuzzy — approximate matching: finds words within 1–2 letter changes '
-                            '(typos, missing or swapped letters), independent of the variant '
-                            'tables. Slowest.'
-                        )).classes('text-xs')
-                        ui.label(tr(
-                            'You can type Responsa operators directly in a word box '
-                            '(space = sequence, a/b = alternatives); the gear menu adds the '
-                            '#, %, *, − modifiers.'
-                        )).classes('text-xs').style('color: var(--text-muted);')
-
-            # Fuzzy hint (shown only when fuzzy selected)
-            fuzzy_hint = ui.label(
+            # Fuzzy slowness hint (single-line Fuzzy only)
+            type_hint = ui.label(
                 tr('Fuzzy search is slower and uses more server resources.')
-            ).classes('text-xs').style(
-                'color: var(--text-muted);'
-            )
-            fuzzy_hint.set_visibility(mode_state['mode'] == 'fuzzy')
+            ).classes('text-xs').style('color: var(--text-muted);')
 
-        # Lines area (re-rendered as lines/words are added/removed)
-        lines_area = ui.column().classes('w-full gap-0')
-        lines_container['el'] = lines_area
-        _render_all(lines_area)
+        # Responsa-style structured builder (lines area, re-rendered on add/remove)
+        responsa_container = ui.column().classes('w-full gap-0')
+        with responsa_container:
+            lines_area = ui.column().classes('w-full gap-0')
+            lines_container['el'] = lines_area
+            _render_all(lines_area)
+
+        # Single-line free-text input (Exact / Variants / Fuzzy / Regex). Distinct
+        # class jl-single-rtl so the structured-word-box test helpers (which match
+        # jl-word-rtl) never pick it up; jl-rtl-field carries the shared RTL CSS.
+        single_container = ui.column().classes('w-full')
+        with single_container:
+            single_input = ui.input(
+                placeholder=tr('Type your search — behaves like the main search bar')
+            ).props(
+                'outlined dense input-style="direction: rtl; text-align: right;"'
+            ).classes('w-full jl-single-rtl jl-rtl-field').style(
+                'direction: rtl;'
+                ' font-family: "Noto Sans Hebrew", "SBL Hebrew", serif; font-size: 1rem;'
+            )
+            single_input.value = single_query_state['text']
+            single_input.on(
+                'update:model-value',
+                lambda e: single_query_state.update(text=e.args or ''),
+            )
+            if on_submit is not None:
+                single_input.on('keydown.enter', on_submit)
+
+        # Initial visibility (Responsa-style default)
+        _apply_type_visibility()
 
     # ---- reset (New Search) ---------------------------------------------
 
     def _reset() -> None:
-        """Reset the builder to one empty line / Exact / Anywhere (New Search).
-
-        Clears all typed words, modifiers and line anchors, restores the default
-        mode (Exact) and Text Position (Anywhere), and re-renders the lines area.
-        Used by the page-level "New Search" button (parity with /search reset).
-        """
+        """Reset the builder to defaults (New Search): Responsa-style, one empty
+        line, Variants off, single-line query cleared, Text Position = Anywhere."""
         lines_state.clear()
         lines_state.append(_default_line())
-        mode_state['mode'] = 'exact'
+        search_type_state['type'] = 'responsa'
+        variants_state['on'] = False
+        single_query_state['text'] = ''
         text_position_state['value'] = 'anywhere'
         _sym_rows.clear()
         if lines_container['el'] is not None:
             _render_all(lines_container['el'])
-        _set_mode('exact')  # refresh mode-button visuals + fuzzy hint
+        if variants_cb is not None:
+            variants_cb.value = False
+        if single_input is not None:
+            single_input.value = ''
         if allow_page_position and text_pos_select is not None:
             text_pos_select.value = 'anywhere'
+        # Restore type-button visuals + container visibility
+        for tv, btn in type_btns.items():
+            if tv == 'responsa':
+                btn.props('color=primary')
+                btn.props(remove='flat')
+            else:
+                btn.props(remove='color=primary')
+                btn.props('flat')
+        _apply_type_visibility()
 
     # ---- return handle dict ---------------------------------------------
 
     return {
         'container': container,
         'build_side_query': _build_sq,
+        'build_query': _build_query,
+        'get_search_type': _get_search_type,
         'get_mode': _get_mode,
         'get_text_position': _get_text_position,
         'get_summary': _get_summary,

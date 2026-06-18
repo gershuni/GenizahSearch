@@ -566,7 +566,13 @@ def create_joins_lab_page(
                 # Other-side builder (allow_page_position=False — no Text Position).
                 # Built inside this `with other_side_controls:` block, so its
                 # container mounts here automatically (no manual reparenting).
-                other_builder = create_joins_builder(allow_page_position=False, on_submit=_trigger_search)
+                # Other side stays Responsa-style only (no single-line modes) —
+                # show_search_type=False (D-Q1).
+                other_builder = create_joins_builder(
+                    allow_page_position=False,
+                    on_submit=_trigger_search,
+                    show_search_type=False,
+                )
                 _other_side['builder'] = other_builder
 
             def _on_other_side_toggle() -> None:
@@ -932,48 +938,58 @@ def create_joins_lab_page(
             )
             return
 
-        side = anchor_builder['build_side_query']()
-        if side is None or not side.rows:
-            ui.notify(
-                tr('Enter at least one search line to run'),
-                type='warning',
-            )
-            return
-
         if not state.is_ready():
             ui.notify(tr('Engine not ready.'), type='warning')
             return
 
-        # BLD-03: Text Position routing (Pitfall 3 — SideQuery only accepts
-        # None/'start'/'end'; 'line_start'/'line_end' bypass SideQuery and go
-        # directly to execute_search(text_position=...)).
+        # D-Q1: unified query descriptor — Responsa-style structured side, or a
+        # single-line standard-mode query (Exact/Variants/Fuzzy/Regex).
+        q = anchor_builder['build_query']()
+
+        # Text Position applies to BOTH kinds (full join workflow kept in
+        # single-line modes). 'line_start'/'line_end' always go directly to
+        # execute_search(text_position=...).
         tp_val = anchor_builder['get_text_position']()
-        if tp_val in ('line_start', 'line_end'):
-            direct_text_position: Optional[str] = tp_val
-        else:
-            direct_text_position = None  # 'anywhere'/'start'/'end' via compose()
 
-        # BLD-03: mode from the builder
-        mode_str = anchor_builder['get_mode']()
-
-        # CR-01: compose() raises ValueError when page_position='start'/'end'
-        # but the anchoring (first/last) row is empty — reachable when the user
-        # clears row 1 but types in row 2 (the empty-builder guard does NOT
-        # trip). Surface a friendly notify instead of letting it bubble out of
-        # the click handler (silent broken search + server exception).
-        try:
-            query_str, ro, page_position = compose(side)
-        except ValueError:
-            ui.notify(
-                tr('Text Position requires content on that line. '
-                   'Add a word to the first/last line or set Text Position to Anywhere.'),
-                type='warning',
+        if q['kind'] == 'responsa':
+            side = q['side']
+            if side is None or not side.rows:
+                ui.notify(tr('Enter at least one search line to run'), type='warning')
+                return
+            # Responsa-style: variant expansion driven by the Variants checkbox.
+            mode_str = 'variants' if side.variants else 'exact'
+            # CR-01: compose() raises ValueError when page_position='start'/'end'
+            # but the anchoring (first/last) row is empty.
+            try:
+                query_str, ro, page_position = compose(side)
+            except ValueError:
+                ui.notify(
+                    tr('Text Position requires content on that line. '
+                       'Add a word to the first/last line or set Text Position to Anywhere.'),
+                    type='warning',
+                )
+                return
+            # BLD-04: re-inject flex_spacing + bidirectional from the UI toggles
+            # (compose() hardcodes both to False at shared/joins_lab.py:741-749).
+            _merge_globals_web(ro, _global_opts)
+            # line_start/line_end go direct; start/end already live in page_position.
+            direct_text_position: Optional[str] = (
+                tp_val if tp_val in ('line_start', 'line_end') else page_position
             )
-            return
-
-        # BLD-04: re-inject flex_spacing + bidirectional from the UI toggles
-        # (compose() hardcodes both to False at shared/joins_lab.py:741-749)
-        _merge_globals_web(ro, _global_opts)
+        else:
+            # Single-line standard search — NO responsa_options (responsa_mode off);
+            # behaves like the main search bar. Here Fuzzy is real edit-distance and
+            # Regex is a real regex (CR HIGH-7).
+            query_str = q['query']
+            if not query_str:
+                ui.notify(tr('Enter a search query to run'), type='warning')
+                return
+            mode_str = q['mode']
+            ro = None
+            # All non-default positions map straight to execute_search(text_position=).
+            direct_text_position = (
+                tp_val if tp_val in ('start', 'end', 'line_start', 'line_end') else None
+            )
 
         if not query_str:
             return
@@ -1030,7 +1046,7 @@ def create_joins_lab_page(
                     gap=0,
                     progress_callback=_make_progress_cb(my_gen, _search_generation),
                     responsa_options=ro,
-                    text_position=(direct_text_position or page_position),
+                    text_position=direct_text_position,
                     corpus_scope='genizah',
                 )
 
