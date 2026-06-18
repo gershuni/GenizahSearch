@@ -71,3 +71,20 @@ None (single reviewer). The three intentional divergences (JA dropped, shared to
 
 ### Key drift to resolve first
 The `fragment_joins.status` schema is genuinely ambiguous in-repo (`supabase_setup.sql:151` defines it; `SUPABASE_GUIDE.md` omits it). The planner assumed "no status column" — that assumption is unverified. **The Wave-0 schema probe (Plan 01 Task 3) is the linchpin**, and the ANC-05 plans + tests must branch on its result rather than hardcode either assumption.
+
+---
+
+## Orchestrator Verification (2026-06-18) — resolves the ANC-05 schema drift
+
+Codex's drift finding #1 and the planner's "no status column" premise were both checked against the live code. **The premise is wrong; the clean fix already exists:**
+
+- `supabase_setup.sql:162` defines `status TEXT DEFAULT 'proposed' CHECK (status IN ('proposed','confirmed','rejected'))` plus `confirmed_by UUID` (`:164`). The `'confirmed'` value ANC-05 needs is canonical.
+- `web/supabase_client.py:1574-1594` — `get_fragment_joins(..., status=None)` **already accepts a `status` kwarg** and applies `.eq('status', status)`. Its docstring (`:1578-1579`) literally references `status='confirmed'`. So `get_fragment_joins(fragment_sys_id=…, status='confirmed')` is a **fully-supported existing call, not a nonexistent-column call.**
+- RLS is `USING(true)` (`SUPABASE_GUIDE.md:520-524`) → the DB does NOT enforce confirmed-only, so the **application-layer `status='confirmed'` query filter IS the ANC-05 mechanism** and it realizes D-17 exactly (a user's own `proposed` joins are excluded from the process-global Lab group).
+
+**Corrected directive for the `--reviews` replan:**
+1. **Make `status='confirmed'` the PRIMARY ANC-05 fix** (query filter via the existing `get_fragment_joins` param) + the isolated `:confirmed` cache key. This resolves Codex HIGH #1 and HIGH #2.
+2. **Rewrite the Plan 01 test** to assert `status='confirmed'` IS passed on the Lab known-joins path (the prior "assert no status kwarg" / "assert status is not None contradiction" both dissolve — confirmed-filtering is correct).
+3. **Keep the Wave-0 probe** but re-scope it: confirm the column exists in the *live* deployment (canonical SQL + the function signature say it does); design the `status='confirmed'` path as primary, with an app-layer fallback (exclude `source=='user'` rows that aren't confirmed) ONLY if the live probe proves the column absent.
+4. **Codex HIGH #3 (community source) STANDS** — `fetch_connected_fragments()` returns only user/PGP/FJMS; merge published community puzzle joins (from the `create_joins_dialog` path) into the Lab connected-group with `sources=['community']` so ANC-04's four-source group is real.
+5. **Fix the 2 MEDIUM plan bugs** — Plan 04 `await run.io_bound(lambda: …)[0]` precedence; Plan 05 per-card synchronous `fetch_connected_fragments()` (use `run.io_bound`/batch/lazy-on-click).
