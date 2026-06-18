@@ -490,13 +490,25 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
         """Render one word box (text input + modifier menu + symbol indicators)."""
         word = lines_state[li]['words'][wi]
 
-        with ui.column().classes('items-center gap-0').style('min-width: 80px; max-width: 180px;'):
+        # A lone word on the line gets a WIDE box (type a full sentence); once a
+        # second word is added the boxes trim to word-width. The explanatory
+        # placeholder shows ONLY on the lone wide box and is dropped once there are
+        # multiple word boxes (UAT: box sizing + alt-text).
+        single_word = len(lines_state[li]['words']) == 1
+        col_style = (
+            'flex: 1 1 auto; min-width: 280px; max-width: 100%;' if single_word
+            else 'min-width: 80px; max-width: 180px;'
+        )
+        with ui.column().classes('items-center gap-0').style(col_style):
             # Word text input (RTL)
-            placeholder = (
-                tr('Words on this line (space = sequence, a/b = alternatives)')
-                if allow_page_position
-                else tr('Words on this side (space = sequence, a/b = alternatives)')
-            )
+            if single_word:
+                placeholder = (
+                    tr('Words on this line (space = sequence, a/b = alternatives)')
+                    if allow_page_position
+                    else tr('Words on this side (space = sequence, a/b = alternatives)')
+                )
+            else:
+                placeholder = ''
             # RTL: `input-style` targets the inner <input> so typed Hebrew flows
             # right-to-left (a wrapper-level `style(direction:rtl)` alone does NOT
             # reach the native input). Wrapper keeps direction:rtl for placeholder.
@@ -548,7 +560,13 @@ def create_joins_builder(allow_page_position: bool = True) -> dict:
                                 # Refresh symbol row in place
                                 _refresh_symbol_row(i, j)
 
-                            cb.on('update:model-value', lambda e, i=li, j=wi, k=mod_key: _on_mod_change(e.args, i, j, k))
+                            # Read the checkbox's synced .value (reliable bool) via
+                            # on_value_change — robust across menu interactions and
+                            # consistent with the other selects/checkboxes. Ensures an
+                            # UNCHECK actually clears the symbol (state -> False).
+                            cb.on_value_change(
+                                lambda e, i=li, j=wi, k=mod_key: _on_mod_change(bool(e.value), i, j, k)
+                            )
 
                 # Remove word button (hidden when only one word in the line)
                 remove_btn = ui.button(icon='close').props('flat dense size=xs color=negative')
