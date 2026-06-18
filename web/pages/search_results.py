@@ -33,6 +33,7 @@ from genizah_core import SearchEngine, get_library_display
 from web.document_service import (
     get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page,
 )
+from web.components.joins_panel import fetch_connected_fragments, create_joins_dialog
 from urllib.parse import quote
 from web.components.typography import h3
 import logging
@@ -627,6 +628,63 @@ def create_result_card(search_state, refs, index, result):
                 ).props('flat round dense size=sm').tooltip(f'{tr("Catalog Records")} ({cat_count})')
                 if cat_count == 0:
                     cat_btn.disable()
+
+            # Joins icon (FND-04, D-20/D-21)
+            if sys_id:
+                # Build deep link — reuse _card_ie_id parsed above (guarded inside Browse block at :587-598)
+                _joins_url = f'/joins-lab?sys_id={sys_id}'
+                # Re-parse _card_ie_id here in case Browse block was not entered (e.g. no sys_id in Browse)
+                _joins_ie_id = None
+                if 'raw_header' in result and state.meta_mgr:
+                    try:
+                        _joins_parsed = state.meta_mgr.parse_full_id_components(result['raw_header'])
+                        _joins_ie_id = _joins_parsed.get('ie_id')
+                    except Exception:
+                        pass
+                if _joins_ie_id:
+                    _joins_url += f'&volume_ie={_joins_ie_id}'
+
+                _joins_icon_ref = {'has_joins': False}
+
+                def _open_joins_for_card(s=sys_id, sm=shelfmark, url=_joins_url,
+                                         ref=_joins_icon_ref):
+                    """D-21: joins exist → open dialog; none → open Lab in new tab."""
+                    if ref['has_joins']:
+                        create_joins_dialog(
+                            shelfmark=sm,
+                            document_id=s,
+                            find_joins_url=url,
+                        )
+                    else:
+                        ui.navigate.to(url, new_tab=True)
+
+                joins_btn = ui.button(
+                    icon='link',
+                    on_click=_open_joins_for_card,
+                ).props('flat round dense size=sm').style(
+                    'color: var(--neutral-400);'
+                ).tooltip(tr('Joins'))
+
+                async def _load_card_joins_count(s=sys_id, sm=shelfmark,
+                                                 btn=joins_btn, ref=_joins_icon_ref):
+                    """Load joins-presence hint off the event loop (Codex MEDIUM — synchronous I/O)."""
+                    try:
+                        data = await run.io_bound(
+                            fetch_connected_fragments,
+                            shelfmark=sm,
+                            document_id=s,
+                        )
+                        has = data.get('total_joins', 0) > 0
+                        ref['has_joins'] = has
+                        if has:
+                            btn.style('color: var(--primary-600);')
+                    except Exception:
+                        pass  # Icon stays neutral; acts as straight-to-Lab on failure
+
+                try:
+                    ui.timer(0.15, _load_card_joins_count, once=True)
+                except RuntimeError:
+                    pass  # NiceGUI lifecycle guard (card deleted before timer fires)
 
         # Snippet — enrich with earlier chain terms if refinement is active
         if snippet:
@@ -1962,10 +2020,16 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     dialog.close()
                                     ui.navigate.to(f'/browse?shelfmark={target_shelfmark}')
 
+                                # D-20: pass find_joins_url so Quick View button/dialog carry Lab link
+                                _qv_joins_url = f'/joins-lab?sys_id={sys_id}'
+                                if adv_state.volume_ie:
+                                    _qv_joins_url += f'&volume_ie={adv_state.volume_ie}'
+
                                 create_joins_button(
                                     shelfmark=shelfmark,
                                     document_id=sys_id,
-                                    on_navigate=navigate_to_join
+                                    on_navigate=navigate_to_join,
+                                    find_joins_url=_qv_joins_url,
                                 )
 
                 # Right Panel: Image viewer (toggleable)
