@@ -288,6 +288,31 @@ _SIMPLE_TYPE_TO_ENGINE_MODE = {
     'regex': 'Regex',
 }
 
+# Responsa operator legend — mirrors the main search legend (web/pages/search.py
+# :599-606) so the word-box tooltip shows the SAME operators with the SAME meaning
+# keys. Operators are literal (Hebrew מילה = "word"); meanings go through tr().
+_RESPONSA_SYNTAX_OPS = [
+    ('#מילה', 'prefix'),
+    ('מילה#', 'suffix'),
+    ('%מילה', 'plene'),
+    ('*מילה / מילה*', 'wildcard'),
+    ('(א/ב)', 'OR'),
+    ('-מילה', 'Exclude'),
+    ('|מילה', 'Line starts'),
+    ('מילה|', 'Line ends'),
+]
+
+
+def _responsa_syntax_tooltip() -> str:
+    """Build the word-box tooltip: the Responsa operator legend exactly as the main
+    search lists it (operator = meaning), assembled at request time so tr() honors
+    the request language."""
+    legend = '  ·  '.join(f'{op} = {tr(mk)}' for op, mk in _RESPONSA_SYNTAX_OPS)
+    return (
+        tr('Responsa syntax') + ': ' + legend + '. '
+        + tr('Space separates words; click the gear icon for the same options per word.')
+    )
+
 
 def create_joins_builder(
     allow_page_position: bool = True,
@@ -591,11 +616,7 @@ def create_joins_builder(
                 'direction: rtl;'
                 ' font-family: "Noto Sans Hebrew", "SBL Hebrew", serif; font-size: 1rem;'
             )
-            term_input.tooltip(tr(
-                'Type words to match on this line. Space = a sequence of words; '
-                '(a/b) = alternatives. Click the gear icon on a word for options '
-                '(prefix, plene/defective, wildcard, negation).'
-            ))
+            term_input.tooltip(_responsa_syntax_tooltip())
             term_input.value = word.get('term', '')
 
             def _on_term_change(v, i=li, j=wi):
