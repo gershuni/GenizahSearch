@@ -512,3 +512,83 @@ class TestViewerAssetInjection:
                 external_resolver=lambda *a, **kw: {},
             )
             mock_ui.add_head_html.assert_not_called()
+
+
+# ─── Regression: folio-nav boundary handling (UAT round 2) ────────────────────
+
+class TestFolioBoundary:
+    """Navigating before the first / past the last folio must NOT destroy the
+    view with a 'fragment not found' state, and prev/next must disable at the
+    boundaries. (UAT: clicking prev at page 1 showed 'fragment not found'.)
+    """
+
+    def _viewer_with_async_run(self, browse_resolver):
+        import asyncio
+        from unittest.mock import patch, MagicMock
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        async def _fake_io_bound(fn, *a, **k):
+            return fn()
+
+        ctx = patch("web.components.anchor_viewer.ui")
+        rctx = patch("web.components.anchor_viewer.run")
+        mock_ui = ctx.start()
+        mock_run = rctx.start()
+        mock_run.io_bound = _fake_io_bound
+        for attr in (
+            "column", "row", "element", "html", "button", "icon",
+            "label", "tooltip", "add_head_html", "run_javascript", "notify",
+        ):
+            factory = MagicMock(return_value=mock_element)
+            factory.__enter__ = lambda s: s
+            factory.__exit__ = MagicMock(return_value=False)
+            setattr(mock_ui, attr, factory)
+        from web.components.anchor_viewer import AnchorViewer
+        v = AnchorViewer(
+            sys_id="990025143260205171",
+            browse_resolver=browse_resolver,
+            external_resolver=lambda *a, **kw: {},
+        )
+        # Give prev/next buttons real MagicMocks so we can assert set_enabled.
+        v._prev_btn = MagicMock()
+        v._next_btn = MagicMock()
+        v._page_label = MagicMock()
+        v._transcription_html = MagicMock()
+        return v, mock_ui, (ctx, rctx)
+
+    def test_prev_disabled_at_first_folio(self):
+        import asyncio
+        page = _make_page(p_num=1, total_pages=4, library_code="CUL")
+        v, mock_ui, ctxs = self._viewer_with_async_run(
+            lambda *a, **kw: page
+        )
+        try:
+            asyncio.run(v.update_content(p_num=1))
+            v._prev_btn.set_enabled.assert_called_with(False)   # at first folio
+            v._next_btn.set_enabled.assert_called_with(True)    # more folios ahead
+        finally:
+            for c in ctxs:
+                c.stop()
+
+    def test_boundary_nav_keeps_view_no_not_found(self):
+        import asyncio
+        page = _make_page(p_num=1, total_pages=4, library_code="CUL")
+
+        def resolver(sid, *, p_num=None, direction=0, volume_ie=None, **kw):
+            return None if direction != 0 else page
+
+        v, mock_ui, ctxs = self._viewer_with_async_run(resolver)
+        try:
+            asyncio.run(v.update_content(p_num=1))   # loads page 1, sets _last_img_url
+            assert v._last_img_url, "page 1 should have rendered an image"
+            asyncio.run(v.update_content(direction=-1))  # boundary
+            # A boundary nav with a prior image notifies and keeps the view.
+            assert mock_ui.notify.called, "boundary nav should notify, not blow away the view"
+        finally:
+            for c in ctxs:
+                c.stop()

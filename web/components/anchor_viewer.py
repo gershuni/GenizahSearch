@@ -35,7 +35,7 @@ from nicegui import run, ui
 
 from web.components.image_resolution import resolve_external_images, resolve_image_url
 from web.components.typography import render_line_numbered_html
-from web.translations import is_rtl, tr
+from web.translations import tr
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +249,9 @@ class AnchorViewer:
         self._prev_btn: Optional[Any] = None
         self._next_btn: Optional[Any] = None
         self._zoom_label: Optional[Any] = None
+        # Last successfully-rendered image URL — used to restore the view when a
+        # folio navigation hits a boundary / sparse page (don't destroy the view).
+        self._last_img_url: Optional[str] = None
 
         # NOTE: the manuscriptViewer JS/CSS is injected by inject_viewer_assets()
         # at PAGE-BUILD time (see web/pages/joins_lab.py), NOT here — a viewer
@@ -394,14 +397,6 @@ class AnchorViewer:
 
     def _build_ui(self) -> None:
         """Build the full AnchorViewer component (image + controls + transcription)."""
-        rtl = is_rtl()
-        direction_class = "flex-row-reverse" if rtl else "flex-row"
-        # Direction-aware folio arrows (ANC-01 / D-02): in RTL, "previous"
-        # points right and "next" points left to match Hebrew reading order
-        # (LTR keeps the conventional ‹ prev / next ›).
-        prev_icon = "chevron_right" if rtl else "chevron_left"
-        next_icon = "chevron_left" if rtl else "chevron_right"
-
         with ui.column().classes("anchor-viewer-container w-full gap-0"):
             # Image container (shows skeleton initially)
             self._image_container = ui.element("div").classes("image-container relative")
@@ -410,12 +405,19 @@ class AnchorViewer:
                 self._img_html_elem: Optional[Any] = None
                 self._error_elem: Optional[Any] = None
 
-            # Controls bar (below image, full width)
-            with ui.row().classes(f"anchor-controls-bar w-full justify-between {direction_class}"):
+            # Controls bar (below image, full width).
+            # Forced LTR so the media-control layout is stable regardless of the
+            # app's RTL direction: prev (<) on the left, next (>) on the right,
+            # zoom group on the far side. This matches the universal pager/player
+            # convention scholars expect (clicking > advances), and avoids the
+            # RTL flex-reversal that made the arrows read backwards (UAT round 2).
+            with ui.row().classes("anchor-controls-bar w-full justify-between").style(
+                "direction: ltr;"
+            ):
                 # Folio navigation group
                 with ui.row().classes("gap-1 items-center"):
                     self._prev_btn = (
-                        ui.button(icon=prev_icon, on_click=self._on_prev_folio)
+                        ui.button(icon="chevron_left", on_click=self._on_prev_folio)
                         .props(f'flat round dense aria-label="{tr("Previous folio")}"')
                         .classes("text-white min-h-[44px] min-w-[44px]")
                     )
@@ -424,7 +426,7 @@ class AnchorViewer:
                     self._page_label = ui.label("…").classes("text-white text-sm px-2")
 
                     self._next_btn = (
-                        ui.button(icon=next_icon, on_click=self._on_next_folio)
+                        ui.button(icon="chevron_right", on_click=self._on_next_folio)
                         .props(f'flat round dense aria-label="{tr("Next folio")}"')
                         .classes("text-white min-h-[44px] min-w-[44px]")
                     )
@@ -512,7 +514,15 @@ class AnchorViewer:
             return
 
         if result is None:
-            self._show_boundary()
+            if direction != 0 and self._last_img_url:
+                # Folio-navigation boundary (before the first / past the last
+                # folio) or a sparse/metadata-only page: keep the current view
+                # instead of destroying it with a "not found" state.
+                ui.notify(tr('No more folios in this direction'), type='info')
+                self._show_image(self._last_img_url)
+            else:
+                # Initial load (or bad sys_id) with no prior image — show boundary.
+                self._show_boundary()
             return
 
         page, resolved = result
@@ -523,6 +533,15 @@ class AnchorViewer:
             self._page_label.set_text(f"{page.p_num} / {page.total_pages}")
         else:
             self._page_label.set_text(str(page.p_num))
+
+        # Disable nav at the boundaries so the user cannot navigate off either
+        # end (prev before folio 1, next past the last folio when known).
+        if self._prev_btn is not None:
+            self._prev_btn.set_enabled(page.p_num > 1)
+        if self._next_btn is not None:
+            self._next_btn.set_enabled(
+                not page.total_pages or page.p_num < page.total_pages
+            )
 
         # Render image or error placeholder
         if resolved.get("has_image") and resolved.get("img_url"):
@@ -551,6 +570,7 @@ class AnchorViewer:
 
     def _show_image(self, img_url: str) -> None:
         """Replace skeleton with the actual image element."""
+        self._last_img_url = img_url
         self._image_container.clear()
         with self._image_container:
             # HIGH-2: NO onerror="handleImageError(...)".  NO iiif.nli.org.il URL.

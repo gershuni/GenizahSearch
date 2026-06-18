@@ -320,6 +320,13 @@ def create_joins_lab_page(
     # Built inside builder_area (populated after anchor load).
     # -----------------------------------------------------------------------
     with builder_area:
+        # "Change anchor" — return to the cold-start picker to load a DIFFERENT
+        # fragment (without this, the smart box is hidden once an anchor loads
+        # and there is no way to switch). Full clear/reset is Phase 120.
+        change_anchor_btn = ui.button(
+            tr('Change anchor'), icon='swap_horiz'
+        ).props('flat dense').classes('self-start')
+
         ui.label(tr('Search lines')).classes('text-sm font-semibold').style(
             'color: var(--text-secondary); letter-spacing: 0.05em; text-transform: uppercase;'
         )
@@ -465,7 +472,23 @@ def create_joins_lab_page(
             login_dialog.open()
 
     # Wire button handlers
+    def _on_change_anchor() -> None:
+        """Return to the cold-start picker so the user can load a DIFFERENT anchor.
+
+        Re-shows the empty-state smart box and hides the builder/candidates.
+        Does NOT clear the persisted anchor (D-13) — picking a new one overwrites
+        it via load_anchor. Full clear/reset is Phase 120.
+        """
+        anchor_input.value = ''
+        error_label.style('display: none;')
+        anchor_viewer_container.clear()
+        candidates_container.clear()
+        search_textarea.value = ''
+        builder_area.set_visibility(False)
+        empty_state.set_visibility(True)
+
     load_btn.on('click', _on_load_btn_click)
+    change_anchor_btn.on('click', _on_change_anchor)
     anchor_input.on('keydown.enter', _on_load_btn_click)
     lists_btn.on('click', _on_lists_btn_click)
 
