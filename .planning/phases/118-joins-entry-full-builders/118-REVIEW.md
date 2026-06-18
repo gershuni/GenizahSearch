@@ -20,7 +20,17 @@ findings:
   warning: 6
   info: 4
   total: 12
-status: issues_found
+status: remediated
+remediation:
+  fixed: [CR-01, CR-02, WR-01, WR-02, WR-03, WR-04, WR-05, WR-06]
+  fixed_count: 8
+  remaining_info: [IN-02, IN-03, IN-04]
+  note: >
+    All 2 Critical + 6 Warning findings fixed in commits 143c8202, fa69dc64,
+    d6b21cff, a25932bf, a1b9b5cd, 633064f5, fcdb5ae9, a3d817e2 (IN-01 folded into
+    CR-02). Phase test suite GREEN (34 passed) post-fix. Info items IN-02/03/04
+    (combined-modifier test, OR-group comment, get_event_loop deprecation) left for
+    optional follow-up.
 ---
 
 # Phase 118: Code Review Report
