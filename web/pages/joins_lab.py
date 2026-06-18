@@ -820,141 +820,156 @@ def create_joins_lab_page(
         # D-14: auto-collapse builder to summary bar on search
         _collapse_builder(anchor_builder['get_summary']())
 
-        # Step 5: Build the sync closure (MEDIUM-4: execute_search appears ONLY
-        # here, inside the synchronous function that is passed to run.io_bound).
-        # CI guard (tests/test_joins_lab_off_loop.py): the LITERAL name
-        # "run_search_core" MUST be the first positional arg to run.io_bound.
-        def run_search_core():
-            return executor.execute_search(
-                query_str,
-                mode=mode_str,
-                gap=0,
-                progress_callback=_make_progress_cb(my_gen, _search_generation),
-                responsa_options=ro,
-                text_position=(direct_text_position or page_position),
-                corpus_scope='genizah',
-            )
-
-        # Step 6: TIMEOUT wrap + LATEST-WINS task reference.
-        search_coro = run.io_bound(run_search_core)
-        _current_task['task'] = asyncio.ensure_future(
-            asyncio.wait_for(search_coro, timeout=_SEARCH_TIMEOUT_SECONDS)
-        )
-
+        # WR-01: a SINGLE outer try/finally wraps BOTH the anchor leg and the
+        # cross-side leg so the loading affordance (button + _is_running) is held
+        # for the full duration of the search and is restored on every exit path
+        # (return / exception). Previously the button was re-enabled in the inner
+        # finally after the FIRST await, leaving it clickable for up to
+        # _SEARCH_TIMEOUT_SECONDS while the cross-side leg still ran.
         try:
-            raw_results = await _current_task['task']
+            # Step 5: Build the sync closure (MEDIUM-4: execute_search appears ONLY
+            # here, inside the synchronous function that is passed to run.io_bound).
+            # CI guard (tests/test_joins_lab_off_loop.py): the LITERAL name
+            # "run_search_core" MUST be the first positional arg to run.io_bound.
+            def run_search_core():
+                return executor.execute_search(
+                    query_str,
+                    mode=mode_str,
+                    gap=0,
+                    progress_callback=_make_progress_cb(my_gen, _search_generation),
+                    responsa_options=ro,
+                    text_position=(direct_text_position or page_position),
+                    corpus_scope='genizah',
+                )
 
-        except asyncio.TimeoutError:
-            search_status.set_text(
-                tr('Search timed out. Try fewer or shorter lines.')
+            # Step 6: TIMEOUT wrap + LATEST-WINS task reference.
+            search_coro = run.io_bound(run_search_core)
+            _current_task['task'] = asyncio.ensure_future(
+                asyncio.wait_for(search_coro, timeout=_SEARCH_TIMEOUT_SECONDS)
             )
-            return
 
-        except asyncio.CancelledError:
-            # The asyncio.wait_for wrapper was cancelled by a newer search click
-            # (latest-wins path).  The newer run owns the UI — return quietly.
-            return
+            try:
+                raw_results = await _current_task['task']
 
-        except Exception as exc:
-            logger.exception('Joins Lab search error: %s', exc)
-            search_status.set_text(
-                tr('Search failed. Check your connection and try again.')
-            )
-            return
+            except asyncio.TimeoutError:
+                search_status.set_text(
+                    tr('Search timed out. Try fewer or shorter lines.')
+                )
+                return
+
+            except asyncio.CancelledError:
+                # The asyncio.wait_for wrapper was cancelled by a newer search click
+                # (latest-wins path).  The newer run owns the UI — return quietly.
+                return
+
+            except Exception as exc:
+                logger.exception('Joins Lab search error: %s', exc)
+                search_status.set_text(
+                    tr('Search failed. Check your connection and try again.')
+                )
+                return
+
+            finally:
+                # Clean up the task reference if this is still the current task.
+                # (The button/_is_running restore now lives in the OUTER finally so
+                # it also covers the cross-side leg — WR-01.)
+                if _current_task['task'] is not None and _current_task['task'].done():
+                    _current_task['task'] = None
+
+            # Step 7: STALE-GENERATION discard — the PRIMARY guard for a
+            # cooperatively-cancelled run (core returns partial results normally;
+            # _should_apply_results is what prevents them reaching the UI).
+            if not _should_apply_results(my_gen, _search_generation):
+                return
+
+            # Step 8: Dedup anchor results
+            anchor_sid = _anchor_state.get('sys_id') or ''
+            base_candidates, anchor_matched = dedup_candidates(raw_results, anchor_sid)
+
+            # ---------------------------------------------------------------
+            # BLD-02: Cross-side block — if other-side builder is enabled and
+            # has content, run apply_cross_side via run_cross_side_core off the
+            # event loop (CI guard: literal name "run_cross_side_core" MUST be
+            # the first positional arg to run.io_bound).
+            # ---------------------------------------------------------------
+            final_candidates = base_candidates  # default: no cross-side filtering
+
+            if _other_side['enabled'] and _other_side['builder'] is not None:
+                other_side_sq = _other_side['builder']['build_side_query']()
+                if other_side_sq is not None and other_side_sq.rows:
+                    # Snapshot inputs that are safe to read on the event loop
+                    _combine_mode_snap = _other_side['combine']
+                    _other_sq_snap = other_side_sq   # SideQuery is immutable (frozen dataclass)
+                    _base_snapshot = list(base_candidates)
+                    _global_opts_snap = dict(_global_opts)
+
+                    # CI guard (tests/test_joins_lab_off_loop.py): the sync closure
+                    # named EXACTLY "run_cross_side_core" MUST be the first positional
+                    # arg to run.io_bound.  apply_cross_side is I/O-bound (calls
+                    # execute_search internally) and must NOT run on the event loop.
+                    # Per the plan, compose + _merge_globals_web both run INSIDE this
+                    # closure so the full b_ro lifecycle is off the event loop.
+                    def run_cross_side_core():
+                        b_query, b_ro, _ = compose(_other_sq_snap)
+                        # BLD-04: re-inject flex_spacing + bidirectional into b_ro
+                        # (Pitfall 2 — compose() hardcodes flex/bidir=False on b_ro also)
+                        _merge_globals_web(b_ro, _global_opts_snap)
+                        return apply_cross_side(
+                            executor,
+                            _base_snapshot,
+                            b_query,
+                            b_ro,
+                            _combine_mode_snap,
+                        )
+
+                    cross_coro = run.io_bound(run_cross_side_core)
+                    cross_task = asyncio.ensure_future(
+                        asyncio.wait_for(cross_coro, timeout=_SEARCH_TIMEOUT_SECONDS)
+                    )
+                    # Update _current_task so a cancellation also covers the cross-side leg
+                    _current_task['task'] = cross_task
+
+                    try:
+                        merge_result = await cross_task
+                        # Re-check stale generation after the second await
+                        if not _should_apply_results(my_gen, _search_generation):
+                            return
+                        final_candidates = list(merge_result.candidates)
+                    except asyncio.TimeoutError:
+                        search_status.set_text(
+                            tr('Other-side search timed out.')
+                        )
+                        final_candidates = list(base_candidates)
+                    except asyncio.CancelledError:
+                        return
+                    except Exception as exc:
+                        logger.exception('Joins Lab cross-side error: %s', exc)
+                        ui.notify(
+                            tr('Could not resolve the other side of this leaf. '
+                               'Try navigating to a specific folio first.'),
+                            type='warning',
+                        )
+                        final_candidates = list(base_candidates)
+
+            # Step 9: Render final candidates
+            candidates_container.clear()
+            search_status.style('display: none;')
+            with candidates_container:
+                if final_candidates:
+                    create_candidate_grid(final_candidates)
+                else:
+                    ui.label(tr('No candidates found. Try different lines.')).style(
+                        'color: var(--text-secondary);'
+                    )
 
         finally:
-            # Clean up the task reference if this is still the current task.
-            if _current_task['task'] is not None and _current_task['task'].done():
-                _current_task['task'] = None
+            # WR-01: restore the loading affordance for the WHOLE search (both the
+            # anchor leg AND the cross-side leg), only if this run is still the
+            # current generation. A superseding run owns the UI and must not have
+            # its loading state cleared by an older run's finally.
             if _is_running['value'] and my_gen == _search_generation['value']:
                 _is_running['value'] = False
                 search_btn.props(remove='loading disabled')
-
-        # Step 7: STALE-GENERATION discard — the PRIMARY guard for a
-        # cooperatively-cancelled run (core returns partial results normally;
-        # _should_apply_results is what prevents them reaching the UI).
-        if not _should_apply_results(my_gen, _search_generation):
-            return
-
-        # Step 8: Dedup anchor results
-        anchor_sid = _anchor_state.get('sys_id') or ''
-        base_candidates, anchor_matched = dedup_candidates(raw_results, anchor_sid)
-
-        # ---------------------------------------------------------------
-        # BLD-02: Cross-side block — if other-side builder is enabled and
-        # has content, run apply_cross_side via run_cross_side_core off the
-        # event loop (CI guard: literal name "run_cross_side_core" MUST be
-        # the first positional arg to run.io_bound).
-        # ---------------------------------------------------------------
-        final_candidates = base_candidates  # default: no cross-side filtering
-
-        if _other_side['enabled'] and _other_side['builder'] is not None:
-            other_side_sq = _other_side['builder']['build_side_query']()
-            if other_side_sq is not None and other_side_sq.rows:
-                # Snapshot inputs that are safe to read on the event loop
-                _combine_mode_snap = _other_side['combine']
-                _other_sq_snap = other_side_sq   # SideQuery is immutable (frozen dataclass)
-                _base_snapshot = list(base_candidates)
-                _global_opts_snap = dict(_global_opts)
-
-                # CI guard (tests/test_joins_lab_off_loop.py): the sync closure
-                # named EXACTLY "run_cross_side_core" MUST be the first positional
-                # arg to run.io_bound.  apply_cross_side is I/O-bound (calls
-                # execute_search internally) and must NOT run on the event loop.
-                # Per the plan, compose + _merge_globals_web both run INSIDE this
-                # closure so the full b_ro lifecycle is off the event loop.
-                def run_cross_side_core():
-                    b_query, b_ro, _ = compose(_other_sq_snap)
-                    # BLD-04: re-inject flex_spacing + bidirectional into b_ro
-                    # (Pitfall 2 — compose() hardcodes flex/bidir=False on b_ro also)
-                    _merge_globals_web(b_ro, _global_opts_snap)
-                    return apply_cross_side(
-                        executor,
-                        _base_snapshot,
-                        b_query,
-                        b_ro,
-                        _combine_mode_snap,
-                    )
-
-                cross_coro = run.io_bound(run_cross_side_core)
-                cross_task = asyncio.ensure_future(
-                    asyncio.wait_for(cross_coro, timeout=_SEARCH_TIMEOUT_SECONDS)
-                )
-                # Update _current_task so a cancellation also covers the cross-side leg
-                _current_task['task'] = cross_task
-
-                try:
-                    merge_result = await cross_task
-                    # Re-check stale generation after the second await
-                    if not _should_apply_results(my_gen, _search_generation):
-                        return
-                    final_candidates = list(merge_result.candidates)
-                except asyncio.TimeoutError:
-                    search_status.set_text(
-                        tr('Other-side search timed out.')
-                    )
-                    final_candidates = list(base_candidates)
-                except asyncio.CancelledError:
-                    return
-                except Exception as exc:
-                    logger.exception('Joins Lab cross-side error: %s', exc)
-                    ui.notify(
-                        tr('Could not resolve the other side of this leaf. '
-                           'Try navigating to a specific folio first.'),
-                        type='warning',
-                    )
-                    final_candidates = list(base_candidates)
-
-        # Step 9: Render final candidates
-        candidates_container.clear()
-        search_status.style('display: none;')
-        with candidates_container:
-            if final_candidates:
-                create_candidate_grid(final_candidates)
-            else:
-                ui.label(tr('No candidates found. Try different lines.')).style(
-                    'color: var(--text-secondary);'
-                )
 
     search_btn.on('click', execute_joins_search)
 
