@@ -359,6 +359,7 @@ def apply_cross_side(
     combine: str,
     anchor_pattern: Optional[str] = None,
     progress_callback=None,
+    text_position: Optional[str] = None,
 ) -> "MergeResult":
     """I/O-bound orchestrator for cross-side AND/OR membership (SC#2).
 
@@ -377,6 +378,10 @@ def apply_cross_side(
     InterruptedError the callback raises and returns early, freeing the worker
     thread). None for the desktop path, which does not supersede mid-scan.
 
+    text_position: the OTHER side's own Text Position ('start'/'end'/'line_start'/
+    'line_end'/None) — the other-side builder now has its own selector, independent
+    of the anchor side. Forwarded to the query-B execute_search.
+
     Returns MergeResult(candidates=tuple, note=str).
     """
     # 1) Run query B through the engine → b_set of (sid, page)
@@ -388,6 +393,7 @@ def apply_cross_side(
                 0,
                 progress_callback=progress_callback,
                 responsa_options=b_responsa_options,
+                text_position=text_position,
                 corpus_scope="genizah",
             )
             or []

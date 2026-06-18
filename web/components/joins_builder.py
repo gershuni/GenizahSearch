@@ -314,6 +314,21 @@ def _responsa_syntax_tooltip() -> str:
     )
 
 
+# Per-mode help for the single-line input: (placeholder_key, tooltip_key). Keys are
+# resolved via tr() at request time (WR-03). Examples use Hebrew (the search target).
+_SIMPLE_MODE_HELP = {
+    'exact':    ('Exact search — words as typed',
+                 'Matches the words exactly as written, with no spelling variants.'),
+    'variants': ('Variants search — also matches spelling variants',
+                 'Matches each word plus its common spelling variants (plene/defective, etc.).'),
+    'fuzzy':    ('Fuzzy search — approximate matches',
+                 'Finds words within 1–2 letter changes (typos, missing or swapped letters). Slower.'),
+    'regex':    ('Regular expression — e.g. אמ.*רבי',
+                 'Type a regular expression over the text. Example: '
+                 'אמ.*רבי finds אמ then רבי with anything between.'),
+}
+
+
 def create_joins_builder(
     allow_page_position: bool = True,
     on_submit=None,
@@ -785,20 +800,36 @@ def create_joins_builder(
     # resolve them at call time.
     text_pos_select = None
     single_input = None
+    single_tooltip = None
     responsa_container = None
     single_container = None
     type_btns: dict = {}
+
+    def _update_single_help() -> None:
+        """Set the single-line input's placeholder + tooltip for the current mode
+        (Exact/Variants/Fuzzy/Regex), resolved via tr() at call time."""
+        ph_key, tip_key = _SIMPLE_MODE_HELP.get(
+            search_type_state['type'], _SIMPLE_MODE_HELP['exact']
+        )
+        if single_input is not None:
+            single_input._props['placeholder'] = tr(ph_key)
+            single_input.update()
+        if single_tooltip is not None:
+            single_tooltip.text = tr(tip_key)
+            single_tooltip.update()
 
     def _apply_type_visibility() -> None:
         """Show the structured builder for Responsa-style; the single-line input
         for the simple modes. Notifies the page (on_type_change) so it can hide the
         Responsa-only options (Variants / Flexible spacing / Bidirectional) outside
-        Responsa-style."""
+        Responsa-style, and refreshes the mode-specific single-line help."""
         is_resp = (search_type_state['type'] == 'responsa')
         if responsa_container is not None:
             responsa_container.set_visibility(is_resp)
         if single_container is not None:
             single_container.set_visibility(not is_resp)
+        if not is_resp:
+            _update_single_help()
         if on_type_change is not None:
             on_type_change(search_type_state['type'])
 
@@ -883,14 +914,15 @@ def create_joins_builder(
         # jl-word-rtl) never pick it up; jl-rtl-field carries the shared RTL CSS.
         single_container = ui.column().classes('w-full')
         with single_container:
-            single_input = ui.input(
-                placeholder=tr('Type your search — behaves like the main search bar')
-            ).props(
+            # Placeholder + tooltip are mode-specific (set by _update_single_help).
+            single_input = ui.input().props(
                 'outlined dense input-style="direction: rtl; text-align: right;"'
             ).classes('w-full jl-single-rtl jl-rtl-field').style(
                 'direction: rtl;'
                 ' font-family: "Noto Sans Hebrew", "SBL Hebrew", serif; font-size: 1rem;'
             )
+            with single_input:
+                single_tooltip = ui.tooltip('')
             single_input.value = single_query_state['text']
             single_input.on(
                 'update:model-value',
@@ -898,6 +930,9 @@ def create_joins_builder(
             )
             if on_submit is not None:
                 single_input.on('keydown.enter', on_submit)
+            # Seed the initial (Exact) placeholder/tooltip so the box is never blank
+            # before the first mode switch.
+            _update_single_help()
 
         # Initial visibility (Responsa-style default)
         _apply_type_visibility()

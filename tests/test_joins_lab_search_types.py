@@ -172,6 +172,28 @@ def test_other_side_has_no_type_selector():
         assert not _type_button(root, key), f'{key} button must be absent on the other side'
 
 
+def test_single_line_placeholder_is_mode_specific():
+    handle, root = _build()
+    si = _single_input(root)[0]
+    assert _fire_click(_type_button(root, 'Fuzzy')[0])
+    assert si._props.get('placeholder') == tr('Fuzzy search — approximate matches')
+    assert _fire_click(_type_button(root, 'Regex')[0])
+    assert si._props.get('placeholder') == tr('Regular expression — e.g. אמ.*רבי')
+    assert _fire_click(_type_button(root, 'Exact')[0])
+    assert si._props.get('placeholder') == tr('Exact search — words as typed')
+
+
+def test_other_side_builder_has_text_position():
+    from nicegui import ui
+    col = ui.column()
+    with col:
+        other = create_joins_builder(allow_page_position=True, show_search_type=False)
+    selects = [el for el in _walk(col) if isinstance(el, ui.select)]
+    assert selects, 'other-side builder (allow_page_position=True) should expose Text Position'
+    selects[0].value = 'line_end'  # programmatic set fires on_value_change
+    assert other['get_text_position']() == 'line_end'
+
+
 def test_reset_from_single_line_restores_responsa():
     handle, root = _build()
     assert _fire_click(_type_button(root, 'Fuzzy')[0])

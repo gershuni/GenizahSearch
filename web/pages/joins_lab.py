@@ -598,13 +598,12 @@ def create_joins_lab_page(
                         )
                     )
 
-                # Other-side builder (allow_page_position=False — no Text Position).
-                # Built inside this `with other_side_controls:` block, so its
-                # container mounts here automatically (no manual reparenting).
-                # Other side stays Responsa-style only (no single-line modes) —
-                # show_search_type=False (D-Q1).
+                # Other-side builder: its OWN Text Position selector, independent of
+                # the anchor side (allow_page_position=True; UAT). Built inside this
+                # `with other_side_controls:` block, so its container mounts here
+                # automatically. Responsa-style only — show_search_type=False (D-Q1).
                 other_builder = create_joins_builder(
-                    allow_page_position=False,
+                    allow_page_position=True,
                     on_submit=_trigger_search,
                     show_search_type=False,
                 )
@@ -1169,6 +1168,10 @@ def create_joins_lab_page(
                     _other_sq_snap = other_side_sq   # SideQuery is immutable (frozen dataclass)
                     _base_snapshot = list(base_candidates)
                     _global_opts_snap = dict(_global_opts)
+                    # Other side's OWN Text Position (independent of the anchor side).
+                    # line_start/line_end go directly to execute_search(text_position=);
+                    # start/end live in the SideQuery's page_position (set below).
+                    _other_tp_snap = _other_side['builder']['get_text_position']()
 
                     # CI guard (tests/test_joins_lab_off_loop.py): the sync closure
                     # named EXACTLY "run_cross_side_core" MUST be the first positional
@@ -1177,10 +1180,17 @@ def create_joins_lab_page(
                     # Per the plan, compose + _merge_globals_web both run INSIDE this
                     # closure so the full b_ro lifecycle is off the event loop.
                     def run_cross_side_core():
-                        b_query, b_ro, _ = compose(_other_sq_snap)
+                        b_query, b_ro, b_page_position = compose(_other_sq_snap)
                         # BLD-04: re-inject flex_spacing + bidirectional into b_ro
                         # (Pitfall 2 — compose() hardcodes flex/bidir=False on b_ro also)
                         _merge_globals_web(b_ro, _global_opts_snap)
+                        # Other-side Text Position: line_start/line_end go direct;
+                        # start/end come from compose()'s page_position.
+                        b_text_position = (
+                            _other_tp_snap
+                            if _other_tp_snap in ('line_start', 'line_end')
+                            else b_page_position
+                        )
                         return apply_cross_side(
                             executor,
                             _base_snapshot,
@@ -1190,6 +1200,7 @@ def create_joins_lab_page(
                             # CR HIGH-3: make the query-B scan cooperatively
                             # cancellable when a newer search supersedes this run.
                             progress_callback=_make_progress_cb(my_gen, _search_generation),
+                            text_position=b_text_position,
                         )
 
                     cross_coro = run.io_bound(run_cross_side_core)

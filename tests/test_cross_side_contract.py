@@ -106,3 +106,10 @@ def test_progress_callback_forwarded_to_execute_search():
     apply_cross_side(ex, [], "q", {}, "AND", progress_callback=sentinel)
     assert ex.exec_kwargs is not None
     assert ex.exec_kwargs.get("progress_callback") is sentinel
+
+
+def test_other_side_text_position_forwarded():
+    # The other side now has its OWN Text Position; apply_cross_side forwards it.
+    ex = _FakeExec([])
+    apply_cross_side(ex, [], "q", {}, "AND", text_position="line_start")
+    assert ex.exec_kwargs.get("text_position") == "line_start"
