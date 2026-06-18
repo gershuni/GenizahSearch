@@ -593,7 +593,7 @@ def create_joins_builder(
             )
             term_input.tooltip(tr(
                 'Type words to match on this line. Space = a sequence of words; '
-                'a/b = alternatives. Click the gear icon on a word for options '
+                '(a/b) = alternatives. Click the gear icon on a word for options '
                 '(prefix, plene/defective, wildcard, negation).'
             ))
             term_input.value = word.get('term', '')

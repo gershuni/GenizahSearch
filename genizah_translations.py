@@ -2496,9 +2496,9 @@ TRANSLATIONS = {
         "הקלידו את החיפוש — מתנהג כמו שורת החיפוש הראשית",
     "Search in Responsa syntax": "חיפוש בתחביר השו״ת",
     "Type words to match on this line. Space = a sequence of words; "
-    "a/b = alternatives. Click the gear icon on a word for options "
+    "(a/b) = alternatives. Click the gear icon on a word for options "
     "(prefix, plene/defective, wildcard, negation).":
-        "הקלידו מילים להתאמה בשורה זו. רווח = רצף מילים; א/ב = חלופות. "
+        "הקלידו מילים להתאמה בשורה זו. רווח = רצף מילים; (א/ב) = חלופות. "
         "לחצו על סמל גלגל השיניים שליד מילה לאפשרויות "
         "(קידומת, מלא/חסר, תו כללי, שלילה).",
     "with variants": "עם וריאנטים",
