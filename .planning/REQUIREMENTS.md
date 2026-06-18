@@ -16,8 +16,8 @@ Requirements for this milestone. Each maps to a roadmap phase.
 - [x] **FND-01**: A web `SearchExecutor` adapter implements the `shared/joins_lab.py` Protocol (`execute_search` / `get_browse_page` / `get_meta_for_id` / `get_library_for_id`) by wrapping the web search engine **directly** (`state.searcher.execute_search` — NOT `/api/search`, which omits `text_position`/`corpus_scope` and caps modes). Search runs **off the event loop** (`run.io_bound`-style, as `web/pages/search.py` does) with timeout, cancellation, and stale-generation (latest-wins) handling — the NiceGUI event loop is never blocked. No search logic re-implemented.
 - [x] **FND-02**: User can open the Joins Lab at a dedicated `/joins-lab` web route.
 - [x] **FND-03**: User can cold-start the Joins Lab by entering a shelfmark or sys_id (no prior search required).
-- [ ] **FND-04**: User can launch the Joins Lab on a specific fragment via a "Find joins" action on `/search` result cards.
-- [ ] **FND-05**: User can launch the Joins Lab on a specific fragment via a "Find joins" action on `/browse`.
+- [x] **FND-04**: User can launch the Joins Lab on a specific fragment via a "Find joins" action on `/search` result cards.
+- [x] **FND-05**: User can launch the Joins Lab on a specific fragment via a "Find joins" action on `/browse`.
 - [x] **FND-06**: The Joins Lab works without login (no auth wall); every per-user state access goes through `web/safe_storage.py` (zero raw `app.storage.user`, preserving the Phase 87 CI-guarded invariant — `tests/test_no_raw_storage_access.py`, allowlist `[]`).
 - [ ] **FND-07**: The entire Joins Lab UI is bilingual (EN/HE) with correct RTL layout, consistent with the rest of the web app.
 - [x] **FND-08**: The entry/deep-link URL contract is explicit — anchor identified by `sys_id` (with shelfmark / `fl_id` / page / `volume_ie` where relevant) so `/search`, `/browse`, and cold-start all resolve the same anchor (incl. multi-IE volumes). The deep link carries the anchor (and optional initial VS mode) only; builder/candidate/triage state is device-local, NOT encoded in shareable URLs.
@@ -108,8 +108,8 @@ Which phases cover which requirements. Populated during roadmap creation.
 | FND-01 | Phase 117 | Complete |
 | FND-02 | Phase 117 | Complete |
 | FND-03 | Phase 117 | Complete |
-| FND-04 | Phase 118 | Pending |
-| FND-05 | Phase 118 | Pending |
+| FND-04 | Phase 118 | Complete |
+| FND-05 | Phase 118 | Complete |
 | FND-06 | Phase 117 | Complete |
 | FND-07 | Phase 121 | Pending |
 | FND-08 | Phase 117 | Complete |

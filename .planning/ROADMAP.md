@@ -66,7 +66,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 ## Summary Checklist
 
 - [x] **Phase 117: Vertical Spine** - `/joins-lab` route + safe_storage schema + `WebSearchExecutor` adapter (off-loop) + anchor image/transcription + minimal anchor-side builder + search → candidate grid. Proves the riskiest seam (FND-01 adapter) end-to-end. **COMPLETE 2026-06-17**
-- [ ] **Phase 118: Joins, Entry & Full Builders** - Known-joins group (PGP + FJMS + user + community, multitenant-safe) + "Find joins" from `/search` and `/browse` + other-side builder with web page contract + per-line modifiers + global toggles (variants/JA/spacing/bidirectional) applied correctly.
+- [x] **Phase 118: Joins, Entry & Full Builders** - Known-joins group (PGP + FJMS + user + community, multitenant-safe) + "Find joins" from `/search` and `/browse` + other-side builder with web page contract + per-line modifiers + global toggles (variants/JA/spacing/bidirectional) applied correctly. (completed 2026-06-18)
 - [ ] **Phase 119: Candidates, Compare & Visual Similarity** - Full candidate surface (grid+table, sys_id-keyed triage, self-match, filters, pagination, off-loop enrichment) + side-by-side Compare (per-pane zoom/nav, verdict sync) + VS toggle (merge look-alikes, eye badge everywhere).
 - [ ] **Phase 120: Actions & Persistence** - Add-as-Join (login-gated) + bulk puzzle handoff + add-to-list / export + builder/triage/view state survive refresh (server-side per-session, re-run on restore) + clear/reset.
 - [ ] **Phase 121: i18n Polish** - Complete bilingual EN/HE coverage + RTL layout verification + Hebrew-leak audit across all surfaces.
@@ -117,7 +117,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 - [x] 118-02-PLAN.md — ANC-04/ANC-05: confirmed-only isolated-cache join path + source-badged known-joins group component [Wave 1]
 - [x] 118-03-PLAN.md — BLD-03: line-builder widget (per-row modifiers + gap + prominent Text Position + Exact/Variants/Fuzzy) [Wave 1]
 - [x] 118-04-PLAN.md — Integration: `_merge_globals_web` (BLD-04) + other-side cross-side (BLD-02) + known-joins wiring (ANC-04) into `/joins-lab` [Wave 2]
-- [ ] 118-05-PLAN.md — FND-04/FND-05: "Find joins" entry from `/search` cards + Quick View + `/browse` (new-tab deep link) [Wave 2]
+- [x] 118-05-PLAN.md — FND-04/FND-05: "Find joins" entry from `/search` cards + Quick View + `/browse` (new-tab deep link) [Wave 2]
 
 **UI hint**: yes
 
@@ -173,7 +173,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 117. Vertical Spine | 6/6 | Complete    | 2026-06-18 |
-| 118. Joins, Entry & Full Builders | 4/5 | In Progress|  |
+| 118. Joins, Entry & Full Builders | 5/5 | Complete   | 2026-06-18 |
 | 119. Candidates, Compare & Visual Similarity | 0/TBD | Not started | - |
 | 120. Actions & Persistence | 0/TBD | Not started | - |
 | 121. i18n Polish | 0/TBD | Not started | - |

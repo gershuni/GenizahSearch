@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.2.0
 milestone_name: Web Joins Lab
-status: executing
-stopped_at: Phase 118 UI-SPEC approved
-last_updated: "2026-06-18T08:00:45.500Z"
+status: verifying
+stopped_at: Completed 118-05-PLAN.md
+last_updated: "2026-06-18T08:08:39.924Z"
 last_activity: 2026-06-18
 progress:
   total_phases: 5
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 11
-  completed_plans: 10
-  percent: 20
+  completed_plans: 11
+  percent: 40
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md
 
 Phase: 118 (joins-entry-full-builders) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-18
 
 ## Accumulated Context
@@ -85,8 +85,8 @@ Items carried forward from v8.1.0:
 
 ## Session Continuity
 
-Last session: 2026-06-18T08:00:45.493Z
-Stopped at: Phase 118 UI-SPEC approved
+Last session: 2026-06-18T08:08:39.918Z
+Stopped at: Completed 118-05-PLAN.md
 Resume file: None
 Next step: `/gsd:plan-phase 117` (Vertical Spine)
 
@@ -120,6 +120,7 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 - **117-04:** D-06 login gate: logged-in path shows placeholder dialog pointing to /lists (full list picker is Phase 120 scope); anonymous path shows explicit login prompt
 - [Phase ?]: BLD-03 modifier hoist desktop parity
 - [Phase ?]: BLD-03 widget factory pattern
+- [Phase ?]: 118-05: find_joins_url appended as last kwarg to both create_joins_button and create_joins_dialog — backward-compatible; card count load via run.io_bound (T-118-06)
 
 ## Operator Next Steps
 
