@@ -8,7 +8,7 @@ Uses the simplified pairwise joins model with connected components.
 
 import asyncio
 import logging
-from nicegui import ui
+from nicegui import run, ui
 from web.translations import tr, is_rtl
 from web.feature_flags import WEB_PUZZLE_ENABLED
 from web.auth_state import GlobalAuthState
@@ -453,9 +453,16 @@ def create_joins_button(
     join_count = {'value': 0}
     button_ref = {'btn': None}
 
-    def load_count():
+    async def load_count():
         """Load the count of connected fragments."""
-        data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id, pgpid=pgpid)
+        # Off-loop Supabase read — a synchronous call here runs on the event loop
+        # via call_later and, on an expired JWT / slow network, can stall the loop
+        # exactly when the user clicks the button (so the dialog's open() never
+        # flushes). run.io_bound keeps the loop responsive.
+        data = await run.io_bound(
+            fetch_connected_fragments,
+            shelfmark=shelfmark, document_id=document_id, pgpid=pgpid,
+        )
         join_count['value'] = data.get('total_fragments', 1)
         total = join_count['value']
         if button_ref['btn']:
@@ -498,13 +505,15 @@ def create_joins_button(
     _btn_client = ui.context.client
 
     def _safe_load_count():
-        try:
-            with _btn_client:
-                load_count()
-        except RuntimeError:
-            pass  # Parent element was deleted / client torn down (NiceGUI lifecycle)
-        except Exception:
-            pass  # joins-count hint is best-effort
+        async def _runner():
+            try:
+                with _btn_client:
+                    await load_count()
+            except RuntimeError:
+                pass  # Parent element deleted / client torn down (NiceGUI lifecycle)
+            except Exception:
+                pass  # joins-count hint is best-effort
+        asyncio.ensure_future(_runner())
 
     # Use call_later instead of ui.timer to avoid parent_slot RuntimeError
     # when content_container.clear() destroys the timer's parent element
@@ -552,9 +561,16 @@ def create_joins_dialog(
         # Loading state - use dict to track if deleted
         spinner_state = {'spinner': ui.spinner(size='lg').classes('mx-auto my-8'), 'deleted': False}
 
-        def load_content():
+        async def load_content():
             """Load and display connected fragments."""
-            data = fetch_connected_fragments(shelfmark=shelfmark, document_id=document_id, pgpid=pgpid)
+            # Off-loop: a synchronous Supabase call here (esp. on an expired JWT
+            # or slow network) blocks the event loop right after dialog.open(),
+            # which can stop the open() update from ever reaching the browser —
+            # i.e. "the dialog never appears". run.io_bound keeps the loop free.
+            data = await run.io_bound(
+                fetch_connected_fragments,
+                shelfmark=shelfmark, document_id=document_id, pgpid=pgpid,
+            )
 
             # Delete spinner only if it exists and hasn't been deleted
             if not spinner_state['deleted']:
