@@ -901,3 +901,185 @@ class TestHighlightPattern:
         # And converts \n to <br>
         result_nl = htmlify("a\nb", None)
         assert "<br>" in result_nl, "htmlify should still convert \\n to <br>"
+
+
+# ─── Plan 119-11: R2-3 / R2-6 — suppress_shelfmark_header + image_max_height ─
+
+
+class TestSuppressShelfmarkHeader:
+    """R2-6: AnchorViewer.suppress_shelfmark_header kwarg (Plan 119-11).
+
+    When True: no inner shelfmark/meta header built; _shelfmark_label/_meta_label stay None.
+    When False (default): header is built and update_content sets shelfmark text as before.
+    """
+
+    def _make_viewer_suppress(self, suppress: bool = False, sys_id: str = "990025143260205171"):
+        """Construct an AnchorViewer with NiceGUI mocked, with the given suppress flag."""
+        from unittest.mock import MagicMock, patch
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark", "set_text"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        with (
+            patch("web.components.anchor_viewer.ui") as mock_ui,
+            patch("web.components.anchor_viewer.run"),
+        ):
+            for attr in (
+                "column", "row", "element", "html", "button", "icon",
+                "label", "tooltip", "add_head_html", "run_javascript",
+            ):
+                factory = MagicMock(return_value=mock_element)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+            from web.components.anchor_viewer import AnchorViewer
+            viewer = AnchorViewer(
+                sys_id=sys_id,
+                browse_resolver=lambda *a, **kw: None,
+                external_resolver=lambda *a, **kw: {},
+                suppress_shelfmark_header=suppress,
+            )
+        return viewer
+
+    def test_suppress_true_shelfmark_label_is_none(self):
+        """R2-6: when suppress_shelfmark_header=True, _shelfmark_label is None (no header built)."""
+        viewer = self._make_viewer_suppress(suppress=True)
+        assert viewer._shelfmark_label is None, (
+            "R2-6: suppress_shelfmark_header=True must leave _shelfmark_label as None"
+        )
+
+    def test_suppress_true_meta_label_is_none(self):
+        """R2-6: when suppress_shelfmark_header=True, _meta_label is None."""
+        viewer = self._make_viewer_suppress(suppress=True)
+        assert viewer._meta_label is None, (
+            "R2-6: suppress_shelfmark_header=True must leave _meta_label as None"
+        )
+
+    def test_suppress_true_info_header_is_none(self):
+        """R2-6: when suppress_shelfmark_header=True, _info_header is None (no column built)."""
+        viewer = self._make_viewer_suppress(suppress=True)
+        assert viewer._info_header is None, (
+            "R2-6: suppress_shelfmark_header=True must leave _info_header as None"
+        )
+
+    def test_suppress_false_shelfmark_label_is_not_none(self):
+        """R2-6: default (suppress=False): _shelfmark_label is built (non-Compare callers unchanged)."""
+        viewer = self._make_viewer_suppress(suppress=False)
+        assert viewer._shelfmark_label is not None, (
+            "R2-6 regression: suppress_shelfmark_header=False (default) must still build "
+            "_shelfmark_label for the main Joins-Lab anchor pane (non-Compare callers unchanged)"
+        )
+
+    def test_suppress_false_meta_label_is_not_none(self):
+        """R2-6: default (suppress=False): _meta_label is built."""
+        viewer = self._make_viewer_suppress(suppress=False)
+        assert viewer._meta_label is not None, (
+            "R2-6 regression: default AnchorViewer must still build _meta_label"
+        )
+
+    def test_update_content_does_not_raise_when_suppressed(self):
+        """R2-6: update_content must not raise AttributeError when _shelfmark_label is None."""
+        import asyncio
+        from unittest.mock import MagicMock, patch
+
+        page = _make_page(shelfmark="T-S 12.555", library_name="CUL", title="Test")
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        async def _fake_io_bound(fn, *a, **k):
+            return fn()
+
+        ctx = patch("web.components.anchor_viewer.ui")
+        rctx = patch("web.components.anchor_viewer.run")
+        mock_ui = ctx.start()
+        mock_run = rctx.start()
+        mock_run.io_bound = _fake_io_bound
+
+        for attr in (
+            "column", "row", "element", "html", "button", "icon",
+            "label", "tooltip", "add_head_html", "run_javascript", "notify",
+        ):
+            factory = MagicMock(return_value=mock_element)
+            factory.__enter__ = lambda s: s
+            factory.__exit__ = MagicMock(return_value=False)
+            setattr(mock_ui, attr, factory)
+
+        try:
+            from web.components.anchor_viewer import AnchorViewer
+            viewer = AnchorViewer(
+                sys_id="990025143260205171",
+                browse_resolver=lambda *a, **kw: page,
+                external_resolver=lambda *a, **kw: {},
+                suppress_shelfmark_header=True,
+            )
+            # With suppress=True, _shelfmark_label and _meta_label are None.
+            # update_content must guard them with `is not None` — must NOT raise.
+            viewer._transcription_html = MagicMock()
+            viewer._prev_btn = MagicMock()
+            viewer._next_btn = MagicMock()
+            viewer._page_label = MagicMock()
+            # _shelfmark_label and _meta_label intentionally remain None (from __init__)
+            asyncio.run(viewer.update_content(p_num=1))
+            # Reached here → no AttributeError raised
+        finally:
+            ctx.stop()
+            rctx.stop()
+
+    def test_anchor_viewer_accepts_image_max_height_kwarg(self):
+        """R2-3: AnchorViewer accepts an image_max_height kwarg and stores it."""
+        viewer = self._make_viewer_suppress(suppress=False)
+        # Default is None
+        assert viewer._image_max_height is None, (
+            "R2-3: default AnchorViewer must have _image_max_height=None (72vh from CSS unchanged)"
+        )
+
+        # Re-build with explicit height
+        from unittest.mock import MagicMock, patch
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        with (
+            patch("web.components.anchor_viewer.ui") as mock_ui,
+            patch("web.components.anchor_viewer.run"),
+        ):
+            for attr in (
+                "column", "row", "element", "html", "button", "icon",
+                "label", "tooltip", "add_head_html", "run_javascript",
+            ):
+                factory = MagicMock(return_value=mock_element)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+            from web.components.anchor_viewer import AnchorViewer
+            v2 = AnchorViewer(
+                sys_id="990025143260205171",
+                browse_resolver=lambda *a, **kw: None,
+                external_resolver=lambda *a, **kw: {},
+                image_max_height="40vh",
+            )
+        assert v2._image_max_height == "40vh", (
+            "R2-3: AnchorViewer must store the image_max_height kwarg value"
+        )
+
+    def test_source_image_container_style_applied_when_height_set(self):
+        """R2-3: source must apply image_max_height as an inline style on the image container."""
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        assert "image_max_height" in source, (
+            "R2-3: anchor_viewer.py must implement the image_max_height kwarg"
+        )
+        # The implementation must apply max-height via .style() or inline CSS
+        assert "max-height" in source, (
+            "R2-3: anchor_viewer.py must apply max-height inline style when image_max_height is set"
+        )

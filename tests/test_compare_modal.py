@@ -403,6 +403,273 @@ def test_compare_modal_imports_headlessly():
 
 
 # ---------------------------------------------------------------------------
+# Plan 119-11: R2-2 / R2-3 / R2-4 / R2-5 / R2-6 / R2-7 source assertions
+# ---------------------------------------------------------------------------
+
+class TestPlan11R2Features:
+    """Source integrity checks for the Plan 119-11 R2 gap-closure features."""
+
+    def test_r2_2_counter_label_has_direction_ltr(self):
+        """R2-2: the flip-through counter label must include direction:ltr to prevent bidi flip."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "direction:ltr" in source, (
+            "R2-2: compare_modal.py must set direction:ltr on the counter label "
+            "so '5 / 118' is not bidi-flipped to '118 / 5' under the Hebrew RTL UI"
+        )
+
+    def test_r2_2_counter_label_has_unicode_bidi_isolate(self):
+        """R2-2: the counter label must also carry unicode-bidi:isolate for full bidi isolation."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "unicode-bidi:isolate" in source, (
+            "R2-2: compare_modal.py counter label must include unicode-bidi:isolate "
+            "(in addition to direction:ltr) for full bidi isolation"
+        )
+
+    def test_r2_2_no_hardcoded_ltr_chevron_icons_on_nav_buttons(self):
+        """R2-2: Prev/Next nav buttons must NOT carry a hardcoded LTR icon= contradicting the RTL label."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        # The banned pattern: icon="chevron_left" or icon="chevron_right" on the nav buttons.
+        # These are hardcoded LTR icons that contradict the RTL label direction.
+        assert 'icon="chevron_left"' not in source, (
+            "R2-2: compare_modal.py must NOT use icon=\"chevron_left\" on nav buttons — "
+            "the labelled chevron in tr('‹ Prev')/tr('Next ›') handles direction"
+        )
+        assert 'icon="chevron_right"' not in source, (
+            "R2-2: compare_modal.py must NOT use icon=\"chevron_right\" on nav buttons — "
+            "use the labelled chevron only (R2-2 Codex P119-R2-2-1)"
+        )
+
+    def test_r2_2_no_flex_direction_row_reverse_on_next(self):
+        """R2-2: the Next button must NOT use flex-direction:row-reverse (the old RTL workaround)."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "flex-direction:row-reverse" not in source, (
+            "R2-2: compare_modal.py must not use flex-direction:row-reverse — "
+            "the RTL-correct label from 119-09 (‹ הבא) handles direction natively"
+        )
+
+    def test_r2_4_compare_imports_triage_icons(self):
+        """R2-4: compare_modal.py must import TRIAGE_ICONS from shared.joins_lab."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "TRIAGE_ICONS" in source, (
+            "R2-4: compare_modal.py must import and use TRIAGE_ICONS from shared.joins_lab"
+        )
+
+    def test_r2_4_verdict_buttons_use_glyphs_not_text(self):
+        """R2-4: verdict buttons must render the glyph (✓/?/✗), not Yes/Maybe/No text."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        # The glyphs must be in the source via TRIAGE_ICONS["glyph"] reference
+        assert 'TRIAGE_ICONS[_v]["glyph"]' in source or 'TRIAGE_ICONS[verdict]["glyph"]' in source, (
+            "R2-4: compare_modal.py verdict buttons must use TRIAGE_ICONS[v][\"glyph\"] "
+            "to render ✓/?/✗ (desktop parity)"
+        )
+
+    def test_r2_4_verdict_buttons_have_tooltips(self):
+        """R2-4: verdict buttons must carry tooltips via TRIAGE_ICONS tooltip key."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert 'TRIAGE_ICONS[_v]["tooltip"]' in source or 'TRIAGE_ICONS[verdict]["tooltip"]' in source, (
+            "R2-4: Compare verdict buttons must carry .tooltip(tr(TRIAGE_ICONS[v]['tooltip'])) "
+            "for Mark yes/maybe/no tooltips"
+        )
+
+    def test_r2_5_pane_border_refresh_function_exists(self):
+        """R2-5: _refresh_pane_border helper must exist and be called from _refresh_verdict_buttons."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "_refresh_pane_border" in source, (
+            "R2-5: compare_modal.py must define _refresh_pane_border to update the "
+            "candidate pane border on verdict (mirrors grid card _make_restyle_fn)"
+        )
+
+    def test_r2_5_cand_pane_mark_for_render_smoke(self):
+        """R2-5: the candidate pane column must be marked 'compare-candidate-pane' for render-smoke."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "compare-candidate-pane" in source, (
+            "R2-5: the candidate pane column must carry .mark('compare-candidate-pane') "
+            "so render-smoke can locate it for the verdict-border assertion"
+        )
+
+    def test_r2_6_anchor_viewer_suppress_kwarg_passed_to_both_panes(self):
+        """R2-6: both pane AnchorViewers must be constructed with suppress_shelfmark_header=True."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        count = source.count("suppress_shelfmark_header=True")
+        assert count >= 2, (
+            f"R2-6: expected at least 2 occurrences of suppress_shelfmark_header=True "
+            f"(one per pane) but found {count}. Both anchor and candidate panes must "
+            "suppress the inner AnchorViewer shelfmark header."
+        )
+
+    def test_r2_6_image_max_height_passed_to_both_panes(self):
+        """R2-3: both pane AnchorViewers must be constructed with image_max_height set."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        count = source.count("image_max_height=")
+        assert count >= 2, (
+            f"R2-3: expected at least 2 occurrences of image_max_height= "
+            f"(one per pane) but found {count}. Both panes must cap the image height."
+        )
+
+    def test_r2_7_esc_handler_defined(self):
+        """R2-7: compare_modal.py must define an Escape-key handler that closes the dialog."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "_on_escape" in source, (
+            "R2-7: compare_modal.py must define an _on_escape key handler for Esc-to-close"
+        )
+        assert "ui.keyboard" in source, (
+            "R2-7: compare_modal.py must use ui.keyboard(on_key=...) for the Esc handler"
+        )
+
+    def test_r2_7_esc_handler_guards_dialog_value(self):
+        """R2-7: the Escape handler must guard dialog.value to avoid firing on hidden modals."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        # The guard checks dialog.value (or getattr(dialog, 'value', False))
+        assert "dialog" in source and "value" in source, (
+            "R2-7: Esc handler must guard with dialog.value check (Codex P119-R2-7-1)"
+        )
+
+    def test_r2_7_esc_handler_noop_when_dialog_closed(self):
+        """R2-7 BEHAVIORAL: invoking _on_escape on a closed dialog does NOT call _handle_close."""
+        from unittest.mock import MagicMock, patch
+
+        anchor = _Cand(sys_id="ANCHOR01", page=1, shelfmark="T-S Anchor")
+        cand = _Cand(sys_id="CAND01", page=2, shelfmark="T-S Cand")
+        triage: dict = {}
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark", "tooltip", "on"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        dialog_obj = None
+        close_calls: list = []
+
+        def _make_dialog():
+            d = MagicMock()
+            d.__enter__ = lambda s: s
+            d.__exit__ = MagicMock(return_value=False)
+            d.props = MagicMock(return_value=d)
+            d.on = MagicMock(return_value=d)
+            d.value = False  # dialog is CLOSED
+            d.close = MagicMock(side_effect=lambda: close_calls.append("close"))
+            return d
+
+        with (
+            patch("web.components.compare_modal.ui") as mock_ui,
+            patch("web.components.compare_modal.AnchorViewer"),
+        ):
+            mock_ui.dialog.side_effect = _make_dialog
+            mock_ui.keyboard = MagicMock(return_value=mock_element)
+            for attr in ("card", "row", "column", "label", "button", "icon", "badge"):
+                factory = MagicMock(return_value=mock_element)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+
+            from web.components.compare_modal import create_compare_modal
+            dialog = create_compare_modal(
+                anchor_cand=anchor,
+                initial_candidate=cand,
+                filtered_candidates=[cand],
+                triage=triage,
+                on_verdict=lambda sid, v: None,
+            )
+
+        # Simulate an Escape keydown on the CLOSED dialog
+        on_escape = getattr(dialog, "_on_escape", None)
+        assert on_escape is not None, "dialog._on_escape test seam not set"
+
+        # Build a synthetic Escape keydown event
+        from types import SimpleNamespace
+        escape_event = SimpleNamespace(
+            action=SimpleNamespace(keydown=True),
+            key=SimpleNamespace(name="Escape"),
+        )
+
+        # dialog.value is False (closed) → handler must be a no-op
+        on_escape(escape_event)
+
+        # _handle_close calls dialog.close() — must NOT have been called
+        assert not close_calls, (
+            "R2-7: _on_escape must be a no-op when dialog.value is False "
+            f"(stale hidden-dialog keyboard guard, Codex P119-R2-7-1). close() was called {len(close_calls)} times"
+        )
+
+    def test_r2_7_esc_handler_closes_when_dialog_open(self):
+        """R2-7 BEHAVIORAL: invoking _on_escape on an OPEN dialog calls _handle_close (dialog.close)."""
+        from unittest.mock import MagicMock, patch
+
+        anchor = _Cand(sys_id="ANCHOR01", page=1, shelfmark="T-S Anchor")
+        cand = _Cand(sys_id="CAND01", page=2, shelfmark="T-S Cand")
+        triage: dict = {}
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark", "tooltip", "on"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        close_calls: list = []
+
+        def _make_dialog():
+            d = MagicMock()
+            d.__enter__ = lambda s: s
+            d.__exit__ = MagicMock(return_value=False)
+            d.props = MagicMock(return_value=d)
+            d.on = MagicMock(return_value=d)
+            d.value = True  # dialog is OPEN
+            d.close = MagicMock(side_effect=lambda: close_calls.append("close"))
+            return d
+
+        with (
+            patch("web.components.compare_modal.ui") as mock_ui,
+            patch("web.components.compare_modal.AnchorViewer"),
+        ):
+            mock_ui.dialog.side_effect = _make_dialog
+            mock_ui.keyboard = MagicMock(return_value=mock_element)
+            for attr in ("card", "row", "column", "label", "button", "icon", "badge"):
+                factory = MagicMock(return_value=mock_element)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+
+            from web.components.compare_modal import create_compare_modal
+            dialog = create_compare_modal(
+                anchor_cand=anchor,
+                initial_candidate=cand,
+                filtered_candidates=[cand],
+                triage=triage,
+                on_verdict=lambda sid, v: None,
+            )
+
+        on_escape = getattr(dialog, "_on_escape", None)
+        assert on_escape is not None, "dialog._on_escape test seam not set"
+
+        from types import SimpleNamespace
+        escape_event = SimpleNamespace(
+            action=SimpleNamespace(keydown=True),
+            key=SimpleNamespace(name="Escape"),
+        )
+
+        # dialog.value is True (open) → handler must call dialog.close()
+        on_escape(escape_event)
+
+        assert close_calls, (
+            "R2-7: _on_escape must call dialog.close() when dialog.value is True (open)"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Task 2 (Plan 119-06): G5 — show-loader behavioral tests
 # ---------------------------------------------------------------------------
 

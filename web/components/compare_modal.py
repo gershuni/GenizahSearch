@@ -36,7 +36,7 @@ from typing import Optional, Callable
 
 from nicegui import ui
 
-from shared.joins_lab import Candidate, badge_and_tooltip
+from shared.joins_lab import Candidate, TRIAGE_ICONS, badge_and_tooltip
 from web.components.anchor_viewer import AnchorViewer
 from web.components.candidate_grid import is_size_mismatch
 from web.translations import tr
@@ -258,6 +258,7 @@ def create_compare_modal(
     _cand_shelfmark_ref: list = []     # [label_element]
     _cand_badge_row_ref: list = []     # [row_element]
     _cand_viewer_container_ref: list = []  # [column_element]
+    _cand_pane_ref: list = []          # [column_element] — R2-5 verdict border
     _prev_btn_ref: list = []           # [button_element]
     _next_btn_ref: list = []           # [button_element]
 
@@ -313,6 +314,7 @@ def create_compare_modal(
         is persisted in triage and visible when the user navigates back.
 
         Render-local — _verdict_btn_refs is a factory-scoped dict (no module globals).
+        Also updates the candidate pane border (R2-5).
         """
         if not _verdict_btn_refs:
             return
@@ -329,6 +331,25 @@ def create_compare_modal(
             else:
                 # Inactive: outline style
                 btn.props(f"outline color={_triage_colors[v]}")
+
+        # R2-5: update candidate pane border to reflect verdict state
+        _refresh_pane_border(active_verdict)
+
+    def _refresh_pane_border(active_verdict: Optional[str]) -> None:
+        """Update the candidate pane border to reflect the current verdict (R2-5).
+
+        When a verdict exists: 2px solid {TRIAGE_ICONS[verdict]["color"]} (green/amber/red).
+        When no verdict: 1px solid var(--border-light) — neutral.
+        Mirrors the grid card _make_restyle_fn border formula (candidate_grid.py).
+        """
+        if not _cand_pane_ref:
+            return
+        pane = _cand_pane_ref[0]
+        if active_verdict and active_verdict in TRIAGE_ICONS:
+            color = TRIAGE_ICONS[active_verdict]["color"]
+            pane.style(f"border: 2px solid {color};")
+        else:
+            pane.style("border: 1px solid var(--border-light);")
 
     def _fill_candidate(cand: Candidate) -> None:
         """Populate the candidate pane with cand (parity _fill_candidate:4086).
@@ -368,6 +389,8 @@ def create_compare_modal(
 
         # Fresh AnchorViewer for candidate pane — independent from anchor pane (Pitfall 3).
         # Store it in _cand_viewer_ref so _load_candidate_pane can await update_content.
+        # R2-6: suppress_shelfmark_header=True — Compare's green subtitle is the only shelfmark.
+        # R2-3: image_max_height="40vh" — caps image so transcription is also visible.
         if _cand_viewer_container_ref:
             container = _cand_viewer_container_ref[0]
             container.clear()
@@ -377,6 +400,8 @@ def create_compare_modal(
                     p_num=cand.page,
                     volume_ie=getattr(cand, "volume_ie", None),
                     highlight_pattern=getattr(cand, "highlight_pattern", None),
+                    suppress_shelfmark_header=True,
+                    image_max_height="40vh",
                 )
             # Replace the stored viewer ref
             if _cand_viewer_ref:
@@ -390,6 +415,7 @@ def create_compare_modal(
         _cand_load_gen["n"] += 1
 
         # Refresh verdict buttons for the newly shown candidate (G3-compare).
+        # This also updates the candidate pane border (R2-5).
         _refresh_verdict_buttons(cand)
 
     async def _load_candidate_pane() -> None:
@@ -463,8 +489,10 @@ def create_compare_modal(
                 "background: var(--bg-header); color: white; flex-shrink:0;"
             ):
                 ui.label(tr("Compare")).classes("text-lg font-semibold")
+                # R2-2: force LTR + bidi-isolate so "5 / 118" is not flipped to
+                # "118 / 5" by the Hebrew RTL UI direction.
                 counter_label = ui.label("").classes("text-sm").style(
-                    "color:rgba(255,255,255,0.8);"
+                    "color:rgba(255,255,255,0.8); direction:ltr; unicode-bidi:isolate;"
                 )
                 _counter_label_ref.append(counter_label)
                 ui.button(icon="close", on_click=_handle_close).props(
@@ -489,16 +517,25 @@ def create_compare_modal(
 
                     # Fresh AnchorViewer for anchor pane — NOT the sticky-page viewer (Pitfall 3).
                     # Stored in _anchor_viewer_ref so the show-loader can await update_content.
+                    # R2-6: suppress_shelfmark_header=True — green subtitle is the only shelfmark.
+                    # R2-3: image_max_height="40vh" — caps image so transcription stays visible.
                     anchor_viewer = AnchorViewer(
                         sys_id=anchor_cand.sys_id,
                         p_num=anchor_cand.page,
                         volume_ie=getattr(anchor_cand, "volume_ie", None),
                         highlight_pattern=getattr(anchor_cand, "highlight_pattern", None),
+                        suppress_shelfmark_header=True,
+                        image_max_height="40vh",
                     )
                     _anchor_viewer_ref.append(anchor_viewer)
 
                 # ── Candidate pane (right) ────────────────────────────────────
-                with ui.column().classes("flex-1 gap-4 p-4 overflow-y-auto"):
+                # R2-5: capture ref for verdict-border updates; mark for render-smoke.
+                cand_pane_col = ui.column().classes("flex-1 gap-4 p-4 overflow-y-auto").mark(
+                    "compare-candidate-pane"
+                ).style("border: 1px solid var(--border-light);")
+                _cand_pane_ref.append(cand_pane_col)
+                with cand_pane_col:
                     ui.label(tr("Candidate")).classes(
                         "text-xs font-bold uppercase"
                     ).style("color: var(--text-muted);")
@@ -520,19 +557,23 @@ def create_compare_modal(
             ).style(
                 "background: var(--bg-tertiary); position:sticky; bottom:0; flex-shrink:0;"
             ):
+                # R2-2: nav buttons — label carries the RTL-correct chevron (from 119-09
+                # HE translations: "‹ Prev"→"הקודם ›", "Next ›"→"‹ הבא").  No fixed
+                # icon= so there is no contradicting LTR chevron-icon under RTL.
                 prev_btn = ui.button(
-                    tr("‹ Prev"), icon="chevron_left"
+                    tr("‹ Prev")
                 ).props("flat dense").on("click", lambda: _step(-1))
                 _prev_btn_ref.append(prev_btn)
 
-                # Verdict buttons — visible text labels with triage colors (D-03 UI-SPEC).
+                # R2-4: Verdict buttons — ✓/?/✗ glyph buttons (desktop parity).
                 # Refs captured into _verdict_btn_refs so _refresh_verdict_buttons can
                 # toggle active/inactive state on each candidate change (G3-compare).
+                # PRESERVE active(unelevated)/inactive(outline) toggle logic (G3-compare).
                 with ui.row().classes("gap-2 items-center"):
-                    for verdict, label, q_color in [
-                        ("yes", tr("Yes"), "positive"),
-                        ("maybe", tr("Maybe"), "warning"),
-                        ("no", tr("No"), "negative"),
+                    for verdict, q_color in [
+                        ("yes", "positive"),
+                        ("maybe", "warning"),
+                        ("no", "negative"),
                     ]:
                         _v = verdict
 
@@ -541,16 +582,18 @@ def create_compare_modal(
                                 await _record_verdict(v)
                             return _handler
 
-                        _btn = ui.button(label).props(
-                            f"outline color={q_color} size=md"
-                        ).on("click", _make_verdict_handler())
+                        _btn = (
+                            ui.button(TRIAGE_ICONS[_v]["glyph"])
+                            .props(f"outline color={q_color} size=md")
+                            .tooltip(tr(TRIAGE_ICONS[_v]["tooltip"]))
+                            .on("click", _make_verdict_handler())
+                        )
                         _verdict_btn_refs[_v] = _btn
 
+                # R2-2: Next button — no fixed icon= (avoids LTR chevron contradicting HE label).
                 next_btn = ui.button(
-                    tr("Next ›"), icon="chevron_right"
-                ).props("flat dense").style("flex-direction:row-reverse;").on(
-                    "click", lambda: _step(1)
-                )
+                    tr("Next ›")
+                ).props("flat dense").on("click", lambda: _step(1))
                 _next_btn_ref.append(next_btn)
 
     # Attach async show-loader: fires when dialog mounts in the live client context.
@@ -565,6 +608,33 @@ def create_compare_modal(
         await _load_candidate_pane()
 
     dialog.on("show", _on_show)
+
+    # R2-7: Escape-key handler — close the modal when Escape is pressed (keydown only).
+    # The dialog is props("persistent") so the built-in Esc-close is DISABLED;
+    # we install a ui.keyboard listener scoped to this dialog's open state.
+    # Guard: only act when THIS dialog is currently open (dialog.value truthy) so
+    # a stale hidden-dialog keyboard from a prior _open_compare call cannot fire
+    # globally (Codex P119-R2-7-1).
+    def _on_escape(e: object) -> None:
+        """Close the Compare modal on Escape keydown (R2-7)."""
+        # Guard: only act when this dialog instance is currently open
+        if not getattr(dialog, "value", False):
+            return
+        # Guard: keydown only (avoid double-fire on keyup)
+        action = getattr(e, "action", None)
+        if action is not None and not getattr(action, "keydown", True):
+            return
+        key = getattr(e, "key", None)
+        key_name = getattr(key, "name", None) if key is not None else str(getattr(e, "key", ""))
+        if key_name == "Escape":
+            _handle_close()
+
+    with dialog:
+        _kb = ui.keyboard(on_key=_on_escape)
+
+    # Expose Esc handler for tests (test seam: invoke directly with a synthetic Escape event).
+    dialog._on_escape = _on_escape  # type: ignore[attr-defined]
+    dialog._keyboard = _kb  # type: ignore[attr-defined]
 
     # Expose show-loader for behavioral tests (Task 2 test seam):
     # A test can call _on_show directly via asyncio.run with stub viewers.

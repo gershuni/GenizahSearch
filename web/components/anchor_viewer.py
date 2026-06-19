@@ -271,6 +271,8 @@ class AnchorViewer:
         highlight_pattern: Optional[str] = None,
         browse_resolver: Optional[Callable] = None,
         external_resolver: Optional[Callable] = None,
+        suppress_shelfmark_header: bool = False,
+        image_max_height: Optional[str] = None,
     ) -> None:
         self._sys_id = sys_id
         self._fl_id = fl_id
@@ -280,6 +282,14 @@ class AnchorViewer:
         # Passed to _highlight_html_line_safe which builds a LINE-SAFE escaped
         # highlight string compatible with render_line_numbered_html (F-G1b).
         self._highlight_pattern: Optional[str] = highlight_pattern
+        # R2-6 (Compare): when True, skip the inner shelfmark/meta info header so
+        # Compare's green column subtitle is the only shelfmark shown.
+        # Default False — main Joins-Lab anchor pane is UNCHANGED.
+        self._suppress_shelfmark_header: bool = suppress_shelfmark_header
+        # R2-3 (Compare): when set (e.g. "40vh"), override the default 72vh
+        # image-container max-height so both image + transcription fit in Compare.
+        # Default None — non-Compare callers get the global 72vh CSS rule unchanged.
+        self._image_max_height: Optional[str] = image_max_height
 
         # Inject real defaults lazily so the module can be imported without
         # a live AppState (test safety).
@@ -313,6 +323,7 @@ class AnchorViewer:
         self._next_btn: Optional[Any] = None
         self._zoom_label: Optional[Any] = None
         # Info header (shelfmark + library + title) — populated by update_content.
+        # When suppress_shelfmark_header=True, all three are left as None (R2-6).
         self._info_header: Optional[Any] = None
         self._shelfmark_label: Optional[Any] = None
         self._meta_label: Optional[Any] = None
@@ -469,29 +480,41 @@ class AnchorViewer:
             # by update_content. Uses theme CSS vars so it stays legible in both
             # light and dark themes, and follows the page RTL direction so Hebrew
             # library/title metadata reads correctly under a Hebrew UI.
-            self._info_header = ui.column().classes("anchor-info-header w-full gap-0").style(
-                "padding: 2px 4px 6px;"
-            )
-            with self._info_header:
-                self._shelfmark_label = (
-                    ui.label("").classes("text-base font-semibold").style(
-                        "color: var(--text-primary); line-height: 1.3;"
-                    )
+            # R2-6: when suppress_shelfmark_header=True, skip the header entirely
+            # so Compare's green column subtitle is the only shelfmark shown.
+            if not self._suppress_shelfmark_header:
+                self._info_header = ui.column().classes("anchor-info-header w-full gap-0").style(
+                    "padding: 2px 4px 6px;"
                 )
-                self._meta_label = (
-                    ui.label("").classes("text-xs").style(
-                        "color: var(--text-secondary); line-height: 1.3;"
+                with self._info_header:
+                    self._shelfmark_label = (
+                        ui.label("").classes("text-base font-semibold").style(
+                            "color: var(--text-primary); line-height: 1.3;"
+                        )
                     )
-                )
+                    self._meta_label = (
+                        ui.label("").classes("text-xs").style(
+                            "color: var(--text-secondary); line-height: 1.3;"
+                        )
+                    )
+            # When suppressed, _info_header/_shelfmark_label/_meta_label remain None
+            # (set in __init__). update_content guards all three with `is not None`.
 
             # Image container (shows skeleton initially).
             # .mark("anchor-viewer-image-pane") enables Plan-08 render-smoke to
             # assert that the skeleton is gone after update_content resolves (F-A3).
+            # R2-3: when image_max_height is set (Compare context), apply it as an
+            # inline style override so both image + transcription fit in the pane.
+            image_container_style = ""
+            if self._image_max_height:
+                image_container_style = f"max-height: {self._image_max_height};"
             self._image_container = (
                 ui.element("div")
                 .classes("image-container relative")
                 .mark("anchor-viewer-image-pane")
             )
+            if image_container_style:
+                self._image_container.style(image_container_style)
             with self._image_container:
                 self._skeleton = ui.element("div").classes("anchor-viewer-skeleton")
                 self._img_html_elem: Optional[Any] = None
