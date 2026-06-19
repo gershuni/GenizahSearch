@@ -69,8 +69,7 @@ from shared.joins_lab import (
 from shared.visual_similarity_service import get_vs_service
 from web.components.anchor_viewer import AnchorViewer, inject_viewer_assets
 from web.components.candidate_grid import (
-    compute_filtered, create_candidate_grid, make_triage_state, open_filter_dialog,
-    paginate,
+    compute_filtered, create_candidate_grid, open_filter_dialog,
 )
 from web.components.compare_modal import create_compare_modal
 from web.components.joins_builder import create_joins_builder
