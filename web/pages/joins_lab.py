@@ -486,7 +486,8 @@ def create_joins_lab_page(
     _enrichment_ready: dict = {'value': False}
     _view_mode: dict = {'value': 'grid'}      # 'grid' | 'table'
     _current_page: dict = {'value': 0}        # 0-indexed page for pagination
-    _all_candidates: list = []                # last search result candidates
+    _raw_text_candidates: list = []           # G2: RAW text+cross-side baseline BEFORE any VS merge
+    _all_candidates: list = []                # current DISPLAY set (post-merge, derived)
     _filtered_candidates: list = []           # after compute_filtered
 
     # VS toggle state (D-04/D-06) — MUST NEVER be written to storage
@@ -576,6 +577,24 @@ def create_joins_lab_page(
     # by _make_restyle_fn — it captures the per-render card_refs dict (CR-04).
     _triage_state_ref: dict = {'obj': None, 'restyle': None}
 
+    def _compute_display_candidates() -> list:
+        """G2: Single source of truth for the current display candidate list.
+
+        Recomputes the display list from the RAW text baseline (_raw_text_candidates)
+        and the current VS state every call. Never merges an already-merged set —
+        so toggling VS on/off (and filter/page changes) genuinely changes the candidate
+        set rather than re-filtering a pre-merged snapshot.
+
+        Returns _apply_vs_merge(_raw_text_candidates, _vs_candidates, _vs_on, builder_has_query).
+        """
+        builder_has_query = not anchor_builder['is_empty']()
+        return _apply_vs_merge(
+            _raw_text_candidates,
+            _vs_candidates,
+            vs_on=_vs_on['value'],
+            builder_has_query=builder_has_query,
+        )
+
     def _open_compare(cand) -> None:
         """Open the Compare modal for a clicked candidate (F2, D-02).
 
@@ -630,8 +649,17 @@ def create_joins_lab_page(
 
         Called after enrichment completes (Pitfall 7) or filter/page change.
         Preserves _triage and _current_page across re-renders.
+
+        G2 fix: recomputes the display list from the RAW baseline via
+        _compute_display_candidates() before passing to compute_filtered — so
+        toggling VS on/off, filtering, and pagination all reflect the correct
+        intersection/union/text-only state.
         """
         anchor_sid = _anchor_state.get('sys_id') or ''
+        # G2: recompute display from RAW baseline first, THEN compute_filtered
+        display = _compute_display_candidates()
+        _all_candidates.clear()
+        _all_candidates.extend(display)
         filtered = compute_filtered(
             _all_candidates, _filter_state, _enrichment, _triage, anchor_sid
         )
@@ -1149,6 +1177,7 @@ def create_joins_lab_page(
 
         # Phase 119: D-11 triage resets on re-anchor; D-06 VS invalidates (D-11)
         _triage.clear()
+        _raw_text_candidates.clear()  # G2: clear RAW baseline on re-anchor
         _all_candidates.clear()
         _filtered_candidates.clear()
         _enrichment.clear()
@@ -1262,19 +1291,14 @@ def create_joins_lab_page(
         _vs_candidates.extend(vs_cands)
         _vs_anchor_sid['value'] = anchor_sid
 
-        # Determine builder_has_query from the anchor builder's current state
-        builder_empty = anchor_builder['is_empty']()
         vs_switch_el = _vs_switch_ref.get('el')
         if vs_switch_el is not None and vs_switch_el.value:
-            # Toggle is still ON — update the display list
-            merged = _apply_vs_merge(
-                _all_candidates,
-                _vs_candidates,
-                vs_on=True,
-                builder_has_query=not builder_empty,
-            )
+            # Toggle is still ON — recompute from RAW baseline via single helper (G2)
             anchor_sid_now = _anchor_state.get('sys_id') or ''
-            filtered = compute_filtered(merged, _filter_state, _enrichment, _triage, anchor_sid_now)
+            display = _compute_display_candidates()
+            _all_candidates.clear()
+            _all_candidates.extend(display)
+            filtered = compute_filtered(display, _filter_state, _enrichment, _triage, anchor_sid_now)
             _filtered_candidates.clear()
             _filtered_candidates.extend(filtered)
             _current_page['value'] = 0
@@ -1307,17 +1331,11 @@ def create_joins_lab_page(
 
         anchor_sid = _anchor_state.get('sys_id') or ''
         if not is_on:
-            # Toggle OFF — text-only (look-alikes among text hits keep 👁 badge)
-            merged = _apply_vs_merge(
-                _all_candidates,
-                _vs_candidates,
-                vs_on=False,
-                builder_has_query=not anchor_builder['is_empty'](),
-            )
-            anchor_sid_now = _anchor_state.get('sys_id') or ''
-            filtered = compute_filtered(merged, _filter_state, _enrichment, _triage, anchor_sid_now)
-            _filtered_candidates.clear()
-            _filtered_candidates.extend(filtered)
+            # Toggle OFF — recompute from RAW baseline via single helper (G2)
+            # _vs_on['value'] is already False; _compute_display_candidates reads it
+            display = _compute_display_candidates()
+            _all_candidates.clear()
+            _all_candidates.extend(display)
             _current_page['value'] = 0
             _re_render_candidates_surface()
             _update_vs_status_label()
@@ -1328,18 +1346,10 @@ def create_joins_lab_page(
             # Need a fresh fetch
             asyncio.ensure_future(_do_vs_fetch_and_update(anchor_sid))
         else:
-            # Already have VS candidates for this anchor — recompute immediately
-            builder_empty = anchor_builder['is_empty']()
-            merged = _apply_vs_merge(
-                _all_candidates,
-                _vs_candidates,
-                vs_on=True,
-                builder_has_query=not builder_empty,
-            )
-            anchor_sid_now = _anchor_state.get('sys_id') or ''
-            filtered = compute_filtered(merged, _filter_state, _enrichment, _triage, anchor_sid_now)
-            _filtered_candidates.clear()
-            _filtered_candidates.extend(filtered)
+            # Already have VS candidates for this anchor — recompute from RAW baseline (G2)
+            display = _compute_display_candidates()
+            _all_candidates.clear()
+            _all_candidates.extend(display)
             _current_page['value'] = 0
             _re_render_candidates_surface()
             _update_vs_status_label()
@@ -1825,26 +1835,20 @@ def create_joins_lab_page(
                         )
                         final_candidates = list(base_candidates)
 
-            # Step 9: Apply VS merge if toggle is ON, store candidates, render surface
-            # D-04 conditional model: ON+query=intersection, ON+empty=union(handled above)
+            # Step 9: Store RAW text baseline, apply VS merge, render surface
+            # G2 fix: _raw_text_candidates is the RAW text+cross-side result BEFORE
+            # any VS merge. _compute_display_candidates() derives the display list
+            # from this raw baseline on demand so toggling VS later is always clean.
             anchor_sid_step9 = _anchor_state.get('sys_id') or ''
-            if _vs_on['value'] and _vs_candidates:
-                display_candidates = _apply_vs_merge(
-                    final_candidates,
-                    _vs_candidates,
-                    vs_on=True,
-                    builder_has_query=True,  # builder is non-empty (Step 1 guard above)
-                )
-            else:
-                # OFF or no VS data yet — text-only (look-alikes get 👁 badge when VS data present)
-                display_candidates = _apply_vs_merge(
-                    final_candidates,
-                    _vs_candidates,
-                    vs_on=False,
-                    builder_has_query=True,
-                )
 
-            # Store the full search result (for VS-toggle recompute + filter recompute)
+            # Store the RAW text baseline (never the merged/display set)
+            _raw_text_candidates.clear()
+            _raw_text_candidates.extend(final_candidates)
+
+            # Derive the display set via the single helper (G2: one source of truth)
+            display_candidates = _compute_display_candidates()
+
+            # Store the derived display set
             _all_candidates.clear()
             _all_candidates.extend(display_candidates)
 

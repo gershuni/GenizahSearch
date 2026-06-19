@@ -187,3 +187,114 @@ def test_vs_score_none_is_no_data_not_dissimilar():
     assert icon == "visibility", (
         "badge_and_tooltip must return 'visibility' for via_vs=True even when vs_score=None"
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 119-07: G2 — raw baseline + _compute_display_candidates helper
+# ---------------------------------------------------------------------------
+
+
+def test_toggle_on_vs_off_produces_different_set_from_raw_baseline():
+    """G2: _apply_vs_merge(raw, vs, on=True, query=True) INTERSECTS; on=False returns full text.
+
+    With a raw text baseline where some candidates also appear in the VS list,
+    toggling VS ON (intersection) must produce a STRICT SUBSET of toggling VS OFF
+    (text-only). This proves that the baseline is the RAW text set (not the
+    pre-merged display set), since a pre-merged set would already contain both
+    text+VS candidates AND lose the ability to distinguish them.
+    """
+    from shared.joins_lab import Candidate
+    from web.pages.joins_lab import _apply_vs_merge
+
+    raw_text = [
+        Candidate(sys_id="A", page=1, via_text=True),   # text-only
+        Candidate(sys_id="B", page=2, via_text=True),   # in BOTH text and VS
+        Candidate(sys_id="D", page=3, via_text=True),   # text-only
+    ]
+    vs_cands = [
+        Candidate(sys_id="B", page=None, via_vs=True, vs_rank=1, vs_score=0.9),
+        Candidate(sys_id="C", page=None, via_vs=True, vs_rank=2, vs_score=0.8),  # VS-only
+    ]
+
+    # ON: intersection — only candidates that are in BOTH text AND VS
+    on_result = _apply_vs_merge(raw_text, vs_cands, vs_on=True, builder_has_query=True)
+    on_ids = [c.sys_id for c in on_result]
+
+    # OFF: text-only (look-alikes carry badge but VS-only excluded)
+    off_result = _apply_vs_merge(raw_text, vs_cands, vs_on=False, builder_has_query=True)
+    off_ids = [c.sys_id for c in off_result]
+
+    # Intersection must differ from text-only (the core G2 correctness criterion)
+    assert on_ids != off_ids, (
+        "ON (intersection) and OFF (text-only) must produce different sets from a RAW baseline; "
+        f"got ON={on_ids!r} == OFF={off_ids!r}"
+    )
+    # ON is a subset of OFF
+    assert set(on_ids) < set(off_ids), (
+        f"Intersection set {on_ids!r} must be a STRICT SUBSET of text-only set {off_ids!r}"
+    )
+    # Only B survives the intersection (A and D are text-only, C is VS-only)
+    assert on_ids == ["B"], f"Only B (text+VS) must survive intersection, got {on_ids!r}"
+    # OFF includes A, B, D (text candidates); C is VS-only and excluded
+    assert set(off_ids) == {"A", "B", "D"}, f"Text-only set must be {{A,B,D}}, got {set(off_ids)!r}"
+
+
+def test_compute_display_candidates_symbol_exists_in_joins_lab():
+    """G2 source assertion: joins_lab.py must define _compute_display_candidates.
+
+    This test is RED until Plan 07 Task 1 implements the helper.
+    """
+    from pathlib import Path
+    import ast
+
+    joins_lab_path = Path(__file__).parent.parent / "web" / "pages" / "joins_lab.py"
+    assert joins_lab_path.exists(), "web/pages/joins_lab.py must exist"
+    source = joins_lab_path.read_text(encoding="utf-8")
+
+    # Helper must be defined (a page-local closure)
+    assert "_compute_display_candidates" in source, (
+        "joins_lab.py must define _compute_display_candidates (G2 fix — Task 1 RED)"
+    )
+    # Raw baseline must exist
+    assert "_raw_text_candidates" in source, (
+        "joins_lab.py must define _raw_text_candidates (G2 fix — raw baseline)"
+    )
+
+
+def test_re_render_calls_compute_display_candidates_not_all_candidates_directly():
+    """G2 source assertion: _re_render_candidates_surface must call _compute_display_candidates.
+
+    The pre-fix code passed _all_candidates directly to compute_filtered, skipping the
+    VS recompute. The fix must route through _compute_display_candidates() first.
+    """
+    from pathlib import Path
+
+    joins_lab_path = Path(__file__).parent.parent / "web" / "pages" / "joins_lab.py"
+    assert joins_lab_path.exists(), "web/pages/joins_lab.py must exist"
+    source = joins_lab_path.read_text(encoding="utf-8")
+
+    # Find _re_render_candidates_surface function body
+    lines = source.splitlines()
+    fn_start = None
+    fn_end = None
+    for i, line in enumerate(lines):
+        if "def _re_render_candidates_surface(" in line:
+            fn_start = i
+        if fn_start is not None and i > fn_start:
+            # Next function definition ends the body
+            stripped = line.strip()
+            if stripped.startswith("def ") or stripped.startswith("async def "):
+                fn_end = i
+                break
+    assert fn_start is not None, "_re_render_candidates_surface must exist in joins_lab.py"
+    fn_body = "\n".join(lines[fn_start: fn_end or fn_start + 30])
+
+    assert "_compute_display_candidates" in fn_body, (
+        "_re_render_candidates_surface must call _compute_display_candidates() to recompute "
+        "the display list from the RAW baseline (not pass _all_candidates directly — G2 fix)"
+    )
+    # Must NOT directly pass _all_candidates to compute_filtered in this function
+    assert "_apply_vs_merge(_all_candidates" not in fn_body, (
+        "_re_render_candidates_surface must NOT call _apply_vs_merge(_all_candidates, ...) "
+        "— it must go through _compute_display_candidates() (G2 fix)"
+    )
