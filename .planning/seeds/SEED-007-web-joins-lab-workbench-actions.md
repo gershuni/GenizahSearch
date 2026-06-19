@@ -3,9 +3,15 @@ id: SEED-007
 status: dormant
 planted: 2026-06-19
 planted_during: v8.2.0 / Phase 119 (Web Joins Lab)
-trigger_when: next v8.2.0 Web Joins Lab phase (the phase AFTER the Phase-119 round-2 Compare-polish gap closure)
-scope: medium-large
+trigger_when: Phase 120 (Actions & Persistence) discuss — pull these items in there. Phase 120 ALREADY scopes "Add-as-Join (login-gated)" + persistence; items #1,#2,#3,#5,#6 below are additive to that same phase, NOT a separate one.
+scope: medium (fold into existing Phase 120)
 ---
+
+> **ROUTING (revised 2026-06-19):** These are NOT a new standalone phase. The v8.2.0 roadmap already has
+> **Phase 120 — Actions & Persistence** (Add-as-Join + bulk puzzle handoff + add-to-list/export + state
+> persistence). Item #4 below ("Add as join") is already Phase-120 scope; items #1/#2/#3/#5/#6 are additive
+> workbench actions for the SAME phase. Surface this seed at `/gsd:discuss-phase 120`. (The R2-1/R2-2 Hebrew/RTL
+> items from the same UAT are i18n — they belong to the Phase-119 gap closure and/or **Phase 121 — i18n Polish**.)
 
 # SEED-007: Web Joins Lab — workbench actions (anchor management, joins, Compare info/browse, stop-with-partial)
 
