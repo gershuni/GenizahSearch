@@ -53,9 +53,17 @@ across `joins_lab.py`, `candidate_grid.py`, and `visual_similarity_dialog.py`):
 | 3xl | 64px | Not used in Phase 119 |
 
 Exceptions:
-- Candidate thumbnails: 160×160px (grid cards) and 48×48px (table rows). See Grid/Table card spec below.
-- Touch targets on triage Y/?/N buttons: minimum 44px height (`min-h-11`).
-- Sticky anchor pane: existing width 380px, top offset 64px — unchanged from Phase 117.
+- Candidate thumbnails: 160×160px (grid cards) and 48×48px (table rows) — image
+  dimensions, not spacing tokens.
+- Touch targets on triage Y/?/N buttons: minimum 44px height (`min-h-11`) — accessibility
+  minimum, not a spacing token.
+- Sticky anchor pane: existing width 380px, top offset 64px — pre-existing Phase 117
+  dimensions, unchanged.
+
+All new Phase-119 element spacing uses ONLY the declared scale tokens (4, 8, 16, 24, 32,
+48). The earlier draft's `p-3`/`gap-3` (12px) usages are replaced with `p-2`/`gap-2` (8px)
+in compact contexts and `p-4`/`gap-4` (16px) in default contexts — see the Spacing
+Application Map below. No 12px spacing is used.
 
 ---
 
@@ -66,12 +74,18 @@ No new type sizes are introduced in Phase 119.
 
 | Role | Class | Size | Weight | Line Height | Source |
 |------|-------|------|--------|-------------|--------|
-| Body | `text-sm` | 14px | 400 | 1.5 | existing codebase convention |
-| Label / metadata | `text-xs` | 12px | 400 | 1.4 | existing chip/badge/muted label pattern |
-| Heading / section | `text-base font-semibold` | 16px | 600 | 1.5 | existing candidates header pattern |
-| Pane heading (Compare) | `text-lg font-bold` | 18px | 700 | 1.2 | mirrors VS dialog header pattern |
+| Body | `text-sm` | 14px | 400 (regular) | 1.5 | existing codebase convention |
+| Label / metadata | `text-xs` | 14px | 400 (regular) | 1.4 | existing chip/badge/muted label pattern |
+| Heading / section | `text-base font-semibold` | 16px | 600 (semibold) | 1.5 | existing candidates header pattern |
+| Pane heading (Compare) | `text-lg font-semibold` | 18px | 600 (semibold) | 1.2 | mirrors VS dialog header pattern |
 
-Weights in use: **400** (regular) and **600/700** (semibold/bold) only.
+Weights in use: exactly **two** — **400** (regular) for body/label text and **600**
+(semibold) for all headings. The Compare pane heading uses `text-lg font-semibold` (600),
+NOT `font-bold` (700), to hold the contract to two weights.
+
+Sizes in use: **3** distinct — 14px (body + label), 16px (section heading), 18px (Compare
+pane heading). Label metadata uses the 14px body size at the muted color token rather than
+a smaller size, keeping the size count at 3.
 
 RTL: all transcription text and Hebrew shelfmarks render with `direction: rtl; text-align: right`.
 LTR metadata (library codes, scores, dimensions) render without direction override.
@@ -104,6 +118,10 @@ tokens are introduced in Phase 119.
 - Filter popover "Apply" button (`props='color=primary unelevated'`)
 - `run.io_bound` loading spinner (`props='color=primary'`)
 
+The triage green/amber/red are semantic VERDICT colors (not decorative accents); the
+VS amber is a single semantic INDICATOR color distinct from the primary accent. No
+decorative second accent is introduced.
+
 ---
 
 ## Component Inventory
@@ -131,7 +149,9 @@ tokens are introduced in Phase 119.
   Inactive state: outlined / flat, muted text.
 - 👁 badge: shown when `via_vs=True` per `badge_and_tooltip()` precedence (⚓ anchor self
   › ⇄ via_other_side › 👁 via_vs). Icon `visibility` with amber tint, tooltip from helper.
-- Compare button: `ui.button(icon='compare_arrows')` flat dense, launches Compare modal.
+- Compare button: `ui.button('Compare', icon='compare_arrows')` flat dense — carries a
+  **visible text label** (not icon-only) so it is self-describing for keyboard / screen-reader
+  users; also `.tooltip(tr('Compare fragment'))`. Launches the Compare modal.
 - Grid responsive: `grid-cols-1 sm:grid-cols-2 lg:grid-cols-3` (1 col < 640px, 2 col
   640–1023px, 3 col ≥1024px) — 3 cols replaces Phase-117's max of 2 cols to match D-09's
   "large thumbnails" intent at wider viewports.
@@ -150,7 +170,7 @@ tokens are introduced in Phase 119.
 | Material | Material label (from FJMS enrichment) | 80px | yes |
 | Dimensions | `W×H cm` or `—` if unavailable | 72px | yes |
 | Page | Fragment page number | 48px | yes |
-| Triage | Y/?/N compact buttons (icon only) | 80px | no |
+| Triage | Y/?/N compact buttons (icon-with-tooltip) | 80px | no |
 
 - Default sort: **Score descending** (relevance-first).
 - When VS toggle is ON: sort switches to **VS rank ascending** automatically; column header
@@ -160,6 +180,8 @@ tokens are introduced in Phase 119.
   with count badge. Fixed at bottom of the table, `position:sticky bottom:0`.
 - Enrichment loading: Material and Dimensions cells show `—` with `ui.spinner(size='xs')`
   while the batch enrichment is in-flight, then update in place.
+- The compact triage buttons in the Triage column are icon-style but each carries a
+  `.tooltip` ("Yes" / "Maybe" / "No") for accessibility.
 
 ### 3. Toolbar (above candidate grid/table)
 
@@ -222,9 +244,10 @@ Full-screen `ui.dialog` (`props='maximized'`), two-pane layout.
 - Transcription: RTL numbered lines, `direction:rtl; text-align:right`, `font-size:14px`,
   `line-height:1.5`, `color:var(--text-primary)`. Line numbers `color:var(--text-muted)`.
 - Verdict bar (`position:sticky bottom:0`, `background:var(--bg-tertiary)`):
-  - Three verdict buttons: `Y` (green-700), `?` (amber-700), `N` (red-700).
-    Size: `props='size=md'` (not dense) — primary CTA prominence.
-    Active state: filled background. Recording a verdict auto-advances to next candidate.
+  - Three verdict buttons with **visible text labels**: `Yes` (green-700), `Maybe`
+    (amber-700), `No` (red-700). Size: `props='size=md'` (not dense) — primary CTA
+    prominence. Active state: filled background. Recording a verdict auto-advances to next
+    candidate.
   - Flip-through: `‹ Prev` / `Next ›` flat buttons, `counter label` "3 / 47" center.
     Disabled at boundaries (first/last candidate in filtered order).
 - Size mismatch warning in candidate pane header: amber `ui.badge` icon `warning`
@@ -251,15 +274,18 @@ All four states must have a non-blank affordance (D-06):
 
 | Element | Padding | Gap |
 |---------|---------|-----|
-| Candidate card body | `p-3` (12px) | `gap-2` (8px) between rows |
+| Candidate card body | `p-2` (8px) | `gap-2` (8px) between rows |
 | Thumbnail → card body | 0 (thumbnail flush top/sides) | — |
 | Triage button row | — | `gap-1` (4px) between Y/?/N |
-| Table cell | `px-3 py-2` | — |
-| Filter dialog | `p-4` (16px) | `gap-3` (12px) between filters |
-| Compare header | `px-4 py-2` | `gap-3` |
-| Compare pane body | `p-4` (16px) | `gap-3` |
-| Verdict bar | `px-4 py-3` | `gap-3` between buttons |
-| Toolbar row | `px-1 py-2` | `gap-2` |
+| Table cell | `px-2 py-2` (8px) | — |
+| Filter dialog | `p-4` (16px) | `gap-4` (16px) between filters |
+| Compare header | `px-4 py-2` (16px / 8px) | `gap-2` (8px) |
+| Compare pane body | `p-4` (16px) | `gap-4` (16px) |
+| Verdict bar | `px-4 py-2` (16px / 8px) | `gap-2` (8px) between buttons |
+| Toolbar row | `px-1 py-2` (8px vertical) | `gap-2` (8px) |
+
+Every value above resolves to a declared scale token (4, 8, 16). No 12px (`p-3`/`gap-3`)
+spacing is used anywhere in Phase 119.
 
 ---
 
@@ -270,7 +296,7 @@ the full RTL audit; Phase 119 introduces no bare Hebrew literals).
 
 | Element | EN Copy | HE Copy |
 |---------|---------|---------|
-| Primary CTA (grid card) | "Compare" | "השווה" |
+| Primary CTA (grid card) | "Compare fragment" | "השווה שבר" |
 | Primary CTA (verdict bar) | "Yes" / "Maybe" / "No" | "כן" / "אולי" / "לא" |
 | Table view toggle | "Table" | "טבלה" |
 | Grid view toggle | "Grid" | "רשת" |
@@ -418,4 +444,5 @@ No third-party component registry is used. All UI is built from:
 
 *Phase: 119-candidates-compare-visual-similarity*
 *UI-SPEC created: 2026-06-19*
-*Researcher: gsd-ui-researcher (claude-sonnet-4-6)*
+*UI-SPEC revised: 2026-06-19 (checker round 1: typography → 2 weights / 3 sizes; spacing → drop 12px; CTA noun; icon-button labels)*
+*Researcher: gsd-ui-researcher (claude-opus-4-8)*
