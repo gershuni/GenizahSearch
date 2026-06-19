@@ -4575,6 +4575,9 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
 
         # Main content container
         content_container = ui.column().classes('w-full')
+        # Expose it on refs so deferred enrichment (Phase B) can check page
+        # liveness before rebuilding UI on a torn-down client.
+        refs.content_container = content_container
 
         # Phase 74 (D-17): precedence logic extracted to resolve_browse_bootstrap.
         # asyncio.ensure_future calls remain here because create_browse_page() still

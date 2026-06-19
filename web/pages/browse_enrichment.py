@@ -427,12 +427,17 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
     # navigation. If the visitor left the page entirely (e.g. opened the Joins
     # Lab) while this enrichment awaited, the client is deleted but the
     # generation is unchanged — rebuilding UI on it spams "Client has been
-    # deleted but is still being used". Bail quietly when the page is gone.
+    # deleted but is still being used". Bail quietly when the page is DEFINITELY
+    # gone. Fail OPEN: if liveness is unknown (no container ref yet), proceed —
+    # update_content() carries its own hardened deleted-client guard, so a false
+    # negative here only risks the benign warning, never a missing joins button.
     _cc = refs.content_container
-    try:
-        _page_gone = _cc is None or _cc.is_deleted or getattr(_cc.client, '_deleted', False)
-    except (RuntimeError, AttributeError):
-        _page_gone = True
+    _page_gone = False
+    if _cc is not None:
+        try:
+            _page_gone = _cc.is_deleted or getattr(_cc.client, '_deleted', False)
+        except (RuntimeError, AttributeError):
+            _page_gone = True
     if _page_gone:
         return
 
