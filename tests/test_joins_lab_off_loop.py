@@ -490,6 +490,49 @@ def test_enrichment_batch_not_on_event_loop():
         )
 
 
+def test_vs_meta_lookup_not_on_event_loop():
+    """Phase 119-07 A4 F-A4-guard: assert joins_lab.py never calls get_meta_for_id or
+    get_library_for_id directly on the NiceGUI event loop.
+
+    This is the NEW off-loop guard for the A4 VS-metadata enrichment path (Task 3).
+    It is DISTINCT from the existing test_vs_lookup_not_on_event_loop (which guards
+    get_suggestions) and test_enrichment_batch_not_on_event_loop (which guards
+    get_measurement_summaries_batch).
+
+    Skips while web/pages/joins_lab.py does not yet exist, or while neither
+    get_meta_for_id nor get_library_for_id appears in the file.
+    Becomes load-bearing once Plan 07 Task 3 adds the VS-metadata call sites.
+    """
+    if not JOINS_LAB_PATH.exists():
+        pytest.skip(
+            "web/pages/joins_lab.py not yet created — "
+            "this test becomes load-bearing once Plan 07 Task 3 lands."
+        )
+
+    source = JOINS_LAB_PATH.read_text(encoding="utf-8")
+    if "get_meta_for_id" not in source and "get_library_for_id" not in source:
+        pytest.skip(
+            "web/pages/joins_lab.py does not yet contain 'get_meta_for_id' or "
+            "'get_library_for_id' — this test becomes load-bearing once Plan 07 Task 3 "
+            "adds the VS-metadata enrichment call sites."
+        )
+
+    violations = _find_blocking_call_violations(
+        source,
+        ["get_meta_for_id", "get_library_for_id"],
+        filename=str(JOINS_LAB_PATH),
+    )
+    if violations:
+        lines = []
+        for v in violations:
+            lines.append(f"  Line {v['line']} — {v['call_shape']!r}: {v['reason']}")
+        raise AssertionError(
+            f"Found {len(violations)} get_meta_for_id/get_library_for_id off-loop "
+            f"violation(s) in web/pages/joins_lab.py (A4 F-A4-guard):\n"
+            + "\n".join(lines)
+        )
+
+
 class TestSyntheticViolationsPhase119:
     """Negative-control tests: verify _find_blocking_call_violations fires for VS + enrichment."""
 

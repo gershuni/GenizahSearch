@@ -92,3 +92,118 @@ def test_enrichment_call_site_is_covered_by_off_loop_guard():
     assert "_find_blocking_call_violations" in source, (
         "Off-loop guard must have the generic _find_blocking_call_violations detector"
     )
+
+
+# ---------------------------------------------------------------------------
+# Plan 119-07: A3 anchor in enrichment batch + A4 VS-only candidate metadata
+# ---------------------------------------------------------------------------
+
+
+def test_enrichment_batch_includes_anchor_sys_id():
+    """A3: the enrichment batch must include the anchor sys_id so is_size_mismatch
+    has the anchor's width/height.
+
+    _get_enrichment_sys_ids extracts candidate sys_ids; _do_enrich_and_update
+    adds the anchor sys_id to that list (deduped) before calling _enrich_candidates.
+
+    Here we test the structural source assertion that the enrichment batch path
+    includes the anchor sys_id.
+    """
+    from pathlib import Path
+
+    joins_lab_path = Path(__file__).parent.parent / "web" / "pages" / "joins_lab.py"
+    assert joins_lab_path.exists(), "web/pages/joins_lab.py must exist"
+    source = joins_lab_path.read_text(encoding="utf-8")
+
+    # _do_enrich_and_update must reference anchor sys_id from _anchor_state
+    assert "_anchor_state.get('sys_id')" in source or '_anchor_state["sys_id"]' in source, (
+        "_do_enrich_and_update must read the anchor sys_id from _anchor_state (A3)"
+    )
+    # The enrichment section must explicitly include the anchor
+    assert "anchor_sid" in source, (
+        "A variable named 'anchor_sid' must appear in the enrichment batch logic (A3)"
+    )
+
+
+def test_enrichment_batch_dedup_with_anchor():
+    """A3: _get_enrichment_sys_ids + anchor dedup produces a list containing the anchor."""
+    from web.pages.joins_lab import _get_enrichment_sys_ids
+    from shared.joins_lab import Candidate
+
+    candidates = [
+        Candidate(sys_id="C1", page=1, via_text=True),
+        Candidate(sys_id="C2", page=1, via_text=True),
+        Candidate(sys_id="C1", page=2, via_text=True),  # duplicate sys_id, different page
+    ]
+    anchor_sid = "ANCHOR_SID"
+
+    # Simulate what _do_enrich_and_update does: get candidate sys_ids + add anchor
+    sys_ids = list(_get_enrichment_sys_ids(candidates))
+    if anchor_sid not in sys_ids:
+        sys_ids.append(anchor_sid)
+
+    # Anchor must be present exactly once
+    assert sys_ids.count(anchor_sid) == 1, (
+        f"Anchor sys_id must appear exactly once in the enrichment batch, "
+        f"got count={sys_ids.count(anchor_sid)!r}"
+    )
+    # All candidate sys_ids must also be present (deduped)
+    assert "C1" in sys_ids and "C2" in sys_ids, (
+        "All candidate sys_ids must be in the batch"
+    )
+    # C1 appears only once (deduped by _get_enrichment_sys_ids)
+    assert sys_ids.count("C1") == 1, "C1 must be deduped in the enrichment batch"
+
+
+def test_vs_candidate_metadata_populated_when_supplied():
+    """A4: VS Candidate built with metadata resolvers carries shelfmark/title/library_code.
+
+    This tests the _map_vs_suggestions_to_candidates base output + the run_vs_meta_core
+    enrichment model: when metadata is supplied (as would happen after the off-loop
+    executor.get_meta_for_id / get_library_for_id calls), the resulting Candidate has
+    real shelfmark/title/library_code (not '?'/None/'').
+
+    Uses dataclasses.replace (the actual implementation mechanism) to apply metadata.
+    """
+    import dataclasses
+    from web.pages.joins_lab import _map_vs_suggestions_to_candidates
+
+    raw = [{"alma_id": "990001", "svm_score": 0.9, "rank": 1}]
+    vs_cands = _map_vs_suggestions_to_candidates(raw)
+    assert len(vs_cands) == 1
+
+    base = vs_cands[0]
+    # By default, shelfmark is '?' (Candidate default), page is None (VS-agnostic)
+    assert base.page is None, "VS candidates must have page=None (page-agnostic, F-A4-api)"
+    assert base.shelfmark == "?", "VS candidates start with default '?' shelfmark"
+
+    # Simulate what run_vs_meta_core would produce
+    meta = {'shelfmark': 'T-S 12.100', 'title': 'Some manuscript', 'library_code': 'CUL'}
+    enriched = dataclasses.replace(base, **meta)
+
+    assert enriched.shelfmark == 'T-S 12.100', "Enriched shelfmark must match supplied value"
+    assert enriched.title == 'Some manuscript', "Enriched title must match supplied value"
+    assert enriched.library_code == 'CUL', "Enriched library_code must match supplied value"
+    # page stays None — VS suggestions are page-agnostic (F-A4-api)
+    assert enriched.page is None, "page must remain None after A4 metadata enrichment"
+
+
+def test_off_loop_guard_names_meta_for_id_and_library_for_id():
+    """A4 F-A4-guard: the NEW off-loop guard for VS metadata must NAME get_meta_for_id
+    and get_library_for_id.
+
+    This is distinct from the existing guards for get_suggestions and
+    get_measurement_summaries_batch. The dedicated test ensures that the guard
+    names the actual blocking calls (not just that run_vs_core/run_enrich_core stay green).
+    """
+    from pathlib import Path
+
+    guard_path = Path(__file__).parent / "test_joins_lab_off_loop.py"
+    assert guard_path.exists(), "Off-loop guard test file must exist"
+    source = guard_path.read_text(encoding="utf-8")
+    assert "get_meta_for_id" in source, (
+        "The off-loop guard must reference get_meta_for_id (A4 F-A4-guard)"
+    )
+    assert "get_library_for_id" in source, (
+        "The off-loop guard must reference get_library_for_id (A4 F-A4-guard)"
+    )

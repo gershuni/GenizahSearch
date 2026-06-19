@@ -467,7 +467,11 @@ def create_joins_lab_page(
     # Per-render transient state (mutable-dict containers — NOT safe_storage;
     # these are per-render closures, not per-user persisted values)
     # -----------------------------------------------------------------------
-    _anchor_state: dict = {'sys_id': None, 'fl_id': None, 'volume_ie': None}
+    _anchor_state: dict = {
+        'sys_id': None, 'fl_id': None, 'volume_ie': None,
+        'page': None,   # A1: anchor's resolved folio (set in load_anchor)
+        'shelfmark': '', # A1: anchor's resolved shelfmark (set in load_anchor)
+    }
     _search_generation: dict = {'value': 0}
     # Bumped on every anchor swap so a slow known-joins fetch for a prior anchor
     # cannot render under a newer one (MED, CR fire-and-forget guard).
@@ -619,13 +623,17 @@ def create_joins_lab_page(
         anchor_sid = _anchor_state.get('sys_id') or ''
         anchor_fl_id = _anchor_state.get('fl_id')
         anchor_vol = _anchor_state.get('volume_ie')
-        anchor_page_num = 1  # default; AnchorViewer in Compare resolves folio
+        # A1: use the RESOLVED anchor page/shelfmark stored during load_anchor.
+        # Fall back to 1 / '' only when load_anchor hasn't resolved them yet.
+        anchor_page_num = _anchor_state.get('page') or 1
+        anchor_shelfmark = _anchor_state.get('shelfmark') or ''
         # CR-03: Candidate has no fl_id field — it's an anchor-pane concept stored
         # in _anchor_state. The AnchorViewer inside create_compare_modal resolves
         # the folio independently from sys_id + page. Remove the spurious kwarg.
         anchor_cand = Candidate(
             sys_id=anchor_sid,
             page=anchor_page_num,
+            shelfmark=anchor_shelfmark,
             uid=f'{anchor_sid}|anchor',
             volume_ie=anchor_vol,
             is_anchor_self=True,
@@ -646,10 +654,17 @@ def create_joins_lab_page(
         Fires after Step-9 renders the surface (Pitfall 7 — enrichment is async;
         material/dims columns populate once this completes). Updates _enrichment +
         _enrichment_ready and refreshes the current surface with the new data.
+
+        A3: includes the anchor sys_id in the batch so _enrichment[anchor_sid]
+        is populated and is_size_mismatch() has the anchor's width/height.
         """
         if not candidates_snap:
             return
-        sys_ids = _get_enrichment_sys_ids(candidates_snap)
+        sys_ids = list(_get_enrichment_sys_ids(candidates_snap))
+        # A3: include anchor sys_id in the enrichment batch (deduped)
+        anchor_sid = _anchor_state.get('sys_id')
+        if anchor_sid and anchor_sid not in sys_ids:
+            sys_ids.append(anchor_sid)
         enrichment = await _enrich_candidates(sys_ids)
         # Store in the page-level dict (shared with filter dialog + table cells)
         _enrichment.clear()
@@ -1269,15 +1284,24 @@ def create_joins_lab_page(
         # Prefer whatever AnchorViewer may have surfaced; fall back to executor.
         shelfmark: str = ''
         try:
-            # get_meta_for_id is blocking I/O — must be called inside run.io_bound
+            # get_meta_for_id is blocking I/O — must be called inside run.io_bound.
+            # A4 F-A4-guard: use a NAMED sync closure (not lambda) so the AST off-loop
+            # guard can verify this call is correctly dispatched via run.io_bound.
             # CORRECT await precedence: await the coroutine FIRST, THEN unpack
             # the (shelfmark, meta) tuple (do NOT write `await run.io_bound(...)[0]`
             # which subscripts the coroutine before awaiting it — Plan 04 precedence
             # bug flagged by Codex).
-            meta_result = await run.io_bound(lambda: executor.get_meta_for_id(sys_id))
+            def run_get_meta_for_anchor():
+                return executor.get_meta_for_id(sys_id)
+            meta_result = await run.io_bound(run_get_meta_for_anchor)
             shelfmark, _ = meta_result
         except Exception:
             shelfmark = ''
+
+        # A1: store the resolved page + shelfmark into _anchor_state so Compare
+        # can pass the REAL folio and shelfmark to the anchor pane (not hardcoded 1/'').
+        _anchor_state['page'] = page  # page arg is the resolved folio (or None for first)
+        _anchor_state['shelfmark'] = shelfmark
 
         # Fire-and-forget the known-joins load (non-blocking for the anchor swap).
         # Pass the captured anchor generation so a slow fetch for THIS anchor is
@@ -1367,6 +1391,51 @@ def create_joins_lab_page(
         # Check the anchor hasn't changed while we were fetching
         if _anchor_state.get('sys_id') != anchor_sid:
             return  # stale fetch — discard
+
+        # A4: enrich VS-only candidates with shelfmark/title/library_code off-loop.
+        # VS suggestions carry only sys_id/rank/score (page=None, page-agnostic by design
+        # — F-A4-api). Resolve metadata via the PAGE-LOCAL executor (F-A4-scope: the
+        # executor is a page-local closure; _fetch_vs_candidates is module-level and
+        # cannot see it — resolve here inside _do_vs_fetch_and_update which CAN).
+        # The I/O runs via run.io_bound (F-A4-guard) naming get_meta_for_id / get_library_for_id.
+        if vs_cands:
+            def run_vs_meta_core():
+                import dataclasses
+                meta_by_sid = {}
+                for c in vs_cands:
+                    try:
+                        shelfmark_v, title_v = executor.get_meta_for_id(c.sys_id)
+                    except Exception:
+                        shelfmark_v, title_v = '', ''
+                    try:
+                        library_code_v = executor.get_library_for_id(c.sys_id)
+                    except Exception:
+                        library_code_v = ''
+                    meta_by_sid[c.sys_id] = {
+                        'shelfmark': shelfmark_v or '',
+                        'title': title_v or '',
+                        'library_code': library_code_v or '',
+                    }
+                # Apply metadata via dataclasses.replace (Candidate is frozen=True)
+                # page stays None — VS suggestions are page-agnostic (F-A4-api)
+                enriched = []
+                for c in vs_cands:
+                    m = meta_by_sid.get(c.sys_id, {})
+                    replacements = {}
+                    if m.get('shelfmark'):
+                        replacements['shelfmark'] = m['shelfmark']
+                    if m.get('title'):
+                        replacements['title'] = m['title']
+                    if m.get('library_code'):
+                        replacements['library_code'] = m['library_code']
+                    enriched.append(dataclasses.replace(c, **replacements) if replacements else c)
+                return enriched
+
+            try:
+                vs_cands = await run.io_bound(run_vs_meta_core)
+            except Exception:
+                logger.debug('VS metadata enrichment failed', exc_info=True)
+                # vs_cands stays as-is (no metadata, but still usable)
 
         _vs_candidates.clear()
         _vs_candidates.extend(vs_cands)
