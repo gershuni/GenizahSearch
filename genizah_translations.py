@@ -4201,3 +4201,15 @@ TRANSLATIONS.update({
     # and opens the anchor PLAIN in the Join Lab).
     "find joins in joins lab": "מצא צירופים במעבדת הצירופים",
 })
+
+# === Phase 119-07: A2 Grid/Table toggle + F-VSavail VS-unavailable affordance ===
+TRANSLATIONS.update({
+    # A2: view mode toggle button labels (current state shows the OTHER mode as the action)
+    "Table": "טבלה",
+    "Grid": "רשת",
+    "Switch between Grid and Table view": "החלף בין תצוגת רשת לתצוגת טבלה",
+    # F-VSavail: VS service unavailable (distinct from 'no data for this fragment')
+    "Visual similarity unavailable": "דמיון חזותי אינו זמין",
+    # A1/A3/A4 strings (Compare anchor + VS metadata)
+    "No visual similarity data for this fragment": "אין נתוני דמיון חזותי עבור קטע זה",
+})

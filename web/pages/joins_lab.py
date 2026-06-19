@@ -69,7 +69,7 @@ from shared.joins_lab import (
 from shared.visual_similarity_service import get_vs_service
 from web.components.anchor_viewer import AnchorViewer, inject_viewer_assets
 from web.components.candidate_grid import (
-    compute_filtered, create_candidate_grid, open_filter_dialog,
+    compute_filtered, create_candidate_grid, create_candidate_table, open_filter_dialog,
 )
 from web.components.compare_modal import create_compare_modal
 from web.components.joins_builder import create_joins_builder
@@ -369,6 +369,19 @@ def _get_enrichment_sys_ids(candidates: list) -> list:
     return result
 
 
+def _check_vs_service_available() -> bool:
+    """F-VSavail: probe VS availability OFF the event loop (sync, blocking I/O).
+
+    get_vs_service(thread_safe=True).__init__ opens a LOCAL SQLite connection.
+    This function is meant to be dispatched via run.io_bound — never called
+    directly on the NiceGUI event loop. Returns True when the DB is available.
+    """
+    try:
+        return get_vs_service(thread_safe=True).is_available()
+    except Exception:
+        return False
+
+
 async def _fetch_vs_candidates(anchor_sid: str) -> list:
     """Fetch VS look-alikes for *anchor_sid* off the event loop (D-05, VSM-01).
 
@@ -495,6 +508,7 @@ def create_joins_lab_page(
     _vs_candidates: list = []                 # cached VS look-alike Candidate objects
     _vs_anchor_sid: dict = {'value': None}    # anchor sid used for _vs_candidates
     _vs_loading: dict = {'value': False}      # True while VS fetch in-flight
+    _vs_available: dict = {'checked': False, 'available': True}  # F-VSavail: probed off-loop
 
     # Late-bound UI refs (populated after UI is built)
     _vs_switch_ref: dict = {'el': None}       # the ui.switch element
@@ -675,6 +689,10 @@ def create_joins_lab_page(
 
         Uses compute_filtered result already stored in _filtered_candidates.
         Always called inside a `with candidates_container:` block.
+
+        A2 fix: branches on _view_mode['value'] — calls create_candidate_table when
+        'table', create_candidate_grid when 'grid'. Both share the same _triage dict
+        and _open_compare handler (D-10: triage is never reset on view switch).
         """
         if not _filtered_candidates:
             ui.label(tr('No candidates found. Try different lines.')).style(
@@ -694,20 +712,33 @@ def create_joins_lab_page(
             """Store the render-scoped restyle fn so Compare verdicts can update cards (WR-01)."""
             _triage_state_ref['restyle'] = restyle_fn
 
-        # Render the Phase-02 surface
-        create_candidate_grid(
-            _filtered_candidates,
-            triage=_triage,
-            page=_current_page['value'],
-            on_compare=_open_compare,
-            enrichment=_enrichment,
-            enrichment_ready=_enrichment_ready['value'],
-            filter_state=_filter_state,
-            anchor_sys_id=_anchor_state.get('sys_id') or '',
-            on_page_change=_on_page_change,
-            on_filter_open=_on_filter_open,
-            on_restyle_ready=_on_restyle_ready,
-        )
+        sort_mode = 'vs_rank' if _vs_on['value'] else 'score'
+
+        # A2: branch on _view_mode to reach the table (not just the grid)
+        if _view_mode['value'] == 'table':
+            create_candidate_table(
+                _filtered_candidates,
+                triage=_triage,
+                enrichment=_enrichment,
+                sort_mode=sort_mode,
+                on_compare=_open_compare,
+                restyle_fn=_triage_state_ref.get('restyle'),
+            )
+        else:
+            # Render the Phase-02 grid surface
+            create_candidate_grid(
+                _filtered_candidates,
+                triage=_triage,
+                page=_current_page['value'],
+                on_compare=_open_compare,
+                enrichment=_enrichment,
+                enrichment_ready=_enrichment_ready['value'],
+                filter_state=_filter_state,
+                anchor_sys_id=_anchor_state.get('sys_id') or '',
+                on_page_change=_on_page_change,
+                on_filter_open=_on_filter_open,
+                on_restyle_ready=_on_restyle_ready,
+            )
 
     def _on_page_change(page: int) -> None:
         """Page nav callback — changes page WITHOUT resetting triage (D-08)."""
@@ -1029,6 +1060,24 @@ def create_joins_lab_page(
             )
             _vs_status_ref['el'] = vs_status_label
 
+            # A2: Grid/Table view toggle — flips _view_mode and re-renders WITHOUT
+            # resetting _triage or _current_page (D-10: triage/page survive a view switch).
+            def _on_view_toggle_click() -> None:
+                """Toggle between Grid and Table view without resetting triage/page (D-10)."""
+                if _view_mode['value'] == 'grid':
+                    _view_mode['value'] = 'table'
+                    view_toggle_btn.set_text(tr('Grid'))
+                else:
+                    _view_mode['value'] = 'grid'
+                    view_toggle_btn.set_text(tr('Table'))
+                # Re-render without clearing _triage or resetting _current_page
+                _re_render_candidates_surface()
+
+            view_toggle_btn = ui.button(tr('Table')).props('flat dense').tooltip(
+                tr('Switch between Grid and Table view')
+            )
+            view_toggle_btn.on('click', _on_view_toggle_click)
+
     # -----------------------------------------------------------------------
     # Async helpers
     # -----------------------------------------------------------------------
@@ -1267,13 +1316,45 @@ def create_joins_lab_page(
                 label_el.set_text(tr('No visual similarity data for this fragment'))
                 label_el.style('display: inline; color: var(--text-secondary);')
 
+    def _apply_vs_unavailable_affordance() -> None:
+        """F-VSavail: disable the VS switch and surface 'unavailable' string.
+
+        Called after the off-loop availability probe returns False.
+        Distinct from 'no data for this fragment' (which means available + 0 results).
+        """
+        vs_switch_el = _vs_switch_ref.get('el')
+        if vs_switch_el is not None:
+            vs_switch_el.disable()
+        label_el = _vs_status_ref.get('el')
+        if label_el is not None:
+            label_el.set_text(tr('Visual similarity unavailable'))
+            label_el.style('display: inline; color: var(--text-secondary);')
+
     async def _do_vs_fetch_and_update(anchor_sid: str) -> None:
         """Fetch VS candidates off-loop and update the display (D-06).
 
         Used by the toggle ON handler and by re-anchor invalidation when VS is ON.
         After fetch: recomputes _apply_vs_merge, updates _filtered_candidates,
         and re-renders the surface.
+
+        F-VSavail: first time called, probes VS availability via run.io_bound
+        (_check_vs_service_available). When unavailable: disables the switch +
+        surfaces tr('Visual similarity unavailable') INSTEAD of silently returning [].
         """
+        # F-VSavail: probe availability off-loop on first VS fetch attempt
+        if not _vs_available['checked']:
+            available = await run.io_bound(_check_vs_service_available)
+            _vs_available['checked'] = True
+            _vs_available['available'] = available
+            if not available:
+                _apply_vs_unavailable_affordance()
+                return  # VS is not available — do not proceed
+
+        # If we already know it's unavailable, bail immediately
+        if not _vs_available['available']:
+            _apply_vs_unavailable_affordance()
+            return
+
         _vs_loading['value'] = True
         _update_vs_status_label()
         try:

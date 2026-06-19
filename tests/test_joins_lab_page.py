@@ -334,3 +334,116 @@ class TestEndToEndDiscard:
         gen_ref = {'value': 1}
         my_gen = 1
         assert _should_apply_results(my_gen, gen_ref) is True
+
+
+# ---------------------------------------------------------------------------
+# Plan 119-07 Task 2: A2 view-mode-aware render + F-VSavail
+# ---------------------------------------------------------------------------
+
+
+class TestA2ViewModeRender:
+    """Source assertions for the A2 grid↔table render fix and F-VSavail VS-unavailable."""
+
+    def _source(self):
+        from pathlib import Path
+        p = Path(__file__).parent.parent / "web" / "pages" / "joins_lab.py"
+        assert p.exists(), "web/pages/joins_lab.py must exist"
+        return p.read_text(encoding="utf-8")
+
+    def test_create_candidate_table_imported(self):
+        """A2: create_candidate_table must be imported from web.components.candidate_grid."""
+        source = self._source()
+        assert "create_candidate_table" in source, (
+            "joins_lab.py must import create_candidate_table (A2 fix)"
+        )
+
+    def test_render_surface_branches_on_view_mode(self):
+        """A2: _render_candidates_surface must branch on _view_mode['value']."""
+        source = self._source()
+        # Check that both table and grid calls exist
+        assert "create_candidate_table" in source, (
+            "joins_lab.py must call create_candidate_table (A2 fix)"
+        )
+        assert "create_candidate_grid" in source, (
+            "joins_lab.py must call create_candidate_grid (A2 fix)"
+        )
+        # The render function must check _view_mode
+        assert "_view_mode" in source and "table" in source, (
+            "joins_lab.py must branch on _view_mode['value'] to call table vs grid"
+        )
+
+    def test_view_toggle_button_sets_view_mode_and_rerenders(self):
+        """A2: a Grid/Table toggle button must set _view_mode['value'] and call _re_render_candidates_surface."""
+        source = self._source()
+        # The toggle handler function must set _view_mode['value']
+        assert "_view_mode['value']" in source or "_view_mode[\"value\"]" in source, (
+            "A toggle handler must write _view_mode['value'] (A2 fix)"
+        )
+        # _re_render_candidates_surface must be called from the toggle handler
+        assert "_re_render_candidates_surface" in source, (
+            "The view toggle must call _re_render_candidates_surface (A2 fix)"
+        )
+
+    def test_view_toggle_does_not_clear_triage_or_reset_page(self):
+        """A2: the view toggle handler must NOT clear _triage or reset _current_page (D-10)."""
+        source = self._source()
+        # Find the _on_view_toggle_click function
+        lines = source.splitlines()
+        fn_start = None
+        fn_end = None
+        for i, line in enumerate(lines):
+            if "_on_view_toggle_click" in line and "def " in line:
+                fn_start = i
+            if fn_start is not None and i > fn_start:
+                stripped = line.strip()
+                if (stripped.startswith("def ") or stripped.startswith("async def ")) and stripped != "def _on_view_toggle_click() -> None:":
+                    fn_end = i
+                    break
+        assert fn_start is not None, "_on_view_toggle_click must be defined (A2 fix)"
+        fn_body = "\n".join(lines[fn_start: fn_end or fn_start + 20])
+        # The toggle handler must NOT clear _triage (no triage.clear() inside)
+        assert "_triage.clear()" not in fn_body, (
+            "View toggle handler must NOT call _triage.clear() — triage survives view switch (D-10)"
+        )
+        # Must NOT reset _current_page to 0
+        assert "_current_page['value'] = 0" not in fn_body, (
+            "View toggle handler must NOT reset _current_page to 0 — page survives view switch (D-10)"
+        )
+
+    def test_vs_unavailable_string_present(self):
+        """F-VSavail: joins_lab.py must use tr('Visual similarity unavailable')."""
+        source = self._source()
+        assert "Visual similarity unavailable" in source, (
+            "joins_lab.py must contain tr('Visual similarity unavailable') for the F-VSavail affordance"
+        )
+
+    def test_vs_unavailable_switch_disabled(self):
+        """F-VSavail: joins_lab.py must disable the VS switch when the service is unavailable."""
+        source = self._source()
+        # The unavailability handler must call vs_switch_el.disable()
+        assert ".disable()" in source, (
+            "joins_lab.py must call vs_switch_el.disable() when VS service is unavailable (F-VSavail)"
+        )
+
+    def test_vs_availability_probe_via_run_io_bound(self):
+        """F-VSavail: the VS availability probe must be dispatched via run.io_bound (not bare event-loop call)."""
+        source = self._source()
+        # _check_vs_service_available must be the module-level sync function
+        assert "_check_vs_service_available" in source, (
+            "joins_lab.py must define _check_vs_service_available as an off-loop probe (F-VSavail)"
+        )
+        # It must be passed to run.io_bound
+        assert "run.io_bound(_check_vs_service_available)" in source, (
+            "The VS availability probe must be dispatched via run.io_bound(_check_vs_service_available) "
+            "— NOT called directly on the event loop (F-VSavail)"
+        )
+
+    def test_vs_unavailable_distinct_from_no_data(self):
+        """F-VSavail: 'Visual similarity unavailable' string is distinct from 'No visual similarity data...'."""
+        source = self._source()
+        assert "Visual similarity unavailable" in source, (
+            "F-VSavail affordance string must be present"
+        )
+        assert "No visual similarity data for this fragment" in source, (
+            "No-data string must also be present (distinct from unavailable)"
+        )
