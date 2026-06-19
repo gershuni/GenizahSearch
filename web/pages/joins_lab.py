@@ -61,9 +61,18 @@ from urllib.parse import quote
 
 from nicegui import run, ui
 
-from shared.joins_lab import BuilderRow, SideQuery, apply_cross_side, compose, dedup_candidates
+from shared.fjms_service import get_fjms_service
+from shared.joins_lab import (
+    BuilderRow, Candidate, SideQuery, apply_cross_side, compose, dedup_candidates,
+    detect_self_match, merge_candidates,
+)
+from shared.visual_similarity_service import get_vs_service
 from web.components.anchor_viewer import AnchorViewer, inject_viewer_assets
-from web.components.candidate_grid import create_candidate_grid
+from web.components.candidate_grid import (
+    compute_filtered, create_candidate_grid, make_triage_state, open_filter_dialog,
+    paginate,
+)
+from web.components.compare_modal import create_compare_modal
 from web.components.joins_builder import create_joins_builder
 from web.components.joins_panel import fetch_connected_fragments
 from web.components.known_joins_group import render_known_joins_group
@@ -277,6 +286,140 @@ def _make_progress_cb(my_gen: int, gen_ref: dict):
         # Numeric progress (current, total) — ignore in the spine (no progress UI).
 
     return progress_cb
+
+
+# ---------------------------------------------------------------------------
+# Phase 119 — VS adapter, enrichment batch, conditional merge (pure + off-loop)
+# ---------------------------------------------------------------------------
+
+
+def _map_vs_suggestions_to_candidates(raw: list) -> list:
+    """Map raw get_suggestions output to Candidate objects (D-05, VSM-01).
+
+    Each ``{'alma_id': str, 'svm_score': float, 'rank': int}`` dict is the PARTNER
+    sys_id (alma_id_b from the DB query ``SELECT alma_id_b WHERE alma_id_a = ?``).
+    The partner IS the candidate — Candidate(sys_id=alma_id).
+
+    Critical field mapping (Pitfall 4 — do NOT transpose):
+      svm_score → vs_score  (float 0–1, NOT rank)
+      rank      → vs_rank   (int 1-indexed, NOT svm_score)
+
+    Returns a list of Candidate objects with via_vs=True.
+    Module-level and pure so tests can import directly.
+    """
+    candidates = []
+    for r in raw:
+        c = Candidate(
+            sys_id=r['alma_id'],
+            page=None,                        # VS-only: no specific folio page
+            uid=f"{r['alma_id']}|vs",
+            via_vs=True,
+            vs_rank=r['rank'],
+            vs_score=r['svm_score'],          # NOT swapped (Pitfall 4)
+        )
+        candidates.append(c)
+    return candidates
+
+
+def _apply_vs_merge(
+    text_candidates: list,
+    vs_candidates: list,
+    vs_on: bool,
+    builder_has_query: bool,
+) -> list:
+    """Apply the D-04 conditional VS merge model.
+
+    Conditional model (desktop parity join_workbench.py:2788-2802):
+      ON + builder has query  → INTERSECTION: keep only (via_text AND via_vs)
+      ON + empty builder      → UNION: pure VS browse = merge_candidates([], vs)
+      OFF                     → text-only; tier0+tier1; VS-only (tier2) excluded
+                                BUT look-alikes among text hits keep via_vs=True badge
+
+    Pure function — headlessly testable.
+    """
+    if vs_on:
+        if builder_has_query:
+            # INTERSECTION: tier0 candidates have both via_text AND via_vs after merge
+            merged = merge_candidates(text_candidates, vs_candidates)
+            return [c for c in merged if c.via_text and c.via_vs]
+        else:
+            # UNION: pure VS browse — merge_candidates([], vs) gives tier2 only
+            return merge_candidates([], vs_candidates)
+    else:
+        # OFF: text-only but look-alikes among text hits carry 👁 badge
+        # merge_candidates annotates shared sys_ids with via_vs=True;
+        # filter keeps via_text (tier0 + tier1), excludes VS-only (tier2).
+        merged = merge_candidates(text_candidates, vs_candidates)
+        return [c for c in merged if c.via_text]
+
+
+def _get_enrichment_sys_ids(candidates: list) -> list:
+    """Extract unique sys_ids from a candidate list for the enrichment batch.
+
+    Covers the FULL filtered set (not just the current page) so material/dims
+    filter predicates evaluate correctly for candidates on later pages (D-16).
+    Module-level and pure so tests can import directly.
+    """
+    seen = set()
+    result = []
+    for c in candidates:
+        sid = c.sys_id
+        if sid and sid not in seen:
+            seen.add(sid)
+            result.append(sid)
+    return result
+
+
+async def _fetch_vs_candidates(anchor_sid: str) -> list:
+    """Fetch VS look-alikes for *anchor_sid* off the event loop (D-05, VSM-01).
+
+    Dispatches via run.io_bound — LOCAL visual_similarity.db SQLite read.
+    No NLI circuit breaker (only thumbnail image fetches need the breaker).
+
+    CI guard (tests/test_joins_lab_off_loop.py): the sync closure named EXACTLY
+    ``run_vs_core`` MUST be the first positional arg to run.io_bound.
+
+    Returns [] when the VS service is unavailable or on any exception (graceful).
+    """
+    def run_vs_core():
+        vs_svc = get_vs_service(thread_safe=True)
+        if not vs_svc.is_available():
+            return []
+        return vs_svc.get_suggestions(anchor_sid, 200)
+
+    try:
+        raw = await run.io_bound(run_vs_core)
+        return _map_vs_suggestions_to_candidates(raw or [])
+    except Exception:
+        logger.debug('VS lookup failed for anchor %s', anchor_sid, exc_info=True)
+        return []
+
+
+async def _enrich_candidates(sys_ids: list) -> dict:
+    """Batch-enrich candidates with material/dimensions data off the event loop (D-16).
+
+    Dispatches via run.io_bound — LOCAL fjms_enrichment.db SQLite read.
+    No NLI circuit breaker (only thumbnail image fetches need the breaker).
+
+    CI guard (tests/test_joins_lab_off_loop.py): the sync closure named EXACTLY
+    ``run_enrich_core`` MUST be the first positional arg to run.io_bound.
+
+    Returns {} for empty input or when the FJMS service is unavailable (graceful).
+    """
+    if not sys_ids:
+        return {}
+
+    def run_enrich_core():
+        fjms_svc = get_fjms_service(thread_safe=True)
+        if not fjms_svc.is_available():
+            return {}
+        return fjms_svc.get_measurement_summaries_batch(sys_ids)
+
+    try:
+        return await run.io_bound(run_enrich_core)
+    except Exception:
+        logger.debug('Enrichment batch failed', exc_info=True)
+        return {}
 
 
 # ---------------------------------------------------------------------------
