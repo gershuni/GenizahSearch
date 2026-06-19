@@ -1393,14 +1393,18 @@ def create_joins_lab_page(
             return  # stale fetch — discard
 
         # A4: enrich VS-only candidates with shelfmark/title/library_code off-loop.
+        # R2-8: also fetch the transcription BEGINNING (first ~200 chars via get_browse_page)
+        # so VS-only card snippet is non-blank instead of empty.
         # VS suggestions carry only sys_id/rank/score (page=None, page-agnostic by design
         # — F-A4-api). Resolve metadata via the PAGE-LOCAL executor (F-A4-scope: the
         # executor is a page-local closure; _fetch_vs_candidates is module-level and
         # cannot see it — resolve here inside _do_vs_fetch_and_update which CAN).
-        # The I/O runs via run.io_bound (F-A4-guard) naming get_meta_for_id / get_library_for_id.
+        # The I/O runs via run.io_bound (F-A4-guard) naming get_meta_for_id /
+        # get_library_for_id / get_browse_page.
         if vs_cands:
             def run_vs_meta_core():
                 import dataclasses
+                _TRANSCRIPTION_PREFIX_LEN = 200  # R2-8: show the beginning, not the full text
                 meta_by_sid = {}
                 for c in vs_cands:
                     try:
@@ -1411,10 +1415,22 @@ def create_joins_lab_page(
                         library_code_v = executor.get_library_for_id(c.sys_id)
                     except Exception:
                         library_code_v = ''
+                    # R2-8: fetch transcription beginning (dict key "text")
+                    # get_browse_page returns a DICT (or None) — read via .get()
+                    # NOT .text (it's not a BrowsePage object here, just a narrow dict).
+                    transcription_prefix = ''
+                    try:
+                        page_data = executor.get_browse_page(c.sys_id)
+                        if page_data:
+                            raw_text = page_data.get('text', '') or ''
+                            transcription_prefix = raw_text[:_TRANSCRIPTION_PREFIX_LEN]
+                    except Exception:
+                        pass  # graceful: card stays blank (no crash)
                     meta_by_sid[c.sys_id] = {
                         'shelfmark': shelfmark_v or '',
                         'title': title_v or '',
                         'library_code': library_code_v or '',
+                        'full_text': transcription_prefix,
                     }
                 # Apply metadata via dataclasses.replace (Candidate is frozen=True)
                 # page stays None — VS suggestions are page-agnostic (F-A4-api)
@@ -1428,6 +1444,8 @@ def create_joins_lab_page(
                         replacements['title'] = m['title']
                     if m.get('library_code'):
                         replacements['library_code'] = m['library_code']
+                    if m.get('full_text'):
+                        replacements['full_text'] = m['full_text']
                     enriched.append(dataclasses.replace(c, **replacements) if replacements else c)
                 return enriched
 

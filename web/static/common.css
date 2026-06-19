@@ -412,6 +412,33 @@ a.nicegui-link[style*="--primary-600"] { color: var(--primary-700) !important; }
     color: var(--text-primary) !important;
 }
 
+/* R2-10: Candidate table (joins-candidate-table) dark-mode — mirrors q-card/q-menu pattern.
+   Uses CSS vars only (no hardcoded hex) so light/parchment/dark stay consistent. */
+[data-theme="dark"] .joins-candidate-table,
+[data-theme="dark"] .joins-candidate-table .q-table__container,
+[data-theme="dark"] .joins-candidate-table .q-table__card {
+    background: var(--bg-secondary) !important;
+    color: var(--text-primary) !important;
+}
+[data-theme="dark"] .joins-candidate-table .q-table thead tr th {
+    background: var(--bg-tertiary) !important;
+    color: var(--text-primary) !important;
+    border-bottom: 1px solid var(--border-light) !important;
+}
+[data-theme="dark"] .joins-candidate-table .q-table tbody td {
+    background: var(--bg-card) !important;
+    color: var(--text-primary) !important;
+    border-bottom: 1px solid var(--border-light) !important;
+}
+[data-theme="dark"] .joins-candidate-table .q-table tbody tr:hover td {
+    background: var(--bg-hover) !important;
+}
+[data-theme="dark"] .joins-candidate-table .q-table__bottom {
+    background: var(--bg-secondary) !important;
+    color: var(--text-secondary) !important;
+    border-top: 1px solid var(--border-light) !important;
+}
+
 /* Parchment theme input fixes */
 [data-theme="parchment"] .q-field__native,
 [data-theme="parchment"] .q-field__input,

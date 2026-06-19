@@ -491,17 +491,16 @@ def test_enrichment_batch_not_on_event_loop():
 
 
 def test_vs_meta_lookup_not_on_event_loop():
-    """Phase 119-07 A4 F-A4-guard: assert joins_lab.py never calls get_meta_for_id or
-    get_library_for_id directly on the NiceGUI event loop.
+    """Phase 119-07 A4 + R2-8 guard: assert joins_lab.py never calls get_meta_for_id,
+    get_library_for_id, or get_browse_page directly on the NiceGUI event loop.
 
-    This is the NEW off-loop guard for the A4 VS-metadata enrichment path (Task 3).
-    It is DISTINCT from the existing test_vs_lookup_not_on_event_loop (which guards
-    get_suggestions) and test_enrichment_batch_not_on_event_loop (which guards
-    get_measurement_summaries_batch).
+    This is the off-loop guard for the A4 VS-metadata enrichment path (Task 3) and the
+    R2-8 transcription-beginning fetch (Plan 119-10).  All three methods run inside the
+    existing run.io_bound(run_vs_meta_core) worker, so they must not appear in an
+    async-def context.
 
-    Skips while web/pages/joins_lab.py does not yet exist, or while neither
-    get_meta_for_id nor get_library_for_id appears in the file.
-    Becomes load-bearing once Plan 07 Task 3 adds the VS-metadata call sites.
+    Skips while web/pages/joins_lab.py does not yet exist, or while none of the
+    guarded method names appear in the file.
     """
     if not JOINS_LAB_PATH.exists():
         pytest.skip(
@@ -510,16 +509,17 @@ def test_vs_meta_lookup_not_on_event_loop():
         )
 
     source = JOINS_LAB_PATH.read_text(encoding="utf-8")
-    if "get_meta_for_id" not in source and "get_library_for_id" not in source:
+    guarded_methods = ["get_meta_for_id", "get_library_for_id", "get_browse_page"]
+    if not any(m in source for m in guarded_methods):
         pytest.skip(
-            "web/pages/joins_lab.py does not yet contain 'get_meta_for_id' or "
-            "'get_library_for_id' — this test becomes load-bearing once Plan 07 Task 3 "
-            "adds the VS-metadata enrichment call sites."
+            "web/pages/joins_lab.py does not yet contain 'get_meta_for_id', "
+            "'get_library_for_id', or 'get_browse_page' — this test becomes "
+            "load-bearing once Plan 07 Task 3 / Plan 10 R2-8 adds the VS-metadata call sites."
         )
 
     violations = _find_blocking_call_violations(
         source,
-        ["get_meta_for_id", "get_library_for_id"],
+        guarded_methods,
         filename=str(JOINS_LAB_PATH),
     )
     if violations:
@@ -527,8 +527,8 @@ def test_vs_meta_lookup_not_on_event_loop():
         for v in violations:
             lines.append(f"  Line {v['line']} — {v['call_shape']!r}: {v['reason']}")
         raise AssertionError(
-            f"Found {len(violations)} get_meta_for_id/get_library_for_id off-loop "
-            f"violation(s) in web/pages/joins_lab.py (A4 F-A4-guard):\n"
+            f"Found {len(violations)} get_meta_for_id/get_library_for_id/get_browse_page "
+            f"off-loop violation(s) in web/pages/joins_lab.py (A4 F-A4-guard + R2-8):\n"
             + "\n".join(lines)
         )
 
