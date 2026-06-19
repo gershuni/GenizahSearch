@@ -39,6 +39,7 @@ from typing import Optional, Callable
 
 from nicegui import ui
 
+from shared.joins_lab import TRIAGE_ICONS
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from web.services import is_oxford_manuscript, get_oxford_direct_image_url
 from web.translations import tr, get_language
@@ -482,11 +483,10 @@ def cap_candidates(
 # Card-restyle infrastructure (D-11 / D-09 triage border feedback)
 # ---------------------------------------------------------------------------
 
-_TRIAGE_COLORS = {
-    "yes": "#15803d",    # green-700
-    "maybe": "#a16207",  # amber-700
-    "no": "#b91c1c",     # red-700
-}
+# R2-4: derive from the single source of truth in shared.joins_lab.TRIAGE_ICONS.
+# This keeps the border-restyle logic (_make_restyle_fn) working unchanged while
+# ensuring the card triage icons and table triage colors stay in sync.
+_TRIAGE_COLORS = {k: v["color"] for k, v in TRIAGE_ICONS.items()}
 
 
 def _make_restyle_fn(card_refs: dict):
@@ -687,85 +687,114 @@ def _create_candidate_card(
                     "color: #f59e0b;"  # var(--accent-amber)
                 ).tooltip(tr(tooltip_text))
 
-            # Triage row (Phase 119 CND-04, D-11, G3)
-            # Three flat buttons Y/?/N; 44px touch target; active state filled.
+            # Triage + action row (R2-4 / R2-9 — Phase 119-10)
+            # ✓ / ? / ✗ icon-glyph buttons with Mark-yes/maybe/no tooltips (desktop parity);
+            # browse + compare icon-only buttons in the SAME row (R2-9).
             # G3: render-local per-card button refs so the click handler can update
             # fills immediately — not only when the grid is later rebuilt.
             # T-119-07: refs are per-card local dict, never module-global.
             _triage_btn_refs: dict[str, object] = {}  # verdict → button element
 
-            with ui.row().classes("gap-1 items-center"):
-                for verdict, label, v_color in [
-                    ("yes", tr("Yes"), _TRIAGE_COLORS["yes"]),
-                    ("maybe", tr("Maybe"), _TRIAGE_COLORS["maybe"]),
-                    ("no", tr("No"), _TRIAGE_COLORS["no"]),
-                ]:
-                    _v = verdict  # closure capture
-                    _sid = cand.sys_id
-
-                    # Active state: filled background in triage color
-                    if current_verdict == verdict:
-                        btn_style = f"min-height:44px; font-size:0.75rem; background:{v_color}; color:#fff;"
-                    else:
-                        btn_style = "min-height:44px; font-size:0.75rem;"
-
-                    def _make_triage_handler(
-                        v=_v, sid=_sid, t=triage, _rf=restyle_fn,
-                        _btn_refs=_triage_btn_refs,
-                    ):
-                        def _handler():
-                            if isinstance(t, TriageState):
-                                t.set(sid, v)
-                            elif isinstance(t, dict):
-                                t[sid] = v
-                            if _rf is not None:
-                                _rf(sid, t)
-                            # G3: immediately update triage button fills (not only on grid rebuild)
-                            for _verdict, _btn in _btn_refs.items():
-                                try:
-                                    if _verdict == v:
-                                        _c = _TRIAGE_COLORS.get(_verdict, "")
-                                        _btn.style(
-                                            f"min-height:44px; font-size:0.75rem; "
-                                            f"background:{_c}; color:#fff;"
-                                        )
-                                    else:
-                                        _btn.style("min-height:44px; font-size:0.75rem;")
-                                except Exception:
-                                    pass
-                        return _handler
-
-                    _btn_el = ui.button(label).props("flat dense").style(btn_style).on(
-                        "click", _make_triage_handler()
-                    )
-                    _triage_btn_refs[verdict] = _btn_el
-
-            # Bottom row: View in Browse + Compare fragment
             browse_url = build_browse_url(cand)
-            with ui.row().classes("gap-2 items-center flex-wrap"):
-                if on_browse_click:
-                    # Caller provided a Python handler (for testing / customisation).
-                    ui.link(tr("View in Browse"), "#").style(
-                        "color: var(--primary-700); font-size: 0.85rem;"
-                    ).on(
-                        "click",
-                        # WR-04: json.dumps yields a safely-escaped JS string literal
-                        js_handler=f"() => {{ window.location.href={json.dumps(browse_url)}; }}",
-                    )
-                else:
-                    ui.link(tr("View in Browse"), browse_url).style(
-                        "color: var(--primary-700); font-size: 0.85rem;"
-                    )
+            with ui.row().classes("gap-1 items-center justify-between w-full"):
+                # ── left cluster: ✓ / ? / ✗ triage icon-glyph buttons ────────
+                with ui.row().classes("gap-1 items-center"):
+                    for verdict in ("yes", "maybe", "no"):
+                        _v = verdict  # closure capture
+                        _sid = cand.sys_id
+                        _v_icon = TRIAGE_ICONS[verdict]
+                        _glyph = _v_icon["glyph"]
+                        _v_color = _v_icon["color"]
+                        _tooltip_key = _v_icon["tooltip"]
 
-                # Compare button (Phase 119 CND-04, D-02)
-                # Reuses the hoisted _make_compare_handler (defined above the card)
-                # which carries the FULL candidate. NOT keyed by sys_id alone —
-                # same sys_id can appear on multiple folios.
-                ui.button(tr("Compare fragment"), icon="compare_arrows").props(
-                    "flat dense"
-                ).style("font-size:0.75rem;").tooltip(
-                    tr("Compare fragment")
-                ).on("click", _make_compare_handler())
+                        # Active state: filled background in triage color
+                        if current_verdict == verdict:
+                            btn_style = (
+                                f"min-height:44px; font-size:0.85rem; "
+                                f"background:{_v_color}; color:#fff;"
+                            )
+                        else:
+                            btn_style = "min-height:44px; font-size:0.85rem;"
+
+                        def _make_triage_handler(
+                            v=_v, sid=_sid, t=triage, _rf=restyle_fn,
+                            _btn_refs=_triage_btn_refs,
+                        ):
+                            def _handler():
+                                if isinstance(t, TriageState):
+                                    t.set(sid, v)
+                                elif isinstance(t, dict):
+                                    t[sid] = v
+                                if _rf is not None:
+                                    _rf(sid, t)
+                                # G3: immediately update triage button fills (not only on grid rebuild)
+                                for _verdict, _btn in _btn_refs.items():
+                                    try:
+                                        if _verdict == v:
+                                            _c = _TRIAGE_COLORS.get(_verdict, "")
+                                            _btn.style(
+                                                f"min-height:44px; font-size:0.85rem; "
+                                                f"background:{_c}; color:#fff;"
+                                            )
+                                        else:
+                                            _btn.style("min-height:44px; font-size:0.85rem;")
+                                    except Exception:
+                                        pass
+                            return _handler
+
+                        _btn_el = (
+                            ui.button(_glyph)
+                            .props("flat dense")
+                            .style(btn_style)
+                            .tooltip(tr(_tooltip_key))
+                            .on("click", _make_triage_handler())
+                        )
+                        _triage_btn_refs[verdict] = _btn_el
+
+                # ── right cluster: browse + compare icon-only buttons (R2-9) ─
+                with ui.row().classes("gap-1 items-center"):
+                    # Browse icon button — navigates to /browse deep-link.
+                    # T-119-R9: json.dumps-escaped JS literal (no server-side stop_propagation).
+                    if on_browse_click:
+                        # Test-hook branch: client-side navigation via js_handler.
+                        (
+                            ui.button(icon="menu_book")
+                            .props("flat dense")
+                            .style("min-height:44px;")
+                            .tooltip(tr("View in Browse"))
+                            .on(
+                                "click",
+                                js_handler=(
+                                    f"() => {{ window.location.href={json.dumps(browse_url)}; }}"
+                                ),
+                            )
+                        )
+                    else:
+                        # Normal branch: plain client-side navigation.
+                        (
+                            ui.button(icon="menu_book")
+                            .props("flat dense")
+                            .style("min-height:44px;")
+                            .tooltip(tr("View in Browse"))
+                            .on(
+                                "click",
+                                js_handler=(
+                                    f"() => {{ window.location.href={json.dumps(browse_url)}; }}"
+                                ),
+                            )
+                        )
+
+                    # Compare icon button (Phase 119 CND-04, D-02, R2-9)
+                    # Reuses the hoisted _make_compare_handler (defined above the card)
+                    # which carries the FULL candidate. NOT keyed by sys_id alone —
+                    # same sys_id can appear on multiple folios.
+                    (
+                        ui.button(icon="compare_arrows")
+                        .props("flat dense")
+                        .style("min-height:44px;")
+                        .tooltip(tr("Compare fragment"))
+                        .on("click", _make_compare_handler())
+                    )
 
 
 # ---------------------------------------------------------------------------
@@ -926,7 +955,7 @@ def create_candidate_table(
             rows=rows,
             row_key="uid",
             selection="multiple",
-        ).classes("w-full")
+        ).classes("w-full joins-candidate-table")
 
         # Row double-click → Compare (D-02)
         if on_compare:

@@ -667,10 +667,21 @@ class TestTriageButtonFillImmediate:
             "Triage handler must set background: CSS property for active button fill"
 
     def test_triage_btn_refs_assigned_after_button_creation(self):
-        """Each button element must be captured into _triage_btn_refs after creation."""
+        """Each button element must be captured into _triage_btn_refs after creation.
+
+        R2-4 (119-10): the button assignment may use a multi-line chained form
+        (``_btn_el = (\n    ui.button(glyph)\n    .props(...)``). Accept either
+        the inline ``_btn_el = ui.button(`` or the parenthesised form
+        ``_btn_el = (`` followed by ``ui.button(`` elsewhere in the source.
+        """
         source = self._get_source()
-        # _btn_el = ui.button(...) and then _triage_btn_refs[verdict] = _btn_el
-        assert "_btn_el = ui.button(" in source or "_btn_el=ui.button(" in source, \
+        # Accept either inline or chained-parenthesised assignment
+        has_btn_el_assign = (
+            "_btn_el = ui.button(" in source
+            or "_btn_el=ui.button(" in source
+            or ("_btn_el = (" in source and "ui.button(" in source)
+        )
+        assert has_btn_el_assign, \
             "Button element must be assigned to _btn_el for capture into _triage_btn_refs"
         assert "_triage_btn_refs[verdict] = _btn_el" in source, \
             "Each button must be stored in _triage_btn_refs keyed by verdict"
