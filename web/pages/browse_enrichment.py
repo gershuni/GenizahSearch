@@ -476,6 +476,16 @@ def update_enrichment_sections(state: BrowseState, refs: BrowsePageRefs):
         if page and page.shelfmark:
             pgpid_for_joins = state.pgp_metadata.get('pgpid') if state.pgp_metadata else None
             navigate_fn = refs.enrichment_refs.get('navigate_to_shelfmark')
+            # FND-05 (D-19): build the Lab deep link so the joins dialog always
+            # offers a "Find Joins in the Joins Lab" entry point, even with zero
+            # known joins. (The inline create_joins_button at browse.py builds the
+            # same URL; this deferred Phase-B path is the one that runs in normal
+            # use, so it MUST pass find_joins_url too.)
+            _joins_lab_url = None
+            if page.sys_id:
+                _joins_lab_url = f'/joins-lab?sys_id={page.sys_id}'
+                if getattr(page, 'volume_ie', None):
+                    _joins_lab_url += f'&volume_ie={page.volume_ie}'
             with joins_container:
                 from web.components import create_joins_button
                 create_joins_button(
@@ -483,7 +493,8 @@ def update_enrichment_sections(state: BrowseState, refs: BrowsePageRefs):
                     document_id=page.sys_id,
                     pgpid=pgpid_for_joins,
                     on_navigate=navigate_fn,
-                    on_view_all=refs.enter_joined_view
+                    on_view_all=refs.enter_joined_view,
+                    find_joins_url=_joins_lab_url,
                 )
 
     # Bibliography & Catalog buttons
