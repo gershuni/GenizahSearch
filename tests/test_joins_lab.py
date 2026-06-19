@@ -728,3 +728,41 @@ class TestSnippet:
         assert "<b style=" not in out
         assert "\x01" not in out
         assert "\x02" not in out
+
+
+# ── Phase 119 Plan 01 Task 1 tests ──────────────────────────────────────────────
+
+
+def test_badge_and_tooltip_precedence():
+    """VSM-02: badge_and_tooltip implements ⚓ is_anchor_self > ⇄ via_other_side > 👁 via_vs.
+
+    Desktop parity: join_workbench.py:452-457.
+    Icon names: 'anchor' / 'swap_horiz' / 'visibility' (Material Icons, locked in 119-RESEARCH).
+    """
+    from shared.joins_lab import badge_and_tooltip
+
+    # ⚓ is_anchor_self wins over ⇄ and 👁 (all three flags set)
+    all_flags = Candidate(
+        sys_id="123", page=1, via_vs=True, via_other_side=True, is_anchor_self=True
+    )
+    icon, tip = badge_and_tooltip(all_flags)
+    assert icon == "anchor", f"Expected 'anchor' but got {icon!r}"
+    assert tip == "Anchor fragment"
+
+    # ⇄ via_other_side wins over 👁 when is_anchor_self=False
+    both_vs = Candidate(sys_id="123", page=1, via_vs=True, via_other_side=True)
+    icon, tip = badge_and_tooltip(both_vs)
+    assert icon == "swap_horiz", f"Expected 'swap_horiz' but got {icon!r}"
+    assert tip == "Found via other side"
+
+    # 👁 via_vs only (no other provenance flags)
+    vs_only = Candidate(sys_id="123", page=1, via_vs=True)
+    icon, tip = badge_and_tooltip(vs_only)
+    assert icon == "visibility", f"Expected 'visibility' but got {icon!r}"
+    assert tip == "Visually similar"
+
+    # No badge when no provenance flags set
+    no_flags = Candidate(sys_id="123", page=1)
+    icon, tip = badge_and_tooltip(no_flags)
+    assert icon is None, f"Expected None but got {icon!r}"
+    assert tip == ""

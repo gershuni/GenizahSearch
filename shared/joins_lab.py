@@ -624,6 +624,29 @@ def detect_self_match(raw_results: list, anchor_sid: str) -> bool:
     return any(_r_sid(r) == anchor_sid for r in raw_results)
 
 
+def badge_and_tooltip(cand: "Candidate") -> tuple:
+    """Return (icon_name | None, tooltip_text) for a candidate badge.
+
+    Precedence (desktop parity join_workbench.py:452-457):
+      ⚓ is_anchor_self  → ('anchor', 'Anchor fragment')
+      ⇄ via_other_side  → ('swap_horiz', 'Found via other side')
+      👁 via_vs          → ('visibility', 'Visually similar')
+      (none)            → (None, '')
+
+    Pure function — no I/O.
+    The English tooltip strings are returned as plain strings (the shared/desktop-parity
+    core does not depend on web translations); callers in the web UI wrap copy through
+    tr() at render time.
+    """
+    if cand.is_anchor_self:
+        return ("anchor", "Anchor fragment")
+    if cand.via_other_side:
+        return ("swap_horiz", "Found via other side")
+    if cand.via_vs:
+        return ("visibility", "Visually similar")
+    return (None, "")
+
+
 def _match_line(lines: list, pattern: Optional[str]) -> int:
     """Return the index of the first line whose content matches the pattern.
 
