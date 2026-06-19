@@ -44,10 +44,10 @@ Requirements for this milestone. Each maps to a roadmap phase.
 - [x] **CND-02**: User can view candidates in a grid surface (thumbnail + key metadata + per-card actions).
 - [ ] **CND-03**: User can view candidates in a table surface (sortable columns, multi-select).
 - [ ] **CND-04**: User can triage each candidate Yes / Maybe / No; triage is keyed by `sys_id`, reflected consistently across grid, table, and Compare, and resets on re-anchor.
-- [ ] **CND-05**: The Lab surfaces a self-match readout when the anchor appears in its own candidate results (`detect_self_match`).
+- [x] **CND-05**: The Lab surfaces a self-match readout when the anchor appears in its own candidate results (`detect_self_match`).
 - [ ] **CND-06**: User can filter candidates (material / dimensions / size-mismatch / triage state), matching the desktop candidate filters.
 - [ ] **CND-07**: The candidate surface is bounded — pagination and/or a result cap so a large candidate set never renders unbounded (event-loop / payload safety).
-- [ ] **CND-08**: Candidate metadata (shelfmark/title/library/material/dimensions/thumbnail) is enriched off the event loop, batched, and breaker-guarded for image/network lookups.
+- [x] **CND-08**: Candidate metadata (shelfmark/title/library/material/dimensions/thumbnail) is enriched off the event loop, batched, and breaker-guarded for image/network lookups.
 
 ### Compare (CMP)
 
@@ -57,8 +57,8 @@ Requirements for this milestone. Each maps to a roadmap phase.
 
 ### Visual Similarity (VSM)
 
-- [ ] **VSM-01**: A single Visual Similarity (👁) toggle merges FIST look-alike candidates into the candidate surface (text-only when OFF; VS-merged / intersection when ON) via a web VS-service adapter feeding `merge_candidates`. The toggle tracks the loaded anchor sid so look-alikes invalidate on re-anchor, and has explicit disabled / no-VS-data / empty-intersection states.
-- [ ] **VSM-02**: Visually-similar candidates carry a consistent 👁 badge across grid, table, and Compare.
+- [x] **VSM-01**: A single Visual Similarity (👁) toggle merges FIST look-alike candidates into the candidate surface (text-only when OFF; VS-merged / intersection when ON) via a web VS-service adapter feeding `merge_candidates`. The toggle tracks the loaded anchor sid so look-alikes invalidate on re-anchor, and has explicit disabled / no-VS-data / empty-intersection states.
+- [x] **VSM-02**: Visually-similar candidates carry a consistent 👁 badge across grid, table, and Compare.
 
 ### Actions (ACT)
 
@@ -127,15 +127,15 @@ Which phases cover which requirements. Populated during roadmap creation.
 | CND-02 | Phase 117 | Complete |
 | CND-03 | Phase 119 | Pending |
 | CND-04 | Phase 119 | Pending |
-| CND-05 | Phase 119 | Pending |
+| CND-05 | Phase 119 | Complete |
 | CND-06 | Phase 119 | Pending |
 | CND-07 | Phase 119 | Pending |
-| CND-08 | Phase 119 | Pending |
+| CND-08 | Phase 119 | Complete |
 | CMP-01 | Phase 119 | Pending |
 | CMP-02 | Phase 119 | Pending |
 | CMP-03 | Phase 119 | Pending |
-| VSM-01 | Phase 119 | Pending |
-| VSM-02 | Phase 119 | Pending |
+| VSM-01 | Phase 119 | Complete |
+| VSM-02 | Phase 119 | Complete |
 | ACT-01 | Phase 120 | Pending |
 | ACT-02 | Phase 120 | Pending |
 | ACT-03 | Phase 120 | Pending |
