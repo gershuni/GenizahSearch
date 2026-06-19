@@ -1,7 +1,7 @@
 ---
 phase: 119
 slug: candidates-compare-visual-similarity
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-06-19
