@@ -67,7 +67,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 - [x] **Phase 117: Vertical Spine** - `/joins-lab` route + safe_storage schema + `WebSearchExecutor` adapter (off-loop) + anchor image/transcription + minimal anchor-side builder + search → candidate grid. Proves the riskiest seam (FND-01 adapter) end-to-end. **COMPLETE 2026-06-17**
 - [x] **Phase 118: Joins, Entry & Full Builders** - Known-joins group (PGP + FJMS + user + community, multitenant-safe) + "Find joins" from `/search` and `/browse` + other-side builder with web page contract + per-line modifiers + global toggles (variants/JA/spacing/bidirectional) applied correctly. (completed 2026-06-18)
-- [ ] **Phase 119: Candidates, Compare & Visual Similarity** - Full candidate surface (grid+table, sys_id-keyed triage, self-match, filters, pagination, off-loop enrichment) + side-by-side Compare (per-pane zoom/nav, verdict sync) + VS toggle (merge look-alikes, eye badge everywhere).
+- [x] **Phase 119: Candidates, Compare & Visual Similarity** - Full candidate surface (grid+table, sys_id-keyed triage, self-match, filters, pagination, off-loop enrichment) + side-by-side Compare (per-pane zoom/nav, verdict sync) + VS toggle (merge look-alikes, eye badge everywhere). (completed 2026-06-19)
 - [ ] **Phase 120: Actions & Persistence** - Add-as-Join (login-gated) + bulk puzzle handoff + add-to-list / export + builder/triage/view state survive refresh (server-side per-session, re-run on restore) + clear/reset.
 - [ ] **Phase 121: i18n Polish** - Complete bilingual EN/HE coverage + RTL layout verification + Hebrew-leak audit across all surfaces.
 
@@ -140,7 +140,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 - [x] 119-01-PLAN.md — Wave-0 foundation: badge_and_tooltip() in shared core + extend off-loop guard (VS + enrichment) + RED test scaffolds [Wave 0]
 - [x] 119-02-PLAN.md — Candidate surface: large-thumbnail grid + sortable multi-select table + triage + filters + pagination + 👁 badge (candidate_grid.py) [Wave 1]
 - [x] 119-03-PLAN.md — Compare modal: full-screen two-pane (two independent AnchorViewers) + flip-through + verdict auto-advance + badges (compare_modal.py) [Wave 1]
-- [ ] 119-04-PLAN.md — Page integration: off-loop VS adapter + enrichment batch + conditional merge + 👁 toggle + wire surface/Compare into joins_lab.py [Wave 2]
+- [x] 119-04-PLAN.md — Page integration: off-loop VS adapter + enrichment batch + conditional merge + 👁 toggle + wire surface/Compare into joins_lab.py [Wave 2]
 
 **UI hint**: yes
 
@@ -180,6 +180,6 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 |-------|----------------|--------|-----------|
 | 117. Vertical Spine | 6/6 | Complete    | 2026-06-18 |
 | 118. Joins, Entry & Full Builders | 6/6 | Complete    | 2026-06-19 |
-| 119. Candidates, Compare & Visual Similarity | 3/4 | In Progress|  |
+| 119. Candidates, Compare & Visual Similarity | 4/4 | Complete   | 2026-06-19 |
 | 120. Actions & Persistence | 0/TBD | Not started | - |
 | 121. i18n Polish | 0/TBD | Not started | - |
