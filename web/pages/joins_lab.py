@@ -538,17 +538,24 @@ def create_joins_lab_page(
         column, bulk-triage bar, and Compare verdict callback.
         """
         _triage[sys_id] = verdict
-        # Trigger restyle via TriageState wrapper; the surface holds a reference
-        # to the TriageState object built in _render_candidates_surface — we store it.
+        # Since TriageState._data IS _triage (CR-01 backing dict), ts.set() is
+        # redundant but kept for safety (validates the verdict string).
         ts = _triage_state_ref.get('obj')
         if ts is not None:
             try:
                 ts.set(sys_id, verdict)
             except Exception:
                 pass
+        # WR-01: call render-scoped restyle so card borders update immediately.
+        rf = _triage_state_ref.get('restyle')
+        if rf is not None:
+            try:
+                rf(sys_id, _triage)
+            except Exception:
+                pass
 
     def _on_compare_verdict(sys_id: str, verdict: str) -> None:
-        """Compare verdict callback — writes shared triage + restyle (D-03)."""
+        """Compare verdict callback — writes shared triage + restyle (D-03, WR-01)."""
         _triage[sys_id] = verdict
         ts = _triage_state_ref.get('obj')
         if ts is not None:
@@ -556,9 +563,18 @@ def create_joins_lab_page(
                 ts.set(sys_id, verdict)
             except Exception:
                 pass
+        # WR-01: restyle the card grid so the verdict border updates behind the modal.
+        rf = _triage_state_ref.get('restyle')
+        if rf is not None:
+            try:
+                rf(sys_id, _triage)
+            except Exception:
+                pass
 
-    # Late-bound reference to the TriageState object created in _render_candidates_surface
-    _triage_state_ref: dict = {'obj': None}
+    # Late-bound reference to the TriageState object + render-scoped restyle fn.
+    # _restyle_fn is set inside _render_candidates_surface to the closure returned
+    # by _make_restyle_fn — it captures the per-render card_refs dict (CR-04).
+    _triage_state_ref: dict = {'obj': None, 'restyle': None}
 
     def _open_compare(cand) -> None:
         """Open the Compare modal for a clicked candidate (F2, D-02).
@@ -571,11 +587,13 @@ def create_joins_lab_page(
         anchor_fl_id = _anchor_state.get('fl_id')
         anchor_vol = _anchor_state.get('volume_ie')
         anchor_page_num = 1  # default; AnchorViewer in Compare resolves folio
+        # CR-03: Candidate has no fl_id field — it's an anchor-pane concept stored
+        # in _anchor_state. The AnchorViewer inside create_compare_modal resolves
+        # the folio independently from sys_id + page. Remove the spurious kwarg.
         anchor_cand = Candidate(
             sys_id=anchor_sid,
             page=anchor_page_num,
             uid=f'{anchor_sid}|anchor',
-            fl_id=anchor_fl_id,
             volume_ie=anchor_vol,
             is_anchor_self=True,
         )
@@ -636,10 +654,17 @@ def create_joins_lab_page(
             )
             return
 
-        # Build the TriageState wrapper (shared with grid/table/Compare)
+        # Build the TriageState wrapper (shared with grid/table/Compare).
+        # CR-01: pass _triage as the backing dict so both share the SAME object —
+        # verdicts set via either _triage[sid] or triage_obj.set(sid, v) are
+        # instantly visible to the other path (fixes WR-01/WR-02 at the source).
         from web.components.candidate_grid import TriageState
-        triage_obj = TriageState(_triage)
+        triage_obj = TriageState(backing=_triage)
         _triage_state_ref['obj'] = triage_obj
+
+        def _on_restyle_ready(restyle_fn) -> None:
+            """Store the render-scoped restyle fn so Compare verdicts can update cards (WR-01)."""
+            _triage_state_ref['restyle'] = restyle_fn
 
         # Render the Phase-02 surface
         create_candidate_grid(
@@ -653,6 +678,7 @@ def create_joins_lab_page(
             anchor_sys_id=_anchor_state.get('sys_id') or '',
             on_page_change=_on_page_change,
             on_filter_open=_on_filter_open,
+            on_restyle_ready=_on_restyle_ready,
         )
 
     def _on_page_change(page: int) -> None:
@@ -662,20 +688,28 @@ def create_joins_lab_page(
 
     def _on_filter_open() -> None:
         """Open the filter dialog (D-14) with enrichment-ready gate (Pitfall 7)."""
-        anchor_sid = _anchor_state.get('sys_id') or ''
+        # CR-02: open_filter_dialog signature is (filter_state, enrichment,
+        # enrichment_ready, on_apply, on_reset).  The old call passed
+        # candidates=/anchor_sys_id= (unknown kwargs) and omitted on_reset.
+        # The on_apply contract is no-arg (filter_state is mutated in place by
+        # the dialog's _do_apply before calling on_apply()).
 
-        def _on_filter_apply(new_filter_state: dict) -> None:
-            _filter_state.update(new_filter_state)
+        def _on_filter_apply() -> None:
+            # filter_state was already mutated in place by the dialog.
             _current_page['value'] = 0  # reset to page 0 on filter change
+            _re_render_candidates_surface()
+
+        def _on_filter_reset() -> None:
+            # filter_state was already reset to defaults by the dialog.
+            _current_page['value'] = 0
             _re_render_candidates_surface()
 
         open_filter_dialog(
             filter_state=_filter_state,
             enrichment=_enrichment,
             enrichment_ready=_enrichment_ready['value'],
-            candidates=_all_candidates,
             on_apply=_on_filter_apply,
-            anchor_sys_id=anchor_sid,
+            on_reset=_on_filter_reset,
         )
 
     # One WebSearchExecutor per page render (used for SEARCH only —
@@ -1485,6 +1519,11 @@ def create_joins_lab_page(
         if anchor_builder['is_empty']():
             if _vs_on['value']:
                 # VS-ONLY branch: fetch look-alikes and render merge_candidates([], vs)
+                # WR-04: cancel any in-flight search before starting this branch so
+                # the prior task's cooperative-cancel fires immediately and frees the
+                # worker thread (the generation bump alone was sufficient for result
+                # gating, but explicit cancel avoids resource waste).
+                _cancel_current_search()
                 anchor_sid_f1 = _anchor_state.get('sys_id') or ''
                 _search_generation['value'] += 1
                 my_gen_f1 = _search_generation['value']
@@ -1720,6 +1759,16 @@ def create_joins_lab_page(
                     # closure so the full b_ro lifecycle is off the event loop.
                     def run_cross_side_core():
                         b_query, b_ro, b_page_position = compose(_other_sq_snap)
+                        # CR-05: compose() returns (None, None, None) when all other-side
+                        # rows have whitespace-only terms.  _merge_globals_web(None, ...)
+                        # would raise TypeError.  Guard: treat as "no other-side query"
+                        # and return the base snapshot unchanged.
+                        if b_query is None:
+                            from shared.joins_lab import MergeResult
+                            return MergeResult(
+                                candidates=tuple(_base_snapshot),
+                                note='b_query empty — all other-side rows were whitespace',
+                            )
                         # BLD-04: re-inject flex_spacing + bidirectional into b_ro
                         # (Pitfall 2 — compose() hardcodes flex/bidir=False on b_ro also)
                         _merge_globals_web(b_ro, _global_opts_snap)
@@ -1801,7 +1850,11 @@ def create_joins_lab_page(
 
             # D-11: triage resets on new search; D-13: detect_self_match runs (silently)
             _triage.clear()
-            detect_self_match(raw_results, anchor_sid_step9)  # result is not surfaced (D-13)
+            _self_matched = detect_self_match(raw_results, anchor_sid_step9)
+            # D-13: self-match is detected but not surfaced in Phase 119. Phase 120
+            # exposes it as a UI badge.  Captured to prevent accidental removal as
+            # "dead code" — the call has observability value for future callers.
+            _ = _self_matched  # noqa: F841
 
             # Compute initial filtered list and reset pagination
             filtered = compute_filtered(
