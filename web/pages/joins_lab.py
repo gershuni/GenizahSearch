@@ -470,6 +470,36 @@ def create_joins_lab_page(
     # Other-side state (D-13, UI-SPEC §3)
     _other_side: dict = {'enabled': False, 'builder': None, 'combine': 'AND'}
 
+    # -----------------------------------------------------------------------
+    # Phase 119 candidate surface state (in-memory page state — NOT safe_storage)
+    # MUST NEVER be written to app.storage.user (Phase-87 invariant).
+    # -----------------------------------------------------------------------
+    _triage: dict = {}            # sys_id → 'yes'|'maybe'|'no' (D-11)
+    _selected: set = set()        # table multi-select sys_ids
+    _filter_state: dict = {       # filter dialog state
+        'materials': [],
+        'has_dims': False,
+        'exclude_mismatch': False,
+        'triage_states': [],
+        'text_q': '',
+    }
+    _enrichment: dict = {}        # sys_id → {width_cm, height_cm, material, ...} (D-16)
+    _enrichment_ready: dict = {'value': False}
+    _view_mode: dict = {'value': 'grid'}      # 'grid' | 'table'
+    _current_page: dict = {'value': 0}        # 0-indexed page for pagination
+    _all_candidates: list = []                # last search result candidates
+    _filtered_candidates: list = []           # after compute_filtered
+
+    # VS toggle state (D-04/D-06) — MUST NEVER be written to storage
+    _vs_on: dict = {'value': False}           # 👁 toggle ON/OFF
+    _vs_candidates: list = []                 # cached VS look-alike Candidate objects
+    _vs_anchor_sid: dict = {'value': None}    # anchor sid used for _vs_candidates
+    _vs_loading: dict = {'value': False}      # True while VS fetch in-flight
+
+    # Late-bound UI refs (populated after UI is built)
+    _vs_switch_ref: dict = {'el': None}       # the ui.switch element
+    _vs_status_ref: dict = {'el': None}       # inline VS status label
+
     # Enter-to-search: the builders are created before execute_joins_search is
     # defined, so wire the word-box Enter key through a mutable ref set later.
     _submit_ref: dict = {'fn': None}
@@ -496,6 +526,158 @@ def create_joins_lab_page(
         if _is_running['value']:
             _is_running['value'] = False
             search_btn.props(remove='loading disabled')
+
+    # -----------------------------------------------------------------------
+    # Phase 119: Candidate surface helpers (close over page state)
+    # All state is in-memory — NEVER written to app.storage.user (Phase-87).
+    # -----------------------------------------------------------------------
+
+    def _on_triage_verdict(sys_id: str, verdict: str) -> None:
+        """Record a verdict into the shared triage dict + restyle (D-11).
+
+        Keyed by sys_id (D-11); called from grid card buttons, table triage
+        column, bulk-triage bar, and Compare verdict callback.
+        """
+        _triage[sys_id] = verdict
+        # Trigger restyle via TriageState wrapper; the surface holds a reference
+        # to the TriageState object built in _render_candidates_surface — we store it.
+        ts = _triage_state_ref.get('obj')
+        if ts is not None:
+            try:
+                ts.set(sys_id, verdict)
+            except Exception:
+                pass
+
+    def _on_compare_verdict(sys_id: str, verdict: str) -> None:
+        """Compare verdict callback — writes shared triage + restyle (D-03)."""
+        _triage[sys_id] = verdict
+        ts = _triage_state_ref.get('obj')
+        if ts is not None:
+            try:
+                ts.set(sys_id, verdict)
+            except Exception:
+                pass
+
+    # Late-bound reference to the TriageState object created in _render_candidates_surface
+    _triage_state_ref: dict = {'obj': None}
+
+    def _open_compare(cand) -> None:
+        """Open the Compare modal for a clicked candidate (F2, D-02).
+
+        Receives the FULL candidate object (not sys_id alone — same sys_id can
+        appear on multiple folios, Candidate.key == (sys_id, page), Pitfall 6).
+        Passes the full candidate list (filtered) so flip-through works correctly.
+        """
+        anchor_sid = _anchor_state.get('sys_id') or ''
+        anchor_fl_id = _anchor_state.get('fl_id')
+        anchor_vol = _anchor_state.get('volume_ie')
+        anchor_page_num = 1  # default; AnchorViewer in Compare resolves folio
+        anchor_cand = Candidate(
+            sys_id=anchor_sid,
+            page=anchor_page_num,
+            uid=f'{anchor_sid}|anchor',
+            fl_id=anchor_fl_id,
+            volume_ie=anchor_vol,
+            is_anchor_self=True,
+        )
+        modal = create_compare_modal(
+            anchor_cand=anchor_cand,
+            initial_candidate=cand,
+            filtered_candidates=list(_filtered_candidates),
+            triage=_triage,
+            on_verdict=_on_compare_verdict,
+            enrichment=_enrichment,
+        )
+        modal.open()
+
+    async def _do_enrich_and_update(candidates_snap: list) -> None:
+        """Fetch enrichment off-loop for all filtered candidates, then re-render.
+
+        Fires after Step-9 renders the surface (Pitfall 7 — enrichment is async;
+        material/dims columns populate once this completes). Updates _enrichment +
+        _enrichment_ready and refreshes the current surface with the new data.
+        """
+        if not candidates_snap:
+            return
+        sys_ids = _get_enrichment_sys_ids(candidates_snap)
+        enrichment = await _enrich_candidates(sys_ids)
+        # Store in the page-level dict (shared with filter dialog + table cells)
+        _enrichment.clear()
+        _enrichment.update(enrichment)
+        _enrichment_ready['value'] = True
+        # Re-render the surface so material/dims populate (same render path)
+        _re_render_candidates_surface()
+
+    def _re_render_candidates_surface() -> None:
+        """Re-render the candidate grid/table into candidates_container in-place.
+
+        Called after enrichment completes (Pitfall 7) or filter/page change.
+        Preserves _triage and _current_page across re-renders.
+        """
+        anchor_sid = _anchor_state.get('sys_id') or ''
+        filtered = compute_filtered(
+            _all_candidates, _filter_state, _enrichment, _triage, anchor_sid
+        )
+        _filtered_candidates.clear()
+        _filtered_candidates.extend(filtered)
+
+        candidates_container.clear()
+        with candidates_container:
+            _render_candidates_surface()
+
+    def _render_candidates_surface() -> None:
+        """Render the candidate grid/table for the current page into candidates_container.
+
+        Uses compute_filtered result already stored in _filtered_candidates.
+        Always called inside a `with candidates_container:` block.
+        """
+        if not _filtered_candidates:
+            ui.label(tr('No candidates found. Try different lines.')).style(
+                'color: var(--text-secondary);'
+            )
+            return
+
+        # Build the TriageState wrapper (shared with grid/table/Compare)
+        from web.components.candidate_grid import TriageState
+        triage_obj = TriageState(_triage)
+        _triage_state_ref['obj'] = triage_obj
+
+        # Render the Phase-02 surface
+        create_candidate_grid(
+            _filtered_candidates,
+            triage=_triage,
+            page=_current_page['value'],
+            on_compare=_open_compare,
+            enrichment=_enrichment,
+            enrichment_ready=_enrichment_ready['value'],
+            filter_state=_filter_state,
+            anchor_sys_id=_anchor_state.get('sys_id') or '',
+            on_page_change=_on_page_change,
+            on_filter_open=_on_filter_open,
+        )
+
+    def _on_page_change(page: int) -> None:
+        """Page nav callback — changes page WITHOUT resetting triage (D-08)."""
+        _current_page['value'] = page
+        _re_render_candidates_surface()
+
+    def _on_filter_open() -> None:
+        """Open the filter dialog (D-14) with enrichment-ready gate (Pitfall 7)."""
+        anchor_sid = _anchor_state.get('sys_id') or ''
+
+        def _on_filter_apply(new_filter_state: dict) -> None:
+            _filter_state.update(new_filter_state)
+            _current_page['value'] = 0  # reset to page 0 on filter change
+            _re_render_candidates_surface()
+
+        open_filter_dialog(
+            filter_state=_filter_state,
+            enrichment=_enrichment,
+            enrichment_ready=_enrichment_ready['value'],
+            candidates=_all_candidates,
+            on_apply=_on_filter_apply,
+            anchor_sys_id=anchor_sid,
+        )
 
     # One WebSearchExecutor per page render (used for SEARCH only —
     # NOT for anchor image data; AnchorViewer resolves its own rich BrowsePage,
@@ -761,7 +943,7 @@ def create_joins_lab_page(
 
             other_side_cb.on_value_change(_on_other_side_toggle)
 
-        with ui.row().classes('gap-2 items-center'):
+        with ui.row().classes('gap-2 items-center flex-wrap'):
             search_btn = ui.button(tr('Run Search')).props('color=primary unelevated icon=search')
             # New Search (reset) — parity with /search's restart_alt button. Clears
             # both builders + results but KEEPS the loaded anchor ("Change anchor"
@@ -772,6 +954,19 @@ def create_joins_lab_page(
             search_status = ui.label('').classes('text-sm').style(
                 'color: var(--text-secondary); display: none;'
             )
+
+            # Phase 119 — 👁 Visual Similarity toggle (D-04/D-06, VSM-01)
+            # This switch is defined here so it close over all page state; the
+            # on_value_change handler is wired after execute_joins_search is defined.
+            vs_switch = ui.switch(tr('Visual Similarity')).props('icon=visibility').style(
+                'color: var(--text-secondary);'
+            )
+            _vs_switch_ref['el'] = vs_switch
+
+            vs_status_label = ui.label('').classes('text-xs').style(
+                'color: var(--text-secondary); display: none;'
+            )
+            _vs_status_ref['el'] = vs_status_label
 
     # -----------------------------------------------------------------------
     # Async helpers
@@ -919,6 +1114,22 @@ def create_joins_lab_page(
         _builder_vis['expanded'] = True
         search_status.style('display: none;')
 
+        # Phase 119: D-11 triage resets on re-anchor; D-06 VS invalidates (D-11)
+        _triage.clear()
+        _all_candidates.clear()
+        _filtered_candidates.clear()
+        _enrichment.clear()
+        _enrichment_ready['value'] = False
+        _current_page['value'] = 0
+
+        # Phase 119 D-06: VS invalidate on re-anchor — clear cached look-alikes
+        # and schedule a re-fetch if the toggle is currently ON.
+        _vs_candidates.clear()
+        _vs_anchor_sid['value'] = None
+        if _vs_on['value']:
+            # Schedule a re-fetch for the NEW anchor (fire-and-forget)
+            asyncio.ensure_future(_do_vs_fetch_and_update(sys_id))
+
         # Update anchor chip label (narrow screens)
         anchor_chip_label.set_text(sys_id)
 
@@ -961,6 +1172,144 @@ def create_joins_lab_page(
         # Pass the captured anchor generation so a slow fetch for THIS anchor is
         # discarded if a newer anchor is loaded before it returns (MED, CR).
         asyncio.ensure_future(_load_known_joins(sys_id, shelfmark, anchor_gen=_my_anchor_gen))
+
+    # -----------------------------------------------------------------------
+    # Phase 119: VS toggle helpers (D-04/D-06/VSM-01)
+    # -----------------------------------------------------------------------
+
+    def _update_vs_status_label() -> None:
+        """Update the VS status label to reflect the current toggle state."""
+        label_el = _vs_status_ref.get('el')
+        if label_el is None:
+            return
+        if _vs_loading['value']:
+            label_el.set_text(tr('Loading visual similarity…'))
+            label_el.style('display: inline; color: var(--text-secondary);')
+        elif not _vs_on['value']:
+            label_el.set_text('')
+            label_el.style('display: none;')
+        else:
+            n = len([c for c in _filtered_candidates if c.via_vs])
+            if n > 0:
+                label_el.set_text(tr('Visual Similarity') + f' ({n})')
+                label_el.style('display: inline; color: #f59e0b;')
+            elif _vs_candidates:
+                # VS returned results but none survived the intersection
+                label_el.set_text(
+                    tr('No candidates match both text and visual similarity. '
+                       'Try clearing the builder for VS-only browse.')
+                )
+                label_el.style('display: inline; color: #f59e0b; font-size:0.8rem;')
+            else:
+                # VS service returned empty (no data for this anchor)
+                label_el.set_text(tr('No visual similarity data for this fragment'))
+                label_el.style('display: inline; color: var(--text-secondary);')
+
+    async def _do_vs_fetch_and_update(anchor_sid: str) -> None:
+        """Fetch VS candidates off-loop and update the display (D-06).
+
+        Used by the toggle ON handler and by re-anchor invalidation when VS is ON.
+        After fetch: recomputes _apply_vs_merge, updates _filtered_candidates,
+        and re-renders the surface.
+        """
+        _vs_loading['value'] = True
+        _update_vs_status_label()
+        try:
+            vs_cands = await _fetch_vs_candidates(anchor_sid)
+        except Exception:
+            vs_cands = []
+        finally:
+            _vs_loading['value'] = False
+
+        # Check the anchor hasn't changed while we were fetching
+        if _anchor_state.get('sys_id') != anchor_sid:
+            return  # stale fetch — discard
+
+        _vs_candidates.clear()
+        _vs_candidates.extend(vs_cands)
+        _vs_anchor_sid['value'] = anchor_sid
+
+        # Determine builder_has_query from the anchor builder's current state
+        builder_empty = anchor_builder['is_empty']()
+        vs_switch_el = _vs_switch_ref.get('el')
+        if vs_switch_el is not None and vs_switch_el.value:
+            # Toggle is still ON — update the display list
+            merged = _apply_vs_merge(
+                _all_candidates,
+                _vs_candidates,
+                vs_on=True,
+                builder_has_query=not builder_empty,
+            )
+            anchor_sid_now = _anchor_state.get('sys_id') or ''
+            filtered = compute_filtered(merged, _filter_state, _enrichment, _triage, anchor_sid_now)
+            _filtered_candidates.clear()
+            _filtered_candidates.extend(filtered)
+            _current_page['value'] = 0
+            # Re-render
+            candidates_container.clear()
+            if filtered:
+                with candidates_container:
+                    _render_candidates_surface()
+            else:
+                # VS on + empty builder + no VS data OR empty intersection
+                with candidates_container:
+                    if not _vs_candidates:
+                        ui.label(tr('No visual similarity data for this fragment')).style(
+                            'color: var(--text-secondary);'
+                        )
+                    else:
+                        ui.label(
+                            tr('No candidates match both text and visual similarity. '
+                               'Try clearing the builder for VS-only browse.')
+                        ).style('color: var(--text-secondary);')
+        _update_vs_status_label()
+
+    def _on_vs_toggle_change() -> None:
+        """Handle 👁 VS toggle ON/OFF (D-04/D-06)."""
+        vs_switch_el = _vs_switch_ref.get('el')
+        if vs_switch_el is None:
+            return
+        is_on = bool(vs_switch_el.value)
+        _vs_on['value'] = is_on
+
+        anchor_sid = _anchor_state.get('sys_id') or ''
+        if not is_on:
+            # Toggle OFF — text-only (look-alikes among text hits keep 👁 badge)
+            merged = _apply_vs_merge(
+                _all_candidates,
+                _vs_candidates,
+                vs_on=False,
+                builder_has_query=not anchor_builder['is_empty'](),
+            )
+            anchor_sid_now = _anchor_state.get('sys_id') or ''
+            filtered = compute_filtered(merged, _filter_state, _enrichment, _triage, anchor_sid_now)
+            _filtered_candidates.clear()
+            _filtered_candidates.extend(filtered)
+            _current_page['value'] = 0
+            _re_render_candidates_surface()
+            _update_vs_status_label()
+            return
+
+        # Toggle ON — check if we need to fetch VS candidates
+        if _vs_anchor_sid['value'] != anchor_sid or not _vs_candidates:
+            # Need a fresh fetch
+            asyncio.ensure_future(_do_vs_fetch_and_update(anchor_sid))
+        else:
+            # Already have VS candidates for this anchor — recompute immediately
+            builder_empty = anchor_builder['is_empty']()
+            merged = _apply_vs_merge(
+                _all_candidates,
+                _vs_candidates,
+                vs_on=True,
+                builder_has_query=not builder_empty,
+            )
+            anchor_sid_now = _anchor_state.get('sys_id') or ''
+            filtered = compute_filtered(merged, _filter_state, _enrichment, _triage, anchor_sid_now)
+            _filtered_candidates.clear()
+            _filtered_candidates.extend(filtered)
+            _current_page['value'] = 0
+            _re_render_candidates_surface()
+            _update_vs_status_label()
 
     async def _on_load_btn_click() -> None:
         """Handle the Load Anchor button / Enter key in the smart box."""
@@ -1132,12 +1481,60 @@ def create_joins_lab_page(
         # once we know a real replacement search will start (just below compose()).
 
         # Step 1: Validate inputs
+        # F1: VS-only empty-builder branch — when 👁 is ON + builder is empty,
+        # BYPASS the text-search early return and render the pure VS union instead.
         if anchor_builder['is_empty']():
-            ui.notify(
-                tr('Enter at least one search line to run'),
-                type='warning',
-            )
-            return
+            if _vs_on['value']:
+                # VS-ONLY branch: fetch look-alikes and render merge_candidates([], vs)
+                anchor_sid_f1 = _anchor_state.get('sys_id') or ''
+                _search_generation['value'] += 1
+                my_gen_f1 = _search_generation['value']
+                _is_running['value'] = True
+                search_btn.props('loading=true disabled=true')
+                candidates_container.clear()
+                search_status.set_text(tr('Loading visual similarity…'))
+                search_status.style('display: block;')
+                try:
+                    if _vs_anchor_sid['value'] != anchor_sid_f1 or not _vs_candidates:
+                        vs_cands_f1 = await _fetch_vs_candidates(anchor_sid_f1)
+                        _vs_candidates.clear()
+                        _vs_candidates.extend(vs_cands_f1)
+                        _vs_anchor_sid['value'] = anchor_sid_f1
+                    else:
+                        vs_cands_f1 = list(_vs_candidates)
+                    if not _should_apply_results(my_gen_f1, _search_generation):
+                        return
+                    final_f1 = _apply_vs_merge([], vs_cands_f1, vs_on=True, builder_has_query=False)
+                    _all_candidates.clear()
+                    _all_candidates.extend(final_f1)
+                    _triage.clear()
+                    _current_page['value'] = 0
+                    anchor_sid_now = _anchor_state.get('sys_id') or ''
+                    filtered_f1 = compute_filtered(final_f1, _filter_state, _enrichment, _triage, anchor_sid_now)
+                    _filtered_candidates.clear()
+                    _filtered_candidates.extend(filtered_f1)
+                    candidates_container.clear()
+                    search_status.style('display: none;')
+                    with candidates_container:
+                        if _filtered_candidates:
+                            _render_candidates_surface()
+                        else:
+                            ui.label(
+                                tr('No visual similarity data for this fragment')
+                            ).style('color: var(--text-secondary);')
+                    # Fire enrichment off-loop for the full filtered set
+                    asyncio.ensure_future(_do_enrich_and_update(list(_filtered_candidates)))
+                finally:
+                    if _is_running['value'] and my_gen_f1 == _search_generation['value']:
+                        _is_running['value'] = False
+                        search_btn.props(remove='loading disabled')
+                return
+            else:
+                ui.notify(
+                    tr('Enter at least one search line to run'),
+                    type='warning',
+                )
+                return
 
         if not state.is_ready():
             ui.notify(tr('Engine not ready.'), type='warning')
@@ -1380,16 +1777,53 @@ def create_joins_lab_page(
                         )
                         final_candidates = list(base_candidates)
 
-            # Step 9: Render final candidates
+            # Step 9: Apply VS merge if toggle is ON, store candidates, render surface
+            # D-04 conditional model: ON+query=intersection, ON+empty=union(handled above)
+            anchor_sid_step9 = _anchor_state.get('sys_id') or ''
+            if _vs_on['value'] and _vs_candidates:
+                display_candidates = _apply_vs_merge(
+                    final_candidates,
+                    _vs_candidates,
+                    vs_on=True,
+                    builder_has_query=True,  # builder is non-empty (Step 1 guard above)
+                )
+            else:
+                # OFF or no VS data yet — text-only (look-alikes get 👁 badge when VS data present)
+                display_candidates = _apply_vs_merge(
+                    final_candidates,
+                    _vs_candidates,
+                    vs_on=False,
+                    builder_has_query=True,
+                )
+
+            # Store the full search result (for VS-toggle recompute + filter recompute)
+            _all_candidates.clear()
+            _all_candidates.extend(display_candidates)
+
+            # D-11: triage resets on new search; D-13: detect_self_match runs (silently)
+            _triage.clear()
+            detect_self_match(raw_results, anchor_sid_step9)  # result is not surfaced (D-13)
+
+            # Compute initial filtered list and reset pagination
+            filtered = compute_filtered(
+                _all_candidates, _filter_state, _enrichment, _triage, anchor_sid_step9
+            )
+            _filtered_candidates.clear()
+            _filtered_candidates.extend(filtered)
+            _current_page['value'] = 0
+
+            # Render the candidate surface
             candidates_container.clear()
             search_status.style('display: none;')
             with candidates_container:
-                if final_candidates:
-                    create_candidate_grid(final_candidates)
-                else:
-                    ui.label(tr('No candidates found. Try different lines.')).style(
-                        'color: var(--text-secondary);'
-                    )
+                _render_candidates_surface()
+
+            # Fire enrichment off-loop for the FULL filtered set (D-16, Pitfall 7)
+            asyncio.ensure_future(_do_enrich_and_update(list(_filtered_candidates)))
+
+            # If VS is ON but we haven't fetched VS candidates for this anchor yet, fetch now
+            if _vs_on['value'] and _vs_anchor_sid['value'] != anchor_sid_step9:
+                asyncio.ensure_future(_do_vs_fetch_and_update(anchor_sid_step9))
 
         finally:
             # WR-01: restore the loading affordance for the WHOLE search (both the
@@ -1402,6 +1836,10 @@ def create_joins_lab_page(
 
     _submit_ref['fn'] = execute_joins_search  # enables Enter-to-search in word boxes
     search_btn.on('click', execute_joins_search)
+
+    # Wire the VS toggle — must happen AFTER execute_joins_search is defined
+    # (the toggle handler reads _vs_on, _all_candidates, etc. which are closures)
+    vs_switch.on_value_change(_on_vs_toggle_change)
 
     # -----------------------------------------------------------------------
     # Initial anchor resolution / restore (D-13: URL wins over storage)
