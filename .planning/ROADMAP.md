@@ -146,7 +146,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 - [x] 119-07-PLAN.md — Round-1 gaps: VS raw-baseline recompute + table render branch + anchor page/shelfmark + VS-meta enrichment (G2/A1/A2/A3/A4) [Wave 1]
 - [x] 119-08-PLAN.md — Round-1 gaps: render-smoke harness (NiceGUI User, /joins-lab, mocked engine) [Wave 2]
 - [x] 119-09-PLAN.md — Round-2 gap closure: HE Compare translations (R2-1) + shared TRIAGE_ICONS mapping [Wave 1]
-- [ ] 119-10-PLAN.md — Round-2 gap closure: card icon triage ✓/?/✗ + browse/compare icon buttons (R2-4/R2-9) + VS-only transcription (R2-8) + dark table (R2-10) + render-smoke [Wave 2]
+- [x] 119-10-PLAN.md — Round-2 gap closure: card icon triage ✓/?/✗ + browse/compare icon buttons (R2-4/R2-9) + VS-only transcription (R2-8) + dark table (R2-10) + render-smoke [Wave 2]
 - [ ] 119-11-PLAN.md — Round-2 gap closure: Compare LTR counter+arrows (R2-2) + image-height cap (R2-3) + verdict icons (R2-4) + verdict border (R2-5) + single shelfmark (R2-6) + Esc-close (R2-7) + render-smoke [Wave 3]
 
 **UI hint**: yes
@@ -187,6 +187,6 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 |-------|----------------|--------|-----------|
 | 117. Vertical Spine | 6/6 | Complete    | 2026-06-18 |
 | 118. Joins, Entry & Full Builders | 6/6 | Complete    | 2026-06-19 |
-| 119. Candidates, Compare & Visual Similarity | 9/11 | In Progress|  |
+| 119. Candidates, Compare & Visual Similarity | 10/11 | In Progress|  |
 | 120. Actions & Persistence | 0/TBD | Not started | - |
 | 121. i18n Polish | 0/TBD | Not started | - |
