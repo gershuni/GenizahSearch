@@ -4213,3 +4213,24 @@ TRANSLATIONS.update({
     # A1/A3/A4 strings (Compare anchor + VS metadata)
     "No visual similarity data for this fragment": "אין נתוני דמיון חזותי עבור קטע זה",
 })
+
+# === Phase 119-09: R2-1 — missing Hebrew translations for Compare modal ===
+# Closes the live-UAT defect: under the Hebrew UI these strings leaked in English.
+# "Yes"→כן / "No"→לא / "Compare"→השווה / "Mark yes/maybe/no" / "View in Browse" /
+# "Filter candidates" are already present — DO NOT re-add.
+TRANSLATIONS.update({
+    # --- Compare pane labels (compare_modal.py:482, 502) ---
+    "Anchor":           "עוגן",
+    "Candidate":        "מועמד",
+    # --- Verdict bar label (compare_modal.py:534; candidate_grid.py:700) ---
+    "Maybe":            "אולי",
+    # --- Navigation buttons (compare_modal.py:524/550; candidate_grid.py:1060/1064)
+    # RTL-correct: "Next ›" advances leftward in RTL → leading ‹ chevron;
+    # "‹ Prev" moves rightward → trailing › chevron.
+    "Next ›":           "‹ הבא",
+    "‹ Prev":           "הקודם ›",
+    # --- Card actions + pagination (candidate_grid.py:764/1063) ---
+    "Compare fragment": "השווה קטע",
+    # N and M are placeholder literals replaced by the caller via .replace("N",...).replace("M",...)
+    "Page N of M":      "עמוד N מתוך M",
+})
