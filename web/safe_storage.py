@@ -56,6 +56,15 @@ def safe_user_get(key: str, default: Any = None) -> Any:
         logger.debug("safe_user_get(%r): session storage unavailable: %s", key, e)
         return default
     except Exception as e:
+        # "...can only be used within a UI context" is raised when this read runs
+        # off the request context — e.g. inside a run.io_bound worker thread or a
+        # background task (a joins-count fetch, a deferred loader). The read
+        # degrades to `default` (anonymous), which is correct for public reads, so
+        # this is an EXPECTED condition, not unexpected breakage — log at debug
+        # like the pruned-session case above. Genuine failures still warn.
+        if 'UI context' in str(e):
+            logger.debug("safe_user_get(%r): no UI context (background task): %s", key, e)
+            return default
         logger.warning("safe_user_get(%r) unexpected failure: %s", key, e, exc_info=False)
         return default
 
