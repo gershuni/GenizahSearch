@@ -138,7 +138,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 **Plans**: 4 plans (3 waves)
 
 - [x] 119-01-PLAN.md — Wave-0 foundation: badge_and_tooltip() in shared core + extend off-loop guard (VS + enrichment) + RED test scaffolds [Wave 0]
-- [ ] 119-02-PLAN.md — Candidate surface: large-thumbnail grid + sortable multi-select table + triage + filters + pagination + 👁 badge (candidate_grid.py) [Wave 1]
+- [x] 119-02-PLAN.md — Candidate surface: large-thumbnail grid + sortable multi-select table + triage + filters + pagination + 👁 badge (candidate_grid.py) [Wave 1]
 - [ ] 119-03-PLAN.md — Compare modal: full-screen two-pane (two independent AnchorViewers) + flip-through + verdict auto-advance + badges (compare_modal.py) [Wave 1]
 - [ ] 119-04-PLAN.md — Page integration: off-loop VS adapter + enrichment batch + conditional merge + 👁 toggle + wire surface/Compare into joins_lab.py [Wave 2]
 
@@ -180,6 +180,6 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 |-------|----------------|--------|-----------|
 | 117. Vertical Spine | 6/6 | Complete    | 2026-06-18 |
 | 118. Joins, Entry & Full Builders | 6/6 | Complete    | 2026-06-19 |
-| 119. Candidates, Compare & Visual Similarity | 1/4 | In Progress|  |
+| 119. Candidates, Compare & Visual Similarity | 2/4 | In Progress|  |
 | 120. Actions & Persistence | 0/TBD | Not started | - |
 | 121. i18n Polish | 0/TBD | Not started | - |

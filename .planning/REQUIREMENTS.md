@@ -42,11 +42,11 @@ Requirements for this milestone. Each maps to a roadmap phase.
 
 - [x] **CND-01**: Candidates render deduped to one entry per image/fragment (`dedup_candidates`).
 - [x] **CND-02**: User can view candidates in a grid surface (thumbnail + key metadata + per-card actions).
-- [ ] **CND-03**: User can view candidates in a table surface (sortable columns, multi-select).
-- [ ] **CND-04**: User can triage each candidate Yes / Maybe / No; triage is keyed by `sys_id`, reflected consistently across grid, table, and Compare, and resets on re-anchor.
+- [x] **CND-03**: User can view candidates in a table surface (sortable columns, multi-select).
+- [x] **CND-04**: User can triage each candidate Yes / Maybe / No; triage is keyed by `sys_id`, reflected consistently across grid, table, and Compare, and resets on re-anchor.
 - [x] **CND-05**: The Lab surfaces a self-match readout when the anchor appears in its own candidate results (`detect_self_match`).
-- [ ] **CND-06**: User can filter candidates (material / dimensions / size-mismatch / triage state), matching the desktop candidate filters.
-- [ ] **CND-07**: The candidate surface is bounded — pagination and/or a result cap so a large candidate set never renders unbounded (event-loop / payload safety).
+- [x] **CND-06**: User can filter candidates (material / dimensions / size-mismatch / triage state), matching the desktop candidate filters.
+- [x] **CND-07**: The candidate surface is bounded — pagination and/or a result cap so a large candidate set never renders unbounded (event-loop / payload safety).
 - [x] **CND-08**: Candidate metadata (shelfmark/title/library/material/dimensions/thumbnail) is enriched off the event loop, batched, and breaker-guarded for image/network lookups.
 
 ### Compare (CMP)
@@ -125,11 +125,11 @@ Which phases cover which requirements. Populated during roadmap creation.
 | BLD-05 | Phase 117 | Complete |
 | CND-01 | Phase 117 | Complete |
 | CND-02 | Phase 117 | Complete |
-| CND-03 | Phase 119 | Pending |
-| CND-04 | Phase 119 | Pending |
+| CND-03 | Phase 119 | Complete |
+| CND-04 | Phase 119 | Complete |
 | CND-05 | Phase 119 | Complete |
-| CND-06 | Phase 119 | Pending |
-| CND-07 | Phase 119 | Pending |
+| CND-06 | Phase 119 | Complete |
+| CND-07 | Phase 119 | Complete |
 | CND-08 | Phase 119 | Complete |
 | CMP-01 | Phase 119 | Pending |
 | CMP-02 | Phase 119 | Pending |
