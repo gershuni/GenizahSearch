@@ -644,3 +644,260 @@ class TestFolioBoundary:
         finally:
             for c in ctxs:
                 c.stop()
+
+
+# ─── Task 1 (Plan 119-06): highlight_pattern + _highlight_html_line_safe ────────
+
+class TestHighlightPattern:
+    """AnchorViewer.highlight_pattern + _highlight_html_line_safe (G1-compare, F-G1a/b)."""
+
+    def test_anchor_viewer_accepts_highlight_pattern(self):
+        """AnchorViewer can be constructed with highlight_pattern and stores it."""
+        v = _make_viewer(
+            browse_resolver=lambda *a, **kw: None,
+            external_resolver=_noop_external,
+        )
+        # Re-construct with highlight_pattern= to verify it is accepted + stored.
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+        with (
+            patch("web.components.anchor_viewer.ui") as mock_ui,
+            patch("web.components.anchor_viewer.run"),
+        ):
+            for attr in (
+                "column", "row", "element", "html", "button", "icon",
+                "label", "tooltip", "add_head_html", "run_javascript",
+            ):
+                factory = MagicMock(return_value=mock_element)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+            from web.components.anchor_viewer import AnchorViewer
+            viewer = AnchorViewer(
+                sys_id="990025143260205171",
+                highlight_pattern="שלום",
+                browse_resolver=lambda *a, **kw: None,
+                external_resolver=_noop_external,
+            )
+        assert viewer._highlight_pattern == "שלום"
+
+    def test_highlight_html_line_safe_contains_bold_span(self):
+        """_highlight_html_line_safe wraps matches in <b style='color:#dc2626'> (F-G1a)."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        result = _highlight_html_line_safe("foo שלום bar", "שלום")
+        assert "<b style='color:#dc2626'>" in result
+        assert "</b>" in result
+
+    def test_highlight_html_line_safe_no_outer_div_wrapper(self):
+        """_highlight_html_line_safe must NOT emit an outer <div dir='rtl'> wrapper (F-G1b)."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        result = _highlight_html_line_safe("text with שלום", "שלום")
+        assert "<div" not in result, (
+            "F-G1b violation: output contains <div> which would be torn across "
+            "per-line grid rows in render_line_numbered_html"
+        )
+
+    def test_highlight_html_line_safe_preserves_newlines(self):
+        """_highlight_html_line_safe preserves \\n so render_line_numbered_html can split (F-G1b)."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        text = "שורה ראשונה\nשורה שנייה"
+        result = _highlight_html_line_safe(text, "שורה")
+        # Two-line input → output splits back to two elements on \\n
+        lines = result.split("\n")
+        assert len(lines) == 2, (
+            f"Expected 2 lines after split on \\n, got {len(lines)}: {result!r}"
+        )
+
+    def test_highlight_html_line_safe_no_br_conversion(self):
+        """_highlight_html_line_safe must NOT convert \\n to <br>."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        result = _highlight_html_line_safe("line1\nline2", "line")
+        assert "<br>" not in result
+        assert "<br/>" not in result
+
+    def test_highlight_html_line_safe_no_pattern_returns_escaped(self):
+        """With no pattern, _highlight_html_line_safe returns HTML-escaped text (no spans)."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        result = _highlight_html_line_safe("a < b & c", None)
+        assert "&lt;" in result
+        assert "&amp;" in result
+        assert "<b style=" not in result
+
+    def test_highlight_html_line_safe_strips_sentinel_bytes(self):
+        """Sentinel bytes in corpus text are stripped before processing (WR-01, T-119-10)."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        from shared.joins_lab import MARK_A, MARK_B
+        # Corpus text containing raw sentinel bytes should NOT forge highlight spans.
+        text = f"normal{MARK_A}forged{MARK_B}text"
+        result = _highlight_html_line_safe(text, None)
+        # Sentinels stripped; no spurious <b> tag
+        assert "<b style='color:#dc2626'>" not in result
+        assert "forged" in result
+
+    def test_highlight_html_line_safe_invalid_regex_falls_back(self):
+        """Invalid regex pattern is silently ignored (no crash); text is still escaped."""
+        from web.components.anchor_viewer import _highlight_html_line_safe
+        result = _highlight_html_line_safe("hello world", "[invalid(")
+        assert "hello world" in result
+        assert "<b style=" not in result
+
+    def test_update_content_uses_highlight_html_when_pattern_set(self):
+        """update_content passes highlight_html to render_line_numbered_html when pattern set."""
+        import asyncio
+        from unittest.mock import patch, MagicMock, call
+
+        page = _make_page(text="שלום עולם\nשורה שנייה")
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        async def _fake_io_bound(fn, *a, **k):
+            return fn()
+
+        ctx = patch("web.components.anchor_viewer.ui")
+        rctx = patch("web.components.anchor_viewer.run")
+        mock_ui = ctx.start()
+        mock_run = rctx.start()
+        mock_run.io_bound = _fake_io_bound
+
+        for attr in (
+            "column", "row", "element", "html", "button", "icon",
+            "label", "tooltip", "add_head_html", "run_javascript", "notify",
+        ):
+            factory = MagicMock(return_value=mock_element)
+            factory.__enter__ = lambda s: s
+            factory.__exit__ = MagicMock(return_value=False)
+            setattr(mock_ui, attr, factory)
+
+        try:
+            from web.components.anchor_viewer import AnchorViewer
+            viewer = AnchorViewer(
+                sys_id="990025143260205171",
+                highlight_pattern="שלום",
+                browse_resolver=lambda *a, **kw: page,
+                external_resolver=_noop_external,
+            )
+            # Mock transcription_html so we can check set_content was called
+            viewer._transcription_html = MagicMock()
+            viewer._prev_btn = MagicMock()
+            viewer._next_btn = MagicMock()
+            viewer._page_label = MagicMock()
+            viewer._shelfmark_label = MagicMock()
+            viewer._meta_label = MagicMock()
+
+            # Capture the render call's html to verify highlight spans appear
+            rendered_html_captured = []
+
+            original_set_content = viewer._transcription_html.set_content
+
+            def capture_set_content(html):
+                rendered_html_captured.append(html)
+
+            viewer._transcription_html.set_content = capture_set_content
+
+            asyncio.run(viewer.update_content(p_num=1))
+
+            assert rendered_html_captured, "set_content was never called on transcription_html"
+            html_out = rendered_html_captured[0]
+            assert "<b style='color:#dc2626'>" in html_out, (
+                f"Expected highlight span in transcription render but got: {html_out[:300]!r}"
+            )
+        finally:
+            ctx.stop()
+            rctx.stop()
+
+    def test_update_content_no_highlight_when_pattern_is_none(self):
+        """update_content renders plain escaped transcription when highlight_pattern is None."""
+        import asyncio
+        from unittest.mock import patch, MagicMock
+
+        page = _make_page(text="שלום עולם")
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        async def _fake_io_bound(fn, *a, **k):
+            return fn()
+
+        ctx = patch("web.components.anchor_viewer.ui")
+        rctx = patch("web.components.anchor_viewer.run")
+        mock_ui = ctx.start()
+        mock_run = rctx.start()
+        mock_run.io_bound = _fake_io_bound
+
+        for attr in (
+            "column", "row", "element", "html", "button", "icon",
+            "label", "tooltip", "add_head_html", "run_javascript", "notify",
+        ):
+            factory = MagicMock(return_value=mock_element)
+            factory.__enter__ = lambda s: s
+            factory.__exit__ = MagicMock(return_value=False)
+            setattr(mock_ui, attr, factory)
+
+        try:
+            from web.components.anchor_viewer import AnchorViewer
+            viewer = AnchorViewer(
+                sys_id="990025143260205171",
+                highlight_pattern=None,  # no highlighting
+                browse_resolver=lambda *a, **kw: page,
+                external_resolver=_noop_external,
+            )
+            viewer._transcription_html = MagicMock()
+            viewer._prev_btn = MagicMock()
+            viewer._next_btn = MagicMock()
+            viewer._page_label = MagicMock()
+            viewer._shelfmark_label = MagicMock()
+            viewer._meta_label = MagicMock()
+
+            rendered_html_captured = []
+
+            def capture_set_content(html):
+                rendered_html_captured.append(html)
+
+            viewer._transcription_html.set_content = capture_set_content
+
+            asyncio.run(viewer.update_content(p_num=1))
+
+            assert rendered_html_captured, "set_content was never called"
+            html_out = rendered_html_captured[0]
+            assert "<b style='color:#dc2626'>" not in html_out, (
+                "Expected NO highlight span when highlight_pattern=None"
+            )
+        finally:
+            ctx.stop()
+            rctx.stop()
+
+    def test_anchor_viewer_image_pane_marker(self):
+        """AnchorViewer image container carries .mark('anchor-viewer-image-pane') (F-A3)."""
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        assert "anchor-viewer-image-pane" in source, (
+            "Image container must carry .mark('anchor-viewer-image-pane') for Plan-08 render-smoke (F-A3)"
+        )
+
+    def test_anchor_viewer_transcription_pane_marker(self):
+        """AnchorViewer transcription container carries .mark('anchor-viewer-transcription-pane') (F-A3)."""
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        assert "anchor-viewer-transcription-pane" in source, (
+            "Transcription container must carry .mark('anchor-viewer-transcription-pane') for Plan-08 render-smoke (F-A3)"
+        )
+
+    def test_shared_htmlify_is_unchanged(self):
+        """shared/joins_lab.htmlify is not modified by this plan (no app-wide ripple)."""
+        from shared.joins_lab import htmlify
+        # Verify it still wraps output in <div dir='rtl'> (which is why LINE-SAFE variant needed)
+        result = htmlify("test", None)
+        assert "<div dir='rtl'>" in result, "htmlify should still wrap in <div dir='rtl'>"
+        # And converts \n to <br>
+        result_nl = htmlify("a\nb", None)
+        assert "<br>" in result_nl, "htmlify should still convert \\n to <br>"

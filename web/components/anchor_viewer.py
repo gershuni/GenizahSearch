@@ -28,11 +28,14 @@ Phase 119 Compare readiness: the head HTML (``_VIEWER_HEAD``) is injected
 """
 from __future__ import annotations
 
+import html as _html_module
 import logging
+import re
 from typing import Any, Callable, Optional
 
 from nicegui import run, ui
 
+from shared.joins_lab import MARK_A, MARK_B
 from web.components.image_resolution import resolve_external_images, resolve_image_url
 from web.components.typography import render_line_numbered_html
 from web.translations import tr
@@ -183,6 +186,54 @@ def inject_viewer_assets() -> None:
     ui.add_head_html(_VIEWER_HEAD)
 
 
+def _highlight_html_line_safe(text: str, pattern: Optional[str]) -> str:
+    """Build a LINE-SAFE HTML string with pattern matches highlighted.
+
+    Uses the same ``<b style='color:#dc2626'>`` span as ``shared.joins_lab.htmlify``
+    (F-G1a) but WITHOUT the outer ``<div dir='rtl'>`` wrapper and WITHOUT
+    converting ``\\n`` to ``<br>`` (F-G1b).  This makes the output safe to pass
+    directly to ``render_line_numbered_html(highlight_html=...)`` which splits on
+    ``\\n`` to build per-line grid rows.  An outer wrapper would be torn across rows.
+
+    Security (T-119-10):
+        - MARK_A/MARK_B sentinel bytes are stripped from the input first (WR-01)
+          so corpus text cannot forge a highlight region.
+        - ``html.escape()`` is applied to the whole string before inserting the
+          ``<b>`` tags — only the fixed tag survives; raw text is fully escaped.
+        - ``\\n`` is preserved as-is (no ``<br>`` conversion).
+        - The output is suitable for ``ui.html(sanitize=False)`` only because it
+          is pre-escaped; raw ``page.text`` is never passed to ``ui.html``.
+
+    Args:
+        text:     Corpus text (may be multi-line; ``\\n`` is the line separator).
+        pattern:  Optional regex pattern.  If None or invalid, text is returned
+                  HTML-escaped with no highlight spans.
+
+    Returns:
+        HTML-escaped string with highlight ``<b>`` spans injected around matches
+        and ``\\n`` preserved (no outer wrapper element).
+    """
+    # 0. Strip sentinel bytes from input so corpus text cannot forge highlights.
+    text = (text or "").replace(MARK_A, "").replace(MARK_B, "")
+
+    # 1. Wrap match regions with sentinels (before escaping).
+    if pattern:
+        try:
+            rx = re.compile(pattern, re.IGNORECASE | re.MULTILINE)
+            text = rx.sub(lambda m: MARK_A + m.group(0) + MARK_B, text)
+        except re.error:
+            pass
+
+    # 2. HTML-escape the whole string (corpus content fully escaped; sentinels survive).
+    t = _html_module.escape(text)
+
+    # 3. Replace sentinels with the fixed <b> tag.
+    t = t.replace(MARK_A, "<b style='color:#dc2626'>").replace(MARK_B, "</b>")
+
+    # 4. Return as-is — \n is preserved, NO <br> conversion, NO outer wrapper.
+    return t
+
+
 # ============================================================================
 # AnchorViewer class
 # ============================================================================
@@ -198,6 +249,13 @@ class AnchorViewer:
         fl_id:            Optional fragment leaf ID (informational; not used for nav).
         p_num:            Initial page number (1-based).  None = first page.
         volume_ie:        Optional IE identifier for multi-IE manuscripts.
+        highlight_pattern: Optional regex pattern for transcription term highlighting
+                           (G1-compare).  When set, ``update_content`` builds a
+                           LINE-SAFE escaped highlight string via
+                           ``_highlight_html_line_safe`` and passes it to
+                           ``render_line_numbered_html(highlight_html=...)``.
+                           The same ``<b style='color:#dc2626'>`` span the rest of the
+                           app uses (F-G1a); no outer wrapper (F-G1b); ``\\n`` preserved.
         browse_resolver:  Callable matching ``service.get_browse_page`` signature.
                           Defaults to the real AppState-backed singleton.
         external_resolver: Callable matching ``resolve_external_images`` signature.
@@ -210,6 +268,7 @@ class AnchorViewer:
         fl_id: Optional[str] = None,
         p_num: Optional[int] = None,
         volume_ie: Optional[str] = None,
+        highlight_pattern: Optional[str] = None,
         browse_resolver: Optional[Callable] = None,
         external_resolver: Optional[Callable] = None,
     ) -> None:
@@ -217,6 +276,10 @@ class AnchorViewer:
         self._fl_id = fl_id
         self._p_num: Optional[int] = p_num
         self._volume_ie = volume_ie
+        # Optional regex pattern for transcription term highlighting (G1-compare).
+        # Passed to _highlight_html_line_safe which builds a LINE-SAFE escaped
+        # highlight string compatible with render_line_numbered_html (F-G1b).
+        self._highlight_pattern: Optional[str] = highlight_pattern
 
         # Inject real defaults lazily so the module can be imported without
         # a live AppState (test safety).
@@ -421,8 +484,14 @@ class AnchorViewer:
                     )
                 )
 
-            # Image container (shows skeleton initially)
-            self._image_container = ui.element("div").classes("image-container relative")
+            # Image container (shows skeleton initially).
+            # .mark("anchor-viewer-image-pane") enables Plan-08 render-smoke to
+            # assert that the skeleton is gone after update_content resolves (F-A3).
+            self._image_container = (
+                ui.element("div")
+                .classes("image-container relative")
+                .mark("anchor-viewer-image-pane")
+            )
             with self._image_container:
                 self._skeleton = ui.element("div").classes("anchor-viewer-skeleton")
                 self._img_html_elem: Optional[Any] = None
@@ -482,9 +551,13 @@ class AnchorViewer:
                     )
                     ui.tooltip(tr("Reset zoom")).bind_visibility_from(_zoom_reset_btn)
 
-            # Transcription area
-            self._transcription_container = ui.element("div").classes(
-                "anchor-transcription-panel w-full"
+            # Transcription area.
+            # .mark("anchor-viewer-transcription-pane") enables Plan-08 render-smoke
+            # to query the loaded transcription state (F-A3).
+            self._transcription_container = (
+                ui.element("div")
+                .classes("anchor-transcription-panel w-full")
+                .mark("anchor-viewer-transcription-pane")
             )
             with self._transcription_container:
                 self._transcription_html = ui.html("", sanitize=False)
@@ -600,9 +673,20 @@ class AnchorViewer:
         else:
             self._show_image_error()
 
-        # Render transcription
+        # Render transcription — with optional term highlighting (G1-compare, F-G1a/b).
+        # When highlight_pattern is set, build a LINE-SAFE escaped HTML string via
+        # _highlight_html_line_safe (escape → <b> span → preserve \n, NO outer wrapper)
+        # and pass it to render_line_numbered_html(highlight_html=...) so per-line
+        # grid rows split correctly.  Security (T-119-10): only the escaped output of
+        # _highlight_html_line_safe reaches ui.html(sanitize=False) — never raw page.text.
+        raw_text = page.text or ""
+        if self._highlight_pattern and raw_text:
+            highlight_html = _highlight_html_line_safe(raw_text, self._highlight_pattern)
+        else:
+            highlight_html = None
         html_text = render_line_numbered_html(
-            text=page.text or "",
+            text=raw_text,
+            highlight_html=highlight_html,
             show_line_numbers=True,
             line_height="2.2",
             font_size="1.4rem",
