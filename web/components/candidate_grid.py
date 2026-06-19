@@ -888,6 +888,13 @@ def create_candidate_grid(
     on_compare: Optional[Callable] = None,
     triage: object = None,
     page: int = 0,
+    # Phase 119 integration kwargs (Plan 04 — joins_lab page wiring)
+    enrichment: Optional[dict] = None,
+    enrichment_ready: bool = False,
+    filter_state: Optional[dict] = None,
+    anchor_sys_id: str = '',
+    on_page_change: Optional[Callable] = None,
+    on_filter_open: Optional[Callable] = None,
 ) -> ui.element:
     """Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
@@ -899,12 +906,22 @@ def create_candidate_grid(
         triage:           TriageState or dict[sys_id → verdict]. Shared single source
                           of truth across grid, table, Compare (D-11).
         page:             0-indexed page number to render.
+        enrichment:       dict[sys_id → {material, width_cm, height_cm, ...}] (D-16).
+        enrichment_ready: True once enrichment batch has completed (Pitfall 7).
+        filter_state:     Current filter dialog state dict (D-14).
+        anchor_sys_id:    The anchor's sys_id — excluded from self-match display (D-13).
+        on_page_change:   Callback(page: int) for Prev/Next pagination clicks (D-08).
+        on_filter_open:   Callback() for the Filter button click (D-14).
 
     Returns:
         The outer ui.column() element wrapping the section header + grid + pagination.
     """
     if triage is None:
         triage = {}
+    if enrichment is None:
+        enrichment = {}
+    if filter_state is None:
+        filter_state = {}
 
     total = len(candidates)
     page_slice, current_page, total_pages = paginate(candidates, page)
@@ -917,10 +934,16 @@ def create_candidate_grid(
                 tr("No candidates found. Try different lines or broader terms.")
             ).classes("text-sm").style("color: var(--text-secondary);")
         else:
-            # Section header shows the FULL count.
-            ui.label(f"{tr('Candidates')} ({total})").classes(
-                "text-base font-semibold"
-            )
+            # Section header row: candidate count + Filter button (D-14)
+            with ui.row().classes("w-full items-center justify-between"):
+                ui.label(f"{tr('Candidates')} ({total})").classes(
+                    "text-base font-semibold"
+                )
+                if on_filter_open is not None:
+                    ui.button(
+                        icon='filter_list',
+                        on_click=on_filter_open,
+                    ).props('flat dense round').tooltip(tr('Filter candidates'))
 
             # Responsive grid (D-09): 1 col <640px, 2 col 640–1023px, 3 col ≥1024px.
             with ui.grid().classes("w-full gap-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"):
@@ -934,12 +957,22 @@ def create_candidate_grid(
 
             # Pagination controls (D-08): ‹ Prev | Page N of M | Next ›
             if total_pages > 1:
+                _cp = current_page  # capture for closures
+
+                def _prev_click(_cp=_cp):
+                    if on_page_change is not None and _cp > 0:
+                        on_page_change(_cp - 1)
+
+                def _next_click(_cp=_cp, _tp=total_pages):
+                    if on_page_change is not None and _cp < _tp - 1:
+                        on_page_change(_cp + 1)
+
                 with ui.row().classes("w-full items-center justify-center gap-2 mt-2"):
-                    ui.button(tr("‹ Prev")).props("flat dense").props(
+                    ui.button(tr("‹ Prev"), on_click=_prev_click).props("flat dense").props(
                         "disable" if current_page == 0 else ""
                     )
                     ui.label(tr("Page N of M").replace("N", str(current_page + 1)).replace("M", str(total_pages))).classes("text-sm")
-                    ui.button(tr("Next ›")).props("flat dense").props(
+                    ui.button(tr("Next ›"), on_click=_next_click).props("flat dense").props(
                         "disable" if current_page >= total_pages - 1 else ""
                     )
 
