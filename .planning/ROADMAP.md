@@ -173,7 +173,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 117. Vertical Spine | 6/6 | Complete    | 2026-06-18 |
-| 118. Joins, Entry & Full Builders | 6/6 | Complete   | 2026-06-18 |
+| 118. Joins, Entry & Full Builders | 6/6 | Complete    | 2026-06-19 |
 | 119. Candidates, Compare & Visual Similarity | 0/TBD | Not started | - |
 | 120. Actions & Persistence | 0/TBD | Not started | - |
 | 121. i18n Polish | 0/TBD | Not started | - |
