@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v8.2.0
 milestone_name: Web Joins Lab
 status: executing
-stopped_at: Phase 119 Plan 08 complete — render-smoke harness 7/7 passing
-last_updated: "2026-06-19T16:15:12.894Z"
+stopped_at: Phase 119 R2 gap closure (plans 09-11) code-complete + committed; closed EARLY per user — final verification (test gate + gsd-verifier + live re-run of R2-3/6/8/10) DEFERRED to Phase 120 (see 119-DEFERRED-VERIFICATION.md)
+last_updated: "2026-06-19T18:00:00.000Z"
 last_activity: 2026-06-19
 progress:
   total_phases: 5
@@ -21,13 +21,14 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 119 — candidates-compare-visual-similarity
+**Current focus:** Phase 120 — Actions & Persistence (Phase 119 closed early; verification deferred here)
 
 ## Current Position
 
-Phase: 119 (candidates-compare-visual-similarity) — EXECUTING
-Plan: 8 of 8
-Status: Ready to execute
+Phase: 119 (candidates-compare-visual-similarity) — CLOSED EARLY
+Plan: 11 of 11 (R2 gap closure 09-11 code-complete + committed)
+Status: Closed early per user (2026-06-19). Verification deferred to Phase 120 — see 119-DEFERRED-VERIFICATION.md (test gate + gsd-verifier + live HUMAN-UAT re-run of R2-3/6/8/10) + SEED-008 crash + SEED-007 workbench actions.
+Next: Phase 120 — Actions & Persistence
 Last activity: 2026-06-19
 
 ## Accumulated Context
