@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v8.2.0
 milestone_name: Web Joins Lab
 status: executing
-stopped_at: Phase 119 planned + Codex-reviewed (4 plans, 3 waves) — ready to execute
-last_updated: "2026-06-19T13:23:06.967Z"
+stopped_at: Phase 119 Plan 08 complete — render-smoke harness 7/7 passing
+last_updated: "2026-06-19T14:34:28.548Z"
 last_activity: 2026-06-19
 progress:
   total_phases: 5
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 20
-  completed_plans: 19
-  percent: 40
+  completed_plans: 20
+  percent: 60
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 119 (candidates-compare-visual-similarity) — EXECUTING
-Plan: 4 of 8
+Plan: 5 of 8
 Status: Ready to execute
 Last activity: 2026-06-19
 
@@ -85,8 +85,8 @@ Items carried forward from v8.1.0:
 
 ## Session Continuity
 
-Last session: 2026-06-19T13:23:06.961Z
-Stopped at: Phase 119 planned + Codex-reviewed (4 plans, 3 waves) — ready to execute
+Last session: 2026-06-19T14:34:28.541Z
+Stopped at: Phase 119 Plan 08 complete — render-smoke harness 7/7 passing
 Resume file: None
 Next step: `/gsd:plan-phase 117` (Vertical Spine)
 
@@ -107,6 +107,7 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 | Phase 119-candidates-compare-visual-similarity P05 | 20min | 2 tasks | 2 files |
 | Phase 119-candidates-compare-visual-similarity P06 | 35min | 3 tasks | 4 files |
 | Phase 119 P07 | 35m | 3 tasks | 6 files |
+| Phase 119 P08 | 120min | 3 tasks | 5 files |
 
 ## Decisions
 
@@ -130,6 +131,9 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 - **119-05:** _make_compare_handler hoisted before card block so image click and Compare button share the same candidate-carrying closure (G4)
 - **119-05:** _triage_btn_refs per-card render-local dict passed into _make_triage_handler — immediate fill update without grid rebuild (G3, T-119-07)
 - **119-05:** Only snippet_html()/htmlify() output passes to ui.html(sanitize=False); cursor:pointer on both image and placeholder branches (G4)
+- [Phase ?]: 119-08 F-A1+F-A2 render-smoke harness
+- [Phase ?]: 119-08: Task 1 manual — no pytest-asyncio; asyncio.run wrapper pattern over NiceGUI User on httpx.ASGITransport(core.app)
+- [Phase ?]: 119-08: execute_search must return raw dicts (not Candidate objects) — dedup_candidates calls .get(); context.slot_stack saved before asyncio.run() and restored in finally for test isolation
 
 ## Operator Next Steps
 
