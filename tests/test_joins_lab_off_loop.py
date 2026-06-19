@@ -93,6 +93,94 @@ def _collect_io_bound_args(tree: ast.AST) -> set:
     return io_bound_args
 
 
+def _find_blocking_call_violations(
+    source: str,
+    blocking_attrs: list,
+    filename: str = "<string>",
+) -> list:
+    """Generic parameterized version of the blocking-call detector.
+
+    Identical logic to _find_execute_search_violations, but matches any method
+    name in *blocking_attrs* instead of the hardcoded 'execute_search'.
+
+    Used by Phase 119 to guard VS lookup (get_suggestions) and enrichment batch
+    (get_measurement_summaries_batch) call sites.
+
+    Each returned dict has:
+        {
+            "line": int,
+            "call_shape": str,
+            "enclosing_fn": str | None,
+            "reason": str,
+        }
+
+    Violations:
+      V1: blocking method called directly inside an async def.
+      V2: blocking method inside a sync def whose name is never passed to run.io_bound.
+    """
+    tree = ast.parse(source, filename=filename)
+    parent_map = _build_parent_map(tree)
+    io_bound_args = _collect_io_bound_args(tree)
+
+    violations = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        # Match Attribute calls whose attr is one of the blocking method names
+        if not (isinstance(func, ast.Attribute) and func.attr in blocking_attrs):
+            continue
+
+        call_shape = ast.get_source_segment(source, func) or f"?.{func.attr}"
+
+        enclosing = _enclosing_function(node, parent_map)
+
+        if enclosing is None:
+            violations.append({
+                "line": node.lineno,
+                "call_shape": call_shape,
+                "enclosing_fn": None,
+                "reason": (
+                    f"{func.attr} called at module level (not inside any function)"
+                ),
+            })
+            continue
+
+        # V1: inside an async def → runs on the event loop
+        if isinstance(enclosing, ast.AsyncFunctionDef):
+            violations.append({
+                "line": node.lineno,
+                "call_shape": call_shape,
+                "enclosing_fn": enclosing.name,
+                "reason": (
+                    f"{func.attr} is called directly inside async def "
+                    f"'{enclosing.name}' (line {enclosing.lineno}) — "
+                    f"this runs on the NiceGUI event loop. "
+                    f"Wrap the call in a synchronous function and dispatch it via "
+                    f"run.io_bound(...)."
+                ),
+            })
+            continue
+
+        # V2: inside a sync def, but that def is never passed to run.io_bound
+        fn_name = enclosing.name
+        if fn_name not in io_bound_args:
+            violations.append({
+                "line": node.lineno,
+                "call_shape": call_shape,
+                "enclosing_fn": fn_name,
+                "reason": (
+                    f"{func.attr} is inside sync def '{fn_name}' (line "
+                    f"{enclosing.lineno}), but '{fn_name}' is never passed as the "
+                    f"first positional arg to run.io_bound(...) in this module. "
+                    f"An uncalled sync closure does not protect the event loop."
+                ),
+            })
+
+    return violations
+
+
 def _find_execute_search_violations(source: str, filename: str = "<string>") -> list:
     """Parse *source* and return a list of violation dicts.
 
@@ -328,4 +416,145 @@ class TestSyntheticViolationDetected:
             "(sync methods call execute_search but are not passed to run.io_bound in "
             "that file — they are dispatched externally by joins_lab.py). "
             "This confirms the live test MUST be scoped to joins_lab.py only."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 119: VS lookup + enrichment batch off-loop guard (live-file + synthetic)
+# ---------------------------------------------------------------------------
+
+
+def test_vs_lookup_not_on_event_loop():
+    """Phase 119 SC#3 extension: assert joins_lab.py never calls get_suggestions on the event loop.
+
+    Skips while web/pages/joins_lab.py does not yet exist, or while it has not yet
+    added any get_suggestions call site (Wave 2 adds the calls).  Becomes load-bearing
+    once Wave 2 lands.
+    """
+    if not JOINS_LAB_PATH.exists():
+        pytest.skip(
+            "web/pages/joins_lab.py not yet created — "
+            "this test becomes load-bearing once Wave 2 lands."
+        )
+
+    source = JOINS_LAB_PATH.read_text(encoding="utf-8")
+    if "get_suggestions" not in source:
+        pytest.skip(
+            "web/pages/joins_lab.py does not yet contain 'get_suggestions' — "
+            "this test becomes load-bearing once Wave 2 adds the VS lookup call site."
+        )
+
+    violations = _find_blocking_call_violations(source, ["get_suggestions"],
+                                                filename=str(JOINS_LAB_PATH))
+    if violations:
+        lines = []
+        for v in violations:
+            lines.append(f"  Line {v['line']} — {v['call_shape']!r}: {v['reason']}")
+        raise AssertionError(
+            f"Found {len(violations)} get_suggestions off-loop violation(s) in "
+            f"web/pages/joins_lab.py:\n" + "\n".join(lines)
+        )
+
+
+def test_enrichment_batch_not_on_event_loop():
+    """Phase 119 SC#3 extension: assert joins_lab.py never calls get_measurement_summaries_batch
+    on the event loop.
+
+    Skips while web/pages/joins_lab.py does not yet exist, or while it has not yet
+    added any get_measurement_summaries_batch call site (Wave 2 adds the calls).
+    Becomes load-bearing once Wave 2 lands.
+    """
+    if not JOINS_LAB_PATH.exists():
+        pytest.skip(
+            "web/pages/joins_lab.py not yet created — "
+            "this test becomes load-bearing once Wave 2 lands."
+        )
+
+    source = JOINS_LAB_PATH.read_text(encoding="utf-8")
+    if "get_measurement_summaries_batch" not in source:
+        pytest.skip(
+            "web/pages/joins_lab.py does not yet contain 'get_measurement_summaries_batch' — "
+            "this test becomes load-bearing once Wave 2 adds the enrichment call site."
+        )
+
+    violations = _find_blocking_call_violations(
+        source, ["get_measurement_summaries_batch"], filename=str(JOINS_LAB_PATH)
+    )
+    if violations:
+        lines = []
+        for v in violations:
+            lines.append(f"  Line {v['line']} — {v['call_shape']!r}: {v['reason']}")
+        raise AssertionError(
+            f"Found {len(violations)} get_measurement_summaries_batch off-loop violation(s) in "
+            f"web/pages/joins_lab.py:\n" + "\n".join(lines)
+        )
+
+
+class TestSyntheticViolationsPhase119:
+    """Negative-control tests: verify _find_blocking_call_violations fires for VS + enrichment."""
+
+    def test_vs_get_suggestions_in_async_detected(self):
+        """Detector FIRES when vs_svc.get_suggestions is called inside an async def."""
+        source = textwrap.dedent("""\
+            async def fetch_vs(anchor_sid, vs_svc):
+                raw = vs_svc.get_suggestions(anchor_sid, 200)
+                return raw
+        """)
+        violations = _find_blocking_call_violations(source, ["get_suggestions"])
+        assert violations, (
+            "Detector should fire for vs_svc.get_suggestions inside an async def, "
+            "but no violations were found."
+        )
+        assert violations[0]["enclosing_fn"] == "fetch_vs"
+        assert "async def" in violations[0]["reason"]
+
+    def test_vs_get_suggestions_in_io_bound_no_violation(self):
+        """Detector PASSES (no violations) when get_suggestions is inside a sync def
+        passed to run.io_bound — the correct off-loop pattern."""
+        source = textwrap.dedent("""\
+            async def fetch_vs(anchor_sid, vs_svc):
+                def run_vs_core():
+                    return vs_svc.get_suggestions(anchor_sid, 200)
+                raw = await run.io_bound(run_vs_core)
+                return raw
+        """)
+        violations = _find_blocking_call_violations(source, ["get_suggestions"])
+        assert not violations, (
+            f"Detector should NOT fire when get_suggestions is inside a sync def "
+            f"passed to run.io_bound, but got: {violations}"
+        )
+
+    def test_enrichment_batch_in_async_detected(self):
+        """Detector FIRES when get_measurement_summaries_batch is called inside an async def."""
+        source = textwrap.dedent("""\
+            async def enrich(sys_ids, fjms):
+                data = fjms.get_measurement_summaries_batch(sys_ids)
+                return data
+        """)
+        violations = _find_blocking_call_violations(
+            source, ["get_measurement_summaries_batch"]
+        )
+        assert violations, (
+            "Detector should fire for get_measurement_summaries_batch inside an async def, "
+            "but no violations were found."
+        )
+        assert violations[0]["enclosing_fn"] == "enrich"
+        assert "async def" in violations[0]["reason"]
+
+    def test_enrichment_batch_in_io_bound_no_violation(self):
+        """Detector PASSES (no violations) when get_measurement_summaries_batch is inside
+        a sync def passed to run.io_bound — the correct off-loop pattern."""
+        source = textwrap.dedent("""\
+            async def enrich(sys_ids, fjms):
+                def run_enrich_core():
+                    return fjms.get_measurement_summaries_batch(sys_ids)
+                data = await run.io_bound(run_enrich_core)
+                return data
+        """)
+        violations = _find_blocking_call_violations(
+            source, ["get_measurement_summaries_batch"]
+        )
+        assert not violations, (
+            f"Detector should NOT fire when get_measurement_summaries_batch is in a sync def "
+            f"passed to run.io_bound, but got: {violations}"
         )
