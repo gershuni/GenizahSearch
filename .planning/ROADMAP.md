@@ -147,7 +147,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 - [x] 119-08-PLAN.md — Round-1 gaps: render-smoke harness (NiceGUI User, /joins-lab, mocked engine) [Wave 2]
 - [ ] 119-09-PLAN.md — Round-2 gap closure: HE Compare translations (R2-1) + shared TRIAGE_ICONS mapping [Wave 1]
 - [ ] 119-10-PLAN.md — Round-2 gap closure: card icon triage ✓/?/✗ + browse/compare icon buttons (R2-4/R2-9) + VS-only transcription (R2-8) + dark table (R2-10) + render-smoke [Wave 2]
-- [ ] 119-11-PLAN.md — Round-2 gap closure: Compare LTR counter+arrows (R2-2) + image-height cap (R2-3) + verdict icons (R2-4) + verdict border (R2-5) + single shelfmark (R2-6) + Esc-close (R2-7) + render-smoke [Wave 2]
+- [ ] 119-11-PLAN.md — Round-2 gap closure: Compare LTR counter+arrows (R2-2) + image-height cap (R2-3) + verdict icons (R2-4) + verdict border (R2-5) + single shelfmark (R2-6) + Esc-close (R2-7) + render-smoke [Wave 3]
 
 **UI hint**: yes
 
