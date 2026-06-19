@@ -1,31 +1,40 @@
 # -*- coding: utf-8 -*-
-"""Candidate grid component for the Joins Lab (Phase 117 CND-02).
+"""Candidate grid component for the Joins Lab (Phase 117 CND-02 / Phase 119 CND-03..07).
 
-Renders a read-only grid of Candidate cards — thumbnail + shelfmark + library chip
-+ title + "View in Browse" link.  Phase 119 will extend this component with triage
-Y/?/N, table view, and VS badges without requiring a structural rewrite (D-14, D-04).
+Phase 117: Renders a read-only grid of Candidate cards — thumbnail + shelfmark + library
+chip + title + "View in Browse" link.
+
+Phase 119 (this file): Extended with triage Y/?/N, pagination (24/page), large 160×160
+thumbnails, table view (sortable 8-column multi-select), filter dialog, and 👁 VS badge.
 
 Public API
 ----------
-create_candidate_grid(candidates, *, on_browse_click=None) -> ui.element
+create_candidate_grid(candidates, *, on_browse_click=None, on_compare=None,
+                      triage=None, page=0) -> ui.element
 build_thumbnail_url(sys_id, page, shelfmark='', library_code='') -> str | None
 build_browse_url(cand) -> str
+paginate(all_candidates, page, page_size) -> (slice, current_page, total_pages)
+compute_filtered(candidates, filter_state, enrichment, triage, anchor_sys_id) -> list
+is_size_mismatch(candidate_width_cm, anchor_width_cm, threshold=1.4) -> bool
+make_triage_state() -> TriageState
+get_table_columns() -> list[dict]
+get_table_config() -> dict
 
-SECURITY BOUNDARY (T-117-07):
+SECURITY BOUNDARY (T-117-07 / T-119-04/05/06/07):
   - Thumbnail URLs are proxy-only: /api/nli_image_by_sysid/... or Oxford Bodleian.
   - Never a direct iiif.nli.org.il URL.
   - Synthetic sys_ids return None → placeholder box rendered directly.
   - Image onerror stops at an inline placeholder; no handleImageError.
+  - Triage/filter state is in-memory only — zero raw app.storage.user access (CI-guarded).
+  - Nested links use js_handler='(e) => e.stopPropagation()' (AST guard enforced).
 
-MULTITENANT (T-117-03):
+MULTITENANT (T-117-03 / T-119-07):
   - Zero raw app.storage.user access — CI-guarded by test_no_raw_storage_access.py.
-
-SCOPE LOCK (D-14):
-  - No triage state, no checkboxes, no Compare, no VS.  Those are Phase 119.
 """
 from __future__ import annotations
 
 import json
+import math
 from typing import Optional, Callable
 
 from nicegui import ui
@@ -43,14 +52,14 @@ _TITLE_TRUNCATE_AT = 80
 """Characters at which to truncate candidate titles before appending '...'."""
 
 _MAX_RENDERED_CANDIDATES = 200
-"""Hard cap on how many candidate cards are rendered at once.
+"""Defensive cap — kept as a safety net but no longer the PRIMARY render bound.
 
-WebSocket safety: each card pushes an image element + proxy fetch, so rendering
-hundreds at once (a common-term search can return 700+) overruns the NiceGUI
-websocket — the connection drops ("Connection Lost") and the session resets.
-This mirrors the app-wide ``render_results[:200]`` convention. True pagination /
-lazy-loading is Phase 119 (Candidates surface); this is the interim safety net.
+Phase 119 (D-08): Pagination (24/page) is now the rendering bound. The 200-cap
+remains as a fallback defensive net only. See _PAGE_SIZE and paginate().
 """
+
+_PAGE_SIZE = 24
+"""Candidates per page (D-08). Replaces _MAX_RENDERED_CANDIDATES as the primary bound."""
 
 _PLACEHOLDER_STYLE = (
     "width:48px; height:48px; background:var(--bg-tertiary); "
@@ -58,6 +67,325 @@ _PLACEHOLDER_STYLE = (
     "justify-content:center; color:var(--text-muted); font-size:18px; "
     "flex-shrink:0;"
 )
+
+_PLACEHOLDER_STYLE_160 = (
+    "width:100%; height:160px; background:var(--bg-tertiary); "
+    "border-radius:8px 8px 0 0; display:flex; align-items:center; "
+    "justify-content:center; color:var(--text-muted); font-size:48px; "
+    "flex-shrink:0;"
+)
+
+
+# ---------------------------------------------------------------------------
+# Pagination (D-08 — replaces _MAX_RENDERED_CANDIDATES as the primary bound)
+# ---------------------------------------------------------------------------
+
+def paginate(
+    all_candidates: list,
+    page: int,
+    page_size: int = _PAGE_SIZE,
+) -> tuple:
+    """Paginate a list of candidates.
+
+    Pure function — headlessly testable.
+
+    Args:
+        all_candidates: The full (filtered) candidate list.
+        page:           0-indexed page number. Clamped into [0, total_pages-1].
+        page_size:      Items per page (default: _PAGE_SIZE = 24).
+
+    Returns:
+        (page_slice, clamped_page, total_pages)
+        - page_slice:    The candidates for this page.
+        - clamped_page:  The clamped page index (in case page was out of bounds).
+        - total_pages:   Total number of pages (always >= 1).
+    """
+    total = len(all_candidates)
+    if total == 0:
+        return [], 0, 1
+    total_pages = max(1, math.ceil(total / page_size))
+    clamped = max(0, min(page, total_pages - 1))
+    start = clamped * page_size
+    return all_candidates[start:start + page_size], clamped, total_pages
+
+
+# Keep the private alias for internal use
+def _paginate(filtered: list, page: int = 0) -> tuple:
+    """Internal alias for paginate() using the module-level _PAGE_SIZE."""
+    return paginate(filtered, page, _PAGE_SIZE)
+
+
+# ---------------------------------------------------------------------------
+# Size-mismatch predicate (D-15, parity desktop join_workbench.py:1687-1695)
+# ---------------------------------------------------------------------------
+
+def is_size_mismatch(
+    candidate_width_cm: Optional[float],
+    anchor_width_cm: Optional[float],
+    threshold: float = 1.4,
+) -> bool:
+    """Return True if candidate width differs from anchor width by more than threshold×.
+
+    Pure function — headlessly testable.
+
+    Formula (D-15, parity join_workbench.py:1687-1695):
+        ratio = max(w, anchor_w) / min(w, anchor_w)
+        mismatch = ratio > threshold
+
+    Guards:
+        - None on either side → False (no data → not flagged)
+        - min == 0 → False (guards division by zero)
+    """
+    if candidate_width_cm is None or anchor_width_cm is None:
+        return False
+    if min(candidate_width_cm, anchor_width_cm) == 0:
+        return False
+    ratio = max(candidate_width_cm, anchor_width_cm) / min(candidate_width_cm, anchor_width_cm)
+    return ratio > threshold
+
+
+# Private alias for internal use (consistent with PATTERNS.md)
+_is_size_mismatch = is_size_mismatch
+
+
+# ---------------------------------------------------------------------------
+# Triage state container (D-11 — in-memory, never written to safe_storage)
+# ---------------------------------------------------------------------------
+
+_VALID_VERDICTS = frozenset(("yes", "maybe", "no"))
+
+
+class TriageState:
+    """In-memory triage state keyed by sys_id.
+
+    Values are 'yes' | 'maybe' | 'no'.  Never written to safe_storage
+    (Phase 87 invariant — CI-guarded by test_no_raw_storage_access.py).
+    Phase 120 adds persistence via safe_storage.
+    """
+
+    def __init__(self) -> None:
+        self._data: dict = {}
+
+    def set(self, sys_id: str, verdict: str) -> None:
+        """Set verdict for a sys_id. Raises ValueError for invalid verdicts."""
+        if verdict not in _VALID_VERDICTS:
+            raise ValueError(
+                f"Invalid triage verdict {verdict!r}; must be one of {sorted(_VALID_VERDICTS)}"
+            )
+        self._data[sys_id] = verdict
+
+    def set_bulk(self, sys_ids: list, verdict: str) -> None:
+        """Set the same verdict for multiple sys_ids. Raises ValueError for invalid verdicts."""
+        if verdict not in _VALID_VERDICTS:
+            raise ValueError(
+                f"Invalid triage verdict {verdict!r}; must be one of {sorted(_VALID_VERDICTS)}"
+            )
+        for sid in sys_ids:
+            self._data[sid] = verdict
+
+    def get(self, sys_id: str) -> Optional[str]:
+        """Return the verdict for sys_id, or None if not triaged."""
+        return self._data.get(sys_id)
+
+    def reset(self) -> None:
+        """Clear all triage verdicts (called on re-anchor / new search)."""
+        self._data.clear()
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __contains__(self, sys_id: str) -> bool:
+        return sys_id in self._data
+
+
+def make_triage_state() -> TriageState:
+    """Factory for a fresh in-memory triage state object (D-11)."""
+    return TriageState()
+
+
+# ---------------------------------------------------------------------------
+# Filter predicates (D-14 — apply before pagination per D-08)
+# ---------------------------------------------------------------------------
+
+def compute_filtered(
+    all_candidates: list,
+    filter_state: dict,
+    enrichment: dict,
+    triage: dict,
+    anchor_sys_id: str,
+) -> list:
+    """Apply filter_state predicates to all_candidates and return the filtered list.
+
+    Pure function — no closures over module globals; headlessly testable.
+
+    Args:
+        all_candidates: Full list of Candidate objects.
+        filter_state:   Dict with keys:
+                          - materials: list[str] — include only these materials (empty=all)
+                          - has_dims: bool — require both width_cm and height_cm
+                          - exclude_mismatch: bool — exclude size-mismatch candidates
+                          - triage_states: list[str] — 'All'/'Not triaged'/'Yes'/'Maybe'/'No'
+                          - text_q: str — case-insensitive substring on shelfmark+title
+        enrichment:     dict[sys_id → {width_cm, height_cm, material, ...}]
+        triage:         dict[sys_id → 'yes'|'maybe'|'no'] (or TriageState)
+        anchor_sys_id:  sys_id of the anchor fragment (for size-mismatch comparison)
+
+    Returns:
+        Filtered list of Candidate objects (in the same order as all_candidates).
+    """
+    text_q = (filter_state.get("text_q") or "").strip().lower()
+    materials = set(filter_state.get("materials") or [])
+    has_dims = bool(filter_state.get("has_dims", False))
+    exclude_mismatch = bool(filter_state.get("exclude_mismatch", False))
+    triage_states = set(filter_state.get("triage_states") or [])
+
+    # Look up anchor width for size-mismatch comparison
+    anchor_w = enrichment.get(anchor_sys_id, {}).get("width_cm")
+
+    # Support both TriageState objects and plain dicts
+    def _get_verdict(sys_id: str) -> Optional[str]:
+        if isinstance(triage, TriageState):
+            return triage.get(sys_id)
+        return triage.get(sys_id)
+
+    out = []
+    for c in all_candidates:
+        # Text filter (case-insensitive substring on shelfmark + title)
+        if text_q:
+            shelfmark_l = (getattr(c, "shelfmark", None) or "").lower()
+            title_l = (getattr(c, "title", None) or "").lower()
+            if text_q not in shelfmark_l and text_q not in title_l:
+                continue
+
+        # Material filter
+        m = enrichment.get(c.sys_id, {})
+        if materials and m.get("material") not in materials:
+            continue
+
+        # Has-dims filter
+        if has_dims and not (m.get("width_cm") and m.get("height_cm")):
+            continue
+
+        # Size-mismatch filter
+        if exclude_mismatch and is_size_mismatch(m.get("width_cm"), anchor_w):
+            continue
+
+        # Triage-state filter
+        if triage_states and "All" not in triage_states:
+            verdict = _get_verdict(c.sys_id)
+            if "Not triaged" in triage_states and verdict is None:
+                pass  # passes — not triaged matches "Not triaged"
+            elif verdict is not None and verdict.capitalize() not in triage_states:
+                continue
+            elif verdict is None and "Not triaged" not in triage_states:
+                continue
+
+        out.append(c)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Table configuration (D-10, CND-03)
+# ---------------------------------------------------------------------------
+
+def get_table_columns() -> list:
+    """Return the 8-column table column definitions (D-10, CND-03).
+
+    Web ADDS sortable columns — divergence from desktop setSortingEnabled(False) (D-10).
+    Default sort: score descending. VS-rank ascending when 👁 ON.
+    """
+    return [
+        {"name": "select", "label": "", "field": "sys_id", "sortable": False},
+        {"name": "shelfmark", "label": tr("Shelfmark"), "field": "shelfmark", "sortable": True},
+        {"name": "score", "label": tr("Score"), "field": "score", "sortable": True},
+        {"name": "snippet", "label": tr("Snippet"), "field": "snippet", "sortable": False},
+        {"name": "material", "label": tr("Material"), "field": "material", "sortable": True},
+        {"name": "dimensions", "label": tr("Dimensions"), "field": "dimensions", "sortable": True},
+        {"name": "page", "label": tr("Page"), "field": "page", "sortable": True},
+        {"name": "triage", "label": tr("Triage"), "field": "triage", "sortable": False},
+    ]
+
+
+def get_table_config() -> dict:
+    """Return table configuration dict (used by tests to assert multi-select etc.)."""
+    return {
+        "row_key": "uid",
+        "selection": "multiple",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Table row builder (D-10, CND-03)
+# ---------------------------------------------------------------------------
+
+def _make_table_rows(
+    candidates: list,
+    triage: object,
+    enrichment: dict,
+    sort_mode: str = "score",
+) -> list:
+    """Build row dicts for the ui.table from a candidate list.
+
+    Args:
+        candidates:  List of Candidate objects.
+        triage:      TriageState or dict[sys_id → verdict].
+        enrichment:  dict[sys_id → {width_cm, height_cm, material, ...}].
+        sort_mode:   'score' (default, desc) or 'vs_rank' (asc when 👁 ON).
+
+    Returns:
+        List of row dicts — each has all 8 column fields plus 'uid' for row identity.
+    """
+    from shared.joins_lab import badge_and_tooltip
+
+    def _get_verdict(sys_id: str) -> Optional[str]:
+        if isinstance(triage, TriageState):
+            return triage.get(sys_id)
+        return triage.get(sys_id) if isinstance(triage, dict) else None
+
+    rows = []
+    for c in candidates:
+        m = enrichment.get(c.sys_id, {})
+        icon_name, tooltip_text = badge_and_tooltip(c)
+        badge_marker = f"[{icon_name}] " if icon_name else ""
+        width_cm = m.get("width_cm")
+        height_cm = m.get("height_cm")
+        if width_cm is not None and height_cm is not None:
+            dims = f"{width_cm:.1f}×{height_cm:.1f} cm"
+        else:
+            dims = "—"
+        material = m.get("material") or "—"
+        verdict = _get_verdict(c.sys_id)
+        triage_glyph = {"yes": "✓", "maybe": "?", "no": "✗"}.get(verdict, "")
+        snippet = getattr(c, "snippet", None) or ""
+        if len(snippet) > 80:
+            snippet = snippet[:80] + "..."
+
+        score_val = getattr(c, "score", None)
+        score_display = f"{score_val:.2f}" if score_val is not None else "—"
+        vs_rank_val = getattr(c, "vs_rank", None)
+
+        rows.append({
+            "uid": c.uid,
+            "sys_id": c.sys_id,
+            "shelfmark": badge_marker + (c.shelfmark or "?"),
+            "score": score_display,
+            "score_sort": score_val if score_val is not None else 0.0,
+            "snippet": snippet,
+            "material": material,
+            "dimensions": dims,
+            "page": c.page if c.page is not None else "—",
+            "triage": triage_glyph,
+            "vs_rank": vs_rank_val if vs_rank_val is not None else 9999,
+        })
+
+    # Sort
+    if sort_mode == "vs_rank":
+        rows.sort(key=lambda r: r["vs_rank"])
+    else:
+        # Default: score descending
+        rows.sort(key=lambda r: r["score_sort"], reverse=True)
+
+    return rows
 
 
 def build_thumbnail_url(
