@@ -19,10 +19,8 @@ Seams covered:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
-
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -408,118 +406,6 @@ def test_compare_modal_imports_headlessly():
 # Task 2 (Plan 119-06): G5 — show-loader behavioral tests
 # ---------------------------------------------------------------------------
 
-def _make_compare_modal_with_stubs():
-    """Create a compare modal with mocked NiceGUI; return (dialog, anchor_stub, cand_stub).
-
-    The stubs are AsyncMock AnchorViewer instances injected in place of the real
-    AnchorViewer constructor, so the show-loader coroutine calls update_content on
-    them instead of building live NiceGUI widgets.
-    """
-    import asyncio
-    import inspect
-    from unittest.mock import MagicMock, AsyncMock, patch
-
-    anchor = _Cand(sys_id="ANCHOR01", page=2, shelfmark="T-S Anchor")
-    cand1 = _Cand(sys_id="CAND01", page=3, shelfmark="T-S Cand1")
-    cand2 = _Cand(sys_id="CAND02", page=4, shelfmark="T-S Cand2")
-    triage: dict = {}
-    calls: list = []
-
-    def on_verdict(sys_id, verdict):
-        calls.append((sys_id, verdict))
-
-    # Stub AnchorViewer — records update_content calls
-    anchor_stub = MagicMock()
-    anchor_stub.update_content = AsyncMock()
-
-    cand1_stub = MagicMock()
-    cand1_stub.update_content = AsyncMock()
-
-    # Track which stub instances were created (in order)
-    created_viewers = []
-
-    mock_element = MagicMock()
-    mock_element.__enter__ = lambda s: s
-    mock_element.__exit__ = MagicMock(return_value=False)
-    for m in ("classes", "props", "style", "mark", "tooltip", "on"):
-        setattr(mock_element, m, MagicMock(return_value=mock_element))
-
-    # dialog mock that supports .on("show", ...) — captures the handler
-    dialog_mock = MagicMock()
-    dialog_mock.__enter__ = lambda s: s
-    dialog_mock.__exit__ = MagicMock(return_value=False)
-    _show_handlers: list = []
-
-    def _dialog_on(event, handler):
-        if event == "show":
-            _show_handlers.append(handler)
-        return dialog_mock
-
-    dialog_mock.on = _dialog_on
-    dialog_mock.props = MagicMock(return_value=dialog_mock)
-
-    stub_sequence = [anchor_stub, cand1_stub]
-
-    def _fake_anchor_viewer_init(self, sys_id, p_num=None, volume_ie=None,
-                                  highlight_pattern=None, browse_resolver=None,
-                                  external_resolver=None, fl_id=None):
-        if stub_sequence:
-            stub = stub_sequence.pop(0)
-        else:
-            stub = MagicMock()
-            stub.update_content = AsyncMock()
-        created_viewers.append(stub)
-        # Copy stub attributes into self (since the factory accesses _cand_viewer_ref[0])
-        self.update_content = stub.update_content
-        self._sys_id = sys_id
-        self._p_num = p_num
-
-    with (
-        patch("web.components.compare_modal.ui") as mock_ui,
-        patch("web.components.compare_modal.AnchorViewer") as MockAnchorViewer,
-    ):
-        mock_ui.dialog.return_value = dialog_mock
-        mock_ui.card.return_value = mock_element
-        mock_ui.row.return_value = mock_element
-        mock_ui.column.return_value = mock_element
-        mock_ui.label.return_value = mock_element
-        mock_ui.button.return_value = mock_element
-        mock_ui.icon.return_value = mock_element
-        mock_ui.badge.return_value = mock_element
-
-        # Make AnchorViewer() return the stub instances in order.
-        # The factory calls AnchorViewer(...) and then we need to inject
-        # the stub so _anchor_viewer_ref / _cand_viewer_ref get the stub's
-        # update_content. Use side_effect to inject.
-        created_viewer_instances = []
-
-        def _av_side_effect(*args, **kwargs):
-            if created_viewer_instances:
-                # Return next stub
-                stub = anchor_stub if len(created_viewer_instances) == 0 else cand1_stub
-            # Build a real-looking mock with update_content
-            inst = MagicMock()
-            if not created_viewer_instances:
-                inst.update_content = anchor_stub.update_content
-            else:
-                inst.update_content = cand1_stub.update_content
-            created_viewer_instances.append(inst)
-            return inst
-
-        MockAnchorViewer.side_effect = _av_side_effect
-
-        from web.components.compare_modal import create_compare_modal
-        dialog = create_compare_modal(
-            anchor_cand=anchor,
-            initial_candidate=cand1,
-            filtered_candidates=[cand1, cand2],
-            triage=triage,
-            on_verdict=on_verdict,
-        )
-
-    return dialog, anchor_stub, cand1_stub, _show_handlers, triage, cand2
-
-
 class TestShowLoaderBehavioral:
     """Behavioral tests for the G5 show-loader (Task 2, Plan 119-06).
 
@@ -865,13 +751,12 @@ class TestVerdictButtonRefresh:
         asserts the 'maybe' button gets the 'unelevated' active prop while others get 'outline'.
         """
         import pathlib
-        import re
 
         # We test _refresh_verdict_buttons by reading the source logic.
         # The function reads triage.get(cand.sys_id) and sets active vs outline props.
         # This is a behavioral-level assertion using the pure helper via source analysis
         # and the record_verdict / triage state machinery.
-        from web.components.compare_modal import create_compare_state, record_verdict
+        from web.components.compare_modal import create_compare_state
 
         anchor = _Cand(sys_id="ANC", page=1)
         cand_a = _Cand(sys_id="MAYBE_CAND", page=2)

@@ -747,7 +747,7 @@ class TestHighlightPattern:
     def test_update_content_uses_highlight_html_when_pattern_set(self):
         """update_content passes highlight_html to render_line_numbered_html when pattern set."""
         import asyncio
-        from unittest.mock import patch, MagicMock, call
+        from unittest.mock import patch, MagicMock
 
         page = _make_page(text="שלום עולם\nשורה שנייה")
 
