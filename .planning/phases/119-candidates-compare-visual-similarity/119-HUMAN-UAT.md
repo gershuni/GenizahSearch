@@ -1,14 +1,14 @@
 ---
 status: issues_found
 phase: 119-candidates-compare-visual-similarity
-source: [119-VERIFICATION.md]
+source: [119-VERIFICATION.md, live-uat-round2-2026-06-19]
 started: 2026-06-19T00:00:00Z
-updated: 2026-06-19T00:00:00Z
+updated: 2026-06-19T12:00:00Z
 ---
 
 ## Current Test
 
-[UAT complete — 5 defects found, see Gaps]
+[Round 1 (G1-G5/A1-A4 + TEST-INFRA) RESOLVED by plans 119-05/06/07/08. Round 2 (live Compare UAT 2026-06-19) found 10 new gaps R2-1..R2-10 — see Gaps. Round-2 → gap-closure.]
 
 ## Tests
 
@@ -38,56 +38,80 @@ result: [pending]
 
 ## Summary
 
-total: 6
+total: 16
 passed: 0
-issues: 3
+round1_resolved: 10
+round2_open: 10
+issues: 10
 pending: 3
 skipped: 0
 blocked: 0
 
 ## Gaps
 
-### G1 — No transcription text / highlighted search terms on grid cards or Compare panes
+### Round 1 — RESOLVED by plans 119-05/06/07/08 (verified green: 281 component + 7 render-smoke tests)
+
+- **G1** (no transcription/highlight on cards + Compare) — status: resolved (119-05 cards, 119-06 Compare line-safe highlight via `highlight_pattern`)
+- **G2** (VS toggle shows same set — baseline pollution) — status: resolved (119-07 raw-baseline `_compute_display_candidates`)
+- **G3** (triage feedback lags, grid) — status: resolved (119-05 per-card button-fill on click)
+- **G3-compare** (Compare verdict buttons don't reflect current) — status: resolved (119-06 `_refresh_verdict_buttons` on post-advance candidate)
+- **G4** (image click → Compare) — status: resolved (119-05 `img_el.on("click")` + cursor:pointer)
+- **G5** (Compare panes blank — `update_content` never awaited) — status: resolved (119-06 `dialog.on("show")` awaits both panes + latest-wins gen counter)
+- **A1** (Compare anchor always page 1 / no shelfmark) — status: resolved (119-07 `_anchor_state` page+shelfmark)
+- **A2** (table view dead code) — status: resolved (119-07 `_view_mode` render branch + Grid/Table toggle)
+- **A3** (size-mismatch lacks anchor dims) — status: resolved (119-07 anchor sys_id in enrichment batch)
+- **A4** (VS-only metadata-poor) — status: resolved (119-07 `run_vs_meta_core` off-loop enrichment)
+- **TEST-INFRA** (render-smoke harness) — status: resolved (119-08 NiceGUI `User` sim, manual `asyncio.run` path, 7 tests, no new dependency)
+
+> Round-1 full Codex diagnosis preserved in git history + 119-05/06/07/08 SUMMARY.md. `_tmp/codex-119-uat-output.md`.
+
+### Round 2 — live Compare UAT 2026-06-19 (NEW; → gap closure). All in `web/components/compare_modal.py` / `candidate_grid.py` / `anchor_viewer.py` + TRANSLATIONS.
+
+### R2-1 — Hebrew not fully translated in Compare (CANDIDATE/ANCHOR/MAYBE/NEXT/PREV)
 status: failed
-detail: `_create_candidate_card` (web/components/candidate_grid.py:585-719) never renders `cand.snippet`/`cand.full_text` and applies no highlight. Compare panes show no text because `AnchorViewer.update_content` is never awaited (see G5); even once fixed, the candidate's `highlight_pattern` is not applied over the AnchorViewer transcription. User wants matched terms highlighted on the card and on both Compare sides.
+detail: `tr()` keys are present (compare_modal.py:465/482/502/524/533-535/550) but the Hebrew TRANSLATIONS entries are MISSING for "Candidate", "Anchor", "Maybe", "Next ›", "‹ Prev" (Yes/No/Compare DO translate → כן/לא/השווה). Fix = add the missing HE keys (scanner `_tmp/find_missing_tr2.py`; ref `reference_i18n_audit_method`). NOTE: the English description line "Biblical Exegesis ; On offerings…" is English source DATA (domains/desc) — confirm whether translatable before touching; likely out of scope.
 
-### G2 — Visual Similarity toggle shows the same candidates on and off
+### R2-2 — Next/Prev arrows confusing in RTL + top-center counter shows "118 / 5"
 status: failed
-detail: REVISED root cause (Codex). NOT a data-availability issue — `fist_data/visual_similarity.db` (1.3GB) is present and web auto-loads it + exposes VS API routes. The real bug is **baseline-candidate pollution**: Step 9 stores the ALREADY-MERGED `display_candidates` into `_all_candidates` (joins_lab.py:1848-1849), and `_re_render_candidates_surface` (joins_lab.py:634) re-filters that merged set WITHOUT reapplying `_apply_vs_merge` from a raw text baseline — so toggling can't cleanly switch text-only ↔ intersection/union. Fix: keep RAW text candidates as the baseline and centralize display = `_apply_vs_merge(raw_text, _vs_candidates, _vs_on, builder_has_query)` applied consistently in search/toggle/filter/pagination/enrichment re-render. Also surface "VS unavailable" + disable the toggle when `vs_service.is_available()` is false (ops: confirm the 1.3GB db ships to the web server).
+detail: RTL bidi. Nav buttons (compare_modal.py:524 `‹ Prev`, :550 `Next ›`) read wrong in HE (correct in EN). The center counter (`_counter_label_ref`, :257) shows "118 / 5" = bidi-flipped "5 / 118" (candidate 5 of 118). Fix = bidi-isolate / force-LTR the counter and correct arrow direction/placement under RTL.
 
-### G3 — Y/?/N triage feedback lags (only updates after another action), grid + Compare
+### R2-3 — Images dominate Compare window; transcription text not visible
 status: failed
-detail: `_make_triage_handler` (candidate_grid.py:673-685) calls `restyle_fn` which (`_restyle_all`, :506-528) repaints only the card BORDER. The triage button active-FILL is set once at render (:668-671) and never updated on click, so the obvious feedback appears only when a later action rebuilds the grid. Fix: update the button fill on click (or re-render the triage row). Verify the Compare verdict path (compare_modal.py:318) for the same issue.
+detail: The AnchorViewer image panes consume nearly all vertical space, pushing transcription off-screen. Cap the Compare image height (e.g. max-height / flex balance / scroll) so both image AND text are visible per pane.
 
-### G4 — Clicking the candidate image does not open Compare
+### R2-4 — Replace Yes/Maybe/No text with V / ? / X icons (desktop parity)
 status: failed
-detail: `img_el` (candidate_grid.py:598) has only `.on("error", ...)`; no click handler. Add `img_el.on("click", <compare>)` + `cursor:pointer` calling `on_compare(cand)`.
+detail: compare_modal.py:533-535 + candidate_grid triage buttons render text. Use ✓ / ? / ✗ icon buttons matching the desktop app (also eliminates the R2-1 MAYBE leak). Keep the green/yellow/red color coding.
 
-### G5 — Images do not load in Compare (both panes blank)
+### R2-5 — Show verdict state as light green/yellow/red border in Compare
 status: failed
-detail: `create_compare_modal` builds `AnchorViewer(sys_id, p_num, volume_ie)` (compare_modal.py:305, 369) but never awaits `AnchorViewer.update_content()` (anchor_viewer.py:496) — `__init__`→`_build_ui()` builds only the skeleton. The working page awaits update_content (joins_lab.py:~1103). Fix: schedule/await `update_content` for the anchor pane (modal build) and candidate pane (`_fill_candidate`) via an async path / background task, honoring AnchorViewer's `_nav_gen` latest-wins guard.
+detail: When the current candidate has a verdict, show it as a light green (yes) / yellow (maybe) / red (no) border on the candidate pane in the Compare window (mirrors the grid card border).
 
-### G3-compare — Compare verdict buttons never reflect current verdict state
+### R2-6 — Shelfmark appears twice in Compare window
 status: failed
-detail: (Codex extension of G3) The Compare modal's verdict buttons (compare_modal.py:417) are command-only — they never show which verdict is active for the current candidate. Add verdict-button refs + refresh after `_fill_candidate`.
+detail: The modal renders the shelfmark as the green column subtitle AND the inner AnchorViewer header also renders it (bold) — duplicate on both panes. Suppress one (pass a flag to AnchorViewer to skip its shelfmark header in Compare, keep the green column header).
 
-### A1 — Compare anchor pane is always page 1 and lacks shelfmark
+### R2-7 — Esc should close the Compare window
 status: failed
-detail: (Codex, new) `anchor_page_num = 1` is hardcoded when building `anchor_cand` (joins_lab.py:589) and the anchor shelfmark isn't carried. Store the anchor's resolved page + shelfmark in `_anchor_state` during `load_anchor()` and pass them into `anchor_cand`.
+detail: Add a keyboard handler so Escape closes the Compare modal (NiceGUI dialog keydown / `ui.keyboard`).
 
-### A2 — Table view is dead code (grid↔table toggle can't reach the table)
+### R2-8 — Show transcription beginning for VS-only / no-text-search candidates
 status: failed
-detail: (Codex, new — CONFIRMED) `_view_mode` (joins_lab.py:487) and `create_candidate_table()` exist, but the render path only ever calls `create_candidate_grid` (joins_lab.py:670). The table is never rendered, so UAT item 2 (grid↔table) cannot switch views. Wire the render to honor `_view_mode` and call `create_candidate_table()` when 'table'.
+detail: When VS is on with no text query (or VS-only candidates), cards/Compare show no transcription. Show the beginning of the transcription text instead of blank.
 
-### A3 — Size-mismatch flag lacks anchor dimensions
+### R2-9 — Browse + Compare as icon-only buttons + tooltip, in the X/?/V row
 status: failed
-detail: (Codex, new) Enrichment batches only CANDIDATE sys_ids, not the anchor's, so `is_size_mismatch(cand_w, anchor_w)` (candidate_grid.py:250, compare_modal.py:295) usually has no `anchor_w`. Include the anchor sys_id in the enrichment batch.
+detail: Replace the text "View in Browse" / "Compare fragment" controls with browse + compare ICON buttons (tooltips), placed in the same row as the ✓/?/✗ triage buttons (candidate_grid card actions).
 
-### A4 — VS-only candidates are metadata-poor (`?` shelfmark / page 1)
+### R2-10 — Table view has white background in dark mode
 status: failed
-detail: (Codex, new) `_map_vs_suggestions_to_candidates` (joins_lab.py:311) sets only sys_id/rank/score, unlike the API enrichment path (web/api.py:2266). Pure-VS rows render with `?` shelfmark and default page. Enrich VS-only candidates with shelfmark/title/page like the API path.
+detail: The candidate table view (candidate_grid.py table render) does not respect dark mode — renders white bg. Apply dark-mode-aware styling.
 
-### TEST-INFRA — render-smoke harness required
-detail: The headless suite (169 passing) never exercises the NiceGUI async render path — the same blind spot that hid the 5 earlier criticals AND all 9 defects here. Codex recommendation: add a real render-smoke/UAT test that loads Joins Lab with a mocked anchor/search, renders cards, clicks image→Compare, waits for both panes to leave skeleton state, clicks triage, toggles VS, and asserts the candidate set actually changes. Signature/contract tests are insufficient.
+## Deferred to next phase (NEW features — user-flagged 2026-06-19; seeded, NOT gap-closure)
 
-> Full Codex diagnosis: `_tmp/codex-119-uat-output.md`. 9 defects (G1-G5 + G3-compare + A1-A4) + render-smoke test → gap-closure phase.
+- Stop search with partial results
+- "Make an anchor" (promote candidate/fragment to anchor)
+- Show the anchor's joins
+- "Add as join" button
+- Browse-in-Compare
+- Info buttons (catalog + bibliography) in Compare
