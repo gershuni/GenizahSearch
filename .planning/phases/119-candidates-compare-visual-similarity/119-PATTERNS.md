@@ -46,7 +46,7 @@ from shared.joins_lab import Candidate, badge_and_tooltip
 from shared.fjms_service import get_fjms_service
 ```
 
-**Thumbnail URL pattern — proxy-only guard** (lines 63–106):
+**Thumbnail URL pattern — proxy guard (Oxford direct-Bodleian path preserved)** (lines 63–106):
 ```python
 def build_thumbnail_url(
     sys_id: str,

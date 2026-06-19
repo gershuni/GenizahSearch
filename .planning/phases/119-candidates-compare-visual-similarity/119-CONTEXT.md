@@ -47,7 +47,11 @@ CMP-02, CMP-03, VSM-01, VSM-02.
 - **D-02:** **Flip-through navigation INSIDE Compare** — ‹ Prev / Next › step through candidates in
   the current sort/filter order while Compare stays open (parity `step(delta)` over `wb.filtered`,
   `:3741`/`:3753`). Compare opens from a grid card, a table row (double-click parity `:3207`), or a
-  shortcut.
+  shortcut. **Compare open/lookup is keyed by the full candidate (its `uid` / `(sys_id, page)`),
+  NOT by `sys_id` alone** — the same `sys_id` can survive on multiple folios (`Candidate.key ==
+  (sys_id, page)`, `shared/joins_lab.py:124-137`; proven by `tests/test_joins_lab.py:425-433`), so
+  keying Compare by `sys_id` alone would open the wrong folio. (TRIAGE stays keyed by `sys_id` —
+  see D-11.)
 - **D-03:** **Y/?/N verdict buttons live in Compare; recording a verdict AUTO-ADVANCES to the next
   candidate** (manual ‹ › still allowed, including back). The verdict syncs **immediately** to the
   `sys_id`-keyed triage shared with grid + table — no refresh (parity `_mark → wb.mark(sys_id,val) →
@@ -66,8 +70,12 @@ CMP-02, CMP-03, VSM-01, VSM-02.
   This resolves the requirement's ambiguous "VS-merged / intersection" wording.
 - **D-05:** Look-alikes are fetched via a **thin web VS-service adapter** mirroring the desktop
   `_vs_adapter_v1` (`:228`): call `shared/visual_similarity_service.get_vs_service().get_suggestions(
-  sys_id, limit=200)` (returns `{alma_id, svm_score, rank}`; **`alma_id == sys_id`**), map to
-  `Candidate(via_vs=True, vs_rank=..., vs_score=...)`, and feed `shared/joins_lab.merge_candidates`.
+  sys_id, limit=200)` (returns `{alma_id, svm_score, rank}`). The input `sys_id` is `alma_id_a`; each
+  suggestion's returned **`alma_id` is the suggested PARTNER sys_id (`alma_id_b`)** — verified
+  `shared/visual_similarity_service.py:111-124` (the query `SELECT alma_id_b … WHERE alma_id_a = ?`).
+  So the partner IS the candidate, and the adapter mapping `Candidate(sys_id=row['alma_id'],
+  via_vs=True, vs_rank=..., vs_score=...)` is **correct** — feed it to
+  `shared/joins_lab.merge_candidates`.
   The lookup is a **LOCAL `visual_similarity.db` SQLite read** → run **off the event loop**
   (`run.io_bound`) but it does **NOT** need the NLI circuit breaker (only thumbnail image fetches do).
   The existing web VS path is `web/components/visual_similarity_dialog.py:show_visual_similarity_dialog`
@@ -102,10 +110,9 @@ CMP-02, CMP-03, VSM-01, VSM-02.
 - **D-11:** **Triage Y/?/N keyed by `sys_id`** (parity `wb.triage[sys_id]`, values `yes`/`maybe`/
   `no`), held as **in-memory page state this phase** — survives grid↔table↔Compare switches and
   pagination within a session; **resets on re-anchor**. Cross-refresh **persistence is Phase 120**
-  (PST-01) — 119 does **NOT** write triage to `safe_storage`.
-- **D-12:** **Multi-select (table) ships with BULK TRIAGE in 119** — mark all selected rows
-  Y/?/N in one action (a real 119 capability). Selection state is structured so Phase 120 can wire
-  bulk Add-to-Puzzle / Add-to-List onto it (ACT-02/03) — those **actions** are NOT in 119.
+  (PST-01) — 119 does **NOT** write triage to `safe_storage`. (Triage is keyed by `sys_id`; Compare
+  open/lookup is keyed by the full candidate / `(sys_id, page)` — see D-02 — because the same
+  `sys_id` can appear on multiple folios.)
 
 ### Self-match (CND-05) — DIVERGENCE (parity over the spec'd banner)
 - **D-13:** Self-match → **silently exclude the anchor** (`dedup_candidates(include_self=False)`),
@@ -130,10 +137,13 @@ CMP-02, CMP-03, VSM-01, VSM-02.
 - **D-16:** Candidate metadata is enriched **off the event loop, batched**: `material` / `width_cm`
   / `height_cm` via `shared/fjms_service.get_measurement_summaries_batch()` per `sys_id` (parity with
   the desktop `_EnrichWorker` `:1671`). This is a **LOCAL `fjms_enrichment.db` read** → needs
-  `run.io_bound` but **NOT** the breaker. **Thumbnail IMAGE fetches** go through the existing
-  per-provider proxy + **Phase-98 NLI circuit breaker** — an NLI outage degrades thumbnails
-  gracefully without stalling the surface. Enrichment feeds the filters (material/dimensions/
-  size-mismatch) and the table columns.
+  `run.io_bound` but **NOT** the breaker. **Thumbnail IMAGE fetches** route through the existing
+  per-provider `/api/*` image proxy + **Phase-98 NLI circuit breaker**, EXCEPT the existing Oxford
+  direct-Bodleian path which is preserved (`build_thumbnail_url` returns a direct Bodleian URL for
+  Oxford — `web/components/candidate_grid.py:95-101`, `web/services.py:193-212`; Bodleian is a
+  different host so the NLI breaker does not apply to it). An NLI outage degrades NLI-hosted
+  thumbnails gracefully without stalling the surface. Enrichment feeds the filters (material/
+  dimensions/size-mismatch) and the table columns.
 
 ### Claude's Discretion
 - Table default sort column + the VS-rank-when-👁-on sort switch (D-10).
@@ -170,10 +180,12 @@ CMP-02, CMP-03, VSM-01, VSM-02.
 ### The shared core this phase rides (do not re-implement)
 - `shared/joins_lab.py` — `dedup_candidates(..., include_self=False)` (`:505`), `merge_candidates`
   (union/tiering: tier0 both › tier1 text-only › tier2 vs-only, `:547`), `detect_self_match`
-  (`:601`), `Candidate` (`via_text` / `via_vs` / `vs_rank` / `vs_score` / `is_anchor_self` / `.key`),
-  `normalize_candidate`, and the `badge_and_tooltip` precedence helper.
+  (`:601`), `Candidate` (`via_text` / `via_vs` / `vs_rank` / `vs_score` / `is_anchor_self` / `.key
+  == (sys_id, page)`, `:124-137`), `normalize_candidate`, and the `badge_and_tooltip` precedence
+  helper.
 - `shared/visual_similarity_service.py` — `get_vs_service().get_suggestions(sys_id, limit=200)` →
-  list of `{alma_id, svm_score, rank}`; LOCAL `visual_similarity.db` SQLite (no network). The VS data
+  list of `{alma_id, svm_score, rank}` where the returned `alma_id` is the PARTNER (`alma_id_b`) of
+  the input `sys_id` (`alma_id_a`); LOCAL `visual_similarity.db` SQLite (no network). The VS data
   source for D-05.
 - `shared/fjms_service.py` — `get_measurement_summaries_batch()` (material / width_cm / height_cm);
   LOCAL `fjms_enrichment.db`. The enrichment + size-mismatch data source for D-15/D-16.
@@ -194,11 +206,14 @@ CMP-02, CMP-03, VSM-01, VSM-02.
 ### Web seams to extend (Phase 117/118 + reuse targets)
 - `web/components/candidate_grid.py` — the Phase-117 read-only grid to extend with triage / table /
   filters / 👁 badge: `create_candidate_grid(candidates, on_browse_click=...)`, `build_thumbnail_url`
-  (`:63`), `build_browse_url` (`:109`), `_MAX_RENDERED_CANDIDATES=200` (`:45`, replaced by pagination
+  (`:63`; Oxford fork returns a DIRECT Bodleian URL `:95-101`, otherwise the `/api/*` proxy),
+  `build_browse_url` (`:109`), `_MAX_RENDERED_CANDIDATES=200` (`:45`, replaced by pagination
   per D-08). Renders `sys_id`/`page`/`shelfmark`/`library_code`/`title`; thumbnails are 48×48 (D-09
-  enlarges them).
+  enlarges them). Pre-existing `gap-3` at `:177`/`:273`/`:305` (replaced with scale tokens in 119-02).
 - `web/pages/joins_lab.py` — the page hosting the candidate surface + Compare + 👁 toggle;
-  `execute_joins_search` compose→off-loop→dedup pipeline to extend with VS merge + enrichment.
+  `execute_joins_search` compose→off-loop→dedup pipeline to extend with VS merge + enrichment. NOTE:
+  the empty-builder early return at `:992-997` (and the responsa empty guard `:1012-1015`) returns
+  BEFORE any render — the VS-ONLY path (👁 ON + empty builder) must BYPASS this early return (F1).
 - `web/components/visual_similarity_dialog.py` — `show_visual_similarity_dialog` /
   `get_suggestions` call site (`:176`) — reuse the **service**, mirror its `run.io_bound` wrap.
 - `web/pages/browse.py` — the image viewer extracted in Phase 117 (Compare panes reuse it).
@@ -220,9 +235,10 @@ CMP-02, CMP-03, VSM-01, VSM-02.
 ### Reusable Assets
 - **`shared/joins_lab.py`** — `merge_candidates` (union/tiering), `dedup_candidates`
   (`include_self`), `detect_self_match`, `badge_and_tooltip` precedence, `Candidate` provenance
-  flags. **Do not re-implement** — 119 writes UI + adapters around these.
+  flags + `.key == (sys_id, page)`. **Do not re-implement** — 119 writes UI + adapters around these.
 - **`shared/visual_similarity_service.py` `get_suggestions`** — same local service the desktop and
-  the existing web VS dialog already use. 119 adds only a thin `Candidate`-mapping adapter (D-05).
+  the existing web VS dialog already use; returns the PARTNER `alma_id` (`alma_id_b`). 119 adds only
+  a thin `Candidate`-mapping adapter (D-05).
 - **`shared/fjms_service.get_measurement_summaries_batch`** — the exact batch the desktop
   `_EnrichWorker` calls; web calls it off-loop for material/dimensions/size-mismatch (D-16).
 - **`web/components/candidate_grid.py`** — the Phase-117 grid to grow into the working surface
@@ -233,8 +249,9 @@ CMP-02, CMP-03, VSM-01, VSM-02.
 ### Established Patterns
 - **Off-loop discipline** (`run.io_bound` + generation counter + `is_running`, CI-guarded) — applies
   to the existing search AND the new VS lookup AND the enrichment batch.
-- **Image fetches → per-provider proxy + Phase-98 NLI breaker** (thumbnails in grid/table/Compare);
-  local SQLite reads (VS, FJMS measurements) do NOT use the breaker but still go off-loop.
+- **Image fetches → per-provider `/api/*` proxy + Phase-98 NLI breaker** (NLI-hosted thumbnails in
+  grid/table/Compare), EXCEPT the preserved Oxford direct-Bodleian path (different host, breaker
+  N/A); local SQLite reads (VS, FJMS measurements) do NOT use the breaker but still go off-loop.
 - **Multitenant invariant (Phase 87):** zero raw `app.storage.user`. 119 triage/filter/view is
   in-memory page state (no `safe_storage` writes until Phase 120).
 - **Web-idiomatic UI, desktop behavior = parity north star** (118 D-01).
@@ -244,7 +261,8 @@ CMP-02, CMP-03, VSM-01, VSM-02.
 - Grid + table + filter dialog + 👁 toggle + Compare all attach to `web/pages/joins_lab.py`'s
   candidate region; reusable bits → `web/components/`.
 - Triage state is a single `sys_id`-keyed page-level structure shared by grid, table, and Compare
-  (one source of truth).
+  (one source of truth). Compare open/lookup, however, is keyed by the full candidate /
+  `(sys_id, page)` so the correct folio opens when a `sys_id` appears on multiple pages.
 - VS adapter binds `shared/visual_similarity_service` → `merge_candidates`; tracks the loaded
   anchor sid for invalidation.
 - Enrichment binds `shared/fjms_service` batch → filter predicates + table cells, off-loop/batched.
@@ -312,3 +330,5 @@ The `todo.match-phase 119` query surfaced 8 pending todos. **None folded:**
 
 *Phase: 119-candidates-compare-visual-similarity*
 *Context gathered: 2026-06-19*
+</content>
+</invoke>
