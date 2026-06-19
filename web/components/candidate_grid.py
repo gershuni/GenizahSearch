@@ -563,7 +563,7 @@ def _create_candidate_card(
     Callers that omit them fall back to a fresh local dict (cards can't be restyled
     from outside, but no cross-session leak occurs).
     """
-    from shared.joins_lab import badge_and_tooltip
+    from shared.joins_lab import badge_and_tooltip, snippet_html
 
     if triage is None:
         triage = {}
@@ -585,6 +585,17 @@ def _create_candidate_card(
     color = _TRIAGE_COLORS.get(current_verdict)
     initial_border = f"2px solid {color}" if color else "1px solid var(--border-light)"
 
+    # ── Compare handler — hoisted so image click can reuse it (G4) ──────────
+    # Carries the FULL candidate (uid / sys_id+page) to on_compare.
+    # NOT keyed by sys_id alone — same sys_id can appear on multiple folios.
+    _cand_ref = cand  # explicit closure capture
+
+    def _make_compare_handler(c=_cand_ref, handler=on_compare):
+        def _handler():
+            if handler:
+                handler(c)
+        return _handler
+
     with ui.card().classes("w-full p-0").style(
         f"border-radius:8px; border:{initial_border}; overflow:hidden;"
     ) as card_el:
@@ -595,10 +606,12 @@ def _create_candidate_card(
         if thumb_url:
             # Proxy image with inline onerror → placeholder (NO handleImageError,
             # NO direct-IIIF fallback).  T-117-07 / T-119-04 boundary.
+            # G4: click opens Compare for this candidate; cursor:pointer signals clickability.
             img_el = ui.image(thumb_url).style(
                 "width:100%; height:160px; object-fit:cover;"
-                "border-radius:8px 8px 0 0; flex-shrink:0; display:block;"
+                "border-radius:8px 8px 0 0; flex-shrink:0; display:block; cursor:pointer;"
             )
+            img_el.on("click", _make_compare_handler())
             # Replace with a placeholder box on load error (no IIIF fallback).
             img_el.on(
                 "error",
@@ -614,7 +627,13 @@ def _create_candidate_card(
             )
         else:
             # Synthetic sys_id: render placeholder directly.
-            ui.element("div").style(_PLACEHOLDER_STYLE_160).html("&#128196;")
+            # G4: placeholder is also clickable → opens Compare.
+            (
+                ui.element("div")
+                .style(_PLACEHOLDER_STYLE_160 + " cursor:pointer;")
+                .html("&#128196;")
+                .on("click", _make_compare_handler())
+            )
 
         # ── Metadata column (below thumbnail) ─────────────────────────
         with ui.column().classes("flex-grow min-w-0 gap-2 p-2"):
@@ -645,6 +664,21 @@ def _create_candidate_card(
                     "-webkit-line-clamp: 2; -webkit-box-orient: vertical;"
                 )
 
+            # Transcription snippet with highlighted search terms (G1 — CND-03)
+            # T-119-05: ONLY snippet_html()/htmlify() output passes to ui.html(sanitize=False).
+            # These helpers escape corpus text first, then inject <b style='color:#dc2626'>
+            # highlight spans — corpus text never reaches the DOM unescaped.
+            _snippet_source = getattr(cand, "full_text", None) or getattr(cand, "snippet", None) or ""
+            _highlight_pattern = getattr(cand, "highlight_pattern", None)
+            if _snippet_source:
+                _snippet_rendered = snippet_html(_snippet_source, _highlight_pattern)
+                ui.html(_snippet_rendered, sanitize=False).style(
+                    "direction:rtl; text-align:right; "
+                    "color:var(--text-secondary); font-size:0.75rem; "
+                    "overflow:hidden; display:-webkit-box; "
+                    "-webkit-line-clamp:3; -webkit-box-orient:vertical;"
+                )
+
             # 👁 badge (Phase 119 VSM-02) — badge_and_tooltip() precedence
             # T-119-05: rendered via ui.icon (auto-escaped; not .html())
             icon_name, tooltip_text = badge_and_tooltip(cand)
@@ -653,8 +687,13 @@ def _create_candidate_card(
                     "color: #f59e0b;"  # var(--accent-amber)
                 ).tooltip(tr(tooltip_text))
 
-            # Triage row (Phase 119 CND-04, D-11)
+            # Triage row (Phase 119 CND-04, D-11, G3)
             # Three flat buttons Y/?/N; 44px touch target; active state filled.
+            # G3: render-local per-card button refs so the click handler can update
+            # fills immediately — not only when the grid is later rebuilt.
+            # T-119-07: refs are per-card local dict, never module-global.
+            _triage_btn_refs: dict[str, object] = {}  # verdict → button element
+
             with ui.row().classes("gap-1 items-center"):
                 for verdict, label, v_color in [
                     ("yes", tr("Yes"), _TRIAGE_COLORS["yes"]),
@@ -670,7 +709,10 @@ def _create_candidate_card(
                     else:
                         btn_style = "min-height:44px; font-size:0.75rem;"
 
-                    def _make_triage_handler(v=_v, sid=_sid, t=triage, _rf=restyle_fn):
+                    def _make_triage_handler(
+                        v=_v, sid=_sid, t=triage, _rf=restyle_fn,
+                        _btn_refs=_triage_btn_refs,
+                    ):
                         def _handler():
                             if isinstance(t, TriageState):
                                 t.set(sid, v)
@@ -678,11 +720,25 @@ def _create_candidate_card(
                                 t[sid] = v
                             if _rf is not None:
                                 _rf(sid, t)
+                            # G3: immediately update triage button fills (not only on grid rebuild)
+                            for _verdict, _btn in _btn_refs.items():
+                                try:
+                                    if _verdict == v:
+                                        _c = _TRIAGE_COLORS.get(_verdict, "")
+                                        _btn.style(
+                                            f"min-height:44px; font-size:0.75rem; "
+                                            f"background:{_c}; color:#fff;"
+                                        )
+                                    else:
+                                        _btn.style("min-height:44px; font-size:0.75rem;")
+                                except Exception:
+                                    pass
                         return _handler
 
-                    ui.button(label).props("flat dense").style(btn_style).on(
+                    _btn_el = ui.button(label).props("flat dense").style(btn_style).on(
                         "click", _make_triage_handler()
                     )
+                    _triage_btn_refs[verdict] = _btn_el
 
             # Bottom row: View in Browse + Compare fragment
             browse_url = build_browse_url(cand)
@@ -702,16 +758,9 @@ def _create_candidate_card(
                     )
 
                 # Compare button (Phase 119 CND-04, D-02)
-                # Carries the FULL candidate (uid / sys_id+page) to on_compare.
-                # NOT keyed by sys_id alone — same sys_id can appear on multiple folios.
-                _cand_ref = cand  # explicit closure capture of the full candidate
-
-                def _make_compare_handler(c=_cand_ref, handler=on_compare):
-                    def _handler():
-                        if handler:
-                            handler(c)
-                    return _handler
-
+                # Reuses the hoisted _make_compare_handler (defined above the card)
+                # which carries the FULL candidate. NOT keyed by sys_id alone —
+                # same sys_id can appear on multiple folios.
                 ui.button(tr("Compare fragment"), icon="compare_arrows").props(
                     "flat dense"
                 ).style("font-size:0.75rem;").tooltip(
