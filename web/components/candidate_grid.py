@@ -161,10 +161,17 @@ class TriageState:
     Values are 'yes' | 'maybe' | 'no'.  Never written to safe_storage
     (Phase 87 invariant — CI-guarded by test_no_raw_storage_access.py).
     Phase 120 adds persistence via safe_storage.
+
+    CR-01 fix: accepts an optional ``backing`` dict so the page's ``_triage``
+    dict and the TriageState share the SAME dict object — no copy, no drift.
+    ``TriageState()`` with no args still works (existing tests call it that way).
     """
 
-    def __init__(self) -> None:
-        self._data: dict = {}
+    def __init__(self, backing: dict | None = None) -> None:
+        # Share the caller's dict directly when provided; otherwise create a new one.
+        # This makes _triage (page-level) and TriageState._data the SAME object,
+        # so verdicts set via either path are immediately visible to the other.
+        self._data: dict = backing if backing is not None else {}
 
     def set(self, sys_id: str, verdict: str) -> None:
         """Set verdict for a sys_id. Raises ValueError for invalid verdicts."""
@@ -270,14 +277,11 @@ def compute_filtered(
         if exclude_mismatch and is_size_mismatch(m.get("width_cm"), anchor_w):
             continue
 
-        # Triage-state filter
+        # Triage-state filter (WR-03: simplified from three-branch form)
         if triage_states and "All" not in triage_states:
             verdict = _get_verdict(c.sys_id)
-            if "Not triaged" in triage_states and verdict is None:
-                pass  # passes — not triaged matches "Not triaged"
-            elif verdict is not None and verdict.capitalize() not in triage_states:
-                continue
-            elif verdict is None and "Not triaged" not in triage_states:
+            verdict_key = verdict.capitalize() if verdict else "Not triaged"
+            if verdict_key not in triage_states:
                 continue
 
         out.append(c)
@@ -478,10 +482,6 @@ def cap_candidates(
 # Card-restyle infrastructure (D-11 / D-09 triage border feedback)
 # ---------------------------------------------------------------------------
 
-# Page-level card ref registry: sys_id → list of ui.card() elements
-# Keyed by sys_id (triage is per sys_id — D-11), capturing all cards for that sys_id.
-_card_refs: dict = {}
-
 _TRIAGE_COLORS = {
     "yes": "#15803d",    # green-700
     "maybe": "#a16207",  # amber-700
@@ -489,27 +489,43 @@ _TRIAGE_COLORS = {
 }
 
 
-def _restyle_all(sys_id: str, triage: object) -> None:
-    """Update every visible card whose sys_id matches — apply triage border (D-11).
+def _make_restyle_fn(card_refs: dict):
+    """Return a render-scoped restyle callable that operates on ``card_refs``.
 
-    Desktop parity: _restyle_card at join_workbench.py:3344.
+    CR-04 fix: ``card_refs`` is a fresh dict created per ``create_candidate_grid``
+    call, so refs from different user sessions never mix.  The returned function
+    has the same public signature as the old module-level ``_restyle_all`` so all
+    existing callers inside the same render pass work unchanged.
 
     Args:
-        sys_id: The candidate sys_id whose triage verdict changed.
-        triage: TriageState or dict[sys_id → verdict].
-    """
-    if isinstance(triage, TriageState):
-        verdict = triage.get(sys_id)
-    else:
-        verdict = triage.get(sys_id) if isinstance(triage, dict) else None
+        card_refs: Render-local dict mapping sys_id → list[ui.card].
 
-    color = _TRIAGE_COLORS.get(verdict)
-    border = f"2px solid {color}" if color else "1px solid var(--border-light)"
-    for ref in _card_refs.get(sys_id, []):
-        try:
-            ref.style(f"border-radius:8px; border:{border};")
-        except Exception:
-            pass
+    Returns:
+        A callable ``restyle(sys_id, triage)`` bound to this render's card_refs.
+    """
+    def _restyle_all(sys_id: str, triage: object) -> None:
+        """Update every visible card whose sys_id matches — apply triage border (D-11).
+
+        Desktop parity: _restyle_card at join_workbench.py:3344.
+
+        Args:
+            sys_id: The candidate sys_id whose triage verdict changed.
+            triage: TriageState or dict[sys_id → verdict].
+        """
+        if isinstance(triage, TriageState):
+            verdict = triage.get(sys_id)
+        else:
+            verdict = triage.get(sys_id) if isinstance(triage, dict) else None
+
+        color = _TRIAGE_COLORS.get(verdict)
+        border = f"2px solid {color}" if color else "1px solid var(--border-light)"
+        for ref in card_refs.get(sys_id, []):
+            try:
+                ref.style(f"border-radius:8px; border:{border};")
+            except Exception:
+                pass
+
+    return _restyle_all
 
 
 # ---------------------------------------------------------------------------
@@ -521,6 +537,9 @@ def _create_candidate_card(
     triage: object = None,
     on_browse_click: Optional[Callable] = None,
     on_compare: Optional[Callable] = None,
+    *,
+    card_refs: dict | None = None,
+    restyle_fn: Optional[Callable] = None,
 ) -> None:
     """Render a single candidate card (Phase 119 D-09/D-11/D-07).
 
@@ -538,11 +557,19 @@ def _create_candidate_card(
         - Text fields rendered via ui.label (auto-escaped; no .html())
         - Nested links use js_handler='(e) => e.stopPropagation()' (AST guard)
         - Triage state is the caller-provided dict/TriageState — never safe_storage
+
+    CR-04: ``card_refs`` is a render-scoped dict passed from ``create_candidate_grid``.
+    ``restyle_fn(sys_id, triage)`` is the closure returned by ``_make_restyle_fn``.
+    Callers that omit them fall back to a fresh local dict (cards can't be restyled
+    from outside, but no cross-session leak occurs).
     """
     from shared.joins_lab import badge_and_tooltip
 
     if triage is None:
         triage = {}
+
+    # CR-04: use render-scoped card_refs; fall back to a local (non-shared) dict.
+    _refs = card_refs if card_refs is not None else {}
 
     thumb_url = build_thumbnail_url(
         cand.sys_id,
@@ -551,11 +578,8 @@ def _create_candidate_card(
         library_code=cand.library_code,
     )
 
-    # Derive current verdict for initial render
-    if isinstance(triage, TriageState):
-        current_verdict = triage.get(cand.sys_id)
-    else:
-        current_verdict = triage.get(cand.sys_id)
+    # Derive current verdict for initial render (IN-01: both branches are identical)
+    current_verdict = triage.get(cand.sys_id) if triage else None
 
     # Initial border reflects current triage state
     color = _TRIAGE_COLORS.get(current_verdict)
@@ -564,8 +588,8 @@ def _create_candidate_card(
     with ui.card().classes("w-full p-0").style(
         f"border-radius:8px; border:{initial_border}; overflow:hidden;"
     ) as card_el:
-        # Register card ref for restyle (keyed by sys_id — D-11)
-        _card_refs.setdefault(cand.sys_id, []).append(card_el)
+        # Register card ref for restyle (keyed by sys_id — D-11, render-scoped)
+        _refs.setdefault(cand.sys_id, []).append(card_el)
 
         # ── Thumbnail (160×160, full-width, rounded-top) ──────────────
         if thumb_url:
@@ -646,13 +670,14 @@ def _create_candidate_card(
                     else:
                         btn_style = "min-height:44px; font-size:0.75rem;"
 
-                    def _make_triage_handler(v=_v, sid=_sid, t=triage):
+                    def _make_triage_handler(v=_v, sid=_sid, t=triage, _rf=restyle_fn):
                         def _handler():
                             if isinstance(t, TriageState):
                                 t.set(sid, v)
                             elif isinstance(t, dict):
                                 t[sid] = v
-                            _restyle_all(sid, t)
+                            if _rf is not None:
+                                _rf(sid, t)
                         return _handler
 
                     ui.button(label).props("flat dense").style(btn_style).on(
@@ -790,6 +815,7 @@ def create_candidate_table(
     enrichment: dict = None,
     sort_mode: str = "score",
     on_compare: Optional[Callable] = None,
+    restyle_fn: Optional[Callable] = None,
 ) -> ui.element:
     """Render the multi-select sortable table view of candidates (D-10, CND-03).
 
@@ -799,6 +825,9 @@ def create_candidate_table(
         enrichment:  dict[sys_id → {material, width_cm, height_cm, ...}]
         sort_mode:   'score' (default, desc) or 'vs_rank' (asc when 👁 ON).
         on_compare:  Optional callback(cand) launched on row double-click.
+        restyle_fn:  Optional render-scoped restyle callable from _make_restyle_fn().
+                     When None, bulk-triage verdict changes are recorded in triage but
+                     the visual border update is deferred until the next full re-render.
 
     Returns:
         The outer ui.element wrapping the table and bulk-triage bar.
@@ -827,15 +856,16 @@ def create_candidate_table(
             ]:
                 _v = verdict
 
-                def _make_bulk_handler(v=_v):
+                def _make_bulk_handler(v=_v, _rf=restyle_fn):
                     def _handler():
                         if isinstance(triage, TriageState):
                             triage.set_bulk(selected_sys_ids, v)
                         elif isinstance(triage, dict):
                             for sid in selected_sys_ids:
                                 triage[sid] = v
-                        for sid in selected_sys_ids:
-                            _restyle_all(sid, triage)
+                        if _rf is not None:
+                            for sid in selected_sys_ids:
+                                _rf(sid, triage)
                     return _handler
 
                 ui.button(label).props("flat dense").style(
@@ -895,6 +925,7 @@ def create_candidate_grid(
     anchor_sys_id: str = '',
     on_page_change: Optional[Callable] = None,
     on_filter_open: Optional[Callable] = None,
+    on_restyle_ready: Optional[Callable] = None,
 ) -> ui.element:
     """Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
@@ -912,6 +943,9 @@ def create_candidate_grid(
         anchor_sys_id:    The anchor's sys_id — excluded from self-match display (D-13).
         on_page_change:   Callback(page: int) for Prev/Next pagination clicks (D-08).
         on_filter_open:   Callback() for the Filter button click (D-14).
+        on_restyle_ready: Optional callback(restyle_fn) invoked with the render-scoped
+                          restyle function immediately after the grid is built (WR-01).
+                          The page stores this so Compare verdicts can restyle grid cards.
 
     Returns:
         The outer ui.column() element wrapping the section header + grid + pagination.
@@ -922,6 +956,10 @@ def create_candidate_grid(
         enrichment = {}
     if filter_state is None:
         filter_state = {}
+
+    # CR-04: per-render card_refs dict — never module-global, never shared across users.
+    _render_card_refs: dict = {}
+    _render_restyle = _make_restyle_fn(_render_card_refs)
 
     total = len(candidates)
     page_slice, current_page, total_pages = paginate(candidates, page)
@@ -953,6 +991,8 @@ def create_candidate_grid(
                         triage=triage,
                         on_browse_click=on_browse_click,
                         on_compare=on_compare,
+                        card_refs=_render_card_refs,
+                        restyle_fn=_render_restyle,
                     )
 
             # Pagination controls (D-08): ‹ Prev | Page N of M | Next ›
@@ -975,5 +1015,13 @@ def create_candidate_grid(
                     ui.button(tr("Next ›"), on_click=_next_click).props("flat dense").props(
                         "disable" if current_page >= total_pages - 1 else ""
                     )
+
+    # WR-01: expose the render-scoped restyle fn to the caller so Compare verdicts
+    # can update card borders without a full re-render.
+    if on_restyle_ready is not None:
+        try:
+            on_restyle_ready(_render_restyle)
+        except Exception:
+            pass
 
     return outer
