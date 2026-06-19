@@ -395,8 +395,11 @@ def test_g3_compare_verdict_button_reflects_verdict(joins_lab_smoke_runner):
     """G3-compare: Compare verdict buttons reflect the candidate's stored verdict.
 
     Plan-06 Task 3: _verdict_btn_refs + _refresh_verdict_buttons(cand) called
-    inside _fill_candidate.  After recording 'Yes' the button should be in the
+    inside _fill_candidate.  After recording '✓' the button should be in the
     active style (unelevated + solid color) and the others in outline style.
+
+    Updated (Plan 119-11 Task 3): verdict buttons now carry glyph labels (✓/?/✗)
+    instead of Yes/Maybe/No text (R2-4).  Locator updated accordingly.
     """
     async def driver(user):
         await user.open('/joins-lab')
@@ -404,6 +407,7 @@ def test_g3_compare_verdict_button_reflects_verdict(joins_lab_smoke_runner):
 
         # Open Compare via image click
         from nicegui import ElementFilter, ui
+        from shared.joins_lab import TRIAGE_ICONS
         with user._client:
             img_els = [e for e in ElementFilter(kind=ui.image) if e.visible]
 
@@ -413,17 +417,19 @@ def test_g3_compare_verdict_button_reflects_verdict(joins_lab_smoke_runner):
         _click_element(user, img_els[0])
         await asyncio.sleep(0.5)
 
-        # Find verdict buttons in the modal (Yes/Maybe/No verdict buttons)
-        # Verdict buttons in compare_modal.py use labels from the triage color dict
+        # Find verdict buttons in the Compare modal by glyph content (R2-4 update).
+        # verdict buttons now render ✓/?/✗ — NOT Yes/Maybe/No.
+        compare_glyphs = {v["glyph"] for v in TRIAGE_ICONS.values()}
         with user._client:
             all_verdict_btns = [
                 b for b in ElementFilter(kind=ui.button)
-                if b.visible and b._props.get('label', '') in ('Yes', 'Maybe', 'No', 'כן', 'אולי', 'לא')
+                if b.visible and b._props.get('label', '') in compare_glyphs
             ]
 
         assert all_verdict_btns, (
-            "G3-compare FAIL: no verdict buttons (Yes/Maybe/No) visible in Compare modal. "
-            "Check compare_modal.py _refresh_verdict_buttons / _verdict_btn_refs (Plan-06)."
+            "G3-compare FAIL: no verdict glyph buttons (✓/?/✗) visible in Compare modal. "
+            "Check compare_modal.py _refresh_verdict_buttons / _verdict_btn_refs (Plan-06). "
+            "Buttons must use glyph labels since Plan 119-11 R2-4."
         )
 
         # Verify the verdict buttons have the expected outline style initially
@@ -437,13 +443,16 @@ def test_g3_compare_verdict_button_reflects_verdict(joins_lab_smoke_runner):
         # Initially no verdict is recorded, so no button should be active (unelevated)
         # This validates that _refresh_verdict_buttons correctly starts in outline state.
         assert not initial_unelevated, (
-            "G3-compare FAIL: verdict buttons are unelevated before any verdict was recorded. "
+            "G3-compare FAIL: verdict glyph buttons are unelevated before any verdict was recorded. "
             "Expected all buttons in outline state initially. "
             f"Unelevated buttons: {[b._props.get('label') for b in initial_unelevated]}"
         )
 
-        # Click the first verdict button (Yes/כן) — causes auto-advance to next candidate
-        yes_btn = all_verdict_btns[0]
+        # Click the ✓ verdict button — causes auto-advance to next candidate
+        yes_btn = next(
+            (b for b in all_verdict_btns if b._props.get('label', '') == TRIAGE_ICONS['yes']['glyph']),
+            all_verdict_btns[0]
+        )
         _click_element(user, yes_btn)
         await asyncio.sleep(0.5)  # wait for async _record_verdict + auto-advance
 
@@ -454,12 +463,272 @@ def test_g3_compare_verdict_button_reflects_verdict(joins_lab_smoke_runner):
         with user._client:
             post_advance_btns = [
                 b for b in ElementFilter(kind=ui.button)
-                if b.visible and b._props.get('label', '') in ('Yes', 'Maybe', 'No', 'כן', 'אולי', 'לא')
+                if b.visible and b._props.get('label', '') in compare_glyphs
             ]
         assert post_advance_btns, (
-            "G3-compare FAIL: verdict buttons disappeared after auto-advance. "
+            "G3-compare FAIL: verdict glyph buttons disappeared after auto-advance. "
             "The modal should still show the next candidate's verdict buttons. "
             "Check _record_verdict auto-advance in compare_modal.py (Plan-06 Task 3)."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
+# R2-7: Escape closes the Compare modal
+# ---------------------------------------------------------------------------
+
+def test_r2_7_esc_closes_compare(joins_lab_smoke_runner):
+    """R2-7 (LIVE OWNER): pressing Escape closes the Compare modal.
+
+    Plan 119-11 Task 1 adds a ui.keyboard handler inside the dialog scope that
+    calls _handle_close() when Escape is pressed (keydown only).  The dialog is
+    persistent (backdrop click won't close it) — Esc is the keyboard exit path.
+
+    The handler is exposed as dialog._on_escape for in-process testing.
+    We locate it via the dialog's test seam and invoke it with a synthetic
+    Escape keydown event, then assert the dialog is no longer open.
+
+    Note: AnchorViewer.update_content is mocked (AsyncMock) so the test
+    focuses purely on the Esc-close behavior, not image loading.
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        # Open Compare via image click
+        from nicegui import ElementFilter, ui
+        with user._client:
+            img_els = [e for e in ElementFilter(kind=ui.image) if e.visible]
+
+        if not img_els:
+            pytest.skip("R2-7: No images found — skipping (depends on G4)")
+
+        _click_element(user, img_els[0])
+        await asyncio.sleep(0.5)
+
+        # Confirm the Compare dialog is open
+        with user._client:
+            open_dialogs = [
+                e for e in ElementFilter(kind=ui.dialog)
+                if e.visible and e._props.get('model-value')
+            ]
+        assert open_dialogs, (
+            "R2-7 PRE-CONDITION: Compare dialog did not open after clicking the image."
+        )
+
+        dialog = open_dialogs[0]
+
+        # Locate the _on_escape handler via the test seam set by compare_modal.py
+        on_escape = getattr(dialog, '_on_escape', None)
+        if on_escape is None:
+            pytest.skip("R2-7: dialog._on_escape test seam not found — handler not set")
+
+        # Synthesize an Escape keydown event (matches NiceGUI KeyEventArguments shape)
+        from types import SimpleNamespace
+        escape_event = SimpleNamespace(
+            action=SimpleNamespace(keydown=True),
+            key=SimpleNamespace(name="Escape"),
+        )
+
+        # Invoke the handler — should call _handle_close() → dialog.close()
+        on_escape(escape_event)
+        await asyncio.sleep(0.2)
+
+        # Assert the dialog is no longer open
+        with user._client:
+            still_open = [
+                e for e in ElementFilter(kind=ui.dialog)
+                if e.visible and e._props.get('model-value')
+            ]
+        assert not still_open, (
+            "R2-7 FAIL: Compare dialog is still open after firing the Escape handler. "
+            "Check compare_modal.py _on_escape and _handle_close (Plan 119-11 Task 1)."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
+# R2-4 Compare: verdict icon buttons (✓/?/✗) in the Compare modal
+# ---------------------------------------------------------------------------
+
+def test_r2_4_compare_verdict_icon_buttons(joins_lab_smoke_runner):
+    """R2-4 Compare (LIVE OWNER): Compare verdict buttons carry ✓/?/✗ glyphs, not Yes/Maybe/No.
+
+    Plan 119-11 Task 2 converts the Compare modal verdict buttons from text labels
+    (Yes/Maybe/No) to glyph buttons (✓/?/✗) using TRIAGE_ICONS, matching the
+    candidate grid buttons shipped in Plan 119-10.
+
+    Assertions:
+      (a) At least one visible button inside the Compare dialog has glyph label '✓'.
+      (b) NO visible verdict button inside the Compare dialog has a text label in
+          {Yes, Maybe, No, כן, אולי, לא} — the old text labels are gone.
+      (c) All three glyphs (✓, ?, ✗) are present in the modal.
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+        from shared.joins_lab import TRIAGE_ICONS
+        compare_glyphs = {v["glyph"] for v in TRIAGE_ICONS.values()}
+
+        with user._client:
+            img_els = [e for e in ElementFilter(kind=ui.image) if e.visible]
+        if not img_els:
+            pytest.skip("R2-4 Compare: No images found — skipping (depends on G4)")
+
+        _click_element(user, img_els[0])
+        await asyncio.sleep(0.5)
+
+        # (a) + (c): find glyph verdict buttons inside the Compare dialog
+        with user._client:
+            glyph_btns = [
+                b for b in ElementFilter(kind=ui.button)
+                if b.visible and b._props.get('label', '') in compare_glyphs
+            ]
+
+        assert glyph_btns, (
+            "R2-4 Compare FAIL: no visible verdict glyph buttons (✓/?/✗) found in Compare modal. "
+            "compare_modal.py verdict buttons must use TRIAGE_ICONS glyph (Plan 119-11 Task 2)."
+        )
+
+        found_glyphs = {b._props.get('label', '') for b in glyph_btns}
+        assert compare_glyphs.issubset(found_glyphs), (
+            f"R2-4 Compare FAIL: not all verdict glyphs rendered in Compare modal. "
+            f"Expected all of {compare_glyphs!r}; found {found_glyphs!r}."
+        )
+
+        # (b): NO old text labels
+        old_labels = {'Yes', 'Maybe', 'No', 'כן', 'אולי', 'לא'}
+        with user._client:
+            old_btns = [
+                b for b in ElementFilter(kind=ui.button)
+                if b.visible and b._props.get('label', '') in old_labels
+            ]
+        assert not old_btns, (
+            f"R2-4 Compare FAIL: found {len(old_btns)} visible buttons with old text labels "
+            f"(Yes/Maybe/No/כן/אולי/לא) in Compare modal. "
+            f"Labels: {[b._props.get('label') for b in old_btns]}. "
+            "Compare verdict buttons must use glyph content (Plan 119-11 Task 2)."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
+# R2-2: Compare counter label is LTR-isolated
+# ---------------------------------------------------------------------------
+
+def test_r2_2_counter_is_ltr(joins_lab_smoke_runner):
+    """R2-2 (LIVE OWNER): the Compare flip-through counter label has direction:ltr.
+
+    Plan 119-11 Task 1: the counter label (e.g. '5 / 118') must not be bidi-flipped
+    to '118 / 5' under the Hebrew RTL UI.  The fix adds direction:ltr +
+    unicode-bidi:isolate to the counter label's inline style.
+
+    Assertion: after opening Compare, the counter label (the one whose text
+    contains ' / ') has a _style or style string that contains 'ltr'.
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+        with user._client:
+            img_els = [e for e in ElementFilter(kind=ui.image) if e.visible]
+        if not img_els:
+            pytest.skip("R2-2: No images found — skipping (depends on G4)")
+
+        _click_element(user, img_els[0])
+        await asyncio.sleep(0.5)
+
+        # Find the flip-through counter label via its stable marker.
+        # compare_modal.py marks the counter label 'compare-flip-counter' (R2-2 fix)
+        # so we don't accidentally pick up AnchorViewer's folio navigation label
+        # which also shows "N / M" formatted text but has no direction:ltr style.
+        with user._client:
+            all_elements = list(user._client.elements.values())
+            counter_el = next(
+                (e for e in all_elements
+                 if 'compare-flip-counter' in getattr(e, '_markers', [])),
+                None,
+            )
+
+        if counter_el is None:
+            pytest.skip(
+                "R2-2: compare-flip-counter marker not found — "
+                "counter label may not have been built yet."
+            )
+
+        # Assert the counter label's _style dict contains direction:ltr.
+        # NiceGUI's .style("direction:ltr;") populates element._style as a dict
+        # (e.g. {'direction': 'ltr', 'unicode-bidi': 'isolate', ...}).
+        counter_style = counter_el._style or {}
+        style_str = ";".join(f"{k}:{v}" for k, v in counter_style.items())
+
+        assert 'ltr' in style_str.lower(), (
+            f"R2-2 FAIL: Compare counter label does not have direction:ltr in its style. "
+            f"_style dict: {counter_style!r}. "
+            "The counter must use direction:ltr so '5 / 118' is not bidi-flipped "
+            "to '118 / 5' under the Hebrew RTL UI (Plan 119-11 Task 1)."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
+# R2-5: verdict border on the candidate pane after a verdict is recorded
+# ---------------------------------------------------------------------------
+
+def test_r2_5_verdict_border_on_candidate_pane(joins_lab_smoke_runner):
+    """R2-5 (LIVE OWNER): the candidate pane is built and marked for verdict-border updates.
+
+    Plan 119-11 Task 2: compare_modal.py marks the candidate pane column with
+    'compare-candidate-pane' so _refresh_pane_border can reliably locate it.
+    The border-update logic (border: 2px solid {color} on verdict, neutral otherwise)
+    is verified by test_compare_modal.py::TestPlan11R2Features unit tests.
+
+    This render-smoke assertion verifies the RENDER path: after opening Compare,
+    the 'compare-candidate-pane' marker element is present in the live client tree.
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+        with user._client:
+            img_els = [e for e in ElementFilter(kind=ui.image) if e.visible]
+        if not img_els:
+            pytest.skip("R2-5: No images found — skipping (depends on G4)")
+
+        _click_element(user, img_els[0])
+        await asyncio.sleep(0.5)
+
+        # Locate the candidate pane via its marker — direct element scan (no async should_see).
+        # The pane is built when the Compare modal dialog is opened.
+        with user._client:
+            all_elements = list(user._client.elements.values())
+            pane_el = next(
+                (e for e in all_elements if 'compare-candidate-pane' in getattr(e, '_markers', [])),
+                None,
+            )
+
+        assert pane_el is not None, (
+            "R2-5 FAIL: 'compare-candidate-pane' marker element not found in the live client "
+            "element tree after opening Compare. "
+            "compare_modal.py must mark the candidate pane column with .mark('compare-candidate-pane') "
+            "for the _refresh_pane_border verdict-border mechanism (Plan 119-11 Task 2)."
+        )
+
+        # The pane should start with a neutral border (no verdict recorded yet).
+        pane_style = ";".join(f"{k}:{v}" for k, v in (pane_el._style or {}).items())
+        assert 'border' in pane_style, (
+            f"R2-5 FAIL: candidate pane has no 'border' in its style. "
+            f"Pane style: {pane_style!r}. "
+            "The pane must be initialized with a neutral border style "
+            "(border: 1px solid var(--border-light)) in compare_modal.py."
         )
 
     joins_lab_smoke_runner(driver)

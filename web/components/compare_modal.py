@@ -491,9 +491,10 @@ def create_compare_modal(
                 ui.label(tr("Compare")).classes("text-lg font-semibold")
                 # R2-2: force LTR + bidi-isolate so "5 / 118" is not flipped to
                 # "118 / 5" by the Hebrew RTL UI direction.
+                # Marked 'compare-flip-counter' for render-smoke element location.
                 counter_label = ui.label("").classes("text-sm").style(
                     "color:rgba(255,255,255,0.8); direction:ltr; unicode-bidi:isolate;"
-                )
+                ).mark("compare-flip-counter")
                 _counter_label_ref.append(counter_label)
                 ui.button(icon="close", on_click=_handle_close).props(
                     "flat dense round"
