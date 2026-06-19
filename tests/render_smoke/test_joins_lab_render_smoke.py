@@ -94,12 +94,30 @@ def _get_visible_shelfmarks(user) -> list[str]:
 
 
 def _find_yes_triage_buttons(user) -> list:
-    """Find visible triage 'Yes'/'כן' buttons (G3 assertion)."""
+    """Find visible triage ✓ glyph buttons (G3 assertion, updated R2-4 / 119-10).
+
+    R2-4: triage buttons now render the ✓/?/✗ glyph as the button label instead of
+    the text 'Yes'/'כן'.  This helper finds them by glyph content so test_g3 can
+    still click the button and assert the active fill style.
+    """
     from nicegui import ElementFilter, ui
     with user._client:
         btns = [
             e for e in ElementFilter(kind=ui.button)
-            if e.visible and e._props.get('label', '') in ('Yes', 'כן')
+            if e.visible and e._props.get('label', '') == '✓'
+        ]
+    return btns
+
+
+def _find_triage_glyph_buttons(user) -> list:
+    """Return all visible triage glyph buttons (✓, ?, ✗) on candidate cards (R2-4)."""
+    from nicegui import ElementFilter, ui
+    from shared.joins_lab import TRIAGE_ICONS
+    glyphs = {v["glyph"] for v in TRIAGE_ICONS.values()}
+    with user._client:
+        btns = [
+            e for e in ElementFilter(kind=ui.button)
+            if e.visible and e._props.get('label', '') in glyphs
         ]
     return btns
 
@@ -568,6 +586,128 @@ def test_a2_grid_table_toggle_reaches_table(joins_lab_smoke_runner):
         if grid_btns:
             _click_element(user, grid_btns[0])
             await asyncio.sleep(0.2)
+
+    joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
+# R2-4: triage icon-glyph buttons (✓/?/✗) on rendered candidate cards
+# ---------------------------------------------------------------------------
+
+def test_r2_4_triage_icon_buttons_on_cards(joins_lab_smoke_runner):
+    """R2-4 (LIVE OWNER): candidate cards render ✓/?/✗ glyph buttons, NOT Yes/Maybe/No text.
+
+    Plan 119-10 Task 1 converts the three text triage buttons to icon-glyph buttons
+    whose _props['label'] equals the glyph ('✓', '?', '✗') from TRIAGE_ICONS.
+
+    This test drives the live async render path and:
+      (a) Asserts at least one card-triage button with glyph content '✓' is visible.
+      (b) Asserts NO visible card-triage button has a text label in
+          {Yes, Maybe, No, כן, אולי, לא} — the old text labels are gone.
+      (c) Finds all three glyph variants (✓, ?, ✗) across all rendered cards.
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from shared.joins_lab import TRIAGE_ICONS
+
+        # (a) + (c) — find all triage glyph buttons
+        glyph_btns = _find_triage_glyph_buttons(user)
+        assert glyph_btns, (
+            "R2-4 FAIL: no visible triage glyph buttons (✓/?/✗) found after search. "
+            "Cards may not have rendered or the triage buttons still have text labels. "
+            "Check candidate_grid.py _create_candidate_card (Plan 119-10 Task 1)."
+        )
+
+        found_glyphs = {b._props.get('label', '') for b in glyph_btns}
+        expected_glyphs = {v["glyph"] for v in TRIAGE_ICONS.values()}
+        # Each card renders all 3 glyphs; with 2 stub candidates we expect all 3.
+        assert expected_glyphs.issubset(found_glyphs), (
+            f"R2-4 FAIL: not all triage glyphs rendered. "
+            f"Expected all of {expected_glyphs!r}; found {found_glyphs!r}. "
+            "Check TRIAGE_ICONS usage in candidate_grid.py."
+        )
+
+        # (b) — assert NO visible card triage button uses the old text labels
+        from nicegui import ElementFilter, ui
+        old_text_labels = {'Yes', 'Maybe', 'No', 'כן', 'אולי', 'לא'}
+        with user._client:
+            old_text_btns = [
+                e for e in ElementFilter(kind=ui.button)
+                if e.visible and e._props.get('label', '') in old_text_labels
+            ]
+        # Filter to card-level triage buttons only (compare modal verdict buttons
+        # may still use text labels — they are 119-11's responsibility).
+        # We distinguish card triage buttons from Compare modal verdict buttons by
+        # checking that they are NOT inside a q-dialog (the modal is a dialog).
+        # Simple proxy: if the glyph buttons outnumber old-text buttons it's a pass;
+        # the critical invariant is that the grid triage buttons use glyphs.
+        # Since compare_modal verdict buttons are inside a ui.dialog that is not
+        # yet open at this point, old_text_btns should be empty.
+        assert not old_text_btns, (
+            f"R2-4 FAIL: found {len(old_text_btns)} visible button(s) with old text "
+            f"triage labels (Yes/Maybe/No/כן/אולי/לא). "
+            f"Labels found: {[b._props.get('label') for b in old_text_btns]}. "
+            "Triage buttons must use glyph content (✓/?/✗) after Plan 119-10 Task 1."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
+# R2-9: browse + compare icon buttons in the same triage row
+# ---------------------------------------------------------------------------
+
+def test_r2_9_browse_compare_icon_buttons_in_triage_row(joins_lab_smoke_runner):
+    """R2-9 (LIVE OWNER): browse (menu_book) + compare (compare_arrows) are icon buttons
+    on rendered candidate cards, present alongside the ✓/?/✗ triage glyph buttons.
+
+    Plan 119-10 Task 1 moves browse and compare controls from a separate bottom row
+    into the same control row as the triage glyph buttons.
+
+    Assertions:
+      - A visible button with icon='compare_arrows' exists (compare action).
+      - A visible button with icon='menu_book' exists (browse action).
+      - The glyph triage buttons AND the icon action buttons are all present
+        on the same rendered candidate card (same client render tree).
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+
+        # Find compare icon button
+        with user._client:
+            compare_btns = [
+                e for e in ElementFilter(kind=ui.button)
+                if e.visible and e._props.get('icon') == 'compare_arrows'
+            ]
+        assert compare_btns, (
+            "R2-9 FAIL: no visible button with icon='compare_arrows' found after search. "
+            "The compare action must be an icon button in the triage row (Plan 119-10 Task 1). "
+            "Check candidate_grid.py _create_candidate_card."
+        )
+
+        # Find browse icon button
+        with user._client:
+            browse_btns = [
+                e for e in ElementFilter(kind=ui.button)
+                if e.visible and e._props.get('icon') == 'menu_book'
+            ]
+        assert browse_btns, (
+            "R2-9 FAIL: no visible button with icon='menu_book' found after search. "
+            "The browse action must be an icon button in the triage row (Plan 119-10 Task 1). "
+            "Check candidate_grid.py _create_candidate_card."
+        )
+
+        # Glyph triage buttons are also present (all five controls co-exist)
+        glyph_btns = _find_triage_glyph_buttons(user)
+        assert glyph_btns, (
+            "R2-9 FAIL: no ✓/?/✗ glyph triage buttons visible — expected them to share "
+            "the same control row as the browse/compare icon buttons (Plan 119-10 Task 1)."
+        )
 
     joins_lab_smoke_runner(driver)
 
