@@ -475,22 +475,75 @@ def cap_candidates(
 
 
 # ---------------------------------------------------------------------------
-# Private card renderer
+# Card-restyle infrastructure (D-11 / D-09 triage border feedback)
 # ---------------------------------------------------------------------------
 
-def _create_candidate_card(cand, on_browse_click: Optional[Callable] = None) -> None:
-    """Render a single read-only candidate card.
+# Page-level card ref registry: sys_id → list of ui.card() elements
+# Keyed by sys_id (triage is per sys_id — D-11), capturing all cards for that sys_id.
+_card_refs: dict = {}
+
+_TRIAGE_COLORS = {
+    "yes": "#15803d",    # green-700
+    "maybe": "#a16207",  # amber-700
+    "no": "#b91c1c",     # red-700
+}
+
+
+def _restyle_all(sys_id: str, triage: object) -> None:
+    """Update every visible card whose sys_id matches — apply triage border (D-11).
+
+    Desktop parity: _restyle_card at join_workbench.py:3344.
+
+    Args:
+        sys_id: The candidate sys_id whose triage verdict changed.
+        triage: TriageState or dict[sys_id → verdict].
+    """
+    if isinstance(triage, TriageState):
+        verdict = triage.get(sys_id)
+    else:
+        verdict = triage.get(sys_id) if isinstance(triage, dict) else None
+
+    color = _TRIAGE_COLORS.get(verdict)
+    border = f"2px solid {color}" if color else "1px solid var(--border-light)"
+    for ref in _card_refs.get(sys_id, []):
+        try:
+            ref.style(f"border-radius:8px; border:{border};")
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Private card renderer (Phase 119 — 160×160 image-first, triage row, badge, Compare)
+# ---------------------------------------------------------------------------
+
+def _create_candidate_card(
+    cand,
+    triage: object = None,
+    on_browse_click: Optional[Callable] = None,
+    on_compare: Optional[Callable] = None,
+) -> None:
+    """Render a single candidate card (Phase 119 D-09/D-11/D-07).
 
     Card layout (reading order):
-        ┌──────────────────────────────────────┐
-        │ [thumbnail 48×48]                    │
-        │ [library chip] [shelfmark]           │
-        │ [title — RTL, truncated]             │
-        │ [View in Browse link]                │
-        └──────────────────────────────────────┘
+        ┌──────────────────────────────────────────┐
+        │ [thumbnail 160×160, full-width]          │  ← rounded-top, object-fit:cover
+        │ [library chip] [shelfmark]               │
+        │ [title — RTL, 2-line clamp, muted]       │
+        │ [👁 badge]   [triage: Y ? N]             │  ← new Phase 119
+        │ [View in Browse] [Compare fragment]      │  ← Compare button new Phase 119
+        └──────────────────────────────────────────┘
 
-    Phase 119 will add a triage row below the title without restructuring.
+    Security (T-119-04/05/06):
+        - Thumbnail URL via build_thumbnail_url() (proxy-only; Oxford fork preserved)
+        - Text fields rendered via ui.label (auto-escaped; no .html())
+        - Nested links use js_handler='(e) => e.stopPropagation()' (AST guard)
+        - Triage state is the caller-provided dict/TriageState — never safe_storage
     """
+    from shared.joins_lab import badge_and_tooltip
+
+    if triage is None:
+        triage = {}
+
     thumb_url = build_thumbnail_url(
         cand.sys_id,
         cand.page,
@@ -498,74 +551,124 @@ def _create_candidate_card(cand, on_browse_click: Optional[Callable] = None) -> 
         library_code=cand.library_code,
     )
 
-    with ui.card().classes("w-full p-4").style(
-        "border-radius: 8px; border: 1px solid var(--border-light);"
-    ):
-        # ── Thumbnail ──────────────────────────────────────────────────
-        with ui.row().classes("items-start gap-3"):
-            if thumb_url:
-                # Proxy image with inline onerror → placeholder (NO handleImageError,
-                # NO direct-IIIF fallback).  T-117-07 boundary.
-                img_el = ui.image(thumb_url).style(
-                    "width:48px; height:48px; object-fit:cover; border-radius:4px; flex-shrink:0;"
+    # Derive current verdict for initial render
+    if isinstance(triage, TriageState):
+        current_verdict = triage.get(cand.sys_id)
+    else:
+        current_verdict = triage.get(cand.sys_id)
+
+    # Initial border reflects current triage state
+    color = _TRIAGE_COLORS.get(current_verdict)
+    initial_border = f"2px solid {color}" if color else "1px solid var(--border-light)"
+
+    with ui.card().classes("w-full p-0").style(
+        f"border-radius:8px; border:{initial_border}; overflow:hidden;"
+    ) as card_el:
+        # Register card ref for restyle (keyed by sys_id — D-11)
+        _card_refs.setdefault(cand.sys_id, []).append(card_el)
+
+        # ── Thumbnail (160×160, full-width, rounded-top) ──────────────
+        if thumb_url:
+            # Proxy image with inline onerror → placeholder (NO handleImageError,
+            # NO direct-IIIF fallback).  T-117-07 / T-119-04 boundary.
+            img_el = ui.image(thumb_url).style(
+                "width:100%; height:160px; object-fit:cover;"
+                "border-radius:8px 8px 0 0; flex-shrink:0; display:block;"
+            )
+            # Replace with a placeholder box on load error (no IIIF fallback).
+            img_el.on(
+                "error",
+                js_handler=(
+                    "(e) => {"
+                    " e.target.style.display='none';"
+                    " const ph=document.createElement('div');"
+                    " ph.innerHTML='&#128196;';"
+                    " ph.setAttribute('style','" + _PLACEHOLDER_STYLE_160.replace("'", "\\'") + "');"
+                    " e.target.parentNode.insertBefore(ph,e.target);"
+                    "}"
+                ),
+            )
+        else:
+            # Synthetic sys_id: render placeholder directly.
+            ui.element("div").style(_PLACEHOLDER_STYLE_160).html("&#128196;")
+
+        # ── Metadata column (below thumbnail) ─────────────────────────
+        with ui.column().classes("flex-grow min-w-0 gap-2 p-2"):
+
+            # Library chip + shelfmark row
+            with ui.row().classes("items-center gap-2 flex-wrap"):
+                if cand.library_code:
+                    from genizah_core import get_library_display
+                    full_name = get_library_display(
+                        cand.library_code, short=False, lang=get_language()
+                    )
+                    ui.label(cand.library_code).classes(
+                        "text-xs px-2 py-0.5 rounded shrink-0"
+                    ).style(
+                        "background: var(--primary-100); color: var(--primary-700);"
+                    ).tooltip(full_name)
+
+                ui.label(cand.shelfmark or "?").classes(
+                    "text-sm font-semibold truncate"
                 )
-                # Replace with a placeholder box on load error (no IIIF fallback).
-                img_el.on(
-                    "error",
-                    js_handler=(
-                        "(e) => {"
-                        " e.target.style.display='none';"
-                        " const ph=document.createElement('div');"
-                        " ph.innerHTML='&#128196;';"
-                        " ph.setAttribute('style','" + _PLACEHOLDER_STYLE.replace("'", "\\'") + "');"
-                        " e.target.parentNode.insertBefore(ph,e.target);"
-                        "}"
-                    ),
+
+            # Title (RTL, truncated, muted)
+            if cand.title:
+                title_display = _truncate_title(cand.title)
+                ui.label(title_display).classes("text-sm").style(
+                    "color: var(--text-secondary); direction: rtl; "
+                    "overflow: hidden; display: -webkit-box; "
+                    "-webkit-line-clamp: 2; -webkit-box-orient: vertical;"
                 )
-            else:
-                # Synthetic sys_id: render placeholder directly.
-                ui.element("div").style(_PLACEHOLDER_STYLE).html("&#128196;")
 
-            # ── Metadata column (library chip + shelfmark + title + link) ──
-            with ui.column().classes("flex-grow min-w-0 gap-1"):
+            # 👁 badge (Phase 119 VSM-02) — badge_and_tooltip() precedence
+            # T-119-05: rendered via ui.icon (auto-escaped; not .html())
+            icon_name, tooltip_text = badge_and_tooltip(cand)
+            if icon_name:
+                ui.icon(icon_name).classes("text-sm").style(
+                    "color: #f59e0b;"  # var(--accent-amber)
+                ).tooltip(tr(tooltip_text))
 
-                # Library chip + shelfmark row
-                with ui.row().classes("items-center gap-2 flex-wrap"):
-                    if cand.library_code:
-                        from genizah_core import get_library_display
-                        full_name = get_library_display(
-                            cand.library_code, short=False, lang=get_language()
-                        )
-                        ui.label(cand.library_code).classes(
-                            "text-xs px-2 py-0.5 rounded shrink-0"
-                        ).style(
-                            "background: var(--primary-100); color: var(--primary-700);"
-                        ).tooltip(full_name)
+            # Triage row (Phase 119 CND-04, D-11)
+            # Three flat buttons Y/?/N; 44px touch target; active state filled.
+            with ui.row().classes("gap-1 items-center"):
+                for verdict, label, v_color in [
+                    ("yes", tr("Yes"), _TRIAGE_COLORS["yes"]),
+                    ("maybe", tr("Maybe"), _TRIAGE_COLORS["maybe"]),
+                    ("no", tr("No"), _TRIAGE_COLORS["no"]),
+                ]:
+                    _v = verdict  # closure capture
+                    _sid = cand.sys_id
 
-                    ui.label(cand.shelfmark or "?").classes(
-                        "text-sm font-semibold truncate"
+                    # Active state: filled background in triage color
+                    if current_verdict == verdict:
+                        btn_style = f"min-height:44px; font-size:0.75rem; background:{v_color}; color:#fff;"
+                    else:
+                        btn_style = "min-height:44px; font-size:0.75rem;"
+
+                    def _make_triage_handler(v=_v, sid=_sid, t=triage):
+                        def _handler():
+                            if isinstance(t, TriageState):
+                                t.set(sid, v)
+                            elif isinstance(t, dict):
+                                t[sid] = v
+                            _restyle_all(sid, t)
+                        return _handler
+
+                    ui.button(label).props("flat dense").style(btn_style).on(
+                        "click", _make_triage_handler()
                     )
 
-                # Title (RTL, truncated, muted)
-                if cand.title:
-                    title_display = _truncate_title(cand.title)
-                    ui.label(title_display).classes("text-sm").style(
-                        "color: var(--text-secondary); direction: rtl; "
-                        "overflow: hidden; display: -webkit-box; "
-                        "-webkit-line-clamp: 2; -webkit-box-orient: vertical;"
-                    )
-
-                # "View in Browse" link
-                browse_url = build_browse_url(cand)
+            # Bottom row: View in Browse + Compare fragment
+            browse_url = build_browse_url(cand)
+            with ui.row().classes("gap-2 items-center flex-wrap"):
                 if on_browse_click:
                     # Caller provided a Python handler (for testing / customisation).
                     ui.link(tr("View in Browse"), "#").style(
                         "color: var(--primary-700); font-size: 0.85rem;"
                     ).on(
                         "click",
-                        # WR-04: json.dumps yields a safely-escaped JS string literal,
-                        # so a sys_id/URL containing a quote cannot break out of the
-                        # handler (defense-in-depth; sys_ids are internal IDs).
+                        # WR-04: json.dumps yields a safely-escaped JS string literal
                         js_handler=f"() => {{ window.location.href={json.dumps(browse_url)}; }}",
                     )
                 else:
@@ -573,32 +676,240 @@ def _create_candidate_card(cand, on_browse_click: Optional[Callable] = None) -> 
                         "color: var(--primary-700); font-size: 0.85rem;"
                     )
 
+                # Compare button (Phase 119 CND-04, D-02)
+                # Carries the FULL candidate (uid / sys_id+page) to on_compare.
+                # NOT keyed by sys_id alone — same sys_id can appear on multiple folios.
+                _cand_ref = cand  # explicit closure capture of the full candidate
+
+                def _make_compare_handler(c=_cand_ref, handler=on_compare):
+                    def _handler():
+                        if handler:
+                            handler(c)
+                    return _handler
+
+                ui.button(tr("Compare fragment"), icon="compare_arrows").props(
+                    "flat dense"
+                ).style("font-size:0.75rem;").tooltip(
+                    tr("Compare fragment")
+                ).on("click", _make_compare_handler())
+
 
 # ---------------------------------------------------------------------------
-# Public grid factory
+# Filter dialog (D-14 — opens as ui.dialog popover, D-14/D-15 predicates)
+# ---------------------------------------------------------------------------
+
+def open_filter_dialog(
+    filter_state: dict,
+    enrichment: dict,
+    enrichment_ready: bool,
+    on_apply: Callable,
+    on_reset: Callable,
+) -> None:
+    """Open the candidate filter dialog (D-14, CND-06).
+
+    Args:
+        filter_state:     Current filter state dict (mutated in place on Apply).
+        enrichment:       dict[sys_id → {material, width_cm, height_cm, ...}]
+        enrichment_ready: True when enrichment batch has completed.
+        on_apply:         Called after Apply closes the dialog.
+        on_reset:         Called after Reset closes the dialog.
+    """
+    # Gather material options from enrichment (disabled until enrichment ready — Pitfall 7)
+    mat_options = sorted({v.get("material") for v in enrichment.values() if v.get("material")})
+
+    with ui.dialog() as dlg, ui.card().classes("p-4 gap-4").style("min-width:360px;"):
+        ui.label(tr("Filters")).classes("text-base font-semibold")
+
+        # 1. Material (multi-select; disabled until enrichment ready)
+        mat_sel = ui.select(
+            options=mat_options,
+            value=list(filter_state.get("materials") or []),
+            label=tr("Material"),
+            multiple=True,
+        ).props("dense outlined use-chips")
+        if not enrichment_ready:
+            mat_sel.disable()
+
+        # 2. Has dimensions
+        dims_sw = ui.switch(tr("Has dimensions data"), value=bool(filter_state.get("has_dims", False)))
+
+        # 3. Size mismatch (disabled until enrichment ready — Pitfall 7)
+        mismatch_sw = ui.switch(tr("Exclude size mismatch"), value=bool(filter_state.get("exclude_mismatch", False)))
+        if not enrichment_ready:
+            mismatch_sw.disable()
+
+        # 4. Triage state (multi-select)
+        triage_opts = ["All", "Not triaged", "Yes", "Maybe", "No"]
+        tri_sel = ui.select(
+            options=triage_opts,
+            value=list(filter_state.get("triage_states") or []),
+            label=tr("Triage state"),
+            multiple=True,
+        ).props("dense outlined use-chips")
+
+        # 5. Text filter (D-14 discretion — included per UI-SPEC)
+        text_inp = ui.input(
+            placeholder=tr("Filter by shelfmark…"),
+            value=filter_state.get("text_q", ""),
+        ).props("dense outlined")
+
+        with ui.row().classes("justify-end gap-2 mt-2"):
+            def _do_reset():
+                filter_state.update({
+                    "materials": [],
+                    "has_dims": False,
+                    "exclude_mismatch": False,
+                    "triage_states": [],
+                    "text_q": "",
+                })
+                dlg.close()
+                on_reset()
+
+            def _do_apply():
+                filter_state["materials"] = list(mat_sel.value or [])
+                filter_state["has_dims"] = bool(dims_sw.value)
+                filter_state["exclude_mismatch"] = bool(mismatch_sw.value)
+                filter_state["triage_states"] = list(tri_sel.value or [])
+                filter_state["text_q"] = text_inp.value or ""
+                dlg.close()
+                on_apply()
+
+            ui.button(tr("Reset"), on_click=_do_reset).props("flat")
+            ui.button(tr("Apply"), on_click=_do_apply).props("color=primary unelevated")
+
+    dlg.open()
+
+
+# ---------------------------------------------------------------------------
+# Table view renderer (D-10, CND-03 — sortable 8-column multi-select table)
+# ---------------------------------------------------------------------------
+
+def create_candidate_table(
+    candidates: list,
+    triage: object = None,
+    enrichment: dict = None,
+    sort_mode: str = "score",
+    on_compare: Optional[Callable] = None,
+) -> ui.element:
+    """Render the multi-select sortable table view of candidates (D-10, CND-03).
+
+    Args:
+        candidates:  Filtered (not paginated) list of Candidate objects.
+        triage:      TriageState or dict[sys_id → verdict].
+        enrichment:  dict[sys_id → {material, width_cm, height_cm, ...}]
+        sort_mode:   'score' (default, desc) or 'vs_rank' (asc when 👁 ON).
+        on_compare:  Optional callback(cand) launched on row double-click.
+
+    Returns:
+        The outer ui.element wrapping the table and bulk-triage bar.
+    """
+    if triage is None:
+        triage = {}
+    if enrichment is None:
+        enrichment = {}
+
+    rows = _make_table_rows(candidates, triage, enrichment, sort_mode=sort_mode)
+    columns = get_table_columns()
+
+    with ui.column().classes("w-full gap-2") as outer:
+        # Bulk-triage bar (D-12) — appears when rows are selected
+        bulk_bar = ui.row().classes("gap-2 items-center p-2 flex-wrap").style(
+            "background:var(--bg-tertiary); border-radius:4px; display:none;"
+        )
+        selected_sys_ids: list = []
+
+        with bulk_bar:
+            bulk_count_label = ui.label(tr("Mark N selected as:").replace("N", "0"))
+            for verdict, label, v_color in [
+                ("yes", tr("Yes"), _TRIAGE_COLORS["yes"]),
+                ("maybe", tr("Maybe"), _TRIAGE_COLORS["maybe"]),
+                ("no", tr("No"), _TRIAGE_COLORS["no"]),
+            ]:
+                _v = verdict
+
+                def _make_bulk_handler(v=_v):
+                    def _handler():
+                        if isinstance(triage, TriageState):
+                            triage.set_bulk(selected_sys_ids, v)
+                        elif isinstance(triage, dict):
+                            for sid in selected_sys_ids:
+                                triage[sid] = v
+                        for sid in selected_sys_ids:
+                            _restyle_all(sid, triage)
+                    return _handler
+
+                ui.button(label).props("flat dense").style(
+                    f"color:{v_color};"
+                ).on("click", _make_bulk_handler())
+
+        table = ui.table(
+            columns=columns,
+            rows=rows,
+            row_key="uid",
+            selection="multiple",
+        ).classes("w-full")
+
+        # Row double-click → Compare (D-02)
+        if on_compare:
+            def _on_row_dblclick(e):
+                uid = e.args.get("uid") or e.args.get("key")
+                # Find the matching candidate by uid
+                for c in candidates:
+                    if getattr(c, "uid", None) == uid:
+                        on_compare(c)
+                        break
+            table.on("rowDblclick", _on_row_dblclick)
+
+        # Track selection for bulk-triage bar
+        def _on_selection(e):
+            sel = e.args if isinstance(e.args, list) else []
+            selected_sys_ids.clear()
+            for row in sel:
+                sys_id = row.get("sys_id")
+                if sys_id:
+                    selected_sys_ids.append(sys_id)
+            n = len(selected_sys_ids)
+            bulk_count_label.set_text(tr("Mark N selected as:").replace("N", str(n)))
+            bulk_bar.style("display:flex;" if n > 0 else "display:none;")
+
+        table.on("selection", _on_selection)
+
+    return outer
+
+
+# ---------------------------------------------------------------------------
+# Public grid factory (Phase 119 — paginated, triage-aware, 160×160 thumbnails)
 # ---------------------------------------------------------------------------
 
 def create_candidate_grid(
     candidates: list,
     *,
     on_browse_click: Optional[Callable] = None,
+    on_compare: Optional[Callable] = None,
+    triage: object = None,
+    page: int = 0,
 ) -> ui.element:
-    """Render a read-only deduped candidate grid.
+    """Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
     Args:
-        candidates: List of shared.joins_lab.Candidate objects.
-        on_browse_click: Optional Python callback called when a browse link is
-            clicked (useful for testing; if omitted the link navigates directly).
+        candidates:       Full filtered list of shared.joins_lab.Candidate objects.
+        on_browse_click:  Optional Python callback for browse links (test hook).
+        on_compare:       Optional callback(cand) for the Compare button — receives the
+                          FULL candidate (uid/(sys_id,page)) NOT just sys_id (D-02).
+        triage:           TriageState or dict[sys_id → verdict]. Shared single source
+                          of truth across grid, table, Compare (D-11).
+        page:             0-indexed page number to render.
 
     Returns:
-        The outer ui.column() element wrapping the section header + grid.
-
-    Phase 119 extension points:
-        - Add a triage row inside `_create_candidate_card` below the title.
-        - Replace the grid with a table by wrapping this call from the page.
-        - Add VS badges / per-card action buttons.
+        The outer ui.column() element wrapping the section header + grid + pagination.
     """
-    with ui.column().classes("w-full gap-3") as outer:
+    if triage is None:
+        triage = {}
+
+    total = len(candidates)
+    page_slice, current_page, total_pages = paginate(candidates, page)
+
+    with ui.column().classes("w-full gap-2") as outer:
 
         if not candidates:
             # Empty state
@@ -606,32 +917,30 @@ def create_candidate_grid(
                 tr("No candidates found. Try different lines or broader terms.")
             ).classes("text-sm").style("color: var(--text-secondary);")
         else:
-            # WebSocket-safety cap (see _MAX_RENDERED_CANDIDATES): render at most
-            # N cards so a common-term search (700+ hits) cannot drop the socket.
-            to_render, total = cap_candidates(candidates)
-
-            # Section header shows the FULL count (not the rendered subset).
+            # Section header shows the FULL count.
             ui.label(f"{tr('Candidates')} ({total})").classes(
                 "text-base font-semibold"
             )
 
-            # Truncation notice when the cap kicked in. Phase 121 (i18n Polish)
-            # supplies the Hebrew key for this {n} template, like every other
-            # joins-lab string; until then it follows the page-wide EN fallback.
-            if len(to_render) < total:
-                ui.label(
-                    tr(
-                        "Showing the first {n} results — "
-                        "refine your search to narrow them down."
-                    ).format(n=len(to_render))
-                ).classes("text-sm").style("color: var(--text-secondary);")
+            # Responsive grid (D-09): 1 col <640px, 2 col 640–1023px, 3 col ≥1024px.
+            with ui.grid().classes("w-full gap-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"):
+                for cand in page_slice:
+                    _create_candidate_card(
+                        cand,
+                        triage=triage,
+                        on_browse_click=on_browse_click,
+                        on_compare=on_compare,
+                    )
 
-            # Responsive grid (WR-02): single column on narrow (<640px), two
-            # columns at the Tailwind `sm` breakpoint (>=640px). An @media rule
-            # cannot live inside an inline style attribute, so the collapse is
-            # driven by Tailwind responsive grid classes instead (D-03).
-            with ui.grid().classes("w-full gap-3 grid grid-cols-1 sm:grid-cols-2"):
-                for cand in to_render:
-                    _create_candidate_card(cand, on_browse_click=on_browse_click)
+            # Pagination controls (D-08): ‹ Prev | Page N of M | Next ›
+            if total_pages > 1:
+                with ui.row().classes("w-full items-center justify-center gap-2 mt-2"):
+                    ui.button(tr("‹ Prev")).props("flat dense").props(
+                        "disable" if current_page == 0 else ""
+                    )
+                    ui.label(tr("Page N of M").replace("N", str(current_page + 1)).replace("M", str(total_pages))).classes("text-sm")
+                    ui.button(tr("Next ›")).props("flat dense").props(
+                        "disable" if current_page >= total_pages - 1 else ""
+                    )
 
     return outer
