@@ -537,22 +537,22 @@ def badge_and_tooltip(cand: "Candidate") -> tuple:
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **`badge_and_tooltip` icon names for grid/table rendering**
    - What we know: desktop uses Qt icons (not Material Icons); CONTEXT.md says `⚓`, `⇄`, `👁` glyphs at `:3144`.
    - What's unclear: The exact Material Icon names the web should use. UI-SPEC says `icon='visibility'` for VS — that is the 👁 icon. For `⚓` (anchor self) and `⇄` (via_other_side) in the web, sensible choices are `anchor` and `swap_horiz`.
-   - Recommendation: Use `anchor` for `is_anchor_self`, `swap_horiz` for `via_other_side`, `visibility` for `via_vs` — all standard Material Icons.
+   - RESOLVED: Use `anchor` for `is_anchor_self`, `swap_horiz` for `via_other_side`, `visibility` for `via_vs` — all standard Material Icons. Locked in plan 119-01 T1.
 
 2. **Enrichment timing for filter dialog initial render**
    - What we know: Enrichment batch runs off-loop after search; there is a window where `_enrichment` dict is empty (Pitfall 7).
    - What's unclear: Whether the filter dialog should block on enrichment or be openable before it completes.
-   - Recommendation: The filter dialog is non-blocking. Material `ui.select` options are dynamic (populated from enrichment); size-mismatch and material filters are visually disabled with a spinner until `_enrichment_ready` is set. This is the desktop pattern (`_EnrichWorker` fills data asynchronously; filter dialog shows empty/loading state).
+   - RESOLVED: The filter dialog is non-blocking. Material `ui.select` options are dynamic (populated from enrichment); size-mismatch and material filters are visually disabled with a spinner until `_enrichment_ready` is set. This is the desktop pattern (`_EnrichWorker` fills data asynchronously; filter dialog shows empty/loading state). Implemented via the `_enrichment_ready` flag in plans 119-02 T3 + 119-04 T2.
 
 3. **Compare modal vs. sticky anchor pane AnchorViewer interaction**
    - What we know: Phase 117 created ONE AnchorViewer for the sticky pane. Phase 119 Compare needs two more (one for each Compare pane). Three total AnchorViewer instances on one page.
    - What's unclear: Whether all three share the same `manuscriptViewer` JS instance or need separate `gammaFilterId` / `imageSelector` scoping.
-   - Recommendation: The idempotency guard ensures one `manuscriptViewer` JS object is created. The JS `imageSelector: '.zoomable-image'` is a CLASS selector (multiple elements). Each image gets its own pan/zoom state via the existing DOM-element-keyed maps in `manuscript_viewer.js`. No additional scoping should be needed, but the planner should verify by reading `manuscript_viewer.js` briefly.
+   - RESOLVED: The idempotency guard ensures one `manuscriptViewer` JS object is created. The JS `imageSelector: '.zoomable-image'` is a CLASS selector (multiple elements). Each image gets its own pan/zoom state via the existing DOM-element-keyed maps in `manuscript_viewer.js`. No additional scoping is needed; honored by plan 119-03 (no `inject_viewer_assets()` inside the modal — page-build injects once). The planner verified the existing idempotency guard covers this.
 
 ---
 
