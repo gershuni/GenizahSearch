@@ -402,3 +402,404 @@ def test_compare_modal_imports_headlessly():
     assert hasattr(m, "step_candidate")
     assert hasattr(m, "step_pane_page")
     assert hasattr(m, "record_verdict")
+
+
+# ---------------------------------------------------------------------------
+# Task 2 (Plan 119-06): G5 — show-loader behavioral tests
+# ---------------------------------------------------------------------------
+
+def _make_compare_modal_with_stubs():
+    """Create a compare modal with mocked NiceGUI; return (dialog, anchor_stub, cand_stub).
+
+    The stubs are AsyncMock AnchorViewer instances injected in place of the real
+    AnchorViewer constructor, so the show-loader coroutine calls update_content on
+    them instead of building live NiceGUI widgets.
+    """
+    import asyncio
+    import inspect
+    from unittest.mock import MagicMock, AsyncMock, patch
+
+    anchor = _Cand(sys_id="ANCHOR01", page=2, shelfmark="T-S Anchor")
+    cand1 = _Cand(sys_id="CAND01", page=3, shelfmark="T-S Cand1")
+    cand2 = _Cand(sys_id="CAND02", page=4, shelfmark="T-S Cand2")
+    triage: dict = {}
+    calls: list = []
+
+    def on_verdict(sys_id, verdict):
+        calls.append((sys_id, verdict))
+
+    # Stub AnchorViewer — records update_content calls
+    anchor_stub = MagicMock()
+    anchor_stub.update_content = AsyncMock()
+
+    cand1_stub = MagicMock()
+    cand1_stub.update_content = AsyncMock()
+
+    # Track which stub instances were created (in order)
+    created_viewers = []
+
+    mock_element = MagicMock()
+    mock_element.__enter__ = lambda s: s
+    mock_element.__exit__ = MagicMock(return_value=False)
+    for m in ("classes", "props", "style", "mark", "tooltip", "on"):
+        setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+    # dialog mock that supports .on("show", ...) — captures the handler
+    dialog_mock = MagicMock()
+    dialog_mock.__enter__ = lambda s: s
+    dialog_mock.__exit__ = MagicMock(return_value=False)
+    _show_handlers: list = []
+
+    def _dialog_on(event, handler):
+        if event == "show":
+            _show_handlers.append(handler)
+        return dialog_mock
+
+    dialog_mock.on = _dialog_on
+    dialog_mock.props = MagicMock(return_value=dialog_mock)
+
+    stub_sequence = [anchor_stub, cand1_stub]
+
+    def _fake_anchor_viewer_init(self, sys_id, p_num=None, volume_ie=None,
+                                  highlight_pattern=None, browse_resolver=None,
+                                  external_resolver=None, fl_id=None):
+        if stub_sequence:
+            stub = stub_sequence.pop(0)
+        else:
+            stub = MagicMock()
+            stub.update_content = AsyncMock()
+        created_viewers.append(stub)
+        # Copy stub attributes into self (since the factory accesses _cand_viewer_ref[0])
+        self.update_content = stub.update_content
+        self._sys_id = sys_id
+        self._p_num = p_num
+
+    with (
+        patch("web.components.compare_modal.ui") as mock_ui,
+        patch("web.components.compare_modal.AnchorViewer") as MockAnchorViewer,
+    ):
+        mock_ui.dialog.return_value = dialog_mock
+        mock_ui.card.return_value = mock_element
+        mock_ui.row.return_value = mock_element
+        mock_ui.column.return_value = mock_element
+        mock_ui.label.return_value = mock_element
+        mock_ui.button.return_value = mock_element
+        mock_ui.icon.return_value = mock_element
+        mock_ui.badge.return_value = mock_element
+
+        # Make AnchorViewer() return the stub instances in order.
+        # The factory calls AnchorViewer(...) and then we need to inject
+        # the stub so _anchor_viewer_ref / _cand_viewer_ref get the stub's
+        # update_content. Use side_effect to inject.
+        created_viewer_instances = []
+
+        def _av_side_effect(*args, **kwargs):
+            if created_viewer_instances:
+                # Return next stub
+                stub = anchor_stub if len(created_viewer_instances) == 0 else cand1_stub
+            # Build a real-looking mock with update_content
+            inst = MagicMock()
+            if not created_viewer_instances:
+                inst.update_content = anchor_stub.update_content
+            else:
+                inst.update_content = cand1_stub.update_content
+            created_viewer_instances.append(inst)
+            return inst
+
+        MockAnchorViewer.side_effect = _av_side_effect
+
+        from web.components.compare_modal import create_compare_modal
+        dialog = create_compare_modal(
+            anchor_cand=anchor,
+            initial_candidate=cand1,
+            filtered_candidates=[cand1, cand2],
+            triage=triage,
+            on_verdict=on_verdict,
+        )
+
+    return dialog, anchor_stub, cand1_stub, _show_handlers, triage, cand2
+
+
+class TestShowLoaderBehavioral:
+    """Behavioral tests for the G5 show-loader (Task 2, Plan 119-06).
+
+    These tests drive the _on_show / _load_candidate_pane coroutines with stub
+    viewers and observe that both panes' update_content is awaited — NO source
+    introspection required for the core behavioral assertions.
+    """
+
+    def test_source_contains_dialog_on_show(self):
+        """Source assertion: compare_modal.py wires the loader via dialog.on('show'."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert 'dialog.on("show"' in source, (
+            "compare_modal.py must attach an async show-loader via dialog.on('show', ...)"
+        )
+
+    def test_step_is_async_coroutine_function(self):
+        """Source assertion: _step is defined as async def (G5 fix)."""
+        import pathlib
+        import re
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert re.search(r"async def _step\b", source), (
+            "_step must be defined as 'async def' so it awaits _load_candidate_pane"
+        )
+
+    def test_record_verdict_is_async_coroutine_function(self):
+        """Source assertion: _record_verdict is defined as async def (G5 fix)."""
+        import pathlib
+        import re
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert re.search(r"async def _record_verdict\b", source), (
+            "_record_verdict must be defined as 'async def' so it awaits _load_candidate_pane"
+        )
+
+    def test_no_naked_ensure_future(self):
+        """Source assertion: no naked asyncio.ensure_future for pane loaders (T-119-09)."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "ensure_future" not in source, (
+            "compare_modal.py must NOT use asyncio.ensure_future — "
+            "use dialog.on('show', async ...) instead (Codex client-context rule, T-119-09)"
+        )
+
+    def test_modal_level_generation_guard_in_source(self):
+        """Source assertion: _cand_load_gen modal-level generation counter is present (F-G5)."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "_cand_load_gen" in source, (
+            "_cand_load_gen modal-level generation token must exist in compare_modal.py (F-G5)"
+        )
+
+    def test_generation_incremented_in_fill_candidate(self):
+        """Source assertion: _cand_load_gen['n'] incremented in _fill_candidate (F-G5)."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        # Both _fill_candidate and _load_candidate_pane reference _cand_load_gen
+        assert source.count("_cand_load_gen") >= 3, (
+            "_cand_load_gen must appear in _fill_candidate (increment) and "
+            "_load_candidate_pane (capture + recheck) — at least 3 references"
+        )
+
+    def test_anchor_viewer_constructed_with_highlight_pattern(self):
+        """Source assertion: both pane AnchorViewers are constructed with highlight_pattern= (G1-compare)."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "highlight_pattern=" in source, (
+            "compare_modal.py must pass highlight_pattern= to AnchorViewer constructors (G1-compare)"
+        )
+
+    def test_behavioral_show_loader_awaits_both_panes(self):
+        """BEHAVIORAL: show-loader coroutine awaits update_content on BOTH anchor + candidate stubs.
+
+        This is the load-bearing behavioral test for G5.  It does NOT inspect source
+        code — it drives the actual loader coroutine with AsyncMock stub viewers and
+        asserts that BOTH stubs' update_content was called (i.e., awaited).
+        """
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock, patch
+
+        anchor = _Cand(sys_id="ANCHOR01", page=2, shelfmark="T-S Anchor")
+        cand1 = _Cand(sys_id="CAND01", page=3, shelfmark="T-S Cand1")
+        triage: dict = {}
+
+        # Stub AnchorViewer instances — update_content is an AsyncMock
+        anchor_stub = MagicMock()
+        anchor_stub.update_content = AsyncMock(return_value=None)
+
+        cand_stub = MagicMock()
+        cand_stub.update_content = AsyncMock(return_value=None)
+
+        # Keep track of which pane each AV instance serves
+        av_call_order = []
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark", "tooltip", "on"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        dialog_show_handlers = []
+
+        def _make_dialog():
+            d = MagicMock()
+            d.__enter__ = lambda s: s
+            d.__exit__ = MagicMock(return_value=False)
+            d.props = MagicMock(return_value=d)
+            d.on = lambda event, handler: dialog_show_handlers.append(handler) if event == "show" else None
+            return d
+
+        av_instances_created = []
+
+        def _av_constructor(*args, **kwargs):
+            """Each call returns next stub in sequence."""
+            if len(av_instances_created) == 0:
+                inst = anchor_stub
+            else:
+                inst = cand_stub
+            av_instances_created.append(inst)
+            return inst
+
+        with (
+            patch("web.components.compare_modal.ui") as mock_ui,
+            patch("web.components.compare_modal.AnchorViewer", side_effect=_av_constructor),
+        ):
+            mock_ui.dialog.side_effect = _make_dialog
+            for attr in ("card", "row", "column", "label", "button", "icon", "badge"):
+                factory = MagicMock(return_value=mock_element)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+
+            from web.components.compare_modal import create_compare_modal
+            dialog = create_compare_modal(
+                anchor_cand=anchor,
+                initial_candidate=cand1,
+                filtered_candidates=[cand1],
+                triage=triage,
+                on_verdict=lambda sid, v: None,
+            )
+
+        # The show-handler must have been registered
+        assert dialog_show_handlers, (
+            "No 'show' handler was registered on the dialog — "
+            "dialog.on('show', ...) was not called"
+        )
+
+        # Drive the loader coroutine with asyncio.run (behavioral — no live NiceGUI)
+        show_handler = dialog_show_handlers[0]
+        asyncio.run(show_handler())
+
+        # BEHAVIORAL: both panes' update_content must have been awaited
+        anchor_stub.update_content.assert_awaited_once(), (
+            "Anchor pane update_content was NOT awaited by the show-loader (G5)"
+        )
+        cand_stub.update_content.assert_awaited_once(), (
+            "Candidate pane update_content was NOT awaited by the show-loader (G5)"
+        )
+
+    def test_behavioral_step_awaits_candidate_not_anchor(self):
+        """BEHAVIORAL: step/_load_candidate_pane awaits candidate stub but NOT anchor (CMP-02).
+
+        Drives _on_show to load both, then drives _load_candidate_pane directly
+        (as the step/verdict path would) and asserts only the candidate is re-called.
+        """
+        import asyncio
+        from unittest.mock import MagicMock, AsyncMock, patch
+
+        anchor = _Cand(sys_id="ANCHOR01", page=2)
+        cand1 = _Cand(sys_id="CAND01", page=3)
+        triage: dict = {}
+
+        anchor_stub = MagicMock()
+        anchor_stub.update_content = AsyncMock(return_value=None)
+
+        cand_stub = MagicMock()
+        cand_stub.update_content = AsyncMock(return_value=None)
+
+        mock_element = MagicMock()
+        mock_element.__enter__ = lambda s: s
+        mock_element.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark", "tooltip", "on"):
+            setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+        dialog_show_handlers = []
+        av_instances_created = []
+
+        def _make_dialog():
+            d = MagicMock()
+            d.__enter__ = lambda s: s
+            d.__exit__ = MagicMock(return_value=False)
+            d.props = MagicMock(return_value=d)
+            d.on = lambda event, handler: dialog_show_handlers.append(handler) if event == "show" else None
+            return d
+
+        def _av_constructor(*args, **kwargs):
+            if len(av_instances_created) == 0:
+                inst = anchor_stub
+            else:
+                inst = cand_stub
+            av_instances_created.append(inst)
+            return inst
+
+        with (
+            patch("web.components.compare_modal.ui") as mock_ui,
+            patch("web.components.compare_modal.AnchorViewer", side_effect=_av_constructor),
+        ):
+            mock_ui.dialog.side_effect = _make_dialog
+            for attr in ("card", "row", "column", "label", "button", "icon", "badge"):
+                factory = MagicMock(return_value=mock_element)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+
+            from web.components.compare_modal import create_compare_modal
+            dialog = create_compare_modal(
+                anchor_cand=anchor,
+                initial_candidate=cand1,
+                filtered_candidates=[cand1],
+                triage=triage,
+                on_verdict=lambda sid, v: None,
+            )
+
+        assert dialog_show_handlers, "No show handler registered"
+        show_handler = dialog_show_handlers[0]
+
+        # Step 1: run show-loader — both get called
+        asyncio.run(show_handler())
+        anchor_call_count_after_show = anchor_stub.update_content.await_count
+        cand_call_count_after_show = cand_stub.update_content.await_count
+
+        assert anchor_call_count_after_show >= 1, "Anchor not awaited on show"
+        assert cand_call_count_after_show >= 1, "Candidate not awaited on show"
+
+        # Step 2: simulate a subsequent candidate-pane reload (as step/verdict does)
+        # The _load_candidate_pane coroutine is exposed on dialog for testing.
+        load_cand = getattr(dialog, "_load_candidate_pane", None)
+        if load_cand is not None:
+            asyncio.run(load_cand())
+            # Candidate update_content is called again; anchor is NOT called again (CMP-02)
+            assert cand_stub.update_content.await_count > cand_call_count_after_show, (
+                "Candidate pane update_content was NOT re-awaited by _load_candidate_pane"
+            )
+            assert anchor_stub.update_content.await_count == anchor_call_count_after_show, (
+                "Anchor pane update_content was re-awaited by step/verdict (CMP-02 violation — "
+                "only the candidate pane should reload on step/verdict)"
+            )
+
+    def test_f_g3c_record_verdict_advances_to_next_candidate(self):
+        """F-G3c behavioral: record_verdict writes+advances atomically — _fill_candidate shows NEXT.
+
+        After record_verdict(state, 'yes', triage) the _state["current_candidate"] is the
+        NEXT candidate. _refresh_verdict_buttons (called inside _fill_candidate) keys on that
+        next candidate's triage entry, not the just-recorded one.
+        """
+        from web.components.compare_modal import create_compare_state, record_verdict
+
+        anchor = _Cand(sys_id="A", page=1)
+        cand_a = _Cand(sys_id="CAND_A", page=2)
+        cand_b = _Cand(sys_id="CAND_B", page=3)
+        filtered = [cand_a, cand_b]
+        triage: dict = {}
+
+        state = create_compare_state(
+            anchor_cand=anchor,
+            initial_candidate=cand_a,
+            filtered_candidates=filtered,
+        )
+        assert state["current_candidate"].sys_id == "CAND_A"
+
+        # record_verdict writes the verdict AND advances atomically (F-G3c)
+        record_verdict(state, "yes", triage)
+
+        # After advance, current_candidate is cand_b
+        assert state["current_candidate"].sys_id == "CAND_B", (
+            "F-G3c: record_verdict must advance _state to the NEXT candidate atomically; "
+            "the verdict button refresh keys on this POST-ADVANCE candidate"
+        )
+        assert triage.get("CAND_A") == "yes", "Verdict for CAND_A must be stored in triage"
+        # The verdict button for CAND_B's entry in triage — which is None (not yet voted)
+        assert triage.get("CAND_B") is None, (
+            "F-G3c: the refresh keys on CAND_B's triage entry (the shown candidate), "
+            "NOT CAND_A's just-recorded verdict"
+        )

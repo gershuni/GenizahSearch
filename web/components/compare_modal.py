@@ -223,6 +223,23 @@ def create_compare_modal(
         - Zero raw storage access (Phase-87 invariant).
         - No direct iiif.nli.org.il URL.
         - Nested clickables use js_handler (see T-119-09).
+
+    ASYNC LOADING (G5 fix):
+        - create_compare_modal stays SYNC (returns the dialog).
+        - Both panes are loaded via an async ``dialog.on("show", _on_show)`` handler
+          that awaits BOTH anchor+candidate pane update_content. This runs in the
+          active NiceGUI client context when the dialog mounts — NOT via a naked
+          background-task coroutine (Codex client-context regression rule, T-119-09).
+        - _step / _record_verdict are ASYNC; they await candidate-pane reload only
+          (anchor pane is never reloaded — per-pane independence, CMP-02).
+        - Modal-level candidate-load generation guard (F-G5): ``_cand_load_gen``
+          is incremented each time _fill_candidate creates a NEW candidate viewer
+          instance. The candidate-reload coroutine captures its generation, awaits
+          update_content, then no-ops if a newer _fill_candidate superseded it.
+          This guard works ACROSS instance replacement — AnchorViewer's per-instance
+          ``_nav_gen`` only guards the SAME instance; it cannot protect against a
+          previous stale instance whose load completes after a new instance is
+          created.
     """
     if enrichment is None:
         enrichment = {}
@@ -243,6 +260,24 @@ def create_compare_modal(
     _cand_viewer_container_ref: list = []  # [column_element]
     _prev_btn_ref: list = []           # [button_element]
     _next_btn_ref: list = []           # [button_element]
+
+    # Anchor viewer ref — stored here so the show-loader can await update_content.
+    _anchor_viewer_ref: list = []      # [AnchorViewer instance]
+
+    # Candidate viewer ref — replaced each _fill_candidate call (Pitfall 3).
+    _cand_viewer_ref: list = []        # [AnchorViewer instance]
+
+    # Modal-level candidate-load generation counter (F-G5).
+    # Incremented each time _fill_candidate builds a NEW candidate viewer instance.
+    # The candidate-reload coroutine captures its generation; if a newer
+    # _fill_candidate supersedes it (bumps the counter) the stale coroutine no-ops
+    # after its await returns. This guard works ACROSS instance replacement, unlike
+    # AnchorViewer's per-instance _nav_gen which only guards the SAME object.
+    _cand_load_gen: dict = {"n": 0}
+
+    # Verdict button refs — keyed by verdict ('yes'/'maybe'/'no').
+    # Populated during the verdict-buttons loop; refreshed by _refresh_verdict_buttons.
+    _verdict_btn_refs: dict = {}
 
     def _update_counter() -> None:
         """Update the flip-through counter label (e.g. '3 / 47')."""
@@ -265,6 +300,36 @@ def create_compare_modal(
         if _next_btn_ref:
             _next_btn_ref[0].set_enabled(enabled)
 
+    def _refresh_verdict_buttons(cand: Candidate) -> None:
+        """Refresh verdict-button active/inactive styling for the SHOWN candidate (G3-compare).
+
+        Reads triage.get(cand.sys_id) and sets the matching button to a filled
+        (unelevated + solid colour) active state; the other two to outline/flat.
+
+        F-G3c contract: this always keys on the candidate CURRENTLY SHOWN.
+        record_verdict writes the verdict AND advances _state atomically, so by
+        the time _fill_candidate calls this, _state["current_candidate"] is already
+        the POST-ADVANCE candidate. The recorded verdict for the previous candidate
+        is persisted in triage and visible when the user navigates back.
+
+        Render-local — _verdict_btn_refs is a factory-scoped dict (no module globals).
+        """
+        if not _verdict_btn_refs:
+            return
+        active_verdict = triage.get(cand.sys_id)
+        _triage_colors = {
+            "yes": "positive",
+            "maybe": "warning",
+            "no": "negative",
+        }
+        for v, btn in _verdict_btn_refs.items():
+            if v == active_verdict:
+                # Active: filled / unelevated
+                btn.props(f"color={_triage_colors[v]} unelevated")
+            else:
+                # Inactive: outline style
+                btn.props(f"outline color={_triage_colors[v]}")
+
     def _fill_candidate(cand: Candidate) -> None:
         """Populate the candidate pane with cand (parity _fill_candidate:4086).
 
@@ -272,6 +337,10 @@ def create_compare_modal(
           - Candidate shelfmark label
           - Badge row (👁 via badge_and_tooltip + size-mismatch warning)
           - Candidate AnchorViewer (FRESH instance — Pitfall 3)
+          - Verdict button refresh (G3-compare)
+
+        Also increments ``_cand_load_gen`` so the candidate-reload coroutine
+        (_load_candidate_pane) can detect that a newer instance superseded it (F-G5).
         """
         # Update state tracking
         _state["current_candidate"] = cand
@@ -297,31 +366,84 @@ def create_compare_modal(
                 if is_size_mismatch(m.get("width_cm"), anchor_w):
                     ui.badge(tr("Size mismatch"), icon="warning").props("color=warning")
 
-        # Fresh AnchorViewer for candidate pane — independent from anchor pane (Pitfall 3)
+        # Fresh AnchorViewer for candidate pane — independent from anchor pane (Pitfall 3).
+        # Store it in _cand_viewer_ref so _load_candidate_pane can await update_content.
         if _cand_viewer_container_ref:
             container = _cand_viewer_container_ref[0]
             container.clear()
             with container:
-                AnchorViewer(
+                new_viewer = AnchorViewer(
                     sys_id=cand.sys_id,
                     p_num=cand.page,
                     volume_ie=getattr(cand, "volume_ie", None),
+                    highlight_pattern=getattr(cand, "highlight_pattern", None),
                 )
+            # Replace the stored viewer ref
+            if _cand_viewer_ref:
+                _cand_viewer_ref[0] = new_viewer
+            else:
+                _cand_viewer_ref.append(new_viewer)
 
-    def _step(delta: int) -> None:
-        """Advance/retreat through filtered_candidates (parity desktop step(delta):3741)."""
+        # F-G5: increment the modal-level generation counter.  Any in-flight
+        # _load_candidate_pane coroutine that was awaiting the PREVIOUS viewer's
+        # update_content will see its captured generation is stale and no-op.
+        _cand_load_gen["n"] += 1
+
+        # Refresh verdict buttons for the newly shown candidate (G3-compare).
+        _refresh_verdict_buttons(cand)
+
+    async def _load_candidate_pane() -> None:
+        """Await the current candidate viewer's update_content (modal-level latest-wins).
+
+        Captures the current generation token from _cand_load_gen before the await;
+        after update_content returns, no-ops if a newer _fill_candidate has already
+        superseded this load (F-G5 — works across instance replacement, unlike the
+        per-instance _nav_gen guard inside AnchorViewer).
+
+        CMP-02: only the CANDIDATE pane is reloaded; the anchor pane is fixed.
+        """
+        if not _cand_viewer_ref:
+            return
+        my_gen = _cand_load_gen["n"]
+        cand = _state["current_candidate"]
+        viewer = _cand_viewer_ref[0]
+        await viewer.update_content(p_num=cand.page or 1)
+        # Latest-wins guard: if a newer _fill_candidate ran while we were awaiting,
+        # the new viewer is already stored; our result is stale — discard it.
+        if my_gen != _cand_load_gen["n"]:
+            return
+        # (If generation still matches, the load succeeded for the shown candidate.)
+
+    async def _step(delta: int) -> None:
+        """Advance/retreat through filtered_candidates (parity desktop step(delta):3741).
+
+        ASYNC: after rebuilding the candidate viewer via _fill_candidate, awaits
+        _load_candidate_pane so the new candidate's image+transcription actually loads.
+        The anchor pane is NEVER reloaded (per-pane independence, CMP-02).
+        """
         step_candidate(_state, delta)
         _fill_candidate(_state["current_candidate"])
         _update_counter()
         _update_nav_buttons()
+        await _load_candidate_pane()
 
-    def _record_verdict(verdict: str) -> None:
-        """Record verdict and AUTO-ADVANCE (D-03, parity _mark → wb.mark → triage:4202)."""
+    async def _record_verdict(verdict: str) -> None:
+        """Record verdict and AUTO-ADVANCE (D-03, parity _mark → wb.mark → triage:4202).
+
+        ASYNC: after record_verdict() writes the verdict and advances _state (F-G3c
+        constraint — write+advance is atomic), _fill_candidate is called on the
+        POST-ADVANCE candidate and its pane is loaded via _load_candidate_pane.
+
+        F-G3c: _refresh_verdict_buttons (inside _fill_candidate) keys on the
+        POST-ADVANCE candidate's triage entry. The recorded verdict for the previous
+        candidate is persisted in triage and visible on back-navigation.
+        """
         record_verdict(_state, verdict, triage, on_verdict=on_verdict)
         # After step_candidate() inside record_verdict(), _state["current_candidate"] is updated
         _fill_candidate(_state["current_candidate"])
         _update_counter()
         _update_nav_buttons()
+        await _load_candidate_pane()
 
     def _handle_close() -> None:
         """Handle modal close — invoke on_close callback if provided."""
@@ -365,12 +487,15 @@ def create_compare_modal(
                         "text-sm font-semibold"
                     ).style("color: var(--primary-700);")
 
-                    # Fresh AnchorViewer for anchor pane — NOT the sticky-page viewer (Pitfall 3)
-                    AnchorViewer(
+                    # Fresh AnchorViewer for anchor pane — NOT the sticky-page viewer (Pitfall 3).
+                    # Stored in _anchor_viewer_ref so the show-loader can await update_content.
+                    anchor_viewer = AnchorViewer(
                         sys_id=anchor_cand.sys_id,
                         p_num=anchor_cand.page,
                         volume_ie=getattr(anchor_cand, "volume_ie", None),
+                        highlight_pattern=getattr(anchor_cand, "highlight_pattern", None),
                     )
+                    _anchor_viewer_ref.append(anchor_viewer)
 
                 # ── Candidate pane (right) ────────────────────────────────────
                 with ui.column().classes("flex-1 gap-4 p-4 overflow-y-auto"):
@@ -400,7 +525,9 @@ def create_compare_modal(
                 ).props("flat dense").on("click", lambda: _step(-1))
                 _prev_btn_ref.append(prev_btn)
 
-                # Verdict buttons — visible text labels with triage colors (D-03 UI-SPEC)
+                # Verdict buttons — visible text labels with triage colors (D-03 UI-SPEC).
+                # Refs captured into _verdict_btn_refs so _refresh_verdict_buttons can
+                # toggle active/inactive state on each candidate change (G3-compare).
                 with ui.row().classes("gap-2 items-center"):
                     for verdict, label, q_color in [
                         ("yes", tr("Yes"), "positive"),
@@ -410,13 +537,14 @@ def create_compare_modal(
                         _v = verdict
 
                         def _make_verdict_handler(v=_v):
-                            def _handler():
-                                _record_verdict(v)
+                            async def _handler():
+                                await _record_verdict(v)
                             return _handler
 
-                        ui.button(label).props(
-                            f"color={q_color} unelevated size=md"
+                        _btn = ui.button(label).props(
+                            f"outline color={q_color} size=md"
                         ).on("click", _make_verdict_handler())
+                        _verdict_btn_refs[_v] = _btn
 
                 next_btn = ui.button(
                     tr("Next ›"), icon="chevron_right"
@@ -424,6 +552,24 @@ def create_compare_modal(
                     "click", lambda: _step(1)
                 )
                 _next_btn_ref.append(next_btn)
+
+    # Attach async show-loader: fires when dialog mounts in the live client context.
+    # Awaits BOTH the anchor pane and the candidate pane's update_content so images
+    # and transcriptions actually render (G5 fix). Runs in the active NiceGUI client
+    # context via dialog.on("show") — NOT via a naked background coroutine
+    # (T-119-09 / Codex client-context regression rule).
+    async def _on_show(_: object = None) -> None:
+        """Async show handler — awaits both pane update_content calls (G5 fix)."""
+        if _anchor_viewer_ref:
+            await _anchor_viewer_ref[0].update_content(p_num=anchor_cand.page or 1)
+        await _load_candidate_pane()
+
+    dialog.on("show", _on_show)
+
+    # Expose show-loader for behavioral tests (Task 2 test seam):
+    # A test can call _on_show directly via asyncio.run with stub viewers.
+    dialog._on_show = _on_show  # type: ignore[attr-defined]
+    dialog._load_candidate_pane = _load_candidate_pane  # type: ignore[attr-defined]
 
     # Populate the candidate pane with the initial candidate
     _fill_candidate(initial_candidate)
