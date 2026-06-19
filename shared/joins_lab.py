@@ -624,6 +624,18 @@ def detect_self_match(raw_results: list, anchor_sid: str) -> bool:
     return any(_r_sid(r) == anchor_sid for r in raw_results)
 
 
+# R2-4: single source of truth for triage icon rendering — consumed by
+# web/components/candidate_grid.py (119-10) and web/components/compare_modal.py (119-11)
+# so both render identical ✓/?/✗ icon buttons with matching glyphs, tooltip keys and colors.
+# Colors are desktop-parity: join_workbench.py:434 glyphs + candidate_grid._TRIAGE_COLORS hexes.
+# Tooltip values are English tr() keys (already present in TRANSLATIONS → translate in HE UI).
+TRIAGE_ICONS: dict[str, dict] = {
+    "yes":   {"glyph": "✓", "tooltip": "Mark yes",   "color": "#15803d"},
+    "maybe": {"glyph": "?", "tooltip": "Mark maybe",  "color": "#a16207"},
+    "no":    {"glyph": "✗", "tooltip": "Mark no",    "color": "#b91c1c"},
+}
+
+
 def badge_and_tooltip(cand: "Candidate") -> tuple:
     """Return (icon_name | None, tooltip_text) for a candidate badge.
 
