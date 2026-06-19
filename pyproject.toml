@@ -9,6 +9,7 @@
 #
 # Run slow tests explicitly with:  pytest -m slow tests/test_search_api_soak.py
 # See tests/README.md for full slow-test invocation documentation.
+#
 markers = [
     "slow: marks tests as slow; run with `pytest -m slow`",
     "e2e: marks tests requiring Selenium/ChromeDriver (paired with slow)",

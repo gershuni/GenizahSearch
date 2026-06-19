@@ -27,6 +27,9 @@ fist_data/*
 nli_data/
 pgp_data/pgp.db
 FIST_DB_BACKUP/
+# FGP transcription archive (local sidecar, copied from D:\fgp_transcriptions).
+# Large (~1.5 GB, 48K files); never committed. Manifest lives inside.
+fgp_data/
 
 # Build artifacts
 dist/
@@ -140,3 +143,7 @@ TestLLMAPIsProgram.cs
 /pgp_sample_*.txt
 /test_*.txt
 /shelfmark_mismatch_report.txt
+
+# Debug/smoke scripts (development scratch — not committed)
+/debug_smoke*.py
+/debug_*.py
