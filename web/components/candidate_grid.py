@@ -298,7 +298,7 @@ def get_table_columns() -> list:
         {"name": "select", "label": "", "field": "sys_id", "sortable": False},
         {"name": "shelfmark", "label": tr("Shelfmark"), "field": "shelfmark", "sortable": True},
         {"name": "score", "label": tr("Score"), "field": "score", "sortable": True},
-        {"name": "snippet", "label": tr("Snippet"), "field": "snippet", "sortable": False},
+        {"name": "snippet", "label": tr("Snippet"), "field": "snippet", "sortable": True},
         {"name": "material", "label": tr("Material"), "field": "material", "sortable": True},
         {"name": "dimensions", "label": tr("Dimensions"), "field": "dimensions", "sortable": True},
         {"name": "page", "label": tr("Page"), "field": "page", "sortable": True},
