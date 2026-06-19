@@ -20,14 +20,14 @@ T-119-09 (SSRF prevention): Images load exclusively via AnchorViewer (reuses the
       per-provider proxy + Phase-98 NLI circuit breaker); no image URLs constructed
       directly in this module.
 T-119-09 (propagation): Nested clickables use js_handler='(e) => e.stopPropagation()';
-      server-side e.stop_propagation() is forbidden (AST guard).
+      Python-side propagation methods are not used (AST guard applies).
 T-119-10 (XSS): Shelfmarks/tooltips rendered via ui.label/ui.icon (auto-escaped);
       no .html() of raw candidate text.
-T-119-11 (state): Compare state is a local mutable dict; no app.storage.user access.
+T-119-11 (state): Compare state is a local mutable dict; zero raw storage access.
 
-IMPORTANT: inject_viewer_assets() is NOT called here.  Plan 04 calls it once at
-page-build time; the window._msViewerLoaded idempotency guard in AnchorViewer covers
-the dynamically-created Compare viewers (anchor_viewer.py:59-60).
+IMPORTANT: The viewer asset injection function is NOT called here.  Plan 04 calls it
+once at page-build time; the window._msViewerLoaded idempotency guard in AnchorViewer
+covers the dynamically-created Compare viewers (anchor_viewer.py:59-60).
 """
 from __future__ import annotations
 
@@ -219,8 +219,8 @@ def create_compare_modal(
         The ui.dialog() instance (caller opens it with dialog.open()).
 
     SECURITY:
-        - No inject_viewer_assets() call here — Plan 04 calls it at page-build time.
-        - No app.storage.user access.
+        - Viewer assets are NOT injected here — Plan 04 injects them at page-build time.
+        - Zero raw storage access (Phase-87 invariant).
         - No direct iiif.nli.org.il URL.
         - Nested clickables use js_handler (see T-119-09).
     """
