@@ -172,15 +172,16 @@ def test_other_side_has_no_type_selector():
         assert not _type_button(root, key), f'{key} button must be absent on the other side'
 
 
-def test_single_line_input_has_no_placeholder():
-    # JL users already know the main search bar — the single-line box stays blank
-    # (no placeholder) in every simple mode.
+def test_single_line_input_uses_main_search_placeholder():
+    # The single-line modes mirror the main /search box, so they carry the same
+    # placeholder text in every simple mode.
     handle, root = _build()
     si = _single_input(root)[0]
+    want = tr('Enter Hebrew text to search')
     for mode in ('Fuzzy', 'Regex', 'Exact', 'Variants'):
         assert _fire_click(_type_button(root, mode)[0])
-        assert not (si._props.get('placeholder') or '').strip(), \
-            f'single-line box must have no placeholder in {mode} mode'
+        assert (si._props.get('placeholder') or '') == want, \
+            f'single-line box should use the main-search placeholder in {mode} mode'
 
 
 def test_other_side_builder_has_text_position():

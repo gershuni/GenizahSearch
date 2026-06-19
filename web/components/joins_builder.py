@@ -883,11 +883,10 @@ def create_joins_builder(
         # jl-word-rtl) never pick it up; jl-rtl-field carries the shared RTL CSS.
         single_container = ui.column().classes('w-full')
         with single_container:
-            # No placeholder: Joins Lab users already know the main search bar, so
-            # the single-line box (Exact/Variants/Fuzzy/Regex) is left blank.
-            # TODO(joins-lab): revisit — find good per-mode placeholder wording
-            # (NOT a generic "enter Hebrew text to search") before exposing it again.
-            single_input = ui.input().props(
+            # Same placeholder as the main /search box (web/pages/search.py) so the
+            # single-line modes (Exact/Variants/Fuzzy/Regex) read identically to the
+            # search bar they mirror.
+            single_input = ui.input(placeholder=tr('Enter Hebrew text to search')).props(
                 'outlined dense input-style="direction: rtl; text-align: right;"'
             ).classes('w-full jl-single-rtl jl-rtl-field').style(
                 'direction: rtl;'
