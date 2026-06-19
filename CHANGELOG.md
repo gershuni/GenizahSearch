@@ -4,6 +4,13 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Unreleased]
+
+### Fixed (desktop)
+- **Crash telemetry made actionable in the shipped EXE.** Desktop `desktop_crash` events labeled every crash `exc_module='external'` with a useless line number, because the in-app frame classifier matched traceback frames by `os.path.realpath()` equality against import-time paths — which never match in a frozen PyInstaller build (a frame's `co_filename` is the build host's path; the runtime module lives under `_MEIPASS`). Found in a PostHog review: a real main-thread `PermissionError` opening the Fragment Puzzle on v8.1.0 came through as `PermissionError:external:1116`. The classifier now matches by path segment (`/desktop/`, `/shared/`, plus distinctive top-level module basenames), so crashes report the real module and line (e.g. `PermissionError:puzzle.py:NNN`) and group correctly — identically from source and from the frozen `.exe`. Also closed a cross-platform privacy gap (D-07): `os.path.basename` does not split a Windows `\` path on a POSIX host (Linux CI), which could have leaked a full path into `exc_module` and the fingerprint — a host-independent basename helper now guarantees only a basename ever leaves the process. Reviewed by Codex over two passes (REQUEST CHANGES → APPROVE). `desktop/telemetry.py`, `tests/test_crash_payload.py`.
+
+---
+
 ## [8.1.0] - 2026-06-16 — Desktop Telemetry & API Enhancements
 
 This release adds **opt-in, privacy-respecting telemetry** to the desktop app, brings the **public Search API and the Cairo Genizah Research AI skill** to desktop users (a new Help section + a What's New note), and bundles the **public Search API enhancements** below that were deployed continuously to the web platform since v8.0.0. The desktop app is **Dicta Genizah Search Pro**; the web platform keeps the name **Dicta Genizah Search**.

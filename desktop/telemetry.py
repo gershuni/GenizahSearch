@@ -919,63 +919,103 @@ def _is_enabled_nolock() -> bool:
 # ---------------------------------------------------------------------------
 # In-app frame classifier for crash payload (D-07 / REVIEWS MEDIUM-9 + PASS2)
 #
-# Classification approach (all paths resolved via os.path.realpath at import):
-#   _APP_SOURCE_ROOTS: ONLY desktop/ and shared/ — NOT the repo root.
-#     (The repo root contains .venv/ and venv/; using it would misclassify
-#     third-party frames under venv/Lib/site-packages/ as in-app — MEDIUM-9)
-#   _APP_SOURCE_FILES: explicit realpaths of top-level app modules in the repo
-#     root (genizah_app.py, genizah_core.py, gui_threads.py). Matched by exact
-#     path, so sibling venv/ files under the same root are never swept in.
-#   _EXCLUDED_PATH_SEGMENTS: path substrings that force 'external' regardless
-#     of the above — defense-in-depth against any edge case.
-#   _GENERIC_BASENAMES: names that recur across many packages and must never be
-#     a distinguishing in-app module.
+# Classification is by PATH SEGMENT of co_filename, NOT realpath equality.
+# Rationale (the frozen-build fix): a PyInstaller build bakes the BUILD host's
+# source path into each code object's co_filename (e.g.
+# 'C:\\ci\\build\\desktop\\puzzle.py', or a bundle-relative 'desktop/puzzle.py').
+# On the end user's machine that string never equals a realpath resolved from
+# this module's runtime __file__ (which lives inside the _MEIPASS extraction
+# dir), so the old realpath-equality match classified EVERY shipped crash as
+# 'external' with a useless line number. Segment matching inspects only the
+# co_filename string, so it behaves identically from source and from the frozen
+# .exe — and we still transmit ONLY the basename, never a path (D-07 privacy).
+#
+#   _APP_SOURCE_ROOTS:   in-app package directory NAMES. A frame is in-app if its
+#                        normalized co_filename contains '/<root>/' or begins
+#                        with '<root>/' (bundle-relative form).
+#   _APP_SOURCE_FILES:   in-app top-level module BASENAMES (matched by basename).
+#                        These live at the repo/bundle root with no '/desktop/'
+#                        or '/shared/' segment, so a segment match can't catch
+#                        them — they must be named explicitly. Only DISTINCTIVE
+#                        app-owned names are listed; generic names that collide
+#                        with third-party packages (server.py, version.py) are
+#                        deliberately excluded to avoid false positives.
+#   _EXCLUDED_PATH_SEGMENTS: normalized substrings that force 'external'
+#                        regardless of the above. Checked before any positive
+#                        in-app match, so a third-party package that happens to
+#                        be named 'desktop' or 'shared' under site-packages can
+#                        never be a false positive.
+#   _GENERIC_BASENAMES:  names that recur across many packages and must never be
+#                        a distinguishing in-app module.
 # ---------------------------------------------------------------------------
-_TELEMETRY_DIR = os.path.dirname(os.path.abspath(__file__))    # desktop/
-_SHARED_DIR = os.path.normpath(os.path.join(_TELEMETRY_DIR, '..', 'shared'))
-_REPO_ROOT = os.path.normpath(os.path.join(_TELEMETRY_DIR, '..'))
-_APP_SOURCE_ROOTS: tuple[str, ...] = (
-    os.path.realpath(_TELEMETRY_DIR),   # desktop/
-    os.path.realpath(_SHARED_DIR),      # shared/
-)
-_APP_SOURCE_FILES: frozenset[str] = frozenset(
-    os.path.realpath(os.path.join(_REPO_ROOT, name))
-    for name in ('genizah_app.py', 'genizah_core.py', 'gui_threads.py')
-)
+_APP_SOURCE_ROOTS: tuple[str, ...] = ('desktop', 'shared')
+_APP_SOURCE_FILES: frozenset[str] = frozenset({
+    'genizah_app.py', 'genizah_core.py', 'gui_threads.py',
+    # Distinctive root-level app modules (imported at runtime; no package segment
+    # to match on). Generic basenames (server.py/version.py) intentionally omitted.
+    'corrections_client.py', 'corrections_ui.py', 'supabase_corrections_client.py',
+    'lists_sync.py', 'filter_text_dialog.py', 'column_filter_dialog.py',
+    'list_filter_dialog.py', 'genizah_translations.py', 'pgp_tag_translations.py',
+    'sefaria_utils.py', 'shared_export_utils.py', 'unified_variants.py',
+})
 _EXCLUDED_PATH_SEGMENTS: tuple[str, ...] = (
     'site-packages',
-    os.sep + '.venv' + os.sep,
-    os.sep + 'venv' + os.sep,
+    'dist-packages',
     '/.venv/',
     '/venv/',
 )
 _GENERIC_BASENAMES: frozenset[str] = frozenset({'__init__.py', '__main__.py'})
 
 
+def _frame_basename(co_filename: str) -> str:
+    """Separator-agnostic basename for crash payloads (D-07 privacy).
+
+    os.path.basename is HOST-dependent: posixpath (Linux CI / a POSIX dev host)
+    does NOT split a Windows backslash path, so os.path.basename of
+    'C:\\a\\b\\puzzle.py' returns the WHOLE string there. A frozen build's
+    co_filename always carries the BUILD host's separators no matter where this
+    code later runs, so we normalize both separators ourselves. Guarantees ONLY
+    a basename ever leaves the process — never a path. Never raises.
+    """
+    return co_filename.replace('\\', '/').rstrip('/').rsplit('/', 1)[-1]
+
+
 def _is_in_app_frame(co_filename: str) -> bool:
-    """Return True if co_filename resolves to an in-app source file.
+    """Return True if co_filename belongs to an in-app source file.
 
     In-app means ALL of:
-    - Resolved path is under one of _APP_SOURCE_ROOTS, OR equals a member of
-      _APP_SOURCE_FILES
-    - Resolved path contains NONE of _EXCLUDED_PATH_SEGMENTS (defense-in-depth)
-    - Basename is NOT in _GENERIC_BASENAMES
-    Pure function, never raises.
+    - basename is NOT in _GENERIC_BASENAMES
+    - normalized path contains NONE of _EXCLUDED_PATH_SEGMENTS (checked before
+      any positive in-app match — so a third-party 'desktop'/'shared' package
+      under site-packages stays external)
+    - AND EITHER the basename is in _APP_SOURCE_FILES, OR the normalized path
+      carries an _APP_SOURCE_ROOTS package segment ('/<root>/' anywhere, or a
+      bundle-relative '<root>/' prefix)
+
+    Segment-based, NOT realpath — so it classifies identically whether the app
+    runs from source or from a frozen PyInstaller build (whose co_filename is the
+    build host's path). Pure function, never raises.
     """
     try:
-        resolved = os.path.realpath(co_filename)
-        basename = os.path.basename(resolved)
+        # Normalize separators to '/' and lowercase: Windows paths are
+        # case-insensitive and every token we match (site-packages, venv,
+        # desktop, shared, the module basenames) is lowercase.
+        norm = co_filename.replace('\\', '/').lower()
+        basename = norm.rsplit('/', 1)[-1]
         if basename in _GENERIC_BASENAMES:
             return False
-        # Force-external if path contains a venv/site-packages segment
+        # Force-external if the path carries a venv/site-packages segment
+        # (before any positive in-app match).
         for seg in _EXCLUDED_PATH_SEGMENTS:
-            if seg in resolved:
+            if seg in norm:
                 return False
-        # Check membership in app source roots or app source files
-        if resolved in _APP_SOURCE_FILES:
+        # Top-level app modules — matched by basename.
+        if basename in _APP_SOURCE_FILES:
             return True
+        # In-app package modules — '/desktop/' or '/shared/' anywhere, or a
+        # bundle-relative 'desktop/...' / 'shared/...' prefix.
         for root in _APP_SOURCE_ROOTS:
-            if resolved == root or resolved.startswith(root + os.sep):
+            if ('/' + root + '/') in norm or norm.startswith(root + '/'):
                 return True
         return False
     except Exception:
@@ -989,8 +1029,9 @@ def _make_crash_props(
 ) -> dict:
     """Build crash payload by walking the traceback — no format_exception, no str(exc).
 
-    Finds the innermost IN-APP frame (resolved co_filename under _APP_SOURCE_ROOTS
-    or in _APP_SOURCE_FILES, excluding _EXCLUDED_PATH_SEGMENTS and _GENERIC_BASENAMES).
+    Finds the innermost IN-APP frame (co_filename carrying an _APP_SOURCE_ROOTS
+    package segment or an _APP_SOURCE_FILES basename, excluding
+    _EXCLUDED_PATH_SEGMENTS and _GENERIC_BASENAMES — see _is_in_app_frame).
     Falls back to the deepest frame with error_module='external'.
     Returns exactly five keys: exc_type, exc_module, exc_lineno, error_fingerprint,
     is_background_thread. All five are in _ALLOWED_PROPS (D-07).
@@ -1010,8 +1051,10 @@ def _make_crash_props(
         error_line: int = 0
 
         if in_app_frame is not None:
-            # In-app frame found: transmit only the basename (never the full path)
-            error_module = os.path.basename(in_app_frame.tb_frame.f_code.co_filename)
+            # In-app frame found: transmit only the basename (never the full path).
+            # _frame_basename (NOT os.path.basename) so a Windows-style co_filename
+            # is reduced to a basename even on a POSIX host (Linux CI) — D-07.
+            error_module = _frame_basename(in_app_frame.tb_frame.f_code.co_filename)
             error_line = in_app_frame.tb_lineno
         elif deepest_frame is not None:
             # No in-app frame: fallback is deepest frame, still classified as 'external'
@@ -1762,6 +1805,7 @@ __all__ = [
     '_make_crash_props',
     '_emit_crash_direct',
     '_is_in_app_frame',
+    '_frame_basename',
     '_APP_SOURCE_ROOTS',
     '_APP_SOURCE_FILES',
     '_EXCLUDED_PATH_SEGMENTS',

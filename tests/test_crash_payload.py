@@ -249,6 +249,147 @@ def test_site_packages_frame_external(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Frozen-build regression — PyInstaller bakes the BUILD host's source path into
+# co_filename. On the end-user's machine that path is neither extractable via
+# realpath nor under this module's runtime __file__, so the OLD realpath-equality
+# classifier returned 'external' for EVERY shipped crash (module + real line
+# lost). Segment matching must classify these as in-app. Each path below is
+# deliberately one that does NOT exist on the test machine and is NOT under the
+# real desktop/ or shared/ dirs.
+# ---------------------------------------------------------------------------
+def test_frozen_build_path_package_module_in_app():
+    """A build-host absolute path carrying '/desktop/' → in-app basename, not 'external'."""
+    frozen_path = '/__frozen_build_host__/work/genizahsearch/desktop/puzzle.py'
+    tb = _make_tb_in_file(frozen_path)
+    assert tb is not None, "Failed to create traceback from frozen build path"
+
+    props = tel._make_crash_props(ValueError, tb, is_background=False)
+    assert props['exc_module'] == 'puzzle.py', (
+        f"frozen-build /desktop/ frame should be 'puzzle.py', got {props['exc_module']!r}"
+    )
+    assert props['exc_lineno'] > 0, "Expected non-zero lineno for in-app frame"
+
+
+def test_frozen_build_path_shared_package_in_app():
+    """A build-host absolute path carrying '/shared/' → in-app basename, not 'external'."""
+    frozen_path = 'C:\\ci\\build\\genizahsearch\\shared\\puzzle_service.py'
+    tb = _make_tb_in_file(frozen_path)
+    assert tb is not None, "Failed to create traceback from frozen build path"
+
+    props = tel._make_crash_props(ValueError, tb, is_background=False)
+    assert props['exc_module'] == 'puzzle_service.py', (
+        f"frozen-build /shared/ frame should be 'puzzle_service.py', got {props['exc_module']!r}"
+    )
+
+
+def test_frozen_bundle_relative_package_module_in_app():
+    """A bundle-relative co_filename ('desktop/...') → in-app basename, not 'external'."""
+    tb = _make_tb_in_file('desktop/my_library_tab.py')
+    assert tb is not None, "Failed to create traceback from bundle-relative path"
+
+    props = tel._make_crash_props(ValueError, tb, is_background=False)
+    assert props['exc_module'] == 'my_library_tab.py', (
+        f"bundle-relative desktop/ frame should be 'my_library_tab.py', got {props['exc_module']!r}"
+    )
+
+
+def test_frozen_build_path_top_level_module_in_app():
+    """A build-host path whose basename is a top-level app module → in-app, not 'external'."""
+    frozen_path = '/__frozen_build_host__/work/genizahsearch/genizah_app.py'
+    tb = _make_tb_in_file(frozen_path)
+    assert tb is not None, "Failed to create traceback from frozen build path"
+
+    props = tel._make_crash_props(ValueError, tb, is_background=False)
+    assert props['exc_module'] == 'genizah_app.py', (
+        f"frozen-build top-level frame should be 'genizah_app.py', got {props['exc_module']!r}"
+    )
+
+
+def test_third_party_shared_under_site_packages_stays_external(tmp_path):
+    """False-positive guard: a 3rd-party package literally named 'shared' under
+    site-packages must stay 'external' — the exclusion check must win over the
+    '/shared/' package-segment match (ordering invariant)."""
+    sp_path = str(tmp_path / 'lib' / 'site-packages' / 'shared' / 'thing.py')
+    tb = _make_tb_in_file(sp_path)
+    assert tb is not None, "Failed to create traceback from site-packages/shared path"
+
+    props = tel._make_crash_props(ValueError, tb, is_background=False)
+    assert props['exc_module'] == 'external', (
+        f"site-packages/shared frame should be 'external', got {props['exc_module']!r}"
+    )
+
+
+def test_frozen_root_level_module_in_app():
+    """A build-host path to a root-level app module (no '/desktop/' or '/shared/'
+    segment) is classified in-app via its _APP_SOURCE_FILES basename."""
+    frozen_path = '/__frozen_build_host__/work/genizahsearch/corrections_ui.py'
+    tb = _make_tb_in_file(frozen_path)
+    assert tb is not None, "Failed to create traceback from frozen root-level path"
+
+    props = tel._make_crash_props(ValueError, tb, is_background=False)
+    assert props['exc_module'] == 'corrections_ui.py', (
+        f"root-level app module should be 'corrections_ui.py', got {props['exc_module']!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# D-07 cross-platform basename — a frozen build's co_filename carries the BUILD
+# host's separators (Windows '\\'), but the classifier may run on a POSIX host
+# (Linux CI / dev). os.path.basename is host-dependent and would NOT split a
+# Windows path on POSIX, leaking the FULL path into exc_module + the fingerprint.
+# _frame_basename must normalize separators itself so only a basename ever leaves
+# the process regardless of host OS.
+# ---------------------------------------------------------------------------
+def test_windows_style_inapp_path_yields_clean_basename():
+    """A Windows '\\'-separated in-app co_filename → bare basename, no separators,
+    on ANY host (regression: os.path.basename leaks the whole path on POSIX)."""
+    win_path = 'C:\\ci\\build\\genizahsearch\\desktop\\puzzle.py'
+    tb = _make_tb_in_file(win_path)
+    assert tb is not None
+
+    props = tel._make_crash_props(ValueError, tb, is_background=False)
+    module_val = props['exc_module']
+    assert module_val == 'puzzle.py', (
+        f"Windows-style in-app path should reduce to 'puzzle.py', got {module_val!r}"
+    )
+    # D-07: no path separator of either flavour may survive into exc_module...
+    assert '/' not in module_val and '\\' not in module_val, (
+        f"exc_module leaked a separator: {module_val!r}"
+    )
+    # ...nor into the module component of the fingerprint.
+    module_in_fp = props['error_fingerprint'].split(':')[1]
+    assert '/' not in module_in_fp and '\\' not in module_in_fp, (
+        f"fingerprint module component leaked a separator: {module_in_fp!r}"
+    )
+
+
+def test_emit_crash_direct_windows_path_no_separator_leak(monkeypatch):
+    """Full _emit_crash_direct path: a Windows-style in-app frame must reach
+    send_crash_event_direct with a separator-free exc_module + fingerprint
+    (post-scrub), on any host OS (D-07)."""
+    win_path = 'C:\\ci\\build\\genizahsearch\\shared\\puzzle_service.py'
+    tb = _make_tb_in_file(win_path)
+    assert tb is not None
+
+    monkeypatch.setattr(tel, '_enabled', True)
+    monkeypatch.setattr(tel, '_crash_distinct_id', 'crash-test-id')
+    captured: dict = {}
+
+    def _fake_send(event, props, distinct_id=None, **kwargs):
+        captured['props'] = dict(props)
+
+    monkeypatch.setattr(tel, 'send_crash_event_direct', _fake_send)
+    tel._emit_crash_direct(ValueError, tb, is_background=False)
+
+    assert captured, "send_crash_event_direct was never called"
+    module_val = captured['props'].get('exc_module', '')
+    fp = captured['props'].get('error_fingerprint', '')
+    assert module_val == 'puzzle_service.py', f"exc_module wrong/leaked: {module_val!r}"
+    assert '/' not in module_val and '\\' not in module_val, f"exc_module leaked sep: {module_val!r}"
+    assert '/' not in fp and '\\' not in fp, f"fingerprint leaked a path separator: {fp!r}"
+
+
+# ---------------------------------------------------------------------------
 # CRASH-04 — static: no str(exc) and no format_exception in emit/make_crash paths
 # ---------------------------------------------------------------------------
 def test_no_str_exc_in_emit_crash():
