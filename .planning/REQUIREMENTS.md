@@ -51,9 +51,9 @@ Requirements for this milestone. Each maps to a roadmap phase.
 
 ### Compare (CMP)
 
-- [ ] **CMP-01**: User can open a side-by-side Compare of the anchor and a chosen candidate (image + transcription).
-- [ ] **CMP-02**: Compare supports per-pane zoom and folio navigation.
-- [ ] **CMP-03**: User can record a Yes/Maybe/No verdict from Compare, synced with the `sys_id`-keyed candidate triage state.
+- [x] **CMP-01**: User can open a side-by-side Compare of the anchor and a chosen candidate (image + transcription).
+- [x] **CMP-02**: Compare supports per-pane zoom and folio navigation.
+- [x] **CMP-03**: User can record a Yes/Maybe/No verdict from Compare, synced with the `sys_id`-keyed candidate triage state.
 
 ### Visual Similarity (VSM)
 
@@ -131,9 +131,9 @@ Which phases cover which requirements. Populated during roadmap creation.
 | CND-06 | Phase 119 | Complete |
 | CND-07 | Phase 119 | Complete |
 | CND-08 | Phase 119 | Complete |
-| CMP-01 | Phase 119 | Pending |
-| CMP-02 | Phase 119 | Pending |
-| CMP-03 | Phase 119 | Pending |
+| CMP-01 | Phase 119 | Complete |
+| CMP-02 | Phase 119 | Complete |
+| CMP-03 | Phase 119 | Complete |
 | VSM-01 | Phase 119 | Complete |
 | VSM-02 | Phase 119 | Complete |
 | ACT-01 | Phase 120 | Pending |
