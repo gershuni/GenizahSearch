@@ -135,12 +135,19 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
   5. Opening Compare from any candidate (grid card, table row, or shortcut) shows a side-by-side anchor↔candidate panel (image + numbered transcription) with independent per-pane zoom and folio navigation; recording a Y/?/N verdict in Compare syncs back to the `sys_id`-keyed triage in grid and table with no refresh.
   6. A single Visual Similarity (👁) toggle merges FIST look-alikes for the loaded anchor via the web VS-service adapter + `merge_candidates` (off = text-only; on = merged / intersection); it tracks the loaded anchor sid so look-alikes invalidate on re-anchor, has explicit disabled / no-data / empty-intersection states, and badges look-alikes consistently across grid, table, and Compare.
 
-**Plans**: 4 plans (3 waves)
+**Plans**: 11 plans (4 waves) — 04 original + 04 round-1 gap closure (05-08) + 03 round-2 live-UAT gap closure (09-11)
 
 - [x] 119-01-PLAN.md — Wave-0 foundation: badge_and_tooltip() in shared core + extend off-loop guard (VS + enrichment) + RED test scaffolds [Wave 0]
 - [x] 119-02-PLAN.md — Candidate surface: large-thumbnail grid + sortable multi-select table + triage + filters + pagination + 👁 badge (candidate_grid.py) [Wave 1]
 - [x] 119-03-PLAN.md — Compare modal: full-screen two-pane (two independent AnchorViewers) + flip-through + verdict auto-advance + badges (compare_modal.py) [Wave 1]
 - [x] 119-04-PLAN.md — Page integration: off-loop VS adapter + enrichment batch + conditional merge + 👁 toggle + wire surface/Compare into joins_lab.py [Wave 2]
+- [x] 119-05-PLAN.md — Round-1 gaps: candidate card snippet+highlight + image-click Compare + triage fill (G1/G3/G4) [Wave 1]
+- [x] 119-06-PLAN.md — Round-1 gaps: Compare both-panes async load + verdict refresh + line-safe highlight (G5/G3-compare) [Wave 1]
+- [x] 119-07-PLAN.md — Round-1 gaps: VS raw-baseline recompute + table render branch + anchor page/shelfmark + VS-meta enrichment (G2/A1/A2/A3/A4) [Wave 1]
+- [x] 119-08-PLAN.md — Round-1 gaps: render-smoke harness (NiceGUI User, /joins-lab, mocked engine) [Wave 2]
+- [ ] 119-09-PLAN.md — Round-2 gap closure: HE Compare translations (R2-1) + shared TRIAGE_ICONS mapping [Wave 1]
+- [ ] 119-10-PLAN.md — Round-2 gap closure: card icon triage ✓/?/✗ + browse/compare icon buttons (R2-4/R2-9) + VS-only transcription (R2-8) + dark table (R2-10) + render-smoke [Wave 2]
+- [ ] 119-11-PLAN.md — Round-2 gap closure: Compare LTR counter+arrows (R2-2) + image-height cap (R2-3) + verdict icons (R2-4) + verdict border (R2-5) + single shelfmark (R2-6) + Esc-close (R2-7) + render-smoke [Wave 2]
 
 **UI hint**: yes
 
