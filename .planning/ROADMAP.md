@@ -135,7 +135,12 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
   5. Opening Compare from any candidate (grid card, table row, or shortcut) shows a side-by-side anchor↔candidate panel (image + numbered transcription) with independent per-pane zoom and folio navigation; recording a Y/?/N verdict in Compare syncs back to the `sys_id`-keyed triage in grid and table with no refresh.
   6. A single Visual Similarity (👁) toggle merges FIST look-alikes for the loaded anchor via the web VS-service adapter + `merge_candidates` (off = text-only; on = merged / intersection); it tracks the loaded anchor sid so look-alikes invalidate on re-anchor, has explicit disabled / no-data / empty-intersection states, and badges look-alikes consistently across grid, table, and Compare.
 
-**Plans**: TBD
+**Plans**: 4 plans (3 waves)
+
+- [ ] 119-01-PLAN.md — Wave-0 foundation: badge_and_tooltip() in shared core + extend off-loop guard (VS + enrichment) + RED test scaffolds [Wave 0]
+- [ ] 119-02-PLAN.md — Candidate surface: large-thumbnail grid + sortable multi-select table + triage + filters + pagination + 👁 badge (candidate_grid.py) [Wave 1]
+- [ ] 119-03-PLAN.md — Compare modal: full-screen two-pane (two independent AnchorViewers) + flip-through + verdict auto-advance + badges (compare_modal.py) [Wave 1]
+- [ ] 119-04-PLAN.md — Page integration: off-loop VS adapter + enrichment batch + conditional merge + 👁 toggle + wire surface/Compare into joins_lab.py [Wave 2]
 **UI hint**: yes
 
 ### Phase 120: Actions & Persistence
@@ -174,6 +179,6 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 |-------|----------------|--------|-----------|
 | 117. Vertical Spine | 6/6 | Complete    | 2026-06-18 |
 | 118. Joins, Entry & Full Builders | 6/6 | Complete    | 2026-06-19 |
-| 119. Candidates, Compare & Visual Similarity | 0/TBD | Not started | - |
+| 119. Candidates, Compare & Visual Similarity | 0/4 | Planned | - |
 | 120. Actions & Persistence | 0/TBD | Not started | - |
 | 121. i18n Polish | 0/TBD | Not started | - |
