@@ -299,3 +299,92 @@ class TestExternalFragmentPersistence:
         assert frag.image_url == ''
         assert frag.external_provider == ''
         assert frag.page_index == -1
+
+
+class TestPathResolution:
+    """Frozen-build path resolution (desktop Fragment Puzzle crash).
+
+    When the auto-detected project root is the read-only install dir (a frozen
+    PyInstaller app under Program Files), creating joins_data/ there raised an
+    uncaught PermissionError on the main thread when the puzzle opened. The
+    service must fall back to a writable per-user dir instead of crashing.
+    """
+
+    def test_user_data_db_path_under_localappdata(self, monkeypatch):
+        """_user_data_db_path() points at %LOCALAPPDATA%/GenizahSearchPro/joins_data/joins.db."""
+        import shared.puzzle_service as ps
+        monkeypatch.setenv("LOCALAPPDATA", "/tmp/LocalAppData")
+        p = ps._user_data_db_path().replace("\\", "/")
+        assert p.endswith("GenizahSearchPro/joins_data/joins.db"), p
+
+    def test_autodetect_readonly_root_falls_back(self, monkeypatch, tmp_path):
+        """Project root not writable -> fall back to the per-user dir, stay available, NO raise."""
+        import shared.puzzle_service as ps
+        from pathlib import Path
+
+        readonly_root = tmp_path / "install"        # simulated Program Files
+        writable_db = tmp_path / "userdata" / "joins_data" / "joins.db"
+        monkeypatch.setattr(ps, "_find_project_root", lambda: readonly_root)
+        monkeypatch.setattr(ps, "_user_data_db_path", lambda: str(writable_db))
+
+        real_mkdir = Path.mkdir
+
+        def deny_under_root(self, *args, **kwargs):
+            if str(self).startswith(str(readonly_root)):
+                raise PermissionError(13, "Access is denied")
+            return real_mkdir(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "mkdir", deny_under_root)
+
+        svc = ps.PuzzleService()  # auto-detect; must NOT raise
+        assert svc.is_available()
+        assert svc._db_path == str(writable_db)
+
+    def test_no_project_root_uses_user_data_dir(self, monkeypatch, tmp_path):
+        """No libraries.csv marker (frozen) -> use the writable per-user dir, not None/disabled."""
+        import shared.puzzle_service as ps
+        writable_db = tmp_path / "userdata" / "joins_data" / "joins.db"
+        monkeypatch.setattr(ps, "_find_project_root", lambda: None)
+        monkeypatch.setattr(ps, "_user_data_db_path", lambda: str(writable_db))
+
+        svc = ps.PuzzleService()
+        assert svc.is_available()
+        assert svc._db_path == str(writable_db)
+
+    def test_explicit_path_missing_parent_disabled(self, tmp_path):
+        """Explicit db_path with a missing parent stays disabled (no auto-create) — unchanged contract."""
+        from shared.puzzle_service import PuzzleService
+        svc = PuzzleService(db_path=str(tmp_path / "does_not_exist" / "joins.db"))
+        assert not svc.is_available()
+
+    def test_both_locations_unwritable_disables_without_raising(self, monkeypatch, tmp_path):
+        """If BOTH the detected root AND the per-user fallback are unwritable, init
+        degrades to unavailable — it must NOT raise (the crash-proof invariant)."""
+        import shared.puzzle_service as ps
+        from pathlib import Path
+
+        readonly_root = tmp_path / "install"
+        readonly_user = tmp_path / "userdata" / "joins_data" / "joins.db"
+        monkeypatch.setattr(ps, "_find_project_root", lambda: readonly_root)
+        monkeypatch.setattr(ps, "_user_data_db_path", lambda: str(readonly_user))
+
+        def deny_all_mkdir(self, *args, **kwargs):
+            raise PermissionError(13, "Access is denied")
+
+        monkeypatch.setattr(Path, "mkdir", deny_all_mkdir)
+
+        svc = ps.PuzzleService()  # both legs fail; must NOT raise
+        assert not svc.is_available()
+
+    def test_connect_failure_disables_without_raising(self, monkeypatch, tmp_path):
+        """A sqlite connect / WAL / schema failure during init stays contained —
+        no raise, service unavailable (the open block is wrapped in try/except)."""
+        import shared.puzzle_service as ps
+
+        def boom(*args, **kwargs):
+            raise ps.sqlite3.OperationalError("disk I/O error")
+
+        monkeypatch.setattr(ps.sqlite3, "connect", boom)
+        # Explicit path with an existing parent so resolution reaches the connect block.
+        svc = ps.PuzzleService(db_path=str(tmp_path / "joins.db"))
+        assert not svc.is_available()

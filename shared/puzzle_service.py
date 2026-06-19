@@ -15,6 +15,7 @@ Follows the singleton pattern established by nli_crossref_service.py.
 
 import json
 import logging
+import os
 import sqlite3
 import threading
 from pathlib import Path
@@ -38,6 +39,23 @@ def _find_project_root() -> Optional[Path]:
     return None
 
 
+def _user_data_db_path() -> str:
+    """Writable per-user joins.db path.
+
+    Used when the auto-detected project root is read-only — notably a frozen
+    PyInstaller build where `_find_project_root()` resolves to the install dir
+    (e.g. under Program Files, not writable for a standard user). Mirrors the
+    ``%LOCALAPPDATA%\\GenizahSearchPro`` convention used by genizah_core.Config so
+    joins.db lands alongside the app's other per-user data.
+    """
+    base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+    if base:
+        base = os.path.join(base, "GenizahSearchPro")
+    else:
+        base = os.path.join(os.path.expanduser("~"), ".genizahsearch")
+    return os.path.join(base, _SIDECAR_DIR, _SIDECAR_FILENAME)
+
+
 class PuzzleService:
     """Service for persisting puzzle documents to joins.db sidecar."""
 
@@ -57,24 +75,46 @@ class PuzzleService:
         auto_detected = False
         if db_path is None:
             root = _find_project_root()
-            if root:
-                sidecar_dir = root / _SIDECAR_DIR
-                sidecar_dir.mkdir(exist_ok=True)
-                db_path = str(sidecar_dir / _SIDECAR_FILENAME)
-                auto_detected = True
+            # Source/web: the (writable) repo root. Frozen app: the root resolves
+            # to the read-only install dir, or no marker is found — use a writable
+            # per-user location instead.
+            db_path = str(root / _SIDECAR_DIR / _SIDECAR_FILENAME) if root else _user_data_db_path()
+            auto_detected = True
 
         if db_path is None:
             logger.warning("PuzzleService: no db_path and project root not found")
             return
 
-        # Only auto-create parent dirs for auto-detected paths
-        # For explicit paths, require parent dir to exist
-        parent = Path(db_path).parent
-        if not parent.exists():
-            if auto_detected:
+        if auto_detected:
+            # Create the joins_data dir. If it is NOT writable (e.g. a frozen app
+            # installed under Program Files, where the project root is the read-only
+            # install dir), fall back to a writable per-user dir rather than raising.
+            # Regression: this mkdir was previously unguarded and raised an uncaught
+            # PermissionError on the main thread when the puzzle opened (the
+            # _refresh_docs_list -> get_puzzle_service() call) — a desktop crash.
+            parent = Path(db_path).parent
+            try:
                 parent.mkdir(parents=True, exist_ok=True)
-            else:
-                logger.warning("PuzzleService: parent directory does not exist: %s", parent)
+            except OSError as e:
+                fallback = _user_data_db_path()
+                if Path(fallback).parent != parent:
+                    logger.warning(
+                        "PuzzleService: %s not writable (%s); falling back to %s",
+                        parent, e, fallback,
+                    )
+                    db_path = fallback
+                    try:
+                        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+                    except OSError as e2:
+                        logger.error("PuzzleService: fallback joins_data dir not writable: %s", e2)
+                        return
+                else:
+                    logger.error("PuzzleService: joins_data dir not writable: %s", e)
+                    return
+        else:
+            # Explicit path: require the parent to already exist (unchanged contract).
+            if not Path(db_path).parent.exists():
+                logger.warning("PuzzleService: parent directory does not exist: %s", Path(db_path).parent)
                 return
 
         try:
