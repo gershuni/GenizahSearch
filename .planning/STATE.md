@@ -4,13 +4,13 @@ milestone: v8.2.0
 milestone_name: Web Joins Lab
 status: executing
 stopped_at: Phase 119 planned + Codex-reviewed (4 plans, 3 waves) — ready to execute
-last_updated: "2026-06-19T11:56:45.347Z"
-last_activity: 2026-06-19 -- Phase 119 planning complete
+last_updated: "2026-06-19T12:52:53.765Z"
+last_activity: 2026-06-19
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 20
-  completed_plans: 16
+  completed_plans: 17
   percent: 40
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 119 (candidates-compare-visual-similarity) — EXECUTING
-Plan: 4 of 4
+Plan: 2 of 8
 Status: Ready to execute
-Last activity: 2026-06-19 -- Phase 119 planning complete
+Last activity: 2026-06-19
 
 ## Accumulated Context
 
@@ -85,7 +85,7 @@ Items carried forward from v8.1.0:
 
 ## Session Continuity
 
-Last session: 2026-06-19T08:55:12.558Z
+Last session: 2026-06-19T12:52:53.759Z
 Stopped at: Phase 119 planned + Codex-reviewed (4 plans, 3 waves) — ready to execute
 Resume file: None
 Next step: `/gsd:plan-phase 117` (Vertical Spine)
@@ -104,6 +104,7 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 | Phase 118-joins-entry-full-builders P04 | 25min | 3 tasks | 1 files |
 | Phase 119-candidates-compare-visual-similarity P02 | 8min | 3 tasks | 1 files |
 | Phase 119-candidates-compare-visual-similarity P03 | 18min | 2 tasks | 2 files |
+| Phase 119-candidates-compare-visual-similarity P05 | 20min | 2 tasks | 2 files |
 
 ## Decisions
 
@@ -124,6 +125,9 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 - [Phase ?]: BLD-03 widget factory pattern
 - [Phase ?]: 118-05: find_joins_url appended as last kwarg to both create_joins_button and create_joins_dialog — backward-compatible; card count load via run.io_bound (T-118-06)
 - [Phase ?]: 119-02: snippet sortable per scaffold; on_compare full candidate; TriageState enforces verdicts
+- **119-05:** _make_compare_handler hoisted before card block so image click and Compare button share the same candidate-carrying closure (G4)
+- **119-05:** _triage_btn_refs per-card render-local dict passed into _make_triage_handler — immediate fill update without grid rebuild (G3, T-119-07)
+- **119-05:** Only snippet_html()/htmlify() output passes to ui.html(sanitize=False); cursor:pointer on both image and placeholder branches (G4)
 
 ## Operator Next Steps
 
