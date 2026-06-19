@@ -1628,9 +1628,16 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
     def update_content():
         """Update the content display."""
         try:
-            _ = content_container.client
+            _client = content_container.client
         except (RuntimeError, AttributeError):
             return  # Client/session gone (user navigated away)
+        # Accessing .client returns the (deleted) client object without raising,
+        # so the bare access above can't catch a torn-down session. Check the
+        # deletion flags explicitly — otherwise rebuilding here spams "Client has
+        # been deleted but is still being used" when an async enrichment resolves
+        # after the visitor navigated away (e.g. to the Joins Lab).
+        if content_container.is_deleted or getattr(_client, '_deleted', False):
+            return
         content_container.clear()
 
         with content_container:

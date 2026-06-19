@@ -423,6 +423,19 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
     if generation != refs.load_generation['value']:
         return
 
+    # Client-liveness guard: the generation check only catches intra-Browse
+    # navigation. If the visitor left the page entirely (e.g. opened the Joins
+    # Lab) while this enrichment awaited, the client is deleted but the
+    # generation is unchanged — rebuilding UI on it spams "Client has been
+    # deleted but is still being used". Bail quietly when the page is gone.
+    _cc = refs.content_container
+    try:
+        _page_gone = _cc is None or _cc.is_deleted or getattr(_cc.client, '_deleted', False)
+    except (RuntimeError, AttributeError):
+        _page_gone = True
+    if _page_gone:
+        return
+
     state.enrichment_loaded = True
     state.enrichment_loading = False
 
