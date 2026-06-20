@@ -26,6 +26,9 @@ Provides:
         get_summary()         -> str (human-readable for collapsed summary bar)
         is_empty()            -> bool
         container             (NiceGUI element - mount point for the page)
+        get_state()           -> dict  (Phase 120-03 B1: plain-dict snapshot)
+        set_state(state)      -> None  (Phase 120-03 B1: restore + visual sync)
+        on_change(cb)         -> None  (Phase 120-03 B1: register mutation callback)
 
 No raw app.storage.user access. All per-user state is closure-local (Phase 87 invariant).
 """
@@ -370,6 +373,18 @@ def create_joins_builder(
     single_query_state: dict = {'text': ''}     # the single free-text line query
     text_position_state: dict = {'value': 'anywhere'}
 
+    # Phase 120-03 B1: registered on_change callbacks (persistence / page hooks).
+    # Fired at END of each user-mutation handler (not from set_state / reset).
+    _on_change_cbs: list = []
+
+    def _fire_on_change() -> None:
+        """Fire all registered on_change callbacks (best-effort, never raises)."""
+        for _cb in _on_change_cbs:
+            try:
+                _cb()
+            except Exception:  # noqa: BLE001 – fire-and-forget, never crash builder
+                pass
+
     # ---- internal helpers -----------------------------------------------
 
     def _get_search_type() -> str:
@@ -519,10 +534,12 @@ def create_joins_builder(
                 def _toggle_line_start(i=li):
                     _toggle_line_anchor(lines_state[i], 'line_start')
                     _refresh_anchors(i)
+                    _fire_on_change()
 
                 def _toggle_line_end(i=li):
                     _toggle_line_anchor(lines_state[i], 'line_end')
                     _refresh_anchors(i)
+                    _fire_on_change()
 
                 ls_btn.on('click', lambda i=li: _toggle_line_start(i))
                 le_btn.on('click', lambda i=li: _toggle_line_end(i))
@@ -551,6 +568,7 @@ def create_joins_builder(
                             lines_state[i]['gap_to_next_line'] = gap
                             color = 'var(--border-focus)' if gap > 0 else 'var(--neutral-300)'
                             el.style(f'width: 56px; border-color: {color};')
+                            _fire_on_change()
 
                         gap_input.on(
                             'update:model-value',
@@ -622,6 +640,7 @@ def create_joins_builder(
             def _on_term_change(v, i=li, j=wi):
                 # WR-05: update ONLY state; do NOT re-render (Guardrail 3)
                 lines_state[i]['words'][j]['term'] = v
+                _fire_on_change()
 
             term_input.on('update:model-value', lambda e, i=li, j=wi: _on_term_change(e.args, i, j))
             # Enter in any word box runs the search (parity with the Run Search
@@ -662,6 +681,7 @@ def create_joins_builder(
                                 )
                                 # Refresh symbol row in place
                                 _refresh_symbol_row(i, j)
+                                _fire_on_change()
 
                             # Read the checkbox's synced .value (reliable bool) via
                             # on_value_change — robust across menu interactions and
@@ -751,6 +771,7 @@ def create_joins_builder(
                 lines_state[i]['words'][j]['gap_to_next_word'] = gap
                 color = 'var(--border-focus)' if gap > 0 else 'var(--neutral-300)'
                 el.style(f'width: 52px; border-color: {color};')
+                _fire_on_change()
 
             gap_input.on(
                 'update:model-value',
@@ -762,20 +783,24 @@ def create_joins_builder(
     def _add_word(li: int):
         lines_state[li]['words'].append(_default_word())
         _render_all(lines_container['el'])
+        _fire_on_change()
 
     def _remove_word(li: int, wi: int):
         if len(lines_state[li]['words']) > 1:
             lines_state[li]['words'].pop(wi)
         _render_all(lines_container['el'])
+        _fire_on_change()
 
     def _add_line():
         lines_state.append(_default_line())
         _render_all(lines_container['el'])
+        _fire_on_change()
 
     def _remove_line(li: int):
         if len(lines_state) > 1:
             lines_state.pop(li)
         _render_all(lines_container['el'])
+        _fire_on_change()
 
     # ---- build the widget -----------------------------------------------
 
@@ -812,6 +837,7 @@ def create_joins_builder(
                 btn.props(remove='color=primary')
                 btn.props('flat')
         _apply_type_visibility()
+        _fire_on_change()
 
     with ui.column().classes('w-full gap-3') as container:
 
@@ -865,11 +891,13 @@ def create_joins_builder(
                     # raw `update:model-value` payload — for a dict-options select that
                     # is the Quasar option object {'label','value'}, a dict, which breaks
                     # _TEXT_POSITION_LABEL_KEYS.get(tp). Coerce as belt-and-braces (WR-03).
-                    text_pos_select.on_value_change(
-                        lambda: text_position_state.update(
+                    def _on_text_pos_change():
+                        text_position_state.update(
                             value=_coerce_text_position(text_pos_select.value)
                         )
-                    )
+                        _fire_on_change()
+
+                    text_pos_select.on_value_change(_on_text_pos_change)
 
         # Responsa-style structured builder (lines area, re-rendered on add/remove)
         responsa_container = ui.column().classes('w-full gap-0')
@@ -893,10 +921,11 @@ def create_joins_builder(
                 ' font-family: "Noto Sans Hebrew", "SBL Hebrew", serif; font-size: 1rem;'
             )
             single_input.value = single_query_state['text']
-            single_input.on(
-                'update:model-value',
-                lambda e: single_query_state.update(text=e.args or ''),
-            )
+            def _on_single_input_change(e):
+                single_query_state.update(text=e.args or '')
+                _fire_on_change()
+
+            single_input.on('update:model-value', _on_single_input_change)
             if on_submit is not None:
                 single_input.on('keydown.enter', on_submit)
 
@@ -934,6 +963,115 @@ def create_joins_builder(
     def _set_variants(on: bool) -> None:
         """Set the Responsa-style Variants flag (the page owns the checkbox now)."""
         variants_state['on'] = bool(on)
+        _fire_on_change()
+
+    # ---- Phase 120-03 B1: state snapshot / restore / on_change API ------
+
+    def _get_state() -> dict:
+        """Return a plain-dict snapshot of the builder's current input state.
+
+        All values are JSON-serializable (no widgets, closures, or NiceGUI
+        elements). lines_state is deep-copied so the caller can store/compare
+        the snapshot without mutating the builder.
+
+        Keys:
+          lines_state    - deep copy of the lines-with-words structure
+          search_type    - str ('responsa'|'exact'|'variants'|'fuzzy'|'regex')
+          variants_on    - bool (Responsa-style Variants toggle)
+          single_text    - str (single free-text line query)
+          text_position  - str ('anywhere'|'start'|'end'|'line_start'|'line_end')
+        """
+        import copy
+        return {
+            'lines_state': copy.deepcopy(lines_state),
+            'search_type': search_type_state['type'],
+            'variants_on': variants_state['on'],
+            'single_text': single_query_state['text'],
+            'text_position': text_position_state['value'],
+        }
+
+    def _set_state(state: dict | None) -> None:  # noqa: UP007 (py3.9 compat)
+        """Restore the builder from a plain-dict snapshot.
+
+        Mirrors the visual-sync sequence from _reset (R2-M1):
+          (a) _render_all to rebuild the lines UI
+          (b) re-set type-button props
+          (c) _apply_type_visibility
+          (d) sync single_input.value
+          (e) sync text_pos_select.value
+
+        Silently ignores unknown keys. Falls back gracefully on None or partial
+        blobs (legacy-blob tolerance: if lines_state is absent/empty, keeps one
+        default line).
+
+        NOTE: set_state is a RESTORE operation — it does NOT fire on_change
+        callbacks (restoring persisted state should not trigger re-persist).
+        """
+        if not isinstance(state, dict):
+            return  # None or unexpected type — silently ignore
+
+        # --- 1. Restore closure state ---
+        raw_lines = state.get('lines_state')
+        if raw_lines and isinstance(raw_lines, list):
+            import copy
+            lines_state.clear()
+            lines_state.extend(copy.deepcopy(raw_lines))
+        else:
+            # Ensure at least one default line (empty or missing lines_state)
+            if not lines_state:
+                lines_state.append(_default_line())
+
+        new_type = state.get('search_type', search_type_state['type'])
+        if new_type in _SEARCH_TYPES or new_type in _SIMPLE_TYPE_TO_ENGINE_MODE:
+            search_type_state['type'] = new_type
+        # else: keep current — unknown type value ignored
+
+        if 'variants_on' in state:
+            variants_state['on'] = bool(state['variants_on'])
+
+        if 'single_text' in state:
+            single_query_state['text'] = str(state.get('single_text') or '')
+
+        if 'text_position' in state:
+            tp = _coerce_text_position(state['text_position'])
+            text_position_state['value'] = tp
+
+        # --- 2. Visual sync (mirrors _reset, R2-M1) ---
+        _sym_rows.clear()
+        if lines_container['el'] is not None:
+            _render_all(lines_container['el'])
+
+        # Re-set type-button props to match restored search_type
+        t = search_type_state['type']
+        for tv, btn in type_btns.items():
+            if tv == t:
+                btn.props('color=primary')
+                btn.props(remove='flat')
+            else:
+                btn.props(remove='color=primary')
+                btn.props('flat')
+
+        _apply_type_visibility()
+
+        if single_input is not None:
+            single_input.value = single_query_state['text']
+
+        if allow_page_position and text_pos_select is not None:
+            text_pos_select.value = text_position_state['value']
+
+    def _on_change(cb) -> None:
+        """Register a callback to fire on every user-driven builder state mutation.
+
+        The callback is called with no arguments at the END of each existing
+        mutation handler (word add/edit/remove, gap change, line anchor toggle,
+        mode/type change, Text Position change, variants toggle, single-line edit).
+
+        set_state() and reset() do NOT fire on_change — they are restore/clear
+        operations, not user mutations.
+
+        Multiple callbacks may be registered; they fire in registration order.
+        """
+        _on_change_cbs.append(cb)
 
     # ---- return handle dict ---------------------------------------------
 
@@ -948,4 +1086,8 @@ def create_joins_builder(
         'is_empty': _is_empty,
         'reset': _reset,
         'set_variants': _set_variants,
+        # Phase 120-03 B1 additions
+        'get_state': _get_state,
+        'set_state': _set_state,
+        'on_change': _on_change,
     }
