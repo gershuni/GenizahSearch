@@ -824,7 +824,7 @@ Tailwind utilities, and existing `web/components/`.
 | Spacing scale (4/8/16/24/32/48) | 117/118/119 baseline | Carried forward |
 | Typography (3 sizes, 2 weights: 400/600) | 119 baseline | Carried forward |
 | Add-as-Join → Supabase `create_fragment_join` | 120-CONTEXT.md D-01 | Locked |
-| Join status = confirmed-on-insert | 120-CONTEXT.md D-02 | Locked (researcher verifies) |
+| Join status stays `'proposed'` on insert; Lab known-joins shows proposed (`confirmed_only=False`, parity with /browse) | 120-CONTEXT.md D-02 (user override 2026-06-20) | Locked |
 | Remove-join → own-joins only, self-service | 120-CONTEXT.md D-03 | Locked |
 | Add-to-Puzzle = anchor + multi-selected | 120-CONTEXT.md D-04 | Locked |
 | Staging mechanism = server-side safe_storage key | Claude's Discretion (D-04) | Chosen here |

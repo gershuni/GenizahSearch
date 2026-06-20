@@ -4,6 +4,15 @@
 **Domain:** NiceGUI web app — Supabase community writes, multi-fragment puzzle staging, safe_storage persistence, fire-and-forget async lifecycle hardening
 **Confidence:** HIGH — all critical unknowns resolved against live code; no training-data-only claims in load-bearing sections
 
+> **⚠ D-02 USER OVERRIDE (2026-06-20) — READ FIRST. This research recommends inserting
+> `status='confirmed'`; the user SUPERSEDED that.** ACT-01 must keep the inserted status as the
+> `'proposed'` DB default (do NOT pass `status='confirmed'` — a user-added join is an unmoderated
+> claim). Instead, make the **Lab known-joins group SHOW proposed joins** by relaxing/removing the
+> `confirmed_only=True` filter (`joins_lab.py:1150` → `confirmed_only=False`, or equivalent), matching
+> `/browse`, plus `force_refresh` the cache. See `120-CONTEXT.md` D-02 (authoritative). Every
+> "insert `status='confirmed'`" instruction below is OBSOLETE; read it as "leave status `'proposed'`
+> and show proposed in the Lab."
+
 ---
 
 <user_constraints>
@@ -11,7 +20,10 @@
 
 ### Locked Decisions
 - **D-01:** Add-as-Join writes via existing `create_fragment_join` (login-gated); does NOT write to `joins.db`.
-- **D-02:** Match the LIVE behavior — new join must appear in known-joins group right after adding. Insert `status='confirmed'` explicitly (researcher has resolved the code vs. schema discrepancy — see §Verification below).
+- **D-02:** Match the LIVE behavior — new join must appear in known-joins group right after adding.
+  **[USER OVERRIDE 2026-06-20]** Keep inserted status `'proposed'` (do NOT mark `'confirmed'`); instead
+  show proposed joins in the Lab known-joins group (relax `confirmed_only`) + `force_refresh`. See the
+  ⚠ banner above and CONTEXT D-02. (The "insert `status='confirmed'`" text below is superseded.)
 - **D-03:** Add self-service "remove my join" on logged-in user's own joins; wire existing `delete_fragment_join` + RLS. Own joins only.
 - **D-04:** Bulk handoff: anchor + multi-selected candidates via NEW multi-fragment staging payload/API; anchor always included.
 - **D-05:** Add-to-List login-gated; operates on multi-selected candidates via `add_list_item`.
@@ -286,7 +298,11 @@ def progress_cb(arg1, arg2=None):
 **Size discipline:** `triage` values are single-char strings; `builder_rows` text fields are capped at 200 chars each; `filter_state` stores only the active filter discriminants (no result data). Total payload remains well under 50 KB.
 
 ### Anti-Patterns to Avoid
-- **Inserting without explicit `status`:** `create_fragment_join` currently omits `status`; DB default is `'proposed'`; proposed joins are filtered OUT by the Lab's `confirmed_only=True` path. Always pass `status='confirmed'` for ACT-01. [VERIFIED: supabase_setup.sql:162, web/supabase_client.py:1639]
+- **Filtering proposed joins out of the Lab known-joins group [USER OVERRIDE 2026-06-20]:** new joins
+  land `'proposed'` (DB default) and the Lab's `confirmed_only=True` path filters them OUT. Do NOT
+  "fix" this by inserting `status='confirmed'` (the join is an unmoderated claim). Instead set the Lab
+  fetch to `confirmed_only=False` so proposed joins show — matching `/browse` — and keep status
+  `'proposed'`. [VERIFIED: supabase_setup.sql:162, web/supabase_client.py:1639, joins_lab.py:1150]
 - **Using `ui.navigate.to('/settings')` for sign-in:** The current bug at `joins_lab.py:1573` — navigates away and loses all Joins Lab state. Use `create_login_dialog().open()` instead. [VERIFIED: web/auth_state.py:358]
 - **Persisting result blobs:** Never write `full_text`, image bytes, or candidate lists to `safe_storage`. The 778 MB `search_history.json` incident (CHANGELOG v7.16) is the canonical warning. [VERIFIED: CHANGELOG]
 - **Bumping generation before partials are returned:** See Pattern 4 above — Stop must NOT supersede the generation before `_should_apply_results` runs.
@@ -336,10 +352,18 @@ The `/browse` dialog (the path the user tested live) calls `fetch_connected_frag
 
 **RLS** (`supabase_setup.sql:338`): `USING (true)` — all rows publicly readable. No server-side filtering by status. [VERIFIED: supabase_setup.sql:338]
 
-**Resolution for ACT-01:**
-Pass `status='confirmed'` explicitly in the `create_fragment_join` data dict. This makes the new join visible in the Joins Lab's own known-joins group (confirmed-only path) immediately after insert, matching the user-observed live behavior for the browse dialog. The `confirmed_by` and `confirmed_at` columns can remain NULL (the schema allows it).
+**Resolution for ACT-01 — [USER OVERRIDE 2026-06-20; supersedes the original recommendation]:**
+Do **NOT** pass `status='confirmed'`. Keep the inserted status as the `'proposed'` default — a
+user-added join is an *unmoderated* scholarly claim, and marking it `'confirmed'` would falsely assert
+moderation. To make the new join appear in the Joins Lab's own known-joins group (SC#1), change the
+Lab's fetch to `confirmed_only=False` (`joins_lab.py:1150`) so the group shows proposed + confirmed
+alike — exactly as `/browse` already does. The known-joins cache key must therefore NOT be
+`:confirmed`-scoped (otherwise proposed rows are cached out); `force_refresh` after insert (below).
+This REVERSES Phase-118 D-17's confirmed-only filter for the Lab known-joins group.
 
-This also resolves the Phase-118 D-17 apparent conflict: Phase-118 D-17 described the Lab path as "confirmed-only" correctly — the issue was that ACT-01 needed to insert `confirmed` status, which Phase-118 didn't define.
+> ~~Original (OBSOLETE) recommendation: Pass `status='confirmed'` explicitly in the
+> `create_fragment_join` data dict so the join shows in the confirmed-only Lab path.~~ — replaced by
+> the user override above (keep `'proposed'`, show proposed in the Lab).
 
 **After insert, force-refresh the known-joins:** Call `_load_known_joins(sys_id, shelfmark, force_refresh=True)` (or pass `force_refresh=True` to `fetch_connected_fragments`) so the 30-second cache is bypassed and the new join appears immediately.
 
@@ -493,11 +517,11 @@ except RuntimeError:
 
 ## Common Pitfalls
 
-### Pitfall 1: Inserting joins without explicit status (D-02)
+### Pitfall 1: New join invisible in the Lab known-joins group (D-02) [USER OVERRIDE 2026-06-20]
 **What goes wrong:** New joins land with `status='proposed'` (DB default); the Joins Lab known-joins group filters `status='confirmed'`; the new join never appears in the Lab even though it's visible in `/browse`. The user sees a "success" toast but the known-joins group doesn't update.
-**Why it happens:** `create_fragment_join` omits `status` from the insert dict. This has been the case since the table was created.
-**How to avoid:** Always pass `status='confirmed'` in the data dict for ACT-01 inserts.
-**Warning signs:** Join created successfully (Supabase returns row) but known-joins group doesn't refresh even after force-refresh.
+**Why it happens:** the Lab fetch passes `confirmed_only=True` (`joins_lab.py:1150`), filtering out proposed joins.
+**How to avoid (user-chosen):** set the Lab fetch to `confirmed_only=False` so proposed joins show (parity with `/browse`), keep the inserted status `'proposed'` (do NOT mark `'confirmed'`), and ensure the known-joins cache key is not `:confirmed`-scoped, then `force_refresh` after insert. ~~(Do NOT "fix" by inserting `status='confirmed'`.)~~
+**Warning signs:** Join created successfully (Supabase returns row) but known-joins group doesn't refresh even after force-refresh → check the `confirmed_only` flag and the cache key scope.
 
 ### Pitfall 2: Navigating to `/settings` for sign-in (D-18 bug)
 **What goes wrong:** User is navigated away from Joins Lab; all in-memory state (candidates, triage, open dialogs) is lost; user must rebuild the search from scratch.

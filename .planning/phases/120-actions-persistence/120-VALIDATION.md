@@ -50,7 +50,7 @@ created: 2026-06-20
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| TBD | TBD | TBD | ACT-01 | T-120-cache | `create_fragment_join` inserts `status='confirmed'` (authenticated client, RLS-scoped) | unit | `pytest tests/test_joins_lab.py -k "test_add_join"` | ✅ | ⬜ pending |
+| TBD | TBD | TBD | ACT-01 | T-120-cache | `create_fragment_join` leaves status `'proposed'` (NOT `'confirmed'`); Lab known-joins fetch uses `confirmed_only=False` so the proposed join shows (parity with `/browse`) | unit | `pytest tests/test_joins_lab.py -k "test_add_join"` | ✅ | ⬜ pending |
 | TBD | TBD | TBD | ACT-01 | V2 auth | Anonymous user sees login gate, not the write | render-smoke | `pytest tests/render_smoke/test_joins_lab_render_smoke.py -k "test_anon_add_join_gate"` | ✅ | ⬜ pending |
 | TBD | TBD | TBD | ACT-01 | — | New join appears in known-joins after `force_refresh=True` | unit | `pytest tests/test_joins_lab.py -k "test_add_join_visible"` | ✅ | ⬜ pending |
 | TBD | TBD | TBD | ACT-01 (D-03) | V4 access | "Remove my join" deletes own join only (self-scope; RLS) | unit | `pytest tests/test_joins_lab.py -k "test_remove_own_join"` | ✅ | ⬜ pending |

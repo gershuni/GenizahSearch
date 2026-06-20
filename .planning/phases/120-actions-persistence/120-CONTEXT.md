@@ -55,13 +55,25 @@ folded SEED-007 / SEED-008 / Lists-integration items above (user-directed scope,
 - **D-02:** **Match the observed LIVE behavior** — the user verified on production
   (`genizahsearch.com/browse?sys_id=990051753430205171…`) that a regular user's added join shows
   **immediately to everyone**, and there is **no confirm UI and no delete UI** anywhere. So the new
-  join must appear in the known-joins group right after adding (satisfies ROADMAP SC#1). **Researcher
-  MUST verify** the live `fragment_joins.status` default and the browse/known-joins fetch branching:
-  the committed code says `status DEFAULT 'proposed'` (`supabase_setup.sql:162`) + the group fetch
-  filters `status='confirmed'` (`joins_panel.py:114`), which CONTRADICTS the live behavior. Resolve
-  the discrepancy and set status **explicitly** on insert so the join reliably appears (do NOT rely
-  on an unclear default). This also reconciles the apparent conflict with Phase-118 D-17 (which
-  assumed user joins start unconfirmed/creator-only).
+  join must appear in the known-joins group right after adding (satisfies ROADMAP SC#1).
+  **RESOLVED (research-verified, 2026-06-20):** `create_fragment_join` (`web/supabase_client.py:1639`)
+  passes no `status`, so new joins land as the `'proposed'` DB default (`supabase_setup.sql:162`). The
+  `/browse` known-joins path does **not** filter by status (→ joins show to everyone immediately, as
+  observed live), but the Joins Lab known-joins panel uses `confirmed_only=True` (`joins_panel.py:114`)
+  and would **hide** a `'proposed'` join.
+  **DECISION (user override, 2026-06-20) — keep `'proposed'`, do NOT mark `'confirmed'`:** ACT-01
+  leaves the inserted status as the `'proposed'` default (a user-added join is an *unmoderated*
+  scholarly claim — marking it `'confirmed'` would falsely assert moderation). To satisfy SC#1, the
+  **Lab known-joins group must SHOW `'proposed'` joins too** — relax/remove the `confirmed_only=True`
+  filter on the Lab's known-joins fetch so it displays proposed + confirmed alike, matching the
+  `/browse` behavior the user confirmed live (show ALL community joins immediately). After insert,
+  **force-refresh** the ~30s known-joins cache (`force_refresh=True`, using a cache key NOT scoped to
+  `:confirmed`) so the join appears without the cache delay.
+  **⚠ SUPERSEDES the RESEARCH.md D-02 fix** (which recommended inserting `status='confirmed'`) and
+  **REVERSES Phase-118 D-17's confirmed-only filter** for the Lab known-joins group: the Lab now shows
+  all joins (proposed + confirmed), consistent with `/browse`. Since there is no moderation/confirm UI
+  (deferred), the Lab will surface all community-proposed joins — acceptable per the user and already
+  the `/browse` behavior; add the OPEN_ISSUES note already planned under Deferred Ideas.
 - **D-03:** **Add a self-service "remove my join"** affordance on the logged-in user's OWN joins in
   the known-joins group — wire the existing `web/supabase_client.py:1658 delete_fragment_join` + the
   "users can delete own joins" RLS policy. Login-gated, self-scoped, OWN-joins-only. NO admin /
