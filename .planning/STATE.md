@@ -4,13 +4,13 @@ milestone: v8.2.0
 milestone_name: Web Joins Lab
 status: executing
 stopped_at: Phase 120 context gathered
-last_updated: "2026-06-20T20:04:08.064Z"
-last_activity: 2026-06-20 -- Phase 120 planning complete
+last_updated: "2026-06-20T23:15:24.031Z"
+last_activity: 2026-06-20
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 31
-  completed_plans: 23
+  completed_plans: 24
   percent: 60
 ---
 
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 120 — Actions & Persistence (Phase 119 closed early; verification deferred here)
+**Current focus:** Phase 120 — actions-persistence
 
 ## Current Position
 
-Phase: 119 (candidates-compare-visual-similarity) — CLOSED EARLY
-Plan: 11 of 11 (R2 gap closure 09-11 code-complete + committed)
+Phase: 120 (actions-persistence) — EXECUTING
+Plan: 2 of 8
 Status: Ready to execute
 Next: Phase 120 — Actions & Persistence
-Last activity: 2026-06-20 -- Phase 120 planning complete
+Last activity: 2026-06-20
 
 ## Accumulated Context
 
@@ -86,9 +86,9 @@ Items carried forward from v8.1.0:
 
 ## Session Continuity
 
-Last session: 2026-06-20T18:21:53.723Z
+Last session: 2026-06-20T23:15:24.025Z
 Stopped at: Phase 120 context gathered
-Resume file: .planning/phases/120-actions-persistence/120-CONTEXT.md
+Resume file: None
 Next step: `/gsd:plan-phase 117` (Vertical Spine)
 
 ## Performance Metrics
@@ -110,6 +110,7 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 | Phase 119 P07 | 35m | 3 tasks | 6 files |
 | Phase 119 P08 | 120min | 3 tasks | 5 files |
 | Phase 119 P11 | 60 | 3 tasks | 5 files |
+| Phase 120-actions-persistence P01 | 4m | 2 tasks | 2 files |
 
 ## Decisions
 

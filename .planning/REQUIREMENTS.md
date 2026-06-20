@@ -68,9 +68,9 @@ Requirements for this milestone. Each maps to a roadmap phase.
 
 ### Persistence (PST)
 
-- [ ] **PST-01**: The Joins Lab persists builder **inputs**, triage verdicts, filter, and view state — NOT candidate result blobs (no `full_text` / image data). On restore the search is **re-run** from the persisted inputs (mirrors desktop `join_workbench`; avoids the search-history payload-bloat class of bug). Survives a page refresh without login.
-- [ ] **PST-02**: Persistence uses server-side **per-browser-session** state via `web/safe_storage.py` (`safe_user_*`, keyed by the NiceGUI session cookie — survives refresh for anonymous users; NOT the volatile `browser`/`client`/`tab` stores, NOT a new localStorage wrapper). Per-session/per-user isolated (multitenant-safe, no cross-user leakage); compact schema with caps and a schema-version invalidation field. No Supabase, no cross-device sync.
-- [ ] **PST-03**: User can clear/reset the Joins Lab working state.
+- [x] **PST-01**: The Joins Lab persists builder **inputs**, triage verdicts, filter, and view state — NOT candidate result blobs (no `full_text` / image data). On restore the search is **re-run** from the persisted inputs (mirrors desktop `join_workbench`; avoids the search-history payload-bloat class of bug). Survives a page refresh without login.
+- [x] **PST-02**: Persistence uses server-side **per-browser-session** state via `web/safe_storage.py` (`safe_user_*`, keyed by the NiceGUI session cookie — survives refresh for anonymous users; NOT the volatile `browser`/`client`/`tab` stores, NOT a new localStorage wrapper). Per-session/per-user isolated (multitenant-safe, no cross-user leakage); compact schema with caps and a schema-version invalidation field. No Supabase, no cross-device sync.
+- [x] **PST-03**: User can clear/reset the Joins Lab working state.
 
 ## Future Requirements
 
@@ -139,9 +139,9 @@ Which phases cover which requirements. Populated during roadmap creation.
 | ACT-01 | Phase 120 | Pending |
 | ACT-02 | Phase 120 | Pending |
 | ACT-03 | Phase 120 | Pending |
-| PST-01 | Phase 120 | Pending |
-| PST-02 | Phase 120 | Pending |
-| PST-03 | Phase 120 | Pending |
+| PST-01 | Phase 120 | Complete |
+| PST-02 | Phase 120 | Complete |
+| PST-03 | Phase 120 | Complete |
 | JSA-01 | — | Deferred (Component B, future milestone) |
 | JSA-02 | — | Deferred (Component B, future milestone) |
 | JSA-03 | — | Deferred (Component B, future milestone) |
