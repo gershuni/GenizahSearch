@@ -250,7 +250,7 @@ def _should_apply_results(my_gen: int, gen_ref: dict) -> bool:
     return my_gen == gen_ref['value']
 
 
-def _make_progress_cb(my_gen: int, gen_ref: dict):
+def _make_progress_cb(my_gen: int, gen_ref: dict, stop_ref: Optional[dict] = None):
     """Return a progress callback that cooperatively cancels superseded searches.
 
     The returned ``progress_cb(arg1, arg2=None)`` is called by the search core
@@ -261,6 +261,12 @@ def _make_progress_cb(my_gen: int, gen_ref: dict):
     worker thread), and returns the partial deduped results gathered so far
     (genizah_core.py:9005/:9071).  The caller's stale-generation guard
     (``_should_apply_results``) then discards those partial results.
+
+    D-11 Stop-with-partials: when ``stop_ref`` is provided and its ``value`` is
+    True, raises ``InterruptedError('joins-lab search stopped by user')`` BEFORE
+    the generation check.  Because the generation is NOT bumped on a user Stop,
+    ``_should_apply_results(my_gen, gen_ref)`` returns True after the await —
+    so the partial results ARE applied to the UI.
 
     NOTE: ``.cancel()`` on the asyncio.Task only cancels the asyncio.wait_for
     wrapper coroutine.  It does NOT stop the already-running run.io_bound
@@ -274,7 +280,13 @@ def _make_progress_cb(my_gen: int, gen_ref: dict):
     Module-level for testability.
     """
     def progress_cb(arg1, arg2=None):
-        # COOPERATIVE CANCEL CHECK (MEDIUM): fires first — if a newer search
+        # D-11 STOP-WITH-PARTIALS: check the user Stop flag FIRST, before the
+        # generation check.  stop_ref is NOT bumped on user Stop, so
+        # _should_apply_results(my_gen, gen_ref) will still return True →
+        # partial results are applied (not discarded) after the InterruptedError.
+        if stop_ref is not None and stop_ref['value']:
+            raise InterruptedError('joins-lab search stopped by user')
+        # COOPERATIVE CANCEL CHECK (MEDIUM): fires second — if a newer search
         # has started, abort the old scan loop early to free the worker thread.
         if my_gen != gen_ref['value']:
             raise InterruptedError('joins-lab search superseded')
@@ -478,6 +490,10 @@ def create_joins_lab_page(
     _anchor_generation: dict = {'value': 0}
     _is_running: dict = {'value': False}
     _current_task: dict = {'task': None}  # in-flight asyncio.Task (for cancel)
+    # D-11 Stop-with-partials: set True on explicit Stop click (does NOT bump
+    # _search_generation so _should_apply_results returns True → partials applied).
+    # Reset to False at the start of every new search.
+    _stop_requested: dict = {'value': False}
 
     # Global options toggles — shared between both sides (D-11)
     # Mutable dict so closures see current values.
@@ -543,7 +559,12 @@ def create_joins_lab_page(
         _current_task['task'] = None
         if _is_running['value']:
             _is_running['value'] = False
-            search_btn.props(remove='loading disabled')
+            # D-11: also restore the Stop/Run Search swap if Stop was showing.
+            stop_btn.set_visibility(False)
+            stop_btn.props(remove='loading disabled')
+            stop_btn.set_text(tr('Stop'))
+            search_btn.set_visibility(True)
+            _stop_requested['value'] = False
 
     # -----------------------------------------------------------------------
     # Phase 119: Candidate surface helpers (close over page state)
@@ -1058,6 +1079,17 @@ def create_joins_lab_page(
 
         with ui.row().classes('gap-2 items-center flex-wrap'):
             search_btn = ui.button(tr('Run Search')).props('color=primary unelevated icon=search')
+            # D-11 Stop button — occupies the SAME slot as Run Search (replaces it
+            # while a user-initiated search is in flight).  Hidden by default; swap
+            # visibility with search_btn during execute_joins_search.
+            # NOT shown during auto-restore re-run (_bootstrap_anchor path).
+            stop_btn = (
+                ui.button(tr('Stop'))
+                .props('color=negative unelevated icon=stop_circle')
+                .mark('stop_search_btn')
+                .tooltip(tr('Stop search and show partial results'))
+                .set_visibility(False)
+            )
             # New Search (reset) — parity with /search's restart_alt button. Clears
             # both builders + results but KEEPS the loaded anchor ("Change anchor"
             # switches fragments). Wired below, next to the other handlers.
@@ -1659,11 +1691,36 @@ def create_joins_lab_page(
         search_status.set_text('')
         search_status.style('display: none;')
 
+    def _on_stop_click() -> None:
+        """D-11 Stop-with-partials: request cooperative search abort.
+
+        Sets ``_stop_requested['value'] = True`` (checked by the progress_cb
+        inside run.io_bound) WITHOUT bumping ``_search_generation``.  Because
+        the generation is unchanged, ``_should_apply_results(my_gen,
+        _search_generation)`` returns True in ``execute_joins_search`` after the
+        await — so the partial results ARE rendered (not discarded).
+
+        The UI immediately transitions to the "Stopping…" affordance so the user
+        knows the stop was registered. The actual UI switch back to Run Search
+        happens in execute_joins_search's outer ``finally`` block (WR-01), which
+        fires once the run.io_bound worker thread has been cooperatively aborted.
+
+        NOT called during auto-restore re-run (stop_btn is never shown during
+        ``_bootstrap_anchor`` — see execute_joins_search for the guard).
+        """
+        if not _is_running['value']:
+            return  # idempotent — ignore if no search is running
+        _stop_requested['value'] = True
+        # Transition to "Stopping…" affordance (spinner on stop_btn label)
+        stop_btn.set_text(tr('Stopping…'))
+        stop_btn.props('loading=true disabled=true')
+
     load_btn.on('click', _on_load_btn_click)
     change_anchor_btn.on('click', _on_change_anchor)
     new_search_btn.on('click', _reset_search)
     anchor_input.on('keydown.enter', _on_load_btn_click)
     lists_btn.on('click', _on_lists_btn_click)
+    stop_btn.on('click', _on_stop_click)
 
     # -----------------------------------------------------------------------
     # Off-loop search with timeout + cancellation + latest-wins + stale-gen
@@ -1718,10 +1775,16 @@ def create_joins_lab_page(
                 # gating, but explicit cancel avoids resource waste).
                 _cancel_current_search()
                 anchor_sid_f1 = _anchor_state.get('sys_id') or ''
+                # D-11: reset stop flag before this user-initiated VS-only search.
+                _stop_requested['value'] = False
                 _search_generation['value'] += 1
                 my_gen_f1 = _search_generation['value']
                 _is_running['value'] = True
-                search_btn.props('loading=true disabled=true')
+                # D-11: swap Run Search → Stop (VS-only is user-initiated).
+                search_btn.set_visibility(False)
+                stop_btn.set_text(tr('Stop'))
+                stop_btn.props(remove='loading disabled')
+                stop_btn.set_visibility(True)
                 candidates_container.clear()
                 search_status.set_text(tr('Loading visual similarity…'))
                 search_status.style('display: block;')
@@ -1758,7 +1821,12 @@ def create_joins_lab_page(
                 finally:
                     if _is_running['value'] and my_gen_f1 == _search_generation['value']:
                         _is_running['value'] = False
-                        search_btn.props(remove='loading disabled')
+                        # D-11: swap Stop → Run Search.
+                        stop_btn.set_visibility(False)
+                        stop_btn.props(remove='loading disabled')
+                        stop_btn.set_text(tr('Stop'))
+                        search_btn.set_visibility(True)
+                        _stop_requested['value'] = False
                 return
             else:
                 ui.notify(
@@ -1828,6 +1896,8 @@ def create_joins_lab_page(
         # the already-running run.io_bound worker thread is aborted cooperatively via
         # the bumped _search_generation making the OLD search's progress_cb raise
         # InterruptedError (see _make_progress_cb).
+        # D-11: reset the user Stop flag so a prior Stop cannot bleed into the new search.
+        _stop_requested['value'] = False
         _search_generation['value'] += 1
         my_gen = _search_generation['value']
         prev = _current_task['task']
@@ -1835,8 +1905,12 @@ def create_joins_lab_page(
             prev.cancel()
 
         # Step 4: UI — loading state; collapse builder to summary bar (D-14)
+        # D-11: swap Run Search → Stop (user-initiated search; NOT auto-restore path).
         _is_running['value'] = True
-        search_btn.props('loading=true disabled=true')
+        search_btn.set_visibility(False)
+        stop_btn.set_text(tr('Stop'))
+        stop_btn.props(remove='loading disabled')
+        stop_btn.set_visibility(True)
         candidates_container.clear()
         search_status.set_text(tr('Searching...'))
         search_status.style('display: block;')
@@ -1873,7 +1947,11 @@ def create_joins_lab_page(
                     query_str,
                     mode=mode_str,
                     gap=0,
-                    progress_callback=_make_progress_cb(my_gen, _search_generation),
+                    # D-11: pass stop_ref so user-clicked Stop raises InterruptedError
+                    # BEFORE the generation check — partials are applied (not discarded).
+                    progress_callback=_make_progress_cb(
+                        my_gen, _search_generation, stop_ref=_stop_requested
+                    ),
                     responsa_options=ro,
                     text_position=direct_text_position,
                     corpus_scope='genizah',
@@ -1980,7 +2058,11 @@ def create_joins_lab_page(
                             _combine_mode_snap,
                             # CR HIGH-3: make the query-B scan cooperatively
                             # cancellable when a newer search supersedes this run.
-                            progress_callback=_make_progress_cb(my_gen, _search_generation),
+                            # D-11: also pass stop_ref so user-clicked Stop propagates
+                            # through the cross-side leg too.
+                            progress_callback=_make_progress_cb(
+                                my_gen, _search_generation, stop_ref=_stop_requested
+                            ),
                             text_position=b_text_position,
                         )
 
@@ -2071,7 +2153,12 @@ def create_joins_lab_page(
             # its loading state cleared by an older run's finally.
             if _is_running['value'] and my_gen == _search_generation['value']:
                 _is_running['value'] = False
-                search_btn.props(remove='loading disabled')
+                # D-11: swap Stop → Run Search and reset the stop flag.
+                stop_btn.set_visibility(False)
+                stop_btn.props(remove='loading disabled')
+                stop_btn.set_text(tr('Stop'))  # reset label from 'Stopping…' if set
+                search_btn.set_visibility(True)
+                _stop_requested['value'] = False  # clean up for next search
 
     _submit_ref['fn'] = execute_joins_search  # enables Enter-to-search in word boxes
     search_btn.on('click', execute_joins_search)

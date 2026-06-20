@@ -2498,8 +2498,10 @@ TRANSLATIONS = {
         "רווח מפריד בין מילים; לחצו על סמל גלגל השיניים לאותן אפשרויות לכל מילה.",
     "with variants": "עם וריאנטים",
     "exact": "מדויק",
-    # Run / reset / anchor controls
+    # Run / Stop / reset / anchor controls
     "Run Search": "הרצת חיפוש",
+    "Stop search and show partial results": "עצור חיפוש והצג תוצאות חלקיות",
+    "Stopping…": "עוצר…",
     "Load Anchor": "טעינת עוגן",
     "Change anchor": "החלפת עוגן",
     "Edit search": "עריכת החיפוש",
