@@ -34,7 +34,7 @@
 **Existing structure** (lines 1–112 — read in full):
 ```python
 _JOINS_LAB_KEY = 'joins_lab'
-_SCHEMA_VERSION = 1   # <-- bump to 2 for Phase 120 additions
+_SCHEMA_VERSION = 1   # KEEP AT 1 for Phase 120 (additive keys; bump only on remove/retype)
 
 def read_joins_lab_state() -> Optional[dict]:
     data = safe_user_get(_JOINS_LAB_KEY, default=None)
@@ -59,13 +59,14 @@ def clear_joins_lab_state():
 
 **Phase 120 extension — add `write_full_state()` and `read_full_state()`:**
 
-The schema version is bumped to 2 per the UI-SPEC (non-breaking additions; v1 blobs are
-treated as v2 with Phase-120 keys defaulting to empty/None — no discard on 1→2).
+The schema version **STAYS at 1** (CONTEXT D-16: "extend v1; bump only on remove/retype"). Phase-120
+keys are additive; existing v1 blobs are read with `.get(key, default)` so they restore cleanly. Do
+NOT bump to 2 — `read_joins_lab_state()`'s exact-match check would DISCARD existing users' anchors.
 
 New payload shape (all Phase-120 keys under the same `_JOINS_LAB_KEY`):
 ```python
 {
-    'schema_version': 2,              # bumped from 1
+    'schema_version': 1,              # UNCHANGED — additive keys only (do NOT bump; see note below)
 
     # Phase 117 fields (unchanged):
     'anchor_sys_id': str | None,

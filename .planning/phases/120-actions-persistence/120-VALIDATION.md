@@ -54,7 +54,7 @@ created: 2026-06-20
 | TBD | TBD | TBD | ACT-01 | V2 auth | Anonymous user sees login gate, not the write | render-smoke | `pytest tests/render_smoke/test_joins_lab_render_smoke.py -k "test_anon_add_join_gate"` | ✅ | ⬜ pending |
 | TBD | TBD | TBD | ACT-01 | — | New join appears in known-joins after `force_refresh=True` | unit | `pytest tests/test_joins_lab.py -k "test_add_join_visible"` | ✅ | ⬜ pending |
 | TBD | TBD | TBD | ACT-01 (D-03) | V4 access | "Remove my join" deletes own join only (self-scope; RLS) | unit | `pytest tests/test_joins_lab.py -k "test_remove_own_join"` | ✅ | ⬜ pending |
-| TBD | TBD | TBD | ACT-02 | T-120-stale | `puzzle_bulk_add` key written + cleared one-shot on puzzle load | unit | `pytest tests/test_joins_lab.py -k "test_bulk_puzzle_staging"` | ✅ | ⬜ pending |
+| TBD | TBD | TBD | ACT-02 | T-120-stale | `puzzle_staging` key written + cleared one-shot on puzzle load | unit | `pytest tests/test_joins_lab.py -k "test_bulk_puzzle_staging"` | ✅ | ⬜ pending |
 | TBD | TBD | TBD | ACT-02 | V5 input | Anchor always included; candidate list capped at 20 | unit | `pytest tests/test_joins_lab.py -k "test_bulk_anchor_always_included"` | ✅ | ⬜ pending |
 | TBD | TBD | TBD | ACT-03 | — | Export CSV has triage verdict + capped text column (10 cols) | unit | `pytest tests/test_joins_lab.py -k "test_export_csv_columns"` | ✅ | ⬜ pending |
 | TBD | TBD | TBD | ACT-03 | — | Export text = matched page (text hits) / first text page (VS-only) | unit | `pytest tests/test_joins_lab.py -k "test_export_text_page_selection"` | ✅ | ⬜ pending |

@@ -66,8 +66,8 @@
 
 | ID | Description | Research Support |
 |----|-------------|------------------|
-| ACT-01 | Add confirmed candidate as join via pairwise-join path (login-gated) | D-02 resolved: insert `status='confirmed'` explicitly; `create_fragment_join` wired; delete via D-03 |
-| ACT-02 | Add anchor + selected candidates to Fragment Puzzle via NEW bulk staging | Staging via `safe_storage` key (`puzzle_bulk_add`) before navigation; `create_puzzle_page` reads it on load |
+| ACT-01 | Add candidate as join via pairwise-join path (login-gated) | D-02 [USER OVERRIDE]: keep inserted status `'proposed'` (no `status` kwarg); make the Lab show it via `confirmed_only=False` + `force_refresh`; `create_fragment_join` wired; delete via D-03 |
+| ACT-02 | Add anchor + selected candidates to Fragment Puzzle via NEW bulk staging | Staging via `safe_storage` key (`puzzle_staging`) before navigation; `create_puzzle_page` reads it on load |
 | ACT-03 | Add candidates to saved list and/or export the candidate set | `add_list_item` wired for Add-to-List; flat CSV/XLSX export with off-loop text fetch |
 | PST-01 | Persist builder inputs + triage + filter + view; restore = auto re-run | `joins_lab_storage.py` extended under `schema_version: 1`; restore calls `execute_joins_search` |
 | PST-02 | Persistence uses server-side per-browser-session `safe_user_*` (no blobs, versioned) | `web/safe_storage.py` chokepoint; `_JOINS_LAB_KEY = 'joins_lab'`; cap discipline enforced |
@@ -78,7 +78,7 @@
 
 ## Summary
 
-Phase 120 extends the already-shipped Joins Lab (Phases 117–119) with research-output actions and durable working-state persistence. All six major research questions have been resolved by reading the live code. The most critical finding is the **D-02 status discrepancy**: `create_fragment_join` does NOT set `status` on insert, so new joins land with `status='proposed'` (schema default); the Joins Lab known-joins group filters `confirmed_only=True` via `status='confirmed'`; therefore new joins from ACT-01 would silently NOT appear in the known-joins group unless the insert explicitly sets `status='confirmed'`. The live behavior the user observed (joins appear immediately to everyone) reflects the `/browse` dialog path, which does NOT use `confirmed_only=True` — confirming the discrepancy. The fix is simple and explicit: pass `status='confirmed'` in the `create_fragment_join` call from ACT-01.
+Phase 120 extends the already-shipped Joins Lab (Phases 117–119) with research-output actions and durable working-state persistence. All six major research questions have been resolved by reading the live code. The most critical finding is the **D-02 status discrepancy**: `create_fragment_join` does NOT set `status` on insert, so new joins land with `status='proposed'` (schema default); the Joins Lab known-joins group filters `confirmed_only=True` via `status='confirmed'`; therefore new joins from ACT-01 silently do NOT appear in the Lab's known-joins group, even though they DO appear immediately in `/browse` (whose path does NOT use `confirmed_only=True`). **[USER OVERRIDE 2026-06-20]** The fix is NOT to insert `status='confirmed'` (that would falsely mark an unmoderated claim). Instead, keep the inserted status `'proposed'` and set the Lab known-joins fetch to `confirmed_only=False` so proposed joins show in the Lab too — parity with `/browse` — plus `force_refresh` the cache after insert.
 
 The persistence extension is straightforward: `web/joins_lab_storage.py` was written in Phase 117 with a forward-compatibility note explicitly inviting Phase 120 to add keys under `schema_version: 1`. The restore path wires into the existing `_bootstrap_anchor` / `execute_joins_search` pipeline already in place.
 
@@ -149,15 +149,15 @@ No new packages are installed in Phase 120. All work rides existing dependencies
 User clicks "Add as Join"
     └─► login gate (GlobalAuthState.is_logged_in())
         ├─► anon: create_login_dialog().open()   [D-18 fix: was /settings navigate]
-        └─► authed: create_fragment_join(status='confirmed')  [D-02 explicit insert]
+        └─► authed: create_fragment_join(...)  [D-02 OVERRIDE: NO status kwarg → stays 'proposed']
                 └─► Supabase fragment_joins table
-                    └─► _load_known_joins() force_refresh=True → re-render known_joins_container
+                    └─► _load_known_joins(force_refresh=True) with confirmed_only=False → re-render
 
 User clicks "Add to Puzzle"
-    └─► safe_user_set('puzzle_bulk_add', {anchor_sys_id, candidate_sys_ids[]})
+    └─► safe_user_set('puzzle_staging', {anchor_sys_id, candidate_sys_ids[]})
         └─► ui.navigate.to('/puzzle')
             └─► puzzle_page_route(add=None)
-                └─► create_puzzle_page reads safe_user_get('puzzle_bulk_add')
+                └─► create_puzzle_page reads safe_user_get('puzzle_staging')
                     └─► clears key, loops _add_fragment_by_sys_id for each
 
 User clicks Stop (D-11)
@@ -186,12 +186,14 @@ web/
 │   └── compare_modal.py     # extend: Browse-in-Compare (D-08), info buttons (D-09), prefetch (D-10)
 ```
 
-### Pattern 1: Insert with explicit status (D-02)
-**What:** Pass `status='confirmed'` in the insert dict so ACT-01 joins reliably appear in the known-joins group.
-**When to use:** Every `create_fragment_join` call from ACT-01.
+### Pattern 1: Insert as 'proposed' + show proposed in the Lab (D-02) [USER OVERRIDE 2026-06-20]
+**What:** Do NOT pass `status` — let the insert keep the `'proposed'` DB default. Make ACT-01 joins
+appear in the Lab's known-joins group by flipping that fetch to `confirmed_only=False` (parity with
+`/browse`), then `force_refresh` the cache.
+**When to use:** Every `create_fragment_join` call from ACT-01, plus the Lab known-joins fetch.
 **Example:**
 ```python
-# Source: web/supabase_client.py:1639-1651 (data dict extended)
+# Source: web/supabase_client.py:1639-1651 (data dict — NO status key)
 data = {
     'user_id': user_id,
     'fragment_a_sys_id': anchor_sys_id,
@@ -200,8 +202,9 @@ data = {
     'fragment_b_shelfmark': candidate_shelfmark,
     'join_type': 'uncertain',  # DB default; can expose in UI later
     'confidence': 'possible',
-    'status': 'confirmed',     # D-02: explicit — do NOT rely on DB default 'proposed'
+    # NO 'status' key → stays 'proposed' (DB default). Do NOT set 'confirmed'.
 }
+# Then: Lab known-joins fetch uses confirmed_only=False so this proposed join shows.
 ```
 
 ### Pattern 2: SEED-008 fire-and-forget guard
@@ -224,16 +227,16 @@ except RuntimeError:
 **Example:**
 ```python
 # Joins Lab side (before navigate)
-safe_user_set('puzzle_bulk_add', {
+safe_user_set('puzzle_staging', {
     'anchor_sys_id': anchor_sys_id,
     'candidate_sys_ids': [c.sys_id for c in selected_candidates],  # max 20
 })
 ui.navigate.to('/puzzle')
 
 # Puzzle page side (create_puzzle_page, after existing initial_add check)
-bulk = safe_user_get('puzzle_bulk_add', default=None)
+bulk = safe_user_get('puzzle_staging', default=None)
 if bulk:
-    safe_user_pop('puzzle_bulk_add', None)  # clear immediately (one-shot)
+    safe_user_pop('puzzle_staging', None)  # clear immediately (one-shot)
     # loop _add_fragment_by_sys_id for anchor + candidates
 ```
 
@@ -400,13 +403,13 @@ The route handler at `web/main.py:1902`: `def puzzle_page_route(add: str = None,
 
 `initial_add` is a single `'sys_id'` or `'sys_id,fl_id'` string. [VERIFIED: puzzle.py:2218-2220]
 
-**Staging mechanism (Claude's Discretion, recommendation):** Write a `safe_storage` key (`'puzzle_bulk_add'`) containing `{anchor_sys_id, candidate_sys_ids: [...]}`  before navigating to `/puzzle`. `create_puzzle_page` reads and clears this key at the top of its initialization (after the existing `initial_add` / `initial_doc` checks). Max 20 sys_ids (anchor + 19 candidates; bounded to avoid unbounded page-load time).
+**Staging mechanism (Claude's Discretion, recommendation):** Write a `safe_storage` key (`'puzzle_staging'`) containing `{anchor_sys_id, candidate_sys_ids: [...]}`  before navigating to `/puzzle`. `create_puzzle_page` reads and clears this key at the top of its initialization (after the existing `initial_add` / `initial_doc` checks). Max 20 sys_ids (anchor + 19 candidates; bounded to avoid unbounded page-load time).
 
 **Multitenant safety:** `safe_user_get`/`safe_user_set` is per-session (Phase-87 invariant). The key is read and immediately cleared (one-shot) to prevent stale data on subsequent puzzle visits. [VERIFIED: web/safe_storage.py]
 
 **Integration point in `create_puzzle_page`:** Read the key immediately after the existing `WEB_PUZZLE_ENABLED` guard and before the Fabric.js canvas setup. Call `_add_fragment_by_sys_id` for each sys_id in sequence (anchor first, then candidates). This function is already async-capable and handles the off-loop IIIF resolution. [VERIFIED: puzzle.py:2110]
 
-**The new allowlist entry:** `puzzle_bulk_add` must be added to `.planning/phase87_storage_allowlist.yaml` (like all new `safe_user_*` keys). Check current allowlist to follow the schema. The `test_no_raw_storage_access.py` AST guard will fail CI if direct `app.storage.user` access is used instead.
+**The new allowlist entry:** `puzzle_staging` must be added to `.planning/phase87_storage_allowlist.yaml` (like all new `safe_user_*` keys). Check current allowlist to follow the schema. The `test_no_raw_storage_access.py` AST guard will fail CI if direct `app.storage.user` access is used instead.
 
 ### V4: D-11 — stop-with-partials parity
 
@@ -503,7 +506,7 @@ except RuntimeError:
 **`tests/test_no_raw_storage_access.py`:** [VERIFIED: tests/test_no_raw_storage_access.py]
 - Scans all `web/` `.py` files for direct `app.storage.user` access
 - Allowlist at `.planning/phase87_storage_allowlist.yaml`; currently `[]` (empty)
-- New `puzzle_bulk_add` key in `create_puzzle_page` (which lives in `web/pages/puzzle.py`) must use `safe_user_get`/`safe_user_set` (not raw access). The scan covers `web/pages/puzzle.py`.
+- New `puzzle_staging` key in `create_puzzle_page` (which lives in `web/pages/puzzle.py`) must use `safe_user_get`/`safe_user_set` (not raw access). The scan covers `web/pages/puzzle.py`.
 - All new `joins_lab_storage.py` writes use `safe_user_set` → guard satisfied
 
 **`tests/test_joins_lab_off_loop.py`:** [VERIFIED: tests/test_joins_lab_off_loop.py]
@@ -539,9 +542,9 @@ except RuntimeError:
 **What goes wrong:** If `_cancel_current_search()` (which bumps the generation) is called synchronously by the Stop button handler, `_should_apply_results` returns `False` and partials are discarded — identical to a superseded run.
 **How to avoid:** See Pattern 4. Stop only sets `_stop_requested = True`; generation is NOT bumped until after the partial results are safely applied.
 
-### Pitfall 6: puzzle_bulk_add key not cleared (stale staging)
+### Pitfall 6: puzzle_staging key not cleared (stale staging)
 **What goes wrong:** User adds to puzzle from Joins Lab, puzzle opens and loads fragments. User then navigates directly to `/puzzle` later — the stale key still triggers bulk-add of the old fragments.
-**How to avoid:** `safe_user_pop('puzzle_bulk_add', None)` immediately after reading in `create_puzzle_page`. The key is one-shot.
+**How to avoid:** `safe_user_pop('puzzle_staging', None)` immediately after reading in `create_puzzle_page`. The key is one-shot.
 
 ### Pitfall 7: force_refresh=False on known-joins after ACT-01 insert
 **What goes wrong:** The in-memory cache (30-second TTL) returns stale data; the new join doesn't appear for up to 30 seconds.
@@ -620,7 +623,7 @@ result = add_list_item(
 |---|-------|---------|---------------|
 | A1 | `get_browse_page(sys_id, p_num=None)` returns the first available text page (not a random page) | V5/D-06 export text fetch | Export shows wrong page text for VS-only candidates |
 | A2 | `app.storage.user` (via safe_user_*) survives a page REFRESH for anonymous users in the current NiceGUI version | PST-02 | Persistence silently fails for anonymous users on refresh |
-| A3 | The `puzzle_bulk_add` key doesn't conflict with any existing `safe_storage` key in `create_puzzle_page` | ACT-02 | Key collision clobbers existing state |
+| A3 | The `puzzle_staging` key doesn't conflict with any existing `safe_storage` key in `create_puzzle_page` | ACT-02 | Key collision clobbers existing state |
 
 **A1 risk is LOW:** `get_browse_page` is used by the existing AnchorViewer on every anchor load and defaults to the first page. Verified indirectly by the VS-only transcription prefix fetch at `joins_lab.py:1423`.
 
@@ -642,7 +645,7 @@ result = add_list_item(
    - What's unclear: The current `render_known_joins_group` doesn't receive the current user's identity (it's stateless per T-118-02).
    - Recommendation: Pass `current_user_id` (or `current_username`) as an optional parameter to `render_known_joins_group`; render a delete button only for own joins. This keeps the component pure-render (no auth calls inside it).
 
-3. **puzzle_bulk_add size cap**
+3. **puzzle_staging size cap**
    - Recommendation: Cap at anchor + 19 candidates (20 total). Each sys_id is a ~18-char string; 20 of them is ~400 bytes. Well within safe_storage limits.
 
 ---
@@ -677,11 +680,11 @@ Nyquist validation is ENABLED (`config.json workflow.nyquist_validation: true`).
 
 | Req ID | Behavior | Test Type | Automated Command | Notes |
 |--------|----------|-----------|-------------------|-------|
-| ACT-01 | `create_fragment_join` inserts `status='confirmed'` | unit | `pytest tests/test_joins_lab.py -k "test_add_join"` | New test; assert status field |
+| ACT-01 | `create_fragment_join` called with NO `status` kwarg (stays `'proposed'`); Lab fetch uses `confirmed_only=False` | unit | `pytest tests/test_joins_lab.py -k "test_add_join"` | New test; assert no status kwarg + confirmed_only=False |
 | ACT-01 | Login gate shows dialog for anonymous user | render-smoke | `pytest tests/render_smoke/test_joins_lab_render_smoke.py -k "test_anon_add_join_gate"` | New render-smoke; headless mock |
 | ACT-01 | New join appears in known-joins after force-refresh | unit | `pytest tests/test_joins_lab.py -k "test_add_join_visible"` | Mock fetch_connected_fragments |
 | ACT-01 (D-03) | "Remove my join" deletes own join; not others | unit | `pytest tests/test_joins_lab.py -k "test_remove_own_join"` | Mock delete_fragment_join + RLS |
-| ACT-02 | `puzzle_bulk_add` key written + cleared (one-shot) | unit | `pytest tests/test_joins_lab.py -k "test_bulk_puzzle_staging"` | Mock safe_user_get/set |
+| ACT-02 | `puzzle_staging` key written + cleared (one-shot) | unit | `pytest tests/test_joins_lab.py -k "test_bulk_puzzle_staging"` | Mock safe_user_get/set |
 | ACT-02 | Anchor always included regardless of selection | unit | `pytest tests/test_joins_lab.py -k "test_bulk_anchor_always_included"` | Pure logic test |
 | ACT-03 | Export CSV contains triage verdict + text column | unit | `pytest tests/test_joins_lab.py -k "test_export_csv_columns"` | Mock executor.get_browse_page |
 | ACT-03 | Export text: matched page for text hits; first page for VS-only | unit | `pytest tests/test_joins_lab.py -k "test_export_text_page_selection"` | |
@@ -716,7 +719,7 @@ Nyquist validation is ENABLED (`config.json workflow.nyquist_validation: true`).
 | V2 Authentication | yes | `GlobalAuthState.is_logged_in()` gate + `create_login_dialog()` |
 | V3 Session Management | yes | `safe_user_*` (per NiceGUI session cookie, Phase 87) |
 | V4 Access Control | yes | RLS on `fragment_joins` (`USING (auth.uid() = user_id)` for DELETE); self-scope only |
-| V5 Input Validation | yes | Builder row text capped at 200 chars before storage; triage keys are `sys_id` strings (validated format); `puzzle_bulk_add` list capped at 20 |
+| V5 Input Validation | yes | Builder row text capped at 200 chars before storage; triage keys are `sys_id` strings (validated format); `puzzle_staging` list capped at 20 |
 | V6 Cryptography | no | No new crypto; HMAC tokens for puzzle upload already in place |
 
 ### Known Threat Patterns for this stack
@@ -724,7 +727,7 @@ Nyquist validation is ENABLED (`config.json workflow.nyquist_validation: true`).
 | Pattern | STRIDE | Standard Mitigation |
 |---------|--------|---------------------|
 | Cross-user join leakage via shared cache | Information Disclosure | `confirmed_only=True` + `:confirmed` cache key already in place (T-118-01); ACT-01 uses `get_user_client()` (authenticated RLS) |
-| Stale `puzzle_bulk_add` key from prior session | Tampering | Clear key immediately on read (one-shot pattern) |
+| Stale `puzzle_staging` key from prior session | Tampering | Clear key immediately on read (one-shot pattern) |
 | Blob persistence in `joins_lab` storage | Denial of Service | Size cap enforced; NEVER write `full_text`/images |
 | Server-side event propagation | Tampering | `js_handler='(e) => e.stopPropagation()'` for nested clickables; Python-side guard CI test |
 | SSRF via image prefetch | SSRF | Images load exclusively via per-provider proxy + Phase-98 NLI breaker (T-119-09); no direct IIIF URLs |
