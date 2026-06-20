@@ -679,7 +679,7 @@ translator; EN copy is the canonical source.
 | Add to Puzzle tooltip | "Add anchor + selected candidates to the Fragment Puzzle" | `add_to_puzzle_tooltip` | |
 | Bulk bar — Add to List | "Add to List" | `add_to_list` | + lock icon when gated |
 | Add to List tooltip (anon) | "Sign in to add candidates to a list" | `add_to_list_anon_tooltip` | |
-| Bulk bar — Export | "Export" | `export` | dropdown: CSV / Excel |
+| Toolbar — Export (persistent; full filtered set, NOT selection) | "Export" | `export` | dropdown: CSV / Excel |
 | Export menu — CSV | "CSV" | `export_csv` | |
 | Export menu — Excel | "Excel (XLSX)" | `export_xlsx` | |
 | Export cap notice | "Exporting the first 500 candidates." | `export_cap_notice` | appears if set > 500 |

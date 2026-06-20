@@ -153,12 +153,12 @@ User clicks "Add as Join"
                 └─► Supabase fragment_joins table
                     └─► _load_known_joins(force_refresh=True) with confirmed_only=False → re-render
 
-User clicks "Add to Puzzle"
-    └─► safe_user_set('puzzle_staging', {anchor_sys_id, candidate_sys_ids[]})
+User clicks "Add to Puzzle" (table view, ≥1 selected; anchor always added too)
+    └─► safe_user_set('puzzle_staging', {schema_version:1, fragments:[anchor, ...selected≤20]})
         └─► ui.navigate.to('/puzzle')
-            └─► puzzle_page_route(add=None)
-                └─► create_puzzle_page reads safe_user_get('puzzle_staging')
-                    └─► clears key, loops _add_fragment_by_sys_id for each
+            └─► create_puzzle_page (SYNC): safe_user_pop('puzzle_staging') + validate on the event loop
+                └─► schedules deferred async auto_add_bulk() via _after_delay (AFTER canvas init)
+                    └─► auto_add_bulk awaits _add_fragment_by_sys_id sequentially (anchor first)
 
 User clicks Stop (D-11)
     └─► sets _stop_requested['value'] = True   [new flag]
@@ -222,22 +222,28 @@ except RuntimeError:
 ```
 
 ### Pattern 3: Bulk staging via safe_storage (ACT-02)
-**What:** Write a staging key before navigating to `/puzzle`; puzzle page reads + clears it on load.
-**When to use:** ACT-02 bulk Add-to-Puzzle.
+**What:** Write a staging key before navigating to `/puzzle`; the **SYNC** puzzle page pops+validates it
+synchronously, then schedules a **DEFERRED** async bulk-add after canvas init. NO `await` in the sync
+page body — `create_puzzle_page` is sync (`web/pages/puzzle.py:2202`) and `_add_fragment_by_sys_id` is
+async (`:2110`); mirror the existing deferred single-add at `:3779-3911`.
+**When to use:** ACT-02 bulk Add-to-Puzzle (table view, ≥1 selected; anchor always included IN ADDITION).
 **Example:**
 ```python
-# Joins Lab side (before navigate)
+# Joins Lab side (before navigate) — payload = schema_version + ordered fragments (anchor first)
 safe_user_set('puzzle_staging', {
-    'anchor_sys_id': anchor_sys_id,
-    'candidate_sys_ids': [c.sys_id for c in selected_candidates],  # max 20
+    'schema_version': 1,
+    'fragments': [anchor_sys_id] + [c.sys_id for c in selected_candidates][:20],  # anchor + max 20
 })
 ui.navigate.to('/puzzle')
 
-# Puzzle page side (create_puzzle_page, after existing initial_add check)
-bulk = safe_user_get('puzzle_staging', default=None)
-if bulk:
-    safe_user_pop('puzzle_staging', None)  # clear immediately (one-shot)
-    # loop _add_fragment_by_sys_id for anchor + candidates
+# Puzzle page side — create_puzzle_page is SYNC: pop+validate on the event loop, then DEFER the adds
+bulk = safe_user_pop('puzzle_staging', None)   # one-shot read+delete (atomic)
+if isinstance(bulk, dict) and bulk.get('schema_version') == 1:
+    fragments = bulk.get('fragments', [])[:21]  # anchor + 20
+    async def auto_add_bulk():
+        for sid in fragments:                   # anchor first
+            await _add_fragment_by_sys_id(sid, ...)
+    asyncio.ensure_future(_after_delay(1.5, auto_add_bulk))  # after canvas init (mirror :3779-3911)
 ```
 
 ### Pattern 4: Stop-with-partials (D-11)
@@ -403,9 +409,9 @@ The route handler at `web/main.py:1902`: `def puzzle_page_route(add: str = None,
 
 `initial_add` is a single `'sys_id'` or `'sys_id,fl_id'` string. [VERIFIED: puzzle.py:2218-2220]
 
-**Staging mechanism (Claude's Discretion, recommendation):** Write a `safe_storage` key (`'puzzle_staging'`) containing `{anchor_sys_id, candidate_sys_ids: [...]}`  before navigating to `/puzzle`. `create_puzzle_page` reads and clears this key at the top of its initialization (after the existing `initial_add` / `initial_doc` checks). Max 20 sys_ids (anchor + 19 candidates; bounded to avoid unbounded page-load time).
+**Staging mechanism (Claude's Discretion, recommendation):** Write a `safe_storage` key (`'puzzle_staging'`) containing `{schema_version: 1, fragments: [anchor, ...selected]}` (ordered, anchor first) before navigating to `/puzzle`. Because `create_puzzle_page` is **sync** (`:2202`) and `_add_fragment_by_sys_id` is **async** (`:2110`), the page **pops+validates the key synchronously** at the top of init (after the existing `initial_add` / `initial_doc` checks), then schedules a **deferred async `auto_add_bulk()`** via `asyncio.ensure_future(_after_delay(...))` AFTER canvas init (mirror the single-add defer at `:3779-3911`) that awaits `_add_fragment_by_sys_id` sequentially. NO `await` in the sync page body. Cap: anchor + 20 candidates (bounded page-load time).
 
-**Multitenant safety:** `safe_user_get`/`safe_user_set` is per-session (Phase-87 invariant). The key is read and immediately cleared (one-shot) to prevent stale data on subsequent puzzle visits. [VERIFIED: web/safe_storage.py]
+**Multitenant safety:** `safe_user_pop` is per-session (Phase-87 invariant) and atomic (read+delete in one call) — one-shot, so no stale data on subsequent puzzle visits. [VERIFIED: web/safe_storage.py]
 
 **Integration point in `create_puzzle_page` [B2 / R2-H1 CORRECTED 2026-06-20]:** `create_puzzle_page` is **SYNCHRONOUS** (`def`, not `async def` — `puzzle.py:2202`), and `_add_fragment_by_sys_id` is **async** (`:2110`) — so you CANNOT `await` the adds inside the page body. POP + VALIDATE the `puzzle_staging` key SYNCHRONOUSLY on the event loop at page build (`safe_user_pop` reads+deletes atomically; the page body runs on the event loop, so storage context is available — never pop inside a `run.io_bound` closure). Then define an inner `async def auto_add_bulk()` that `await asyncio.sleep(...)` (let canvas init complete) and `await`s `_add_fragment_by_sys_id` for each sys_id SEQUENTIALLY (anchor index 0 first), and SCHEDULE it via `asyncio.ensure_future(_after_delay(1.5, auto_add_bulk))` — mirroring the EXISTING single-fragment `initial_add` deferred pattern (`puzzle.py:3779-3911`; the `_after_delay` helper at `:3769-3776` re-enters the client context and try/excepts). There is NO `await` in the sync `create_puzzle_page` body. Absent/malformed key → normal cold start. [VERIFIED: puzzle.py:2110, 2202, 3769-3911]
 
