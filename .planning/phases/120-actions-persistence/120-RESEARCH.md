@@ -409,7 +409,7 @@ The route handler at `web/main.py:1902`: `def puzzle_page_route(add: str = None,
 
 **Integration point in `create_puzzle_page`:** Read the key immediately after the existing `WEB_PUZZLE_ENABLED` guard and before the Fabric.js canvas setup. Call `_add_fragment_by_sys_id` for each sys_id in sequence (anchor first, then candidates). This function is already async-capable and handles the off-loop IIIF resolution. [VERIFIED: puzzle.py:2110]
 
-**The new allowlist entry:** `puzzle_staging` must be added to `.planning/phase87_storage_allowlist.yaml` (like all new `safe_user_*` keys). Check current allowlist to follow the schema. The `test_no_raw_storage_access.py` AST guard will fail CI if direct `app.storage.user` access is used instead.
+**No allowlist entry needed [L2 CORRECTED 2026-06-20]:** `puzzle_staging` does NOT go into `.planning/phase87_storage_allowlist.yaml`. The `test_no_raw_storage_access.py` AST guard scans ONLY raw `app.storage.user` access (it is blind to `safe_user_*` keys), so any key written through the `safe_user_*` chokepoint requires NO allowlist exemption. The allowlist stays `allowed_raw_access: []`. The only requirement is that `puzzle_staging` is read/written via `safe_user_get`/`safe_user_set`/`safe_user_pop` — never raw `app.storage.user`. [VERIFIED: tests/test_no_raw_storage_access.py:8,88-89; .planning/phase87_storage_allowlist.yaml `[]`]
 
 ### V4: D-11 — stop-with-partials parity
 
@@ -506,7 +506,7 @@ except RuntimeError:
 **`tests/test_no_raw_storage_access.py`:** [VERIFIED: tests/test_no_raw_storage_access.py]
 - Scans all `web/` `.py` files for direct `app.storage.user` access
 - Allowlist at `.planning/phase87_storage_allowlist.yaml`; currently `[]` (empty)
-- New `puzzle_staging` key in `create_puzzle_page` (which lives in `web/pages/puzzle.py`) must use `safe_user_get`/`safe_user_set` (not raw access). The scan covers `web/pages/puzzle.py`.
+- New `puzzle_staging` key in `create_puzzle_page` (which lives in `web/pages/puzzle.py`) must use `safe_user_get`/`safe_user_set`/`safe_user_pop` (not raw access). The scan covers `web/pages/puzzle.py`. NOTE [L2]: `safe_user_*` keys need NO allowlist entry — the guard scans only raw `app.storage.user`; the allowlist stays `[]`.
 - All new `joins_lab_storage.py` writes use `safe_user_set` → guard satisfied
 
 **`tests/test_joins_lab_off_loop.py`:** [VERIFIED: tests/test_joins_lab_off_loop.py]

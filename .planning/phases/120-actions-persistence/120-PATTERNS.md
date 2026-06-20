@@ -531,11 +531,32 @@ async def _prefetch_adjacent_images(candidate_list: list, current_idx: int) -> N
         asyncio.ensure_future(_fetch_one_image(sys_id))
 
 async def _fetch_one_image(sys_id: str) -> None:
-    """Fetch and cache image URL for sys_id (fire-and-forget)."""
+    """Fetch and cache image URL for sys_id (fire-and-forget).
+
+    [M3 CORRECTED 2026-06-20] Do NOT use ``executor.get_browse_page`` — the
+    WebSearchExecutor returns a NARROW text dict and explicitly does NOT enrich
+    image data (web/joins_executor.py:87-94 HIGH-1). Use the SAME rich resolver
+    path AnchorViewer/Compare use: ``service.get_browse_page`` (from
+    ``web.services.service.get_service()``) + ``resolve_external_images(sys_id)``
+    + ``resolve_image_url(...)`` (web/components/image_resolution.py). Proxy URLs
+    ONLY (per-provider proxy + Phase-98 breaker) — never a direct iiif URL.
+    [VERIFIED: web/components/anchor_viewer.py:302-304,399-431,
+     web/components/image_resolution.py resolve_external_images/resolve_image_url]
+    """
     try:
         def _resolve():
-            # Use same proxy URL construction as _add_fragment_by_sys_id (puzzle.py:2159)
-            return executor.get_browse_page(sys_id)   # returns dict with image metadata
+            # Rich resolver path (mirror AnchorViewer): fetch the browse page via
+            # the service resolver, populate external-provider fields via
+            # resolve_external_images(sys_id), then resolve_image_url(...) to get the
+            # PROXY image URL. Returns the proxy URL (or None on no-image).
+            from web.services.service import get_service
+            from web.components.image_resolution import (
+                resolve_external_images, resolve_image_url,
+            )
+            page = get_service().get_browse_page(sys_id)
+            ext = resolve_external_images(sys_id)
+            resolved = resolve_image_url(page, ext)  # see anchor_viewer for the exact merge
+            return resolved.get('img_url') if resolved and resolved.get('has_image') else None
         result = await run.io_bound(_resolve)
         if result:
             _prefetch_cache[sys_id] = result
@@ -661,8 +682,12 @@ ui.navigate.to('/puzzle')
 **Multitenant safety:** `safe_user_pop` is per-session (Phase 87 chokepoint). The pop is atomic
 (read + delete in one call) — no stale data on next puzzle visit.
 
-**Allowlist:** `puzzle_staging` must be added to `.planning/phase87_storage_allowlist.yaml`
-(currently `[]`; CI guard `tests/test_no_raw_storage_access.py` will fail otherwise).
+**Allowlist [L2 CORRECTED 2026-06-20]:** `puzzle_staging` does NOT need an allowlist entry. The
+`tests/test_no_raw_storage_access.py` AST guard scans ONLY raw `app.storage.user` access — keys written
+through the `safe_user_*` chokepoint are invisible to it and require no allowlist exemption. The
+allowlist stays `allowed_raw_access: []`. The ONLY requirement is that `puzzle_staging` is read/written
+via `safe_user_get`/`safe_user_set`/`safe_user_pop` (never raw `app.storage.user`).
+[VERIFIED: tests/test_no_raw_storage_access.py:8,88-89; .planning/phase87_storage_allowlist.yaml `[]`]
 
 **`_add_fragment_by_sys_id` signature** (lines 2110-2199 — already correct):
 ```python
@@ -777,10 +802,14 @@ async def _export_candidates(candidates: list, fmt: str) -> None:
     # ... assemble rows + trigger ui.download()
 ```
 
-**Image URL column** — reuse `shared/export_dossier.build_image_url_for_row` (Phase 94 helper):
+**Image URL column** — reuse `shared/export_dossier.build_image_url_for_row` (Phase 94 helper).
+**[M2 CORRECTED 2026-06-20]** The LIVE signature is positional `(sys_id, library_code, img_page,
+base_url=...)` — NOT the keyword form `(sys_id=, page=, library=)`. [VERIFIED: shared/export_dossier.py:265-270]
+`img_page` is the 1-based page number on the candidate row (`cand.page`); the helper converts it
+internally and returns `''` for synthetic/missing sys_ids. `library_code` is the candidate's library code:
 ```python
 from shared.export_dossier import build_image_url_for_row
-image_url = build_image_url_for_row(sys_id=cand.sys_id, page=cand.page or 0, library=cand.library)
+image_url = build_image_url_for_row(cand.sys_id, library_code=cand.library_code, img_page=cand.page)
 ```
 
 **`ui.download` pattern** (existing in `web/pages/search.py`, `web/export_service.py`):
@@ -926,7 +955,7 @@ None — all new/modified files have strong analogs in the existing codebase.
 | `test_no_raw_storage_access.py` | all `web/*.py` | no direct `app.storage.user` | Phase-87 chokepoint bypass |
 | `test_joins_lab_off_loop.py` | `web/pages/joins_lab.py` | `execute_search` only inside `run.io_bound` | event-loop blockage |
 | `test_no_server_side_stop_propagation.py` | all `web/*.py` | no `.stop_propagation()` in Python | broken click isolation |
-| `puzzle_staging` allowlist | `.planning/phase87_storage_allowlist.yaml` | new `safe_user_*` key declared | CI scan failure |
+| `safe_user_*` chokepoint | all `web/*.py` (incl. `puzzle_staging`) | new keys go through `safe_user_get/set/pop` (NO raw `app.storage.user`) | Phase-87 bypass. NOTE: `safe_user_*` keys need NO allowlist entry — the guard scans only raw access; allowlist stays `[]` |
 
 ---
 
