@@ -164,7 +164,19 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
   4. After a page refresh (or return to `/joins-lab` in the same browser session without logging in), the anchor, builder inputs (line text, modifiers, global toggles), triage verdicts, active filter, and view mode are all restored; the search is automatically re-run from the persisted inputs (not a stale result blob) — consistent with the desktop `join_workbench` restore pattern.
   5. Persistence uses server-side per-browser-session state through `web/safe_storage.py` (`safe_user_*`, keyed by the NiceGUI session cookie); the stored schema has an explicit version field for clean invalidation; the payload contains no `full_text` / image / result blobs (size cap enforced) and never leaks across sessions; a "Clear / Reset" control wipes all Joins Lab working state, and a test confirms the `safe_storage` keys are empty after reset.
 
-**Plans**: TBD
+Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-an-anchor D-07, Browse-in-Compare D-08, Compare info buttons D-09, image prefetch D-10, Stop-with-partials D-11, hide VS toggle D-12), Lists↔Joins-Lab integration (picker D-17, sign-in fix D-18, /lists entry D-19), and stability close-out (SEED-008 D-20, deferred Phase-119 verification D-21).
+
+**Plans**: 8 plans (7 waves — serialized on the shared `web/pages/joins_lab.py` page file)
+
+- [ ] 120-01-PLAN.md — PST storage extension: write_full_state/read_full_state under schema_version 1 + size caps + extended clear (PST-01/02/03, D-13/16) [Wave 1]
+- [ ] 120-02-PLAN.md — Page hardening: SEED-008 fire-and-forget guards (D-20) + sign-in route fix (D-18) + Stop-with-partials (D-11) [Wave 1]
+- [ ] 120-03-PLAN.md — Persistence wiring: save-on-change + auto re-run restore + restoring indicator + re-attach by sys_id (D-14/15) + Clear/Reset (D-16) [Wave 2]
+- [ ] 120-04-PLAN.md — ACT-01 Add-as-Join (proposed status, confirmed_only=False + force_refresh per D-02) + D-03 remove-my-join [Wave 3]
+- [ ] 120-05-PLAN.md — ACT-02 bulk Add-to-Puzzle: new multi-fragment safe_storage staging handoff (D-04) [Wave 4]
+- [ ] 120-06-PLAN.md — ACT-03 Add-to-List (D-05) + flat CSV/XLSX Export with off-loop batched transcription (D-06) [Wave 5]
+- [ ] 120-07-PLAN.md — SEED-007 Compare/workbench: Make-an-anchor (D-07) + Browse-in-Compare (D-08) + info buttons (D-09) + image prefetch (D-10) + hide VS toggle (D-12) [Wave 6]
+- [ ] 120-08-PLAN.md — Lists integration: choose-from-lists picker (D-17) + /lists entry (D-19) + deferred Phase-119 verification close-out (D-21) [Wave 7]
+
 **UI hint**: yes
 
 ### Phase 121: i18n Polish
@@ -188,5 +200,5 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 | 117. Vertical Spine | 6/6 | Complete    | 2026-06-18 |
 | 118. Joins, Entry & Full Builders | 6/6 | Complete    | 2026-06-19 |
 | 119. Candidates, Compare & Visual Similarity | 11/11 | Complete   | 2026-06-19 |
-| 120. Actions & Persistence | 0/TBD | Not started | - |
+| 120. Actions & Persistence | 0/8 | Not started | - |
 | 121. i18n Polish | 0/TBD | Not started | - |
