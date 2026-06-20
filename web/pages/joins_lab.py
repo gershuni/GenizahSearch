@@ -1584,18 +1584,11 @@ def create_joins_lab_page(
                 ui.button(tr('Close'), on_click=picker_dialog.close).props('flat')
             picker_dialog.open()
         else:
-            # Anonymous visitor — show login prompt (D-06 locked decision)
-            with ui.dialog() as login_dialog, ui.card().classes('p-4 min-w-[320px]'):
-                ui.label(tr('Sign in required')).classes('text-lg font-semibold mb-2')
-                ui.label(
-                    tr('Sign in to access your saved research lists.')
-                ).classes('text-sm').style('color: var(--text-secondary);')
-                ui.button(
-                    tr('Sign in'),
-                    on_click=lambda: ui.navigate.to('/settings')
-                ).props('color=primary unelevated')
-                ui.button(tr('Cancel'), on_click=login_dialog.close).props('flat')
-            login_dialog.open()
+            # Anonymous visitor — open the canonical in-page login overlay (D-18).
+            # D-18: replaced the old custom dialog (which lost Lab state by routing
+            # the user away) with create_login_dialog().open() — an in-page overlay.
+            from web.auth_state import create_login_dialog  # local import to avoid cycles
+            create_login_dialog().open()
 
     # Wire button handlers
     def _on_change_anchor() -> None:
