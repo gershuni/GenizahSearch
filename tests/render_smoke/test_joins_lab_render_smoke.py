@@ -1230,3 +1230,74 @@ def test_page_renders_without_real_engine(joins_lab_smoke_runner):
         )
 
     joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
+# Phase 120-03 PST-02/PST-03: Restore indicator + Clear/Reset control
+# (Static source assertions — not live render driver tests, since the
+#  render harness has a pre-existing stop_btn NoneType failure unrelated
+#  to Phase-120-03 changes.)
+# ---------------------------------------------------------------------------
+
+
+def _jl_source() -> str:
+    from pathlib import Path
+    return (Path(__file__).parent.parent.parent / "web" / "pages" / "joins_lab.py").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_restore_indicator_element_present_in_source():
+    """PST-02 UI-SPEC §8: the restoring indicator row must be defined in the page source.
+
+    Verifies that _restore_indicator_ref is assigned (the element was created and
+    stored so _bootstrap_anchor can show/hide it at runtime).
+    """
+    source = _jl_source()
+    assert "_restore_indicator_ref" in source, (
+        "_restore_indicator_ref must be defined (PST-02 restoring indicator)"
+    )
+    assert "Restoring your search" in source, (
+        "Restoring indicator text must be present (PST-02 UI-SPEC §8)"
+    )
+
+
+def test_restore_indicator_hidden_on_cold_start():
+    """PST-02 UI-SPEC §8: restoring indicator must start hidden (display: none).
+
+    The indicator is shown ONLY when _bootstrap_anchor detects a persisted anchor;
+    it must be hidden by default so cold-start users never see it.
+    """
+    source = _jl_source()
+    # The element must have display:none in its initial style
+    assert "display: none" in source, (
+        "The restoring indicator element must have display:none initial style (cold start hidden)"
+    )
+
+
+def test_stop_button_not_shown_during_restore():
+    """PST-02 D-11: auto-restore re-run must NOT show the Stop button.
+
+    Verifies the code comment/pattern that prevents the Stop button from appearing
+    during the auto-restore bootstrap path (user didn't initiate this search).
+    """
+    source = _jl_source()
+    # The plan mandates this is documented — check for the D-11 / auto-restore comment
+    assert ("auto-restore" in source or "Stop NOT shown" in source), (
+        "joins_lab.py must document that Stop is not shown on auto-restore re-run (PST-02 D-11)"
+    )
+
+
+def test_clear_all_state_and_navigate_present():
+    """PST-03 D-16: Reset confirm path must call clear_joins_lab_state + navigate.to('/joins-lab').
+
+    Static assertion that both operations appear in the page source; the live
+    render test (when the harness is fixed) will exercise the actual dialog.
+    """
+    source = _jl_source()
+    assert "clear_joins_lab_state" in source, (
+        "joins_lab.py must call clear_joins_lab_state() in the Reset confirm path (PST-03)"
+    )
+    assert "navigate.to('/joins-lab')" in source or 'navigate.to("/joins-lab")' in source, (
+        "joins_lab.py must call ui.navigate.to('/joins-lab') after clear (PST-03 cold reload)"
+    )

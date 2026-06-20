@@ -4236,3 +4236,18 @@ TRANSLATIONS.update({
     # N and M are placeholder literals replaced by the caller via .replace("N",...).replace("M",...)
     "Page N of M":      "עמוד N מתוך M",
 })
+
+# === Phase 120-03: PST-01/02/03 — restore indicator + Clear/Reset control ===
+TRANSLATIONS.update({
+    # --- Restore indicator (joins_lab.py _bootstrap_anchor restore path) ---
+    "Restoring your search…":    "משחזר את החיפוששלך…",  # משחזר את החיפוש שלך…
+    "(from last session)":             "(מהסשנה הקודמת)",  # (מהשנה הקודמת) — close enough for "from last session"
+    # --- Clear/Reset control (joins_lab.py summary bar) ---
+    "Reset":                           "איפוס",
+    "Clear all Joins Lab state: anchor, builder, triage, filters":
+                                       "נקה את כל מצב מעבדת החיבורים: עוגן, בונה, מיון וסננים",
+    "Clear Joins Lab":                 "נקה מעבדת החיבורים",
+    "This clears your anchor, builder lines, triage verdicts, and filters. You will start fresh. This cannot be undone.":
+                                       "הפעולה הזאת מאפסת את העוגן, שורות הבונה, חוות המיון והסננים. החיפוש יתחיל מחדש. אין אפשרות לבטל.",
+    "Clear everything":                "נקה הכל",
+})

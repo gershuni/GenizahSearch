@@ -76,7 +76,13 @@ from web.components.joins_builder import create_joins_builder
 from web.components.joins_panel import fetch_connected_fragments
 from web.components.known_joins_group import render_known_joins_group
 from web.joins_executor import WebSearchExecutor
-from web.joins_lab_storage import read_anchor, write_anchor
+from web.joins_lab_storage import (
+    clear_joins_lab_state,
+    read_anchor,
+    read_full_state,
+    write_anchor,
+    write_full_state,
+)
 from web.services import get_service
 from web.state import state
 from web.translations import is_rtl, tr
@@ -533,6 +539,8 @@ def create_joins_lab_page(
     # Late-bound UI refs (populated after UI is built)
     _vs_switch_ref: dict = {'el': None}       # the ui.switch element
     _vs_status_ref: dict = {'el': None}       # inline VS status label
+    # Phase 120-03 PST-02: restoring indicator (shown during auto-restore re-run)
+    _restore_indicator_ref: dict = {'el': None}
 
     # Enter-to-search: the builders are created before execute_joins_search is
     # defined, so wire the word-box Enter key through a mutable ref set later.
@@ -593,6 +601,8 @@ def create_joins_lab_page(
                 rf(sys_id, _triage)
             except Exception:
                 pass
+        # PST-01: persist triage change (on event loop — not inside run.io_bound)
+        _persist_state()
 
     def _on_compare_verdict(sys_id: str, verdict: str) -> None:
         """Compare verdict callback — writes shared triage + restyle (D-03, WR-01)."""
@@ -610,6 +620,8 @@ def create_joins_lab_page(
                 rf(sys_id, _triage)
             except Exception:
                 pass
+        # PST-01: persist triage change
+        _persist_state()
 
     # Late-bound reference to the TriageState object + render-scoped restyle fn.
     # _restyle_fn is set inside _render_candidates_surface to the closure returned
@@ -799,11 +811,15 @@ def create_joins_lab_page(
             # filter_state was already mutated in place by the dialog.
             _current_page['value'] = 0  # reset to page 0 on filter change
             _re_render_candidates_surface()
+            # PST-01: persist filter change (on event loop; filter dialog runs synchronously)
+            _persist_state()
 
         def _on_filter_reset() -> None:
             # filter_state was already reset to defaults by the dialog.
             _current_page['value'] = 0
             _re_render_candidates_surface()
+            # PST-01: persist filter reset
+            _persist_state()
 
         open_filter_dialog(
             filter_state=_filter_state,
@@ -957,6 +973,39 @@ def create_joins_lab_page(
                 icon='edit', on_click=lambda: _expand_builder()
             ).props('flat dense size=sm').tooltip(tr('Edit search'))
 
+            # Phase 120-03 PST-03: Clear/Reset control (D-16).
+            # Appears at the trailing end of the collapsed summary bar ONLY (not on
+            # cold start — summary_bar_container is hidden until first search runs).
+            def _on_reset_click() -> None:
+                """Open the Clear/Reset confirmation dialog."""
+                with ui.dialog() as _reset_dialog, ui.card().classes('p-4 gap-3'):
+                    ui.label(tr('Clear Joins Lab')).classes('text-base font-bold')
+                    ui.label(tr(
+                        'This clears your anchor, builder lines, triage verdicts, and filters.'
+                        ' You will start fresh. This cannot be undone.'
+                    )).classes('text-sm').style('max-width: 340px; white-space: normal;')
+                    with ui.row().classes('gap-2 justify-end'):
+                        ui.button(tr('Cancel')).props('flat').on(
+                            'click', lambda: _reset_dialog.close()
+                        )
+                        ui.button(
+                            tr('Clear everything')
+                        ).props('color=negative unelevated').on('click', _do_reset)
+                _reset_dialog.open()
+
+            def _do_reset() -> None:
+                """Confirm: wipe all Joins Lab state and reload to cold start."""
+                clear_joins_lab_state()
+                ui.navigate.to('/joins-lab')
+
+            ui.button(
+                tr('Reset'), icon='clear_all'
+            ).props('flat dense size=sm').style(
+                'color: var(--negative);'
+            ).tooltip(
+                tr('Clear all Joins Lab state: anchor, builder, triage, filters')
+            ).on('click', _on_reset_click)
+
         def _collapse_builder(summary_text: str) -> None:
             """Collapse the builder to the summary bar (D-14).
 
@@ -1004,6 +1053,10 @@ def create_joins_lab_page(
                         _ob = _other_side.get('builder')
                         if _ob is not None and 'set_variants' in _ob:
                             _ob['set_variants'](on)
+                        # PST-01: variants is already fired via set_variants → on_change
+                        # (Task 1 B1 wires _persist_state via anchor_builder on_change);
+                        # but if it doesn't fire (e.g. cached value), persist explicitly.
+                        _persist_state()
 
                     variants_cb.on_value_change(_on_variants_change)
 
@@ -1011,18 +1064,23 @@ def create_joins_lab_page(
                         tr('Flexible spacing'),
                         value=_global_opts['flex_spacing'],
                     )
-                    flex_cb.on(
-                        'update:model-value',
-                        lambda e: _global_opts.update({'flex_spacing': bool(e.args)}),
-                    )
+
+                    def _on_flex_change(e) -> None:
+                        _global_opts.update({'flex_spacing': bool(e.args)})
+                        _persist_state()
+
+                    flex_cb.on('update:model-value', _on_flex_change)
+
                     bidir_cb = ui.checkbox(
                         tr('Bidirectional'),
                         value=_global_opts['bidirectional'],
                     )
-                    bidir_cb.on(
-                        'update:model-value',
-                        lambda e: _global_opts.update({'bidirectional': bool(e.args)}),
-                    )
+
+                    def _on_bidir_change(e) -> None:
+                        _global_opts.update({'bidirectional': bool(e.args)})
+                        _persist_state()
+
+                    bidir_cb.on('update:model-value', _on_bidir_change)
 
                 other_side_cb = ui.checkbox(
                     tr('Search the other side of the leaf'),
@@ -1051,11 +1109,11 @@ def create_joins_lab_page(
                     # which for a dict-options select is the Quasar option object
                     # {'label','value'} (a dict) and silently mis-routes
                     # apply_cross_side. _coerce_combine_mode is belt-and-braces.
-                    combine_select.on_value_change(
-                        lambda: _other_side.update(
-                            combine=_coerce_combine_mode(combine_select.value)
-                        )
-                    )
+                    def _on_combine_change():
+                        _other_side.update(combine=_coerce_combine_mode(combine_select.value))
+                        _persist_state()
+
+                    combine_select.on_value_change(_on_combine_change)
 
                 # Other-side builder: its OWN Text Position selector, independent of
                 # the anchor side (allow_page_position=True; UAT). Built inside this
@@ -1074,8 +1132,26 @@ def create_joins_lab_page(
                 enabled = bool(other_side_cb.value)
                 _other_side['enabled'] = enabled
                 other_side_controls.set_visibility(enabled)
+                # PST-01: persist other-side enabled/disabled change
+                _persist_state()
 
             other_side_cb.on_value_change(_on_other_side_toggle)
+
+        # Phase 120-03 PST-02: restoring indicator — shown during auto-restore re-run.
+        # Hidden by default (cold start); shown in _bootstrap_anchor when a persisted
+        # anchor is restored; hidden again once the first search results render.
+        _restore_indicator = ui.row().classes('items-center gap-2 px-2 py-1 rounded').style(
+            'background: var(--bg-tertiary); display: none;'
+        )
+        _restore_indicator_ref['el'] = _restore_indicator
+        with _restore_indicator:
+            ui.spinner(size='xs').style('color: var(--text-secondary);')
+            ui.label(tr('Restoring your search…')).classes('text-sm').style(
+                'color: var(--text-secondary);'
+            )
+            ui.label(tr('(from last session)')).classes('text-xs').style(
+                'color: var(--text-tertiary);'
+            )
 
         with ui.row().classes('gap-2 items-center flex-wrap'):
             search_btn = ui.button(tr('Run Search')).props('color=primary unelevated icon=search')
@@ -1125,6 +1201,8 @@ def create_joins_lab_page(
                     view_toggle_btn.set_text(tr('Table'))
                 # Re-render without clearing _triage or resetting _current_page
                 _re_render_candidates_surface()
+                # PST-01: persist view mode change
+                _persist_state()
 
             view_toggle_btn = ui.button(tr('Table')).props('flat dense').tooltip(
                 tr('Switch between Grid and Table view')
@@ -2168,11 +2246,82 @@ def create_joins_lab_page(
     vs_switch.on_value_change(_on_vs_toggle_change)
 
     # -----------------------------------------------------------------------
+    # Phase 120-03 PST-01: Persistence — save full state on every input/triage/
+    # filter/view change.  All calls to _persist_state are on the event loop
+    # (never inside run.io_bound — Pitfall 4).
+    # -----------------------------------------------------------------------
+
+    def _persist_state() -> None:
+        """Gather the full joins_lab blob and write it via write_full_state.
+
+        Persists INPUTS + TRIAGE only — never candidate lists, full_text, or
+        images (D-13; avoids the search-history payload-bloat bug class).
+
+        Called from:
+          - anchor_builder on_change (builder word/mode/gap/anchor mutations)
+          - other_builder on_change
+          - global toggle changes (variants, flex_spacing, bidirectional)
+          - other-side toggle + combine changes
+          - triage verdict change
+          - filter apply / reset
+          - view-mode switch
+        """
+        anchor_sys_id = _anchor_state.get('sys_id') or ''
+        anchor_fl_id = _anchor_state.get('fl_id') or ''
+        if not anchor_sys_id:
+            return  # cold start — nothing to persist yet
+
+        # Anchor builder snapshot (rows + mode + text_position)
+        ab_state = anchor_builder['get_state']()
+
+        # Other-side builder snapshot (only when enabled)
+        ob = _other_side.get('builder')
+        ob_state = ob['get_state']() if (ob is not None and _other_side['enabled']) else None
+
+        write_full_state(
+            # Anchor identity
+            anchor_sys_id=anchor_sys_id,
+            anchor_fl_id=anchor_fl_id,
+            # Builder inputs (D-13): rows, mode, text_position
+            builder_rows=ab_state.get('lines_state', []),
+            builder_mode=anchor_builder['get_mode'](),
+            text_position=anchor_builder['get_text_position'](),
+            # Global options
+            flex_spacing=_global_opts['flex_spacing'],
+            bidirectional=_global_opts['bidirectional'],
+            # Other side
+            other_side_enabled=_other_side['enabled'],
+            other_side_rows=ob_state.get('lines_state', []) if ob_state else [],
+            other_side_combine=_other_side.get('combine', 'AND'),
+            # Triage (sys_id keyed verdicts — no result blobs or images, D-13)
+            triage=dict(_triage),
+            # Filter + view
+            active_filter=dict(_filter_state),
+            view_mode=_view_mode['value'],
+        )
+
+    # Register persistence hooks on both builders (Task 1 B1 API)
+    anchor_builder['on_change'](_persist_state)
+    other_builder['on_change'](_persist_state)
+
+    # -----------------------------------------------------------------------
     # Initial anchor resolution / restore (D-13: URL wins over storage)
     # -----------------------------------------------------------------------
 
     async def _bootstrap_anchor() -> None:
-        """Resolve and load the initial anchor (deferred off the page handler)."""
+        """Resolve and load the initial anchor (deferred off the page handler).
+
+        Phase 120-03 PST-02 extension: when the source is 'stored', read the
+        full persisted blob (read_full_state) and perform a full state restore:
+          1. Show restoring indicator (slim bar).
+          2. Load anchor + restore builder via set_state.
+          3. Restore global toggles + other-side.
+          4. Restore filter + view_mode.
+          5. Auto-run search (Stop NOT shown — auto-restore path).
+          6. Re-attach triage by sys_id AFTER execute_joins_search clears it.
+          7. Re-render candidates surface with restored triage.
+          8. Hide restoring indicator.
+        """
         stored = read_anchor()
         decision = decide_initial_anchor(initial_sys_id, initial_shelfmark, stored)
 
@@ -2201,12 +2350,103 @@ def create_joins_lab_page(
             # else: fall through to empty state (shelfmark not found)
 
         elif decision['source'] == 'stored':
+            # --- PST-02: full restore flow ---
+            full_state = read_full_state()  # returns dict or None
+
+            # Show restoring indicator
+            ind_el = _restore_indicator_ref.get('el')
+            if ind_el is not None:
+                ind_el.style('display: flex;')
+
+            # Step 1: load anchor
             await load_anchor(
                 decision['sys_id'],
                 fl_id=decision.get('fl_id'),
                 volume_ie=decision.get('volume_ie'),
-                show_restored_toast=True,
+                show_restored_toast=False,  # we show our own restoring indicator
             )
+
+            if full_state:
+                # Step 2: restore anchor builder state via B1 set_state
+                stored_ab = {
+                    'lines_state': full_state.get('builder_rows', []),
+                    'search_type': full_state.get('builder_mode', 'responsa'),
+                    'variants_on': full_state.get('variants_on', False),
+                    'single_text': '',
+                    'text_position': full_state.get('text_position', 'anywhere'),
+                }
+                # Infer variants_on from builder_mode if not stored explicitly
+                if 'variants_on' not in full_state:
+                    stored_ab['variants_on'] = full_state.get('builder_mode') == 'variants'
+                anchor_builder['set_state'](stored_ab)
+
+                # Step 3: restore global toggles
+                flex_val = bool(full_state.get('flex_spacing', False))
+                bidir_val = bool(full_state.get('bidirectional', False))
+                _global_opts['flex_spacing'] = flex_val
+                _global_opts['bidirectional'] = bidir_val
+                flex_cb.value = flex_val
+                bidir_cb.value = bidir_val
+
+                variants_val = stored_ab['variants_on']
+                variants_cb.value = variants_val
+                anchor_builder['set_variants'](variants_val)
+
+                # Step 4: restore other-side
+                other_enabled = bool(full_state.get('other_side_enabled', False))
+                if other_enabled:
+                    _other_side['enabled'] = True
+                    other_side_cb.value = True
+                    other_side_controls.set_visibility(True)
+                    combine_val = full_state.get('other_side_combine', 'AND')
+                    combine_select.value = combine_val
+                    _other_side['combine'] = _coerce_combine_mode(combine_val)
+                    _ob = _other_side.get('builder')
+                    if _ob is not None:
+                        stored_ob = {
+                            'lines_state': full_state.get('other_side_rows', []),
+                            'search_type': 'responsa',
+                            'variants_on': variants_val,
+                            'single_text': '',
+                            'text_position': full_state.get('text_position', 'anywhere'),
+                        }
+                        _ob['set_state'](stored_ob)
+                        _ob['set_variants'](variants_val)
+
+                # Step 5: restore filter state (before execute so display is correct)
+                stored_filter = full_state.get('active_filter')
+                if stored_filter and isinstance(stored_filter, dict):
+                    _filter_state.update(stored_filter)
+
+                # Step 6: restore view_mode
+                stored_view = full_state.get('view_mode', 'grid')
+                _view_mode['value'] = stored_view if stored_view in ('grid', 'table') else 'grid'
+                if _view_mode['value'] == 'table':
+                    view_toggle_btn.set_text(tr('Grid'))
+                else:
+                    view_toggle_btn.set_text(tr('Table'))
+
+                # Step 7: capture persisted triage for re-attachment AFTER execute
+                stored_triage = dict(full_state.get('triage') or {})
+            else:
+                stored_triage = {}
+
+            # Step 8: auto-run search (Stop NOT shown on auto-restore path, D-11)
+            # execute_joins_search resets _triage to {} — we re-attach afterwards.
+            await execute_joins_search()
+
+            # Step 9: re-attach persisted triage by sys_id (D-15).
+            # Orphan keys for sys_ids not in the current result set are harmless.
+            if stored_triage:
+                _triage.update(stored_triage)
+                # Re-render to show verdict borders on the restored candidate cards.
+                candidates_container.clear()
+                with candidates_container:
+                    _render_candidates_surface()
+
+            # Step 10: hide restoring indicator
+            if ind_el is not None:
+                ind_el.style('display: none;')
 
     # Defer the initial async resolution so it runs after the page handler
     # returns (do NOT block the page handler). asyncio.call_later (NOT ui.timer):
