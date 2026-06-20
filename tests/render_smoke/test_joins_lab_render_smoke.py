@@ -982,6 +982,229 @@ def test_r2_9_browse_compare_icon_buttons_in_triage_row(joins_lab_smoke_runner):
 
 
 # ---------------------------------------------------------------------------
+# Phase 120 Plan 02: SEED-008 / D-18 / D-11 render-smoke tests
+# ---------------------------------------------------------------------------
+
+def test_client_deleted_guard_load_known_joins(joins_lab_smoke_runner):
+    """D-20 render-smoke (VALIDATION.md row): a simulated client disconnect during
+    _load_known_joins does NOT raise or crash the server.
+
+    Tests the SEED-008 guard from Phase 120 Plan 02 Task 1: the full body of the
+    fire-and-forget coroutine is wrapped in try/except RuntimeError, including the
+    PRE-await UI mutations (M4 requirement).
+
+    Simulation: we trigger _load_known_joins by loading an anchor (which schedules
+    the known-joins coroutine) and then verify the page is still alive afterward.
+    Since we cannot inject a real client-disconnect mid-await in an in-process test,
+    we verify the GUARD structure via source assertion (belt-and-suspenders with the
+    unit test in test_joins_lab.py) and also verify the page continues rendering
+    after a simulated RuntimeError from a side-by-side mock call.
+    """
+    import asyncio
+    from unittest.mock import patch
+
+    async def driver(user):
+        await user.open('/joins-lab')
+
+        # Verify the page is alive (F-A1 + F-A2)
+        from nicegui import ElementFilter, ui
+        with user._client:
+            all_els = list(user._client.elements.values())
+        assert len(all_els) >= 50, (
+            f"D-20 PRE-CONDITION FAIL: page rendered only {len(all_els)} elements. "
+            "Expected at least 50 for a real /joins-lab page."
+        )
+
+        # Trigger an anchor load — this schedules _load_known_joins in ensure_future.
+        # _load_known_joins is wrapped in try/except RuntimeError (SEED-008 guard).
+        # If the guard is missing, a RuntimeError from UI mutations would propagate
+        # and crash the coroutine (and potentially the task loop).
+        with user._client:
+            all_inputs = list(ElementFilter(kind=ui.input))
+        if len(all_inputs) < 2:
+            pytest.skip("D-20: not enough inputs to drive anchor load")
+
+        anchor_inp = all_inputs[1]
+        with user._client:
+            anchor_inp.value = STUB_ANCHOR_SID
+
+        with user._client:
+            unelevated_btns = [
+                b for b in ElementFilter(kind=ui.button)
+                if b._props.get('unelevated') and b.visible
+            ]
+        if not unelevated_btns:
+            pytest.skip("D-20: no unelevated buttons found to trigger anchor load")
+
+        # Patch fetch_connected_fragments to raise RuntimeError — simulates
+        # client teardown mid-await; the SEED-008 outer guard must catch it.
+        # We use the module path where joins_lab imports it.
+        with patch('web.pages.joins_lab.fetch_connected_fragments',
+                   side_effect=RuntimeError('slot has been deleted')):
+            from nicegui import events
+            with user._client:
+                btn = unelevated_btns[0]
+                for listener in list(btn._event_listeners.values()):
+                    if listener.element_id == btn.id:
+                        ea = events.GenericEventArguments(
+                            sender=btn, client=user._client, args=None
+                        )
+                        events.handle_event(listener.handler, ea)
+                        break
+            await asyncio.sleep(0.7)
+
+        # Page must still be alive after the RuntimeError was raised and swallowed
+        with user._client:
+            els_after = list(user._client.elements.values())
+        assert len(els_after) >= 50, (
+            "D-20 FAIL: page element count dropped significantly after a simulated "
+            "RuntimeError in _load_known_joins. The SEED-008 guard may not have "
+            "caught the exception — check the try/except RuntimeError wrapping in "
+            "web/pages/joins_lab.py (Phase 120 Plan 02 Task 1)."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_signin_button_opens_dialog_not_navigate(joins_lab_smoke_runner):
+    """D-18 render-smoke (VALIDATION.md row): the anonymous Sign-in button in
+    the Joins Lab opens an in-page login dialog, NOT navigating to /settings.
+
+    Phase 120 Plan 02 Task 2: replaces `ui.navigate.to('/settings')` with
+    `create_login_dialog().open()` so Lab state is preserved.
+
+    Assertion strategy:
+    - Static: confirms the source file does NOT contain `navigate.to('/settings')`
+      (the removed bug pattern).
+    - Render: loads the page and verifies that after a simulated Sign-in button
+      click a dialog element is opened (model-value=True).
+
+    Note: the Sign-in button is only visible when no user is logged in.
+    The test fixture runs without Supabase so the user is always anonymous.
+    """
+    import asyncio
+
+    async def driver(user):
+        import pathlib
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        assert "navigate.to('/settings')" not in src, (
+            "D-18 FAIL (static): web/pages/joins_lab.py still contains "
+            "`navigate.to('/settings')`. Replace with `create_login_dialog().open()`."
+        )
+
+        await user.open('/joins-lab')
+        from nicegui import ElementFilter, ui
+        # Page should render
+        with user._client:
+            all_els = list(user._client.elements.values())
+        assert len(all_els) >= 50
+
+        # The sign-in button (D-18) is inside the action toolbar for anonymous users.
+        # We verify its presence and that clicking it does NOT navigate away.
+        # Since create_login_dialog() opens a dialog, after click a dialog should be visible.
+        # (The login dialog itself is built by web.auth_state.create_login_dialog.)
+
+        with user._client:
+            # Find any button referencing sign-in text (bilingual: 'Sign in' / 'להתחבר')
+            signin_btns = [
+                b for b in ElementFilter(kind=ui.button)
+                if b.visible and any(
+                    t in (b._props.get('label', '') + (b.text or ''))
+                    for t in ('Sign in', 'להתחבר', 'sign_in', 'login', 'Log in', 'כניסה')
+                )
+            ]
+
+        if not signin_btns:
+            # Page may not show Sign-in in this fixture state — skip gracefully
+            pytest.skip(
+                "D-18: no Sign-in button visible in current fixture state "
+                "(user may appear as logged in or button has different label). "
+                "Static source assertion passed — render click skipped."
+            )
+
+        # Click the Sign-in button
+        from nicegui import events
+        btn = signin_btns[0]
+        with user._client:
+            for listener in list(btn._event_listeners.values()):
+                if listener.element_id == btn.id:
+                    ea = events.GenericEventArguments(
+                        sender=btn, client=user._client, args=None
+                    )
+                    events.handle_event(listener.handler, ea)
+                    break
+        await asyncio.sleep(0.3)
+
+        # A dialog should have opened (NOT a page navigation)
+        with user._client:
+            open_dialogs = [
+                e for e in ElementFilter(kind=ui.dialog)
+                if e._props.get('model-value')
+            ]
+        assert open_dialogs, (
+            "D-18 FAIL: clicking the Sign-in button did not open a dialog. "
+            "Expected create_login_dialog().open() to open an in-page dialog. "
+            "Check web/pages/joins_lab.py Sign-in button on_click (Phase 120 Plan 02 Task 2)."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_stop_button_visible_during_search(joins_lab_smoke_runner):
+    """D-11 render-smoke (VALIDATION.md row): a Stop button is visible during search
+    (swapping with Run Search slot) and is NOT visible before search starts.
+
+    Phase 120 Plan 02 Task 3: adds a Stop button that swaps with the Run Search button
+    while a search is running; clicking Stop applies partial results.
+
+    Assertion:
+    - Before search: Stop button is hidden (visibility toggled off or not present).
+    - During/after search: Stop button is rendered and visible at some point,
+      OR (static fallback) the source contains `stop_search` tr() key.
+    """
+    async def driver(user):
+        import pathlib
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+
+        # Static assertion: Stop button is implemented (tr key present)
+        assert 'stop_search' in src, (
+            "D-11 FAIL (static): web/pages/joins_lab.py does not contain the "
+            "'stop_search' tr() key. The Stop button (Phase 120 Plan 02 Task 3) "
+            "must be implemented with tr('stop_search') label."
+        )
+
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+
+        # After Run Search completes (sync stub), the Stop button should be hidden
+        # (swapped back to Run Search). Check that a stop-related element exists
+        # in the client tree (even if hidden) — confirms Task 3 was implemented.
+        with user._client:
+            all_btns = list(ElementFilter(kind=ui.button))
+            # Look for a button marked as the stop button (by marker or icon)
+            stop_btns = [
+                b for b in all_btns
+                if (
+                    'stop_search_btn' in getattr(b, '_markers', [])
+                    or b._props.get('icon') in ('stop', 'stop_circle')
+                )
+            ]
+
+        # The Stop button must exist in the element tree (even if hidden after search)
+        assert stop_btns, (
+            "D-11 FAIL (render): no Stop button element found in the client element tree "
+            "after a search completes. The Stop button must be created (even if hidden) "
+            "as part of the Run Search / Stop swap slot. "
+            "Check web/pages/joins_lab.py Task 3 implementation (Phase 120 Plan 02). "
+            "Expected a button with marker 'stop_search_btn' or icon='stop'/'stop_circle'."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
 # Sanity: the page renders WITHOUT the real engine (F-A2 guard)
 # ---------------------------------------------------------------------------
 

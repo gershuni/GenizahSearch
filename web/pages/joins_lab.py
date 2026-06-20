@@ -657,21 +657,27 @@ def create_joins_lab_page(
 
         A3: includes the anchor sys_id in the batch so _enrichment[anchor_sid]
         is populated and is_size_mismatch() has the anchor's width/height.
+
+        SEED-008 (D-20): the WHOLE body is wrapped in ``try/except RuntimeError``
+        so a client-deleted teardown does not propagate out of the task.
         """
-        if not candidates_snap:
-            return
-        sys_ids = list(_get_enrichment_sys_ids(candidates_snap))
-        # A3: include anchor sys_id in the enrichment batch (deduped)
-        anchor_sid = _anchor_state.get('sys_id')
-        if anchor_sid and anchor_sid not in sys_ids:
-            sys_ids.append(anchor_sid)
-        enrichment = await _enrich_candidates(sys_ids)
-        # Store in the page-level dict (shared with filter dialog + table cells)
-        _enrichment.clear()
-        _enrichment.update(enrichment)
-        _enrichment_ready['value'] = True
-        # Re-render the surface so material/dims populate (same render path)
-        _re_render_candidates_surface()
+        try:
+            if not candidates_snap:
+                return
+            sys_ids = list(_get_enrichment_sys_ids(candidates_snap))
+            # A3: include anchor sys_id in the enrichment batch (deduped)
+            anchor_sid = _anchor_state.get('sys_id')
+            if anchor_sid and anchor_sid not in sys_ids:
+                sys_ids.append(anchor_sid)
+            enrichment = await _enrich_candidates(sys_ids)
+            # Store in the page-level dict (shared with filter dialog + table cells)
+            _enrichment.clear()
+            _enrichment.update(enrichment)
+            _enrichment_ready['value'] = True
+            # Re-render the surface so material/dims populate (same render path)
+            _re_render_candidates_surface()
+        except RuntimeError:
+            return  # client/tab deleted mid-fetch — benign teardown (SEED-008 D-20)
 
     def _re_render_candidates_surface() -> None:
         """Re-render the candidate grid/table into candidates_container in-place.
@@ -1134,54 +1140,64 @@ def create_joins_lab_page(
 
         Re-anchor callback: calls load_anchor (does NOT reset builder state — D-16).
         Open-in-browse callback: navigates to /browse?shelfmark=... (same tab).
-        """
-        if anchor_gen != _anchor_generation['value']:
-            return
-        known_joins_container.clear()
-        with known_joins_container:
-            spinner = ui.spinner(size='sm').style('color: var(--text-muted);')
 
+        SEED-008 (D-20): the WHOLE coroutine body is wrapped in ``try/except
+        RuntimeError`` so a client-deleted teardown at ANY point (including the PRE-await
+        spinner clear/render at the top of this function) does not propagate out of the
+        task.  M4 requires the ``try`` to open BEFORE the first UI mutation — the spinner
+        clear at ``known_joins_container.clear()`` below runs before the first ``await``
+        and can raise RuntimeError if the tab was torn down before this task ran.
+        """
         try:
-            data = await run.io_bound(
-                fetch_connected_fragments,
-                shelfmark=shelfmark,
-                document_id=sys_id,
-                pgpid=pgpid,
-                confirmed_only=True,
-                force_refresh=False,
-            )
-        except Exception:
             if anchor_gen != _anchor_generation['value']:
                 return
             known_joins_container.clear()
             with known_joins_container:
-                ui.label(tr('Could not load joins. Check your connection.')).classes(
-                    'text-xs'
-                ).style('color: var(--text-muted);')
-            return
+                ui.spinner(size='sm').style('color: var(--text-muted);')
 
-        # A newer anchor superseded this fetch while it was in flight — discard.
-        if anchor_gen != _anchor_generation['value']:
-            return
+            try:
+                data = await run.io_bound(
+                    fetch_connected_fragments,
+                    shelfmark=shelfmark,
+                    document_id=sys_id,
+                    pgpid=pgpid,
+                    confirmed_only=True,
+                    force_refresh=False,
+                )
+            except Exception:
+                if anchor_gen != _anchor_generation['value']:
+                    return
+                known_joins_container.clear()
+                with known_joins_container:
+                    ui.label(tr('Could not load joins. Check your connection.')).classes(
+                        'text-xs'
+                    ).style('color: var(--text-muted);')
+                return
 
-        def _on_reanchor(member_sys_id: str, member_shelfmark: str) -> None:
-            """Re-anchor to a known-join member (D-16: does NOT clear builder state)."""
-            asyncio.ensure_future(load_anchor(member_sys_id, show_restored_toast=False))
+            # A newer anchor superseded this fetch while it was in flight — discard.
+            if anchor_gen != _anchor_generation['value']:
+                return
 
-        def _on_open_browse(member_shelfmark: str) -> None:
-            """Open a known-join member in Browse (same tab)."""
-            sm_encoded = quote(member_shelfmark, safe='')
-            ui.navigate.to(f'/browse?shelfmark={sm_encoded}')
+            def _on_reanchor(member_sys_id: str, member_shelfmark: str) -> None:
+                """Re-anchor to a known-join member (D-16: does NOT clear builder state)."""
+                asyncio.ensure_future(load_anchor(member_sys_id, show_restored_toast=False))
 
-        known_joins_container.clear()
-        with known_joins_container:
-            render_known_joins_group(
-                data,
-                current_shelfmark=shelfmark,
-                current_sys_id=sys_id,
-                on_reanchor=_on_reanchor,
-                on_open_browse=_on_open_browse,
-            )
+            def _on_open_browse(member_shelfmark: str) -> None:
+                """Open a known-join member in Browse (same tab)."""
+                sm_encoded = quote(member_shelfmark, safe='')
+                ui.navigate.to(f'/browse?shelfmark={sm_encoded}')
+
+            known_joins_container.clear()
+            with known_joins_container:
+                render_known_joins_group(
+                    data,
+                    current_shelfmark=shelfmark,
+                    current_sys_id=sys_id,
+                    on_reanchor=_on_reanchor,
+                    on_open_browse=_on_open_browse,
+                )
+        except RuntimeError:
+            return  # client/tab deleted mid-fetch — benign teardown (SEED-008 D-20)
 
     async def load_anchor(
         sys_id: str,
@@ -1364,130 +1380,136 @@ def create_joins_lab_page(
         F-VSavail: first time called, probes VS availability via run.io_bound
         (_check_vs_service_available). When unavailable: disables the switch +
         surfaces tr('Visual similarity unavailable') INSTEAD of silently returning [].
+
+        SEED-008 (D-20): the WHOLE body is wrapped in ``try/except RuntimeError``
+        so a client-deleted teardown (tab closed mid-fetch) does not propagate out.
         """
-        # F-VSavail: probe availability off-loop on first VS fetch attempt
-        if not _vs_available['checked']:
-            available = await run.io_bound(_check_vs_service_available)
-            _vs_available['checked'] = True
-            _vs_available['available'] = available
-            if not available:
-                _apply_vs_unavailable_affordance()
-                return  # VS is not available — do not proceed
-
-        # If we already know it's unavailable, bail immediately
-        if not _vs_available['available']:
-            _apply_vs_unavailable_affordance()
-            return
-
-        _vs_loading['value'] = True
-        _update_vs_status_label()
         try:
-            vs_cands = await _fetch_vs_candidates(anchor_sid)
-        except Exception:
-            vs_cands = []
-        finally:
-            _vs_loading['value'] = False
+            # F-VSavail: probe availability off-loop on first VS fetch attempt
+            if not _vs_available['checked']:
+                available = await run.io_bound(_check_vs_service_available)
+                _vs_available['checked'] = True
+                _vs_available['available'] = available
+                if not available:
+                    _apply_vs_unavailable_affordance()
+                    return  # VS is not available — do not proceed
 
-        # Check the anchor hasn't changed while we were fetching
-        if _anchor_state.get('sys_id') != anchor_sid:
-            return  # stale fetch — discard
+            # If we already know it's unavailable, bail immediately
+            if not _vs_available['available']:
+                _apply_vs_unavailable_affordance()
+                return
 
-        # A4: enrich VS-only candidates with shelfmark/title/library_code off-loop.
-        # R2-8: also fetch the transcription BEGINNING (first ~200 chars via get_browse_page)
-        # so VS-only card snippet is non-blank instead of empty.
-        # VS suggestions carry only sys_id/rank/score (page=None, page-agnostic by design
-        # — F-A4-api). Resolve metadata via the PAGE-LOCAL executor (F-A4-scope: the
-        # executor is a page-local closure; _fetch_vs_candidates is module-level and
-        # cannot see it — resolve here inside _do_vs_fetch_and_update which CAN).
-        # The I/O runs via run.io_bound (F-A4-guard) naming get_meta_for_id /
-        # get_library_for_id / get_browse_page.
-        if vs_cands:
-            def run_vs_meta_core():
-                import dataclasses
-                _TRANSCRIPTION_PREFIX_LEN = 200  # R2-8: show the beginning, not the full text
-                meta_by_sid = {}
-                for c in vs_cands:
-                    try:
-                        shelfmark_v, title_v = executor.get_meta_for_id(c.sys_id)
-                    except Exception:
-                        shelfmark_v, title_v = '', ''
-                    try:
-                        library_code_v = executor.get_library_for_id(c.sys_id)
-                    except Exception:
-                        library_code_v = ''
-                    # R2-8: fetch transcription beginning (dict key "text")
-                    # get_browse_page returns a DICT (or None) — read via .get()
-                    # NOT .text (it's not a BrowsePage object here, just a narrow dict).
-                    transcription_prefix = ''
-                    try:
-                        page_data = executor.get_browse_page(c.sys_id)
-                        if page_data:
-                            raw_text = page_data.get('text', '') or ''
-                            transcription_prefix = raw_text[:_TRANSCRIPTION_PREFIX_LEN]
-                    except Exception:
-                        pass  # graceful: card stays blank (no crash)
-                    meta_by_sid[c.sys_id] = {
-                        'shelfmark': shelfmark_v or '',
-                        'title': title_v or '',
-                        'library_code': library_code_v or '',
-                        'full_text': transcription_prefix,
-                    }
-                # Apply metadata via dataclasses.replace (Candidate is frozen=True)
-                # page stays None — VS suggestions are page-agnostic (F-A4-api)
-                enriched = []
-                for c in vs_cands:
-                    m = meta_by_sid.get(c.sys_id, {})
-                    replacements = {}
-                    if m.get('shelfmark'):
-                        replacements['shelfmark'] = m['shelfmark']
-                    if m.get('title'):
-                        replacements['title'] = m['title']
-                    if m.get('library_code'):
-                        replacements['library_code'] = m['library_code']
-                    if m.get('full_text'):
-                        replacements['full_text'] = m['full_text']
-                    enriched.append(dataclasses.replace(c, **replacements) if replacements else c)
-                return enriched
-
+            _vs_loading['value'] = True
+            _update_vs_status_label()
             try:
-                vs_cands = await run.io_bound(run_vs_meta_core)
+                vs_cands = await _fetch_vs_candidates(anchor_sid)
             except Exception:
-                logger.debug('VS metadata enrichment failed', exc_info=True)
-                # vs_cands stays as-is (no metadata, but still usable)
+                vs_cands = []
+            finally:
+                _vs_loading['value'] = False
 
-        _vs_candidates.clear()
-        _vs_candidates.extend(vs_cands)
-        _vs_anchor_sid['value'] = anchor_sid
+            # Check the anchor hasn't changed while we were fetching
+            if _anchor_state.get('sys_id') != anchor_sid:
+                return  # stale fetch — discard
 
-        vs_switch_el = _vs_switch_ref.get('el')
-        if vs_switch_el is not None and vs_switch_el.value:
-            # Toggle is still ON — recompute from RAW baseline via single helper (G2)
-            anchor_sid_now = _anchor_state.get('sys_id') or ''
-            display = _compute_display_candidates()
-            _all_candidates.clear()
-            _all_candidates.extend(display)
-            filtered = compute_filtered(display, _filter_state, _enrichment, _triage, anchor_sid_now)
-            _filtered_candidates.clear()
-            _filtered_candidates.extend(filtered)
-            _current_page['value'] = 0
-            # Re-render
-            candidates_container.clear()
-            if filtered:
-                with candidates_container:
-                    _render_candidates_surface()
-            else:
-                # VS on + empty builder + no VS data OR empty intersection
-                with candidates_container:
-                    if not _vs_candidates:
-                        ui.label(tr('No visual similarity data for this fragment')).style(
-                            'color: var(--text-secondary);'
-                        )
-                    else:
-                        ui.label(
-                            tr('No candidates match both text and visual similarity. '
-                               'Try clearing the builder for VS-only browse.')
-                        ).style('color: var(--text-secondary);')
-        _update_vs_status_label()
+            # A4: enrich VS-only candidates with shelfmark/title/library_code off-loop.
+            # R2-8: also fetch the transcription BEGINNING (first ~200 chars via get_browse_page)
+            # so VS-only card snippet is non-blank instead of empty.
+            # VS suggestions carry only sys_id/rank/score (page=None, page-agnostic by design
+            # — F-A4-api). Resolve metadata via the PAGE-LOCAL executor (F-A4-scope: the
+            # executor is a page-local closure; _fetch_vs_candidates is module-level and
+            # cannot see it — resolve here inside _do_vs_fetch_and_update which CAN).
+            # The I/O runs via run.io_bound (F-A4-guard) naming get_meta_for_id /
+            # get_library_for_id / get_browse_page.
+            if vs_cands:
+                def run_vs_meta_core():
+                    import dataclasses
+                    _TRANSCRIPTION_PREFIX_LEN = 200  # R2-8: show the beginning, not the full text
+                    meta_by_sid = {}
+                    for c in vs_cands:
+                        try:
+                            shelfmark_v, title_v = executor.get_meta_for_id(c.sys_id)
+                        except Exception:
+                            shelfmark_v, title_v = '', ''
+                        try:
+                            library_code_v = executor.get_library_for_id(c.sys_id)
+                        except Exception:
+                            library_code_v = ''
+                        # R2-8: fetch transcription beginning (dict key "text")
+                        # get_browse_page returns a DICT (or None) — read via .get()
+                        # NOT .text (it's not a BrowsePage object here, just a narrow dict).
+                        transcription_prefix = ''
+                        try:
+                            page_data = executor.get_browse_page(c.sys_id)
+                            if page_data:
+                                raw_text = page_data.get('text', '') or ''
+                                transcription_prefix = raw_text[:_TRANSCRIPTION_PREFIX_LEN]
+                        except Exception:
+                            pass  # graceful: card stays blank (no crash)
+                        meta_by_sid[c.sys_id] = {
+                            'shelfmark': shelfmark_v or '',
+                            'title': title_v or '',
+                            'library_code': library_code_v or '',
+                            'full_text': transcription_prefix,
+                        }
+                    # Apply metadata via dataclasses.replace (Candidate is frozen=True)
+                    # page stays None — VS suggestions are page-agnostic (F-A4-api)
+                    enriched = []
+                    for c in vs_cands:
+                        m = meta_by_sid.get(c.sys_id, {})
+                        replacements = {}
+                        if m.get('shelfmark'):
+                            replacements['shelfmark'] = m['shelfmark']
+                        if m.get('title'):
+                            replacements['title'] = m['title']
+                        if m.get('library_code'):
+                            replacements['library_code'] = m['library_code']
+                        if m.get('full_text'):
+                            replacements['full_text'] = m['full_text']
+                        enriched.append(dataclasses.replace(c, **replacements) if replacements else c)
+                    return enriched
+
+                try:
+                    vs_cands = await run.io_bound(run_vs_meta_core)
+                except Exception:
+                    logger.debug('VS metadata enrichment failed', exc_info=True)
+                    # vs_cands stays as-is (no metadata, but still usable)
+
+            _vs_candidates.clear()
+            _vs_candidates.extend(vs_cands)
+            _vs_anchor_sid['value'] = anchor_sid
+
+            vs_switch_el = _vs_switch_ref.get('el')
+            if vs_switch_el is not None and vs_switch_el.value:
+                # Toggle is still ON — recompute from RAW baseline via single helper (G2)
+                anchor_sid_now = _anchor_state.get('sys_id') or ''
+                display = _compute_display_candidates()
+                _all_candidates.clear()
+                _all_candidates.extend(display)
+                filtered = compute_filtered(display, _filter_state, _enrichment, _triage, anchor_sid_now)
+                _filtered_candidates.clear()
+                _filtered_candidates.extend(filtered)
+                _current_page['value'] = 0
+                # Re-render
+                candidates_container.clear()
+                if filtered:
+                    with candidates_container:
+                        _render_candidates_surface()
+                else:
+                    # VS on + empty builder + no VS data OR empty intersection
+                    with candidates_container:
+                        if not _vs_candidates:
+                            ui.label(tr('No visual similarity data for this fragment')).style(
+                                'color: var(--text-secondary);'
+                            )
+                        else:
+                            ui.label(
+                                tr('No candidates match both text and visual similarity. '
+                                   'Try clearing the builder for VS-only browse.')
+                            ).style('color: var(--text-secondary);')
+            _update_vs_status_label()
+        except RuntimeError:
+            return  # client/tab deleted mid-fetch — benign teardown (SEED-008 D-20)
 
     def _on_vs_toggle_change() -> None:
         """Handle 👁 VS toggle ON/OFF (D-04/D-06)."""
