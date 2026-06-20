@@ -20,8 +20,6 @@ per-session in-memory dicts to simulate real NiceGUI session isolation.
 """
 from __future__ import annotations
 
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
