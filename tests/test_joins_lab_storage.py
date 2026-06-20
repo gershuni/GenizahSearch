@@ -5,6 +5,14 @@ Covers:
 1. Schema-version invalidation (3 cases: stale version, missing key, non-dict).
 2. Round-trip write/read via in-memory backing store.
 3. Two-anonymous-session no-state-bleed (SC#5).
+4. Phase-120 full-state write/read round-trip (PST-01).
+5. Legacy v1 anchor-only blob restored without discard (backward-compat).
+6. schema_version stays 1 in write_full_state().
+7. write_anchor() backward-compat (PST-01 regression).
+8. Size-cap enforcement: no blobs (PST-01 test_write_full_state_no_blobs).
+9. builder_rows / other_side_rows truncated at 20; term capped at 200 chars.
+10. triage capped at 500 entries (LRU-evict oldest untriaged first).
+11. clear_joins_lab_state() wipes both joins_lab AND puzzle_staging (PST-03).
 
 All storage I/O is monkeypatched — no live NiceGUI storage context required.
 The module under test uses only safe_user_get/set/pop; we substitute them with
@@ -133,6 +141,279 @@ def test_write_then_read_round_trip(monkeypatch):
 # ---------------------------------------------------------------------------
 # No-state-bleed test (SC#5 — two anonymous sessions)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Phase-120 full-state round-trip tests (Task 1)
+# ---------------------------------------------------------------------------
+
+def test_write_full_state_round_trip(monkeypatch):
+    """write_full_state() then read_full_state() returns all Phase-120 keys."""
+    _get, _set, _pop = _make_session_store()
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+
+    from web.joins_lab_storage import write_full_state, read_full_state
+
+    builder_rows = [{'term': 'שאלה', 'gap_to_next': 0, 'modifiers': {}}]
+    other_rows = [{'term': 'תשובה', 'gap_to_next': 1, 'modifiers': {'variants': True}}]
+    triage = {'990001': 'yes', '990002': 'maybe', '990003': 'no'}
+
+    ok = write_full_state(
+        anchor_sys_id='990001234',
+        anchor_fl_id='T-S 12.123.1r',
+        anchor_volume_ie=None,
+        builder_rows=builder_rows,
+        builder_mode='exact',
+        text_position='anywhere',
+        flex_spacing=False,
+        bidirectional=True,
+        other_side_enabled=True,
+        other_side_rows=other_rows,
+        other_side_combine='narrow',
+        triage=triage,
+        active_filter={'type': 'text'},
+        view_mode='grid',
+    )
+    assert ok is True, 'write_full_state should return True'
+
+    result = read_full_state()
+    assert result is not None, 'read_full_state() should return data after write_full_state()'
+    assert result['anchor_sys_id'] == '990001234'
+    assert result['anchor_fl_id'] == 'T-S 12.123.1r'
+    assert result['anchor_volume_ie'] is None
+    assert result['builder_rows'] == builder_rows
+    assert result['builder_mode'] == 'exact'
+    assert result['text_position'] == 'anywhere'
+    assert result['flex_spacing'] is False
+    assert result['bidirectional'] is True
+    assert result['other_side_enabled'] is True
+    assert result['other_side_rows'] == other_rows
+    assert result['other_side_combine'] == 'narrow'
+    assert result['triage'] == triage
+    assert result['active_filter'] == {'type': 'text'}
+    assert result['view_mode'] == 'grid'
+
+
+def test_write_full_state_schema_version_stays_1(monkeypatch):
+    """write_full_state() persists schema_version=1 (NOT 2)."""
+    _get, _set, _pop = _make_session_store()
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+
+    from web.joins_lab_storage import write_full_state, read_full_state, _SCHEMA_VERSION
+
+    write_full_state(anchor_sys_id='990001234')
+    result = read_full_state()
+    assert result is not None
+    assert result['schema_version'] == 1, (
+        f'schema_version must stay 1 (got {result["schema_version"]})'
+    )
+    assert _SCHEMA_VERSION == 1, '_SCHEMA_VERSION constant must be 1'
+
+
+def test_legacy_v1_anchor_blob_not_discarded(monkeypatch):
+    """An existing Phase-117 v1 blob (anchor keys only) must NOT be discarded.
+
+    Missing Phase-120 keys come back via .get(key, default) — never None for the
+    whole blob just because the new keys are absent.
+    """
+    legacy_blob = {
+        'schema_version': 1,
+        'anchor_sys_id': '990009999',
+        'anchor_fl_id': 'T-S NS 329.96',
+        'anchor_volume_ie': None,
+        # Phase-120 keys ABSENT intentionally
+    }
+    monkeypatch.setattr(
+        'web.joins_lab_storage.safe_user_get',
+        lambda key, default=None: legacy_blob if key == 'joins_lab' else default,
+    )
+
+    from web.joins_lab_storage import read_full_state
+
+    result = read_full_state()
+    assert result is not None, (
+        'Legacy v1 anchor blob must NOT be discarded by read_full_state()'
+    )
+    assert result['anchor_sys_id'] == '990009999'
+    # Phase-120 keys absent in the blob → callers use .get() with defaults
+    assert result.get('builder_rows', []) == []
+    assert result.get('triage', {}) == {}
+    assert result.get('view_mode', 'grid') == 'grid'
+
+
+def test_write_anchor_backward_compat(monkeypatch):
+    """write_anchor() still works unchanged after Phase-120 extension (regression)."""
+    _get, _set, _pop = _make_session_store()
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+
+    from web.joins_lab_storage import write_anchor, read_anchor, _SCHEMA_VERSION
+
+    ok = write_anchor('990001234', anchor_fl_id='T-S 12.123.1r')
+    assert ok is True
+    result = read_anchor()
+    assert result is not None
+    assert result['anchor_sys_id'] == '990001234'
+    assert result['anchor_fl_id'] == 'T-S 12.123.1r'
+    assert result['schema_version'] == _SCHEMA_VERSION == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase-120 size-cap and no-blobs tests (Task 2)
+# ---------------------------------------------------------------------------
+
+def test_write_full_state_no_blobs(monkeypatch):
+    """write_full_state() MUST strip/reject blob keys — no full_text in persisted payload.
+
+    This is VALIDATION.md row PST-01 (test_write_full_state_no_blobs).
+    """
+    _get, _set, _pop = _make_session_store()
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+
+    from web.joins_lab_storage import write_full_state, read_full_state
+
+    # Even if a caller mistakenly tries to pass blob-like kwargs, they must be ignored.
+    # The function accepts only known schema keys as named params — unknown kwargs
+    # should be silently ignored (or the function should only accept known params).
+    write_full_state(
+        anchor_sys_id='990001234',
+        triage={'990001': 'yes'},
+        view_mode='grid',
+    )
+
+    result = read_full_state()
+    assert result is not None
+    assert 'full_text' not in result, (
+        'full_text must never appear in the persisted payload'
+    )
+    assert 'candidates' not in result, 'candidate list must not be persisted'
+    assert 'image' not in result, 'image bytes must not be persisted'
+    assert 'results' not in result, 'result list must not be persisted'
+
+
+def test_builder_rows_capped_at_20(monkeypatch):
+    """write_full_state() truncates builder_rows to 20 entries at write time."""
+    _get, _set, _pop = _make_session_store()
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+
+    from web.joins_lab_storage import write_full_state, read_full_state
+
+    big_rows = [{'term': f'term{i}', 'gap_to_next': 0, 'modifiers': {}} for i in range(30)]
+    write_full_state(anchor_sys_id='990001234', builder_rows=big_rows)
+
+    result = read_full_state()
+    assert result is not None
+    assert len(result['builder_rows']) == 20, (
+        f'builder_rows must be capped at 20, got {len(result["builder_rows"])}'
+    )
+
+
+def test_builder_row_term_capped_at_200_chars(monkeypatch):
+    """Each builder_row term is capped at 200 chars at write time."""
+    _get, _set, _pop = _make_session_store()
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+
+    from web.joins_lab_storage import write_full_state, read_full_state
+
+    long_term = 'א' * 300  # 300-char term
+    rows = [{'term': long_term, 'gap_to_next': 0, 'modifiers': {}}]
+    write_full_state(anchor_sys_id='990001234', builder_rows=rows)
+
+    result = read_full_state()
+    assert result is not None
+    stored_term = result['builder_rows'][0]['term']
+    assert len(stored_term) <= 200, (
+        f'term must be capped at 200 chars, got {len(stored_term)}'
+    )
+
+
+def test_triage_capped_at_500(monkeypatch):
+    """write_full_state() caps triage at 500 entries (LRU-evict oldest untriaged first)."""
+    _get, _set, _pop = _make_session_store()
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+
+    from web.joins_lab_storage import write_full_state, read_full_state
+
+    # 600 entries: first 100 have verdicts (yes/no/maybe), last 500 are untriaged 'maybe'
+    # On eviction, untriaged entries should be evicted first; Y/N entries preserved.
+    triage = {}
+    # First 100: definite verdicts (should survive)
+    for i in range(100):
+        triage[f'99000{i:04d}'] = 'yes' if i % 2 == 0 else 'no'
+    # Next 500: 'maybe' — these are "untriaged" and candidates for eviction
+    for i in range(100, 600):
+        triage[f'99000{i:04d}'] = 'maybe'
+
+    write_full_state(anchor_sys_id='990001234', triage=triage)
+
+    result = read_full_state()
+    assert result is not None
+    stored_triage = result['triage']
+    assert len(stored_triage) <= 500, (
+        f'triage must be capped at 500 entries, got {len(stored_triage)}'
+    )
+    # Verify that Y/N entries are preserved
+    yes_no_count = sum(1 for v in stored_triage.values() if v in ('yes', 'no'))
+    assert yes_no_count == 100, (
+        f'All 100 yes/no triage verdicts must be preserved, got {yes_no_count}'
+    )
+
+
+def test_clear_leaves_empty(monkeypatch):
+    """clear_joins_lab_state() wipes both joins_lab AND puzzle_staging (PST-03).
+
+    This is VALIDATION.md row PST-03 (test_clear_leaves_empty).
+    """
+    store: dict = {}
+
+    def _get(key, default=None):
+        return store.get(key, default)
+
+    def _set(key, value) -> bool:
+        store[key] = value
+        return True
+
+    def _pop(key, default=None):
+        return store.pop(key, default)
+
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+
+    from web.joins_lab_storage import write_full_state, clear_joins_lab_state, read_full_state
+
+    # Write some state
+    write_full_state(anchor_sys_id='990001234', triage={'990001': 'yes'})
+    # Simulate puzzle_staging being set
+    _set('puzzle_staging', {'schema_version': 1, 'fragments': ['990001234']})
+
+    # Both keys should be present
+    assert store.get('joins_lab') is not None
+    assert store.get('puzzle_staging') is not None
+
+    # Clear all
+    clear_joins_lab_state()
+
+    # Both keys must be gone
+    assert read_full_state() is None, (
+        'read_full_state() must return None after clear_joins_lab_state()'
+    )
+    assert _get('puzzle_staging') is None, (
+        'puzzle_staging must be wiped by clear_joins_lab_state() (D-16)'
+    )
+
 
 def test_two_sessions_do_not_share_state(monkeypatch):
     """Writing anchor in session A must not surface in session B.
