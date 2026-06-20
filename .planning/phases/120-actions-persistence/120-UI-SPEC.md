@@ -551,8 +551,10 @@ keep the URL clean.
 
 ```python
 {
-    "schema_version": 2,              # bumped from 1 because new keys added (non-breaking
-                                      # additions; v1 blobs treated as v2 with defaults)
+    "schema_version": 1,              # UNCHANGED — Phase-120 keys are additive. CONTEXT D-16:
+                                      # "extend v1; bump only on remove/retype". v1 blobs read
+                                      # cleanly (missing keys default); bumping would DISCARD them
+                                      # (read_joins_lab_state does an exact-match version check).
     "anchor_sys_id": "990001234",     # str | None (Phase 117)
     "anchor_fl_id": None,             # str | None (Phase 117)
     "anchor_volume_ie": None,         # str | None (Phase 117)
@@ -582,10 +584,13 @@ keep the URL clean.
 oldest untriaged entries first, preserve Y/? verdict entries). `builder_rows` capped at 20
 (per builder widget max). `active_filter` JSON-serialized; must stay < 4KB.
 
-**Schema version:** Bumped to `2` from Phase 117's `1`. Version-1 blobs are treated as
-valid version-2 blobs with the Phase-120 keys defaulting to empty/None — no discard
-on version mismatch from 1→2. A future breaking change (key removal or type change) bumps
-to 3 with full discard.
+**Schema version:** STAYS at `1` (unchanged from Phase 117). Phase-120 keys are additive and
+non-breaking, so per CONTEXT D-16 ("extend v1; bump only on remove/retype") and the
+`joins_lab_storage.py` docstring, the version is NOT bumped. Existing v1 blobs (anchor only) restore
+cleanly — callers read the new keys with `.get(key, <default>)`. **Do not bump:** `read_joins_lab_state()`
+discards on exact-version mismatch, so a 1→2 bump would wipe every user's persisted anchor. A future
+*breaking* change (key removal or type change) is the only thing that bumps the version (to `2`),
+and only then with explicit migration/discard handling.
 
 **Save triggers:** Every state change writes the full `joins_lab` blob immediately
 (`safe_user_set`). No debounce required (the payload is small and the write is off-loop).
@@ -844,7 +849,7 @@ Tailwind utilities, and existing `web/components/`.
 | Persist: all builder inputs + triage + filter + view | 120-CONTEXT.md D-13 | Locked |
 | Restoring indicator = slim bar, inline, work-column top | Claude's Discretion (D-14) | Chosen here |
 | Triage/filter/view re-attach by sys_id post-restore | 120-CONTEXT.md D-15 | Locked |
-| schema_version bump 1→2 (non-breaking additions) | Claude's Discretion (D-16 / D-13) | Chosen here |
+| schema_version STAYS 1 (additive keys; bump only on remove/retype; avoids discarding v1 anchor blobs) | 120-CONTEXT.md D-16 | Locked (corrected from draft) |
 | Reset = trailing button in collapsed summary bar | Claude's Discretion (D-16) | Chosen here |
 | Reset confirms before clearing | 120-CONTEXT.md D-16 | Locked |
 | Picker = two-level drill-down (lists → fragments) | Claude's Discretion (D-17) | Chosen here |
