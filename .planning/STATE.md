@@ -4,13 +4,13 @@ milestone: v8.2.0
 milestone_name: Web Joins Lab
 status: executing
 stopped_at: Phase 120 context gathered
-last_updated: "2026-06-20T23:15:24.031Z"
+last_updated: "2026-06-20T23:32:59.726Z"
 last_activity: 2026-06-20
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 31
-  completed_plans: 24
+  completed_plans: 25
   percent: 60
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 120 (actions-persistence) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
 Next: Phase 120 — Actions & Persistence
 Last activity: 2026-06-20
@@ -86,7 +86,7 @@ Items carried forward from v8.1.0:
 
 ## Session Continuity
 
-Last session: 2026-06-20T23:15:24.025Z
+Last session: 2026-06-20T23:32:59.720Z
 Stopped at: Phase 120 context gathered
 Resume file: None
 Next step: `/gsd:plan-phase 117` (Vertical Spine)
@@ -111,6 +111,7 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 | Phase 119 P08 | 120min | 3 tasks | 5 files |
 | Phase 119 P11 | 60 | 3 tasks | 5 files |
 | Phase 120-actions-persistence P01 | 4m | 2 tasks | 2 files |
+| Phase 120 P02 | 45min | 3 tasks | 4 files |
 
 ## Decisions
 
@@ -137,6 +138,9 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 - [Phase ?]: 119-08 F-A1+F-A2 render-smoke harness
 - [Phase ?]: 119-08: Task 1 manual — no pytest-asyncio; asyncio.run wrapper pattern over NiceGUI User on httpx.ASGITransport(core.app)
 - [Phase ?]: 119-08: execute_search must return raw dicts (not Candidate objects) — dedup_candidates calls .get(); context.slot_stack saved before asyncio.run() and restored in finally for test isolation
+- **120-02-D20:** SEED-008 M4 guard: outer try/except RuntimeError opens BEFORE PRE-await mutations in _load_known_joins — existing inner try/except Exception nested inside (M4 requirement: covers client teardown at any point)
+- **120-02-D18:** create_login_dialog().open() replaces custom dialog + navigate.to('/settings') — Lab state preserved on anonymous sign-in
+- **120-02-D11:** _stop_requested flag checked BEFORE generation check in _make_progress_cb — InterruptedError fires while _should_apply_results still True, so partials applied on user Stop (not discarded)
 
 ## Operator Next Steps
 

@@ -169,7 +169,7 @@ Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-a
 **Plans**: 8 plans (7 waves — serialized on the shared `web/pages/joins_lab.py` page file)
 
 - [x] 120-01-PLAN.md — PST storage extension: write_full_state/read_full_state under schema_version 1 + size caps + extended clear (PST-01/02/03, D-13/16) [Wave 1]
-- [ ] 120-02-PLAN.md — Page hardening: SEED-008 fire-and-forget guards (D-20) + sign-in route fix (D-18) + Stop-with-partials (D-11) [Wave 1]
+- [x] 120-02-PLAN.md — Page hardening: SEED-008 fire-and-forget guards (D-20) + sign-in route fix (D-18) + Stop-with-partials (D-11) [Wave 1]
 - [ ] 120-03-PLAN.md — Persistence wiring: save-on-change + auto re-run restore + restoring indicator + re-attach by sys_id (D-14/15) + Clear/Reset (D-16) [Wave 2]
 - [ ] 120-04-PLAN.md — ACT-01 Add-as-Join (proposed status, confirmed_only=False + force_refresh per D-02) + D-03 remove-my-join [Wave 3]
 - [ ] 120-05-PLAN.md — ACT-02 bulk Add-to-Puzzle: new multi-fragment safe_storage staging handoff (D-04) [Wave 4]
@@ -200,5 +200,5 @@ Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-a
 | 117. Vertical Spine | 6/6 | Complete    | 2026-06-18 |
 | 118. Joins, Entry & Full Builders | 6/6 | Complete    | 2026-06-19 |
 | 119. Candidates, Compare & Visual Similarity | 11/11 | Complete   | 2026-06-19 |
-| 120. Actions & Persistence | 1/8 | In Progress|  |
+| 120. Actions & Persistence | 2/8 | In Progress|  |
 | 121. i18n Polish | 0/TBD | Not started | - |
