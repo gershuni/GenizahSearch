@@ -119,34 +119,51 @@ introduced in Phase 120.**
 
 ## Component Inventory — Net-New Phase 120 Affordances
 
-### 1. Bulk Action Bar (extends Phase-119 multi-select bulk triage bar)
+### 1. Bulk Action Bar (extends Phase-119 multi-select bulk triage bar) — TABLE VIEW ONLY
+
+> **[R2-H2 CORRECTED 2026-06-20] Selection scope:** ONLY the **table** view owns multi-select
+> (`web/components/candidate_grid.py:921,981` — the bulk bar + `table.on("selection", …)` live in
+> `create_candidate_table`). The **grid** view has NO selection API (`create_candidate_grid` at `:992`).
+> Therefore the **bulk action bar appears in TABLE view only**. In GRID view the bulk bar does NOT
+> appear — single-candidate flows use the per-card affordances (Set-as-Anchor + Add-as-Join, §2/§3).
 
 The Phase-119 bulk triage bar (`position:sticky bottom:0`, `background:var(--bg-tertiary)`)
-is extended to include action buttons alongside the existing "Mark selected as: Y/?/N".
+is extended (in TABLE view) to include the **selection-scoped** action buttons alongside the existing
+"Mark selected as: Y/?/N".
 
-**Shape (updated):**
+**Shape (updated — table view):**
 
 ```
-[Mark N selected as: Y ✓  ?  N ✗]   [Add to Puzzle]  [Add to List 🔒]  [Export ▾]
+[Mark N selected as: Y ✓  ?  N ✗]   [Add to Puzzle]  [Add to List 🔒]
 ```
 
-- The bar appears whenever ≥1 candidate is checked (unchanged 119 threshold).
+- The bar appears whenever ≥1 candidate is checked in the TABLE view (unchanged 119 threshold). Since the
+  bar only renders on ≥1 selection, there is no zero-selected path — the Add-to-Puzzle anchor is always
+  included IN ADDITION to ≥1 selected candidate.
 - **"Add to Puzzle"** — `ui.button(tr('Add to Puzzle'), icon='extension')`, flat,
   `color=default`. Tooltip: `tr('Add anchor + selected candidates to the Fragment Puzzle')`.
   No login gate. Count badge shows number of fragments to be added (anchor + N selected):
-  `ui.badge(str(1 + len(selected)), color='primary')` overlaid on the button.
+  `ui.badge(str(1 + len(selected)), color='primary')` overlaid on the button. **Selection-scoped.**
 - **"Add to List"** — `ui.button(tr('Add to List'), icon='playlist_add')`, flat,
   `color=default`. Login-gated: when anonymous, shows the standard login-prompt dialog
   instead of the picker. When logged in, opens the list-picker sub-dialog.
   Lock icon `lock` appended as trailing icon: `props='icon-right=lock'` (muted, 12px) so
-  the gate is visible before click.
+  the gate is visible before click. **Selection-scoped.**
+- Ordering: Mark-as group LEFT, then the two action buttons RIGHT-aligned with `ml-auto`.
+- The bar is `position:sticky bottom:0 z-index:10 px-4 py-2 gap-3 flex items-center`.
+
+**Export is NOT in this selection-gated bar [R2-H2 / D-06 / §7 CORRECTED 2026-06-20].** Export operates
+on the **full filtered/sorted candidate set** (CONTEXT D-06 "the candidate set"; §7 "filtered and
+sorted… snapshot", ≤500), NOT the table selection. So Export is a **persistent toolbar control**, visible
+whenever candidates exist — in BOTH grid and table view (it does not depend on selection):
+
 - **"Export"** — `ui.button(tr('Export'), icon='download')`, flat with a dropdown caret
-  (`icon-right=arrow_drop_down`). Opens a `ui.menu` with two items:
+  (`icon-right=arrow_drop_down`), mounted in the **persistent candidate-results toolbar** (the row with
+  the filter/view-switch controls), NOT in the bulk action bar. Opens a `ui.menu` with two items:
   - `tr('CSV')` — icon `table_view`, flat menu item.
   - `tr('Excel (XLSX)')` — icon `grid_on`, flat menu item.
-  Each menu item triggers the export flow with progress indicator (see Export Affordance, §7).
-- Ordering: Mark-as group LEFT, then the three action buttons RIGHT-aligned with `ml-auto`.
-- The bar is `position:sticky bottom:0 z-index:10 px-4 py-2 gap-3 flex items-center`.
+  Each menu item triggers the export flow with progress indicator (see Export Affordance, §7). Export
+  always exports the full filtered/sorted set (≤500), independent of the table selection.
 
 ### 2. Add-as-Join Button + Remove-Join Affordance
 
@@ -284,6 +301,11 @@ transition. This is visually cleaner than adding a second button alongside Run S
 
 ### 7. Export Affordance + Progress Indicator (D-06)
 
+**Export scope [R2-H2 CORRECTED 2026-06-20]:** Export operates on the **full filtered/sorted candidate
+set** (the snapshot at click time, capped at 500 — see below), NOT the table multi-selection. The Export
+control is therefore a **persistent toolbar button** (in the candidate-results toolbar, NOT the
+selection-gated bulk action bar — see §1), visible whenever candidates exist, in BOTH grid and table view.
+
 **Claude's Discretion (D-06 — export columns, cap, affordance):**
 
 **Column ordering (flat single-sheet):**
@@ -304,7 +326,7 @@ transition. This is visually cleaner than adding a second button alongside Run S
 **Text cap:** 4000 characters per cell (reuses `SEARCH_API_BROWSE_TEXT_CAP` convention, D-06).
 Not user-configurable.
 
-**Export count cap:** 500 candidates max (matches the fuzzy result-cap ceiling `SEARCH_API_FUZZY_MAX_LIMIT`). If the candidate set exceeds 500, a notice appears before download: `tr('Exporting the first 500 candidates.')`.
+**Export count cap:** 500 candidates max (matches the fuzzy result-cap ceiling `SEARCH_API_FUZZY_MAX_LIMIT`). The set exported is the FULL filtered+sorted candidate set snapshotted at click time (NOT the table `_selected` set). If that filtered set exceeds 500, a notice appears before download: `tr('Exporting the first 500 candidates.')`.
 
 **Progress indicator:**
 
@@ -493,7 +515,8 @@ line :701). Inserted as a new third icon button in the row.
 Chosen over batched query params to avoid URL-length limits with large sys_id sets and to
 keep the URL clean.
 
-1. User checks ≥1 candidate in the grid/table.
+1. User checks ≥1 candidate in the TABLE view (the only view with multi-select — R2-H2; the bulk bar
+   appears only on ≥1 table selection, so the anchor is always added IN ADDITION to ≥1 selected candidate).
 2. User clicks "Add to Puzzle" in the bulk action bar.
 3. The page writes a staging payload to `safe_user_set('puzzle_staging', {...})`:
    ```python

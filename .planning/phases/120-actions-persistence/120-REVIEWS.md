@@ -133,3 +133,53 @@ Lab" policy when ACT-01 / the `confirmed_only=False` flip lands.
 - B1, B2, H1–H4, M1, M4, L1, N1 → **plan-logic revisions** (planner reviews-mode, re-verified vs live code).
 - M2, M3, L2 → **PATTERNS.md / RESEARCH.md reference-doc fixes** (signatures + stale guidance).
 - The two overrides (status `'proposed'`, schema_version 1) are correct — preserve them.
+
+---
+
+# ROUND 2 (Codex re-review of the revised plans, 2026-06-20)
+
+**Verdict:** CHANGES-REQUIRED (no BLOCKERs). Resolved: H1, H4(core), M1, M2, M3, M4, L1, L2, N1,
+B1(core). Invariants confirmed: `_SCHEMA_VERSION` stays 1; `create_fragment_join` inserts NO `status`
+kwarg (stays `'proposed'`). Raw output: `_tmp/codex-120-plan-review-2-output.md`. Five open items:
+
+### R2-H1 — B2 reference docs still contradict the corrected Plan 05 (doc-only)
+Plan 05 (lines ~147-160) correctly defers via `_after_delay`/`auto_add_bulk()`. But `120-PATTERNS.md`
+(~:651) and `120-RESEARCH.md` (~:410) still say to add code "immediately" in `create_puzzle_page` and
+directly `await _add_fragment_by_sys_id(...)` — but `create_puzzle_page` is SYNC (`puzzle.py:2202`).
+**Fix:** rewrite the PATTERNS/RESEARCH puzzle-staging snippets to match Plan 05 (sync `safe_user_pop` +
+validate at page build; define `auto_add_bulk()`; schedule via `_after_delay`; NO `await` in the sync body).
+
+### R2-H2 — selection/export scope inconsistency + Export scope decision
+- `120-UI-SPEC.md` (§1 bulk bar, ~:496) still says actions ride multi-select in "grid/table"; the table
+  is the ONLY view with selection (`candidate_grid.py:921,981`; grid none at `:992`). **Fix:** UI-SPEC
+  bulk-action-bar → **TABLE-only**; in grid view the bulk bar does not appear (per-card affordances only).
+- **Export scope DECISION (spec-aligned):** Export operates on the **full filtered/sorted candidate set**
+  (CONTEXT D-06 "the candidate set"; UI-SPEC §7 "filtered and sorted… snapshot", ≤500), NOT the table
+  selection. So **move Export OUT of the selection-gated bulk bar into a PERSISTENT toolbar control**
+  (visible whenever candidates exist, any view). Add-to-Puzzle + Add-to-List STAY in the table bulk bar
+  (selection-scoped, D-04/D-05). Update Plan 06 (Export = all filtered, persistent control) and UI-SPEC
+  §1/§7 accordingly; add a test asserting Export uses the filtered set, not `_selected`.
+- **Add-to-Puzzle zero-selected:** the bulk bar appears only on ≥1 table selection, so there is no
+  "anchor-only Add-to-Puzzle" path (the anchor is always included IN ADDITION to ≥1 selected candidate).
+  **Fix:** rework/remove Plan 05's zero-selected anchor-only test; require ≥1 selected candidate.
+
+### R2-H3 — Compare catalog button reintroduces event-loop blocking (Plan 07, ~:143)
+Plan gates catalog availability off-loop but opens `show_catalog_dialog(sys_id, shelfmark)`, which
+SYNCHRONOUSLY calls `fjms_service.get_catalog_detail(sys_id)` (`catalog_dialog.py:33` →
+`fjms_service.py:2707`, multiple SQLite reads) — blocking the loop on open. **Fix:** prefetch the full
+catalog detail off-loop and pass it in; ADD `web/components/catalog_dialog.py` to Plan 07 `files_modified`
+and extend `show_catalog_dialog(..., catalog_detail=None)` (or pass a primed service returning the
+prefetched detail). Same off-loop-prefetch discipline for the bibliography side.
+
+### R2-M1 — B1 `set_state` must sync existing builder UI controls (Plan 03, ~:136)
+`set_state` writes closure dicts then calls `_render_all(...)`, but `_render_all` only rebuilds structured
+lines. The live builder also has type buttons/visibility (`joins_builder.py:792`), a text-position select
+(`:860`), and the single-line input (`:889`). **Fix:** `set_state` must also update the type-button props,
+call `_apply_type_visibility()`, set `single_input.value` and `text_pos_select.value`, and mirror the
+`_reset` visual sync — otherwise restored state shows stale controls.
+
+### R2-M2 — H4 pending action can stale-replay (Plan 04, ~:195-203)
+The pending-action descriptor carries only action/anchor/candidate; bootstrap pops + replays if logged in,
+with no TTL/schema/anchor-consistency check. **Fix:** add `schema_version`, `created_at`, and an expected
+anchor/route token to the descriptor; on replay, clear WITHOUT writing if expired or if the restored/current
+anchor doesn't match the descriptor.

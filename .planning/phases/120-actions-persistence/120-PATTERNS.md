@@ -610,9 +610,14 @@ else:
 
 **Callbacks** pass through from the page; the component stays pure-render (no auth calls inside it).
 
-**Bulk action bar extension** (D-04/D-05/D-06) — appended to existing Phase-119 bulk triage bar:
+**Bulk action bar extension** (D-04/D-05) — appended to existing Phase-119 bulk triage bar.
+[R2-H2 CORRECTED 2026-06-20] The bulk bar is **TABLE-VIEW ONLY** (only `create_candidate_table` owns
+multi-select — `candidate_grid.py:921,981`; `create_candidate_grid` at `:992` has none) and carries ONLY
+the **selection-scoped** actions: **Add-to-Puzzle** + **Add-to-List**. **Export is NOT in this bar** — it
+operates on the full filtered/sorted candidate set (≤500), not the selection, so it is a PERSISTENT
+toolbar control (see the Export section below + UI-SPEC §1/§7):
 ```python
-# Extend existing bar (appears when ≥1 candidate checked):
+# TABLE bulk bar (appears when ≥1 row checked) — selection-scoped actions only:
 with ui.row().classes('items-center gap-2 ml-auto'):
     # Count badge on Add-to-Puzzle
     with ui.row():
@@ -626,11 +631,16 @@ with ui.row().classes('items-center gap-2 ml-auto'):
         tr('Add to List'), icon='playlist_add',
         on_click=_on_add_to_list,
     ).props('flat icon-right=lock').tooltip(...)
+```
 
-    with ui.button(tr('Export'), icon='download').props('flat icon-right=arrow_drop_down'):
-        with ui.menu():
-            ui.menu_item(tr('CSV'), icon='table_view', on_click=lambda: _on_export('csv'))
-            ui.menu_item(tr('Excel (XLSX)'), icon='grid_on', on_click=lambda: _on_export('xlsx'))
+**Export control** (D-06) — a PERSISTENT toolbar button (mounted in the candidate-results toolbar, NOT
+the selection-gated bulk bar), visible whenever candidates exist in EITHER view. It exports the full
+filtered/sorted candidate set snapshot (≤500), independent of `_selected`:
+```python
+with ui.button(tr('Export'), icon='download').props('flat icon-right=arrow_drop_down'):
+    with ui.menu():
+        ui.menu_item(tr('CSV'), icon='table_view', on_click=lambda: _on_export('csv'))
+        ui.menu_item(tr('Excel (XLSX)'), icon='grid_on', on_click=lambda: _on_export('xlsx'))
 ```
 
 ---
@@ -646,19 +656,35 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
     # At line 2218: initial_add = 'sys_id,fl_id' or 'sys_id'
 ```
 
-**Phase 120 extension — bulk staging key (ACT-02/D-04):**
+**Phase 120 extension — bulk staging key (ACT-02/D-04) [B2 / R2-H1 CORRECTED 2026-06-20]:**
 
-Add immediately after the existing `initial_add` check at the top of `create_puzzle_page`:
+`create_puzzle_page` is **SYNCHRONOUS** (`def`, not `async def` — `web/pages/puzzle.py:2202`) and
+`_add_fragment_by_sys_id` is **async** (`:2110`). So you CANNOT `await` the per-fragment adds inside the
+page body. Mirror the EXISTING single-fragment `initial_add` pattern (`:3779-3911`): POP + VALIDATE the
+staging key SYNCHRONOUSLY on the event loop at page build, define an inner `async def auto_add_bulk()`,
+and SCHEDULE it via `asyncio.ensure_future(_after_delay(1.5, auto_add_bulk))` (the `_after_delay` helper at
+`:3769-3776` re-enters the client context with `with _puzzle_client:` and try/excepts). The deferred
+coroutine runs AFTER `init_canvas` and `await`s each fragment SEQUENTIALLY (anchor index 0 first).
+
+Add this in the SYNC body of `create_puzzle_page`, alongside the existing `initial_add` / `_after_delay`
+schedules:
 ```python
-from web.safe_storage import safe_user_get, safe_user_pop
+from web.safe_storage import safe_user_pop
 
-# Read and clear bulk staging payload (one-shot — must clear immediately to avoid stale data)
-bulk = safe_user_pop('puzzle_staging', None)   # safe_user_pop reads + deletes atomically
-if bulk and isinstance(bulk, dict) and bulk.get('schema_version') == 1:
-    fragments = bulk.get('fragments', [])[:21]  # anchor + max 20 candidates (cap)
-    for sys_id in fragments:
-        if sys_id:
-            # Resolve shelfmark for this sys_id (best-effort)
+# Pop + validate the bulk staging payload SYNCHRONOUSLY on the event loop (one-shot —
+# safe_user_pop reads + deletes atomically; the page body runs on the event loop, so the
+# storage context is available; NEVER pop inside a run.io_bound closure).
+bulk = safe_user_pop('puzzle_staging', None)
+if isinstance(bulk, dict) and bulk.get('schema_version') == 1 and bulk.get('fragments'):
+    bulk_fragments = list(bulk.get('fragments', []))[:21]  # anchor + max 20 candidates (cap)
+
+    async def auto_add_bulk():
+        """Deferred bulk add — runs AFTER canvas init; awaits each fragment sequentially."""
+        import asyncio
+        await asyncio.sleep(1.0)  # let canvas init complete (mirror auto_add :3794)
+        for sys_id in bulk_fragments:  # anchor is index 0 — added first
+            if not sys_id:
+                continue
             shelfmark = ''
             try:
                 shelfmark, _ = state.meta_mgr.get_meta_for_id(sys_id)
@@ -666,7 +692,13 @@ if bulk and isinstance(bulk, dict) and bulk.get('schema_version') == 1:
                 pass
             await _add_fragment_by_sys_id(sys_id, shelfmark, puzzle_meta,
                                           pending_fragment_meta, threshold_slider)
+
+    # Schedule via the SAME deferred wrapper the single-add uses (re-enters client ctx, try/excepts).
+    asyncio.ensure_future(_after_delay(1.5, auto_add_bulk))
+# Absent/malformed key → normal cold start (no schedule).
 ```
+NOTE: there is NO `await` in the synchronous `create_puzzle_page` body — the only `await`s are inside the
+deferred `auto_add_bulk()` coroutine.
 
 **Staging payload written by Joins Lab before `ui.navigate.to('/puzzle')`:**
 ```python
