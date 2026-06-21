@@ -21,17 +21,17 @@ def _make_indexer_canonical(tmp_path):
     which would fail Task 2's path-safety pre-check (REVIEWS Rev-2 HIGH #1).
     Do NOT change the Phase 97 helper — define a local one here.
 
-    Production places the SQLite DB INSIDE the LocalIndex dir (see
-    desktop/my_library_tab.py::_init_indexer at db_path = os.path.join(
-    Config.LOCAL_INDEX_DIR, "local_index.sqlite3")). The reset_my_library
-    rename-aside carries the DB with it. We mirror that here so the test
-    exercises the production teardown path.
+    SEED-006 P1: production places the SQLite DB in the PARENT of the LocalIndex
+    dir (see desktop/my_library_tab.py::_init_indexer via migrate_legacy_local_db),
+    NOT inside it — the reset_my_library rename-aside would otherwise carry/lock
+    the DB. reset_my_library now deletes the external DB explicitly. We mirror the
+    external layout here so the test exercises the real teardown path.
     """
     idx_dir = str(tmp_path / "LocalIndex")
     lab_dir = str(tmp_path / "LocalLabIndex")
     os.makedirs(idx_dir)
     os.makedirs(lab_dir)
-    db_path = str(os.path.join(idx_dir, "local_index.sqlite3"))
+    db_path = str(tmp_path / "local_index.sqlite3")
     return LocalIndexer(idx_dir, lab_dir, db_path)
 
 

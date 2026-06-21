@@ -58,6 +58,9 @@ from shared.nli_circuit_breaker import (
     NLI_IIIF_READ_TIMEOUT,
     NLI_MARC_READ_TIMEOUT,
 )
+# SEED-006: dependency-light hebword tokenizer registration (only imports
+# tantivy — safe at module top, no PyMuPDF/circular-import concern).
+from shared.search_tokenizer import register_search_tokenizers
 
 # Import unified variant pairs (generated from V0.7 vs V0.8 HTR comparison)
 # Sorted by frequency - use top N pairs based on slider setting
@@ -5723,19 +5726,29 @@ class Indexer:
 
         builder = tantivy.SchemaBuilder()
         builder.add_text_field("unique_id", stored=True)
-        builder.add_text_field("content", stored=True, tokenizer_name="whitespace")
+        # SEED-006 Stage 1: hebword tokenizer makes punctuation-attached words
+        # (בסגן, -> בסגן) retrievable; stored value stays original (display intact).
+        # content_head/tail + line_starts/line_ends KEEP whitespace — their
+        # L{n}:word colon markers would be shattered by hebword.
+        builder.add_text_field("content", stored=True, tokenizer_name="hebword")
         builder.add_text_field("content_head", stored=False, tokenizer_name="whitespace")
         builder.add_text_field("content_tail", stored=False, tokenizer_name="whitespace")
         builder.add_text_field("line_starts", stored=False, tokenizer_name="whitespace")
         builder.add_text_field("line_ends", stored=False, tokenizer_name="whitespace")
+        # SEED-006 Stage 2: additive, non-stored, diacritic-folded retrieval field
+        # (= strip_search_diacritics(content)) so צמאן / צ'מאן find the corpus
+        # form צ̇מאן (U+0307). Lower-weighted OR fallback only; display reads `content`.
+        builder.add_text_field("content_search", stored=False, tokenizer_name="hebword")
         builder.add_text_field("source", stored=True)
         builder.add_text_field("full_header", stored=True)
         builder.add_text_field("shelfmark", stored=True)
         builder.add_text_field("scope", stored=True)
         builder.add_text_field("boundaries", stored=True)
         schema = builder.build()
-        
+
         index = tantivy.Index(schema, path=db_path)
+        # SEED-006: register hebword (+ builtins) before the writer tokenizes content.
+        register_search_tokenizers(index)
         writer = index.writer(heap_size=500_000_000)
         
         total_docs = 0
@@ -5778,6 +5791,7 @@ class Indexer:
                             shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
                             writer.add_document(tantivy.Document(
                                 unique_id=str(cid), content=page_content, source=str(label),
+                                content_search=strip_search_diacritics(page_content),  # SEED-006 Stage 2
                                 full_header=str(chead), shelfmark=str(shelfmark),
                                 scope="page", boundaries="",
                                 content_head=pos['content_head'], content_tail=pos['content_tail'],
@@ -5811,6 +5825,7 @@ class Indexer:
                     shelfmark = self.meta_mgr.get_shelfmark_from_header(chead) or self.meta_mgr.meta_map.get(cid, "")
                     writer.add_document(tantivy.Document(
                         unique_id=str(cid), content=page_content, source=str(label),
+                        content_search=strip_search_diacritics(page_content),  # SEED-006 Stage 2
                         full_header=str(chead), shelfmark=str(shelfmark),
                         scope="page", boundaries="",
                         content_head=pos['content_head'], content_tail=pos['content_tail'],
@@ -5925,6 +5940,7 @@ class Indexer:
         writer.add_document(tantivy.Document(
             unique_id=str(unique_id),
             content=str(content),
+            content_search=strip_search_diacritics(str(content)),  # SEED-006 Stage 2
             source=str(first_source),
             full_header=str(first_header),
             shelfmark=str(shelfmark),
@@ -6585,8 +6601,9 @@ def expand_judeo_arabic(word: str) -> List[str]:
 # --------------------------------------------------------------------------
 
 # Matches combining diacritical marks (U+0300-U+036F), apostrophe variants (ASCII and curly),
-# and Hebrew geresh/gershayim. Does NOT match Hebrew nikud (U+05B0-U+05C7).
-COMBINING_DIACRITICALS_PATTERN = re.compile(r'[\u0300-\u036F\u0027\u05F3\u05F4\u2018\u2019]')
+# the ASCII double-quote (U+0022 — the common typed substitute for Hebrew gershayim in
+# abbreviations like רמב"ם), and Hebrew geresh/gershayim. Does NOT match Hebrew nikud (U+05B0-U+05C7).
+COMBINING_DIACRITICALS_PATTERN = re.compile(r'[\u0300-\u036F\u0022\u0027\u05F3\u05F4\u2018\u2019]')
 
 
 def strip_search_diacritics(text: str) -> str:
@@ -6594,6 +6611,7 @@ def strip_search_diacritics(text: str) -> str:
 
     Removes:
     - Combining diacritical marks (U+0300-U+036F)
+    - ASCII double-quote (U+0022) — the gershayim substitute in abbreviations (רמב"ם -> רמבם)
     - ASCII apostrophe (U+0027)
     - Hebrew geresh (U+05F3)
     - Hebrew gershayim (U+05F4)
@@ -6601,6 +6619,13 @@ def strip_search_diacritics(text: str) -> str:
 
     Preserves:
     - Hebrew base letters, nikud/vowel points, Latin chars, digits, punctuation
+
+    SEED-006 P2: folding U+0022 keeps the additive ``content_search`` field
+    (built from ``strip_search_diacritics(content)``) and the ``content_search:``
+    query clause symmetric for ASCII-quote abbreviations, so a clean ``רמבם``
+    query reaches a corpus ``רמב"ם``. The stored ``content`` field is unchanged
+    (the hebword tokenizer still keeps ``"`` inside the token), so display and
+    the gershayim form ``רמב״ם`` are unaffected.
     """
     if not text:
         return text
@@ -6616,13 +6641,22 @@ def strip_search_diacritics(text: str) -> str:
 def _add_bracket_variants(term: str) -> list:
     """Return bracket-adorned variants of *term* for Tantivy OR expansion.
 
-    The whitespace tokenizer stores bracketed words as single tokens
-    (e.g., ``]הנתשנ``), so we need to query for all plausible bracket
-    positions so Tantivy returns them as candidates.
+    The hebword tokenizer keeps bracketed words as single tokens
+    (e.g., ``]הנתשנ``), so a bare query needs the plausible bracket positions
+    so Tantivy returns them as candidates.
+
+    SEED-006 (invariants 1 & 2): only expand a term that has NO bracket of its
+    own. A query that already contains ``[`` / ``]`` is an *exact* bracket
+    search (``[סגן`` must return only ``[סגן``), so it is returned unchanged
+    — never broadened to the bare/other-bracket forms. A bare ``סגן`` still
+    expands to ``[סגן`` etc. so it reaches bracketed tokens on pages that
+    contain it.
     """
     variants = [term]
     if not term:
         return variants
+    if '[' in term or ']' in term:
+        return variants  # exact bracket query — do not expand
     for v in (f'[{term}', f'{term}]', f'[{term}]', f']{term}', f'{term}['):
         if v not in variants:
             variants.append(v)
@@ -6642,6 +6676,30 @@ def _query_has_brackets(query_str: str) -> bool:
 def _strip_brackets(text: str) -> str:
     """Remove all square brackets from *text*."""
     return text.replace('[', '').replace(']', '')
+
+
+def _index_has_field(index, field_name: str) -> bool:
+    """SEED-006 compat gate: True if *index*'s schema defines *field_name*.
+
+    tantivy-py 0.25 ``Schema`` exposes no field introspection, so we probe via
+    ``parse_query`` — querying a missing field raises ``ValueError`` mentioning
+    'does not exist' / 'not defined in the schema'. Any other outcome (parse OK,
+    or an unrelated error such as an unregistered tokenizer) is treated as
+    "field present" so we never disable a working field by accident. Register
+    tokenizers BEFORE calling this so a hebword field does not look absent.
+    """
+    if index is None:
+        return False
+    try:
+        index.parse_query(f'{field_name}:probe', [field_name])
+        return True
+    except ValueError as exc:
+        msg = str(exc).lower()
+        if 'does not exist' in msg or 'not defined' in msg:
+            return False
+        return True
+    except Exception:
+        return True
 
 
 # Inserted between regex tokens to allow optional combining marks and apostrophe variants in source text
@@ -7068,6 +7126,11 @@ class SearchEngine:
         self.var_mgr = variants_mgr
         self.index = None
         self.searcher = None
+        # SEED-006 compat gate: whether the on-disk main / LOCAL indexes carry
+        # the additive content_search field. Set at open time; gates the Stage 2
+        # OR-fallback so the NEW query code never crashes against an OLD index
+        # built before content_search existed (graceful degradation to content).
+        self._has_content_search = False
         # FL ID index for O(1) browse lookup (built in background)
         self._fl_id_index = None  # dict: fl_digits_str -> list of (sys_id, page_idx)
         self._fl_id_index_building = False
@@ -7077,6 +7140,7 @@ class SearchEngine:
         # Phase 95 — open LOCAL side-index alongside main (D-14 + D-37 fallback).
         self.local_index = None            # tantivy.Index for LOCAL side-index
         self.local_searcher = None         # tantivy.Searcher snapshot
+        self._local_has_content_search = False  # SEED-006 compat gate (LOCAL)
         self.local_lab_searcher = None     # tantivy.Searcher for LOCAL LAB side-index
         self._local_lab_index = None       # tantivy.Index for LOCAL LAB side-index (parse_query)
         self.local_lab_searcher_stale = False  # D-38: True when weights_hash mismatch
@@ -7143,6 +7207,7 @@ class SearchEngine:
         from shared.local_indexer import (
             build_local_schema,
             LocalIndexer,
+            migrate_legacy_local_db,
             _compute_schema_marker,
             _read_schema_marker,
         )
@@ -7155,6 +7220,7 @@ class SearchEngine:
         try:
             schema = build_local_schema()
             local_index = tantivy.Index(schema, path=Config.LOCAL_INDEX_DIR)
+            register_search_tokenizers(local_index)  # SEED-006: hebword + builtins
             if schema_mismatch:
                 raise RuntimeError(
                     f"Schema marker mismatch (actual={actual_marker!r}, "
@@ -7162,6 +7228,7 @@ class SearchEngine:
                 )
             self.local_index = local_index
             self.local_searcher = local_index.searcher()
+            self._local_has_content_search = _index_has_field(local_index, "content_search")
             LOGGER.info("LOCAL side-index opened: %s", Config.LOCAL_INDEX_DIR)
         except Exception as open_exc:
             LOGGER.warning(
@@ -7170,7 +7237,9 @@ class SearchEngine:
             )
             try:
                 import uuid as _uuid
-                db_path = os.path.join(Config.LOCAL_INDEX_DIR, "local_index.sqlite3")
+                # SEED-006 P1: DB must live OUTSIDE the atomically-swapped LocalIndex
+                # dir; migrate any legacy in-dir DB out before constructing.
+                db_path = migrate_legacy_local_db(Config.LOCAL_INDEX_DIR)
                 indexer = LocalIndexer(
                     index_dir=Config.LOCAL_INDEX_DIR,
                     lab_index_dir=Config.LOCAL_LAB_INDEX_DIR,
@@ -7194,8 +7263,10 @@ class SearchEngine:
                         LOGGER.exception("temp indexer close failed (continuing)")
                 schema2 = build_local_schema()
                 local_index2 = tantivy.Index(schema2, path=Config.LOCAL_INDEX_DIR)
+                register_search_tokenizers(local_index2)  # SEED-006
                 self.local_index = local_index2
                 self.local_searcher = local_index2.searcher()
+                self._local_has_content_search = _index_has_field(local_index2, "content_search")
                 LOGGER.info(
                     "LOCAL side-index: atomic rebuild succeeded, reopened: %s",
                     Config.LOCAL_INDEX_DIR,
@@ -7439,7 +7510,13 @@ class SearchEngine:
             # Use self.local_index (kept alongside local_searcher) for parse_query.
             # tantivy.Searcher has no .index attribute — Index must be stored separately.
             # MEDIUM-1 deferred: full query builder (variants/Responsa) not extracted yet.
+            # SEED-006 Stage 2: fan field-less terms across content_search too (the
+            # diacritic-folded field) so צמאן / צ'מאן reach צ̇מאן. query_str is
+            # already diacritic-stripped by both callers. Gated on the compat flag
+            # so an OLD LOCAL index (no content_search) keeps working.
             _fields = ["content", "content_head", "content_tail"]
+            if getattr(self, "_local_has_content_search", False):
+                _fields.append("content_search")
             try:
                 tantivy_q = self.local_index.parse_query(query_str, _fields)
             except (ValueError, Exception):
@@ -7669,6 +7746,21 @@ class SearchEngine:
         if os.path.exists(db_path):
             try:
                 self.index = tantivy.Index.open(db_path)
+                # SEED-006: register hebword (content field) BEFORE searcher use,
+                # then detect content_search for the Stage 2 compat gate.
+                register_search_tokenizers(self.index)
+                self._has_content_search = _index_has_field(self.index, "content_search")
+                if not self._has_content_search:
+                    # SEED-006 M3: the GENIZAH main index has no schema marker, so
+                    # nothing else detects that it predates this fix. Surface it
+                    # loudly — the punctuation/diacritic retrieval fix is INERT
+                    # (degrades to whitespace-tokenized content-only) until the
+                    # index is rebuilt via create_index and redeployed.
+                    LOGGER.warning(
+                        "SEED-006: main index predates the content_search field — "
+                        "Hebrew punctuation/diacritic retrieval fix is INERT until "
+                        "the index is rebuilt (create_index) and redeployed."
+                    )
                 self.searcher = self.index.searcher()
                 return True
             except Exception as e:
@@ -7734,7 +7826,14 @@ class SearchEngine:
             if regex_mode != mode:
                 self.var_mgr.get_variants(term, regex_mode, limit=max_limit)
 
-    def build_tantivy_query(self, terms, mode, responsa_components=None, responsa_options=None):
+    def build_tantivy_query(self, terms, mode, responsa_components=None, responsa_options=None,
+                            content_search_field=None):
+        # SEED-006 Stage 2: when *content_search_field* is supplied (only by the
+        # plain word-search + composition retrieval sites, NOT position /
+        # line-break / responsa), each term gets an extra lower-weighted
+        # ``content_search:"<diacritic-folded>"`` OR-clause so צמאן / צ'מאן reach
+        # the corpus form צ̇מאן. The exact-content ^5 boost is preserved, so a
+        # doc carrying the original form still ranks above a fold-only match.
         # --- Responsa branch ---
         if responsa_components is not None:
             flex_spacing = responsa_options.get('flex_spacing', False) if responsa_options else False
@@ -7824,6 +7923,16 @@ class SearchEngine:
                 parts.append(term)
                 continue
 
+            # SEED-006 P2: a raw ASCII double-quote inside a term (the typed
+            # gershayim substitute, e.g. רמב"ם) would break the quoted Tantivy
+            # clauses below (f'"{term}"' -> "רמב"ם" = a parse error). The normal
+            # entry points already fold it via strip_search_diacritics, but
+            # sanitize defensively here too so direct callers (tests/API) are
+            # safe and the exact clause matches the diacritic-folded variants.
+            term = term.replace('"', '')
+            if not term:
+                continue
+
             if mode == 'fuzzy':
                 if len(term) < 3: parts.append(f'"{term}"')
                 elif len(term) < 5: parts.append(f'"{term}"~1')
@@ -7864,6 +7973,16 @@ class SearchEngine:
                     if bv != term and bv not in seen_vars:
                         clean_vars.append(f'"{bv}"')
                         seen_vars.add(bv)
+
+                # SEED-006 Stage 2: lower-weighted diacritic-folded fallback so a
+                # query like צמאן / צ'מאן reaches the corpus form צ̇מאן (U+0307).
+                # Explicit field clause (works without content_search being in the
+                # parse_query default list — verified on tantivy 0.25); strip
+                # quotes/diacritics defensively. ^0.5 keeps it below the ^5 exact.
+                if content_search_field:
+                    cs_term = strip_search_diacritics(term).replace('"', '')
+                    if cs_term:
+                        clean_vars.append(f'{content_search_field}:"{cs_term}"^0.5')
 
                 parts.append(f'({" OR ".join(clean_vars)})')
 
@@ -8662,6 +8781,12 @@ class SearchEngine:
             if getattr(self, "local_searcher", None) is None:
                 return []
             try:
+                # SEED-006: strip diacritics here (the 'all' path strips at the
+                # shared site below) so the LOCAL regex is built mark-tolerant
+                # AND content_search retrieval folds צ'מאן -> צמאן. Mirrors the
+                # main path; Regex mode is left untouched (user owns the pattern).
+                if mode != 'Regex':
+                    query_str = strip_search_diacritics(query_str)
                 # Phase 96 D-F5: build regex here so LOCAL-only path also gets
                 # D-04.1 filter-out + highlight_pattern, same as the RRF merge path.
                 if mode == 'Regex':
@@ -8888,7 +9013,14 @@ class SearchEngine:
                 if mode != 'Regex':
                     self._get_or_compute_variants(terms, mode)
 
-                t_query_str = self.build_tantivy_query(terms, mode)
+                # SEED-006 Stage 2: only fold-fallback for a plain content search.
+                # When text_position is set the query is reused against
+                # content_head/tail/line_starts/ends, where a full-content
+                # content_search clause would defeat the position filter.
+                _cs_field = ('content_search'
+                             if (not text_position and getattr(self, '_has_content_search', False))
+                             else None)
+                t_query_str = self.build_tantivy_query(terms, mode, content_search_field=_cs_field)
                 regex = self.build_regex_pattern(terms, mode, gap)
         if not regex: return []
 
@@ -9217,8 +9349,10 @@ class SearchEngine:
             for i, (token_idx, chunk, chunk_crossed_bounds) in enumerate(chunks_data):
                 if progress_callback: progress_callback(i, total_chunks)
 
-                # Build query
-                t_query = self.build_tantivy_query(chunk, mode)
+                # Build query (SEED-006 Stage 2: composition is a plain
+                # content word-search → enable the diacritic-fold fallback).
+                _cs_field = 'content_search' if getattr(self, '_has_content_search', False) else None
+                t_query = self.build_tantivy_query(chunk, mode, content_search_field=_cs_field)
                 regex = self.build_regex_pattern(chunk, mode, 0)
                 if not regex: continue
 
@@ -9357,11 +9491,26 @@ class SearchEngine:
             try:
                 _local_index_scl = self.local_index
                 _local_searcher_scl = self.local_searcher
+                # SEED-006 M1: parity with the regular LOCAL path (_query_local_index)
+                # — when the diacritic-folded content_search field exists, fan
+                # field-less chunk terms across it too so צמאן/צ'מאן reach צ̇מאן in
+                # LOCAL composition/parallels, not just regular LOCAL search.
+                _local_has_cs_scl = getattr(self, "_local_has_content_search", False)
                 _local_fields_scl = ["content", "content_head", "content_tail"]
+                if _local_has_cs_scl:
+                    _local_fields_scl.append("content_search")
                 if _local_index_scl is not None and _local_searcher_scl is not None:
                     for _i_scl, (_token_idx_scl, _chunk_scl, _chunk_crossed_scl) in enumerate(chunks_data):
-                        _t_query_scl = self.build_tantivy_query(_chunk_scl, mode)
-                        _regex_scl = self.build_regex_pattern(_chunk_scl, mode, 0)
+                        # SEED-006 M1: fold diacritics off the chunk for BOTH the
+                        # Tantivy query AND the regex backstop (a fold-only hit
+                        # retrieved via content_search would otherwise be dropped
+                        # by the regex at the `_regex_scl.search` filter below).
+                        if _local_has_cs_scl and mode != 'Regex':
+                            _chunk_q_scl = [strip_search_diacritics(_w) for _w in _chunk_scl]
+                        else:
+                            _chunk_q_scl = _chunk_scl
+                        _t_query_scl = self.build_tantivy_query(_chunk_q_scl, mode)
+                        _regex_scl = self.build_regex_pattern(_chunk_q_scl, mode, 0)
                         if not _regex_scl:
                             continue
                         _is_freq_filtered_scl = False

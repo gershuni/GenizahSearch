@@ -48,8 +48,10 @@ def _write_marker(index_dir: str) -> None:
 def _build_local_index(index_dir: str, docs: list[dict]) -> None:
     """Build a minimal LOCAL Tantivy index with the given docs for testing."""
     from shared.local_indexer import build_local_schema
+    from shared.search_tokenizer import register_search_tokenizers
     schema = build_local_schema()
     index = tantivy.Index(schema, path=index_dir)
+    register_search_tokenizers(index)  # SEED-006: content uses the hebword tokenizer
     writer = index.writer(heap_size=15_000_000)
     for doc in docs:
         writer.add_document(tantivy.Document(

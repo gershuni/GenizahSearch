@@ -343,8 +343,10 @@ def test_txt_no_replacement_chars_indexed(tmp_path, local_indexer_fixtures_dir):
     # Reopen and search - check no replacement chars in any doc
     import tantivy
     from shared.local_indexer import build_local_schema
+    from shared.search_tokenizer import register_search_tokenizers
     schema = build_local_schema()
     idx = tantivy.Index(schema, path=index_dir)
+    register_search_tokenizers(idx)  # SEED-006: content uses the hebword tokenizer
     searcher = idx.searcher()
 
     # Search for all docs (broad query)
@@ -403,8 +405,10 @@ def test_file_id_populated_on_first_index(tmp_path, local_indexer_fixtures_dir):
     # Reopen and inspect Tantivy stored full_header field
     import tantivy
     from shared.local_indexer import build_local_schema
+    from shared.search_tokenizer import register_search_tokenizers
     schema = build_local_schema()
     idx = tantivy.Index(schema, path=index_dir)
+    register_search_tokenizers(idx)  # SEED-006: content uses the hebword tokenizer
     searcher = idx.searcher()
     query = idx.parse_query("Sample WR-01", ["content"])
     results = searcher.search(query, 10)

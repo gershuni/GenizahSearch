@@ -660,6 +660,14 @@ def _detect_multicolumn_suspected(page_lines_x: list[tuple[float, float]]) -> bo
 
 
 # ---------------------------------------------------------------------------
+# SEED-006: shared Hebrew-aware "hebword" tokenizer registration. Defined in the
+# dependency-light shared.search_tokenizer module so the web process can
+# register it without importing this PyMuPDF-bearing module.
+# ---------------------------------------------------------------------------
+from shared.search_tokenizer import register_search_tokenizers  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
 # Schema builders
 # ---------------------------------------------------------------------------
 
@@ -679,11 +687,22 @@ def build_local_schema() -> tantivy.Schema:
     # and is rebuilt from scratch so the bug stays latent. For LOCAL where incremental
     # delete IS the central operation, raw is mandatory. tantivy-py issue #297.
     builder.add_text_field("unique_id", stored=True, tokenizer_name="raw")
-    builder.add_text_field("content", stored=True, tokenizer_name="whitespace")
+    # SEED-006 Stage 1: searchable content uses the hebword tokenizer so
+    # punctuation-attached words (בסגן, -> בסגן) become retrievable. Stored
+    # value is the ORIGINAL text (display intact). content_head/tail and
+    # line_starts/line_ends stay on whitespace — they carry L{n}:word colon
+    # markers that hebword would shatter.
+    builder.add_text_field("content", stored=True, tokenizer_name="hebword")
     builder.add_text_field("content_head", stored=False, tokenizer_name="whitespace")
     builder.add_text_field("content_tail", stored=False, tokenizer_name="whitespace")
     builder.add_text_field("line_starts", stored=False, tokenizer_name="whitespace")
     builder.add_text_field("line_ends", stored=False, tokenizer_name="whitespace")
+    # SEED-006 Stage 2: additive, non-stored, diacritic-folded retrieval field
+    # (= strip_search_diacritics(content), hebword-tokenized) so a query like
+    # צמאן / צ'מאן finds the corpus form צ̇מאן (U+0307). Used only as a
+    # lower-weighted OR fallback at word-search retrieval sites; display still
+    # reads stored `content`.
+    builder.add_text_field("content_search", stored=False, tokenizer_name="hebword")
     builder.add_text_field("source", stored=True)
     builder.add_text_field("full_header", stored=True)
     builder.add_text_field("shelfmark", stored=True)
@@ -1626,6 +1645,84 @@ def _check_folder_reachable(folder_path: str, max_retries: int = 3) -> tuple[boo
 
 
 # ---------------------------------------------------------------------------
+# SEED-006 P1 — LOCAL SQLite sidecar path resolution
+#
+# The DB must live in the PARENT of the atomically-swapped Tantivy index dir,
+# NEVER inside it. `rebuild_main_index_atomic` / `reset_my_library` rename the
+# index dir wholesale: a DB inside it would (a) be locked on Windows (an open
+# SQLite handle blocks os.rename -> PermissionError(13)) and (b) on POSIX be
+# silently carried into the GC'd `.old-*` quarantine -> the cached_text /
+# processed_files data is destroyed on the next cleanup pass. So the DB lives
+# one level up (Config.INDEX_DIR in production — a stable container that is
+# never swapped).
+# ---------------------------------------------------------------------------
+
+def local_db_path_for(index_dir: str) -> str:
+    """Canonical external path for the LOCAL SQLite sidecar (in index_dir's parent)."""
+    parent = os.path.dirname(os.path.abspath(index_dir))
+    return os.path.join(parent, "local_index.sqlite3")
+
+
+def migrate_legacy_local_db(index_dir: str) -> str:
+    """Move a legacy in-dir ``local_index.sqlite3`` (+ ``-wal`` / ``-shm``) out
+    to the parent and return the canonical external path.
+
+    Idempotent, and MUST run before any SQLite connection is opened on either
+    path. If the external path already exists, a legacy in-dir file is left
+    untouched (newer-wins; never clobber live data).
+
+    A move FAILURE (when the external DB is missing and a legacy DB exists) is
+    FATAL — raising LocalIndexerError rather than returning ``new_path`` (Codex
+    P1). Returning would let the caller open a fresh EMPTY DB at the external
+    path, after which future migrations no-op (external exists) and the real
+    legacy ``cached_text`` / ``processed_files`` is permanently stranded.
+    The sidecars (``-wal`` / ``-shm``) are moved BEFORE the main DB so the
+    invariant "external main DB exists ⇔ migration completed" holds: on a
+    mid-way failure the main DB stays at the legacy path and a retry resumes.
+    """
+    import shutil
+    new_path = local_db_path_for(index_dir)
+    legacy = os.path.join(os.path.abspath(index_dir), "local_index.sqlite3")
+    if os.path.abspath(legacy) == os.path.abspath(new_path):
+        return new_path  # already external (e.g. a test rooting the DB at the parent)
+    if not os.path.exists(new_path) and os.path.exists(legacy):
+        # Sidecars first, main DB LAST (see docstring invariant).
+        for suffix in ("-wal", "-shm", ""):
+            src, dst = legacy + suffix, new_path + suffix
+            if os.path.exists(src) and not os.path.exists(dst):
+                try:
+                    shutil.move(src, dst)
+                except Exception as exc:
+                    raise LocalIndexerError(
+                        f"Failed to migrate legacy LOCAL DB {src!r} -> {dst!r}: {exc}. "
+                        "Aborting so a fresh empty DB is NOT created over your existing "
+                        "library (the legacy DB is left intact for a retry)."
+                    ) from exc
+    return new_path
+
+
+def _assert_db_outside_index_dir(db_path: str, index_dir: str) -> None:
+    """Guard: the SQLite sidecar must NOT live inside the atomically-swapped dir.
+
+    Raised at the dir-swap sites (rebuild / reset) so a future mis-wiring fails
+    loud rather than locking (Windows) or silently destroying the DB (POSIX).
+    """
+    abs_db = os.path.abspath(db_path)
+    abs_idx = os.path.abspath(index_dir)
+    try:
+        inside = os.path.commonpath([abs_db, abs_idx]) == abs_idx
+    except ValueError:
+        inside = False  # different drives (Windows) -> definitely outside
+    if inside:
+        raise LocalIndexerError(
+            "LOCAL SQLite sidecar must not live inside the atomically-swapped "
+            f"Tantivy index dir (db_path={db_path!r} is under index_dir={index_dir!r}); "
+            "a schema rebuild / reset renames that dir wholesale, which would lock "
+            "or destroy the DB. Use migrate_legacy_local_db()/local_db_path_for()."
+        )
+
+
+# ---------------------------------------------------------------------------
 # LocalIndexer class
 # ---------------------------------------------------------------------------
 
@@ -1657,7 +1754,19 @@ class LocalIndexer:
         db_path: str,
         progress_cb: Optional[Callable] = None,
         file_finished_cb: Optional[Callable] = None,
+        defer_schema_rebuild: bool = False,
     ) -> None:
+        # SEED-006 HIGH-5: when True, a schema-marker mismatch does NOT rebuild
+        # synchronously inside __init__ (which, on the desktop, runs on the UI
+        # thread and would freeze launch while every page is re-added from
+        # cached_text). Instead __init__ flags `needs_schema_rebuild` and leaves
+        # the indexer not-ready; the caller runs `run_deferred_schema_rebuild()`
+        # on a background thread (its own per-thread SQLite connection) and gates
+        # search until it completes. Default False preserves the synchronous
+        # behaviour for every other caller (CLI / tests / SearchEngine's own
+        # background StartupThread rebuild path).
+        self.needs_schema_rebuild: bool = False
+        self._defer_schema_rebuild = defer_schema_rebuild
         self._index_dir = index_dir
         self._lab_index_dir = lab_index_dir
         self._db_path = db_path
@@ -1725,6 +1834,7 @@ class LocalIndexer:
         if not _meta_exists:
             # Fresh directory — create index from scratch (normal first-run)
             self._index = tantivy.Index(schema, path=index_dir)
+            register_search_tokenizers(self._index)  # SEED-006: hebword + builtins
             _write_schema_marker(index_dir, _compute_schema_marker(build_local_schema))
         else:
             # Existing index — open and check for corruption/schema mismatch
@@ -1733,6 +1843,7 @@ class LocalIndexer:
             if not _needs_rebuild:
                 try:
                     self._index = tantivy.Index.open(index_dir)
+                    register_search_tokenizers(self._index)  # SEED-006
                 except Exception as _open_exc:
                     logger.warning(
                         "LOCAL Tantivy index open failed: %r — attempting atomic rebuild",
@@ -1741,7 +1852,24 @@ class LocalIndexer:
                     _needs_rebuild = True
                     _open_exc_captured = _open_exc
 
-            if _needs_rebuild:
+            # SEED-006 HIGH-5: defer a *schema-mismatch* rebuild off the UI
+            # thread. Only the marker-mismatch case is deferrable — a genuine
+            # open failure (corruption) still rebuilds inline so the object is
+            # never handed back broken. Leaves the indexer not-ready
+            # (_index/_writer = None); the caller must run
+            # run_deferred_schema_rebuild() before using it.
+            if _needs_rebuild and _schema_mismatch and self._defer_schema_rebuild:
+                logger.info(
+                    "LOCAL schema marker mismatch — deferring rebuild off the UI thread"
+                )
+                self.needs_schema_rebuild = True
+                self._index = None
+                self._writer = None
+                # Do NOT return — fall through so _pending_filepaths /
+                # _commit_triggers are still initialised; the writer-acquisition
+                # loop and pending-delete recovery below are gated on
+                # `needs_schema_rebuild` and run after run_deferred_schema_rebuild().
+            elif _needs_rebuild:
                 if _schema_mismatch:
                     logger.warning(
                         "LOCAL schema marker mismatch — attempting atomic rebuild"
@@ -1752,6 +1880,7 @@ class LocalIndexer:
                     # Initialize _index to a fresh empty one so rebuild_main_index_atomic
                     # can check committed rows via _conn (which is ready at this point)
                     self._index = tantivy.Index(schema, path=index_dir)
+                    register_search_tokenizers(self._index)  # SEED-006
                     self.rebuild_main_index_atomic(
                         _recovery_run_id,
                         close_searcher_cb=lambda: None,
@@ -1780,7 +1909,7 @@ class LocalIndexer:
         # _reopen_internal_writer_index(). Without the gate this loop would
         # try to acquire a second writer on top of the rebuild's writer ->
         # LockBusy (the literal LockBusy in the 2026-05-26 cascade).
-        if self._writer is None:
+        if self._writer is None and not self.needs_schema_rebuild:
             _writer_retries = 3
             _writer_delays = [0.25, 1.0, 2.0]
             for _attempt in range(_writer_retries + 1):
@@ -1811,10 +1940,57 @@ class LocalIndexer:
         # PDFs. Removed entirely. New scans still get the RTL fix from
         # extract_pdf_pages; existing libraries need manual Reset + re-scan.
 
-        # HIGH-3 review fix: run pending-delete recovery at init
-        recovered = self._recover_pending_deletes()
-        if recovered:
-            logger.info("LocalIndexer init: recovered %d pending deletes", recovered)
+        # HIGH-3 review fix: run pending-delete recovery at init.
+        # SEED-006: skipped while a schema rebuild is pending (no writer yet);
+        # run_deferred_schema_rebuild() runs it once the index is ready.
+        if not self.needs_schema_rebuild:
+            recovered = self._recover_pending_deletes()
+            if recovered:
+                logger.info("LocalIndexer init: recovered %d pending deletes", recovered)
+
+    def run_deferred_schema_rebuild(self) -> bool:
+        """SEED-006 HIGH-5: perform a schema-mismatch rebuild deferred from __init__.
+
+        Call this from a BACKGROUND thread (not the UI thread) when the indexer
+        was constructed with ``defer_schema_rebuild=True`` and reported
+        ``needs_schema_rebuild``. It opens its own per-thread SQLite connection
+        (via the ``_conn`` property), so it is safe off the constructing thread.
+
+        Idempotent + race-tolerant: re-reads the on-disk marker first, because a
+        concurrent path (e.g. SearchEngine's own background rebuild) may already
+        have rebuilt + rewritten it. Returns True if the indexer is ready
+        afterwards. Never raises for the "already current" case; a genuine
+        rebuild failure propagates so the caller can fail-open the search gate.
+        """
+        if not self.needs_schema_rebuild:
+            return self._index is not None
+
+        expected = _compute_schema_marker(build_local_schema)
+        actual = _read_schema_marker(self._index_dir)
+        if actual == expected:
+            # Another path already rebuilt — just open + wire the live handles.
+            self._reopen_internal_writer_index()
+        else:
+            import uuid as _uuid
+            # Seed a fresh index handle so rebuild_main_index_atomic can probe
+            # committed rows, then do the atomic cached_text rebuild (it writes
+            # the new marker + reopens the writer/index at step 7).
+            self._index = tantivy.Index(build_local_schema(), path=self._index_dir)
+            register_search_tokenizers(self._index)
+            self.rebuild_main_index_atomic(
+                _uuid.uuid4().hex,
+                close_searcher_cb=lambda: None,
+                reload_searcher_cb=lambda: None,
+            )
+
+        self.needs_schema_rebuild = False
+        # Now that the index/writer are live, run the recovery that __init__
+        # skipped while the rebuild was pending.
+        try:
+            self._recover_pending_deletes()
+        except Exception:
+            logger.exception("run_deferred_schema_rebuild: pending-delete recovery failed")
+        return self._index is not None
 
     # ------------------------------------------------------------------
     # Thread-local connection property (D-threading-fix)
@@ -2959,7 +3135,7 @@ class LocalIndexer:
         # (L1 — round-2 requirement). Plan 02 extract_pdf_pages now yields NIKUD-BEARING
         # text; the strip is here, applied uniformly to every format. content == cached_text
         # == stripped (no divergence). SEED-004 defers nikud display for non-PDF formats.
-        from genizah_core import strip_nikud  # noqa: PLC0415 — intentional lazy import (L1)
+        from genizah_core import strip_nikud, strip_search_diacritics  # noqa: PLC0415 — intentional lazy import (L1)
         stripped = strip_nikud(text)
 
         # Build content_head / content_tail for snippet generation (derived from stripped)
@@ -2971,6 +3147,7 @@ class LocalIndexer:
         doc = tantivy.Document(
             unique_id=[uid],
             content=[stripped],
+            content_search=[strip_search_diacritics(stripped)],  # SEED-006 Stage 2
             content_head=[head],
             content_tail=[tail],
             line_starts=[""],
@@ -3507,10 +3684,20 @@ class LocalIndexer:
         except Exception:
             self._writer = None
         self._index = None
+        # R97.2-B / SEED-006 P1: nulling the Python refs is NOT enough on
+        # Windows — Python GC may delay the Rust-side drop, so the live index
+        # dir keeps an open handle and the os.rename in
+        # rebuild_main_index_atomic() (step 4) fails with
+        # PermissionError(13, 'Access is denied'). This bites the SEED-006
+        # schema-rebuild path, which opens self._index on the LIVE dir before
+        # the rebuild. Force the drop here, exactly as the validation block at
+        # step 2 already does for the fresh rebuild handles.
+        gc.collect()
 
     def _reopen_internal_writer_index(self) -> None:
         """Reopen _writer + _index after atomic swap so LocalIndexer can continue."""
         self._index = tantivy.Index(build_local_schema(), path=self._index_dir)
+        register_search_tokenizers(self._index)  # SEED-006: before writer use
         self._writer = self._index.writer(heap_size=256 * 1024 * 1024)
 
     def _ensure_writer(self):
@@ -3598,6 +3785,11 @@ class LocalIndexer:
         import shutil
         import time as _time
 
+        # SEED-006 P1: the DB MUST live outside the dir we are about to rename
+        # wholesale (else the open SQLite handle locks os.rename on Windows, and
+        # on POSIX the DB is carried into the GC'd .old-* quarantine -> data loss).
+        _assert_db_outside_index_dir(self._db_path, self._index_dir)
+
         rebuild_dir = f"{self._index_dir}.rebuild-{scan_run_id}"
         old_dir = f"{self._index_dir}.old-{int(_time.time())}"
 
@@ -3607,7 +3799,12 @@ class LocalIndexer:
         os.makedirs(rebuild_dir, exist_ok=True)
         fresh_schema = build_local_schema()
         fresh_index = tantivy.Index(fresh_schema, path=rebuild_dir)
+        register_search_tokenizers(fresh_index)  # SEED-006: before writer use
         fresh_writer = fresh_index.writer(heap_size=256 * 1024 * 1024)
+        # SEED-006 Stage 2: fold diacritics for the content_search field. Lazy
+        # import keeps shared/local_indexer.py free of a module-top
+        # genizah_core import (mirrors the strip_nikud import at the live add site).
+        from genizah_core import strip_search_diacritics  # noqa: PLC0415
         docs_written = 0
         try:
             for row in self._conn.execute("""
@@ -3643,6 +3840,7 @@ class LocalIndexer:
                 doc = tantivy.Document(
                     unique_id=[row["uid"]],
                     content=[text],
+                    content_search=[strip_search_diacritics(text)],  # SEED-006 Stage 2
                     content_head=[head],
                     content_tail=[tail],
                     line_starts=[""],
@@ -4092,6 +4290,11 @@ class LocalIndexer:
             "cleanup_strategy": "deferred",
         }
 
+        # SEED-006 P1: the DB lives OUTSIDE the swapped dir, so the rename-aside
+        # no longer carries it — reset must delete it explicitly (Step 4.5). Guard
+        # first so a mis-wired in-dir DB fails loud rather than getting orphaned.
+        _assert_db_outside_index_dir(self._db_path, self._index_dir)
+
         # --- Step 1: close all live handles ---
         try:
             close_searcher_cb()
@@ -4211,7 +4414,51 @@ class LocalIndexer:
                 ) from exc
         # else: LAB did not exist — skip Step 2b silently.
 
-        # --- Step 3: recreate empty dirs ---
+        # --- Step 2c (SEED-006 P1 / Codex): quarantine the EXTERNAL SQLite DB ---
+        # The DB lives OUTSIDE the swapped dirs, so the renames above did not
+        # carry it. It is a THIRD participant in the reset transaction: move it
+        # aside by RENAME (rollback-able) BEFORE recreating the live dirs, so a
+        # failure here leaves NOTHING recreated-empty and we can roll back
+        # LOCAL + LAB + DB to the original live state. Renaming (not deleting)
+        # keeps reset atomic — Codex REQUEST CHANGES: deleting at the old Step
+        # 4.5 (post-recreate) could leave an empty live LocalIndex next to a
+        # stale DB, which a restart would then reopen.
+        db_quarantines: list[tuple[str, str]] = []
+        try:
+            for _suffix in ("", "-wal", "-shm"):
+                _src = self._db_path + _suffix
+                if os.path.exists(_src):
+                    _dst = f"{_src}.reset-quarantine-{ts}"
+                    self._retry_windows_rename(_src, _dst)
+                    db_quarantines.append((_src, _dst))
+        except OSError as exc:
+            logger.exception("reset_my_library: DB quarantine failed — rolling back")
+            # Roll back DB renames already done (reverse order), then LAB, then LOCAL.
+            for _orig, _q in reversed(db_quarantines):
+                try:
+                    self._retry_windows_rename(_q, _orig)
+                except OSError:
+                    logger.exception(
+                        "reset_my_library: DB rollback %r -> %r failed", _q, _orig
+                    )
+            if lab_exists:
+                try:
+                    self._retry_windows_rename(quarantine_lab, lab_dir)
+                    counts["quarantined"].remove(quarantine_lab)
+                except (OSError, ValueError):
+                    logger.exception("reset_my_library: LAB rollback failed")
+            try:
+                self._retry_windows_rename(quarantine_main, local_dir)
+                counts["quarantined"].remove(quarantine_main)
+            except (OSError, ValueError):
+                logger.exception("reset_my_library: LOCAL rollback failed")
+            raise LocalIndexerError(
+                f"Reset failed: could not move the LOCAL DB aside ({exc}); "
+                "LOCAL + LAB were rolled back to their original state. "
+                "Retry or restart the app."
+            ) from exc
+
+        # --- Step 3: recreate empty dirs (ONLY after all participants quarantined) ---
         os.makedirs(local_dir, exist_ok=True)
         os.makedirs(lab_dir, exist_ok=True)
 
@@ -4224,6 +4471,20 @@ class LocalIndexer:
         # --- Step 5: reinit via __init__ (triggers _run_migrations ladder) ---
         self.__init__(self._index_dir, self._lab_index_dir, self._db_path)
         counts["reinit_ok"] = True
+
+        # --- Step 5.5: clean up the quarantined DB files (non-fatal) ---
+        # reinit already opened a fresh empty DB at self._db_path, so the
+        # *.reset-quarantine-* copies can never be reopened. Delete them
+        # best-effort: a failure here cannot resurrect stale state.
+        for _orig, _q in db_quarantines:
+            try:
+                if os.path.exists(_q):
+                    os.remove(_q)
+            except OSError:
+                logger.exception(
+                    "reset_my_library: cleanup of quarantined DB file %r failed (non-fatal)",
+                    _q,
+                )
 
         # --- Step 6: schedule quarantine cleanup ---
         # Prefer pending_dir_cleanup table (Phase 97 R-02 infrastructure).
@@ -4490,14 +4751,9 @@ class LocalIndexer:
                 return
             main_schema = build_local_schema()
             main_index = tantivy.Index(main_schema, path=self._index_dir)
-            # Register raw tokenizer so unique_id term queries work
-            try:
-                main_index.register_tokenizer(
-                    "raw",
-                    tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.raw()).build(),
-                )
-            except Exception:
-                pass  # Non-fatal if already registered
+            # SEED-006: raw (unique_id term queries) + hebword (content field is
+            # now hebword-tokenized) must both be registered after open.
+            register_search_tokenizers(main_index)
             searcher = main_index.searcher()
         except Exception as exc:
             logger.warning(
