@@ -795,6 +795,7 @@ def create_joins_lab_page(
                 on_compare=_open_compare,
                 restyle_fn=_triage_state_ref.get('restyle'),
                 on_selection_change=_on_table_selection_change,
+                on_add_to_puzzle=_on_add_to_puzzle_click,
             )
         else:
             # Render the Phase-02 grid surface
@@ -1409,6 +1410,48 @@ def create_joins_lab_page(
                 ui.button(tr('Remove'), on_click=_do_remove).props('color=negative unelevated')
 
         remove_dialog.open()
+
+    # -----------------------------------------------------------------------
+    # Phase-120 ACT-02: Bulk Add-to-Puzzle — anchor + selected candidates
+    # -----------------------------------------------------------------------
+
+    def _on_add_to_puzzle_click() -> None:
+        """Handle "Add to Puzzle" click in the bulk action bar (TABLE view, ≥1 selected).
+
+        R2-H2: the bulk bar appears only on ≥1 table selection, so ``_selected``
+        is always non-empty here.  The anchor is ALWAYS included as fragments[0]
+        IN ADDITION to the selected candidates.
+
+        Builds a ``puzzle_staging`` payload (schema_version=1, capped at
+        anchor + 20 candidates), writes it via ``safe_user_set`` (Phase-87
+        chokepoint — never raw app.storage.user), then navigates to /puzzle.
+        The puzzle page pops + validates the key one-shot on load (T-120-stale /
+        Pitfall 6) and schedules deferred sequential adds via auto_add_bulk.
+        """
+        anchor_sys_id = _anchor_state.get('sys_id') or ''
+        if not anchor_sys_id:
+            ui.notify(tr('No anchor loaded'), type='warning', timeout=3000)
+            return
+
+        selected_list = list(_selected)
+        MAX_CANDIDATES = 20
+
+        if len(selected_list) > MAX_CANDIDATES:
+            ui.notify(
+                tr('Only the first 20 selected candidates will be added to the Puzzle.'),
+                type='info', timeout=5000,
+            )
+
+        capped = selected_list[:MAX_CANDIDATES]
+        fragments = [anchor_sys_id] + capped
+
+        safe_user_set('puzzle_staging', {
+            'schema_version': 1,
+            'fragments': fragments,
+            'source': 'joins_lab',
+            'created_at': datetime.now(tz=timezone.utc).isoformat(),
+        })
+        ui.navigate.to('/puzzle')
 
     async def _load_known_joins(
         sys_id: str, shelfmark: str, pgpid: Optional[int] = None,

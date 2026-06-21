@@ -895,6 +895,7 @@ def create_candidate_table(
     on_compare: Optional[Callable] = None,
     restyle_fn: Optional[Callable] = None,
     on_selection_change: Optional[Callable] = None,
+    on_add_to_puzzle: Optional[Callable] = None,
 ) -> ui.element:
     """Render the multi-select sortable table view of candidates (D-10, CND-03).
 
@@ -914,6 +915,12 @@ def create_candidate_table(
                            table selection into the page-level ``_selected`` set so
                            SELECTION-scoped bulk actions (Add-to-Puzzle / Add-to-List)
                            see the same selection.
+        on_add_to_puzzle:  Optional Callable[[], None] — invoked when the user clicks
+                           "Add to Puzzle" in the bulk action bar.  The caller (joins_lab.py)
+                           reads its own ``_selected`` set to build the payload.  Defaults to
+                           None (Phase-118/119 callers without it are unaffected).
+                           Phase-120 ACT-02: the button appears in the bulk bar alongside
+                           the existing triage buttons (TABLE view only — R2-H2).
 
     Returns:
         The outer ui.element wrapping the table and bulk-triage bar.
@@ -957,6 +964,21 @@ def create_candidate_table(
                 ui.button(label).props("flat dense").style(
                     f"color:{v_color};"
                 ).on("click", _make_bulk_handler())
+
+            # Phase-120 ACT-02: Add to Puzzle — selection-scoped bulk action.
+            # Appears in the bulk bar (TABLE view only — R2-H2) when ≥1 row is
+            # selected.  The callback reads the page-level _selected set (H2).
+            # No login gate — anonymous users can add to puzzle.
+            if on_add_to_puzzle is not None:
+                with ui.row().classes("ml-auto items-center"):
+                    add_puzzle_btn = ui.button(
+                        tr("Add to Puzzle"),
+                        icon="extension",
+                        on_click=on_add_to_puzzle,
+                    ).props("flat")
+                    add_puzzle_btn.tooltip(
+                        tr("Add anchor + selected candidates to the Fragment Puzzle")
+                    )
 
         table = ui.table(
             columns=columns,

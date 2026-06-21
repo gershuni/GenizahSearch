@@ -4275,3 +4275,13 @@ TRANSLATIONS.update({
     "Remove the join between {a} and {b}? This cannot be undone.":
                                        "להסיר את החיבור בין {a} ל-{b}? לא ניתן לבטל פעולה זו.",
 })
+
+# === Phase 120-05: ACT-02 — Bulk Add-to-Puzzle (anchor + selected candidates) ===
+TRANSLATIONS.update({
+    # --- Bulk Add-to-Puzzle button (bulk action bar) ---
+    "Add to Puzzle":                    "הוסף לפאזל",
+    "Add anchor + selected candidates to the Fragment Puzzle":
+                                        "הוסף עוגן ומועמדים נבחרים לפאזל הקטעים",
+    "Only the first 20 selected candidates will be added to the Puzzle.":
+                                        "רק 20 המועמדים הנבחרים הראשונים יתווספו לפאזל.",
+})
