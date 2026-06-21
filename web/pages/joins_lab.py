@@ -2230,6 +2230,56 @@ def create_joins_lab_page(
         # discarded if a newer anchor is loaded before it returns (MED, CR).
         asyncio.ensure_future(_load_known_joins(sys_id, shelfmark, anchor_gen=_my_anchor_gen))
 
+        # D-12/L1: fire-and-forget VS-data probe — hide the VS toggle when the
+        # anchor has zero look-alikes (not just disable — set_visibility(False)).
+        asyncio.ensure_future(_probe_vs_data_and_update_toggle(sys_id, _my_anchor_gen))
+
+    # -----------------------------------------------------------------------
+    # Phase 120 D-12: VS toggle visibility probe
+    # -----------------------------------------------------------------------
+
+    async def _probe_vs_data_and_update_toggle(anchor_sid: str, my_anchor_gen: int) -> None:
+        """D-12/L1: Probe VS data availability for anchor_sid and hide/show the toggle.
+
+        Called fire-and-forget from load_anchor (each re-anchor triggers a fresh probe).
+
+        Off-loop discipline: the probe call `svc.get_suggestions(anchor_sid, 1)` is a
+        METHOD on the service instance (L1 — NOT a free function); it is dispatched via
+        run.io_bound so it runs off the NiceGUI event loop.
+
+        Generation guard: if the anchor changed while the probe was in flight, the result
+        is stale — we discard it and do NOT mutate the VS toggle for the new anchor.
+
+        SEED-008: the entire body is wrapped in try/except RuntimeError: return.
+
+        Behaviour:
+          empty result  → set_visibility(False) — toggle removed from flex row (no placeholder)
+          non-empty     → set_visibility(True)  — toggle rendered normally (Phase-119 contract)
+        """
+        try:
+            if my_anchor_gen != _anchor_generation['value']:
+                return  # stale probe from previous anchor
+
+            def run_vs_probe():
+                svc = get_vs_service(thread_safe=True)
+                return svc.get_suggestions(anchor_sid, 1)
+
+            probe_result = await run.io_bound(run_vs_probe)
+
+            # Generation re-check after the await (anchor may have changed during I/O)
+            if my_anchor_gen != _anchor_generation['value']:
+                return
+
+            vs_el = _vs_switch_ref.get('el')
+            if vs_el is None:
+                return  # VS toggle not yet built
+
+            has_vs_data = bool(probe_result)
+            vs_el.set_visibility(has_vs_data)
+
+        except RuntimeError:
+            return  # SEED-008: NiceGUI client disconnected
+
     # -----------------------------------------------------------------------
     # Phase 119: VS toggle helpers (D-04/D-06/VSM-01)
     # -----------------------------------------------------------------------
