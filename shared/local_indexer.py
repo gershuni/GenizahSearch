@@ -4414,35 +4414,53 @@ class LocalIndexer:
                 ) from exc
         # else: LAB did not exist — skip Step 2b silently.
 
-        # --- Step 3: recreate empty dirs ---
+        # --- Step 2c (SEED-006 P1 / Codex): quarantine the EXTERNAL SQLite DB ---
+        # The DB lives OUTSIDE the swapped dirs, so the renames above did not
+        # carry it. It is a THIRD participant in the reset transaction: move it
+        # aside by RENAME (rollback-able) BEFORE recreating the live dirs, so a
+        # failure here leaves NOTHING recreated-empty and we can roll back
+        # LOCAL + LAB + DB to the original live state. Renaming (not deleting)
+        # keeps reset atomic — Codex REQUEST CHANGES: deleting at the old Step
+        # 4.5 (post-recreate) could leave an empty live LocalIndex next to a
+        # stale DB, which a restart would then reopen.
+        db_quarantines: list[tuple[str, str]] = []
+        try:
+            for _suffix in ("", "-wal", "-shm"):
+                _src = self._db_path + _suffix
+                if os.path.exists(_src):
+                    _dst = f"{_src}.reset-quarantine-{ts}"
+                    self._retry_windows_rename(_src, _dst)
+                    db_quarantines.append((_src, _dst))
+        except OSError as exc:
+            logger.exception("reset_my_library: DB quarantine failed — rolling back")
+            # Roll back DB renames already done (reverse order), then LAB, then LOCAL.
+            for _orig, _q in reversed(db_quarantines):
+                try:
+                    self._retry_windows_rename(_q, _orig)
+                except OSError:
+                    logger.exception(
+                        "reset_my_library: DB rollback %r -> %r failed", _q, _orig
+                    )
+            if lab_exists:
+                try:
+                    self._retry_windows_rename(quarantine_lab, lab_dir)
+                    counts["quarantined"].remove(quarantine_lab)
+                except (OSError, ValueError):
+                    logger.exception("reset_my_library: LAB rollback failed")
+            try:
+                self._retry_windows_rename(quarantine_main, local_dir)
+                counts["quarantined"].remove(quarantine_main)
+            except (OSError, ValueError):
+                logger.exception("reset_my_library: LOCAL rollback failed")
+            raise LocalIndexerError(
+                f"Reset failed: could not move the LOCAL DB aside ({exc}); "
+                "LOCAL + LAB were rolled back to their original state. "
+                "Retry or restart the app."
+            ) from exc
+
+        # --- Step 3: recreate empty dirs (ONLY after all participants quarantined) ---
         os.makedirs(local_dir, exist_ok=True)
         os.makedirs(lab_dir, exist_ok=True)
-
-        # --- Step 4.5 (SEED-006 P1): delete the EXTERNAL SQLite sidecar ---
-        # The DB no longer lives inside local_dir, so the rename-aside above did
-        # not carry it. Delete it (+ -wal/-shm) now that all handles are closed
-        # (Step 1) and before Step 5 reinit, so __init__ recreates a fresh empty
-        # DB (matching the pre-P1 "rename quarantines the DB" reset semantics).
-        #
-        # FATAL on failure (Codex P2): if the old DB survives, the Step 5 reinit
-        # would reopen it — silently violating the fresh-empty reset contract and
-        # leaving SQLite metadata out of sync with the now-emptied Tantivy dir.
-        # Raise instead of continuing. (The Tantivy dirs are already quarantined;
-        # the UI surfaces the error and the user can retry / restart.)
-        for _suffix in ("", "-wal", "-shm"):
-            _db_file = self._db_path + _suffix
-            try:
-                if os.path.exists(_db_file):
-                    os.remove(_db_file)
-            except OSError as exc:
-                logger.exception(
-                    "reset_my_library: could not remove DB file %r", _db_file
-                )
-                raise LocalIndexerError(
-                    f"Reset failed: could not delete the LOCAL DB ({_db_file!r}: {exc}). "
-                    "Aborting before reinit so a stale DB is not reused over the "
-                    "emptied index. Restart the app and retry."
-                ) from exc
 
         # --- Step 4: (reserved) cleanup scheduling happens in Step 6 after reinit ---
         # REVIEWS Codex MEDIUM: defer rmtree off the UI thread by using the
@@ -4453,6 +4471,20 @@ class LocalIndexer:
         # --- Step 5: reinit via __init__ (triggers _run_migrations ladder) ---
         self.__init__(self._index_dir, self._lab_index_dir, self._db_path)
         counts["reinit_ok"] = True
+
+        # --- Step 5.5: clean up the quarantined DB files (non-fatal) ---
+        # reinit already opened a fresh empty DB at self._db_path, so the
+        # *.reset-quarantine-* copies can never be reopened. Delete them
+        # best-effort: a failure here cannot resurrect stale state.
+        for _orig, _q in db_quarantines:
+            try:
+                if os.path.exists(_q):
+                    os.remove(_q)
+            except OSError:
+                logger.exception(
+                    "reset_my_library: cleanup of quarantined DB file %r failed (non-fatal)",
+                    _q,
+                )
 
         # --- Step 6: schedule quarantine cleanup ---
         # Prefer pending_dir_cleanup table (Phase 97 R-02 infrastructure).

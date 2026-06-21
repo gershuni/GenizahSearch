@@ -234,8 +234,10 @@ def test_migrate_fatal_on_move_failure_keeps_legacy(tmp_path, monkeypatch):
     assert not os.path.exists(local_db_path_for(index_dir))
 
 
-def test_reset_fatal_when_external_db_delete_fails(tmp_path, monkeypatch):
-    """Codex P2: reset must abort if the old external DB can't be deleted."""
+def test_reset_db_quarantine_failure_rolls_back_live_dirs(tmp_path, monkeypatch):
+    """Codex REQUEST CHANGES: a DB-quarantine failure must roll back the LIVE
+    LocalIndex (restored with its marker), not leave it recreated-empty next to
+    a stale DB."""
     index_dir = str(tmp_path / "LocalIndex")
     lab_dir = str(tmp_path / "LocalLabIndex")
     db_path = str(tmp_path / "local_index.sqlite3")
@@ -243,18 +245,34 @@ def test_reset_fatal_when_external_db_delete_fails(tmp_path, monkeypatch):
     os.makedirs(lab_dir, exist_ok=True)
     idx = _new_indexer(index_dir, lab_dir, db_path)
     try:
-        real_remove = os.remove
+        # Marker inside the live LocalIndex — must survive the rollback.
+        marker = os.path.join(index_dir, ".reset-rollback-marker")
+        with open(marker, "w") as f:
+            f.write("must survive DB-quarantine rollback")
+        assert os.path.exists(db_path)  # __init__ created the DB
 
-        def _no_remove(path, *a, **k):
-            if os.path.abspath(path).startswith(os.path.abspath(db_path)):
-                raise OSError(13, "simulated delete failure")
-            return real_remove(path, *a, **k)
+        # Fail the DB rename only; dir renames (basename LocalIndex/LocalLabIndex)
+        # succeed, including the rollback that restores them.
+        real_rename = idx._retry_windows_rename
 
-        monkeypatch.setattr(os, "remove", _no_remove)
-        with pytest.raises(LocalIndexerError, match="could not delete the LOCAL DB"):
+        def _wrapped(src, dst):
+            if os.path.basename(src).startswith("local_index.sqlite3"):
+                raise OSError(13, "simulated DB quarantine failure")
+            return real_rename(src, dst)
+
+        monkeypatch.setattr(idx, "_retry_windows_rename", _wrapped)
+
+        with pytest.raises(LocalIndexerError, match="could not move the LOCAL DB aside"):
             idx.reset_my_library(
                 close_searcher_cb=lambda: None, reload_searcher_cb=lambda: None,
             )
+
+        # Live state fully restored: LocalIndex back with its marker (NOT empty),
+        # DB still at its original path, nothing left in a quarantine.
+        assert os.path.isfile(marker), "LOCAL dir was not rolled back (marker gone)"
+        assert os.path.exists(db_path), "DB should remain at its original path"
+        leftover = [p for p in os.listdir(tmp_path) if "reset-quarantine" in p]
+        assert leftover == [], f"quarantines should have been rolled back, found {leftover}"
     finally:
         idx.close()
 
