@@ -1120,7 +1120,6 @@ class TestBulkPuzzleStaging:
     def test_no_raw_app_storage_user_in_puzzle_for_staging(self):
         """puzzle.py must not access app.storage.user for the staging key."""
         import pathlib
-        import re
         src = pathlib.Path("web/pages/puzzle.py").read_text(encoding="utf-8")
         # The test_no_raw_storage_access.py guard is the authoritative check, but
         # verify here specifically that we didn't introduce raw access for staging.

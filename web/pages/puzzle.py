@@ -15,6 +15,7 @@ import json
 from nicegui import ui, app, run
 from web.translations import tr, get_language
 from web.state import state
+from web.safe_storage import safe_user_pop
 
 # Phase 98 D-21: shared NLI circuit breaker for puzzle folio resolution.
 from shared.nli_circuit_breaker import (
@@ -3909,6 +3910,49 @@ def create_puzzle_page(initial_add: str = None, initial_doc: str = None):
             }
 
         asyncio.ensure_future(_after_delay(1.5, auto_add))
+
+    # ── Phase-120 ACT-02: consume puzzle_staging bulk handoff from Joins Lab ──
+    # POP + VALIDATE synchronously on the event loop (one-shot — safe_user_pop
+    # reads + deletes atomically; the page body runs on the event loop so storage
+    # context is available; NEVER pop inside a run.io_bound closure — Pitfall 4).
+    # create_puzzle_page is SYNC (def, not async def) — so no await here.
+    # The deferred bulk-add runs inside auto_add_bulk, scheduled via _after_delay
+    # (mirrors the existing single-fragment auto_add pattern at :3779-3911 — B2).
+    bulk = safe_user_pop('puzzle_staging', None)
+    if isinstance(bulk, dict) and bulk.get('schema_version') == 1 and bulk.get('fragments'):
+        bulk_fragments = list(bulk.get('fragments', []))[:21]  # anchor + max 20 (T-120-input)
+
+        async def auto_add_bulk():
+            """Deferred sequential bulk-add from puzzle_staging.
+
+            Runs AFTER canvas init (mirroring auto_add at :3794).  Awaits
+            _add_fragment_by_sys_id for each staged sys_id SEQUENTIALLY —
+            anchor (index 0) first.  Scheduled via asyncio.ensure_future(
+            _after_delay(1.5, auto_add_bulk)) so it runs after init_canvas
+            completes.
+
+            B2 / V3: this is an inner async def; create_puzzle_page is SYNC —
+            there is no await in the sync body.
+            """
+            for sys_id in bulk_fragments:
+                if not sys_id:
+                    continue
+                shelfmark = ''
+                try:
+                    if state.meta_mgr:
+                        sm, _ = state.meta_mgr.get_meta_for_id(sys_id)
+                        shelfmark = sm or ''
+                except Exception:
+                    pass
+                await _add_fragment_by_sys_id(
+                    sys_id, shelfmark, puzzle_meta,
+                    pending_fragment_meta, threshold_slider,
+                )
+
+        # Schedule via the SAME _after_delay wrapper the single-add uses —
+        # it re-enters the client context with ``with _puzzle_client:`` and
+        # try/excepts (mirror: asyncio.ensure_future(_after_delay(1.5, auto_add))).
+        asyncio.ensure_future(_after_delay(1.5, auto_add_bulk))
 
     # ── Handle initial_doc query parameter (load saved document by ID) ──
     if initial_doc:
