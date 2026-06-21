@@ -4251,3 +4251,27 @@ TRANSLATIONS.update({
                                        "הפעולה הזאת מאפסת את העוגן, שורות הבונה, חוות המיון והסננים. החיפוש יתחיל מחדש. אין אפשרות לבטל.",
     "Clear everything":                "נקה הכל",
 })
+
+# === Phase 120-04: ACT-01/D-02/D-03 — Add-as-Join, remove-join, selection substrate ===
+TRANSLATIONS.update({
+    # --- Known-joins empty state (D-02: proposed joins shown in Lab) ---
+    "Community-proposed joins are shown":
+                                       "מוצגים חיבורים שהוצעו על ידי הקהילה",
+    # --- Add-as-Join (ACT-01) ---
+    "Add as Join":                     "הוסף כחיבור",
+    "Sign in to add this join to the community record":
+                                       "התחבר להוספת החיבור לרשומת הקהילה",
+    "Could not add join. Check your connection.":
+                                       "לא ניתן להוסיף את החיבור. בדוק את החיבור לאינטרנט.",
+    "This records a scholarly claim that {a} and {b} physically join. It will be immediately visible to all users.":
+                                       "הפעולה מתעדת טענה מחקרית כי {a} ו-{b} מצטרפים פיזית. היא תיראה מיד לכל המשתמשים.",
+    # --- Remove-join (D-03) ---
+    "Remove this join (only your own joins can be removed)":
+                                       "הסר חיבור זה (ניתן להסיר רק חיבורים שלך)",
+    "Remove Join":                     "הסר חיבור",
+    "Remove":                          "הסר",
+    "Could not remove join. Check your connection.":
+                                       "לא ניתן להסיר את החיבור. בדוק את החיבור לאינטרנט.",
+    "Remove the join between {a} and {b}? This cannot be undone.":
+                                       "להסיר את החיבור בין {a} ל-{b}? לא ניתן לבטל פעולה זו.",
+})

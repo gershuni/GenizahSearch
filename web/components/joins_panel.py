@@ -80,18 +80,25 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
         shelfmark: Current fragment shelfmark
         document_id: System ID of the document (sys_id)
         pgpid: PGP document ID (avoids redundant Supabase lookup)
-        force_refresh: Force cache bypass
+        force_refresh: Force cache bypass (pass True after an insert/delete to see
+            the new join immediately without the ~30s cache delay).
         confirmed_only: When True, use status='confirmed' filter (ANC-05 / D-17 / T-118-01)
             and a separate ':confirmed' cache key so the Lab path result never contaminates
-            the browse-dialog full-joins cache. Also merges community puzzle joins (ANC-04).
+            the browse-dialog full-joins cache.
+            When False (the Lab path — ACT-01 D-02 override, Phase-120): all community
+            joins (proposed + confirmed) are shown, consistent with the /browse behavior
+            verified live by the user.
 
     Returns:
         Dict with fragments, joins, total_fragments, total_joins, fragment_details
+        Each join dict includes a 'user_id' key (None for PGP/merged joins).
     """
     # Build cache key (include pgpid for proper cache separation).
     # ANC-05 / D-17 / T-118-01: confirmed_only path uses a ':confirmed' suffix so it
     # is stored in an isolated key — a confirmed-only result can NEVER poison the
     # browse-dialog full-joins cache (which uses the unconfirmed key).
+    # Phase-120 Lab path (confirmed_only=False) uses the non-':confirmed' key so
+    # proposed joins inserted by the current user appear after a force_refresh.
     base_key = f"doc:{document_id}:pgp:{pgpid}" if document_id else f"shelf:{shelfmark}:pgp:{pgpid}"
     cache_key = f"{base_key}:confirmed" if confirmed_only else base_key
 
@@ -105,10 +112,11 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
 
     try:
         # Fetch user joins from Supabase.
-        # ANC-05 (D-17): on the confirmed_only (Lab) path, pass status='confirmed' so
-        # that any user's unconfirmed (proposed) joins are excluded at the query layer.
-        # RLS is USING(true) — all rows are publicly readable; the app-layer filter is
-        # the sole mechanism that prevents cross-user join leaks (T-118-01).
+        # confirmed_only (Lab ANC-05 path): pass status='confirmed' so that any
+        # user's unconfirmed (proposed) joins are excluded at the query layer.
+        # confirmed_only=False (Phase-120 Lab ACT-01 D-02 path): fetch ALL community
+        # joins (proposed + confirmed) — consistent with the /browse show-all behavior
+        # verified live. RLS is USING(true) — all rows are publicly readable.
         if document_id:
             if confirmed_only:
                 joins = get_fragment_joins(fragment_sys_id=document_id, status='confirmed')
@@ -159,6 +167,7 @@ def fetch_connected_fragments(shelfmark: str = None, document_id: str = None, pg
                 'notes': j.get('notes', ''),
                 'created_by_username': j.get('created_by_username', ''),
                 'created_at': j.get('created_at', ''),
+                'user_id': j.get('user_id'),  # Phase-120 ACT-01/D-03: own-join detection
             })
 
         # --- Merge PGP document joins ---

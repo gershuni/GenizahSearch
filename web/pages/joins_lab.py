@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote
 
@@ -67,6 +68,7 @@ from shared.joins_lab import (
     detect_self_match, merge_candidates,
 )
 from shared.visual_similarity_service import get_vs_service
+from web.auth_state import GlobalAuthState, create_login_dialog
 from web.components.anchor_viewer import AnchorViewer, inject_viewer_assets
 from web.components.candidate_grid import (
     compute_filtered, create_candidate_grid, create_candidate_table, open_filter_dialog,
@@ -83,8 +85,10 @@ from web.joins_lab_storage import (
     write_anchor,
     write_full_state,
 )
+from web.safe_storage import safe_user_pop, safe_user_set
 from web.services import get_service
 from web.state import state
+from web.supabase_client import create_fragment_join, delete_fragment_join
 from web.translations import is_rtl, tr
 
 logger = logging.getLogger(__name__)
@@ -98,6 +102,13 @@ _SEARCH_TIMEOUT_SECONDS = 120
 
 Matches the interactive search tier.  Tune via this constant;
 Phase 118+ can expose it as an env knob if needed.
+"""
+
+_PENDING_ACTION_TTL_SECONDS = 900  # 15 minutes — pending Add-as-Join expires after this
+"""TTL for the 'joins_lab_pending' add-as-join descriptor stored before login.
+
+Phase-120 R2-M2: descriptors older than this are cleared without replaying
+(prevents a stale descriptor from executing against a different anchor).
 """
 
 
@@ -770,6 +781,12 @@ def create_joins_lab_page(
 
         # A2: branch on _view_mode to reach the table (not just the grid)
         if _view_mode['value'] == 'table':
+            # Phase-120 H2: wire table selection to the page _selected set so
+            # SELECTION-scoped bulk actions (Add-to-Puzzle / Add-to-List) see it.
+            def _on_table_selection_change(sids: list) -> None:
+                _selected.clear()
+                _selected.update(sids)
+
             create_candidate_table(
                 _filtered_candidates,
                 triage=_triage,
@@ -777,6 +794,7 @@ def create_joins_lab_page(
                 sort_mode=sort_mode,
                 on_compare=_open_compare,
                 restyle_fn=_triage_state_ref.get('restyle'),
+                on_selection_change=_on_table_selection_change,
             )
         else:
             # Render the Phase-02 grid surface
@@ -1235,14 +1253,174 @@ def create_joins_lab_page(
             return results[0].sys_id
         return None
 
-    async def _load_known_joins(
-        sys_id: str, shelfmark: str, pgpid: Optional[int] = None, anchor_gen: int = 0
-    ) -> None:
-        """Fetch confirmed-only joins for the anchor; render in known_joins_container.
+    # -----------------------------------------------------------------------
+    # Phase-120 ACT-01: Add-as-Join login gate + pending-action replay (H4)
+    # -----------------------------------------------------------------------
 
-        ANC-04 / ANC-05: uses the confirmed-only path from Plan 02 (status='confirmed'
-        + ':confirmed' cache key + community merge). The fetch is I/O-bound (Supabase
-        + SQLite) so it MUST be dispatched via run.io_bound.
+    def _on_add_as_join_click(candidate_sys_id: str, candidate_shelfmark: str) -> None:
+        """Handle "Add as Join" click on a candidate card/row.
+
+        Logged-in: show confirm dialog → create_fragment_join (no status kwarg) off-loop
+          → force-refresh known-joins so proposed join appears immediately (D-02).
+        Anonymous: persist pending descriptor to safe_storage and open login dialog (H4).
+          After login, the page reloads and _bootstrap_anchor replays the pending action.
+        """
+        anchor_sys_id = _anchor_state.get('sys_id') or ''
+        anchor_shelfmark = _anchor_state.get('shelfmark') or ''
+
+        if not GlobalAuthState.is_logged_in():
+            # H4: page reloads on successful login — must persist before opening dialog.
+            # R2-M2: include schema_version + created_at + expected_anchor_sys_id.
+            descriptor = {
+                'schema_version': 1,
+                'action': 'add_as_join',
+                'created_at': datetime.now(tz=timezone.utc).isoformat(),
+                'expected_anchor_sys_id': anchor_sys_id,
+                'anchor_sys_id': anchor_sys_id,
+                'anchor_shelfmark': anchor_shelfmark,
+                'candidate_sys_id': candidate_sys_id,
+                'candidate_shelfmark': candidate_shelfmark,
+            }
+            safe_user_set('joins_lab_pending', descriptor)
+            create_login_dialog().open()
+            return
+
+        # Logged-in: show confirm dialog
+        user = GlobalAuthState.get_user()
+        user_id = user['id'] if user else None
+        if not user_id:
+            return
+
+        confirm_body = tr(
+            'This records a scholarly claim that {a} and {b} physically join. '
+            'It will be immediately visible to all users.'
+        ).replace('{a}', anchor_shelfmark or anchor_sys_id).replace(
+            '{b}', candidate_shelfmark or candidate_sys_id
+        )
+
+        with ui.dialog() as confirm_dialog, ui.card().classes('p-4 gap-3').style(
+            'background: var(--bg-card); color: var(--text-primary);'
+        ):
+            ui.label(tr('Add as Join')).classes('text-base font-semibold')
+            ui.label(confirm_body).classes('text-sm').style(
+                'color: var(--text-secondary); max-width: 360px;'
+            )
+            with ui.row().classes('gap-2 justify-end'):
+                ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
+
+                async def _do_add_join(
+                    _uid=user_id, _asid=anchor_sys_id, _asm=anchor_shelfmark,
+                    _csid=candidate_sys_id, _csm=candidate_shelfmark
+                ) -> None:
+                    """Off-loop Supabase write; force-refresh known-joins on success."""
+                    try:
+                        confirm_dialog.close()
+
+                        def _run_create():
+                            return create_fragment_join(
+                                user_id=_uid,
+                                fragment_a_sys_id=_asid,
+                                fragment_a_shelfmark=_asm,
+                                fragment_b_sys_id=_csid,
+                                fragment_b_shelfmark=_csm,
+                                # NO status kwarg — stays 'proposed' (D-02 LOCKED)
+                            )
+
+                        result = await run.io_bound(_run_create)
+                        if result.get('success'):
+                            # D-02: force-refresh so proposed join shows immediately
+                            await _load_known_joins(
+                                _asid, _asm,
+                                anchor_gen=_anchor_generation['value'],
+                                force_refresh=True,
+                            )
+                            ui.notify(tr('Add as Join'), type='positive', timeout=3000)
+                        else:
+                            err = result.get('error', '')
+                            ui.notify(
+                                tr('Could not add join. Check your connection.'),
+                                type='negative', timeout=8000,
+                            )
+                            logger.warning('create_fragment_join error: %s', err)
+                    except RuntimeError:
+                        return  # SEED-008 D-20: client/tab deleted mid-fetch
+
+                ui.button(tr('Add as Join'), on_click=_do_add_join).props('color=primary unelevated')
+
+        confirm_dialog.open()
+
+    # -----------------------------------------------------------------------
+    # Phase-120 D-03: Remove-my-join — self-scoped delete on own joins only
+    # -----------------------------------------------------------------------
+
+    def _on_remove_join_click(join_id: int) -> None:
+        """Handle remove-join click on own join row.
+
+        Opens confirm dialog → delete_fragment_join off-loop → force-refresh
+        known-joins to remove the row. RLS enforces self-scope on the server.
+        """
+        anchor_sys_id = _anchor_state.get('sys_id') or ''
+        anchor_shelfmark = _anchor_state.get('shelfmark') or ''
+
+        with ui.dialog() as remove_dialog, ui.card().classes('p-4 gap-3').style(
+            'background: var(--bg-card); color: var(--text-primary);'
+        ):
+            ui.label(tr('Remove Join')).classes('text-base font-semibold')
+            body_text = tr(
+                'Remove the join between {a} and {b}? This cannot be undone.'
+            ).replace('{a}', anchor_shelfmark or anchor_sys_id).replace('{b}', '…')
+            ui.label(body_text).classes('text-sm').style(
+                'color: var(--text-secondary); max-width: 360px;'
+            )
+            with ui.row().classes('gap-2 justify-end'):
+                ui.button(tr('Cancel'), on_click=remove_dialog.close).props('flat')
+
+                async def _do_remove(
+                    _jid=join_id, _asid=anchor_sys_id, _asm=anchor_shelfmark
+                ) -> None:
+                    """Off-loop Supabase delete; force-refresh known-joins on success."""
+                    try:
+                        remove_dialog.close()
+
+                        def _run_delete():
+                            return delete_fragment_join(_jid)
+
+                        result = await run.io_bound(_run_delete)
+                        if result.get('success'):
+                            # Force-refresh so the removed join disappears immediately
+                            await _load_known_joins(
+                                _asid, _asm,
+                                anchor_gen=_anchor_generation['value'],
+                                force_refresh=True,
+                            )
+                        else:
+                            err = result.get('error', '')
+                            ui.notify(
+                                tr('Could not remove join. Check your connection.'),
+                                type='negative', timeout=8000,
+                            )
+                            logger.warning('delete_fragment_join error: %s', err)
+                    except RuntimeError:
+                        return  # SEED-008 D-20: client/tab deleted mid-fetch
+
+                ui.button(tr('Remove'), on_click=_do_remove).props('color=negative unelevated')
+
+        remove_dialog.open()
+
+    async def _load_known_joins(
+        sys_id: str, shelfmark: str, pgpid: Optional[int] = None,
+        anchor_gen: int = 0, force_refresh: bool = False
+    ) -> None:
+        """Fetch all community joins (proposed + confirmed) for the anchor; render
+        in known_joins_container.
+
+        Phase-120 ACT-01 D-02 override: uses confirmed_only=False so both proposed
+        and confirmed community joins appear in the Lab (parity with /browse).
+        Pass force_refresh=True after an insert/delete so the new join appears
+        immediately (bypasses the ~30s cache).
+
+        ANC-04: the fetch is I/O-bound (Supabase + SQLite) so it MUST be dispatched
+        via run.io_bound.
 
         MED (CR): this is fire-and-forget; ``anchor_gen`` is the anchor generation
         captured at dispatch. Every UI mutation below is guarded so a slow fetch for
@@ -1271,8 +1449,8 @@ def create_joins_lab_page(
                     shelfmark=shelfmark,
                     document_id=sys_id,
                     pgpid=pgpid,
-                    confirmed_only=True,
-                    force_refresh=False,
+                    confirmed_only=False,  # Phase-120 D-02: show proposed + confirmed
+                    force_refresh=force_refresh,
                 )
             except Exception:
                 if anchor_gen != _anchor_generation['value']:
@@ -1297,6 +1475,11 @@ def create_joins_lab_page(
                 sm_encoded = quote(member_shelfmark, safe='')
                 ui.navigate.to(f'/browse?shelfmark={sm_encoded}')
 
+            # Phase-120 D-03: get current user_id for own-join detection.
+            # None when anonymous — no remove button rendered.
+            _user = GlobalAuthState.get_user() if GlobalAuthState.is_logged_in() else None
+            _current_uid = _user['id'] if _user else None
+
             known_joins_container.clear()
             with known_joins_container:
                 render_known_joins_group(
@@ -1305,6 +1488,8 @@ def create_joins_lab_page(
                     current_sys_id=sys_id,
                     on_reanchor=_on_reanchor,
                     on_open_browse=_on_open_browse,
+                    on_remove_join=_on_remove_join_click,
+                    current_user_id=_current_uid,
                 )
         except RuntimeError:
             return  # client/tab deleted mid-fetch — benign teardown (SEED-008 D-20)
@@ -2336,6 +2521,8 @@ def create_joins_lab_page(
                 page=initial_page,
                 volume_ie=initial_volume_ie,
             )
+            # Phase-120 H4: replay pending add-as-join if present (url-anchor path)
+            await _replay_pending_action()
 
         elif decision['source'] == 'url_shelfmark':
             # Shelfmark needs async resolution
@@ -2347,6 +2534,8 @@ def create_joins_lab_page(
                     page=initial_page,
                     volume_ie=initial_volume_ie,
                 )
+                # Phase-120 H4: replay pending add-as-join if present (url-shelfmark path)
+                await _replay_pending_action()
             # else: fall through to empty state (shelfmark not found)
 
         elif decision['source'] == 'stored':
@@ -2447,6 +2636,110 @@ def create_joins_lab_page(
             # Step 10: hide restoring indicator
             if ind_el is not None:
                 ind_el.style('display: none;')
+
+            # Phase-120 H4: replay pending add-as-join if present (stored-anchor path)
+            await _replay_pending_action()
+
+    # -----------------------------------------------------------------------
+    # Phase-120 H4: pending-action replay helper (one-shot safe_user_pop)
+    # -----------------------------------------------------------------------
+
+    async def _replay_pending_action() -> None:
+        """Replay a pending Add-as-Join descriptor after the post-login page reload.
+
+        H4: create_login_dialog() reloads the page on success — in-memory pending
+        actions are lost.  The anonymous path persists a compact descriptor to
+        safe_storage under 'joins_lab_pending'; this function reads and pops it
+        (one-shot — prevents double-fire on subsequent loads).
+
+        R2-M2 replay guards (ALL must hold to replay):
+          1. Descriptor is a dict with schema_version == 1 and action == 'add_as_join'.
+          2. created_at is within _PENDING_ACTION_TTL_SECONDS of now (not expired).
+          3. GlobalAuthState.is_logged_in() is True.
+          4. expected_anchor_sys_id == the currently-loaded anchor sys_id.
+
+        If ANY guard fails → descriptor is already popped; cleared without writing.
+        """
+        # One-shot pop: cleared whether or not we replay (no double-fire)
+        descriptor = safe_user_pop('joins_lab_pending', None)
+        if not descriptor or not isinstance(descriptor, dict):
+            return
+
+        # Guard 1: schema + action
+        if descriptor.get('schema_version') != 1 or descriptor.get('action') != 'add_as_join':
+            logger.debug('_replay_pending_action: schema/action mismatch — cleared')
+            return
+
+        # Guard 2: TTL expiry
+        try:
+            created_at_str = descriptor.get('created_at', '')
+            created_at = datetime.fromisoformat(created_at_str)
+            age_seconds = (datetime.now(tz=timezone.utc) - created_at).total_seconds()
+            if age_seconds > _PENDING_ACTION_TTL_SECONDS:
+                logger.debug('_replay_pending_action: descriptor expired (age=%.0fs) — cleared', age_seconds)
+                return
+        except Exception:
+            logger.debug('_replay_pending_action: unparseable created_at — cleared')
+            return
+
+        # Guard 3: must be logged in
+        if not GlobalAuthState.is_logged_in():
+            logger.debug('_replay_pending_action: not logged in — cleared')
+            return
+
+        user = GlobalAuthState.get_user()
+        user_id = user['id'] if user else None
+        if not user_id:
+            return
+
+        # Guard 4: anchor must match
+        expected_anchor = descriptor.get('expected_anchor_sys_id', '')
+        current_anchor = _anchor_state.get('sys_id') or ''
+        if expected_anchor != current_anchor:
+            logger.debug(
+                '_replay_pending_action: anchor mismatch (expected=%r, current=%r) — cleared',
+                expected_anchor, current_anchor,
+            )
+            return
+
+        # All guards passed — replay the create_fragment_join write
+        anchor_sys_id = descriptor.get('anchor_sys_id', current_anchor)
+        anchor_shelfmark = descriptor.get('anchor_shelfmark', '')
+        candidate_sys_id = descriptor.get('candidate_sys_id', '')
+        candidate_shelfmark = descriptor.get('candidate_shelfmark', '')
+
+        if not candidate_sys_id:
+            return
+
+        try:
+            def _run_create():
+                return create_fragment_join(
+                    user_id=user_id,
+                    fragment_a_sys_id=anchor_sys_id,
+                    fragment_a_shelfmark=anchor_shelfmark,
+                    fragment_b_sys_id=candidate_sys_id,
+                    fragment_b_shelfmark=candidate_shelfmark,
+                    # NO status kwarg — stays 'proposed' (D-02 LOCKED)
+                )
+
+            result = await run.io_bound(_run_create)
+            if result.get('success'):
+                # D-02: force-refresh so proposed join shows immediately
+                await _load_known_joins(
+                    anchor_sys_id, anchor_shelfmark,
+                    anchor_gen=_anchor_generation['value'],
+                    force_refresh=True,
+                )
+                ui.notify(tr('Add as Join'), type='positive', timeout=3000)
+            else:
+                err = result.get('error', '')
+                ui.notify(
+                    tr('Could not add join. Check your connection.'),
+                    type='negative', timeout=8000,
+                )
+                logger.warning('_replay_pending_action create_fragment_join error: %s', err)
+        except RuntimeError:
+            return  # SEED-008 D-20: client/tab deleted mid-fetch
 
     # Defer the initial async resolution so it runs after the page handler
     # returns (do NOT block the page handler). asyncio.call_later (NOT ui.timer):

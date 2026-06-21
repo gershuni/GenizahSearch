@@ -894,18 +894,26 @@ def create_candidate_table(
     sort_mode: str = "score",
     on_compare: Optional[Callable] = None,
     restyle_fn: Optional[Callable] = None,
+    on_selection_change: Optional[Callable] = None,
 ) -> ui.element:
     """Render the multi-select sortable table view of candidates (D-10, CND-03).
 
     Args:
-        candidates:  Filtered (not paginated) list of Candidate objects.
-        triage:      TriageState or dict[sys_id → verdict].
-        enrichment:  dict[sys_id → {material, width_cm, height_cm, ...}]
-        sort_mode:   'score' (default, desc) or 'vs_rank' (asc when 👁 ON).
-        on_compare:  Optional callback(cand) launched on row double-click.
-        restyle_fn:  Optional render-scoped restyle callable from _make_restyle_fn().
-                     When None, bulk-triage verdict changes are recorded in triage but
-                     the visual border update is deferred until the next full re-render.
+        candidates:        Filtered (not paginated) list of Candidate objects.
+        triage:            TriageState or dict[sys_id → verdict].
+        enrichment:        dict[sys_id → {material, width_cm, height_cm, ...}]
+        sort_mode:         'score' (default, desc) or 'vs_rank' (asc when 👁 ON).
+        on_compare:        Optional callback(cand) launched on row double-click.
+        restyle_fn:        Optional render-scoped restyle callable from _make_restyle_fn().
+                           When None, bulk-triage verdict changes are recorded in triage but
+                           the visual border update is deferred until the next full re-render.
+        on_selection_change: Optional Callable[[list], None] — called from the selection
+                           handler with the current list of selected sys_ids.  Defaults to
+                           None (Phase-118/119 callers without it are unaffected — backward
+                           compat).  Phase-120 H2: joins_lab.py passes this to wire the
+                           table selection into the page-level ``_selected`` set so
+                           SELECTION-scoped bulk actions (Add-to-Puzzle / Add-to-List)
+                           see the same selection.
 
     Returns:
         The outer ui.element wrapping the table and bulk-triage bar.
@@ -979,6 +987,14 @@ def create_candidate_table(
             n = len(selected_sys_ids)
             bulk_count_label.set_text(tr("Mark N selected as:").replace("N", str(n)))
             bulk_bar.style("display:flex;" if n > 0 else "display:none;")
+            # Phase-120 H2: notify the page-level selection callback so
+            # SELECTION-scoped bulk actions (Add-to-Puzzle / Add-to-List) see the
+            # current selection.  Backward-compat: skipped when None.
+            if on_selection_change is not None:
+                try:
+                    on_selection_change(list(selected_sys_ids))
+                except Exception:
+                    pass  # never crash the render path from a callback error
 
         table.on("selection", _on_selection)
 

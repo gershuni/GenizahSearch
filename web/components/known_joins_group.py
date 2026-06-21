@@ -1,15 +1,23 @@
 # -*- coding: utf-8 -*-
-"""Known-joins group renderer (ANC-04, D-15/D-16).
+"""Known-joins group renderer (ANC-04, D-15/D-16, Phase-120 ACT-01/D-03).
 
 A pure render component that displays source-attributed known-joins for the
 current anchor fragment inside the Joins Lab anchor pane.  This component
 holds zero per-user state (T-118-02) and never fetches data — the caller
-performs the off-loop ``fetch_connected_fragments(confirmed_only=True)`` call
-and passes the result dict in.
+performs the off-loop ``fetch_connected_fragments(confirmed_only=False)`` call
+(Phase-120 D-02: Lab shows ALL community joins — proposed + confirmed) and
+passes the result dict in.
+
+Phase-120 extensions:
+  - ``render_known_joins_group`` accepts optional ``on_remove_join`` and
+    ``current_user_id`` params for the D-03 self-service remove affordance.
+  - Each join dict returned by ``fetch_connected_fragments`` now includes a
+    ``user_id`` key so own-join detection works without a separate lookup.
 
 Exports
 -------
-render_known_joins_group(data, current_shelfmark, current_sys_id, on_reanchor, on_open_browse)
+render_known_joins_group(data, current_shelfmark, current_sys_id, on_reanchor,
+                         on_open_browse, on_remove_join=None, current_user_id=None)
 badge_for_source(source) -> (label, css_color)
 """
 
@@ -57,6 +65,8 @@ def render_known_joins_group(
     current_sys_id: str,
     on_reanchor: Callable[[str, str], None],
     on_open_browse: Callable[[str], None],
+    on_remove_join: Callable[[int], None] | None = None,
+    current_user_id: str | None = None,
 ) -> None:
     """Render the known-joins group into the current NiceGUI parent slot.
 
@@ -65,15 +75,30 @@ def render_known_joins_group(
     none.  Every user-facing string goes through ``tr()`` for EN/HE bilingual
     support.
 
+    Phase-120 ACT-01/D-02: the data dict is produced by
+    ``fetch_connected_fragments(confirmed_only=False)`` — proposed + confirmed
+    community joins are BOTH shown (parity with /browse live behavior).
+
+    Phase-120 D-03: pass ``on_remove_join`` and ``current_user_id`` to enable
+    the self-service remove affordance on the logged-in user's OWN joins.
+    Both default to None for backward compatibility with Phase-118 callers.
+
     Args:
-        data: Dict returned by ``fetch_connected_fragments(confirmed_only=True)``
+        data: Dict returned by ``fetch_connected_fragments(confirmed_only=False)``
               with keys: fragments, joins, total_joins, fragment_details.
+              Each join dict includes a ``user_id`` key (None for PGP joins).
         current_shelfmark: Shelfmark of the anchor fragment (skipped in list).
         current_sys_id: sys_id of the anchor (used to avoid re-anchoring to self).
         on_reanchor: Callback(sys_id: str, shelfmark: str) — called when the user
                      clicks the re-anchor pin icon on a member row.
         on_open_browse: Callback(shelfmark: str) — called when the user clicks the
                         open-in-browse icon on a member row.
+        on_remove_join: Optional Callback(join_id: int) — called when the user
+                        clicks the remove icon on their OWN join row. When None,
+                        no remove button is rendered (backward-compatible).
+        current_user_id: Optional str — the authenticated user's ID.  Used to
+                         determine ``is_mine`` for own-join detection.  When None,
+                         no join is treated as "own" and no remove button renders.
     """
     joins: list[dict] = data.get('joins', [])
     fragment_details: list[dict] = data.get('fragment_details', [])
@@ -96,12 +121,12 @@ def render_known_joins_group(
         value=count > 0,
     ).classes('w-full'):
         if count == 0:
-            # Empty state — ANC-05 multitenant disclosure
+            # Empty state — Phase-120 D-02: all community joins (proposed + confirmed)
             with ui.column().classes('gap-1 py-2'):
                 ui.label(tr('No known joins')).classes('text-sm').style(
                     'color: var(--text-primary);'
                 )
-                ui.label(tr('Only confirmed public joins are shown')).classes(
+                ui.label(tr('Community-proposed joins are shown')).classes(
                     'text-xs'
                 ).style('color: var(--text-muted); font-size: 12px;')
         else:
@@ -129,12 +154,22 @@ def render_known_joins_group(
                     member_sys_id = shelfmark_to_sys.get(member_shelfmark.upper(), '')
                     sources: list[str] = join.get('sources', [])
 
+                    join_id = join.get('id')
+                    join_user_id = join.get('user_id')
+                    is_mine = bool(
+                        current_user_id
+                        and join_user_id is not None
+                        and join_user_id == current_user_id
+                    )
                     _render_member_row(
                         member_shelfmark=member_shelfmark,
                         member_sys_id=member_sys_id,
                         sources=sources,
+                        join_id=join_id,
+                        is_mine=is_mine,
                         on_reanchor=on_reanchor,
                         on_open_browse=on_open_browse,
+                        on_remove_join=on_remove_join,
                     )
 
 
@@ -144,10 +179,18 @@ def _render_member_row(
     sources: list[str],
     on_reanchor: Callable[[str, str], None],
     on_open_browse: Callable[[str], None],
+    join_id: int | None = None,
+    is_mine: bool = False,
+    on_remove_join: Callable[[int], None] | None = None,
 ) -> None:
     """Render one 36px compact member row.
 
+    Phase-120 D-03: when ``is_mine`` is True AND ``on_remove_join`` is provided,
+    renders a third trailing ``link_off`` icon button for self-service removal.
+    For other users' joins the remove button is absent (not rendered, not hidden).
+
     Layout: [source badge(s)] [shelfmark label] [spacer] [pin icon] [open icon]
+            or (own join): [source badge(s)] [shelfmark label] [spacer] [pin icon] [open icon] [remove icon]
     """
     direction_class = 'flex-row-reverse' if is_rtl() else 'flex-row'
     with ui.row().classes(
@@ -201,3 +244,17 @@ def _render_member_row(
         ).props('flat dense').classes('text-gray-500').tooltip(
             tr('View in Browse')
         )
+
+        # Phase-120 D-03: remove affordance — only on the user's OWN joins
+        if is_mine and on_remove_join is not None and join_id is not None:
+            def _make_remove(jid: int = join_id) -> Callable:
+                def _do() -> None:
+                    on_remove_join(jid)
+                return _do
+
+            ui.button(
+                icon='link_off',
+                on_click=_make_remove(),
+            ).props('flat dense color=negative').tooltip(
+                tr('Remove this join (only your own joins can be removed)')
+            )

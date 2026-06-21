@@ -659,6 +659,281 @@ class TestPersistenceWiring:
         )
 
 
+# ---------------------------------------------------------------------------
+# Phase 120-04: ACT-01/D-02/D-03/H1/H2 — Add-as-Join, remove-join, selection
+# ---------------------------------------------------------------------------
+
+
+class TestLoadKnownJoinsForceRefresh:
+    """Task 1 (H1/D-02): _load_known_joins now accepts force_refresh and uses confirmed_only=False."""
+
+    def _source(self):
+        from pathlib import Path
+        p = Path(__file__).parent.parent / "web" / "pages" / "joins_lab.py"
+        assert p.exists()
+        return p.read_text(encoding="utf-8")
+
+    def test_force_refresh_in_signature(self):
+        """_load_known_joins must accept a force_refresh parameter (H1)."""
+        source = self._source()
+        assert "force_refresh" in source, (
+            "_load_known_joins must accept force_refresh (H1)"
+        )
+
+    def test_confirmed_only_false_not_true(self):
+        """_load_known_joins must pass confirmed_only=False (D-02 override)."""
+        source = self._source()
+        assert "confirmed_only=False" in source, (
+            "_load_known_joins must pass confirmed_only=False (D-02 Lab shows proposed+confirmed)"
+        )
+        # Ensure no confirmed_only=True remains on the _load_known_joins path
+        # (it may still exist in /browse; we just check our call passes False)
+        lines = source.splitlines()
+        in_load_fn = False
+        for line in lines:
+            if "async def _load_known_joins" in line:
+                in_load_fn = True
+            if in_load_fn and "confirmed_only=True" in line:
+                raise AssertionError(
+                    f"_load_known_joins must not pass confirmed_only=True (D-02): {line!r}"
+                )
+            # Stop scanning after the function ends (next top-level def inside the page)
+            if in_load_fn and "async def load_anchor" in line:
+                break
+
+    def test_force_refresh_threaded_into_fetch(self):
+        """force_refresh must be passed to fetch_connected_fragments call (H1)."""
+        source = self._source()
+        assert "force_refresh=force_refresh" in source, (
+            "_load_known_joins must thread force_refresh into fetch_connected_fragments (H1)"
+        )
+
+    def test_user_id_in_formatted_joins(self):
+        """joins_panel.formatted_joins must include user_id key (Task 1 user_id propagation)."""
+        from pathlib import Path
+        p = Path(__file__).parent.parent / "web" / "components" / "joins_panel.py"
+        source = p.read_text(encoding="utf-8")
+        assert "'user_id'" in source, (
+            "formatted_joins must include 'user_id' key for own-join detection (Task 1)"
+        )
+
+    def test_old_confirmed_copy_gone(self):
+        """known_joins_group.py empty-state must not say 'Only confirmed public joins are shown'."""
+        from pathlib import Path
+        p = Path(__file__).parent.parent / "web" / "components" / "known_joins_group.py"
+        source = p.read_text(encoding="utf-8")
+        assert "Only confirmed public joins are shown" not in source, (
+            "known_joins_group.py empty-state copy must be updated (N1)"
+        )
+
+    def test_new_community_copy_present(self):
+        """known_joins_group.py must use 'Community-proposed joins are shown' (N1)."""
+        from pathlib import Path
+        p = Path(__file__).parent.parent / "web" / "components" / "known_joins_group.py"
+        source = p.read_text(encoding="utf-8")
+        assert "Community-proposed joins are shown" in source, (
+            "known_joins_group.py must update empty-state copy (N1)"
+        )
+
+
+class TestAddAsJoinGate:
+    """Task 2: ACT-01 Add-as-Join login gate + pending-action replay."""
+
+    def _source(self):
+        from pathlib import Path
+        p = Path(__file__).parent.parent / "web" / "pages" / "joins_lab.py"
+        assert p.exists()
+        return p.read_text(encoding="utf-8")
+
+    def test_create_fragment_join_called(self):
+        """ACT-01: joins_lab.py must call create_fragment_join (the Supabase write path)."""
+        source = self._source()
+        assert "create_fragment_join" in source, (
+            "joins_lab.py must call create_fragment_join (ACT-01 D-01)"
+        )
+
+    def test_no_status_confirmed_kwarg(self):
+        """D-02: create_fragment_join must NOT be called with status='confirmed'."""
+        source = self._source()
+        assert "status='confirmed'" not in source, (
+            "create_fragment_join must NOT receive status='confirmed' — status stays 'proposed' (D-02)"
+        )
+
+    def test_pending_action_key_used(self):
+        """H4: anonymous add-as-join must persist descriptor via safe_user_* under joins_lab_pending."""
+        source = self._source()
+        assert "joins_lab_pending" in source, (
+            "joins_lab.py must use 'joins_lab_pending' key for anonymous pending action (H4)"
+        )
+
+    def test_pending_replay_checks_schema_version(self):
+        """R2-M2: replay must validate schema_version == 1."""
+        source = self._source()
+        assert "schema_version" in source, (
+            "pending replay must check schema_version (R2-M2)"
+        )
+
+    def test_pending_replay_checks_created_at(self):
+        """R2-M2: replay must check created_at TTL expiry."""
+        source = self._source()
+        assert "created_at" in source, (
+            "pending replay must check created_at for TTL expiry (R2-M2)"
+        )
+
+    def test_pending_replay_checks_expected_anchor(self):
+        """R2-M2: pending descriptor must contain expected_anchor_sys_id."""
+        source = self._source()
+        assert "expected_anchor_sys_id" in source, (
+            "pending descriptor must carry expected_anchor_sys_id for replay guard (R2-M2)"
+        )
+
+    def test_safe_user_pop_used_for_replay(self):
+        """H4: replay must use safe_user_pop (one-shot pop, prevents double-fire)."""
+        source = self._source()
+        assert "safe_user_pop" in source, (
+            "joins_lab.py must use safe_user_pop for pending-action replay (H4 one-shot)"
+        )
+
+    def test_force_refresh_true_after_insert(self):
+        """After successful insert, _load_known_joins must be called with force_refresh=True."""
+        source = self._source()
+        assert "force_refresh=True" in source, (
+            "_load_known_joins must be called with force_refresh=True after insert (D-02)"
+        )
+
+    def test_add_as_join_button_tr_present(self):
+        """ACT-01 UI: 'Add as Join' button label must be via tr()."""
+        source = self._source()
+        assert "Add as Join" in source, (
+            "joins_lab.py must contain 'Add as Join' string (ACT-01 UI)"
+        )
+
+
+class TestRemoveJoin:
+    """Task 3: D-03 remove-my-join on own joins only."""
+
+    def _known_joins_source(self):
+        from pathlib import Path
+        p = Path(__file__).parent.parent / "web" / "components" / "known_joins_group.py"
+        assert p.exists()
+        return p.read_text(encoding="utf-8")
+
+    def _lab_source(self):
+        from pathlib import Path
+        p = Path(__file__).parent.parent / "web" / "pages" / "joins_lab.py"
+        assert p.exists()
+        return p.read_text(encoding="utf-8")
+
+    def test_on_remove_join_param_in_signature(self):
+        """D-03: render_known_joins_group must accept on_remove_join param."""
+        source = self._known_joins_source()
+        assert "on_remove_join" in source, (
+            "render_known_joins_group must accept on_remove_join param (D-03)"
+        )
+
+    def test_on_remove_join_defaults_to_none(self):
+        """D-03: on_remove_join must default to None (backward compat)."""
+        source = self._known_joins_source()
+        assert "on_remove_join: Callable[[int], None] | None = None" in source or \
+               "on_remove_join=None" in source, (
+            "on_remove_join must default to None (D-03 backward compat)"
+        )
+
+    def test_link_off_icon_rendered(self):
+        """D-03: link_off icon button must be rendered for own joins."""
+        source = self._known_joins_source()
+        assert "link_off" in source, (
+            "known_joins_group.py must render link_off icon for remove (D-03)"
+        )
+
+    def test_remove_only_on_own_join(self):
+        """D-03: remove button rendered only when is_mine=True."""
+        source = self._known_joins_source()
+        assert "is_mine" in source, (
+            "known_joins_group.py must use is_mine flag for conditional remove button (D-03)"
+        )
+
+    def test_delete_fragment_join_called_from_lab(self):
+        """D-03: joins_lab.py must call delete_fragment_join (the Supabase delete path)."""
+        source = self._lab_source()
+        assert "delete_fragment_join" in source, (
+            "joins_lab.py must call delete_fragment_join (D-03)"
+        )
+
+    def test_remove_tooltip_present(self):
+        """D-03: remove tooltip must be via tr()."""
+        source = self._known_joins_source()
+        assert "Remove this join" in source, (
+            "known_joins_group.py must contain remove tooltip copy (D-03)"
+        )
+
+
+class TestCandidateTableSelectionSubstrate:
+    """Task 4: H2 — candidate-table multi-select feeds page _selected set."""
+
+    def _grid_source(self):
+        from pathlib import Path
+        p = Path(__file__).parent.parent / "web" / "components" / "candidate_grid.py"
+        assert p.exists()
+        return p.read_text(encoding="utf-8")
+
+    def _lab_source(self):
+        from pathlib import Path
+        p = Path(__file__).parent.parent / "web" / "pages" / "joins_lab.py"
+        assert p.exists()
+        return p.read_text(encoding="utf-8")
+
+    def test_on_selection_change_param_in_create_candidate_table(self):
+        """H2: create_candidate_table must accept on_selection_change param."""
+        source = self._grid_source()
+        assert "on_selection_change" in source, (
+            "create_candidate_table must accept on_selection_change callback (H2)"
+        )
+
+    def test_on_selection_change_called_from_on_selection(self):
+        """H2: _on_selection handler must invoke on_selection_change callback."""
+        source = self._grid_source()
+        # Look for the on_selection_change call inside _on_selection
+        assert "on_selection_change" in source, (
+            "on_selection_change must be called from _on_selection handler (H2)"
+        )
+
+    def test_on_selection_change_defaults_to_none(self):
+        """H2: on_selection_change defaults to None (backward compat)."""
+        source = self._grid_source()
+        assert (
+            "on_selection_change: Optional[Callable] = None" in source
+            or "on_selection_change: Callable" in source
+            or "on_selection_change=None" in source
+        ), "on_selection_change must default to None for backward compat (H2)"
+
+    def test_selected_wired_in_lab(self):
+        """H2: joins_lab.py must wire on_selection_change to update _selected set."""
+        source = self._lab_source()
+        assert "_selected" in source and "on_selection_change" in source, (
+            "joins_lab.py must wire on_selection_change → _selected set (H2)"
+        )
+
+    def test_grid_has_no_on_selection_change(self):
+        """H2: create_candidate_grid does NOT have a bulk-selection bar (grid view is per-card only)."""
+        source = self._grid_source()
+        # create_candidate_grid should NOT have on_selection_change
+        lines = source.splitlines()
+        in_grid_fn = False
+        for line in lines:
+            if "def create_candidate_grid(" in line:
+                in_grid_fn = True
+            # stop at next top-level def
+            if in_grid_fn and line.startswith("def ") and "create_candidate_grid" not in line:
+                break
+            if in_grid_fn and "on_selection_change" in line:
+                # Expected: grid function does NOT accept/use on_selection_change
+                raise AssertionError(
+                    "create_candidate_grid must NOT accept on_selection_change — "
+                    "bulk selection is table-view only (H2)"
+                )
+
+
 class TestPersistStatePayloadContract:
     """Contract tests: _persist_state payload has no result blobs.
 
