@@ -598,18 +598,12 @@ class AnchorViewer:
             # Letting it flow naturally hands all scrolling to the single outer
             # pane scroll area.
             if self._image_max_height:
-                # Compare context: the transcription scrolls WITHIN ITSELF (inner
-                # scroll) at a viewport-bounded height, so the image + text fit the
-                # window and the bottom is always reachable. We use a viewport calc
-                # (NOT the fragile nested-flex fill that collapsed/overflowed) —
-                # it subtracts the image cap (40vh) + the fixed chrome (top header,
-                # pane header, controls bar, verdict bar ≈ 255px) so image +
-                # transcription + chrome ≈ the viewport on any window height. The
-                # pane itself does NOT scroll (overflow:hidden) so this inner scroll
-                # is the only one (no nested-scroll trap). overflow-y:auto comes
-                # from the .anchor-transcription-panel class.
+                # Compare context: the transcription flows at its FULL natural
+                # height (no own scroll, no 65vh cap) so the OUTER two-pane body
+                # scrolls everything above the navigation as one unit (round-5
+                # UAT: "the outer layout should be scrollable", not an inner box).
                 self._transcription_container.style(
-                    "max-height: calc(60vh - 255px); min-height: 96px;"
+                    "max-height:none; overflow:visible;"
                 )
             with self._transcription_container:
                 self._transcription_html = ui.html("", sanitize=False)

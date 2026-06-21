@@ -386,21 +386,16 @@ def test_compare_modal_nav_is_rtl_aware():
     )
 
 
-def test_anchor_viewer_compare_transcription_inner_scrolls():
-    """Source assertion (round-5 UAT 'fit to height' — inner scrolling): in the
-    Compare context (image_max_height set) the transcription has its OWN bounded
-    inner scroll via a VIEWPORT calc (image + transcription + chrome ≈ the
-    viewport), NOT the fragile nested-flex fill that collapsed/overflowed. The
-    .anchor-transcription-panel class supplies overflow-y:auto."""
+def test_anchor_viewer_compare_transcription_flows_for_outer_scroll():
+    """Source assertion (round-5 UAT 'the outer layout should be scrollable'): in
+    the Compare context (image_max_height set) the transcription flows at full
+    natural height (max-height:none; overflow:visible) — NO inner scroll box — so
+    the OUTER two-pane body scrolls everything above the nav as one unit."""
     import pathlib
     source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
-    assert "max-height: calc(60vh - 255px)" in source, (
-        "anchor_viewer transcription must use a viewport calc max-height in Compare "
-        "so it inner-scrolls and the pane fits the window height."
-    )
-    # The panel CSS must provide the inner scroll.
-    assert "overflow-y: auto;" in source, (
-        ".anchor-transcription-panel must keep overflow-y:auto for the inner scroll."
+    assert "max-height:none; overflow:visible;" in source, (
+        "anchor_viewer transcription must flow at natural height in Compare so the "
+        "OUTER body scrolls (no inner transcription scroll box)."
     )
 
 
@@ -1686,26 +1681,21 @@ def test_issue3_compare_has_candidate_title_marker():
     )
 
 
-def test_issue3_compare_panes_split_header_and_scroll():
-    """Round-4 Issue 3 + round-5 fit-to-height: each pane clips overflow so the
-    fixed header (info buttons) stays pinned at 100% zoom. Round-5 moved the scroll
-    OUT of the pane wrapper and INTO the AnchorViewer transcription (the image is
-    fixed, the transcription fills the rest and scrolls within itself) — so the
-    pane + viewer-area wrappers clip overflow and the transcription owns the scroll.
+def test_issue3_compare_outer_body_scrolls():
+    """Round-5 UAT: the WHOLE area above the navigation scrolls as one unit. The
+    two-pane body row is the single scroll container (overflow-y:auto); the top
+    header and the bottom verdict/nav bar stay fixed (flex-shrink:0). Everything
+    inside the body is natural height (no per-pane / per-transcription inner scroll).
     """
     source = _cm_source()
-    # Pane + viewer-area wrappers clip overflow (header pinned, no nested outer scroll).
-    assert "flex-direction:column; overflow:hidden;" in source, (
-        "Issue 3: Compare panes must clip overflow so the header (info buttons) stays "
-        "pinned; the single scroll lives in the transcription (round-5)."
+    # The two-pane body is the scroll container.
+    assert "overflow-y:auto; flex:1; align-items:flex-start;" in source, (
+        "round-5: the two-pane body must scroll as one (overflow-y:auto) so the "
+        "outer layout above the nav is scrollable."
     )
-    # The single scroll region is the viewer transcription (anchor_viewer.py),
-    # bounded by a viewport calc so it inner-scrolls and the pane fits.
-    import pathlib
-    av = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
-    assert "max-height: calc(60vh - 255px)" in av, (
-        "round-5: the transcription must be the single (inner) scroll region, "
-        "bounded by a viewport calc so the pane fits the window."
+    # The verdict/nav bar stays fixed at the bottom.
+    assert "position:sticky; bottom:0; flex-shrink:0;" in source, (
+        "the verdict/nav bar must stay fixed while the body scrolls."
     )
 
 

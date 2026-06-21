@@ -1664,9 +1664,10 @@ def test_issue3_compare_candidate_title_present(joins_lab_smoke_runner):
     joins_lab_smoke_runner(driver)
 
 
-def test_issue3_compare_panes_clip_overflow(joins_lab_smoke_runner):
-    """Issue 3 (LIVE OWNER): the candidate pane clips overflow (fixed header +
-    inner scrolling viewer), so the info buttons stay visible at 100% zoom."""
+def test_issue3_compare_outer_body_scrolls(joins_lab_smoke_runner):
+    """Round-5 (LIVE OWNER): the WHOLE area above the navigation scrolls as one —
+    the two-pane body row is the scroll container (overflow-y:auto) and the panes
+    themselves do NOT clip (everything inside is natural height)."""
     async def driver(user):
         await user.open('/joins-lab')
         await _load_anchor_and_search(user)
@@ -1684,11 +1685,21 @@ def test_issue3_compare_panes_clip_overflow(joins_lab_smoke_runner):
             panes = [
                 e for e in ElementFilter(kind=ui.column, marker='compare-candidate-pane')
             ]
-        assert panes, "Issue 3 FAIL: candidate pane marker not found."
-        pane_style = panes[0]._style or {}
-        assert pane_style.get('overflow') == 'hidden', (
-            "Issue 3 FAIL: candidate pane should clip overflow (header fixed, inner "
-            f"viewer scrolls). Style: {pane_style!r}"
+            assert panes, "Issue 3 FAIL: candidate pane marker not found."
+            pane_style = panes[0]._style or {}
+            # The pane must NOT clip — the outer body scrolls instead.
+            assert pane_style.get('overflow') != 'hidden', (
+                "round-5 FAIL: candidate pane must not clip (the outer body scrolls). "
+                f"Style: {pane_style!r}"
+            )
+            # A two-pane body row must be the scroll container (overflow-y:auto).
+            scroll_rows = [
+                e for e in ElementFilter(kind=ui.row)
+                if (e._style or {}).get('overflow-y') == 'auto'
+            ]
+        assert scroll_rows, (
+            "round-5 FAIL: the two-pane body row must be overflow-y:auto so the outer "
+            "layout above the navigation scrolls as one unit."
         )
 
     joins_lab_smoke_runner(driver)

@@ -653,17 +653,20 @@ def create_compare_modal(
                 ).classes("text-white")
 
             # ── Two-pane body ─────────────────────────────────────────────────
+            # Round-5 (UAT): the WHOLE area above the navigation scrolls as ONE
+            # unit — metadata + image + transcription of BOTH panes scroll together
+            # (overflow-y:auto here); the top header and the bottom verdict/nav bar
+            # stay fixed.  Inside, everything is natural height (no per-pane or
+            # per-transcription inner scroll).  align-items:flex-start keeps the
+            # panes at their natural heights (not stretched) so the row's scroll
+            # length is the taller pane's content.
             with ui.row().classes("w-full flex-grow min-h-0").style(
-                "overflow:hidden; flex:1;"
+                "overflow-y:auto; flex:1; align-items:flex-start;"
             ):
                 # ── Anchor pane (left) ────────────────────────────────────────
-                # Round-4 Issue 3: split each pane into a FIXED (non-scrolling)
-                # header (label + shelfmark/title + info buttons) and a SCROLLING
-                # viewer area below.  Previously the info buttons sat at the bottom
-                # of the scrolling content and overflowed off-screen at 100% zoom.
-                with ui.column().classes("flex-1 gap-2 p-4 min-h-0").style(
+                with ui.column().classes("flex-1 gap-2 p-4").style(
                     "border-right: 2px solid var(--border-light);"
-                    " display:flex; flex-direction:column; overflow:hidden;"
+                    " display:flex; flex-direction:column;"
                 ):
                     # Fixed header block (does not scroll)
                     with ui.column().classes("w-full gap-1").style("flex-shrink:0;"):
@@ -713,14 +716,10 @@ def create_compare_modal(
                         )
                         _anchor_info_row_ref.append(anchor_info_row)
 
-                    # Viewer area — image (capped) + transcription (its OWN bounded
-                    # inner scroll, viewport calc).  overflow-y:auto here is only a
-                    # graceful fallback for very short windows; the bounded
-                    # transcription means it normally never needs to scroll, so
-                    # there is no nested-scroll trap (round-5 UAT).
-                    with ui.column().classes("w-full gap-4 flex-grow min-h-0").style(
-                        "overflow-y:auto;"
-                    ):
+                    # Viewer area — natural height (image capped at 40vh +
+                    # transcription at full height).  NO inner scroll here: the
+                    # outer two-pane body scrolls as one (round-5 UAT).
+                    with ui.column().classes("w-full gap-4"):
                         # Fresh AnchorViewer for anchor pane — NOT the sticky-page viewer (Pitfall 3).
                         # Stored in _anchor_viewer_ref so the show-loader can await update_content.
                         # R2-6: suppress_shelfmark_header=True — green subtitle is the only shelfmark.
@@ -737,11 +736,11 @@ def create_compare_modal(
 
                 # ── Candidate pane (right) ────────────────────────────────────
                 # R2-5: capture ref for verdict-border updates; mark for render-smoke.
-                cand_pane_col = ui.column().classes("flex-1 gap-2 p-4 min-h-0").mark(
+                cand_pane_col = ui.column().classes("flex-1 gap-2 p-4").mark(
                     "compare-candidate-pane"
                 ).style(
                     "border: 1px solid var(--border-light);"
-                    " display:flex; flex-direction:column; overflow:hidden;"
+                    " display:flex; flex-direction:column;"
                 )
                 _cand_pane_ref.append(cand_pane_col)
                 with cand_pane_col:
@@ -778,11 +777,8 @@ def create_compare_modal(
                         )
                         _cand_info_row_ref.append(cand_info_row)
 
-                    # Viewer area — see anchor pane note (image capped + transcription
-                    # inner-scrolls; overflow-y:auto here is the short-window fallback).
-                    with ui.column().classes("w-full gap-4 flex-grow min-h-0").style(
-                        "overflow-y:auto;"
-                    ):
+                    # Viewer area — natural height; the outer body scrolls (round-5).
+                    with ui.column().classes("w-full gap-4"):
                         cand_viewer_container = ui.column().classes("w-full gap-4")
                         _cand_viewer_container_ref.append(cand_viewer_container)
 
