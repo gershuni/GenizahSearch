@@ -2323,6 +2323,15 @@ class LocalIndexer:
             self._end_scan_run(run_id, "canceled")
         else:
             self._end_scan_run(run_id, "completed")
+        # SEED-006 (Codex MED #5): GC orphaned .old-<ts> / .reset-quarantine-<ts>
+        # dirs here — scan_all always runs on the background LocalIndexerWorker
+        # thread, never the UI thread (avoids the Phase-101 D-04 UI-freeze class).
+        # The cleaner had no production caller before this. Best-effort: a cleanup
+        # failure must never fail the scan.
+        try:
+            self.clean_pending_rebuild_dirs()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("scan_all: clean_pending_rebuild_dirs failed: %r", exc)
         return result
 
     def _scan_all_impl(self, cancel_check: Callable[[], bool] = lambda: False) -> dict:
@@ -3791,7 +3800,10 @@ class LocalIndexer:
         _assert_db_outside_index_dir(self._db_path, self._index_dir)
 
         rebuild_dir = f"{self._index_dir}.rebuild-{scan_run_id}"
-        old_dir = f"{self._index_dir}.old-{int(_time.time())}"
+        # SEED-006 (Codex MED #4): include scan_run_id so back-to-back rebuilds in
+        # the same wall-clock second cannot collide on a shared .old-<ts> dir
+        # (a real risk given the _open_local_searcher double-rebuild path).
+        old_dir = f"{self._index_dir}.old-{int(_time.time())}-{scan_run_id}"
 
         # --- Step 1: build fresh index from cached_text ---
         if os.path.isdir(rebuild_dir):
@@ -3953,10 +3965,18 @@ class LocalIndexer:
         reload_cb()
 
     def clean_pending_rebuild_dirs(self) -> None:
-        """Delete .old-<ts> rebuild directories recorded in pending_dir_cleanup."""
+        """Delete quarantined index directories recorded in pending_dir_cleanup.
+
+        SEED-006 (Codex MED #5): covers BOTH kinds — 'rebuild_old' (.old-<ts> from
+        an atomic rebuild) AND 'reset_quarantine' (.reset-quarantine-<ts> from
+        reset_my_library). Previously only 'rebuild_old' was selected, so reset
+        quarantines leaked on disk indefinitely. Idempotent + best-effort
+        (rmtree ignore_errors); rows are removed only after a successful rmtree.
+        """
         import shutil
         rows = self._conn.execute(
-            "SELECT path FROM pending_dir_cleanup WHERE kind = 'rebuild_old'"
+            "SELECT path FROM pending_dir_cleanup "
+            "WHERE kind IN ('rebuild_old', 'reset_quarantine')"
         ).fetchall()
         for r in rows:
             try:
@@ -4283,7 +4303,10 @@ class LocalIndexer:
         """
         import shutil
         import time as _time
-        ts = int(_time.time())
+        import uuid as _uuid
+        # SEED-006 (Codex MED #4): unique suffix so two resets in the same second
+        # cannot collide on a shared .reset-quarantine-<ts> dir.
+        ts = f"{int(_time.time())}-{_uuid.uuid4().hex[:8]}"
         counts: dict = {
             "quarantined": [],
             "reinit_ok": False,
