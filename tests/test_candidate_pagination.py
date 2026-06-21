@@ -82,7 +82,7 @@ def test_filter_applies_before_pagination():
     (15 with via_text=True, 15 without) should yield 15 filtered candidates; the
     paginated slice of page 0 at page_size=10 returns the first 10 of those 15.
     """
-    from web.components.candidate_grid import paginate, compute_filtered
+    from web.components.candidate_grid import paginate
     all_cands = (
         [_Cand(sys_id=str(i), page=1, via_text=True) for i in range(15)] +
         [_Cand(sys_id=str(i + 15), page=1, via_text=False) for i in range(15)]

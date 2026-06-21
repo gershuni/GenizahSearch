@@ -20,7 +20,6 @@ Test layout:
     (confirmed_only=True kwarg + community merge don't exist yet)
 """
 
-import pytest
 from web.components import joins_panel
 from web.components.joins_panel import fetch_connected_fragments, _joins_cache
 

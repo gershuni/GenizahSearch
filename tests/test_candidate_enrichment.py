@@ -81,7 +81,6 @@ def test_enrichment_call_site_is_covered_by_off_loop_guard():
     if the call site were present.
     """
     from pathlib import Path
-    import ast
 
     guard_path = Path(__file__).parent / "test_joins_lab_off_loop.py"
     assert guard_path.exists(), "Off-loop guard test file must exist"

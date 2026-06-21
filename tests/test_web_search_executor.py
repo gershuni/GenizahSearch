@@ -14,7 +14,6 @@ State is monkeypatched at the module-level `state` singleton (web.state.state).
 
 import inspect
 
-import pytest
 
 from shared.joins_lab import SearchExecutor
 from web.joins_executor import WebSearchExecutor

@@ -18,12 +18,9 @@ path. These tests anchor that contract.
 
 from typing import Optional
 from shared.joins_lab import (
-    BuilderRow,
     Candidate,
     MergeResult,
-    SideQuery,
     apply_cross_side,
-    compose,
     resolve_other_side_pages,
 )
 

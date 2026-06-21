@@ -11,8 +11,6 @@ Covers:
 """
 from __future__ import annotations
 
-import pytest
-from types import SimpleNamespace
 
 from web.components.image_resolution import resolve_image_url, resolve_external_images
 

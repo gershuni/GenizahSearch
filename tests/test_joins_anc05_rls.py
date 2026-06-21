@@ -38,9 +38,8 @@ All tests are RED until Plan 02 adds `confirmed_only: bool = False` to
 fetch_connected_fragments and wires the status='confirmed' filter + :confirmed cache key.
 """
 
-import pytest
 from web.components import joins_panel
-from web.components.joins_panel import fetch_connected_fragments, _joins_cache, invalidate_joins_cache
+from web.components.joins_panel import fetch_connected_fragments, _joins_cache
 
 
 def _clear_cache():

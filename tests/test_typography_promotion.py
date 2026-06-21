@@ -12,7 +12,6 @@ Verifies:
 """
 from __future__ import annotations
 
-import re
 
 from web.components.typography import render_line_numbered_html
 from web.pages.browse import _render_line_numbered_html as _browse_alias

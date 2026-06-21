@@ -82,7 +82,7 @@ def test_vs_conditional_model_intersection_when_query():
 
     Desktop parity: join_workbench.py:2788-2802.
     """
-    from shared.joins_lab import Candidate, merge_candidates
+    from shared.joins_lab import Candidate
     from web.pages.joins_lab import _apply_vs_merge
 
     text_candidates = [
@@ -245,7 +245,6 @@ def test_compute_display_candidates_symbol_exists_in_joins_lab():
     This test is RED until Plan 07 Task 1 implements the helper.
     """
     from pathlib import Path
-    import ast
 
     joins_lab_path = Path(__file__).parent.parent / "web" / "pages" / "joins_lab.py"
     assert joins_lab_path.exists(), "web/pages/joins_lab.py must exist"
