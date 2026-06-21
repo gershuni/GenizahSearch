@@ -7240,31 +7240,32 @@ class SearchEngine:
                 open_exc,
             )
             try:
-                import uuid as _uuid
+                import gc as _gc
+                # Codex MED #3: drop the probe Tantivy handle opened above BEFORE
+                # constructing the indexer. The LocalIndexer constructor performs the
+                # atomic rebuild from cached_text on the mismatch/open-failure it
+                # re-detects (which renames LOCAL_INDEX_DIR); a live read handle here
+                # would block os.rename on Windows.
+                local_index = None
+                _gc.collect()
                 # SEED-006 P1: DB must live OUTSIDE the atomically-swapped LocalIndex
                 # dir; migrate any legacy in-dir DB out before constructing.
                 db_path = migrate_legacy_local_db(Config.LOCAL_INDEX_DIR)
+                # Codex MED #3: the constructor already does the SINGLE atomic rebuild
+                # on the same mismatch — do NOT call rebuild_main_index_atomic() again
+                # (the prior code rebuilt twice: once in __init__, once explicitly).
                 indexer = LocalIndexer(
                     index_dir=Config.LOCAL_INDEX_DIR,
                     lab_index_dir=Config.LOCAL_LAB_INDEX_DIR,
                     db_path=db_path,
                 )
+                # D-01: close the temp indexer's writer + index handles before
+                # opening the live searcher below, so its writer lock is released
+                # (a still-live writer would block writer acquisition on the dir).
                 try:
-                    indexer.rebuild_main_index_atomic(
-                        scan_run_id=_uuid.uuid4().hex,
-                        close_searcher_cb=self.close_local_searcher,
-                        reload_searcher_cb=lambda: None,  # reload below
-                    )
-                finally:
-                    # D-01: explicitly close temp indexer's writer + index
-                    # handles before opening the live searcher below. Without
-                    # this, the temp indexer's still-live writer holds the
-                    # lock and blocks any future writer acquisition on
-                    # LOCAL_INDEX_DIR.
-                    try:
-                        indexer._close_internal_writer_index()
-                    except Exception:
-                        LOGGER.exception("temp indexer close failed (continuing)")
+                    indexer._close_internal_writer_index()
+                except Exception:
+                    LOGGER.exception("temp indexer close failed (continuing)")
                 schema2 = build_local_schema()
                 local_index2 = tantivy.Index(schema2, path=Config.LOCAL_INDEX_DIR)
                 register_search_tokenizers(local_index2)  # SEED-006
