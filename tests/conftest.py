@@ -298,8 +298,22 @@ def _reset_nli_breaker_state():
 def _refresh_local_indexer_for_local_indexer_tests(request):
     """D-09 fix: reload shared.local_indexer AND rebind its imported aliases
     in the test module's namespace before each test in tests/test_local_indexer.py.
+
+    SEED-006: the reload above (and test_mupdf_warnings_suppressed.py's reloads)
+    rebuild shared.local_indexer.__dict__ with NEW class objects and LEAVE the
+    module in that reloaded state. tests/test_local_schema_rebuild_deferral.py
+    imports identity-sensitive names (LocalIndexerError, LocalIndexer, ...) at
+    collection time and runs AFTER test_local_indexer.py in the same process
+    (alphabetical order), so its aliases go stale: a method on the live (reloaded)
+    module raises the NEW LocalIndexerError via module-global lookup, while the
+    test's `pytest.raises(LocalIndexerError)` still references the OLD class ->
+    "DID NOT RAISE". Rebind that file's aliases to the LIVE module objects before
+    each of its tests (rebind only -- no extra reload needed) so identity stays
+    consistent regardless of any prior sibling reload. Platform-independent bug;
+    without this the SEED-006 deferral tests fail on CI too.
     """
-    if 'test_local_indexer.py' in str(request.node.fspath):
+    fspath = str(request.node.fspath)
+    if 'test_local_indexer.py' in fspath:
         import importlib
         import shared.local_indexer
         importlib.reload(shared.local_indexer)
@@ -308,6 +322,16 @@ def _refresh_local_indexer_for_local_indexer_tests(request):
         # reloaded module's functions now raise / construct.
         _imported_names = ('LocalIndexer', 'EncodingError', 'extract_txt')
         for _name in _imported_names:
+            if hasattr(shared.local_indexer, _name) and hasattr(request.module, _name):
+                setattr(request.module, _name, getattr(shared.local_indexer, _name))
+    elif 'test_local_schema_rebuild_deferral.py' in fspath:
+        import shared.local_indexer
+        _deferral_names = (
+            'LocalIndexer', 'LocalIndexerError', 'local_db_path_for',
+            'migrate_legacy_local_db', '_compute_schema_marker',
+            '_read_schema_marker', '_write_schema_marker', 'build_local_schema',
+        )
+        for _name in _deferral_names:
             if hasattr(shared.local_indexer, _name) and hasattr(request.module, _name):
                 setattr(request.module, _name, getattr(shared.local_indexer, _name))
     yield
