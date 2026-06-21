@@ -192,7 +192,7 @@ Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-a
 
 **Plans**: 3 plans (2 waves)
 
-- [ ] 121-01-PLAN.md — TRANSLATIONS gap closure: add 17 missing HE keys + fix 'Open in Joins Lab' glossary drift + tr()-wrap the XLSX sheet name [Wave 1]
+- [x] 121-01-PLAN.md — TRANSLATIONS gap closure: add 17 missing HE keys + fix 'Open in Joins Lab' glossary drift + tr()-wrap the XLSX sheet name [Wave 1]
 - [ ] 121-02-PLAN.md — Permanent CI guard tests/test_joins_lab_i18n.py (no-raw-Hebrew + tr()-coverage + badge-strings + scoped entry-point keys) + render-smoke RTL structural assertions [Wave 2]
 - [ ] 121-03-PLAN.md — HE-mode HUMAN-UAT checklist artifact + sign-off (load-bearing SC#2 visual-RTL acceptance) [Wave 2]
 
@@ -206,4 +206,4 @@ Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-a
 | 118. Joins, Entry & Full Builders | 6/6 | Complete    | 2026-06-19 |
 | 119. Candidates, Compare & Visual Similarity | 11/11 | Complete   | 2026-06-19 |
 | 120. Actions & Persistence | 7/8 | Complete    | 2026-06-21 |
-| 121. i18n Polish | 0/TBD | Not started | - |
+| 121. i18n Polish | 1/3 | In Progress|  |
