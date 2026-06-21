@@ -1989,3 +1989,61 @@ def test_round5_grid_selection_bulk_add_to_puzzle(joins_lab_smoke_runner):
         )
 
     joins_lab_smoke_runner(driver)
+
+
+# --- Round-5: results + builder restore across navigation (re-open /joins-lab) -
+
+def test_round5_results_restore_on_reopen(joins_lab_smoke_runner):
+    """Round-5: after a search, RE-OPENING /joins-lab (the back-from-puzzle case)
+    restores the candidates AND the builder query — NOT an empty builder that
+    errors with 'Enter at least one search line to run'.
+
+    Reproduces the user's UAT bug: persistence flattened the builder query on
+    save (_cap_rows schema mismatch) and the tab snapshot wasn't readable in the
+    deferred bootstrap, so back-navigation came back empty. Now the per-user
+    snapshot restores results instantly and builder_rows round-trip in word-model.
+    """
+    async def driver(user):
+        # 1) First visit: load anchor + run a search → persists anchor +
+        #    builder_rows (word-model) + results snapshot to per-user storage.
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+        with user._client:
+            cards_before = [e for e in ElementFilter(kind=ui.card) if e.visible]
+        assert cards_before, "Round-5 precondition: first search rendered no cards."
+
+        # 2) Re-open /joins-lab in the SAME session (simulates returning from
+        #    /puzzle or /browse). The deferred bootstrap restores from storage.
+        await user.open('/joins-lab')
+        # bootstrap: call_later(0.05) → load_anchor (~0.7s) → snapshot restore.
+        await asyncio.sleep(1.4)
+
+        # 3a) The candidate surface must be restored (cards present) — results
+        #     did NOT vanish.
+        with user._client:
+            cards_after = [e for e in ElementFilter(kind=ui.card) if e.visible]
+        assert cards_after, (
+            "Round-5 FAIL: re-opening /joins-lab lost the results (no candidate "
+            "cards restored). The per-user results snapshot must repopulate the grid."
+        )
+
+        # 3b) The builder query must be restored (NOT empty). A flattened-query
+        #     regression shows up as a visible 'Enter at least one search line'
+        #     notification AND an empty builder. Assert the builder word input
+        #     carries the restored term.
+        with user._client:
+            restored_terms = [
+                i.value for i in ElementFilter(kind=ui.input)
+                if i.visible and i._props.get('outlined') and i._props.get('dense')
+                and any('modelValue' in l.type for l in i._event_listeners.values())
+                and i.value
+            ]
+        assert any('highlighted' in (v or '') for v in restored_terms), (
+            "Round-5 FAIL: builder query NOT restored on re-open (empty builder → "
+            "'Enter at least one search line'). _cap_rows must preserve the "
+            f"word-model lines_state. Restored builder terms: {restored_terms!r}"
+        )
+
+    joins_lab_smoke_runner(driver)

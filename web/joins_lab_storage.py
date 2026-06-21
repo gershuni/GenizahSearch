@@ -16,13 +16,17 @@ Schema (extended in Phase 120; same ``schema_version: 1`` as Phase 117):
         'anchor_fl_id': str | None,
         'anchor_volume_ie': str | None,
         # Phase 120 additions (additive, non-breaking):
-        'builder_rows': list,           # [{term, gap_to_next, modifiers}] max 20 rows
+        # builder_rows is the builder's WORD-MODEL lines_state — each row is a LINE:
+        #   {'words': [{'term', 'mods', 'gap_to_next_word'}], 'line_start',
+        #    'line_end', 'gap_to_next_line'}.  (A legacy flat shape
+        #   {'term', 'gap_to_next', 'modifiers'} is still tolerated on read.)
+        'builder_rows': list,           # word-model lines_state; max 20 lines
         'builder_mode': str,            # 'exact' | 'variants' | 'fuzzy'
         'text_position': str,           # 'anywhere' | 'start' | 'end' | 'line_start' | 'line_end'
         'flex_spacing': bool,
         'bidirectional': bool,
         'other_side_enabled': bool,
-        'other_side_rows': list,        # same shape as builder_rows; max 20 rows
+        'other_side_rows': list,        # same shape as builder_rows; max 20 lines
         'other_side_combine': str,      # 'narrow' | 'widen'
         'triage': dict,                 # {sys_id: 'yes'|'maybe'|'no'} max 500 entries
         'active_filter': dict,          # compact filter discriminants only (< 4 KB)
@@ -52,8 +56,6 @@ import dataclasses
 
 from typing import Any, Optional
 
-from nicegui import app
-
 from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop
 
 # ---------------------------------------------------------------------------
@@ -66,23 +68,29 @@ _SCHEMA_VERSION = 1  # KEEP AT 1 — Phase 120 additions are non-breaking (see d
 _PUZZLE_STAGING_KEY = 'puzzle_staging'
 
 # ---------------------------------------------------------------------------
-# Results snapshot (per-TAB, transient) — survives in-tab navigation
+# Results snapshot — survives navigation so /joins-lab restores results intact
 # ---------------------------------------------------------------------------
-# Unlike the per-user blob above, the candidate result set is persisted to
-# ``app.storage.tab`` (in-memory, per browser tab), mirroring how /search keeps
-# results across a Browse round-trip (``persist_search_active_snapshot``).  This
-# lets a Browse / Add-to-Puzzle navigation return to /joins-lab with results
-# INTACT and instant — no slow fuzzy/variants re-run.  Tab storage is NOT the
-# long-lived user file, so the 778 MB ``search_history.json`` payload-bloat class
-# of bug does not apply here; we still strip/cap defensively below.
-_RESULTS_TAB_KEY = 'joins_lab_results'
+# The candidate result set is persisted under its OWN per-user key (NOT the main
+# ``joins_lab`` blob, so its schema-version gate is independent), via the
+# safe_storage chokepoint — exactly how /search persists ``search_results``
+# (``persist_search_snapshot``).  This is read in the deferred page bootstrap,
+# where per-user storage is reliably available (``app.storage.tab`` is NOT — the
+# client has not re-handshaked its tab id yet, so a tab read comes back empty).
+#
+# Blob discipline (the 778 MB ``search_history.json`` lesson): this is a SINGLE,
+# strictly-bounded snapshot — full_text truncated to _SNAPSHOT_FULLTEXT_CAP and
+# at most _MAX_SNAPSHOT_CANDIDATES candidates per list (well under /search's
+# 5000 cap).  It is NOT the unbounded "store every result of every search"
+# pattern that caused the incident.
+_RESULTS_KEY = 'joins_lab_results'
 _RESULTS_SNAPSHOT_VERSION = 1
-_MAX_SNAPSHOT_CANDIDATES = 500       # hard cap on either candidate list
-_SNAPSHOT_FULLTEXT_CAP = 2000        # chars; truncate heavy transcription text
+_MAX_SNAPSHOT_CANDIDATES = 300       # hard cap on either candidate list
+_SNAPSHOT_FULLTEXT_CAP = 500         # chars; truncate heavy transcription text
 
 # Size-cap constants (threat model T-120-blob)
-_MAX_BUILDER_ROWS = 20          # max rows per builder (matches UI widget max)
-_MAX_TERM_CHARS = 200           # max chars per builder row term
+_MAX_BUILDER_ROWS = 20          # max lines per builder (matches UI widget max)
+_MAX_WORDS_PER_ROW = 50         # max words per line (generous; UI rarely exceeds a few)
+_MAX_TERM_CHARS = 200           # max chars per word term
 _MAX_TRIAGE_ENTRIES = 500       # max entries in the sys_id-keyed triage dict
 
 
@@ -91,12 +99,22 @@ _MAX_TRIAGE_ENTRIES = 500       # max entries in the sys_id-keyed triage dict
 # ---------------------------------------------------------------------------
 
 def _cap_rows(rows: Any) -> list:
-    """Sanitise and cap a builder rows list.
+    """Sanitise and cap a builder ``lines_state`` list (blob discipline).
 
-    - Accepts ``None`` → returns ``[]``.
-    - Caps at :data:`_MAX_BUILDER_ROWS` entries.
-    - Truncates each row's ``term`` to :data:`_MAX_TERM_CHARS` characters.
-    - Passes through ``gap_to_next`` and ``modifiers`` untouched.
+    Caps at :data:`_MAX_BUILDER_ROWS` lines and truncates every term to
+    :data:`_MAX_TERM_CHARS`.  Preserves the builder's CURRENT word-model line
+    shape so the persisted query actually round-trips:
+
+        {'words': [{'term', 'mods', 'gap_to_next_word'}, ...],
+         'line_start': bool, 'line_end': bool, 'gap_to_next_line': int}
+
+    Historical bug (fixed here): this used to coerce every row to a flat
+    ``{'term', 'gap_to_next', 'modifiers'}`` shape.  The builder hasn't produced
+    that shape since the word-level model landed — each line carries ``words``,
+    NOT a top-level ``term`` — so persistence silently flattened every query to
+    empty terms and a session restore came back with an empty builder ("Enter at
+    least one search line to run").  We now preserve the word-model and only fall
+    back to the flat shape for genuinely legacy rows (no ``words`` key).
     """
     if not isinstance(rows, list):
         return []
@@ -104,14 +122,37 @@ def _cap_rows(rows: Any) -> list:
     for row in rows[:_MAX_BUILDER_ROWS]:
         if not isinstance(row, dict):
             continue
-        term = row.get('term', '')
-        if not isinstance(term, str):
-            term = str(term)
-        capped.append({
-            'term': term[:_MAX_TERM_CHARS],
-            'gap_to_next': row.get('gap_to_next', 0),
-            'modifiers': row.get('modifiers', {}),
-        })
+        if isinstance(row.get('words'), list):
+            # Current word-model line — preserve words + line anchors/gap.
+            words: list = []
+            for w in row['words'][:_MAX_WORDS_PER_ROW]:
+                if not isinstance(w, dict):
+                    continue
+                term = w.get('term', '')
+                if not isinstance(term, str):
+                    term = str(term)
+                mods = w.get('mods', {})
+                words.append({
+                    'term': term[:_MAX_TERM_CHARS],
+                    'mods': mods if isinstance(mods, dict) else {},
+                    'gap_to_next_word': w.get('gap_to_next_word', 0),
+                })
+            capped.append({
+                'words': words,
+                'line_start': bool(row.get('line_start', False)),
+                'line_end': bool(row.get('line_end', False)),
+                'gap_to_next_line': row.get('gap_to_next_line', 0),
+            })
+        else:
+            # Legacy flat row {'term', 'gap_to_next', 'modifiers'} — tolerated.
+            term = row.get('term', '')
+            if not isinstance(term, str):
+                term = str(term)
+            capped.append({
+                'term': term[:_MAX_TERM_CHARS],
+                'gap_to_next': row.get('gap_to_next', 0),
+                'modifiers': row.get('modifiers', {}),
+            })
     return capped
 
 
@@ -290,28 +331,18 @@ def read_anchor() -> Optional[dict]:
 def clear_joins_lab_state() -> None:
     """Remove the ``joins_lab`` key AND the ``puzzle_staging`` key from per-user storage.
 
-    Used by Phase 120's "Clear / Reset" action (D-16).  Wipes both keys so a
-    reset cannot leave stale cross-session puzzle-staging state.
+    Used by Phase 120's "Clear / Reset" action (D-16).  Wipes the joins_lab blob,
+    the puzzle_staging key, AND the results snapshot so a reset cannot leave any
+    stale cross-session state.
     """
     safe_user_pop(_JOINS_LAB_KEY, None)
     safe_user_pop(_PUZZLE_STAGING_KEY, None)
+    safe_user_pop(_RESULTS_KEY, None)
 
 
 # ---------------------------------------------------------------------------
 # Results snapshot helpers (per-TAB transient cache — see constants above)
 # ---------------------------------------------------------------------------
-
-def _get_tab_storage():
-    """Return ``app.storage.tab`` when a tab context is available, else None.
-
-    Mirrors ``web.pages.search_state._get_tab_storage`` — tab storage requires a
-    live client/tab and raises outside one (e.g. headless tests, teardown).
-    """
-    try:
-        return app.storage.tab
-    except Exception:
-        return None
-
 
 def _compact_candidate(c: Any) -> dict:
     """Serialise a ``Candidate`` dataclass (or dict) to a light JSON-able dict.
@@ -340,60 +371,45 @@ def persist_results_snapshot(
     vs_on: bool,
     vs_anchor_sid: Optional[str],
     enrichment: Any,
-) -> None:
-    """Persist the current candidate result set to per-tab storage.
+) -> bool:
+    """Persist the current candidate result set under the per-user results key.
 
-    Best-effort: silently no-ops when no tab context is available or on any
-    storage error.  ``raw_text_candidates`` is the RAW text+cross-side baseline
+    Strictly bounded (see module constants): full_text truncated, candidate
+    lists capped.  ``raw_text_candidates`` is the RAW text+cross-side baseline
     (NOT the merged display set) so the VS toggle keeps working after restore.
+
+    :returns: ``True`` on success, ``False`` on storage failure (prune race).
     """
-    tab = _get_tab_storage()
-    if tab is None:
-        return
-    try:
-        tab[_RESULTS_TAB_KEY] = {
-            'version': _RESULTS_SNAPSHOT_VERSION,
-            'anchor_sys_id': str(anchor_sys_id or ''),
-            'raw_text_candidates': [
-                _compact_candidate(c)
-                for c in list(raw_text_candidates or [])[:_MAX_SNAPSHOT_CANDIDATES]
-            ],
-            'vs_candidates': [
-                _compact_candidate(c)
-                for c in list(vs_candidates or [])[:_MAX_SNAPSHOT_CANDIDATES]
-            ],
-            'vs_on': bool(vs_on),
-            'vs_anchor_sid': vs_anchor_sid,
-            'enrichment': enrichment if isinstance(enrichment, dict) else {},
-        }
-    except Exception:
-        pass  # transient cache — never crash the render path on a storage error
+    payload: dict = {
+        'version': _RESULTS_SNAPSHOT_VERSION,
+        'anchor_sys_id': str(anchor_sys_id or ''),
+        'raw_text_candidates': [
+            _compact_candidate(c)
+            for c in list(raw_text_candidates or [])[:_MAX_SNAPSHOT_CANDIDATES]
+        ],
+        'vs_candidates': [
+            _compact_candidate(c)
+            for c in list(vs_candidates or [])[:_MAX_SNAPSHOT_CANDIDATES]
+        ],
+        'vs_on': bool(vs_on),
+        'vs_anchor_sid': vs_anchor_sid,
+        'enrichment': enrichment if isinstance(enrichment, dict) else {},
+    }
+    return safe_user_set(_RESULTS_KEY, payload)
 
 
 def read_results_snapshot() -> Optional[dict]:
-    """Return the per-tab candidate snapshot, or ``None`` when absent/stale.
+    """Return the per-user candidate snapshot, or ``None`` when absent/stale.
 
-    Returns ``None`` when there is no tab context, the key is absent, the value
-    is not a dict, or its ``version`` does not match the current snapshot version.
+    Returns ``None`` when the key is absent, the value is not a dict, or its
+    ``version`` does not match the current snapshot version.
     """
-    tab = _get_tab_storage()
-    if tab is None:
+    data: Any = safe_user_get(_RESULTS_KEY, default=None)
+    if not isinstance(data, dict) or data.get('version') != _RESULTS_SNAPSHOT_VERSION:
         return None
-    try:
-        raw = tab.get(_RESULTS_TAB_KEY)
-    except Exception:
-        return None
-    if not isinstance(raw, dict) or raw.get('version') != _RESULTS_SNAPSHOT_VERSION:
-        return None
-    return raw
+    return data
 
 
 def clear_results_snapshot() -> None:
-    """Drop the per-tab candidate snapshot (e.g. on New Search)."""
-    tab = _get_tab_storage()
-    if tab is None:
-        return
-    try:
-        tab.pop(_RESULTS_TAB_KEY, None)
-    except Exception:
-        pass
+    """Drop the per-user candidate snapshot (e.g. on New Search)."""
+    safe_user_pop(_RESULTS_KEY, None)

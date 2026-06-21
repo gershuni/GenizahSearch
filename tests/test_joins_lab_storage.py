@@ -414,28 +414,96 @@ def test_clear_leaves_empty(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Round-5 (PST): per-tab results snapshot (persist / read / clear)
+# Builder word-model round-trip (regression: _cap_rows must NOT flatten the query)
 # ---------------------------------------------------------------------------
 
-def _patch_tab_storage(monkeypatch) -> dict:
-    """Patch _get_tab_storage() to return a private dict (simulates app.storage.tab)."""
-    store: dict = {}
-    monkeypatch.setattr('web.joins_lab_storage._get_tab_storage', lambda: store)
-    return store
+def test_builder_rows_word_model_round_trip(monkeypatch):
+    """write_full_state() must PRESERVE the builder's word-model lines_state.
+
+    Regression guard for the 'session restore → empty builder → Enter at least
+    one search line to run' bug: _cap_rows used to coerce every row to a flat
+    {'term', 'gap_to_next', 'modifiers'} shape, dropping the per-line 'words'
+    (the real builder schema), so the persisted query restored as empty.
+    """
+    _get, _set, _pop = _make_session_store()
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+
+    from web.joins_lab_storage import write_full_state, read_full_state
+
+    # The ACTUAL shape produced by web/components/joins_builder.py get_state().
+    lines_state = [
+        {
+            'words': [
+                {'term': 'שאלה', 'mods': {'prefix': True}, 'gap_to_next_word': 0},
+                {'term': 'ותשובה', 'mods': {}, 'gap_to_next_word': 2},
+            ],
+            'line_start': True,
+            'line_end': False,
+            'gap_to_next_line': 1,
+        },
+    ]
+    write_full_state(anchor_sys_id='990001234', builder_rows=lines_state)
+
+    result = read_full_state()
+    assert result is not None
+    rows = result['builder_rows']
+    assert len(rows) == 1
+    line = rows[0]
+    # The 'words' list (the query itself) must survive — NOT be flattened away.
+    assert 'words' in line, "builder line lost its 'words' (query destroyed on save)"
+    assert [w['term'] for w in line['words']] == ['שאלה', 'ותשובה']
+    assert line['words'][0]['mods'] == {'prefix': True}
+    assert line['line_start'] is True
+    assert line['gap_to_next_line'] == 1
+
+
+def test_builder_rows_word_model_term_capped(monkeypatch):
+    """Each word term in the word-model is still capped at 200 chars."""
+    _get, _set, _pop = _make_session_store()
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+
+    from web.joins_lab_storage import write_full_state, read_full_state
+
+    lines_state = [{
+        'words': [{'term': 'א' * 300, 'mods': {}, 'gap_to_next_word': 0}],
+        'line_start': False, 'line_end': False, 'gap_to_next_line': 0,
+    }]
+    write_full_state(anchor_sys_id='990001234', builder_rows=lines_state)
+    result = read_full_state()
+    assert len(result['builder_rows'][0]['words'][0]['term']) <= 200
+
+
+# ---------------------------------------------------------------------------
+# Round-5 (PST): results snapshot (persist / read / clear) — per-user, bounded
+# ---------------------------------------------------------------------------
+
+def _patch_user_store(monkeypatch) -> dict:
+    """Patch safe_user_get/set/pop to a private dict (one anonymous session)."""
+    _get, _set, _pop = _make_session_store()
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+    # Return the backing store via a read closure for assertions.
+    return _get
 
 
 def test_results_snapshot_round_trip(monkeypatch):
     """persist_results_snapshot() then read_results_snapshot() round-trips the set."""
     from shared.joins_lab import Candidate
     from web.joins_lab_storage import persist_results_snapshot, read_results_snapshot
-    _patch_tab_storage(monkeypatch)
+    _patch_user_store(monkeypatch)
 
     cands = [Candidate(sys_id='990001', page=1, shelfmark='T-S 1.1', full_text='abc')]
-    persist_results_snapshot(
+    ok = persist_results_snapshot(
         anchor_sys_id='990000', raw_text_candidates=cands, vs_candidates=[],
         vs_on=True, vs_anchor_sid='990000',
         enrichment={'990001': {'material': 'paper'}},
     )
+    assert ok is True
     snap = read_results_snapshot()
     assert snap is not None
     assert snap['anchor_sys_id'] == '990000'
@@ -448,20 +516,23 @@ def test_results_snapshot_round_trip(monkeypatch):
 
 
 def test_results_snapshot_version_gate(monkeypatch):
-    """A snapshot with a mismatched version is treated as absent (cold tab)."""
-    from web.joins_lab_storage import read_results_snapshot, _RESULTS_TAB_KEY
-    store = _patch_tab_storage(monkeypatch)
-    store[_RESULTS_TAB_KEY] = {'version': 999, 'anchor_sys_id': 'x'}
-    assert read_results_snapshot() is None
+    """A snapshot with a mismatched version is treated as absent."""
+    from web.joins_lab_storage import read_results_snapshot, _RESULTS_KEY
+    get = _patch_user_store(monkeypatch)
+    # Write a stale-version blob directly through the patched setter.
+    import web.joins_lab_storage as _mod
+    _mod.safe_user_set(_RESULTS_KEY, {'version': 999, 'anchor_sys_id': 'x'})
+    assert get(_RESULTS_KEY) is not None  # it IS stored…
+    assert read_results_snapshot() is None  # …but rejected by the version gate
 
 
 def test_results_snapshot_truncates_full_text(monkeypatch):
-    """Heavy full_text is truncated to the cap (blob discipline, even in tab cache)."""
+    """Heavy full_text is truncated to the cap (blob discipline)."""
     from shared.joins_lab import Candidate
     from web.joins_lab_storage import (
         persist_results_snapshot, read_results_snapshot, _SNAPSHOT_FULLTEXT_CAP,
     )
-    _patch_tab_storage(monkeypatch)
+    _patch_user_store(monkeypatch)
     big = 'א' * (_SNAPSHOT_FULLTEXT_CAP + 5000)
     persist_results_snapshot(
         anchor_sys_id='990000',
@@ -478,7 +549,7 @@ def test_results_snapshot_caps_candidate_count(monkeypatch):
     from web.joins_lab_storage import (
         persist_results_snapshot, read_results_snapshot, _MAX_SNAPSHOT_CANDIDATES,
     )
-    _patch_tab_storage(monkeypatch)
+    _patch_user_store(monkeypatch)
     many = [Candidate(sys_id=str(i), page=1) for i in range(_MAX_SNAPSHOT_CANDIDATES + 50)]
     persist_results_snapshot(
         anchor_sys_id='990000', raw_text_candidates=many, vs_candidates=[],
@@ -489,12 +560,12 @@ def test_results_snapshot_caps_candidate_count(monkeypatch):
 
 
 def test_clear_results_snapshot(monkeypatch):
-    """clear_results_snapshot() drops the per-tab snapshot."""
+    """clear_results_snapshot() drops the snapshot."""
     from shared.joins_lab import Candidate
     from web.joins_lab_storage import (
         persist_results_snapshot, read_results_snapshot, clear_results_snapshot,
     )
-    _patch_tab_storage(monkeypatch)
+    _patch_user_store(monkeypatch)
     persist_results_snapshot(
         anchor_sys_id='990000',
         raw_text_candidates=[Candidate(sys_id='1', page=1)],
@@ -505,45 +576,48 @@ def test_clear_results_snapshot(monkeypatch):
     assert read_results_snapshot() is None
 
 
-def test_results_snapshot_no_tab_context_is_noop(monkeypatch):
-    """With no tab context, persist/read/clear are safe no-ops (never raise)."""
+def test_clear_joins_lab_state_also_wipes_results_snapshot(monkeypatch):
+    """clear_joins_lab_state() must also drop the results snapshot key."""
     from shared.joins_lab import Candidate
     from web.joins_lab_storage import (
-        persist_results_snapshot, read_results_snapshot, clear_results_snapshot,
+        persist_results_snapshot, read_results_snapshot, clear_joins_lab_state,
     )
-    monkeypatch.setattr('web.joins_lab_storage._get_tab_storage', lambda: None)
+    _patch_user_store(monkeypatch)
     persist_results_snapshot(
         anchor_sys_id='990000',
         raw_text_candidates=[Candidate(sys_id='1', page=1)],
         vs_candidates=[], vs_on=False, vs_anchor_sid=None, enrichment={},
     )
+    assert read_results_snapshot() is not None
+    clear_joins_lab_state()
     assert read_results_snapshot() is None
-    clear_results_snapshot()  # must not raise
 
 
-def test_results_snapshot_not_persisted_to_user_storage(monkeypatch):
-    """The results snapshot is per-TAB only — it must never touch user storage.
-
-    Guards the blob-discipline invariant: candidate lists / full_text go to
-    app.storage.tab (transient), NEVER the long-lived per-user blob.
-    """
+def test_results_snapshot_uses_safe_storage_chokepoint(monkeypatch):
+    """The snapshot must route through safe_user_set (Phase-87 chokepoint), not
+    raw app.storage.user — guarded structurally + by the AST lint test."""
     from shared.joins_lab import Candidate
     from web import joins_lab_storage as _mod
 
-    _patch_tab_storage(monkeypatch)
+    calls: list = []
+    _get, _set, _pop = _make_session_store()
 
-    # Trip a hard failure if anything routes the snapshot through user storage.
-    def _boom(*a, **k):  # pragma: no cover - only fires on a regression
-        raise AssertionError('results snapshot must NOT use per-user safe storage')
+    def _tracking_set(key, value):
+        calls.append(key)
+        return _set(key, value)
 
-    monkeypatch.setattr(_mod, 'safe_user_set', _boom)
+    monkeypatch.setattr(_mod, 'safe_user_get', _get)
+    monkeypatch.setattr(_mod, 'safe_user_set', _tracking_set)
+    monkeypatch.setattr(_mod, 'safe_user_pop', _pop)
 
     _mod.persist_results_snapshot(
         anchor_sys_id='990000',
-        raw_text_candidates=[Candidate(sys_id='1', page=1, full_text='x' * 50000)],
+        raw_text_candidates=[Candidate(sys_id='1', page=1)],
         vs_candidates=[], vs_on=False, vs_anchor_sid=None, enrichment={},
     )
-    assert _mod.read_results_snapshot() is not None
+    assert _mod._RESULTS_KEY in calls, (
+        'persist_results_snapshot must write via the safe_user_set chokepoint'
+    )
 
 
 def test_two_sessions_do_not_share_state(monkeypatch):
