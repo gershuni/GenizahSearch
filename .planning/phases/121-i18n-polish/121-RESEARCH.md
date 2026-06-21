@@ -760,15 +760,17 @@ confirmation needed.
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **XLSX sheet name `'Candidates'` (joins_lab.py:2252)**
+1. **XLSX sheet name `'Candidates'` (joins_lab.py:2252)** — **RESOLVED:** Plan 121-01 Task 2
+   wraps `ws.title = tr('Candidates')` (adopts the recommendation below; harmless per D-03).
    - What we know: `ws.title = 'Candidates'` is NOT wrapped in `tr()`. `'Candidates'` IS
      in TRANSLATIONS with HE `'מועמדים'`.
    - What's unclear: Whether the XLSX tab name is considered "user-facing" for this phase.
    - Recommendation: Apply `tr('Candidates')` consistently with D-03 (harmless) — one-line fix.
 
-2. **render-smoke `set_language('he')` call in conftest**
+2. **render-smoke `set_language('he')` call in conftest** — **RESOLVED:** Plan 121-02 Task 2
+   calls `set_language('he')` before `user.open('/joins-lab')` and restores the default after.
    - What we know: The existing conftest does not explicitly call `set_language`. The RTL
      assertions require `is_rtl() == True`.
    - Recommendation: The new RTL assertion test calls `set_language('he')` before
