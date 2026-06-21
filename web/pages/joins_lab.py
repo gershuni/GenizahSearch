@@ -723,6 +723,14 @@ def create_joins_lab_page(
         executes off the event loop.  Returns a dict with:
             'fjms_bib'       — list[dict] from get_bibliography(sys_id)
             'catalog_detail' — dict|None from get_catalog_detail(sys_id)
+            'source_names'   — list[str] from get_source_names(sys_id)
+
+        ``source_names`` is the catalog-presence signal mirroring the Browse
+        enrichment path (browse_enrichment.py:97/551): get_catalog_detail() does
+        NOT carry a 'source_names' key, so the Compare info-button "has catalog"
+        gate MUST use this separately-fetched list (UAT 2026-06-21 — without it the
+        FJMS Catalog button never rendered because catalog_detail.get('source_names')
+        was always empty).
         """
         svc = get_fjms_service(thread_safe=True)
         try:
@@ -733,7 +741,15 @@ def create_joins_lab_page(
             catalog_detail = svc.get_catalog_detail(sys_id)
         except Exception:
             catalog_detail = None
-        return {'fjms_bib': fjms_bib, 'catalog_detail': catalog_detail}
+        try:
+            source_names = svc.get_source_names(sys_id)
+        except Exception:
+            source_names = []
+        return {
+            'fjms_bib': fjms_bib,
+            'catalog_detail': catalog_detail,
+            'source_names': source_names,
+        }
 
     def _prefetch_image_sync(sys_id: str) -> Optional[str]:
         """D-10/M3: Sync image resolver for off-loop prefetch via run.io_bound.
@@ -864,6 +880,7 @@ def create_joins_lab_page(
             enrichment=_enrichment,
             metadata_prefetcher=_metadata_prefetcher_sync,
             on_candidate_change=_schedule_image_prefetch,
+            on_add_as_join=_on_add_as_join_click,
         )
         modal.open()
 
@@ -972,6 +989,7 @@ def create_joins_lab_page(
                 on_selection_change=_on_table_selection_change,
                 on_add_to_puzzle=_on_add_to_puzzle_click,
                 on_add_to_list=_on_add_to_list_click,
+                on_add_as_join=_on_add_as_join_click,
             )
         else:
             # Render the Phase-02 grid surface

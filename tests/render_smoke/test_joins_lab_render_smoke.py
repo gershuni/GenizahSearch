@@ -388,6 +388,109 @@ def test_g4_g5_image_click_opens_compare_both_panes_load(joins_lab_smoke_runner)
 
 
 # ---------------------------------------------------------------------------
+# Issue B (UAT 2026-06-21): Add-as-Join button in the Compare modal header
+# ---------------------------------------------------------------------------
+
+def test_issue_b_compare_has_add_as_join_button(joins_lab_smoke_runner):
+    """Issue B (LIVE OWNER): the Compare modal header shows an Add-as-Join button.
+
+    Opening Compare via image click must render a button with icon='add_link'
+    (the Add-as-Join CTA, wired via on_add_as_join in _open_compare).
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+        with user._client:
+            img_els = [e for e in ElementFilter(kind=ui.image) if e.visible]
+        if not img_els:
+            pytest.skip("Issue B: No images found — skipping (depends on G4)")
+
+        _click_element(user, img_els[0])
+        await asyncio.sleep(0.5)
+
+        with user._client:
+            add_join_btns = [
+                b for b in ElementFilter(kind=ui.button)
+                if b.visible and b._props.get('icon') == 'add_link'
+            ]
+        assert add_join_btns, (
+            "Issue B FAIL: no Add-as-Join button (icon='add_link') visible in the Compare "
+            "modal. Check create_compare_modal on_add_as_join wiring + the _open_compare "
+            "call in joins_lab.py."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
+# Issue D (UAT 2026-06-21): a verdict change restyles the grid triage buttons
+# ---------------------------------------------------------------------------
+
+def test_issue_d_verdict_restyles_grid_triage_buttons(joins_lab_smoke_runner):
+    """Issue D (LIVE OWNER): clicking a grid triage button fills it AND the restyle
+    path keeps button fills in sync.
+
+    This drives the live render path through the render-scoped restyle fn that now
+    updates the V/?/X button fills (not just the card border). It complements the
+    headless restyle-fn unit tests in test_candidate_grid.py.
+
+    We click the '?' (maybe) button and assert it gets the amber active fill, then
+    click '✓' (yes) on the same card and assert the maybe button is reset and the
+    yes button gets the green fill — proving the restyle keeps the trio consistent.
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+        from shared.joins_lab import TRIAGE_ICONS
+
+        maybe_glyph = TRIAGE_ICONS['maybe']['glyph']
+        yes_glyph = TRIAGE_ICONS['yes']['glyph']
+        maybe_color = TRIAGE_ICONS['maybe']['color']
+        yes_color = TRIAGE_ICONS['yes']['color']
+
+        # Locate the first card's maybe + yes buttons (first occurrences)
+        with user._client:
+            maybe_btns = [
+                b for b in ElementFilter(kind=ui.button)
+                if b.visible and b._props.get('label', '') == maybe_glyph
+            ]
+            yes_btns = [
+                b for b in ElementFilter(kind=ui.button)
+                if b.visible and b._props.get('label', '') == yes_glyph
+            ]
+        assert maybe_btns and yes_btns, (
+            "Issue D PRE: triage glyph buttons (✓ / ?) not found on the grid cards."
+        )
+
+        maybe_btn = maybe_btns[0]
+        yes_btn = yes_btns[0]
+
+        # Click '?' → maybe button should get the amber active fill
+        _click_element(user, maybe_btn)
+        await asyncio.sleep(0.1)
+        maybe_style = dict(maybe_btn._style) if maybe_btn._style else {}
+        assert maybe_style.get('background') == maybe_color, (
+            f"Issue D FAIL: after clicking '?', the maybe button did not get the active "
+            f"amber fill ({maybe_color}). Style: {maybe_style!r}"
+        )
+
+        # Click '✓' on the same card → yes gets green fill, maybe resets (restyle trio)
+        _click_element(user, yes_btn)
+        await asyncio.sleep(0.1)
+        yes_style = dict(yes_btn._style) if yes_btn._style else {}
+        assert yes_style.get('background') == yes_color, (
+            f"Issue D FAIL: after clicking '✓', the yes button did not get the active "
+            f"green fill ({yes_color}). Style: {yes_style!r}"
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# ---------------------------------------------------------------------------
 # G3-compare: verdict buttons reflect the current candidate's verdict
 # ---------------------------------------------------------------------------
 

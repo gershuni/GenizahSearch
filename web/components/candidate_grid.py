@@ -373,6 +373,7 @@ def _make_table_rows(
             "uid": c.uid,
             "sys_id": c.sys_id,
             "shelfmark": badge_marker + (c.shelfmark or "?"),
+            "shelfmark_raw": c.shelfmark or "?",
             "score": score_display,
             "score_sort": score_val if score_val is not None else 0.0,
             "snippet": snippet,
@@ -489,7 +490,7 @@ def cap_candidates(
 _TRIAGE_COLORS = {k: v["color"] for k, v in TRIAGE_ICONS.items()}
 
 
-def _make_restyle_fn(card_refs: dict):
+def _make_restyle_fn(card_refs: dict, triage_btn_refs: dict | None = None):
     """Return a render-scoped restyle callable that operates on ``card_refs``.
 
     CR-04 fix: ``card_refs`` is a fresh dict created per ``create_candidate_grid``
@@ -498,15 +499,24 @@ def _make_restyle_fn(card_refs: dict):
     existing callers inside the same render pass work unchanged.
 
     Args:
-        card_refs: Render-local dict mapping sys_id → list[ui.card].
+        card_refs:       Render-local dict mapping sys_id → list[ui.card].
+        triage_btn_refs: Optional render-local dict mapping sys_id → list of per-card
+                         ``{verdict → ui.button}`` dicts.  Phase-120 D (UAT 2026-06-21):
+                         when provided, a verdict change ALSO updates the V/?/X triage
+                         button active-fill on the matching card(s) — not just the
+                         border — so a verdict set from the Compare modal is reflected
+                         on the grid immediately (without a full re-render).
 
     Returns:
-        A callable ``restyle(sys_id, triage)`` bound to this render's card_refs.
+        A callable ``restyle(sys_id, triage)`` bound to this render's refs.
     """
     def _restyle_all(sys_id: str, triage: object) -> None:
         """Update every visible card whose sys_id matches — apply triage border (D-11).
 
         Desktop parity: _restyle_card at join_workbench.py:3344.
+
+        Also updates the V/?/X triage button active-fill on the matching card(s)
+        (Phase-120 D) so a Compare verdict propagates to the grid buttons immediately.
 
         Args:
             sys_id: The candidate sys_id whose triage verdict changed.
@@ -525,6 +535,24 @@ def _make_restyle_fn(card_refs: dict):
             except Exception:
                 pass
 
+        # Phase-120 D: update the triage button active-fill on matching cards so a
+        # verdict change (e.g. from the Compare modal) is reflected on the grid's
+        # ✓/?/✗ buttons immediately — mirrors the in-card _make_triage_handler logic.
+        if triage_btn_refs is not None:
+            for btn_map in triage_btn_refs.get(sys_id, []):
+                for _v, _btn in btn_map.items():
+                    try:
+                        if _v == verdict:
+                            _c = _TRIAGE_COLORS.get(_v, "")
+                            _btn.style(
+                                f"min-height:44px; font-size:0.85rem; "
+                                f"background:{_c}; color:#fff;"
+                            )
+                        else:
+                            _btn.style("min-height:44px; font-size:0.85rem;")
+                    except Exception:
+                        pass
+
     return _restyle_all
 
 
@@ -539,6 +567,7 @@ def _create_candidate_card(
     on_compare: Optional[Callable] = None,
     *,
     card_refs: dict | None = None,
+    triage_btn_refs: dict | None = None,
     restyle_fn: Optional[Callable] = None,
     on_set_as_anchor: Optional[Callable] = None,
     on_add_as_join: Optional[Callable] = None,
@@ -753,6 +782,12 @@ def _create_candidate_card(
                         )
                         _triage_btn_refs[verdict] = _btn_el
 
+                # Phase-120 D: register this card's triage-button map into the
+                # render-scoped dict so the restyle fn can update the ✓/?/✗ active
+                # fill when a verdict changes elsewhere (e.g. from the Compare modal).
+                if triage_btn_refs is not None:
+                    triage_btn_refs.setdefault(cand.sys_id, []).append(_triage_btn_refs)
+
                 # ── right cluster: browse + compare icon-only buttons (R2-9) ─
                 with ui.row().classes("gap-1 items-center"):
                     # Browse icon button — navigates to /browse deep-link.
@@ -937,6 +972,7 @@ def create_candidate_table(
     on_selection_change: Optional[Callable] = None,
     on_add_to_puzzle: Optional[Callable] = None,
     on_add_to_list: Optional[Callable] = None,
+    on_add_as_join: Optional[Callable] = None,
 ) -> ui.element:
     """Render the multi-select sortable table view of candidates (D-10, CND-03).
 
@@ -967,6 +1003,12 @@ def create_candidate_table(
                            checks login state and opens the list-picker or login dialog.
                            Defaults to None (Phase-118/119/120-05 callers unaffected).
                            Phase-120 ACT-03/D-05: login-gated; anonymous users see lock icon.
+        on_add_as_join:    Optional Callable[[sys_id, shelfmark], None] — invoked when the
+                           user clicks "Add as Join" in the bulk action bar.  Add-as-Join is
+                           PAIRWISE (anchor + exactly ONE candidate), so the button is ENABLED
+                           only when exactly ONE row is selected and disabled otherwise.  The
+                           single selected row's sys_id + shelfmark are passed to the callback.
+                           Defaults to None (callers without it are unaffected — backward compat).
 
     Returns:
         The outer ui.element wrapping the table and bulk-triage bar.
@@ -985,6 +1027,10 @@ def create_candidate_table(
             "background:var(--bg-tertiary); border-radius:4px; display:none;"
         )
         selected_sys_ids: list = []
+        # Track the selected rows (sys_id + raw shelfmark) so the single-select
+        # Add-as-Join button can resolve the candidate's shelfmark without the
+        # badge marker prefix (the table column's "shelfmark" field is prefixed).
+        selected_rows: list = []
 
         with bulk_bar:
             bulk_count_label = ui.label(tr("Mark N selected as:").replace("N", "0"))
@@ -1017,8 +1063,36 @@ def create_candidate_table(
             # Add to Puzzle: no login gate.
             # Add to List: login-gated (caller handles the gate; anonymous path shows
             # lock icon here as a visual hint of the gate before the click).
-            if on_add_to_puzzle is not None or on_add_to_list is not None:
+            add_join_btn = None  # late-bound; toggled by the selection handler
+            if (
+                on_add_to_puzzle is not None
+                or on_add_to_list is not None
+                or on_add_as_join is not None
+            ):
                 with ui.row().classes("ml-auto items-center gap-2"):
+                    # Phase-120 ACT-01: Add as Join — PAIRWISE (anchor + exactly ONE
+                    # candidate).  Enabled only when exactly one row is selected; the
+                    # selection handler toggles its enabled state.  On click it resolves
+                    # the single selected row's sys_id + raw shelfmark and calls the
+                    # callback (which handles the anonymous/auth + confirm branching).
+                    if on_add_as_join is not None:
+                        def _on_add_join_bulk_click() -> None:
+                            if len(selected_rows) != 1:
+                                return
+                            row = selected_rows[0]
+                            sid = row.get("sys_id")
+                            sm = row.get("shelfmark_raw") or "?"
+                            if sid:
+                                on_add_as_join(sid, sm)
+
+                        add_join_btn = ui.button(
+                            tr("Add as Join"),
+                            icon="add_link",
+                            on_click=_on_add_join_bulk_click,
+                        ).props("flat color=primary disable")
+                        add_join_btn.tooltip(
+                            tr("Select exactly one candidate to add as a join")
+                        )
                     if on_add_to_puzzle is not None:
                         add_puzzle_btn = ui.button(
                             tr("Add to Puzzle"),
@@ -1063,13 +1137,26 @@ def create_candidate_table(
         def _on_selection(e):
             sel = e.args if isinstance(e.args, list) else []
             selected_sys_ids.clear()
+            selected_rows.clear()
             for row in sel:
                 sys_id = row.get("sys_id")
                 if sys_id:
                     selected_sys_ids.append(sys_id)
+                    selected_rows.append(row)
             n = len(selected_sys_ids)
             bulk_count_label.set_text(tr("Mark N selected as:").replace("N", str(n)))
             bulk_bar.style("display:flex;" if n > 0 else "display:none;")
+            # Phase-120 ACT-01: Add-as-Join is PAIRWISE — enable only on exactly one
+            # selected row; disable for 0 or >1 (toggle tooltip to explain the gate).
+            if add_join_btn is not None:
+                if n == 1:
+                    add_join_btn.props(remove="disable")
+                    add_join_btn.tooltip(tr("Add as Join"))
+                else:
+                    add_join_btn.props("disable")
+                    add_join_btn.tooltip(
+                        tr("Select exactly one candidate to add as a join")
+                    )
             # Phase-120 H2: notify the page-level selection callback so
             # SELECTION-scoped bulk actions (Add-to-Puzzle / Add-to-List) see the
             # current selection.  Backward-compat: skipped when None.
@@ -1140,7 +1227,11 @@ def create_candidate_grid(
 
     # CR-04: per-render card_refs dict — never module-global, never shared across users.
     _render_card_refs: dict = {}
-    _render_restyle = _make_restyle_fn(_render_card_refs)
+    # Phase-120 D: per-render triage-button refs — sys_id → list of {verdict → button}
+    # maps, one per card.  Passed to the restyle fn so a Compare verdict updates the
+    # grid's ✓/?/✗ button fills immediately (UAT 2026-06-21).
+    _render_triage_btn_refs: dict = {}
+    _render_restyle = _make_restyle_fn(_render_card_refs, _render_triage_btn_refs)
 
     total = len(candidates)
     page_slice, current_page, total_pages = paginate(candidates, page)
@@ -1173,6 +1264,7 @@ def create_candidate_grid(
                         on_browse_click=on_browse_click,
                         on_compare=on_compare,
                         card_refs=_render_card_refs,
+                        triage_btn_refs=_render_triage_btn_refs,
                         restyle_fn=_render_restyle,
                         on_set_as_anchor=on_set_as_anchor,
                         on_add_as_join=on_add_as_join,

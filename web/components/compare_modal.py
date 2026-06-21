@@ -201,6 +201,7 @@ def create_compare_modal(
     on_close: Optional[Callable] = None,
     metadata_prefetcher: Optional[Callable] = None,
     on_candidate_change: Optional[Callable] = None,
+    on_add_as_join: Optional[Callable] = None,
 ) -> ui.dialog:
     """Full-screen two-pane Compare modal (CMP-01 / CMP-02 / CMP-03 / VSM-02).
 
@@ -228,6 +229,11 @@ def create_compare_modal(
                              Used by joins_lab.py D-10 to schedule adjacent image
                              prefetch; passes the new candidate's index in
                              filtered_candidates.
+        on_add_as_join:      Optional callback(sys_id, shelfmark) for the "Add as Join"
+                             button in the modal header.  Acts on the CURRENTLY-shown
+                             candidate (_state['current_candidate']).  The callback
+                             handles the anonymous/auth branching + confirm dialog.
+                             When None the button is not rendered.
 
     Returns:
         The ui.dialog() instance (caller opens it with dialog.open()).
@@ -566,6 +572,28 @@ def create_compare_modal(
                     "color:rgba(255,255,255,0.8); direction:ltr; unicode-bidi:isolate;"
                 ).mark("compare-flip-counter")
                 _counter_label_ref.append(counter_label)
+
+                # Phase-120 ACT-01: Add-as-Join — acts on the CURRENTLY-shown
+                # candidate (_state['current_candidate']).  Primary scholarly action
+                # (UI-SPEC §2); the callback handles the anonymous/auth + confirm flow.
+                if on_add_as_join is not None:
+                    def _on_add_join_click() -> None:
+                        cand = _state.get("current_candidate")
+                        if cand is None:
+                            return
+                        on_add_as_join(cand.sys_id, cand.shelfmark or "?")
+
+                    (
+                        ui.button(
+                            tr("Add as Join"),
+                            icon="add_link",
+                            on_click=_on_add_join_click,
+                        )
+                        .props("unelevated color=primary")
+                        .mark("compare-add-as-join")
+                        .tooltip(tr("Add as Join"))
+                    )
+
                 ui.button(icon="close", on_click=_handle_close).props(
                     "flat dense round"
                 ).classes("text-white")
@@ -721,17 +749,29 @@ def create_compare_modal(
         meta must have keys:
             'fjms_bib'      — list[dict] (bibliography rows from get_bibliography)
             'catalog_detail'— dict|None (result of get_catalog_detail)
+            'source_names'  — list[str] (result of get_source_names) — the catalog
+                              presence signal.  get_catalog_detail() does NOT contain
+                              a 'source_names' key, so the "has catalog" gate reads
+                              this separately-fetched list, mirroring the Browse
+                              enrichment path (browse_enrichment.py:551).  UAT 2026-06-21:
+                              relying on catalog_detail['source_names'] left the FJMS
+                              Catalog button permanently hidden.
         """
         from web.components.catalog_dialog import show_catalog_dialog
         from web.components.bibliography_dialog import create_fjms_bibliography_dialog
 
         fjms_bib = meta.get("fjms_bib") or []
         catalog_detail = meta.get("catalog_detail")  # None means no data or fetch failed
-        # Infer source count from catalog_detail if present (mirrors browse_enrichment logic)
-        catalog_src_count = 0
-        if catalog_detail and isinstance(catalog_detail, dict):
-            catalog_src_count = len(catalog_detail.get("source_names", []))
-        elif isinstance(catalog_detail, list):
+        # Catalog presence: use the separately-fetched source_names list (mirrors
+        # browse_enrichment.py:551).  Fall back to catalog_detail's records list when
+        # source_names is absent (defensive — a prefetcher that omits the key).
+        source_names = meta.get("source_names") or []
+        catalog_src_count = len(source_names)
+        if catalog_src_count == 0 and catalog_detail and isinstance(catalog_detail, dict):
+            # Defensive fallback: a catalog_detail with records still has data even
+            # if the prefetcher did not supply source_names.
+            catalog_src_count = len(catalog_detail.get("records", []))
+        elif catalog_src_count == 0 and isinstance(catalog_detail, list):
             # Some service versions return the records list directly
             catalog_src_count = len(catalog_detail)
 

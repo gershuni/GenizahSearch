@@ -1376,3 +1376,240 @@ class TestCatalogDialogPrefetchParam:
             "get_catalog_detail must NOT be called (prefetched data is used directly). "
             f"But get_catalog_detail was called for: {get_catalog_calls}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue B (UAT 2026-06-21): Add-as-Join button in the Compare modal header
+# ---------------------------------------------------------------------------
+
+def _build_modal_with_mock_ui(*, on_add_as_join=None, initial_candidate=None,
+                              filtered=None, anchor=None):
+    """Build a Compare modal under a fully-mocked NiceGUI ``ui`` and return the
+    list of (args, kwargs) for every ``ui.button(...)`` call so tests can locate
+    the Add-as-Join button and exercise its on_click callback.
+
+    Returns (dialog, button_calls) where button_calls is a list of (args, kwargs).
+    """
+    from unittest.mock import MagicMock, patch
+
+    anchor = anchor or _Cand(sys_id="ANC01", page=1, shelfmark="T-S Anchor")
+    cand = initial_candidate or _Cand(sys_id="CAND01", page=2, shelfmark="T-S Cand")
+    filtered = filtered or [cand]
+    triage: dict = {}
+
+    mock_element = MagicMock()
+    mock_element.__enter__ = lambda s: s
+    mock_element.__exit__ = MagicMock(return_value=False)
+    for m in ("classes", "props", "style", "mark", "tooltip", "on"):
+        setattr(mock_element, m, MagicMock(return_value=mock_element))
+
+    button_calls: list = []
+
+    def _button_factory(*args, **kwargs):
+        button_calls.append((args, kwargs))
+        return mock_element
+
+    def _make_dialog():
+        d = MagicMock()
+        d.__enter__ = lambda s: s
+        d.__exit__ = MagicMock(return_value=False)
+        d.props = MagicMock(return_value=d)
+        d.on = MagicMock(return_value=d)
+        d.value = True
+        d.close = MagicMock()
+        return d
+
+    with (
+        patch("web.components.compare_modal.ui") as mock_ui,
+        patch("web.components.compare_modal.AnchorViewer"),
+    ):
+        mock_ui.dialog.side_effect = _make_dialog
+        mock_ui.keyboard = MagicMock(return_value=mock_element)
+        mock_ui.button = MagicMock(side_effect=_button_factory)
+        for attr in ("card", "row", "column", "label", "icon", "badge"):
+            factory = MagicMock(return_value=mock_element)
+            factory.__enter__ = lambda s: s
+            factory.__exit__ = MagicMock(return_value=False)
+            setattr(mock_ui, attr, factory)
+
+        from web.components.compare_modal import create_compare_modal
+        dialog = create_compare_modal(
+            anchor_cand=anchor,
+            initial_candidate=cand,
+            filtered_candidates=filtered,
+            triage=triage,
+            on_verdict=lambda sid, v: None,
+            on_add_as_join=on_add_as_join,
+        )
+    return dialog, button_calls
+
+
+def test_compare_modal_accepts_on_add_as_join_param():
+    """Issue B: create_compare_modal must accept an on_add_as_join parameter."""
+    import inspect
+    from web.components.compare_modal import create_compare_modal
+    sig = inspect.signature(create_compare_modal)
+    assert "on_add_as_join" in sig.parameters, (
+        "Issue B: create_compare_modal must accept on_add_as_join= so the modal "
+        "can offer Add-as-Join on the currently-shown candidate."
+    )
+
+
+def test_compare_modal_renders_add_as_join_button_when_callback_provided():
+    """Issue B: an Add-as-Join button is rendered when on_add_as_join is provided."""
+    def _cb(sys_id, shelfmark):
+        pass
+
+    _dialog, button_calls = _build_modal_with_mock_ui(on_add_as_join=_cb)
+
+    # Locate the Add-as-Join button: it carries icon='add_link'
+    add_join_btns = [
+        (args, kwargs) for (args, kwargs) in button_calls
+        if kwargs.get("icon") == "add_link"
+    ]
+    assert add_join_btns, (
+        "Issue B: no Add-as-Join button (icon='add_link') was created in the "
+        "Compare modal header when on_add_as_join was provided."
+    )
+
+
+def test_compare_modal_no_add_as_join_button_when_callback_absent():
+    """Issue B: no Add-as-Join button when on_add_as_join is None (backward compat)."""
+    _dialog, button_calls = _build_modal_with_mock_ui(on_add_as_join=None)
+    add_join_btns = [
+        (args, kwargs) for (args, kwargs) in button_calls
+        if kwargs.get("icon") == "add_link"
+    ]
+    assert not add_join_btns, (
+        "Issue B: an Add-as-Join button was rendered even though on_add_as_join "
+        "was None — it must only appear when the callback is provided."
+    )
+
+
+def test_compare_add_as_join_callback_uses_current_candidate():
+    """Issue B: clicking Add-as-Join calls back with the CURRENTLY-shown candidate."""
+    captured = []
+
+    def _cb(sys_id, shelfmark):
+        captured.append((sys_id, shelfmark))
+
+    cand = _Cand(sys_id="CAND77", page=4, shelfmark="T-S 99.077")
+    _dialog, button_calls = _build_modal_with_mock_ui(
+        on_add_as_join=_cb, initial_candidate=cand, filtered=[cand],
+    )
+
+    add_join_call = next(
+        ((args, kwargs) for (args, kwargs) in button_calls
+         if kwargs.get("icon") == "add_link"),
+        None,
+    )
+    assert add_join_call is not None, "Add-as-Join button not created"
+    _args, kwargs = add_join_call
+    on_click = kwargs.get("on_click")
+    assert callable(on_click), "Add-as-Join button must have an on_click handler"
+
+    # Fire the handler — must call back with the current candidate's sys_id + shelfmark
+    on_click()
+    assert captured == [("CAND77", "T-S 99.077")], (
+        "Issue B: Add-as-Join must call on_add_as_join(current.sys_id, current.shelfmark). "
+        f"Got: {captured!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Issue C (UAT 2026-06-21): Compare info buttons render when FJMS data exists.
+# Root cause: get_catalog_detail() has NO 'source_names' key, so the catalog
+# gate read an always-empty list.  The fix reads source_names from the
+# separately-fetched prefetcher meta key (mirrors browse_enrichment.py:551).
+# ---------------------------------------------------------------------------
+
+def _compute_info_gate(meta: dict):
+    """Mirror of the gating logic in compare_modal._populate_pane_info_row.
+
+    Canonical contract for the Issue-C fix: catalog presence is derived from
+    meta['source_names'] (mirrors browse_enrichment), falling back to
+    catalog_detail['records'] when source_names is absent.
+    """
+    fjms_bib = meta.get("fjms_bib") or []
+    catalog_detail = meta.get("catalog_detail")
+    source_names = meta.get("source_names") or []
+    catalog_src_count = len(source_names)
+    if catalog_src_count == 0 and catalog_detail and isinstance(catalog_detail, dict):
+        catalog_src_count = len(catalog_detail.get("records", []))
+    elif catalog_src_count == 0 and isinstance(catalog_detail, list):
+        catalog_src_count = len(catalog_detail)
+    return bool(fjms_bib), catalog_src_count > 0
+
+
+class TestCompareInfoRowSourceNamesGate:
+    """The catalog-presence gate must use the prefetched meta['source_names'],
+    NOT catalog_detail['source_names'] (which never exists)."""
+
+    def test_catalog_button_renders_when_source_names_present(self):
+        """has_catalog must be True when meta['source_names'] is non-empty."""
+        meta = {
+            "fjms_bib": [],
+            "catalog_detail": {"records": [{"x": 1}]},
+            "source_names": ["Goitein", "Schwab"],
+        }
+        has_bib, has_catalog = _compute_info_gate(meta)
+        assert has_catalog is True, (
+            "Issue C: catalog button must render when source_names is non-empty "
+            f"(meta={meta!r})"
+        )
+
+    def test_catalog_button_hidden_when_no_source_names_and_no_records(self):
+        """has_catalog must be False when source_names empty AND no records."""
+        meta = {
+            "fjms_bib": [],
+            "catalog_detail": {"records": []},
+            "source_names": [],
+        }
+        has_bib, has_catalog = _compute_info_gate(meta)
+        assert has_catalog is False
+
+    def test_bib_button_renders_when_bibliography_present(self):
+        """has_bib must be True when fjms_bib is non-empty."""
+        meta = {
+            "fjms_bib": [{"citation": "Smith 1990"}],
+            "catalog_detail": {"records": []},
+            "source_names": [],
+        }
+        has_bib, has_catalog = _compute_info_gate(meta)
+        assert has_bib is True
+
+    def test_old_catalog_detail_source_names_key_alone_does_not_gate(self):
+        """Regression: relying on catalog_detail['source_names'] (which never exists)
+        would hide the catalog button.  The fix uses meta['source_names'] instead."""
+        meta = {
+            "fjms_bib": [],
+            "catalog_detail": {
+                "records": [{"source_name": "Goitein"}],
+                "running_titles": {}, "sizes": {}, "fields": {},
+                "free_descriptions": [], "full_texts": [],
+                "textual_frames": {}, "mentions": {},
+            },
+            "source_names": ["Goitein"],
+        }
+        # Confirm the real catalog_detail shape has NO source_names key
+        assert "source_names" not in meta["catalog_detail"], (
+            "Test premise: get_catalog_detail() does NOT carry a source_names key"
+        )
+        has_bib, has_catalog = _compute_info_gate(meta)
+        assert has_catalog is True
+
+
+def test_compare_modal_reads_source_names_from_meta_not_catalog_detail():
+    """Issue C (static): _populate_pane_info_row must read meta['source_names'],
+    not catalog_detail.get('source_names') (which never exists)."""
+    import pathlib
+    source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+    assert 'meta.get("source_names")' in source, (
+        "Issue C: _populate_pane_info_row must read source_names from the prefetched "
+        "meta dict (meta.get('source_names')), since get_catalog_detail() has no such key."
+    )
+    # The old broken pattern must be gone
+    assert 'catalog_detail.get("source_names"' not in source, (
+        "Issue C: compare_modal.py must NOT gate the catalog button on "
+        "catalog_detail.get('source_names') — that key never exists on get_catalog_detail()."
+    )

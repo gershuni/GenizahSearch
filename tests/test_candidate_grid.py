@@ -464,7 +464,6 @@ class TestSnippetHighlightRender:
         assert "snippet_html" in source, "snippet_html must be referenced in candidate_grid.py"
         assert "from shared.joins_lab import" in source
         # Confirm the import statement includes snippet_html
-        import re
         import_lines = [
             line for line in source.splitlines()
             if "from shared.joins_lab import" in line
@@ -584,9 +583,6 @@ class TestImageClickCompare:
 
     def test_image_click_calls_on_compare_with_full_candidate(self):
         """Invoking the image-click handler must call on_compare with the full candidate."""
-        from dataclasses import dataclass, field
-        from typing import Optional
-
         @dataclass
         class _FullCand:
             sys_id: str
@@ -692,3 +688,366 @@ class TestTriageButtonFillImmediate:
         # The handler iterates over all buttons and sets either filled or unfilled style
         assert "for _verdict, _btn in _btn_refs.items():" in source, \
             "Handler must iterate over all button refs to reset non-active buttons"
+
+
+# ===========================================================================
+# Issue D (UAT 2026-06-21): restyle fn updates the V/?/X triage BUTTON fills
+# on the grid after a Compare verdict — not just the card border.
+# ===========================================================================
+
+class _FakeBtn:
+    """Mock NiceGUI button — records the last inline style string applied."""
+
+    def __init__(self) -> None:
+        self.last_style: Optional[str] = None
+
+    def style(self, s: str) -> "_FakeBtn":
+        self.last_style = s
+        return self
+
+
+class _FakeCard:
+    """Mock NiceGUI card — records the last inline style string applied."""
+
+    def __init__(self) -> None:
+        self.last_style: Optional[str] = None
+
+    def style(self, s: str) -> "_FakeCard":
+        self.last_style = s
+        return self
+
+
+class TestRestyleUpdatesTriageButtons:
+    """The render-scoped restyle fn must update both the card border AND the
+    triage button active-fill when a verdict changes (Issue D).
+
+    Before the fix, _make_restyle_fn only restyled the card border, so a verdict
+    set in the Compare modal never updated the grid's ✓/?/✗ button highlight
+    until a full re-render.
+    """
+
+    _SYS_ID = "990025143260205171"
+
+    def _build_refs(self):
+        """Return (card_refs, triage_btn_refs, card, btn_map) for one card."""
+        card = _FakeCard()
+        btn_map = {"yes": _FakeBtn(), "maybe": _FakeBtn(), "no": _FakeBtn()}
+        card_refs = {self._SYS_ID: [card]}
+        triage_btn_refs = {self._SYS_ID: [btn_map]}
+        return card_refs, triage_btn_refs, card, btn_map
+
+    def test_make_restyle_fn_accepts_triage_btn_refs(self):
+        """_make_restyle_fn must accept the optional triage_btn_refs dict (Issue D)."""
+        import inspect
+        sig = inspect.signature(cgrid._make_restyle_fn)
+        assert "triage_btn_refs" in sig.parameters, (
+            "_make_restyle_fn must accept a triage_btn_refs param so the restyle "
+            "path can update the V/?/X button fills (Issue D)."
+        )
+
+    def test_verdict_yes_fills_yes_button_and_clears_others(self):
+        """Setting 'yes' must give the YES button the active green fill; others reset."""
+        card_refs, triage_btn_refs, card, btn_map = self._build_refs()
+        restyle = cgrid._make_restyle_fn(card_refs, triage_btn_refs)
+
+        restyle(self._SYS_ID, {self._SYS_ID: "yes"})
+
+        yes_color = cgrid._TRIAGE_COLORS["yes"]
+        assert btn_map["yes"].last_style is not None
+        assert f"background:{yes_color}" in btn_map["yes"].last_style, (
+            "Active YES button must get the active fill background. "
+            f"Got: {btn_map['yes'].last_style!r}"
+        )
+        assert "color:#fff" in btn_map["yes"].last_style
+        # The other two buttons must be reset (no background fill)
+        for v in ("maybe", "no"):
+            assert btn_map[v].last_style is not None
+            assert "background:" not in btn_map[v].last_style, (
+                f"{v} button should be reset to no-fill when YES is active. "
+                f"Got: {btn_map[v].last_style!r}"
+            )
+
+    def test_verdict_change_also_updates_card_border(self):
+        """The card border must still update alongside the button fills (regression)."""
+        card_refs, triage_btn_refs, card, btn_map = self._build_refs()
+        restyle = cgrid._make_restyle_fn(card_refs, triage_btn_refs)
+
+        restyle(self._SYS_ID, {self._SYS_ID: "no"})
+
+        no_color = cgrid._TRIAGE_COLORS["no"]
+        assert card.last_style is not None
+        assert f"2px solid {no_color}" in card.last_style, (
+            f"Card border must reflect the NO verdict color. Got: {card.last_style!r}"
+        )
+
+    def test_clearing_verdict_resets_all_buttons(self):
+        """A None/absent verdict must reset every button to the no-fill style."""
+        card_refs, triage_btn_refs, card, btn_map = self._build_refs()
+        restyle = cgrid._make_restyle_fn(card_refs, triage_btn_refs)
+
+        # No verdict for this sys_id → all buttons reset, neutral border
+        restyle(self._SYS_ID, {})
+
+        for v in ("yes", "maybe", "no"):
+            assert btn_map[v].last_style is not None
+            assert "background:" not in btn_map[v].last_style
+        assert "var(--border-light)" in (card.last_style or "")
+
+    def test_restyle_fn_without_triage_btn_refs_is_backward_compatible(self):
+        """Omitting triage_btn_refs must not raise (backward compat for old callers)."""
+        card = _FakeCard()
+        restyle = cgrid._make_restyle_fn({self._SYS_ID: [card]})
+        # Should restyle the border and not raise even with no button refs
+        restyle(self._SYS_ID, {self._SYS_ID: "maybe"})
+        assert card.last_style is not None
+
+
+# ===========================================================================
+# Issue A (UAT 2026-06-21): Add-as-Join in the TABLE bulk action bar — enabled
+# only when exactly ONE row is selected (pairwise anchor + one candidate).
+# ===========================================================================
+
+class _RecordingBtn:
+    """Mock NiceGUI button — records props() add/remove + tooltip + on_click."""
+
+    def __init__(self, *args, **kwargs):
+        self.init_args = args
+        self.init_kwargs = kwargs
+        self.props_history: list = []  # list of (positional_str, remove_kwarg)
+        self.tooltips: list = []
+        self.on_click = kwargs.get("on_click")
+
+    def props(self, s: str = "", *, remove: str = None):
+        self.props_history.append((s, remove))
+        return self
+
+    def style(self, *a, **k):
+        return self
+
+    def tooltip(self, t):
+        self.tooltips.append(t)
+        return self
+
+    def on(self, event, handler=None, **kwargs):
+        # The bulk-bar triage buttons attach handlers via .on('click', ...).
+        # Capture a click handler if one is supplied this way.
+        if event == "click" and handler is not None:
+            self.on_click = handler
+        return self
+
+    def classes(self, *a, **k):
+        return self
+
+    def is_currently_disabled(self) -> bool:
+        """Replay props history to compute the current disabled state."""
+        disabled = "disable" in (self.init_kwargs.get("props") or "")
+        for s, remove in self.props_history:
+            if s and "disable" in s:
+                disabled = True
+            if remove and "disable" in remove:
+                disabled = False
+        return disabled
+
+
+def _build_table_with_mock_ui(*, on_add_as_join=None, candidates=None):
+    """Build create_candidate_table under a mocked NiceGUI ``ui``.
+
+    Returns (selection_handler, add_join_btn, button_factory_calls).
+    selection_handler is the function registered on the table's 'selection' event.
+    """
+    from unittest.mock import MagicMock, patch
+
+    candidates = candidates or []
+
+    # Element factory shared by row/column/label/icon
+    def _mk_el():
+        el = MagicMock()
+        el.__enter__ = lambda s: s
+        el.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark", "tooltip", "on", "set_text"):
+            setattr(el, m, MagicMock(return_value=el))
+        return el
+
+    created_buttons: list = []
+
+    def _button_factory(*args, **kwargs):
+        btn = _RecordingBtn(*args, **kwargs)
+        created_buttons.append(btn)
+        return btn
+
+    table_handlers: dict = {}
+
+    def _make_table(*args, **kwargs):
+        t = MagicMock()
+        t.__enter__ = lambda s: s
+        t.__exit__ = MagicMock(return_value=False)
+        t.classes = MagicMock(return_value=t)
+        t.props = MagicMock(return_value=t)
+        t.style = MagicMock(return_value=t)
+
+        def _on(event, handler=None, **kw):
+            if handler is not None:
+                table_handlers[event] = handler
+            return t
+        t.on = MagicMock(side_effect=_on)
+        return t
+
+    with patch("web.components.candidate_grid.ui") as mock_ui:
+        mock_ui.button = MagicMock(side_effect=_button_factory)
+        mock_ui.table = MagicMock(side_effect=_make_table)
+        for attr in ("row", "column", "label", "icon", "grid"):
+            factory = MagicMock(side_effect=lambda *a, **k: _mk_el())
+            setattr(mock_ui, attr, factory)
+
+        cgrid.create_candidate_table(
+            candidates,
+            triage={},
+            enrichment={},
+            on_add_as_join=on_add_as_join,
+        )
+
+    # The Add-as-Join button is the one carrying icon='add_link'
+    add_join_btn = next(
+        (b for b in created_buttons if b.init_kwargs.get("icon") == "add_link"),
+        None,
+    )
+    return table_handlers.get("selection"), add_join_btn, created_buttons
+
+
+class TestTableAddAsJoinSingleSelectGate:
+    """Issue A: the table bulk-bar Add-as-Join button is enabled only on a single
+    selected row, and calls back with the row's sys_id + RAW shelfmark."""
+
+    def test_table_accepts_on_add_as_join_param(self):
+        import inspect
+        sig = inspect.signature(cgrid.create_candidate_table)
+        assert "on_add_as_join" in sig.parameters, (
+            "Issue A: create_candidate_table must accept on_add_as_join="
+        )
+
+    def test_add_join_button_created_when_callback_provided(self):
+        _sel, add_join_btn, _btns = _build_table_with_mock_ui(
+            on_add_as_join=lambda sid, sm: None,
+        )
+        assert add_join_btn is not None, (
+            "Issue A: an Add-as-Join button (icon='add_link') must be created in the "
+            "table bulk bar when on_add_as_join is provided."
+        )
+
+    def test_add_join_button_starts_disabled(self):
+        _sel, add_join_btn, _btns = _build_table_with_mock_ui(
+            on_add_as_join=lambda sid, sm: None,
+        )
+        assert add_join_btn.is_currently_disabled(), (
+            "Issue A: Add-as-Join must start disabled (no selection yet)."
+        )
+
+    def test_add_join_enabled_on_exactly_one_selection(self):
+        sel_handler, add_join_btn, _btns = _build_table_with_mock_ui(
+            on_add_as_join=lambda sid, sm: None,
+        )
+        assert sel_handler is not None, "selection handler must be registered"
+
+        # Simulate selecting exactly one row
+        from types import SimpleNamespace
+        ev = SimpleNamespace(args=[{"sys_id": "S1", "shelfmark_raw": "T-S 1.1"}])
+        sel_handler(ev)
+        assert not add_join_btn.is_currently_disabled(), (
+            "Issue A: Add-as-Join must be ENABLED when exactly one row is selected."
+        )
+
+    def test_add_join_disabled_on_two_selections(self):
+        sel_handler, add_join_btn, _btns = _build_table_with_mock_ui(
+            on_add_as_join=lambda sid, sm: None,
+        )
+        from types import SimpleNamespace
+        # First select one (enables), then two (must re-disable)
+        sel_handler(SimpleNamespace(args=[{"sys_id": "S1", "shelfmark_raw": "T-S 1.1"}]))
+        sel_handler(SimpleNamespace(args=[
+            {"sys_id": "S1", "shelfmark_raw": "T-S 1.1"},
+            {"sys_id": "S2", "shelfmark_raw": "T-S 2.2"},
+        ]))
+        assert add_join_btn.is_currently_disabled(), (
+            "Issue A: Add-as-Join must be DISABLED when more than one row is selected."
+        )
+
+    def test_add_join_disabled_on_zero_selection(self):
+        sel_handler, add_join_btn, _btns = _build_table_with_mock_ui(
+            on_add_as_join=lambda sid, sm: None,
+        )
+        from types import SimpleNamespace
+        sel_handler(SimpleNamespace(args=[{"sys_id": "S1", "shelfmark_raw": "T-S 1.1"}]))
+        sel_handler(SimpleNamespace(args=[]))
+        assert add_join_btn.is_currently_disabled(), (
+            "Issue A: Add-as-Join must be DISABLED when the selection is cleared."
+        )
+
+    def test_add_join_click_calls_back_with_sysid_and_raw_shelfmark(self):
+        captured = []
+        sel_handler, add_join_btn, _btns = _build_table_with_mock_ui(
+            on_add_as_join=lambda sid, sm: captured.append((sid, sm)),
+        )
+        from types import SimpleNamespace
+        sel_handler(SimpleNamespace(args=[{"sys_id": "S42", "shelfmark_raw": "T-S 42.42"}]))
+
+        # The bulk button's on_click is captured at init
+        on_click = add_join_btn.on_click
+        assert callable(on_click), "Add-as-Join must have an on_click handler"
+        on_click()
+        assert captured == [("S42", "T-S 42.42")], (
+            "Issue A: clicking Add-as-Join with one selection must call back with the "
+            f"row's sys_id + RAW shelfmark (no badge prefix). Got: {captured!r}"
+        )
+
+    def test_add_join_click_noop_when_not_exactly_one(self):
+        captured = []
+        sel_handler, add_join_btn, _btns = _build_table_with_mock_ui(
+            on_add_as_join=lambda sid, sm: captured.append((sid, sm)),
+        )
+        from types import SimpleNamespace
+        sel_handler(SimpleNamespace(args=[
+            {"sys_id": "S1", "shelfmark_raw": "T-S 1.1"},
+            {"sys_id": "S2", "shelfmark_raw": "T-S 2.2"},
+        ]))
+        add_join_btn.on_click()
+        assert captured == [], (
+            "Issue A: Add-as-Join click must be a no-op when not exactly one row selected."
+        )
+
+    def test_no_add_join_button_when_callback_absent(self):
+        _sel, add_join_btn, _btns = _build_table_with_mock_ui(on_add_as_join=None)
+        assert add_join_btn is None, (
+            "Issue A: no Add-as-Join button should be created when on_add_as_join is None."
+        )
+
+
+class TestTableRowsHaveRawShelfmark:
+    """Issue A support: table rows must carry a raw (un-prefixed) shelfmark so the
+    single-select Add-as-Join can resolve it without the badge marker."""
+
+    def test_make_table_rows_includes_shelfmark_raw(self):
+        from dataclasses import dataclass as _dc
+
+        @_dc
+        class _C:
+            uid: str
+            sys_id: str
+            shelfmark: str
+            page: object = None
+            score: object = None
+            snippet: str = ""
+            # Fields read by badge_and_tooltip / _make_table_rows
+            is_anchor_self: bool = False
+            via_other_side: bool = False
+            via_vs: bool = False
+            vs_rank: object = None
+
+        rows = cgrid._make_table_rows(
+            [_C(uid="u1", sys_id="S1", shelfmark="T-S 1.1")],
+            triage={},
+            enrichment={},
+        )
+        assert rows, "expected one row"
+        assert rows[0].get("shelfmark_raw") == "T-S 1.1", (
+            "Issue A: each table row must carry 'shelfmark_raw' (the un-prefixed shelfmark)."
+        )
