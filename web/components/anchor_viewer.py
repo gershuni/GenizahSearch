@@ -507,7 +507,13 @@ class AnchorViewer:
             # inline style override so both image + transcription fit in the pane.
             image_container_style = ""
             if self._image_max_height:
-                image_container_style = f"max-height: {self._image_max_height};"
+                # Compare context: cap to the given (viewport-relative) height AND
+                # drop the default 200px min-height floor so the image can shrink to
+                # fit a short window instead of overflowing the pane (round-5 UAT:
+                # "Compare does not adapt to window height").
+                image_container_style = (
+                    f"max-height: {self._image_max_height}; min-height: 0;"
+                )
             self._image_container = (
                 ui.element("div")
                 .classes("image-container relative")

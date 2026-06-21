@@ -356,6 +356,23 @@ def test_compare_modal_no_badge_icon_kwarg():
             )
 
 
+def test_compare_modal_card_is_viewport_bounded():
+    """Source assertion (round-5 UAT 'does not adapt to window height'): the modal
+    card must bind its height to the VIEWPORT (100vh), not rely on h-full.
+
+    height:100% only resolves when every ancestor is height-bounded; that chain
+    breaks inside the maximized dialog wrapper, leaving the flex body unbounded so
+    the panes overflowed the window. The card must use an explicit 100vh so the
+    inner flex column + pane scroll areas cap to the actual window height.
+    """
+    import pathlib
+    source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+    assert "height:100vh" in source, (
+        "compare_modal card must be bound to the viewport height (height:100vh) so "
+        "Compare adapts to the window height."
+    )
+
+
 def test_compare_modal_source_no_inject_viewer_assets():
     """Source assertion: compare_modal.py must NOT call inject_viewer_assets.
 

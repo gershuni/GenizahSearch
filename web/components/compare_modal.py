@@ -580,8 +580,17 @@ def create_compare_modal(
 
     # ── Build the modal UI ────────────────────────────────────────────────────
     with dialog:
-        with ui.card().classes("w-full h-full").style(
-            "display:flex; flex-direction:column; overflow:hidden;"
+        # Bind the card to the VIEWPORT height explicitly (not h-full / height:100%):
+        # height:100% only resolves when every ancestor is height-bounded, and that
+        # chain silently breaks inside the maximized dialog wrapper — leaving the
+        # flex body unbounded so the panes grew past the window and the verdict bar
+        # / image overflowed off-screen (round-5 UAT: "does not adapt to window
+        # height").  100dvh (with a 100vh fallback) gives a hard viewport bound so
+        # the inner flex column distributes correctly and the panes' scroll areas
+        # cap to whatever the window actually is.
+        with ui.card().classes("w-full").style(
+            "height:100vh; max-height:100vh;"
+            " display:flex; flex-direction:column; overflow:hidden;"
         ):
             # ── Header bar ───────────────────────────────────────────────────
             with ui.row().classes(
