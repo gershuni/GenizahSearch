@@ -2047,3 +2047,44 @@ def test_round5_results_restore_on_reopen(joins_lab_smoke_runner):
         )
 
     joins_lab_smoke_runner(driver)
+
+
+def test_round5_triage_restored_on_reopen(joins_lab_smoke_runner):
+    """Round-5 UAT: Y/?/X triage verdicts must survive a re-open of /joins-lab.
+
+    Marks ✓ on a card, re-opens the page, and asserts a triage glyph button
+    comes back rendered in its ACTIVE (filled) style — i.e. the persisted
+    verdict was re-attached to _triage AND shown on the restored card.
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        # Mark ✓ on the first candidate (persists triage via _persist_state).
+        yes_btns = _find_yes_triage_buttons(user)
+        assert yes_btns, "precondition: no ✓ triage buttons on the rendered cards."
+        _click_element(user, yes_btns[0])
+        await asyncio.sleep(0.2)
+
+        # Re-open (returning from /puzzle or /browse).
+        await user.open('/joins-lab')
+        await asyncio.sleep(1.4)
+
+        from nicegui import ElementFilter, ui
+        from shared.joins_lab import TRIAGE_ICONS
+        glyphs = {v["glyph"] for v in TRIAGE_ICONS.values()}
+        with user._client:
+            filled = []
+            for b in ElementFilter(kind=ui.button):
+                if not b.visible or b._props.get('label', '') not in glyphs:
+                    continue
+                bg = (getattr(b, '_style', {}) or {}).get('background', '')
+                if bg and bg not in ('transparent', 'inherit'):
+                    filled.append(bg)
+        assert filled, (
+            "Round-5 FAIL: triage verdict NOT restored on re-open — no triage "
+            "glyph button came back in its active (filled) style. The persisted "
+            "verdict must be re-attached to _triage before the restore render."
+        )
+
+    joins_lab_smoke_runner(driver)

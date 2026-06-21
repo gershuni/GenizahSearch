@@ -135,6 +135,48 @@ class TestRound5SourceContract:
         assert '_on_add_to_puzzle_click' in src
         assert '_on_add_to_list_click' in src
 
+    def test_triage_change_callback_wired_for_persistence(self):
+        """The grid + table must accept on_triage_change, and the page must pass it.
+
+        Regression guard for round-5: grid/table triage clicks mutated the triage
+        dict locally but never called _persist_state, so Y/?/X verdicts were lost
+        on a session restore.
+        """
+        import inspect
+        import web.components.candidate_grid as cgrid
+        grid_sig = inspect.signature(cgrid.create_candidate_grid)
+        table_sig = inspect.signature(cgrid.create_candidate_table)
+        card_sig = inspect.signature(cgrid._create_candidate_card)
+        assert 'on_triage_change' in grid_sig.parameters
+        assert 'on_triage_change' in table_sig.parameters
+        assert 'on_triage_change' in card_sig.parameters
+        # The page must wire the persist hook into BOTH create calls.
+        src = self._page_source()
+        assert src.count('on_triage_change=') >= 2, (
+            'joins_lab.py must pass on_triage_change to both the grid and table '
+            'so triage verdicts persist (round-5).'
+        )
+
+    def test_restore_re_persists_state(self):
+        """The restore path must re-persist after load_anchor (which write_anchor's
+        an anchor-only blob) so triage/builder survive multiple round-trips."""
+        src = self._page_source()
+        # Step 9b re-persist marker.
+        assert 'Step 9b' in src or 'RE-PERSIST' in src, (
+            'restore must re-persist the full state after load_anchor clobbers the '
+            'blob to anchor-only (round-5).'
+        )
+
+    def test_single_text_persisted_and_restored(self):
+        """single-line-mode query text must be persisted + restored (not hardcoded '')."""
+        src = self._page_source()
+        assert "single_text=ab_state.get('single_text'" in src, (
+            'joins_lab.py must persist the builder single_text (round-5).'
+        )
+        assert "'single_text': full_state.get('single_text'" in src, (
+            'joins_lab.py must restore single_text from storage, not hardcode "".'
+        )
+
     def test_table_does_not_render_duplicate_bulk_buttons(self):
         """create_candidate_table must NOT bind on_add_to_puzzle / on_add_to_list
         to a button (those moved to the page toolbar — round-5)."""

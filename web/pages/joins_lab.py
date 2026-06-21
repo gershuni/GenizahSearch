@@ -1082,6 +1082,9 @@ def create_joins_lab_page(
                 on_add_to_puzzle=_on_add_to_puzzle_click,
                 on_add_to_list=_on_add_to_list_click,
                 on_add_as_join=_on_add_as_join_click,
+                # Round-5: persist triage verdicts so they survive a session restore
+                # (the table mutates _triage locally; this is the persist hook).
+                on_triage_change=lambda *_a: _persist_state(),
             )
         else:
             # Render the Phase-02 grid surface
@@ -1115,6 +1118,9 @@ def create_joins_lab_page(
                 # Round-4 Issue 8: per-card selection → shared _selected set
                 on_card_select=_on_card_select,
                 selected_sys_ids=_selected,
+                # Round-5: persist triage verdicts so they survive a session restore
+                # (the grid mutates _triage locally; this is the persist hook).
+                on_triage_change=lambda *_a: _persist_state(),
             )
 
     def _on_page_change(page: int) -> None:
@@ -3786,9 +3792,10 @@ def create_joins_lab_page(
             # Anchor identity
             anchor_sys_id=anchor_sys_id,
             anchor_fl_id=anchor_fl_id,
-            # Builder inputs (D-13): rows, mode, text_position
+            # Builder inputs (D-13): rows, mode, single-line text, text_position
             builder_rows=ab_state.get('lines_state', []),
             builder_mode=anchor_builder['get_mode'](),
+            single_text=ab_state.get('single_text', ''),
             text_position=anchor_builder['get_text_position'](),
             # Global options
             flex_spacing=_global_opts['flex_spacing'],
@@ -3883,7 +3890,9 @@ def create_joins_lab_page(
                     'lines_state': full_state.get('builder_rows', []),
                     'search_type': full_state.get('builder_mode', 'responsa'),
                     'variants_on': full_state.get('variants_on', False),
-                    'single_text': '',
+                    # Round-5: restore the single-line-mode query text (was hardcoded
+                    # empty, so single-line searches came back blank).
+                    'single_text': full_state.get('single_text', ''),
                     'text_position': full_state.get('text_position', 'anywhere'),
                 }
                 # Infer variants_on from builder_mode if not stored explicitly
@@ -4005,6 +4014,16 @@ def create_joins_lab_page(
                     with candidates_container:
                         _render_candidates_surface()
 
+            # Step 9b: RE-PERSIST the fully-restored state.  load_anchor() above
+            # called write_anchor(), which overwrites the joins_lab blob with
+            # ONLY the anchor identity fields — dropping the persisted
+            # builder_rows / triage / filter.  We read full_state BEFORE that (so
+            # this restore is correct), but the on-disk blob is now anchor-only;
+            # without re-persisting, a SECOND navigation round-trip would restore
+            # an empty builder + lost verdicts.  Now that _triage, the builder,
+            # and _filter_state are all repopulated, persist the complete state.
+            _persist_state()
+
             # Step 10: hide restoring indicator
             if ind_el is not None:
                 ind_el.style('display: none;')
@@ -4115,6 +4134,25 @@ def create_joins_lab_page(
                 logger.warning('_replay_pending_action create_fragment_join error: %s', err)
         except RuntimeError:
             return  # SEED-008 D-20: client/tab deleted mid-fetch
+
+    # Round-5: pre-empt the "Pin an Anchor Fragment" FLASH.  The async bootstrap
+    # (load_anchor + restore) is deferred ~0.05s + the anchor fetch, during which
+    # the empty-state panel would otherwise show.  Decide synchronously at build
+    # time whether an anchor will be restored (URL param or stored), and if so
+    # hide the empty state up-front (+ show the restoring indicator for a stored
+    # session restore).  read_anchor()/decide_initial_anchor are cheap + safe here.
+    try:
+        _pre_decision = decide_initial_anchor(
+            initial_sys_id, initial_shelfmark, read_anchor()
+        )
+    except Exception:
+        _pre_decision = None
+    if _pre_decision is not None:
+        empty_state.set_visibility(False)
+        if _pre_decision.get('source') == 'stored':
+            _ind0 = _restore_indicator_ref.get('el')
+            if _ind0 is not None:
+                _ind0.style('display: flex;')
 
     # Defer the initial async resolution so it runs after the page handler
     # returns (do NOT block the page handler). asyncio.call_later (NOT ui.timer):

@@ -22,6 +22,7 @@ Schema (extended in Phase 120; same ``schema_version: 1`` as Phase 117):
         #   {'term', 'gap_to_next', 'modifiers'} is still tolerated on read.)
         'builder_rows': list,           # word-model lines_state; max 20 lines
         'builder_mode': str,            # 'exact' | 'variants' | 'fuzzy'
+        'single_text': str,             # single-line-mode query (not in lines_state)
         'text_position': str,           # 'anywhere' | 'start' | 'end' | 'line_start' | 'line_end'
         'flex_spacing': bool,
         'bidirectional': bool,
@@ -224,6 +225,7 @@ def write_full_state(
     anchor_volume_ie: Optional[str] = None,
     builder_rows: Optional[list] = None,
     builder_mode: str = 'exact',
+    single_text: str = '',
     text_position: str = 'anywhere',
     flex_spacing: bool = False,
     bidirectional: bool = False,
@@ -260,6 +262,10 @@ def write_full_state(
         # Phase 120 additions — caps enforced below
         'builder_rows': _cap_rows(builder_rows),
         'builder_mode': builder_mode if isinstance(builder_mode, str) else 'exact',
+        # single-line-mode query text (Exact/Variants/Fuzzy/Regex) — NOT in the
+        # word-model lines_state, so it must be persisted separately or it is lost
+        # on restore (round-5: "does not remember the search phrase").
+        'single_text': (single_text[:_MAX_TERM_CHARS] if isinstance(single_text, str) else ''),
         'text_position': text_position if isinstance(text_position, str) else 'anywhere',
         'flex_spacing': bool(flex_spacing),
         'bidirectional': bool(bidirectional),

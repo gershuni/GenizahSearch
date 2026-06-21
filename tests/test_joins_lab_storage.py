@@ -459,6 +459,26 @@ def test_builder_rows_word_model_round_trip(monkeypatch):
     assert line['gap_to_next_line'] == 1
 
 
+def test_single_text_round_trip(monkeypatch):
+    """write_full_state() must persist + restore the single-line-mode query text.
+
+    Regression guard for round-5 'does not remember the search phrase': single-line
+    searches keep their query in single_text (NOT the word-model lines_state), and
+    it was never persisted (restore hardcoded it to '').
+    """
+    _get, _set, _pop = _make_session_store()
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+
+    from web.joins_lab_storage import write_full_state, read_full_state
+
+    write_full_state(anchor_sys_id='990001234', single_text='שלום עליכם')
+    result = read_full_state()
+    assert result is not None
+    assert result['single_text'] == 'שלום עליכם'
+
+
 def test_builder_rows_word_model_term_capped(monkeypatch):
     """Each word term in the word-model is still capped at 200 chars."""
     _get, _set, _pop = _make_session_store()

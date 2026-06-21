@@ -580,6 +580,7 @@ def _create_candidate_card(
     on_add_as_join: Optional[Callable] = None,
     on_add_to_puzzle: Optional[Callable] = None,
     on_card_select: Optional[Callable] = None,
+    on_triage_change: Optional[Callable] = None,
     selected: bool = False,
 ) -> None:
     """Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
@@ -789,7 +790,7 @@ def _create_candidate_card(
 
                         def _make_triage_handler(
                             v=_v, sid=_sid, t=triage, _rf=restyle_fn,
-                            _btn_refs=_triage_btn_refs,
+                            _btn_refs=_triage_btn_refs, _otc=on_triage_change,
                         ):
                             def _handler():
                                 if isinstance(t, TriageState):
@@ -817,6 +818,15 @@ def _create_candidate_card(
                                                 "min-height:44px; font-size:0.85rem; "
                                                 "background:transparent; color:inherit;"
                                             )
+                                    except Exception:
+                                        pass
+                                # Round-5: notify the page so the verdict is PERSISTED
+                                # (the grid mutates the triage dict locally; without this
+                                # callback _persist_state never runs → verdict lost on
+                                # restore). Best-effort — never break the click handler.
+                                if _otc is not None:
+                                    try:
+                                        _otc(sid, v)
                                     except Exception:
                                         pass
                             return _handler
@@ -1042,6 +1052,7 @@ def create_candidate_table(
     on_add_to_puzzle: Optional[Callable] = None,
     on_add_to_list: Optional[Callable] = None,
     on_add_as_join: Optional[Callable] = None,
+    on_triage_change: Optional[Callable] = None,
 ) -> ui.element:
     """Render the multi-select sortable table view of candidates (D-10, CND-03).
 
@@ -1110,7 +1121,7 @@ def create_candidate_table(
             ]:
                 _v = verdict
 
-                def _make_bulk_handler(v=_v, _rf=restyle_fn):
+                def _make_bulk_handler(v=_v, _rf=restyle_fn, _otc=on_triage_change):
                     def _handler():
                         if isinstance(triage, TriageState):
                             triage.set_bulk(selected_sys_ids, v)
@@ -1120,6 +1131,12 @@ def create_candidate_table(
                         if _rf is not None:
                             for sid in selected_sys_ids:
                                 _rf(sid, triage)
+                        # Round-5: persist the bulk verdict change (else lost on restore).
+                        if _otc is not None:
+                            try:
+                                _otc(None, v)
+                            except Exception:
+                                pass
                     return _handler
 
                 ui.button(label).props("flat dense").style(
@@ -1243,6 +1260,10 @@ def create_candidate_grid(
     # Round-4 Issue 8: per-card selection toggle (sys_id, is_selected) → page _selected set
     on_card_select: Optional[Callable] = None,
     selected_sys_ids: Optional[set] = None,
+    # Round-5: per-card triage verdict change (sys_id, verdict) → page persist hook.
+    # WITHOUT this the grid mutates the triage dict locally but never persists, so
+    # Y/?/X verdicts are lost on a session restore.
+    on_triage_change: Optional[Callable] = None,
 ) -> ui.element:
     """Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
@@ -1320,6 +1341,7 @@ def create_candidate_grid(
                         on_add_as_join=on_add_as_join,
                         on_add_to_puzzle=on_add_to_puzzle,
                         on_card_select=on_card_select,
+                        on_triage_change=on_triage_change,
                         selected=cand.sys_id in _sel_set,
                     )
 
