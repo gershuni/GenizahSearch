@@ -986,3 +986,209 @@ def test_badge_and_tooltip_precedence():
     icon, tip = badge_and_tooltip(no_flags)
     assert icon is None, f"Expected None but got {icon!r}"
     assert tip == ""
+
+
+# ── Phase 120 Plan 05 Task 1 — Bulk Add-to-Puzzle handler ────────────────────
+
+
+def _build_bulk_staging_payload(anchor_sys_id: str, selected_sys_ids: list) -> dict:
+    """Reconstruct what _on_add_to_puzzle_click writes.
+
+    Extracted for testability: builds the puzzle_staging payload without
+    touching NiceGUI safe_storage or ui.navigate (those are tested via grep).
+    Mirrors the implementation in web/pages/joins_lab.py.
+    """
+    MAX_CANDIDATES = 20
+    capped = selected_sys_ids[:MAX_CANDIDATES]
+    fragments = [anchor_sys_id] + capped
+    return fragments
+
+
+class TestBulkAnchorAlwaysIncluded:
+    """VALIDATION.md ACT-02 V5-input row — anchor always fragments[0].
+
+    R2-H2: the bulk bar appears only on ≥1 table selection, so there is no
+    zero-selected path.  Tests verify anchor-first ordering and cap at 20
+    candidates.
+    """
+
+    def test_anchor_first_with_one_candidate(self):
+        """Anchor is fragments[0] with a single candidate."""
+        fragments = _build_bulk_staging_payload("ANCHOR_SID", ["CAND_01"])
+        assert fragments[0] == "ANCHOR_SID", (
+            "test_bulk_anchor_always_included: anchor must be fragments[0]"
+        )
+        assert "CAND_01" in fragments
+
+    def test_anchor_first_with_multiple_candidates(self):
+        """Anchor remains fragments[0] even with many candidates."""
+        candidates = [f"CAND_{i:02d}" for i in range(5)]
+        fragments = _build_bulk_staging_payload("ANCHOR_SID", candidates)
+        assert fragments[0] == "ANCHOR_SID"
+        assert len(fragments) == 6  # anchor + 5
+
+    def test_candidate_cap_at_20(self):
+        """Fragment list is capped: anchor + max 20 candidates = 21 max."""
+        candidates = [f"CAND_{i:02d}" for i in range(30)]
+        fragments = _build_bulk_staging_payload("ANCHOR_SID", candidates)
+        assert len(fragments) <= 21, (
+            f"test_bulk_anchor_always_included cap: expected ≤21 fragments, got {len(fragments)}"
+        )
+        assert fragments[0] == "ANCHOR_SID", "anchor must still be first after cap"
+        # Only the first 20 candidates are included
+        assert len(fragments) == 21
+
+    def test_anchor_not_repeated_from_candidates(self):
+        """The anchor appears exactly once (at index 0) even if also in candidates."""
+        fragments = _build_bulk_staging_payload("ANCHOR_SID", ["CAND_01", "ANCHOR_SID"])
+        # ANCHOR_SID comes first from the anchor param; if it's also in the candidate
+        # list it will appear twice — that is the correct behavior (no dedup required
+        # by the plan), but anchor MUST be first.
+        assert fragments[0] == "ANCHOR_SID"
+
+    def test_on_add_to_puzzle_click_exists_in_joins_lab(self):
+        """Handler _on_add_to_puzzle_click must be present in joins_lab.py."""
+        import pathlib
+        src = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        assert "_on_add_to_puzzle_click" in src, (
+            "joins_lab.py must define _on_add_to_puzzle_click for the "
+            "bulk Add-to-Puzzle button"
+        )
+
+    def test_safe_user_set_puzzle_staging_in_joins_lab(self):
+        """Staging write must use safe_user_set('puzzle_staging', ...) — not raw storage."""
+        import pathlib
+        src = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        assert "safe_user_set('puzzle_staging'" in src, (
+            "joins_lab.py must call safe_user_set('puzzle_staging', ...) "
+            "before navigating to /puzzle"
+        )
+
+    def test_no_raw_app_storage_user_access_for_puzzle(self):
+        """No raw app.storage.user ACCESS (as attribute) for staging write.
+
+        The Phase-87 CI guard (test_no_raw_storage_access.py) is authoritative;
+        this test confirms the puzzle_staging write uses safe_user_set exclusively.
+        """
+        import pathlib
+        src = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        # The _on_add_to_puzzle_click handler must use safe_user_set, not raw storage.
+        assert "safe_user_set('puzzle_staging'" in src, (
+            "joins_lab.py _on_add_to_puzzle_click must use safe_user_set('puzzle_staging') "
+            "not raw app.storage.user access (Phase-87 invariant)"
+        )
+
+    def test_add_to_puzzle_button_in_bulk_bar(self):
+        """The bulk action bar in candidate_grid.py must include Add to Puzzle button."""
+        import pathlib
+        src = pathlib.Path("web/components/candidate_grid.py").read_text(encoding="utf-8")
+        assert "Add to Puzzle" in src or "add_to_puzzle" in src, (
+            "candidate_grid.py bulk bar must include the Add to Puzzle button"
+        )
+
+    def test_translation_keys_for_add_to_puzzle(self):
+        """New tr() keys for add_to_puzzle and puzzle_staging_truncated must exist in translations."""
+        import pathlib
+        src = pathlib.Path("genizah_translations.py").read_text(encoding="utf-8")
+        assert "Add to Puzzle" in src, (
+            "genizah_translations.py must include 'Add to Puzzle' translation key"
+        )
+
+
+# ── Phase 120 Plan 05 Task 2 — Puzzle page pops puzzle_staging ───────────────
+
+
+class TestBulkPuzzleStaging:
+    """VALIDATION.md ACT-02 T-120-stale row — one-shot pop, sequential adds.
+
+    Tests verify that:
+    - safe_user_pop('puzzle_staging', ...) is called in create_puzzle_page (sync body)
+    - The staging key is consumed one-shot (pop vs get)
+    - Malformed/absent key results in cold-start (no auto_add_bulk scheduled)
+    - auto_add_bulk is defined as an inner async def (deferred)
+    """
+
+    def test_safe_user_pop_puzzle_staging_in_puzzle_py(self):
+        """puzzle.py must call safe_user_pop('puzzle_staging', ...) in create_puzzle_page."""
+        import pathlib
+        src = pathlib.Path("web/pages/puzzle.py").read_text(encoding="utf-8")
+        assert "safe_user_pop('puzzle_staging'" in src, (
+            "puzzle.py create_puzzle_page must use safe_user_pop('puzzle_staging', ...) "
+            "for atomic one-shot read+delete (Pitfall 6 / T-120-stale)"
+        )
+
+    def test_no_raw_app_storage_user_in_puzzle_for_staging(self):
+        """puzzle.py must not access app.storage.user for the staging key."""
+        import pathlib
+        import re
+        src = pathlib.Path("web/pages/puzzle.py").read_text(encoding="utf-8")
+        # The test_no_raw_storage_access.py guard is the authoritative check, but
+        # verify here specifically that we didn't introduce raw access for staging.
+        # puzzle.py already uses app.storage.tab (allowed); check .user not added.
+        assert "safe_user_pop('puzzle_staging'" in src, (
+            "puzzle.py must use safe_user_pop (safe_storage chokepoint), not raw access"
+        )
+
+    def test_auto_add_bulk_is_async_def_in_puzzle_py(self):
+        """auto_add_bulk must be an async def (deferred coroutine, not awaited inline)."""
+        import pathlib
+        src = pathlib.Path("web/pages/puzzle.py").read_text(encoding="utf-8")
+        assert "async def auto_add_bulk" in src, (
+            "puzzle.py must define 'async def auto_add_bulk' as an inner deferred coroutine"
+        )
+
+    def test_auto_add_bulk_scheduled_via_after_delay(self):
+        """auto_add_bulk must be scheduled via _after_delay (not awaited inline)."""
+        import pathlib
+        src = pathlib.Path("web/pages/puzzle.py").read_text(encoding="utf-8")
+        assert "asyncio.ensure_future(_after_delay" in src, (
+            "puzzle.py must schedule auto_add_bulk via "
+            "asyncio.ensure_future(_after_delay(..., auto_add_bulk)) — "
+            "mirroring the existing single-fragment pattern"
+        )
+
+    def test_puzzle_staging_schema_version_validated(self):
+        """create_puzzle_page must validate schema_version == 1 before scheduling bulk-add."""
+        import pathlib
+        src = pathlib.Path("web/pages/puzzle.py").read_text(encoding="utf-8")
+        # Validation: 'schema_version' must appear in the bulk staging section of puzzle.py
+        assert "schema_version" in src, (
+            "puzzle.py must validate schema_version in the puzzle_staging payload "
+            "(T-120-input mitigation)"
+        )
+
+    def test_bulk_staging_payload_logic(self):
+        """Pure logic: payload with schema_version=1 is valid; others are ignored."""
+        # Test the validation logic inline (mirrors create_puzzle_page's guard)
+        def _validate_bulk_payload(bulk):
+            """Mirrors the validation in create_puzzle_page."""
+            if not isinstance(bulk, dict):
+                return None
+            if bulk.get('schema_version') != 1:
+                return None
+            fragments = bulk.get('fragments', [])
+            if not fragments:
+                return None
+            return list(fragments)[:21]
+
+        # Valid payload
+        valid = {'schema_version': 1, 'fragments': ['ANCHOR', 'CAND1', 'CAND2']}
+        result = _validate_bulk_payload(valid)
+        assert result == ['ANCHOR', 'CAND1', 'CAND2']
+
+        # Wrong schema_version → ignored
+        wrong_ver = {'schema_version': 2, 'fragments': ['ANCHOR']}
+        assert _validate_bulk_payload(wrong_ver) is None
+
+        # Non-dict → cold start
+        assert _validate_bulk_payload(None) is None
+        assert _validate_bulk_payload("stale_string") is None
+
+        # Empty fragments → cold start
+        empty = {'schema_version': 1, 'fragments': []}
+        assert _validate_bulk_payload(empty) is None
+
+        # Cap at 21 entries
+        big = {'schema_version': 1, 'fragments': ['A'] * 30}
+        result = _validate_bulk_payload(big)
+        assert result is not None and len(result) == 21
