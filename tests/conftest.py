@@ -147,6 +147,13 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if Path(str(item.fspath)).name in _GUI_TEST_FILES:
             item.add_marker(_pytest.mark.gui)
+        # Auto-apply `render_smoke` to tests under tests/render_smoke/. These enter +
+        # tear down the NiceGUI app lifespan (asyncio.run), which closes the event loop
+        # and deletes the auto-index client — poisoning any later NiceGUI test in the
+        # same process. The main `tests` job deselects them (-m "not render_smoke") and
+        # a dedicated fresh-process job runs them (-m render_smoke).
+        if "render_smoke" in Path(str(item.fspath)).parts:
+            item.add_marker(_pytest.mark.render_smoke)
     if config.getoption("--run-scale"):
         return  # run everything including scale tests
     skip_scale = _pytest.mark.skip(reason="scale test; use --run-scale to enable")

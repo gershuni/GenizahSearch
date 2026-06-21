@@ -16,6 +16,7 @@ markers = [
     "packaging: marks tests requiring the packaged EXE (release CI only; Phase 95 D-43)",
     "scale: marks tests requiring large synthesised corpora; run with --run-scale",
     "gui: marks PyQt6 tests that construct a real QApplication and dispatch widget events; deselected from the main `tests` job (-m 'not gui') and run in a dedicated fresh-process `gui-tests` CI job to avoid the accumulated-Qt-state segfault in the full suite",
+    "render_smoke: marks NiceGUI render-smoke tests (tests/render_smoke/) that enter+tear down the app lifespan via asyncio.run; deselected from the main `tests` job (-m 'not render_smoke') and run in a dedicated fresh-process `render-smoke-tests` CI job because the lifespan teardown closes the event loop and deletes the auto-index client, polluting any later NiceGUI test in the same process",
 ]
 
 # Phase 85 (Plan 85-03 cross-plan integration fix): restrict collection to

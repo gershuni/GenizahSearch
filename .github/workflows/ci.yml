@@ -49,7 +49,37 @@ jobs:
       # `gui` in tests/conftest.py). Run together in this one process they tip the
       # accumulated Qt state into SIGSEGV (exit 139) after ~3000 tests. They run
       # in their own fresh process in the `gui-tests` job below.
-      - run: pytest tests/ -m "not gui"
+      # `not render_smoke` deselects the NiceGUI render-smoke tests (auto-marked in
+      # tests/conftest.py): they enter+tear down the app lifespan via asyncio.run,
+      # closing the event loop + deleting the auto-index client, which poisons any
+      # later NiceGUI test in the same process. They run in the `render-smoke-tests`
+      # job below (fresh process).
+      - run: pytest tests/ -m "not gui and not render_smoke"
+
+  render-smoke-tests:
+    needs: lint-and-docs
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: '3.11'
+          - os: windows-latest
+            python-version: '3.11'
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install Qt runtime deps (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1
+      - run: pip install -r requirements-lock.txt
+      - run: pip install pytest
+      # Fresh process, only the render-smoke tests. They drive a NiceGUI User through
+      # the app lifespan and are safe to run together (each restores slot_stack for
+      # its siblings) but must NOT share a process with the broader suite.
+      - run: pytest tests/ -m render_smoke
 
   gui-tests:
     needs: lint-and-docs
