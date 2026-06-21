@@ -1650,7 +1650,7 @@ TRANSLATIONS = {
     "Advanced View": "תצוגה מתקדמת",
     "Quick View": "מבט מהיר",
     "Match Context": "הקשר התאמה",
-    "View in Browse": "צפה בדפדוף",
+    "View in Browse": "עיין בכתב יד",
     "Copy Text": "העתק טקסט",
     "Text copied to clipboard": "הטקסט הועתק ללוח",
     "No text to copy": "אין טקסט להעתקה",
@@ -4268,13 +4268,13 @@ TRANSLATIONS.update({
     "Community-proposed joins are shown":
                                        "מוצגים חיבורים שהוצעו על ידי הקהילה",
     # --- Add-as-Join (ACT-01) ---
-    "Add as Join":                     "הוסף כחיבור",
+    "Add as Join":                     "הוסף כצירוף",
     "Sign in to add this join to the community record":
                                        "התחבר להוספת החיבור לרשומת הקהילה",
     "Could not add join. Check your connection.":
                                        "לא ניתן להוסיף את החיבור. בדוק את החיבור לאינטרנט.",
     "This records a scholarly claim that {a} and {b} physically join. It will be immediately visible to all users.":
-                                       "הפעולה מתעדת טענה מחקרית כי {a} ו-{b} מצטרפים פיזית. היא תיראה מיד לכל המשתמשים.",
+                                       "האם אתה מעוניין לפרסם לכלל המשתמשים כי {a} ו-{b} מצטרפים?",
     # --- Remove-join (D-03) ---
     "Remove this join (only your own joins can be removed)":
                                        "הסר חיבור זה (ניתן להסיר רק חיבורים שלך)",
