@@ -58,6 +58,9 @@ def resolve_image_url(
     total_pages: int = 0,
     active_source: str = 'nli',
     source_user_override: bool = False,
+    width: Optional[int] = None,
+    surface: str = 'viewer',
+    nli_circuit_open: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """Resolve the image URL for a browse page using the per-provider proxy strategy.
 
@@ -82,6 +85,23 @@ def resolve_image_url(
           ``has_image``     — True when an image is expected at this URL
           ``active_source`` — the (possibly auto-defaulted) active source so callers
                               can persist it (e.g. state.active_source = result['active_source'])
+
+    SEED-010 (source-first resolution):
+        The final ``active_source`` is decided BEFORE any URL is built, then a single
+        URL is constructed from it.  This fixes the Oxford ordering bug where the
+        function could return ``active_source='oxford'`` paired with an NLI URL
+        (the old override block had no Oxford branch).
+
+        ``width``            — when set, append ``&width=N`` to /api/* proxy URLs
+                               (thumbnails pass 300).  The direct Bodleian URL is
+                               unaffected (it carries its own sizing).
+        ``surface``          — 'viewer' (default) or 'thumbnail'.  Thumbnails prefer
+                               the Cambridge proxy whenever CUDL metadata exists (the
+                               proxy keeps its own NLI fallback when NLI is up).
+        ``nli_circuit_open`` — Phase-98 NLI breaker state.  When None it is read from
+                               ``shared.nli_circuit_breaker.is_open()``.  When True
+                               (NLI down) Cambridge auto-defaults even without an
+                               'aligned' verdict so CUDL still resolves.
     """
     cambridge_images = cambridge_images or []
     external_provider = external_provider or ''
@@ -98,47 +118,11 @@ def resolve_image_url(
     has_image = False
     img_url = ''
 
-    # ---- Primary URL construction (Oxford or NLI default) ----
-    if is_oxford and sys_id and active_source != 'nli':
-        has_image = True
-        # For multi-IE Oxford manuscripts, each volume = next folio in sequence
-        # e.g., d.50/19 Volume 1 = folio 19, Volume 2 = folio 20
-        # Oxford folios have 2 sides (recto 'a' + verso 'b'), so offset by
-        # number of preceding volumes, not pages.
-        _ox_folio_offset = max(0, (volume_suffix or 1) - 1)
-        # MEDIUM-5 documented exception: Prefer direct Bodleian URL in the browser
-        # to avoid production /api proxy failures. Bodleian is a STATIC, non-NLI
-        # host with no IIIF circuit breaker — this is the intentional /browse
-        # behaviour, preserved verbatim here. The NLI proxy restriction (ANC-02)
-        # applies only to NLI/iiif.nli.org.il paths, NOT to Bodleian.
-        oxford_direct = get_oxford_direct_image_url(shelfmark, page_idx, folio_offset=_ox_folio_offset)
-        if oxford_direct:
-            img_url = f"{oxford_direct}{cache_bust_direct}"
-        else:
-            # Fallback to proxy when direct URL cannot be derived from shelfmark.
-            img_url = f"/api/oxford_image/{sys_id}?page={page_idx}{cache_bust_api}"
-    elif sys_id:
-        # Use server-side NLI proxy for ALL NLI items.
-        # ANC-02 / HIGH-2: ONLY /api/nli_image_by_sysid — never a direct iiif.nli.org.il URL.
-        # (The NLI_IIIF_BASE constant lives in browse.py's handleImageError path and
-        # must NOT be carried into this module.)
-        has_image = True
-        _suffix_param = f'&suffix={volume_suffix}' if volume_suffix > 1 else ''
-        # Phase 85 D-06/D-08: synthetic sys_ids skip the NLI image proxy.
-        # If a CUDL manifest is available the cambridge auto-default below
-        # switches active_source='cambridge' which routes to /api/cambridge_image/.
-        # If no CUDL, has_image is forced False so the <img> doesn't render
-        # with a 204-only URL.
-        if is_synthetic_sys_id(sys_id):
-            if not cambridge_images:
-                has_image = False
-                img_url = ''
-            else:
-                img_url = ''  # will be reset by cambridge branch below
-        else:
-            img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}{_suffix_param}{cache_bust_api}"
-
-    # ---- External source flags ----
+    # ---- External source availability flags (computed BEFORE any URL) ----
+    # SEED-010: these MUST precede source selection + URL construction so the
+    # final active_source is decided first and exactly one URL is built from it.
+    # The old interleaved order built the NLI URL, THEN flipped active_source to
+    # 'oxford' with no Oxford branch to rewrite the URL -> NLI URL leaked through.
     _has_ext_images = bool(cambridge_images)
     _has_cambridge_images = _has_ext_images and external_provider not in ('manchester', 'jts')
     _has_manchester_images = _has_ext_images and external_provider == 'manchester'
@@ -147,12 +131,24 @@ def resolve_image_url(
     # it as an external source like Cambridge/JTS so the user can switch
     # between it and the NLI IIIF view of the same manuscript.
     _has_oxford_images = bool(is_oxford and sys_id)
-
-    # ---- Auto-default to external sources when available ----
-    # When NLI IIIF is down, these ensure images load from alternate providers.
-    # Phase 85 D-08: synthetic sys_ids with a CUDL manifest default to Cambridge
-    # as the image source (no NLI attempted at all).
     _is_synth = is_synthetic_sys_id(sys_id)
+
+    # ---- NLI circuit-breaker state (SEED-010) ----
+    # When NLI's image API is down (Phase-98 breaker OPEN) we relax the Cambridge
+    # verdict gate so CUDL still resolves. Read lazily when not passed by caller.
+    if nli_circuit_open is None:
+        try:
+            from shared import nli_circuit_breaker
+            nli_circuit_open = nli_circuit_breaker.is_open()
+        except Exception:
+            nli_circuit_open = False
+
+    # ---- Decide the FINAL active_source first (no URL built yet) ----
+    # Preserves the historical auto-default priority (synthetic-cambridge, jts,
+    # manchester, oxford, cambridge-safe) — each guarded on active_source=='nli'
+    # so the first applicable provider wins.
+    # Phase 85 D-08: synthetic sys_ids with a CUDL manifest default to Cambridge
+    # (no NLI attempted at all).
     if _is_synth and _has_cambridge_images and active_source == 'nli' and not source_user_override:
         active_source = 'cambridge'
     if _has_jts_images and active_source == 'nli' and not source_user_override:
@@ -161,14 +157,13 @@ def resolve_image_url(
         active_source = 'manchester'
     if _has_oxford_images and active_source == 'nli' and not source_user_override:
         active_source = 'oxford'
-    # 260419-cfx / 260421-aln: only auto-default to Cambridge CUDL when the
-    # per-position (folio,side) verdict from classify_cambridge_alignment says
-    # 'aligned'. A 'misaligned' verdict (count or position mismatch) OR a missing
-    # verdict entry (CUDL+NLI both present but not yet classified) keeps NLI as
-    # default — positional CUDL mapping is unreliable in those cases. User can
-    # still switch manually via the source toggle. For legacy/backward compat,
-    # also accept a match when the verdict is absent but CUDL count matches
-    # total_pages (e.g. pages loaded before enrich_metadata finished).
+    # 260419-cfx / 260421-aln: auto-default to Cambridge CUDL when the per-position
+    # (folio,side) verdict from classify_cambridge_alignment says 'aligned' (or the
+    # legacy count-match). A 'misaligned'/missing verdict normally keeps NLI as
+    # default — BUT SEED-010: when NLI is DOWN (breaker open) we default to CUDL
+    # regardless (a possibly-misaligned CUDL image beats no image), and for
+    # THUMBNAILS we always prefer the CUDL proxy when it exists (the proxy keeps
+    # its own NLI fallback when NLI is up). User can still switch via the toggle.
     _cam_verdict = (cambridge_alignment or {}).get('verdict') if cambridge_alignment else None
     _cam_safe_default = (
         _has_cambridge_images
@@ -181,16 +176,36 @@ def resolve_image_url(
             )
         )
     )
-    if _cam_safe_default and active_source == 'nli' and not source_user_override:
+    _cam_should_default = _has_cambridge_images and (
+        _cam_safe_default or nli_circuit_open or surface == 'thumbnail'
+    )
+    if _cam_should_default and active_source == 'nli' and not source_user_override:
         active_source = 'cambridge'
 
-    # ---- Provider overrides (external source wins when user switched or auto-defaulted) ----
-    if active_source == 'cambridge' and _has_cambridge_images and not is_oxford:
-        has_image = True
-        img_url = f"/api/cambridge_image/{sys_id}?page={page_idx}{cache_bust_api}"
+    # ---- Build EXACTLY ONE URL from the final active_source ----
+    # Width applies to the /api/* proxy URLs (thumbnails pass width=300); the
+    # direct Bodleian URL carries its own sizing so width is NOT appended there.
+    _width_api = f"&width={int(width)}" if width else ''
 
-    # Manchester source override
-    if active_source == 'manchester' and _has_manchester_images and not is_oxford:
+    if active_source == 'oxford' and _has_oxford_images:
+        has_image = True
+        # For multi-IE Oxford manuscripts, each volume = next folio in sequence
+        # (d.50/19 Vol 1 = folio 19, Vol 2 = folio 20). Oxford folios have 2 sides
+        # (recto 'a' + verso 'b'), so offset by preceding volumes, not pages.
+        _ox_folio_offset = max(0, (volume_suffix or 1) - 1)
+        # MEDIUM-5 documented exception: prefer the direct Bodleian URL in the
+        # browser to avoid production /api proxy failures. Bodleian is a STATIC,
+        # non-NLI host with no circuit breaker. The ANC-02 NLI-proxy restriction
+        # applies only to NLI/iiif.nli.org.il paths, NOT to Bodleian.
+        oxford_direct = get_oxford_direct_image_url(shelfmark, page_idx, folio_offset=_ox_folio_offset)
+        if oxford_direct:
+            img_url = f"{oxford_direct}{cache_bust_direct}"
+        else:
+            img_url = f"/api/oxford_image/{sys_id}?page={page_idx}{cache_bust_api}{_width_api}"
+    elif active_source == 'cambridge' and _has_cambridge_images and not is_oxford:
+        has_image = True
+        img_url = f"/api/cambridge_image/{sys_id}?page={page_idx}{cache_bust_api}{_width_api}"
+    elif active_source == 'manchester' and _has_manchester_images and not is_oxford:
         has_image = True
         # For multi-IE manuscripts, Manchester canvases span all volumes
         # sequentially. Compute absolute canvas index by adding preceding
@@ -202,12 +217,21 @@ def resolve_image_url(
                 if v.get('suffix', 1) < volume_suffix:
                     _vol_offset += v.get('transcription_pages', 0)
             _manch_page_idx = page_idx + _vol_offset
-        img_url = f"/api/manchester_image/{sys_id}?page={_manch_page_idx}{cache_bust_api}"
-
-    # JTS source override
-    if active_source == 'jts' and _has_jts_images and not is_oxford:
+        img_url = f"/api/manchester_image/{sys_id}?page={_manch_page_idx}{cache_bust_api}{_width_api}"
+    elif active_source == 'jts' and _has_jts_images and not is_oxford:
         has_image = True
-        img_url = f"/api/jts_image/{sys_id}?page={page_idx}{cache_bust_api}"
+        img_url = f"/api/jts_image/{sys_id}?page={page_idx}{cache_bust_api}{_width_api}"
+    elif sys_id:
+        # NLI default. ANC-02 / HIGH-2: ONLY /api/nli_image_by_sysid — never a
+        # direct iiif.nli.org.il URL. Phase 85 D-06/D-08: synthetic sys_ids have
+        # no NLI Alma record, so with no external image they render no <img>.
+        if _is_synth:
+            has_image = False
+            img_url = ''
+        else:
+            has_image = True
+            _suffix_param = f'&suffix={volume_suffix}' if volume_suffix > 1 else ''
+            img_url = f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}{_suffix_param}{cache_bust_api}{_width_api}"
 
     return {
         'img_url': img_url,

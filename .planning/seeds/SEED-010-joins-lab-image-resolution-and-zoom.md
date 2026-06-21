@@ -1,7 +1,9 @@
 ---
 id: SEED-010
-status: dormant
+status: fix_implemented_pending_uat
 planted: 2026-06-21
+addressed: 2026-06-21
+addressed_via: /gsd-debug → .planning/debug/joins-lab-image-resolution.md (Option B unified breaker-aware resolver + Compare per-instance zoom; Codex-reviewed). Fix committed into the release on master-main; live UP/DOWN UAT still pending (validate with NLI both up and down). Codex's review also surfaced a 3rd root cause the original capture missed: the Oxford ordering bug in resolve_image_url (active_source='oxford' returned with an NLI URL). Compare-zoom root cause was NOT the onload coupling but a single global manuscriptViewer + first-match querySelector wiring only one of the modal's images.
 planted_during: v8.2.0 / Phase 121 (i18n-polish) HE-mode RTL HUMAN-UAT (Plan 121-03)
 trigger_when: A dedicated debug/fix pass on a cloud branch off origin (per memory feedback_seed_midphase_fixes_to_cloud). NOT i18n — do NOT fold into the i18n-polish phase. Needs live testing with NLI both UP and DOWN, so it cannot be validated during the current outage. Candidate for a small standalone phase or /gsd:debug once NLI is reachable again.
 scope: medium (cross-cutting — 3 divergent image-resolution paths + a zoom-init coupling; standalone, not an inline fix)

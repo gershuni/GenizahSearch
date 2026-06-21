@@ -61,8 +61,26 @@ _VIEWER_HEAD = '''
 (function() {
     if (!window._msViewerLoaded) {
         window._msViewerLoaded = true;
-        // Create viewer via shared factory — AnchorViewer uses .zoomable-image
-        // and .image-container selectors, consistent with /browse.
+        window.__msViewers = window.__msViewers || {};
+        // SEED-010: per-instance viewer registry. Each AnchorViewer carries a
+        // UNIQUE container class (.avcN); __msInitViewer creates a manuscriptViewer
+        // scoped to THAT container so Compare's two panes (plus the page behind the
+        // modal) each get their own zoom/pan wiring. The old single global viewer +
+        // document.querySelector('.zoomable-image') wired only the FIRST image, so
+        // the Compare panes' zoom was dead.
+        window.__msInitViewer = function(vid) {
+            if (typeof createManuscriptViewer !== 'function') return;
+            if (!window.__msViewers[vid]) {
+                window.__msViewers[vid] = createManuscriptViewer({
+                    imageSelector: '.' + vid + ' .zoomable-image',
+                    containerSelector: '.' + vid + ' .image-container',
+                    zoomLabelSelector: '.' + vid + ' .zoom-level-label',
+                    gammaFilterId: 'gamma-main'
+                });
+            }
+            window.__msViewers[vid].init();
+        };
+        // Back-compat global (consistent with /browse; some fallbacks reference it).
         window.manuscriptViewer = createManuscriptViewer({
             imageSelector: '.zoomable-image',
             containerSelector: '.image-container',
@@ -260,7 +278,18 @@ class AnchorViewer:
                           Defaults to the real AppState-backed singleton.
         external_resolver: Callable matching ``resolve_external_images`` signature.
                            Defaults to the shared helper from image_resolution.py.
+        active_source:    Initial image source ('nli' default). SEED-010: lets a
+                          caller (e.g. Compare) seed a known provider so the fresh
+                          viewer doesn't re-default differently from grid/anchor.
+        source_user_override: When True, suppress provider auto-default (the user's
+                          choice is authoritative). Passed through to resolve_image_url.
     """
+
+    # Monotonic per-page instance counter → a unique container class per viewer so
+    # each AnchorViewer gets its OWN scoped manuscriptViewer (SEED-010: a single
+    # global viewer + first-match querySelector wired only ONE image, so Compare's
+    # two panes had dead zoom). Incremented on the NiceGUI event loop (single-threaded).
+    _instance_seq = 0
 
     def __init__(
         self,
@@ -273,6 +302,8 @@ class AnchorViewer:
         external_resolver: Optional[Callable] = None,
         suppress_shelfmark_header: bool = False,
         image_max_height: Optional[str] = None,
+        active_source: str = 'nli',
+        source_user_override: bool = False,
     ) -> None:
         self._sys_id = sys_id
         self._fl_id = fl_id
@@ -308,6 +339,15 @@ class AnchorViewer:
 
         # Per-instance zoom state (mirrors browse.py state.zoom_level)
         self._zoom: float = 1.0
+        # SEED-010: per-instance image source (persisted across folio nav so the
+        # chosen provider sticks) + a unique container CLASS so this viewer's
+        # zoom/pan is scoped to ITS OWN image, not the first .zoomable-image on
+        # the page (Compare puts three on the page → the old global viewer wired
+        # only the first, leaving both modal panes' zoom dead).
+        self._active_source: str = active_source or 'nli'
+        self._source_user_override: bool = bool(source_user_override)
+        AnchorViewer._instance_seq += 1
+        self._viewer_id: str = f"avc{AnchorViewer._instance_seq}"
 
         # Latest-wins folio-navigation generation (WR-03): a newer
         # update_content() supersedes any in-flight one so rapid prev/next
@@ -357,7 +397,9 @@ class AnchorViewer:
     def zoom_reset(self) -> None:
         """Reset zoom to 1.0 and reset the viewer pan/rotation."""
         self._zoom = 1.0
-        ui.run_javascript("if(window.manuscriptViewer) window.manuscriptViewer.reset();")
+        ui.run_javascript(
+            f"(function(){{ var mv=(window.__msViewers||{{}})['{self._viewer_id}']; if(mv) mv.reset(); }})();"
+        )
         self._apply_zoom()
 
     def _apply_zoom(self) -> None:
@@ -373,11 +415,11 @@ class AnchorViewer:
             self._zoom_label.set_text(f"{int(self._zoom * 100)}%")
         ui.run_javascript(
             "(function(){"
-            "  var mv = window.manuscriptViewer;"
+            f"  var mv = (window.__msViewers || {{}})['{self._viewer_id}'];"
             "  if (mv && typeof mv.update === 'function') {"
             f"    mv.update({self._zoom}, (mv.state ? mv.state.rotation : 0));"
             "  } else {"
-            "    var im = document.querySelector('.anchor-viewer-container .zoomable-image');"
+            f"    var im = document.querySelector('.{self._viewer_id} .zoomable-image');"
             f"    if (im) im.style.transform = 'translate(0px,0px) scale({self._zoom})';"
             "  }"
             "})();"
@@ -439,6 +481,10 @@ class AnchorViewer:
             cambridge_alignment=cambridge_alignment,
             volumes=page.volumes,
             total_pages=page.total_pages,
+            # SEED-010: carry the (persisted) source + override so a seeded/chosen
+            # provider survives folio navigation and Compare pane creation.
+            active_source=self._active_source,
+            source_user_override=self._source_user_override,
         )
         return (page, resolved)
 
@@ -456,16 +502,17 @@ class AnchorViewer:
           the inline error-state UI (``_show_image_error()``) is set via the
           server-rendered state, not a client-side onerror handler.
 
-        The only ``onload`` handler is ``window.manuscriptViewer.init()``,
-        which wires zoom/pan to this image element — the same pattern as
-        /browse (without the NLI fallback escape hatch).
+        The only ``onload`` handler is ``window.__msInitViewer(viewer_id)`` (SEED-010),
+        which creates/initialises a manuscriptViewer scoped to THIS viewer's unique
+        container class so each pane (incl. Compare's two) wires its own zoom/pan —
+        the same factory as /browse (without the NLI fallback escape hatch).
         """
         return (
             f'<img src="{img_url}" '
             f'class="zoomable-image" '
             f'style="transform: translate(0px,0px) scale({self._zoom}); cursor: grab;" '
             f'draggable="false" '
-            f'onload="if(window.manuscriptViewer) window.manuscriptViewer.init()" '
+            f'onload="if(window.__msInitViewer) window.__msInitViewer(\'{self._viewer_id}\')" '
             f'/>'
         )
 
@@ -475,7 +522,7 @@ class AnchorViewer:
 
     def _build_ui(self) -> None:
         """Build the full AnchorViewer component (image + controls + transcription)."""
-        _container = ui.column().classes("anchor-viewer-container w-full gap-0")
+        _container = ui.column().classes(f"anchor-viewer-container {self._viewer_id} w-full gap-0")
         with _container:
             # Info header — shelfmark (identifier) + library + title. Populated
             # by update_content. Uses theme CSS vars so it stays legible in both
@@ -678,6 +725,10 @@ class AnchorViewer:
 
         page, resolved = result
 
+        # SEED-010: persist the resolved source so folio nav keeps the chosen
+        # provider and a seeded source isn't lost on the next resolve.
+        self._active_source = resolved.get('active_source', self._active_source)
+
         # Update page label
         self._p_num = page.p_num
         if page.total_pages:
@@ -755,11 +806,13 @@ class AnchorViewer:
         self._image_container.clear()
         with self._image_container:
             # HIGH-2: NO onerror="handleImageError(...)".  NO iiif.nli.org.il URL.
-            # Zoom init only via onload.
+            # SEED-010: init THIS viewer's scoped manuscriptViewer (per-instance, by
+            # unique container class) via a short post-render fallback in addition to
+            # the <img> onload (covers a cached image whose onload already fired).
             img_html = self._build_img_html(img_url)
             ui.html(img_html, sanitize=False)
             ui.run_javascript(
-                "if(window.manuscriptViewer) setTimeout(() => window.manuscriptViewer.init(), 50);"
+                f"if(window.__msInitViewer) setTimeout(() => window.__msInitViewer('{self._viewer_id}'), 50);"
             )
 
     def _show_image_error(self) -> None:

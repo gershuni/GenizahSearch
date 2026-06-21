@@ -1155,3 +1155,48 @@ def test_issue6_restyle_clear_branch_resets_background():
             f"Issue 6: restyle must reset {v} button to background:transparent when "
             f"yes is active. Got: {btns[v].last!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# SEED-010: breaker-aware grid thumbnail routing
+# ---------------------------------------------------------------------------
+# When NLI is UP (breaker closed) non-Oxford thumbnails use the fast NLI proxy
+# (unchanged). When NLI is DOWN (breaker open) they route to the provider's own
+# proxy so CUDL/Manchester/JTS thumbnails still resolve during an outage.
+
+class TestSeed010BreakerAwareThumbnail:
+    def test_nli_up_routes_cul_to_nli_proxy(self, monkeypatch):
+        import shared.nli_circuit_breaker as br
+        monkeypatch.setattr(br, "is_open", lambda: False)
+        url = build_thumbnail_url(_NLI_SYS_ID, page=1, shelfmark="T-S 12.1", library_code="CUL")
+        assert url.startswith(f"/api/nli_image_by_sysid/{_NLI_SYS_ID}")
+
+    def test_nli_down_routes_cul_to_cambridge_proxy(self, monkeypatch):
+        import shared.nli_circuit_breaker as br
+        monkeypatch.setattr(br, "is_open", lambda: True)
+        url = build_thumbnail_url(_NLI_SYS_ID, page=1, shelfmark="T-S 12.1", library_code="CUL")
+        assert url.startswith(f"/api/cambridge_image/{_NLI_SYS_ID}")
+        assert "iiif.nli.org.il" not in url
+
+    def test_nli_down_routes_manchester_and_jts(self, monkeypatch):
+        import shared.nli_circuit_breaker as br
+        monkeypatch.setattr(br, "is_open", lambda: True)
+        man = build_thumbnail_url(_NLI_SYS_ID, page=1, shelfmark="x", library_code="Manchester")
+        jts = build_thumbnail_url(_NLI_SYS_ID, page=1, shelfmark="ENA 1.1", library_code="JTS")
+        assert man.startswith(f"/api/manchester_image/{_NLI_SYS_ID}")
+        assert jts.startswith(f"/api/jts_image/{_NLI_SYS_ID}")
+
+    def test_nli_down_unknown_library_stays_nli_proxy(self, monkeypatch):
+        """BL/RNL/etc. have no alternate provider → still the NLI proxy even when down."""
+        import shared.nli_circuit_breaker as br
+        monkeypatch.setattr(br, "is_open", lambda: True)
+        url = build_thumbnail_url(_NLI_SYS_ID, page=1, shelfmark="Or 1.1", library_code="BL")
+        assert url.startswith(f"/api/nli_image_by_sysid/{_NLI_SYS_ID}")
+
+    def test_nli_down_oxford_still_uses_oxford_fork(self, monkeypatch):
+        """Oxford fork wins before provider routing even when NLI is down."""
+        import shared.nli_circuit_breaker as br
+        monkeypatch.setattr(br, "is_open", lambda: True)
+        url = build_thumbnail_url(_NLI_SYS_ID, page=1, shelfmark="MS Heb. e.93/58", library_code="Oxford")
+        assert "/api/nli_image_by_sysid" not in url
+        assert "iiif.nli.org.il" not in url

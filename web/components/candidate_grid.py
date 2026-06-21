@@ -411,7 +411,10 @@ def build_thumbnail_url(
         1. Synthetic sys_ids → None (placeholder path only).
         2. Oxford manuscripts (is_oxford_manuscript) → Bodleian direct URL when
            derivable, else /api/oxford_image/{sys_id}?page=...  NOT the NLI proxy.
-        3. Everything else → /api/nli_image_by_sysid/{sys_id}?page=...&width=300.
+        3. Everything else → /api/nli_image_by_sysid/{sys_id}?page=...&width=300 while
+           NLI is UP; when the Phase-98 NLI breaker is OPEN (NLI down), route by
+           library_code to the provider proxy (/api/cambridge_image, etc.) so CUDL/
+           Manchester/JTS thumbnails still resolve during an NLI outage (SEED-010).
         4. NEVER a direct iiif.nli.org.il URL.
     """
     page_idx = max(0, (page or 1) - 1)
@@ -435,8 +438,23 @@ def build_thumbnail_url(
             return ox_url  # Direct Bodleian (documented MEDIUM-5 exception)
         return f"/api/oxford_image/{sys_id}?page={page_idx}"
 
-    # NLI default (all other providers — Cambridge/Manchester/JTS defer to Phase 119/CND-08
-    # async enrichment, exactly as the search result card does).
+    # Non-Oxford providers (Cambridge/CUDL, Manchester, JTS) — SEED-010:
+    # When NLI's image API is DOWN (Phase-98 breaker OPEN) route the thumbnail to
+    # the provider's OWN proxy (resolved from the local crossref sidecar + CUDL/
+    # LUNA/Figgy — independent of NLI) instead of the NLI proxy that would 404. The
+    # provider proxies enrich-on-demand when their cache is cold (web/api.py). When
+    # NLI is UP, keep the fast crossref-resolved NLI proxy (no enrich) so the common
+    # path is unchanged and provider resolution is only paid during an actual outage.
+    try:
+        from shared import nli_circuit_breaker
+        _nli_down = nli_circuit_breaker.is_open()
+    except Exception:
+        _nli_down = False
+    if _nli_down and library_code:
+        # Canonical library→proxy table (same one /api/browse uses, search_serializer).
+        from shared.search_serializer import _BROWSE_PROXY_BY_LIBRARY, _BROWSE_DEFAULT_PROXY
+        base, _provider = _BROWSE_PROXY_BY_LIBRARY.get(library_code, _BROWSE_DEFAULT_PROXY)
+        return f"{base}/{sys_id}?page={page_idx}&width=300"
     return f"/api/nli_image_by_sysid/{sys_id}?page={page_idx}&width=300"
 
 

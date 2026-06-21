@@ -217,10 +217,12 @@ function createManuscriptViewer(options) {
 
             console.log('viewer: initializing drag on ' + imageSelector);
 
-            // Attach mousedown directly to the IMAGE element
+            // Attach mousedown directly to the IMAGE element. SEED-010: move/up are
+            // bound to `document` on drag START and removed on release (see
+            // onMouseDown/onMouseUp) instead of overwriting window.onmousemove
+            // globally — so multiple viewers on one page (e.g. Compare's two panes)
+            // each drag independently instead of the last-initialised one winning.
             this.el.onmousedown = this.onMouseDown.bind(this);
-            window.onmousemove = this.onMouseMove.bind(this);
-            window.onmouseup = this.onMouseUp.bind(this);
             this.el.ondragstart = function(e) { e.preventDefault(); };
 
             // Mouse wheel zoom - attach to image
@@ -260,6 +262,12 @@ function createManuscriptViewer(options) {
             this.state.startX = e.clientX - this.state.x;
             this.state.startY = e.clientY - this.state.y;
             this.el.style.cursor = 'grabbing';
+            // SEED-010: bind move/up for THIS drag only (removed on mouseup) so
+            // concurrent viewers don't clobber each other's window handlers.
+            if (!this._boundMove) this._boundMove = this.onMouseMove.bind(this);
+            if (!this._boundUp) this._boundUp = this.onMouseUp.bind(this);
+            document.addEventListener('mousemove', this._boundMove);
+            document.addEventListener('mouseup', this._boundUp);
         },
 
         onMouseMove: function(e) {
@@ -276,6 +284,9 @@ function createManuscriptViewer(options) {
         onMouseUp: function() {
             this.state.isDragging = false;
             if (this.el) this.el.style.cursor = 'grab';
+            // SEED-010: detach this drag's document listeners (paired with onMouseDown).
+            if (this._boundMove) document.removeEventListener('mousemove', this._boundMove);
+            if (this._boundUp) document.removeEventListener('mouseup', this._boundUp);
         },
 
         applyTransform: function() {

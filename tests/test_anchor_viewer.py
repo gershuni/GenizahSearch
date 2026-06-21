@@ -350,11 +350,27 @@ class TestBuildImgHtml:
         assert "zoomable-image" in html
 
     def test_img_html_has_safe_onload_only(self):
-        """Only the safe onload=manuscriptViewer.init() handler is wired, nothing more."""
+        """SEED-010: onload wires the per-instance __msInitViewer(viewer_id) only — no onerror."""
         v = self._viewer()
         html = v._build_img_html("/api/nli_image_by_sysid/990025143260205171?page=0")
-        assert "manuscriptViewer" in html  # safe zoom-init handler present
-        assert "onerror" not in html       # no error handler that could trigger NLI fallback
+        assert "__msInitViewer" in html        # per-instance zoom-init handler present
+        assert v._viewer_id in html            # scoped to THIS viewer's unique container class
+        assert "onerror" not in html           # no error handler that could trigger NLI fallback
+        assert "iiif.nli.org.il" not in html   # HIGH-2: never a direct NLI IIIF URL
+
+    def test_each_viewer_has_a_unique_id_for_per_pane_zoom(self):
+        """SEED-010: two AnchorViewers (e.g. Compare's two panes) must get DISTINCT
+        viewer ids so each wires its OWN zoom/pan — the bug was a single global
+        viewer + first-match querySelector wiring only one image."""
+        a = self._viewer()
+        b = self._viewer()
+        assert a._viewer_id and b._viewer_id
+        assert a._viewer_id != b._viewer_id
+        html_a = a._build_img_html("/api/nli_image_by_sysid/990025143260205171?page=0")
+        html_b = b._build_img_html("/api/nli_image_by_sysid/990025143260205171?page=0")
+        assert f"__msInitViewer('{a._viewer_id}')" in html_a
+        assert f"__msInitViewer('{b._viewer_id}')" in html_b
+        assert a._viewer_id not in html_b  # panes don't cross-wire
 
 
 # ─── _VIEWER_HEAD idempotency guard ───────────────────────────────────────────
@@ -383,6 +399,13 @@ class TestViewerHeadIdempotencyGuard:
     def test_viewer_head_contains_create_manuscript_viewer(self):
         from web.components.anchor_viewer import _VIEWER_HEAD
         assert "createManuscriptViewer" in _VIEWER_HEAD
+
+    def test_viewer_head_contains_per_instance_registry(self):
+        """SEED-010: the head wires the per-instance __msInitViewer registry so each
+        AnchorViewer can scope its manuscriptViewer to its own container class."""
+        from web.components.anchor_viewer import _VIEWER_HEAD
+        assert "__msInitViewer" in _VIEWER_HEAD
+        assert "__msViewers" in _VIEWER_HEAD
 
 
 # ─── Rich BrowsePage shape confirmation (HIGH-1) ─────────────────────────────

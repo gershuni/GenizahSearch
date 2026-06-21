@@ -1051,6 +1051,31 @@ def init_api_routes(app_override=None):
     # WARNING (once per process lifetime, per sys_id — not per request).
     _cambridge_degraded_warned = set()
 
+    def _ensure_images_ext(sys_id: str) -> list:
+        """Return nli_cache images_ext for sys_id, enriching ONCE on a cold cache.
+
+        SEED-010: the provider image endpoints (cambridge/manchester/jts) used to
+        404 whenever nli_cache was cold (e.g. a Joins-Lab grid thumbnail requested
+        during an NLI outage before anything warmed the cache). enrich_metadata
+        resolves CUDL/Manchester/JTS canvases from the LOCAL crossref sidecar (+
+        non-NLI CUDL/LUNA/Figgy manifest fetches), so it populates images_ext even
+        when the NLI circuit breaker is OPEN. enrich_metadata is itself Phase-98-
+        NLI-breaker-guarded, so its NLI sub-calls fast-fail during an outage rather
+        than hang. Runs in the FastAPI route threadpool, never the NiceGUI loop.
+        """
+        mm = state.meta_mgr
+        if not mm or not hasattr(mm, 'nli_cache'):
+            return []
+        images_ext = mm.nli_cache.get(sys_id, {}).get('images_ext', [])
+        if not images_ext:
+            try:
+                mm.enrich_metadata(sys_id)
+                images_ext = mm.nli_cache.get(sys_id, {}).get('images_ext', [])
+            except Exception as e:
+                logger.warning("_ensure_images_ext: enrich failed for %s: %s", sys_id, e)
+                images_ext = []
+        return images_ext
+
     @target_app.get('/api/cambridge_image/{sys_id}')
     def cambridge_image(sys_id: str, page: int = 0, width: int = 2000):
         """
@@ -1093,15 +1118,26 @@ def init_api_routes(app_override=None):
                 resp_headers.update(headers_extra)
             return Response(content=content, media_type=content_type, headers=resp_headers)
 
-        # Look up Cambridge images from nli_cache
+        # Look up Cambridge images from nli_cache (SEED-010: enrich-on-demand when cold).
         if not state.meta_mgr or not hasattr(state.meta_mgr, 'nli_cache'):
             return Response(content="Metadata not available", status_code=503)
 
-        cached = state.meta_mgr.nli_cache.get(sys_id, {})
-        images_ext = cached.get('images_ext', [])
+        images_ext = _ensure_images_ext(sys_id)
 
         if not images_ext:
-            return Response(content="No Cambridge images available", status_code=404)
+            # No CUDL canvases for this manuscript — fall back to the NLI image
+            # (SEED-010: previously a hard 404, which broke CUL grid thumbnails when
+            # the cache was cold). _fetch_nli_image_bytes is breaker-guarded and
+            # returns None when NLI itself is down → 404 → placeholder.
+            got = _fetch_nli_image_bytes(sys_id, page, width=width, suffix=1)
+            if got is None:
+                return Response(content="No Cambridge images available", status_code=404)
+            content, ct, _resolved_fl_id = got
+            extra_headers = {"X-Image-Fallback-Source": "nli"}
+            _cambridge_image_cache.set(cache_key, (content, ct, extra_headers))
+            resp_headers = _base_headers()
+            resp_headers.update(extra_headers)
+            return Response(content=content, media_type=ct, headers=resp_headers)
 
         # Resolve page → canvas or NLI fallback. Sentinel check via
         # `.get('degraded')` — never identity-compare the _DEGRADED dict.
@@ -1229,12 +1265,11 @@ def init_api_routes(app_override=None):
             return Response(content=content, media_type=content_type,
                           headers={"Cache-Control": "public, max-age=600"})
 
-        # Look up Manchester images from nli_cache
+        # Look up Manchester images from nli_cache (SEED-010: enrich-on-demand when cold).
         if not state.meta_mgr or not hasattr(state.meta_mgr, 'nli_cache'):
             return Response(content="Metadata not available", status_code=503)
 
-        cached = state.meta_mgr.nli_cache.get(sys_id, {})
-        images_ext = cached.get('images_ext', [])
+        images_ext = _ensure_images_ext(sys_id)
 
         if not images_ext:
             return Response(content="No Manchester images available", status_code=404)
@@ -1286,12 +1321,11 @@ def init_api_routes(app_override=None):
             return Response(content=content, media_type=content_type,
                           headers={"Cache-Control": "public, max-age=600"})
 
-        # Look up JTS images from nli_cache
+        # Look up JTS images from nli_cache (SEED-010: enrich-on-demand when cold).
         if not state.meta_mgr or not hasattr(state.meta_mgr, 'nli_cache'):
             return Response(content="Metadata not available", status_code=503)
 
-        cached = state.meta_mgr.nli_cache.get(sys_id, {})
-        images_ext = cached.get('images_ext', [])
+        images_ext = _ensure_images_ext(sys_id)
 
         if not images_ext:
             return Response(content="No JTS images available", status_code=404)

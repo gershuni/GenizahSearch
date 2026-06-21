@@ -11,7 +11,6 @@ Covers:
 """
 from __future__ import annotations
 
-
 from web.components.image_resolution import resolve_image_url, resolve_external_images
 
 
@@ -323,3 +322,101 @@ def test_resolve_external_images_enrich_raises_degrades_to_empty():
     assert result['cambridge_images'] == []
     assert result['external_provider'] == ''
     assert result['cambridge_alignment'] is None
+
+
+# ─── SEED-010: source-first resolution, breaker-aware, thumbnail surface, width ──
+
+_CAM_IMAGES = [{'url': 'https://cudl.lib.cam.ac.uk/iiif/1/canvas/1'}]
+
+
+class TestSeed010SourceFirst:
+    """SEED-010: active_source is decided BEFORE the URL is built (fixes the Oxford
+    ordering bug), Cambridge default is breaker-aware + thumbnail-aware, and the
+    width param is appended to /api/* proxy URLs only."""
+
+    def test_oxford_first_load_returns_oxford_url_not_nli(self):
+        """Regression for the Oxford ordering bug: is_oxford + active_source='nli'
+        must NOT return an NLI URL tagged active_source='oxford'."""
+        result = resolve_image_url(
+            sys_id=REAL_SYS_ID, p_num=1, is_oxford=True,
+            shelfmark=OXFORD_SHELFMARK_BODLEIAN,
+            active_source='nli', source_user_override=False,
+        )
+        assert result['active_source'] == 'oxford'
+        assert '/api/nli_image_by_sysid' not in result['img_url']
+        assert 'iiif.nli.org.il' not in result['img_url']
+        assert (
+            'bodleian' in result['img_url'].lower()
+            or result['img_url'].startswith(f'/api/oxford_image/{REAL_SYS_ID}')
+        )
+
+    def test_oxford_first_load_proxy_when_not_bodleian_derivable(self):
+        result = resolve_image_url(
+            sys_id=REAL_SYS_ID, p_num=1, is_oxford=True,
+            shelfmark=OXFORD_SHELFMARK_NODIRECT, active_source='nli',
+        )
+        assert result['active_source'] == 'oxford'
+        assert result['img_url'].startswith(f'/api/oxford_image/{REAL_SYS_ID}')
+
+    def test_cambridge_misaligned_stays_nli_when_breaker_closed(self):
+        """Misaligned verdict + NLI up → keep NLI default (unchanged behavior)."""
+        result = resolve_image_url(
+            sys_id=REAL_SYS_ID, p_num=1, is_oxford=False, shelfmark='T-S 12.1',
+            cambridge_images=_CAM_IMAGES, external_provider='',
+            cambridge_alignment={'verdict': 'misaligned'},
+            active_source='nli', source_user_override=False, nli_circuit_open=False,
+        )
+        assert result['active_source'] == 'nli'
+        assert result['img_url'].startswith('/api/nli_image_by_sysid')
+
+    def test_cambridge_misaligned_defaults_to_cudl_when_breaker_open(self):
+        """SEED-010: misaligned/no verdict BUT NLI down → default to CUDL anyway."""
+        result = resolve_image_url(
+            sys_id=REAL_SYS_ID, p_num=1, is_oxford=False, shelfmark='T-S 12.1',
+            cambridge_images=_CAM_IMAGES, external_provider='',
+            cambridge_alignment={'verdict': 'misaligned'},
+            active_source='nli', source_user_override=False, nli_circuit_open=True,
+        )
+        assert result['active_source'] == 'cambridge'
+        assert result['img_url'].startswith(f'/api/cambridge_image/{REAL_SYS_ID}')
+
+    def test_thumbnail_surface_prefers_cudl_proxy_with_width(self):
+        """surface='thumbnail' prefers the CUDL proxy whenever CUDL exists; width appended."""
+        result = resolve_image_url(
+            sys_id=REAL_SYS_ID, p_num=1, is_oxford=False, shelfmark='T-S 12.1',
+            cambridge_images=_CAM_IMAGES, external_provider='', cambridge_alignment=None,
+            active_source='nli', surface='thumbnail', width=300, nli_circuit_open=False,
+        )
+        assert result['active_source'] == 'cambridge'
+        assert result['img_url'].startswith(f'/api/cambridge_image/{REAL_SYS_ID}')
+        assert 'width=300' in result['img_url']
+
+    def test_width_not_appended_to_direct_bodleian_url(self):
+        """width applies to /api/* proxies, not the static Bodleian direct URL."""
+        result = resolve_image_url(
+            sys_id=REAL_SYS_ID, p_num=1, is_oxford=True,
+            shelfmark=OXFORD_SHELFMARK_BODLEIAN, active_source='nli',
+            surface='thumbnail', width=300,
+        )
+        if '/api/oxford_image' not in result['img_url']:  # direct Bodleian branch
+            assert 'width=300' not in result['img_url']
+
+    def test_user_override_suppresses_autodefault(self):
+        """source_user_override=True pins the chosen source even when CUDL exists + NLI down."""
+        result = resolve_image_url(
+            sys_id=REAL_SYS_ID, p_num=1, is_oxford=False, shelfmark='T-S 12.1',
+            cambridge_images=_CAM_IMAGES, cambridge_alignment={'verdict': 'aligned'},
+            active_source='nli', source_user_override=True, nli_circuit_open=True,
+        )
+        assert result['active_source'] == 'nli'
+
+    def test_nli_circuit_open_read_lazily_when_not_passed(self, monkeypatch):
+        """When nli_circuit_open is None it is read from the shared breaker."""
+        import shared.nli_circuit_breaker as br
+        monkeypatch.setattr(br, 'is_open', lambda: True)
+        result = resolve_image_url(
+            sys_id=REAL_SYS_ID, p_num=1, is_oxford=False, shelfmark='T-S 12.1',
+            cambridge_images=_CAM_IMAGES, cambridge_alignment={'verdict': 'misaligned'},
+            active_source='nli',  # nli_circuit_open omitted → read from breaker
+        )
+        assert result['active_source'] == 'cambridge'
