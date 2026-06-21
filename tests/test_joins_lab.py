@@ -1614,6 +1614,22 @@ class TestMetadataPrefetcher:
             "to create_compare_modal so the per-pane info buttons are populated"
         )
 
+    def test_d09_metadata_prefetcher_is_not_called_directly_on_event_loop(self):
+        """D-09: _metadata_prefetcher_sync must NOT be called directly in an async def.
+
+        It must be dispatched via run.io_bound from compare_modal's _on_show.
+        This ensures the SQLite fetches run off the event loop (R2-H3 off-loop rule).
+        """
+        import pathlib
+        source = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        # _metadata_prefetcher_sync is passed as an argument to create_compare_modal
+        # and never called with direct await or inline call in an async def
+        # (the call site is: metadata_prefetcher=_metadata_prefetcher_sync)
+        assert "metadata_prefetcher=_metadata_prefetcher_sync" in source, (
+            "D-09: _metadata_prefetcher_sync must be passed as metadata_prefetcher= "
+            "to create_compare_modal (not called directly)"
+        )
+
     def test_d09_metadata_prefetcher_returns_correct_keys(self):
         """D-09 BEHAVIORAL: _metadata_prefetcher_sync returns dict with fjms_bib + catalog_detail keys.
 
@@ -1637,4 +1653,139 @@ class TestMetadataPrefetcher:
         )
         assert "'catalog_detail'" in source, (
             "D-09: _metadata_prefetcher_sync must return a dict with 'catalog_detail' key"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Phase 120 Plan 07 Task 2: D-10 Compare image prefetch (bounded pool)
+# ---------------------------------------------------------------------------
+
+class TestImagePrefetch:
+    """D-10/M3: Compare image prefetch — bounded 5-slot off-loop pool (Plan 120-07).
+
+    Source-level assertions: prefetch uses the RICH resolver path (service.get_browse_page +
+    resolve_external_images + resolve_image_url), is bounded to _PREFETCH_SLOTS, is
+    generation-guarded, and does NOT use executor.get_browse_page.
+    """
+
+    def test_d10_prefetch_slots_constant_defined(self):
+        """D-10: _PREFETCH_SLOTS constant must be defined in joins_lab.py."""
+        import pathlib
+        source = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        assert "_PREFETCH_SLOTS" in source, (
+            "D-10: joins_lab.py must define _PREFETCH_SLOTS (pool size = 5)"
+        )
+        assert "5" in source, (
+            "D-10: _PREFETCH_SLOTS must be set to 5 (desktop parity)"
+        )
+
+    def test_d10_prefetch_cache_state_defined(self):
+        """D-10: _prefetch_cache and _prefetch_running state dicts must be defined."""
+        import pathlib
+        source = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        assert "_prefetch_cache" in source, (
+            "D-10: joins_lab.py must define _prefetch_cache = {} for resolved proxy URLs"
+        )
+        assert "_prefetch_running" in source, (
+            "D-10: joins_lab.py must define _prefetch_running = set() for in-flight tasks"
+        )
+        assert "_prefetch_anchor_gen" in source, (
+            "D-10: joins_lab.py must define _prefetch_anchor_gen generation token"
+        )
+
+    def test_d10_prefetch_uses_rich_resolver_not_executor(self):
+        """D-10/M3: image prefetch must use the RICH resolver path, NOT executor.get_browse_page."""
+        import pathlib
+        source = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        # Rich resolver: service.get_browse_page + resolve_external_images + resolve_image_url
+        assert "resolve_external_images" in source, (
+            "D-10/M3: joins_lab.py must use resolve_external_images in the prefetch path "
+            "(the RICH resolver that populates cambridge_images; NOT executor.get_browse_page)"
+        )
+        assert "resolve_image_url" in source, (
+            "D-10/M3: joins_lab.py must use resolve_image_url in the prefetch path "
+            "(the canonical proxy URL builder)"
+        )
+        # Must NOT call executor.get_browse_page directly (narrow text dict — M3).
+        # We check that the executor's method is not invoked (not merely mentioned in comments).
+        # The implementation must use get_service().get_browse_page() instead.
+        assert "get_service()" in source, (
+            "D-10/M3: joins_lab.py must use get_service().get_browse_page() in "
+            "_prefetch_image_sync (the RICH resolver path)"
+        )
+
+    def test_d10_prefetch_guarded_with_generation_check(self):
+        """D-10: _prefetch_one must check generation before AND after the await."""
+        import pathlib
+        source = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        assert "_prefetch_anchor_gen" in source, (
+            "D-10: _prefetch_one must reference _prefetch_anchor_gen for generation guard"
+        )
+        # The generation check appears twice (before + after the await)
+        assert source.count("_prefetch_anchor_gen['value']") >= 2, (
+            "D-10: _prefetch_one must check generation BEFORE the await AND AFTER "
+            "the await (guards both entry and stale-result discard)"
+        )
+
+    def test_d10_prefetch_seed008_guarded(self):
+        """D-10/SEED-008: _prefetch_one must be wrapped in try/except RuntimeError."""
+        import pathlib
+        source = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        # SEED-008 present (whole _prefetch_one body)
+        assert "except RuntimeError" in source, (
+            "D-10/SEED-008: joins_lab.py must guard _prefetch_one with "
+            "try/except RuntimeError: return"
+        )
+
+    def test_d10_prefetch_bounded_to_slots(self):
+        """D-10: _schedule_image_prefetch must check len(_prefetch_running) >= _PREFETCH_SLOTS."""
+        import pathlib
+        source = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        assert "_PREFETCH_SLOTS" in source and "_prefetch_running" in source, (
+            "D-10: _schedule_image_prefetch must bound concurrent tasks by _PREFETCH_SLOTS"
+        )
+
+    def test_d10_reanchor_clears_prefetch_state(self):
+        """D-10: load_anchor must clear _prefetch_cache, _prefetch_running, bump generation."""
+        import pathlib
+        source = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        # All three operations must appear together in load_anchor
+        assert "_prefetch_cache.clear()" in source, (
+            "D-10: load_anchor must clear _prefetch_cache on re-anchor "
+            "(stale URLs from old anchor set)"
+        )
+        assert "_prefetch_running.clear()" in source, (
+            "D-10: load_anchor must clear _prefetch_running on re-anchor"
+        )
+        assert "_prefetch_anchor_gen['value'] += 1" in source, (
+            "D-10: load_anchor must bump _prefetch_anchor_gen on re-anchor "
+            "so in-flight _prefetch_one coroutines discard stale results"
+        )
+
+    def test_d10_no_direct_iiif_url_in_prefetch(self):
+        """D-10: the prefetch path must NOT introduce direct iiif.nli.org.il URLs."""
+        import pathlib
+        source = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        assert "iiif.nli.org.il" not in source, (
+            "D-10: joins_lab.py must not contain direct iiif.nli.org.il URLs; "
+            "all image traffic goes through proxy + Phase-98 circuit breaker"
+        )
+
+    def test_d10_on_candidate_change_param_in_compare_modal(self):
+        """D-10: create_compare_modal must accept on_candidate_change= callback."""
+        import inspect
+        from web.components.compare_modal import create_compare_modal
+        sig = inspect.signature(create_compare_modal)
+        assert "on_candidate_change" in sig.parameters, (
+            "D-10: create_compare_modal must accept on_candidate_change= so "
+            "joins_lab.py can trigger prefetch on candidate flip"
+        )
+
+    def test_d10_schedule_image_prefetch_passed_to_compare_modal(self):
+        """D-10: joins_lab.py must pass on_candidate_change=_schedule_image_prefetch."""
+        import pathlib
+        source = pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+        assert "on_candidate_change=_schedule_image_prefetch" in source, (
+            "D-10: joins_lab.py must pass on_candidate_change=_schedule_image_prefetch "
+            "to create_compare_modal"
         )

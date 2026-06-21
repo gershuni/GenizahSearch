@@ -138,6 +138,12 @@ Small batches keep the per-batch I/O latency manageable and give the cancel chec
 a chance to fire between batches.
 """
 
+_PREFETCH_SLOTS = 5
+"""Max concurrent image prefetch tasks (D-10/M3).
+
+Mirrors desktop join_workbench.py _pump_images 5-slot bounded pool.
+"""
+
 
 # ---------------------------------------------------------------------------
 # Pure module-level helpers (importable without NiceGUI — tested headlessly)
@@ -592,6 +598,15 @@ def create_joins_lab_page(
     _export_cancel_ref: dict = {'value': False}
     _export_progress_ref: dict = {'el': None}
 
+    # Phase-120 D-10: Compare image prefetch — silent bounded 5-slot pool.
+    # _prefetch_cache: {sys_id → img_url} — resolved proxy URL per candidate.
+    # _prefetch_running: {sys_id} — currently in-flight prefetch tasks.
+    # _prefetch_anchor_gen: generation token — bumped on re-anchor so stale
+    #   prefetch results (for the old anchor's candidate set) are discarded.
+    _prefetch_cache: dict = {}
+    _prefetch_running: set = set()
+    _prefetch_anchor_gen: dict = {'value': 0}
+
     async def _trigger_search() -> None:
         if _submit_ref['fn'] is not None:
             await _submit_ref['fn']()
@@ -720,12 +735,100 @@ def create_joins_lab_page(
             catalog_detail = None
         return {'fjms_bib': fjms_bib, 'catalog_detail': catalog_detail}
 
+    def _prefetch_image_sync(sys_id: str) -> Optional[str]:
+        """D-10/M3: Sync image resolver for off-loop prefetch via run.io_bound.
+
+        Uses the RICH resolver path AnchorViewer uses:
+          service.get_browse_page() + resolve_external_images() + resolve_image_url()
+        Returns the resolved proxy img_url string, or None on failure.
+
+        DO NOT use executor.get_browse_page() — that narrow text dict does NOT
+        enrich images (joins_executor.py:87-94, M3 note).
+        All image traffic routes through proxy + Phase-98 NLI circuit breaker.
+        """
+        from web.components.image_resolution import resolve_external_images, resolve_image_url
+        try:
+            svc = get_service()
+            page = svc.get_browse_page(sys_id, p_num=1)
+            if page is None:
+                return None
+            ext = resolve_external_images(page.sys_id)
+            cambridge_images = ext.get('cambridge_images') or page.cambridge_images
+            external_provider = ext.get('external_provider') or page.external_provider
+            cambridge_alignment = (
+                ext['cambridge_alignment']
+                if ext.get('cambridge_alignment') is not None
+                else page.cambridge_alignment
+            )
+            resolved = resolve_image_url(
+                sys_id=page.sys_id,
+                p_num=page.p_num,
+                is_oxford=page.is_oxford,
+                shelfmark=page.shelfmark,
+                volume_suffix=page.volume_suffix,
+                cambridge_images=cambridge_images,
+                external_provider=external_provider,
+                cambridge_alignment=cambridge_alignment,
+                volumes=page.volumes,
+                total_pages=page.total_pages,
+            )
+            return resolved.get('img_url') if isinstance(resolved, dict) else None
+        except Exception:
+            return None
+
+    async def _prefetch_one(sys_id: str, my_gen: int) -> None:
+        """D-10: Fire-and-forget prefetch coroutine for a single candidate image.
+
+        SEED-008 guarded (entire body) + generation-guarded (stale results
+        from before a re-anchor are discarded).
+        """
+        try:
+            if _prefetch_anchor_gen['value'] != my_gen:
+                return
+            img_url = await run.io_bound(_prefetch_image_sync, sys_id)
+            # Generation re-check after the await (may have changed during I/O)
+            if _prefetch_anchor_gen['value'] != my_gen:
+                return
+            if img_url:
+                _prefetch_cache[sys_id] = img_url
+        except RuntimeError:
+            return  # SEED-008: NiceGUI client disconnected
+        finally:
+            _prefetch_running.discard(sys_id)
+
+    def _schedule_image_prefetch(center_idx: int) -> None:
+        """D-10: Schedule prefetch of adjacent candidates around center_idx.
+
+        Fires fire-and-forget coroutines for offsets -2,-1,+1,+2 relative
+        to center_idx, bounded to _PREFETCH_SLOTS concurrent tasks.
+        Already-cached or in-flight candidates are skipped.
+        """
+        candidates = _filtered_candidates
+        if not candidates:
+            return
+        gen = _prefetch_anchor_gen['value']
+        for offset in (-2, -1, 1, 2):
+            idx = center_idx + offset
+            if idx < 0 or idx >= len(candidates):
+                continue
+            cand = candidates[idx]
+            sid = cand.sys_id
+            if sid in _prefetch_cache or sid in _prefetch_running:
+                continue
+            if len(_prefetch_running) >= _PREFETCH_SLOTS:
+                break
+            _prefetch_running.add(sid)
+            asyncio.ensure_future(_prefetch_one(sid, gen))
+
     def _open_compare(cand) -> None:
         """Open the Compare modal for a clicked candidate (F2, D-02).
 
         Receives the FULL candidate object (not sys_id alone — same sys_id can
         appear on multiple folios, Candidate.key == (sys_id, page), Pitfall 6).
         Passes the full candidate list (filtered) so flip-through works correctly.
+
+        D-10: schedules image prefetch for adjacent candidates on open, and wires
+        on_candidate_change so flips also trigger prefetch.
         """
         anchor_sid = _anchor_state.get('sys_id') or ''
         anchor_fl_id = _anchor_state.get('fl_id')
@@ -745,6 +848,13 @@ def create_joins_lab_page(
             volume_ie=anchor_vol,
             is_anchor_self=True,
         )
+        # D-10: schedule prefetch of adjacent candidates for the initial candidate.
+        try:
+            initial_idx = list(_filtered_candidates).index(cand)
+        except (ValueError, AttributeError):
+            initial_idx = 0
+        _schedule_image_prefetch(initial_idx)
+
         modal = create_compare_modal(
             anchor_cand=anchor_cand,
             initial_candidate=cand,
@@ -753,6 +863,7 @@ def create_joins_lab_page(
             on_verdict=_on_compare_verdict,
             enrichment=_enrichment,
             metadata_prefetcher=_metadata_prefetcher_sync,
+            on_candidate_change=_schedule_image_prefetch,
         )
         modal.open()
 
@@ -2047,6 +2158,12 @@ def create_joins_lab_page(
         # Phase 119: D-11 triage resets on re-anchor; D-06 VS invalidates (D-11)
         _triage.clear()
         _raw_text_candidates.clear()  # G2: clear RAW baseline on re-anchor
+        # D-10: bump prefetch generation + clear stale cache on re-anchor.
+        # Any in-flight _prefetch_one coroutines will see the new generation
+        # and discard their results without writing to _prefetch_cache.
+        _prefetch_anchor_gen['value'] += 1
+        _prefetch_cache.clear()
+        _prefetch_running.clear()
         _all_candidates.clear()
         _filtered_candidates.clear()
         _enrichment.clear()

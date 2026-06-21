@@ -200,6 +200,7 @@ def create_compare_modal(
     enrichment: Optional[dict] = None,
     on_close: Optional[Callable] = None,
     metadata_prefetcher: Optional[Callable] = None,
+    on_candidate_change: Optional[Callable] = None,
 ) -> ui.dialog:
     """Full-screen two-pane Compare modal (CMP-01 / CMP-02 / CMP-03 / VSM-02).
 
@@ -222,6 +223,11 @@ def create_compare_modal(
                              inside the dialog's async show handler and fed to the
                              FJMS/PGP info buttons (D-09/H3/R2-H3); when None the
                              info buttons are not rendered.
+        on_candidate_change: Optional sync callback(center_idx: int) — called when
+                             the shown candidate changes (open, step, verdict).
+                             Used by joins_lab.py D-10 to schedule adjacent image
+                             prefetch; passes the new candidate's index in
+                             filtered_candidates.
 
     Returns:
         The ui.dialog() instance (caller opens it with dialog.open()).
@@ -469,6 +475,15 @@ def create_compare_modal(
         # Refresh verdict buttons for the newly shown candidate (G3-compare).
         # This also updates the candidate pane border (R2-5).
         _refresh_verdict_buttons(cand)
+
+        # D-10: notify caller (joins_lab.py) of the new candidate index so it can
+        # schedule adjacent image prefetch.  The candidate index is stored in
+        # _state["idx"] (set by step_candidate / create_compare_state).
+        if on_candidate_change is not None:
+            try:
+                on_candidate_change(_state.get("idx", 0))
+            except Exception:
+                pass  # prefetch scheduling errors must never crash the modal
 
     async def _load_candidate_pane() -> None:
         """Await the current candidate viewer's update_content (modal-level latest-wins).
