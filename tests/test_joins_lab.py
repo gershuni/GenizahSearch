@@ -2049,6 +2049,59 @@ class TestListPickerD17:
             "The picker async task must guard against client-deleted teardowns."
         )
 
+    def test_list_picker_counts_failure_is_non_fatal(self):
+        """D-17 regression (UAT 2026-06-21): a counts-RPC failure must NOT abort the picker.
+
+        get_list_item_counts() RE-RAISES on failure (e.g. 'permission denied for
+        function get_list_item_counts_for_user', Postgres 42501). The picker
+        fetched lists + counts via asyncio.gather WITHOUT return_exceptions, so the
+        counts failure propagated and the whole picker crashed
+        (`Task exception was never retrieved`). The fix: gather with
+        return_exceptions=True and degrade counts to {} (mirrors /lists
+        _load_list_item_counts), hiding the count badge when counts are unavailable.
+        """
+        import ast
+        source = self._get_source()
+        tree = ast.parse(source)
+
+        # Find the asyncio.gather(...) call that fetches get_list_item_counts and
+        # assert it isolates exceptions via return_exceptions=True.
+        found_guarded_gather = False
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            is_gather = (
+                isinstance(func, ast.Attribute) and func.attr == 'gather'
+            )
+            if not is_gather:
+                continue
+            call_src = ast.dump(node)
+            if 'get_list_item_counts' not in call_src:
+                continue
+            has_return_exceptions = any(
+                kw.arg == 'return_exceptions'
+                and isinstance(kw.value, ast.Constant)
+                and kw.value.value is True
+                for kw in node.keywords
+            )
+            if has_return_exceptions:
+                found_guarded_gather = True
+                break
+
+        assert found_guarded_gather, (
+            "D-17 regression: the picker's asyncio.gather() that fetches "
+            "get_list_item_counts must pass return_exceptions=True so a counts-RPC "
+            "failure (e.g. permission denied on get_list_item_counts_for_user) "
+            "degrades gracefully instead of aborting the whole picker."
+        )
+
+        # The degraded path must hide the count badge (no misleading '(0)').
+        assert "counts_available" in source, (
+            "D-17 regression: the picker must track counts availability and hide "
+            "the per-list count badge when counts could not be fetched."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Phase 120 Plan 08 Task 2: D-19 "Open in Joins Lab" button on /lists

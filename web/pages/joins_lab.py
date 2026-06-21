@@ -2559,11 +2559,39 @@ def create_joins_lab_page(
                 user_id = user['id']
 
                 # --- Fetch lists + counts off-loop simultaneously (M1 fix) ---
+                # Counts are BEST-EFFORT: get_list_item_counts() re-raises on
+                # failure (e.g. a missing EXECUTE grant on the
+                # get_list_item_counts_for_user RPC -> Postgres 42501), so the
+                # picker MUST NOT let a counts failure abort it. Mirror
+                # /lists _load_list_item_counts, which degrades to "no counts"
+                # rather than failing the page. return_exceptions=True keeps the
+                # lists usable even when the counts RPC 500s.
                 user_lists, counts = await asyncio.gather(
                     run.io_bound(get_user_lists, user_id),
                     run.io_bound(get_list_item_counts),
+                    return_exceptions=True,
                 )
-                if counts is None:
+                if isinstance(user_lists, BaseException):
+                    # Lists are essential — surface a non-fatal notice and bail.
+                    logger.warning(
+                        "Choose-from-lists picker: get_user_lists failed: %s",
+                        user_lists,
+                    )
+                    ui.notify(
+                        tr('Could not load your lists. Please try again.'),
+                        type='warning',
+                    )
+                    return
+                counts_available = isinstance(counts, dict)
+                if not counts_available:
+                    # Exception object, None, or anything non-dict -> no counts.
+                    # Hide the per-list count badge entirely (see _render_level1)
+                    # rather than render a misleading "(0)" for every list.
+                    logger.warning(
+                        "Choose-from-lists picker: item counts unavailable "
+                        "(showing lists without counts): %s",
+                        counts if isinstance(counts, BaseException) else 'no data',
+                    )
                     counts = {}
 
                 # --- Build dialog with reactive state ---
@@ -2648,9 +2676,13 @@ def create_joins_lab_page(
                                 ).on('click', _make_list_click()):
                                     ui.label(list_name).classes('text-sm font-semibold flex-1')
                                     with ui.row().classes('items-center gap-1'):
-                                        ui.label(f'({item_count})').classes('text-xs').style(
-                                            'color:var(--text-muted,#475569);'
-                                        )
+                                        # Only show the count badge when counts
+                                        # actually loaded; a "(0)" on every list
+                                        # when the RPC is denied is misleading.
+                                        if counts_available:
+                                            ui.label(f'({item_count})').classes(
+                                                'text-xs'
+                                            ).style('color:var(--text-muted,#475569);')
                                         ui.icon('chevron_right').classes('text-base').style(
                                             'color:var(--text-muted,#475569);'
                                         )
