@@ -475,7 +475,18 @@ class AnchorViewer:
 
     def _build_ui(self) -> None:
         """Build the full AnchorViewer component (image + controls + transcription)."""
-        with ui.column().classes("anchor-viewer-container w-full gap-0"):
+        _container = ui.column().classes("anchor-viewer-container w-full gap-0")
+        # Compare context (image_max_height set): make the viewer a bounded flex
+        # column that FILLS its pane, so the image stays fixed on top and the
+        # transcription takes the remaining height and scrolls within itself —
+        # one scroll, no nesting, everything fits the window (round-5 UAT
+        # "fit to height didn't work").
+        if self._image_max_height:
+            _container.style(
+                "height:100%; min-height:0; flex:1 1 0;"
+                " display:flex; flex-direction:column;"
+            )
+        with _container:
             # Info header — shelfmark (identifier) + library + title. Populated
             # by update_content. Uses theme CSS vars so it stays legible in both
             # light and dark themes, and follows the page RTL direction so Hebrew
@@ -513,6 +524,7 @@ class AnchorViewer:
                 # "Compare does not adapt to window height").
                 image_container_style = (
                     f"max-height: {self._image_max_height}; min-height: 0;"
+                    " flex: 0 0 auto;"
                 )
             self._image_container = (
                 ui.element("div")
@@ -597,8 +609,12 @@ class AnchorViewer:
             # Letting it flow naturally hands all scrolling to the single outer
             # pane scroll area.
             if self._image_max_height:
+                # Fill the remaining pane height below the fixed image and scroll
+                # WITHIN the transcription (the only scroll region) — overrides the
+                # .anchor-transcription-panel 65vh cap so the bottom is always
+                # reachable without a nested outer scroll (round-5 UAT).
                 self._transcription_container.style(
-                    "max-height:none; overflow:visible;"
+                    "max-height:none; flex:1 1 0; min-height:0; overflow-y:auto;"
                 )
             with self._transcription_container:
                 self._transcription_html = ui.html("", sanitize=False)

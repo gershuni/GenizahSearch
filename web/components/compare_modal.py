@@ -713,9 +713,11 @@ def create_compare_modal(
                         )
                         _anchor_info_row_ref.append(anchor_info_row)
 
-                    # Scrolling viewer area (image + transcription)
-                    with ui.column().classes("w-full gap-4 flex-grow min-h-0").style(
-                        "overflow-y:auto;"
+                    # Viewer area — the viewer fills this height (fixed image +
+                    # transcription that scrolls WITHIN itself). No outer scroll
+                    # here, so there is no nested-scroll trap (round-5 UAT).
+                    with ui.column().classes("w-full flex-grow min-h-0").style(
+                        "overflow:hidden; display:flex; flex-direction:column;"
                     ):
                         # Fresh AnchorViewer for anchor pane — NOT the sticky-page viewer (Pitfall 3).
                         # Stored in _anchor_viewer_ref so the show-loader can await update_content.
@@ -774,11 +776,16 @@ def create_compare_modal(
                         )
                         _cand_info_row_ref.append(cand_info_row)
 
-                    # Scrolling viewer area (image + transcription)
-                    with ui.column().classes("w-full gap-4 flex-grow min-h-0").style(
-                        "overflow-y:auto;"
+                    # Viewer area — see anchor pane note. The viewer (added in
+                    # _fill_candidate) fills this height; both this wrapper and the
+                    # inner container are filling flex columns so the candidate
+                    # viewer's transcription scrolls within itself (round-5 UAT).
+                    with ui.column().classes("w-full flex-grow min-h-0").style(
+                        "overflow:hidden; display:flex; flex-direction:column;"
                     ):
-                        cand_viewer_container = ui.column().classes("w-full gap-4")
+                        cand_viewer_container = ui.column().classes(
+                            "w-full flex-grow min-h-0"
+                        ).style("overflow:hidden; display:flex; flex-direction:column;")
                         _cand_viewer_container_ref.append(cand_viewer_container)
 
             # ── Verdict bar (sticky bottom) ───────────────────────────────────

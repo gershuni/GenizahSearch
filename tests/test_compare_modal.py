@@ -386,16 +386,21 @@ def test_compare_modal_nav_is_rtl_aware():
     )
 
 
-def test_anchor_viewer_compare_transcription_flows_no_inner_scroll():
-    """Source assertion (round-5 UAT 'cannot see the bottom of the text'): in the
-    Compare context (image_max_height set), the transcription panel must drop its
-    own 65vh cap + overflow so the SINGLE outer pane scroll reaches the bottom
-    (no nested scroll trap)."""
+def test_anchor_viewer_compare_transcription_fills_and_scrolls():
+    """Source assertion (round-5 UAT 'fit to height didn't work'): in the Compare
+    context (image_max_height set) the viewer is a bounded flex column — the image
+    is fixed (flex:0 0 auto) and the transcription FILLS the remaining height and
+    scrolls WITHIN itself (flex:1 1 0; min-height:0; overflow-y:auto), overriding
+    the .anchor-transcription-panel 65vh cap. One scroll region, no nesting, fits
+    the window."""
     import pathlib
     source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
-    assert "max-height:none; overflow:visible;" in source, (
-        "anchor_viewer must let the transcription flow (max-height:none; "
-        "overflow:visible) in Compare context so the outer pane scroll reaches the bottom."
+    assert "max-height:none; flex:1 1 0; min-height:0; overflow-y:auto;" in source, (
+        "anchor_viewer transcription must fill + scroll within itself in Compare."
+    )
+    assert "flex: 0 0 auto;" in source, (
+        "anchor_viewer image-container must be fixed (flex:0 0 auto) in Compare so "
+        "the transcription gets the remaining height."
     )
 
 
@@ -1682,16 +1687,24 @@ def test_issue3_compare_has_candidate_title_marker():
 
 
 def test_issue3_compare_panes_split_header_and_scroll():
-    """Round-4 Issue 3: each pane must clip overflow (fixed header) with an inner
-    scrolling viewer area so the FJMS info buttons stay visible at 100% zoom."""
+    """Round-4 Issue 3 + round-5 fit-to-height: each pane clips overflow so the
+    fixed header (info buttons) stays pinned at 100% zoom. Round-5 moved the scroll
+    OUT of the pane wrapper and INTO the AnchorViewer transcription (the image is
+    fixed, the transcription fills the rest and scrolls within itself) — so the
+    pane + viewer-area wrappers clip overflow and the transcription owns the scroll.
+    """
     source = _cm_source()
-    # The pane columns now use overflow:hidden (header pinned) + an inner overflow-y:auto.
+    # Pane + viewer-area wrappers clip overflow (header pinned, no nested outer scroll).
     assert "flex-direction:column; overflow:hidden;" in source, (
         "Issue 3: Compare panes must clip overflow so the header (info buttons) stays "
-        "pinned while only the inner viewer scrolls."
+        "pinned; the single scroll lives in the transcription (round-5)."
     )
-    assert "overflow-y:auto;" in source, (
-        "Issue 3: the inner viewer area must scroll (overflow-y:auto)."
+    # The single scroll region moved to the viewer transcription (anchor_viewer.py).
+    import pathlib
+    av = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+    assert "flex:1 1 0; min-height:0; overflow-y:auto;" in av, (
+        "round-5: the transcription must be the single scroll region (fills the pane "
+        "below the fixed image)."
     )
 
 
