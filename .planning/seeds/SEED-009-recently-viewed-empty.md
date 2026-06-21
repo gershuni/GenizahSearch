@@ -47,8 +47,28 @@ The "Recently Viewed" list renders empty even after viewing documents.
 - Compare to the working on-loop authed pattern: `create_correction(...)` in `web/pages/browse.py` /
   `web/pages/search_results.py`.
 
+## Differential clue (UAT 2026-06-21, round 3) — IMPORTANT
+
+"Recently Viewed" **IS shown** in the **Joins *dialog* lists picker** (`web/components/joins_panel.py`),
+but is **empty** in BOTH:
+- the new Joins-Lab D-17 "Choose from my lists" picker (`web/pages/joins_lab.py` `_on_lists_btn_click`), and
+- the `/lists` main page (`web/pages/lists.py`).
+
+So the DATA exists and is loadable — the differential is *how each surface loads the lists*:
+- The working joins_panel dialog uses one path (compare it — does it call a different lists_mgr method, or
+  include system lists, or run on the event loop?).
+- The D-17 picker uses `get_user_lists(user_id)` — which may EXCLUDE system lists like `'recent'`
+  (Recently Viewed is a system list, not a user-created list). If so, the D-17 picker "not showing recent"
+  may be by-design or a separate gap from the `/lists`-page emptiness.
+- The `/lists` page emptiness is the core app-wide bug (definitely out of Joins-Lab scope).
+
+**Triage start:** diff the three load paths side by side. The joins_panel one works — copy its approach.
+
 ## Notes
 
 - App-wide; affects users beyond the Joins Lab. Worth a quick check on `/lists` and the discoveries panel too.
 - If it IS the off-loop-auth class, the fix is mechanical (move the authed lists_mgr calls on-loop) and the
   Phase-120 regression test pattern (`test_authenticated_list_calls_run_on_event_loop`) can be extended.
+  BUT the differential clue above (joins_panel works) suggests it may NOT be pure auth — joins_panel also
+  reads lists, so if auth were lost everywhere it'd be empty there too. Lean toward a load-path / system-list
+  difference first.
