@@ -2701,8 +2701,40 @@ def create_joins_lab_page(
                                             'color:var(--text-muted,#475569);'
                                         )
 
+                    def _enrich_list_items(raw_items: list) -> list:
+                        """Resolve shelfmark/title/library_code from sys_id when a
+                        list_items row lacks them (they're OPTIONAL at add_list_item
+                        time, so items can carry only a sys_id — the picker would
+                        otherwise display the raw sys_id). Mirrors the /lists page
+                        enrichment via state.meta_mgr (local lookup, safe on-loop).
+                        """
+                        out = []
+                        for it in raw_items or []:
+                            sid = it.get('sys_id') or ''
+                            sm = it.get('shelfmark') or ''
+                            ti = it.get('title') or ''
+                            lib = it.get('library_code') or ''
+                            if state.meta_mgr and sid and (not sm or not ti or not lib):
+                                try:
+                                    if not sm or not ti:
+                                        shelf_temp, title_temp = state.meta_mgr.get_meta_for_id(sid)
+                                        sm = sm or shelf_temp or ''
+                                        ti = ti or title_temp or ''
+                                    if not lib:
+                                        lib = state.meta_mgr.get_library_for_id(sid) or ''
+                                except Exception:
+                                    pass
+                            out.append({
+                                'sys_id': sid,
+                                'shelfmark': sm or sid,
+                                'title': ti,
+                                'library_code': lib,
+                            })
+                        return out
+
                     async def _load_level2(list_id: int, list_name: str) -> None:
-                        """Fetch fragments for list_id off-loop, then render Level 2.
+                        """Fetch fragments for list_id (authed read, on-loop), enrich
+                        their display metadata, cache, then render Level 2.
 
                         SEED-008: wrapped in ``except RuntimeError: return``.
                         """
@@ -2712,6 +2744,15 @@ def create_joins_lab_page(
                                 ui.spinner(size='sm').style('color:var(--primary-700,#047857);')
 
                             items = get_list_items(list_id)  # authed read: on-loop, not run.io_bound
+                            # Enrich display metadata OFF-loop: meta_mgr lookups are
+                            # LOCAL + NON-authenticated (libraries data, no
+                            # app.storage.user), and the joins_lab off-loop guard
+                            # (F-A4) requires get_meta_for_id/get_library_for_id to
+                            # run inside a run.io_bound worker.
+                            items = await run.io_bound(_enrich_list_items, items)
+                            # Cache enriched items so Level-2 filtering is in-memory
+                            # (no Supabase re-fetch per filter keystroke).
+                            level_state['items_cache'] = items
 
                             level_state['level'] = 2
                             heading_label.set_text(f'← {list_name}')
@@ -2807,9 +2848,10 @@ def create_joins_lab_page(
                                 asyncio.ensure_future(_reload_level2_filter(list_id, list_name_cur))
 
                     async def _reload_level2_filter(list_id: int, list_name: str) -> None:
-                        """Re-render Level-2 with the current filter without re-fetching."""
+                        """Re-render Level-2 with the current filter from the cached,
+                        already-enriched items (no Supabase re-fetch per keystroke)."""
                         try:
-                            items = get_list_items(list_id)  # authed read: on-loop, not run.io_bound
+                            items = level_state.get('items_cache') or []
                             _render_level2_items(items, list_name)
                         except RuntimeError:
                             return  # SEED-008
