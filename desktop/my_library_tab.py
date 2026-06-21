@@ -1655,6 +1655,13 @@ class MyLibraryTab(QWidget):
         worker.finished_signal.connect(self._on_schema_rebuild_finished)
         worker.error_signal.connect(self._on_schema_rebuild_error)
         worker.start()
+        # SEED-006 (Codex HIGH #2): reflect the in-flight rebuild on the Reset
+        # button immediately (the click-time guards on Refresh/Re-index/Reset are
+        # the load-bearing block; this is proactive visual feedback).
+        try:
+            self._update_reset_button_state()
+        except Exception:  # noqa: BLE001
+            pass
 
     def _on_schema_rebuild_finished(self, ready: bool) -> None:
         """Deferred rebuild done — run the startup flow _init_indexer skipped."""
@@ -2146,6 +2153,32 @@ class MyLibraryTab(QWidget):
     # Phase 97.2 R97.2-E — Reset My Library destructive recovery action
     # ------------------------------------------------------------------
 
+    def _schema_rebuild_in_progress(self) -> bool:
+        """SEED-006 (Codex HIGH #2): True while the deferred LOCAL schema rebuild is
+        pending or its background worker is still running.
+
+        LOCAL-mutating actions (Reset / Refresh / Re-index) MUST be blocked during
+        this window: they rename the same index dirs / use the same external DB as
+        the rebuild and would race it (and Reset closes only the UI-thread SQLite
+        connection, not the worker thread's). The window is usually brief (the
+        StartupThread SearchEngine rebuild runs first, so the worker is normally a
+        fast no-op reopen), but a genuine rebuild can take longer.
+        """
+        if getattr(self, "_awaiting_schema_rebuild", False):
+            return True
+        w = getattr(self, "_schema_rebuild_worker", None)
+        return w is not None and w.isRunning()
+
+    def _warn_schema_rebuild_busy(self) -> None:
+        """Codex HIGH #2: inform the user a LOCAL action is blocked by the rebuild."""
+        QMessageBox.information(
+            self,
+            tr("My Library"),
+            "Please wait — the local index is finishing a one-time upgrade."
+            + " / "
+            + "אנא המתן — האינדקס המקומי משלים שדרוג חד-פעמי.",
+        )
+
     def _update_reset_button_state(self) -> None:
         """Phase 97.3 R97.3-B (D-10) — single-condition guard.
 
@@ -2164,7 +2197,12 @@ class MyLibraryTab(QWidget):
         """
         if not hasattr(self, "_btn_reset") or self._btn_reset is None:
             return
-        worker_running = self._worker is not None and self._worker.isRunning()
+        # SEED-006 (Codex HIGH #2): also block Reset while the deferred schema
+        # rebuild is in flight (it renames the same dirs / uses the same DB).
+        worker_running = (
+            (self._worker is not None and self._worker.isRunning())
+            or self._schema_rebuild_in_progress()
+        )
         if worker_running:
             self._btn_reset.setEnabled(False)
             # Always-bilingual tooltip (matches the enabled-tooltip pattern below):
@@ -2485,6 +2523,9 @@ class MyLibraryTab(QWidget):
         """
         if self._indexer is None:
             return
+        if self._schema_rebuild_in_progress():  # Codex HIGH #2
+            self._warn_schema_rebuild_busy()
+            return
         # W8 — AGGREGATE ceiling check for Refresh
         try:
             if not self._check_ceiling_refresh_aggregate():
@@ -2510,6 +2551,9 @@ class MyLibraryTab(QWidget):
         re-extraction happens on the worker QThread.
         """
         if self._indexer is None:
+            return
+        if self._schema_rebuild_in_progress():  # Codex HIGH #2
+            self._warn_schema_rebuild_busy()
             return
         try:
             mb = QMessageBox(self)
