@@ -648,14 +648,18 @@ def test_list_picker_off_loop():
 
 
 class TestSyntheticViolationsPhase120ListPicker:
-    """Negative-control tests: verify the live-file test guards the list picker.
+    """List-picker authenticated-read guards.
 
     NOTE: _find_blocking_call_violations detects ATTRIBUTE calls only (obj.method()).
     get_user_lists / get_list_items are bare function calls — NOT attribute calls — so the
-    existing detector does NOT fire for them in synthetic snippets.  The live-file test
-    ``test_list_picker_off_loop`` works differently: it scans for the raw function names in
-    the source and then asserts they are ALWAYS wrapped inside ``run.io_bound(...)`` calls.
-    These tests verify the scope of the AST detector and document the design.
+    existing detector does NOT fire for them in synthetic snippets.
+
+    UAT 2026-06-21 INVERSION: get_user_lists / get_list_items are AUTHENTICATED Supabase
+    reads. They must run ON the event loop, NOT off-loop via run.io_bound — off-loop
+    dispatches to a thread-pool worker where the contextvar-scoped app.storage.user auth
+    session is unavailable, so get_user_client() falls back to the anon client and RLS
+    returns 0 rows ("no lists found"). The two live-file guards below were originally
+    asserting these calls were off-loop (they encoded the bug); they now assert on-loop.
     """
 
     def test_get_user_lists_bare_call_not_detected_by_attribute_detector(self):
@@ -690,8 +694,11 @@ class TestSyntheticViolationsPhase120ListPicker:
             f"Attribute detector should NOT fire for bare Name calls, but got: {violations}"
         )
 
-    def test_live_file_guards_get_user_lists_via_io_bound(self):
-        """Live-file guard: get_user_lists in joins_lab.py must be wrapped in run.io_bound."""
+    def test_live_file_guards_get_user_lists_on_event_loop(self):
+        """Live-file guard: get_user_lists (authenticated read) must run ON the event
+        loop in joins_lab.py — NOT wrapped in run.io_bound (off-loop loses auth -> anon
+        -> RLS 0 rows). UAT 2026-06-21 inverted this.
+        """
         if not JOINS_LAB_PATH.exists():
             import pytest
             pytest.skip("web/pages/joins_lab.py not found")
@@ -699,17 +706,16 @@ class TestSyntheticViolationsPhase120ListPicker:
         if "get_user_lists" not in source:
             import pytest
             pytest.skip("get_user_lists not yet in joins_lab.py")
-        assert (
-            "run.io_bound(get_user_lists" in source
-            or "io_bound(get_user_lists" in source
-        ), (
-            "get_user_lists appears in joins_lab.py but is NOT wrapped in run.io_bound — "
-            "off-loop discipline requires all Supabase list reads to be dispatched via "
-            "run.io_bound."
+        assert "io_bound(get_user_lists" not in source, (
+            "get_user_lists is an authenticated Supabase read and must NOT be wrapped "
+            "in run.io_bound — off-loop loses the user's auth context (anon -> RLS 0 "
+            "rows). Run it on the event loop."
         )
 
-    def test_live_file_guards_get_list_items_via_io_bound(self):
-        """Live-file guard: get_list_items in joins_lab.py must be wrapped in run.io_bound."""
+    def test_live_file_guards_get_list_items_on_event_loop(self):
+        """Live-file guard: get_list_items (authenticated read) must run ON the event
+        loop in joins_lab.py — NOT wrapped in run.io_bound. UAT 2026-06-21 inverted this.
+        """
         if not JOINS_LAB_PATH.exists():
             import pytest
             pytest.skip("web/pages/joins_lab.py not found")
@@ -717,11 +723,8 @@ class TestSyntheticViolationsPhase120ListPicker:
         if "get_list_items" not in source:
             import pytest
             pytest.skip("get_list_items not yet in joins_lab.py")
-        assert (
-            "run.io_bound(get_list_items" in source
-            or "io_bound(get_list_items" in source
-        ), (
-            "get_list_items appears in joins_lab.py but is NOT wrapped in run.io_bound — "
-            "off-loop discipline requires all Supabase fragment reads to be dispatched via "
-            "run.io_bound."
+        assert "io_bound(get_list_items" not in source, (
+            "get_list_items is an authenticated Supabase read and must NOT be wrapped "
+            "in run.io_bound — off-loop loses auth (anon -> RLS 0 rows). Run it on the "
+            "event loop."
         )

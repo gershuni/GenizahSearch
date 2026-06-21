@@ -1423,20 +1423,26 @@ def create_joins_lab_page(
             _export_btn = ui.button(tr('Export'), icon='download').props(
                 'flat dense icon-right=arrow_drop_down'
             ).tooltip(tr('Export candidates to CSV or Excel'))
-            with ui.menu().props('auto-close') as _export_menu:
-                ui.menu_item(
-                    tr('CSV'),
-                    on_click=lambda: asyncio.ensure_future(
-                        _export_ref['fn']('csv') if _export_ref['fn'] else asyncio.sleep(0)
-                    ),
-                ).props('dense')
-                ui.menu_item(
-                    tr('Excel (XLSX)'),
-                    on_click=lambda: asyncio.ensure_future(
-                        _export_ref['fn']('xlsx') if _export_ref['fn'] else asyncio.sleep(0)
-                    ),
-                ).props('dense')
-            _export_btn.on('click', _export_menu.open)
+            # The menu MUST be a child of the button so the q-menu anchors to the
+            # button and opens only on the button's click. Previously it was a
+            # child of the toolbar row, so q-menu's default parent-click listener
+            # popped it open whenever ANY sibling in the row (Run Search, the VS
+            # toggle) was clicked. Nesting inside the button also auto-opens it on
+            # button click — no explicit .on('click', menu.open) needed.
+            with _export_btn:
+                with ui.menu().props('auto-close'):
+                    ui.menu_item(
+                        tr('CSV'),
+                        on_click=lambda: asyncio.ensure_future(
+                            _export_ref['fn']('csv') if _export_ref['fn'] else asyncio.sleep(0)
+                        ),
+                    ).props('dense')
+                    ui.menu_item(
+                        tr('Excel (XLSX)'),
+                        on_click=lambda: asyncio.ensure_future(
+                            _export_ref['fn']('xlsx') if _export_ref['fn'] else asyncio.sleep(0)
+                        ),
+                    ).props('dense')
 
     # -----------------------------------------------------------------------
     # Async helpers
@@ -1537,7 +1543,12 @@ def create_joins_lab_page(
                                 # NO status kwarg — stays 'proposed' (D-02 LOCKED)
                             )
 
-                        result = await run.io_bound(_run_create)
+                        # Authenticated write — MUST run on the event loop, NOT
+                        # via run.io_bound: app.storage.user auth context is
+                        # contextvar-scoped and does not reach thread-pool
+                        # workers, so an off-loop write hits RLS as the anon
+                        # client and is denied (UAT 2026-06-21).
+                        result = _run_create()
                         if result.get('success'):
                             # D-02: force-refresh so proposed join shows immediately
                             await _load_known_joins(
@@ -1596,7 +1607,10 @@ def create_joins_lab_page(
                         def _run_delete():
                             return delete_fragment_join(_jid)
 
-                        result = await run.io_bound(_run_delete)
+                        # Authenticated delete — on the event loop, NOT
+                        # run.io_bound (off-loop loses the user's auth context;
+                        # RLS would deny as anon). UAT 2026-06-21.
+                        result = _run_delete()
                         if result.get('success'):
                             # Force-refresh so the removed join disappears immediately
                             await _load_known_joins(
@@ -1706,11 +1720,22 @@ def create_joins_lab_page(
                     return
                 user_id = user['id']
 
-                # Fetch lists + counts off-loop simultaneously
-                user_lists, counts = await asyncio.gather(
-                    run.io_bound(get_user_lists, user_id),
-                    run.io_bound(get_list_item_counts),
-                )
+                # Fetch lists + counts ON THE EVENT LOOP. Authenticated Supabase
+                # reads MUST NOT run via run.io_bound: app.storage.user is
+                # contextvar-scoped and does not propagate to the thread-pool
+                # worker, so get_user_client() would fall back to the anon client
+                # and RLS would return 0 rows ("no lists found"). counts are
+                # best-effort (the get_list_item_counts_for_user RPC may be
+                # denied -> Postgres 42501). UAT 2026-06-21.
+                user_lists = get_user_lists(user_id)
+                try:
+                    counts = get_list_item_counts()
+                except Exception as _counts_err:
+                    logger.warning(
+                        "Add-to-list picker: item counts unavailable: %s",
+                        _counts_err,
+                    )
+                    counts = {}
                 if counts is None:
                     counts = {}
 
@@ -1744,8 +1769,10 @@ def create_joins_lab_page(
                                         for c in _filtered_candidates:
                                             if c.sys_id not in selected_list:
                                                 continue
-                                            result = await run.io_bound(
-                                                add_list_item,
+                                            # Authenticated write — on the event
+                                            # loop, NOT run.io_bound (off-loop ->
+                                            # anon -> RLS denies). UAT 2026-06-21.
+                                            result = add_list_item(
                                                 _lid,
                                                 c.sys_id,
                                                 shelfmark=getattr(c, 'shelfmark', None),
@@ -2675,7 +2702,7 @@ def create_joins_lab_page(
                             with list_container:
                                 ui.spinner(size='sm').style('color:var(--primary-700,#047857);')
 
-                            items = await run.io_bound(get_list_items, list_id)
+                            items = get_list_items(list_id)  # authed read: on-loop, not run.io_bound
 
                             level_state['level'] = 2
                             heading_label.set_text(f'← {list_name}')
@@ -2773,7 +2800,7 @@ def create_joins_lab_page(
                     async def _reload_level2_filter(list_id: int, list_name: str) -> None:
                         """Re-render Level-2 with the current filter without re-fetching."""
                         try:
-                            items = await run.io_bound(get_list_items, list_id)
+                            items = get_list_items(list_id)  # authed read: on-loop, not run.io_bound
                             _render_level2_items(items, list_name)
                         except RuntimeError:
                             return  # SEED-008
@@ -2796,16 +2823,20 @@ def create_joins_lab_page(
                             ui.spinner(size='sm').style(
                                 'color:var(--primary-700,#047857);'
                             )
-                        user_lists, counts = await asyncio.gather(
-                            run.io_bound(get_user_lists, user_id),
-                            run.io_bound(get_list_item_counts),
-                            return_exceptions=True,
-                        )
-                        if isinstance(user_lists, BaseException):
+                        # Authenticated reads run ON THE EVENT LOOP here (this
+                        # on('show') handler runs in the live client context).
+                        # They must NOT use run.io_bound: app.storage.user is
+                        # contextvar-scoped and does not reach thread-pool
+                        # workers, so off-loop get_user_client() would fall back
+                        # to the anon client and RLS would return 0 rows ("no
+                        # lists found"). UAT 2026-06-21.
+                        try:
+                            user_lists = get_user_lists(user_id)
+                        except Exception as _lists_err:
                             # Lists are essential — show a non-fatal notice in-dialog.
                             logger.warning(
                                 "Choose-from-lists picker: get_user_lists failed: %s",
-                                user_lists,
+                                _lists_err,
                             )
                             list_container.clear()
                             with list_container:
@@ -2815,17 +2846,23 @@ def create_joins_lab_page(
                                     'color:var(--text-muted,#475569);'
                                 )
                             return
-                        counts_available = isinstance(counts, dict)
-                        if not counts_available:
-                            # Exception object, None, or non-dict -> no counts.
-                            # The count badge is hidden (see _render_level1) rather
-                            # than rendering a misleading "(0)" on every list.
+                        # counts are best-effort (the get_list_item_counts_for_user
+                        # RPC may be denied -> Postgres 42501). The count badge is
+                        # hidden (see _render_level1) rather than rendering a
+                        # misleading "(0)" on every list.
+                        try:
+                            counts = get_list_item_counts()
+                            counts_available = isinstance(counts, dict)
+                            if not counts_available:
+                                counts = {}
+                        except Exception as _counts_err:
                             logger.warning(
                                 "Choose-from-lists picker: item counts unavailable "
                                 "(showing lists without counts): %s",
-                                counts if isinstance(counts, BaseException) else 'no data',
+                                _counts_err,
                             )
                             counts = {}
+                            counts_available = False
                         pdata['lists'] = user_lists
                         pdata['counts'] = counts
                         pdata['counts_available'] = counts_available
@@ -3678,7 +3715,10 @@ def create_joins_lab_page(
                     # NO status kwarg — stays 'proposed' (D-02 LOCKED)
                 )
 
-            result = await run.io_bound(_run_create)
+            # Authenticated write — on the event loop, NOT run.io_bound (the
+            # off-loop worker has no app.storage.user auth context -> anon ->
+            # RLS denies the INSERT). UAT 2026-06-21.
+            result = _run_create()
             if result.get('success'):
                 # D-02: force-refresh so proposed join shows immediately
                 await _load_known_joins(

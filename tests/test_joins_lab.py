@@ -1230,20 +1230,28 @@ class TestAddToList:
             "(Phase-92 RLS: list_items INSERT is authenticated-only)"
         )
 
-    def test_add_list_item_dispatched_off_loop(self):
-        """add_list_item must be dispatched via run.io_bound (never directly on the event loop).
+    def test_add_list_item_runs_on_event_loop(self):
+        """add_list_item is an AUTHENTICATED write — it MUST run on the event loop,
+        NOT via run.io_bound.
 
-        Source-level check: the _pick_list handler passes add_list_item via run.io_bound,
-        consistent with the off-loop discipline enforced by test_joins_lab_off_loop.py.
+        Regression (UAT 2026-06-21): run.io_bound dispatches to a thread-pool
+        worker, and NiceGUI does not propagate contextvars there, so
+        app.storage.user (the per-request auth session) is unavailable ->
+        get_user_client() falls back to the anon client -> RLS denies the write.
+        Authenticated Supabase calls run on the event loop (the established
+        create_correction pattern).
         """
         src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
-        # The multi-line form: run.io_bound(\n ... add_list_item,
-        # Normalise whitespace for a robust check
         import re
         normalised = re.sub(r'\s+', ' ', src)
-        assert 'run.io_bound( add_list_item' in normalised or \
-               'run.io_bound(add_list_item' in normalised, (
-            "joins_lab.py must dispatch add_list_item via run.io_bound (off-loop discipline)"
+        assert 'run.io_bound( add_list_item' not in normalised and \
+               'run.io_bound(add_list_item' not in normalised, (
+            "add_list_item must NOT be dispatched via run.io_bound — authenticated "
+            "writes lose the user's auth context off-loop (anon -> RLS denies). "
+            "Call it on the event loop."
+        )
+        assert 'add_list_item(' in normalised, (
+            "joins_lab.py must still call add_list_item in the list-picker handler"
         )
 
     def test_add_list_item_called_per_selected_candidate(self):
@@ -1262,19 +1270,39 @@ class TestAddToList:
             "joins_lab.py list-picker must iterate over the selected candidates"
         )
 
-    def test_get_user_lists_and_counts_fetched_off_loop(self):
-        """get_user_lists and get_list_item_counts must be dispatched via run.io_bound.
+    def test_authenticated_list_calls_run_on_event_loop(self):
+        """Authenticated Supabase reads/writes MUST run on the event loop, NOT
+        via run.io_bound.
 
-        M1 from plan: these two calls must be gathered off-loop, not called directly
-        in an async context (which would block the event loop on Supabase I/O).
+        Regression (UAT 2026-06-21): off-loop (run.io_bound -> thread pool) loses
+        the contextvar-scoped app.storage.user auth session, so get_user_client()
+        falls back to the anon client and RLS returns 0 rows (reads) / denies
+        (writes) -- the D-17 picker showed "no lists found" and Add-as-Join /
+        Add-to-List silently failed. Public/heavy cores (search, VS, enrichment)
+        stay OFF-loop -- they read public data and must not block the loop.
+
+        The earlier assertion (these calls MUST be off-loop) encoded the bug; it
+        is inverted here.
         """
         src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
-        assert 'run.io_bound(get_user_lists' in src, (
-            "joins_lab.py must dispatch get_user_lists via run.io_bound"
-        )
-        assert 'run.io_bound(get_list_item_counts' in src, (
-            "joins_lab.py must dispatch get_list_item_counts via run.io_bound"
-        )
+        import re
+        normalised = re.sub(r'\s+', ' ', src)
+        authed_dispatch_targets = [
+            'get_user_lists', 'get_list_item_counts', 'get_list_items',
+            'add_list_item', '_run_create', '_run_delete',
+        ]
+        for fn in authed_dispatch_targets:
+            assert f'run.io_bound( {fn}' not in normalised and \
+                   f'run.io_bound({fn}' not in normalised, (
+                f"{fn} is an authenticated Supabase dispatch target and must NOT "
+                f"be wrapped in run.io_bound (off-loop loses auth -> anon client). "
+                f"Run it on the event loop."
+            )
+        # Public/heavy cores MUST remain off-loop (don't regress responsiveness).
+        for core in ('run_search_core', 'run_vs_core', 'run_vs_meta_core', 'run_enrich_core'):
+            assert f'run.io_bound({core}' in normalised, (
+                f"{core} reads public data and must stay off-loop via run.io_bound"
+            )
 
     def test_translation_keys_for_add_to_list(self):
         """Translation keys for Add-to-List flow must exist in genizah_translations.py."""
@@ -2022,21 +2050,33 @@ class TestListPickerD17:
             "D-17: picker_dialog not found — the picker must use a ui.dialog instance."
         )
 
-    def test_list_picker_uses_run_io_bound_for_user_lists(self):
-        """D-17: get_user_lists must be dispatched via run.io_bound (off-loop discipline)."""
+    def test_list_picker_runs_get_user_lists_on_event_loop(self):
+        """D-17: get_user_lists is an authenticated read — it must run ON the event
+        loop, NOT via run.io_bound. Off-loop loses the contextvar-scoped
+        app.storage.user auth session -> anon client -> RLS returns 0 rows
+        ('no lists found'). UAT 2026-06-21 inverted the original off-loop assertion.
+        """
         source = self._get_source()
-        # run.io_bound(get_user_lists, ...) pattern must be present
-        assert "run.io_bound(get_user_lists" in source or "io_bound(get_user_lists" in source, (
-            "D-17: get_user_lists is not wrapped in run.io_bound in joins_lab.py. "
-            "List fetches must be off-loop."
+        assert "io_bound(get_user_lists" not in source, (
+            "D-17: get_user_lists must NOT be wrapped in run.io_bound — authenticated "
+            "reads lose the user's auth context off-loop. Run it on the event loop."
+        )
+        assert "get_user_lists(" in source, (
+            "D-17: the picker must still call get_user_lists."
         )
 
-    def test_list_picker_uses_run_io_bound_for_list_items(self):
-        """D-17: get_list_items must be dispatched via run.io_bound (off-loop discipline)."""
+    def test_list_picker_runs_get_list_items_on_event_loop(self):
+        """D-17: get_list_items is an authenticated read — it must run ON the event
+        loop, NOT via run.io_bound (off-loop -> anon -> RLS returns 0 fragments).
+        UAT 2026-06-21 inverted the original off-loop assertion.
+        """
         source = self._get_source()
-        assert "run.io_bound(get_list_items" in source or "io_bound(get_list_items" in source, (
-            "D-17: get_list_items is not wrapped in run.io_bound in joins_lab.py. "
-            "Fragment fetches must be off-loop."
+        assert "io_bound(get_list_items" not in source, (
+            "D-17: get_list_items must NOT be wrapped in run.io_bound — authenticated "
+            "fragment reads lose auth off-loop. Run it on the event loop."
+        )
+        assert "get_list_items(" in source, (
+            "D-17: the picker must still call get_list_items."
         )
 
     def test_list_picker_seed008_guard_present(self):
@@ -2053,53 +2093,25 @@ class TestListPickerD17:
         """D-17 regression (UAT 2026-06-21): a counts-RPC failure must NOT abort the picker.
 
         get_list_item_counts() RE-RAISES on failure (e.g. 'permission denied for
-        function get_list_item_counts_for_user', Postgres 42501). The picker
-        fetched lists + counts via asyncio.gather WITHOUT return_exceptions, so the
-        counts failure propagated and the whole picker crashed
-        (`Task exception was never retrieved`). The fix: gather with
-        return_exceptions=True and degrade counts to {} (mirrors /lists
-        _load_list_item_counts), hiding the count badge when counts are unavailable.
+        function get_list_item_counts_for_user', Postgres 42501). The picker runs
+        it ON the event loop (authenticated) inside a try/except that degrades to
+        no-counts (counts_available=False) and hides the per-list count badge,
+        rather than letting the failure abort the picker.
         """
-        import ast
         source = self._get_source()
-        tree = ast.parse(source)
-
-        # Find the asyncio.gather(...) call that fetches get_list_item_counts and
-        # assert it isolates exceptions via return_exceptions=True.
-        found_guarded_gather = False
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            is_gather = (
-                isinstance(func, ast.Attribute) and func.attr == 'gather'
-            )
-            if not is_gather:
-                continue
-            call_src = ast.dump(node)
-            if 'get_list_item_counts' not in call_src:
-                continue
-            has_return_exceptions = any(
-                kw.arg == 'return_exceptions'
-                and isinstance(kw.value, ast.Constant)
-                and kw.value.value is True
-                for kw in node.keywords
-            )
-            if has_return_exceptions:
-                found_guarded_gather = True
-                break
-
-        assert found_guarded_gather, (
-            "D-17 regression: the picker's asyncio.gather() that fetches "
-            "get_list_item_counts must pass return_exceptions=True so a counts-RPC "
-            "failure (e.g. permission denied on get_list_item_counts_for_user) "
-            "degrades gracefully instead of aborting the whole picker."
+        # Counts must be fetched on-loop (authenticated), not off-loop.
+        assert "io_bound(get_list_item_counts" not in source, (
+            "D-17: get_list_item_counts must run on the event loop, not run.io_bound."
         )
-
-        # The degraded path must hide the count badge (no misleading '(0)').
+        # The degraded path must be tracked + the count badge hidden.
         assert "counts_available" in source, (
             "D-17 regression: the picker must track counts availability and hide "
             "the per-list count badge when counts could not be fetched."
+        )
+        # A counts failure must be caught and logged as a non-fatal degrade.
+        assert "item counts unavailable" in source, (
+            "D-17 regression: a counts-RPC failure must be caught and degraded "
+            "(logged 'item counts unavailable'), not allowed to abort the picker."
         )
 
     def test_list_picker_loads_via_show_handler_not_pre_await(self):
