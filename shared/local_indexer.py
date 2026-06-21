@@ -4304,9 +4304,12 @@ class LocalIndexer:
         import shutil
         import time as _time
         import uuid as _uuid
-        # SEED-006 (Codex MED #4): unique suffix so two resets in the same second
-        # cannot collide on a shared .reset-quarantine-<ts> dir.
-        ts = f"{int(_time.time())}-{_uuid.uuid4().hex[:8]}"
+        # SEED-006 (Codex MED #4): ts_epoch stays NUMERIC — the deferred-cleanup
+        # created_at column parses it as float below, so it must not be a string.
+        # `ts` adds a uuid suffix used ONLY in dir names so two resets in the same
+        # wall-clock second cannot collide on a shared .reset-quarantine-<ts> dir.
+        ts_epoch = int(_time.time())
+        ts = f"{ts_epoch}-{_uuid.uuid4().hex[:8]}"
         counts: dict = {
             "quarantined": [],
             "reinit_ok": False,
@@ -4525,7 +4528,7 @@ class LocalIndexer:
                     "INSERT OR REPLACE INTO pending_dir_cleanup "
                     "(path, kind, created_at) "
                     "VALUES (?, 'reset_quarantine', ?)",
-                    (qdir, float(ts)),
+                    (qdir, float(ts_epoch)),
                 )
             self._thread_local._conn.commit()
             scheduled = True
