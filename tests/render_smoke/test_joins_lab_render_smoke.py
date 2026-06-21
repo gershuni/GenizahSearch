@@ -2133,3 +2133,147 @@ def test_round5_search_type_restored_on_reopen(joins_lab_smoke_runner):
         )
 
     joins_lab_smoke_runner(driver)
+
+
+# ===========================================================================
+# Phase 121-02: SC#2 — RTL structural assertions in HE mode (D-01a)
+# ===========================================================================
+#
+# Asserts the two manual flex-row-reverse ordering choices from Phases 119/120:
+#   1. Pagination row in candidate_grid.py:1363 (`_pg_dir`)
+#   2. Compare verdict/nav bar in compare_modal.py:792 (`_nav_dir_class`)
+#
+# Both are rendered when is_rtl() returns True.  set_language('he') must be
+# called BEFORE user.open('/joins-lab') so is_rtl() returns True during the
+# page's initial render (Pitfall 4 from RESEARCH.md).
+#
+# The pagination row requires total_pages > 1 (candidate_grid.py:1349); with
+# _PAGE_SIZE = 24, we must pass ≥25 stub results so the grid renders a second
+# page and the pagination row appears.
+# ===========================================================================
+
+# Build 25 stub raw result dicts to exceed _PAGE_SIZE = 24 (triggers pagination).
+def _make_stub_results(n: int = 25) -> list:
+    """Return n distinct raw search result dicts for the smoke harness."""
+    results = []
+    for i in range(n):
+        results.append({
+            'uid': f'99000{i:010d}|p1',
+            'sys_id': f'99000{i:010d}',
+            'display': {
+                'id': f'99000{i:010d}',
+                'shelfmark': f'T-S RTL.{i:03d}',
+                'title': f'RTL Stub Fragment {i}',
+                'library_code': 'CUL',
+            },
+            'full_text': f'RTL test stub content {i}',
+            'snippet': f'rtl stub {i}',
+            'highlight_pattern': 'rtl',
+            'score': 0.5,
+            '_via_text': True,
+            '_via_vs': False,
+        })
+    return results
+
+
+def test_rtl_flex_row_reverse_pagination_and_compare(joins_lab_smoke_runner):
+    """SC#2 (automated half): in HE mode, the pagination row and Compare nav/verdict
+    bar both carry 'flex-row-reverse'.
+
+    Assertion 1 (candidate_grid.py:1363 `_pg_dir`):
+      After _load_anchor_and_search with 25 stub candidates (> _PAGE_SIZE = 24),
+      total_pages = 2, so the pagination row renders.  It must contain
+      'flex-row-reverse' in its _classes.
+
+    Assertion 2 (compare_modal.py:792 `_nav_dir_class`):
+      After opening Compare via image click, the verdict/nav row must carry
+      'flex-row-reverse' AND 'justify-between' AND 'flex-wrap' in its _classes.
+      This triple-token signature distinguishes the Compare bar from the pagination
+      row (which pairs with 'justify-center' — REVIEWS #3 MEDIUM).
+
+    Language restore:
+      set_language('he') is called before user.open and restored in a finally
+      block so subsequent tests in this file are not affected (Pitfall 4).
+    """
+    async def driver(user):
+        from web.translations import get_language, set_language
+        from nicegui import ElementFilter, ui
+
+        # Pitfall 4: force HE mode before opening the page so is_rtl() returns True
+        # during the initial render.  Restore in finally for test isolation.
+        _prev_lang = get_language()
+        set_language('he')
+        try:
+            await user.open('/joins-lab')
+            await _load_anchor_and_search(user)
+
+            # ──────────────────────────────────────────────────────────────────
+            # Assertion 1: pagination row carries 'flex-row-reverse' (candidate_grid.py:1363)
+            # ──────────────────────────────────────────────────────────────────
+            with user._client:
+                pg_rows = [
+                    e for e in ElementFilter(kind=ui.row)
+                    if e.visible and 'flex-row-reverse' in getattr(e, '_classes', [])
+                ]
+
+            assert pg_rows, (
+                "SC#2 / D-01a FAIL (Assertion 1): no visible ui.row with 'flex-row-reverse' "
+                "found in HE mode after _load_anchor_and_search (25 stub candidates). "
+                "Expected the pagination row (_pg_dir) to carry 'flex-row-reverse' in HE mode. "
+                "See candidate_grid.py:1363 `_pg_dir = 'flex-row-reverse' if is_rtl() else 'flex-row'`. "
+                "Check that (a) set_language('he') is called before user.open, (b) total_pages > 1 "
+                "(need ≥25 candidates for _PAGE_SIZE=24), (c) the pagination row is rendered."
+            )
+
+            # ──────────────────────────────────────────────────────────────────
+            # Assertion 2: Compare nav/verdict bar (compare_modal.py:792)
+            # identified by triple-token signature: flex-row-reverse AND
+            # justify-between AND flex-wrap (REVIEWS #3 — not-pagination heuristic
+            # would false-pass on the pagination row which pairs with justify-center).
+            # ──────────────────────────────────────────────────────────────────
+            with user._client:
+                img_els = [
+                    e for e in ElementFilter(kind=ui.image)
+                    if e.visible
+                ]
+
+            assert img_els, (
+                "SC#2 / D-01a FAIL (Assertion 2 pre-condition): no visible ui.image elements "
+                "found in HE mode. Cannot open Compare to test the nav bar RTL. "
+                "Candidate grid may not have rendered — check _load_anchor_and_search in HE mode."
+            )
+
+            # Click the first candidate image to open Compare
+            _click_element(user, img_els[0])
+            await asyncio.sleep(0.5)
+
+            # Find the Compare nav/verdict row by its DISTINCT triple-token class signature:
+            # 'flex-row-reverse' AND 'justify-between' AND 'flex-wrap'.
+            # The pagination row pairs with 'justify-center' (not 'justify-between'),
+            # so this triple uniquely identifies the Compare bar (REVIEWS #3).
+            with user._client:
+                compare_nav_rows = [
+                    e for e in ElementFilter(kind=ui.row)
+                    if e.visible
+                    and 'flex-row-reverse' in getattr(e, '_classes', [])
+                    and 'justify-between' in getattr(e, '_classes', [])
+                    and 'flex-wrap' in getattr(e, '_classes', [])
+                ]
+
+            assert compare_nav_rows, (
+                "SC#2 / D-01a FAIL (Assertion 2): no visible ui.row found with the Compare "
+                "nav/verdict bar triple-token class signature "
+                "('flex-row-reverse' AND 'justify-between' AND 'flex-wrap') in HE mode "
+                "after opening Compare via image click. "
+                "See compare_modal.py:792 "
+                "`_nav_dir_class = 'flex-row-reverse' if is_rtl() else 'flex-row'`. "
+                "Note: identify by the triple-token signature, NOT a 'not-pagination' heuristic "
+                "(the pagination row also carries 'flex-row-reverse' — REVIEWS #3 MEDIUM)."
+            )
+        finally:
+            # Restore language for test isolation (Pitfall 4).
+            set_language(_prev_lang)
+
+    # Pass 25 stub results so total_pages = 2 (> _PAGE_SIZE = 24), which causes
+    # the pagination row to render (candidate_grid.py:1349: `if total_pages > 1`).
+    joins_lab_smoke_runner(driver, mock_search_results=_make_stub_results(25))
