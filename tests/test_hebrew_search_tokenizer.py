@@ -34,6 +34,7 @@ from genizah_core import (
     SearchEngine,
     _add_bracket_variants,
     _index_has_field,
+    make_mark_tolerant_pattern,
     strip_search_diacritics,
 )
 from shared.local_indexer import build_local_schema
@@ -477,6 +478,19 @@ class TestAsciiQuoteAbbreviation:
         # raise a Tantivy parse error).
         idx = _build_index(tmp_path, docs={"rambam": RAMBAM_QUOTE + " כתב"})
         assert "rambam" in _genizah_retrieve(idx, RAMBAM_QUOTE)
+
+    def test_mark_tolerant_filter_matches_stored_ascii_quote(self):
+        # SEED-006 (Codex HIGH #1): the prior tests cover only Tantivy retrieval
+        # (via _genizah_retrieve/_local_retrieve), NOT the SECOND-PHASE regex
+        # filter. A clean query (רמבם) builds a mark-tolerant pattern that is
+        # matched against the STORED content (רמב"ם, ASCII quote intact). If the
+        # tolerator omits U+0022, this pattern fails to match and the candidate
+        # Tantivy returned via content_search is silently dropped by the filter.
+        import re
+        pat = make_mark_tolerant_pattern(re.escape(RAMBAM_CLEAN))
+        assert re.search(pat, RAMBAM_QUOTE), "filter drops ASCII-quote abbreviation"
+        assert re.search(pat, RAMBAM_GERSHAYIM), "filter drops gershayim abbreviation"
+        assert re.search(pat, RAMBAM_CLEAN), "filter must still match the clean form"
 
     def test_build_query_strips_quote_no_invalid_syntax(self):
         # A raw " inside a term must not survive into a quoted clause as

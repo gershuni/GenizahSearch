@@ -6702,8 +6702,12 @@ def _index_has_field(index, field_name: str) -> bool:
         return True
 
 
-# Inserted between regex tokens to allow optional combining marks and apostrophe variants in source text
-MARK_TOLERANT_INSERTER = '[\u0300-\u036F\u0027\u05F3\u05F4\u2018\u2019]*'
+# Inserted between regex tokens to allow optional combining marks and apostrophe/quote variants.
+# SEED-006: U+0022 (ASCII double quote) is included so the second-phase regex filter stays
+# symmetric with strip_search_diacritics / COMBINING_DIACRITICALS_PATTERN (which fold U+0022).
+# Without it, a clean query retrieves the stored quoted abbreviation via content_search but the
+# filter then drops it (no tolerated quote between letters).
+MARK_TOLERANT_INSERTER = '[\u0300-\u036F\u0022\u0027\u05F3\u05F4\u2018\u2019]*'
 
 
 def make_mark_tolerant_pattern(escaped_term: str) -> str:
