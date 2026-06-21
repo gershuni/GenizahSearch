@@ -190,7 +190,12 @@ Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-a
   2. The Hebrew-interface layout is fully RTL: anchor transcription right-aligned, builder rows right-to-left, candidate grid/table headers + cells in RTL, Compare panes mirrored, no element clipped or overlapping from a direction mismatch.
   3. A static / AST audit confirms no raw Hebrew string literal appears in the Joins Lab page/component Python files outside the `tr()` system — every Hebrew string goes through `tr()` so it cannot leak into the English interface.
 
-**Plans**: TBD
+**Plans**: 3 plans (2 waves)
+
+- [ ] 121-01-PLAN.md — TRANSLATIONS gap closure: add 17 missing HE keys + fix 'Open in Joins Lab' glossary drift + tr()-wrap the XLSX sheet name [Wave 1]
+- [ ] 121-02-PLAN.md — Permanent CI guard tests/test_joins_lab_i18n.py (no-raw-Hebrew + tr()-coverage + badge-strings + scoped entry-point keys) + render-smoke RTL structural assertions [Wave 2]
+- [ ] 121-03-PLAN.md — HE-mode HUMAN-UAT checklist artifact + sign-off (load-bearing SC#2 visual-RTL acceptance) [Wave 2]
+
 **UI hint**: yes
 
 ## Progress
