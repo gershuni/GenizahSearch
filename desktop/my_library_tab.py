@@ -802,6 +802,40 @@ class LabRebuildWorker(QThread):
             self.error_signal.emit(str(exc))
 
 
+class SchemaRebuildWorker(QThread):
+    """SEED-006 HIGH-5 — run a deferred LOCAL schema rebuild off the UI thread.
+
+    A schema-marker migration (e.g. the SEED-006 content->hebword + content_search
+    change) makes LocalIndexer rebuild from cached_text. That rebuild used to run
+    synchronously in LocalIndexer.__init__ on the UI thread, freezing the window on
+    the first launch after the update. With ``defer_schema_rebuild=True`` __init__
+    only flags ``needs_schema_rebuild``; this worker runs the actual rebuild
+    (``run_deferred_schema_rebuild``) on its own thread — which opens its own
+    per-thread SQLite connection, so it is safe off the constructing thread.
+
+    By the time MyLibraryTab triggers this (from on_startup_finished), the
+    background StartupThread's SearchEngine has usually ALREADY rebuilt the index +
+    rewritten the marker, so run_deferred_schema_rebuild is a fast no-op reopen;
+    the worker still runs it off-thread so the fallback (a genuine rebuild) never
+    freezes the UI either.
+    """
+
+    finished_signal = pyqtSignal(bool)   # ready
+    error_signal = pyqtSignal(str)
+
+    def __init__(self, indexer) -> None:
+        super().__init__()
+        self._indexer = indexer
+
+    def run(self) -> None:
+        try:
+            ready = self._indexer.run_deferred_schema_rebuild()
+            self.finished_signal.emit(bool(ready))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("SchemaRebuildWorker: deferred LOCAL schema rebuild failed: %s", exc)
+            self.error_signal.emit(str(exc))
+
+
 # ---------------------------------------------------------------------------
 # PrescanWorker (Phase 97 C-03 — folder walk off the UI thread)
 # ---------------------------------------------------------------------------
@@ -1059,6 +1093,12 @@ class MyLibraryTab(QWidget):
         # Active worker (None when idle)
         self._worker: Optional[LocalIndexerWorker] = None
 
+        # SEED-006 HIGH-5: set True in _init_indexer when a LOCAL schema-marker
+        # migration must be rebuilt; finish_deferred_schema_rebuild() (after
+        # startup) clears it. Keeps the off-thread rebuild + is_searchable gate.
+        self._awaiting_schema_rebuild: bool = False
+        self._schema_rebuild_worker: Optional["SchemaRebuildWorker"] = None
+
         # QSettings for non-portable UI prefs only (D-15)
         self._settings = QSettings("Dicta", "GenizahSearchPro")
 
@@ -1082,7 +1122,13 @@ class MyLibraryTab(QWidget):
         self._init_indexer()
 
         # Phase 97 R-01: run recovery probe after indexer init.
-        if self._indexer is not None:
+        # SEED-006 HIGH-5: skip while a deferred schema rebuild is pending — the
+        # index isn't ready and is_searchable must stay False until
+        # finish_deferred_schema_rebuild() completes (which runs this same
+        # recovery-probe + auto-rescan once the index is live).
+        if getattr(self, "_awaiting_schema_rebuild", False):
+            pass
+        elif self._indexer is not None:
             try:
                 running_runs = self._indexer.start_recovery_probe()
                 if not running_runs:
@@ -1092,11 +1138,12 @@ class MyLibraryTab(QWidget):
             except Exception as exc:  # noqa: BLE001
                 logger.warning("MyLibraryTab: start_recovery_probe failed: %s", exc)
                 self.is_searchable = True  # fail-open so search still works
+            # D-25: silent background rescan at startup
+            self._auto_rescan_on_startup()
         else:
             self.is_searchable = True  # no indexer = no gate needed
-
-        # D-25: silent background rescan at startup
-        self._auto_rescan_on_startup()
+            # D-25: silent background rescan at startup
+            self._auto_rescan_on_startup()
 
         # Phase 97.2 R97.2-E — initial Reset button state after recovery probe.
         # Constructor-end call site #1 of 3 (REVIEWS Codex MEDIUM proactive).
@@ -1512,10 +1559,31 @@ class MyLibraryTab(QWidget):
                 index_dir=Config.LOCAL_INDEX_DIR,
                 lab_index_dir=Config.LOCAL_LAB_INDEX_DIR,
                 db_path=db_path,
+                # SEED-006 HIGH-5: never rebuild a schema migration synchronously
+                # here — __init__ runs on the UI thread. Defer it; the background
+                # StartupThread's SearchEngine rebuild is authoritative, and
+                # finish_deferred_schema_rebuild() (from on_startup_finished)
+                # completes our handle off-thread once startup is done.
+                defer_schema_rebuild=True,
             )
         except Exception as exc:  # noqa: BLE001
             logger.error("MyLibraryTab: LocalIndexer init failed: %s", exc)
             self._indexer = None
+            return
+
+        # SEED-006 HIGH-5: a schema-marker migration is pending. Do NOT run the
+        # synchronous recovery / reload / refresh now (the index isn't ready).
+        # Keep LOCAL search gated; finish_deferred_schema_rebuild() (triggered
+        # after startup completes) runs the off-thread rebuild + completes init.
+        # `is True` (not truthiness) so a mocked LocalIndexer — whose attribute
+        # access yields a truthy Mock — does not spuriously enter the defer path.
+        if getattr(self._indexer, "needs_schema_rebuild", False) is True:
+            logger.info(
+                "MyLibraryTab: LOCAL schema rebuild deferred off the UI thread "
+                "(will complete after startup)"
+            )
+            self._awaiting_schema_rebuild = True
+            self.is_searchable = False
             return
 
         # Run startup recovery. Pass A (pending deletes) runs synchronously — it
@@ -1551,6 +1619,75 @@ class MyLibraryTab(QWidget):
 
         # Populate folder list UI
         self._refresh_folder_list_ui()
+
+    # ------------------------------------------------------------------
+    # SEED-006 HIGH-5 — deferred LOCAL schema rebuild (off the UI thread)
+    # ------------------------------------------------------------------
+
+    def finish_deferred_schema_rebuild(self) -> None:
+        """Run the deferred LOCAL schema rebuild off the UI thread.
+
+        Called once from GenizahGUI.on_startup_finished, AFTER the background
+        StartupThread's SearchEngine has already rebuilt the on-disk LOCAL index
+        and rewritten the marker — so the worker's run_deferred_schema_rebuild is
+        usually a fast no-op reopen. It runs off-thread regardless so the fallback
+        (a genuine rebuild) never freezes the UI. Idempotent: no-op when nothing
+        is pending. Fail-open so LOCAL search is never permanently disabled.
+        """
+        if not getattr(self, "_awaiting_schema_rebuild", False):
+            return
+        if self._indexer is None:
+            self._awaiting_schema_rebuild = False
+            self.is_searchable = True  # fail-open: no indexer = no gate needed
+            return
+        worker = SchemaRebuildWorker(self._indexer)
+        self._schema_rebuild_worker = worker
+        worker.finished_signal.connect(self._on_schema_rebuild_finished)
+        worker.error_signal.connect(self._on_schema_rebuild_error)
+        worker.start()
+
+    def _on_schema_rebuild_finished(self, ready: bool) -> None:
+        """Deferred rebuild done — run the startup flow _init_indexer skipped."""
+        self._awaiting_schema_rebuild = False
+        if not ready:
+            logger.warning("MyLibraryTab: deferred schema rebuild reported not-ready")
+        try:
+            self._indexer.startup_recovery(reextract_pending=False)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MyLibraryTab: deferred startup_recovery failed: %s", exc)
+        try:
+            self._on_startup_recovery_completed()
+            self._invalidate_prior_status_cache()
+            self._refresh_folder_list_ui()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MyLibraryTab: deferred post-rebuild refresh failed: %s", exc)
+        # Mirror __init__'s recovery probe → is_searchable + background rescan.
+        try:
+            running_runs = self._indexer.start_recovery_probe()
+            if running_runs:
+                self._show_recovery_modal(running_runs)
+            else:
+                self.is_searchable = True
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MyLibraryTab: deferred recovery probe failed: %s", exc)
+            self.is_searchable = True  # fail-open
+        try:
+            self._auto_rescan_on_startup()
+            self._update_reset_button_state()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("MyLibraryTab: deferred auto-rescan failed: %s", exc)
+
+    def _on_schema_rebuild_error(self, msg: str) -> None:
+        """Rebuild worker failed — fail open so LOCAL search isn't disabled forever."""
+        logger.error("MyLibraryTab: deferred LOCAL schema rebuild failed: %s", msg)
+        self._awaiting_schema_rebuild = False
+        # Fail-open: queries against a still-mismatched index are caught by
+        # _query_local_index and return []; the user can Reset My Library.
+        self.is_searchable = True
+        try:
+            self._refresh_folder_list_ui()
+        except Exception:
+            logger.exception("MyLibraryTab: refresh after schema-rebuild error failed")
 
     def _show_recovery_modal(self, running_runs: list) -> None:
         """Phase 97 R-01 — 3-button Resume/Restart/Skip recovery modal.

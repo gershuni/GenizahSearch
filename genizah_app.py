@@ -3482,6 +3482,14 @@ class GenizahGUI(QMainWindow):
                     searcher.attach_my_library_tab(self.my_library_tab)
                 except Exception as _e:
                     logger.warning("on_startup_finished: attach_my_library_tab failed: %s", _e)
+                # SEED-006 HIGH-5: complete a deferred LOCAL schema rebuild off the
+                # UI thread. The StartupThread's SearchEngine has already rebuilt
+                # the on-disk index by now, so this is usually a fast no-op reopen;
+                # it flips MyLibraryTab.is_searchable True when done.
+                try:
+                    self.my_library_tab.finish_deferred_schema_rebuild()
+                except Exception as _e:
+                    logger.warning("on_startup_finished: finish_deferred_schema_rebuild failed: %s", _e)
 
             # Init Lists Manager
             self.lists_mgr = ListsManager(self.meta_mgr)
