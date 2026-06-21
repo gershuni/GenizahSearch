@@ -1301,3 +1301,123 @@ def test_clear_all_state_and_navigate_present():
     assert "navigate.to('/joins-lab')" in source or 'navigate.to("/joins-lab")' in source, (
         "joins_lab.py must call ui.navigate.to('/joins-lab') after clear (PST-03 cold reload)"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 120-06 ACT-03: Add-to-List anonymous login gate
+# ---------------------------------------------------------------------------
+
+
+def test_anon_add_list_gate(joins_lab_smoke_runner):
+    """ACT-03 V2-auth (VALIDATION.md row): anonymous 'Add to List' click opens the
+    login dialog and does NOT call add_list_item.
+
+    SEED-008 (D-20): the _on_add_to_list_click handler is a sync function that opens
+    a mini login-gate dialog when GlobalAuthState.is_logged_in() returns False.
+    The handler must NOT call add_list_item for an anonymous user.
+
+    Assertion strategy:
+    (a) Static: joins_lab.py calls GlobalAuthState.is_logged_in() inside _on_add_to_list_click.
+    (b) Static: add_list_item import is present (the logged-in path uses it).
+    (c) Static: _on_add_to_list_click is defined.
+    (d) Render: after switching to table view + clicking Add to List, a dialog is
+        opened (the anonymous login-gate dialog) and add_list_item is NOT called.
+
+    Note: the fixture runs without Supabase auth, so GlobalAuthState.is_logged_in()
+    returns False — the anonymous path fires. We verify via mock that add_list_item
+    was never dispatched.
+    """
+    import pathlib
+    from unittest.mock import patch
+
+    # (a)-(c) Static assertions — no render driver needed
+    source = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+    assert '_on_add_to_list_click' in source, (
+        "ACT-03 FAIL (static): _on_add_to_list_click not found in joins_lab.py"
+    )
+    assert 'GlobalAuthState.is_logged_in()' in source, (
+        "ACT-03 FAIL (static): _on_add_to_list_click must call "
+        "GlobalAuthState.is_logged_in() to gate anonymous users"
+    )
+    assert 'add_list_item' in source, (
+        "ACT-03 FAIL (static): add_list_item must be imported/used in joins_lab.py "
+        "(logged-in path dispatches it off-loop)"
+    )
+    assert 'Sign in to add candidates to a list' in source, (
+        "ACT-03 FAIL (static): anonymous login-gate dialog must show "
+        "'Sign in to add candidates to a list' label"
+    )
+
+    # (d) Render: switch to table view, trigger Add to List, assert dialog opens
+    #     and add_list_item is NOT called (anonymous gate fires first)
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        # Switch to table view (the Add to List button is TABLE-view only)
+        from nicegui import ElementFilter, ui
+        with user._client:
+            toggle_btns = [
+                b for b in ElementFilter(kind=ui.button)
+                if b.visible and b._props.get('label', '') in ('Table', 'טבלה')
+                and b._props.get('flat')
+            ]
+
+        if not toggle_btns:
+            pytest.skip(
+                "ACT-03: no Table toggle button visible — skipping render check "
+                "(static assertions passed)"
+            )
+
+        _click_element(user, toggle_btns[0])
+        await asyncio.sleep(0.3)
+
+        # Find the Add to List button in the bulk bar (table view)
+        with user._client:
+            add_list_btns = [
+                b for b in ElementFilter(kind=ui.button)
+                if b.visible and any(
+                    t in (b._props.get('label', '') + (b.text or ''))
+                    for t in ('Add to List', 'הוסף לרשימה', 'playlist_add')
+                )
+            ]
+
+        if not add_list_btns:
+            pytest.skip(
+                "ACT-03: no Add to List button visible — skipping render click "
+                "(bulk bar requires ≥1 selection; static assertions passed)"
+            )
+
+        # Patch add_list_item so we can verify it is NOT called
+        call_count = {'n': 0}
+
+        def mock_add_list_item(*args, **kwargs):
+            call_count['n'] += 1
+            return {'error': 'should not have been called'}
+
+        with patch('web.pages.joins_lab.add_list_item', side_effect=mock_add_list_item):
+            _click_element(user, add_list_btns[0])
+            await asyncio.sleep(0.3)
+
+        # Assert add_list_item was NOT called (anonymous gate precedes it)
+        assert call_count['n'] == 0, (
+            f"ACT-03 FAIL: add_list_item was called {call_count['n']} time(s) for an "
+            "anonymous user. The _on_add_to_list_click handler must show the login-gate "
+            "dialog and return BEFORE dispatching add_list_item "
+            "(Phase-92 RLS: list_items INSERT requires authentication)."
+        )
+
+        # Assert a dialog is now open (the anonymous login-gate dialog)
+        with user._client:
+            open_dialogs = [
+                e for e in ElementFilter(kind=ui.dialog)
+                if e._props.get('model-value')
+            ]
+        assert open_dialogs, (
+            "ACT-03 FAIL: no dialog opened after clicking Add to List for an anonymous user. "
+            "Expected the login-gate dialog to open with "
+            "'Sign in to add candidates to a list' prompt. "
+            "Check _on_add_to_list_click in joins_lab.py (Phase 120 Plan 06 Task 1)."
+        )
+
+    joins_lab_smoke_runner(driver)

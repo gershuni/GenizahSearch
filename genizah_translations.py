@@ -4285,3 +4285,40 @@ TRANSLATIONS.update({
     "Only the first 20 selected candidates will be added to the Puzzle.":
                                         "רק 20 המועמדים הנבחרים הראשונים יתווספו לפאזל.",
 })
+
+# === Phase 120-06: ACT-03 — Add-to-List (login-gated) + Export (CSV/XLSX) ===
+TRANSLATIONS.update({
+    # --- Add-to-List bulk bar button (TABLE view only — selection-scoped) ---
+    "Add to List":                          "הוסף לרשימה",
+    "Sign in to add candidates to a list":  "התחבר להוספת מועמדים לרשימה",
+    "Add N candidates to list:":            "הוסף N מועמדים לרשימה:",
+    "{N} candidates added to \"{list_name}\"":
+                                            "N מועמדים נוספו לרשימה \"{list_name}\"",
+    "Could not add to list. Check your connection.":
+                                            "לא ניתן להוסיף לרשימה. בדוק את החיבור לאינטרנט.",
+    "No lists found. Create a list first.":
+                                            "לא נמצאו רשימות. צור רשימה תחילה.",
+    # --- Export (persistent toolbar — full filtered set, NOT selection) ---
+    "Export":                               "ייצוא",
+    "Export candidates to CSV or Excel":    "ייצא מועמדים ל-CSV או Excel",
+    "CSV":                                  "CSV",
+    "Excel (XLSX)":                         "Excel (XLSX)",
+    "Exporting the first 500 candidates.":  "מייצא את 500 המועמדים הראשונים.",
+    "Preparing export…":                    "מכין ייצוא…",
+    "fragments fetched":                    "קטעים נשלפו",
+    "Export failed. Check your connection and try again.":
+                                            "הייצוא נכשל. בדוק את החיבור לאינטרנט ונסה שוב.",
+    "Retry":                                "נסה שוב",
+    "No candidates to export":              "אין מועמדים לייצוא",
+    # --- Export column headers ---
+    "Shelfmark":                            "מספר מדף",
+    "Library":                              "ספרייה",
+    "Title":                                "כותרת",
+    "Triage":                               "מיון",
+    "Score":                                "ציון",
+    "Material":                             "חומר",
+    "Dimensions":                           "מידות",
+    "Page":                                 "עמוד",
+    "Transcription (page)":                 "תמלול (עמוד)",
+    "Image URL":                            "כתובת תמונה",
+})

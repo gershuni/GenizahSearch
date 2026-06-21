@@ -55,6 +55,8 @@ NOT the shared local store.
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -62,6 +64,7 @@ from urllib.parse import quote
 
 from nicegui import run, ui
 
+from shared.export_dossier import build_image_url_for_row
 from shared.fjms_service import get_fjms_service
 from shared.joins_lab import (
     BuilderRow, Candidate, SideQuery, apply_cross_side, compose, dedup_candidates,
@@ -88,7 +91,10 @@ from web.joins_lab_storage import (
 from web.safe_storage import safe_user_pop, safe_user_set
 from web.services import get_service
 from web.state import state
-from web.supabase_client import create_fragment_join, delete_fragment_join
+from web.supabase_client import (
+    add_list_item, create_fragment_join, delete_fragment_join,
+    get_list_item_counts, get_user_lists,
+)
 from web.translations import is_rtl, tr
 
 logger = logging.getLogger(__name__)
@@ -109,6 +115,27 @@ _PENDING_ACTION_TTL_SECONDS = 900  # 15 minutes — pending Add-as-Join expires 
 
 Phase-120 R2-M2: descriptors older than this are cleared without replaying
 (prevents a stale descriptor from executing against a different anchor).
+"""
+
+_EXPORT_CANDIDATE_CAP = 500
+"""Maximum number of candidates exported per D-06 (matches SEARCH_API_FUZZY_MAX_LIMIT).
+
+Aligns with the search API's fuzzy result-cap ceiling so a researcher can always
+export the full visible candidate pool in one pass.
+"""
+
+_EXPORT_TEXT_CAP = 4000
+"""Per-cell transcription text cap in characters (D-06 / SEARCH_API_BROWSE_TEXT_CAP).
+
+Prevents single-cell text from bloating the export file.  4000 chars ≈ one page
+of dense manuscript transcription.
+"""
+
+_EXPORT_BATCH_SIZE = 10
+"""Number of candidates fetched per off-loop batch during export text fetch (D-06).
+
+Small batches keep the per-batch I/O latency manageable and give the cancel check
+a chance to fire between batches.
 """
 
 
@@ -557,6 +584,14 @@ def create_joins_lab_page(
     # defined, so wire the word-box Enter key through a mutable ref set later.
     _submit_ref: dict = {'fn': None}
 
+    # Phase-120 ACT-03: Export state (D-06).
+    # _export_ref: late-bound ref to _export_candidates coroutine (set after definition).
+    # _export_cancel_ref: set True to cancel an in-flight export text-fetch loop.
+    # _export_progress_ref: reference to the inline progress card element.
+    _export_ref: dict = {'fn': None}
+    _export_cancel_ref: dict = {'value': False}
+    _export_progress_ref: dict = {'el': None}
+
     async def _trigger_search() -> None:
         if _submit_ref['fn'] is not None:
             await _submit_ref['fn']()
@@ -796,6 +831,7 @@ def create_joins_lab_page(
                 restyle_fn=_triage_state_ref.get('restyle'),
                 on_selection_change=_on_table_selection_change,
                 on_add_to_puzzle=_on_add_to_puzzle_click,
+                on_add_to_list=_on_add_to_list_click,
             )
         else:
             # Render the Phase-02 grid surface
@@ -921,6 +957,13 @@ def create_joins_lab_page(
         # Builder + search area (hidden until anchor loaded)
         builder_area = ui.column().classes('w-full gap-3')
         builder_area.set_visibility(False)
+
+        # Phase-120 ACT-03 D-06: Export progress indicator (hidden by default).
+        # Shown below the toolbar while the text-fetch batch runs; hidden on complete/cancel.
+        # Must be created here so the element exists when the export handler runs.
+        export_progress_container = ui.column().classes('w-full gap-2')
+        export_progress_container.set_visibility(False)
+        _export_progress_ref['el'] = export_progress_container
 
         # Candidates section (below builder)
         candidates_container = ui.column().classes('w-full gap-2')
@@ -1231,6 +1274,29 @@ def create_joins_lab_page(
             )
             view_toggle_btn.on('click', _on_view_toggle_click)
 
+            # Phase-120 ACT-03 D-06 R2-H2: Export — PERSISTENT toolbar control.
+            # Operates on the FULL filtered/sorted candidate set (≤500), NOT the
+            # table selection.  Visible in both Grid and Table view.
+            # _on_export_click is defined below after all handlers are defined;
+            # wired via _export_ref (late-bind pattern matching _submit_ref).
+            _export_btn = ui.button(tr('Export'), icon='download').props(
+                'flat dense icon-right=arrow_drop_down'
+            ).tooltip(tr('Export candidates to CSV or Excel'))
+            with ui.menu().props('auto-close') as _export_menu:
+                ui.menu_item(
+                    tr('CSV'),
+                    on_click=lambda: asyncio.ensure_future(
+                        _export_ref['fn']('csv') if _export_ref['fn'] else asyncio.sleep(0)
+                    ),
+                ).props('dense')
+                ui.menu_item(
+                    tr('Excel (XLSX)'),
+                    on_click=lambda: asyncio.ensure_future(
+                        _export_ref['fn']('xlsx') if _export_ref['fn'] else asyncio.sleep(0)
+                    ),
+                ).props('dense')
+            _export_btn.on('click', _export_menu.open)
+
     # -----------------------------------------------------------------------
     # Async helpers
     # -----------------------------------------------------------------------
@@ -1452,6 +1518,358 @@ def create_joins_lab_page(
             'created_at': datetime.now(tz=timezone.utc).isoformat(),
         })
         ui.navigate.to('/puzzle')
+
+    # -----------------------------------------------------------------------
+    # Phase-120 ACT-03/D-05: Add-to-List — login-gated cloud write (selection-scoped)
+    # -----------------------------------------------------------------------
+
+    def _on_add_to_list_click() -> None:
+        """Handle "Add to List" click in the bulk action bar (TABLE view, ≥1 selected).
+
+        Login-gated: anonymous users get the standard login dialog (no pending-replay
+        for Add-to-List per the plan — the user re-clicks after sign-in since the
+        action is selection-dependent and a page reload clears the selection anyway).
+        Logged-in: opens a single-level list-picker sub-dialog; on list pick all
+        selected candidates are written via add_list_item off-loop.
+
+        SEED-008 (D-20): the whole coroutine body is wrapped in ``except RuntimeError``
+        so a client teardown at any point does not propagate out of the task.
+        """
+        if not GlobalAuthState.is_logged_in():
+            # Not logged in: show login gate (no pending replay — user re-clicks)
+            with ui.dialog().props('persistent') as login_dlg:
+                with ui.card().classes('gap-4 p-4'):
+                    ui.label(tr('Sign in to add candidates to a list')).classes(
+                        'text-base font-semibold'
+                    )
+                    with ui.row().classes('gap-2 justify-end'):
+                        ui.button(tr('Cancel'), on_click=login_dlg.close).props('flat')
+                        ui.button(
+                            tr('Sign in'),
+                            on_click=lambda: (login_dlg.close(), create_login_dialog().open()),
+                        ).props('color=primary unelevated')
+            login_dlg.open()
+            return
+
+        # Logged in — open list-picker sub-dialog
+        selected_list = list(_selected)
+        if not selected_list:
+            ui.notify(tr('No candidates selected'), type='warning', timeout=3000)
+            return
+
+        async def _open_list_picker() -> None:
+            """Open the list-picker sub-dialog and handle list selection."""
+            try:
+                user = GlobalAuthState.get_user()
+                if not user:
+                    return
+                user_id = user['id']
+
+                # Fetch lists + counts off-loop simultaneously
+                user_lists, counts = await asyncio.gather(
+                    run.io_bound(get_user_lists, user_id),
+                    run.io_bound(get_list_item_counts),
+                )
+                if counts is None:
+                    counts = {}
+
+                with ui.dialog().props('persistent') as picker_dlg:
+                    with ui.card().classes('gap-2 p-4').style('min-width:320px'):
+                        ui.label(
+                            tr('Add N candidates to list:').replace('N', str(len(selected_list)))
+                        ).classes('text-base font-semibold')
+
+                        picker_status = ui.label('').classes('text-sm').style(
+                            'color:var(--error); display:none;'
+                        )
+
+                        if not user_lists:
+                            ui.label(tr('No lists found. Create a list first.')).classes(
+                                'text-sm'
+                            ).style('color:var(--text-muted);')
+                        else:
+                            for lst in user_lists:
+                                list_id = lst.get('id')
+                                list_name = lst.get('name') or ''
+                                item_count = counts.get(list_id, 0) if list_id else 0
+
+                                async def _pick_list(
+                                    _lid=list_id, _lname=list_name, _dlg=picker_dlg,
+                                    _status=picker_status,
+                                ) -> None:
+                                    """Dispatch add_list_item for each selected candidate."""
+                                    try:
+                                        errors = []
+                                        for c in _filtered_candidates:
+                                            if c.sys_id not in selected_list:
+                                                continue
+                                            result = await run.io_bound(
+                                                add_list_item,
+                                                _lid,
+                                                c.sys_id,
+                                                shelfmark=getattr(c, 'shelfmark', None),
+                                                title=getattr(c, 'title', None),
+                                            )
+                                            if isinstance(result, dict) and result.get('error'):
+                                                errors.append(result['error'])
+
+                                        if errors:
+                                            _status.set_text(tr('Could not add to list. Check your connection.'))
+                                            _status.style('display:block;')
+                                        else:
+                                            _dlg.close()
+                                            ui.notify(
+                                                tr('{N} candidates added to "{list_name}"').replace(
+                                                    '{N}', str(len(selected_list))
+                                                ).replace('{list_name}', _lname),
+                                                type='positive',
+                                                timeout=4000,
+                                            )
+                                    except RuntimeError:
+                                        return
+
+                                with ui.row().classes(
+                                    'w-full items-center justify-between gap-2 cursor-pointer'
+                                ).style(
+                                    'padding:8px 0; border-bottom:1px solid var(--border-light);'
+                                ).on('click', lambda lst_pick=_pick_list: asyncio.ensure_future(lst_pick())):
+                                    ui.label(list_name).classes('text-sm font-semibold')
+                                    ui.label(f'({item_count})').classes('text-xs').style(
+                                        'color:var(--text-muted);'
+                                    )
+
+                        with ui.row().classes('gap-2 justify-end mt-2'):
+                            ui.button(tr('Cancel'), on_click=picker_dlg.close).props('flat')
+
+                picker_dlg.open()
+
+            except RuntimeError:
+                return
+
+        asyncio.ensure_future(_open_list_picker())
+
+    # -----------------------------------------------------------------------
+    # Phase-120 ACT-03/D-06: Export — flat CSV/XLSX with off-loop batched text fetch
+    # -----------------------------------------------------------------------
+
+    async def _export_candidates(fmt: str) -> None:
+        """Export the FULL filtered/sorted candidate set (≤500) as CSV or XLSX.
+
+        R2-H2: Export operates on ``_filtered_candidates`` (the full current filtered
+        set), NOT on ``_selected`` (the table selection).  This is a PERSISTENT action
+        available in both Grid and Table view regardless of selection state.
+
+        D-06 off-loop discipline: transcription text is fetched via
+        ``run.io_bound(fetch_text_batch, batch)`` (never a blocking loop on the event
+        loop).  A cancel flag is checked between batches so the user can abort.
+
+        SEED-008 (D-20): the whole body is wrapped in ``except RuntimeError: return``
+        so a client teardown at any point does not crash the server.
+        """
+        try:
+            # Snapshot the filtered set (not _selected) at click time (R2-H2 / D-06)
+            candidates_snapshot = list(_filtered_candidates)
+            if not candidates_snapshot:
+                ui.notify(tr('No candidates to export'), type='info', timeout=3000)
+                return
+
+            # Cap at 500 (D-06 / _EXPORT_CANDIDATE_CAP)
+            show_cap_notice = len(candidates_snapshot) > _EXPORT_CANDIDATE_CAP
+            candidates_snapshot = candidates_snapshot[:_EXPORT_CANDIDATE_CAP]
+            total = len(candidates_snapshot)
+
+            if show_cap_notice:
+                ui.notify(tr('Exporting the first 500 candidates.'), type='info', timeout=5000)
+
+            # Reset cancel flag
+            _export_cancel_ref['value'] = False
+
+            # Build the progress card
+            progress_el = _export_progress_ref.get('el')
+            progress_card = None
+            progress_bar = None
+            progress_label = None
+
+            if progress_el is not None:
+                progress_el.clear()
+                progress_el.set_visibility(True)
+                with progress_el:
+                    with ui.card().classes('w-full p-3 gap-2') as progress_card:
+                        with ui.row().classes('items-center gap-2 w-full'):
+                            ui.spinner(size='sm').style('color:var(--primary-700);')
+                            progress_label = ui.label(
+                                tr('Preparing export…') + ' 0 / ' + str(total) + ' ' + tr('fragments fetched')
+                            ).classes('text-sm flex-1')
+                            ui.button(
+                                tr('Cancel'),
+                                on_click=lambda: _export_cancel_ref.update({'value': True}),
+                            ).props('flat dense')
+                        progress_bar = ui.linear_progress(value=0.0).props('color=primary')
+
+            # Fetch text in batches off-loop.
+            # Each iteration creates a fresh fetch_export_text_batch closure that
+            # captures the current `batch` list. The closure is passed DIRECTLY to
+            # run.io_bound so the AST guard (test_joins_lab_off_loop.py) sees:
+            #   run.io_bound(fetch_export_text_batch, ...)
+            # and confirms the sync function is dispatched off the event loop.
+            texts: dict = {}  # sys_id → str | None
+            fetched = 0
+
+            def fetch_export_text_batch(batch_items):
+                """Sync I/O closure: fetch get_browse_page text for a batch of candidates.
+
+                Passed directly to run.io_bound — never called on the event loop.
+                Returns dict[sys_id → capped_text_str].
+                """
+                results = {}
+                for cand in batch_items:
+                    try:
+                        page_data = executor.get_browse_page(
+                            cand.sys_id,
+                            p_num=cand.page,  # None → first text page (A1 assumption)
+                        )
+                        if page_data and isinstance(page_data, dict):
+                            text = page_data.get('text') or ''
+                            results[cand.sys_id] = text[:_EXPORT_TEXT_CAP]
+                        else:
+                            results[cand.sys_id] = ''
+                    except Exception:
+                        results[cand.sys_id] = ''
+                return results
+
+            try:
+                for batch_start in range(0, total, _EXPORT_BATCH_SIZE):
+                    if _export_cancel_ref['value']:
+                        break
+                    batch = candidates_snapshot[batch_start:batch_start + _EXPORT_BATCH_SIZE]
+                    batch_texts = await run.io_bound(fetch_export_text_batch, batch)
+                    texts.update(batch_texts)
+                    fetched += len(batch)
+
+                    # Update progress UI
+                    if progress_bar is not None:
+                        progress_bar.set_value(fetched / total)
+                    if progress_label is not None:
+                        progress_label.set_text(
+                            tr('Preparing export…') + f' {fetched} / {total} ' + tr('fragments fetched')
+                        )
+
+            except RuntimeError:
+                # Client disconnected mid-fetch
+                return
+            except Exception as exc:
+                logger.error('Export text fetch failed: %s', exc)
+                # Show error in the progress card area
+                if progress_el is not None:
+                    progress_el.clear()
+                    with progress_el:
+                        with ui.card().classes('w-full p-3 gap-2'):
+                            with ui.row().classes('items-center gap-2'):
+                                ui.label(tr('Export failed. Check your connection and try again.')).classes(
+                                    'text-sm flex-1'
+                                ).style('color:var(--error);')
+                                ui.button(
+                                    tr('Retry'),
+                                    on_click=lambda: asyncio.ensure_future(_export_candidates(fmt)),
+                                ).props('flat dense')
+                                ui.button(
+                                    tr('Cancel'),
+                                    on_click=lambda: (
+                                        progress_el.clear(),
+                                        progress_el.set_visibility(False),
+                                    ),
+                                ).props('flat dense')
+                return
+
+            if _export_cancel_ref['value']:
+                # User cancelled — hide progress card, no download
+                if progress_el is not None:
+                    progress_el.clear()
+                    progress_el.set_visibility(False)
+                return
+
+            # Build the flat export (10 columns per UI-SPEC §7)
+            headers = [
+                tr('Shelfmark'), tr('Library'), tr('Title'), tr('Triage'), tr('Score'),
+                tr('Material'), tr('Dimensions'), tr('Page'),
+                tr('Transcription (page)'), tr('Image URL'),
+            ]
+
+            def _triage_display(sys_id: str) -> str:
+                verdict = _triage.get(sys_id)
+                if verdict == 'yes':
+                    return 'Y'
+                if verdict == 'maybe':
+                    return '?'
+                if verdict == 'no':
+                    return 'N'
+                return '—'
+
+            def _build_rows() -> list:
+                rows = []
+                for c in candidates_snapshot:
+                    enrich = _enrichment.get(c.sys_id, {})
+                    w = enrich.get('width_cm')
+                    h = enrich.get('height_cm')
+                    dims = f'{w:.1f}×{h:.1f}cm' if (w and h) else ''
+                    library_code = getattr(c, 'library_code', '') or getattr(c, 'library', '') or ''
+                    img_url = build_image_url_for_row(c.sys_id, library_code=library_code, img_page=c.page)
+                    rows.append([
+                        getattr(c, 'shelfmark', '') or '',
+                        library_code,
+                        getattr(c, 'title', '') or '',
+                        _triage_display(c.sys_id),
+                        f'{getattr(c, "score", 0.0):.2f}',
+                        enrich.get('material') or '',
+                        dims,
+                        str(c.page) if c.page is not None else '',
+                        texts.get(c.sys_id) or '',
+                        img_url,
+                    ])
+                return rows
+
+            data_rows = _build_rows()
+
+            # Produce the download bytes
+            filename_base = f'joins_lab_candidates_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+
+            if fmt == 'csv':
+                buf = io.StringIO()
+                writer = csv.writer(buf)
+                writer.writerow(headers)
+                writer.writerows(data_rows)
+                content = buf.getvalue().encode('utf-8-sig')
+                filename = filename_base + '.csv'
+                media_type = 'text/csv'
+            else:
+                # XLSX via openpyxl (already a dependency — web/export_service.py uses it)
+                import openpyxl  # noqa: PLC0415 (late import, avoids optional-dep cost at module load)
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.title = 'Candidates'
+                ws.append(headers)
+                for row in data_rows:
+                    ws.append(row)
+                xlsx_buf = io.BytesIO()
+                wb.save(xlsx_buf)
+                content = xlsx_buf.getvalue()
+                filename = filename_base + '.xlsx'
+                media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
+            # Hide the progress card before triggering download
+            if progress_el is not None:
+                progress_el.clear()
+                progress_el.set_visibility(False)
+
+            # Trigger the file download (NiceGUI download pattern)
+            ui.download(content, filename=filename, media_type=media_type)
+
+        except RuntimeError:
+            # SEED-008 D-20: client teardown at any point — swallow silently
+            return
+
+    # Wire _on_export_click into the toolbar button's menu items (late-bind)
+    _export_ref['fn'] = _export_candidates
 
     async def _load_known_joins(
         sys_id: str, shelfmark: str, pgpid: Optional[int] = None,

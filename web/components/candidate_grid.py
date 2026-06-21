@@ -896,6 +896,7 @@ def create_candidate_table(
     restyle_fn: Optional[Callable] = None,
     on_selection_change: Optional[Callable] = None,
     on_add_to_puzzle: Optional[Callable] = None,
+    on_add_to_list: Optional[Callable] = None,
 ) -> ui.element:
     """Render the multi-select sortable table view of candidates (D-10, CND-03).
 
@@ -921,6 +922,11 @@ def create_candidate_table(
                            None (Phase-118/119 callers without it are unaffected).
                            Phase-120 ACT-02: the button appears in the bulk bar alongside
                            the existing triage buttons (TABLE view only — R2-H2).
+        on_add_to_list:    Optional Callable[[], None] — invoked when the user clicks
+                           "Add to List" in the bulk action bar.  The caller (joins_lab.py)
+                           checks login state and opens the list-picker or login dialog.
+                           Defaults to None (Phase-118/119/120-05 callers unaffected).
+                           Phase-120 ACT-03/D-05: login-gated; anonymous users see lock icon.
 
     Returns:
         The outer ui.element wrapping the table and bulk-triage bar.
@@ -965,20 +971,35 @@ def create_candidate_table(
                     f"color:{v_color};"
                 ).on("click", _make_bulk_handler())
 
-            # Phase-120 ACT-02: Add to Puzzle — selection-scoped bulk action.
-            # Appears in the bulk bar (TABLE view only — R2-H2) when ≥1 row is
-            # selected.  The callback reads the page-level _selected set (H2).
-            # No login gate — anonymous users can add to puzzle.
-            if on_add_to_puzzle is not None:
-                with ui.row().classes("ml-auto items-center"):
-                    add_puzzle_btn = ui.button(
-                        tr("Add to Puzzle"),
-                        icon="extension",
-                        on_click=on_add_to_puzzle,
-                    ).props("flat")
-                    add_puzzle_btn.tooltip(
-                        tr("Add anchor + selected candidates to the Fragment Puzzle")
-                    )
+            # Phase-120 ACT-02/ACT-03: Add to Puzzle + Add to List — selection-scoped
+            # bulk actions.  Appear in the bulk bar (TABLE view only — R2-H2) when ≥1
+            # row is selected.  Callbacks read the page-level _selected set (H2).
+            # Add to Puzzle: no login gate.
+            # Add to List: login-gated (caller handles the gate; anonymous path shows
+            # lock icon here as a visual hint of the gate before the click).
+            if on_add_to_puzzle is not None or on_add_to_list is not None:
+                with ui.row().classes("ml-auto items-center gap-2"):
+                    if on_add_to_puzzle is not None:
+                        add_puzzle_btn = ui.button(
+                            tr("Add to Puzzle"),
+                            icon="extension",
+                            on_click=on_add_to_puzzle,
+                        ).props("flat")
+                        add_puzzle_btn.tooltip(
+                            tr("Add anchor + selected candidates to the Fragment Puzzle")
+                        )
+                    if on_add_to_list is not None:
+                        # Phase-120 ACT-03/D-05: Add to List — login-gated cloud write.
+                        # The lock icon (icon-right) signals the login gate before clicking.
+                        # The caller handles the anonymous / logged-in branching logic.
+                        add_list_btn = ui.button(
+                            tr("Add to List"),
+                            icon="playlist_add",
+                            on_click=on_add_to_list,
+                        ).props("flat icon-right=lock")
+                        add_list_btn.tooltip(
+                            tr("Sign in to add candidates to a list")
+                        )
 
         table = ui.table(
             columns=columns,

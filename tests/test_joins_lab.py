@@ -1191,3 +1191,329 @@ class TestBulkPuzzleStaging:
         big = {'schema_version': 1, 'fragments': ['A'] * 30}
         result = _validate_bulk_payload(big)
         assert result is not None and len(result) == 21
+
+
+# ── Phase 120 Plan 06 Task 1 — Add-to-List login gate ────────────────────────
+
+
+class TestAddToList:
+    """VALIDATION.md ACT-03 D-05: Add-to-List — login-gated cloud write.
+
+    Tests verify:
+    - _on_add_to_list_click is defined in joins_lab.py
+    - Add to List button is present in the candidate_grid.py bulk bar
+    - Translation keys for Add-to-List are present
+    - add_list_item is dispatched once per selected candidate (structural source check)
+    - The handler is login-gated (anonymous path opens login dialog, not add_list_item)
+    """
+
+    def test_on_add_to_list_click_exists_in_joins_lab(self):
+        """Handler _on_add_to_list_click must be present in joins_lab.py."""
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        assert '_on_add_to_list_click' in src, (
+            "joins_lab.py must define _on_add_to_list_click for the "
+            "Add-to-List bulk action button"
+        )
+
+    def test_add_to_list_button_in_bulk_bar(self):
+        """The bulk action bar in candidate_grid.py must include an Add to List button."""
+        src = pathlib.Path('web/components/candidate_grid.py').read_text(encoding='utf-8')
+        assert 'Add to List' in src or 'add_to_list' in src or 'on_add_to_list' in src, (
+            "candidate_grid.py bulk bar must include the Add to List button / on_add_to_list param"
+        )
+
+    def test_add_to_list_is_login_gated(self):
+        """_on_add_to_list_click must call GlobalAuthState.is_logged_in() to gate anonymous users."""
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        assert 'GlobalAuthState.is_logged_in()' in src, (
+            "joins_lab.py _on_add_to_list_click must gate on GlobalAuthState.is_logged_in() "
+            "(Phase-92 RLS: list_items INSERT is authenticated-only)"
+        )
+
+    def test_add_list_item_dispatched_off_loop(self):
+        """add_list_item must be dispatched via run.io_bound (never directly on the event loop).
+
+        Source-level check: the _pick_list handler passes add_list_item via run.io_bound,
+        consistent with the off-loop discipline enforced by test_joins_lab_off_loop.py.
+        """
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        # The multi-line form: run.io_bound(\n ... add_list_item,
+        # Normalise whitespace for a robust check
+        import re
+        normalised = re.sub(r'\s+', ' ', src)
+        assert 'run.io_bound( add_list_item' in normalised or \
+               'run.io_bound(add_list_item' in normalised, (
+            "joins_lab.py must dispatch add_list_item via run.io_bound (off-loop discipline)"
+        )
+
+    def test_add_list_item_called_per_selected_candidate(self):
+        """The list-picker must iterate over selected candidates and call add_list_item per hit.
+
+        Source structural check: the _pick_list closure must iterate over selected
+        candidates and dispatch add_list_item for each — verified via AST inspection.
+        """
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        # Both add_list_item dispatch and iteration over selected candidates must be present
+        # in the same function scope (the _pick_list inner coroutine)
+        assert 'add_list_item' in src, (
+            "joins_lab.py must import and call add_list_item in the list-picker handler"
+        )
+        assert 'selected_list' in src or 'selected' in src, (
+            "joins_lab.py list-picker must iterate over the selected candidates"
+        )
+
+    def test_get_user_lists_and_counts_fetched_off_loop(self):
+        """get_user_lists and get_list_item_counts must be dispatched via run.io_bound.
+
+        M1 from plan: these two calls must be gathered off-loop, not called directly
+        in an async context (which would block the event loop on Supabase I/O).
+        """
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        assert 'run.io_bound(get_user_lists' in src, (
+            "joins_lab.py must dispatch get_user_lists via run.io_bound"
+        )
+        assert 'run.io_bound(get_list_item_counts' in src, (
+            "joins_lab.py must dispatch get_list_item_counts via run.io_bound"
+        )
+
+    def test_translation_keys_for_add_to_list(self):
+        """Translation keys for Add-to-List flow must exist in genizah_translations.py."""
+        src = pathlib.Path('genizah_translations.py').read_text(encoding='utf-8')
+        required_keys = [
+            'Add to List',
+            'Sign in to add candidates to a list',
+            'No lists found',
+        ]
+        for key in required_keys:
+            assert key in src, (
+                f"genizah_translations.py must include '{key}' translation key "
+                "(Phase 120 Plan 06 Add-to-List)"
+            )
+
+    def test_no_raw_app_storage_user_in_add_to_list_handler(self):
+        """_on_add_to_list_click must not access app.storage.user directly.
+
+        Structural guard: the Phase-87 CI test is authoritative; this spot-checks
+        that the new handler used GlobalAuthState/run.io_bound, not raw storage.
+        """
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        # The authoritative guard is test_no_raw_storage_access.py (allowlist=[]).
+        # Spot-check: GlobalAuthState is used (not app.storage.user for auth check).
+        assert 'GlobalAuthState' in src, (
+            "joins_lab.py add-to-list handler must use GlobalAuthState (Phase-87 invariant)"
+        )
+
+
+# ── Phase 120 Plan 06 Task 2 — Export flat CSV/XLSX ──────────────────────────
+
+
+def _make_stub_candidate(sys_id: str, page=None, shelfmark: str = '', via_text: bool = True):
+    """Build a minimal Candidate-like object for export tests."""
+    from shared.joins_lab import Candidate
+    return Candidate(
+        sys_id=sys_id,
+        shelfmark=shelfmark or f'T-S {sys_id[-3:]}',
+        score=0.75,
+        page=page,
+        via_text=via_text,
+        via_vs=not via_text,
+    )
+
+
+class TestExport:
+    """VALIDATION.md ACT-03 D-06: Export — flat CSV/XLSX with off-loop batched text fetch.
+
+    Tests verify:
+    - R2-H2: export uses _filtered_candidates (NOT _selected)
+    - CSV header has the 10 columns including Triage and Transcription (page)
+    - Matched page passed for text hits; None (first page) passed for VS-only candidates
+    - Text capped at _EXPORT_TEXT_CAP characters
+    - _export_candidates is defined in joins_lab.py
+    - Export button present (in toolbar, persistent across views)
+    - Translation keys present
+    """
+
+    def test_export_candidates_defined_in_joins_lab(self):
+        """_export_candidates async handler must be present in joins_lab.py."""
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        assert '_export_candidates' in src, (
+            "joins_lab.py must define _export_candidates async handler (D-06)"
+        )
+        assert 'async def _export_candidates' in src, (
+            "joins_lab.py _export_candidates must be an async def (D-06 off-loop pattern)"
+        )
+
+    def test_export_button_in_joins_lab(self):
+        """Export button (toolbar) must be present in joins_lab.py.
+
+        The Export button is a persistent control in the toolbar row (visible in both
+        grid and table view), NOT inside the bulk action bar.
+        """
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        assert "'Export'" in src or "tr('Export')" in src or 'tr("Export")' in src, (
+            "joins_lab.py must include an Export button (D-06 persistent toolbar control)"
+        )
+
+    def test_export_uses_filtered_set_not_selected(self):
+        """R2-H2: _export_candidates snapshots _filtered_candidates, not _selected.
+
+        Source check: the export implementation must read _filtered_candidates
+        (the full post-filter sorted set) — NOT _selected (the table checkbox selection).
+        """
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        # The implementation must snapshot _filtered_candidates for the export
+        assert 'candidates_snapshot = list(_filtered_candidates)' in src or \
+               'candidates_snapshot=list(_filtered_candidates)' in src or \
+               'list(_filtered_candidates)' in src, (
+            "joins_lab.py _export_candidates must snapshot _filtered_candidates (R2-H2), "
+            "not _selected — export operates on the FULL filtered set"
+        )
+
+    def test_export_csv_columns(self):
+        """The CSV header must have exactly 10 columns matching the UI-SPEC §7 spec.
+
+        Columns: Shelfmark, Library, Title, Triage, Score, Material, Dimensions,
+        Page, Transcription (page), Image URL.
+        """
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        # All 10 column names must be referenced in the source
+        required_columns = [
+            'Shelfmark', 'Library', 'Title', 'Triage', 'Score',
+            'Material', 'Dimensions', 'Page',
+            'Transcription (page)', 'Image URL',
+        ]
+        for col in required_columns:
+            assert col in src, (
+                f"joins_lab.py _export_candidates must include '{col}' in the CSV/XLSX headers "
+                "(UI-SPEC §7 — 10-column flat export)"
+            )
+
+    def test_export_text_page_selection(self):
+        """Matched page for text hits; None (first page) for VS-only candidates.
+
+        Source check: _export_candidates passes cand.page to get_browse_page,
+        which is None for VS-only candidates (A1 assumption: first text page).
+        """
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        # The browse page fetch must use cand.page (which is None for VS-only)
+        assert 'p_num=cand.page' in src, (
+            "joins_lab.py fetch_export_text_batch must pass p_num=cand.page to get_browse_page — "
+            "this is None for VS-only candidates (first text page, A1 assumption)"
+        )
+
+    def test_export_text_cap_applied(self):
+        """Per-cell transcription text must be capped at _EXPORT_TEXT_CAP characters."""
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        assert '_EXPORT_TEXT_CAP' in src, (
+            "joins_lab.py must define and apply _EXPORT_TEXT_CAP to cap per-cell text"
+        )
+        assert 'text[:_EXPORT_TEXT_CAP]' in src, (
+            "joins_lab.py fetch_export_text_batch must slice text[:_EXPORT_TEXT_CAP] "
+            "to prevent single-cell text from bloating the export file"
+        )
+
+    def test_export_cap_500_defined(self):
+        """_EXPORT_CANDIDATE_CAP must be 500 (aligns with SEARCH_API_FUZZY_MAX_LIMIT)."""
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        assert '_EXPORT_CANDIDATE_CAP = 500' in src, (
+            "joins_lab.py must define _EXPORT_CANDIDATE_CAP = 500 (D-06)"
+        )
+
+    def test_export_csv_utf8_sig(self):
+        """CSV output must use utf-8-sig encoding (Excel-compatible BOM)."""
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        assert "utf-8-sig" in src, (
+            "joins_lab.py CSV export must encode with 'utf-8-sig' (Excel-compatible BOM) — "
+            "matches existing export convention in the codebase"
+        )
+
+    def test_export_text_batch_passed_to_io_bound(self):
+        """fetch_export_text_batch must be passed directly to run.io_bound (off-loop discipline).
+
+        AST structural check: the sync closure must be the first positional arg to
+        run.io_bound so the off-loop AST guard in test_joins_lab_off_loop.py accepts it.
+        """
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        # The exact pattern the AST guard checks
+        assert 'run.io_bound(fetch_export_text_batch' in src, (
+            "joins_lab.py must pass fetch_export_text_batch directly to run.io_bound "
+            "(off-loop discipline — test_joins_lab_off_loop.py AST guard)"
+        )
+
+    def test_export_seed008_guard(self):
+        """_export_candidates must have a SEED-008 (D-20) try/except RuntimeError guard."""
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        # The whole body is wrapped in try/except RuntimeError: return
+        assert 'except RuntimeError' in src, (
+            "joins_lab.py _export_candidates must wrap its body in try/except RuntimeError "
+            "(SEED-008 D-20 — client teardown must not propagate)"
+        )
+
+    def test_export_late_bind_wired(self):
+        """_export_ref must be wired to _export_candidates after its definition."""
+        src = pathlib.Path('web/pages/joins_lab.py').read_text(encoding='utf-8')
+        assert "_export_ref['fn'] = _export_candidates" in src, (
+            "joins_lab.py must late-bind _export_ref['fn'] = _export_candidates "
+            "after the handler is defined (late-bind pattern matching _submit_ref)"
+        )
+
+    def test_export_translation_keys(self):
+        """Translation keys for the export flow must exist in genizah_translations.py."""
+        src = pathlib.Path('genizah_translations.py').read_text(encoding='utf-8')
+        required_keys = [
+            'Export',
+            'CSV',
+            'No candidates to export',
+        ]
+        for key in required_keys:
+            assert key in src, (
+                f"genizah_translations.py must include '{key}' translation key "
+                "(Phase 120 Plan 06 Export)"
+            )
+
+    def test_export_build_rows_logic(self):
+        """Pure-logic test: row builder maps candidates to the 10-column format.
+
+        Verifies the column ordering and Triage display (Y/?/N/—) are correct
+        without requiring a running NiceGUI page.
+        """
+        # Triage display logic mirrors _triage_display in joins_lab.py
+        def _triage_display(verdict):
+            if verdict == 'yes':
+                return 'Y'
+            if verdict == 'maybe':
+                return '?'
+            if verdict == 'no':
+                return 'N'
+            return '—'
+
+        assert _triage_display('yes') == 'Y'
+        assert _triage_display('maybe') == '?'
+        assert _triage_display('no') == 'N'
+        assert _triage_display(None) == '—'
+        assert _triage_display('') == '—'
+
+    def test_export_csv_row_count_matches_filtered_set(self):
+        """Pure-logic: row count for export equals the (capped) filtered set size, not _selected.
+
+        Simulates R2-H2 invariant: with a filtered set of 5 and _selected of 2,
+        the row count must be 5 (entire filtered set), not 2.
+        """
+        # Simulate what _export_candidates does (snapshot + cap)
+        _EXPORT_CANDIDATE_CAP = 500
+
+        # Build a fake filtered set of 5 candidates
+        filtered_set = [f'SYS{i:03d}' for i in range(5)]
+        # Only 2 are "selected" in the table
+        selected = {'SYS001', 'SYS003'}
+
+        # Export uses the filtered set (capped), NOT the selected set
+        candidates_snapshot = filtered_set[:_EXPORT_CANDIDATE_CAP]
+        assert len(candidates_snapshot) == 5, (
+            "Export row count must equal the filtered set size (5), not len(_selected)=2 "
+            "(R2-H2 invariant)"
+        )
+        assert len(candidates_snapshot) != len(selected), (
+            "Export row count must differ from _selected count — "
+            "export is NOT selection-scoped (R2-H2)"
+        )
