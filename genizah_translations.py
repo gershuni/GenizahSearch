@@ -2535,7 +2535,7 @@ TRANSLATIONS = {
     "No fragments in this list.": "אין קטעים ברשימה זו.",
     "No matches.": "אין התאמות.",
     # D-19: Open in Joins Lab button on /lists (Phase 120)
-    "Open in Joins Lab": "פתח במעבדת ההצטרפות",
+    "Open in Joins Lab": "פתח במעבדת הצירופים",
     # Validation / status / error toasts
     "Enter at least one search line to run": "יש להזין לפחות שורת חיפוש אחת",
     "Enter a search query to run": "יש להזין שאילתת חיפוש",
@@ -4255,8 +4255,8 @@ TRANSLATIONS.update({
     # --- Clear/Reset control (joins_lab.py summary bar) ---
     "Reset":                           "איפוס",
     "Clear all Joins Lab state: anchor, builder, triage, filters":
-                                       "נקה את כל מצב מעבדת החיבורים: עוגן, בונה, מיון וסננים",
-    "Clear Joins Lab":                 "נקה מעבדת החיבורים",
+                                       "נקה את כל מצב מעבדת הצירופים: עוגן, בונה, מיון וסננים",
+    "Clear Joins Lab":                 "נקה את מעבדת הצירופים",
     "This clears your anchor, builder lines, triage verdicts, and filters. You will start fresh. This cannot be undone.":
                                        "הפעולה הזאת מאפסת את העוגן, שורות הבונה, חוות המיון והסננים. החיפוש יתחיל מחדש. אין אפשרות לבטל.",
     "Clear everything":                "נקה הכל",
@@ -4365,4 +4365,57 @@ TRANSLATIONS.update({
         "הצג נתוני PGP וביבליוגרפיה עבור קטע זה",
     "No PGP data for this fragment":
         "אין נתוני PGP עבור קטע זה",
+})
+
+# === Phase 121: Joins Lab i18n gap closure (FND-07) ===
+TRANSLATIONS.update({
+    # --- ACT-02 anchor guard (joins_lab.py:1853, 1887) ---
+    "No anchor loaded":
+        "לא נטען עוגן",
+    # --- Bulk action guard (joins_lab.py:1936) ---
+    "No candidates selected":
+        "לא נבחרו מועמדים",
+    # --- VS spinner label (joins_lab.py:2568, 3360) — U+2026 ellipsis ---
+    "Loading visual similarity…":
+        "טוען דמיון חזותי…",
+    # --- VS empty-state (joins_lab.py:2581, 2740) ---
+    "No candidates match both text and visual similarity. Try clearing the builder for VS-only browse.":
+        "אין מועמדים התואמים גם לטקסט וגם לדמיון החזותי. נסו לנקות את הבונה לעיון בדמיון חזותי בלבד.",
+    # --- Add-to-List error (joins_lab.py:3142) ---
+    "Could not load your lists. Please try again.":
+        "לא ניתן לטעון את הרשימות שלכם. נסו שוב.",
+    # --- Filter checkboxes (candidate_grid.py:991, 994) ---
+    "Has dimensions data":
+        "קיימים נתוני מידות",
+    "Exclude size mismatch":
+        "הסתר אי-התאמת גודל",
+    # --- Table checkbox tooltip (candidate_grid.py:712) ---
+    "Select for bulk actions":
+        "בחר לפעולות קבוצתיות",
+    # --- Filter dropdown label (candidate_grid.py:1003) ---
+    "Triage state":
+        "מצב מיון",
+    # --- Filter input placeholder (candidate_grid.py:1009) — U+2026 ellipsis ---
+    "Filter by shelfmark…":
+        "סנן לפי מספר מדף…",
+    # --- Bulk triage label (candidate_grid.py:1116, 1208) — N is replaced at runtime ---
+    "Mark N selected as:":
+        "סמן N שנבחרו כ:",
+    # --- Add-as-Join guard (candidate_grid.py:1176, 1219) ---
+    "Select exactly one candidate to add as a join":
+        "בחרו מועמד אחד בלבד כדי להוסיף כצירוף",
+    # --- Per-card puzzle button tooltip (candidate_grid.py:949, compare_modal.py:648) ---
+    "Add anchor + this candidate to the Fragment Puzzle":
+        "הוסף את העוגן ואת המועמד הזה לפאזל הקטעים",
+    # --- Compare pane badge label (compare_modal.py:479) ---
+    "Size mismatch":
+        "אי-התאמת גודל",
+    # --- Badge strings from shared/joins_lab.py::badge_and_tooltip() ---
+    # Wrapped via tr(tooltip_text) at candidate_grid.py:760 — variable arg, not AST-catchable.
+    "Anchor fragment":
+        "קטע עוגן",
+    "Found via other side":
+        "נמצא דרך הצד השני",
+    "Visually similar":
+        "דומה חזותית",
 })
