@@ -2543,14 +2543,21 @@ def create_joins_lab_page(
             return
 
         # Logged-in path — open the two-level drill-down picker (D-17).
-        async def _open_picker() -> None:
-            """Open the choose-from-lists picker dialog (D-17).
+        def _open_picker() -> None:
+            """Build + open the choose-from-lists picker dialog (D-17).
 
-            Level 1: user's lists with item counts.
-            Level 2: fragments in the chosen list.
+            Level 1: user's lists. Level 2: fragments in the chosen list.
             Fragment click → load_anchor(sys_id) + close dialog.
 
-            SEED-008: whole body wrapped in ``except RuntimeError: return``.
+            T-119-09 / client-context regression rule: the dialog is built
+            SYNCHRONOUSLY here so it mounts in the live NiceGUI client slot, and
+            the off-loop lists/counts fetch runs in the async ``_on_show`` handler
+            wired via ``picker_dialog.on('show', ...)`` below — NOT in a naked
+            background coroutine that awaits BEFORE creating the dialog. Awaiting
+            first detaches the slot, so ``ui.dialog()`` mounts nowhere and
+            ``.open()`` silently does nothing (this is the compare_modal pattern).
+
+            SEED-008: the async loaders below are wrapped in ``except RuntimeError: return``.
             """
             try:
                 user = GlobalAuthState.get_user()
@@ -2558,41 +2565,11 @@ def create_joins_lab_page(
                     return
                 user_id = user['id']
 
-                # --- Fetch lists + counts off-loop simultaneously (M1 fix) ---
-                # Counts are BEST-EFFORT: get_list_item_counts() re-raises on
-                # failure (e.g. a missing EXECUTE grant on the
-                # get_list_item_counts_for_user RPC -> Postgres 42501), so the
-                # picker MUST NOT let a counts failure abort it. Mirror
-                # /lists _load_list_item_counts, which degrades to "no counts"
-                # rather than failing the page. return_exceptions=True keeps the
-                # lists usable even when the counts RPC 500s.
-                user_lists, counts = await asyncio.gather(
-                    run.io_bound(get_user_lists, user_id),
-                    run.io_bound(get_list_item_counts),
-                    return_exceptions=True,
-                )
-                if isinstance(user_lists, BaseException):
-                    # Lists are essential — surface a non-fatal notice and bail.
-                    logger.warning(
-                        "Choose-from-lists picker: get_user_lists failed: %s",
-                        user_lists,
-                    )
-                    ui.notify(
-                        tr('Could not load your lists. Please try again.'),
-                        type='warning',
-                    )
-                    return
-                counts_available = isinstance(counts, dict)
-                if not counts_available:
-                    # Exception object, None, or anything non-dict -> no counts.
-                    # Hide the per-list count badge entirely (see _render_level1)
-                    # rather than render a misleading "(0)" for every list.
-                    logger.warning(
-                        "Choose-from-lists picker: item counts unavailable "
-                        "(showing lists without counts): %s",
-                        counts if isinstance(counts, BaseException) else 'no data',
-                    )
-                    counts = {}
+                # Picker data populated asynchronously by _on_show (off-loop).
+                # counts are BEST-EFFORT (the get_list_item_counts_for_user RPC may
+                # be denied -> Postgres 42501); counts_available gates the per-list
+                # count badge so we never render a misleading "(0)".
+                pdata: dict = {'lists': [], 'counts': {}, 'counts_available': False}
 
                 # --- Build dialog with reactive state ---
                 # level_state tracks which level is shown and the chosen list.
@@ -2641,10 +2618,11 @@ def create_joins_lab_page(
                         filter_input.props(f'placeholder="{tr("Filter lists…")}"')
                         back_btn.set_visibility(False)
 
+                        all_lists = pdata['lists']
                         visible = [
-                            lst for lst in user_lists
+                            lst for lst in all_lists
                             if filter_val in (lst.get('name') or '').lower()
-                        ] if filter_val else user_lists
+                        ] if filter_val else all_lists
 
                         if not visible:
                             with list_container:
@@ -2656,7 +2634,7 @@ def create_joins_lab_page(
                         for lst in visible:
                             list_id = lst.get('id')
                             list_name = lst.get('name') or ''
-                            item_count = counts.get(list_id, 0) if list_id is not None else 0
+                            item_count = pdata['counts'].get(list_id, 0) if list_id is not None else 0
 
                             def _make_list_click(lid=list_id, lname=list_name):
                                 def _on_click() -> None:
@@ -2679,7 +2657,7 @@ def create_joins_lab_page(
                                         # Only show the count badge when counts
                                         # actually loaded; a "(0)" on every list
                                         # when the RPC is denied is misleading.
-                                        if counts_available:
+                                        if pdata['counts_available']:
                                             ui.label(f'({item_count})').classes(
                                                 'text-xs'
                                             ).style('color:var(--text-muted,#475569);')
@@ -2802,15 +2780,66 @@ def create_joins_lab_page(
 
                     filter_input.on('update:model-value', _on_filter_change)
 
-                    # Initial render
-                    _render_level1()
+                    # Initial loading spinner — replaced once _on_show populates
+                    # pdata and calls _render_level1() (avoids a "No lists" flash).
+                    with list_container:
+                        ui.spinner(size='sm').style('color:var(--primary-700,#047857);')
 
+                # T-119-09: fetch lists+counts off-loop when the dialog mounts in
+                # the LIVE client context (via on('show')) — never before the
+                # dialog exists. Counts are best-effort (get_list_item_counts()
+                # re-raises on a denied RPC), so isolate exceptions and degrade.
+                async def _on_show(_evt: object = None) -> None:
+                    try:
+                        list_container.clear()
+                        with list_container:
+                            ui.spinner(size='sm').style(
+                                'color:var(--primary-700,#047857);'
+                            )
+                        user_lists, counts = await asyncio.gather(
+                            run.io_bound(get_user_lists, user_id),
+                            run.io_bound(get_list_item_counts),
+                            return_exceptions=True,
+                        )
+                        if isinstance(user_lists, BaseException):
+                            # Lists are essential — show a non-fatal notice in-dialog.
+                            logger.warning(
+                                "Choose-from-lists picker: get_user_lists failed: %s",
+                                user_lists,
+                            )
+                            list_container.clear()
+                            with list_container:
+                                ui.label(
+                                    tr('Could not load your lists. Please try again.')
+                                ).classes('text-sm').style(
+                                    'color:var(--text-muted,#475569);'
+                                )
+                            return
+                        counts_available = isinstance(counts, dict)
+                        if not counts_available:
+                            # Exception object, None, or non-dict -> no counts.
+                            # The count badge is hidden (see _render_level1) rather
+                            # than rendering a misleading "(0)" on every list.
+                            logger.warning(
+                                "Choose-from-lists picker: item counts unavailable "
+                                "(showing lists without counts): %s",
+                                counts if isinstance(counts, BaseException) else 'no data',
+                            )
+                            counts = {}
+                        pdata['lists'] = user_lists
+                        pdata['counts'] = counts
+                        pdata['counts_available'] = counts_available
+                        _render_level1()
+                    except RuntimeError:
+                        return  # SEED-008: client/tab deleted mid-fetch
+
+                picker_dialog.on('show', _on_show)
                 picker_dialog.open()
 
             except RuntimeError:
                 return  # SEED-008: client/tab deleted before dialog could open
 
-        asyncio.ensure_future(_open_picker())
+        _open_picker()
 
     # Wire button handlers
     def _on_change_anchor() -> None:

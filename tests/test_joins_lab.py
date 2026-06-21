@@ -2102,6 +2102,26 @@ class TestListPickerD17:
             "the per-list count badge when counts could not be fetched."
         )
 
+    def test_list_picker_loads_via_show_handler_not_pre_await(self):
+        """D-17 regression (UAT 2026-06-21): picker dialog must mount, then load.
+
+        Root cause of "click does nothing": the picker was a naked background
+        coroutine (asyncio.ensure_future) that AWAITED the off-loop fetch BEFORE
+        building ui.dialog(). After the await the NiceGUI client slot is detached,
+        so the dialog mounts nowhere and .open() silently no-ops. The fix follows
+        the compare_modal pattern (T-119-09 client-context rule): build the dialog
+        synchronously, then fetch off-loop in an async dialog.on('show', ...)
+        handler that runs in the live client context.
+        """
+        source = self._get_source()
+        # The dialog must load its data via an on('show') handler (live client
+        # context), not by awaiting before the dialog is created.
+        assert "picker_dialog.on('show'" in source or 'picker_dialog.on("show"' in source, (
+            "D-17 regression: the picker must load lists via picker_dialog.on('show', ...) "
+            "(T-119-09 client-context rule) — building ui.dialog() after an await in a "
+            "background coroutine detaches the slot and .open() does nothing."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Phase 120 Plan 08 Task 2: D-19 "Open in Joins Lab" button on /lists
