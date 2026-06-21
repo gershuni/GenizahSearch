@@ -450,6 +450,55 @@ class TestRealLocalQueryCallSite:
 
 
 # ---------------------------------------------------------------------------
+# 7c. P2 — ASCII double-quote Hebrew abbreviations (רמב"ם) are retrievable
+#     and never emit invalid Tantivy syntax.
+# ---------------------------------------------------------------------------
+
+RAMBAM_QUOTE = 'רמב"ם'       # ASCII double-quote (typed gershayim substitute)
+RAMBAM_GERSHAYIM = "רמב״ם"   # Hebrew gershayim U+05F4
+RAMBAM_CLEAN = "רמבם"        # no separator
+
+
+class TestAsciiQuoteAbbreviation:
+    def test_strip_folds_ascii_double_quote(self):
+        # The ASCII " folds exactly like the Hebrew gershayim ".
+        assert strip_search_diacritics(RAMBAM_QUOTE) == RAMBAM_CLEAN
+        assert strip_search_diacritics(RAMBAM_GERSHAYIM) == RAMBAM_CLEAN
+
+    def test_clean_query_retrieves_ascii_quote_doc(self, tmp_path):
+        # Corpus stores רמב"ם (ASCII quote); a clean רמבם query must reach it
+        # through the content_search fold.
+        idx = _build_index(tmp_path, docs={"rambam": RAMBAM_QUOTE + " כתב"})
+        assert "rambam" in _genizah_retrieve(idx, RAMBAM_CLEAN)
+        assert "rambam" in _local_retrieve(idx, RAMBAM_CLEAN)
+
+    def test_quoted_query_retrieves_ascii_quote_doc(self, tmp_path):
+        # Typing the abbreviation WITH the quote must also retrieve (and not
+        # raise a Tantivy parse error).
+        idx = _build_index(tmp_path, docs={"rambam": RAMBAM_QUOTE + " כתב"})
+        assert "rambam" in _genizah_retrieve(idx, RAMBAM_QUOTE)
+
+    def test_build_query_strips_quote_no_invalid_syntax(self):
+        # A raw " inside a term must not survive into a quoted clause as
+        # "רמב"ם" (which Tantivy rejects). build_tantivy_query strips it.
+        q = SearchEngine.build_tantivy_query(
+            _stub_engine(), [RAMBAM_QUOTE], "exact",
+            content_search_field="content_search",
+        )
+        assert '"' + RAMBAM_QUOTE + '"' not in q   # no raw quoted term
+        assert RAMBAM_CLEAN in q                     # folded form present
+
+    def test_build_query_quote_term_parses(self, tmp_path):
+        # End-to-end: the produced query string parses cleanly against a real index.
+        idx = _build_index(tmp_path, docs={"rambam": RAMBAM_QUOTE + " כתב"})
+        q = SearchEngine.build_tantivy_query(
+            _stub_engine(), [RAMBAM_QUOTE], "exact",
+            content_search_field="content_search",
+        )
+        idx.parse_query(q, ["content"])  # must not raise
+
+
+# ---------------------------------------------------------------------------
 # 8. Source guards — both schemas conform; position fields stay whitespace
 # ---------------------------------------------------------------------------
 

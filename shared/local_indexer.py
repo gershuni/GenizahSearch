@@ -3606,6 +3606,15 @@ class LocalIndexer:
         except Exception:
             self._writer = None
         self._index = None
+        # R97.2-B / SEED-006 P1: nulling the Python refs is NOT enough on
+        # Windows — Python GC may delay the Rust-side drop, so the live index
+        # dir keeps an open handle and the os.rename in
+        # rebuild_main_index_atomic() (step 4) fails with
+        # PermissionError(13, 'Access is denied'). This bites the SEED-006
+        # schema-rebuild path, which opens self._index on the LIVE dir before
+        # the rebuild. Force the drop here, exactly as the validation block at
+        # step 2 already does for the fresh rebuild handles.
+        gc.collect()
 
     def _reopen_internal_writer_index(self) -> None:
         """Reopen _writer + _index after atomic swap so LocalIndexer can continue."""

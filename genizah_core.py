@@ -6601,8 +6601,9 @@ def expand_judeo_arabic(word: str) -> List[str]:
 # --------------------------------------------------------------------------
 
 # Matches combining diacritical marks (U+0300-U+036F), apostrophe variants (ASCII and curly),
-# and Hebrew geresh/gershayim. Does NOT match Hebrew nikud (U+05B0-U+05C7).
-COMBINING_DIACRITICALS_PATTERN = re.compile(r'[\u0300-\u036F\u0027\u05F3\u05F4\u2018\u2019]')
+# the ASCII double-quote (U+0022 — the common typed substitute for Hebrew gershayim in
+# abbreviations like רמב"ם), and Hebrew geresh/gershayim. Does NOT match Hebrew nikud (U+05B0-U+05C7).
+COMBINING_DIACRITICALS_PATTERN = re.compile(r'[\u0300-\u036F\u0022\u0027\u05F3\u05F4\u2018\u2019]')
 
 
 def strip_search_diacritics(text: str) -> str:
@@ -6610,6 +6611,7 @@ def strip_search_diacritics(text: str) -> str:
 
     Removes:
     - Combining diacritical marks (U+0300-U+036F)
+    - ASCII double-quote (U+0022) — the gershayim substitute in abbreviations (רמב"ם -> רמבם)
     - ASCII apostrophe (U+0027)
     - Hebrew geresh (U+05F3)
     - Hebrew gershayim (U+05F4)
@@ -6617,6 +6619,13 @@ def strip_search_diacritics(text: str) -> str:
 
     Preserves:
     - Hebrew base letters, nikud/vowel points, Latin chars, digits, punctuation
+
+    SEED-006 P2: folding U+0022 keeps the additive ``content_search`` field
+    (built from ``strip_search_diacritics(content)``) and the ``content_search:``
+    query clause symmetric for ASCII-quote abbreviations, so a clean ``רמבם``
+    query reaches a corpus ``רמב"ם``. The stored ``content`` field is unchanged
+    (the hebword tokenizer still keeps ``"`` inside the token), so display and
+    the gershayim form ``רמב״ם`` are unaffected.
     """
     if not text:
         return text
@@ -7909,6 +7918,16 @@ class SearchEngine:
         for term in terms:
             if term.upper() in ['AND', 'OR', 'NOT', '(', ')']:
                 parts.append(term)
+                continue
+
+            # SEED-006 P2: a raw ASCII double-quote inside a term (the typed
+            # gershayim substitute, e.g. רמב"ם) would break the quoted Tantivy
+            # clauses below (f'"{term}"' -> "רמב"ם" = a parse error). The normal
+            # entry points already fold it via strip_search_diacritics, but
+            # sanitize defensively here too so direct callers (tests/API) are
+            # safe and the exact clause matches the diacritic-folded variants.
+            term = term.replace('"', '')
+            if not term:
                 continue
 
             if mode == 'fuzzy':

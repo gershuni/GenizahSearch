@@ -121,6 +121,33 @@ def test_run_deferred_is_noop_when_not_flagged(tmp_path):
         idx.close()
 
 
+def test_close_internal_writer_index_forces_gc(tmp_path, monkeypatch):
+    """P1: the live-index handle must be GC'd before the atomic-rebuild rename.
+
+    On Windows, nulling self._index/_writer is not enough — Python GC may delay
+    the Rust-side drop, so os.rename(live_dir -> .old) in rebuild_main_index_atomic
+    fails with PermissionError(13). _close_internal_writer_index must call
+    gc.collect() after dropping the handles (mirroring the rebuild validation
+    block). Cannot reproduce the rename failure on POSIX, so guard the mechanism.
+    """
+    import shared.local_indexer as li
+
+    index_dir, lab_dir, db_path = _make_dirs(tmp_path)
+    idx = _new_indexer(index_dir, lab_dir, db_path)
+    try:
+        calls = {"n": 0}
+        real_collect = li.gc.collect
+        monkeypatch.setattr(li.gc, "collect", lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1), real_collect())[1])
+
+        idx._close_internal_writer_index()
+
+        assert idx._index is None
+        assert idx._writer is None
+        assert calls["n"] >= 1, "expected gc.collect() after dropping handles"
+    finally:
+        idx.close()
+
+
 def test_run_deferred_tolerates_marker_already_current(tmp_path):
     """Race: another path rebuilt + rewrote the marker before we ran."""
     index_dir, lab_dir, db_path = _make_dirs(tmp_path)
