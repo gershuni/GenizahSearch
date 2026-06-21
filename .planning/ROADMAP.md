@@ -68,7 +68,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 - [x] **Phase 117: Vertical Spine** - `/joins-lab` route + safe_storage schema + `WebSearchExecutor` adapter (off-loop) + anchor image/transcription + minimal anchor-side builder + search → candidate grid. Proves the riskiest seam (FND-01 adapter) end-to-end. **COMPLETE 2026-06-17**
 - [x] **Phase 118: Joins, Entry & Full Builders** - Known-joins group (PGP + FJMS + user + community, multitenant-safe) + "Find joins" from `/search` and `/browse` + other-side builder with web page contract + per-line modifiers + global toggles (variants/JA/spacing/bidirectional) applied correctly. (completed 2026-06-18)
 - [x] **Phase 119: Candidates, Compare & Visual Similarity** - Full candidate surface (grid+table, sys_id-keyed triage, self-match, filters, pagination, off-loop enrichment) + side-by-side Compare (per-pane zoom/nav, verdict sync) + VS toggle (merge look-alikes, eye badge everywhere). (completed 2026-06-19)
-- [ ] **Phase 120: Actions & Persistence** - Add-as-Join (login-gated) + bulk puzzle handoff + add-to-list / export + builder/triage/view state survive refresh (server-side per-session, re-run on restore) + clear/reset.
+- [x] **Phase 120: Actions & Persistence** - Add-as-Join (login-gated) + bulk puzzle handoff + add-to-list / export + builder/triage/view state survive refresh (server-side per-session; restore prefers an instant per-user results snapshot, re-run as fallback) + clear/reset. **COMPLETE 2026-06-21** — 5/5 success criteria verified (120-VERIFICATION.md); ~6 rounds live UAT folded in (selection bulk toolbar, results-persist-across-navigation, builder/triage/single_text/search_type restore, RTL prev/next in Compare+Grid, HE string fixes, Compare outer-scroll layout).
 - [ ] **Phase 121: i18n Polish** - Complete bilingual EN/HE coverage + RTL layout verification + Hebrew-leak audit across all surfaces.
 
 ## Phase Details
@@ -175,7 +175,7 @@ Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-a
 - [x] 120-05-PLAN.md — ACT-02 bulk Add-to-Puzzle: new multi-fragment safe_storage staging handoff (D-04) [Wave 4]
 - [x] 120-06-PLAN.md — ACT-03 Add-to-List (D-05) + flat CSV/XLSX Export with off-loop batched transcription (D-06) [Wave 5]
 - [x] 120-07-PLAN.md — SEED-007 Compare/workbench: Make-an-anchor (D-07) + Browse-in-Compare (D-08) + info buttons (D-09) + image prefetch (D-10) + hide VS toggle (D-12) [Wave 6]
-- [ ] 120-08-PLAN.md — Lists integration: choose-from-lists picker (D-17) + /lists entry (D-19) + deferred Phase-119 verification close-out (D-21) [Wave 7]
+- [x] 120-08-PLAN.md — Lists integration: choose-from-lists picker (D-17) + /lists entry (D-19) + deferred Phase-119 verification close-out (D-21) [Wave 7] — picker hardened during UAT (login gate, dialog.on('show') render, on-loop authed calls, graceful count degradation)
 
 **UI hint**: yes
 
@@ -200,5 +200,5 @@ Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-a
 | 117. Vertical Spine | 6/6 | Complete    | 2026-06-18 |
 | 118. Joins, Entry & Full Builders | 6/6 | Complete    | 2026-06-19 |
 | 119. Candidates, Compare & Visual Similarity | 11/11 | Complete   | 2026-06-19 |
-| 120. Actions & Persistence | 7/8 | In Progress|  |
+| 120. Actions & Persistence | 7/8 | Complete    | 2026-06-21 |
 | 121. i18n Polish | 0/TBD | Not started | - |
