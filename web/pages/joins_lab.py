@@ -1182,8 +1182,11 @@ def create_joins_lab_page(
                 .props('color=negative unelevated icon=stop_circle')
                 .mark('stop_search_btn')
                 .tooltip(tr('Stop search and show partial results'))
-                .set_visibility(False)
             )
+            # NOTE: set_visibility() returns None, so it must NOT terminate the
+            # builder chain above (that would make stop_btn None and 500 the page
+            # at stop_btn.on('click', ...)). Hide it on its own statement instead.
+            stop_btn.set_visibility(False)
             # New Search (reset) — parity with /search's restart_alt button. Clears
             # both builders + results but KEEPS the loaded anchor ("Change anchor"
             # switches fragments). Wired below, next to the other handlers.
