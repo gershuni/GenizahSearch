@@ -21,7 +21,8 @@ Schema (extended in Phase 120; same ``schema_version: 1`` as Phase 117):
         #    'line_end', 'gap_to_next_line'}.  (A legacy flat shape
         #   {'term', 'gap_to_next', 'modifiers'} is still tolerated on read.)
         'builder_rows': list,           # word-model lines_state; max 20 lines
-        'builder_mode': str,            # 'exact' | 'variants' | 'fuzzy'
+        'builder_mode': str,            # UI SEARCH TYPE: responsa|exact|variants|fuzzy|regex
+        'variants_on': bool,            # Responsa-style Variants toggle
         'single_text': str,             # single-line-mode query (not in lines_state)
         'text_position': str,           # 'anywhere' | 'start' | 'end' | 'line_start' | 'line_end'
         'flex_spacing': bool,
@@ -225,6 +226,7 @@ def write_full_state(
     anchor_volume_ie: Optional[str] = None,
     builder_rows: Optional[list] = None,
     builder_mode: str = 'exact',
+    variants_on: bool = False,
     single_text: str = '',
     text_position: str = 'anywhere',
     flex_spacing: bool = False,
@@ -261,7 +263,10 @@ def write_full_state(
 
         # Phase 120 additions — caps enforced below
         'builder_rows': _cap_rows(builder_rows),
-        'builder_mode': builder_mode if isinstance(builder_mode, str) else 'exact',
+        # builder_mode holds the UI SEARCH TYPE ('responsa'|'exact'|'variants'|
+        # 'fuzzy'|'regex'), not the engine mode — see joins_lab._persist_state.
+        'builder_mode': builder_mode if isinstance(builder_mode, str) else 'responsa',
+        'variants_on': bool(variants_on),
         # single-line-mode query text (Exact/Variants/Fuzzy/Regex) — NOT in the
         # word-model lines_state, so it must be persisted separately or it is lost
         # on restore (round-5: "does not remember the search phrase").

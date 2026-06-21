@@ -2088,3 +2088,37 @@ def test_round5_triage_restored_on_reopen(joins_lab_smoke_runner):
         )
 
     joins_lab_smoke_runner(driver)
+
+
+def test_round5_search_type_restored_on_reopen(joins_lab_smoke_runner):
+    """Round-5 UAT: the builder SEARCH TYPE must survive a re-open.
+
+    The harness searches in the default 'Responsa-style' type. Re-opening must
+    bring back Responsa-style as the ACTIVE type (color=primary) — NOT 'Exact'.
+    Bug: _persist_state saved get_mode() (engine mode: responsa→'exact'), which
+    restore fed back as the search_type, so a Responsa search reopened as Exact.
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        await user.open('/joins-lab')
+        await asyncio.sleep(1.4)
+
+        from nicegui import ElementFilter, ui
+        # The Responsa-style segmented button — match EN or HE label.
+        resp_labels = {'Responsa-style', 'בסגנון השו״ת'}
+        with user._client:
+            resp_btns = [
+                b for b in ElementFilter(kind=ui.button)
+                if b._props.get('label', '') in resp_labels
+            ]
+            active = [b for b in resp_btns if b._props.get('color') == 'primary']
+        assert resp_btns, "precondition: no Responsa-style type button found."
+        assert active, (
+            "Round-5 FAIL: search type NOT restored — 'Responsa-style' is not the "
+            "active type after re-open (a Responsa search reopened as Exact). "
+            "_persist_state must persist search_type, not get_mode()."
+        )
+
+    joins_lab_smoke_runner(driver)

@@ -3792,9 +3792,13 @@ def create_joins_lab_page(
             # Anchor identity
             anchor_sys_id=anchor_sys_id,
             anchor_fl_id=anchor_fl_id,
-            # Builder inputs (D-13): rows, mode, single-line text, text_position
+            # Builder inputs (D-13): rows, search-TYPE, variants, single text, position.
+            # builder_mode persists the UI SEARCH TYPE ('responsa'|'exact'|'variants'|
+            # 'fuzzy'|'regex') — NOT get_mode() (the engine mode), which collapses
+            # Responsa→'exact'/'variants' and so restored a Responsa search as Exact.
             builder_rows=ab_state.get('lines_state', []),
-            builder_mode=anchor_builder['get_mode'](),
+            builder_mode=ab_state.get('search_type', 'responsa'),
+            variants_on=ab_state.get('variants_on', False),
             single_text=ab_state.get('single_text', ''),
             text_position=anchor_builder['get_text_position'](),
             # Global options

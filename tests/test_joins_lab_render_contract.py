@@ -167,6 +167,21 @@ class TestRound5SourceContract:
             'blob to anchor-only (round-5).'
         )
 
+    def test_search_type_persisted_not_engine_mode(self):
+        """_persist_state must persist the UI search_type, NOT get_mode() (engine
+        mode), else a Responsa search reopens as Exact (round-5)."""
+        src = self._page_source()
+        assert "builder_mode=ab_state.get('search_type'" in src, (
+            "_persist_state must persist ab_state['search_type'] as builder_mode."
+        )
+        assert "builder_mode=anchor_builder['get_mode']()" not in src, (
+            "_persist_state must NOT persist get_mode() — it collapses Responsa to "
+            "an engine mode and loses the search type."
+        )
+        assert "variants_on=ab_state.get('variants_on'" in src, (
+            "_persist_state must persist the Variants toggle explicitly."
+        )
+
     def test_single_text_persisted_and_restored(self):
         """single-line-mode query text must be persisted + restored (not hardcoded '')."""
         src = self._page_source()
