@@ -174,7 +174,7 @@ Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-a
 - [x] 120-04-PLAN.md — ACT-01 Add-as-Join (proposed status, confirmed_only=False + force_refresh per D-02) + D-03 remove-my-join [Wave 3]
 - [x] 120-05-PLAN.md — ACT-02 bulk Add-to-Puzzle: new multi-fragment safe_storage staging handoff (D-04) [Wave 4]
 - [x] 120-06-PLAN.md — ACT-03 Add-to-List (D-05) + flat CSV/XLSX Export with off-loop batched transcription (D-06) [Wave 5]
-- [ ] 120-07-PLAN.md — SEED-007 Compare/workbench: Make-an-anchor (D-07) + Browse-in-Compare (D-08) + info buttons (D-09) + image prefetch (D-10) + hide VS toggle (D-12) [Wave 6]
+- [x] 120-07-PLAN.md — SEED-007 Compare/workbench: Make-an-anchor (D-07) + Browse-in-Compare (D-08) + info buttons (D-09) + image prefetch (D-10) + hide VS toggle (D-12) [Wave 6]
 - [ ] 120-08-PLAN.md — Lists integration: choose-from-lists picker (D-17) + /lists entry (D-19) + deferred Phase-119 verification close-out (D-21) [Wave 7]
 
 **UI hint**: yes
@@ -200,5 +200,5 @@ Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-a
 | 117. Vertical Spine | 6/6 | Complete    | 2026-06-18 |
 | 118. Joins, Entry & Full Builders | 6/6 | Complete    | 2026-06-19 |
 | 119. Candidates, Compare & Visual Similarity | 11/11 | Complete   | 2026-06-19 |
-| 120. Actions & Persistence | 6/8 | In Progress|  |
+| 120. Actions & Persistence | 7/8 | In Progress|  |
 | 121. i18n Polish | 0/TBD | Not started | - |
