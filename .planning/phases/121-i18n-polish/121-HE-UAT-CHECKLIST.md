@@ -165,23 +165,30 @@ line items are PASS (or any FAIL items were fixed inline and re-verified).
 
 | Surface | Result | Notes / Inline Fixes Made |
 |---------|--------|--------------------------|
-| 1. Anchor Pane | `[ ] PASS / [ ] FAIL` | |
-| 2. Query Builder | `[ ] PASS / [ ] FAIL` | |
-| 3. Candidate Grid | `[ ] PASS / [ ] FAIL` | |
-| 4. Candidate Table | `[ ] PASS / [ ] FAIL` | |
-| 5. Compare Modal | `[ ] PASS / [ ] FAIL` | |
-| 6. Known-Joins Group | `[ ] PASS / [ ] FAIL` | |
-| 7. Dialogs and Toasts | `[ ] PASS / [ ] FAIL` | |
-| 8. Entry Points | `[ ] PASS / [ ] FAIL` | |
+| 1. Anchor Pane | PASS | |
+| 2. Query Builder | PASS | |
+| 3. Candidate Grid | PASS | String fixes applied: "Add as Join" הוסף כחיבור→הוסף כצירוף (bfc658fa); "View in Browse" צפה בדפדוף→עיין בכתב יד (bfc658fa); gear icon tune→settings to match ⚙ tooltip (1a8c9aca) |
+| 4. Candidate Table | PASS | |
+| 5. Compare Modal | PASS | Known-join confirm dialog body reworded to a question form (bfc658fa) |
+| 6. Known-Joins Group | PASS | |
+| 7. Dialogs and Toasts | PASS | |
+| 8. Entry Points | PASS | Image-resolution + zoom defect found but is language-independent; deferred → SEED-010 (ea4140f9) |
 
 **Overall sign-off:**
 
-- [ ] PASS — All surfaces verified, any inline fixes committed, SC#2 is met.
+- [x] PASS — All surfaces verified, any inline fixes committed, SC#2 is met.
 - [ ] FAIL — One or more surfaces not yet resolved; list open items below.
 
-**Date:** _______________
+**Date:** 2026-06-21
 
-**Signed by:** _______________
+**Signed by:** Hillel
+
+**Conditional note:** Overall PASS. The i18n/RTL surfaces are accepted and SC#2 is met. Inline
+string and icon fixes were applied during the pass (bfc658fa, 1a8c9aca). An image-resolution +
+zoom defect was found (CUDL/Oxford images not resolving consistently; zoom dead when image fails
+to load) but is language-independent and was untestable during an NLI outage — explicitly deferred
+as SEED-010 (logged ea4140f9; docs/OPEN_ISSUES.md P2 row) and out of i18n scope.
 
 **Open items (if any FAIL):**
-<!-- List any remaining FAILs, their OPEN_ISSUES.md entry ref, or seed ref -->
+- SEED-010: Joins Lab image-resolution + zoom bug (CUDL/Oxford images / zoom on failed load) —
+  language-independent defect; deferred to dedicated cloud-branch debug/fix. See docs/OPEN_ISSUES.md.
