@@ -1703,6 +1703,8 @@ class MyLibraryTab(QWidget):
         self.is_searchable = True
         try:
             self._refresh_folder_list_ui()
+            # Codex HIGH #2 (re-review): re-enable Reset/etc. now the gate is clear.
+            self._update_reset_button_state()
         except Exception:
             logger.exception("MyLibraryTab: refresh after schema-rebuild error failed")
 
@@ -1844,6 +1846,16 @@ class MyLibraryTab(QWidget):
     ) -> None:
         """Acquire mutex and start LocalIndexerWorker; queue if mutex held (D-25)."""
         if self._indexer is None:
+            return
+
+        # SEED-006 (Codex HIGH #2, re-review): defense-in-depth chokepoint — never
+        # start a scan/index worker while the deferred schema rebuild is in flight
+        # (it renames the same dirs / uses the same DB). User entry points show a
+        # notice; this catches any other caller (e.g. a queued action).
+        if self._schema_rebuild_in_progress():
+            logger.info(
+                "MyLibraryTab._start_worker: blocked — schema rebuild in progress"
+            )
             return
 
         if not self._indexer_mutex.tryLock():
@@ -2431,6 +2443,9 @@ class MyLibraryTab(QWidget):
         """Open folder picker; run single-folder ceiling check; add + scan (D-16 + D-26)."""
         if self._indexer is None:
             return
+        if self._schema_rebuild_in_progress():  # Codex HIGH #2 (re-review)
+            self._warn_schema_rebuild_busy()
+            return
         path = QFileDialog.getExistingDirectory(
             self, tr("Select folder to index")
         )
@@ -2469,6 +2484,9 @@ class MyLibraryTab(QWidget):
     def _on_remove_folder_clicked(self) -> None:
         """Synchronous delete (D-20); then reload indexes (HIGH-1 call site 2)."""
         if self._indexer is None:
+            return
+        if self._schema_rebuild_in_progress():  # Codex HIGH #2 (re-review)
+            self._warn_schema_rebuild_busy()
             return
         items = self._folder_list.selectedItems()
         if not items:
