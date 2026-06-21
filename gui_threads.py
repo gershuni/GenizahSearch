@@ -705,14 +705,30 @@ class PGPSourceWorker(QThread):
                 get_document_for_fragment,
                 get_section_for_page
             )
+            from shared.fgp_service import (
+                get_fgp_sources_for_fragment, get_fgp_section_for_page, source_provider
+            )
 
-            # Get all sources (editions + translations) for this fragment
-            all_sources = get_all_sources_for_fragment(self.sys_id)
+            # Get all sources (editions + translations) for this fragment, then
+            # merge FGP transcriptions as additional, distinct sources (FGP-06).
+            # get_fgp_sources_for_fragment returns [] when the flag is off / DB absent.
+            all_sources = get_all_sources_for_fragment(self.sys_id) or []
+            all_sources = all_sources + (get_fgp_sources_for_fragment(self.sys_id) or [])
 
             # Filter sources by page (recto/verso)
             current_page_info = 'recto' if self.page_num == 1 else 'verso'
             page_sources = []
             for source in all_sources:
+                # FGP: split via its dedicated splitter; include only if it has
+                # content for this page (never duplicated on both sides; FGP-02).
+                if source_provider(source) == 'fgp':
+                    fgp_text = get_fgp_section_for_page(source, self.page_num)
+                    if fgp_text:
+                        fgp_src = dict(source)
+                        fgp_src['content'] = fgp_text
+                        page_sources.append(fgp_src)
+                    continue
+
                 source_page = source.get('page_info')
                 is_translation = 'Translation' in (source.get('doc_relation') or '')
 
@@ -838,10 +854,13 @@ class ReadingDeskWorker(QThread):
                 get_all_sources_for_fragment,
                 get_document_for_fragment,
             )
+            from shared.fgp_service import get_fgp_sources_for_fragment
             results = []
             for sys_id in self.sys_ids:
                 try:
                     sources = get_all_sources_for_fragment(sys_id) or []
+                    # Merge FGP as additional, distinct sources (FGP-06; [] when off).
+                    sources = sources + (get_fgp_sources_for_fragment(sys_id) or [])
                     pgp_doc = get_document_for_fragment(sys_id)
                     results.append((sys_id, sources, pgp_doc or {}))
                 except Exception as e:

@@ -1307,19 +1307,21 @@ class ResultDialog(QDialog):
         correction_id = version_data.get('correction_id')
         source_id = version_data.get('source_id')
 
-        # Build cache key
-        if source in ('pgp_edition', 'pgp_translation'):
-            cache_key = f"pgp_{source_id}" if source_id else source
+        # Build cache key. FGP renders like PGP but namespaced (fgp_/pgp_) so the
+        # shared integer source_id never collides across the two sidecars (FGP-06).
+        if source in ('pgp_edition', 'pgp_translation', 'fgp_edition', 'fgp_translation'):
+            prefix = 'fgp' if source.startswith('fgp') else 'pgp'
+            cache_key = f"{prefix}_{source_id}" if source_id else source
         else:
             cache_key = f"{source}_{version_id or correction_id}" if (version_id or correction_id) else source
 
         if cache_key in self._rd_versions_cache:
             content = self._rd_versions_cache[cache_key]
-            if source == 'pgp_translation':
+            if source in ('pgp_translation', 'fgp_translation'):
                 language = version_data.get('language', '')
                 is_rtl = language != 'English'
                 self._rd_display_pgp_text(content, is_rtl=is_rtl)
-            elif source == 'pgp_edition':
+            elif source in ('pgp_edition', 'fgp_edition'):
                 self._rd_display_pgp_text(content, is_rtl=True)
             else:
                 self._rd_display_text(content)
@@ -1330,20 +1332,22 @@ class ResultDialog(QDialog):
             self.text_ms.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
             if hasattr(self, '_rd_original_text'):
                 self._rd_display_text(self._rd_original_text)
-        elif source == "pgp_edition":
-            # PGP edition content is stored directly in version_data
+        elif source in ("pgp_edition", "fgp_edition"):
+            prefix = 'fgp' if source == 'fgp_edition' else 'pgp'
+            # Edition content is stored directly in version_data
             content = version_data.get('content', '')
             if content:
                 if source_id:
-                    self._rd_versions_cache[f"pgp_{source_id}"] = content
+                    self._rd_versions_cache[f"{prefix}_{source_id}"] = content
                 self._rd_display_pgp_text(content, is_rtl=True)
-        elif source == "pgp_translation":
-            # PGP translation content is stored directly in version_data
+        elif source in ("pgp_translation", "fgp_translation"):
+            prefix = 'fgp' if source == 'fgp_translation' else 'pgp'
+            # Translation content is stored directly in version_data
             content = version_data.get('content', '')
             language = version_data.get('language', '')
             if content:
                 if source_id:
-                    self._rd_versions_cache[f"pgp_{source_id}"] = content
+                    self._rd_versions_cache[f"{prefix}_{source_id}"] = content
                 # English translations are LTR, everything else RTL
                 is_rtl = language != 'English'
                 self._rd_display_pgp_text(content, is_rtl=is_rtl)

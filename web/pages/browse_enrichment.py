@@ -24,6 +24,8 @@ from nicegui import ui, run
 
 from web.translations import tr
 from web.document_service import get_document_for_fragment, get_section_for_page, get_all_sources_for_fragment
+from web.feature_flags import web_fgp_enabled
+from shared.fgp_service import get_fgp_sources_for_fragment, filter_sources_for_page
 from web.pages.browse_state import BrowseState, _crossref_cache
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
@@ -73,7 +75,10 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
         _page_p_num = page.p_num
 
         def _pgp_sync():
-            all_sources = get_all_sources_for_fragment(_page_sys_id)
+            all_sources = get_all_sources_for_fragment(_page_sys_id) or []
+            # Merge FGP transcriptions as additional, distinct sources (FGP-05).
+            if web_fgp_enabled():
+                all_sources = all_sources + (get_fgp_sources_for_fragment(_page_sys_id) or [])
             pgp_doc = get_document_for_fragment(_page_sys_id, _page_p_num)
             return all_sources, pgp_doc
 
@@ -285,19 +290,10 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
     if generation != refs.load_generation['value']:
         return
 
-    # Process PGP sources
+    # Process PGP + FGP sources — centralized per-page filter (FGP-04.4). Preserves
+    # the prior PGP behavior exactly and splits FGP via its dedicated splitter.
     if all_sources:
-        current_page_info = 'recto' if page.p_num == 1 else 'verso'
-        page_sources = []
-        for source in all_sources:
-            source_page = source.get('page_info')
-            if source_page == current_page_info or not source_page:
-                is_translation = 'Translation' in (source.get('doc_relation') or '')
-                if source.get('content'):
-                    if not is_translation and not source_page:
-                        source['content'] = get_section_for_page(source['content'], page.p_num, source.get('sections'))
-                page_sources.append(source)
-        state.all_sources = page_sources if page_sources else None
+        state.all_sources = filter_sources_for_page(all_sources, page.p_num) or None
     else:
         state.all_sources = None
 

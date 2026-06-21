@@ -4749,38 +4749,43 @@ class GenizahGUI(QMainWindow):
         version_id = version_data.get('version_id')
         source_id = version_data.get('source_id')
 
-        # Check cache first
-        if source in ('pgp_edition', 'pgp_translation'):
-            cache_key = f"pgp_{source_id}" if source_id else source
+        # Check cache first. FGP renders like PGP (RTL editions; translations RTL
+        # unless English) but namespaced (fgp_/pgp_) so the shared integer
+        # source_id never collides across the two sidecars (FGP-03/06).
+        if source in ('pgp_edition', 'pgp_translation', 'fgp_edition', 'fgp_translation'):
+            prefix = 'fgp' if source.startswith('fgp') else 'pgp'
+            cache_key = f"{prefix}_{source_id}" if source_id else source
         else:
             cache_key = f"{source}_{version_id}" if version_id else source
 
         if cache_key in self._browse_versions_cache:
             content = self._browse_versions_cache[cache_key]
-            if source == 'pgp_translation':
+            if source in ('pgp_translation', 'fgp_translation'):
                 language = version_data.get('language', '')
                 is_rtl = language != 'English'
                 self._browse_display_pgp_text(content, is_rtl=is_rtl)
-            elif source == 'pgp_edition':
+            elif source in ('pgp_edition', 'fgp_edition'):
                 self._browse_display_pgp_text(content, is_rtl=True)
             else:
                 self._browse_display_version_text(content)
             return
 
-        if source == "pgp_edition":
-            # PGP edition content is stored directly in version_data
+        if source in ("pgp_edition", "fgp_edition"):
+            prefix = 'fgp' if source == 'fgp_edition' else 'pgp'
+            # Edition content is stored directly in version_data
             content = version_data.get('content', '')
             if content:
                 if source_id:
-                    self._browse_versions_cache[f"pgp_{source_id}"] = content
+                    self._browse_versions_cache[f"{prefix}_{source_id}"] = content
                 self._browse_display_pgp_text(content, is_rtl=True)
-        elif source == "pgp_translation":
-            # PGP translation content is stored directly in version_data
+        elif source in ("pgp_translation", "fgp_translation"):
+            prefix = 'fgp' if source == 'fgp_translation' else 'pgp'
+            # Translation content is stored directly in version_data
             content = version_data.get('content', '')
             language = version_data.get('language', '')
             if content:
                 if source_id:
-                    self._browse_versions_cache[f"pgp_{source_id}"] = content
+                    self._browse_versions_cache[f"{prefix}_{source_id}"] = content
                 # English translations are LTR, everything else RTL
                 is_rtl = language != 'English'
                 self._browse_display_pgp_text(content, is_rtl=is_rtl)
@@ -4854,17 +4859,25 @@ class GenizahGUI(QMainWindow):
         Returns:
             True if any PGP editions/translations were added, False if only V0.8.
         """
-        editions = [s for s in sources
+        from shared.fgp_service import source_provider, source_relation_kind
+
+        # Split by provider so FGP gets its OWN group and never folds into PGP,
+        # even though both use 'Digital Edition' / 'Digital Translation' (FGP-06/07).
+        pgp_sources = [s for s in sources if source_provider(s) != 'fgp']
+        fgp_sources = [s for s in sources
+                       if source_provider(s) == 'fgp' and s.get('content')]
+
+        editions = [s for s in pgp_sources
                      if 'Edition' in (s.get('doc_relation') or '') and s.get('content')]
         # Exclude sources already classified as editions (compound doc_relation like
         # "Edition ; Translation ; Discussion" should only appear once, as edition)
         edition_ids = {id(s) for s in editions}
-        translations = [s for s in sources
+        translations = [s for s in pgp_sources
                          if 'Translation' in (s.get('doc_relation') or '')
                          and s.get('content')
                          and id(s) not in edition_ids]
 
-        if not editions and not translations:
+        if not editions and not translations and not fgp_sources:
             return False
 
         combo.blockSignals(True)
@@ -4913,6 +4926,31 @@ class GenizahGUI(QMainWindow):
                         "source_id": trans.get('id')
                     })
 
+        # === FGP Group (distinct from PGP; FGP-07) ===
+        if fgp_sources:
+            combo.addItem("─────────────", {"source": "header"})
+            combo.model().item(combo.count() - 1).setEnabled(False)
+            combo.addItem("-- FGP --", {"source": "header"})
+            combo.model().item(combo.count() - 1).setEnabled(False)
+
+            for fsrc in fgp_sources:
+                is_trans = source_relation_kind(fsrc) == 'translation'
+                language = fsrc.get('language') or ''
+                if is_trans:
+                    lang_part = f"{language} " if language else ""
+                    label = f"  FGP {lang_part}{tr('Translation')}"
+                else:
+                    label = f"  {tr('FGP Transcription')}"
+                combo.addItem(label, {
+                    "source": "fgp_translation" if is_trans else "fgp_edition",
+                    "content": fsrc.get('content', ''),
+                    "scholar": fsrc.get('source_scholar', 'FGP'),
+                    "language": language,
+                    "attribution": fsrc.get('attribution'),
+                    "source_id": fsrc.get('id'),
+                    "uid": fsrc.get('uid'),
+                })
+
         # === Visual divider before HTR ===
         combo.addItem("─────────────", {"source": "header"})
         combo.model().item(combo.count() - 1).setEnabled(False)
@@ -4924,16 +4962,21 @@ class GenizahGUI(QMainWindow):
         return True
 
     def _auto_select_pgp_edition(self, combo):
-        """Find the first PGP edition item and set it as current.
+        """Find the first edition item and set it as current.
+
+        PGP-first (the recommended default); falls back to the first FGP edition
+        when no PGP edition exists, so an FGP-only fragment still defaults to a
+        transcription rather than V0.8 (FGP-07).
 
         Returns:
             The item data dict if found, None otherwise.
         """
-        for i in range(combo.count()):
-            data = combo.itemData(i)
-            if data and data.get('source') == 'pgp_edition':
-                combo.setCurrentIndex(i)
-                return data
+        for kind in ('pgp_edition', 'fgp_edition'):
+            for i in range(combo.count()):
+                data = combo.itemData(i)
+                if data and data.get('source') == kind:
+                    combo.setCurrentIndex(i)
+                    return data
         return None
 
     def _check_document_community_status(self):
@@ -8976,7 +9019,7 @@ class GenizahGUI(QMainWindow):
         saved_corrections = []
         for i in range(self.browse_version_combo.count()):
             data = self.browse_version_combo.itemData(i)
-            if data and data.get('source') not in ('original', 'header', 'pgp_edition', 'pgp_translation', None):
+            if data and data.get('source') not in ('original', 'header', 'pgp_edition', 'pgp_translation', 'fgp_edition', 'fgp_translation', None):
                 saved_corrections.append((self.browse_version_combo.itemText(i), data))
 
         # Populate combo with PGP items (clears and rebuilds: PGP Editions > Translations > V0.8)
