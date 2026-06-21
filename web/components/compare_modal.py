@@ -32,6 +32,7 @@ covers the dynamically-created Compare viewers (anchor_viewer.py:59-60).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Optional, Callable
 
@@ -202,6 +203,7 @@ def create_compare_modal(
     metadata_prefetcher: Optional[Callable] = None,
     on_candidate_change: Optional[Callable] = None,
     on_add_as_join: Optional[Callable] = None,
+    on_add_to_puzzle: Optional[Callable] = None,
 ) -> ui.dialog:
     """Full-screen two-pane Compare modal (CMP-01 / CMP-02 / CMP-03 / VSM-02).
 
@@ -234,6 +236,10 @@ def create_compare_modal(
                              candidate (_state['current_candidate']).  The callback
                              handles the anonymous/auth branching + confirm dialog.
                              When None the button is not rendered.
+        on_add_to_puzzle:    Optional callback(sys_id) for the "Add to Puzzle" button in
+                             the modal header (Round-4 Issue 7).  Stages the anchor + the
+                             CURRENTLY-shown candidate into the Fragment Puzzle.  When None
+                             the button is not rendered.
 
     Returns:
         The ui.dialog() instance (caller opens it with dialog.open()).
@@ -309,6 +315,10 @@ def create_compare_modal(
     # D-08: candidate shelfmark+browse row ref — cleared+rebuilt in _fill_candidate
     # so the Browse URL stays in sync each time the candidate flips.
     _cand_shelfmark_row_ref: list = []  # [row_element] — set during UI build
+
+    # Round-4 Issue 3: candidate title row ref — cleared+rebuilt in _fill_candidate
+    # so the title tracks the flipped candidate (was previously missing entirely).
+    _cand_title_row_ref: list = []     # [row_element] — set during UI build
 
     def _update_counter() -> None:
         """Update the flip-through counter label (e.g. '3 / 47')."""
@@ -434,6 +444,21 @@ def create_compare_modal(
         elif _cand_shelfmark_ref:
             # Fallback: if no shelfmark-row ref just update the label text
             _cand_shelfmark_ref[0].set_text(cand.shelfmark or "?")
+
+        # Round-4 Issue 3: candidate title — clear + rebuild on each flip.
+        if _cand_title_row_ref:
+            title_row = _cand_title_row_ref[0]
+            title_row.clear()
+            _cand_title = getattr(cand, "title", None)
+            if _cand_title:
+                with title_row:
+                    ui.label(_cand_title).classes("text-sm").mark(
+                        "compare-candidate-title"
+                    ).style(
+                        "color: var(--text-secondary); direction: rtl;"
+                        " overflow: hidden; display: -webkit-box;"
+                        " -webkit-line-clamp: 2; -webkit-box-orient: vertical;"
+                    )
 
         # Badge row — rebuild (clear + repopulate)
         if _cand_badge_row_ref:
@@ -594,6 +619,26 @@ def create_compare_modal(
                         .tooltip(tr("Add as Join"))
                     )
 
+                # Round-4 Issue 7: Add to Puzzle — stages anchor + CURRENT candidate
+                # into the Fragment Puzzle and navigates to /puzzle.
+                if on_add_to_puzzle is not None:
+                    def _on_add_puzzle_click() -> None:
+                        cand = _state.get("current_candidate")
+                        if cand is None:
+                            return
+                        on_add_to_puzzle(cand.sys_id)
+
+                    (
+                        ui.button(
+                            tr("Add to Puzzle"),
+                            icon="extension",
+                            on_click=_on_add_puzzle_click,
+                        )
+                        .props("flat color=primary")
+                        .mark("compare-add-to-puzzle")
+                        .tooltip(tr("Add anchor + this candidate to the Fragment Puzzle"))
+                    )
+
                 ui.button(icon="close", on_click=_handle_close).props(
                     "flat dense round"
                 ).classes("text-white")
@@ -603,92 +648,129 @@ def create_compare_modal(
                 "overflow:hidden; flex:1;"
             ):
                 # ── Anchor pane (left) ────────────────────────────────────────
-                with ui.column().classes("flex-1 gap-4 p-4 overflow-y-auto").style(
+                # Round-4 Issue 3: split each pane into a FIXED (non-scrolling)
+                # header (label + shelfmark/title + info buttons) and a SCROLLING
+                # viewer area below.  Previously the info buttons sat at the bottom
+                # of the scrolling content and overflowed off-screen at 100% zoom.
+                with ui.column().classes("flex-1 gap-2 p-4 min-h-0").style(
                     "border-right: 2px solid var(--border-light);"
+                    " display:flex; flex-direction:column; overflow:hidden;"
                 ):
-                    ui.label(tr("Anchor")).classes(
-                        "text-xs font-bold uppercase"
-                    ).style("color: var(--text-muted);")
+                    # Fixed header block (does not scroll)
+                    with ui.column().classes("w-full gap-1").style("flex-shrink:0;"):
+                        ui.label(tr("Anchor")).classes(
+                            "text-xs font-bold uppercase"
+                        ).style("color: var(--text-muted);")
 
-                    # D-08: shelfmark + Browse button row for anchor pane
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label(anchor_cand.shelfmark or "?").classes(
-                            "text-sm font-semibold"
-                        ).style("color: var(--primary-700);")
-                        # Browse icon — opens anchor in /browse (new tab)
-                        _anchor_browse_url = build_browse_url(anchor_cand)
-                        (
-                            ui.button(icon="open_in_new")
-                            .props(
-                                "flat dense round"
-                                f' aria-label="{tr("Open anchor in Browse (new tab)")}"'
+                        # D-08: shelfmark + Browse button row for anchor pane
+                        with ui.row().classes("items-center gap-1"):
+                            ui.label(anchor_cand.shelfmark or "?").classes(
+                                "text-sm font-semibold"
+                            ).style("color: var(--primary-700);")
+                            # Browse icon — opens anchor in /browse (new tab)
+                            _anchor_browse_url = build_browse_url(anchor_cand)
+                            (
+                                ui.button(icon="open_in_new")
+                                .props(
+                                    "flat dense round"
+                                    f' aria-label="{tr("Open anchor in Browse (new tab)")}"'
+                                )
+                                .classes("text-white")
+                                .tooltip(tr("Open anchor in Browse (new tab)"))
+                                .on(
+                                    "click",
+                                    js_handler=(
+                                        f"() => {{ window.open({json.dumps(_anchor_browse_url)}, '_blank'); }}"
+                                    ),
+                                )
                             )
-                            .classes("text-white")
-                            .tooltip(tr("Open anchor in Browse (new tab)"))
-                            .on(
-                                "click",
-                                js_handler=(
-                                    f"() => {{ window.open({__import__('json').dumps(_anchor_browse_url)}, '_blank'); }}"
-                                ),
+
+                        # Round-4 Issue 3: anchor title (RTL, muted) when present.
+                        _anchor_title = getattr(anchor_cand, "title", None)
+                        if _anchor_title:
+                            ui.label(_anchor_title).classes("text-sm").mark(
+                                "compare-anchor-title"
+                            ).style(
+                                "color: var(--text-secondary); direction: rtl;"
+                                " overflow: hidden; display: -webkit-box;"
+                                " -webkit-line-clamp: 2; -webkit-box-orient: vertical;"
                             )
+
+                        # D-09/H3: anchor pane info button row — MOVED UP into the
+                        # header so the FJMS/PGP buttons stay visible at 100% zoom
+                        # (Round-4 Issue 3).  Populated off-loop in _on_show.
+                        anchor_info_row = ui.row().classes("gap-2 items-center py-1").style(
+                            "display:none;"
                         )
+                        _anchor_info_row_ref.append(anchor_info_row)
 
-                    # Fresh AnchorViewer for anchor pane — NOT the sticky-page viewer (Pitfall 3).
-                    # Stored in _anchor_viewer_ref so the show-loader can await update_content.
-                    # R2-6: suppress_shelfmark_header=True — green subtitle is the only shelfmark.
-                    # R2-3: image_max_height="40vh" — caps image so transcription stays visible.
-                    anchor_viewer = AnchorViewer(
-                        sys_id=anchor_cand.sys_id,
-                        p_num=anchor_cand.page,
-                        volume_ie=getattr(anchor_cand, "volume_ie", None),
-                        highlight_pattern=getattr(anchor_cand, "highlight_pattern", None),
-                        suppress_shelfmark_header=True,
-                        image_max_height="40vh",
-                    )
-                    _anchor_viewer_ref.append(anchor_viewer)
-
-                    # D-09/H3: anchor pane info button row — populated off-loop in _on_show
-                    # when metadata_prefetcher is provided; hidden by default.
-                    anchor_info_row = ui.row().classes("gap-2 items-center py-1").style(
-                        "display:none;"
-                    )
-                    _anchor_info_row_ref.append(anchor_info_row)
+                    # Scrolling viewer area (image + transcription)
+                    with ui.column().classes("w-full gap-4 flex-grow min-h-0").style(
+                        "overflow-y:auto;"
+                    ):
+                        # Fresh AnchorViewer for anchor pane — NOT the sticky-page viewer (Pitfall 3).
+                        # Stored in _anchor_viewer_ref so the show-loader can await update_content.
+                        # R2-6: suppress_shelfmark_header=True — green subtitle is the only shelfmark.
+                        # R2-3: image_max_height="40vh" — caps image so transcription stays visible.
+                        anchor_viewer = AnchorViewer(
+                            sys_id=anchor_cand.sys_id,
+                            p_num=anchor_cand.page,
+                            volume_ie=getattr(anchor_cand, "volume_ie", None),
+                            highlight_pattern=getattr(anchor_cand, "highlight_pattern", None),
+                            suppress_shelfmark_header=True,
+                            image_max_height="40vh",
+                        )
+                        _anchor_viewer_ref.append(anchor_viewer)
 
                 # ── Candidate pane (right) ────────────────────────────────────
                 # R2-5: capture ref for verdict-border updates; mark for render-smoke.
-                cand_pane_col = ui.column().classes("flex-1 gap-4 p-4 overflow-y-auto").mark(
+                cand_pane_col = ui.column().classes("flex-1 gap-2 p-4 min-h-0").mark(
                     "compare-candidate-pane"
-                ).style("border: 1px solid var(--border-light);")
+                ).style(
+                    "border: 1px solid var(--border-light);"
+                    " display:flex; flex-direction:column; overflow:hidden;"
+                )
                 _cand_pane_ref.append(cand_pane_col)
                 with cand_pane_col:
-                    ui.label(tr("Candidate")).classes(
-                        "text-xs font-bold uppercase"
-                    ).style("color: var(--text-muted);")
+                    # Fixed header block (does not scroll) — shelfmark/title/badges/info
+                    with ui.column().classes("w-full gap-1").style("flex-shrink:0;"):
+                        ui.label(tr("Candidate")).classes(
+                            "text-xs font-bold uppercase"
+                        ).style("color: var(--text-muted);")
 
-                    # D-08: shelfmark + Browse button row for candidate pane.
-                    # The row is cleared + rebuilt in _fill_candidate so the Browse
-                    # URL stays in sync each time the candidate flips.
-                    cand_shelfmark_row = ui.row().classes("items-center gap-1")
-                    _cand_shelfmark_row_ref.append(cand_shelfmark_row)
-                    # Seed an initial label ref so _fill_candidate can update text too.
-                    with cand_shelfmark_row:
-                        cand_shelfmark_label = ui.label("").classes(
-                            "text-sm font-semibold"
-                        ).style("color: var(--primary-700);")
-                    _cand_shelfmark_ref.append(cand_shelfmark_label)
+                        # D-08: shelfmark + Browse button row for candidate pane.
+                        # The row is cleared + rebuilt in _fill_candidate so the Browse
+                        # URL stays in sync each time the candidate flips.
+                        cand_shelfmark_row = ui.row().classes("items-center gap-1")
+                        _cand_shelfmark_row_ref.append(cand_shelfmark_row)
+                        # Seed an initial label ref so _fill_candidate can update text too.
+                        with cand_shelfmark_row:
+                            cand_shelfmark_label = ui.label("").classes(
+                                "text-sm font-semibold"
+                            ).style("color: var(--primary-700);")
+                        _cand_shelfmark_ref.append(cand_shelfmark_label)
 
-                    cand_badge_row = ui.row().classes("gap-2 items-center flex-wrap")
-                    _cand_badge_row_ref.append(cand_badge_row)
+                        # Round-4 Issue 3: candidate TITLE (RTL, muted) — was missing.
+                        # Cleared + rebuilt on each flip in _fill_candidate.
+                        cand_title_row = ui.row().classes("w-full")
+                        _cand_title_row_ref.append(cand_title_row)
 
-                    cand_viewer_container = ui.column().classes("w-full gap-4")
-                    _cand_viewer_container_ref.append(cand_viewer_container)
+                        cand_badge_row = ui.row().classes("gap-2 items-center flex-wrap")
+                        _cand_badge_row_ref.append(cand_badge_row)
 
-                    # D-09/H3: candidate pane info button row — populated off-loop in _on_show;
-                    # refreshed in _fill_candidate when the candidate flips.
-                    cand_info_row = ui.row().classes("gap-2 items-center py-1").style(
-                        "display:none;"
-                    )
-                    _cand_info_row_ref.append(cand_info_row)
+                        # D-09/H3: candidate pane info button row — MOVED UP into the
+                        # header (Round-4 Issue 3) so it stays visible at 100% zoom.
+                        cand_info_row = ui.row().classes("gap-2 items-center py-1").style(
+                            "display:none;"
+                        )
+                        _cand_info_row_ref.append(cand_info_row)
+
+                    # Scrolling viewer area (image + transcription)
+                    with ui.column().classes("w-full gap-4 flex-grow min-h-0").style(
+                        "overflow-y:auto;"
+                    ):
+                        cand_viewer_container = ui.column().classes("w-full gap-4")
+                        _cand_viewer_container_ref.append(cand_viewer_container)
 
             # ── Verdict bar (sticky bottom) ───────────────────────────────────
             with ui.row().classes(
@@ -910,10 +992,50 @@ def create_compare_modal(
     # Guard: only act when THIS dialog is currently open (dialog.value truthy) so
     # a stale hidden-dialog keyboard from a prior _open_compare call cannot fire
     # globally (Codex P119-R2-7-1).
+    def _has_nested_dialog_open() -> bool:
+        """Round-4 Issue 4: True when ANOTHER dialog is open on top of Compare.
+
+        A child dialog opened over Compare (e.g. the Add-as-Join confirm dialog,
+        or the Add-to-List picker) registers as a separate ui.dialog with a truthy
+        ``.value``.  When such a dialog is open, Compare's Esc handler must NOT fire
+        — Esc should dismiss only the TOPMOST dialog.  The nested dialog is itself
+        non-persistent, so NiceGUI's built-in q-dialog handles its own Esc-close
+        client-side; we just have to stop Compare from also closing underneath it.
+
+        We scan THIS dialog's client for other open dialogs.  At the instant the
+        server-side keyboard handler runs, the nested dialog's ``.value`` is still
+        truthy (its client-side close has not round-tripped yet), so this guard sees
+        it and correctly suppresses Compare's close.
+        """
+        try:
+            from nicegui.elements.dialog import Dialog
+            # Scan THIS dialog's client elements directly so the guard works whether
+            # or not it is called inside an ambient client/slot context (ElementFilter
+            # relies on the ambient context and would find nothing off-context).
+            client = getattr(dialog, "client", None)
+            elements = getattr(client, "elements", None)
+            if not elements:
+                return False
+            for el in list(elements.values()):
+                if el is dialog:
+                    continue
+                if isinstance(el, Dialog) and getattr(el, "value", False):
+                    return True
+        except Exception:
+            return False
+        return False
+
     def _on_escape(e: object) -> None:
-        """Close the Compare modal on Escape keydown (R2-7)."""
+        """Close the Compare modal on Escape keydown (R2-7).
+
+        Round-4 Issue 4: no-op when a nested dialog (Add-as-Join / Add-to-List) is
+        open on top — Esc dismisses only the topmost dialog, never Compare beneath it.
+        """
         # Guard: only act when this dialog instance is currently open
         if not getattr(dialog, "value", False):
+            return
+        # Round-4 Issue 4: a child dialog over Compare owns Esc — leave Compare open.
+        if _has_nested_dialog_open():
             return
         # Guard: keydown only (avoid double-fire on keyup)
         action = getattr(e, "action", None)

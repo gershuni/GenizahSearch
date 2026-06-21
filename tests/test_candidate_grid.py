@@ -759,12 +759,22 @@ class TestRestyleUpdatesTriageButtons:
             f"Got: {btn_map['yes'].last_style!r}"
         )
         assert "color:#fff" in btn_map["yes"].last_style
-        # The other two buttons must be reset (no background fill)
-        for v in ("maybe", "no"):
+        # Round-4 Issue 6: the other two buttons must be EXPLICITLY reset to a
+        # transparent fill — NOT merely omit a background.  element.style() does not
+        # remove a previously-set background, so a prior verdict's color would
+        # otherwise persist (all three lit at once).  Assert the inactive buttons
+        # carry no TRIAGE-COLOR fill and an explicit transparent reset.
+        maybe_color = cgrid._TRIAGE_COLORS["maybe"]
+        no_color = cgrid._TRIAGE_COLORS["no"]
+        for v, other_color in (("maybe", maybe_color), ("no", no_color)):
             assert btn_map[v].last_style is not None
-            assert "background:" not in btn_map[v].last_style, (
-                f"{v} button should be reset to no-fill when YES is active. "
+            assert f"background:{other_color}" not in btn_map[v].last_style, (
+                f"{v} button must NOT keep its own triage color when YES is active. "
                 f"Got: {btn_map[v].last_style!r}"
+            )
+            assert "background:transparent" in btn_map[v].last_style, (
+                f"{v} button should be EXPLICITLY reset to background:transparent when "
+                f"YES is active (Round-4 Issue 6). Got: {btn_map[v].last_style!r}"
             )
 
     def test_verdict_change_also_updates_card_border(self):
@@ -788,9 +798,17 @@ class TestRestyleUpdatesTriageButtons:
         # No verdict for this sys_id → all buttons reset, neutral border
         restyle(self._SYS_ID, {})
 
+        # Round-4 Issue 6: a cleared verdict must EXPLICITLY reset each button to a
+        # transparent fill (not just omit a background) so no prior color lingers.
         for v in ("yes", "maybe", "no"):
             assert btn_map[v].last_style is not None
-            assert "background:" not in btn_map[v].last_style
+            assert "background:transparent" in btn_map[v].last_style, (
+                f"{v} button should be reset to background:transparent on clear "
+                f"(Round-4 Issue 6). Got: {btn_map[v].last_style!r}"
+            )
+            # And no TRIAGE color fill remains
+            for _color in cgrid._TRIAGE_COLORS.values():
+                assert f"background:{_color}" not in btn_map[v].last_style
         assert "var(--border-light)" in (card.last_style or "")
 
     def test_restyle_fn_without_triage_btn_refs_is_backward_compatible(self):
@@ -1050,4 +1068,78 @@ class TestTableRowsHaveRawShelfmark:
         assert rows, "expected one row"
         assert rows[0].get("shelfmark_raw") == "T-S 1.1", (
             "Issue A: each table row must carry 'shelfmark_raw' (the un-prefixed shelfmark)."
+        )
+
+
+# ===========================================================================
+# Round 4 UAT (2026-06-21) — Issues 6, 7, 8 (candidate grid)
+# ===========================================================================
+
+import inspect as _inspect  # noqa: E402
+
+
+def test_issue7_8_grid_accepts_new_callbacks():
+    """Round-4 Issues 7+8: create_candidate_grid must accept on_add_to_puzzle,
+    on_card_select, and selected_sys_ids."""
+    sig = _inspect.signature(cgrid.create_candidate_grid)
+    for p in ("on_add_to_puzzle", "on_card_select", "selected_sys_ids"):
+        assert p in sig.parameters, (
+            f"create_candidate_grid must accept {p!r} (Round-4 Issues 7/8)."
+        )
+
+
+def test_issue7_8_card_accepts_new_callbacks():
+    """Round-4 Issues 7+8: _create_candidate_card must accept on_add_to_puzzle,
+    on_card_select, and selected."""
+    sig = _inspect.signature(cgrid._create_candidate_card)
+    for p in ("on_add_to_puzzle", "on_card_select", "selected"):
+        assert p in sig.parameters, (
+            f"_create_candidate_card must accept {p!r} (Round-4 Issues 7/8)."
+        )
+
+
+def test_issue6_in_card_triage_handler_resets_background_on_clear():
+    """Round-4 Issue 6: the in-card triage handler must EXPLICITLY reset the inactive
+    buttons to background:transparent (not just omit a background) so the previously
+    lit button turns off when a new verdict is clicked."""
+    import pathlib
+    src = pathlib.Path("web/components/candidate_grid.py").read_text(encoding="utf-8")
+    # The clear branch inside _make_triage_handler must set a transparent background.
+    assert "background:transparent; color:inherit;" in src, (
+        "Issue 6: the triage 'clear' branches must reset inactive buttons to "
+        "'background:transparent; color:inherit;' — element.style() does not remove a "
+        "previously-set background, so without this all verdicts can be lit at once."
+    )
+
+
+def test_issue6_restyle_clear_branch_resets_background():
+    """Round-4 Issue 6: _make_restyle_fn's button-update path must reset inactive
+    buttons to a transparent fill (mutual exclusivity from the restyle path too)."""
+    card_refs = {}
+    triage_btn_refs = {}
+
+    class _FB:
+        def __init__(self):
+            self.last = None
+        def style(self, s):
+            self.last = s
+
+    class _FC:
+        def style(self, s):
+            pass
+
+    sid = "S9"
+    btns = {"yes": _FB(), "maybe": _FB(), "no": _FB()}
+    card_refs[sid] = [_FC()]
+    triage_btn_refs[sid] = [btns]
+
+    restyle = cgrid._make_restyle_fn(card_refs, triage_btn_refs)
+    # Set 'yes' → maybe/no must be reset to transparent
+    restyle(sid, {sid: "yes"})
+    yes_color = cgrid._TRIAGE_COLORS["yes"]
+    assert f"background:{yes_color}" in btns["yes"].last
+    for v in ("maybe", "no"):
+        assert "background:transparent" in btns[v].last, (
+            f"Issue 6: restyle must reset {v} button to background:transparent when "
+            f"yes is active. Got: {btns[v].last!r}"
         )

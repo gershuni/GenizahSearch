@@ -1613,3 +1613,86 @@ def test_compare_modal_reads_source_names_from_meta_not_catalog_detail():
         "Issue C: compare_modal.py must NOT gate the catalog button on "
         "catalog_detail.get('source_names') — that key never exists on get_catalog_detail()."
     )
+
+
+# ===========================================================================
+# Round 4 UAT (2026-06-21) — Compare modal fixes (Issues 3, 4, 7)
+# ===========================================================================
+
+
+def _cm_source():
+    import pathlib
+    return pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+
+
+def test_issue3_compare_has_candidate_title_marker():
+    """Round-4 Issue 3: the candidate pane must render a title label marked
+    'compare-candidate-title' (the title was previously missing)."""
+    source = _cm_source()
+    assert "compare-candidate-title" in source, (
+        "Issue 3: compare_modal.py must mark the candidate title label "
+        "'compare-candidate-title' so it is rendered + locatable."
+    )
+    assert "_cand_title_row_ref" in source, (
+        "Issue 3: a candidate title row ref must exist and be rebuilt in _fill_candidate."
+    )
+
+
+def test_issue3_compare_panes_split_header_and_scroll():
+    """Round-4 Issue 3: each pane must clip overflow (fixed header) with an inner
+    scrolling viewer area so the FJMS info buttons stay visible at 100% zoom."""
+    source = _cm_source()
+    # The pane columns now use overflow:hidden (header pinned) + an inner overflow-y:auto.
+    assert "flex-direction:column; overflow:hidden;" in source, (
+        "Issue 3: Compare panes must clip overflow so the header (info buttons) stays "
+        "pinned while only the inner viewer scrolls."
+    )
+    assert "overflow-y:auto;" in source, (
+        "Issue 3: the inner viewer area must scroll (overflow-y:auto)."
+    )
+
+
+def test_issue3_info_rows_built_in_header_block():
+    """Round-4 Issue 3: the per-pane info rows must be appended in the FIXED header
+    block (the refs are populated before the scrolling viewer column is built)."""
+    source = _cm_source()
+    # The anchor + candidate info-row refs must still be present (moved up, not removed).
+    assert "_anchor_info_row_ref.append" in source
+    assert "_cand_info_row_ref.append" in source
+
+
+def test_issue4_compare_esc_guarded_by_nested_dialog():
+    """Round-4 Issue 4: Compare's Esc handler must no-op when a nested dialog is open."""
+    source = _cm_source()
+    assert "_has_nested_dialog_open" in source, (
+        "Issue 4: compare_modal.py must define _has_nested_dialog_open and call it "
+        "from _on_escape so Esc dismisses only the topmost dialog."
+    )
+    # The guard must be invoked inside _on_escape before closing.
+    assert "if _has_nested_dialog_open():" in source, (
+        "Issue 4: _on_escape must early-return when a nested dialog is open."
+    )
+
+
+def test_issue7_compare_has_add_to_puzzle_param_and_button():
+    """Round-4 Issue 7: create_compare_modal must accept on_add_to_puzzle and render
+    a header button marked 'compare-add-to-puzzle'."""
+    source = _cm_source()
+    assert "on_add_to_puzzle" in source, (
+        "Issue 7: create_compare_modal must accept an on_add_to_puzzle callback."
+    )
+    assert "compare-add-to-puzzle" in source, (
+        "Issue 7: the Compare header must render an Add-to-Puzzle button marked "
+        "'compare-add-to-puzzle'."
+    )
+
+
+def test_issue7_compare_add_to_puzzle_acts_on_current_candidate():
+    """Round-4 Issue 7: the Compare Add-to-Puzzle handler must act on the
+    CURRENTLY-shown candidate (_state['current_candidate'])."""
+    source = _cm_source()
+    # The handler resolves cand = _state.get("current_candidate") then calls on_add_to_puzzle(cand.sys_id)
+    assert "on_add_to_puzzle(cand.sys_id)" in source, (
+        "Issue 7: the Compare Add-to-Puzzle button must pass the current candidate's "
+        "sys_id to on_add_to_puzzle."
+    )

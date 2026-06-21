@@ -808,6 +808,83 @@ class TestAddAsJoinGate:
             "joins_lab.py must contain 'Add as Join' string (ACT-01 UI)"
         )
 
+    # -- Round-4 Issue 1: Add-as-Join dialog matches the regular dialog --------
+
+    def test_add_as_join_dialog_has_join_type_radio(self):
+        """Round-4 Issue 1: the confirm dialog must offer the same relationship/join-type
+        radio as the regular join dialog (physical_join / same_composition / not-sure)."""
+        source = self._source()
+        assert "relationship_select" in source, (
+            "Issue 1: _on_add_as_join_click must build a relationship/join-type radio "
+            "(relationship_select) matching joins_panel.py."
+        )
+        assert "'physical_join'" in source and "'same_composition'" in source, (
+            "Issue 1: the join-type radio must offer physical_join + same_composition "
+            "options (parity with the regular dialog)."
+        )
+
+    def test_add_as_join_dialog_has_notes_textarea(self):
+        """Round-4 Issue 1: the confirm dialog must offer a notes textarea."""
+        source = self._source()
+        assert "notes_input" in source, (
+            "Issue 1: _on_add_as_join_click must build a notes textarea (notes_input)."
+        )
+
+    def test_add_as_join_passes_join_type_and_notes(self):
+        """Round-4 Issue 1: create_fragment_join must receive join_type= and notes=
+        from the dialog (was previously called with NEITHER)."""
+        source = self._source()
+        # The _run_create closure inside _do_add_join must forward both kwargs.
+        assert "join_type=_jt" in source, (
+            "Issue 1: create_fragment_join must be called with join_type= from the radio."
+        )
+        assert "notes=_nt" in source, (
+            "Issue 1: create_fragment_join must be called with notes= from the textarea."
+        )
+
+    # -- Round-4 Issue 7: per-candidate Add-to-Puzzle ([anchor, candidate]) ----
+
+    def test_single_candidate_add_to_puzzle_handler_present(self):
+        """Round-4 Issue 7: a single-candidate Add-to-Puzzle handler must exist."""
+        source = self._source()
+        assert "_on_add_candidate_to_puzzle_click" in source, (
+            "Issue 7: joins_lab.py must define _on_add_candidate_to_puzzle_click "
+            "(stages anchor + ONE candidate into the puzzle)."
+        )
+
+    def test_single_candidate_add_to_puzzle_payload_is_pair(self):
+        """Round-4 Issue 7: the single-candidate handler must stage exactly
+        [anchor, candidate] and navigate to /puzzle."""
+        source = self._source()
+        # The handler builds fragments = [anchor_sys_id, candidate_sys_id]
+        assert "[anchor_sys_id, candidate_sys_id]" in source, (
+            "Issue 7: the single-candidate Add-to-Puzzle payload must be "
+            "[anchor_sys_id, candidate_sys_id] (exactly the anchor + that candidate)."
+        )
+        assert "puzzle_staging" in source, (
+            "Issue 7: the handler must write a puzzle_staging payload via safe_user_set."
+        )
+
+    def test_compare_modal_call_passes_on_add_to_puzzle(self):
+        """Round-4 Issue 7: _open_compare must pass on_add_to_puzzle to create_compare_modal."""
+        source = self._source()
+        assert "on_add_to_puzzle=_on_add_candidate_to_puzzle_click" in source, (
+            "Issue 7: create_compare_modal(...) must receive "
+            "on_add_to_puzzle=_on_add_candidate_to_puzzle_click."
+        )
+
+    def test_grid_call_passes_on_add_to_puzzle_and_card_select(self):
+        """Round-4 Issues 7+8: create_candidate_grid(...) must receive the per-card
+        Add-to-Puzzle and selection callbacks."""
+        source = self._source()
+        assert "on_add_to_puzzle=_on_add_candidate_to_puzzle_click" in source, (
+            "Issue 7: create_candidate_grid(...) must receive on_add_to_puzzle."
+        )
+        assert "on_card_select=_on_card_select" in source, (
+            "Issue 8: create_candidate_grid(...) must receive on_card_select to wire "
+            "per-card selection into the page _selected set."
+        )
+
 
 class TestRemoveJoin:
     """Task 3: D-03 remove-my-join on own joins only."""

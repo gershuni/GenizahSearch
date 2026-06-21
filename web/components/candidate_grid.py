@@ -549,7 +549,14 @@ def _make_restyle_fn(card_refs: dict, triage_btn_refs: dict | None = None):
                                 f"background:{_c}; color:#fff;"
                             )
                         else:
-                            _btn.style("min-height:44px; font-size:0.85rem;")
+                            # Round-4 Issue 6: element.style() UPDATES named props but
+                            # does NOT remove a previously-set background — so the prior
+                            # verdict button would stay lit.  Explicitly reset the fill
+                            # so only the active verdict button is highlighted.
+                            _btn.style(
+                                "min-height:44px; font-size:0.85rem; "
+                                "background:transparent; color:inherit;"
+                            )
                     except Exception:
                         pass
 
@@ -571,6 +578,9 @@ def _create_candidate_card(
     restyle_fn: Optional[Callable] = None,
     on_set_as_anchor: Optional[Callable] = None,
     on_add_as_join: Optional[Callable] = None,
+    on_add_to_puzzle: Optional[Callable] = None,
+    on_card_select: Optional[Callable] = None,
+    selected: bool = False,
 ) -> None:
     """Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
 
@@ -671,6 +681,36 @@ def _create_candidate_card(
 
             # Library chip + shelfmark row
             with ui.row().classes("items-center gap-2 flex-wrap"):
+                # Round-4 Issue 8: per-card selection checkbox.  Toggles the
+                # candidate's sys_id in the page-level _selected set (same set the
+                # table feeds), so SELECTION-scoped bulk actions (Add-to-Puzzle /
+                # Add-to-List) work from the grid too.  Keyed by sys_id to match the
+                # table's selection semantics.
+                if on_card_select is not None:
+                    _sel_sid = cand.sys_id
+
+                    def _make_select_handler(sid=_sel_sid, _fn=on_card_select):
+                        def _h(e) -> None:
+                            # ValueChangeEventArguments carries .value; be defensive
+                            # and fall back to .args (raw payload) so the callback
+                            # always receives the correct boolean.
+                            val = getattr(e, "value", None)
+                            if val is None:
+                                val = getattr(e, "args", None)
+                            try:
+                                _fn(sid, bool(val))
+                            except Exception:
+                                pass
+                        return _h
+
+                    (
+                        ui.checkbox(value=selected)
+                        .props("dense")
+                        .classes("shrink-0")
+                        .on_value_change(_make_select_handler())
+                        .tooltip(tr("Select for bulk actions"))
+                    )
+
                 if cand.library_code:
                     from genizah_core import get_library_display
                     full_name = get_library_display(
@@ -768,7 +808,15 @@ def _create_candidate_card(
                                                 f"background:{_c}; color:#fff;"
                                             )
                                         else:
-                                            _btn.style("min-height:44px; font-size:0.85rem;")
+                                            # Round-4 Issue 6: explicitly clear the prior
+                                            # verdict's fill — element.style() does NOT
+                                            # remove a previously-set background, so without
+                                            # this the previously-clicked button stays lit
+                                            # (all three could be highlighted at once).
+                                            _btn.style(
+                                                "min-height:44px; font-size:0.85rem; "
+                                                "background:transparent; color:inherit;"
+                                            )
                                     except Exception:
                                         pass
                             return _handler
@@ -869,6 +917,26 @@ def _create_candidate_card(
                             .style("min-height:44px;")
                             .tooltip(tr("Add as Join"))
                             .on("click", _make_add_join_handler())
+                        )
+
+                    # Round-4 Issue 7: Add to Puzzle — stages the ANCHOR + this ONE
+                    # candidate into the puzzle and navigates to /puzzle.  The
+                    # callback (joins_lab._on_add_candidate_to_puzzle_click) builds the
+                    # [anchor, candidate] puzzle_staging payload.
+                    if on_add_to_puzzle is not None:
+                        _ap_sid = cand.sys_id
+
+                        def _make_add_puzzle_handler(sid=_ap_sid, _fn=on_add_to_puzzle):
+                            def _h():
+                                _fn(sid)
+                            return _h
+
+                        (
+                            ui.button(icon="extension")
+                            .props("flat dense")
+                            .style("min-height:44px;")
+                            .tooltip(tr("Add anchor + this candidate to the Fragment Puzzle"))
+                            .on("click", _make_add_puzzle_handler())
                         )
 
 
@@ -1194,6 +1262,11 @@ def create_candidate_grid(
     on_set_as_anchor: Optional[Callable] = None,
     # Phase 120 ACT-01: Add-as-Join (community write, login-gated)
     on_add_as_join: Optional[Callable] = None,
+    # Round-4 Issue 7: per-card Add-to-Puzzle (anchor + this candidate)
+    on_add_to_puzzle: Optional[Callable] = None,
+    # Round-4 Issue 8: per-card selection toggle (sys_id, is_selected) → page _selected set
+    on_card_select: Optional[Callable] = None,
+    selected_sys_ids: Optional[set] = None,
 ) -> ui.element:
     """Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
@@ -1257,6 +1330,7 @@ def create_candidate_grid(
 
             # Responsive grid (D-09): 1 col <640px, 2 col 640–1023px, 3 col ≥1024px.
             with ui.grid().classes("w-full gap-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"):
+                _sel_set = selected_sys_ids if selected_sys_ids is not None else set()
                 for cand in page_slice:
                     _create_candidate_card(
                         cand,
@@ -1268,6 +1342,9 @@ def create_candidate_grid(
                         restyle_fn=_render_restyle,
                         on_set_as_anchor=on_set_as_anchor,
                         on_add_as_join=on_add_as_join,
+                        on_add_to_puzzle=on_add_to_puzzle,
+                        on_card_select=on_card_select,
+                        selected=cand.sys_id in _sel_set,
                     )
 
             # Pagination controls (D-08): ‹ Prev | Page N of M | Next ›

@@ -2270,3 +2270,46 @@ class TestListsOpenInJoinsLabD19:
             f"must be between menu_book (pos={browse_pos}) and extension (pos={puzzle_pos}). "
             f"Insert it BETWEEN Browse and Add-to-Puzzle per UI-SPEC §11."
         )
+
+
+# ===========================================================================
+# Round 4 UAT (2026-06-21) — Issue 5: Compare image prefetch warms browser cache
+# ===========================================================================
+
+def _round4_jl_src():
+    import pathlib
+    return pathlib.Path("web/pages/joins_lab.py").read_text(encoding="utf-8")
+
+
+def test_issue5_prefetch_warms_browser_image_cache():
+    """Round-4 Issue 5 (root cause): resolving the proxy URL alone did nothing — the
+    candidate-pane AnchorViewer re-resolves its own URL, so the flip felt slow.  The
+    prefetch must now WARM THE BROWSER CACHE by issuing `new Image().src = <url>` in
+    the captured client context so the eventual <img src> is served from cache."""
+    src = _round4_jl_src()
+    assert "new Image()" in src, (
+        "Issue 5: _prefetch_one must warm the browser image cache via "
+        "ui.run_javascript('... new Image(); _i.src = <url> ...') so flips are instant."
+    )
+    assert "run_javascript" in src, (
+        "Issue 5: the prefetch warm-up must run JS in the client to fetch the image bytes."
+    )
+    assert "_prefetch_client_ref" in src, (
+        "Issue 5: the prefetch must capture the live client (in _schedule_image_prefetch) "
+        "so _prefetch_one can run JS from its fire-and-forget task."
+    )
+
+
+def test_issue5_prefetch_captures_client_on_schedule():
+    """Round-4 Issue 5: _schedule_image_prefetch must capture ui.context.client (it
+    runs in the flip/click handler context) so the warm-up JS has a client to run in."""
+    src = _round4_jl_src()
+    # The capture happens inside _schedule_image_prefetch.
+    sched_idx = src.find("def _schedule_image_prefetch")
+    assert sched_idx != -1, "Issue 5: _schedule_image_prefetch must exist."
+    one_idx = src.find("def _open_compare", sched_idx)
+    block = src[sched_idx:one_idx if one_idx != -1 else sched_idx + 2000]
+    assert "_prefetch_client_ref['client'] = ui.context.client" in block, (
+        "Issue 5: _schedule_image_prefetch must capture ui.context.client into "
+        "_prefetch_client_ref so _prefetch_one can warm the browser cache."
+    )

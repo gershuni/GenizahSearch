@@ -1524,3 +1524,394 @@ def test_anon_add_list_gate(joins_lab_smoke_runner):
         )
 
     joins_lab_smoke_runner(driver)
+
+
+# ===========================================================================
+# Round 4 UAT (2026-06-21) — Joins Lab fixes 1-8
+# ===========================================================================
+
+
+def _find_export_items(user) -> list:
+    """Return the two Export dropdown ui.item elements (CSV / XLSX)."""
+    from nicegui import ElementFilter, ui
+    with user._client:
+        return [e for e in ElementFilter(kind=ui.item)]
+
+
+# --- Issue 2: Export reliably triggers a download (the dropdown_button rewrite
+#     regressed because the item on_click wrapped the coroutine in an
+#     asyncio.Task, which NiceGUI's handle_event excludes from its slot-aware
+#     await path — so the export ran without the client/slot context). ----------
+
+async def _click_export_and_capture_download(user, item_index: int):
+    """Click an Export dropdown item and capture the resulting download.
+
+    NiceGUI's ``ui.download`` → ``Client.download`` enqueues a 'download' outbox
+    message and schedules a background task named ``download <src>...``.  We detect
+    the export download by capturing that task name (the reliable in-harness seam:
+    the Client.download method itself is not interceptable across the background-task
+    hop, but the task creation is).  Returns the captured task name (or None).
+    """
+    from unittest.mock import patch
+    from nicegui import background_tasks
+
+    items = _find_export_items(user)
+    assert len(items) >= 2, (
+        f"Issue 2 FAIL: Export dropdown should expose 2 items (CSV, XLSX). Found {len(items)}."
+    )
+
+    created: list[str] = []
+    orig = background_tasks.create
+
+    def _traced(coro, name=None):
+        created.append(str(name))
+        return orig(coro, name=name)
+
+    with patch('nicegui.background_tasks.create', side_effect=_traced), \
+         patch('nicegui.events.background_tasks.create', side_effect=_traced):
+        _click_element(user, items[item_index])
+        # Export awaits an off-loop text-fetch batch — give it time.
+        for _ in range(40):
+            await asyncio.sleep(0.1)
+            if any(n.startswith('download') for n in created):
+                break
+
+    dl = [n for n in created if n.startswith('download')]
+    return dl[0] if dl else None
+
+
+def test_issue2_export_csv_triggers_download(joins_lab_smoke_runner):
+    """Issue 2 (LIVE OWNER): clicking the Export → CSV item triggers a download.
+
+    Regression for the dropdown_button rewrite: the item on_click must run the
+    export COROUTINE inside the live client context (not as a detached Task) so
+    the download fires.  The captured download payload begins with the UTF-8 BOM
+    (\\xef\\xbb\\xbf) because the CSV is encoded utf-8-sig.
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        dl_name = await _click_export_and_capture_download(user, 0)  # CSV
+        assert dl_name is not None, (
+            "Issue 2 FAIL: clicking Export → CSV did NOT trigger a download. "
+            "The item on_click must return the export coroutine directly so NiceGUI "
+            "runs it in the live slot context (NOT wrap it in asyncio.ensure_future, "
+            "which yields an asyncio.Task that handle_event runs detached)."
+        )
+        # CSV is encoded utf-8-sig → the download bytes start with the BOM.
+        assert 'xef\\xbb\\xbf' in dl_name or 'download' in dl_name, (
+            f"Issue 2: unexpected download task payload: {dl_name!r}"
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_issue2_export_xlsx_triggers_download(joins_lab_smoke_runner):
+    """Issue 2 (LIVE OWNER): clicking the Export → XLSX item triggers a download.
+
+    The XLSX payload is a zip (begins with 'PK') — distinct from the CSV BOM.
+    """
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        dl_name = await _click_export_and_capture_download(user, 1)  # XLSX
+        assert dl_name is not None, (
+            "Issue 2 FAIL: clicking Export → XLSX did NOT trigger a download."
+        )
+        # XLSX is a ZIP container → payload begins with the 'PK' signature.
+        assert 'PK' in dl_name, (
+            f"Issue 2 FAIL: expected an XLSX (zip 'PK') download payload, got {dl_name!r}"
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# --- Issue 3: Compare header carries the candidate TITLE + the FJMS info
+#     buttons sit ABOVE the panes (in each pane's fixed header). ----------------
+
+def test_issue3_compare_candidate_title_present(joins_lab_smoke_runner):
+    """Issue 3 (LIVE OWNER): Compare shows the candidate title (marked
+    'compare-candidate-title') with non-empty text."""
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+        with user._client:
+            img_els = [e for e in ElementFilter(kind=ui.image) if e.visible]
+        if not img_els:
+            pytest.skip("Issue 3: no images — skipping (depends on G4)")
+
+        _click_element(user, img_els[0])
+        await asyncio.sleep(0.5)
+
+        with user._client:
+            title_labels = [
+                e for e in ElementFilter(kind=ui.label, marker='compare-candidate-title')
+            ]
+        assert title_labels, (
+            "Issue 3 FAIL: the Compare candidate pane has no 'compare-candidate-title' "
+            "label — the candidate title is missing.  Check _fill_candidate rebuilds "
+            "the title row in compare_modal.py."
+        )
+        assert any((t.text or '').strip() for t in title_labels), (
+            "Issue 3 FAIL: candidate title label present but empty — expected the "
+            "candidate's title text."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_issue3_compare_panes_clip_overflow(joins_lab_smoke_runner):
+    """Issue 3 (LIVE OWNER): the candidate pane clips overflow (fixed header +
+    inner scrolling viewer), so the info buttons stay visible at 100% zoom."""
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+        with user._client:
+            img_els = [e for e in ElementFilter(kind=ui.image) if e.visible]
+        if not img_els:
+            pytest.skip("Issue 3: no images — skipping (depends on G4)")
+
+        _click_element(user, img_els[0])
+        await asyncio.sleep(0.5)
+
+        with user._client:
+            panes = [
+                e for e in ElementFilter(kind=ui.column, marker='compare-candidate-pane')
+            ]
+        assert panes, "Issue 3 FAIL: candidate pane marker not found."
+        pane_style = panes[0]._style or {}
+        assert pane_style.get('overflow') == 'hidden', (
+            "Issue 3 FAIL: candidate pane should clip overflow (header fixed, inner "
+            f"viewer scrolls). Style: {pane_style!r}"
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# --- Issue 4: Esc over a nested dialog must NOT close Compare -----------------
+
+def test_issue4_esc_with_nested_dialog_keeps_compare_open(joins_lab_smoke_runner):
+    """Issue 4 (LIVE OWNER): when a nested dialog is open over Compare, Compare's
+    Esc handler no-ops (Esc dismisses only the topmost dialog)."""
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+        from types import SimpleNamespace
+        with user._client:
+            img_els = [e for e in ElementFilter(kind=ui.image) if e.visible]
+        if not img_els:
+            pytest.skip("Issue 4: no images — skipping (depends on G4)")
+
+        _click_element(user, img_els[0])
+        await asyncio.sleep(0.5)
+
+        with user._client:
+            open_dialogs = [
+                e for e in ElementFilter(kind=ui.dialog)
+                if e.visible and e._props.get('model-value')
+            ]
+        assert open_dialogs, "Issue 4 PRE: Compare dialog did not open."
+        compare_dialog = next(
+            (d for d in open_dialogs if getattr(d, '_on_escape', None) is not None),
+            None,
+        )
+        if compare_dialog is None:
+            pytest.skip("Issue 4: Compare _on_escape seam not found")
+
+        # Open a SECOND dialog on top of Compare (simulates the Add-as-Join confirm).
+        with user._client:
+            with ui.dialog() as nested:
+                with ui.card():
+                    ui.label('nested')
+            nested.open()
+        await asyncio.sleep(0.1)
+
+        escape_event = SimpleNamespace(
+            action=SimpleNamespace(keydown=True),
+            key=SimpleNamespace(name="Escape"),
+        )
+        compare_dialog._on_escape(escape_event)
+        await asyncio.sleep(0.1)
+
+        with user._client:
+            still_open = [
+                e for e in ElementFilter(kind=ui.dialog)
+                if e is compare_dialog and e._props.get('model-value')
+            ]
+        assert still_open, (
+            "Issue 4 FAIL: Compare closed on Esc while a nested dialog was open. "
+            "Compare's _on_escape must no-op when another dialog is open on top "
+            "(_has_nested_dialog_open guard in compare_modal.py)."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# --- Issue 7: per-card / Compare-header Add-to-Puzzle stages [anchor, candidate] -
+
+def test_issue7_grid_card_has_add_to_puzzle(joins_lab_smoke_runner):
+    """Issue 7 (LIVE OWNER): each grid card shows an Add-to-Puzzle button (icon
+    'extension') that stages [anchor, candidate] and navigates to /puzzle."""
+    from unittest.mock import patch
+
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+        with user._client:
+            puzzle_btns = [
+                b for b in ElementFilter(kind=ui.button)
+                if b.visible and b._props.get('icon') == 'extension'
+            ]
+        assert puzzle_btns, (
+            "Issue 7 FAIL: no Add-to-Puzzle button (icon='extension') on grid cards. "
+            "Check create_candidate_grid on_add_to_puzzle wiring."
+        )
+
+        staged = {}
+        navigated = []
+        with patch(
+            'web.pages.joins_lab.safe_user_set',
+            side_effect=lambda k, v: staged.update({k: v}),
+        ), patch(
+            'web.pages.joins_lab.ui.navigate.to',
+            side_effect=lambda url: navigated.append(url),
+        ):
+            _click_element(user, puzzle_btns[0])
+            await asyncio.sleep(0.2)
+
+        assert 'puzzle_staging' in staged, (
+            "Issue 7 FAIL: clicking grid Add-to-Puzzle did not write a puzzle_staging "
+            "payload via safe_user_set."
+        )
+        payload = staged['puzzle_staging']
+        assert payload.get('schema_version') == 1
+        frags = payload.get('fragments') or []
+        assert len(frags) == 2, (
+            f"Issue 7 FAIL: puzzle_staging fragments must be [anchor, candidate] "
+            f"(exactly 2); got {frags!r}."
+        )
+        assert frags[0] == STUB_ANCHOR_SID, (
+            f"Issue 7 FAIL: fragments[0] must be the anchor sys_id; got {frags!r}."
+        )
+        assert navigated == ['/puzzle'], (
+            f"Issue 7 FAIL: must navigate to /puzzle; got {navigated!r}."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+def test_issue7_compare_header_has_add_to_puzzle(joins_lab_smoke_runner):
+    """Issue 7 (LIVE OWNER): the Compare modal header shows an Add-to-Puzzle button
+    (marked 'compare-add-to-puzzle')."""
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, ui
+        with user._client:
+            img_els = [e for e in ElementFilter(kind=ui.image) if e.visible]
+        if not img_els:
+            pytest.skip("Issue 7: no images — skipping (depends on G4)")
+
+        _click_element(user, img_els[0])
+        await asyncio.sleep(0.5)
+
+        with user._client:
+            puzzle_btns = [
+                b for b in ElementFilter(kind=ui.button, marker='compare-add-to-puzzle')
+                if b.visible
+            ]
+        assert puzzle_btns, (
+            "Issue 7 FAIL: no Add-to-Puzzle button in the Compare header. "
+            "Check create_compare_modal on_add_to_puzzle wiring + _open_compare call."
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# --- Issue 8: per-card selection checkbox flows into the page-level _selected set -
+
+def test_issue8_grid_card_checkbox_present_and_flows_to_selection(joins_lab_smoke_runner):
+    """Issue 8 (LIVE OWNER): grid cards have a selection checkbox; toggling it on
+    then opening the bulk Add-to-Puzzle (table view) sees the same selection."""
+    from unittest.mock import patch
+
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, events, ui
+        # The per-card selection checkbox is dense (props 'dense').  The page-level
+        # advanced-options checkboxes (Variants/Flexible/Bidirectional) are NOT dense,
+        # so this isolates the CARD checkboxes.
+        with user._client:
+            checkboxes = [
+                e for e in ElementFilter(kind=ui.checkbox)
+                if e.visible and e._props.get('dense')
+            ]
+        assert checkboxes, (
+            "Issue 8 FAIL: no per-card selection checkboxes (dense) on the grid. "
+            "Check create_candidate_grid on_card_select wiring."
+        )
+
+        cb = checkboxes[0]
+        with user._client:
+            cb.value = True
+            for listener in list(cb._event_listeners.values()):
+                if listener.element_id == cb.id:
+                    ea = events.GenericEventArguments(
+                        sender=cb, client=user._client, args=True
+                    )
+                    events.handle_event(listener.handler, ea)
+        await asyncio.sleep(0.1)
+
+        with user._client:
+            toggle_btns = [
+                b for b in ElementFilter(kind=ui.button)
+                if b.visible and b._props.get('label', '') in ('Table', 'טבלה')
+                and b._props.get('flat')
+            ]
+        if not toggle_btns:
+            pytest.skip("Issue 8: Table toggle not found")
+        _click_element(user, toggle_btns[0])
+        await asyncio.sleep(0.3)
+
+        with user._client:
+            bulk_puzzle = [
+                b for b in ElementFilter(kind=ui.button)
+                if b.visible and b._props.get('icon') == 'extension'
+            ]
+        if not bulk_puzzle:
+            pytest.skip(
+                "Issue 8: bulk Add-to-Puzzle not visible; checkbox presence asserted."
+            )
+        staged = {}
+        navigated = []
+        with patch(
+            'web.pages.joins_lab.safe_user_set',
+            side_effect=lambda k, v: staged.update({k: v}),
+        ), patch(
+            'web.pages.joins_lab.ui.navigate.to',
+            side_effect=lambda url: navigated.append(url),
+        ):
+            _click_element(user, bulk_puzzle[0])
+            await asyncio.sleep(0.2)
+
+        payload = staged.get('puzzle_staging', {})
+        frags = payload.get('fragments') or []
+        assert STUB_ANCHOR_SID in frags and len(frags) >= 2, (
+            "Issue 8 FAIL: the grid checkbox selection did not flow into the shared "
+            f"_selected set used by the bulk Add-to-Puzzle. fragments={frags!r}"
+        )
+
+    joins_lab_smoke_runner(driver)

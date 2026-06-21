@@ -57,6 +57,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -792,11 +793,23 @@ def create_joins_lab_page(
         except Exception:
             return None
 
+    # Round-4 Issue 5: client captured when a Compare flip schedules prefetch, so
+    # _prefetch_one can warm the BROWSER image cache from its fire-and-forget task.
+    _prefetch_client_ref: dict = {'client': None}
+
     async def _prefetch_one(sys_id: str, my_gen: int) -> None:
         """D-10: Fire-and-forget prefetch coroutine for a single candidate image.
 
         SEED-008 guarded (entire body) + generation-guarded (stale results
         from before a re-anchor are discarded).
+
+        Round-4 Issue 5 (root cause): resolving the proxy URL alone did nothing —
+        the candidate-pane AnchorViewer re-resolves its own URL and renders
+        ``<img src=...>``, so the only thing that makes a flip feel instant is the
+        BROWSER's HTTP cache for that proxy URL.  After resolving the URL we now
+        issue ``new Image().src = <url>`` in the captured client context so the
+        browser actually downloads + caches the bytes; when the user flips to that
+        candidate the AnchorViewer's identical ``<img src>`` is served from cache.
         """
         try:
             if _prefetch_anchor_gen['value'] != my_gen:
@@ -807,6 +820,16 @@ def create_joins_lab_page(
                 return
             if img_url:
                 _prefetch_cache[sys_id] = img_url
+                # Warm the browser image cache so the eventual <img src> is instant.
+                client = _prefetch_client_ref.get('client')
+                if client is not None:
+                    try:
+                        with client:
+                            ui.run_javascript(
+                                f'{{ const _i = new Image(); _i.src = {json.dumps(img_url)}; }}'
+                            )
+                    except Exception:
+                        pass  # JS warm-up is best-effort; never crash the flip
         except RuntimeError:
             return  # SEED-008: NiceGUI client disconnected
         finally:
@@ -818,10 +841,17 @@ def create_joins_lab_page(
         Fires fire-and-forget coroutines for offsets -2,-1,+1,+2 relative
         to center_idx, bounded to _PREFETCH_SLOTS concurrent tasks.
         Already-cached or in-flight candidates are skipped.
+
+        Round-4 Issue 5: captures the live client here (this runs in the click /
+        flip handler context) so _prefetch_one can warm the browser image cache.
         """
         candidates = _filtered_candidates
         if not candidates:
             return
+        try:
+            _prefetch_client_ref['client'] = ui.context.client
+        except Exception:
+            pass
         gen = _prefetch_anchor_gen['value']
         for offset in (-2, -1, 1, 2):
             idx = center_idx + offset
@@ -881,6 +911,8 @@ def create_joins_lab_page(
             metadata_prefetcher=_metadata_prefetcher_sync,
             on_candidate_change=_schedule_image_prefetch,
             on_add_as_join=_on_add_as_join_click,
+            # Round-4 Issue 7: Add-to-Puzzle (anchor + current candidate) in header
+            on_add_to_puzzle=_on_add_candidate_to_puzzle_click,
         )
         modal.open()
 
@@ -993,6 +1025,15 @@ def create_joins_lab_page(
             )
         else:
             # Render the Phase-02 grid surface
+            # Round-4 Issue 8: per-card selection toggles the shared page-level
+            # _selected set (same set the table feeds), so SELECTION-scoped bulk
+            # actions (Add-to-Puzzle / Add-to-List) work from the grid too.
+            def _on_card_select(sys_id: str, is_selected: bool) -> None:
+                if is_selected:
+                    _selected.add(sys_id)
+                else:
+                    _selected.discard(sys_id)
+
             create_candidate_grid(
                 _filtered_candidates,
                 triage=_triage,
@@ -1007,6 +1048,11 @@ def create_joins_lab_page(
                 on_restyle_ready=_on_restyle_ready,
                 on_set_as_anchor=_on_set_as_anchor,
                 on_add_as_join=_on_add_as_join_click,
+                # Round-4 Issue 7: per-card Add-to-Puzzle (anchor + this candidate)
+                on_add_to_puzzle=_on_add_candidate_to_puzzle_click,
+                # Round-4 Issue 8: per-card selection → shared _selected set
+                on_card_select=_on_card_select,
+                selected_sys_ids=_selected,
             )
 
     def _on_page_change(page: int) -> None:
@@ -1445,23 +1491,31 @@ def create_joins_lab_page(
             # listener popped open whenever any sibling toolbar control (Run
             # Search / the VS toggle) was clicked, and whose nested-in-button
             # variant didn't open at all (UAT 2026-06-21).
+            # Round-4 Issue 2 (root cause): the item on_click previously wrapped the
+            # export coroutine in `lambda: asyncio.ensure_future(...)`, which returns
+            # an asyncio.Task.  NiceGUI's handle_event EXCLUDES asyncio.Task from its
+            # "await the awaitable inside the parent slot" path (events.py:
+            # `not isinstance(result, asyncio.Task)`), so the detached task ran
+            # WITHOUT the client/slot context — `with progress_el:` mounted nowhere
+            # (no progress bar) and `ui.download` could not reach the client (no file,
+            # just a flicker).  Returning the COROUTINE directly lets NiceGUI run it
+            # inside the live parent slot, so the progress card renders and the
+            # download fires.
+            async def _on_export_csv() -> None:
+                if _export_ref['fn'] is not None:
+                    await _export_ref['fn']('csv')
+
+            async def _on_export_xlsx() -> None:
+                if _export_ref['fn'] is not None:
+                    await _export_ref['fn']('xlsx')
+
             _export_btn = ui.dropdown_button(
                 tr('Export'), icon='download', auto_close=True,
             ).props('flat dense')
             _export_btn.tooltip(tr('Export candidates to CSV or Excel'))
             with _export_btn:
-                ui.item(
-                    tr('CSV'),
-                    on_click=lambda: asyncio.ensure_future(
-                        _export_ref['fn']('csv') if _export_ref['fn'] else asyncio.sleep(0)
-                    ),
-                )
-                ui.item(
-                    tr('Excel (XLSX)'),
-                    on_click=lambda: asyncio.ensure_future(
-                        _export_ref['fn']('xlsx') if _export_ref['fn'] else asyncio.sleep(0)
-                    ),
-                )
+                ui.item(tr('CSV'), on_click=_on_export_csv)
+                ui.item(tr('Excel (XLSX)'), on_click=_on_export_xlsx)
 
     # -----------------------------------------------------------------------
     # Async helpers
@@ -1541,6 +1595,28 @@ def create_joins_lab_page(
             ui.label(confirm_body).classes('text-sm').style(
                 'color: var(--text-secondary); max-width: 360px;'
             )
+
+            # Round-4 Issue 1: match the "regular" join dialog (joins_panel.py) —
+            # offer a relationship/join-type radio + a free-text notes box, and pass
+            # both to create_fragment_join.  The radio VALUE maps to join_type
+            # ('' → 'uncertain', else the option key); notes are passed verbatim.
+            ui.label(tr('Relationship (optional)')).classes('text-sm font-medium').style(
+                'color: var(--text-secondary);'
+            )
+            relationship_select = ui.radio(
+                {
+                    '': tr('Not sure / just related'),
+                    'physical_join': tr('Physical join'),
+                    'same_composition': tr('Same composition'),
+                },
+                value='',
+            ).props('dense')
+
+            notes_input = ui.textarea(
+                label=tr('Notes (optional)'),
+                placeholder=tr('Add notes about this join...'),
+            ).classes('w-full').props('outlined rows=2')
+
             with ui.row().classes('gap-2 justify-end'):
                 ui.button(tr('Cancel'), on_click=confirm_dialog.close).props('flat')
 
@@ -1550,15 +1626,21 @@ def create_joins_lab_page(
                 ) -> None:
                     """Off-loop Supabase write; force-refresh known-joins on success."""
                     try:
+                        # Round-4 Issue 1: read join-type + notes BEFORE closing the
+                        # dialog (the elements are torn down on close).
+                        _join_type = relationship_select.value or 'uncertain'
+                        _notes = (notes_input.value or '').strip()
                         confirm_dialog.close()
 
-                        def _run_create():
+                        def _run_create(_jt=_join_type, _nt=_notes):
                             return create_fragment_join(
                                 user_id=_uid,
                                 fragment_a_sys_id=_asid,
                                 fragment_a_shelfmark=_asm,
                                 fragment_b_sys_id=_csid,
                                 fragment_b_shelfmark=_csm,
+                                join_type=_jt,
+                                notes=_nt,
                                 # NO status kwarg — stays 'proposed' (D-02 LOCKED)
                             )
 
@@ -1685,6 +1767,31 @@ def create_joins_lab_page(
         capped = selected_list[:MAX_CANDIDATES]
         fragments = [anchor_sys_id] + capped
 
+        safe_user_set('puzzle_staging', {
+            'schema_version': 1,
+            'fragments': fragments,
+            'source': 'joins_lab',
+            'created_at': datetime.now(tz=timezone.utc).isoformat(),
+        })
+        ui.navigate.to('/puzzle')
+
+    def _on_add_candidate_to_puzzle_click(candidate_sys_id: str) -> None:
+        """Round-4 Issue 7: stage ANCHOR + this ONE candidate into the puzzle.
+
+        Per-card / Compare-header action (acts on a single candidate, not the
+        selection set).  Mirrors the bulk handler but the fragments payload is
+        exactly ``[anchor, candidate]``.  Writes a ``puzzle_staging`` descriptor
+        via ``safe_user_set`` (Phase-87 chokepoint) and navigates to /puzzle, which
+        pops + validates the key one-shot on load and adds the fragments.
+        """
+        anchor_sys_id = _anchor_state.get('sys_id') or ''
+        if not anchor_sys_id:
+            ui.notify(tr('No anchor loaded'), type='warning', timeout=3000)
+            return
+        if not candidate_sys_id:
+            return
+
+        fragments = [anchor_sys_id, candidate_sys_id]
         safe_user_set('puzzle_staging', {
             'schema_version': 1,
             'fragments': fragments,
