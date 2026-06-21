@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v8.2.0
 milestone_name: Web Joins Lab
 status: executing
-stopped_at: Phase 120 context gathered
-last_updated: "2026-06-20T23:57:01.886Z"
-last_activity: 2026-06-20
+stopped_at: Completed 120-04-PLAN.md
+last_updated: "2026-06-21T00:13:05.761Z"
+last_activity: 2026-06-21
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 31
-  completed_plans: 26
+  completed_plans: 27
   percent: 60
 ---
 
@@ -26,10 +26,10 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 120 (actions-persistence) — EXECUTING
-Plan: 4 of 8
+Plan: 5 of 8
 Status: Ready to execute
 Next: Phase 120 — Actions & Persistence
-Last activity: 2026-06-20
+Last activity: 2026-06-21
 
 ## Accumulated Context
 
@@ -86,8 +86,8 @@ Items carried forward from v8.1.0:
 
 ## Session Continuity
 
-Last session: 2026-06-20T23:57:01.879Z
-Stopped at: Phase 120 context gathered
+Last session: 2026-06-21T00:13:05.754Z
+Stopped at: Completed 120-04-PLAN.md
 Resume file: None
 Next step: `/gsd:plan-phase 117` (Vertical Spine)
 
@@ -112,6 +112,7 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 | Phase 119 P11 | 60 | 3 tasks | 5 files |
 | Phase 120-actions-persistence P01 | 4m | 2 tasks | 2 files |
 | Phase 120 P02 | 45min | 3 tasks | 4 files |
+| Phase 120 P04 | 65 | 4 tasks | 6 files |
 
 ## Decisions
 
@@ -141,6 +142,10 @@ Next step: `/gsd:plan-phase 117` (Vertical Spine)
 - **120-02-D20:** SEED-008 M4 guard: outer try/except RuntimeError opens BEFORE PRE-await mutations in _load_known_joins — existing inner try/except Exception nested inside (M4 requirement: covers client teardown at any point)
 - **120-02-D18:** create_login_dialog().open() replaces custom dialog + navigate.to('/settings') — Lab state preserved on anonymous sign-in
 - **120-02-D11:** _stop_requested flag checked BEFORE generation check in _make_progress_cb — InterruptedError fires while _should_apply_results still True, so partials applied on user Stop (not discarded)
+- [Phase ?]: test summary
+- [Phase ?]: confirmed_only=False in Lab known-joins: proposed joins visible immediately post-insert via force_refresh=True cache bypass
+- [Phase ?]: safe_user_pop one-shot descriptor with TTL=900s and 4 R2-M2 guards (schema, TTL, logged-in, anchor match); prevents double-fire on subsequent page loads
+- [Phase ?]: on_selection_change=None default in create_candidate_table; export NOT selection-scoped per Plan 06 (full filtered set)
 
 ## Operator Next Steps
 
