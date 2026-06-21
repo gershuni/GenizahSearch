@@ -692,6 +692,34 @@ def create_joins_lab_page(
             builder_has_query=builder_has_query,
         )
 
+    def _on_set_as_anchor(sys_id: str) -> None:
+        """D-07: re-anchor the workbench to the chosen candidate (no confirm dialog).
+
+        Calls the existing load_anchor() re-anchor flow (which clears _triage per
+        Phase-119 D-11). Dispatched as fire-and-forget via asyncio.ensure_future
+        so it can be used as a sync callback from the candidate grid.
+        """
+        asyncio.ensure_future(load_anchor(sys_id))
+
+    def _metadata_prefetcher_sync(sys_id: str) -> dict:
+        """D-09/H3: Sync fetcher for per-pane Compare metadata (catalog + bibliography).
+
+        Called via run.io_bound by compare_modal's _on_show show-handler so it
+        executes off the event loop.  Returns a dict with:
+            'fjms_bib'       — list[dict] from get_bibliography(sys_id)
+            'catalog_detail' — dict|None from get_catalog_detail(sys_id)
+        """
+        svc = get_fjms_service(thread_safe=True)
+        try:
+            fjms_bib = svc.get_bibliography(sys_id)
+        except Exception:
+            fjms_bib = []
+        try:
+            catalog_detail = svc.get_catalog_detail(sys_id)
+        except Exception:
+            catalog_detail = None
+        return {'fjms_bib': fjms_bib, 'catalog_detail': catalog_detail}
+
     def _open_compare(cand) -> None:
         """Open the Compare modal for a clicked candidate (F2, D-02).
 
@@ -724,6 +752,7 @@ def create_joins_lab_page(
             triage=_triage,
             on_verdict=_on_compare_verdict,
             enrichment=_enrichment,
+            metadata_prefetcher=_metadata_prefetcher_sync,
         )
         modal.open()
 
@@ -847,6 +876,7 @@ def create_joins_lab_page(
                 on_page_change=_on_page_change,
                 on_filter_open=_on_filter_open,
                 on_restyle_ready=_on_restyle_ready,
+                on_set_as_anchor=_on_set_as_anchor,
             )
 
     def _on_page_change(page: int) -> None:

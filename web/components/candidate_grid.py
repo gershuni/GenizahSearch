@@ -540,8 +540,10 @@ def _create_candidate_card(
     *,
     card_refs: dict | None = None,
     restyle_fn: Optional[Callable] = None,
+    on_set_as_anchor: Optional[Callable] = None,
+    on_add_as_join: Optional[Callable] = None,
 ) -> None:
-    """Render a single candidate card (Phase 119 D-09/D-11/D-07).
+    """Render a single candidate card (Phase 119 D-09/D-11/D-07, Phase 120 D-07/ACT-01).
 
     Card layout (reading order):
         ┌──────────────────────────────────────────┐
@@ -795,6 +797,44 @@ def _create_candidate_card(
                         .tooltip(tr("Compare fragment"))
                         .on("click", _make_compare_handler())
                     )
+
+                    # Phase-120 D-07: Set as Anchor — pivots the workbench in place
+                    # (triage resets per 119 D-11; no confirm dialog — not destructive).
+                    if on_set_as_anchor is not None:
+                        _sid_capture = cand.sys_id
+
+                        def _make_anchor_handler(sid=_sid_capture, _fn=on_set_as_anchor):
+                            def _h():
+                                _fn(sid)
+                            return _h
+
+                        (
+                            ui.button(icon="push_pin")
+                            .props("flat dense")
+                            .style("min-height:44px;")
+                            .tooltip(tr("Pivot the workbench: make this fragment the new anchor"))
+                            .on("click", _make_anchor_handler())
+                        )
+
+                    # Phase-120 ACT-01: Add as Join — community write, login-gated.
+                    # The callback handles anonymous/auth branching; the card passes
+                    # the candidate sys_id + shelfmark to the handler.
+                    if on_add_as_join is not None:
+                        _aj_sid = cand.sys_id
+                        _aj_sm = cand.shelfmark or "?"
+
+                        def _make_add_join_handler(sid=_aj_sid, sm=_aj_sm, _fn=on_add_as_join):
+                            def _h():
+                                _fn(sid, sm)
+                            return _h
+
+                        (
+                            ui.button(icon="add_link")
+                            .props("flat dense color=primary")
+                            .style("min-height:44px;")
+                            .tooltip(tr("Add as Join"))
+                            .on("click", _make_add_join_handler())
+                        )
 
 
 # ---------------------------------------------------------------------------
@@ -1063,6 +1103,10 @@ def create_candidate_grid(
     on_page_change: Optional[Callable] = None,
     on_filter_open: Optional[Callable] = None,
     on_restyle_ready: Optional[Callable] = None,
+    # Phase 120 D-07: Set-as-Anchor (pivots workbench in place)
+    on_set_as_anchor: Optional[Callable] = None,
+    # Phase 120 ACT-01: Add-as-Join (community write, login-gated)
+    on_add_as_join: Optional[Callable] = None,
 ) -> ui.element:
     """Render a paginated candidate grid with triage, 👁 badge, and Compare hook.
 
@@ -1130,6 +1174,8 @@ def create_candidate_grid(
                         on_compare=on_compare,
                         card_refs=_render_card_refs,
                         restyle_fn=_render_restyle,
+                        on_set_as_anchor=on_set_as_anchor,
+                        on_add_as_join=on_add_as_join,
                     )
 
             # Pagination controls (D-08): ‹ Prev | Page N of M | Next ›

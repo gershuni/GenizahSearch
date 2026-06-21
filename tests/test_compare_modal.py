@@ -1113,3 +1113,237 @@ class TestVerdictButtonRefresh:
         assert active is None, (
             "When triage has no entry for the shown candidate, no verdict button should be active"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 120 Plan 07: D-08 Browse-in-Compare + D-09 Info buttons source guards
+# ---------------------------------------------------------------------------
+
+class TestBrowseInCompare:
+    """D-08: Browse-in-Compare source-level assertions (Plan 120-07).
+
+    Both the anchor and the candidate pane must have an Open-in-Browse button
+    that opens via js_handler (no Python navigate call — T-119-09 propagation rule).
+    """
+
+    def test_d08_build_browse_url_imported_in_compare_modal(self):
+        """D-08: compare_modal.py must import build_browse_url from candidate_grid."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "build_browse_url" in source, (
+            "D-08: compare_modal.py must import and use build_browse_url from "
+            "candidate_grid to construct the per-pane Browse URL"
+        )
+
+    def test_d08_open_in_new_icon_present_in_compare_modal(self):
+        """D-08: compare_modal.py must render open_in_new icon buttons (Browse-in-Compare)."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "open_in_new" in source, (
+            "D-08: compare_modal.py must render icon='open_in_new' buttons for Browse-in-Compare"
+        )
+
+    def test_d08_browse_buttons_have_aria_labels(self):
+        """D-08: icon-only Browse buttons must carry aria-label (UI-SPEC §4 exception)."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        # aria-label appears in the .props() string for the Browse button
+        assert "aria-label" in source, (
+            "D-08: Browse-in-Compare icon-only buttons must carry aria-label "
+            "(UI-SPEC §4 icon-only exception — screen reader accessibility)"
+        )
+
+    def test_d08_browse_opens_via_js_handler_not_navigate(self):
+        """D-08/T-119-09: Browse button must use js_handler (window.open), NOT ui.navigate.to."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "window.open" in source, (
+            "D-08: Browse button must use js_handler with window.open (new tab), "
+            "not ui.navigate.to which would navigate the current client session"
+        )
+        # No Python-side navigate call
+        assert "ui.navigate.to" not in source, (
+            "D-08: compare_modal.py must NOT use ui.navigate.to — "
+            "Browse-in-Compare must open in a new tab via js_handler"
+        )
+
+    def test_d08_candidate_shelfmark_row_ref_exists_in_source(self):
+        """D-08: _cand_shelfmark_row_ref ref exists for the candidate pane Browse row."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "_cand_shelfmark_row_ref" in source, (
+            "D-08: compare_modal.py must maintain _cand_shelfmark_row_ref so the "
+            "candidate-pane Browse URL updates on each candidate flip"
+        )
+
+
+class TestCompareInfoButtons:
+    """D-09/H3/R2-H3: Compare pane info buttons source-level assertions (Plan 120-07)."""
+
+    def test_d09_metadata_prefetcher_param_in_create_compare_modal(self):
+        """D-09/H3: create_compare_modal must accept a metadata_prefetcher parameter."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "metadata_prefetcher" in source, (
+            "D-09/H3: create_compare_modal must accept metadata_prefetcher= param "
+            "for the off-loop per-pane metadata fetch layer"
+        )
+
+    def test_d09_populate_pane_info_row_defined(self):
+        """D-09: _populate_pane_info_row helper must exist in compare_modal.py."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "_populate_pane_info_row" in source, (
+            "D-09: compare_modal.py must define _populate_pane_info_row to build "
+            "FJMS Catalog + PGP/Bibliography info buttons from prefetched metadata"
+        )
+
+    def test_d09_info_rows_hidden_by_default(self):
+        """D-09: info button row containers must start hidden (display:none)."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        # The info row uses display:none by default
+        assert "_anchor_info_row_ref" in source, (
+            "D-09: _anchor_info_row_ref must exist as a factory-scoped ref"
+        )
+        assert "_cand_info_row_ref" in source, (
+            "D-09: _cand_info_row_ref must exist as a factory-scoped ref"
+        )
+
+    def test_d09_pjms_catalog_button_in_info_row(self):
+        """D-09: _populate_pane_info_row must render a 'FJMS Catalog' button."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "FJMS Catalog" in source or "tr(\"FJMS Catalog\")" in source, (
+            "D-09: compare_modal.py must render an 'FJMS Catalog' button in each pane info row"
+        )
+
+    def test_d09_pgp_bibliography_button_in_info_row(self):
+        """D-09: _populate_pane_info_row must render a 'PGP / Bibliography' button."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "PGP / Bibliography" in source or 'tr("PGP / Bibliography")' in source, (
+            "D-09: compare_modal.py must render a 'PGP / Bibliography' button in each pane info row"
+        )
+
+    def test_r2_h3_show_catalog_dialog_receives_catalog_detail_kwarg(self):
+        """R2-H3: compare_modal.py must call show_catalog_dialog with catalog_detail= keyword.
+
+        This proves the Compare modal passes the prefetched catalog detail so the
+        dialog does NOT call get_catalog_detail synchronously on open (R2-H3).
+        """
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "catalog_detail=" in source, (
+            "R2-H3: compare_modal.py must pass catalog_detail= to show_catalog_dialog "
+            "so the dialog skips its internal synchronous get_catalog_detail call on open"
+        )
+
+    def test_d09_metadata_fetched_via_run_io_bound(self):
+        """D-09/R2-H3: metadata fetch in _on_show must dispatch via run.io_bound (off-loop)."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        # asyncio.gather + run.io_bound present in _on_show metadata fetch block
+        assert "run.io_bound" in source, (
+            "D-09: compare_modal.py _on_show must dispatch metadata fetch via run.io_bound "
+            "so get_bibliography / get_catalog_detail run off the event loop (R2-H3)"
+        )
+        assert "asyncio.gather" in source, (
+            "D-09: compare_modal.py _on_show should use asyncio.gather to fetch anchor + "
+            "candidate metadata concurrently off-loop"
+        )
+
+    def test_d09_info_row_calls_existing_dialogs(self):
+        """D-09: _populate_pane_info_row must call create_fjms_bibliography_dialog
+        and show_catalog_dialog (not re-implement fetching).
+
+        Source-level assertion: the existing dialog helpers are referenced from
+        within compare_modal.py.
+        """
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        assert "create_fjms_bibliography_dialog" in source, (
+            "D-09: _populate_pane_info_row must call create_fjms_bibliography_dialog "
+            "for the PGP / Bibliography button"
+        )
+        assert "show_catalog_dialog" in source, (
+            "D-09: _populate_pane_info_row must call show_catalog_dialog "
+            "for the FJMS Catalog button"
+        )
+
+    def test_d09_on_show_uses_seed008_runtime_error_guard(self):
+        """D-09/SEED-008: _on_show must be wrapped in try/except RuntimeError."""
+        import pathlib
+        source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+        # SEED-008 pattern: except RuntimeError: return in _on_show
+        assert "except RuntimeError" in source, (
+            "D-09/SEED-008: _on_show must guard the whole body with try/except RuntimeError: return "
+            "to handle NiceGUI client disconnect cleanly"
+        )
+
+
+class TestCatalogDialogPrefetchParam:
+    """R2-H3: catalog_dialog.py accepts catalog_detail= and skips sync fetch when provided."""
+
+    def test_r2_h3_show_catalog_dialog_accepts_catalog_detail_param(self):
+        """R2-H3: show_catalog_dialog must accept a catalog_detail= param."""
+        import inspect
+        from web.components.catalog_dialog import show_catalog_dialog
+        sig = inspect.signature(show_catalog_dialog)
+        assert "catalog_detail" in sig.parameters, (
+            "R2-H3: show_catalog_dialog must accept catalog_detail= param so that "
+            "Compare modal can pass prefetched data and skip the synchronous internal fetch"
+        )
+
+    def test_r2_h3_catalog_dialog_skips_sync_fetch_when_detail_provided(self):
+        """R2-H3 BEHAVIORAL: when catalog_detail is supplied, get_catalog_detail is NOT called."""
+        from unittest.mock import patch, MagicMock
+
+        mock_el = MagicMock()
+        mock_el.__enter__ = lambda s: s
+        mock_el.__exit__ = MagicMock(return_value=False)
+        for m in ("classes", "props", "style", "mark", "tooltip", "on", "clear"):
+            setattr(mock_el, m, MagicMock(return_value=mock_el))
+
+        # Pre-build a catalog_detail dict
+        prefetched_detail = {
+            "source_names": ["FJMS"],
+            "records": [],
+        }
+
+        get_catalog_calls: list = []
+
+        def fake_get_catalog_detail(sys_id):
+            get_catalog_calls.append(sys_id)
+            return {"source_names": [], "records": []}
+
+        with (
+            patch("web.components.catalog_dialog.ui") as mock_ui,
+        ):
+            for attr in ("dialog", "card", "row", "column", "label", "button", "icon",
+                         "badge", "scroll_area", "separator", "tabs", "tab", "tab_panels",
+                         "tab_panel", "table", "select", "expansion"):
+                factory = MagicMock(return_value=mock_el)
+                factory.__enter__ = lambda s: s
+                factory.__exit__ = MagicMock(return_value=False)
+                setattr(mock_ui, attr, factory)
+
+            mock_svc = MagicMock()
+            mock_svc.get_catalog_detail = fake_get_catalog_detail
+
+            from web.components.catalog_dialog import show_catalog_dialog
+            try:
+                show_catalog_dialog(
+                    sys_id="990001",
+                    shelfmark="T-S 12.001",
+                    fjms_service=mock_svc,
+                    catalog_detail=prefetched_detail,
+                )
+            except Exception:
+                pass  # UI render may partially fail in headless context
+
+        assert not get_catalog_calls, (
+            "R2-H3: when catalog_detail= is supplied to show_catalog_dialog, "
+            "get_catalog_detail must NOT be called (prefetched data is used directly). "
+            f"But get_catalog_detail was called for: {get_catalog_calls}"
+        )

@@ -17,7 +17,7 @@ from nicegui import ui
 from web.translations import tr, get_language
 
 
-def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
+def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None, catalog_detail=None):
     """
     Create and open a catalog records dialog showing multi-team scholarly data.
 
@@ -25,12 +25,18 @@ def show_catalog_dialog(sys_id: str, shelfmark: str, fjms_service=None):
         sys_id: The Alma/system ID for the manuscript.
         shelfmark: Display shelfmark for the header.
         fjms_service: FjmsService instance (or None to auto-get).
+        catalog_detail: Optional pre-fetched detail dict (R2-H3 — when supplied,
+            skips the synchronous get_catalog_detail() call on the event loop so
+            the dialog opens without blocking; None keeps the existing self-fetch
+            for backward-compatible Browse callers).
     """
-    if fjms_service is None:
-        from shared.fjms_service import get_fjms_service
-        fjms_service = get_fjms_service(thread_safe=True)
+    if catalog_detail is None:
+        if fjms_service is None:
+            from shared.fjms_service import get_fjms_service
+            fjms_service = get_fjms_service(thread_safe=True)
+        catalog_detail = fjms_service.get_catalog_detail(sys_id)
 
-    detail = fjms_service.get_catalog_detail(sys_id)
+    detail = catalog_detail
     records = detail.get("records", [])
     running_titles = detail.get("running_titles", {})
     sizes = detail.get("sizes", {})

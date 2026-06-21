@@ -4322,3 +4322,30 @@ TRANSLATIONS.update({
     "Transcription (page)":                 "תמלול (עמוד)",
     "Image URL":                            "כתובת תמונה",
 })
+
+# === Phase 120-07: D-07 Set-as-Anchor + D-08 Browse-in-Compare + D-09 Info buttons ===
+TRANSLATIONS.update({
+    # --- D-07: Set-as-Anchor button on candidate cards ---
+    "Set as Anchor":
+        "הגדר כעוגן",
+    "Pivot the workbench: make this fragment the new anchor":
+        "הפוך קטע זה לעוגן החדש",
+    # --- D-08: Browse-in-Compare per-pane open buttons ---
+    "Open anchor in Browse (new tab)":
+        "פתח עוגן בדפדפן (לשונית חדשה)",
+    "Open candidate in Browse (new tab)":
+        "פתח מועמד בדפדפן (לשונית חדשה)",
+    # --- D-09: Compare pane info buttons ---
+    "FJMS Catalog":
+        "קטלוג FJMS",
+    "View FJMS catalog data for this fragment":
+        "הצג נתוני קטלוג FJMS עבור קטע זה",
+    "No FJMS catalog data for this fragment":
+        "אין נתוני קטלוג FJMS עבור קטע זה",
+    "PGP / Bibliography":
+        "PGP / ביבליוגרפיה",
+    "View PGP and bibliography data for this fragment":
+        "הצג נתוני PGP וביבליוגרפיה עבור קטע זה",
+    "No PGP data for this fragment":
+        "אין נתוני PGP עבור קטע זה",
+})

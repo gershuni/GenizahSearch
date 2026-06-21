@@ -31,14 +31,15 @@ covers the dynamically-created Compare viewers (anchor_viewer.py:59-60).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Optional, Callable
 
-from nicegui import ui
+from nicegui import run, ui
 
 from shared.joins_lab import Candidate, TRIAGE_ICONS, badge_and_tooltip
 from web.components.anchor_viewer import AnchorViewer
-from web.components.candidate_grid import is_size_mismatch
+from web.components.candidate_grid import build_browse_url, is_size_mismatch
 from web.translations import tr
 
 logger = logging.getLogger(__name__)
@@ -198,6 +199,7 @@ def create_compare_modal(
     on_verdict: Callable,
     enrichment: Optional[dict] = None,
     on_close: Optional[Callable] = None,
+    metadata_prefetcher: Optional[Callable] = None,
 ) -> ui.dialog:
     """Full-screen two-pane Compare modal (CMP-01 / CMP-02 / CMP-03 / VSM-02).
 
@@ -214,6 +216,12 @@ def create_compare_modal(
         enrichment:          Optional dict[sys_id → {width_cm, height_cm, ...}] for
                              the size-mismatch badge (D-15).
         on_close:            Optional callback invoked when the modal closes.
+        metadata_prefetcher: Optional async callable(sys_id) → dict with keys
+                             'fjms_bib': list and 'catalog_detail': dict|None.
+                             When provided the per-pane metadata is fetched off-loop
+                             inside the dialog's async show handler and fed to the
+                             FJMS/PGP info buttons (D-09/H3/R2-H3); when None the
+                             info buttons are not rendered.
 
     Returns:
         The ui.dialog() instance (caller opens it with dialog.open()).
@@ -279,6 +287,16 @@ def create_compare_modal(
     # Verdict button refs — keyed by verdict ('yes'/'maybe'/'no').
     # Populated during the verdict-buttons loop; refreshed by _refresh_verdict_buttons.
     _verdict_btn_refs: dict = {}
+
+    # Phase-120 D-08/D-09: per-pane info button container refs.
+    # Populated in the UI build block below; mutated in _on_show to add
+    # Browse buttons and FJMS/PGP info buttons once metadata is prefetched.
+    _anchor_info_row_ref: list = []   # [row_element] — anchor pane info row
+    _cand_info_row_ref: list = []     # [row_element] — candidate pane info row
+
+    # D-08: candidate shelfmark+browse row ref — cleared+rebuilt in _fill_candidate
+    # so the Browse URL stays in sync each time the candidate flips.
+    _cand_shelfmark_row_ref: list = []  # [row_element] — set during UI build
 
     def _update_counter() -> None:
         """Update the flip-through counter label (e.g. '3 / 47')."""
@@ -367,8 +385,42 @@ def create_compare_modal(
         _state["current_candidate"] = cand
         _state["candidate_page"] = cand.page or 1
 
-        # Shelfmark label
-        if _cand_shelfmark_ref:
+        # D-08: Shelfmark + Browse button row — clear and rebuild on each flip so
+        # the Browse URL tracks the current candidate.  The shelfmark text ref
+        # must be updated too (first child of the rebuilt row).
+        if _cand_shelfmark_row_ref:
+            import json as _json
+            sm_row = _cand_shelfmark_row_ref[0]
+            sm_row.clear()
+            with sm_row:
+                new_sm_label = ui.label(cand.shelfmark or "?").classes(
+                    "text-sm font-semibold"
+                ).style("color: var(--primary-700);")
+                # Replace the shelfmark label ref so other code sees the new element
+                if _cand_shelfmark_ref:
+                    _cand_shelfmark_ref[0] = new_sm_label
+                else:
+                    _cand_shelfmark_ref.append(new_sm_label)
+                # Browse button — js_handler opens in new tab (no Python navigate call;
+                # avoids server-side stop_propagation AST guard, T-119-09).
+                _cand_browse_url = build_browse_url(cand)
+                (
+                    ui.button(icon="open_in_new")
+                    .props(
+                        "flat dense round"
+                        f' aria-label="{tr("Open candidate in Browse (new tab)")}"'
+                    )
+                    .classes("text-white")
+                    .tooltip(tr("Open candidate in Browse (new tab)"))
+                    .on(
+                        "click",
+                        js_handler=(
+                            f"() => {{ window.open({_json.dumps(_cand_browse_url)}, '_blank'); }}"
+                        ),
+                    )
+                )
+        elif _cand_shelfmark_ref:
+            # Fallback: if no shelfmark-row ref just update the label text
             _cand_shelfmark_ref[0].set_text(cand.shelfmark or "?")
 
         # Badge row — rebuild (clear + repopulate)
@@ -512,9 +564,28 @@ def create_compare_modal(
                         "text-xs font-bold uppercase"
                     ).style("color: var(--text-muted);")
 
-                    ui.label(anchor_cand.shelfmark or "?").classes(
-                        "text-sm font-semibold"
-                    ).style("color: var(--primary-700);")
+                    # D-08: shelfmark + Browse button row for anchor pane
+                    with ui.row().classes("items-center gap-1"):
+                        ui.label(anchor_cand.shelfmark or "?").classes(
+                            "text-sm font-semibold"
+                        ).style("color: var(--primary-700);")
+                        # Browse icon — opens anchor in /browse (new tab)
+                        _anchor_browse_url = build_browse_url(anchor_cand)
+                        (
+                            ui.button(icon="open_in_new")
+                            .props(
+                                "flat dense round"
+                                f' aria-label="{tr("Open anchor in Browse (new tab)")}"'
+                            )
+                            .classes("text-white")
+                            .tooltip(tr("Open anchor in Browse (new tab)"))
+                            .on(
+                                "click",
+                                js_handler=(
+                                    f"() => {{ window.open({__import__('json').dumps(_anchor_browse_url)}, '_blank'); }}"
+                                ),
+                            )
+                        )
 
                     # Fresh AnchorViewer for anchor pane — NOT the sticky-page viewer (Pitfall 3).
                     # Stored in _anchor_viewer_ref so the show-loader can await update_content.
@@ -530,6 +601,13 @@ def create_compare_modal(
                     )
                     _anchor_viewer_ref.append(anchor_viewer)
 
+                    # D-09/H3: anchor pane info button row — populated off-loop in _on_show
+                    # when metadata_prefetcher is provided; hidden by default.
+                    anchor_info_row = ui.row().classes("gap-2 items-center py-1").style(
+                        "display:none;"
+                    )
+                    _anchor_info_row_ref.append(anchor_info_row)
+
                 # ── Candidate pane (right) ────────────────────────────────────
                 # R2-5: capture ref for verdict-border updates; mark for render-smoke.
                 cand_pane_col = ui.column().classes("flex-1 gap-4 p-4 overflow-y-auto").mark(
@@ -541,9 +619,16 @@ def create_compare_modal(
                         "text-xs font-bold uppercase"
                     ).style("color: var(--text-muted);")
 
-                    cand_shelfmark_label = ui.label("").classes(
-                        "text-sm font-semibold"
-                    ).style("color: var(--primary-700);")
+                    # D-08: shelfmark + Browse button row for candidate pane.
+                    # The row is cleared + rebuilt in _fill_candidate so the Browse
+                    # URL stays in sync each time the candidate flips.
+                    cand_shelfmark_row = ui.row().classes("items-center gap-1")
+                    _cand_shelfmark_row_ref.append(cand_shelfmark_row)
+                    # Seed an initial label ref so _fill_candidate can update text too.
+                    with cand_shelfmark_row:
+                        cand_shelfmark_label = ui.label("").classes(
+                            "text-sm font-semibold"
+                        ).style("color: var(--primary-700);")
                     _cand_shelfmark_ref.append(cand_shelfmark_label)
 
                     cand_badge_row = ui.row().classes("gap-2 items-center flex-wrap")
@@ -551,6 +636,13 @@ def create_compare_modal(
 
                     cand_viewer_container = ui.column().classes("w-full gap-4")
                     _cand_viewer_container_ref.append(cand_viewer_container)
+
+                    # D-09/H3: candidate pane info button row — populated off-loop in _on_show;
+                    # refreshed in _fill_candidate when the candidate flips.
+                    cand_info_row = ui.row().classes("gap-2 items-center py-1").style(
+                        "display:none;"
+                    )
+                    _cand_info_row_ref.append(cand_info_row)
 
             # ── Verdict bar (sticky bottom) ───────────────────────────────────
             with ui.row().classes(
@@ -597,16 +689,160 @@ def create_compare_modal(
                 ).props("flat dense").on("click", lambda: _step(1))
                 _next_btn_ref.append(next_btn)
 
+    def _populate_pane_info_row(
+        row_el,
+        sys_id: str,
+        shelfmark: str,
+        meta: dict,
+    ) -> None:
+        """Build FJMS + PGP/Bib info buttons inside *row_el* from prefetched *meta*.
+
+        D-09/H3 — called from the async _on_show show-handler AFTER metadata has
+        been fetched off-loop.  Must run on the event loop (NiceGUI element mutation).
+
+        meta must have keys:
+            'fjms_bib'      — list[dict] (bibliography rows from get_bibliography)
+            'catalog_detail'— dict|None (result of get_catalog_detail)
+        """
+        from web.components.catalog_dialog import show_catalog_dialog
+        from web.components.bibliography_dialog import create_fjms_bibliography_dialog
+
+        fjms_bib = meta.get("fjms_bib") or []
+        catalog_detail = meta.get("catalog_detail")  # None means no data or fetch failed
+        # Infer source count from catalog_detail if present (mirrors browse_enrichment logic)
+        catalog_src_count = 0
+        if catalog_detail and isinstance(catalog_detail, dict):
+            catalog_src_count = len(catalog_detail.get("source_names", []))
+        elif isinstance(catalog_detail, list):
+            # Some service versions return the records list directly
+            catalog_src_count = len(catalog_detail)
+
+        has_bib = bool(fjms_bib)
+        has_catalog = catalog_src_count > 0
+
+        if not has_bib and not has_catalog:
+            # Nothing to show — leave row hidden
+            return
+
+        # Make the row visible
+        row_el.style("display:flex;")
+
+        chip_base = (
+            "border-radius: 12px; min-height: 22px; font-weight: 600;"
+        )
+
+        with row_el:
+            # PGP / Bibliography button
+            if has_bib:
+                bib_dlg = create_fjms_bibliography_dialog(
+                    fjms_bib, sys_id, shelfmark=shelfmark
+                )
+                (
+                    ui.button(
+                        tr("PGP / Bibliography"),
+                        icon="menu_book",
+                        on_click=bib_dlg.open,
+                    )
+                    .props("flat dense no-caps size=sm")
+                    .classes("text-xs px-2 py-0")
+                    .style(f"border: 1.5px solid #7e57c2; color: #7e57c2; {chip_base}")
+                    .tooltip(tr("View PGP and bibliography data for this fragment"))
+                )
+            else:
+                (
+                    ui.button(
+                        tr("PGP / Bibliography"),
+                        icon="menu_book",
+                    )
+                    .props("flat dense no-caps size=sm disable")
+                    .classes("text-xs px-2 py-0")
+                    .style(f"border: 1.5px solid #bdbdbd; color: #bdbdbd; {chip_base}")
+                    .tooltip(tr("No PGP data for this fragment"))
+                )
+
+            # FJMS Catalog button (R2-H3: pass prefetched catalog_detail so dialog
+            # does NOT call get_catalog_detail synchronously on open)
+            if has_catalog:
+                _cd = catalog_detail  # captured for closure
+
+                def _make_cat_click(s=sys_id, sm=shelfmark, cd=_cd):
+                    def _h():
+                        show_catalog_dialog(s, sm, catalog_detail=cd)
+                    return _h
+
+                (
+                    ui.button(
+                        tr("FJMS Catalog"),
+                        icon="info_outline",
+                        on_click=_make_cat_click(),
+                    )
+                    .props("flat dense no-caps size=sm")
+                    .classes("text-xs px-2 py-0")
+                    .style(f"border: 1.5px solid #5c6bc0; color: #5c6bc0; {chip_base}")
+                    .tooltip(tr("View FJMS catalog data for this fragment"))
+                )
+            else:
+                (
+                    ui.button(
+                        tr("FJMS Catalog"),
+                        icon="info_outline",
+                    )
+                    .props("flat dense no-caps size=sm disable")
+                    .classes("text-xs px-2 py-0")
+                    .style(f"border: 1.5px solid #bdbdbd; color: #bdbdbd; {chip_base}")
+                    .tooltip(tr("No FJMS catalog data for this fragment"))
+                )
+
     # Attach async show-loader: fires when dialog mounts in the live client context.
     # Awaits BOTH the anchor pane and the candidate pane's update_content so images
     # and transcriptions actually render (G5 fix). Runs in the active NiceGUI client
     # context via dialog.on("show") — NOT via a naked background coroutine
     # (T-119-09 / Codex client-context regression rule).
     async def _on_show(_: object = None) -> None:
-        """Async show handler — awaits both pane update_content calls (G5 fix)."""
-        if _anchor_viewer_ref:
-            await _anchor_viewer_ref[0].update_content(p_num=anchor_cand.page or 1)
-        await _load_candidate_pane()
+        """Async show handler — awaits both pane update_content calls (G5 fix).
+
+        D-09/H3: When metadata_prefetcher is provided, also fetches per-pane
+        bibliography + catalog detail off-loop (run.io_bound) and populates
+        FJMS/PGP info buttons in each pane.  SEED-008 guarded (entire body).
+        """
+        try:
+            if _anchor_viewer_ref:
+                await _anchor_viewer_ref[0].update_content(p_num=anchor_cand.page or 1)
+            await _load_candidate_pane()
+
+            # D-09/H3: off-loop per-pane metadata fetch (only if caller provided
+            # the prefetcher; the prefetcher must accept a sys_id and return a dict
+            # with keys 'fjms_bib' (list) and 'catalog_detail' (dict|None)).
+            if metadata_prefetcher is not None:
+                cand_current = _state.get("current_candidate")
+                if cand_current is None:
+                    cand_current = initial_candidate
+
+                # Fetch anchor + candidate metadata concurrently off-loop.
+                anchor_meta, cand_meta = await asyncio.gather(
+                    run.io_bound(metadata_prefetcher, anchor_cand.sys_id),
+                    run.io_bound(metadata_prefetcher, cand_current.sys_id),
+                )
+
+                # Populate anchor pane info row
+                if _anchor_info_row_ref:
+                    _populate_pane_info_row(
+                        _anchor_info_row_ref[0],
+                        anchor_cand.sys_id,
+                        anchor_cand.shelfmark or "?",
+                        anchor_meta,
+                    )
+
+                # Populate candidate pane info row
+                if _cand_info_row_ref:
+                    _populate_pane_info_row(
+                        _cand_info_row_ref[0],
+                        cand_current.sys_id,
+                        cand_current.shelfmark or "?",
+                        cand_meta,
+                    )
+        except RuntimeError:
+            return  # SEED-008: NiceGUI client disconnected
 
     dialog.on("show", _on_show)
 
