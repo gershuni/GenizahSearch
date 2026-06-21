@@ -2048,3 +2048,91 @@ class TestListPickerD17:
             "D-17: SEED-008 guard (except RuntimeError: return) not found in joins_lab.py. "
             "The picker async task must guard against client-deleted teardowns."
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 120 Plan 08 Task 2: D-19 "Open in Joins Lab" button on /lists
+# ---------------------------------------------------------------------------
+
+class TestListsOpenInJoinsLabD19:
+    """D-19: 'Open in Joins Lab' button on /lists items (Plan 120-08 Task 2).
+
+    Source-level assertions against the live web/pages/lists.py:
+
+    1. A button with icon='science' is present.
+    2. The navigation target is /joins-lab?sys_id=... (new tab).
+    3. The tooltip is tr('Open in Joins Lab').
+    4. The button is positioned between Browse (menu_book) and Add-to-Puzzle (extension).
+    5. The button carries aria-label matching the tooltip.
+    """
+
+    def _get_lists_source(self):
+        import pathlib
+        p = pathlib.Path("web/pages/lists.py")
+        if not p.exists():
+            import pytest
+            pytest.skip("web/pages/lists.py not found")
+        return p.read_text(encoding="utf-8")
+
+    def test_open_in_joins_lab_icon_science(self):
+        """D-19: the Joins Lab entry button must use icon='science'."""
+        source = self._get_lists_source()
+        assert "icon='science'" in source or 'icon="science"' in source, (
+            "D-19: icon='science' not found in web/pages/lists.py. "
+            "The 'Open in Joins Lab' button must use the science icon per UI-SPEC §11."
+        )
+
+    def test_open_in_joins_lab_deep_link_present(self):
+        """D-19: navigation target must be /joins-lab?sys_id=... (FND-08 deep-link contract)."""
+        source = self._get_lists_source()
+        assert "/joins-lab?sys_id=" in source, (
+            "D-19: '/joins-lab?sys_id=' deep link not found in web/pages/lists.py. "
+            "The button must navigate to /joins-lab?sys_id={sid} in a new tab (FND-08)."
+        )
+
+    def test_open_in_joins_lab_new_tab(self):
+        """D-19: the deep link must open in a new tab (consistent with Phase-118 entry points)."""
+        source = self._get_lists_source()
+        assert "new_tab=True" in source, (
+            "D-19: 'new_tab=True' not found near the Joins Lab button in web/pages/lists.py. "
+            "The button must open in a new tab (118 D-18 contract)."
+        )
+
+    def test_open_in_joins_lab_tooltip(self):
+        """D-19: the button tooltip must use tr('Open in Joins Lab')."""
+        source = self._get_lists_source()
+        assert "Open in Joins Lab" in source, (
+            "D-19: 'Open in Joins Lab' not found in web/pages/lists.py. "
+            "The button must have a tooltip with this text."
+        )
+
+    def test_open_in_joins_lab_aria_label(self):
+        """D-19: the button must carry aria-label='Open in Joins Lab' (icon-only accessibility)."""
+        source = self._get_lists_source()
+        assert 'aria-label="Open in Joins Lab"' in source or "aria-label='Open in Joins Lab'" in source, (
+            "D-19: aria-label not found for the Joins Lab button in web/pages/lists.py. "
+            "Icon-only buttons MUST carry an aria-label for accessibility (UI-SPEC §11)."
+        )
+
+    def test_open_in_joins_lab_between_browse_and_puzzle(self):
+        """D-19: the science button must appear between menu_book (Browse) and extension (Puzzle)."""
+        source = self._get_lists_source()
+        # Find the positions of each icon string in the source
+        browse_pos = source.find("icon='menu_book'")
+        if browse_pos == -1:
+            browse_pos = source.find('icon="menu_book"')
+        science_pos = source.find("icon='science'")
+        if science_pos == -1:
+            science_pos = source.find('icon="science"')
+        puzzle_pos = source.find("icon='extension'")
+        if puzzle_pos == -1:
+            puzzle_pos = source.find('icon="extension"')
+
+        assert browse_pos != -1, "D-19: menu_book (Browse) button not found in lists.py"
+        assert science_pos != -1, "D-19: science (Joins Lab) button not found in lists.py"
+        assert puzzle_pos != -1, "D-19: extension (Puzzle) button not found in lists.py"
+        assert browse_pos < science_pos < puzzle_pos, (
+            f"D-19: button order wrong in lists.py — science button (pos={science_pos}) "
+            f"must be between menu_book (pos={browse_pos}) and extension (pos={puzzle_pos}). "
+            f"Insert it BETWEEN Browse and Add-to-Puzzle per UI-SPEC §11."
+        )

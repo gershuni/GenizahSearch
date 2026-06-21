@@ -695,6 +695,19 @@ def create_lists_page():
                                     on_click=lambda sid=sys_id: ui.navigate.to(f'/browse?sys_id={sid}')
                                 ).props('flat round dense').tooltip(tr('Browse'))
 
+                                # Open in Joins Lab button (Phase 120 D-19)
+                                # Inserted BETWEEN Browse and Add-to-Puzzle (UI-SPEC §11).
+                                # icon=science matches the Phase-118 Joins Lab entry points.
+                                # Always enabled — Joins Lab requires no login for anonymous browsing.
+                                ui.button(
+                                    icon='science',
+                                    on_click=lambda sid=sys_id: ui.navigate.to(
+                                        f'/joins-lab?sys_id={sid}', new_tab=True
+                                    ),
+                                ).props(
+                                    'flat round dense aria-label="Open in Joins Lab"'
+                                ).tooltip(tr('Open in Joins Lab'))
+
                                 if WEB_PUZZLE_ENABLED:
                                     # Add to Puzzle button (Phase 49)
                                     ui.button(
