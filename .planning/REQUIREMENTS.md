@@ -64,7 +64,7 @@ Requirements for this milestone. Each maps to a roadmap phase.
 
 - [x] **ACT-01**: User can add a confirmed candidate as a join via the existing pairwise-join path (login-gated — community write).
 - [x] **ACT-02**: User can add the anchor + selected candidates to the Fragment Puzzle. Because `/puzzle?add=` currently accepts a single fragment, this milestone adds a **bulk staging handoff** (multi-fragment payload/API) so the anchor + the selected candidates open together in `/puzzle`.
-- [ ] **ACT-03**: User can add candidates to a saved list and/or export the candidate set.
+- [x] **ACT-03**: User can add candidates to a saved list and/or export the candidate set.
 
 ### Persistence (PST)
 
@@ -138,7 +138,7 @@ Which phases cover which requirements. Populated during roadmap creation.
 | VSM-02 | Phase 119 | Complete |
 | ACT-01 | Phase 120 | Complete |
 | ACT-02 | Phase 120 | Complete |
-| ACT-03 | Phase 120 | Pending |
+| ACT-03 | Phase 120 | Complete |
 | PST-01 | Phase 120 | Complete |
 | PST-02 | Phase 120 | Complete |
 | PST-03 | Phase 120 | Complete |
