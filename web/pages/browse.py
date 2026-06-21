@@ -18,6 +18,9 @@ import asyncio
 import re
 import html as html_module
 from urllib.parse import quote
+from shared.fgp_service import (
+    source_provider, source_relation_kind, get_fgp_section_for_page,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +39,24 @@ def _warn_bridge_import_failed(exc: Exception) -> None:
     _logging.getLogger(__name__).warning(
         "shelfmark_bridge unavailable in browse.py (degrading to v7.10 fallback): %s", exc
     )
+
+
+def _merge_fgp_sources(sys_id: str, pgp_sources):
+    """Append FGP transcription sources (when enabled) to a PGP source list.
+
+    Used by the reading-desk fetch sites so FGP appears as a distinct, selectable
+    source in the per-fragment chooser (FGP-05). Degrades to the PGP list on any
+    error or when the flag/DB is off.
+    """
+    sources = list(pgp_sources or [])
+    try:
+        from web.feature_flags import web_fgp_enabled
+        if web_fgp_enabled():
+            from shared.fgp_service import get_fgp_sources_for_fragment
+            sources += get_fgp_sources_for_fragment(sys_id) or []
+    except Exception as exc:  # never let FGP break the reading desk
+        logger.debug("FGP merge skipped for %s: %s", sys_id, exc)
+    return sources
 
 
 # Phase 117 Plan 03: promoted to web/components/typography.py (ANC-03).
@@ -1017,7 +1038,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             sources = []
             pgp_doc = None
             try:
-                sources = get_all_sources_for_fragment(frag_sid) or []
+                sources = _merge_fgp_sources(frag_sid, get_all_sources_for_fragment(frag_sid))
                 pgp_doc = get_document_for_fragment(frag_sid)
             except Exception:
                 pass  # Shelfmark lookup failed; use fallback identifier
@@ -1070,7 +1091,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
             sources = []
             pgp_doc = None
             try:
-                sources = rd_get_sources(current_sid) or []
+                sources = _merge_fgp_sources(current_sid, rd_get_sources(current_sid))
                 pgp_doc = rd_get_doc(current_sid)
             except Exception:
                 pass  # Join operation failed; continue with available data
@@ -1102,7 +1123,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
         sources = []
         pgp_doc = None
         try:
-            sources = rd_get_sources(sys_id) or []
+            sources = _merge_fgp_sources(sys_id, rd_get_sources(sys_id))
             pgp_doc = rd_get_doc(sys_id)
         except Exception:
             pass  # Shelfmark lookup failed; use fallback identifier
@@ -2753,7 +2774,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                     sources = []
                                                     pgp_doc_data = None
                                                     try:
-                                                        sources = ld_src(item_sid) or []
+                                                        sources = _merge_fgp_sources(item_sid, ld_src(item_sid))
                                                         pgp_doc_data = ld_doc(item_sid)
                                                     except Exception:
                                                         pass  # Shelfmark lookup failed; use fallback identifier
@@ -3130,7 +3151,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         doc_rel = src.get('doc_relation', '')
                                         scholar = src.get('source_scholar', 'Unknown')
                                         lang = src.get('language', '')
-                                        if 'Edition' in doc_rel:
+                                        # FGP is a distinct provider — label it as such
+                                        # so it never reads as a PGP edition (FGP-07).
+                                        if source_provider(src) == 'fgp':
+                                            if source_relation_kind(src) == 'translation':
+                                                label = f"FGP {lang} {tr('Translation')}".replace('  ', ' ').strip()
+                                            else:
+                                                label = tr('FGP Transcription')
+                                        elif 'Edition' in doc_rel:
                                             label = f"PGP Edition: {scholar}"
                                         elif 'Translation' in doc_rel:
                                             label = f"{lang} Translation: {scholar}"
@@ -3174,6 +3202,7 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                     is_english = src.get('language') == 'English'
                                                     text_dir = 'ltr' if (is_translation and is_english) else 'rtl'
                                                     text_align = 'left' if text_dir == 'ltr' else 'right'
+                                                    is_fgp = source_provider(src) == 'fgp'
                                                     from shared.document_service import parse_transcription_sections
                                                     sections = parse_transcription_sections(content)
                                                     for pg_key, container in t_containers.items():
@@ -3181,7 +3210,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                         with container:
                                                             pg_section = 'recto' if pg_key == 0 else 'verso'
                                                             section_texts = sections.get(pg_section, [])
-                                                            section_text = '\n\n'.join(section_texts) if section_texts else content
+                                                            if is_fgp:
+                                                                # FGP: dedicated splitter (never both sides)
+                                                                section_text = get_fgp_section_for_page(src, pg_key + 1)
+                                                            else:
+                                                                section_text = '\n\n'.join(section_texts) if section_texts else content
                                                             if section_text:
                                                                 ui.label(section_text).style(
                                                                     f'font-size: 1.2rem; line-height: 1.9; direction: {text_dir}; text-align: {text_align}; '
@@ -3227,12 +3260,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                 initial_source = source_map.get(default_key)
                                 initial_sections = None
                                 initial_is_ltr = False
+                                initial_is_fgp = False
                                 if initial_source and initial_source.get('content'):
                                     from shared.document_service import parse_transcription_sections
                                     initial_sections = parse_transcription_sections(initial_source['content'])
                                     is_translation = 'Translation' in (initial_source.get('doc_relation') or '')
                                     is_english = initial_source.get('language') == 'English'
                                     initial_is_ltr = is_translation and is_english
+                                    initial_is_fgp = source_provider(initial_source) == 'fgp'
 
                                 # Render each page's text
                                 for pg_i, pg in enumerate(frag_pages):
@@ -3253,7 +3288,14 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         text_dir = 'rtl'
                                         text_align = 'right'
 
-                                        if initial_sections is not None:
+                                        if initial_is_fgp:
+                                            # FGP: dedicated splitter (never both sides).
+                                            fgp_text = get_fgp_section_for_page(initial_source, pg_idx + 1)
+                                            display_text = fgp_text or ''
+                                            if initial_is_ltr:
+                                                text_dir = 'ltr'
+                                                text_align = 'left'
+                                        elif initial_sections is not None:
                                             pg_section = 'recto' if pg_idx == 0 else 'verso'
                                             section_texts = initial_sections.get(pg_section, [])
                                             if section_texts:

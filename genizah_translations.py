@@ -2086,6 +2086,9 @@ TRANSLATIONS = {
     "Has PGP Transcription": "יש תעתיק PGP",
     "PGP Transcription": "תעתוק PGP",
     "PGP Transcriptions": "תעתוקי PGP",
+    # --- FGP (Friedberg Genizah Project) Transcription ---
+    "FGP Transcription": "תעתוק FGP",
+    "FGP Transcriptions": "תעתוקי FGP",
     "Transcription by": "תעתוק מאת",
     "View on PGP": "צפה ב-PGP",
     "Translations": "תרגומים",

@@ -29,7 +29,9 @@ from shared import fgp_service
 from shared.fgp_service import (
     FGP_ATTRIBUTION,
     FgpService,
+    filter_sources_for_page,
     get_fgp_section_for_page,
+    group_transcription_sources,
     namespaced_source_id,
     reset_fgp_service,
     source_provider,
@@ -39,26 +41,30 @@ from shared.fgp_service import (
 
 # ── Schema + fixture helpers ──────────────────────────────────────
 
-# Assumed FGP schema: mirrors PGP document_sources, flattened (sys_id/page_info/
-# fgp_c_number live on the row; no document_fragments join).
-FGP_SOURCES_DDL = """
-CREATE TABLE document_sources (
+# Real FGP schema (fgp_data/README.md): table fgp_transcriptions; sys_id/page_info/
+# c_number/sections live on the row; no sequence_order column.
+FGP_TRANSCRIPTIONS_DDL = """
+CREATE TABLE fgp_transcriptions (
     id INTEGER PRIMARY KEY,
-    sys_id TEXT,
-    fgp_c_number TEXT,
-    page_info TEXT,
+    collection TEXT,
+    shelfmark TEXT,
+    c_number TEXT,
+    image_id TEXT,
     source_scholar TEXT,
     doc_relation TEXT,
     language TEXT,
     content TEXT,
     content_length INTEGER,
-    sequence_order INTEGER DEFAULT 1,
-    sections TEXT
+    n_pages INTEGER,
+    sections TEXT,
+    sys_id TEXT,
+    page_info TEXT,
+    folio_num INTEGER
 )
 """
 
 
-def _create_fgp_db(tmp_path_str: str, table_ddl: str = FGP_SOURCES_DDL) -> str:
+def _create_fgp_db(tmp_path_str: str, table_ddl: str = FGP_TRANSCRIPTIONS_DDL) -> str:
     """Create a temp FGP SQLite database with schema. Returns path."""
     db_path = os.path.join(tmp_path_str, "test_fgp.db")
     conn = sqlite3.connect(db_path)
@@ -71,33 +77,22 @@ def _create_fgp_db(tmp_path_str: str, table_ddl: str = FGP_SOURCES_DDL) -> str:
 def _insert_sample_data(db_path: str):
     """Insert standard FGP sample rows for most tests."""
     conn = sqlite3.connect(db_path)
+    cols = ("id, collection, shelfmark, c_number, source_scholar, doc_relation, "
+            "language, content, sections, sys_id, page_info")
+    q = f"INSERT INTO fgp_transcriptions ({cols}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 
     # Row 1: edition with structured page_num sections (recto + verso), sys_id A
-    conn.execute(
-        "INSERT INTO document_sources (id, sys_id, fgp_c_number, page_info, "
-        "source_scholar, doc_relation, language, content, sequence_order, sections) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (1, "003072766", "C12345", None, "FGP", "Digital Edition", "he",
-         "recto side text\nverso side text", 1,
-         '[{"page_num": 1, "text": "recto side text"}, '
-         '{"page_num": 2, "text": "verso side text"}]'),
-    )
+    conn.execute(q, (1, "CUL", "T-S 8J5.11", "C12345", "FGP", "Digital Edition",
+                     None, "recto side text\nverso side text",
+                     '[{"page_num": 1, "text": "recto side text"}, '
+                     '{"page_num": 2, "text": "verso side text"}]',
+                     "003072766", None))
     # Row 2: edition, verso-only via page_info, NO sections, sys_id A
-    conn.execute(
-        "INSERT INTO document_sources (id, sys_id, fgp_c_number, page_info, "
-        "source_scholar, doc_relation, language, content, sequence_order, sections) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (2, "003072766", "C12346", "verso", "FGP", "Digital Edition", "he",
-         "only verso content here", 2, None),
-    )
+    conn.execute(q, (2, "CUL", "T-S 8J5.11", "C12346", "FGP", "Digital Edition",
+                     None, "only verso content here", None, "003072766", "verso"))
     # Row 3: edition, NO sections, NO page_info, sys_id B
-    conn.execute(
-        "INSERT INTO document_sources (id, sys_id, fgp_c_number, page_info, "
-        "source_scholar, doc_relation, language, content, sequence_order, sections) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        (3, "003099001", "C20000", None, "FGP", "Digital Edition", "jrb",
-         "unsided fragment text", 1, None),
-    )
+    conn.execute(q, (3, "JTS", "ENA 1234.5", "C20000", "FGP", "Digital Edition",
+                     None, "unsided fragment text", None, "003099001", None))
     conn.commit()
     conn.close()
 
@@ -125,13 +120,14 @@ def fgp_svc(tmp_path):
 
 
 class TestSchemaDiscovery:
-    def test_discovers_document_sources_table(self, fgp_svc):
+    def test_discovers_fgp_transcriptions_table(self, fgp_svc):
         assert fgp_svc.is_available()
-        assert fgp_svc._table == "document_sources"
+        assert fgp_svc._table == "fgp_transcriptions"
         assert "sys_id" in fgp_svc._columns
 
     def test_discovers_alternate_table_name(self, tmp_path):
-        ddl = FGP_SOURCES_DDL.replace("document_sources", "fgp_sources")
+        # Robustness: a rebuilt DB under a different (candidate) name still resolves.
+        ddl = FGP_TRANSCRIPTIONS_DDL.replace("fgp_transcriptions", "fgp_sources")
         db_path = _create_fgp_db(str(tmp_path), table_ddl=ddl)
         svc = FgpService(db_path=db_path)
         try:
@@ -170,7 +166,8 @@ class TestGetFgpSourcesForFragment:
         for key in ("doc_relation", "content", "language", "id", "sections", "page_info"):
             assert key in s
 
-    def test_ordered_by_sequence(self, fgp_svc):
+    def test_ordered_by_id(self, fgp_svc):
+        # No sequence_order column -> stable order by id.
         sources = fgp_svc.get_fgp_sources_for_fragment("003072766")
         assert [s["id"] for s in sources] == [1, 2]
 
@@ -234,6 +231,18 @@ class TestGetFgpSectionForPage:
         assert get_fgp_section_for_page(src, 1) == "unsided fragment text"
         assert get_fgp_section_for_page(src, 2) is None
 
+    def test_page_info_takes_precedence_over_sections(self):
+        # page_info is authoritative for the side: a 'recto' row shows its FULL
+        # content on recto and nothing on verso, even if it has multi-page sections.
+        src = {
+            "content": "full recto pdf text",
+            "page_info": "recto",
+            "sections": [{"canvas_num": 1, "text": "pdf page 1"},
+                         {"canvas_num": 2, "text": "pdf page 2"}],
+        }
+        assert get_fgp_section_for_page(src, 1) == "full recto pdf text"
+        assert get_fgp_section_for_page(src, 2) is None
+
     def test_empty_content_is_none(self):
         assert get_fgp_section_for_page({"content": ""}, 1) is None
         assert get_fgp_section_for_page({"content": "   "}, 1) is None
@@ -265,6 +274,99 @@ class TestSourceKindHelpers:
 
     def test_namespaced_source_id_none(self):
         assert namespaced_source_id({"source": "fgp"}) is None
+
+
+# ── TestGroupTranscriptionSources (FGP-03/07) ─────────────────────
+
+
+class TestGroupTranscriptionSources:
+    def test_fgp_edition_not_folded_into_pgp(self):
+        # Both share 'Digital Edition'; provider must keep them in separate groups.
+        sources = [
+            {"source": "pgp", "doc_relation": "Digital Edition", "content": "p", "id": 1},
+            {"source": "fgp", "doc_relation": "Digital Edition", "content": "f", "id": 1},
+        ]
+        groups = group_transcription_sources(sources)
+        assert [s["content"] for s in groups["pgp_editions"]] == ["p"]
+        assert [s["content"] for s in groups["fgp_editions"]] == ["f"]
+
+    def test_translations_split_by_provider(self):
+        sources = [
+            {"source": "pgp", "doc_relation": "Digital Translation", "content": "pt", "id": 1},
+            {"is_fgp": True, "doc_relation": "Digital Translation", "content": "ft", "id": 2},
+        ]
+        groups = group_transcription_sources(sources)
+        assert groups["pgp_translations"][0]["content"] == "pt"
+        assert groups["fgp_translations"][0]["content"] == "ft"
+
+    def test_contentless_skipped(self):
+        sources = [{"source": "fgp", "doc_relation": "Digital Edition", "content": ""}]
+        groups = group_transcription_sources(sources)
+        assert groups["fgp_editions"] == []
+
+    def test_order_preserved(self):
+        sources = [
+            {"source": "fgp", "doc_relation": "Digital Edition", "content": "a", "id": 5},
+            {"source": "fgp", "doc_relation": "Digital Edition", "content": "b", "id": 2},
+        ]
+        groups = group_transcription_sources(sources)
+        assert [s["content"] for s in groups["fgp_editions"]] == ["a", "b"]
+
+    def test_empty_and_none(self):
+        empty = {"pgp_editions": [], "fgp_editions": [], "pgp_translations": [], "fgp_translations": []}
+        assert group_transcription_sources(None) == empty
+        assert group_transcription_sources([]) == empty
+
+
+# ── TestFilterSourcesForPage (FGP-04.4) ───────────────────────────
+
+
+class TestFilterSourcesForPage:
+    def test_pgp_page_info_match_kept(self):
+        sources = [{"source": "pgp", "doc_relation": "Digital Edition",
+                    "content": "x", "page_info": "verso"}]
+        assert filter_sources_for_page(sources, 2)  # verso page keeps it
+        assert filter_sources_for_page(sources, 1) == []  # recto page drops it
+
+    def test_pgp_no_page_info_narrowed(self):
+        # Lowercase content lines so the recto/verso marker regex (which treats a
+        # Capitalized following word as a qualifier) splits as intended. Fresh
+        # dict per call — the PGP path narrows content in place (original behavior).
+        def _src():
+            return [{"source": "pgp", "doc_relation": "Digital Edition",
+                     "content": "Recto\nrecto body\nVerso\nverso body", "page_info": None}]
+        assert filter_sources_for_page(_src(), 1)[0]["content"] == "recto body"
+        assert filter_sources_for_page(_src(), 2)[0]["content"] == "verso body"
+
+    def test_pgp_translation_not_narrowed(self):
+        sources = [{"source": "pgp", "doc_relation": "Digital Translation",
+                    "content": "full translation", "page_info": None}]
+        kept = filter_sources_for_page(sources, 1)
+        assert kept[0]["content"] == "full translation"
+
+    def test_fgp_kept_only_on_its_side(self):
+        # FGP verso-only (no sections, page_info=verso)
+        fgp = {"source": "fgp", "is_fgp": True, "doc_relation": "Digital Edition",
+               "content": "verso text", "page_info": "verso", "sections": None}
+        assert filter_sources_for_page([fgp], 2)[0]["content"] == "verso text"
+        assert filter_sources_for_page([fgp], 1) == []  # not duplicated on recto
+
+    def test_mixed_list_order_and_split(self):
+        pgp = {"source": "pgp", "doc_relation": "Digital Edition",
+               "content": "p-recto", "page_info": "recto"}
+        fgp = {"source": "fgp", "is_fgp": True, "doc_relation": "Digital Edition",
+               "content": "f-unsided", "page_info": None, "sections": None}
+        out = filter_sources_for_page([pgp, fgp], 1)
+        # both present on recto, original order
+        assert [s["content"] for s in out] == ["p-recto", "f-unsided"]
+        # verso: pgp(recto) dropped, fgp(no page_info) defaults recto-only -> dropped
+        assert filter_sources_for_page([pgp, fgp], 2) == []
+
+    def test_fgp_dict_not_mutated(self):
+        fgp = {"source": "fgp", "is_fgp": True, "doc_relation": "Digital Edition",
+               "content": "orig", "page_info": "recto", "sections": None}
+        filter_sources_for_page([fgp], 1)
+        assert fgp["content"] == "orig"  # copied, not clobbered
 
 
 # ── TestFeatureFlag (FGP-04) ──────────────────────────────────────

@@ -17,7 +17,7 @@ from web.safe_storage import safe_user_get as _safe_get
 from web.state import state
 from web.pages.search_helpers import compute_selected_uids
 from web.translations import tr, is_rtl, get_language
-from web.feature_flags import WEB_PUZZLE_ENABLED
+from web.feature_flags import WEB_PUZZLE_ENABLED, web_fgp_enabled
 from web.components.filter_panel import persist_value
 from web.pages.search_state import (
     AdvancedViewState, domain_display_name,
@@ -33,6 +33,7 @@ from genizah_core import SearchEngine, get_library_display
 from web.document_service import (
     get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page,
 )
+from shared.fgp_service import get_fgp_sources_for_fragment, filter_sources_for_page
 from web.components.joins_panel import fetch_connected_fragments, create_joins_dialog
 from urllib.parse import quote
 from web.components.typography import h3
@@ -1223,18 +1224,13 @@ def open_advanced_dialog(search_state, refs, index, result):
         all_sources = None
         if sys_id:
             try:
-                all_sources_raw = get_all_sources_for_fragment(sys_id)
-                current_page_info = 'recto' if current_p_num == 1 else 'verso'
-                page_sources = []
-                for src in all_sources_raw:
-                    source_page = src.get('page_info')
-                    if source_page == current_page_info or not source_page:
-                        is_translation = 'Translation' in (src.get('doc_relation') or '')
-                        if src.get('content'):
-                            if not is_translation and not source_page:
-                                src['content'] = get_section_for_page(src['content'], current_p_num, src.get('sections'))
-                        page_sources.append(src)
-                all_sources = page_sources if page_sources else None
+                all_sources_raw = get_all_sources_for_fragment(sys_id) or []
+                # Merge FGP transcriptions as additional, distinct sources (FGP-05).
+                if web_fgp_enabled():
+                    all_sources_raw = all_sources_raw + (get_fgp_sources_for_fragment(sys_id) or [])
+                # Centralized per-page filter (FGP-04.4): preserves PGP behavior,
+                # splits FGP via its dedicated splitter (never both sides).
+                all_sources = filter_sources_for_page(all_sources_raw, current_p_num) or None
 
                 pgp_doc = get_document_for_fragment(sys_id, current_p_num)
                 if pgp_doc:

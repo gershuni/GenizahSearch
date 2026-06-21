@@ -20,22 +20,28 @@ Thread-safe: uses per-thread SQLite connections via ``ThreadLocalConnection`` so
 concurrent NiceGUI ``run.io_bound()`` calls each get their own connection.
 
 ------------------------------------------------------------------------------
-⚠️  SCHEMA ASSUMPTION — VERIFY AGAINST THE REAL DB BEFORE SHIP (Phase C / FGP-09)
+SCHEMA — confirmed from fgp_data/README.md (the data-store reference, 2026-06-21)
 ------------------------------------------------------------------------------
-The real ``fgp_transcriptions.db`` is gitignored and was UNAVAILABLE when this
-module was written, and its companion references (``fgp_data/README.md``,
-``docs/plans/FGP_TRANSCRIPTIONS_INTEGRATION_PLAN.md``) are not in the repo. The
-assumed schema below is derived from:
-  * docs/OPEN_ISSUES.md  -> "mirrors PGP document_sources; 99.94% sys_id-resolved;
-    recto/verso for 18,222 rows via FGP C-number"
-  * docs/plans/FGP_CHOOSER_MILESTONE.md §4.1 -> the chooser-shaped output dict.
+The real DB is gitignored/absent in this repo, but its schema is documented in
+``fgp_data/README.md``. Source table ``fgp_transcriptions`` (45,034 rows) — the
+columns this service reads:
+  * ``id``            surrogate PK
+  * ``sys_id``        GenizahSearch join key (== NLI Alma id); 99.9% resolved
+  * ``c_number``      FGP fragment id ``C#####`` (present on 24,184 rows)
+  * ``source_scholar``'FGP' (no per-transcriber field in the source)
+  * ``doc_relation``  'Digital Edition' (41,692) / 'Digital Translation' (He 2,725 / En 617)
+  * ``language``      'Hebrew'/'English' for translations; NULL for editions
+  * ``content``       full plain-text transcription (PyMuPDF get_text())
+  * ``sections``      JSON ``[{"page_num":1,"text":"…"}]`` — one per PDF page
+  * ``page_info``     'recto'/'verso' (18,222 rows, via the C-number); else NULL
+  * (also present, unused here: collection, image_id, content_length, n_pages,
+    heb_ratio, rel_path/filename, author_*, title_*, domain, image_side, folio_num)
+There is NO ``sequence_order`` column, so rows are ordered by ``id``. Other tables
+in the DB (``fgp_meta``, ``fgp_shelfmark_meta``, ``fgp_cnumber_info``) are ignored.
 
-To absorb minor real-schema drift WITHOUT crashing, the service DISCOVERS the
-actual source table + column set at connect time (see ``_discover_source_table``)
-and reads every column defensively. But the assumed column NAMES — ``sys_id``,
-``page_info``, ``fgp_c_number``, ``doc_relation``, ``content``, ``language``,
-``source_scholar``, ``sections``, ``sequence_order``, ``id`` — MUST be confirmed
-(and this file adjusted) once the real DB is in hand.
+The service still DISCOVERS the source table + columns at connect time (see
+``_discover_source_table``) and reads every column defensively, so it tolerates a
+refreshed/renamed schema; Phase C should still smoke-test against the live DB.
 """
 
 import json
@@ -65,13 +71,14 @@ SOURCE_PGP = "pgp"
 # release-gated sign-off item; this is the working default per the milestone doc.
 FGP_ATTRIBUTION = "FGP (Friedberg Genizah Project)"
 
-# Documented candidate table names, most-likely first ("mirrors document_sources").
+# Candidate source-table names, confirmed name first (fgp_data/README.md). The
+# rest are fallbacks in case the DB is rebuilt under a different name.
 _CANDIDATE_TABLES = (
+    "fgp_transcriptions",
     "document_sources",
     "fgp_sources",
     "sources",
     "transcriptions",
-    "fgp_transcriptions",
 )
 # Column names that may hold the transcription text, in preference order.
 _CONTENT_COLUMNS = ("content", "transcription", "text")
@@ -148,6 +155,39 @@ def namespaced_source_id(source: Dict[str, Any]) -> Optional[str]:
     return f"{source_provider(source)}:{raw}"
 
 
+def group_transcription_sources(sources: Optional[List[Dict[str, Any]]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Split a merged PGP+FGP source list into chooser groups (FGP-03/07).
+
+    Centralizes the Edition/Translation + provider classification so the web
+    ``version_selector`` and the desktop ``_populate_pgp_combo`` render identical
+    groups. FGP editions get their OWN group (``fgp_editions``) and are NOT folded
+    into the PGP group even though they share PGP's ``'Digital Edition'``
+    ``doc_relation`` — the whole point of the ``source='fgp'`` discriminator.
+
+    Only sources carrying ``content`` are included. Input order (already
+    sequence-ordered by the services) is preserved within each group.
+
+    Returns a dict with keys ``pgp_editions`` / ``fgp_editions`` /
+    ``pgp_translations`` / ``fgp_translations`` (``'other'`` relations dropped).
+    """
+    groups: Dict[str, List[Dict[str, Any]]] = {
+        "pgp_editions": [],
+        "fgp_editions": [],
+        "pgp_translations": [],
+        "fgp_translations": [],
+    }
+    for s in sources or []:
+        if not s.get("content"):
+            continue
+        provider = source_provider(s)
+        kind = source_relation_kind(s)
+        if kind == "edition":
+            groups[f"{provider}_editions"].append(s)
+        elif kind == "translation":
+            groups[f"{provider}_translations"].append(s)
+    return groups
+
+
 def _normalize_fgp_sections(sections: Any) -> Optional[List[Dict[str, Any]]]:
     """Normalize FGP ``sections`` so canvas-based page lookup works (FGP-02).
 
@@ -175,24 +215,34 @@ def _normalize_fgp_sections(sections: Any) -> Optional[List[Dict[str, Any]]]:
 def get_fgp_section_for_page(source: Dict[str, Any], page_num: int) -> Optional[str]:
     """Return the FGP source's text for a page (1=recto, 2=verso), or ``None``.
 
-    FGP-specific page split. Deliberately does NOT reuse
-    ``document_service.get_section_for_page``: that function falls back to
-    returning the FULL transcription when a page is not covered by structured
-    sections and the text has no recto/verso markers — which, for FGP's faithful
-    PDF->text content (no markers), would show the SAME full text on BOTH sides.
-    This splitter returns ``None`` for an uncovered page instead (FGP-02), and
-    never touches the shared PGP path (FGP-12).
+    FGP-specific page split, with the precedence the integration plan (§4b)
+    prescribes and the data model in fgp_data/README.md confirms:
 
-    Rules:
-      * structured ``sections`` present -> match by ``canvas_num`` (already
-        normalized from ``page_num``); uncovered page -> ``None``.
-      * no sections, ``page_info`` present -> show only on that side.
-      * no sections, no ``page_info`` -> default to recto only (page 1).
+      1. ``page_info`` ('recto'/'verso') is AUTHORITATIVE for the fragment side
+         (set for 18,222 rows via the FGP C-number). Each FGP row is ONE
+         image/side, so the WHOLE row content belongs to that side — full content
+         on the matching page, ``None`` on the other.
+      2. No ``page_info`` -> fall back to per-page ``sections`` (``page_num``,
+         normalized to ``canvas_num``): the section for this page, else ``None``.
+      3. Neither -> default to recto only (page 1).
+
+    Never returns the full text on BOTH recto and verso (FGP-02). Deliberately
+    does NOT reuse ``document_service.get_section_for_page`` (whose "return full
+    transcription" fallbacks would duplicate marker-less FGP text on both sides),
+    and never touches the shared PGP path (FGP-12).
     """
     content = (source.get("content") or "").strip()
     if not content:
         return None
 
+    # 1. page_info is authoritative for the fragment side.
+    page_info = (source.get("page_info") or "").lower()
+    if "recto" in page_info or "verso" in page_info:
+        side = "recto" if "recto" in page_info else "verso"
+        target = "recto" if page_num == 1 else "verso"
+        return content if side == target else None
+
+    # 2. No page_info -> per-page sections (page_num -> fragment page).
     sections = source.get("sections") or []
     if sections:
         for sec in sections:
@@ -204,14 +254,60 @@ def get_fgp_section_for_page(source: Dict[str, Any], page_num: int) -> Optional[
             if cnum == page_num:
                 text = sec.get("text") or sec.get("content")
                 return text if text else None
-        # Page not covered by any section -> no content for this page.
-        return None
+        return None  # page not covered -> no content (never full-on-both)
 
-    # No structured sections: single-sided by page_info (default: recto).
-    page_info = (source.get("page_info") or "recto").lower()
-    side = "verso" if "verso" in page_info else "recto"
-    target = "recto" if page_num == 1 else "verso"
-    return content if side == target else None
+    # 3. No page_info, no sections -> recto only (FGP-02).
+    return content if page_num == 1 else None
+
+
+def filter_sources_for_page(
+    sources: Optional[List[Dict[str, Any]]], page_num: int
+) -> List[Dict[str, Any]]:
+    """Filter a merged PGP+FGP source list to one folio page (1=recto, 2=verso).
+
+    Centralizes the per-page filtering that was duplicated across the web
+    enrichment path (``browse_enrichment``), the web Advanced-view path
+    (``search_results``) and the desktop ``PGPSourceWorker`` (FGP-04.4).
+
+    PGP behavior is preserved EXACTLY (FGP-12):
+      * keep a source whose ``page_info`` matches the current side, or that has
+        no ``page_info``;
+      * for a kept PGP NON-translation source with no ``page_info``, narrow its
+        ``content`` to this page via ``get_section_for_page`` (mutated in place,
+        as the original code did).
+
+    FGP sources are split with the FGP-specific splitter
+    (``get_fgp_section_for_page``) and kept ONLY when they have content for this
+    page — never duplicated on both recto and verso (FGP-02). FGP dicts are
+    copied so the page-narrowed ``content`` does not clobber a reused source dict.
+
+    Returns a (possibly empty) list; callers may apply ``or None``.
+    """
+    # Imported here to avoid any import-order coupling; document_service does not
+    # import this module, so there is no cycle.
+    from shared.document_service import get_section_for_page
+
+    current_page_info = "recto" if page_num == 1 else "verso"
+    page_sources: List[Dict[str, Any]] = []
+    for source in sources or []:
+        if source_provider(source) == SOURCE_FGP:
+            text = get_fgp_section_for_page(source, page_num)
+            if text:
+                narrowed = dict(source)
+                narrowed["content"] = text
+                page_sources.append(narrowed)
+            continue
+        # PGP path — preserved verbatim from the original sites.
+        source_page = source.get("page_info")
+        if source_page == current_page_info or not source_page:
+            is_translation = "Translation" in (source.get("doc_relation") or "")
+            if source.get("content"):
+                if not is_translation and not source_page:
+                    source["content"] = get_section_for_page(
+                        source["content"], page_num, source.get("sections")
+                    )
+            page_sources.append(source)
+    return page_sources
 
 
 def _row_to_fgp_source(row: sqlite3.Row) -> Dict[str, Any]:
@@ -251,7 +347,8 @@ def _row_to_fgp_source(row: sqlite3.Row) -> Dict[str, Any]:
         "page_info": d.get("page_info"),
         "source_scholar": d.get("source_scholar") or "FGP",
         "attribution": FGP_ATTRIBUTION,
-        "fgp_c_number": d.get("fgp_c_number"),
+        # Real column is ``c_number``; keep ``fgp_c_number`` as a defensive alias.
+        "fgp_c_number": d.get("c_number") or d.get("fgp_c_number"),
         "sequence_order": d.get("sequence_order") or 0,
     }
     return out
@@ -349,7 +446,11 @@ class FgpService:
             return []
 
         try:
-            order = " ORDER BY sequence_order" if "sequence_order" in self._columns else ""
+            # Editions before translations (doc_relation alpha), then folio order,
+            # stable by id (integration plan §4a). Built from columns that exist —
+            # there is no sequence_order column in fgp_transcriptions.
+            order_cols = [c for c in ("doc_relation", "folio_num", "id") if c in self._columns]
+            order = f" ORDER BY {', '.join(order_cols)}" if order_cols else ""
             cursor = self._conn.execute(
                 f'SELECT * FROM "{self._table}" WHERE sys_id = ?{order}', (sys_id,)
             )
@@ -409,18 +510,25 @@ class FgpService:
                 self._columns = set()
 
     def get_version(self) -> Optional[str]:
-        """Get the sidecar DB version from a ``meta`` table, or ``None``."""
+        """Get the sidecar DB version from a build-metadata table, or ``None``.
+
+        Build metadata lives in ``fgp_meta`` (per the README); older/other DBs may
+        use ``meta``. Best-effort and assumes a key/value shape — returns ``None``
+        rather than raising if neither table/shape exists.
+        """
         if self._conn is None:
             return None
-        try:
-            cursor = self._conn.execute(
-                "SELECT value FROM meta WHERE key = 'version'"
-            )
-            row = cursor.fetchone()
-            return row["value"] if row else None
-        except Exception:
-            # meta table may not exist in the FGP DB; not an error.
-            return None
+        for table in ("fgp_meta", "meta"):
+            try:
+                cursor = self._conn.execute(
+                    f"SELECT value FROM {table} WHERE key = 'version'"
+                )
+                row = cursor.fetchone()
+                if row:
+                    return row["value"]
+            except Exception:
+                continue  # table missing or different shape; try the next
+        return None
 
 
 def _discover_source_table(conn) -> tuple:

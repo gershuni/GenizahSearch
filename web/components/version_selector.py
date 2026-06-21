@@ -17,9 +17,13 @@ from web.supabase_client import get_corrections
 from web.auth_state import GlobalAuthState
 from web.corrections_service import get_pending_corrections_for_page
 from web.supabase_client import get_user_client
+from shared.fgp_service import group_transcription_sources
 from typing import Optional, Callable, List, Dict, Any
 
 logger = logging.getLogger(__name__)
+
+# FGP group accent — a distinct violet so FGP never reads as the PGP green group.
+_FGP_COLOR = '#7c3aed'
 
 
 def fetch_page_versions(sys_id: str, page_num: int = 1) -> dict:
@@ -116,17 +120,25 @@ def create_version_selector(
     """
     container = ui.row().classes('items-center gap-2')
 
-    # Helper functions to separate editions and translations from all_sources
+    # Helper functions to separate editions and translations from all_sources.
+    # PGP and FGP are split by the shared source-kind classifier so FGP editions
+    # never fold into the green PGP group (they share 'Digital Edition'); FGP
+    # renders as its own additive group below (FGP-03/07).
     def get_editions(sources: List[Dict]) -> List[Dict]:
-        """Filter sources to Digital Editions with content for current page."""
-        return [s for s in sources if 'Edition' in (s.get('doc_relation') or '') and s.get('content')]
+        """PGP Digital Editions with content (FGP excluded — own group)."""
+        return group_transcription_sources(sources)['pgp_editions']
 
     def get_translations(sources: List[Dict]) -> List[Dict]:
-        """Filter sources to Digital Translations (shown when editions exist for page)."""
-        return [s for s in sources if 'Translation' in (s.get('doc_relation') or '') and s.get('content')]
+        """PGP Digital Translations with content (shown when editions exist)."""
+        return group_transcription_sources(sources)['pgp_translations']
+
+    def get_fgp_sources(sources: List[Dict]) -> List[Dict]:
+        """FGP transcription sources with content (editions + any translations)."""
+        groups = group_transcription_sources(sources)
+        return groups['fgp_editions'] + groups['fgp_translations']
 
     def has_editions_for_page(sources: List[Dict]) -> bool:
-        """Check if there are any editions with content for current page."""
+        """Check if there are any PGP editions with content for current page."""
         return len(get_editions(sources)) > 0
 
     with container:
@@ -154,6 +166,23 @@ def create_version_selector(
                             'is_pgp': True,
                             'is_default': True,
                             'source_id': first_edition.get('id')
+                        })
+                    return
+
+                # No PGP edition — fall back to FGP (additive, PGP-first rule).
+                fgp_sources = get_fgp_sources(all_sources)
+                if fgp_sources:
+                    first_fgp = fgp_sources[0]
+                    version_label.text = 'FGP'
+                    version_label.style(f'color: {_FGP_COLOR};')
+                    if on_version_change:
+                        on_version_change(first_fgp.get('content', ''), {
+                            'source': 'fgp',
+                            'attribution': first_fgp.get('attribution') or first_fgp.get('source_scholar', 'FGP'),
+                            'is_fgp': True,
+                            'is_default': True,
+                            'source_id': first_fgp.get('id'),
+                            'uid': first_fgp.get('uid'),
                         })
                     return
 
@@ -352,6 +381,45 @@ def create_version_selector(
 
                         ui.separator()
 
+                    # FGP Transcriptions group — its own violet group/badge so it
+                    # is never mistaken for the green PGP group (FGP-07). Additive:
+                    # rendered after the PGP section, before V0.8.
+                    fgp_sources = get_fgp_sources(all_sources) if all_sources else []
+                    if fgp_sources:
+                        if len(fgp_sources) > 1 or editions:
+                            ui.label(tr('FGP Transcriptions')).classes(
+                                'text-xs px-4 py-1 font-semibold'
+                            ).style(f'color: {_FGP_COLOR};')
+                        for fed in fgp_sources:
+                            attribution = fed.get('attribution') or fed.get('source_scholar') or 'FGP'
+
+                            def make_select_fgp(ed=fed, attr=attribution):
+                                def select_fgp():
+                                    version_label.text = 'FGP'
+                                    version_label.style(f'color: {_FGP_COLOR};')
+                                    menu.close()
+                                    if on_version_change:
+                                        on_version_change(ed.get('content', ''), {
+                                            'source': 'fgp',
+                                            'attribution': attr,
+                                            'is_fgp': True,
+                                            'source_id': ed.get('id'),
+                                            'uid': ed.get('uid'),
+                                        })
+                                return select_fgp
+
+                            with ui.menu_item(on_click=make_select_fgp()).classes('text-sm'):
+                                with ui.row().classes('items-center gap-2'):
+                                    ui.icon('menu_book', size='xs').style(f'color: {_FGP_COLOR};')
+                                    with ui.column().classes('gap-0'):
+                                        ui.label(tr('FGP Transcription')).classes(
+                                            'font-medium'
+                                        ).style(f'color: {_FGP_COLOR};')
+                                        ui.label(attribution).classes('text-xs').style(
+                                            'color: var(--text-muted);'
+                                        )
+                        ui.separator()
+
                     # Original V0.8
                     def select_original():
                         version_label.text = 'V0.8'
@@ -438,6 +506,8 @@ def create_version_badge(source: str = 'original', author: str = None):
     """Create a badge showing the current version source."""
     if source == 'pgp':
         return ui.badge('PGP').props('color=positive').classes('text-xs')
+    elif source == 'fgp':
+        return ui.badge('FGP').props('color=deep-purple').classes('text-xs')
     elif source in ('original', 'V0.8'):
         return ui.badge('V0.8').props('color=grey').classes('text-xs')
     elif source == 'V0.7':
