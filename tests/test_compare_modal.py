@@ -395,7 +395,7 @@ def test_anchor_viewer_compare_transcription_fills_and_scrolls():
     the window."""
     import pathlib
     source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
-    assert "max-height:none; flex:1 1 0; min-height:0; overflow-y:auto;" in source, (
+    assert "max-height:none; flex:1 1 auto; min-height:0; overflow-y:auto;" in source, (
         "anchor_viewer transcription must fill + scroll within itself in Compare."
     )
     assert "flex: 0 0 auto;" in source, (
@@ -1702,7 +1702,7 @@ def test_issue3_compare_panes_split_header_and_scroll():
     # The single scroll region moved to the viewer transcription (anchor_viewer.py).
     import pathlib
     av = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
-    assert "flex:1 1 0; min-height:0; overflow-y:auto;" in av, (
+    assert "flex:1 1 auto; min-height:0; overflow-y:auto;" in av, (
         "round-5: the transcription must be the single scroll region (fills the pane "
         "below the fixed image)."
     )

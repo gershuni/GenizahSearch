@@ -482,8 +482,13 @@ class AnchorViewer:
         # one scroll, no nesting, everything fits the window (round-5 UAT
         # "fit to height didn't work").
         if self._image_max_height:
+            # Pure flex fill — NO height:100%. A percentage height against a
+            # flex-COMPUTED parent height does not resolve (falls back to auto),
+            # and with flex-basis:0 that collapsed the whole viewer to zero height
+            # (round-5 UAT: "no image no text"). flex:1 1 auto + min-height:0 fills
+            # the (bounded) parent without the percentage-height trap.
             _container.style(
-                "height:100%; min-height:0; flex:1 1 0;"
+                "min-height:0; flex:1 1 auto;"
                 " display:flex; flex-direction:column;"
             )
         with _container:
@@ -614,7 +619,7 @@ class AnchorViewer:
                 # .anchor-transcription-panel 65vh cap so the bottom is always
                 # reachable without a nested outer scroll (round-5 UAT).
                 self._transcription_container.style(
-                    "max-height:none; flex:1 1 0; min-height:0; overflow-y:auto;"
+                    "max-height:none; flex:1 1 auto; min-height:0; overflow-y:auto;"
                 )
             with self._transcription_container:
                 self._transcription_html = ui.html("", sanitize=False)
