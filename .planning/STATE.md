@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.2.0
 milestone_name: Web Joins Lab
-status: executing
-stopped_at: "Phase 121 Plan 03 Task 2 — human-verify checkpoint (HE-mode RTL UAT sign-off)"
-last_updated: "2026-06-21T12:53:00Z"
+status: verifying
+stopped_at: Phase 121 complete — all 3 plans done; SC#2 (HE-mode UAT sign-off PASS) met; ready for release verification
+last_updated: "2026-06-21T14:20:00Z"
 last_activity: 2026-06-21
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 34
-  completed_plans: 32
-  percent: 60
+  completed_plans: 33
+  percent: 80
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md
 
 Phase: 121 (i18n-polish) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Next: Phase 120 — Actions & Persistence
 Last activity: 2026-06-21
 
@@ -86,10 +86,10 @@ Items carried forward from v8.1.0:
 
 ## Session Continuity
 
-Last session: 2026-06-21T12:53:00Z
-Stopped at: Phase 121 Plan 03 Task 2 — human-verify checkpoint (HE-mode RTL UAT sign-off)
-Resume file: .planning/phases/121-i18n-polish/121-03-PLAN.md
-Next step: Hillel runs the HE-mode RTL UAT checklist against the live web app and signs off (SC#2 acceptance gate). Type "approved" to resume after sign-off.
+Last session: 2026-06-21T14:20:00Z
+Stopped at: Phase 121 complete — all 3 plans done; SC#2 met (HE-mode UAT sign-off PASS by Hillel)
+Resume file: None
+Next step: Phase 121 complete. Run /release or proceed to milestone verification.
 
 ## Performance Metrics
 
@@ -118,7 +118,7 @@ Next step: Hillel runs the HE-mode RTL UAT checklist against the live web app an
 | Phase 120-actions-persistence P07 | 150 | 3 tasks | 7 files |
 | Phase 121-i18n-polish P01 | 5min | 2 tasks | 2 files |
 | Phase 121-i18n-polish P02 | 20min | 2 tasks | 2 files |
-| Phase 121-i18n-polish P03 | 5min | 1 task (paused at human checkpoint) | 1 file |
+| Phase 121-i18n-polish P03 | 20min | 2 tasks (incl. human UAT sign-off) | 2 files |
 
 ## Decisions
 

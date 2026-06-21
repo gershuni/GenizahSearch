@@ -69,7 +69,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 - [x] **Phase 118: Joins, Entry & Full Builders** - Known-joins group (PGP + FJMS + user + community, multitenant-safe) + "Find joins" from `/search` and `/browse` + other-side builder with web page contract + per-line modifiers + global toggles (variants/JA/spacing/bidirectional) applied correctly. (completed 2026-06-18)
 - [x] **Phase 119: Candidates, Compare & Visual Similarity** - Full candidate surface (grid+table, sys_id-keyed triage, self-match, filters, pagination, off-loop enrichment) + side-by-side Compare (per-pane zoom/nav, verdict sync) + VS toggle (merge look-alikes, eye badge everywhere). (completed 2026-06-19)
 - [x] **Phase 120: Actions & Persistence** - Add-as-Join (login-gated) + bulk puzzle handoff + add-to-list / export + builder/triage/view state survive refresh (server-side per-session; restore prefers an instant per-user results snapshot, re-run as fallback) + clear/reset. **COMPLETE 2026-06-21** — 5/5 success criteria verified (120-VERIFICATION.md); ~6 rounds live UAT folded in (selection bulk toolbar, results-persist-across-navigation, builder/triage/single_text/search_type restore, RTL prev/next in Compare+Grid, HE string fixes, Compare outer-scroll layout).
-- [ ] **Phase 121: i18n Polish** - Complete bilingual EN/HE coverage + RTL layout verification + Hebrew-leak audit across all surfaces.
+- [x] **Phase 121: i18n Polish** - Complete bilingual EN/HE coverage + RTL layout verification + Hebrew-leak audit across all surfaces. (completed 2026-06-21)
 
 ## Phase Details
 
@@ -194,7 +194,7 @@ Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-a
 
 - [x] 121-01-PLAN.md — TRANSLATIONS gap closure: add 17 missing HE keys + fix 'Open in Joins Lab' glossary drift + tr()-wrap the XLSX sheet name [Wave 1]
 - [x] 121-02-PLAN.md — Permanent CI guard tests/test_joins_lab_i18n.py (no-raw-Hebrew + tr()-coverage + badge-strings + scoped entry-point keys) + render-smoke RTL structural assertions [Wave 2]
-- [ ] 121-03-PLAN.md — HE-mode HUMAN-UAT checklist artifact + sign-off (load-bearing SC#2 visual-RTL acceptance) [Wave 2]
+- [x] 121-03-PLAN.md — HE-mode HUMAN-UAT checklist artifact + sign-off (load-bearing SC#2 visual-RTL acceptance) [Wave 2]
 
 **UI hint**: yes
 
@@ -206,4 +206,4 @@ Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-a
 | 118. Joins, Entry & Full Builders | 6/6 | Complete    | 2026-06-19 |
 | 119. Candidates, Compare & Visual Similarity | 11/11 | Complete   | 2026-06-19 |
 | 120. Actions & Persistence | 7/8 | Complete    | 2026-06-21 |
-| 121. i18n Polish | 2/3 | In Progress|  |
+| 121. i18n Polish | 3/3 | Complete   | 2026-06-21 |
