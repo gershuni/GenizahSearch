@@ -1645,6 +1645,73 @@ def _check_folder_reachable(folder_path: str, max_retries: int = 3) -> tuple[boo
 
 
 # ---------------------------------------------------------------------------
+# SEED-006 P1 — LOCAL SQLite sidecar path resolution
+#
+# The DB must live in the PARENT of the atomically-swapped Tantivy index dir,
+# NEVER inside it. `rebuild_main_index_atomic` / `reset_my_library` rename the
+# index dir wholesale: a DB inside it would (a) be locked on Windows (an open
+# SQLite handle blocks os.rename -> PermissionError(13)) and (b) on POSIX be
+# silently carried into the GC'd `.old-*` quarantine -> the cached_text /
+# processed_files data is destroyed on the next cleanup pass. So the DB lives
+# one level up (Config.INDEX_DIR in production — a stable container that is
+# never swapped).
+# ---------------------------------------------------------------------------
+
+def local_db_path_for(index_dir: str) -> str:
+    """Canonical external path for the LOCAL SQLite sidecar (in index_dir's parent)."""
+    parent = os.path.dirname(os.path.abspath(index_dir))
+    return os.path.join(parent, "local_index.sqlite3")
+
+
+def migrate_legacy_local_db(index_dir: str) -> str:
+    """Move a legacy in-dir ``local_index.sqlite3`` (+ ``-wal`` / ``-shm``) out
+    to the parent and return the canonical external path.
+
+    Idempotent + best-effort, and MUST run before any SQLite connection is
+    opened on either path. If the external path already exists, a legacy in-dir
+    file is left untouched (newer-wins; never clobber live data).
+    """
+    import shutil
+    new_path = local_db_path_for(index_dir)
+    legacy = os.path.join(os.path.abspath(index_dir), "local_index.sqlite3")
+    if os.path.abspath(legacy) == os.path.abspath(new_path):
+        return new_path  # already external (e.g. a test rooting the DB at the parent)
+    if not os.path.exists(new_path) and os.path.exists(legacy):
+        for suffix in ("", "-wal", "-shm"):
+            src, dst = legacy + suffix, new_path + suffix
+            if os.path.exists(src) and not os.path.exists(dst):
+                try:
+                    shutil.move(src, dst)
+                except Exception:
+                    logger.exception(
+                        "migrate_legacy_local_db: move %r -> %r failed (continuing)",
+                        src, dst,
+                    )
+    return new_path
+
+
+def _assert_db_outside_index_dir(db_path: str, index_dir: str) -> None:
+    """Guard: the SQLite sidecar must NOT live inside the atomically-swapped dir.
+
+    Raised at the dir-swap sites (rebuild / reset) so a future mis-wiring fails
+    loud rather than locking (Windows) or silently destroying the DB (POSIX).
+    """
+    abs_db = os.path.abspath(db_path)
+    abs_idx = os.path.abspath(index_dir)
+    try:
+        inside = os.path.commonpath([abs_db, abs_idx]) == abs_idx
+    except ValueError:
+        inside = False  # different drives (Windows) -> definitely outside
+    if inside:
+        raise LocalIndexerError(
+            "LOCAL SQLite sidecar must not live inside the atomically-swapped "
+            f"Tantivy index dir (db_path={db_path!r} is under index_dir={index_dir!r}); "
+            "a schema rebuild / reset renames that dir wholesale, which would lock "
+            "or destroy the DB. Use migrate_legacy_local_db()/local_db_path_for()."
+        )
+
+
+# ---------------------------------------------------------------------------
 # LocalIndexer class
 # ---------------------------------------------------------------------------
 
@@ -3707,6 +3774,11 @@ class LocalIndexer:
         import shutil
         import time as _time
 
+        # SEED-006 P1: the DB MUST live outside the dir we are about to rename
+        # wholesale (else the open SQLite handle locks os.rename on Windows, and
+        # on POSIX the DB is carried into the GC'd .old-* quarantine -> data loss).
+        _assert_db_outside_index_dir(self._db_path, self._index_dir)
+
         rebuild_dir = f"{self._index_dir}.rebuild-{scan_run_id}"
         old_dir = f"{self._index_dir}.old-{int(_time.time())}"
 
@@ -4207,6 +4279,11 @@ class LocalIndexer:
             "cleanup_strategy": "deferred",
         }
 
+        # SEED-006 P1: the DB lives OUTSIDE the swapped dir, so the rename-aside
+        # no longer carries it — reset must delete it explicitly (Step 4.5). Guard
+        # first so a mis-wired in-dir DB fails loud rather than getting orphaned.
+        _assert_db_outside_index_dir(self._db_path, self._index_dir)
+
         # --- Step 1: close all live handles ---
         try:
             close_searcher_cb()
@@ -4329,6 +4406,22 @@ class LocalIndexer:
         # --- Step 3: recreate empty dirs ---
         os.makedirs(local_dir, exist_ok=True)
         os.makedirs(lab_dir, exist_ok=True)
+
+        # --- Step 4.5 (SEED-006 P1): delete the EXTERNAL SQLite sidecar ---
+        # The DB no longer lives inside local_dir, so the rename-aside above did
+        # not carry it. Delete it (+ -wal/-shm) now that all handles are closed
+        # (Step 1) and before Step 5 reinit, so __init__ recreates a fresh empty
+        # DB (matching the pre-P1 "rename quarantines the DB" reset semantics).
+        for _suffix in ("", "-wal", "-shm"):
+            _db_file = self._db_path + _suffix
+            try:
+                if os.path.exists(_db_file):
+                    os.remove(_db_file)
+            except OSError:
+                logger.exception(
+                    "reset_my_library: could not remove DB file %r (continuing)",
+                    _db_file,
+                )
 
         # --- Step 4: (reserved) cleanup scheduling happens in Step 6 after reinit ---
         # REVIEWS Codex MEDIUM: defer rmtree off the UI thread by using the

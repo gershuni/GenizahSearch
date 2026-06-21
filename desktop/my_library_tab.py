@@ -60,7 +60,12 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QColor
 
-from shared.local_indexer import LocalIndexer, _SUPPORTED_EXTENSIONS, is_office_temp_file
+from shared.local_indexer import (
+    LocalIndexer,
+    migrate_legacy_local_db,
+    _SUPPORTED_EXTENSIONS,
+    is_office_temp_file,
+)
 from genizah_core import Config, tr, CURRENT_LANG
 
 logger = logging.getLogger(__name__)
@@ -1552,7 +1557,12 @@ class MyLibraryTab(QWidget):
 
     def _init_indexer(self) -> None:
         """Instantiate LocalIndexer and run startup crash-recovery (D-21 + HIGH-3)."""
-        db_path = os.path.join(Config.LOCAL_INDEX_DIR, "local_index.sqlite3")
+        # SEED-006 P1: the LOCAL SQLite sidecar must live OUTSIDE the
+        # atomically-swapped LocalIndex dir (a schema rebuild / reset renames
+        # that dir wholesale — an in-dir DB locks the rename on Windows and is
+        # orphaned/destroyed on POSIX). Migrate any legacy in-dir DB out, then
+        # use the canonical external path.
+        db_path = migrate_legacy_local_db(Config.LOCAL_INDEX_DIR)
         os.makedirs(Config.LOCAL_INDEX_DIR, exist_ok=True)
         try:
             self._indexer = LocalIndexer(

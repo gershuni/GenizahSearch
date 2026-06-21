@@ -37,7 +37,8 @@ def _make_tab(tmp_path, monkeypatch):
 
     Patches genizah_core.Config.LOCAL_INDEX_DIR and LOCAL_LAB_INDEX_DIR BEFORE
     construction so MyLibraryTab._init_indexer wires the LocalIndexer at the
-    test-owned paths. The DB lives inside LOCAL_INDEX_DIR (production layout).
+    test-owned paths. SEED-006 P1: the DB lives in the PARENT of LOCAL_INDEX_DIR
+    (external to the atomically-swapped dir), resolved via migrate_legacy_local_db.
     """
     from genizah_core import Config
     idx_dir = str(tmp_path / "local_index")

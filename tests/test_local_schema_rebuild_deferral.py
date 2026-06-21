@@ -17,8 +17,15 @@ import os
 
 import tantivy
 
+import sqlite3
+
+import pytest
+
 from shared.local_indexer import (
     LocalIndexer,
+    LocalIndexerError,
+    local_db_path_for,
+    migrate_legacy_local_db,
     _compute_schema_marker,
     _read_schema_marker,
     _write_schema_marker,
@@ -29,7 +36,8 @@ from shared.local_indexer import (
 def _make_dirs(tmp_path):
     index_dir = str(tmp_path / "LocalIndex")
     lab_dir = str(tmp_path / "LocalLabIndex")
-    db_path = os.path.join(index_dir, "local_index.sqlite3")
+    # SEED-006 P1: DB lives in the PARENT of the swapped index dir, never inside.
+    db_path = str(tmp_path / "local_index.sqlite3")
     os.makedirs(index_dir, exist_ok=True)
     return index_dir, lab_dir, db_path
 
@@ -144,6 +152,79 @@ def test_close_internal_writer_index_forces_gc(tmp_path, monkeypatch):
         assert idx._index is None
         assert idx._writer is None
         assert calls["n"] >= 1, "expected gc.collect() after dropping handles"
+    finally:
+        idx.close()
+
+
+# ---------------------------------------------------------------------------
+# SEED-006 P1 — the SQLite sidecar must live OUTSIDE the atomically-swapped
+# Tantivy index dir (else os.rename locks on Windows / orphans the DB on POSIX).
+# ---------------------------------------------------------------------------
+
+def test_local_db_path_is_outside_index_dir(tmp_path):
+    index_dir = str(tmp_path / "LocalIndex")
+    db = local_db_path_for(index_dir)
+    # The resolved DB path must NOT be under the (swapped) index dir.
+    assert os.path.commonpath([os.path.abspath(db), os.path.abspath(index_dir)]) != os.path.abspath(index_dir)
+    assert os.path.dirname(os.path.abspath(db)) == os.path.dirname(os.path.abspath(index_dir))
+
+
+def test_migrate_legacy_local_db_moves_db_out(tmp_path):
+    """A legacy in-dir DB (+ -wal/-shm) is moved to the parent; new path returned."""
+    index_dir = str(tmp_path / "LocalIndex")
+    os.makedirs(index_dir, exist_ok=True)
+    legacy = os.path.join(index_dir, "local_index.sqlite3")
+    # Seed a legacy DB with a marker row + sidecar files.
+    conn = sqlite3.connect(legacy)
+    conn.execute("CREATE TABLE marker (v TEXT)")
+    conn.execute("INSERT INTO marker VALUES ('legacy-data')")
+    conn.commit()
+    conn.close()
+    for suffix in ("-wal", "-shm"):
+        with open(legacy + suffix, "w") as f:
+            f.write("x")
+
+    new_path = migrate_legacy_local_db(index_dir)
+
+    assert new_path == local_db_path_for(index_dir)
+    assert not os.path.exists(legacy), "legacy DB should have been moved out"
+    assert os.path.exists(new_path), "DB should now be at the external path"
+    assert os.path.exists(new_path + "-wal") and os.path.exists(new_path + "-shm")
+    # Data survived the move.
+    conn2 = sqlite3.connect(new_path)
+    assert conn2.execute("SELECT v FROM marker").fetchone()[0] == "legacy-data"
+    conn2.close()
+
+
+def test_migrate_is_noop_when_external_db_exists(tmp_path):
+    """Never clobber a live external DB with a stale legacy one (newer wins)."""
+    index_dir = str(tmp_path / "LocalIndex")
+    os.makedirs(index_dir, exist_ok=True)
+    new_path = local_db_path_for(index_dir)
+    with open(new_path, "w") as f:
+        f.write("current")
+    legacy = os.path.join(index_dir, "local_index.sqlite3")
+    with open(legacy, "w") as f:
+        f.write("stale")
+
+    assert migrate_legacy_local_db(index_dir) == new_path
+    with open(new_path) as f:
+        assert f.read() == "current"          # untouched
+    assert os.path.exists(legacy)             # legacy left in place
+
+
+def test_rebuild_raises_when_db_inside_index_dir(tmp_path):
+    """The dir-swap guard fails loud if the DB is wired inside the swapped dir."""
+    index_dir = str(tmp_path / "LocalIndex")
+    lab_dir = str(tmp_path / "LocalLabIndex")
+    os.makedirs(index_dir, exist_ok=True)
+    bad_db = os.path.join(index_dir, "local_index.sqlite3")  # INSIDE — the bug
+    idx = _new_indexer(index_dir, lab_dir, bad_db)
+    try:
+        with pytest.raises(LocalIndexerError, match="must not live inside"):
+            idx.rebuild_main_index_atomic(
+                "run", close_searcher_cb=lambda: None, reload_searcher_cb=lambda: None,
+            )
     finally:
         idx.close()
 

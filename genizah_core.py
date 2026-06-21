@@ -7207,6 +7207,7 @@ class SearchEngine:
         from shared.local_indexer import (
             build_local_schema,
             LocalIndexer,
+            migrate_legacy_local_db,
             _compute_schema_marker,
             _read_schema_marker,
         )
@@ -7236,7 +7237,9 @@ class SearchEngine:
             )
             try:
                 import uuid as _uuid
-                db_path = os.path.join(Config.LOCAL_INDEX_DIR, "local_index.sqlite3")
+                # SEED-006 P1: DB must live OUTSIDE the atomically-swapped LocalIndex
+                # dir; migrate any legacy in-dir DB out before constructing.
+                db_path = migrate_legacy_local_db(Config.LOCAL_INDEX_DIR)
                 indexer = LocalIndexer(
                     index_dir=Config.LOCAL_INDEX_DIR,
                     lab_index_dir=Config.LOCAL_LAB_INDEX_DIR,
