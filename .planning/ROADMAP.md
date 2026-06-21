@@ -206,4 +206,4 @@ Also folds in (user-directed, 2026-06-19/20): SEED-007 workbench actions (Make-a
 | 118. Joins, Entry & Full Builders | 6/6 | Complete    | 2026-06-19 |
 | 119. Candidates, Compare & Visual Similarity | 11/11 | Complete   | 2026-06-19 |
 | 120. Actions & Persistence | 7/8 | Complete    | 2026-06-21 |
-| 121. i18n Polish | 3/3 | Complete   | 2026-06-21 |
+| 121. i18n Polish | 3/3 | Complete    | 2026-06-21 |
