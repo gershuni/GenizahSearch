@@ -386,21 +386,21 @@ def test_compare_modal_nav_is_rtl_aware():
     )
 
 
-def test_anchor_viewer_compare_transcription_fills_and_scrolls():
-    """Source assertion (round-5 UAT 'fit to height didn't work'): in the Compare
-    context (image_max_height set) the viewer is a bounded flex column — the image
-    is fixed (flex:0 0 auto) and the transcription FILLS the remaining height and
-    scrolls WITHIN itself (flex:1 1 0; min-height:0; overflow-y:auto), overriding
-    the .anchor-transcription-panel 65vh cap. One scroll region, no nesting, fits
-    the window."""
+def test_anchor_viewer_compare_transcription_inner_scrolls():
+    """Source assertion (round-5 UAT 'fit to height' — inner scrolling): in the
+    Compare context (image_max_height set) the transcription has its OWN bounded
+    inner scroll via a VIEWPORT calc (image + transcription + chrome ≈ the
+    viewport), NOT the fragile nested-flex fill that collapsed/overflowed. The
+    .anchor-transcription-panel class supplies overflow-y:auto."""
     import pathlib
     source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
-    assert "max-height:none; flex:1 1 auto; min-height:0; overflow-y:auto;" in source, (
-        "anchor_viewer transcription must fill + scroll within itself in Compare."
+    assert "max-height: calc(60vh - 255px)" in source, (
+        "anchor_viewer transcription must use a viewport calc max-height in Compare "
+        "so it inner-scrolls and the pane fits the window height."
     )
-    assert "flex: 0 0 auto;" in source, (
-        "anchor_viewer image-container must be fixed (flex:0 0 auto) in Compare so "
-        "the transcription gets the remaining height."
+    # The panel CSS must provide the inner scroll.
+    assert "overflow-y: auto;" in source, (
+        ".anchor-transcription-panel must keep overflow-y:auto for the inner scroll."
     )
 
 
@@ -1699,12 +1699,13 @@ def test_issue3_compare_panes_split_header_and_scroll():
         "Issue 3: Compare panes must clip overflow so the header (info buttons) stays "
         "pinned; the single scroll lives in the transcription (round-5)."
     )
-    # The single scroll region moved to the viewer transcription (anchor_viewer.py).
+    # The single scroll region is the viewer transcription (anchor_viewer.py),
+    # bounded by a viewport calc so it inner-scrolls and the pane fits.
     import pathlib
     av = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
-    assert "flex:1 1 auto; min-height:0; overflow-y:auto;" in av, (
-        "round-5: the transcription must be the single scroll region (fills the pane "
-        "below the fixed image)."
+    assert "max-height: calc(60vh - 255px)" in av, (
+        "round-5: the transcription must be the single (inner) scroll region, "
+        "bounded by a viewport calc so the pane fits the window."
     )
 
 

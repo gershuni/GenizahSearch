@@ -476,21 +476,6 @@ class AnchorViewer:
     def _build_ui(self) -> None:
         """Build the full AnchorViewer component (image + controls + transcription)."""
         _container = ui.column().classes("anchor-viewer-container w-full gap-0")
-        # Compare context (image_max_height set): make the viewer a bounded flex
-        # column that FILLS its pane, so the image stays fixed on top and the
-        # transcription takes the remaining height and scrolls within itself —
-        # one scroll, no nesting, everything fits the window (round-5 UAT
-        # "fit to height didn't work").
-        if self._image_max_height:
-            # Pure flex fill — NO height:100%. A percentage height against a
-            # flex-COMPUTED parent height does not resolve (falls back to auto),
-            # and with flex-basis:0 that collapsed the whole viewer to zero height
-            # (round-5 UAT: "no image no text"). flex:1 1 auto + min-height:0 fills
-            # the (bounded) parent without the percentage-height trap.
-            _container.style(
-                "min-height:0; flex:1 1 auto;"
-                " display:flex; flex-direction:column;"
-            )
         with _container:
             # Info header — shelfmark (identifier) + library + title. Populated
             # by update_content. Uses theme CSS vars so it stays legible in both
@@ -523,13 +508,12 @@ class AnchorViewer:
             # inline style override so both image + transcription fit in the pane.
             image_container_style = ""
             if self._image_max_height:
-                # Compare context: cap to the given (viewport-relative) height AND
-                # drop the default 200px min-height floor so the image can shrink to
-                # fit a short window instead of overflowing the pane (round-5 UAT:
-                # "Compare does not adapt to window height").
+                # Compare context: cap the image to the given (viewport-relative)
+                # height and drop the 200px min-height floor so it can shrink on a
+                # short window. The transcription below gets its own bounded inner
+                # scroll (see _transcription_container) so the pane fits the window.
                 image_container_style = (
                     f"max-height: {self._image_max_height}; min-height: 0;"
-                    " flex: 0 0 auto;"
                 )
             self._image_container = (
                 ui.element("div")
@@ -614,12 +598,18 @@ class AnchorViewer:
             # Letting it flow naturally hands all scrolling to the single outer
             # pane scroll area.
             if self._image_max_height:
-                # Fill the remaining pane height below the fixed image and scroll
-                # WITHIN the transcription (the only scroll region) — overrides the
-                # .anchor-transcription-panel 65vh cap so the bottom is always
-                # reachable without a nested outer scroll (round-5 UAT).
+                # Compare context: the transcription scrolls WITHIN ITSELF (inner
+                # scroll) at a viewport-bounded height, so the image + text fit the
+                # window and the bottom is always reachable. We use a viewport calc
+                # (NOT the fragile nested-flex fill that collapsed/overflowed) —
+                # it subtracts the image cap (40vh) + the fixed chrome (top header,
+                # pane header, controls bar, verdict bar ≈ 255px) so image +
+                # transcription + chrome ≈ the viewport on any window height. The
+                # pane itself does NOT scroll (overflow:hidden) so this inner scroll
+                # is the only one (no nested-scroll trap). overflow-y:auto comes
+                # from the .anchor-transcription-panel class.
                 self._transcription_container.style(
-                    "max-height:none; flex:1 1 auto; min-height:0; overflow-y:auto;"
+                    "max-height: calc(60vh - 255px); min-height: 96px;"
                 )
             with self._transcription_container:
                 self._transcription_html = ui.html("", sanitize=False)
