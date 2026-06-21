@@ -701,15 +701,16 @@ def create_joins_builder(
             if on_submit is not None:
                 term_input.on('keydown.enter', on_submit)
 
-            # Modifier row: tune icon + optional remove-word
+            # Modifier row: gear icon + optional remove-word (matches the
+            # desktop ⚙ and the builder tooltip that says "click the gear icon")
             with ui.row().classes('items-center gap-1 justify-center'):
-                # Tune button -> per-word modifier menu
+                # Gear button -> per-word modifier menu
                 mods = word.get('mods', {})
                 has_active = any(mods.get(k, False) for k, _, _, _ in _WORD_MOD_TABLE)
                 tune_style = (
                     'color: var(--primary-600);' if has_active else 'color: var(--text-muted);'
                 )
-                with ui.button(icon='tune').props('flat dense size=xs').style(
+                with ui.button(icon='settings').props('flat dense size=xs').style(
                     tune_style
                 ).tooltip(tr('Word options')) as _tune_btn:
                     with ui.menu():
