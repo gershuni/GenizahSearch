@@ -271,6 +271,63 @@ def _reset_nli_breaker_state():
 
 
 # ---------------------------------------------------------------------------
+# Cross-test NiceGUI/asyncio pollution guard (SEED-006 CI fix).
+#
+# Many tests drive async handlers via asyncio.run(...) (test_auth_callback_resilience,
+# test_anchor_viewer, test_compare_modal, test_joins_lab, test_add_to_list_dialog_*,
+# ...). Two side effects pollute later tests IN THE SAME PROCESS:
+#
+#   (a) asyncio.run() closes its loop and clears the thread's current loop → a later
+#       NiceGUI test that calls asyncio.get_event_loop() raises "There is no current
+#       event loop in thread 'MainThread'" / "Event loop is closed".
+#   (b) Running a NiceGUI handler enters/exits a client context that POPS NiceGUI's
+#       ambient auto-index slot off `nicegui.context.slot_stack` (a plain module-level
+#       list in nicegui 3.8.0, NOT a per-context ContextVar) and never restores it.
+#       Render/builder tests (test_joins_builder*, test_joins_lab_render,
+#       test_joins_lab_options_inline, test_joins_lab_new_search_reset,
+#       test_word_builder_symbols, ...) assert that ambient slot is present (as it is
+#       at a clean import) and fail with an empty slot_stack.
+#
+# All of these PASS in isolation — the failures are pure full-suite ordering pollution
+# that reddens CI's single-process (-m "not gui") job. No pytest-asyncio plugin is
+# installed, so this autouse fixture owns no event-loop contract it could fight with.
+#
+# Fix: before every test, (a) guarantee a fresh OPEN current event loop and (b) restore
+# the captured pristine auto-index slot_stack if a prior test emptied it. Cheap and
+# inert for tests that don't touch asyncio/NiceGUI; restore is skipped when a slot is
+# already active so it never clobbers a test mid-context.
+# ---------------------------------------------------------------------------
+try:
+    from nicegui import context as _ng_context_for_default
+    # Captured at conftest import — before any test can pop it — so the fixture can
+    # re-push the pristine auto-index slot after a polluter clears it.
+    _NICEGUI_DEFAULT_SLOT_STACK = list(_ng_context_for_default.slot_stack)
+except Exception:
+    _NICEGUI_DEFAULT_SLOT_STACK = []
+
+
+@pytest.fixture(autouse=True)
+def _nicegui_loop_and_slot_isolation():
+    import asyncio
+    loop = None
+    try:
+        loop = asyncio.get_event_loop_policy().get_event_loop()
+    except Exception:
+        loop = None
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+    if _NICEGUI_DEFAULT_SLOT_STACK:
+        try:
+            from nicegui import context as ng_context
+            if not ng_context.slot_stack:
+                ng_context.slot_stack[:] = _NICEGUI_DEFAULT_SLOT_STACK
+        except Exception:
+            pass
+    yield
+
+
+# ---------------------------------------------------------------------------
 # Phase 101 D-09 (USER-DEC-3, REVISED per REVIEWS round 2 HIGH #2):
 # autouse fixture insulating tests/test_local_indexer.py from importlib.reload
 # pollution by sibling tests (test_mupdf_warnings_suppressed.py reloads
