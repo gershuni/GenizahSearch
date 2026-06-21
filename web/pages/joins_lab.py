@@ -2249,7 +2249,7 @@ def create_joins_lab_page(
                 import openpyxl  # noqa: PLC0415 (late import, avoids optional-dep cost at module load)
                 wb = openpyxl.Workbook()
                 ws = wb.active
-                ws.title = 'Candidates'
+                ws.title = tr('Candidates')
                 ws.append(headers)
                 for row in data_rows:
                     ws.append(row)
