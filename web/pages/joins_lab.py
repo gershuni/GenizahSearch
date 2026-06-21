@@ -1712,8 +1712,17 @@ def create_joins_lab_page(
             ui.notify(tr('No candidates selected'), type='warning', timeout=3000)
             return
 
-        async def _open_list_picker() -> None:
-            """Open the list-picker sub-dialog and handle list selection."""
+        def _open_list_picker() -> None:
+            """Open the list-picker sub-dialog and handle list selection.
+
+            SYNCHRONOUS + called directly (NOT via asyncio.ensure_future): the
+            authenticated fetches now run on the event loop, so there is no await
+            before the dialog is built. Building the dialog inside the live click
+            handler's slot context (like confirm_dialog / remove_dialog above) is
+            what makes it actually mount and open — an ensure_future task runs on a
+            later tick after the slot context is gone, so its dialog mounts nowhere
+            and .open() silently no-ops (the D-17 picker hit exactly this). UAT 2026-06-21.
+            """
             try:
                 user = GlobalAuthState.get_user()
                 if not user:
@@ -1814,7 +1823,7 @@ def create_joins_lab_page(
             except RuntimeError:
                 return
 
-        asyncio.ensure_future(_open_list_picker())
+        _open_list_picker()
 
     # -----------------------------------------------------------------------
     # Phase-120 ACT-03/D-06: Export — flat CSV/XLSX with off-loop batched text fetch

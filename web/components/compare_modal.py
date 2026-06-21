@@ -443,7 +443,10 @@ def create_compare_modal(
                 m = enrichment.get(cand.sys_id, {})
                 anchor_w = enrichment.get(anchor_cand.sys_id, {}).get("width_cm")
                 if is_size_mismatch(m.get("width_cm"), anchor_w):
-                    ui.badge(tr("Size mismatch"), icon="warning").props("color=warning")
+                    # ui.badge has no `icon` kwarg (TypeError) — render the warning
+                    # glyph as a child element inside the badge instead.
+                    with ui.badge(tr("Size mismatch")).props("color=warning"):
+                        ui.icon("warning").classes("text-xs q-ml-xs")
 
         # Fresh AnchorViewer for candidate pane — independent from anchor pane (Pitfall 3).
         # Store it in _cand_viewer_ref so _load_candidate_pane can await update_content.

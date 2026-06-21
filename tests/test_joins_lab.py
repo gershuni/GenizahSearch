@@ -2134,6 +2134,51 @@ class TestListPickerD17:
             "background coroutine detaches the slot and .open() does nothing."
         )
 
+    def test_export_menu_nested_in_button_not_row(self):
+        """Regression (UAT 2026-06-21): Export dropdown must anchor to its button.
+
+        The export ui.menu() was a child of the toolbar ROW, so Quasar's q-menu
+        anchored to the row and its default parent-click listener popped it open
+        whenever ANY sibling in the row (Run Search, the VS toggle) was clicked —
+        AND the menu items were effectively unusable ("export didn't work at all").
+        Nesting the menu inside the Export button fixes both.
+        """
+        source = self._get_source()
+        assert "with _export_btn:" in source, (
+            "Export regression: the export ui.menu() must be nested inside the Export "
+            "button (`with _export_btn:`) so the q-menu anchors to the button and opens "
+            "only on the button's click — not a child of the toolbar row."
+        )
+        # The old row-sibling pattern needed an explicit open binding; nesting the
+        # menu in the button auto-opens it, so that binding must be gone (it would
+        # double-trigger / toggle the menu shut).
+        assert "_export_btn.on('click', _export_menu.open)" not in source, (
+            "Export regression: remove `_export_btn.on('click', _export_menu.open)` — "
+            "with the menu nested in the button it auto-opens; the explicit binding "
+            "double-triggers and toggles the menu closed."
+        )
+
+    def test_add_to_list_picker_built_synchronously(self):
+        """Regression (UAT 2026-06-21): Add-to-List picker must render.
+
+        _open_list_picker built its dialog inside an asyncio.ensure_future task that
+        ran on a later tick — after the click handler's NiceGUI slot context was
+        gone — so the dialog mounted nowhere and never appeared. Now that its
+        authenticated fetches run on the event loop (no await before the dialog), it
+        must be a SYNC function called DIRECTLY in the click handler's slot context
+        (like confirm_dialog / remove_dialog), not launched via ensure_future.
+        """
+        source = self._get_source()
+        assert "asyncio.ensure_future(_open_list_picker())" not in source, (
+            "Add-to-List regression: _open_list_picker must NOT be launched via "
+            "asyncio.ensure_future — that runs it after the slot context is gone, so "
+            "the dialog never mounts. Call it synchronously in the click handler."
+        )
+        assert "async def _open_list_picker" not in source, (
+            "Add-to-List regression: _open_list_picker must be a plain `def` (sync) so "
+            "its dialog is built in the live click-handler slot context."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Phase 120 Plan 08 Task 2: D-19 "Open in Joins Lab" button on /lists

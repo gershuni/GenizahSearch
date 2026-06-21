@@ -327,6 +327,35 @@ def test_compare_modal_source_has_two_anchor_viewer_instantiations():
     )
 
 
+def test_compare_modal_no_badge_icon_kwarg():
+    """Regression (UAT 2026-06-21): ui.badge() has no `icon` kwarg.
+
+    `ui.badge(tr("Size mismatch"), icon="warning")` raised
+    `TypeError: got an unexpected keyword argument 'icon'` inside _fill_candidate,
+    which aborted the ENTIRE Compare modal build — so the modal showed no image,
+    no transcription, no metadata, and no image prefetch. Render the warning glyph
+    as a child element of the badge instead.
+    """
+    import ast
+    import pathlib
+    source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        is_badge = (
+            (isinstance(func, ast.Attribute) and func.attr == "badge")
+            or (isinstance(func, ast.Name) and func.id == "badge")
+        )
+        if is_badge and any(kw.arg == "icon" for kw in node.keywords):
+            raise AssertionError(
+                "ui.badge() does not accept an `icon` kwarg (TypeError at runtime, "
+                "aborts the whole Compare modal build). Put the icon inside the badge "
+                "as a child element instead."
+            )
+
+
 def test_compare_modal_source_no_inject_viewer_assets():
     """Source assertion: compare_modal.py must NOT call inject_viewer_assets.
 
