@@ -189,10 +189,16 @@ def _cap_triage(triage: Any) -> dict:
         result[sys_id] = verdict
 
     remaining_slots = _MAX_TRIAGE_ENTRIES - len(result)
-    undecided_values = list(undecided.items())
-    # Keep the NEWEST undecided entries (tail of insertion order = most recent)
-    for sys_id, verdict in undecided_values[-remaining_slots:]:
-        result[sys_id] = verdict
+    # Guard remaining_slots > 0 BEFORE slicing: when the cap is already filled by
+    # decided verdicts (≥500 yes/no on one anchor), remaining_slots is 0 and the
+    # slice `undecided_values[-0:]` would return the WHOLE undecided list (Python
+    # `[-0:]` == `[:]`), defeating the cap (120-VERIFICATION WARNING). With the
+    # guard the result stays ≤ _MAX_TRIAGE_ENTRIES in every case.
+    if remaining_slots > 0:
+        undecided_values = list(undecided.items())
+        # Keep the NEWEST undecided entries (tail of insertion order = most recent)
+        for sys_id, verdict in undecided_values[-remaining_slots:]:
+            result[sys_id] = verdict
 
     return result
 

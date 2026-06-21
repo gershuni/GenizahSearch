@@ -369,6 +369,35 @@ def test_triage_capped_at_500(monkeypatch):
     )
 
 
+def test_triage_capped_at_500_all_decided(monkeypatch):
+    """Cap holds even when ALL entries are decided (yes/no) — the 120-VERIFICATION
+    edge case: with ≥500 decided verdicts, remaining_slots hits 0 and the old
+    `undecided_values[-0:]` slice returned the WHOLE undecided list, defeating the
+    cap. 600 decided + 50 maybe must still cap at ≤500."""
+    _get, _set, _pop = _make_session_store()
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_get', _get)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_set', _set)
+    monkeypatch.setattr('web.joins_lab_storage.safe_user_pop', _pop)
+
+    from web.joins_lab_storage import write_full_state, read_full_state
+
+    triage = {}
+    # 600 DECIDED (yes/no) — already exceeds the 500 cap on its own.
+    for i in range(600):
+        triage[f'99000{i:04d}'] = 'yes' if i % 2 == 0 else 'no'
+    # + 50 undecided 'maybe' that must NOT slip past the full cap.
+    for i in range(600, 650):
+        triage[f'99000{i:04d}'] = 'maybe'
+
+    write_full_state(anchor_sys_id='990001234', triage=triage)
+    result = read_full_state()
+    assert result is not None
+    stored_triage = result['triage']
+    assert len(stored_triage) <= 500, (
+        f'triage must stay capped at 500 even when all-decided, got {len(stored_triage)}'
+    )
+
+
 def test_clear_leaves_empty(monkeypatch):
     """clear_joins_lab_state() wipes both joins_lab AND puzzle_staging (PST-03).
 
