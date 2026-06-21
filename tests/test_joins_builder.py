@@ -256,7 +256,6 @@ class TestSetStateSyncsControls:
 
     def test_set_state_then_get_state_idempotent_for_single_text(self):
         """set_state → get_state → set_state again produces identical state."""
-        import json
         handle = _make_builder()
         state_in = {
             'search_type': 'variants',
@@ -390,3 +389,41 @@ class TestSetStatePartialBlob:
                               'variants_on': False, 'single_text': '',
                               'text_position': 'anywhere'})
         assert handle['get_search_type']() == 'responsa'
+
+    def test_set_state_legacy_line_missing_words_does_not_crash(self):
+        """Regression (UAT 2026-06-21): a persisted line WITHOUT a 'words' key.
+
+        A session restored from a pre-word-level-builder schema crashed the page
+        with `KeyError: 'words'` in _render_line (via _bootstrap_anchor). set_state
+        must normalize such legacy lines to a valid one-word line instead.
+        """
+        handle = _make_builder()
+        # A legacy line dict: no 'words' key at all (old schema).
+        handle['set_state']({
+            'search_type': 'responsa',
+            'lines_state': [{'line_start': False, 'line_end': False, 'gap_to_next_line': 0}],
+        })  # must NOT raise KeyError
+        state = handle['get_state']()
+        assert len(state['lines_state']) == 1
+        assert state['lines_state'][0]['words'], (
+            "normalized legacy line must have at least one word"
+        )
+        assert state['lines_state'][0]['words'][0]['term'] == ''
+
+    def test_set_state_legacy_line_empty_words_and_non_dict_entries(self):
+        """Regression: lines with empty 'words' list, and non-dict line entries."""
+        handle = _make_builder()
+        handle['set_state']({
+            'search_type': 'responsa',
+            'lines_state': [
+                {'words': []},          # present but empty -> default word
+                'not-a-dict',           # garbage entry -> default line
+                {'words': [{'term': 'שלום'}]},  # partial word -> normalized
+            ],
+        })  # must NOT raise
+        state = handle['get_state']()
+        assert len(state['lines_state']) == 3
+        assert all(ln['words'] for ln in state['lines_state']), "every line has ≥1 word"
+        # The partial word's term survives; missing mods/gap defaulted.
+        assert state['lines_state'][2]['words'][0]['term'] == 'שלום'
+        assert state['lines_state'][2]['words'][0]['gap_to_next_word'] == 0

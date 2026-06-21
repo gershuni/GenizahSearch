@@ -123,6 +123,52 @@ def _normalize_word_mods(mods: dict) -> dict:
     return {k: bool(mods.get(k, False)) for k in keys}
 
 
+def _coerce_gap_int(val) -> int:
+    """Coerce a persisted gap value to a non-negative int (0 on anything odd)."""
+    try:
+        n = int(val or 0)
+        return n if n >= 0 else 0
+    except (TypeError, ValueError):
+        return 0
+
+
+def _normalize_word(raw) -> dict:
+    """Coerce a (possibly malformed/legacy) word dict to the current schema."""
+    if not isinstance(raw, dict):
+        return _default_word()
+    term = raw.get('term', '')
+    mods = raw.get('mods', {})
+    return {
+        'term': str(term) if term is not None else '',
+        'mods': dict(mods) if isinstance(mods, dict) else {},
+        'gap_to_next_word': _coerce_gap_int(raw.get('gap_to_next_word', 0)),
+    }
+
+
+def _normalize_line(raw) -> dict:
+    """Coerce a (possibly malformed/legacy) line dict to the current line schema.
+
+    RESTORE TOLERANCE: persisted state written by an older builder schema (e.g.
+    before the word-level model) — or any partial blob — may lack ``'words'`` or
+    carry malformed entries. A session restore must NEVER crash the page on stale
+    state (the observed ``KeyError: 'words'`` in _render_line), so every required
+    key is defaulted and at least one word is guaranteed.
+    """
+    if not isinstance(raw, dict):
+        return _default_line()
+    raw_words = raw.get('words')
+    if isinstance(raw_words, list) and raw_words:
+        words = [_normalize_word(w) for w in raw_words]
+    else:
+        words = [_default_word()]
+    return {
+        'words': words,
+        'line_start': bool(raw.get('line_start', False)),
+        'line_end': bool(raw.get('line_end', False)),
+        'gap_to_next_line': _coerce_gap_int(raw.get('gap_to_next_line', 0)),
+    }
+
+
 def _toggle_line_anchor(line: dict, which: str) -> None:
     """Toggle a line's 'line_start'/'line_end' anchor in place, mutually exclusive.
 
@@ -499,6 +545,13 @@ def create_joins_builder(
     def _render_line(li: int) -> None:
         """Render one line and its words."""
         line = lines_state[li]
+        # Defensive: a malformed/legacy line dict may lack 'words' (or carry an
+        # empty list). setdefault repairs it in place so subsequent word-index
+        # operations stay consistent. The restore path normalizes upstream
+        # (_set_state -> _normalize_line); this is belt-and-braces for any other
+        # code path that could produce a wordless line.
+        if not line.get('words'):
+            line['words'] = [_default_word()]
         words = line['words']
 
         with ui.column().classes('w-full gap-1 border-b pb-2 mb-1').style(
@@ -1013,9 +1066,14 @@ def create_joins_builder(
         # --- 1. Restore closure state ---
         raw_lines = state.get('lines_state')
         if raw_lines and isinstance(raw_lines, list):
-            import copy
+            # Normalize each restored line to the current schema so a legacy /
+            # partial blob (e.g. a pre-word-level-builder session) cannot crash
+            # the restore (_render_line -> KeyError 'words'). _normalize_line
+            # builds fresh dicts, so no aliasing with the stored snapshot.
             lines_state.clear()
-            lines_state.extend(copy.deepcopy(raw_lines))
+            lines_state.extend(_normalize_line(rl) for rl in raw_lines)
+            if not lines_state:
+                lines_state.append(_default_line())
         else:
             # Ensure at least one default line (empty or missing lines_state)
             if not lines_state:
