@@ -213,6 +213,52 @@ def test_migrate_is_noop_when_external_db_exists(tmp_path):
     assert os.path.exists(legacy)             # legacy left in place
 
 
+def test_migrate_fatal_on_move_failure_keeps_legacy(tmp_path, monkeypatch):
+    """Codex P1: a move failure must raise (not strand the legacy DB silently)."""
+    import shutil as _shutil
+    index_dir = str(tmp_path / "LocalIndex")
+    os.makedirs(index_dir, exist_ok=True)
+    legacy = os.path.join(index_dir, "local_index.sqlite3")
+    with open(legacy, "w") as f:
+        f.write("legacy-data")
+
+    def _boom(src, dst):
+        raise OSError(13, "simulated move failure")
+
+    monkeypatch.setattr(_shutil, "move", _boom)
+    with pytest.raises(LocalIndexerError, match="migrate legacy LOCAL DB"):
+        migrate_legacy_local_db(index_dir)
+
+    # Legacy DB left intact for a retry; no empty external DB was created.
+    assert os.path.exists(legacy)
+    assert not os.path.exists(local_db_path_for(index_dir))
+
+
+def test_reset_fatal_when_external_db_delete_fails(tmp_path, monkeypatch):
+    """Codex P2: reset must abort if the old external DB can't be deleted."""
+    index_dir = str(tmp_path / "LocalIndex")
+    lab_dir = str(tmp_path / "LocalLabIndex")
+    db_path = str(tmp_path / "local_index.sqlite3")
+    os.makedirs(index_dir, exist_ok=True)
+    os.makedirs(lab_dir, exist_ok=True)
+    idx = _new_indexer(index_dir, lab_dir, db_path)
+    try:
+        real_remove = os.remove
+
+        def _no_remove(path, *a, **k):
+            if os.path.abspath(path).startswith(os.path.abspath(db_path)):
+                raise OSError(13, "simulated delete failure")
+            return real_remove(path, *a, **k)
+
+        monkeypatch.setattr(os, "remove", _no_remove)
+        with pytest.raises(LocalIndexerError, match="could not delete the LOCAL DB"):
+            idx.reset_my_library(
+                close_searcher_cb=lambda: None, reload_searcher_cb=lambda: None,
+            )
+    finally:
+        idx.close()
+
+
 def test_rebuild_raises_when_db_inside_index_dir(tmp_path):
     """The dir-swap guard fails loud if the DB is wired inside the swapped dir."""
     index_dir = str(tmp_path / "LocalIndex")

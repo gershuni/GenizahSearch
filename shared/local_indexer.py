@@ -1667,9 +1667,18 @@ def migrate_legacy_local_db(index_dir: str) -> str:
     """Move a legacy in-dir ``local_index.sqlite3`` (+ ``-wal`` / ``-shm``) out
     to the parent and return the canonical external path.
 
-    Idempotent + best-effort, and MUST run before any SQLite connection is
-    opened on either path. If the external path already exists, a legacy in-dir
-    file is left untouched (newer-wins; never clobber live data).
+    Idempotent, and MUST run before any SQLite connection is opened on either
+    path. If the external path already exists, a legacy in-dir file is left
+    untouched (newer-wins; never clobber live data).
+
+    A move FAILURE (when the external DB is missing and a legacy DB exists) is
+    FATAL — raising LocalIndexerError rather than returning ``new_path`` (Codex
+    P1). Returning would let the caller open a fresh EMPTY DB at the external
+    path, after which future migrations no-op (external exists) and the real
+    legacy ``cached_text`` / ``processed_files`` is permanently stranded.
+    The sidecars (``-wal`` / ``-shm``) are moved BEFORE the main DB so the
+    invariant "external main DB exists ⇔ migration completed" holds: on a
+    mid-way failure the main DB stays at the legacy path and a retry resumes.
     """
     import shutil
     new_path = local_db_path_for(index_dir)
@@ -1677,16 +1686,18 @@ def migrate_legacy_local_db(index_dir: str) -> str:
     if os.path.abspath(legacy) == os.path.abspath(new_path):
         return new_path  # already external (e.g. a test rooting the DB at the parent)
     if not os.path.exists(new_path) and os.path.exists(legacy):
-        for suffix in ("", "-wal", "-shm"):
+        # Sidecars first, main DB LAST (see docstring invariant).
+        for suffix in ("-wal", "-shm", ""):
             src, dst = legacy + suffix, new_path + suffix
             if os.path.exists(src) and not os.path.exists(dst):
                 try:
                     shutil.move(src, dst)
-                except Exception:
-                    logger.exception(
-                        "migrate_legacy_local_db: move %r -> %r failed (continuing)",
-                        src, dst,
-                    )
+                except Exception as exc:
+                    raise LocalIndexerError(
+                        f"Failed to migrate legacy LOCAL DB {src!r} -> {dst!r}: {exc}. "
+                        "Aborting so a fresh empty DB is NOT created over your existing "
+                        "library (the legacy DB is left intact for a retry)."
+                    ) from exc
     return new_path
 
 
@@ -4412,16 +4423,26 @@ class LocalIndexer:
         # not carry it. Delete it (+ -wal/-shm) now that all handles are closed
         # (Step 1) and before Step 5 reinit, so __init__ recreates a fresh empty
         # DB (matching the pre-P1 "rename quarantines the DB" reset semantics).
+        #
+        # FATAL on failure (Codex P2): if the old DB survives, the Step 5 reinit
+        # would reopen it — silently violating the fresh-empty reset contract and
+        # leaving SQLite metadata out of sync with the now-emptied Tantivy dir.
+        # Raise instead of continuing. (The Tantivy dirs are already quarantined;
+        # the UI surfaces the error and the user can retry / restart.)
         for _suffix in ("", "-wal", "-shm"):
             _db_file = self._db_path + _suffix
             try:
                 if os.path.exists(_db_file):
                     os.remove(_db_file)
-            except OSError:
+            except OSError as exc:
                 logger.exception(
-                    "reset_my_library: could not remove DB file %r (continuing)",
-                    _db_file,
+                    "reset_my_library: could not remove DB file %r", _db_file
                 )
+                raise LocalIndexerError(
+                    f"Reset failed: could not delete the LOCAL DB ({_db_file!r}: {exc}). "
+                    "Aborting before reinit so a stale DB is not reused over the "
+                    "emptied index. Restart the app and retry."
+                ) from exc
 
         # --- Step 4: (reserved) cleanup scheduling happens in Step 6 after reinit ---
         # REVIEWS Codex MEDIUM: defer rmtree off the UI thread by using the
