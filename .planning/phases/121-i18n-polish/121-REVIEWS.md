@@ -92,6 +92,15 @@ execution; tighten the Compare RTL assertion before relying on Plan 02 as a guar
 - Codex confirmed the bulk of the plans (the 17-key list, badge strings, fixture name, RTL sites, reload
   verdict) are accurate — only the items above need change.
 
-### To incorporate
-Run `/gsd-plan-phase 121 --reviews` to re-spawn the planner with this feedback for targeted plan edits,
-then re-verify with the plan-checker.
+### Resolution (2026-06-21)
+All 6 findings were applied directly to the plans (user chose direct edits over a `--reviews` re-spawn)
+and committed as `39a19471`:
+- #1 HIGH — Plan 01 fixes both reset-dialog drifts (`Clear Joins Lab`, `Clear all Joins Lab state...`) to `מעבדת הצירופים`.
+- #2 MED — Plan 01 shelfmark HE → `סנן לפי מספר מדף…`.
+- #3 MED — Plan 02 Compare-RTL assertion now matches by class signature (`flex-row-reverse` + `justify-between` + `flex-wrap`).
+- #4 MED — Plan 01 verify asserts each new value is Hebrew and `!= key`.
+- #5 LOW — Plan 02 notes the 2nd badge site (`compare_modal.py:470-471`).
+- #6 LOW — Plan 03 verify substring loosened.
+
+The plan-checker was NOT re-run (direct-edit path). Edits were textual (action/acceptance/verify) plus one
+added `must_haves.truth`; all 3 plans still parse with valid frontmatter and `requirements: [FND-07]`.
