@@ -384,6 +384,70 @@ class TestCompatGate:
         q = old_idx.parse_query(SAGAN, ["content"])
         assert len(old_idx.searcher().search(q, 5).hits) == 1
 
+    def test_missing_field_error_wording_is_pinned(self, tmp_path):
+        # L4: _index_has_field keys on 'does not exist' / 'not defined' in the
+        # tantivy ValueError text. Pin that wording so a future tantivy reword
+        # fails THIS test loudly (else the gate would fail OPEN — emit a
+        # content_search clause against a fieldless index and crash at runtime).
+        old_idx = self._old_schema_index(tmp_path)
+        import pytest
+        with pytest.raises(ValueError) as exc:
+            old_idx.parse_query('content_search:"x"', ["content_search"])
+        msg = str(exc.value).lower()
+        assert ("does not exist" in msg) or ("not defined" in msg), (
+            f"tantivy missing-field wording changed: {exc.value!r} — update "
+            "_index_has_field in genizah_core.py to match."
+        )
+
+
+# ---------------------------------------------------------------------------
+# 7b. Real call site — drive the actual _query_local_index (not a mirror).
+#     Addresses L1: the helpers above re-implement retrieval; this exercises
+#     the genuine LOCAL method + its metacharacter-strip fallback, incl. the
+#     LOCAL bracket-exactness that leans on the regex backstop.
+# ---------------------------------------------------------------------------
+
+class TestRealLocalQueryCallSite:
+    def _engine(self, idx):
+        eng = SearchEngine.__new__(SearchEngine)  # bypass __init__ (no real indexes)
+        eng.local_index = idx
+        eng.local_searcher = idx.searcher()
+        eng._local_has_content_search = True
+        eng._my_library_tab_ref = None       # is_searchable gate defaults True
+        eng._last_local_query_regex = None
+        eng.var_mgr = _stub_engine().var_mgr  # get_variants -> [term]
+        return eng
+
+    def _search(self, eng, raw_query, mode="exact", gap=0):
+        """Replicate execute_search's corpus_scope=='local' branch exactly."""
+        q = strip_search_diacritics(raw_query) if mode != "Regex" else raw_query
+        terms = [q] if mode == "Regex" else q.split()
+        regex = eng.build_regex_pattern(terms, mode, gap)
+        hits = eng._query_local_index(q, mode, gap, regex=regex)
+        return {h["uid"] for h in hits}
+
+    def test_comma_word_via_real_method(self, tmp_path):
+        eng = self._engine(_build_index(tmp_path))
+        assert "comma" in self._search(eng, B_SAGAN)
+
+    def test_diacritic_fold_via_real_method(self, tmp_path):
+        eng = self._engine(_build_index(tmp_path))
+        assert "dot" in self._search(eng, TSAMAN_CLEAN)
+        assert "dot" in self._search(eng, TSAMAN_GERESH)  # geresh-typed too
+
+    def test_local_bracket_query_no_false_positives(self, tmp_path):
+        # Invariant 1 on LOCAL = "exact-or-nothing" (never over-match).
+        # LOCAL [סגן goes through the pre-existing metacharacter-strip fallback
+        # (the parser can't take a literal '['), which rewrites the query to
+        # bare סגן; the regex backstop (literal '[') then drops the bare/
+        # parenthesised סגן docs. The bracket doc itself is NOT retrievable on
+        # LOCAL (its hebword token is '[סגן', and LOCAL does no bracket-variant
+        # expansion — a documented pre-existing limitation, unchanged by SEED-006).
+        # What matters: NO false positives leak in.
+        eng = self._engine(_build_index(tmp_path))
+        hits = self._search(eng, BRACKET_SAGAN)
+        assert hits.isdisjoint({"plain", "paren", "prefix", "comma"})
+
 
 # ---------------------------------------------------------------------------
 # 8. Source guards — both schemas conform; position fields stay whitespace
@@ -428,3 +492,10 @@ class TestSchemaSourceGuards:
         # The fallback must be disabled when text_position is set.
         src = inspect.getsource(SearchEngine.execute_search)
         assert "not text_position" in src and "_has_content_search" in src
+
+    def test_local_composition_has_content_search_parity(self):
+        # M1: the Phase-110 LOCAL composition/parallels hook is the 4th retrieval
+        # site — it must also fan across content_search (gated) and fold the chunk.
+        src = inspect.getsource(SearchEngine.search_composition_logic)
+        assert '_local_fields_scl.append("content_search")' in src
+        assert "strip_search_diacritics(_w) for _w in _chunk_scl" in src

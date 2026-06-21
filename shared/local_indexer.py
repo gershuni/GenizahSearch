@@ -1676,7 +1676,19 @@ class LocalIndexer:
         db_path: str,
         progress_cb: Optional[Callable] = None,
         file_finished_cb: Optional[Callable] = None,
+        defer_schema_rebuild: bool = False,
     ) -> None:
+        # SEED-006 HIGH-5: when True, a schema-marker mismatch does NOT rebuild
+        # synchronously inside __init__ (which, on the desktop, runs on the UI
+        # thread and would freeze launch while every page is re-added from
+        # cached_text). Instead __init__ flags `needs_schema_rebuild` and leaves
+        # the indexer not-ready; the caller runs `run_deferred_schema_rebuild()`
+        # on a background thread (its own per-thread SQLite connection) and gates
+        # search until it completes. Default False preserves the synchronous
+        # behaviour for every other caller (CLI / tests / SearchEngine's own
+        # background StartupThread rebuild path).
+        self.needs_schema_rebuild: bool = False
+        self._defer_schema_rebuild = defer_schema_rebuild
         self._index_dir = index_dir
         self._lab_index_dir = lab_index_dir
         self._db_path = db_path
@@ -1762,7 +1774,24 @@ class LocalIndexer:
                     _needs_rebuild = True
                     _open_exc_captured = _open_exc
 
-            if _needs_rebuild:
+            # SEED-006 HIGH-5: defer a *schema-mismatch* rebuild off the UI
+            # thread. Only the marker-mismatch case is deferrable — a genuine
+            # open failure (corruption) still rebuilds inline so the object is
+            # never handed back broken. Leaves the indexer not-ready
+            # (_index/_writer = None); the caller must run
+            # run_deferred_schema_rebuild() before using it.
+            if _needs_rebuild and _schema_mismatch and self._defer_schema_rebuild:
+                logger.info(
+                    "LOCAL schema marker mismatch — deferring rebuild off the UI thread"
+                )
+                self.needs_schema_rebuild = True
+                self._index = None
+                self._writer = None
+                # Do NOT return — fall through so _pending_filepaths /
+                # _commit_triggers are still initialised; the writer-acquisition
+                # loop and pending-delete recovery below are gated on
+                # `needs_schema_rebuild` and run after run_deferred_schema_rebuild().
+            elif _needs_rebuild:
                 if _schema_mismatch:
                     logger.warning(
                         "LOCAL schema marker mismatch — attempting atomic rebuild"
@@ -1802,7 +1831,7 @@ class LocalIndexer:
         # _reopen_internal_writer_index(). Without the gate this loop would
         # try to acquire a second writer on top of the rebuild's writer ->
         # LockBusy (the literal LockBusy in the 2026-05-26 cascade).
-        if self._writer is None:
+        if self._writer is None and not self.needs_schema_rebuild:
             _writer_retries = 3
             _writer_delays = [0.25, 1.0, 2.0]
             for _attempt in range(_writer_retries + 1):
@@ -1833,10 +1862,57 @@ class LocalIndexer:
         # PDFs. Removed entirely. New scans still get the RTL fix from
         # extract_pdf_pages; existing libraries need manual Reset + re-scan.
 
-        # HIGH-3 review fix: run pending-delete recovery at init
-        recovered = self._recover_pending_deletes()
-        if recovered:
-            logger.info("LocalIndexer init: recovered %d pending deletes", recovered)
+        # HIGH-3 review fix: run pending-delete recovery at init.
+        # SEED-006: skipped while a schema rebuild is pending (no writer yet);
+        # run_deferred_schema_rebuild() runs it once the index is ready.
+        if not self.needs_schema_rebuild:
+            recovered = self._recover_pending_deletes()
+            if recovered:
+                logger.info("LocalIndexer init: recovered %d pending deletes", recovered)
+
+    def run_deferred_schema_rebuild(self) -> bool:
+        """SEED-006 HIGH-5: perform a schema-mismatch rebuild deferred from __init__.
+
+        Call this from a BACKGROUND thread (not the UI thread) when the indexer
+        was constructed with ``defer_schema_rebuild=True`` and reported
+        ``needs_schema_rebuild``. It opens its own per-thread SQLite connection
+        (via the ``_conn`` property), so it is safe off the constructing thread.
+
+        Idempotent + race-tolerant: re-reads the on-disk marker first, because a
+        concurrent path (e.g. SearchEngine's own background rebuild) may already
+        have rebuilt + rewritten it. Returns True if the indexer is ready
+        afterwards. Never raises for the "already current" case; a genuine
+        rebuild failure propagates so the caller can fail-open the search gate.
+        """
+        if not self.needs_schema_rebuild:
+            return self._index is not None
+
+        expected = _compute_schema_marker(build_local_schema)
+        actual = _read_schema_marker(self._index_dir)
+        if actual == expected:
+            # Another path already rebuilt — just open + wire the live handles.
+            self._reopen_internal_writer_index()
+        else:
+            import uuid as _uuid
+            # Seed a fresh index handle so rebuild_main_index_atomic can probe
+            # committed rows, then do the atomic cached_text rebuild (it writes
+            # the new marker + reopens the writer/index at step 7).
+            self._index = tantivy.Index(build_local_schema(), path=self._index_dir)
+            register_search_tokenizers(self._index)
+            self.rebuild_main_index_atomic(
+                _uuid.uuid4().hex,
+                close_searcher_cb=lambda: None,
+                reload_searcher_cb=lambda: None,
+            )
+
+        self.needs_schema_rebuild = False
+        # Now that the index/writer are live, run the recovery that __init__
+        # skipped while the rebuild was pending.
+        try:
+            self._recover_pending_deletes()
+        except Exception:
+            logger.exception("run_deferred_schema_rebuild: pending-delete recovery failed")
+        return self._index is not None
 
     # ------------------------------------------------------------------
     # Thread-local connection property (D-threading-fix)

@@ -58,6 +58,9 @@ from shared.nli_circuit_breaker import (
     NLI_IIIF_READ_TIMEOUT,
     NLI_MARC_READ_TIMEOUT,
 )
+# SEED-006: dependency-light hebword tokenizer registration (only imports
+# tantivy — safe at module top, no PyMuPDF/circular-import concern).
+from shared.search_tokenizer import register_search_tokenizers
 
 # Import unified variant pairs (generated from V0.7 vs V0.8 HTR comparison)
 # Sorted by frequency - use top N pairs based on slider setting
@@ -5745,7 +5748,6 @@ class Indexer:
 
         index = tantivy.Index(schema, path=db_path)
         # SEED-006: register hebword (+ builtins) before the writer tokenizes content.
-        from shared.search_tokenizer import register_search_tokenizers  # noqa: PLC0415
         register_search_tokenizers(index)
         writer = index.writer(heap_size=500_000_000)
         
@@ -7206,7 +7208,6 @@ class SearchEngine:
         schema_mismatch = (actual_marker != expected_marker)
 
         try:
-            from shared.search_tokenizer import register_search_tokenizers  # noqa: PLC0415
             schema = build_local_schema()
             local_index = tantivy.Index(schema, path=Config.LOCAL_INDEX_DIR)
             register_search_tokenizers(local_index)  # SEED-006: hebword + builtins
@@ -7735,9 +7736,19 @@ class SearchEngine:
                 self.index = tantivy.Index.open(db_path)
                 # SEED-006: register hebword (content field) BEFORE searcher use,
                 # then detect content_search for the Stage 2 compat gate.
-                from shared.search_tokenizer import register_search_tokenizers  # noqa: PLC0415
                 register_search_tokenizers(self.index)
                 self._has_content_search = _index_has_field(self.index, "content_search")
+                if not self._has_content_search:
+                    # SEED-006 M3: the GENIZAH main index has no schema marker, so
+                    # nothing else detects that it predates this fix. Surface it
+                    # loudly — the punctuation/diacritic retrieval fix is INERT
+                    # (degrades to whitespace-tokenized content-only) until the
+                    # index is rebuilt via create_index and redeployed.
+                    LOGGER.warning(
+                        "SEED-006: main index predates the content_search field — "
+                        "Hebrew punctuation/diacritic retrieval fix is INERT until "
+                        "the index is rebuilt (create_index) and redeployed."
+                    )
                 self.searcher = self.index.searcher()
                 return True
             except Exception as e:
@@ -9458,11 +9469,26 @@ class SearchEngine:
             try:
                 _local_index_scl = self.local_index
                 _local_searcher_scl = self.local_searcher
+                # SEED-006 M1: parity with the regular LOCAL path (_query_local_index)
+                # — when the diacritic-folded content_search field exists, fan
+                # field-less chunk terms across it too so צמאן/צ'מאן reach צ̇מאן in
+                # LOCAL composition/parallels, not just regular LOCAL search.
+                _local_has_cs_scl = getattr(self, "_local_has_content_search", False)
                 _local_fields_scl = ["content", "content_head", "content_tail"]
+                if _local_has_cs_scl:
+                    _local_fields_scl.append("content_search")
                 if _local_index_scl is not None and _local_searcher_scl is not None:
                     for _i_scl, (_token_idx_scl, _chunk_scl, _chunk_crossed_scl) in enumerate(chunks_data):
-                        _t_query_scl = self.build_tantivy_query(_chunk_scl, mode)
-                        _regex_scl = self.build_regex_pattern(_chunk_scl, mode, 0)
+                        # SEED-006 M1: fold diacritics off the chunk for BOTH the
+                        # Tantivy query AND the regex backstop (a fold-only hit
+                        # retrieved via content_search would otherwise be dropped
+                        # by the regex at the `_regex_scl.search` filter below).
+                        if _local_has_cs_scl and mode != 'Regex':
+                            _chunk_q_scl = [strip_search_diacritics(_w) for _w in _chunk_scl]
+                        else:
+                            _chunk_q_scl = _chunk_scl
+                        _t_query_scl = self.build_tantivy_query(_chunk_q_scl, mode)
+                        _regex_scl = self.build_regex_pattern(_chunk_q_scl, mode, 0)
                         if not _regex_scl:
                             continue
                         _is_freq_filtered_scl = False
