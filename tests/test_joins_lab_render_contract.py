@@ -89,6 +89,70 @@ class TestTriageStateConstructorContract:
 
 
 # ---------------------------------------------------------------------------
+# Round-5 (PST + bulk toolbar): source-contract guards
+# ---------------------------------------------------------------------------
+
+class TestRound5SourceContract:
+    """Structural guards for the round-5 features (no live server needed):
+
+    1. Results persistence is wired (persist_results_snapshot called).
+    2. Restore prefers the per-tab snapshot before re-running the search
+       (read_results_snapshot + a restored_from_snapshot branch).
+    3. The selection bulk-action toolbar exists and is refreshed on selection.
+    4. The candidate TABLE no longer renders its own Add-to-Puzzle / Add-to-List
+       buttons (the page toolbar owns them for BOTH views — no duplication).
+    """
+
+    def _page_source(self) -> str:
+        import web.pages.joins_lab as jl
+        return inspect.getsource(jl)
+
+    def test_results_snapshot_persisted(self):
+        src = self._page_source()
+        assert 'persist_results_snapshot(' in src, (
+            'results must be persisted to the per-tab snapshot (round-5 PST)'
+        )
+
+    def test_restore_prefers_snapshot_over_rerun(self):
+        src = self._page_source()
+        assert 'read_results_snapshot(' in src, (
+            'restore must read the per-tab snapshot before re-running the search'
+        )
+        assert 'restored_from_snapshot' in src, (
+            'the stored-anchor restore path must branch on a snapshot restore '
+            '(instant) vs a full search re-run (fallback)'
+        )
+
+    def test_bulk_toolbar_wired(self):
+        src = self._page_source()
+        assert '_refresh_bulk_toolbar' in src, (
+            'the selection bulk-action toolbar must exist (round-5)'
+        )
+        assert "_bulk_bar_ref" in src, (
+            'the bulk toolbar must be reachable via a late-bound ref'
+        )
+        # The bulk bar wires the existing selection-scoped handlers.
+        assert '_on_add_to_puzzle_click' in src
+        assert '_on_add_to_list_click' in src
+
+    def test_table_does_not_render_duplicate_bulk_buttons(self):
+        """create_candidate_table must NOT bind on_add_to_puzzle / on_add_to_list
+        to a button (those moved to the page toolbar — round-5)."""
+        import web.components.candidate_grid as cgrid
+        table_src = inspect.getsource(cgrid.create_candidate_table)
+        assert 'on_click=on_add_to_puzzle' not in table_src, (
+            'Add-to-Puzzle must not be rendered inside the table bulk bar '
+            '(moved to the page toolbar for both views — round-5)'
+        )
+        assert 'on_click=on_add_to_list' not in table_src, (
+            'Add-to-List must not be rendered inside the table bulk bar '
+            '(moved to the page toolbar for both views — round-5)'
+        )
+        # Add-as-Join STAYS in the table bulk bar (pairwise single-select).
+        assert 'on_add_as_join' in table_src
+
+
+# ---------------------------------------------------------------------------
 # CR-02: open_filter_dialog call-site kwargs must match the real signature
 # ---------------------------------------------------------------------------
 

@@ -935,6 +935,7 @@ def _create_candidate_card(
                             ui.button(icon="extension")
                             .props("flat dense")
                             .style("min-height:44px;")
+                            .mark("grid_card_add_to_puzzle")
                             .tooltip(tr("Add anchor + this candidate to the Fragment Puzzle"))
                             .on("click", _make_add_puzzle_handler())
                         )
@@ -1125,63 +1126,38 @@ def create_candidate_table(
                     f"color:{v_color};"
                 ).on("click", _make_bulk_handler())
 
-            # Phase-120 ACT-02/ACT-03: Add to Puzzle + Add to List — selection-scoped
-            # bulk actions.  Appear in the bulk bar (TABLE view only — R2-H2) when ≥1
-            # row is selected.  Callbacks read the page-level _selected set (H2).
-            # Add to Puzzle: no login gate.
-            # Add to List: login-gated (caller handles the gate; anonymous path shows
-            # lock icon here as a visual hint of the gate before the click).
+            # Phase-120 ACT-01: Add as Join — PAIRWISE (anchor + exactly ONE
+            # candidate).  Enabled only when exactly one row is selected; the
+            # selection handler toggles its enabled state.  On click it resolves
+            # the single selected row's sys_id + raw shelfmark and calls the
+            # callback (which handles the anonymous/auth + confirm branching).
+            #
+            # Round-5 NOTE: Add-to-Puzzle / Add-to-List for the SELECTION are no
+            # longer rendered here.  They moved to the page-level toolbar bar
+            # (next to Export) so they work identically in BOTH grid and table
+            # view (the table feeds the same page-level _selected set via
+            # on_selection_change).  on_add_to_puzzle / on_add_to_list remain in
+            # the signature for back-compat but are intentionally unused here.
             add_join_btn = None  # late-bound; toggled by the selection handler
-            if (
-                on_add_to_puzzle is not None
-                or on_add_to_list is not None
-                or on_add_as_join is not None
-            ):
+            if on_add_as_join is not None:
                 with ui.row().classes("ml-auto items-center gap-2"):
-                    # Phase-120 ACT-01: Add as Join — PAIRWISE (anchor + exactly ONE
-                    # candidate).  Enabled only when exactly one row is selected; the
-                    # selection handler toggles its enabled state.  On click it resolves
-                    # the single selected row's sys_id + raw shelfmark and calls the
-                    # callback (which handles the anonymous/auth + confirm branching).
-                    if on_add_as_join is not None:
-                        def _on_add_join_bulk_click() -> None:
-                            if len(selected_rows) != 1:
-                                return
-                            row = selected_rows[0]
-                            sid = row.get("sys_id")
-                            sm = row.get("shelfmark_raw") or "?"
-                            if sid:
-                                on_add_as_join(sid, sm)
+                    def _on_add_join_bulk_click() -> None:
+                        if len(selected_rows) != 1:
+                            return
+                        row = selected_rows[0]
+                        sid = row.get("sys_id")
+                        sm = row.get("shelfmark_raw") or "?"
+                        if sid:
+                            on_add_as_join(sid, sm)
 
-                        add_join_btn = ui.button(
-                            tr("Add as Join"),
-                            icon="add_link",
-                            on_click=_on_add_join_bulk_click,
-                        ).props("flat color=primary disable")
-                        add_join_btn.tooltip(
-                            tr("Select exactly one candidate to add as a join")
-                        )
-                    if on_add_to_puzzle is not None:
-                        add_puzzle_btn = ui.button(
-                            tr("Add to Puzzle"),
-                            icon="extension",
-                            on_click=on_add_to_puzzle,
-                        ).props("flat")
-                        add_puzzle_btn.tooltip(
-                            tr("Add anchor + selected candidates to the Fragment Puzzle")
-                        )
-                    if on_add_to_list is not None:
-                        # Phase-120 ACT-03/D-05: Add to List — login-gated cloud write.
-                        # The lock icon (icon-right) signals the login gate before clicking.
-                        # The caller handles the anonymous / logged-in branching logic.
-                        add_list_btn = ui.button(
-                            tr("Add to List"),
-                            icon="playlist_add",
-                            on_click=on_add_to_list,
-                        ).props("flat icon-right=lock")
-                        add_list_btn.tooltip(
-                            tr("Sign in to add candidates to a list")
-                        )
+                    add_join_btn = ui.button(
+                        tr("Add as Join"),
+                        icon="add_link",
+                        on_click=_on_add_join_bulk_click,
+                    ).props("flat color=primary disable")
+                    add_join_btn.tooltip(
+                        tr("Select exactly one candidate to add as a join")
+                    )
 
         table = ui.table(
             columns=columns,

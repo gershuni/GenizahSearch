@@ -48,7 +48,11 @@ reset cannot leave stale cross-session staging state.
 """
 from __future__ import annotations
 
+import dataclasses
+
 from typing import Any, Optional
+
+from nicegui import app
 
 from web.safe_storage import safe_user_get, safe_user_set, safe_user_pop
 
@@ -60,6 +64,21 @@ _JOINS_LAB_KEY = 'joins_lab'
 _SCHEMA_VERSION = 1  # KEEP AT 1 — Phase 120 additions are non-breaking (see docstring)
 
 _PUZZLE_STAGING_KEY = 'puzzle_staging'
+
+# ---------------------------------------------------------------------------
+# Results snapshot (per-TAB, transient) — survives in-tab navigation
+# ---------------------------------------------------------------------------
+# Unlike the per-user blob above, the candidate result set is persisted to
+# ``app.storage.tab`` (in-memory, per browser tab), mirroring how /search keeps
+# results across a Browse round-trip (``persist_search_active_snapshot``).  This
+# lets a Browse / Add-to-Puzzle navigation return to /joins-lab with results
+# INTACT and instant — no slow fuzzy/variants re-run.  Tab storage is NOT the
+# long-lived user file, so the 778 MB ``search_history.json`` payload-bloat class
+# of bug does not apply here; we still strip/cap defensively below.
+_RESULTS_TAB_KEY = 'joins_lab_results'
+_RESULTS_SNAPSHOT_VERSION = 1
+_MAX_SNAPSHOT_CANDIDATES = 500       # hard cap on either candidate list
+_SNAPSHOT_FULLTEXT_CAP = 2000        # chars; truncate heavy transcription text
 
 # Size-cap constants (threat model T-120-blob)
 _MAX_BUILDER_ROWS = 20          # max rows per builder (matches UI widget max)
@@ -276,3 +295,105 @@ def clear_joins_lab_state() -> None:
     """
     safe_user_pop(_JOINS_LAB_KEY, None)
     safe_user_pop(_PUZZLE_STAGING_KEY, None)
+
+
+# ---------------------------------------------------------------------------
+# Results snapshot helpers (per-TAB transient cache — see constants above)
+# ---------------------------------------------------------------------------
+
+def _get_tab_storage():
+    """Return ``app.storage.tab`` when a tab context is available, else None.
+
+    Mirrors ``web.pages.search_state._get_tab_storage`` — tab storage requires a
+    live client/tab and raises outside one (e.g. headless tests, teardown).
+    """
+    try:
+        return app.storage.tab
+    except Exception:
+        return None
+
+
+def _compact_candidate(c: Any) -> dict:
+    """Serialise a ``Candidate`` dataclass (or dict) to a light JSON-able dict.
+
+    Truncates the heavy ``full_text`` transcription field to
+    :data:`_SNAPSHOT_FULLTEXT_CAP` chars — enough to keep the card snippet but
+    not the whole page (blob discipline, even though tab storage is transient).
+    """
+    if dataclasses.is_dataclass(c) and not isinstance(c, type):
+        d = dataclasses.asdict(c)
+    elif isinstance(c, dict):
+        d = dict(c)
+    else:
+        return {}
+    ft = d.get('full_text') or ''
+    if ft:
+        d['full_text'] = str(ft)[:_SNAPSHOT_FULLTEXT_CAP]
+    return d
+
+
+def persist_results_snapshot(
+    *,
+    anchor_sys_id: Optional[str],
+    raw_text_candidates: Any,
+    vs_candidates: Any,
+    vs_on: bool,
+    vs_anchor_sid: Optional[str],
+    enrichment: Any,
+) -> None:
+    """Persist the current candidate result set to per-tab storage.
+
+    Best-effort: silently no-ops when no tab context is available or on any
+    storage error.  ``raw_text_candidates`` is the RAW text+cross-side baseline
+    (NOT the merged display set) so the VS toggle keeps working after restore.
+    """
+    tab = _get_tab_storage()
+    if tab is None:
+        return
+    try:
+        tab[_RESULTS_TAB_KEY] = {
+            'version': _RESULTS_SNAPSHOT_VERSION,
+            'anchor_sys_id': str(anchor_sys_id or ''),
+            'raw_text_candidates': [
+                _compact_candidate(c)
+                for c in list(raw_text_candidates or [])[:_MAX_SNAPSHOT_CANDIDATES]
+            ],
+            'vs_candidates': [
+                _compact_candidate(c)
+                for c in list(vs_candidates or [])[:_MAX_SNAPSHOT_CANDIDATES]
+            ],
+            'vs_on': bool(vs_on),
+            'vs_anchor_sid': vs_anchor_sid,
+            'enrichment': enrichment if isinstance(enrichment, dict) else {},
+        }
+    except Exception:
+        pass  # transient cache — never crash the render path on a storage error
+
+
+def read_results_snapshot() -> Optional[dict]:
+    """Return the per-tab candidate snapshot, or ``None`` when absent/stale.
+
+    Returns ``None`` when there is no tab context, the key is absent, the value
+    is not a dict, or its ``version`` does not match the current snapshot version.
+    """
+    tab = _get_tab_storage()
+    if tab is None:
+        return None
+    try:
+        raw = tab.get(_RESULTS_TAB_KEY)
+    except Exception:
+        return None
+    if not isinstance(raw, dict) or raw.get('version') != _RESULTS_SNAPSHOT_VERSION:
+        return None
+    return raw
+
+
+def clear_results_snapshot() -> None:
+    """Drop the per-tab candidate snapshot (e.g. on New Search)."""
+    tab = _get_tab_storage()
+    if tab is None:
+        return
+    try:
+        tab.pop(_RESULTS_TAB_KEY, None)
+    except Exception:
+        pass

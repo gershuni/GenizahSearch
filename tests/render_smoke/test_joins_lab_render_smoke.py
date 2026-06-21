@@ -1767,13 +1767,17 @@ def test_issue7_grid_card_has_add_to_puzzle(joins_lab_smoke_runner):
         await _load_anchor_and_search(user)
 
         from nicegui import ElementFilter, ui
+        # Round-5: target the PER-CARD button by its marker.  A page-level bulk
+        # "Add to Puzzle" (also icon='extension', marker 'bulk_add_to_puzzle')
+        # now lives next to Export, so an icon-only filter is ambiguous.
         with user._client:
             puzzle_btns = [
-                b for b in ElementFilter(kind=ui.button)
+                b for b in ElementFilter(kind=ui.button, marker='grid_card_add_to_puzzle')
                 if b.visible and b._props.get('icon') == 'extension'
             ]
         assert puzzle_btns, (
-            "Issue 7 FAIL: no Add-to-Puzzle button (icon='extension') on grid cards. "
+            "Issue 7 FAIL: no per-card Add-to-Puzzle button "
+            "(icon='extension', marker 'grid_card_add_to_puzzle') on grid cards. "
             "Check create_candidate_grid on_add_to_puzzle wiring."
         )
 
@@ -1912,6 +1916,76 @@ def test_issue8_grid_card_checkbox_present_and_flows_to_selection(joins_lab_smok
         assert STUB_ANCHOR_SID in frags and len(frags) >= 2, (
             "Issue 8 FAIL: the grid checkbox selection did not flow into the shared "
             f"_selected set used by the bulk Add-to-Puzzle. fragments={frags!r}"
+        )
+
+    joins_lab_smoke_runner(driver)
+
+
+# --- Round-5: selection bulk-action toolbar (next to Export) works in GRID view -
+
+def test_round5_grid_selection_bulk_add_to_puzzle(joins_lab_smoke_runner):
+    """Round-5: selecting a grid card surfaces the page-level bulk toolbar (next
+    to Export) and its 'Add to Puzzle' (marker 'bulk_add_to_puzzle') stages
+    [anchor, selected…] — WITHOUT having to switch to Table view (the gap the
+    user reported: 'no bulk add-to-list/add-to-puzzle on selection')."""
+    from unittest.mock import patch
+
+    async def driver(user):
+        await user.open('/joins-lab')
+        await _load_anchor_and_search(user)
+
+        from nicegui import ElementFilter, events, ui
+
+        # Toggle the first per-card (dense) selection checkbox ON.
+        with user._client:
+            checkboxes = [
+                e for e in ElementFilter(kind=ui.checkbox)
+                if e.visible and e._props.get('dense')
+            ]
+        assert checkboxes, "Round-5 FAIL: no per-card selection checkboxes on the grid."
+        cb = checkboxes[0]
+        with user._client:
+            cb.value = True
+            for listener in list(cb._event_listeners.values()):
+                if listener.element_id == cb.id:
+                    ea = events.GenericEventArguments(
+                        sender=cb, client=user._client, args=True
+                    )
+                    events.handle_event(listener.handler, ea)
+        await asyncio.sleep(0.1)
+
+        # The page-level bulk "Add to Puzzle" (marker 'bulk_add_to_puzzle') must
+        # exist — it lives in the toolbar next to Export, NOT inside a card.
+        with user._client:
+            bulk_puzzle = [
+                b for b in ElementFilter(kind=ui.button, marker='bulk_add_to_puzzle')
+            ]
+        assert bulk_puzzle, (
+            "Round-5 FAIL: no page-level bulk 'Add to Puzzle' button next to Export "
+            "(marker 'bulk_add_to_puzzle'). The selection bulk bar must appear in "
+            "BOTH grid and table view."
+        )
+
+        staged = {}
+        navigated = []
+        with patch(
+            'web.pages.joins_lab.safe_user_set',
+            side_effect=lambda k, v: staged.update({k: v}),
+        ), patch(
+            'web.pages.joins_lab.ui.navigate.to',
+            side_effect=lambda url: navigated.append(url),
+        ):
+            _click_element(user, bulk_puzzle[0])
+            await asyncio.sleep(0.2)
+
+        payload = staged.get('puzzle_staging', {})
+        frags = payload.get('fragments') or []
+        assert frags and frags[0] == STUB_ANCHOR_SID and len(frags) >= 2, (
+            "Round-5 FAIL: grid-view bulk Add-to-Puzzle did not stage "
+            f"[anchor, selected…] from the toolbar. fragments={frags!r}"
+        )
+        assert navigated == ['/puzzle'], (
+            f"Round-5 FAIL: bulk Add-to-Puzzle must navigate to /puzzle; got {navigated!r}"
         )
 
     joins_lab_smoke_runner(driver)

@@ -413,6 +413,139 @@ def test_clear_leaves_empty(monkeypatch):
     )
 
 
+# ---------------------------------------------------------------------------
+# Round-5 (PST): per-tab results snapshot (persist / read / clear)
+# ---------------------------------------------------------------------------
+
+def _patch_tab_storage(monkeypatch) -> dict:
+    """Patch _get_tab_storage() to return a private dict (simulates app.storage.tab)."""
+    store: dict = {}
+    monkeypatch.setattr('web.joins_lab_storage._get_tab_storage', lambda: store)
+    return store
+
+
+def test_results_snapshot_round_trip(monkeypatch):
+    """persist_results_snapshot() then read_results_snapshot() round-trips the set."""
+    from shared.joins_lab import Candidate
+    from web.joins_lab_storage import persist_results_snapshot, read_results_snapshot
+    _patch_tab_storage(monkeypatch)
+
+    cands = [Candidate(sys_id='990001', page=1, shelfmark='T-S 1.1', full_text='abc')]
+    persist_results_snapshot(
+        anchor_sys_id='990000', raw_text_candidates=cands, vs_candidates=[],
+        vs_on=True, vs_anchor_sid='990000',
+        enrichment={'990001': {'material': 'paper'}},
+    )
+    snap = read_results_snapshot()
+    assert snap is not None
+    assert snap['anchor_sys_id'] == '990000'
+    assert snap['vs_on'] is True
+    assert snap['vs_anchor_sid'] == '990000'
+    assert len(snap['raw_text_candidates']) == 1
+    assert snap['raw_text_candidates'][0]['sys_id'] == '990001'
+    assert snap['raw_text_candidates'][0]['full_text'] == 'abc'
+    assert snap['enrichment'] == {'990001': {'material': 'paper'}}
+
+
+def test_results_snapshot_version_gate(monkeypatch):
+    """A snapshot with a mismatched version is treated as absent (cold tab)."""
+    from web.joins_lab_storage import read_results_snapshot, _RESULTS_TAB_KEY
+    store = _patch_tab_storage(monkeypatch)
+    store[_RESULTS_TAB_KEY] = {'version': 999, 'anchor_sys_id': 'x'}
+    assert read_results_snapshot() is None
+
+
+def test_results_snapshot_truncates_full_text(monkeypatch):
+    """Heavy full_text is truncated to the cap (blob discipline, even in tab cache)."""
+    from shared.joins_lab import Candidate
+    from web.joins_lab_storage import (
+        persist_results_snapshot, read_results_snapshot, _SNAPSHOT_FULLTEXT_CAP,
+    )
+    _patch_tab_storage(monkeypatch)
+    big = 'א' * (_SNAPSHOT_FULLTEXT_CAP + 5000)
+    persist_results_snapshot(
+        anchor_sys_id='990000',
+        raw_text_candidates=[Candidate(sys_id='990001', page=1, full_text=big)],
+        vs_candidates=[], vs_on=False, vs_anchor_sid=None, enrichment={},
+    )
+    snap = read_results_snapshot()
+    assert len(snap['raw_text_candidates'][0]['full_text']) <= _SNAPSHOT_FULLTEXT_CAP
+
+
+def test_results_snapshot_caps_candidate_count(monkeypatch):
+    """Either candidate list is hard-capped at _MAX_SNAPSHOT_CANDIDATES."""
+    from shared.joins_lab import Candidate
+    from web.joins_lab_storage import (
+        persist_results_snapshot, read_results_snapshot, _MAX_SNAPSHOT_CANDIDATES,
+    )
+    _patch_tab_storage(monkeypatch)
+    many = [Candidate(sys_id=str(i), page=1) for i in range(_MAX_SNAPSHOT_CANDIDATES + 50)]
+    persist_results_snapshot(
+        anchor_sys_id='990000', raw_text_candidates=many, vs_candidates=[],
+        vs_on=False, vs_anchor_sid=None, enrichment={},
+    )
+    snap = read_results_snapshot()
+    assert len(snap['raw_text_candidates']) == _MAX_SNAPSHOT_CANDIDATES
+
+
+def test_clear_results_snapshot(monkeypatch):
+    """clear_results_snapshot() drops the per-tab snapshot."""
+    from shared.joins_lab import Candidate
+    from web.joins_lab_storage import (
+        persist_results_snapshot, read_results_snapshot, clear_results_snapshot,
+    )
+    _patch_tab_storage(monkeypatch)
+    persist_results_snapshot(
+        anchor_sys_id='990000',
+        raw_text_candidates=[Candidate(sys_id='1', page=1)],
+        vs_candidates=[], vs_on=False, vs_anchor_sid=None, enrichment={},
+    )
+    assert read_results_snapshot() is not None
+    clear_results_snapshot()
+    assert read_results_snapshot() is None
+
+
+def test_results_snapshot_no_tab_context_is_noop(monkeypatch):
+    """With no tab context, persist/read/clear are safe no-ops (never raise)."""
+    from shared.joins_lab import Candidate
+    from web.joins_lab_storage import (
+        persist_results_snapshot, read_results_snapshot, clear_results_snapshot,
+    )
+    monkeypatch.setattr('web.joins_lab_storage._get_tab_storage', lambda: None)
+    persist_results_snapshot(
+        anchor_sys_id='990000',
+        raw_text_candidates=[Candidate(sys_id='1', page=1)],
+        vs_candidates=[], vs_on=False, vs_anchor_sid=None, enrichment={},
+    )
+    assert read_results_snapshot() is None
+    clear_results_snapshot()  # must not raise
+
+
+def test_results_snapshot_not_persisted_to_user_storage(monkeypatch):
+    """The results snapshot is per-TAB only — it must never touch user storage.
+
+    Guards the blob-discipline invariant: candidate lists / full_text go to
+    app.storage.tab (transient), NEVER the long-lived per-user blob.
+    """
+    from shared.joins_lab import Candidate
+    from web import joins_lab_storage as _mod
+
+    _patch_tab_storage(monkeypatch)
+
+    # Trip a hard failure if anything routes the snapshot through user storage.
+    def _boom(*a, **k):  # pragma: no cover - only fires on a regression
+        raise AssertionError('results snapshot must NOT use per-user safe storage')
+
+    monkeypatch.setattr(_mod, 'safe_user_set', _boom)
+
+    _mod.persist_results_snapshot(
+        anchor_sys_id='990000',
+        raw_text_candidates=[Candidate(sys_id='1', page=1, full_text='x' * 50000)],
+        vs_candidates=[], vs_on=False, vs_anchor_sid=None, enrichment={},
+    )
+    assert _mod.read_results_snapshot() is not None
+
+
 def test_two_sessions_do_not_share_state(monkeypatch):
     """Writing anchor in session A must not surface in session B.
 

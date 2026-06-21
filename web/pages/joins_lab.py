@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import dataclasses
 import io
 import json
 import logging
@@ -84,8 +85,11 @@ from web.components.known_joins_group import render_known_joins_group
 from web.joins_executor import WebSearchExecutor
 from web.joins_lab_storage import (
     clear_joins_lab_state,
+    clear_results_snapshot,
+    persist_results_snapshot,
     read_anchor,
     read_full_state,
+    read_results_snapshot,
     write_anchor,
     write_full_state,
 )
@@ -584,6 +588,9 @@ def create_joins_lab_page(
     # Late-bound UI refs (populated after UI is built)
     _vs_switch_ref: dict = {'el': None}       # the ui.switch element
     _vs_status_ref: dict = {'el': None}       # inline VS status label
+    # Round-5: SELECTION-scoped bulk-action toolbar (Add-to-List / Add-to-Puzzle).
+    # Shown next to Export when ≥1 candidate is selected; works in grid + table.
+    _bulk_bar_ref: dict = {'bar': None, 'label': None}
     # Phase 120-03 PST-02: restoring indicator (shown during auto-restore re-run)
     _restore_indicator_ref: dict = {'el': None}
 
@@ -607,6 +614,54 @@ def create_joins_lab_page(
     _prefetch_cache: dict = {}
     _prefetch_running: set = set()
     _prefetch_anchor_gen: dict = {'value': 0}
+
+    # Round-5 (PST): per-tab results-snapshot bridge.  Keeps the candidate result
+    # set INTACT across an in-tab Browse / Add-to-Puzzle round-trip (the page is
+    # destroyed + rebuilt on navigation), mirroring how /search restores results
+    # from app.storage.tab (persist_search_active_snapshot).  The snapshot itself
+    # lives in web/joins_lab_storage; these closures bridge it to page state.
+    _CANDIDATE_FIELDS = {f.name for f in dataclasses.fields(Candidate)}
+
+    def _candidate_from_dict(d: dict) -> Candidate:
+        """Reconstruct a frozen Candidate from a snapshot dict (tolerant of schema drift)."""
+        return Candidate(**{k: v for k, v in d.items() if k in _CANDIDATE_FIELDS})
+
+    def _persist_results_snapshot() -> None:
+        """Persist the current candidate result set to per-tab storage (best-effort).
+
+        Called from every point where the underlying result data changes: search
+        completion, enrichment update, and VS fetch/toggle.  NEVER inside
+        run.io_bound (Pitfall 4) — all call sites run on the event loop.
+        """
+        persist_results_snapshot(
+            anchor_sys_id=_anchor_state.get('sys_id') or '',
+            raw_text_candidates=_raw_text_candidates,
+            vs_candidates=_vs_candidates,
+            vs_on=_vs_on['value'],
+            vs_anchor_sid=_vs_anchor_sid['value'],
+            enrichment=_enrichment,
+        )
+
+    # Round-5: SELECTION bulk-action toolbar helpers.  _selected is fed by BOTH
+    # the grid per-card checkboxes and the table multi-select; both call
+    # _refresh_bulk_toolbar() so the bar (next to Export) shows/hides + counts.
+    def _refresh_bulk_toolbar() -> None:
+        """Show/hide + re-count the selection bulk-action bar from _selected."""
+        bar = _bulk_bar_ref.get('bar')
+        if bar is None:
+            return  # toolbar not built yet (early restore) — no-op
+        n = len(_selected)
+        label = _bulk_bar_ref.get('label')
+        if label is not None:
+            label.set_text(tr('N selected').replace('N', str(n)))
+        bar.style('display:flex;' if n > 0 else 'display:none;')
+
+    def _clear_selection() -> None:
+        """Clear the selection set, hide the bulk bar, and re-render so the grid
+        checkboxes / table selection reflect the cleared state."""
+        _selected.clear()
+        _refresh_bulk_toolbar()
+        _re_render_candidates_surface()
 
     async def _trigger_search() -> None:
         if _submit_ref['fn'] is not None:
@@ -944,6 +999,9 @@ def create_joins_lab_page(
             _enrichment_ready['value'] = True
             # Re-render the surface so material/dims populate (same render path)
             _re_render_candidates_surface()
+            # Round-5 (PST): re-persist now that enrichment is populated, so a
+            # back-navigation restores the FULL result set (incl. dims/material).
+            _persist_results_snapshot()
         except RuntimeError:
             return  # client/tab deleted mid-fetch — benign teardown (SEED-008 D-20)
 
@@ -1010,6 +1068,8 @@ def create_joins_lab_page(
             def _on_table_selection_change(sids: list) -> None:
                 _selected.clear()
                 _selected.update(sids)
+                # Round-5: reflect selection in the Export-adjacent bulk bar.
+                _refresh_bulk_toolbar()
 
             create_candidate_table(
                 _filtered_candidates,
@@ -1033,6 +1093,8 @@ def create_joins_lab_page(
                     _selected.add(sys_id)
                 else:
                     _selected.discard(sys_id)
+                # Round-5: reflect selection in the Export-adjacent bulk bar.
+                _refresh_bulk_toolbar()
 
             create_candidate_grid(
                 _filtered_candidates,
@@ -1516,6 +1578,36 @@ def create_joins_lab_page(
             with _export_btn:
                 ui.item(tr('CSV'), on_click=_on_export_csv)
                 ui.item(tr('Excel (XLSX)'), on_click=_on_export_xlsx)
+
+            # Round-5: SELECTION-scoped bulk actions — appear NEXT TO Export when
+            # ≥1 candidate is selected (grid checkboxes OR table multi-select feed
+            # the shared _selected set).  Works in BOTH Grid and Table view.
+            # _on_add_to_list_click / _on_add_to_puzzle_click are defined below;
+            # the lambdas resolve them at click time (late binding).
+            _bulk_actions_bar = ui.row().classes('gap-1 items-center').style(
+                'display:none;'
+            )
+            _bulk_bar_ref['bar'] = _bulk_actions_bar
+            with _bulk_actions_bar:
+                _bulk_count_label = ui.label('').classes('text-sm').style(
+                    'color: var(--text-secondary);'
+                )
+                _bulk_bar_ref['label'] = _bulk_count_label
+                ui.button(
+                    tr('Add to List'), icon='playlist_add',
+                    on_click=lambda: _on_add_to_list_click(),
+                ).props('flat dense icon-right=lock').tooltip(
+                    tr('Sign in to add candidates to a list')
+                )
+                ui.button(
+                    tr('Add to Puzzle'), icon='extension',
+                    on_click=lambda: _on_add_to_puzzle_click(),
+                ).props('flat dense').mark('bulk_add_to_puzzle').tooltip(
+                    tr('Add anchor + selected candidates to the Fragment Puzzle')
+                )
+                ui.button(
+                    icon='clear', on_click=lambda: _clear_selection(),
+                ).props('flat dense round').tooltip(tr('Clear selection'))
 
     # -----------------------------------------------------------------------
     # Async helpers
@@ -2611,6 +2703,8 @@ def create_joins_lab_page(
             _vs_candidates.clear()
             _vs_candidates.extend(vs_cands)
             _vs_anchor_sid['value'] = anchor_sid
+            # Round-5 (PST): VS look-alikes changed — refresh the tab snapshot.
+            _persist_results_snapshot()
 
             vs_switch_el = _vs_switch_ref.get('el')
             if vs_switch_el is not None and vs_switch_el.value:
@@ -2662,11 +2756,13 @@ def create_joins_lab_page(
             _current_page['value'] = 0
             _re_render_candidates_surface()
             _update_vs_status_label()
+            # Round-5 (PST): VS toggle OFF — persist the new vs_on state.
+            _persist_results_snapshot()
             return
 
         # Toggle ON — check if we need to fetch VS candidates
         if _vs_anchor_sid['value'] != anchor_sid or not _vs_candidates:
-            # Need a fresh fetch
+            # Need a fresh fetch (the fetch persists the snapshot on completion)
             asyncio.ensure_future(_do_vs_fetch_and_update(anchor_sid))
         else:
             # Already have VS candidates for this anchor — recompute from RAW baseline (G2)
@@ -2676,6 +2772,8 @@ def create_joins_lab_page(
             _current_page['value'] = 0
             _re_render_candidates_surface()
             _update_vs_status_label()
+            # Round-5 (PST): VS toggle ON (cached) — persist the new vs_on state.
+            _persist_results_snapshot()
 
     async def _on_load_btn_click() -> None:
         """Handle the Load Anchor button / Enter key in the smart box."""
@@ -3140,6 +3238,17 @@ def create_joins_lab_page(
         # Results + builder visibility (anchor_builder.reset() restored type to
         # Responsa-style, so the responsa-only options row is shown again).
         candidates_container.clear()
+        # Round-5 (PST): a New Search wipes results — drop the per-tab snapshot
+        # (same anchor, so the restore anchor-match guard would NOT catch it) and
+        # clear the selection + bulk toolbar.
+        clear_results_snapshot()
+        _raw_text_candidates.clear()
+        _all_candidates.clear()
+        _filtered_candidates.clear()
+        _vs_candidates.clear()
+        _vs_anchor_sid['value'] = None
+        _selected.clear()
+        _refresh_bulk_toolbar()
         summary_bar_container.set_visibility(False)
         anchor_builder['container'].set_visibility(True)
         advanced_options_container.set_visibility(True)
@@ -3575,6 +3684,10 @@ def create_joins_lab_page(
 
             # D-11: triage resets on new search; D-13: detect_self_match runs (silently)
             _triage.clear()
+            # Round-5: a fresh result set invalidates the prior selection — clear
+            # it (and the bulk bar) so stale sys_ids don't linger in _selected.
+            _selected.clear()
+            _refresh_bulk_toolbar()
             _self_matched = detect_self_match(raw_results, anchor_sid_step9)
             # D-13: self-match is detected but not surfaced in Phase 119. Phase 120
             # exposes it as a UI badge.  Captured to prevent accidental removal as
@@ -3594,6 +3707,12 @@ def create_joins_lab_page(
             search_status.style('display: none;')
             with candidates_container:
                 _render_candidates_surface()
+
+            # Round-5 (PST): persist the fresh result set immediately (enrichment
+            # is still in flight — _do_enrich_and_update re-persists with dims once
+            # it lands).  A back-navigation now restores candidates without a
+            # slow fuzzy/variants re-run.
+            _persist_results_snapshot()
 
             # Fire enrichment off-loop for the FULL filtered set (D-16, Pitfall 7)
             asyncio.ensure_future(_do_enrich_and_update(list(_filtered_candidates)))
@@ -3741,6 +3860,9 @@ def create_joins_lab_page(
         elif decision['source'] == 'stored':
             # --- PST-02: full restore flow ---
             full_state = read_full_state()  # returns dict or None
+            # Round-5 (PST): read the per-tab results snapshot UP-FRONT (before
+            # load_anchor) so we can restore candidates instantly without a re-run.
+            snapshot = read_results_snapshot()
 
             # Show restoring indicator
             ind_el = _restore_indicator_ref.get('el')
@@ -3820,18 +3942,68 @@ def create_joins_lab_page(
             else:
                 stored_triage = {}
 
-            # Step 8: auto-run search (Stop NOT shown on auto-restore path, D-11)
-            # execute_joins_search resets _triage to {} — we re-attach afterwards.
-            await execute_joins_search()
+            # Step 8: restore the candidate result set.  Prefer the per-tab
+            # snapshot (INSTANT — no re-run); fall back to re-running the search
+            # only when there is no usable snapshot (cold tab, schema/anchor
+            # mismatch, or a deserialise error).  This is what lets a Browse /
+            # Add-to-Puzzle round-trip return with results intact instead of
+            # vanishing for a slow fuzzy/variants re-run (round-5 PST).
+            restored_from_snapshot = False
+            if snapshot and snapshot.get('anchor_sys_id') == (decision['sys_id'] or ''):
+                try:
+                    _raw_text_candidates.clear()
+                    _raw_text_candidates.extend(
+                        _candidate_from_dict(d)
+                        for d in (snapshot.get('raw_text_candidates') or [])
+                        if isinstance(d, dict)
+                    )
+                    _vs_candidates.clear()
+                    _vs_candidates.extend(
+                        _candidate_from_dict(d)
+                        for d in (snapshot.get('vs_candidates') or [])
+                        if isinstance(d, dict)
+                    )
+                    _vs_on['value'] = bool(snapshot.get('vs_on', False))
+                    _vs_anchor_sid['value'] = snapshot.get('vs_anchor_sid')
+                    snap_enrich = snapshot.get('enrichment')
+                    _enrichment.clear()
+                    if isinstance(snap_enrich, dict):
+                        _enrichment.update(snap_enrich)
+                    _enrichment_ready['value'] = bool(_enrichment)
+                    # Sync the VS switch widget to the restored toggle state.
+                    _vs_el = _vs_switch_ref.get('el')
+                    if _vs_el is not None:
+                        _vs_el.value = _vs_on['value']
+                    # Re-attach persisted triage BEFORE the first render so verdict
+                    # borders appear immediately (D-15).
+                    if stored_triage:
+                        _triage.update(stored_triage)
+                    _current_page['value'] = 0
+                    _re_render_candidates_surface()
+                    restored_from_snapshot = True
+                    # If enrichment wasn't captured (navigated away before it
+                    # landed), fetch it now so dims/material populate.
+                    if not _enrichment_ready['value'] and _filtered_candidates:
+                        asyncio.ensure_future(
+                            _do_enrich_and_update(list(_filtered_candidates))
+                        )
+                except Exception:
+                    logger.exception(
+                        'joins-lab snapshot restore failed; re-running search'
+                    )
+                    restored_from_snapshot = False
 
-            # Step 9: re-attach persisted triage by sys_id (D-15).
-            # Orphan keys for sys_ids not in the current result set are harmless.
-            if stored_triage:
-                _triage.update(stored_triage)
-                # Re-render to show verdict borders on the restored candidate cards.
-                candidates_container.clear()
-                with candidates_container:
-                    _render_candidates_surface()
+            if not restored_from_snapshot:
+                # No usable snapshot — re-run the search (Stop NOT shown on the
+                # auto-restore path, D-11).  execute_joins_search resets _triage
+                # to {} so we re-attach the persisted verdicts afterwards (D-15).
+                await execute_joins_search()
+                if stored_triage:
+                    _triage.update(stored_triage)
+                    # Re-render to show verdict borders on the restored cards.
+                    candidates_container.clear()
+                    with candidates_container:
+                        _render_candidates_surface()
 
             # Step 10: hide restoring indicator
             if ind_el is not None:

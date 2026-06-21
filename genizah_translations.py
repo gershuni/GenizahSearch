@@ -4333,6 +4333,13 @@ TRANSLATIONS.update({
     "Image URL":                            "כתובת תמונה",
 })
 
+# === Round-5 (PST): selection bulk-action toolbar (next to Export) ===
+TRANSLATIONS.update({
+    # Count label — "N" is replaced with the live selected count at runtime.
+    "N selected":                           "נבחרו N",
+    "Clear selection":                      "נקה בחירה",
+})
+
 # === Phase 120-07: D-07 Set-as-Anchor + D-08 Browse-in-Compare + D-09 Info buttons ===
 TRANSLATIONS.update({
     # --- D-07: Set-as-Anchor button on candidate cards ---
