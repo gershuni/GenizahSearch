@@ -24,8 +24,6 @@ import ast
 import pathlib
 import re
 
-import pytest
-
 # ---------------------------------------------------------------------------
 # Module-level constants
 # ---------------------------------------------------------------------------
@@ -344,4 +342,43 @@ def test_entry_point_keys():
         + "\n".join(failures)
         + "\n\nFix: ensure each key (a) has a HE entry in TRANSLATIONS and "
         "(b) is used as tr(\"key\") in the mapped host file."
+    )
+
+
+# Keys that have drifted before (duplicate definitions and/or glossary
+# inconsistency) and whose CORRECT resolved value must be pinned so a future
+# re-drift fails CI. Motivated by the Phase-121 HE-mode UAT: 'Add as Join' had
+# three duplicate definitions in genizah_translations.py and the wrong (last)
+# one shadowed the correct value (חיבור instead of the established צירוף
+# glossary). Pinning the *resolved* value guards the bug class regardless of
+# where a future duplicate is added.
+DRIFT_PINNED_VALUES = {
+    'Add as Join': 'הוסף כצירוף',
+    'Open in Joins Lab': 'פתח במעבדת הצירופים',
+    'Clear Joins Lab': 'נקה את מעבדת הצירופים',
+    'View in Browse': 'עיין בכתב יד',
+}
+
+
+def test_glossary_drift_values_pinned():
+    """Regression guard (Phase-121 UAT): drift-prone keys must resolve to their
+    corrected glossary value. Because TRANSLATIONS is a plain dict, a later
+    duplicate definition silently shadows an earlier one — this pins the
+    *resolved* value so reintroducing the wrong term (e.g. מעבדת החיבורים or
+    הוסף כחיבור) fails CI regardless of where the duplicate is added.
+    """
+    from genizah_translations import TRANSLATIONS
+
+    failures = []
+    for key, expected in DRIFT_PINNED_VALUES.items():
+        actual = TRANSLATIONS.get(key)
+        if actual != expected:
+            failures.append(f"  {key!r}: expected {expected!r}, got {actual!r}")
+
+    assert not failures, (
+        "Glossary drift detected — drift-prone keys resolved to the wrong value:\n"
+        + "\n".join(failures)
+        + "\n\nThe Joins Lab glossary uses צירוף (not חיבור) for 'join'. If a key "
+        "above regressed, a later duplicate definition in genizah_translations.py "
+        "likely shadowed the correct value — fix the winning (last) definition."
     )
