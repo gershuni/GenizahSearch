@@ -660,6 +660,14 @@ def _detect_multicolumn_suspected(page_lines_x: list[tuple[float, float]]) -> bo
 
 
 # ---------------------------------------------------------------------------
+# SEED-006: shared Hebrew-aware "hebword" tokenizer registration. Defined in the
+# dependency-light shared.search_tokenizer module so the web process can
+# register it without importing this PyMuPDF-bearing module.
+# ---------------------------------------------------------------------------
+from shared.search_tokenizer import register_search_tokenizers  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
 # Schema builders
 # ---------------------------------------------------------------------------
 
@@ -679,11 +687,22 @@ def build_local_schema() -> tantivy.Schema:
     # and is rebuilt from scratch so the bug stays latent. For LOCAL where incremental
     # delete IS the central operation, raw is mandatory. tantivy-py issue #297.
     builder.add_text_field("unique_id", stored=True, tokenizer_name="raw")
-    builder.add_text_field("content", stored=True, tokenizer_name="whitespace")
+    # SEED-006 Stage 1: searchable content uses the hebword tokenizer so
+    # punctuation-attached words (בסגן, -> בסגן) become retrievable. Stored
+    # value is the ORIGINAL text (display intact). content_head/tail and
+    # line_starts/line_ends stay on whitespace — they carry L{n}:word colon
+    # markers that hebword would shatter.
+    builder.add_text_field("content", stored=True, tokenizer_name="hebword")
     builder.add_text_field("content_head", stored=False, tokenizer_name="whitespace")
     builder.add_text_field("content_tail", stored=False, tokenizer_name="whitespace")
     builder.add_text_field("line_starts", stored=False, tokenizer_name="whitespace")
     builder.add_text_field("line_ends", stored=False, tokenizer_name="whitespace")
+    # SEED-006 Stage 2: additive, non-stored, diacritic-folded retrieval field
+    # (= strip_search_diacritics(content), hebword-tokenized) so a query like
+    # צמאן / צ'מאן finds the corpus form צ̇מאן (U+0307). Used only as a
+    # lower-weighted OR fallback at word-search retrieval sites; display still
+    # reads stored `content`.
+    builder.add_text_field("content_search", stored=False, tokenizer_name="hebword")
     builder.add_text_field("source", stored=True)
     builder.add_text_field("full_header", stored=True)
     builder.add_text_field("shelfmark", stored=True)
@@ -1725,6 +1744,7 @@ class LocalIndexer:
         if not _meta_exists:
             # Fresh directory — create index from scratch (normal first-run)
             self._index = tantivy.Index(schema, path=index_dir)
+            register_search_tokenizers(self._index)  # SEED-006: hebword + builtins
             _write_schema_marker(index_dir, _compute_schema_marker(build_local_schema))
         else:
             # Existing index — open and check for corruption/schema mismatch
@@ -1733,6 +1753,7 @@ class LocalIndexer:
             if not _needs_rebuild:
                 try:
                     self._index = tantivy.Index.open(index_dir)
+                    register_search_tokenizers(self._index)  # SEED-006
                 except Exception as _open_exc:
                     logger.warning(
                         "LOCAL Tantivy index open failed: %r — attempting atomic rebuild",
@@ -1752,6 +1773,7 @@ class LocalIndexer:
                     # Initialize _index to a fresh empty one so rebuild_main_index_atomic
                     # can check committed rows via _conn (which is ready at this point)
                     self._index = tantivy.Index(schema, path=index_dir)
+                    register_search_tokenizers(self._index)  # SEED-006
                     self.rebuild_main_index_atomic(
                         _recovery_run_id,
                         close_searcher_cb=lambda: None,
@@ -2959,7 +2981,7 @@ class LocalIndexer:
         # (L1 — round-2 requirement). Plan 02 extract_pdf_pages now yields NIKUD-BEARING
         # text; the strip is here, applied uniformly to every format. content == cached_text
         # == stripped (no divergence). SEED-004 defers nikud display for non-PDF formats.
-        from genizah_core import strip_nikud  # noqa: PLC0415 — intentional lazy import (L1)
+        from genizah_core import strip_nikud, strip_search_diacritics  # noqa: PLC0415 — intentional lazy import (L1)
         stripped = strip_nikud(text)
 
         # Build content_head / content_tail for snippet generation (derived from stripped)
@@ -2971,6 +2993,7 @@ class LocalIndexer:
         doc = tantivy.Document(
             unique_id=[uid],
             content=[stripped],
+            content_search=[strip_search_diacritics(stripped)],  # SEED-006 Stage 2
             content_head=[head],
             content_tail=[tail],
             line_starts=[""],
@@ -3511,6 +3534,7 @@ class LocalIndexer:
     def _reopen_internal_writer_index(self) -> None:
         """Reopen _writer + _index after atomic swap so LocalIndexer can continue."""
         self._index = tantivy.Index(build_local_schema(), path=self._index_dir)
+        register_search_tokenizers(self._index)  # SEED-006: before writer use
         self._writer = self._index.writer(heap_size=256 * 1024 * 1024)
 
     def _ensure_writer(self):
@@ -3607,7 +3631,12 @@ class LocalIndexer:
         os.makedirs(rebuild_dir, exist_ok=True)
         fresh_schema = build_local_schema()
         fresh_index = tantivy.Index(fresh_schema, path=rebuild_dir)
+        register_search_tokenizers(fresh_index)  # SEED-006: before writer use
         fresh_writer = fresh_index.writer(heap_size=256 * 1024 * 1024)
+        # SEED-006 Stage 2: fold diacritics for the content_search field. Lazy
+        # import keeps shared/local_indexer.py free of a module-top
+        # genizah_core import (mirrors the strip_nikud import at the live add site).
+        from genizah_core import strip_search_diacritics  # noqa: PLC0415
         docs_written = 0
         try:
             for row in self._conn.execute("""
@@ -3643,6 +3672,7 @@ class LocalIndexer:
                 doc = tantivy.Document(
                     unique_id=[row["uid"]],
                     content=[text],
+                    content_search=[strip_search_diacritics(text)],  # SEED-006 Stage 2
                     content_head=[head],
                     content_tail=[tail],
                     line_starts=[""],
@@ -4490,14 +4520,9 @@ class LocalIndexer:
                 return
             main_schema = build_local_schema()
             main_index = tantivy.Index(main_schema, path=self._index_dir)
-            # Register raw tokenizer so unique_id term queries work
-            try:
-                main_index.register_tokenizer(
-                    "raw",
-                    tantivy.TextAnalyzerBuilder(tantivy.Tokenizer.raw()).build(),
-                )
-            except Exception:
-                pass  # Non-fatal if already registered
+            # SEED-006: raw (unique_id term queries) + hebword (content field is
+            # now hebword-tokenized) must both be registered after open.
+            register_search_tokenizers(main_index)
             searcher = main_index.searcher()
         except Exception as exc:
             logger.warning(
