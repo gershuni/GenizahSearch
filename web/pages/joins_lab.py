@@ -1420,29 +1420,29 @@ def create_joins_lab_page(
             # table selection.  Visible in both Grid and Table view.
             # _on_export_click is defined below after all handlers are defined;
             # wired via _export_ref (late-bind pattern matching _submit_ref).
-            _export_btn = ui.button(tr('Export'), icon='download').props(
-                'flat dense icon-right=arrow_drop_down'
-            ).tooltip(tr('Export candidates to CSV or Excel'))
-            # The menu MUST be a child of the button so the q-menu anchors to the
-            # button and opens only on the button's click. Previously it was a
-            # child of the toolbar row, so q-menu's default parent-click listener
-            # popped it open whenever ANY sibling in the row (Run Search, the VS
-            # toggle) was clicked. Nesting inside the button also auto-opens it on
-            # button click — no explicit .on('click', menu.open) needed.
+            # Canonical NiceGUI dropdown (q-btn-dropdown + q-menu): opens reliably
+            # on its OWN click only, and auto-closes on item select. Replaces the
+            # earlier bare ui.button + sibling ui.menu, whose q-menu parent-click
+            # listener popped open whenever any sibling toolbar control (Run
+            # Search / the VS toggle) was clicked, and whose nested-in-button
+            # variant didn't open at all (UAT 2026-06-21).
+            _export_btn = ui.dropdown_button(
+                tr('Export'), icon='download', auto_close=True,
+            ).props('flat dense')
+            _export_btn.tooltip(tr('Export candidates to CSV or Excel'))
             with _export_btn:
-                with ui.menu().props('auto-close'):
-                    ui.menu_item(
-                        tr('CSV'),
-                        on_click=lambda: asyncio.ensure_future(
-                            _export_ref['fn']('csv') if _export_ref['fn'] else asyncio.sleep(0)
-                        ),
-                    ).props('dense')
-                    ui.menu_item(
-                        tr('Excel (XLSX)'),
-                        on_click=lambda: asyncio.ensure_future(
-                            _export_ref['fn']('xlsx') if _export_ref['fn'] else asyncio.sleep(0)
-                        ),
-                    ).props('dense')
+                ui.item(
+                    tr('CSV'),
+                    on_click=lambda: asyncio.ensure_future(
+                        _export_ref['fn']('csv') if _export_ref['fn'] else asyncio.sleep(0)
+                    ),
+                )
+                ui.item(
+                    tr('Excel (XLSX)'),
+                    on_click=lambda: asyncio.ensure_future(
+                        _export_ref['fn']('xlsx') if _export_ref['fn'] else asyncio.sleep(0)
+                    ),
+                )
 
     # -----------------------------------------------------------------------
     # Async helpers
@@ -2043,6 +2043,19 @@ def create_joins_lab_page(
 
         except RuntimeError:
             # SEED-008 D-20: client teardown at any point — swallow silently
+            return
+        except Exception as exc:
+            # Any OTHER failure must NOT vanish as an unretrieved task exception
+            # (which is what made a broken export look like "nothing happens").
+            # Surface it so the user — and the logs — see the failure.
+            logger.exception('Joins Lab export failed: %s', exc)
+            try:
+                ui.notify(
+                    tr('Export failed. Check your connection and try again.'),
+                    type='negative', timeout=6000,
+                )
+            except Exception:
+                pass
             return
 
     # Wire _on_export_click into the toolbar button's menu items (late-bind)
@@ -2963,6 +2976,12 @@ def create_joins_lab_page(
         # the freshly-cleared grid.
         _cancel_current_search()
 
+        # A New Search supersedes any auto-restore — clear the "restoring last
+        # session" indicator (UAT 2026-06-21: it otherwise lingered).
+        _ri = _restore_indicator_ref.get('el')
+        if _ri is not None:
+            _ri.style('display: none;')
+
         # Anchor builder back to clean defaults
         anchor_builder['reset']()
 
@@ -3454,6 +3473,13 @@ def create_joins_lab_page(
                 asyncio.ensure_future(_do_vs_fetch_and_update(anchor_sid_step9))
 
         finally:
+            # Always clear the "restoring last session" indicator once ANY search
+            # run finishes (the auto-restore re-run OR a user-initiated search) —
+            # even if the run raised. Otherwise it lingers forever (UAT
+            # 2026-06-21: it "never stops, even after a new search").
+            _ri = _restore_indicator_ref.get('el')
+            if _ri is not None:
+                _ri.style('display: none;')
             # WR-01: restore the loading affordance for the WHOLE search (both the
             # anchor leg AND the cross-side leg), only if this run is still the
             # current generation. A superseding run owns the UI and must not have
