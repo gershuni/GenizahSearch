@@ -988,6 +988,7 @@ def create_joins_lab_page(
                 on_filter_open=_on_filter_open,
                 on_restyle_ready=_on_restyle_ready,
                 on_set_as_anchor=_on_set_as_anchor,
+                on_add_as_join=_on_add_as_join_click,
             )
 
     def _on_page_change(page: int) -> None:
@@ -1748,7 +1749,9 @@ def create_joins_lab_page(
                 if counts is None:
                     counts = {}
 
-                with ui.dialog().props('persistent') as picker_dlg:
+                # NOT persistent: Esc / click-outside should dismiss the picker
+                # cleanly. A persistent dialog only "shakes" (flickers) on Esc.
+                with ui.dialog() as picker_dlg:
                     with ui.card().classes('gap-2 p-4').style('min-width:320px'):
                         ui.label(
                             tr('Add N candidates to list:').replace('N', str(len(selected_list)))
@@ -1996,7 +1999,7 @@ def create_joins_lab_page(
                         library_code,
                         getattr(c, 'title', '') or '',
                         _triage_display(c.sys_id),
-                        f'{getattr(c, "score", 0.0):.2f}',
+                        f'{(getattr(c, "score", 0.0) or 0.0):.2f}',
                         enrich.get('material') or '',
                         dims,
                         str(c.page) if c.page is not None else '',
@@ -2630,7 +2633,9 @@ def create_joins_lab_page(
                     'frag_filter': '',   # Level-2 filter text
                 }
 
-                with ui.dialog().props('persistent') as picker_dialog:
+                # NOT persistent: Esc / click-outside should dismiss the picker
+                # cleanly. A persistent dialog only "shakes" (flickers) on Esc.
+                with ui.dialog() as picker_dialog:
                     with ui.card().classes('p-4 gap-2').style(
                         'min-width:360px; max-width:540px; '
                         'max-height:calc(100vh - 128px); overflow-y:auto; '

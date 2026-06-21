@@ -2204,12 +2204,16 @@ class TestListsOpenInJoinsLabD19:
             pytest.skip("web/pages/lists.py not found")
         return p.read_text(encoding="utf-8")
 
-    def test_open_in_joins_lab_icon_science(self):
-        """D-19: the Joins Lab entry button must use icon='science'."""
+    def test_open_in_joins_lab_icon_link(self):
+        """D-19: the Joins Lab entry button must use icon='link' (UAT 2026-06-21).
+
+        Changed from 'science' to 'link' at the user's request — 'link' reads as
+        "open the joins/link workbench".
+        """
         source = self._get_lists_source()
-        assert "icon='science'" in source or 'icon="science"' in source, (
-            "D-19: icon='science' not found in web/pages/lists.py. "
-            "The 'Open in Joins Lab' button must use the science icon per UI-SPEC §11."
+        assert "icon='link'" in source or 'icon="link"' in source, (
+            "D-19: icon='link' not found in web/pages/lists.py. "
+            "The 'Open in Joins Lab' button must use the link icon."
         )
 
     def test_open_in_joins_lab_deep_link_present(self):
@@ -2245,24 +2249,24 @@ class TestListsOpenInJoinsLabD19:
         )
 
     def test_open_in_joins_lab_between_browse_and_puzzle(self):
-        """D-19: the science button must appear between menu_book (Browse) and extension (Puzzle)."""
+        """D-19: the link button must appear between menu_book (Browse) and extension (Puzzle)."""
         source = self._get_lists_source()
         # Find the positions of each icon string in the source
         browse_pos = source.find("icon='menu_book'")
         if browse_pos == -1:
             browse_pos = source.find('icon="menu_book"')
-        science_pos = source.find("icon='science'")
-        if science_pos == -1:
-            science_pos = source.find('icon="science"')
+        link_pos = source.find("icon='link'")
+        if link_pos == -1:
+            link_pos = source.find('icon="link"')
         puzzle_pos = source.find("icon='extension'")
         if puzzle_pos == -1:
             puzzle_pos = source.find('icon="extension"')
 
         assert browse_pos != -1, "D-19: menu_book (Browse) button not found in lists.py"
-        assert science_pos != -1, "D-19: science (Joins Lab) button not found in lists.py"
+        assert link_pos != -1, "D-19: link (Joins Lab) button not found in lists.py"
         assert puzzle_pos != -1, "D-19: extension (Puzzle) button not found in lists.py"
-        assert browse_pos < science_pos < puzzle_pos, (
-            f"D-19: button order wrong in lists.py — science button (pos={science_pos}) "
+        assert browse_pos < link_pos < puzzle_pos, (
+            f"D-19: button order wrong in lists.py — link button (pos={link_pos}) "
             f"must be between menu_book (pos={browse_pos}) and extension (pos={puzzle_pos}). "
             f"Insert it BETWEEN Browse and Add-to-Puzzle per UI-SPEC §11."
         )

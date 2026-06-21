@@ -697,10 +697,10 @@ def create_lists_page():
 
                                 # Open in Joins Lab button (Phase 120 D-19)
                                 # Inserted BETWEEN Browse and Add-to-Puzzle (UI-SPEC §11).
-                                # icon=science matches the Phase-118 Joins Lab entry points.
+                                # icon=link reads as "open the joins/link workbench".
                                 # Always enabled — Joins Lab requires no login for anonymous browsing.
                                 ui.button(
-                                    icon='science',
+                                    icon='link',
                                     on_click=lambda sid=sys_id: ui.navigate.to(
                                         f'/joins-lab?sys_id={sid}', new_tab=True
                                     ),
