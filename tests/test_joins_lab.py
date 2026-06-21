@@ -1913,3 +1913,138 @@ class TestVSToggleHide:
             "D-12: _probe_vs_data_and_update_toggle must set visibility to bool(probe_result) "
             "so non-empty probes show the toggle and empty probes hide it"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 120 Plan 08 Task 1: D-17 Choose-anchor-from-lists picker
+# ---------------------------------------------------------------------------
+
+class TestListPickerD17:
+    """D-17: authenticated 'Choose anchor from my lists' picker (Plan 120-08 Task 1).
+
+    Source-level assertions against the live web/pages/joins_lab.py:
+
+    1. 'Go to Lists' placeholder is REMOVED from the logged-in path.
+    2. get_user_lists and get_list_items are both imported.
+    3. 'Choose a List' (Level-1 heading) and 'Filter lists…' appear in the source.
+    4. 'Filter fragments…' and 'Back to lists' appear (Level-2 navigation).
+    5. 'load_anchor' is called after a fragment-row click (picker calls load_anchor).
+    6. get_list_items is imported from web.supabase_client.
+    """
+
+    def _get_source(self):
+        import pathlib
+        p = pathlib.Path("web/pages/joins_lab.py")
+        if not p.exists():
+            import pytest
+            pytest.skip("web/pages/joins_lab.py not found")
+        return p.read_text(encoding="utf-8")
+
+    def test_list_picker_go_to_lists_placeholder_removed(self):
+        """D-17: the logged-in 'Go to Lists' placeholder must be replaced by the real picker.
+
+        The acceptance criteria for Task 1:
+          grep -n 'Go to Lists' web/pages/joins_lab.py  → returns nothing (or only comments).
+        """
+        source = self._get_source()
+        # Strip comments and docstrings for this check
+        import ast
+        tree = ast.parse(source)
+        # Collect all string literals from the AST (not in comments)
+        string_literals = [
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        ]
+        assert "Go to Lists" not in string_literals, (
+            "D-17: 'Go to Lists' string literal still present in joins_lab.py — "
+            "the placeholder must be replaced by the two-level picker."
+        )
+
+    def test_list_picker_get_list_items_imported(self):
+        """D-17: get_list_items must be imported in joins_lab.py."""
+        source = self._get_source()
+        assert "get_list_items" in source, (
+            "D-17: get_list_items is not imported in web/pages/joins_lab.py. "
+            "The two-level picker requires it to fetch fragments for a chosen list."
+        )
+
+    def test_list_picker_get_user_lists_imported(self):
+        """D-17: get_user_lists must be imported in joins_lab.py."""
+        source = self._get_source()
+        assert "get_user_lists" in source, (
+            "D-17: get_user_lists is not imported in web/pages/joins_lab.py. "
+            "The two-level picker requires it to fetch the user's lists."
+        )
+
+    def test_list_picker_level1_heading_present(self):
+        """D-17: the Level-1 heading 'Choose a List' must appear in the picker."""
+        source = self._get_source()
+        assert "Choose a List" in source, (
+            "D-17: 'Choose a List' (Level-1 heading) not found in joins_lab.py. "
+            "The picker must render a 'Choose a List' heading at Level 1."
+        )
+
+    def test_list_picker_filter_lists_placeholder_present(self):
+        """D-17: 'Filter lists…' placeholder must appear in the Level-1 filter input."""
+        source = self._get_source()
+        assert "Filter lists" in source, (
+            "D-17: 'Filter lists…' placeholder not found in joins_lab.py. "
+            "Level 1 must have a filterable list input."
+        )
+
+    def test_list_picker_filter_fragments_placeholder_present(self):
+        """D-17: 'Filter fragments…' placeholder must appear in the Level-2 filter input."""
+        source = self._get_source()
+        assert "Filter fragments" in source, (
+            "D-17: 'Filter fragments…' placeholder not found in joins_lab.py. "
+            "Level 2 must have a filterable fragment input."
+        )
+
+    def test_list_picker_back_to_lists_tooltip_present(self):
+        """D-17: 'Back to lists' must appear (back button tooltip at Level 2)."""
+        source = self._get_source()
+        assert "Back to lists" in source, (
+            "D-17: 'Back to lists' not found in joins_lab.py. "
+            "Level 2 must have a Back button with this tooltip."
+        )
+
+    def test_list_picker_calls_load_anchor(self):
+        """D-17: the picker must call load_anchor(sys_id) after fragment selection."""
+        source = self._get_source()
+        assert "load_anchor" in source, (
+            "D-17: load_anchor not referenced in joins_lab.py — "
+            "the picker must call load_anchor(sys_id) to load the chosen fragment."
+        )
+        # More specific: load_anchor must be called inside _open_picker or a nested function
+        # that handles fragment-row clicks (the D-17 authenticated path)
+        assert "picker_dialog" in source, (
+            "D-17: picker_dialog not found — the picker must use a ui.dialog instance."
+        )
+
+    def test_list_picker_uses_run_io_bound_for_user_lists(self):
+        """D-17: get_user_lists must be dispatched via run.io_bound (off-loop discipline)."""
+        source = self._get_source()
+        # run.io_bound(get_user_lists, ...) pattern must be present
+        assert "run.io_bound(get_user_lists" in source or "io_bound(get_user_lists" in source, (
+            "D-17: get_user_lists is not wrapped in run.io_bound in joins_lab.py. "
+            "List fetches must be off-loop."
+        )
+
+    def test_list_picker_uses_run_io_bound_for_list_items(self):
+        """D-17: get_list_items must be dispatched via run.io_bound (off-loop discipline)."""
+        source = self._get_source()
+        assert "run.io_bound(get_list_items" in source or "io_bound(get_list_items" in source, (
+            "D-17: get_list_items is not wrapped in run.io_bound in joins_lab.py. "
+            "Fragment fetches must be off-loop."
+        )
+
+    def test_list_picker_seed008_guard_present(self):
+        """D-17: the async picker coroutine must have a SEED-008 RuntimeError guard."""
+        source = self._get_source()
+        # The guard pattern: except RuntimeError: return — inside _open_picker
+        # (The plan requires this for fire-and-forget tasks that mutate UI after await.)
+        assert "except RuntimeError" in source and "return  # SEED-008" in source, (
+            "D-17: SEED-008 guard (except RuntimeError: return) not found in joins_lab.py. "
+            "The picker async task must guard against client-deleted teardowns."
+        )

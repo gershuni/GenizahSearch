@@ -2517,7 +2517,7 @@ TRANSLATIONS = {
     "Combine mode": "אופן השילוב",
     "Narrow (AND)": "צמצום (AND)",
     "Widen (OR)": "הרחבה (OR)",
-    # Lists / sign-in (D-06)
+    # Lists / sign-in (D-06 / D-17 / D-19 — Phase 120)
     "Choose from my lists": "בחירה מהרשימות שלי",
     "Sign in to access your saved research lists": "התחברו כדי לגשת לרשימות המחקר השמורות שלכם",
     "Sign in to access your saved research lists.": "התחברו כדי לגשת לרשימות המחקר השמורות שלכם.",
@@ -2526,6 +2526,16 @@ TRANSLATIONS = {
     "Full list picker is available in the next phase. Go to /lists to pick a fragment, "
     "then return here.":
         "בורר הרשימות המלא יהיה זמין בשלב הבא. עברו אל /lists כדי לבחור קטע, ואז חזרו לכאן.",
+    # D-17: choose-from-lists picker (Phase 120)
+    "Choose a List": "בחרו רשימה",
+    "Filter lists…": "סינון רשימות…",
+    "Back to lists": "חזרה לרשימות",
+    "Filter fragments…": "סינון קטעים…",
+    "No lists found.": "לא נמצאו רשימות.",
+    "No fragments in this list.": "אין קטעים ברשימה זו.",
+    "No matches.": "אין התאמות.",
+    # D-19: Open in Joins Lab button on /lists (Phase 120)
+    "Open in Joins Lab": "פתח במעבדת ההצטרפות",
     # Validation / status / error toasts
     "Enter at least one search line to run": "יש להזין לפחות שורת חיפוש אחת",
     "Enter a search query to run": "יש להזין שאילתת חיפוש",

@@ -93,7 +93,7 @@ from web.services import get_service
 from web.state import state
 from web.supabase_client import (
     add_list_item, create_fragment_join, delete_fragment_join,
-    get_list_item_counts, get_user_lists,
+    get_list_item_counts, get_list_items, get_user_lists,
 )
 from web.translations import is_rtl, tr
 
@@ -2520,31 +2520,265 @@ def create_joins_lab_page(
             load_btn.props(remove='loading disabled')
 
     def _on_lists_btn_click() -> None:
-        """D-06: anonymous users see a login-prompt dialog.
+        """D-06 / D-17: anonymous users see a login-prompt dialog; logged-in users
+        get a two-level drill-down picker (lists → fragments) that loads the chosen
+        fragment as the anchor.
 
         "My lists" routes ONLY to the per-user Supabase lists (login required).
         See the module-level NOTE for the full D-06 rationale.
+
+        D-17: the two-level picker replaces the old "Go to Lists" placeholder.
+        Level 1 = list selection (filterable); Level 2 = fragment selection within
+        the chosen list (filterable, back-button preserves Level-1 filter).
+        On fragment click: close dialog + call load_anchor(sys_id).
+
+        SEED-008 (D-20): off-loop fetches inside fire-and-forget are wrapped in
+        ``except RuntimeError: return`` so client-deleted teardowns are benign.
         """
-        from web.auth_state import GlobalAuthState  # local import to avoid cycles
-        if GlobalAuthState.is_logged_in():
-            # Logged-in path: open a list picker dialog.
-            # Full list picker UI is Phase 120 scope — for the spine, show a
-            # placeholder "coming soon" notice inside a dialog.
-            with ui.dialog() as picker_dialog, ui.card().classes('p-4 min-w-[320px]'):
-                ui.label(tr('Choose from my lists')).classes('text-lg font-semibold mb-2')
-                ui.label(
-                    tr('Full list picker is available in the next phase. '
-                       'Go to /lists to pick a fragment, then return here.')
-                ).classes('text-sm').style('color: var(--text-secondary);')
-                ui.button(tr('Go to Lists'), on_click=lambda: ui.navigate.to('/lists')).props('flat')
-                ui.button(tr('Close'), on_click=picker_dialog.close).props('flat')
-            picker_dialog.open()
-        else:
+        if not GlobalAuthState.is_logged_in():
             # Anonymous visitor — open the canonical in-page login overlay (D-18).
             # D-18: replaced the old custom dialog (which lost Lab state by routing
             # the user away) with create_login_dialog().open() — an in-page overlay.
-            from web.auth_state import create_login_dialog  # local import to avoid cycles
             create_login_dialog().open()
+            return
+
+        # Logged-in path — open the two-level drill-down picker (D-17).
+        async def _open_picker() -> None:
+            """Open the choose-from-lists picker dialog (D-17).
+
+            Level 1: user's lists with item counts.
+            Level 2: fragments in the chosen list.
+            Fragment click → load_anchor(sys_id) + close dialog.
+
+            SEED-008: whole body wrapped in ``except RuntimeError: return``.
+            """
+            try:
+                user = GlobalAuthState.get_user()
+                if not user:
+                    return
+                user_id = user['id']
+
+                # --- Fetch lists + counts off-loop simultaneously (M1 fix) ---
+                user_lists, counts = await asyncio.gather(
+                    run.io_bound(get_user_lists, user_id),
+                    run.io_bound(get_list_item_counts),
+                )
+                if counts is None:
+                    counts = {}
+
+                # --- Build dialog with reactive state ---
+                # level_state tracks which level is shown and the chosen list.
+                level_state: dict = {
+                    'level': 1,
+                    'list_id': None,
+                    'list_name': '',
+                    'list_filter': '',   # Level-1 filter text (preserved on Back)
+                    'frag_filter': '',   # Level-2 filter text
+                }
+
+                with ui.dialog().props('persistent') as picker_dialog:
+                    with ui.card().classes('p-4 gap-2').style(
+                        'min-width:360px; max-width:540px; '
+                        'max-height:calc(100vh - 128px); overflow-y:auto; '
+                        'background:var(--bg-card,#fff); color:var(--text-primary,#111);'
+                    ):
+                        # Dynamic heading label (updated on drill-down / back)
+                        heading_label = ui.label(tr('Choose a List')).classes(
+                            'text-base font-semibold'
+                        )
+
+                        # Filter input (shared; placeholder changes per level)
+                        filter_input = ui.input(
+                            placeholder=tr('Filter lists…'),
+                        ).classes('w-full')
+
+                        # Scrollable list container (Level 1 or Level 2)
+                        list_container = ui.column().classes('w-full gap-1')
+
+                        # Bottom row: back + cancel
+                        with ui.row().classes('gap-2 justify-end mt-2 w-full'):
+                            back_btn = ui.button(
+                                tr('Back'),
+                                icon='arrow_back',
+                                on_click=lambda: None,   # wired below
+                            ).props('flat').tooltip(tr('Back to lists'))
+                            back_btn.set_visibility(False)
+                            ui.button(tr('Cancel'), on_click=picker_dialog.close).props('flat')
+
+                    def _render_level1() -> None:
+                        """Render Level-1: list rows filtered by level_state['list_filter']."""
+                        filter_val = level_state['list_filter'].lower()
+                        list_container.clear()
+                        heading_label.set_text(tr('Choose a List'))
+                        filter_input.props(f'placeholder="{tr("Filter lists…")}"')
+                        back_btn.set_visibility(False)
+
+                        visible = [
+                            lst for lst in user_lists
+                            if filter_val in (lst.get('name') or '').lower()
+                        ] if filter_val else user_lists
+
+                        if not visible:
+                            with list_container:
+                                ui.label(tr('No lists found.')).classes('text-sm').style(
+                                    'color:var(--text-muted,#475569);'
+                                )
+                            return
+
+                        for lst in visible:
+                            list_id = lst.get('id')
+                            list_name = lst.get('name') or ''
+                            item_count = counts.get(list_id, 0) if list_id is not None else 0
+
+                            def _make_list_click(lid=list_id, lname=list_name):
+                                def _on_click() -> None:
+                                    level_state['list_id'] = lid
+                                    level_state['list_name'] = lname
+                                    level_state['frag_filter'] = ''
+                                    filter_input.value = ''
+                                    asyncio.ensure_future(_load_level2(lid, lname))
+                                return _on_click
+
+                            with list_container:
+                                with ui.row().classes(
+                                    'w-full items-center justify-between gap-2 cursor-pointer '
+                                    'px-4 py-2 rounded hover:bg-gray-100'
+                                ).style(
+                                    'border-bottom:1px solid var(--border-light,#e2e8f0);'
+                                ).on('click', _make_list_click()):
+                                    ui.label(list_name).classes('text-sm font-semibold flex-1')
+                                    with ui.row().classes('items-center gap-1'):
+                                        ui.label(f'({item_count})').classes('text-xs').style(
+                                            'color:var(--text-muted,#475569);'
+                                        )
+                                        ui.icon('chevron_right').classes('text-base').style(
+                                            'color:var(--text-muted,#475569);'
+                                        )
+
+                    async def _load_level2(list_id: int, list_name: str) -> None:
+                        """Fetch fragments for list_id off-loop, then render Level 2.
+
+                        SEED-008: wrapped in ``except RuntimeError: return``.
+                        """
+                        try:
+                            list_container.clear()
+                            with list_container:
+                                ui.spinner(size='sm').style('color:var(--primary-700,#047857);')
+
+                            items = await run.io_bound(get_list_items, list_id)
+
+                            level_state['level'] = 2
+                            heading_label.set_text(f'← {list_name}')
+                            filter_input.props(f'placeholder="{tr("Filter fragments…")}"')
+                            back_btn.set_visibility(True)
+                            level_state['frag_filter'] = ''
+
+                            _render_level2_items(items, list_name)
+                        except RuntimeError:
+                            return  # SEED-008: client/tab deleted mid-fetch
+
+                    def _render_level2_items(items: list, list_name: str) -> None:
+                        """Render Level-2 fragment rows (filtered by level_state['frag_filter'])."""
+                        filter_val = level_state['frag_filter'].lower()
+                        list_container.clear()
+
+                        if not items:
+                            with list_container:
+                                ui.label(tr('No fragments in this list.')).classes(
+                                    'text-sm'
+                                ).style('color:var(--text-muted,#475569);')
+                            return
+
+                        visible = [
+                            it for it in items
+                            if filter_val in (it.get('shelfmark') or '').lower()
+                               or filter_val in (it.get('title') or '').lower()
+                        ] if filter_val else items
+
+                        if not visible:
+                            with list_container:
+                                ui.label(tr('No matches.')).classes('text-sm').style(
+                                    'color:var(--text-muted,#475569);'
+                                )
+                            return
+
+                        for item in visible:
+                            sys_id = item.get('sys_id') or ''
+                            shelfmark = item.get('shelfmark') or sys_id
+                            title = item.get('title') or ''
+                            library = item.get('library_code') or ''
+
+                            def _make_frag_click(sid=sys_id):
+                                async def _on_frag_click() -> None:
+                                    try:
+                                        picker_dialog.close()
+                                        await load_anchor(sid)
+                                    except RuntimeError:
+                                        return  # SEED-008
+                                return _on_frag_click
+
+                            with list_container:
+                                with ui.row().classes(
+                                    'w-full items-center gap-2 cursor-pointer '
+                                    'px-4 py-2 rounded hover:bg-gray-100'
+                                ).style(
+                                    'border-bottom:1px solid var(--border-light,#e2e8f0); '
+                                    'min-height:44px;'
+                                ).on('click', lambda fn=_make_frag_click(): asyncio.ensure_future(fn())):
+                                    if library:
+                                        ui.badge(library).classes(
+                                            'text-xs'
+                                        ).props('color=primary outline')
+                                    with ui.column().classes('flex-1 gap-0'):
+                                        ui.label(shelfmark).classes('text-sm font-semibold')
+                                        if title:
+                                            ui.label(title).classes('text-xs').style(
+                                                'color:var(--text-muted,#475569); '
+                                                'direction:rtl; text-align:right;'
+                                            )
+
+                    # Wire Back button
+                    def _on_back() -> None:
+                        level_state['level'] = 1
+                        filter_input.value = level_state['list_filter']
+                        _render_level1()
+
+                    back_btn.on('click', _on_back)
+
+                    # Wire filter input
+                    def _on_filter_change(e) -> None:
+                        val = e.value if hasattr(e, 'value') else (e.args if isinstance(e.args, str) else '')
+                        if level_state['level'] == 1:
+                            level_state['list_filter'] = val
+                            _render_level1()
+                        else:
+                            level_state['frag_filter'] = val
+                            # Re-render level 2 with the current cached items
+                            # (trigger a fresh re-render from in-memory state)
+                            list_id = level_state.get('list_id')
+                            list_name_cur = level_state.get('list_name', '')
+                            if list_id is not None:
+                                asyncio.ensure_future(_reload_level2_filter(list_id, list_name_cur))
+
+                    async def _reload_level2_filter(list_id: int, list_name: str) -> None:
+                        """Re-render Level-2 with the current filter without re-fetching."""
+                        try:
+                            items = await run.io_bound(get_list_items, list_id)
+                            _render_level2_items(items, list_name)
+                        except RuntimeError:
+                            return  # SEED-008
+
+                    filter_input.on('update:model-value', _on_filter_change)
+
+                    # Initial render
+                    _render_level1()
+
+                picker_dialog.open()
+
+            except RuntimeError:
+                return  # SEED-008: client/tab deleted before dialog could open
+
+        asyncio.ensure_future(_open_picker())
 
     # Wire button handlers
     def _on_change_anchor() -> None:
