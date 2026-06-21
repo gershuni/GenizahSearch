@@ -588,6 +588,18 @@ class AnchorViewer:
                 .classes("anchor-transcription-panel w-full")
                 .mark("anchor-viewer-transcription-pane")
             )
+            # Compare context (image_max_height set): the panel lives INSIDE the
+            # pane's own scroll area, so drop its 65vh cap + own overflow scroll.
+            # Otherwise there are NESTED scroll regions — at normal zoom the
+            # image (40vh) + the 65vh panel overflow the pane and scrolling lands
+            # on the inner panel, so the bottom of the text is unreachable
+            # (round-5 UAT: "cannot see the bottom of the text even if I scroll").
+            # Letting it flow naturally hands all scrolling to the single outer
+            # pane scroll area.
+            if self._image_max_height:
+                self._transcription_container.style(
+                    "max-height:none; overflow:visible;"
+                )
             with self._transcription_container:
                 self._transcription_html = ui.html("", sanitize=False)
 

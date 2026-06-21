@@ -373,6 +373,32 @@ def test_compare_modal_card_is_viewport_bounded():
     )
 
 
+def test_compare_modal_nav_is_rtl_aware():
+    """Source assertion (round-5 UAT 'הבא/הקודם reversed in Hebrew'): the
+    Prev/Next nav bar must reverse for RTL using the app idiom (flex-row-reverse
+    if is_rtl()), since the app does NOT rely on browser flex auto-flip."""
+    import pathlib
+    source = pathlib.Path("web/components/compare_modal.py").read_text(encoding="utf-8")
+    assert "is_rtl" in source, "compare_modal must import/use is_rtl for nav ordering."
+    assert "flex-row-reverse" in source, (
+        "the verdict/nav bar must apply flex-row-reverse for RTL so הבא (Next) is "
+        "on the left and הקודם (Prev) on the right in Hebrew."
+    )
+
+
+def test_anchor_viewer_compare_transcription_flows_no_inner_scroll():
+    """Source assertion (round-5 UAT 'cannot see the bottom of the text'): in the
+    Compare context (image_max_height set), the transcription panel must drop its
+    own 65vh cap + overflow so the SINGLE outer pane scroll reaches the bottom
+    (no nested scroll trap)."""
+    import pathlib
+    source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+    assert "max-height:none; overflow:visible;" in source, (
+        "anchor_viewer must let the transcription flow (max-height:none; "
+        "overflow:visible) in Compare context so the outer pane scroll reaches the bottom."
+    )
+
+
 def test_compare_modal_source_no_inject_viewer_assets():
     """Source assertion: compare_modal.py must NOT call inject_viewer_assets.
 

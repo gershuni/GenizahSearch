@@ -4250,8 +4250,8 @@ TRANSLATIONS.update({
 # === Phase 120-03: PST-01/02/03 — restore indicator + Clear/Reset control ===
 TRANSLATIONS.update({
     # --- Restore indicator (joins_lab.py _bootstrap_anchor restore path) ---
-    "Restoring your search…":    "משחזר את החיפוששלך…",  # משחזר את החיפוש שלך…
-    "(from last session)":             "(מהסשנה הקודמת)",  # (מהשנה הקודמת) — close enough for "from last session"
+    "Restoring your search…":    "משחזר את החיפוש שלך…",
+    "(from last session)":             "(מהפעם הקודמת)",
     # --- Clear/Reset control (joins_lab.py summary bar) ---
     "Reset":                           "איפוס",
     "Clear all Joins Lab state: anchor, builder, triage, filters":

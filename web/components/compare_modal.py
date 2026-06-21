@@ -41,7 +41,7 @@ from nicegui import run, ui
 from shared.joins_lab import Candidate, TRIAGE_ICONS, badge_and_tooltip
 from web.components.anchor_viewer import AnchorViewer
 from web.components.candidate_grid import build_browse_url, is_size_mismatch
-from web.translations import tr
+from web.translations import is_rtl, tr
 
 logger = logging.getLogger(__name__)
 
@@ -782,8 +782,15 @@ def create_compare_modal(
                         _cand_viewer_container_ref.append(cand_viewer_container)
 
             # ── Verdict bar (sticky bottom) ───────────────────────────────────
+            # RTL: the app reverses flex rows manually for Hebrew (it does NOT rely
+            # on the browser auto-flipping flex order — see joins_lab.py:1169
+            # `flex-row-reverse if is_rtl()`).  Without this, ‹ Prev (DOM-first)
+            # landed on the LEFT and Next › on the RIGHT in Hebrew — the LTR order,
+            # which reads reversed to a Hebrew user (round-5 UAT). Reversing puts
+            # הבא (Next) on the left and הקודם (Prev) on the right.
+            _nav_dir_class = "flex-row-reverse" if is_rtl() else "flex-row"
             with ui.row().classes(
-                "w-full items-center justify-between px-4 py-2 flex-wrap gap-2"
+                f"w-full items-center justify-between px-4 py-2 flex-wrap gap-2 {_nav_dir_class}"
             ).style(
                 "background: var(--bg-tertiary); position:sticky; bottom:0; flex-shrink:0;"
             ):

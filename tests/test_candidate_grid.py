@@ -1098,6 +1098,18 @@ def test_issue7_8_card_accepts_new_callbacks():
         )
 
 
+def test_grid_pagination_is_rtl_aware():
+    """Round-5 UAT ('הבא/הקודם reversed in Grid too'): the pagination row must
+    reverse for RTL (flex-row-reverse if is_rtl()), matching the app idiom — it
+    does not rely on browser flex auto-flip — so Next (הבא) is on the left and
+    Prev (הקודם) on the right in Hebrew."""
+    import pathlib
+    src = pathlib.Path("web/components/candidate_grid.py").read_text(encoding="utf-8")
+    assert "flex-row-reverse" in src and "is_rtl()" in src, (
+        "the grid pagination row must apply flex-row-reverse when is_rtl()."
+    )
+
+
 def test_issue6_in_card_triage_handler_resets_background_on_clear():
     """Round-4 Issue 6: the in-card triage handler must EXPLICITLY reset the inactive
     buttons to background:transparent (not just omit a background) so the previously

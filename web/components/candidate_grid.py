@@ -42,7 +42,7 @@ from nicegui import ui
 from shared.joins_lab import TRIAGE_ICONS
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from web.services import is_oxford_manuscript, get_oxford_direct_image_url
-from web.translations import tr, get_language
+from web.translations import tr, get_language, is_rtl
 
 
 # ---------------------------------------------------------------------------
@@ -1357,7 +1357,13 @@ def create_candidate_grid(
                     if on_page_change is not None and _cp < _tp - 1:
                         on_page_change(_cp + 1)
 
-                with ui.row().classes("w-full items-center justify-center gap-2 mt-2"):
+                # RTL: reverse the row for Hebrew (app idiom — joins_lab.py:1169 —
+                # it does NOT rely on browser flex auto-flip), so ‹ Prev (הקודם) is
+                # on the RIGHT and Next › (הבא) on the LEFT (round-5 UAT).
+                _pg_dir = "flex-row-reverse" if is_rtl() else "flex-row"
+                with ui.row().classes(
+                    f"w-full items-center justify-center gap-2 mt-2 {_pg_dir}"
+                ):
                     ui.button(tr("‹ Prev"), on_click=_prev_click).props("flat dense").props(
                         "disable" if current_page == 0 else ""
                     )
