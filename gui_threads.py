@@ -692,10 +692,28 @@ class PGPSourceWorker(QThread):
     finished_signal = pyqtSignal(str, list, dict)  # sys_id, page_sources, pgp_doc_dict
     error_signal = pyqtSignal(str, str)  # sys_id, error_message
 
-    def __init__(self, sys_id: str, page_num: int = 1):
+    def __init__(self, sys_id: str, page_num: int = 1, folio_label: str = '',
+                 image_number: str = '', page_text: str = ''):
         super().__init__()
         self.sys_id = sys_id
         self.page_num = page_num
+        # Folio label ('1r','2v',…) of the image currently displayed, resolved
+        # by the caller on the MAIN thread (the NLI crossref singleton is not
+        # thread-safe on desktop, so it must NOT be queried from this QThread).
+        # '' -> all FGP rows kept.
+        self.folio_label = folio_label or ''
+        # FGP image number (fgp_image_number_id) of the displayed image — the
+        # EXACT per-image FGP key, preferred over the folio label (which is only
+        # coincidentally equal and breaks on bare-sequence / NULL / duplicate
+        # image_side values and multi-volume manuscripts). Also resolved on the
+        # MAIN thread and passed in. '' -> fall back to folio_label.
+        self.image_number = image_number or ''
+        # V0.8 (HTR) text of the displayed page, resolved on the MAIN thread and
+        # passed in. Used to align FGP editions to V0.8 by TEXTUAL SIMILARITY
+        # (same folio shares most words) — robust where folio/positional matching
+        # fails (multi-volume, uneven editions, page!=image count). '' -> folio
+        # matching only.
+        self.page_text = page_text or ''
 
     def run(self):
         try:
@@ -706,7 +724,8 @@ class PGPSourceWorker(QThread):
                 get_section_for_page
             )
             from shared.fgp_service import (
-                get_fgp_sources_for_fragment, get_fgp_section_for_page, source_provider
+                get_fgp_sources_for_fragment, source_provider,
+                _select_fgp_sources_for_page,
             )
 
             # Get all sources (editions + translations) for this fragment, then
@@ -715,18 +734,29 @@ class PGPSourceWorker(QThread):
             all_sources = get_all_sources_for_fragment(self.sys_id) or []
             all_sources = all_sources + (get_fgp_sources_for_fragment(self.sys_id) or [])
 
+            # Displayed image identity, resolved on the MAIN thread and passed in
+            # (the crossref singleton is not thread-safe on desktop). The FGP
+            # image NUMBER (fgp_image_number_id) is the exact per-image key; the
+            # folio label is the fallback. '' for both -> all FGP kept.
+            fgp_folio = self.folio_label
+            fgp_image_number = self.image_number
+
+            # FGP chosen collectively: editions aligned to the V0.8 page text by
+            # similarity (folio match = safe default; fgp_source_for_folio is used
+            # inside), translations by folio match. PGP loop below is unchanged.
+            fgp_all = [s for s in all_sources if source_provider(s) == 'fgp']
+            fgp_keep_ids = {
+                id(s) for s in _select_fgp_sources_for_page(
+                    fgp_all, fgp_folio, fgp_image_number, self.page_text)
+            }
+
             # Filter sources by page (recto/verso)
             current_page_info = 'recto' if self.page_num == 1 else 'verso'
             page_sources = []
             for source in all_sources:
-                # FGP: split via its dedicated splitter; include only if it has
-                # content for this page (never duplicated on both sides; FGP-02).
                 if source_provider(source) == 'fgp':
-                    fgp_text = get_fgp_section_for_page(source, self.page_num)
-                    if fgp_text:
-                        fgp_src = dict(source)
-                        fgp_src['content'] = fgp_text
-                        page_sources.append(fgp_src)
+                    if id(source) in fgp_keep_ids:
+                        page_sources.append(source)
                     continue
 
                 source_page = source.get('page_info')

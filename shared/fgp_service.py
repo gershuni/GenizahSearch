@@ -47,6 +47,7 @@ refreshed/renamed schema; Phase C should still smoke-test against the live DB.
 import json
 import logging
 import os
+import re
 import sqlite3
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
@@ -94,6 +95,16 @@ def _find_project_root() -> Optional[Path]:
     return None
 
 
+def _quote_ident(name: str) -> str:
+    """Quote a SQL identifier (table name), doubling embedded quotes.
+
+    The source table name is DISCOVERED from the sidecar DB, not user input, but
+    a malformed/hostile identifier could otherwise break or alter the SQL (Codex
+    MEDIUM). Defense-in-depth for the f-string-interpolated table name.
+    """
+    return '"' + str(name).replace('"', '""') + '"'
+
+
 def _fgp_enabled() -> bool:
     """Return whether the shared FGP flag is enabled.
 
@@ -103,12 +114,15 @@ def _fgp_enabled() -> bool:
     ``web/`` (the web app layers an optional ``WEB_FGP_ENABLED`` override on top
     via ``web/feature_flags.py``).
 
-    Default: OFF (opt-in). Nothing surfaces until the DB is in place and the flag
-    is explicitly enabled — safe for prod and keeps existing behavior unchanged.
+    Default: ON (2026-06-22, go-live). FGP transcriptions surface wherever the
+    gitignored sidecar DB is present; absent the DB this is a graceful no-op
+    (``get_fgp_sources_for_fragment`` returns ``[]`` via ``is_available()``), so
+    enabling by default is safe even before the DB is deployed. Kill-switch:
+    set ``FGP_TRANSCRIPTIONS_ENABLED=0`` (or ``false``/``no``/``off``).
     """
     value = os.environ.get("FGP_TRANSCRIPTIONS_ENABLED")
     if value is None:
-        return False
+        return True
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
@@ -135,10 +149,13 @@ def source_relation_kind(source: Dict[str, Any]) -> str:
     ``_populate_pgp_combo`` classifiers, centralized so both apps agree.
     """
     rel = source.get("doc_relation") or ""
-    if "Translation" in rel:
-        return "translation"
+    # Check Edition FIRST: a compound "Edition ; Translation" is an edition (this
+    # matches the desktop classifier; checking Translation first mis-routed
+    # compounds and drifted from desktop — Codex LOW).
     if "Edition" in rel:
         return "edition"
+    if "Translation" in rel:
+        return "translation"
     return "other"
 
 
@@ -260,10 +277,335 @@ def get_fgp_section_for_page(source: Dict[str, Any], page_num: int) -> Optional[
     return content if page_num == 1 else None
 
 
-def filter_sources_for_page(
-    sources: Optional[List[Dict[str, Any]]], page_num: int
+def _fgp_match_folio(source: Dict[str, Any]) -> str:
+    """The REAL folio identity of an FGP row for image alignment.
+
+    Returns a normalized folio label ('1r', '2v', …) when the row is one
+    image of a foliated manuscript, or ``''`` when it is a whole-document
+    transcription with no per-image folio. Prefers the raw ``image_side``
+    ('1r'/'1v'); else composes ``folio_num`` + recto/verso from ``page_info``.
+
+    DELIBERATELY does NOT fall back to ``c_number`` the way the *display*
+    label (``_fgp_folio_label``) does: a c_number is not a folio, so using it
+    as a match key would hide that row on every displayed image.
+    """
+    side = (source.get("image_side") or "").strip()
+    if side:
+        return side.lower()
+    fn = source.get("folio_num")
+    pi = (source.get("page_info") or "").lower()
+    if fn is not None and ("recto" in pi or "verso" in pi):
+        return f"{fn}{'r' if 'recto' in pi else 'v'}".lower()
+    return ""
+
+
+def _fgp_match_image_number(source: Dict[str, Any]) -> str:
+    """The FGP image number of a source row — the EXACT per-image join key.
+
+    Returns the FGP image number (``c_number`` with its leading ``C`` stripped,
+    e.g. ``'62553'``) or ``''`` when the row has no c_number (whole-document
+    rows). This equals ``nli_images.FGPImageNumberId`` (the gallery image's
+    ``fgp_image_number_id``) 100% of the time, so it is the robust per-image
+    alignment key — unlike the folio LABEL, which is independently derived and
+    only coincidentally agrees:
+
+      * a bare-sequence ``image_side`` (``'1'``,``'2'``…) never equals a gallery
+        ``'1r'`` label (Geneva → FGP hidden entirely);
+      * two volumes both parse to label ``'1r'`` (Manchester → both volumes'
+        text shown on one image);
+      * ``image_side`` can be NULL on a foliated row (NLI Heb 577 → row dropped).
+
+    Each physical image (including each volume's) has a UNIQUE FGPImageNumberId,
+    so this key is volume-aware and order-independent.
+    """
+    cn = source.get("fgp_c_number") or source.get("c_number")
+    if cn is None:
+        return ""
+    s = str(cn).strip()
+    if s[:1] in ("C", "c"):
+        s = s[1:]
+    return s.strip()
+
+
+def fgp_source_for_folio(
+    source: Dict[str, Any],
+    folio_label: Optional[str],
+    image_number: Optional[str] = None,
+) -> bool:
+    """Decide whether an FGP source belongs on the currently displayed image.
+
+    PREFERRED key — FGP image number: when the displayed image's
+    ``image_number`` (its ``fgp_image_number_id``) is known AND the source row
+    carries a ``c_number``, the row belongs on this image iff the two are equal.
+    This is the exact ``c_number ↔ FGPImageNumberId`` join (100% on real data),
+    which — unlike the folio label — is volume-aware and immune to bare-sequence
+    / NULL / duplicate ``image_side`` values (the Geneva / Manchester / NLI-Heb
+    bugs). A row with a c_number that does NOT equal the displayed image number
+    is correctly hidden.
+
+    FALLBACK key — folio label (legacy behavior, preserved): used when the
+    displayed image number is unknown, or the source has no c_number. The
+    mapping is by folio (1r↔1r, …); both labels derive from the same NLI
+    crossref ``ImageName`` so they usually agree.
+
+      * whole-doc row (no per-image folio AND no c_number): applies to the
+        whole manuscript → show on every page;
+      * displayed image/folio unknown (non-NLI manuscript, no ``folio_images``,
+        page out of range): keep the row rather than hide it.
+    """
+    # Preferred: exact per-image number match.
+    mk_num = _fgp_match_image_number(source)
+    disp_num = str(image_number).strip() if image_number not in (None, "") else ""
+    if mk_num and disp_num:
+        return mk_num == disp_num
+
+    # Fallback: folio-label match (legacy).
+    mk = _fgp_match_folio(source)
+    if not mk:
+        return True
+    fl = (folio_label or "").strip().lower()
+    if not fl:
+        return True
+    return mk == fl
+
+
+def folio_label_for_displayed_page(
+    folio_images: Optional[List[Dict[str, Any]]],
+    page_num: int,
+    total_pages: int = 0,
+) -> str:
+    """Folio label ('1r','2v',…) of the image shown at 1-based ``page_num``.
+
+    Robust to manuscripts digitized as MULTIPLE text editions (IEs): such a
+    manuscript exposes ``total_pages = k * len(folio_images)`` pages — the same
+    ``n`` folios repeating once per IE — so the displayed page index can exceed
+    ``n``. We map it back onto the folio sequence with ``(page_num-1) % n``.
+    Single-IE manuscripts (``total_pages == n``) are the ``k == 1`` case, so the
+    modulo is a no-op. (Without this, positional ``folio_images[page-1]`` ran off
+    the end on the 2nd IE and the FGP transcription defaulted to the wrong folio.)
+
+    Only trusts the modulo when ``total_pages`` is a clean multiple of ``n``
+    (the well-formed IE case); otherwise falls back to a best-effort in-range
+    positional lookup, and returns ``''`` when even that is out of range — in
+    which case callers keep all FGP rows rather than show the wrong one.
+    """
+    img = _image_at_displayed_page(folio_images, page_num, total_pages)
+    return (img.get("folio_label") or "").strip() if img else ""
+
+
+def _image_at_displayed_page(
+    folio_images: Optional[List[Dict[str, Any]]],
+    page_num: int,
+    total_pages: int = 0,
+) -> Optional[Dict[str, Any]]:
+    """Resolve the gallery image dict shown at 1-based ``page_num`` (or ``None``).
+
+    The single source of the page→image positional/modulo logic (so the folio
+    LABEL and the FGP image NUMBER resolvers can never drift). Multi-IE aware:
+    a manuscript with ``total_pages = k * len(folio_images)`` repeats the same
+    ``n`` folios once per text edition, so map the page index back with
+    ``(page_num-1) % n`` when ``total_pages`` is a clean multiple of ``n``.
+    """
+    imgs = folio_images or []
+    n = len(imgs)
+    if not n or not page_num or page_num < 1:
+        return None
+    # A page index past the known total is stale/bad — never fabricate an image
+    # from it via the modulo below (that would silently show the wrong image's
+    # transcription and hide the rest). Out of range -> caller keeps all FGP.
+    if total_pages and page_num > total_pages:
+        return None
+    if total_pages:
+        # Alignable ONLY when the page count is a clean multiple of the image
+        # count (k editions × n folios each). Otherwise the manuscript is
+        # structurally unalignable — uneven editions, fewer pages than images,
+        # or page-count not a multiple — and a positional guess would put FGP on
+        # the WRONG folio. Bail to keep-all (None): the chooser then shows every
+        # FGP transcription on every page rather than a confidently-wrong one.
+        # See docs/OPEN_ISSUES.md "FGP per-folio alignment". (Multi-volume MSS
+        # whose counts happen to match are NOT caught here and remain in that
+        # open issue — counts alone can't distinguish them from a clean 1:1 MS.)
+        if total_pages % n == 0:
+            return imgs[(page_num - 1) % n]
+        return None
+    # total unknown -> best-effort positional (legacy behavior).
+    if page_num <= n:
+        return imgs[page_num - 1]
+    return None
+
+
+def fgp_image_number_for_displayed_page(
+    folio_images: Optional[List[Dict[str, Any]]],
+    page_num: int,
+    total_pages: int = 0,
+) -> str:
+    """FGP image number (``fgp_image_number_id``) of the image at ``page_num``.
+
+    The EXACT per-image alignment key (see :func:`_fgp_match_image_number`).
+    Same positional/modulo resolution as :func:`folio_label_for_displayed_page`
+    (shared via :func:`_image_at_displayed_page`), but reads the gallery image's
+    ``fgp_image_number_id`` instead of its label. Returns ``''`` when the image
+    is unavailable or lacks the id — callers then fall back to the folio label.
+    """
+    img = _image_at_displayed_page(folio_images, page_num, total_pages)
+    if not img:
+        return ""
+    v = img.get("fgp_image_number_id")
+    return str(v).strip() if v not in (None, "") else ""
+
+
+def displayed_folio_label(sys_id: str, page_num: int, total_pages: int = 0) -> str:
+    """Folio label ('1r','2v',…) of the displayed image at 1-based ``page_num``.
+
+    Reads the LOCAL NLI crossref ``folio_images`` list (no network) and resolves
+    the folio via :func:`folio_label_for_displayed_page` (multi-IE aware when
+    ``total_pages`` is given). Returns ``''`` when unavailable — non-NLI
+    manuscript, page out of range, or the service is down — in which case callers
+    keep all FGP rows rather than hide them. Centralizes the ``(sys_id, page) ->
+    folio`` resolution so the web and desktop chooser paths cannot drift apart.
+    """
+    if not sys_id or not page_num:
+        return ""
+    try:
+        from shared.nli_crossref_service import get_nli_crossref_service
+        svc = get_nli_crossref_service(thread_safe=True)
+        if not svc or not svc.is_available():
+            return ""
+        imgs = svc.get_folio_images(sys_id) or []
+        return folio_label_for_displayed_page(imgs, page_num, total_pages)
+    except Exception:
+        return ""
+
+
+def displayed_fgp_image_number(sys_id: str, page_num: int, total_pages: int = 0) -> str:
+    """FGP image number (``fgp_image_number_id``) of the displayed image at ``page_num``.
+
+    The exact per-image alignment key, resolved from the LOCAL NLI crossref
+    ``folio_images`` (no network) via :func:`fgp_image_number_for_displayed_page`
+    (multi-IE aware when ``total_pages`` is given). Returns ``''`` when
+    unavailable — non-NLI manuscript, page out of range, missing id, or the
+    service is down — in which case callers fall back to the folio label and
+    ultimately keep all FGP rows rather than hide them. Mirrors
+    :func:`displayed_folio_label` so web and desktop cannot drift.
+    """
+    if not sys_id or not page_num:
+        return ""
+    try:
+        from shared.nli_crossref_service import get_nli_crossref_service
+        svc = get_nli_crossref_service(thread_safe=True)
+        if not svc or not svc.is_available():
+            return ""
+        imgs = svc.get_folio_images(sys_id) or []
+        return fgp_image_number_for_displayed_page(imgs, page_num, total_pages)
+    except Exception:
+        return ""
+
+
+# ── Textual-similarity alignment (FGP edition ↔ V0.8 page) ─────────
+# FGP editions and the V0.8 (HTR) text transcribe the SAME folio, so they share
+# most words; a different folio shares few. Picking the FGP edition whose text is
+# most similar to the displayed V0.8 page aligns FGP to V0.8 by CONTENT — immune
+# to the volume/edition/gap ORDERING issues that defeat positional/label/fl_id
+# matching (the structurally-unalignable manuscripts). Calibrated on real data:
+# same folio ≈ 0.4–0.6 word-overlap, different folio ≈ 0.1–0.2.
+_SIM_FLOOR = 0.18          # min overlap to call a match real (well below ~0.4 same-folio)
+_SIM_MIN_TOKENS = 6        # too-short pages give unreliable overlap -> don't override folio
+_NIKUD_RE = re.compile(r"[֑-ׇ]")        # Hebrew points/accents (combining)
+_HEBWORD_RE = re.compile(r"[א-ת]+")     # base Hebrew letters only
+
+
+def _heb_token_set(text: Optional[str]) -> Set[str]:
+    """Set of base-Hebrew-letter words in ``text`` (nikud/punctuation stripped).
+
+    A diacritic- and punctuation-insensitive content fingerprint so an FGP
+    edition (often pointed) and the V0.8 HTR compare on consonantal words.
+    """
+    if not text:
+        return set()
+    return set(_HEBWORD_RE.findall(_NIKUD_RE.sub("", text)))
+
+
+def _content_similarity(page_tokens: Set[str], content: Optional[str]) -> float:
+    """Word-overlap of a page's tokens vs an FGP source's content (0..1).
+
+    Overlap / min(|a|,|b|) — robust to one side being a longer transcription of
+    the same folio. 0.0 when either side has no Hebrew tokens.
+    """
+    ct = _heb_token_set(content)
+    if not page_tokens or not ct:
+        return 0.0
+    return len(page_tokens & ct) / min(len(page_tokens), len(ct))
+
+
+def _select_fgp_editions_by_similarity(
+    eds_all: List[Dict[str, Any]],
+    folio_eds: List[Dict[str, Any]],
+    page_text: Optional[str],
 ) -> List[Dict[str, Any]]:
-    """Filter a merged PGP+FGP source list to one folio page (1=recto, 2=verso).
+    """Choose the FGP edition(s) for a page, preferring V0.8 textual similarity.
+
+    SAFE-BY-DESIGN against regressing the manuscripts that already work:
+      * with no/short page text or <2 editions → return the folio match unchanged;
+      * if the folio filter already pinned a SINGLE edition that matches the page
+        well (sim ≥ floor) → TRUST it (no similarity override → zero regression);
+      * otherwise (folio gave many = keep-all/unalignable, or a single weak/wrong
+        pick — e.g. a multi-volume manuscript whose positional guess landed on the
+        wrong volume) → pick the SINGLE best-matching edition (argmax) when it
+        clears the floor, so each page shows one transcription (per user
+        direction). No runner-up margin: on a continuous work, adjacent folios
+        share vocabulary, so a margin would leave many pages showing every
+        transcription; argmax is the best available guess. Below the floor (no
+        real signal — e.g. blank/heavily-garbled V0.8) → keep the folio match,
+        else keep-all.
+    """
+    page_tokens = _heb_token_set(page_text)
+    if len(page_tokens) < _SIM_MIN_TOKENS or len(eds_all) < 2:
+        return folio_eds
+    if len(folio_eds) == 1 and _content_similarity(page_tokens, folio_eds[0].get("content")) >= _SIM_FLOOR:
+        return folio_eds
+    scored = sorted(
+        ((_content_similarity(page_tokens, s.get("content")), s) for s in eds_all),
+        key=lambda x: -x[0],
+    )
+    if scored[0][0] >= _SIM_FLOOR:
+        return [scored[0][1]]
+    return folio_eds or [s for _, s in scored]
+
+
+def _select_fgp_sources_for_page(
+    fgp_sources: List[Dict[str, Any]],
+    folio_label: Optional[str],
+    image_number: Optional[str],
+    page_text: Optional[str],
+) -> List[Dict[str, Any]]:
+    """The FGP sources to show on a page: editions aligned to V0.8 by similarity
+    (with the folio match as the safe default), translations kept by folio match.
+
+    Translations are a different language than the Hebrew V0.8, so they can't be
+    similarity-aligned — they stay on the folio/positional path (keep-all when
+    the manuscript is structurally unalignable). Output preserves input order.
+    """
+    if not fgp_sources:
+        return []
+    folio_kept = [s for s in fgp_sources if fgp_source_for_folio(s, folio_label, image_number)]
+    if not page_text:
+        return folio_kept
+    eds_all = [s for s in fgp_sources if source_relation_kind(s) == "edition"]
+    folio_eds = [s for s in folio_kept if source_relation_kind(s) == "edition"]
+    folio_trans = [s for s in folio_kept if source_relation_kind(s) != "edition"]
+    sel_eds = _select_fgp_editions_by_similarity(eds_all, folio_eds, page_text)
+    keep_ids = {id(s) for s in sel_eds} | {id(s) for s in folio_trans}
+    return [s for s in fgp_sources if id(s) in keep_ids]
+
+
+def filter_sources_for_page(
+    sources: Optional[List[Dict[str, Any]]],
+    page_num: int,
+    folio_label: Optional[str] = None,
+    image_number: Optional[str] = None,
+    page_text: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    """Filter a merged PGP+FGP source list to one displayed page.
 
     Centralizes the per-page filtering that was duplicated across the web
     enrichment path (``browse_enrichment``), the web Advanced-view path
@@ -276,10 +618,11 @@ def filter_sources_for_page(
         ``content`` to this page via ``get_section_for_page`` (mutated in place,
         as the original code did).
 
-    FGP sources are split with the FGP-specific splitter
-    (``get_fgp_section_for_page``) and kept ONLY when they have content for this
-    page — never duplicated on both recto and verso (FGP-02). FGP dicts are
-    copied so the page-narrowed ``content`` does not clobber a reused source dict.
+    FGP is one row per manuscript image, aligned to the displayed image by
+    folio (see ``fgp_source_for_folio``): a foliated row shows only on the
+    image whose folio it matches; a whole-doc row shows on every page. When
+    ``folio_label`` is omitted (caller could not resolve the displayed folio)
+    every FGP row is kept, so the chooser never silently hides a transcription.
 
     Returns a (possibly empty) list; callers may apply ``or None``.
     """
@@ -287,15 +630,22 @@ def filter_sources_for_page(
     # import this module, so there is no cycle.
     from shared.document_service import get_section_for_page
 
+    # FGP is chosen COLLECTIVELY (so similarity can pick the best edition for this
+    # page vs the V0.8 text); PGP is filtered individually (unchanged). When
+    # page_text is given, FGP editions align to V0.8 by textual similarity with
+    # the folio match as the safe default; without it, pure folio matching.
+    fgp_all = [s for s in (sources or []) if source_provider(s) == SOURCE_FGP]
+    fgp_keep_ids = {
+        id(s) for s in _select_fgp_sources_for_page(
+            fgp_all, folio_label, image_number, page_text)
+    }
+
     current_page_info = "recto" if page_num == 1 else "verso"
     page_sources: List[Dict[str, Any]] = []
     for source in sources or []:
         if source_provider(source) == SOURCE_FGP:
-            text = get_fgp_section_for_page(source, page_num)
-            if text:
-                narrowed = dict(source)
-                narrowed["content"] = text
-                page_sources.append(narrowed)
+            if id(source) in fgp_keep_ids:
+                page_sources.append(source)
             continue
         # PGP path — preserved verbatim from the original sites.
         source_page = source.get("page_info")
@@ -310,12 +660,108 @@ def filter_sources_for_page(
     return page_sources
 
 
+def _fgp_folio_label(d: Dict[str, Any]) -> str:
+    """Short folio/side label for the chooser (e.g. '1r', '2v', or 'recto').
+
+    Lets multi-folio manuscripts (one FGP row per image) render distinguishable
+    entries instead of N identical 'FGP Transcription' rows. Prefers the raw
+    ``image_side`` ('1r'/'1v'); else composes ``folio_num`` + recto/verso suffix
+    from ``page_info``; else the bare side word; else ''.
+    """
+    side = (d.get("image_side") or "").strip()
+    if side:
+        return side
+    page_info = (d.get("page_info") or "").lower()
+    sfx = "r" if "recto" in page_info else ("v" if "verso" in page_info else "")
+    folio = d.get("folio_num")
+    if folio is not None and str(folio).strip() not in ("", "None"):
+        return f"{folio}{sfx}"
+    if sfx:
+        return "recto" if sfx == "r" else "verso"
+    # No side/folio at all (Codex MEDIUM: 5,822 such rows render identically).
+    # Fall back to the FGP image id (c_number) so entries stay distinguishable.
+    cn = d.get("c_number") or d.get("fgp_c_number")
+    return str(cn) if cn else ""
+
+
+def _fgp_sort_key(s: Dict[str, Any]):
+    """Sort FGP chooser sources into FGP file order: 1r, 1v, 2r, 2v, … (FGP-B).
+
+    Editions before translations, then folio number ascending, then recto before
+    verso. Rows WITHOUT a folio number (single-leaf fragments / unsided rows) are
+    NOT reordered among themselves — they keep their insertion order via Python's
+    stable sort (so the PGP-parity behavior for plain fragments is unchanged).
+    """
+    is_trans = 1 if "Translation" in (s.get("doc_relation") or "") else 0
+    try:
+        fn = int(s.get("folio_num"))
+        has_folio = True
+    except (TypeError, ValueError):
+        fn, has_folio = 10**9, False
+    if has_folio:
+        side = (s.get("image_side") or "").lower()
+        pi = (s.get("page_info") or "").lower()
+        if side.endswith("r") or pi == "recto":
+            side_rank = 0
+        elif side.endswith("v") or pi == "verso":
+            side_rank = 1
+        else:
+            side_rank = 2
+    else:
+        side_rank = 0  # don't reorder unsided rows; rely on stable sort
+    return (is_trans, fn, side_rank)
+
+
+def dedupe_fgp_sources(sources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Collapse the row-per-image FGP data into chooser-ready sources (FGP-B).
+
+    Two corpus artifacts make the raw rows unusable in the chooser:
+
+    * **Whole-document rows** (no ``c_number``, ~46% of rows) hold the ENTIRE
+      manuscript's text and duplicate the per-page rows. Dropped for a given
+      ``doc_relation`` whenever c-numbered per-page rows of that relation exist;
+      kept only when they are the sole source (e.g. CUL direct-``Trans/`` layout).
+    * **Duplicate scans** (~3.2K groups): the same folio side photographed twice
+      yields two rows with the same ``c_number``/side. Deduped to one per
+      ``(c_number, doc_relation, language)``, keeping the longest content.
+
+    Order-preserving. A no-``c_number`` row that survives is kept verbatim
+    (each is a distinct whole-doc transcription).
+    """
+    # Key on (doc_relation, language): a c-numbered Hebrew translation must not
+    # suppress a whole-doc English translation, since both are 'Digital
+    # Translation' (Codex MEDIUM).
+    relations_with_cnum = {
+        (s.get("doc_relation"), s.get("language"))
+        for s in sources if s.get("fgp_c_number")
+    }
+    out: List[Dict[str, Any]] = []
+    seen: Dict[tuple, int] = {}
+    for s in sources:
+        cn = s.get("fgp_c_number")
+        if not cn:
+            if (s.get("doc_relation"), s.get("language")) in relations_with_cnum:
+                continue  # redundant whole-doc row; per-page rows cover it
+            out.append(s)
+            continue
+        key = (cn, s.get("doc_relation"), s.get("language"))
+        if key in seen:
+            idx = seen[key]
+            if len(s.get("content") or "") > len(out[idx].get("content") or ""):
+                out[idx] = s  # keep the longest of the duplicate scans
+            continue
+        seen[key] = len(out)
+        out.append(s)
+    return out
+
+
 def _row_to_fgp_source(row: sqlite3.Row) -> Dict[str, Any]:
     """Map a raw FGP DB row to a chooser-shaped source dict (FGP-01/02/03).
 
     Output keys mirror what ``version_selector`` / ``_populate_pgp_combo`` read
     from PGP sources (``doc_relation``, ``content``, ``source_scholar``,
-    ``language``, ``id``), plus the FGP discriminator + extras.
+    ``language``, ``id``), plus the FGP discriminator + extras (``source_credit``
+    = the FGP team credit, ``folio_label`` for multi-folio disambiguation).
     """
     d = dict(row)
 
@@ -347,6 +793,13 @@ def _row_to_fgp_source(row: sqlite3.Row) -> Dict[str, Any]:
         "page_info": d.get("page_info"),
         "source_scholar": d.get("source_scholar") or "FGP",
         "attribution": FGP_ATTRIBUTION,
+        # Per-source FGP credit (team leader, e.g. "יעקב זוסמן, ראש צוות FGP…").
+        # None on an old DB lacking the column (graceful — display falls back to
+        # the generic attribution).
+        "source_credit": d.get("source_credit"),
+        "folio_num": d.get("folio_num"),
+        "image_side": d.get("image_side"),
+        "folio_label": _fgp_folio_label(d),
         # Real column is ``c_number``; keep ``fgp_c_number`` as a defensive alias.
         "fgp_c_number": d.get("c_number") or d.get("fgp_c_number"),
         "sequence_order": d.get("sequence_order") or 0,
@@ -452,9 +905,17 @@ class FgpService:
             order_cols = [c for c in ("doc_relation", "folio_num", "id") if c in self._columns]
             order = f" ORDER BY {', '.join(order_cols)}" if order_cols else ""
             cursor = self._conn.execute(
-                f'SELECT * FROM "{self._table}" WHERE sys_id = ?{order}', (sys_id,)
+                f'SELECT * FROM {_quote_ident(self._table)} WHERE sys_id = ?{order}', (sys_id,)
             )
-            return [_row_to_fgp_source(row) for row in cursor.fetchall()]
+            # Collapse whole-doc + duplicate-scan rows into chooser-ready sources
+            # (FGP-B); raw rows are one-per-image with heavy redundancy.
+            sources = dedupe_fgp_sources(
+                [_row_to_fgp_source(row) for row in cursor.fetchall()]
+            )
+            # Present per-image transcriptions in FGP file order (1r, 1v, 2r, …)
+            # so multi-folio manuscripts read as a navigable sequence (FGP-B).
+            sources.sort(key=_fgp_sort_key)
+            return sources
         except Exception as e:
             logger.error("Error getting FGP sources for fragment %s: %s", sys_id, e)
             return []
@@ -486,7 +947,7 @@ class FgpService:
                 batch = sys_ids[i:i + batch_size]
                 placeholders = ",".join("?" * len(batch))
                 cursor = self._conn.execute(
-                    f'SELECT DISTINCT sys_id FROM "{self._table}" '
+                    f'SELECT DISTINCT sys_id FROM {_quote_ident(self._table)} '
                     f"WHERE sys_id IN ({placeholders})",
                     batch,
                 )
@@ -521,7 +982,7 @@ class FgpService:
         for table in ("fgp_meta", "meta"):
             try:
                 cursor = self._conn.execute(
-                    f"SELECT value FROM {table} WHERE key = 'version'"
+                    f"SELECT value FROM {_quote_ident(table)} WHERE key = 'version'"
                 )
                 row = cursor.fetchone()
                 if row:
@@ -549,7 +1010,7 @@ def _discover_source_table(conn) -> tuple:
 
     def cols(table: str) -> Set[str]:
         try:
-            return {row["name"] for row in conn.execute(f'PRAGMA table_info("{table}")')}
+            return {row["name"] for row in conn.execute(f'PRAGMA table_info({_quote_ident(table)})')}
         except Exception:
             return set()
 

@@ -29,7 +29,16 @@ from shared import fgp_service
 from shared.fgp_service import (
     FGP_ATTRIBUTION,
     FgpService,
+    _content_similarity,
+    _fgp_match_image_number,
+    _heb_token_set,
+    _select_fgp_editions_by_similarity,
+    _select_fgp_sources_for_page,
+    dedupe_fgp_sources,
+    fgp_image_number_for_displayed_page,
+    fgp_source_for_folio,
     filter_sources_for_page,
+    folio_label_for_displayed_page,
     get_fgp_section_for_page,
     group_transcription_sources,
     namespaced_source_id,
@@ -59,7 +68,9 @@ CREATE TABLE fgp_transcriptions (
     sections TEXT,
     sys_id TEXT,
     page_info TEXT,
-    folio_num INTEGER
+    folio_num INTEGER,
+    image_side TEXT,
+    source_credit TEXT
 )
 """
 
@@ -344,12 +355,14 @@ class TestFilterSourcesForPage:
         kept = filter_sources_for_page(sources, 1)
         assert kept[0]["content"] == "full translation"
 
-    def test_fgp_kept_only_on_its_side(self):
-        # FGP verso-only (no sections, page_info=verso)
+    def test_fgp_kept_full_on_every_page(self):
+        # Codex HIGH-1: FGP is per-image and NOT side-filtered — kept with full
+        # content on BOTH recto and verso (its numbering is independent of the
+        # displayed page model, so side-filtering wrongly hid rows).
         fgp = {"source": "fgp", "is_fgp": True, "doc_relation": "Digital Edition",
                "content": "verso text", "page_info": "verso", "sections": None}
         assert filter_sources_for_page([fgp], 2)[0]["content"] == "verso text"
-        assert filter_sources_for_page([fgp], 1) == []  # not duplicated on recto
+        assert filter_sources_for_page([fgp], 1)[0]["content"] == "verso text"
 
     def test_mixed_list_order_and_split(self):
         pgp = {"source": "pgp", "doc_relation": "Digital Edition",
@@ -359,14 +372,323 @@ class TestFilterSourcesForPage:
         out = filter_sources_for_page([pgp, fgp], 1)
         # both present on recto, original order
         assert [s["content"] for s in out] == ["p-recto", "f-unsided"]
-        # verso: pgp(recto) dropped, fgp(no page_info) defaults recto-only -> dropped
-        assert filter_sources_for_page([pgp, fgp], 2) == []
+        # verso: pgp(recto) dropped; fgp kept full (no side-filtering) — Codex HIGH-1
+        assert [s["content"] for s in filter_sources_for_page([pgp, fgp], 2)] == ["f-unsided"]
 
     def test_fgp_dict_not_mutated(self):
         fgp = {"source": "fgp", "is_fgp": True, "doc_relation": "Digital Edition",
                "content": "orig", "page_info": "recto", "sections": None}
         filter_sources_for_page([fgp], 1)
         assert fgp["content"] == "orig"  # copied, not clobbered
+
+
+# ── TestFgpFolioMapping — align FGP to the displayed image by folio ───
+#
+# FGP is one row per manuscript image. When the caller knows the displayed
+# image's folio label (resolved from the local NLI crossref folio_images, which
+# shares the same ImageName origin as the FGP folio — verified 56/56 on
+# Add.3207), the chooser shows only that image's transcription, matched by folio
+# label (robust to gaps — a manuscript starting at 1v aligns to the 1v image,
+# not image position 1).
+
+
+class TestFgpFolioMapping:
+    @staticmethod
+    def _fgp(side=None, folio_num=None, page_info=None, content="x", c=None):
+        return {
+            "source": "fgp", "is_fgp": True, "doc_relation": "Digital Edition",
+            "content": content, "image_side": side, "folio_num": folio_num,
+            "page_info": page_info, "fgp_c_number": c, "sections": None,
+        }
+
+    def test_matches_own_folio(self):
+        assert fgp_source_for_folio(self._fgp(side="1r"), "1r") is True
+        assert fgp_source_for_folio(self._fgp(side="1r"), "1v") is False
+        assert fgp_source_for_folio(self._fgp(side="2v"), "2v") is True
+
+    def test_match_is_case_insensitive(self):
+        assert fgp_source_for_folio(self._fgp(side="1R"), "1r") is True
+
+    def test_compose_from_folio_num_and_page_info_when_no_side(self):
+        assert fgp_source_for_folio(
+            self._fgp(folio_num=3, page_info="recto"), "3r") is True
+        assert fgp_source_for_folio(
+            self._fgp(folio_num=3, page_info="verso"), "3r") is False
+
+    def test_whole_doc_shows_on_every_folio(self):
+        # No image_side / folio_num -> whole-document transcription.
+        wd = self._fgp(content="whole")
+        assert fgp_source_for_folio(wd, "1r") is True
+        assert fgp_source_for_folio(wd, "9v") is True
+
+    def test_unknown_displayed_folio_keeps_row(self):
+        # Caller could not resolve the displayed folio (e.g. non-NLI MS) -> never hide.
+        assert fgp_source_for_folio(self._fgp(side="1r"), None) is True
+        assert fgp_source_for_folio(self._fgp(side="1r"), "") is True
+
+    def test_c_number_is_not_a_match_key(self):
+        # A row with only a c_number (no real folio) is whole-doc, NOT folio 'C123';
+        # it must never be hidden by failing to match a displayed folio.
+        row = self._fgp(c="C362967")
+        assert fgp_source_for_folio(row, "1r") is True
+        assert fgp_source_for_folio(row, "5v") is True
+
+    def test_filter_keeps_only_matching_folio(self):
+        srcs = [self._fgp(side="1r", content="r1"),
+                self._fgp(side="1v", content="v1"),
+                self._fgp(side="2r", content="r2")]
+        out = filter_sources_for_page(srcs, 1, "1v")
+        assert [s["content"] for s in out] == ["v1"]
+
+    def test_filter_whole_doc_plus_foliated(self):
+        srcs = [self._fgp(content="whole"),            # whole-doc -> every page
+                self._fgp(side="1r", content="r1"),
+                self._fgp(side="1v", content="v1")]
+        out = filter_sources_for_page(srcs, 1, "1r")
+        assert [s["content"] for s in out] == ["whole", "r1"]
+
+    def test_filter_no_folio_label_keeps_all_fgp(self):
+        # Backward-compatible 2-arg call: folio unknown -> keep every FGP row.
+        srcs = [self._fgp(side="1r", content="r1"),
+                self._fgp(side="2v", content="v2")]
+        out = filter_sources_for_page(srcs, 1)
+        assert {s["content"] for s in out} == {"r1", "v2"}
+
+    def test_pgp_unaffected_by_folio_label(self):
+        # folio_label only governs FGP; PGP side-filtering is unchanged.
+        pgp = {"source": "pgp", "doc_relation": "Digital Edition",
+               "content": "p", "page_info": "verso"}
+        assert filter_sources_for_page([pgp], 2, "9r")  # verso page keeps it
+        assert filter_sources_for_page([pgp], 1, "9r") == []  # recto drops it
+
+
+# ── TestFgpImageNumberMapping — exact c_number ↔ fgp_image_number_id key ─
+
+
+class TestFgpImageNumberMapping:
+    """The robust per-image FGP key. Verified against real data: the folio
+    LABEL is only coincidentally equal to FGP's image_side and breaks on
+    bare-sequence / NULL / duplicate values and multi-volume manuscripts, while
+    c_number == fgp_image_number_id is exact (100%) and volume-aware."""
+
+    @staticmethod
+    def _fgp(side=None, folio_num=None, page_info=None, content="x", c=None):
+        return {
+            "source": "fgp", "is_fgp": True, "doc_relation": "Digital Edition",
+            "content": content, "image_side": side, "folio_num": folio_num,
+            "page_info": page_info, "fgp_c_number": c, "sections": None,
+        }
+
+    # -- _fgp_match_image_number --
+    def test_strips_leading_c(self):
+        assert _fgp_match_image_number({"fgp_c_number": "C62553"}) == "62553"
+        assert _fgp_match_image_number({"fgp_c_number": "c62553"}) == "62553"
+        assert _fgp_match_image_number({"c_number": "C421559"}) == "421559"
+
+    def test_no_c_number_is_blank(self):
+        assert _fgp_match_image_number({"fgp_c_number": None}) == ""
+        assert _fgp_match_image_number({}) == ""
+
+    # -- fgp_image_number_for_displayed_page --
+    def test_resolver_reads_fgp_image_number_id(self):
+        imgs = [{"folio_label": "1r", "fgp_image_number_id": "62553"},
+                {"folio_label": "1v", "fgp_image_number_id": "62554"}]
+        assert fgp_image_number_for_displayed_page(imgs, 1, 2) == "62553"
+        assert fgp_image_number_for_displayed_page(imgs, 2, 2) == "62554"
+
+    def test_resolver_multi_ie_and_out_of_range(self):
+        imgs = [{"fgp_image_number_id": "10"}, {"fgp_image_number_id": "11"},
+                {"fgp_image_number_id": "12"}, {"fgp_image_number_id": "13"}]
+        assert fgp_image_number_for_displayed_page(imgs, 5, 8) == "10"  # 2nd IE -> img0
+        assert fgp_image_number_for_displayed_page(imgs, 9, 8) == ""    # past total
+        assert fgp_image_number_for_displayed_page(imgs, 1, 4) == "10"
+
+    def test_resolver_missing_id_is_blank(self):
+        assert fgp_image_number_for_displayed_page([{"folio_label": "1r"}], 1, 1) == ""
+
+    # -- fgp_source_for_folio with image_number (preferred key) --
+    def test_image_number_preferred_over_label(self):
+        # The displayed image's number matches this row's c_number -> show it,
+        # even though its (bare-sequence) image_side would NOT match the label.
+        row = self._fgp(side="1", c="C69878")           # Geneva: bare-sequence side
+        assert fgp_source_for_folio(row, "1r", "69878") is True
+        # A different displayed image number -> hidden, despite any label.
+        assert fgp_source_for_folio(row, "1r", "99999") is False
+
+    def test_multi_volume_separated_by_number(self):
+        # Manchester: two volumes both parse to label '1r'; distinct numbers.
+        vol_a = self._fgp(side="1r", c="C421559")
+        vol_b = self._fgp(side="1r", c="C421512")
+        assert fgp_source_for_folio(vol_a, "1r", "421559") is True
+        assert fgp_source_for_folio(vol_b, "1r", "421559") is False   # other volume
+        assert fgp_source_for_folio(vol_b, "1r", "421512") is True
+
+    def test_null_side_row_pinned_by_number_not_whole_doc(self):
+        # NLI Heb 577: a foliated row whose image_side is NULL. Under the label
+        # path it looks whole-doc (every page); the c_number pins it to its image.
+        row = self._fgp(side=None, c="C62555")
+        assert fgp_source_for_folio(row, "2r", "62555") is True
+        assert fgp_source_for_folio(row, "1r", "62553") is False  # NOT on other images
+
+    def test_falls_back_to_label_when_number_unknown(self):
+        row = self._fgp(side="1r", c="C62553")
+        # Displayed image number unknown ('' / None) -> use the folio label.
+        assert fgp_source_for_folio(row, "1r", "") is True
+        assert fgp_source_for_folio(row, "1v", None) is False
+
+    def test_no_c_number_uses_label_path(self):
+        # Row without c_number can't match by number -> label path (whole-doc here).
+        row = self._fgp(content="whole")
+        assert fgp_source_for_folio(row, "1r", "62553") is True
+
+    def test_filter_uses_image_number(self):
+        srcs = [self._fgp(side="1", c="C69878", content="A"),
+                self._fgp(side="2", c="C69879", content="B")]
+        # Geneva-style: bare-sequence sides, gallery label '1r' — number selects A.
+        out = filter_sources_for_page(srcs, 1, "1r", "69878")
+        assert [s["content"] for s in out] == ["A"]
+
+
+# ── TestFgpSimilarityAlignment — align FGP editions to V0.8 by text ─
+
+
+class TestFgpSimilarityAlignment:
+    """FGP editions align to the displayed V0.8 page by word-overlap (same folio
+    shares most words). Safe-by-design: a confident single folio match is never
+    overridden; similarity only chooses when the folio result is ambiguous
+    (keep-all / unalignable) or a single weak/wrong pick."""
+
+    # Three distinct "folios" with disjoint vocabularies + a shared page text
+    # that matches FOLIO B (so B is the correct alignment).
+    A = "אלף בית גימל דלת הא וו זין חית טית יוד"
+    B = "כף למד מם נון סמך עין פא צדי קוף ריש"
+    C = "שין תיו אבן גזר משנה תלמוד גמרא הלכה אגדה פירוש"
+    PAGE_B = "כף למד מם נון סמך עין פא צדי קוף ריש שונה"  # ≈ B + 1 word
+
+    @staticmethod
+    def _ed(content, c=None, side=None):
+        return {"source": "fgp", "is_fgp": True, "doc_relation": "Digital Edition",
+                "content": content, "fgp_c_number": c, "image_side": side,
+                "folio_num": None, "page_info": None, "sections": None}
+
+    def test_token_set_strips_nikud_and_punctuation(self):
+        assert _heb_token_set("בְּרֵאשִׁית, בָּרָא") == {"בראשית", "ברא"}
+        assert _heb_token_set("") == set()
+        assert _heb_token_set("hello 123") == set()
+
+    def test_similarity_high_for_same_folio_low_for_other(self):
+        pt = _heb_token_set(self.PAGE_B)
+        assert _content_similarity(pt, self.B) > 0.8     # same folio
+        assert _content_similarity(pt, self.A) < 0.2     # different folio
+        assert _content_similarity(set(), self.B) == 0.0
+
+    def test_confident_single_folio_match_not_overridden(self):
+        # Folio filter pinned ONE edition that matches the page well -> trust it
+        # (no similarity override -> zero regression), even though another
+        # edition exists. Here folio_eds is the CORRECT one.
+        eds = [self._ed(self.B), self._ed(self.A)]
+        out = _select_fgp_editions_by_similarity(eds, [eds[0]], self.PAGE_B)
+        assert out == [eds[0]]
+
+    def test_keep_all_narrowed_to_best_by_similarity(self):
+        # Unalignable -> folio filter kept ALL editions; similarity narrows to the
+        # one matching the page (the fix for the structural cases).
+        eds = [self._ed(self.A), self._ed(self.B), self._ed(self.C)]
+        out = _select_fgp_editions_by_similarity(eds, eds, self.PAGE_B)
+        assert out == [eds[1]]   # B
+
+    def test_single_wrong_pick_corrected(self):
+        # Folio filter pinned the WRONG single edition (A); its similarity to the
+        # page is low -> similarity corrects to B (the multi-volume failure mode).
+        eds = [self._ed(self.A), self._ed(self.B)]
+        out = _select_fgp_editions_by_similarity(eds, [eds[0]], self.PAGE_B)
+        assert out == [eds[1]]
+
+    def test_keep_all_picks_single_best_even_when_close(self):
+        # Unalignable (folio kept all). Per "one transcription per page", narrow
+        # to the SINGLE best match (argmax) rather than show all — even when a
+        # sibling is close (continuous-work folios share vocabulary).
+        eds = [self._ed(self.B + " מלה אחרת"), self._ed(self.B)]
+        out = _select_fgp_editions_by_similarity(eds, eds, self.PAGE_B)
+        assert len(out) == 1
+
+    def test_short_page_text_does_not_override(self):
+        eds = [self._ed(self.A), self._ed(self.B)]
+        out = _select_fgp_editions_by_similarity(eds, [eds[0]], "כף למד")  # < min tokens
+        assert out == [eds[0]]
+
+    def test_no_page_text_keeps_folio(self):
+        eds = [self._ed(self.A), self._ed(self.B)]
+        out = _select_fgp_sources_for_page(eds, folio_label="1r", image_number="", page_text="")
+        # No page text -> pure folio match; neither has a folio so both kept.
+        assert len(out) == 2
+
+    def test_filter_uses_similarity_when_page_text_given(self):
+        srcs = [self._ed(self.A, c="C1"), self._ed(self.B, c="C2"), self._ed(self.C, c="C3")]
+        # No folio/image -> folio filter keeps all 3; similarity narrows to B.
+        out = filter_sources_for_page(srcs, 1, folio_label="", image_number="",
+                                      page_text=self.PAGE_B)
+        assert [s["fgp_c_number"] for s in out] == ["C2"]
+
+
+# ── TestFolioForDisplayedPage — multi-edition (IE) page→folio resolver ─
+
+
+class TestFolioForDisplayedPage:
+    IMGS = [{"folio_label": "1r"}, {"folio_label": "1v"},
+            {"folio_label": "2r"}, {"folio_label": "2v"}]
+
+    def test_single_ie_positional(self):
+        f = folio_label_for_displayed_page
+        assert f(self.IMGS, 1, 4) == "1r"
+        assert f(self.IMGS, 3, 4) == "2r"
+        assert f(self.IMGS, 4, 4) == "2v"
+
+    def test_multi_ie_modulo_maps_back_onto_folios(self):
+        # Two text editions -> 8 pages, same 4 folios repeating. Page 5 is the
+        # 2nd edition's 1r; page 7 is its 2r (this is the Add.3207 failure mode).
+        f = folio_label_for_displayed_page
+        assert f(self.IMGS, 5, 8) == "1r"
+        assert f(self.IMGS, 7, 8) == "2r"
+        assert f(self.IMGS, 8, 8) == "2v"
+        # First edition still correct.
+        assert f(self.IMGS, 3, 8) == "2r"
+
+    def test_three_editions(self):
+        assert folio_label_for_displayed_page(self.IMGS, 11, 12) == "2r"  # (10 % 4)=2
+
+    def test_page_past_total_is_blank_not_modulo(self):
+        # Codex MEDIUM: a page index beyond total_pages is stale/bad — must NOT
+        # be folded back onto a folio via the modulo (would show a wrong image).
+        f = folio_label_for_displayed_page
+        assert f(self.IMGS, 9, 8) == ""    # 9 > total 8 even though 8 % 4 == 0
+        assert f(self.IMGS, 13, 12) == ""  # 13 > total 12
+        assert f(self.IMGS, 8, 8) == "2v"  # boundary still valid
+
+    def test_unknown_total_falls_back_to_positional(self):
+        f = folio_label_for_displayed_page
+        assert f(self.IMGS, 3, 0) == "2r"      # in range
+        assert f(self.IMGS, 5, 0) == ""        # out of range, no total -> blank
+
+    def test_irregular_total_keeps_all_failsafe(self):
+        # total not a clean multiple of the image count -> structurally
+        # unalignable (uneven editions / fewer pages than images). FAIL-SAFE:
+        # return '' for every page so the caller keeps ALL FGP (chooser shows
+        # every transcription) rather than confidently placing the WRONG folio.
+        # See docs/OPEN_ISSUES.md "FGP per-folio alignment".
+        f = folio_label_for_displayed_page
+        assert f(self.IMGS, 2, 5) == ""        # 5 % 4 != 0 -> keep all
+        assert f(self.IMGS, 1, 7) == ""        # 7 % 4 != 0 -> keep all
+        assert f(self.IMGS, 5, 5) == ""        # out of range
+        # Clean multiples still resolve (unchanged).
+        assert f(self.IMGS, 2, 4) == "1v"      # single edition
+        assert f(self.IMGS, 6, 8) == "1v"      # two editions (6th page -> 2nd ed 1v)
+
+    def test_empty_or_bad_input(self):
+        f = folio_label_for_displayed_page
+        assert f([], 1, 4) == ""
+        assert f(self.IMGS, 0, 4) == ""
+        assert f(None, 1, 4) == ""
 
 
 # ── TestFeatureFlag (FGP-04) ──────────────────────────────────────
@@ -378,9 +700,11 @@ class TestFeatureFlag:
         assert fgp_svc.get_fgp_sources_for_fragment("003072766") == []
         assert fgp_svc.get_sys_ids_with_fgp_sources(["003072766"]) == set()
 
-    def test_flag_unset_defaults_off(self, fgp_svc, monkeypatch):
+    def test_flag_unset_defaults_on(self, fgp_svc, monkeypatch):
+        # Default is ON (2026-06-22 go-live): with the env unset, FGP surfaces
+        # wherever the sidecar DB is present. Kill-switch is FGP_TRANSCRIPTIONS_ENABLED=0.
         monkeypatch.delenv("FGP_TRANSCRIPTIONS_ENABLED", raising=False)
-        assert fgp_svc.get_fgp_sources_for_fragment("003072766") == []
+        assert len(fgp_svc.get_fgp_sources_for_fragment("003072766")) == 2
 
     def test_flag_truthy_variants(self, fgp_svc, monkeypatch):
         for val in ("1", "true", "TRUE", "yes", "on"):
@@ -418,3 +742,141 @@ class TestBatchLookup:
 
     def test_empty_input(self, fgp_svc):
         assert fgp_svc.get_sys_ids_with_fgp_sources([]) == set()
+
+
+# ── TestDedupeWholeDocAndCredit (FGP-A/B) ─────────────────────────
+
+
+def _insert_dedupe_data(db_path: str):
+    """Rows exercising whole-doc + duplicate-scan + credit + image_side (FGP-B)."""
+    conn = sqlite3.connect(db_path)
+    cols = ("id, collection, shelfmark, c_number, source_scholar, doc_relation, "
+            "language, content, sys_id, page_info, folio_num, image_side, source_credit")
+    q = (f"INSERT INTO fgp_transcriptions ({cols}) "
+         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    sid = "990000000000000001"
+    credit = "יעקב זוסמן, ראש צוות FGP לספרות תלמודית"
+    # Whole-document row (no c_number) — should be dropped (page rows exist).
+    conn.execute(q, (1, "BL", "OR 1", None, "FGP", "Digital Edition", None,
+                     "WHOLE DOC recto+verso", sid, None, None, None, credit))
+    # Recto, scan A (shorter) + scan B (longer) — same c_number -> dedup, keep longest.
+    conn.execute(q, (2, "BL", "OR 1", "C100", "FGP", "Digital Edition", None,
+                     "recto short", sid, "recto", 1, "1r", credit))
+    conn.execute(q, (3, "BL", "OR 1", "C100", "FGP", "Digital Edition", None,
+                     "recto LONGER content here", sid, "recto", 1, "1r", credit))
+    # Verso, single row.
+    conn.execute(q, (4, "BL", "OR 1", "C101", "FGP", "Digital Edition", None,
+                     "verso content", sid, "verso", 1, "1v", credit))
+    # A second sys_id with ONLY a whole-doc row -> kept (sole source).
+    conn.execute(q, (5, "CUL", "Add.1", None, "FGP", "Digital Edition", None,
+                     "cul whole doc only", "990000000000000002", None, None, None, None))
+    # A multi-folio sys_id inserted OUT of folio order -> chooser must sort to
+    # FGP file order 1r, 1v, 2r, 2v (FGP-B per-image navigation).
+    sid3 = "990000000000000003"
+    conn.execute(q, (10, "BL", "OR 9", "C200", "FGP", "Digital Edition", None,
+                     "f2 verso", sid3, "verso", 2, "2v", None))
+    conn.execute(q, (11, "BL", "OR 9", "C201", "FGP", "Digital Edition", None,
+                     "f1 recto", sid3, "recto", 1, "1r", None))
+    conn.execute(q, (12, "BL", "OR 9", "C202", "FGP", "Digital Edition", None,
+                     "f2 recto", sid3, "recto", 2, "2r", None))
+    conn.execute(q, (13, "BL", "OR 9", "C203", "FGP", "Digital Edition", None,
+                     "f1 verso", sid3, "verso", 1, "1v", None))
+    conn.commit()
+    conn.close()
+
+
+@pytest.fixture
+def dedupe_svc(tmp_path):
+    db_path = _create_fgp_db(str(tmp_path))
+    _insert_dedupe_data(db_path)
+    svc = FgpService(db_path=db_path)
+    yield svc
+    svc.close()
+
+
+class TestDedupeWholeDocAndCredit:
+    def test_whole_doc_row_dropped_when_page_rows_exist(self, dedupe_svc):
+        srcs = dedupe_svc.get_fgp_sources_for_fragment("990000000000000001")
+        # whole-doc id=1 dropped; C100 deduped to one; C101 kept -> 2 sources.
+        assert len(srcs) == 2
+        assert all(s["fgp_c_number"] for s in srcs)
+        assert "WHOLE DOC recto+verso" not in [s["content"] for s in srcs]
+
+    def test_duplicate_scan_keeps_longest(self, dedupe_svc):
+        srcs = dedupe_svc.get_fgp_sources_for_fragment("990000000000000001")
+        c100 = [s for s in srcs if s["fgp_c_number"] == "C100"]
+        assert len(c100) == 1
+        assert c100[0]["content"] == "recto LONGER content here"
+
+    def test_whole_doc_only_sys_id_is_kept(self, dedupe_svc):
+        srcs = dedupe_svc.get_fgp_sources_for_fragment("990000000000000002")
+        assert len(srcs) == 1
+        assert srcs[0]["content"] == "cul whole doc only"
+
+    def test_folio_label_from_image_side(self, dedupe_svc):
+        srcs = dedupe_svc.get_fgp_sources_for_fragment("990000000000000001")
+        labels = {s["folio_label"] for s in srcs}
+        assert labels == {"1r", "1v"}
+
+    def test_source_credit_exposed(self, dedupe_svc):
+        srcs = dedupe_svc.get_fgp_sources_for_fragment("990000000000000001")
+        assert all(s["source_credit"] == "יעקב זוסמן, ראש צוות FGP לספרות תלמודית"
+                   for s in srcs)
+
+    def test_multi_folio_sorted_to_fgp_file_order(self, dedupe_svc):
+        # Rows inserted as 2v,1r,2r,1v must surface as 1r,1v,2r,2v (FGP-B).
+        srcs = dedupe_svc.get_fgp_sources_for_fragment("990000000000000003")
+        assert [s["folio_label"] for s in srcs] == ["1r", "1v", "2r", "2v"]
+
+    def test_relation_kind_compound_is_edition(self):
+        # Codex LOW-1: compound "Edition ; Translation" -> edition (desktop parity)
+        assert source_relation_kind(
+            {"doc_relation": "Digital Edition ; Digital Translation"}) == "edition"
+        assert source_relation_kind({"doc_relation": "Digital Translation"}) == "translation"
+
+    def test_folio_label_falls_back_to_cnumber(self):
+        # Codex MEDIUM-1: no side/folio -> use the FGP c_number, not "" (identical labels)
+        from shared.fgp_service import _fgp_folio_label
+        assert _fgp_folio_label({"c_number": "C520386"}) == "C520386"
+        assert _fgp_folio_label({"image_side": "1r", "c_number": "C1"}) == "1r"
+
+    def test_whole_doc_translation_kept_across_language(self):
+        # Codex MEDIUM-3: a c-numbered Hebrew translation must NOT drop a whole-doc
+        # English translation (both are 'Digital Translation').
+        srcs = [
+            {"fgp_c_number": "C1", "doc_relation": "Digital Translation",
+             "language": "Hebrew", "content": "he"},
+            {"fgp_c_number": None, "doc_relation": "Digital Translation",
+             "language": "English", "content": "en whole"},
+        ]
+        out = dedupe_fgp_sources(srcs)
+        assert {s["language"] for s in out} == {"Hebrew", "English"}
+
+    def test_filter_keeps_all_fgp_rows_full(self):
+        # Codex HIGH-1: FGP is per-image; NOT side-filtered. Both rows survive on
+        # page 2 (verso) with full content (no recto/verso narrowing).
+        fgp = [
+            {"source": "fgp", "is_fgp": True, "doc_relation": "Digital Edition",
+             "page_info": "recto", "content": "R", "fgp_c_number": "C1"},
+            {"source": "fgp", "is_fgp": True, "doc_relation": "Digital Edition",
+             "page_info": "verso", "content": "V", "fgp_c_number": "C2"},
+        ]
+        out = filter_sources_for_page(list(fgp), 2)
+        assert {s["content"] for s in out} == {"R", "V"}
+
+    def test_parse_datasource_order_independent_and_multi(self):
+        # Codex LOW-2: parse eng/heb in either order; aggregate multi-source.
+        from scripts.fgp_rebuild_text_and_credit import _parse_datasource
+        assert _parse_datasource("{heb: שלום, eng: hello}") == "שלום"
+        assert _parse_datasource("{eng: hello, heb: שלום}") == "שלום"
+        assert _parse_datasource("{eng: A, heb: A}, {eng: B, heb: B}") == "A; B"
+
+    def test_dedupe_pure_function_preserves_order(self):
+        rows = [
+            {"fgp_c_number": "C2", "doc_relation": "Digital Edition", "content": "b"},
+            {"fgp_c_number": "C1", "doc_relation": "Digital Edition", "content": "a"},
+            {"fgp_c_number": "C1", "doc_relation": "Digital Edition", "content": "aaa"},
+        ]
+        out = dedupe_fgp_sources(rows)
+        assert [s["fgp_c_number"] for s in out] == ["C2", "C1"]
+        assert out[1]["content"] == "aaa"  # longest kept

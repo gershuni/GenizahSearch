@@ -4758,7 +4758,12 @@ class GenizahGUI(QMainWindow):
         else:
             cache_key = f"{source}_{version_id}" if version_id else source
 
-        if cache_key in self._browse_versions_cache:
+        # "original" (V0.8) is per-PAGE, not per-document: it must always render
+        # the live current-page text (self.browse_original_page_text, refreshed by
+        # browse_render_page on every page), never the document-level cache entry
+        # seeded once at load. That cache held page 1, so after switching away from
+        # an FGP/PGP version and back to V0.8 the view jumped to page 1's text.
+        if source != "original" and cache_key in self._browse_versions_cache:
             content = self._browse_versions_cache[cache_key]
             if source in ('pgp_translation', 'fgp_translation'):
                 language = version_data.get('language', '')
@@ -4843,6 +4848,57 @@ class GenizahGUI(QMainWindow):
         apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
 
     # ── PGP Version Selector Helpers (shared by Browse tab and ResultDialog) ──
+
+    def _displayed_folio_label_for_pgp(self) -> str:
+        """Folio label ('1r','2v',…) of the image at the current browse page.
+
+        Read from the already-loaded ``_browse_folio_images`` (set on the main
+        thread from the manuscript meta) — NOT via the NLI crossref service,
+        which is not thread-safe on desktop and must never be queried from the
+        PGPSourceWorker QThread. Passed into PGPSourceWorker so FGP transcriptions
+        are aligned to the displayed image by folio.
+
+        Uses the page combo's 0-based ``currentIndex`` (the absolute displayed
+        page, across all text editions) and its ``count`` (the true total), so
+        the shared resolver can map a multi-edition manuscript's page index back
+        onto the folio sequence. ``current_browse_p`` alone is ambiguous (per-IE
+        vs absolute) on multi-edition manuscripts, which mis-aligned FGP there.
+        Returns '' when unavailable -> the worker keeps all FGP rows.
+        """
+        from shared.fgp_service import folio_label_for_displayed_page
+        imgs, page_1b, total = self._displayed_page_for_pgp()
+        return folio_label_for_displayed_page(imgs, page_1b, total)
+
+    def _displayed_page_for_pgp(self):
+        """(_browse_folio_images, 1-based displayed page, total pages).
+
+        Shared by the folio-label and FGP-image-number resolvers so they agree
+        on which page/image is displayed. Uses the page combo's 0-based
+        ``currentIndex`` (absolute across all text editions) + its ``count``.
+        """
+        imgs = getattr(self, '_browse_folio_images', None) or []
+        try:
+            idx0 = self.combo_browse_page.currentIndex()
+            total = self.combo_browse_page.count()
+        except Exception:
+            idx0, total = -1, 0
+        if idx0 < 0:
+            idx0 = (self.current_browse_p or 1) - 1
+        return imgs, idx0 + 1, total
+
+    def _displayed_fgp_image_number_for_pgp(self) -> str:
+        """FGP image number (fgp_image_number_id) of the image at the current page.
+
+        The EXACT per-image FGP alignment key (c_number ↔ fgp_image_number_id),
+        preferred over the folio label — which is only coincidentally equal and
+        breaks on bare-sequence / NULL / duplicate ``image_side`` values and on
+        multi-volume manuscripts (Geneva / Manchester / NLI-Heb bugs). Resolved
+        on the MAIN thread (crossref singleton is not thread-safe on desktop) and
+        passed into PGPSourceWorker. '' -> the worker falls back to the folio label.
+        """
+        from shared.fgp_service import fgp_image_number_for_displayed_page
+        imgs, page_1b, total = self._displayed_page_for_pgp()
+        return fgp_image_number_for_displayed_page(imgs, page_1b, total)
 
     def _populate_pgp_combo(self, combo, sources, pgp_doc):
         """Build combo items with PGP editions and translations grouped.
@@ -4930,7 +4986,13 @@ class GenizahGUI(QMainWindow):
         if fgp_sources:
             combo.addItem("─────────────", {"source": "header"})
             combo.model().item(combo.count() - 1).setEnabled(False)
-            combo.addItem("-- FGP --", {"source": "header"})
+            # Show the transcription credit in the FGP group header when the
+            # manuscript has a single shared credit (the common case); the
+            # per-item tooltip still carries each row's credit when they differ.
+            _fgp_credits = {s.get('source_credit') for s in fgp_sources if s.get('source_credit')}
+            _fgp_hdr = (f"-- FGP · {next(iter(_fgp_credits))} --"
+                        if len(_fgp_credits) == 1 else "-- FGP --")
+            combo.addItem(_fgp_hdr, {"source": "header"})
             combo.model().item(combo.count() - 1).setEnabled(False)
 
             for fsrc in fgp_sources:
@@ -4941,15 +5003,23 @@ class GenizahGUI(QMainWindow):
                     label = f"  FGP {lang_part}{tr('Translation')}"
                 else:
                     label = f"  {tr('FGP Transcription')}"
+                # No folio suffix: the combo is filtered to the displayed image's
+                # folio, so the folio only routes placement (it's not shown).
                 combo.addItem(label, {
                     "source": "fgp_translation" if is_trans else "fgp_edition",
                     "content": fsrc.get('content', ''),
                     "scholar": fsrc.get('source_scholar', 'FGP'),
                     "language": language,
                     "attribution": fsrc.get('attribution'),
+                    "source_credit": fsrc.get('source_credit'),
                     "source_id": fsrc.get('id'),
                     "uid": fsrc.get('uid'),
                 })
+                # Surface the FGP team credit on hover (the label stays compact).
+                _credit = fsrc.get('source_credit') or fsrc.get('attribution')
+                if _credit:
+                    combo.setItemData(combo.count() - 1, _credit,
+                                      Qt.ItemDataRole.ToolTipRole)
 
         # === Visual divider before HTR ===
         combo.addItem("─────────────", {"source": "header"})
@@ -8953,7 +9023,20 @@ class GenizahGUI(QMainWindow):
         # Update joins dropdown menu (PGP joins will be added when PGP worker completes)
         self._update_joins_dropdown()
 
-        # Start PGP source fetch (runs in background, populates combo when done)
+        # 4. Trigger Page Load FIRST so the page combo + current page are
+        #    repopulated for THIS manuscript, THEN start the PGP/FGP worker.
+        #    The worker reads the displayed folio from the page combo to align
+        #    FGP to the shown image, so it MUST run after the combo is rebuilt —
+        #    otherwise it reads the previous manuscript's (or an empty) combo and
+        #    resolves the wrong folio (Codex HIGH). On arrow-nav the page was
+        #    already rendered (combo current), so we skip the reload but still
+        #    start the worker below.
+        if getattr(self, '_browse_nav_rendered', False):
+            self._browse_nav_rendered = False
+        else:
+            self.browse_load_page()
+
+        # Start PGP source fetch (runs in background, populates version combo when done)
         # Disconnect old worker signals first to prevent stale results
         if self._browse_pgp_worker is not None:
             try:
@@ -8961,16 +9044,14 @@ class GenizahGUI(QMainWindow):
                 self._browse_pgp_worker.error_signal.disconnect(self._on_browse_pgp_error)
             except (TypeError, RuntimeError):
                 pass
-        self._browse_pgp_worker = PGPSourceWorker(self.current_browse_sid, self.current_browse_p or 1)
+        self._browse_pgp_worker = PGPSourceWorker(
+            self.current_browse_sid, self.current_browse_p or 1,
+            folio_label=self._displayed_folio_label_for_pgp(),
+            image_number=self._displayed_fgp_image_number_for_pgp(),
+            page_text=getattr(self, 'browse_original_page_text', '') or '')
         self._browse_pgp_worker.finished_signal.connect(self._on_browse_pgp_loaded)
         self._browse_pgp_worker.error_signal.connect(self._on_browse_pgp_error)
         self._browse_pgp_worker.start()
-
-        # 4. Trigger Page Load to show text (skip if already rendered by arrow navigation)
-        if getattr(self, '_browse_nav_rendered', False):
-            self._browse_nav_rendered = False
-        else:
-            self.browse_load_page()
 
     def _on_browse_pgp_loaded(self, sys_id, sources, pgp_doc):
         """Handle PGP sources loaded from background thread."""
@@ -9034,10 +9115,11 @@ class GenizahGUI(QMainWindow):
                     self.browse_version_combo.addItem(label, data)
                 self.browse_version_combo.blockSignals(False)
 
-            # Store original V0.8 text from browse_render_page output
-            current_text = self.browse_text.toPlainText()
-            if current_text:
-                self.browse_original_page_text = current_text
+            # NOTE: browse_original_page_text is now captured synchronously in
+            # browse_render_page (the current page's V0.8). Do NOT re-capture from
+            # browse_text here — by the time this async worker callback runs the
+            # user may have switched to an FGP/PGP version, so toPlainText() could
+            # clobber the V0.8 baseline with the wrong text.
 
             # Auto-select first PGP edition and display it
             edition_data = self._auto_select_pgp_edition(self.browse_version_combo)
@@ -10014,11 +10096,14 @@ class GenizahGUI(QMainWindow):
         apply_find_highlight(self.browse_text, self.browse_find_input.text().strip())
 
     def _browse_refresh_pgp_for_page(self):
-        """Re-fetch PGP sources for current page (called on page change within same manuscript)."""
+        """Re-fetch PGP/FGP sources for current page (called on page change within same manuscript)."""
         if not hasattr(self, '_browse_pgp_doc'):
-            return  # PGP worker never ran for this manuscript
-        if not self._browse_pgp_doc:
-            return  # No PGP document linked to this fragment
+            return  # source worker never ran for this manuscript
+        # NOTE: do NOT bail on an empty _browse_pgp_doc — an FGP-only manuscript
+        # (no PGP document) still has FGP sources that must be re-aligned to the
+        # new page's folio. Gating on PGP presence left FGP frozen on the prior
+        # page's folio across navigation (Codex HIGH). The worker returns []/{}
+        # cheaply when there is nothing, and _on_browse_pgp_loaded no-ops on empty.
         if not self.current_browse_sid:
             return
         # Disconnect old worker signals first
@@ -10029,7 +10114,11 @@ class GenizahGUI(QMainWindow):
             except (TypeError, RuntimeError):
                 pass
         # Start a new PGP worker for the current page
-        self._browse_pgp_worker = PGPSourceWorker(self.current_browse_sid, self.current_browse_p or 1)
+        self._browse_pgp_worker = PGPSourceWorker(
+            self.current_browse_sid, self.current_browse_p or 1,
+            folio_label=self._displayed_folio_label_for_pgp(),
+            image_number=self._displayed_fgp_image_number_for_pgp(),
+            page_text=getattr(self, 'browse_original_page_text', '') or '')
         self._browse_pgp_worker.finished_signal.connect(self._on_browse_pgp_loaded)
         self._browse_pgp_worker.error_signal.connect(self._on_browse_pgp_error)
         self._browse_pgp_worker.start()
@@ -25324,6 +25413,11 @@ class GenizahGUI(QMainWindow):
 
         # Apply highlights (manual spans first, then pattern)
         page_text = pd['text']
+        # Capture THIS page's V0.8 synchronously so the version selector's
+        # "V0.8 (Original)" entry restores the current page — not whatever the
+        # async PGP/FGP worker last captured (which froze on page 1 / the prior
+        # page when switching back from an FGP transcription).
+        self.browse_original_page_text = pd['text']
         page_text = self._apply_browse_highlights(page_text, pd.get('uid'))
         if self.browse_highlight_pattern:
             try:

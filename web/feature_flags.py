@@ -24,6 +24,10 @@ def web_fgp_enabled() -> bool:
     the shared flag; when set it wins for the web app (e.g. disable on web while
     the shared/desktop default is on). Read per call so an env flip + restart
     takes effect without code changes. ``shared/`` must not import this.
+
+    Default: ON (2026-06-22, go-live) — mirrors the shared
+    ``FGP_TRANSCRIPTIONS_ENABLED`` default. Graceful no-op when the sidecar DB is
+    absent. Disable on web only with ``WEB_FGP_ENABLED=0``.
     """
-    shared_default = _env_enabled("FGP_TRANSCRIPTIONS_ENABLED", False)
+    shared_default = _env_enabled("FGP_TRANSCRIPTIONS_ENABLED", True)
     return _env_enabled("WEB_FGP_ENABLED", shared_default)

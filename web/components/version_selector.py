@@ -17,7 +17,7 @@ from web.supabase_client import get_corrections
 from web.auth_state import GlobalAuthState
 from web.corrections_service import get_pending_corrections_for_page
 from web.supabase_client import get_user_client
-from shared.fgp_service import group_transcription_sources
+from shared.fgp_service import group_transcription_sources, source_relation_kind
 from typing import Optional, Callable, List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -392,8 +392,23 @@ def create_version_selector(
                             ).style(f'color: {_FGP_COLOR};')
                         for fed in fgp_sources:
                             attribution = fed.get('attribution') or fed.get('source_scholar') or 'FGP'
+                            # Specific FGP team credit (e.g. "יעקב זוסמן, ראש צוות
+                            # FGP…"); falls back to the generic attribution.
+                            credit = fed.get('source_credit') or attribution
+                            # An FGP source can be a transcription OR a translation
+                            # (e.g. a Hebrew translation of a Judeo-Arabic letter).
+                            # Label it by its actual kind — never call a translation
+                            # a "transcription" (matches desktop + reading desk).
+                            _is_trans = source_relation_kind(fed) == 'translation'
+                            _lang = fed.get('language') or ''
+                            if _is_trans:
+                                _fgp_main = f"FGP {_lang} {tr('Translation')}".replace('  ', ' ').strip()
+                                _fgp_icon = 'translate'
+                            else:
+                                _fgp_main = tr('FGP Transcription')
+                                _fgp_icon = 'menu_book'
 
-                            def make_select_fgp(ed=fed, attr=attribution):
+                            def make_select_fgp(ed=fed, attr=attribution, cr=credit, is_tr=_is_trans):
                                 def select_fgp():
                                     version_label.text = 'FGP'
                                     version_label.style(f'color: {_FGP_COLOR};')
@@ -402,7 +417,9 @@ def create_version_selector(
                                         on_version_change(ed.get('content', ''), {
                                             'source': 'fgp',
                                             'attribution': attr,
+                                            'source_credit': cr,
                                             'is_fgp': True,
+                                            'is_translation': is_tr,
                                             'source_id': ed.get('id'),
                                             'uid': ed.get('uid'),
                                         })
@@ -410,12 +427,15 @@ def create_version_selector(
 
                             with ui.menu_item(on_click=make_select_fgp()).classes('text-sm'):
                                 with ui.row().classes('items-center gap-2'):
-                                    ui.icon('menu_book', size='xs').style(f'color: {_FGP_COLOR};')
+                                    ui.icon(_fgp_icon, size='xs').style(f'color: {_FGP_COLOR};')
                                     with ui.column().classes('gap-0'):
-                                        ui.label(tr('FGP Transcription')).classes(
+                                        # No folio suffix: the chooser is already
+                                        # filtered to the displayed image's folio,
+                                        # so the folio only routes placement.
+                                        ui.label(_fgp_main).classes(
                                             'font-medium'
                                         ).style(f'color: {_FGP_COLOR};')
-                                        ui.label(attribution).classes('text-xs').style(
+                                        ui.label(credit).classes('text-xs').style(
                                             'color: var(--text-muted);'
                                         )
                         ui.separator()

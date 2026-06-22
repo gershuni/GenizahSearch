@@ -2306,6 +2306,28 @@ class ResultDialog(QDialog):
             logger.exception("load_by_shelfmark failed: %s", e)
             return False
 
+    def _rd_displayed_image_keys(self, total_pages=0):
+        """(folio_label, fgp_image_number) of the image at the current page.
+
+        Resolved on the MAIN thread from the manuscript's already-enriched
+        ``folio_images`` in ``meta_mgr.nli_cache`` (plain dicts — no crossref
+        service call, which on desktop is bound to a background thread). The FGP
+        image number (``fgp_image_number_id``) is the exact per-image key;
+        the folio label is the fallback. Passed into PGPSourceWorker so FGP
+        transcriptions align to the displayed image (1r↔1r), volume-aware. Both
+        ``''`` when the manuscript isn't enriched yet -> worker keeps all FGP.
+        """
+        from shared.fgp_service import (
+            folio_label_for_displayed_page, fgp_image_number_for_displayed_page,
+        )
+        meta = self.meta_mgr.nli_cache.get(self.current_sys_id, {}) if self.meta_mgr else {}
+        imgs = meta.get('folio_images') or []
+        p = self.current_p_num or 1
+        return (
+            folio_label_for_displayed_page(imgs, p, total_pages),
+            fgp_image_number_for_displayed_page(imgs, p, total_pages),
+        )
+
     def load_page(self, offset=0, target=None):
         if not self.current_sys_id: return
         # Phase 96 NEW-2 dispatch: LOCAL hits use a separate primitive
@@ -2444,7 +2466,16 @@ class ResultDialog(QDialog):
                     self._rd_pgp_worker.error_signal.disconnect(self._on_rd_pgp_error)
                 except (TypeError, RuntimeError):
                     pass
-            self._rd_pgp_worker = PGPSourceWorker(self.current_sys_id, self.current_p_num or 1)
+            # Align FGP to the displayed image. Resolve the displayed image's
+            # keys on the MAIN thread from the already-enriched folio_images in
+            # nli_cache (the crossref singleton is thread_safe=False on desktop
+            # and must NOT be queried from the worker QThread) and pass them in.
+            _rd_folio, _rd_imgnum = self._rd_displayed_image_keys(
+                page_data.get('total_pages', 0))
+            self._rd_pgp_worker = PGPSourceWorker(
+                self.current_sys_id, self.current_p_num or 1,
+                folio_label=_rd_folio, image_number=_rd_imgnum,
+                page_text=page_data.get('text') or '')
             self._rd_pgp_worker.finished_signal.connect(self._on_rd_pgp_loaded)
             self._rd_pgp_worker.error_signal.connect(self._on_rd_pgp_error)
             self._rd_pgp_worker.start()

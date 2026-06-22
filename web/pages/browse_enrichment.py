@@ -25,7 +25,10 @@ from nicegui import ui, run
 from web.translations import tr
 from web.document_service import get_document_for_fragment, get_section_for_page, get_all_sources_for_fragment
 from web.feature_flags import web_fgp_enabled
-from shared.fgp_service import get_fgp_sources_for_fragment, filter_sources_for_page
+from shared.fgp_service import (
+    get_fgp_sources_for_fragment, filter_sources_for_page, folio_label_for_displayed_page,
+    fgp_image_number_for_displayed_page,
+)
 from web.pages.browse_state import BrowseState, _crossref_cache
 from shared.synthetic_sys_id import is_synthetic_sys_id
 
@@ -228,6 +231,20 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
                             and len(folio_images) == _total_pages
                             and 0 < _p_num <= len(folio_images)):
                         result['folio_label'] = folio_images[_p_num - 1].get('folio_label', '')
+                    # Folio for ALIGNING FGP to the displayed image — multi-IE aware
+                    # (total_pages = k * folio_count when a manuscript has several
+                    # text editions), so it resolves even when the strict equality
+                    # above does not. Kept separate so the display-label logic above
+                    # is unchanged.
+                    result['fgp_folio_label'] = folio_label_for_displayed_page(
+                        folio_images, _p_num, _total_pages)
+                    # EXACT per-image FGP key (c_number ↔ fgp_image_number_id):
+                    # preferred over the folio label, which is only coincidentally
+                    # equal and breaks on bare-sequence / NULL / duplicate
+                    # image_side and multi-volume manuscripts. Same positional
+                    # (multi-IE-aware) resolution as the label above.
+                    result['fgp_image_number'] = fgp_image_number_for_displayed_page(
+                        folio_images, _p_num, _total_pages)
 
                     # Skip get_physical_metadata here -- fetch_crossref already gets it
                     # via get_crossref_metadata. We read it from crossref_data after gather.
@@ -291,9 +308,16 @@ async def load_enrichment(state: BrowseState, refs: BrowsePageRefs, page, genera
         return
 
     # Process PGP + FGP sources — centralized per-page filter (FGP-04.4). Preserves
-    # the prior PGP behavior exactly and splits FGP via its dedicated splitter.
+    # the prior PGP behavior exactly; FGP rows are aligned to the displayed image
+    # by folio (1r↔1r) using the multi-IE-aware folio label resolved above.
     if all_sources:
-        state.all_sources = filter_sources_for_page(all_sources, page.p_num) or None
+        _folio = (browse_enrich or {}).get('fgp_folio_label')
+        _img_num = (browse_enrich or {}).get('fgp_image_number')
+        # Pass the V0.8 page text so FGP editions align to it by textual
+        # similarity (robust where folio/positional matching can't).
+        state.all_sources = filter_sources_for_page(
+            all_sources, page.p_num, _folio, _img_num,
+            page_text=getattr(page, 'text', '') or '') or None
     else:
         state.all_sources = None
 

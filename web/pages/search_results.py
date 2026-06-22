@@ -33,7 +33,10 @@ from genizah_core import SearchEngine, get_library_display
 from web.document_service import (
     get_all_sources_for_fragment, get_document_for_fragment, get_section_for_page,
 )
-from shared.fgp_service import get_fgp_sources_for_fragment, filter_sources_for_page
+from shared.fgp_service import (
+    get_fgp_sources_for_fragment, filter_sources_for_page, displayed_folio_label,
+    displayed_fgp_image_number,
+)
 from web.components.joins_panel import fetch_connected_fragments, create_joins_dialog
 from urllib.parse import quote
 from web.components.typography import h3
@@ -1228,9 +1231,17 @@ def open_advanced_dialog(search_state, refs, index, result):
                 # Merge FGP transcriptions as additional, distinct sources (FGP-05).
                 if web_fgp_enabled():
                     all_sources_raw = all_sources_raw + (get_fgp_sources_for_fragment(sys_id) or [])
-                # Centralized per-page filter (FGP-04.4): preserves PGP behavior,
-                # splits FGP via its dedicated splitter (never both sides).
-                all_sources = filter_sources_for_page(all_sources_raw, current_p_num) or None
+                # Centralized per-page filter (FGP-04.4): preserves PGP behavior;
+                # FGP rows are aligned to the displayed image by the EXACT FGP
+                # image number (c_number ↔ fgp_image_number_id), falling back to
+                # the folio label. Both multi-IE aware via total_pages.
+                _folio = displayed_folio_label(sys_id, current_p_num, total_pages)
+                _img_num = displayed_fgp_image_number(sys_id, current_p_num, total_pages)
+                # Pass the V0.8 page text so FGP editions align to it by textual
+                # similarity (robust where folio/positional matching can't).
+                all_sources = filter_sources_for_page(
+                    all_sources_raw, current_p_num, _folio, _img_num,
+                    page_text=current_text or '') or None
 
                 pgp_doc = get_document_for_fragment(sys_id, current_p_num)
                 if pgp_doc:

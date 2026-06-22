@@ -19,7 +19,7 @@ import re
 import html as html_module
 from urllib.parse import quote
 from shared.fgp_service import (
-    source_provider, source_relation_kind, get_fgp_section_for_page,
+    source_provider, source_relation_kind,
 )
 
 logger = logging.getLogger(__name__)
@@ -3158,6 +3158,11 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                 label = f"FGP {lang} {tr('Translation')}".replace('  ', ' ').strip()
                                             else:
                                                 label = tr('FGP Transcription')
+                                            # Disambiguate the per-image navigable
+                                            # list (1r, 1v, 2r…) — one FGP row/image.
+                                            folio = src.get('folio_label')
+                                            if folio:
+                                                label = f"{label} · {folio}"
                                         elif 'Edition' in doc_rel:
                                             label = f"PGP Edition: {scholar}"
                                         elif 'Translation' in doc_rel:
@@ -3211,8 +3216,12 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                                             pg_section = 'recto' if pg_key == 0 else 'verso'
                                                             section_texts = sections.get(pg_section, [])
                                                             if is_fgp:
-                                                                # FGP: dedicated splitter (never both sides)
-                                                                section_text = get_fgp_section_for_page(src, pg_key + 1)
+                                                                # FGP is a navigable per-image list; its image
+                                                                # numbering does not map to the fragment's
+                                                                # recto/verso, so show the full content once
+                                                                # (under the first page) — never side-split or
+                                                                # hidden on a later page (round-2 contract).
+                                                                section_text = content if pg_key == 0 else ''
                                                             else:
                                                                 section_text = '\n\n'.join(section_texts) if section_texts else content
                                                             if section_text:
@@ -3289,9 +3298,10 @@ def create_browse_page(initial_sys_id: Optional[str] = None, highlight: Optional
                                         text_align = 'right'
 
                                         if initial_is_fgp:
-                                            # FGP: dedicated splitter (never both sides).
-                                            fgp_text = get_fgp_section_for_page(initial_source, pg_idx + 1)
-                                            display_text = fgp_text or ''
+                                            # FGP: full content shown once (navigable per-image
+                                            # list; its image numbering does not map to the
+                                            # fragment's recto/verso, so no side split — round-2).
+                                            display_text = initial_source.get('content', '') if pg_idx == 0 else ''
                                             if initial_is_ltr:
                                                 text_dir = 'ltr'
                                                 text_align = 'left'
