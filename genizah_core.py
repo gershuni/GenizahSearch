@@ -7476,7 +7476,7 @@ class SearchEngine:
         return LabEngine.lab_index_normalize(content)
 
     def _query_local_index(self, query_str: str, mode: str, gap: int,
-                           limit=None, regex=None):
+                           limit=None, regex=None, tantivy_query_str=None):
         """Query the LOCAL side-index. Returns [] if local_searcher is None (D-37).
 
         MEDIUM-1 note: this uses a simplified parse_query (not the full Responsa
@@ -7522,19 +7522,36 @@ class SearchEngine:
             _fields = ["content", "content_head", "content_tail"]
             if getattr(self, "_local_has_content_search", False):
                 _fields.append("content_search")
-            try:
-                tantivy_q = self.local_index.parse_query(query_str, _fields)
-            except (ValueError, Exception):
-                # v7.16: Tantivy's query parser chokes on syntax metacharacters,
-                # which appear naturally in Hebrew abbreviations — the geresh in
-                # אמ' and the gershayim in רמב"ם both raise "Syntax Error" and the
-                # whole LOCAL search returned 0 results. Strip the metacharacters
-                # (`'"` + structural chars) so the term query parses; the precise
-                # match is still enforced by the regex filter below.
-                _safe = re.sub(r"[+\-&|!(){}\[\]^\"~*?:\\/']", " ", query_str).strip()
-                if not _safe:
-                    return []
-                tantivy_q = self.local_index.parse_query(_safe, _fields)
+            # Phase 95-05 follow-up (Responsa-over-LOCAL): when the caller supplies
+            # a pre-expanded candidate query (the SAME operator-expanded query the
+            # main index uses for Responsa #/*/%/(a/b)), parse THAT — the simplified
+            # parse_query below strips operator metacharacters and returns nothing,
+            # which is why LOCAL Responsa came back empty. Defensive fall-back to the
+            # simplified path if the pre-built query somehow fails to parse.
+            tantivy_q = None
+            if tantivy_query_str:
+                try:
+                    tantivy_q = self.local_index.parse_query(tantivy_query_str, _fields)
+                except (ValueError, Exception):
+                    LOGGER.warning(
+                        "LOCAL pre-built query failed to parse; falling back to simplified: %.200s",
+                        tantivy_query_str,
+                    )
+                    tantivy_q = None
+            if tantivy_q is None:
+                try:
+                    tantivy_q = self.local_index.parse_query(query_str, _fields)
+                except (ValueError, Exception):
+                    # v7.16: Tantivy's query parser chokes on syntax metacharacters,
+                    # which appear naturally in Hebrew abbreviations — the geresh in
+                    # אמ' and the gershayim in רמב"ם both raise "Syntax Error" and the
+                    # whole LOCAL search returned 0 results. Strip the metacharacters
+                    # (`'"` + structural chars) so the term query parses; the precise
+                    # match is still enforced by the regex filter below.
+                    _safe = re.sub(r"[+\-&|!(){}\[\]^\"~*?:\\/']", " ", query_str).strip()
+                    if not _safe:
+                        return []
+                    tantivy_q = self.local_index.parse_query(_safe, _fields)
             search_limit = limit or Config.SEARCH_LIMIT
             res_obj = self.local_searcher.search(tantivy_q, search_limit)
             hits = res_obj.hits if hasattr(res_obj, "hits") else res_obj
@@ -7830,6 +7847,132 @@ class SearchEngine:
             self.var_mgr.get_variants(term, mode, limit=max_limit)
             if regex_mode != mode:
                 self.var_mgr.get_variants(term, regex_mode, limit=max_limit)
+
+    def _build_local_responsa_query_and_regex(self, query_str, mode, gap, responsa_options):
+        """Build a Tantivy query string + filter regex for a Responsa query, for
+        use against the LOCAL My-Library index.
+
+        Mirrors the component expansion the main (genizah) path runs inline in
+        execute_search — grammatical ``#prefix``/``suffix#``, ``*`` wildcards,
+        ``%`` plene/defective, ``(a/b)`` alternation, Judeo-Arabic + spelling-
+        variant expansion — but is self-contained so it never disturbs the
+        load-bearing main search path. It reuses the SAME index-agnostic
+        ``build_tantivy_query`` / ``build_regex_pattern`` the main path uses, so
+        the returned query string drops straight onto ``local_index.parse_query``.
+
+        Closes the Phase-95 MEDIUM-1 deferral (95-05): LOCAL search used a
+        simplified ``parse_query`` that stripped operator metacharacters, so
+        Responsa queries returned nothing. The line-break (``|``) operator is NOT
+        handled here — it runs through the separate ``_execute_line_break_search``
+        (main index only); callers get ``(None, None)`` and fall back.
+
+        Parity with the main path is pinned by
+        ``tests/test_local_reload_after_refresh.py::test_query_semantics_*``.
+
+        Returns ``(t_query_str, regex)``, or ``(None, None)`` when the query can't
+        be expressed for LOCAL (no components, line-break query, or no positive
+        components) so the caller falls back to the simplified path.
+        """
+        components = parse_responsa_query(query_str)
+        if not components:
+            return None, None
+        # Line-break ('|') is a separate, main-index-only path. Bail to fallback.
+        line_groups, _ = _parse_line_break_query(query_str)
+        if line_groups is not None:
+            return None, None
+        per_pair_gaps = extract_per_pair_gaps(query_str)
+
+        variants_on = responsa_options.get('variants', False)
+        ja_on = responsa_options.get('ja', False)
+        flex_spacing = responsa_options.get('flex_spacing', False)
+        variant_mode = responsa_options.get('variant_mode', 'exact')
+
+        # Rewrite *word* -> #word# (both-side wildcard = prefix+suffix expansion;
+        # true substring search isn't expressible in Tantivy). Mirrors main path.
+        for comp in components:
+            if (comp.wildcard == 'pattern' and comp.wildcard_pattern
+                    and comp.wildcard_pattern.startswith('*')
+                    and comp.wildcard_pattern.endswith('*')
+                    and comp.wildcard_pattern.count('*') == 2):
+                stem = comp.wildcard_pattern.strip('*')
+                if stem:
+                    comp.words = [stem]
+                    comp.wildcard = None
+                    comp.wildcard_pattern = None
+                    comp.grammatical_prefixes = True
+                    comp.grammatical_suffixes = True
+
+        # Explosion guard (same as main path) so a huge LOCAL expansion can't hang.
+        _components, _guard_warning, actual_opts = _apply_explosion_guard(
+            components, variants_on=variants_on, ja_on=ja_on,
+            var_mgr=self.var_mgr, variant_mode=variant_mode,
+        )
+        if _guard_warning:
+            variants_on = actual_opts['variants_on']
+            ja_on = actual_opts['ja_on']
+            variant_mode = actual_opts['variant_mode']
+
+        positive_components = [c for c in components if not c.negated]
+        if not positive_components:
+            return None, None
+
+        component_dicts = []
+        for comp in positive_components:
+            expanded_words = list(comp.words)
+            if comp.plene_defective:
+                pe = []
+                for w in expanded_words:
+                    pe.extend(expand_plene_defective(w))
+                expanded_words = list(dict.fromkeys(pe))
+            if comp.grammatical_prefixes:
+                pe = []
+                for w in expanded_words:
+                    pe.extend(expand_grammatical_prefixes(w))
+                expanded_words = list(dict.fromkeys(pe))
+            if comp.grammatical_suffixes:
+                se = []
+                for w in expanded_words:
+                    se.extend(expand_grammatical_suffixes(w))
+                expanded_words = list(dict.fromkeys(se))
+            if ja_on:
+                je = []
+                for w in expanded_words:
+                    je.extend(expand_judeo_arabic(w))
+                expanded_words = list(dict.fromkeys(je))
+            if variants_on and self.var_mgr:
+                ve = []
+                for w in expanded_words:
+                    try:
+                        ve.extend(self.var_mgr.get_variants(w, variant_mode, limit=200))
+                    except Exception:
+                        ve.append(w)
+                expanded_words = list(dict.fromkeys(ve))
+            flex_patterns = []
+            if flex_spacing:
+                for w in comp.words:
+                    flex_patterns.append(_make_flex_spacing_pattern(w))
+            component_dicts.append({
+                'tantivy_terms': expanded_words,
+                'regex_terms': expanded_words,
+                'original_words': comp.words,
+                'wildcard': comp.wildcard,
+                'wildcard_pattern': comp.wildcard_pattern,
+                'flex_patterns': flex_patterns,
+                'inline_pattern': comp.inline_pattern,
+            })
+
+        if not component_dicts:
+            return None, None
+        t_query_str = self.build_tantivy_query(
+            terms=None, mode=mode,
+            responsa_components=component_dicts, responsa_options=responsa_options,
+        )
+        regex = self.build_regex_pattern(
+            terms=None, mode=mode, max_gap=gap,
+            responsa_components=component_dicts, responsa_options=responsa_options,
+            per_pair_gaps=per_pair_gaps,
+        )
+        return t_query_str, regex
 
     def build_tantivy_query(self, terms, mode, responsa_components=None, responsa_options=None,
                             content_search_field=None):
@@ -8792,6 +8935,20 @@ class SearchEngine:
                 # main path; Regex mode is left untouched (user owns the pattern).
                 if mode != 'Regex':
                     query_str = strip_search_diacritics(query_str)
+                # Phase 95-05 follow-up: Responsa operators (#/*/%/(a/b)) need the
+                # full component expansion; the simplified path below strips them and
+                # returns nothing. Build the same candidate query + components-aware
+                # regex the main index uses, then run it against LOCAL. Line-break (|)
+                # is main-index only -> helper returns None -> simplified fallback.
+                if responsa_options and responsa_options.get('responsa_mode'):
+                    _resp_q, _resp_regex = self._build_local_responsa_query_and_regex(
+                        query_str, mode, gap, responsa_options
+                    )
+                    if _resp_q is not None and _resp_regex is not None:
+                        return self._query_local_index(
+                            query_str, mode, gap,
+                            regex=_resp_regex, tantivy_query_str=_resp_q,
+                        )
                 # Phase 96 D-F5: build regex here so LOCAL-only path also gets
                 # D-04.1 filter-out + highlight_pattern, same as the RRF merge path.
                 if mode == 'Regex':
@@ -8815,6 +8972,11 @@ class SearchEngine:
 
         # --- Responsa Pipeline ---
         responsa_warning = None
+        # Phase 95-05: the clean (pre-restrict) Responsa candidate query, captured
+        # so the LOCAL RRF merge can reuse it without re-parsing/expanding (keeps the
+        # single parse_responsa_query/build_regex_pattern contract the tests pin).
+        # Stays None for non-Responsa searches.
+        _local_responsa_query = None
         if responsa_options and responsa_options.get('responsa_mode'):
             # a. Bypass prefix shortcuts
             self.parse_query_syntax(query_str, responsa_mode=True)
@@ -8981,6 +9143,10 @@ class SearchEngine:
                 responsa_options=responsa_options,
                 per_pair_gaps=per_pair_gaps,
             )
+            # Phase 95-05: capture the clean Responsa candidate query for the LOCAL
+            # RRF merge below — BEFORE any restrict_sys_ids augmentation (which adds
+            # genizah-only full_header clauses that don't apply to LOCAL docs).
+            _local_responsa_query = t_query_str
         else:
             # --- Existing path (unchanged) ---
             if mode == 'Regex': terms = [query_str]
@@ -9191,7 +9357,20 @@ class SearchEngine:
         # Phase 95 smoke-fix (item 2): skip LOCAL merge when corpus_scope='genizah'.
         if corpus_scope != "genizah" and getattr(self, "local_searcher", None) is not None:
             try:
-                local_hits = self._query_local_index(query_str, mode, gap, regex=regex)
+                # Phase 95-05 follow-up: reuse the main path's already-built,
+                # operator-expanded Responsa candidate query (captured above, pre-
+                # restrict) so merged LOCAL hits aren't dropped by the simplified
+                # path — WITHOUT re-running parse/expand (preserves the single
+                # parse_responsa_query/build_regex_pattern call the tests pin). The
+                # main `regex` is already components-aware. Non-Responsa: stays None
+                # -> simplified path, unchanged. Line-break (|) returned early above.
+                if _local_responsa_query is not None:
+                    local_hits = self._query_local_index(
+                        query_str, mode, gap, regex=regex,
+                        tantivy_query_str=_local_responsa_query,
+                    )
+                else:
+                    local_hits = self._query_local_index(query_str, mode, gap, regex=regex)
             except Exception as _e:
                 LOGGER.warning(
                     "LOCAL side-index query failed; main results unaffected: %r", _e

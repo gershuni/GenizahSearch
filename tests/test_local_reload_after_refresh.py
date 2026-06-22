@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
 import tantivy
 
 
@@ -201,42 +200,96 @@ def test_reload_local_lab_index_no_op_when_dir_missing(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# MEDIUM-1 deferred (Option B): query semantics parity tests (xfail)
+# Phase 95-05 MEDIUM-1 RESOLVED: Responsa operators now work over the LOCAL index.
 # ---------------------------------------------------------------------------
-# The main execute_search query builder uses Responsa expansion, spelling variants,
-# grammatical prefix/suffix expansion, Judeo-Arabic expansion, line constraints, and
-# flex spacing — over 200 LOC. Extracting a shared _build_tantivy_query() helper
-# is too invasive for this revision.
-#
-# These tests are marked xfail to document the known divergence and serve as a
-# follow-up trigger. When the shared helper lands, remove the xfail markers.
-# See plan 95-05 <deferred> block.
+# The LOCAL path previously used a simplified parse_query that stripped operator
+# metacharacters (#, *, %, |, (a/b)) — so Responsa queries returned nothing in
+# LOCAL. _query_local_index now accepts a pre-expanded candidate query built by
+# the shared, index-agnostic build_tantivy_query / build_regex_pattern (via
+# _build_local_responsa_query_and_regex), so LOCAL applies the SAME grammatical
+# prefix/suffix, plene/defective, JA, variant, and (a/b) alternation expansion as
+# the main index. (The line-break '|' operator still routes through the separate
+# main-index-only _execute_line_break_search — LOCAL falls back gracefully.)
 
-@pytest.mark.xfail(
-    reason=(
-        "MEDIUM-1 deferred: shared query builder not yet extracted from execute_search. "
-        "_query_local_index uses a simplified parse_query (content/content_head/content_tail) "
-        "without Responsa expansion, spelling variants, or Hebrew morphological expansion. "
-        "Follow-up: extract _build_tantivy_query() in a future v7.14.x patch plan."
-    ),
-    strict=False,
-)
-def test_query_semantics_phrase_mode_parity_with_main(tmp_path):
-    """MEDIUM-1 Option B (xfail): phrase mode search should produce identical
-    hit-sets on main-index and LOCAL-index fixtures for the same document.
-    This test documents the known divergence until the shared builder is extracted.
-    """
-    # This test intentionally fails to document the deferred work.
-    # When the shared builder is extracted, this should pass.
-    pytest.xfail("MEDIUM-1 deferred — shared query builder not yet extracted")
+def _make_engine_with_local(tmp_path, docs):
+    """Build a LOCAL index with `docs` and a SearchEngine pointed at it (no main index)."""
+    import genizah_core
+    from unittest.mock import MagicMock as _MM
+
+    index_dir = str(tmp_path / "LocalIndex")
+    os.makedirs(index_dir)
+    _build_local_index(index_dir, docs)
+    with patch.object(genizah_core.Config, "LOCAL_INDEX_DIR", index_dir):
+        with patch.object(genizah_core.Config, "LOCAL_LAB_INDEX_DIR", str(tmp_path / "LocalLabIndex")):
+            with patch("genizah_core.SearchEngine.reload_index", return_value=False):
+                meta = _MM()
+                meta.parse_full_id_components.return_value = {}
+                engine = genizah_core.SearchEngine(meta, _MM())
+    assert engine.local_searcher is not None, "LOCAL searcher should open on the built index"
+    # We exercise the non-variant operators (#, *, (a/b)); stub get_variants so any
+    # incidental call returns an empty list rather than a non-iterable MagicMock.
+    engine.var_mgr.get_variants = _MM(return_value=[])
+    return engine
 
 
-@pytest.mark.xfail(
-    reason=(
-        "MEDIUM-1 deferred: gap mode parity not tested until shared builder extracted."
-    ),
-    strict=False,
-)
-def test_query_semantics_gap_mode_parity_with_main(tmp_path):
-    """MEDIUM-1 Option B (xfail): gap mode search parity between main and LOCAL index."""
-    pytest.xfail("MEDIUM-1 deferred — shared query builder not yet extracted")
+def test_responsa_grammatical_prefix_finds_prefixed_form_in_local(tmp_path):
+    """`#word` (grammatical-prefix expansion) finds a prefixed form in LOCAL that a
+    bare term cannot (hebword tokenizes `לשלום` as one token, so `שלום` ≠ `לשלום`)."""
+    from genizah_core import expand_grammatical_prefixes
+
+    prefixed = [w for w in expand_grammatical_prefixes("שלום") if w != "שלום"]
+    assert prefixed, "expand_grammatical_prefixes should yield prefixed forms"
+    target = prefixed[0]
+    engine = _make_engine_with_local(tmp_path, [{
+        "uid": "LOCAL_970000000100000001_P1",
+        "content": f"כתב {target} העם בכל מקום",
+        "full_header": "970000000100000001_LOCAL_P1_F0001",
+    }])
+    opts = {"responsa_mode": True}
+    # Bare term does NOT match the prefixed token...
+    bare = engine.execute_search("שלום", "Phrase", 0, responsa_options=opts, corpus_scope="local")
+    assert bare == [], f"bare שלום should not match the prefixed token {target!r}"
+    # ...but #-prefix expansion DOES (this returned nothing before the fix).
+    hits = engine.execute_search("#שלום", "Phrase", 0, responsa_options=opts, corpus_scope="local")
+    assert len(hits) >= 1, f"#שלום must find the prefixed form {target!r} in LOCAL"
+
+
+def test_responsa_inline_alternation_finds_either_in_local(tmp_path):
+    """`(a/b)` inline alternation matches a LOCAL doc containing either alternative."""
+    engine = _make_engine_with_local(tmp_path, [{
+        "uid": "LOCAL_970000000100000002_P1",
+        "content": "ויהי בימי המלך הגדול",
+        "full_header": "970000000100000002_LOCAL_P1_F0001",
+    }])
+    opts = {"responsa_mode": True}
+    hits = engine.execute_search("(שלום/המלך)", "Phrase", 0, responsa_options=opts, corpus_scope="local")
+    assert len(hits) >= 1, "(שלום/המלך) alternation must find the doc containing המלך in LOCAL"
+
+
+def test_responsa_line_break_falls_back_without_crashing_in_local(tmp_path):
+    """Line-break (`|`) is main-index only; in LOCAL the helper returns None and the
+    simplified fallback runs — it must not raise (graceful, documented gap)."""
+    engine = _make_engine_with_local(tmp_path, [{
+        "uid": "LOCAL_970000000100000003_P1",
+        "content": "שורה ראשונה\nשורה שנייה",
+        "full_header": "970000000100000003_LOCAL_P1_F0001",
+    }])
+    opts = {"responsa_mode": True}
+    # Must not raise (returns whatever the simplified fallback yields).
+    engine.execute_search("ראשונה | שנייה", "Phrase", 0, responsa_options=opts, corpus_scope="local")
+
+
+def test_local_responsa_helper_bails_on_line_break_and_empty(tmp_path):
+    """The helper returns (None, None) for line-break and empty queries so callers
+    fall back instead of mis-building a query."""
+    engine = _make_engine_with_local(tmp_path, [{
+        "uid": "LOCAL_970000000100000004_P1",
+        "content": "טקסט כלשהו",
+        "full_header": "970000000100000004_LOCAL_P1_F0001",
+    }])
+    opts = {"responsa_mode": True}
+    assert engine._build_local_responsa_query_and_regex("א | ב", "Phrase", 0, opts) == (None, None)
+    assert engine._build_local_responsa_query_and_regex("", "Phrase", 0, opts) == (None, None)
+    # A plain operator query yields a usable (query, regex) pair.
+    q, rx = engine._build_local_responsa_query_and_regex("#שלום", "Phrase", 0, opts)
+    assert q and rx is not None
