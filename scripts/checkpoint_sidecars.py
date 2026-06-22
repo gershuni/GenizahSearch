@@ -12,6 +12,7 @@ SIDECARS = [
     "fist_data/visual_similarity.db",
     "pgp_data/pgp.db",
     "nli_data/nli_crossref.db",
+    "fgp_data/fgp_transcriptions.db",
 ]
 
 for path in SIDECARS:

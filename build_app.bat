@@ -32,6 +32,7 @@ python -m PyInstaller --noconfirm --noconsole --onedir --clean ^
  --add-data "fist_data\vs_manifest.txt;fist_data" ^
  --add-data "nli_data\nli_crossref.db;nli_data" ^
  --add-data "pgp_data\pgp.db;pgp_data" ^
+ --add-data "fgp_data\fgp_transcriptions.db;fgp_data" ^
  --exclude-module "tkinter" ^
  --exclude-module "matplotlib" ^
  --exclude-module "scipy" ^
