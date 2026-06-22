@@ -32,8 +32,16 @@ def _make_minimal_search_engine():
 # ---------------------------------------------------------------------------
 
 def test_corrupt_local_index_falls_back_to_genizah_only(tmp_path, caplog):
-    """D-37: when LOCAL_INDEX_DIR contains a corrupt meta.json (not a valid Tantivy index),
-    local_searcher is None, no exception propagates, and a warning is logged.
+    """D-37: an unopenable LOCAL index must not crash construction or contribute
+    spurious hits.
+
+    SEED-006 update: a corrupt/mismatched LOCAL index is now RECOVERED via an
+    atomic rebuild from cached_text (SQLite) instead of being disabled. With no
+    cached rows here the rebuild yields an EMPTY index, so local_searcher is a
+    valid empty searcher (was None pre-fix). Either outcome satisfies D-37: no
+    exception propagates, LOCAL contributes no hits, and a warning is logged.
+    (A genuinely unrecoverable index — rebuild also fails — still falls back to
+    None, exercised by test_missing_local_index_dir_falls_back.)
     """
     import genizah_core
 
@@ -55,11 +63,19 @@ def test_corrupt_local_index_falls_back_to_genizah_only(tmp_path, caplog):
                 meta.parse_full_id_components.return_value = {}
                 engine = genizah_core.SearchEngine(meta, MagicMock())
 
-    assert engine.local_searcher is None, "local_searcher must be None on corrupt index"
+    # Recovered-to-empty (SEED-006) OR fell back to None — both are graceful.
+    assert engine.local_searcher is None or engine.local_searcher.num_docs == 0, (
+        "corrupt LOCAL index must recover to an empty index or fall back to None, "
+        f"never return docs (got {engine.local_searcher!r})"
+    )
+    # D-37 core guarantee: no spurious LOCAL hits regardless of recover/fallback.
+    assert engine._query_local_index("בדיקה", "Phrase", 0) == [], (
+        "a recovered-empty / absent LOCAL index must yield no hits"
+    )
     assert any(
         "LOCAL index unavailable" in msg or "LOCAL" in msg
         for msg in warnings_logged
-    ), f"Expected a warning about LOCAL index. Got: {warnings_logged}"
+    ), f"Expected a warning about the LOCAL index. Got: {warnings_logged}"
 
 
 def test_missing_local_index_dir_falls_back(tmp_path, caplog):

@@ -293,6 +293,111 @@ def test_rebuild_raises_when_db_inside_index_dir(tmp_path):
         idx.close()
 
 
+# ---------------------------------------------------------------------------
+# SEED-006 regression — a REAL on-disk schema mismatch (old index lacks the
+# content_search field) must rebuild from cached_text, not crash. The other
+# tests force a MARKER-only mismatch, which leaves the on-disk schema identical
+# to build_local_schema() — so the buggy seed `tantivy.Index(new_schema,
+# path=index_dir)` succeeded there and never reproduced the production failure
+# ("Schema error: 'An index exists but the schema does not match.'").
+# ---------------------------------------------------------------------------
+
+def _build_old_schema_index(index_dir):
+    """Replace the on-disk index with a genuine pre-SEED-006 schema: `content`
+    tokenized whitespace and NO `content_search` field, + a stale marker."""
+    import gc as _gc
+    import shutil as _sh
+
+    _sh.rmtree(index_dir, ignore_errors=True)
+    os.makedirs(index_dir, exist_ok=True)
+    b = tantivy.SchemaBuilder()
+    b.add_text_field("unique_id", stored=True, tokenizer_name="raw")
+    b.add_text_field("content", stored=True, tokenizer_name="whitespace")  # OLD: no hebword, no content_search
+    b.add_text_field("content_head", stored=False, tokenizer_name="whitespace")
+    b.add_text_field("content_tail", stored=False, tokenizer_name="whitespace")
+    b.add_text_field("line_starts", stored=False, tokenizer_name="whitespace")
+    b.add_text_field("line_ends", stored=False, tokenizer_name="whitespace")
+    b.add_text_field("source", stored=True)
+    b.add_text_field("full_header", stored=True)
+    b.add_text_field("shelfmark", stored=True)
+    b.add_text_field("scope", stored=True)
+    b.add_text_field("boundaries", stored=True)
+    b.add_text_field("scan_run_id", stored=True, tokenizer_name="raw")
+    b.add_text_field("chunk_locator", stored=True, tokenizer_name="raw")
+    old = tantivy.Index(b.build(), path=index_dir)  # creates meta.json with the OLD schema
+    old = None  # drop the handle before any rename (Windows lock)
+    _gc.collect()
+    _write_schema_marker(index_dir, "0000oldschema0000")
+
+
+def _seed_committed_page(db_path, text):
+    """Seed one committed page with cached_text so the rebuild has a doc to carry."""
+    import sqlite3
+    c = sqlite3.connect(db_path)
+    try:
+        c.execute("INSERT INTO folders (folder_id, path, added_at) VALUES (1, '/fake/folder', 0)")
+        c.execute(
+            "INSERT INTO local_files (sys_id, filepath, folder_id, original_filename, "
+            "file_extension, page_count, file_size_bytes, extraction_status, last_indexed_at) "
+            "VALUES ('sysX', '/fake/folder/doc.txt', 1, 'doc.txt', '.txt', 1, 10, 'ok', 0)"
+        )
+        c.execute(
+            "INSERT INTO processed_files (filepath, mtime, size, sys_id, status, scan_run_id, mtime_ns) "
+            "VALUES ('/fake/folder/doc.txt', 0, 10, 'sysX', 'committed', 'run1', 0)"
+        )
+        c.execute(
+            "INSERT INTO local_pages (sys_id, uid, page_num, cached_text, cached_text_codec, "
+            "extraction_format_version, chunk_locator) VALUES ('sysX', 'uidX', 1, ?, 'raw', 3, '')",
+            (text.encode("utf-8"),),
+        )
+        c.commit()
+    finally:
+        c.close()
+
+
+def test_real_schema_mismatch_rebuilds_inline_and_preserves_docs(tmp_path):
+    """Default (inline) path: old-schema on-disk index + committed cached_text →
+    migrate without raising, new index has content_search, doc preserved."""
+    from genizah_core import _index_has_field
+
+    index_dir, lab_dir, db_path = _make_dirs(tmp_path)
+    _new_indexer(index_dir, lab_dir, db_path).close()       # create SQLite tables
+    _seed_committed_page(db_path, "מצותה בסגן, ועוד בסגן כאן")
+    _build_old_schema_index(index_dir)                       # genuine schema mismatch
+
+    idx = _new_indexer(index_dir, lab_dir, db_path)          # default: inline rebuild (line 1882 site)
+    try:
+        assert idx.needs_schema_rebuild is False
+        assert idx._index is not None
+        assert _index_has_field(idx._index, "content_search")
+        assert _read_schema_marker(index_dir) == _compute_schema_marker(build_local_schema)
+        assert idx._index.searcher().num_docs == 1           # cached_text doc carried across migration
+    finally:
+        idx.close()
+
+
+def test_real_schema_mismatch_rebuilds_deferred_and_preserves_docs(tmp_path):
+    """Deferred path (run_deferred_schema_rebuild, line 1978 site): same real
+    schema mismatch must rebuild from cached_text once the deferred call runs."""
+    from genizah_core import _index_has_field
+
+    index_dir, lab_dir, db_path = _make_dirs(tmp_path)
+    _new_indexer(index_dir, lab_dir, db_path).close()
+    _seed_committed_page(db_path, "מצותה בסגן, ועוד בסגן כאן")
+    _build_old_schema_index(index_dir)
+
+    idx = _new_indexer(index_dir, lab_dir, db_path, defer_schema_rebuild=True)
+    try:
+        assert idx.needs_schema_rebuild is True
+        assert idx._index is None
+        assert idx.run_deferred_schema_rebuild() is True     # must NOT raise on the real mismatch
+        assert idx.needs_schema_rebuild is False
+        assert _index_has_field(idx._index, "content_search")
+        assert idx._index.searcher().num_docs == 1
+    finally:
+        idx.close()
+
+
 def test_run_deferred_tolerates_marker_already_current(tmp_path):
     """Race: another path rebuilt + rewrote the marker before we ran."""
     index_dir, lab_dir, db_path = _make_dirs(tmp_path)

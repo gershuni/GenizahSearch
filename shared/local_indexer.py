@@ -1877,10 +1877,16 @@ class LocalIndexer:
                 import uuid as _uuid
                 _recovery_run_id = _uuid.uuid4().hex
                 try:
-                    # Initialize _index to a fresh empty one so rebuild_main_index_atomic
-                    # can check committed rows via _conn (which is ready at this point)
-                    self._index = tantivy.Index(schema, path=index_dir)
-                    register_search_tokenizers(self._index)  # SEED-006
+                    # SEED-006 fix: do NOT seed self._index by opening index_dir with
+                    # the NEW schema — on a schema MIGRATION the dir still holds the
+                    # OLD-schema index, so tantivy.Index(new_schema, path=index_dir)
+                    # raises "An index exists but the schema does not match", which
+                    # dead-ended every migration into "rebuild from cached_text failed".
+                    # rebuild_main_index_atomic builds a fresh .rebuild-<id> dir from
+                    # cached_text (SQLite) and reopens the live dir AFTER the swap; it
+                    # needs no valid self._index at entry, and _close_internal_writer_
+                    # index() tolerates None.
+                    self._index = None
                     self.rebuild_main_index_atomic(
                         _recovery_run_id,
                         close_searcher_cb=lambda: None,
@@ -1972,11 +1978,12 @@ class LocalIndexer:
             self._reopen_internal_writer_index()
         else:
             import uuid as _uuid
-            # Seed a fresh index handle so rebuild_main_index_atomic can probe
-            # committed rows, then do the atomic cached_text rebuild (it writes
-            # the new marker + reopens the writer/index at step 7).
-            self._index = tantivy.Index(build_local_schema(), path=self._index_dir)
-            register_search_tokenizers(self._index)
+            # SEED-006 fix: do NOT seed self._index from the live dir with the new
+            # schema — on a migration the dir still holds the OLD-schema index, so
+            # the open raises "schema does not match". rebuild_main_index_atomic
+            # builds a fresh .rebuild-<id> dir from cached_text and reopens the live
+            # dir after the swap; None is correct here (close tolerates it).
+            self._index = None
             self.rebuild_main_index_atomic(
                 _uuid.uuid4().hex,
                 close_searcher_cb=lambda: None,

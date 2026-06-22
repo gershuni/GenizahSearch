@@ -1,7 +1,8 @@
 ---
 id: SEED-006
-status: dormant
+status: implemented-rollout-pending
 planted: 2026-06-19
+code_merged: 2026-06-21 (master-main — shared/search_tokenizer.py; create_index + build_local_schema schema; _index_has_field compat gate)
 planted_during: v8.2.0 / Phase 119 (Web Joins Lab)
 trigger_when: next search-quality, indexing, or My-Library milestone — anything touching Tantivy tokenization, LOCAL indexing, or Hebrew search recall
 scope: large
@@ -9,9 +10,23 @@ scope: large
 
 # SEED-006: Fix Hebrew search retrieval — punctuation- and diacritic-attached words are unretrievable (LOCAL + Genizah)
 
-> Captured as a seed (NOT implemented). Intended to run on the cloud on a separate branch
-> (e.g. `fix/hebrew-search-tokenizer`) off `origin`, isolated from active phase-119 work.
-> Full plan: `C:\Users\gersh\.claude\plans\linked-beaming-hamster.md`. Codex review (BLOCK →
+> **Status (2026-06-22): code IMPLEMENTED & merged to `master-main`; ROLLOUT pending.**
+> The tokenizer + schema fix shipped 2026-06-21 (`shared/search_tokenizer.py`; `create_index`
+> builds `content`→`hebword` + the additive `content_search` field; runtime `_index_has_field`
+> compat gate degrades to content-only against an old index, and `reload_index` logs a staleness
+> WARNING). **The fix is INERT until the indexes are rebuilt with the new schema and redeployed** —
+> every existing index still lacks `content_search` (verified 2026-06-22: web prod GENIZAH *and*
+> the local dev index at `~/Genizah_Tantivy_Index/tantivy_db`).
+>
+> Outstanding rollout: (1) rebuild + redeploy the **web GENIZAH** index over `Transcriptions.txt`
+> (data-first per deploy lesson; `create_index` is **destructive-in-place** — `shutil.rmtree`s
+> `tantivy_db` *before* rebuilding and also regenerates `browse_map.pkl` — so build to a staging
+> dir + swap, never run it against the live dir); (2) **desktop** ships a rebuilt index via the
+> sidecar channel (or a background `create_index`). LOCAL My-Library auto-rebuilds off-thread on
+> the schema-marker bump. In progress 2026-06-22: a local in-place index rebuild to UAT the fix
+> before prod rollout. Also pending: scp the FGP sidecar (separate, SEED-004 / `claude/fgp-go-live`).
+>
+> Original plan: `C:\Users\gersh\.claude\plans\linked-beaming-hamster.md`. Codex review (BLOCK →
 > all findings incorporated): `_tmp/codex-hebrew-search-review.md`; brief: `_tmp/codex-hebrew-search-tokenizer-brief.md`.
 
 ## Why This Matters
