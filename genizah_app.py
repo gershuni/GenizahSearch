@@ -3744,10 +3744,23 @@ class GenizahGUI(QMainWindow):
         except Exception:
             pass  # applicationStateChanged not available on all Qt builds
 
-    def _on_app_state_changed(self, state) -> None:
-        """Focus/resume handler — fires heartbeat on app activation."""
+    def _on_app_state_changed(self) -> None:
+        """Focus/resume handler — fires heartbeat on app activation.
+
+        Takes NO signal argument on purpose. ``applicationStateChanged`` emits a
+        ``Qt::ApplicationState`` enum that on some PyQt6/sip builds fails to
+        marshal to Python, raising "TypeError: unable to convert a C++
+        'Qt::ApplicationState' instance to a Python object" *during* signal
+        dispatch — before this body runs, so the try/except around the
+        ``.connect()`` in _setup_active_ping cannot catch it and it surfaces via
+        ``sys.excepthook`` (and crash telemetry) on every focus/blur. PyQt drops
+        the unused arg for a zero-arg slot, so the enum is never converted; read
+        the state via the ``applicationState()`` getter instead (it marshals
+        fine — already used in _maybe_emit_active_ping / _maybe_flush_perf_summary).
+        """
         from PyQt6.QtCore import Qt
-        if state == Qt.ApplicationState.ApplicationActive:
+        app = QApplication.instance()
+        if app is not None and app.applicationState() == Qt.ApplicationState.ApplicationActive:
             self._maybe_emit_active_ping()
             self._maybe_flush_perf_summary()  # Phase 115: also check perf flush on resume (D-04)
 
