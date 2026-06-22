@@ -1078,11 +1078,10 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                # Link the descriptive text to the Help page's "Public API & AI
-                # Tools" section (anchor name="help-api" in web/pages/help.py).
+                # Link the banner to the Joins Lab — the v8.2.0 milestone CTA.
                 ui.link(
-                    tr('New: Experiment with GenizahSearch using AI tools and the public API.'),
-                    '/help#help-api',
+                    tr('New features: Friedberg (FGP) transcriptions are now available; search now finds Judeo-Arabic letters with an upper dot, without typing the dot; and the Joins Lab is now on the web too — give it a try!'),
+                    '/joins-lab',
                 ).classes('text-xs flex-1 truncate text-primary hover:underline')
                 def dismiss_whats_new():
                     # Explicit user dismiss (X button): persist the flag unconditionally.
@@ -1532,7 +1531,7 @@ def dashboard_page():
                 "name": "מהיכן באים התעתיקים?",
                 "acceptedAnswer": {
                     "@type": "Answer",
-                    "text": "התעתיקים מופקים אוטומטית על ידי פרויקט MiDRASH (בתמיכת האיחוד האירופי) — מנוע קריאת-מכונה שאומן על כתבי יד עבריים מימי הביניים. כיוון שמדובר בתעתוק ממוחשב, ישנם שיבושים רבים. מומלץ להשתמש במצבי חיפוש מתקדמים: וריאנטים לחילופים נפוצים בין אותיות, עמום לחילופים חופשיים, וחיפוש בסגנון פרויקט השו׳ת או ביטוי רגולרי לשליטה מדויקת יותר."
+                    "text": "התעתיקים מופקים אוטומטית על ידי פרויקט MiDRASH (בתמיכת האיחוד האירופי) — מנוע קריאת-מכונה שאומן על כתבי יד עבריים מימי הביניים. כיוון שמדובר בתעתוק ממוחשב, ישנם שיבושים רבים. מומלץ להשתמש במצבי חיפוש מתקדמים: וריאנטים לחילופים נפוצים בין אותיות, מקורב לחילופים חופשיים, וחיפוש בסגנון פרויקט השו׳ת או ביטוי רגולרי לשליטה מדויקת יותר."
                 }
             },
             {

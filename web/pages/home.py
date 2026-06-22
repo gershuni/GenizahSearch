@@ -613,7 +613,7 @@ def create_page():
     ניתן לחפש חופשי בטקסט המלא של הקורפוס, לדפדף בקטעים יחד עם הצילומים,
     לזהות מקבילות לטקסטים ידועים ולמצוא צירופים חדשים בין קטעים, ולשתף תגליות עם קהילת החוקרים.
     התעתיקים האוטומטיים כוללים שיבושים רבים, ועל כן מומלץ להשתמש בחיפוש מתקדם בצורות שונות:
-    וריאנטים לחילופים נפוצים בין אותיות, עמום לחילופים חופשיים,
+    וריאנטים לחילופים נפוצים בין אותיות, מקורב לחילופים חופשיים,
     וחיפוש מתקדם בעזרת מצב סגנון פרויקט השו&quot;ת או ביטוי רגולרי.
   </p>
 </div>
@@ -663,7 +663,7 @@ def create_page():
   </details>
   <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">מהיכן באים התעתיקים?</summary>
-    <p style="margin: 0.5rem 0 0 0;">התעתיקים מופקים אוטומטית על ידי <a href="https://www.midrash.eu" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט MiDRASH</a> (בתמיכת האיחוד האירופי), מנוע קריאת-מכונה שאומן על כתבי יד עבריים מימי הביניים. כיוון שמדובר בתעתוק ממוחשב, ישנם שיבושים רבים. מומלץ להשתמש במצבי חיפוש מתקדמים: וריאנטים לחילופים נפוצים בין אותיות, עמום לחילופים חופשיים, וחיפוש בסגנון פרויקט השו"ת או ביטוי רגולרי לשליטה מדויקת יותר.</p>
+    <p style="margin: 0.5rem 0 0 0;">התעתיקים מופקים אוטומטית על ידי <a href="https://www.midrash.eu" target="_blank" rel="noopener noreferrer" style="color: var(--primary-700); text-decoration: underline;">פרויקט MiDRASH</a> (בתמיכת האיחוד האירופי), מנוע קריאת-מכונה שאומן על כתבי יד עבריים מימי הביניים. כיוון שמדובר בתעתוק ממוחשב, ישנם שיבושים רבים. מומלץ להשתמש במצבי חיפוש מתקדמים: וריאנטים לחילופים נפוצים בין אותיות, מקורב לחילופים חופשיים, וחיפוש בסגנון פרויקט השו"ת או ביטוי רגולרי לשליטה מדויקת יותר.</p>
   </details>
   <details style="margin-bottom: 0.5rem; padding: 0.5rem 0.75rem; border: 1px solid var(--border-light); border-radius: 6px;">
     <summary style="cursor: pointer; font-weight: 600; color: var(--text-primary);">מהיכן באים התמונות והמידע הקטלוגי?</summary>

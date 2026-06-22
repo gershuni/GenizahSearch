@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 8.1.0
+# Dicta Genizah Search Pro 8.2.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -7,6 +7,30 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 > **Web Access:** [genizahsearch.com](https://genizahsearch.com) (אתר הגניזה של דיקטה) - Search, browse, and collaborate from any browser
 
 ---
+
+## What's New in Version 8.2.0?
+
+### v8.2.0: Web Joins Lab, FGP Transcriptions & Hebrew Search
+
+This release brings the **Joins Lab to the web**, adds **Friedberg Genizah Project
+(FGP) transcriptions** as a selectable source on both platforms, and makes **Hebrew
+search** find words it used to miss.
+
+- **Joins Lab on the web** — Hunt **physical joins** from any browser at `/joins-lab`:
+  pin an anchor fragment, build a line-by-line query for the joining fragment, and
+  triage candidates **Yes / Maybe / No** — with side-by-side **Compare**, built-in
+  **Visual Similarity**, and one-click "add as join", send-to-Puzzle or save-to-list.
+  No login required; bilingual with full RTL.
+- **FGP transcriptions** — Friedberg Genizah Project transcriptions now appear as a
+  selectable source in the version chooser, each shown on its matching manuscript image.
+- **Smarter Hebrew search** — Words attached to punctuation (e.g. `בסגן,`) or written
+  with a Judeo-Arabic dot above a letter are now retrievable: searching `בסגן` finds
+  `בסגן,`, and searching `צמאן` — or with a geresh, `צ'מאן` — now finds the corpus
+  spelling that carries a dot above the צ. *(On the desktop, My Library picks this up
+  automatically; for the Genizah corpus, rebuild the index via Settings → Build /
+  Rebuild Index.)*
+- **Responsa search over My Library (desktop)** — The `#`, `*`, `%` and `(א/ב)`
+  operators now work over your own indexed documents.
 
 ## What's New in Version 8.1.0?
 
@@ -410,7 +434,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V8.1.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V8.2.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

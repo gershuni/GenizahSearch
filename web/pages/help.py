@@ -51,6 +51,7 @@ def _create_english_content():
                 ('exclude-manuscripts', 'Exclude Known Manuscripts'),
                 ('translations', 'Catalog & Metadata Translations'),
                 ('parallels', 'Parallels Search'),
+                ('joins-lab', 'Joins Lab'),
                 ('pgp', 'Princeton Geniza Project (PGP) Data'),
                 ('reading-desk', 'Reading Desk'),
                 ('browse', 'Browse Manuscript'),
@@ -61,8 +62,8 @@ def _create_english_content():
                 ('my-library', 'My Library — Local Documents'),
             ]
             if WEB_PUZZLE_ENABLED:
-                toc_items.insert(8, ('puzzle', 'Fragment Puzzle'))
-                toc_items.insert(9, ('community-publish', 'Community Publishing'))
+                toc_items.insert(9, ('puzzle', 'Fragment Puzzle'))
+                toc_items.insert(10, ('community-publish', 'Community Publishing'))
             for anchor, title in toc_items:
                 if not WEB_PUZZLE_ENABLED and anchor in {'puzzle', 'community-publish'}:
                     continue
@@ -375,6 +376,42 @@ Results are **grouped by manuscript** and sorted by score:
 Click on a result to expand and see your source chunk alongside the matching manuscript text, with matching words **highlighted** for easy comparison.
         ''').style('color: var(--text-secondary);')
 
+    # === Joins Lab ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-joins-lab"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('join_inner').classes('text-2xl text-primary')
+            h2('Joins Lab', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+The **Joins Lab** is a dedicated workspace for hunting **physical joins** — fragments once part of the same leaf or codex, now scattered across collections. You pin one fragment as the **anchor**, then search for and triage candidate fragments against it, side by side. It works **without logging in** (saving a join or adding to a list does require login).
+
+**Opening the Joins Lab** — the **Joins Lab** link in the sidebar (or go directly to `/joins-lab`); the **Find joins** button on **Browse**; or from any search result (opens the Lab anchored on that page).
+
+**The anchor pane** — the pinned fragment: its shelfmark, brief metadata, and page image. Use the folio arrows to page through its images and zoom in to inspect the script. **Known joins** (yours or the community's) appear in a collapsible section.
+
+**Building a query** — the default search mode is **Responsa-style line search**, best suited for joins since you describe the joining fragment line by line. Other modes (exact, variants, fuzzy) are available from the search-type selector. Build a line-by-line query for the text you expect on the joining fragment:
+
+- **+ Add Line** — add another manuscript line, and set how many lines to skip before it (0 = the very next line).
+- **+ or** — add an alternative word that may appear instead on the same line.
+- **Line options (⚙)** — per-line modifiers: negation (−), plene/defective spelling (%), prefixes (`#_`), suffixes (`_#`), wildcards (`*`), and "starts line" / "ends line" position anchors.
+- **Search options** — global toggles: spelling variants, Judeo-Arabic, flexible spacing, and bidirectional matching.
+- **Position** — restrict a line to the start or end of the page text.
+- **Other side of the leaf (p ±1)** — also require or include text on the adjacent page; **Narrow** keeps only candidates whose adjacent page also matches, **Widen** adds adjacent pages as extra candidates.
+- **Visual Similarity** — show only fragments that look alike, optionally combined with a text query.
+
+> ⚠ **About visual similarity:** the visual-similarity index covers only about **half of the Genizah**, and the algorithm is not conclusive — so it can miss real matches. **Do not assume that a fragment absent from the visual-similarity results is not a join.** Use it to surface candidates, never to rule a fragment out.
+
+Click **Find Candidates** to run the query.
+
+> 💡 **Tip — torn phrases & verses:** A tear often splits a known phrase or verse between the two joining fragments. Search for the *missing* half and pin it to the torn edge:
+> - If a line on the anchor **starts** with the second half of a phrase (the first half is torn away), search for that **first half** with the **"ends line"** modifier — on the join it will sit at a line's end.
+> - If a line **ends** with the first half of a phrase, search for the **second half** with **"starts line"**.
+> - You can also set **Position** to **start of text** / **end of text** so only candidates with that text at the page's torn edge are returned.
+
+**Triaging candidates** — candidates appear as cards with their image and metadata. For each one you can mark **Yes** / **Maybe** / **No** (then filter by triage state); **Browse** it; **Compare** it side by side with the anchor (each pane zooms and pages independently); **Re-anchor** on it; **Add as Join** (login) to record a confirmed join; **Add to Puzzle** to send it with the anchor to the Fragment Puzzle; or **Add to list** (login). A **⚠ size mismatch** note flags candidates whose physical dimensions differ from the anchor's. Use the filter bar to narrow by shelfmark, text, title, material, dimensions or triage state, and switch to a compact **Table view** for many results. Your anchor, query, candidates and triage **survive a page refresh**; **Clear** resets them.
+        ''').style('color: var(--text-secondary);')
+
     # === PGP Information ===
     with ui.card().classes('w-full p-6'):
         ui.element('a').props(f'name="help-pgp"')
@@ -678,6 +715,7 @@ def _create_hebrew_content():
                 ('search-within', 'חיפוש בתוך תוצאות'),
                 ('translations', 'תרגומי קטלוג ומטא-נתונים'),
                 ('parallels', 'חיפוש מקבילות'),
+                ('joins-lab', 'מעבדת צירופים'),
                 ('pgp', 'מידע מפרויקט הגניזה של פרינסטון (PGP)'),
                 ('reading-desk', 'שולחן קריאה (Reading Desk)'),
                 ('browse', 'עיון בכתב יד'),
@@ -734,7 +772,7 @@ def _create_hebrew_content():
             ('מדויק (=)', 'מוצא רק את המילה או את רצף המילים בדיוק כפי שנכתבו. לחיפוש עם פערים בין המילים יש למלא את התיבה "מרווח" במספר הרצוי.'),
             ('וריאנטים (?)', 'מתחשב בחילופי אותיות נפוצים בטקסטים אלו (למשל: ד/ר, ה/ח, ו/י). כברירת מחדל **מחוון** (סליידר) קובע את מידת הגמישות — הגדלת הערך מוסיפה עוד זוגות אותיות (מחילופים מצומצמים, דרך זוגות כמו ק/כ ו-ט/ת, ועד גמישות מרבית), ומרחיבה את כמות התוצאות אך איטית ורועשת יותר. פקד **מספר שינויים** נפרד קובע את מספר השינויים למילה (×1 מחמיר, ×2 מאוזן — ברירת המחדל, ×3 מקל). בהגדרות הכלליות ניתן להחליף את בחירת הרמה מהמחוון לכפתורי קביעה מראש (בסיסי, מורחב, מרבי).'),
             ('\U0001F195 פרויקט השו"ת (R)', 'חיפוש בתחביר בסגנון החיפוש המתקדם של פרויקט השו"ת של אוניברסיטת בר-אילן, עם הרחבת תחיליות/סיומות, תווים כלליים, חלופות כתיב ומרווחים. כולל גם בונה שאילתות טבלאי נוח וגמיש. מוכר למשתמשי פרויקט השו"ת; קל ללמוד גם למי שלא מכיר. ראו [חיפוש בסגנון פרויקט השו"ת](#help-responsa) להלן.'),
-            ('עמום (~)', 'משתמש ב[מרחק לווינשטיין](https://he.wikipedia.org/wiki/%D7%9E%D7%A8%D7%97%D7%A7_%D7%9C%D7%95%D7%99%D7%A0%D7%A9%D7%98%D7%99%D7%99%D7%9F) למציאת מילים דומות גם עם שגיאות פענוח.'),
+            ('מקורב (~)', 'משתמש ב[מרחק לווינשטיין](https://he.wikipedia.org/wiki/%D7%9E%D7%A8%D7%97%D7%A7_%D7%9C%D7%95%D7%99%D7%A0%D7%A9%D7%98%D7%99%D7%99%D7%9F) למציאת מילים דומות גם עם שגיאות פענוח.'),
             ('ביטוי רגולרי (/)', 'חיפוש מתקדם למשתמשים מנוסים. דוגמה: \\bא[א-ת]{3}\\b מוצא מילים בנות 4 אותיות המתחילות באל"ף. תוכלו להיעזר במנוע הבינה המלאכותית המועדף עליכם כדי לבנות ביטוי רגולרי המתאים לצרכיכם.'),
             ('כותרת ($)', 'חיפוש בתוך כותרות הקטלוג של חיבורים.'),
             ('מספר מדף (#)', 'חיפוש מהיר של מספרי מדף (למשל: "T-S NS 13.15").'),
@@ -954,7 +992,7 @@ def _create_hebrew_content():
         h3('פרמטרים חשובים', classes='text-lg font-semibold mb-2', style='color: var(--text-primary); direction: rtl; text-align: right;')
         ui.markdown('''
 - **גודל מקטע:** מספר המילים בכל יחידת חיפוש. ערך נמוך (2–3) יגרור חיפוש איטי ותוצאות לא רלוונטיות רבות; ערך גבוה (10+) עלול להחמיץ התאמות אמיתיות.
-- **מצב חיפוש:** כמו בחיפוש רגיל — מדויק, וריאנטים, או עמום.
+- **מצב חיפוש:** כמו בחיפוש רגיל — מדויק, וריאנטים, או מקורב.
 - **רמת וריאנטים / מספר שינויים:** שליטה בגמישות חילופי האותיות (ראו מצבי חיפוש לעיל).
 - **סריקה עמוקה:** רלוונטי למצב מעבדה. סריקה מעמיקה ויסודית יותר, איטית משמעותית אך מומלצת למציאת ביטויים נדירים.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;').classes('mb-4')
@@ -995,6 +1033,42 @@ def _create_hebrew_content():
 - **ציון ממוצע:** ממוצע הציונים של כל ההתאמות בכתב היד
 
 לחצו על תוצאה כדי להרחיב ולראות את המקטע מהמקור שלכם לצד הטקסט המקביל מכתב יד הגניזה, עם מילים תואמות **מודגשות** להשוואה קלה.
+        ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
+
+    # === Joins Lab (מעבדת צירופים) ===
+    with ui.card().classes('w-full p-6'):
+        ui.element('a').props(f'name="help-joins-lab"')
+        with ui.row().classes('items-center gap-3 mb-4'):
+            ui.icon('join_inner').classes('text-2xl text-primary')
+            h2('מעבדת צירופים', classes='text-xl font-bold', style='color: var(--text-primary);')
+
+        ui.markdown('''
+**מעבדת הצירופים** היא סביבת עבודה ייעודית לאיתור **צירופים פיזיים** — קטעים שהיו בעבר חלק מאותו דף או כרך, וכיום מפוזרים בין אוספים שונים. אתם מקבעים קטע אחד כ**עוגן**, ואז מחפשים קטעים מועמדים וממיינים אותם מולו, זה לצד זה. המעבדה פועלת **בלי צורך בהתחברות** (שמירת צירוף או הוספה לרשימה כן דורשות התחברות).
+
+**כיצד לפתוח את מעבדת הצירופים** — קישור **מעבדת צירופים** בתפריט הצד (או מעבר ישיר אל `/joins-lab`); כפתור **מצא צירופים** בעמוד **עיון**; או מכל תוצאת חיפוש (נפתחת מעוגנת על אותו עמוד).
+
+**פאנל העוגן** — הקטע המקובע: סימן המדף שלו, מטא-דאטה תמציתית, ותמונת העמוד. השתמשו בחצי הדפדוף למעבר בין תמונות העוגן, והגדילו כדי לבחון את הכתב. **צירופים ידועים** (שלכם או של הקהילה) מופיעים בקטע ניתן-לקיפול.
+
+**בניית שאילתה** — מצב החיפוש שמוגדר כברירת מחדל הוא **חיפוש שורות בסגנון פרויקט השו״ת**, המתאים ביותר לאיתור צירופים, שכן הוא מאפשר לתאר את הקטע המצורף שורה אחר שורה. מצבי חיפוש נוספים (מדויק, וריאנטים, מקורב) זמינים בבורר סוג החיפוש. בנו שאילתה שורה-אחר-שורה לטקסט הצפוי בקטע המצורף:
+
+- **+ הוסף שורה** — הוסיפו שורת כתב יד נוספת, וקבעו כמה שורות לדלג לפניה (0 = השורה הבאה מיד).
+- **+ או** — הוסיפו מילה חלופית שעשויה להופיע במקומה באותה שורה.
+- **אפשרויות שורה (⚙)** — שינויים לכל שורה: שלילה (−), כתיב מלא/חסר (%), תחיליות (`#_`), סופיות (`_#`), תווים כלליים (`*`), ועוגני מיקום "תחילת שורה" / "סוף שורה".
+- **אפשרויות חיפוש** — מתגים גלובליים: שינויי כתיב, יהודית-ערבית, ריווח גמיש, והתאמה דו-כיוונית.
+- **מיקום** — הגבילו שורה לתחילת טקסט העמוד או לסופו.
+- **הצד השני של הדף (p ±1)** — דרשו או כללו גם טקסט בעמוד שמנגד; **צמצם** משאיר רק מועמדים שגם העמוד הסמוך שלהם תואם, **הרחב** מוסיף עמודים סמוכים כמועמדים נוספים.
+- **דמיון חזותי** — הציגו רק קטעים הדומים חזותית, אפשר בשילוב עם שאילתת טקסט.
+
+> ⚠ **על אודות הדמיון החזותי:** מאגר הדמיון החזותי מכסה כיום רק כמחצית מן הגניזה, והאלגוריתם אינו חד-משמעי — ולכן עלול להחמיץ התאמות אמיתיות. **אין להסיק שקטע שאינו מופיע בתוצאות הדמיון החזותי אינו צירוף.** השתמשו בו כדי להעלות מועמדים, ולעולם לא כדי לפסול קטע.
+
+לחצו **מצא מועמדים** כדי להריץ את השאילתה.
+
+> 💡 **טיפ — ביטויים ופסוקים קרועים:** קרע מפצל לעיתים ביטוי או פסוק ידוע בין שני הקטעים המצורפים. חפשו את המחצית ה*חסרה* וקבעו אותה אל קצה הקרע:
+> - אם שורה בעוגן **מתחילה** במחצית השנייה של ביטוי (המחצית הראשונה נקרעה), חפשו את **המחצית הראשונה** עם המתג **"סוף שורה"** — בקטע המצורף היא תופיע בסוף שורה.
+> - אם שורה **מסתיימת** במחצית הראשונה של ביטוי, חפשו את **המחצית השנייה** עם **"תחילת שורה"**.
+> - אפשר גם להגדיר את **המיקום** ל**תחילת טקסט** / **סוף טקסט**, כדי לקבל רק מועמדים שבהם הטקסט הזה נמצא בקצה הקרוע של העמוד.
+
+**מיון מועמדים** — המועמדים מופיעים ככרטיסים עם תמונה ומטא-דאטה. עבור כל אחד תוכלו לסמן **כן** / **אולי** / **לא** (ואז לסנן לפי מצב המיון); **עיון** בו; **השווה** אותו זה לצד זה עם העוגן (כל פאנל מתקרב ומדפדף באופן עצמאי); **עגן מחדש** עליו; **הוסף כצירוף** (דורש התחברות) לתיעוד צירוף מאושר; **הוסף לפאזל** לשליחתו עם העוגן אל פאזל הקטעים; או **הוסף לרשימה** (דורש התחברות). הערת **⚠ אי-התאמת גודל** מסמנת מועמדים שמידותיהם הפיזיות שונות מן העוגן. השתמשו בסרגל הסינון לצמצום לפי סימן מדף, טקסט, כותרת, חומר, מידות או מצב מיון, ועברו ל**תצוגת טבלה** קומפקטית כשיש הרבה תוצאות. העוגן, השאילתה, המועמדים ומצב המיון **נשמרים גם לאחר רענון הדף**; **נקה** מאפס אותם.
         ''', extras=['rtl']).style('color: var(--text-secondary); direction: rtl; text-align: right;')
 
     # === PGP Information ===

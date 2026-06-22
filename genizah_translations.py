@@ -144,8 +144,8 @@ TRANSLATIONS = {
     "Extended": "מורחב",
     "Maximum (???)": "מרבי (???)",
     "Maximum": "מרבי",
-    "Fuzzy (~)": "עמום (~)",
-    "Fuzzy": "עמום",
+    "Fuzzy (~)": "מקורב (~)",
+    "Fuzzy": "מקורב",
     "Regex": "ביטוי רגולרי",
     "Regex (/)": "ביטוי רגולרי (/)",
     "Title ($)": "כותרת ($)",
@@ -167,8 +167,8 @@ TRANSLATIONS = {
     "Variant Level": "דרגת וריאנטים",
     "Current level": "דרגה נוכחית",
     "Max changes:": "שינויים:",
-    "Fuzzy search": "חיפוש עמום",
-    "Fuzzy search: Levenshtein distance": "חיפוש עמום: מרחק לווינשטיין",
+    "Fuzzy search": "חיפוש מקורב",
+    "Fuzzy search: Levenshtein distance": "חיפוש מקורב: מרחק לווינשטיין",
     "Regex: Use AI Assistant for complex patterns": "ביטוי רגולרי: השתמש בעוזר ה-AI לתבניות מורכבות",
     "Search in Title metadata": "חיפוש בכותרות (Metadata)",
     "Search in Shelfmark metadata": "חיפוש במספרי מדף (Metadata)",
@@ -687,7 +687,7 @@ TRANSLATIONS = {
     <li><b>וריאנטים (?):</b> שגיאות OCR בסיסיות.</li>
     <li><b>מורחב (??):</b> וריאנטים נוספים.</li>
     <li><b>מקסימלי (???):</b> חילופים אגרסיביים (השתמש בזהירות).</li>
-    <li><b>עמום (~):</b> מרחק לווינשטיין (1-2 שגיאות).</li>
+    <li><b>מקורב (~):</b> מרחק לווינשטיין (1-2 שגיאות).</li>
     <li><b>ביטוי רגולרי:</b> תבניות מורכבות (היעזר ב-AI).</li>
     <li><b>כותרת:</b> חיפוש בכותרות החיבורים.</li>
     <li><b>מספר מדף:</b> חיפוש במספרי מדף.</li>
@@ -2458,7 +2458,7 @@ TRANSLATIONS = {
     "Words on this side (space = sequence, a/b = alternatives)":
         "מילים בצד זה (רווח = רצף, א/ב = חלופות)",
     "Fuzzy search is slower and uses more server resources.":
-        "חיפוש עמום איטי יותר ועמוס יותר על השרת.",
+        "חיפוש מקורב איטי יותר ועמוס יותר על השרת.",
     "↕ gap": "↕ מרווח",
     # New Search (reset) button + mode/syntax info popup (Phase 118 UAT)
     "New Search — clear the query and results (keeps the anchor)":
@@ -2475,7 +2475,7 @@ TRANSLATIONS = {
         "וריאנטים — התאמה גם לווריאנטי כתיב ידועים של כל מילה.",
     "Fuzzy — approximate matching: finds words within 1–2 letter changes "
     "(typos, missing or swapped letters), independent of the variant tables. Slowest.":
-        "עמום — התאמה מקורבת: מאתר מילים במרחק עריכה של 1–2 אותיות "
+        "מקורב — מאתר מילים במרחק עריכה של 1–2 אותיות "
         "(שגיאות כתיב, אותיות חסרות או מוחלפות), ללא תלות בטבלאות הווריאנטים. האיטי ביותר.",
     "You can type Responsa operators directly in a word box (space = sequence, "
     "a/b = alternatives); the gear menu adds the #, %, *, − modifiers.":
@@ -2493,8 +2493,8 @@ TRANSLATIONS = {
         "ומשַני-מילה. הפעילו \"וריאנטים\" כדי להתאים גם לווריאנטי כתיב.",
     "Exact / Variants / Fuzzy / Regex — a single free-text line that searches like the "
     "main search bar (Fuzzy = approximate, within 1–2 letter changes; Regex = a regular expression).":
-        "מדויק / וריאנטים / עמום / ביטוי רגולרי — שורת טקסט חופשי אחת שמחפשת כמו שורת החיפוש "
-        "הראשית (עמום = מקורב, במרחק 1–2 אותיות; ביטוי רגולרי = regex).",
+        "מדויק / וריאנטים / מקורב / ביטוי רגולרי — שורת טקסט חופשי אחת שמחפשת כמו שורת החיפוש "
+        "הראשית (מקורב = במרחק 1–2 אותיות; ביטוי רגולרי = regex).",
     "Search in Responsa syntax": "חיפוש בתחביר השו״ת",
     "Responsa syntax": "תחביר השו״ת",
     "Space separates words; click the gear icon for the same options per word.":
@@ -2608,6 +2608,13 @@ TRANSLATIONS = {
     "Use the Claude skill to intelligently search for phrases or parallels and surface images and information — you can also point other AI engines, including local ones, at the same skill. See Help → Public API & AI Tools.": "השתמשו בסקיל של קלוד כדי לחפש באופן חכם ביטויים או מקבילות ולהציג תמונות ומידע; תוכלו להפנות גם מנועי בינה מלאכותית מקומיים אחרים לסקיל זה. ראו עזרה ← ממשק API וכלי בינה מלאכותית.",
     "A public HTTP/JSON API (POST /api/search, POST /api/parallels, GET /api/browse) gives programmatic access to the corpus, documented by an OpenAPI schema.": "ממשק HTTP/JSON ציבורי (POST /api/search, POST /api/parallels, GET /api/browse) מספק גישה תכנותית לקורפוס, עם סכמת OpenAPI.",
     "Data collection — with your consent, the app can collect general usage data and crash reports, without compromising the privacy of your searches or your personal data, to help improve the app.": "איסוף נתונים — בהסכמתכם, ניתן לאפשר לתוכנה לאסוף נתונים כלליים על דרך השימוש שלכם ועל נתוני קריסה, בלי לפגוע בפרטיות החיפושים שלכם או המידע האישי שלכם, לצורך שיפור התוכנה.",
+    # v8.2.0 — Web Joins Lab, FGP transcriptions & Hebrew/Judeo-Arabic search
+    "New features: Friedberg (FGP) transcriptions are now available; search now finds Judeo-Arabic letters with an upper dot, without typing the dot; and the Joins Lab is now on the web too — give it a try!": "תכונות חדשות: תעתיקי פרידברג (FGP) זמינים כעת; החיפוש שופר ומאפשר מציאה של אותיות בערבית-יהודית עם נקודה עליונה, בלי להקליד אותה; ומעבדת צירופים זמינה גם באתר - מוזמנים לנסות אותה!",
+    "New features: Friedberg (FGP) transcriptions are now available in the app; and search is improved — it now finds Judeo-Arabic letters with an upper dot (without typing it) and words attached to punctuation, including searches in My Library.": "תכונות חדשות: תעתיקי פרידברג (FGP) זמינים כעת באפליקציה; והחיפוש שופר - מוצא כעת אותיות בערבית-יהודית עם נקודה עליונה (בלי להקליד אותה) ומילים הצמודות לסימני פיסוק, גם בחיפוש בספרייה שלי.",
+    "Friedberg Genizah Project (FGP) transcriptions are now available as a selectable source in the version chooser, shown on the matching manuscript image.": "תעתיקי פרויקט הגניזה של פרידברג (FGP) זמינים כעת כמקור נבחר בבורר הגרסאות, ומוצגים על גבי תמונת כתב היד המתאימה.",
+    "Search is improved: it now finds words attached to punctuation (searching \"בסגן\" also finds \"בסגן,\") and Judeo-Arabic letters written with an upper dot (without typing the dot). In My Library this works automatically — the index rebuilds itself.": "החיפוש שופר: מאתר כעת מילים הצמודות לסימני פיסוק (חיפוש \"בסגן\" מאתר גם \"בסגן,\") ואותיות בערבית-יהודית עם נקודה עליונה (בלי להקליד אותה). בספרייה שלי השיפור פועל אוטומטית — האינדקס נבנה מחדש מעצמו.",
+    "Recommended: to enjoy the improved search on the Genizah corpus too — especially for Judeo-Arabic texts — rebuild your Genizah index from Settings, via \"Build / Rebuild Index\". It's a one-time action, and highly recommended.": "מומלץ: כדי ליהנות מהחיפוש המשופר גם בקורפוס הגניזה — ובמיוחד בטקסטים בערבית-יהודית — בנו מחדש את אינדקס הגניזה דרך ההגדרות, בכפתור \"בנה / בנייה מחדש של אינדקס\". זוהי פעולה חד-פעמית, ומומלצת בחום.",
+    "Responsa search operators — # (prefixes/suffixes), * (wildcard), % (plene/defective) and (א/ב) alternation — now work when searching My Library.": "אופרטורים של חיפוש שו״ת — # (תחיליות/סופיות), * (תו כללי), % (כתיב מלא/חסר) וחלופות (א/ב) — פועלים כעת גם בחיפוש בספרייה שלי.",
     "v7.15: PDF page images and Hebrew text fixes in My Library (desktop)": "גרסה 7.15: תמונות עמודי PDF ותיקוני טקסט עברית ב\"הספרייה שלי\" (אפליקציית שולחן עבודה)",
     "v7.15: PDF page images in My Library, Hebrew text fixes, and a new Re-index All button": "גרסה 7.15: תמונות עמודי PDF ב\"הספרייה שלי\", תיקוני טקסט עברית, וכפתור 'אנדקס מחדש הכל'",
     "PDF page image in My Library: a LOCAL PDF search result now shows the original PDF page alongside the extracted text. Navigation between results and pages syncs the image automatically.": "תמונות עמודי PDF ב\"הספרייה שלי\" — תוצאת חיפוש בקובץ PDF מקומי מציגה כעת את עמוד ה-PDF המקורי לצד הטקסט שחולץ. הניווט בין תוצאות ובין עמודים מסנכרן את התמונה אוטומטית.",

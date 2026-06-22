@@ -279,7 +279,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New: Experiment with GenizahSearch using AI tools and the public API."))
+        self.lbl_msg.setText(tr("New features: Friedberg (FGP) transcriptions are now available in the app; and search is improved — it now finds Judeo-Arabic letters with an upper dot (without typing it) and words attached to punctuation, including searches in My Library."))
         self.show()
 
     def on_learn_more(self):
@@ -297,7 +297,10 @@ class WhatsNewDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(tr("New Features!"))
         self.setModal(True)
-        self.setFixedSize(500, 440)
+        # Resizable + scrollable body (set below) so the four What's New bullets,
+        # some of them long, never clip on smaller displays.
+        self.setMinimumSize(520, 480)
+        self.resize(520, 600)
         self.setWindowFlags(self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint)
         if CURRENT_LANG == 'he':
             self.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
@@ -313,9 +316,10 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("Use the Claude skill to intelligently search for phrases or parallels and surface images and information \u2014 you can also point other AI engines, including local ones, at the same skill. See Help \u2192 Public API & AI Tools."),
-            tr("A public HTTP/JSON API (POST /api/search, POST /api/parallels, GET /api/browse) gives programmatic access to the corpus, documented by an OpenAPI schema."),
-            tr("Data collection \u2014 with your consent, the app can collect general usage data and crash reports, without compromising the privacy of your searches or your personal data, to help improve the app."),
+            tr("Friedberg Genizah Project (FGP) transcriptions are now available as a selectable source in the version chooser, shown on the matching manuscript image."),
+            tr("Search is improved: it now finds words attached to punctuation (searching \"\u05d1\u05e1\u05d2\u05df\" also finds \"\u05d1\u05e1\u05d2\u05df,\") and Judeo-Arabic letters written with an upper dot (without typing the dot). In My Library this works automatically \u2014 the index rebuilds itself."),
+            tr("Recommended: to enjoy the improved search on the Genizah corpus too \u2014 especially for Judeo-Arabic texts \u2014 rebuild your Genizah index from Settings, via \"Build / Rebuild Index\". It's a one-time action, and highly recommended."),
+            tr("Responsa search operators \u2014 # (prefixes/suffixes), * (wildcard), % (plene/defective) and (\u05d0/\u05d1) alternation \u2014 now work when searching My Library."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)
@@ -336,9 +340,13 @@ class WhatsNewDialog(QDialog):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop
             )
         features_label.setText(features_text)
-        layout.addWidget(features_label)
-
-        layout.addStretch()
+        # Wrap in a scroll area so the four (sometimes long) bullets never clip on
+        # smaller displays; the dialog is resizable rather than fixed-size.
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(features_label)
+        layout.addWidget(scroll, 1)
 
         btn_ok = QPushButton(tr("Got it!"))
         btn_ok.setStyleSheet("background-color: #10b981; color: white; font-weight: bold; border-radius: 4px; padding: 8px 24px; font-size: 14px;")

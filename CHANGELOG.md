@@ -4,9 +4,68 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Unreleased]
+## [8.2.0] - 2026-06-22 — Web Joins Lab, FGP Transcriptions & Hebrew Search
 
-### Fixed (desktop)
+This release brings the **Joins Lab to the web** at parity with the desktop
+workbench, adds **Friedberg Genizah Project (FGP) transcriptions** as a selectable
+source on both platforms, and substantially **improves Hebrew search retrieval** so
+that words attached to punctuation or carrying diacritics are findable. The web
+platform is **Dicta Genizah Search**; the desktop app is **Dicta Genizah Search Pro**.
+
+### New Features
+
+- **Web Joins Lab (web)** — The desktop Joins Lab is now on the web at `/joins-lab`:
+  a human-in-the-loop workbench for hunting **physical joins** (fragments once part of
+  the same leaf or codex, now scattered across collections). Pin a fragment as the
+  **anchor** (image + numbered transcription), build a line-by-line query for the text
+  you expect on the joining fragment — with per-line modifiers (negation, plene/
+  defective, prefixes/suffixes, wildcards, line-position anchors) and global
+  spelling-variant / Judeo-Arabic / flexible-spacing / bidirectional toggles — and
+  triage candidates **Yes / Maybe / No**. Candidates can be browsed, **compared side by
+  side** with the anchor (per-pane zoom + synchronized verdicts), re-anchored, added as
+  a confirmed join, sent to the **Fragment Puzzle**, or saved to a list. Built-in
+  **Visual Similarity** surfaces look-alikes. Open it from the sidebar, the **Find
+  joins** button on Browse, or any search result. Works without logging in; bilingual
+  EN/HE with full RTL; your builder, triage and view state survive a page refresh.
+- **FGP transcriptions (web + desktop)** — Transcriptions from the **Friedberg Genizah
+  Project (FGP)** are now available as a distinct, selectable source in the version
+  chooser, alongside the existing editions. Each transcription is shown on its own
+  manuscript image (aligned by folio label) and rendered faithfully from FGP's
+  structured XML (exact spacing and sigla preserved). On by default; a graceful no-op
+  where the FGP data is absent.
+
+### Improvements
+
+- **Hebrew search retrieval — punctuation- and diacritic-attached words are now
+  findable (web + desktop)** — Previously, searching `בסגן` would not find a page whose
+  text was `בסגן,` (the word immediately followed by a comma), because the search index
+  split text only on spaces and indexed the word *with* its trailing punctuation. The
+  index now tokenizes Hebrew correctly (splitting on commas, periods, colons,
+  parentheses, slashes and brackets while keeping letters, marks, apostrophes and
+  bracketed forms together), so `בסגן` finds `בסגן,`. In addition, a diacritic-folded
+  search field means a Judeo-Arabic word written with an upper dot is found whether you
+  type the plain letters or a geresh — e.g. searching `צמאן` or `צ'מאן` now finds the
+  corpus spelling that carries a dot above the צ. Displayed text is unchanged (dots and
+  brackets still visible). Applies to the main Genizah search and (desktop) My Library.
+  *(Requires the search index rebuilt with the new schema: the **web** Genizah index is
+  rebuilt on deploy; the **desktop My Library** rebuilds itself automatically; the
+  **desktop Genizah** index is rebuilt on demand via **Settings → Build / Rebuild
+  Index** — recommended, mainly for Judeo-Arabic.)*
+- **Responsa operators over My Library (desktop)** — Responsa-style operators now work
+  when searching your **Local Library** ("My Library"): `#` (grammatical prefix/suffix),
+  `*` (wildcard), `%` (plene/defective spelling) and inline alternation `(א/ב)`.
+  Previously these returned nothing over local documents and only worked against the
+  Genizah corpus. *(The `|` line-break operator over local documents remains a
+  Genizah-only feature and falls back gracefully.)*
+
+### Bug Fixes
+
+- **My Library re-index no longer crashes after the search-quality upgrade (desktop)** —
+  Rebuilding My Library (or letting it auto-rebuild after the Hebrew-search schema
+  change) could abort with `LOCAL index handle is gone — restart the app or use Reset My
+  Library`. The migration path tried to reopen the old index under the new schema before
+  rebuilding; it now rebuilds cleanly from the cached document text. Your documents are
+  preserved across the rebuild.
 - **Fragment Puzzle crashed on open under a per-machine install.** Opening the Fragment Puzzle (e.g. from the Join Lab) raised an uncaught `PermissionError` on the main thread when the app was installed per-machine (under `Program Files`, not writable for a standard user). The puzzle's saved-document list calls `get_puzzle_service()`, whose first use created the `joins_data/` SQLite sidecar dir under an auto-detected "project root" that, in the frozen build, resolves to the read-only install dir — and that directory creation was not guarded. `joins.db` now falls back to a writable per-user location (`%LOCALAPPDATA%\GenizahSearchPro\joins_data`) when the install dir isn't writable, and the service can no longer crash the caller (it degrades to unavailable). Per-user installs and the web app are unaffected; existing users keep their saved puzzles. Found via the crash telemetry above; Codex-reviewed (APPROVE). `shared/puzzle_service.py`, `tests/test_puzzle_service.py`.
 - **Crash telemetry made actionable in the shipped EXE.** Desktop `desktop_crash` events labeled every crash `exc_module='external'` with a useless line number, because the in-app frame classifier matched traceback frames by `os.path.realpath()` equality against import-time paths — which never match in a frozen PyInstaller build (a frame's `co_filename` is the build host's path; the runtime module lives under `_MEIPASS`). Found in a PostHog review: a real main-thread `PermissionError` opening the Fragment Puzzle on v8.1.0 came through as `PermissionError:external:1116`. The classifier now matches by path segment (`/desktop/`, `/shared/`, plus distinctive top-level module basenames), so crashes report the real module and line (e.g. `PermissionError:puzzle.py:NNN`) and group correctly — identically from source and from the frozen `.exe`. Also closed a cross-platform privacy gap (D-07): `os.path.basename` does not split a Windows `\` path on a POSIX host (Linux CI), which could have leaked a full path into `exc_module` and the fingerprint — a host-independent basename helper now guarantees only a basename ever leaves the process. Reviewed by Codex over two passes (REQUEST CHANGES → APPROVE). `desktop/telemetry.py`, `tests/test_crash_payload.py`.
 
