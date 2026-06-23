@@ -13,6 +13,8 @@ import ast
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from genizah_core import RRF_K
+
 
 # ---------------------------------------------------------------------------
 # Helper — bare SearchEngine instance (no real index required)
@@ -84,7 +86,7 @@ def test_local_hit_after_dedup_survives():
 
     # Simulate the post-dedup merge
     deduped = engine._deduplicate(genizah_hits)  # V0.8 survive
-    merged = engine._rrf_merge(deduped, local_hits, k=60)
+    merged = engine._rrf_merge(deduped, local_hits, k=RRF_K)
 
     uids = [r["uid"] for r in merged]
     assert "l1" in uids, "LOCAL hit merged AFTER _deduplicate must survive"

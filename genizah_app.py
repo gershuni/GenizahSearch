@@ -5354,6 +5354,8 @@ class GenizahGUI(QMainWindow):
     # ── Visual Similarity ────────────────────────────────────────────
 
     _VS_SERVER_URL = "https://genizahsearch.com"
+    # Network timeout (seconds) for the synchronous Visual Similarity server fallback.
+    _VS_SERVER_HTTP_TIMEOUT = 15
 
     def _browse_view_visual_similarity(self):
         """REROUTED (Phase 109, D-10): open the Join Workbench with the Visual source auto-loaded."""
@@ -5944,7 +5946,7 @@ class GenizahGUI(QMainWindow):
         try:
             import urllib.request
             url = f'{self._VS_SERVER_URL}/api/visual_suggestions/{sys_id}?limit=200'
-            with urllib.request.urlopen(url, timeout=15) as resp:
+            with urllib.request.urlopen(url, timeout=self._VS_SERVER_HTTP_TIMEOUT) as resp:
                 data = json.loads(resp.read().decode())
             self._vs_cache.store(sys_id, data)
             return {s['alma_id'] for s in data}
@@ -17829,7 +17831,7 @@ class GenizahGUI(QMainWindow):
                 _lab_corpus_scope = self.corpus_scope_combo.currentData() or "genizah"
             self.search_thread = LabSearchThread(self.lab_engine, query, mode, gap, deep_scan=deep, scan_limit=limit, corpus_scope=_lab_corpus_scope)
         else:
-            text_position = [None, 'start', 'end', 'line_start', 'line_end'][self.text_position_combo.currentIndex()]
+            text_position = self._text_position_from_index(self.text_position_combo.currentIndex())
             # Phase 95 smoke-fix (item 2): read corpus scope from pre-search dropdown.
             _corpus_scope = "genizah"
             if hasattr(self, 'corpus_scope_combo'):
@@ -18391,7 +18393,10 @@ class GenizahGUI(QMainWindow):
             else:
                 _modes = ['literal', 'variants', None, 'fuzzy', 'Regex', 'Title', 'Shelfmark']
                 mode_val = _modes[mode_idx] if mode_idx < len(_modes) else 'literal'
-            text_position = [None, 'start', 'end', 'line_start', 'line_end'][self.text_position_combo.currentIndex()] if hasattr(self, 'text_position_combo') else None
+            text_position = (
+                self._text_position_from_index(self.text_position_combo.currentIndex())
+                if hasattr(self, 'text_position_combo') else None
+            )
             step = RefinementStep(
                 query=self.query_input.text().strip(),
                 mode=mode_val or 'exact',
@@ -19017,10 +19022,34 @@ class GenizahGUI(QMainWindow):
         except Exception:
             pass
 
+    @staticmethod
+    def _local_filter_state_index(states, value):
+        """Return the index of ``value`` in ``states``, or 0 if unknown.
+
+        Guards against a corrupt restored session leaving the LOCAL filter
+        state at a value not in ``states`` (which would otherwise raise
+        ValueError from list.index on the next cycle).
+        """
+        return states.index(value) if value in states else 0
+
+    # Text-position options for the search text_position_combo, in combo order.
+    _TEXT_POSITION_OPTS = [None, 'start', 'end', 'line_start', 'line_end']
+
+    @classmethod
+    def _text_position_from_index(cls, i):
+        """Map a combo index to its text-position option, or None if out of range.
+
+        QComboBox.currentIndex() returns -1 when nothing is selected; a bare
+        list subscript would then silently return the LAST element
+        ('line_end'). Returns None for -1 / any out-of-range index.
+        """
+        opts = cls._TEXT_POSITION_OPTS
+        return opts[i] if 0 <= i < len(opts) else None
+
     def _toggle_local_filter_search(self):
         """Cycle the LOCAL filter state for the Search surface (D-10 / D-39)."""
         states = ['all', 'only_local', 'no_local']
-        cur = states.index(self._local_filter_state_search)
+        cur = self._local_filter_state_index(states, self._local_filter_state_search)
         self._local_filter_state_search = states[(cur + 1) % 3]
         self._update_local_filter_btn_search()
         self._apply_results_table_filters()
@@ -19029,7 +19058,7 @@ class GenizahGUI(QMainWindow):
     def _toggle_local_filter_composition(self):
         """Cycle the LOCAL filter state for the Composition surface (D-10 / D-39)."""
         states = ['all', 'only_local', 'no_local']
-        cur = states.index(self._local_filter_state_composition)
+        cur = self._local_filter_state_index(states, self._local_filter_state_composition)
         self._local_filter_state_composition = states[(cur + 1) % 3]
         self._update_local_filter_btn_composition()
         self._apply_comp_tree_filters()
@@ -19038,7 +19067,7 @@ class GenizahGUI(QMainWindow):
     def _toggle_local_filter_parallels(self):
         """Cycle the LOCAL filter state for the Parallels surface (D-10 / D-39)."""
         states = ['all', 'only_local', 'no_local']
-        cur = states.index(self._local_filter_state_parallels)
+        cur = self._local_filter_state_index(states, self._local_filter_state_parallels)
         self._local_filter_state_parallels = states[(cur + 1) % 3]
         self._update_local_filter_btn_parallels()
         self._apply_comp_tree_filters()

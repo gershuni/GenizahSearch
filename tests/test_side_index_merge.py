@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+from genizah_core import RRF_K
+
 
 # ---------------------------------------------------------------------------
 # Helper — bare SearchEngine instance
@@ -40,14 +42,14 @@ def _hit(uid: str, source: str = "V0.8") -> dict:
 # ---------------------------------------------------------------------------
 
 def test_rrf_merge_genizah_plus_local():
-    """REQ-3 + D-08: merge Genizah and LOCAL search results via RRF (k=60).
+    """REQ-3 + D-08: merge Genizah and LOCAL search results via RRF (k=RRF_K).
     With 2 Genizah + 2 LOCAL hits, all 4 appear in merged output.
     """
     engine = _make_engine()
     genizah_hits = [_hit("g1"), _hit("g2")]
     local_hits = [_hit("l1", "LOCAL"), _hit("l2", "LOCAL")]
 
-    merged = engine._rrf_merge(genizah_hits, local_hits, k=60)
+    merged = engine._rrf_merge(genizah_hits, local_hits, k=RRF_K)
 
     assert len(merged) == 4, f"Expected 4 merged hits, got {len(merged)}"
     uids = [r["uid"] for r in merged]
@@ -59,7 +61,7 @@ def test_rrf_merge_empty_local():
     engine = _make_engine()
     genizah_hits = [_hit("g1"), _hit("g2")]
 
-    merged = engine._rrf_merge(genizah_hits, [], k=60)
+    merged = engine._rrf_merge(genizah_hits, [], k=RRF_K)
 
     assert [r["uid"] for r in merged] == ["g1", "g2"]
 
@@ -69,7 +71,7 @@ def test_rrf_merge_empty_genizah():
     engine = _make_engine()
     local_hits = [_hit("l1", "LOCAL"), _hit("l2", "LOCAL")]
 
-    merged = engine._rrf_merge([], local_hits, k=60)
+    merged = engine._rrf_merge([], local_hits, k=RRF_K)
 
     assert [r["uid"] for r in merged] == ["l1", "l2"]
 
@@ -80,7 +82,7 @@ def test_rrf_score_uses_reciprocal_rank():
     genizah_hits = [_hit("g1")]
     local_hits = []
 
-    merged = engine._rrf_merge(genizah_hits, local_hits, k=60)
+    merged = engine._rrf_merge(genizah_hits, local_hits, k=RRF_K)
 
     assert len(merged) == 1
     assert merged[0]["uid"] == "g1"
@@ -100,13 +102,13 @@ def test_rrf_tiebreak_genizah_first():
     local_hits = [_hit("l_uid", "LOCAL")]
 
     # Both lists have 1 element at rank=1 → identical RRF score 1/(60+1).
-    result_a = engine._rrf_merge(genizah_hits, local_hits, k=60)
+    result_a = engine._rrf_merge(genizah_hits, local_hits, k=RRF_K)
     assert [r["uid"] for r in result_a] == ["g_uid", "l_uid"], (
         "Genizah-first tie-break violated when genizah passed as first arg"
     )
 
     # Reverse argument order — tie-break must still apply.
-    result_b = engine._rrf_merge(local_hits, genizah_hits, k=60)
+    result_b = engine._rrf_merge(local_hits, genizah_hits, k=RRF_K)
     assert [r["uid"] for r in result_b] == ["g_uid", "l_uid"], (
         "Genizah-first tie-break is supposed to be order-independent; "
         "argument order should not change outcome on tied scores"
@@ -124,7 +126,7 @@ def test_rrf_does_not_blanket_prioritize_genizah():
     genizah_hits = [_hit(f"g_{i}", "V0.8") for i in range(10)]
     local_hits = [_hit("l_uid", "LOCAL")]
 
-    result = engine._rrf_merge(genizah_hits, local_hits, k=60)
+    result = engine._rrf_merge(genizah_hits, local_hits, k=RRF_K)
 
     l_pos = next(i for i, r in enumerate(result) if r["uid"] == "l_uid")
     g9_pos = next(i for i, r in enumerate(result) if r["uid"] == "g_9")

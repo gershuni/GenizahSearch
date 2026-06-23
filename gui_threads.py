@@ -19,7 +19,7 @@ def _prevent_sleep():
             ES_SYSTEM_REQUIRED = 0x00000001
             ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)
         except Exception:
-            pass
+            logger.debug("_prevent_sleep: SetThreadExecutionState failed", exc_info=True)
 
 
 def _allow_sleep():
@@ -29,7 +29,7 @@ def _allow_sleep():
             ES_CONTINUOUS = 0x80000000
             ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS)
         except Exception:
-            pass
+            logger.debug("_allow_sleep: SetThreadExecutionState failed", exc_info=True)
 
 class IndexerThread(QThread):
     """Build or refresh the index without blocking the UI."""
