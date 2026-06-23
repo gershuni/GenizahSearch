@@ -86,14 +86,26 @@ logger = logging.getLogger(__name__)
 DEFAULT_BROWSE_TIMEOUT = 1.0       # D-17, R-01: lowered 2.0 -> 1.0
 DEFAULT_BROWSE_CORE_TIMEOUT = 2.0  # D-17 NEW per R-01
 
+def _read_int_env(env_var: str, default: int, *, minimum: int = 1) -> int:
+    """Read an int env var at import; fall back to `default` on missing/malformed.
+
+    Never raises on a garbage value (e.g. SEARCH_API_BROWSE_EXECUTOR_WORKERS=abc)
+    -- a bad env var must not crash module import."""
+    raw = os.environ.get(env_var)
+    if not raw:
+        return max(minimum, default)
+    try:
+        return max(minimum, int(raw))
+    except (ValueError, TypeError):
+        return max(minimum, default)
+
+
 # SEED-016 #29: bounded named executor sizing. Read once at module import for the
 # pool (a ThreadPoolExecutor cannot be resized live); the per-request source
 # concurrency cap is derived from the same default. Keep workers modest -- one
 # browse request fans out to at most core(1) + 3 enrichment sources, and the
 # concurrency cap (below) is what actually shields the pool.
-BROWSE_EXECUTOR_MAX_WORKERS = max(
-    1, int(os.environ.get('SEARCH_API_BROWSE_EXECUTOR_WORKERS', '8') or '8'),
-)
+BROWSE_EXECUTOR_MAX_WORKERS = _read_int_env('SEARCH_API_BROWSE_EXECUTOR_WORKERS', 8)
 # Max sync fetches dispatched concurrently across ALL in-flight browse requests.
 # Bounds blast radius so a single request's fan-out (or a stampede) cannot
 # consume the whole pool. Defaults below the pool size so headroom always exists.
@@ -206,6 +218,19 @@ async def _run_sync(func, *args):
     """
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(_get_browse_executor(), func, *args)
+
+
+def _submit_sync(func, *args):
+    """Submit blocking sync work to the named bounded pool; return the underlying
+    concurrent.futures.Future.
+
+    SEED-016 #29 fix: callers can hang a done-callback on the returned future so
+    a resource (e.g. the source-concurrency semaphore slot) is released only when
+    the EXECUTOR THREAD actually finishes -- not merely when an asyncio.wait_for
+    on the awaiting coroutine times out. asyncio.wait_for cancels the await; it
+    cannot stop a thread already running in the pool.
+    """
+    return _get_browse_executor().submit(func, *args)
 
 
 # ---------------------------------------------------------------------------
@@ -384,19 +409,63 @@ async def _wrap_with_timeout(
 
     SEED-016 #29: the dispatch is gated by the module-level source-concurrency
     semaphore so a single browse request's fan-out cannot consume the whole
-    named pool. The semaphore slot is held for the work's TRUE lifetime
-    (released in finally), so a hung source keeps its slot until the underlying
-    sync call actually returns -- it cannot re-admit more work past the cap.
+    named pool.
+
+    SEED-016 #29 FIX (Codex REQUEST-CHANGES): the semaphore slot is held until the
+    underlying EXECUTOR FUTURE actually completes -- NOT merely until the awaiting
+    coroutine's asyncio.wait_for times out. `wait_for` only cancels the await; it
+    cannot stop a thread already running in the pool. Releasing the slot on
+    timeout would free a concurrency slot while the worker thread is still busy,
+    re-admitting work past the cap and defeating the saturation guard. So we:
+      - acquire the slot,
+      - submit the blocking work and get its concurrent.futures.Future,
+      - release the slot from the FUTURE's done-callback (fires exactly once when
+        the thread truly finishes; scheduled back onto the loop because
+        asyncio.Semaphore is not thread-safe),
+      - keep asyncio.wait_for as the CALLER-facing timeout (the coroutine still
+        returns promptly on timeout; the slot just stays occupied until the real
+        work returns).
 
     R-PR-05: this is the SOLE place that catches inner sync-helper failures.
     `_pgp_sync` / `_fjms_sync` / `_nli_sync` no longer have inner try/except
     blocks -- they let exceptions propagate so this wrapper can emit
     'enrichment_failed' warnings (instead of silently nulling out the source).
     """
+    loop = asyncio.get_event_loop()
     sem = _get_browse_semaphore()
     await sem.acquire()
+
+    # Release the slot from the executor future's completion path so it is held
+    # for the work's TRUE lifetime, even if the caller-facing wait_for below
+    # times out and cancels the await. add_done_callback fires exactly once.
+    released = False
+
+    def _release_once() -> None:
+        nonlocal released
+        if not released:
+            released = True
+            sem.release()
+
+    def _on_future_done(_f) -> None:
+        # Runs on the worker thread once the blocking call truly finishes.
+        # asyncio.Semaphore is not thread-safe, so hop back to the loop. If the
+        # loop is already closed (e.g. a timed-out source's thread finishing
+        # after the request's loop tore down -- only happens in short-lived test
+        # loops; production runs a single long-lived loop), there is nothing left
+        # to release into, so swallow the closed-loop error.
+        try:
+            loop.call_soon_threadsafe(_release_once)
+        except RuntimeError:
+            pass
+
+    future = _submit_sync(sync_func, *args)
+    future.add_done_callback(_on_future_done)
+
     try:
-        return await asyncio.wait_for(_run_sync(sync_func, *args), timeout=timeout)
+        # wrap_future binds the concurrent future to this loop; cancelling the
+        # await on timeout does NOT cancel the running thread (so the slot stays
+        # held until the thread finishes and the done-callback releases it).
+        return await asyncio.wait_for(asyncio.wrap_future(future), timeout=timeout)
     except asyncio.TimeoutError:
         warnings_list.append({'code': 'enrichment_timeout', 'source': source_name})
         return None
@@ -404,8 +473,6 @@ async def _wrap_with_timeout(
         logger.exception('enrichment source %s failed', source_name)
         warnings_list.append({'code': 'enrichment_failed', 'source': source_name})
         return None
-    finally:
-        sem.release()
 
 
 # ---------------------------------------------------------------------------

@@ -402,6 +402,122 @@ def test_browse_slow_source_times_out_without_starving_others(monkeypatch):
     )
 
 
+def test_timed_out_source_holds_slot_until_blocking_call_returns(monkeypatch):
+    """SEED-016 #29 (Codex REQUEST-CHANGES): a source whose coroutine TIMES OUT
+    must keep its concurrency slot until the underlying blocking function ACTUALLY
+    returns -- not merely until asyncio.wait_for cancels the await.
+
+    With BROWSE_SOURCE_CONCURRENCY = 1 we run two enrichment sources serialized by
+    the one slot. The first (slow) source blocks past its per-source timeout. We
+    prove the second source CANNOT begin executing its blocking body while the
+    first is still running (slot held despite the timeout), and that it DOES
+    proceed once the first blocking function returns.
+
+    This is the gap the prior `..._without_starving_others` test missed: that one
+    only asserts the coroutine returned quickly, which the buggy
+    release-in-finally version also satisfied.
+    """
+    # Cap concurrency to a single slot and rebuild the semaphore on this loop.
+    monkeypatch.setattr(bs, 'BROWSE_SOURCE_CONCURRENCY', 1)
+    bs.reset_browse_executor_state()
+    # Slow source's per-source timeout is short; the slow body runs much longer.
+    monkeypatch.setenv('SEARCH_API_BROWSE_TIMEOUT', '0.2')
+
+    slow_started = threading.Event()
+    slow_may_finish = threading.Event()
+    slow_returned = threading.Event()
+    second_started = threading.Event()
+
+    # Records: did the second source begin its blocking body BEFORE the slow
+    # source's blocking body returned? If the slot was wrongly freed on timeout,
+    # the second source starts while slow_returned is still unset -> True (bug).
+    observed = {'second_started_before_slow_returned': None}
+
+    def _slow_pgp(*a, **k):
+        slow_started.set()
+        # Block well past the 0.2s coroutine timeout; only finish on command.
+        slow_may_finish.wait(timeout=5.0)
+        slow_returned.set()
+        return {'page_section_text': 'late'}
+
+    def _second_fjms(*a, **k):
+        second_started.set()
+        # Observe whether the slow source had already returned (slot truly freed)
+        # at the instant we were admitted.
+        observed['second_started_before_slow_returned'] = not slow_returned.is_set()
+        return {'source_names': ['CUL'], 'has_measurements': False,
+                'has_visual_suggestions': False}
+
+    def _noop_nli(*a, **k):
+        return {'physical_metadata': None, 'folio': None}
+
+    monkeypatch.setattr(bs, '_pgp_sync', _slow_pgp)
+    monkeypatch.setattr(bs, '_fjms_sync', _second_fjms)
+    monkeypatch.setattr(bs, '_nli_sync', _noop_nli)
+
+    provider = _FakeProvider()
+
+    async def _run():
+        task = asyncio.ensure_future(
+            bs.fetch_browse_bundle(service=provider, sys_id='99001', p_num=3)
+        )
+        # Wait until the slow source is running (it holds the only slot).
+        for _ in range(200):
+            if slow_started.is_set():
+                break
+            await asyncio.sleep(0.01)
+        assert slow_started.is_set(), 'slow source never started'
+
+        # Give the slow coroutine time to TIME OUT (0.2s) and then some. If the
+        # buggy finally-release were in place, the freed slot would let the
+        # second source begin its body here, while the slow body is still blocked.
+        await asyncio.sleep(0.6)
+        assert not second_started.is_set(), (
+            'second source acquired the slot while the timed-out source was '
+            'still running its blocking call -- the concurrency slot was freed '
+            'on coroutine timeout instead of on real completion (SEED-016 #29 '
+            'regression)'
+        )
+
+        # Now let the slow blocking function return; the done-callback releases
+        # the slot and the second source must proceed.
+        slow_may_finish.set()
+        bundle, warnings = await asyncio.wait_for(task, timeout=5.0)
+        return bundle, warnings
+
+    bundle, warnings = asyncio.run(_run())
+
+    # The slow source timed out -> null + warning; the second source resolved.
+    assert bundle.pgp is None
+    assert any(
+        w.get('code') == 'enrichment_timeout' and w.get('source') == 'pgp'
+        for w in warnings
+    ), f'expected enrichment_timeout/pgp; got {warnings!r}'
+    assert bundle.fjms is not None and bundle.fjms['source_names'] == ['CUL']
+    # And when it finally ran, the slow body had already returned (slot freed only
+    # after real completion).
+    assert observed['second_started_before_slow_returned'] is False, (
+        'second source ran before the slow blocking call returned'
+    )
+
+
+def test_browse_executor_workers_env_parse_does_not_raise_on_garbage():
+    """_read_int_env falls back to the default on malformed input instead of
+    raising at import (secondary nit)."""
+    assert bs._read_int_env('SEARCH_API_BROWSE_EXECUTOR_WORKERS_NONEXISTENT', 8) == 8
+    import os as _os
+    _os.environ['_BS_TEST_GARBAGE_INT'] = 'not-a-number'
+    try:
+        assert bs._read_int_env('_BS_TEST_GARBAGE_INT', 8) == 8
+        _os.environ['_BS_TEST_GARBAGE_INT'] = '3'
+        assert bs._read_int_env('_BS_TEST_GARBAGE_INT', 8) == 3
+        _os.environ['_BS_TEST_GARBAGE_INT'] = '0'
+        # Clamped to the minimum (1).
+        assert bs._read_int_env('_BS_TEST_GARBAGE_INT', 8) == 1
+    finally:
+        _os.environ.pop('_BS_TEST_GARBAGE_INT', None)
+
+
 def test_shutdown_browse_executor_is_idempotent_and_rebuilds():
     ex1 = bs._get_browse_executor()
     bs.shutdown_browse_executor(wait=True)
