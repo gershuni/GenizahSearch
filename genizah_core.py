@@ -724,7 +724,11 @@ class LabEngine:
                 with open(Config.LAB_WEIGHTS_FILE, 'r', encoding='utf-8') as f:
                     self.dynamic_rank_map = json.load(f)
             except Exception:
-                pass  # Dynamic weights file corrupt or unreadable; use defaults
+                # Dynamic weights file corrupt or unreadable; keep defaults.
+                logging.getLogger(__name__).warning(
+                    'Failed to load dynamic weights from %s; using defaults',
+                    Config.LAB_WEIGHTS_FILE, exc_info=True,
+                )
 
         self._reload_lab_index()
         # CR-02 FIX: open LOCAL LAB side-index at startup so LAB-mode
@@ -1720,7 +1724,10 @@ class LabEngine:
                                 rec['chunk_hits'].append((i, chunk_text, match_score, ms_snip))
                             elif match_score > rec['chunk_hits'][_existing_idx][2]:
                                 rec['chunk_hits'][_existing_idx] = (i, chunk_text, match_score, ms_snip)
-                    except (KeyError, IndexError, TypeError): pass
+                    except (KeyError, IndexError, TypeError) as _dedup_exc:
+                        logging.getLogger(__name__).debug(
+                            "lab_composition_search: skipped chunk-hit dedup entry: %r", _dedup_exc
+                        )
         except InterruptedError:
             was_interrupted = True
 
@@ -1857,11 +1864,15 @@ class LabEngine:
                                         _rec['chunk_hits'][_existing_llb] = (
                                             _i, _chunk_text, _match_score, _ms_snip
                                         )
-                            except (KeyError, IndexError, TypeError):
-                                pass
+                            except (KeyError, IndexError, TypeError) as _dedup_llb_exc:
+                                logging.getLogger(__name__).debug(
+                                    "lab_composition_search: skipped LOCAL-LAB chunk-hit dedup entry: %r",
+                                    _dedup_llb_exc,
+                                )
             except Exception as _local_lab_exc:
-                LOGGER.warning(
-                    "lab_composition_search: LOCAL LAB scan failed: %r", _local_lab_exc
+                logging.getLogger(__name__).warning(
+                    "lab_composition_search: LOCAL LAB scan failed: %r", _local_lab_exc,
+                    exc_info=True,
                 )
 
         # (Part 3: Result Processing) - runs even if interrupted to return partial results
@@ -2284,7 +2295,6 @@ def _strip_library_prefix(query: str) -> str:
 class Config:
     """Static paths and limits used by the application and by bundled binaries."""
 
-#    @staticmethod
     def _pick_writable_dir(primary: str, fallback: str) -> str:
         """
         Prefer primary; if we cannot create/write there, use fallback.
@@ -2305,7 +2315,6 @@ class Config:
         os.makedirs(fallback, exist_ok=True)
         return fallback
 
-#    @staticmethod
     def _get_documents_dir() -> str:
         """Best-effort Documents directory (Windows-aware), falling back to home."""
         documents_dir = None
@@ -3819,6 +3828,13 @@ class _BoundedLRUCache:
 # ==============================================================================
 #  METADATA MANAGER
 # ==============================================================================
+# Per-operation network timeouts (seconds). Named so each remote dependency can
+# be tuned independently rather than sharing one opaque literal.
+MARC_FUTURE_TIMEOUT = 15          # await fetch_marc_data() future result
+NLI_IIIF_FUTURE_TIMEOUT = 15      # await fetch_iiif_manifest() future result
+EXTERNAL_IIIF_HTTP_TIMEOUT = 5    # external IIIF manifest GET (Figgy/CUDL etc.)
+
+
 class MetadataManager:
     def _make_session(self):
         return requests.Session()
@@ -4601,7 +4617,7 @@ class MetadataManager:
 
         # Await MARC result first (needed for external IIIF logic below)
         try:
-            marc_data = marc_future.result(timeout=15)
+            marc_data = marc_future.result(timeout=MARC_FUTURE_TIMEOUT)
         except Exception:
             marc_data = {}  # Network/parse failure; proceed with empty metadata
         current_meta['marc'] = marc_data
@@ -4744,7 +4760,7 @@ class MetadataManager:
 
         # Await NLI IIIF manifest (submitted concurrently with MARC above)
         try:
-            nli_iiif_data = iiif_future.result(timeout=15)
+            nli_iiif_data = iiif_future.result(timeout=NLI_IIIF_FUTURE_TIMEOUT)
         except Exception:
             nli_iiif_data = {}  # Network/parse failure; proceed with empty metadata
         if nli_iiif_data.get('canvas_map'):
@@ -4901,7 +4917,7 @@ class MetadataManager:
             # 260421 follow-up (L81 lag): 10s was overkill — Figgy/CUDL
             # normally respond in <2s. Shorten so a slow external host
             # does not gate the whole browse navigation.
-            resp = session.get(manifest_url, timeout=5)
+            resp = session.get(manifest_url, timeout=EXTERNAL_IIIF_HTTP_TIMEOUT)
             if resp.status_code == 200:
                 data = resp.json()
 
@@ -7123,6 +7139,12 @@ def _expand_inline_alternation(pattern_str: str) -> str:
 # ==============================================================================
 #  SEARCH ENGINE
 # ==============================================================================
+# Reciprocal Rank Fusion constant (D-08 Codex P0): BM25 scores from two
+# independent indexes are not comparable, so LOCAL + Genizah hits are fused by
+# rank. k=60 is the Cormack/Clarke (2009) default.
+RRF_K = 60
+
+
 class SearchEngine:
     """Run searches, build queries, and provide browsing utilities."""
     def __init__(self, meta_mgr, variants_mgr):
@@ -7664,7 +7686,7 @@ class SearchEngine:
             "full_header": full_header,
         }
 
-    def _rrf_merge(self, genizah_hits, local_hits, k: int = 60, limit=None):
+    def _rrf_merge(self, genizah_hits, local_hits, k: int = RRF_K, limit=None):
         """Reciprocal Rank Fusion merger (D-08 Codex P0). BM25 scores from two
         independent indexes are NOT comparable; RRF fuses by rank (Cormack/Clarke 2009).
 
@@ -9377,7 +9399,7 @@ class SearchEngine:
                 )
                 local_hits = []
             if local_hits:
-                deduped = self._rrf_merge(deduped, local_hits, k=60)
+                deduped = self._rrf_merge(deduped, local_hits, k=RRF_K)
         # End Phase 95 D-08 LOCAL merge.
 
         # --- Apply Exclusion Filter (NOT Filter) ---

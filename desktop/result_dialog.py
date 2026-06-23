@@ -1954,8 +1954,8 @@ class ResultDialog(QDialog):
                     flags |= re.MULTILINE
                 regex = re.compile(pattern_str, flags)
                 text = regex.sub(r'*\g<0>*', text)
-            except re.error:
-                pass
+            except re.error as _re_exc:
+                logger.debug("result_dialog: invalid highlight regex %r: %s", pattern_str, _re_exc)
         return text
 
     def open_external_link(self):
@@ -2199,8 +2199,8 @@ class ResultDialog(QDialog):
                     flags |= re.MULTILINE
                 regex = re.compile(pattern_str, flags)
                 ms_raw = regex.sub(r'*\g<0>*', ms_raw)
-            except re.error:
-                pass
+            except re.error as _re_exc:
+                logger.debug("result_dialog: invalid highlight regex %r: %s", pattern_str, _re_exc)
 
         # Phase 999.4: route through gutter helper (source_text = raw `ms_raw`)
         apply_line_numbered_text(
@@ -2423,7 +2423,8 @@ class ResultDialog(QDialog):
                 regex = re.compile(pattern_str, flags)
                 highlighted_text = regex.sub(r'*\g<0>*', raw_text)
                 raw_text = highlighted_text
-            except re.error: pass
+            except re.error as _re_exc:
+                logger.debug("result_dialog: invalid highlight regex %r: %s", pattern_str, _re_exc)
 
         # Phase 999.4: route through gutter helper (source_text = raw `raw_text`)
         apply_line_numbered_text(
