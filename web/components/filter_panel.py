@@ -342,7 +342,7 @@ def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bo
 # Async recompute function
 # ============================================================================
 
-async def recompute_filter_count(state, update_chip_bar_fn):
+async def recompute_filter_count(state, update_chip_bar_fn, on_state=None):
     """Recompute manuscript count for current filters (background).
 
     Uses a generation counter to prevent out-of-order completion races.
@@ -351,7 +351,20 @@ async def recompute_filter_count(state, update_chip_bar_fn):
         state: State object with filter attributes + filter_manuscript_count,
                restrict_sys_ids, and _filter_recompute_gen (auto-created).
         update_chip_bar_fn: Callback to update the chip bar UI after recompute.
+        on_state: Optional callback receiving a status string for per-op feedback
+                  (#11): 'pending' when the background compute starts, 'done' on
+                  success, 'error' if the FJMS lookup raised. Stale completions
+                  (superseded by a newer recompute) do NOT emit a terminal state.
+                  Backward compatible — callers that omit it (e.g. parallels) are
+                  unaffected.
     """
+    def _emit(status):
+        if on_state is not None:
+            try:
+                on_state(status)
+            except Exception:
+                logger.debug("recompute_filter_count on_state(%s) raised", status, exc_info=True)
+
     # Generation guard: increment BEFORE any early return so in-flight
     # older recomputes see a newer generation and discard their results.
     if not hasattr(state, '_filter_recompute_gen'):
@@ -362,8 +375,11 @@ async def recompute_filter_count(state, update_chip_bar_fn):
     if not has_active_filters(state):
         state.filter_manuscript_count = None
         state.restrict_sys_ids = None
+        _emit('done')
         update_chip_bar_fn()
         return
+
+    _emit('pending')
 
     from shared.fjms_service import get_fjms_service
 
@@ -419,7 +435,18 @@ async def recompute_filter_count(state, update_chip_bar_fn):
             kwargs['works_exclude'] = _works
         return fjms.get_filter_sys_ids(**kwargs)
 
-    result = await run.io_bound(_compute)
+    try:
+        result = await run.io_bound(_compute)
+    except Exception:
+        logger.error("recompute_filter_count: filter lookup failed", exc_info=True)
+        # Stale guard: a newer recompute supersedes this failure.
+        if state._filter_recompute_gen != gen:
+            return
+        state.filter_manuscript_count = None
+        state.restrict_sys_ids = None
+        _emit('error')
+        update_chip_bar_fn()
+        return
 
     # Stale guard: skip update if a newer recompute was triggered
     if state._filter_recompute_gen != gen:
@@ -431,6 +458,7 @@ async def recompute_filter_count(state, update_chip_bar_fn):
     else:
         state.filter_manuscript_count = None
         state.restrict_sys_ids = None
+    _emit('done')
     update_chip_bar_fn()
 
 
