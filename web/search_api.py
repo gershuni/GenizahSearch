@@ -54,6 +54,10 @@ from web.api_hardening import (
 from shared.api_errors import APIError
 # Phase 79 imports.
 from shared.browse_service import fetch_browse_bundle, _read_timeout
+# SEED-016 #3: the browse core-fetch provider is injected by the caller (here),
+# inverting the former shared/ -> web/ import. web.services is the web layer's
+# own dependency, so importing it from web/search_api.py respects layering.
+from web.services import get_service
 from shared.search_serializer import serialize_browse_payload, serialize_parallels_payload
 # Phase 80 imports.
 from shared.parallels_service import fetch_parallels_results, ParallelsResultBundle
@@ -1331,6 +1335,7 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
         #    fetch_browse_bundle raises APIError('core_timeout', 504) on
         #    core timeout; otherwise returns a bundle (page may be None).
         bundle, warnings_list = await fetch_browse_bundle(
+            service=get_service(),  # SEED-016 #3: inject the browse-page provider.
             sys_id=loc.sys_id,
             p_num=loc.effective_p_num,
             volume_ie=loc.effective_volume_ie,
@@ -1541,6 +1546,10 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
             try:
                 _par_task = asyncio.ensure_future(
                     fetch_parallels_results(
+                        # SEED-016 #3: inject the SearchEngine + MetadataManager
+                        # singletons (was read off web.state inside shared/).
+                        searcher=state.searcher,
+                        meta_mgr=state.meta_mgr,
                         text=text,
                         chunk_size=req.chunk_size,
                         mode=req.mode,

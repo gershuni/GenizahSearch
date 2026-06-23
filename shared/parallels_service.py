@@ -4,11 +4,21 @@
 Mirrors shared/browse_service.py (Phase 79 D-23 extraction precedent): pure-data
 async fan-out, importable from shared/, with no UI-framework dependency.
 
+Layering contract (SEED-016 #3):
+- This module lives in shared/ and MUST NOT import from web/ at runtime. It used
+  to do `from web.state import state` inline (twice) to reach the process-
+  singleton SearchEngine + MetadataManager, which inverted the layering
+  (shared -> web). The dependency is now INVERTED: the caller
+  (web/search_api.py) passes `searcher` (a CompositionSearcher) and `meta_mgr`
+  (a UidComponentParser) INTO fetch_parallels_results. shared/ stays framework-
+  and web-agnostic.
+
 Statelessness contract (D-20 inherited from Phase 78 / D-22 inherited from Phase 79):
-- Reads via the process-singleton SearchEngine (web.state).
-- MUST NOT touch any per-session UI state -- last-results caches, parallels-results
-  caches, current-search-query, browser-storage, request-cookies, or any UI-coupled
-  page state. Verified by grep at acceptance time.
+- The injected searcher/meta_mgr are the process-singletons (formerly read off
+  web.state). MUST NOT touch any per-session UI state -- last-results caches,
+  parallels-results caches, current-search-query, browser-storage,
+  request-cookies, or any UI-coupled page state. Verified by grep at acceptance
+  time.
 
 D-07 cap policy: main_results capped at 200 groups (one group per sys_id) AFTER
 sorting groups desc by aggregate_score (sum of per-row final_score within group).
@@ -38,9 +48,32 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Protocol
 
 logger = logging.getLogger(__name__)
+
+
+class CompositionSearcher(Protocol):
+    """Structural type for the injected SearchEngine (SEED-016 #3).
+
+    The process-singleton SearchEngine (genizah_core.py) satisfies this without
+    importing it here. Only the one method fetch_parallels_results needs is
+    declared. Kept loose (**kwargs) so the real engine's wider signature is
+    compatible.
+    """
+
+    def search_composition_logic(self, *args, **kwargs) -> dict:
+        ...
+
+
+class UidComponentParser(Protocol):
+    """Structural type for the injected MetadataManager (SEED-016 #3).
+
+    Only the parse method _group_parallels_by_sys_id needs is declared.
+    """
+
+    def parse_full_id_components(self, uid_or_header: str) -> dict:
+        ...
 
 
 # D-07 hardcoded group cap -- no env override in v7.10 per CONTEXT deferred ideas.
@@ -96,6 +129,7 @@ async def _run_sync(func, *args, **kwargs):
 
 def _cap_main_results_by_group(
     main_results: list[dict],
+    meta_mgr: UidComponentParser,
     cap: int = PARALLELS_GROUP_CAP,
 ) -> tuple[list[dict], bool]:
     """Apply D-07 group cap.
@@ -108,6 +142,9 @@ def _cap_main_results_by_group(
     Returns (capped_rows, truncated_flag). truncated_flag=True iff raw group
     count exceeded `cap`.
 
+    SEED-016 #3: `meta_mgr` is injected by the caller (was read off web.state).
+    _group_parallels_by_sys_id needs it to parse uid components.
+
     NOTE: This cap applies ONLY to main_results. filtered_results is NOT capped
     in v7.10 -- see ParallelsResultBundle docstring for rationale.
     """
@@ -115,12 +152,9 @@ def _cap_main_results_by_group(
         return [], False
 
     # Late import to keep service import-time fast and avoid circular imports.
-    # _group_parallels_by_sys_id needs meta_mgr to parse uid components -- use
-    # the process-singleton from web.state.
     from shared.search_serializer import _group_parallels_by_sys_id
-    from web.state import state as _state
 
-    groups = _group_parallels_by_sys_id(main_results, meta_mgr=_state.meta_mgr)
+    groups = _group_parallels_by_sys_id(main_results, meta_mgr=meta_mgr)
 
     if len(groups) <= cap:
         return main_results, False
@@ -150,6 +184,8 @@ def _cap_main_results_by_group(
 
 async def fetch_parallels_results(
     *,
+    searcher: CompositionSearcher,
+    meta_mgr: UidComponentParser,
     text: str,
     chunk_size: int,
     mode: str,
@@ -164,7 +200,16 @@ async def fetch_parallels_results(
     inputs and only translates them to search_composition_logic's call shape
     + applies the D-07 group cap on the way out.
 
+    SEED-016 #3: `searcher` (SearchEngine) and `meta_mgr` (MetadataManager) are
+    injected by the caller (web/search_api.py) -- this module no longer imports
+    web.state. Keeps shared/ from importing web/.
+
     Args:
+        searcher: process-singleton SearchEngine exposing
+                  search_composition_logic. Injected by the caller.
+        meta_mgr: process-singleton MetadataManager exposing
+                  parse_full_id_components (used by the group cap). Injected by
+                  the caller.
         text: composition source. Mapped to search_composition_logic's
               `full_text` arg. The handler has already stripped + length-
               capped this.
@@ -197,11 +242,8 @@ async def fetch_parallels_results(
     # high-frequency filtering when the caller did not specify a threshold.
     effective_max_freq = float('inf') if max_freq is None else float(max_freq)
 
-    # Late import -- process-singleton SearchEngine. Same pattern as Phase 79.
-    from web.state import state
-
     def _sync_call() -> dict:
-        return state.searcher.search_composition_logic(
+        return searcher.search_composition_logic(
             full_text=text,
             chunk_size=chunk_size,
             max_freq=effective_max_freq,
@@ -229,7 +271,7 @@ async def fetch_parallels_results(
     # if load testing reveals large filtered payloads.
 
     # D-07 cap on main groups only.
-    capped_main, truncated = _cap_main_results_by_group(main_results)
+    capped_main, truncated = _cap_main_results_by_group(main_results, meta_mgr)
 
     # Boundary options for envelope echo (D-06 inherited from Phase 77).
     boundary_options = {
