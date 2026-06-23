@@ -144,7 +144,10 @@ def show_add_to_list_dialog(
         lists = lists_mgr.data.get('lists', {})
         # Store list data with colors for display
         list_data = {lid: lst for lid, lst in lists.items() if not lst.get('is_system')}
-        list_options = {lid: lst['name'] for lid, lst in list_data.items()}
+        # W4: localize app-managed names (the default "General" list) — user-created
+        # names pass through unchanged via localize_list_name's is_default gate.
+        from web.user_lists import localize_list_name
+        list_options = {lid: localize_list_name(lst) for lid, lst in list_data.items()}
 
         # Container for the main form
         form_container = ui.column().classes('w-full mt-4 gap-3')

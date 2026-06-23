@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 8.2.0
+# Dicta Genizah Search Pro 8.2.1
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,15 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 8.2.0?
+## What's New in Version 8.2.1?
+
+### v8.2.1: Recently Viewed fixes
+
+Patch release. Fixes the **Recently Viewed** list on both platforms — on the web the
+list and its "General" sibling are now localized in Hebrew, the list loads correctly
+(was empty), and the count badge is accurate; on desktop it is sorted by recency and
+no longer shows true duplicate rows. Also bundles the web search "Filter PGP" button
+polish.
 
 ### v8.2.0: Web Joins Lab, FGP Transcriptions & Hebrew Search
 
@@ -434,7 +442,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V8.2.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V8.2.1_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

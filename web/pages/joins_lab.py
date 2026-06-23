@@ -98,11 +98,23 @@ from web.services import get_service
 from web.state import state
 from web.supabase_client import (
     add_list_item, create_fragment_join, delete_fragment_join,
-    get_list_item_counts, get_list_items, get_user_lists,
+    get_list_item_counts, get_list_items, get_recent_items, get_user_lists,
 )
 from web.translations import is_rtl, tr
+from web.user_lists import localize_list_name
 
 logger = logging.getLogger(__name__)
+
+
+def _is_recent_system_list(lst: dict) -> bool:
+    """True when a get_user_lists() row is the "Recently Viewed" system list.
+
+    The recent list's items live in the recent_items table, NOT list_items, so
+    a get_list_items(id) read returns empty. Detect it by is_system + the
+    canonical DB name 'Recently Viewed' (name_en is the stable key)."""
+    if not lst or not lst.get('is_system'):
+        return False
+    return 'Recently Viewed' in (lst.get('name_en'), lst.get('name'))
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1972,6 +1984,20 @@ def create_joins_lab_page(
                 if counts is None:
                     counts = {}
 
+                # W3: overlay the recent system list's real count (recent_items),
+                # since the batched RPC never counts it (its items aren't in
+                # list_items) and it would otherwise read "(0)".
+                for _lst in user_lists:
+                    if _is_recent_system_list(_lst):
+                        try:
+                            counts[_lst.get('id')] = len(get_recent_items(user_id))
+                        except Exception as _rc_err:
+                            logger.warning(
+                                "Add-to-list picker: recent count unavailable: %s",
+                                _rc_err,
+                            )
+                        break
+
                 # NOT persistent: Esc / click-outside should dismiss the picker
                 # cleanly. A persistent dialog only "shakes" (flickers) on Esc.
                 with ui.dialog() as picker_dlg:
@@ -1991,7 +2017,8 @@ def create_joins_lab_page(
                         else:
                             for lst in user_lists:
                                 list_id = lst.get('id')
-                                list_name = lst.get('name') or ''
+                                # W4: localize app-managed names (system + default).
+                                list_name = localize_list_name(lst)
                                 item_count = counts.get(list_id, 0) if list_id else 0
 
                                 async def _pick_list(
@@ -2916,16 +2943,22 @@ def create_joins_lab_page(
 
                         for lst in visible:
                             list_id = lst.get('id')
-                            list_name = lst.get('name') or ''
+                            is_recent = _is_recent_system_list(lst)
+                            # App-managed list names (system lists like "Recently
+                            # Viewed" AND the default "General") are stored verbatim
+                            # in the DB — localize at render (W1/W4). User-created
+                            # names are never translated.
+                            list_name = localize_list_name(lst)
                             item_count = pdata['counts'].get(list_id, 0) if list_id is not None else 0
 
-                            def _make_list_click(lid=list_id, lname=list_name):
+                            def _make_list_click(lid=list_id, lname=list_name, recent=is_recent):
                                 def _on_click() -> None:
                                     level_state['list_id'] = lid
                                     level_state['list_name'] = lname
+                                    level_state['is_recent'] = recent
                                     level_state['frag_filter'] = ''
                                     filter_input.value = ''
-                                    asyncio.ensure_future(_load_level2(lid, lname))
+                                    asyncio.ensure_future(_load_level2(lid, lname, recent))
                                 return _on_click
 
                             with list_container:
@@ -2937,10 +2970,16 @@ def create_joins_lab_page(
                                 ).on('click', _make_list_click()):
                                     ui.label(list_name).classes('text-sm font-semibold flex-1')
                                     with ui.row().classes('items-center gap-1'):
-                                        # Only show the count badge when counts
-                                        # actually loaded; a "(0)" on every list
-                                        # when the RPC is denied is misleading.
-                                        if pdata['counts_available']:
+                                        # Show the count badge when the batched
+                                        # counts loaded; a "(0)" on every list when
+                                        # the RPC is denied is misleading. EXCEPTION
+                                        # (W3): the recent list has an authoritative
+                                        # count from recent_items overlaid into
+                                        # counts, independent of the batched RPC, so
+                                        # show it even when counts_available is False.
+                                        if pdata['counts_available'] or (
+                                            is_recent and pdata.get('recent_count') is not None
+                                        ):
                                             ui.label(f'({item_count})').classes(
                                                 'text-xs'
                                             ).style('color:var(--text-muted,#475569);')
@@ -2979,9 +3018,12 @@ def create_joins_lab_page(
                             })
                         return out
 
-                    async def _load_level2(list_id: int, list_name: str) -> None:
+                    async def _load_level2(list_id: int, list_name: str, is_recent: bool = False) -> None:
                         """Fetch fragments for list_id (authed read, on-loop), enrich
                         their display metadata, cache, then render Level 2.
+
+                        The "Recently Viewed" system list reads from recent_items, not
+                        list_items (W2) — get_list_items(id) would be empty.
 
                         SEED-008: wrapped in ``except RuntimeError: return``.
                         """
@@ -2990,7 +3032,11 @@ def create_joins_lab_page(
                             with list_container:
                                 ui.spinner(size='sm').style('color:var(--primary-700,#047857);')
 
-                            items = get_list_items(list_id)  # authed read: on-loop, not run.io_bound
+                            # authed read: on-loop, not run.io_bound
+                            items = (
+                                get_recent_items(user_id) if is_recent
+                                else get_list_items(list_id)
+                            )
                             # Enrich display metadata OFF-loop: meta_mgr lookups are
                             # LOCAL + NON-authenticated (libraries data, no
                             # app.storage.user), and the joins_lab off-loop guard
@@ -3161,9 +3207,29 @@ def create_joins_lab_page(
                             )
                             counts = {}
                             counts_available = False
+                        # W3: the recent system list is never counted by the
+                        # batched RPC (its items live in recent_items, not
+                        # list_items), so it would always read "(0)". Overlay its
+                        # real count from recent_items, keyed by the row id used in
+                        # _render_level1. This is independent of counts_available —
+                        # we have an authoritative count for the recent list.
+                        recent_count = None
+                        for _lst in user_lists:
+                            if _is_recent_system_list(_lst):
+                                try:
+                                    recent_count = len(get_recent_items(user_id))
+                                except Exception as _rc_err:
+                                    logger.warning(
+                                        "Choose-from-lists picker: recent count "
+                                        "unavailable: %s", _rc_err,
+                                    )
+                                else:
+                                    counts[_lst.get('id')] = recent_count
+                                break
                         pdata['lists'] = user_lists
                         pdata['counts'] = counts
                         pdata['counts_available'] = counts_available
+                        pdata['recent_count'] = recent_count
                         _render_level1()
                     except RuntimeError:
                         return  # SEED-008: client/tab deleted mid-fetch

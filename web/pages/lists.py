@@ -90,16 +90,27 @@ def create_inline_edit_label(
     lists_mgr,
     tr_func,
     classes: str = 'font-semibold',
-    on_save_callback=None
+    on_save_callback=None,
+    is_default: bool = False,
 ):
     """
     Create an inline-editable label for list names.
     Click to edit, Enter/blur to save, Escape to cancel.
     """
     if is_system:
-        # System lists cannot be renamed, just show a label
-        ui.label(current_name).classes(classes)
+        # System lists cannot be renamed, just show a label. The name is stored
+        # verbatim in the DB (e.g. "Recently Viewed") and must be localized at
+        # render time so it doesn't leak English under a Hebrew UI (W1).
+        ui.label(tr_func(current_name)).classes(classes)
         return
+
+    # The default "General" list is renameable, but until renamed its name is the
+    # canonical English "General" stored verbatim in the DB — localize the DISPLAY
+    # so it doesn't leak English under a Hebrew UI (W4). The edit value uses the
+    # localized text too; if the user saves it unchanged that's a harmless no-op,
+    # and any real rename overwrites it. User-created lists (is_default=False) are
+    # never translated.
+    display_name = tr_func(current_name) if is_default else current_name
 
     # Container to hold either the label or the input
     container = ui.element('div').classes('inline-edit-container')
@@ -109,10 +120,10 @@ def create_inline_edit_label(
         editing_state = {'active': False}
 
         # The display label (shown when not editing)
-        label_el = ui.label(current_name).classes(classes + ' cursor-pointer hover:underline')
+        label_el = ui.label(display_name).classes(classes + ' cursor-pointer hover:underline')
 
         # The input field (hidden initially)
-        input_el = ui.input(value=current_name).classes('inline-edit-input').props('dense outlined')
+        input_el = ui.input(value=display_name).classes('inline-edit-input').props('dense outlined')
         input_el.set_visibility(False)
 
         def start_editing():
@@ -597,7 +608,8 @@ def create_lists_page():
                             lists_mgr=lists_mgr,
                             tr_func=tr,
                             classes='text-3xl font-bold',
-                            on_save_callback=refresh_ui
+                            on_save_callback=refresh_ui,
+                            is_default=list_data.get('is_default', False),
                         )
                     if is_system:
                         ui.label(tr('System List')).classes('text-xs').style('color: var(--text-tertiary);')
@@ -614,9 +626,16 @@ def create_lists_page():
             items_list = lists_mgr.get_items_in_list_sync(list_id)
             items_data = [(item.get('item_id'), item) for item in items_list]
 
-            # expected_count: prefer threaded counts dict over len(items_data) when available
+            # expected_count: prefer threaded counts dict over len(items_data) when available.
+            # W3: the recent system list is never in the batched counts dict (its items live in
+            # recent_items, not list_items), so trust the actually-loaded items_data for it rather
+            # than the stale batched value.
             expected_count = len(items_data)
-            if counts is not None:
+            is_recent = (
+                lists_mgr._is_recent_list(list_id)
+                if hasattr(lists_mgr, '_is_recent_list') else False
+            )
+            if counts is not None and not is_recent:
                 try:
                     expected_count = counts.get(int(list_id), len(items_data))
                 except (TypeError, ValueError):

@@ -43,7 +43,21 @@ def _resolve_list_item_count(list_id: str, lists_mgr, counts: Optional[Dict[int,
         list_id: string list ID
         lists_mgr: UserListsManager (used only for legacy fallback when counts is None)
         counts: None -> legacy fallback; {} -> valid empty batched result; {id: n} -> use value
+
+    W3 (2026-06-23): the recent system list's items live in recent_items, NOT
+    list_items, so the batched get_list_item_counts_for_user RPC never counts them
+    (the list is absent from `counts` -> counts.get(...,0) == 0 -> a stale "(0)"
+    badge even when the list is full). The recent list must ALWAYS resolve through
+    the recent-aware _get_list_item_count, regardless of whether a batched counts
+    dict is present. Only non-recent lists may use the batched dict.
     """
+    if hasattr(lists_mgr, '_is_recent_list'):
+        try:
+            if lists_mgr._is_recent_list(list_id):
+                return lists_mgr._get_list_item_count(list_id)
+        except Exception:
+            pass
+
     if counts is None:
         try:
             return lists_mgr._get_list_item_count(list_id)
@@ -352,6 +366,14 @@ def _render_list_item(
     is_system = list_data.get('is_system', False)
     is_selected = selected_list_id == list_id
 
+    # App-managed list names (system lists like "Recently Viewed" AND the default
+    # "General" list) are stored verbatim in the DB and must be localized at render
+    # time (the keys exist in TRANSLATIONS). User-created list names are never
+    # translated. W4: localize_list_name() owns the is_system-OR-is_default rule so
+    # "General" no longer leaks English under a Hebrew UI.
+    from web.user_lists import localize_list_name
+    display_name = localize_list_name(list_data)
+
     # Get display color — pass data= so get_list_display_color() avoids a second .data fetch
     if show_color:
         color = (
@@ -382,7 +404,7 @@ def _render_list_item(
         # List name
         with ui.column().classes('flex-grow gap-0'):
             name_style = 'font-weight: 600;' if is_selected else ''
-            ui.label(list_name).classes('text-sm').style(name_style)
+            ui.label(display_name).classes('text-sm').style(name_style)
             if is_system:
                 ui.label(tr('System')).classes('text-xs').style('color: var(--text-muted);')
 

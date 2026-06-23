@@ -13455,11 +13455,16 @@ class GenizahGUI(QMainWindow):
             self.btn_edit_list.setEnabled(not is_system)
             self.btn_delete_list.setEnabled(not is_system and not is_default)
 
-        # Get sort order
-        sort_map = {0: 'shelfmark', 1: 'title', 2: 'added'}
-        sort_by = sort_map.get(self.lists_sort_combo.currentIndex(), 'shelfmark')
-
-        items = self.lists_mgr.get_items_sorted(self.lists_current_list_id, sort_by=sort_by)
+        # The "Recently Viewed" system list must preserve view-time ordering
+        # (most-recent first) and collapse true duplicates — never re-sort it by
+        # shelfmark/library (D1) and never show the same manuscript twice (D2).
+        # Other lists honor the sort combo.
+        if self.lists_current_list_id == 'recent':
+            items = self._get_recent_items_deduped()
+        else:
+            sort_map = {0: 'shelfmark', 1: 'title', 2: 'added'}
+            sort_by = sort_map.get(self.lists_sort_combo.currentIndex(), 'shelfmark')
+            items = self.lists_mgr.get_items_sorted(self.lists_current_list_id, sort_by=sort_by)
 
         # Apply filter if any
         filter_text = self.lists_filter_input.text().strip().lower()
@@ -13544,6 +13549,40 @@ class GenizahGUI(QMainWindow):
         if not self.lists_current_item_id or self.lists_current_item_id not in visible_item_ids:
             self.lists_current_item_id = None
             self.lists_clear_details()
+
+    def _get_recent_items_deduped(self):
+        """Return Recently Viewed items in view order, with true duplicates collapsed.
+
+        Recency order is preserved (the core returns most-recent first). True
+        duplicates — the same manuscript with no distinguishing image — are
+        collapsed to their most-recent occurrence (D2). Legitimate per-image
+        variants (distinct, non-empty img) are kept as separate rows.
+
+        Dedup key is (sys_id, img): rows that differ only by fl_id but carry no
+        image render identically in the lists table (the table shows the Image
+        column, not fl_id), so they are real duplicates and collapse together.
+        """
+        items = self.lists_mgr.get_items_in_list('recent')
+
+        # Enrich with metadata for display (mirrors the browse-tab recent path).
+        if self.meta_mgr:
+            for item in items:
+                sid = item.get('sys_id', '')
+                shelfmark, title = self.meta_mgr.get_meta_for_id(sid)
+                item['shelfmark'] = item.get('shelfmark_override') or shelfmark or 'Unknown'
+                item['title'] = title or ''
+
+        seen = set()
+        deduped = []
+        for item in items:  # already most-recent-first; keep first occurrence
+            img = item.get('img')
+            img_key = img if img not in (None, "") else None
+            key = (item.get('sys_id'), img_key)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+        return deduped
 
     def lists_on_list_selected(self, item, column):
         """Handle list selection in the sidebar."""

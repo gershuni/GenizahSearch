@@ -33,6 +33,29 @@ from genizah_core import ListsManager
 import logging
 LOGGER = logging.getLogger(__name__)
 
+
+def localize_list_name(list_data: Dict) -> str:
+    """Return the display name for a list, localized for app-managed lists.
+
+    System lists (e.g. "Recently Viewed") AND the default list ("General") are
+    stored verbatim in the DB with their canonical English name; their names have
+    translation keys in the shared TRANSLATIONS dict and must be localized at
+    render time. User-created list names are NEVER translated (a user list named
+    "General" would otherwise be mistranslated).
+
+    This mirrors the desktop's GenizahGUI._get_list_display_name, which translates
+    when `is_system OR is_default`. W4 (2026-06-23): the web render sites only
+    translated `is_system`, so the default "General" list leaked English under a
+    Hebrew UI. Use this helper at EVERY web render site so the rule stays generic
+    (all app-managed names), not hardcoded per string.
+    """
+    from web.translations import tr as _tr
+    name = list_data.get('name') or list_data.get('name_en') or ''
+    if list_data.get('is_system') or list_data.get('is_default'):
+        return _tr(name)
+    return name
+
+
 # Project color palette (same as desktop app)
 PROJECT_COLORS = [
     '#4CAF50',  # Green
@@ -187,6 +210,10 @@ class UserListsManager:
     def _get_list_item_count(self, list_id: str) -> int:
         """Get item count for a list."""
         if self.is_authenticated:
+            # Recent system list lives in recent_items, not list_items (see
+            # _is_recent_list); counting via get_list_items(id) would return 0.
+            if self._is_recent_list(list_id):
+                return len(get_recent_items(self.user_id))
             try:
                 list_id_int = int(list_id)
                 items = get_list_items(list_id_int)
@@ -537,10 +564,36 @@ class UserListsManager:
             return self.local_mgr.update_item(item_id, tags=tags)
         return False
 
+    def _is_recent_list(self, list_id: str) -> bool:
+        """True when list_id refers to the "Recently Viewed" system list.
+
+        The recent list can be addressed two ways:
+          - The literal sentinel 'recent' (used by the add-to-joins / comment
+            "Recent activity" tabs, which always worked), and
+          - Its numeric Supabase user_lists row id, which is how the /lists page
+            sidebar and the Join-Labs picker select it (they key lists by
+            str(lst['id'])). That numeric path used to fall through to
+            get_list_items(id) on the empty list_items table -> empty list.
+
+        Both must resolve to the recent_items source. We detect the numeric form
+        by consulting the cached lists data for a row that is_system AND named the
+        canonical 'Recently Viewed' (the DB-stored name_en is the stable key; the
+        localized name may differ).
+        """
+        if list_id == 'recent':
+            return True
+        if not self.is_authenticated:
+            return False
+        data = self._get_cached_data()
+        lst = data.get('lists', {}).get(str(list_id))
+        if not lst or not lst.get('is_system'):
+            return False
+        return 'Recently Viewed' in (lst.get('name_en'), lst.get('name'))
+
     async def get_items_in_list(self, list_id: str) -> List[Dict]:
         """Get all items in a list."""
         if self.is_authenticated:
-            if list_id == 'recent':
+            if self._is_recent_list(list_id):
                 return self._format_recent_items(get_recent_items(self.user_id))
             try:
                 list_id_int = int(list_id)
@@ -554,7 +607,7 @@ class UserListsManager:
     def get_items_in_list_sync(self, list_id: str) -> List[Dict]:
         """Synchronous version of get_items_in_list."""
         if self.is_authenticated:
-            if list_id == 'recent':
+            if self._is_recent_list(list_id):
                 return self._format_recent_items(get_recent_items(self.user_id))
             try:
                 list_id_int = int(list_id)

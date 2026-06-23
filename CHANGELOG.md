@@ -4,15 +4,17 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
-## [Web Hotfix] - 2026-06-23 — Search "Filter PGP" button polish
+## [8.2.1] - 2026-06-23 — Recently Viewed fixes
 
-Web-only deploy on top of v8.2.0 (no version bump, no installer). Three display-only fixes to the post-search "Filter PGP" button on `/search`, all in `web/pages/search.py`.
+Patch release (both). Fixes to the **Recently Viewed** list on both platforms, plus the search "Filter PGP" button polish previously deployed to web.
 
 ### Bug Fixes
 
-- **Web: "Filter PGP" no longer lingers during a search** — The session-restore path makes the PGP filter button visible on page load, but `execute_search` only hid the "Search within" button at search start, so a search run after a restore left a stale "Filter PGP" showing while *Searching…* (the sibling domain/printed buttons correctly stayed hidden). All three post-search filter buttons are now hidden at search start and reappear together when enrichment completes.
-- **Web: "Filter PGP" now matches the other filter buttons' color** — In its default state the button stripped its `color` prop and rendered white/grey while "Filter by domains" and "Filter Printed" stayed blue. It now keeps `color=primary` in the `all` state; the printed button's `all` branch got the same fix so it stays blue when cycled back.
-- **Web: "Filter PGP" now matches the other filter buttons' height** — The icon-less button sat at the dense `2em` min-height, shorter than its icon-bearing siblings (icon `1.715em` + padding ≈ `2.286em`). A matching `min-height` brings it level without adding an icon.
+- **Web: Recently Viewed & General list names now localized** — under the Hebrew UI the "Recently Viewed" and "General" list names leaked English; they now read "נצפו לאחרונה" / "כללי". Root cause: render sites only translated system lists (`is_system`), but "General" is the *default* list (`is_default`); the fix is a shared `localize_list_name()` helper applied at every render site (sidebar, lists header, Joins-Lab picker, add-to-list dialog) — generic for all app-managed list names.
+- **Web: Recently Viewed list no longer empty** — when opened from the sidebar/lists page or the Joins-Lab picker the list was keyed by its numeric Supabase id and read the (empty) `list_items` table instead of the `recent_items` source (the add-to-joins "Recent activity" tab worked because it used the literal `'recent'` source). The recent list now routes its reads to `recent_items` regardless of how it is addressed.
+- **Web: Recently Viewed count badge** — the badge showed "(0)" on a full list because the warm batched-count path counted `list_items` rows (zero for the recent list). The recent list now routes through the recent-aware count at every render site.
+- **Desktop: Recently Viewed order & duplicates** — the list was sorted by library instead of by recency and showed true duplicate rows. It now lists most-recent first and collapses true duplicates by `(sys_id, image)` keeping the most-recent occurrence; distinct per-image views are preserved.
+- **Web: "Filter PGP" button polish** *(previously deployed to web)* — three display-only fixes to the post-search "Filter PGP" button on `/search`: it no longer lingers during a search (all three post-search filter buttons hide at search start and reappear together), it keeps `color=primary` in its default state to match the other filter buttons' blue, and a matching `min-height` brings the icon-less button level with its icon-bearing siblings.
 
 ---
 
