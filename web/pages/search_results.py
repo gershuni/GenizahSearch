@@ -49,6 +49,32 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Bidi isolation (Finding #15)
+# ---------------------------------------------------------------------------
+# Shelfmarks ("T-S NS 192.21") and mixed Hebrew/Latin titles must be bidi-
+# isolated so their Latin letters / digits don't reorder against the
+# surrounding RTL UI. We render them as a <bdi> element (which carries an
+# implicit unicode-bidi: isolate + dir=auto), and ALSO set dir="auto" +
+# unicode-bidi: isolate explicitly so the contract is visible to tests and
+# robust across browsers. Text is HTML-escaped because it is user/corpus data.
+_BIDI_ISOLATE_STYLE = "unicode-bidi: isolate;"
+
+
+def _isolated_label(text, *, classes='', style=''):
+    """Render `text` as a bidi-isolated <bdi> via ui.html (text is escaped).
+
+    Returns the created ui.html element so callers can chain .tooltip()/.style().
+    """
+    safe = html.escape(str(text if text is not None else ''))
+    extra = (style + ' ' if style else '') + _BIDI_ISOLATE_STYLE
+    el = ui.html(f'<bdi dir="auto">{safe}</bdi>', sanitize=False)
+    if classes:
+        el.classes(classes)
+    el.style(extra)
+    return el
+
+
+# ---------------------------------------------------------------------------
 # Standalone helpers (zero closure dependencies)
 # ---------------------------------------------------------------------------
 
@@ -91,24 +117,43 @@ def show_add_to_list_dialog(result):
 # Core rendering functions (take search_state + refs as parameters)
 # ---------------------------------------------------------------------------
 
+def _set_expansion_aria(search_state, index, expanded):
+    """Reflect accordion open/closed state on the clickable toggle (#26).
+
+    The toggle element carries role=button + aria-expanded; keep that in sync
+    so screen-reader users hear "expanded"/"collapsed".
+    """
+    toggle_refs = getattr(search_state, 'expansion_toggle_refs', {})
+    el = toggle_refs.get(index)
+    if el is not None and not getattr(el, 'is_deleted', False):
+        el.props(f'aria-expanded={"true" if expanded else "false"}')
+
+
 def toggle_expansion(search_state, refs, index):
-    """Toggle inline accordion expansion for a result card."""
+    """Toggle inline accordion expansion for a result card.
+
+    #25: visibility is driven through NiceGUI state (set_visibility) instead of
+    imperative inline display:none/block, and aria-expanded is kept in sync (#26).
+    """
     if search_state.expanded_index == index:
         # Collapse current
         ref = search_state.expansion_refs.get(index)
         if ref and not ref.is_deleted:
-            ref.style('display: none')
+            ref.set_visibility(False)
+        _set_expansion_aria(search_state, index, False)
         search_state.expanded_index = None
     else:
         # Collapse old if any
         if search_state.expanded_index is not None:
             old_ref = search_state.expansion_refs.get(search_state.expanded_index)
             if old_ref and not old_ref.is_deleted:
-                old_ref.style('display: none')
+                old_ref.set_visibility(False)
+            _set_expansion_aria(search_state, search_state.expanded_index, False)
         # Expand new
         ref = search_state.expansion_refs.get(index)
         if ref and not ref.is_deleted:
-            ref.style('display: block')
+            ref.set_visibility(True)
+        _set_expansion_aria(search_state, index, True)
         search_state.expanded_index = index
         # Trigger lazy text loading if registered for this card
         lazy_loaders = getattr(search_state, '_lazy_loaders', {})
@@ -238,14 +283,14 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                     with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
                         'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
                     ).on('click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)):
-                        ui.label(excl_shelfmark).classes('text-sm font-medium truncate shrink-0').style(
+                        _isolated_label(excl_shelfmark, classes='text-sm font-medium truncate shrink-0', style=(
                             'color: var(--text-secondary); max-width: 200px;'
-                        )
+                        ))
                         if excl_title:
                             title_short = (excl_title[:60] + '...') if len(excl_title) > 60 else excl_title
-                            ui.label(title_short).classes('text-xs truncate').style(
-                                'color: var(--text-muted); direction: rtl; min-width: 0; flex: 1 1 0;'
-                            )
+                            _isolated_label(title_short, classes='text-xs truncate', style=(
+                                'color: var(--text-muted); min-width: 0; flex: 1 1 0;'
+                            ))
                         ui.label(excl_reason).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                             'background: #fff3cd; color: #856404; white-space: nowrap;'
                         )
@@ -280,19 +325,19 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                             persist_value('word_search_excluded_ids', list(search_state.word_search_excluded_ids))
                             refs.apply_word_search_exclusions_and_render()
                         ui.button(icon='add_circle_outline', on_click=_restore_word_result).props(
-                            'flat round dense size=xs'
+                            f'flat round dense size=xs aria-label="{tr("Restore")}"'
                         ).style('color: var(--text-muted);').tooltip(tr('Restore'))
                         with ui.row().classes('items-center gap-2 flex-grow min-w-0 cursor-pointer').on(
                             'click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)
                         ):
-                            ui.label(excl_shelfmark).classes('text-sm font-medium truncate shrink-0').style(
+                            _isolated_label(excl_shelfmark, classes='text-sm font-medium truncate shrink-0', style=(
                                 'color: var(--text-secondary); max-width: 200px;'
-                            )
+                            ))
                             if excl_title:
                                 title_short = (excl_title[:60] + '...') if len(excl_title) > 60 else excl_title
-                                ui.label(title_short).classes('text-xs truncate').style(
-                                    'color: var(--text-muted); direction: rtl; min-width: 0; flex: 1 1 0;'
-                                )
+                                _isolated_label(title_short, classes='text-xs truncate', style=(
+                                    'color: var(--text-muted); min-width: 0; flex: 1 1 0;'
+                                ))
                 if len(ws_excluded) > WS_EXCLUDED_LIMIT:
                     ui.label(
                         f"... {tr('and')} {len(ws_excluded) - WS_EXCLUDED_LIMIT} {tr('more')}"
@@ -326,14 +371,14 @@ def render_results(search_state, refs, results, page=None, scroll_to_top=False, 
                     with ui.row().classes('w-full items-center gap-2 py-1 px-2 cursor-pointer').style(
                         'border-bottom: 1px solid var(--border-light); overflow: hidden; max-width: 100%;'
                     ).on('click', lambda r=excl_result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, None, r)):
-                        ui.label(excl_shelfmark).classes('text-sm font-medium truncate shrink-0').style(
+                        _isolated_label(excl_shelfmark, classes='text-sm font-medium truncate shrink-0', style=(
                             'color: var(--text-secondary); max-width: 200px;'
-                        )
+                        ))
                         if excl_title:
                             title_short = (excl_title[:60] + '...') if len(excl_title) > 60 else excl_title
-                            ui.label(title_short).classes('text-xs truncate').style(
-                                'color: var(--text-muted); direction: rtl; min-width: 0; flex: 1 1 0;'
-                            )
+                            _isolated_label(title_short, classes='text-xs truncate', style=(
+                                'color: var(--text-muted); min-width: 0; flex: 1 1 0;'
+                            ))
                         ui.label(excl_reason).classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                             'background: var(--accent-red, #fecaca); color: var(--text-on-accent, #991b1b); white-space: nowrap;'
                         )
@@ -385,8 +430,25 @@ def create_result_card(search_state, refs, index, result):
                     on_change=toggle_card_selection
                 ).props('dense')
 
-            # Main content (clickable — toggles inline accordion)
-            with ui.column().classes('flex-grow min-w-0 gap-1').on('click', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx)):
+            # Main content (clickable — toggles inline accordion).
+            # M3 + #26: expose button semantics so keyboard + screen-reader users can
+            # operate the accordion. role=button + tabindex make it focusable/activatable;
+            # aria-expanded reflects state; aria-controls points at the expansion panel.
+            # The expansion panel below uses the matching id (see _expand_panel_id).
+            _expand_panel_id = f'result-expand-{index}'
+            _content_col = ui.column().classes('flex-grow min-w-0 gap-1 cursor-pointer')
+            _content_col.props(
+                f'role=button tabindex=0 aria-expanded=false aria-controls="{_expand_panel_id}" '
+                f'aria-label="{tr("Toggle full text and image")}"'
+            )
+            search_state.expansion_toggle_refs = getattr(search_state, 'expansion_toggle_refs', {})
+            search_state.expansion_toggle_refs[index] = _content_col
+            _content_col.on('click', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
+            # Enter / Space activate, matching native button behavior. keydown.space.prevent
+            # stops the page from scrolling on Space.
+            _content_col.on('keydown.enter', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
+            _content_col.on('keydown.space.prevent', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
+            with _content_col:
                 with ui.row().classes('items-center gap-2 flex-wrap'):
                     ui.label(f"#{index + 1}").classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                         'background: var(--bg-tertiary); color: var(--text-muted);'
@@ -467,10 +529,10 @@ def create_result_card(search_state, refs, index, result):
                                 container.classes(add='hidden')
 
                         ui.button(icon='compare', on_click=_toggle_vs_partners).props(
-                            'flat dense round size=xs'
+                            f'flat dense round size=xs aria-label="{tr("Visual similarity partners")}"'
                         ).style('color: #ef6c00;').tooltip(tr('Visual similarity partners'))
 
-                    ui.label(shelfmark).classes('font-bold break-all').style('color: var(--primary-700);')
+                    _isolated_label(shelfmark, classes='font-bold break-all', style='color: var(--primary-700);')
                     # Phase 999.1 (FOLIO-01): page/image number chip after shelfmark for desktop parity.
                     # Source: display['img'] — same field desktop COL_IMG renders (genizah_app.py:16111).
                     # D-02 / D-02a: just the number, no prefix, no separator char; falsy → render nothing.
@@ -560,27 +622,29 @@ def create_result_card(search_state, refs, index, result):
                     if _title_info and _orig_short and _orig_short != _resolved_short:
                         _tt_st = {'showing_original': False}
                         with ui.row().classes('items-center gap-0'):
-                            _tt_lbl = ui.label(_resolved_short).classes('text-xs').style(
-                                f'color: var(--text-tertiary); direction: {_dir}; word-wrap: break-word;'
+                            _tt_lbl = ui.label(_resolved_short).classes('text-xs').props('dir="auto"').style(
+                                f'color: var(--text-tertiary); direction: {_dir}; unicode-bidi: isolate; word-wrap: break-word;'
                             )
                             def _make_title_toggle(lbl, orig, resolved, orig_dir, res_dir, flag):
                                 def handler():
                                     flag['showing_original'] = not flag['showing_original']
                                     if flag['showing_original']:
                                         lbl.text = orig
-                                        lbl.style(f'color: var(--text-tertiary); direction: {orig_dir}; word-wrap: break-word;')
+                                        lbl.style(f'color: var(--text-tertiary); direction: {orig_dir}; unicode-bidi: isolate; word-wrap: break-word;')
                                     else:
                                         lbl.text = resolved
-                                        lbl.style(f'color: var(--text-tertiary); direction: {res_dir}; word-wrap: break-word;')
+                                        lbl.style(f'color: var(--text-tertiary); direction: {res_dir}; unicode-bidi: isolate; word-wrap: break-word;')
                                 return handler
-                            ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
+                            ui.button(icon='swap_horiz').props(
+                                f'flat dense round size=xs aria-label="{tr("Show original title")}"'
+                            ).style(
                                 'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.4;'
                             ).tooltip(tr('Show original title')).on(
                                 'click.stop', _make_title_toggle(_tt_lbl, _orig_short, _resolved_short, 'rtl', _dir, _tt_st)
                             )
                     else:
-                        ui.label(_resolved_short).classes('text-xs').style(
-                            f'color: var(--text-tertiary); direction: {_dir}; word-wrap: break-word;'
+                        ui.label(_resolved_short).classes('text-xs').props('dir="auto"').style(
+                            f'color: var(--text-tertiary); direction: {_dir}; unicode-bidi: isolate; word-wrap: break-word;'
                         )
 
         # Action buttons row (on the card, always visible)
@@ -679,7 +743,7 @@ def create_result_card(search_state, refs, index, result):
                 joins_btn = ui.button(
                     icon='link',
                     on_click=_open_joins_for_card,
-                ).props('flat round dense size=sm').style(
+                ).props(f'flat round dense size=sm aria-label="{tr("Find Joins in the Joins Lab")}"').style(
                     'color: var(--neutral-400);'
                 ).tooltip(tr('Find Joins in the Joins Lab'))
 
@@ -697,7 +761,13 @@ def create_result_card(search_state, refs, index, result):
                         if has:
                             btn.style('color: var(--primary-600);')
                     except Exception:
-                        pass  # Icon stays neutral; acts as straight-to-Lab on failure
+                        # #11: the joins-presence hint is best-effort and non-blocking.
+                        # On failure the button still opens the Lab; surface a quiet
+                        # tooltip so the user knows the hint itself didn't load.
+                        try:
+                            btn.tooltip(tr('Could not check for joins — open the Joins Lab to search'))
+                        except Exception:
+                            pass  # Icon stays neutral; acts as straight-to-Lab on failure
 
                 # Defer the joins-presence hint off the initial render. Use
                 # asyncio.call_later (NOT ui.timer): a card cleared by a new
@@ -733,7 +803,11 @@ def create_result_card(search_state, refs, index, result):
                 ui.html(snippet_html, sanitize=False)
 
         # === Inline accordion expansion (image + full text only) ===
-        expand_container = ui.column().classes('w-full result-inline-expand').style('display: none;')
+        # #25: use NiceGUI visibility/state instead of imperative display:none/block.
+        # #26: id + role=region let the toggle's aria-controls target a labeled region.
+        expand_container = ui.column().classes('w-full result-inline-expand')
+        expand_container.props(f'id="{_expand_panel_id}" role=region aria-label="{tr("Full text and image")}"')
+        expand_container.set_visibility(False)
         search_state.expansion_refs[index] = expand_container
 
         # Build thumbnail URL eagerly (browser preloads in background)
@@ -775,6 +849,20 @@ def create_result_card(search_state, refs, index, result):
                     _img_url = f"/api/oxford_image/{sys_id}?page={page_idx}"  # Enrichment failed; continue with available data
 
         with expand_container:
+            # #26: visible boundary + explicit Collapse control so the expanded
+            # panel reads as a distinct region and is dismissable without hunting
+            # for the (also-clickable) header.
+            with ui.row().classes('w-full items-center justify-between mt-2 pt-2').style(
+                'border-top: 1px solid var(--border-light);'
+            ):
+                ui.label(tr('Full text and image')).classes('text-xs font-medium').style(
+                    'color: var(--text-muted);'
+                )
+                ui.button(
+                    tr('Collapse'), icon='expand_less',
+                    on_click=lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx),
+                ).props(f'flat dense no-caps size=sm aria-label="{tr("Collapse")}"')
+
             # Content row: image + text
             _expand_row = ui.row().classes('gap-4 flex-wrap w-full')
             with _expand_row:
@@ -834,6 +922,13 @@ def create_result_card(search_state, refs, index, result):
                         return
                     ls['loaded'] = True
                     p_num = int(r.get('display', {}).get('img', '1'))
+                    # #11: per-op pending feedback — show a spinner in this card's
+                    # text column while the page fetch runs (does not block the page).
+                    tc.clear()
+                    with tc:
+                        with ui.row().classes('items-center gap-2'):
+                            ui.spinner(size='sm').props('aria-hidden=true')
+                            ui.label(tr('Loading full text…')).classes('text-sm').style('color: var(--text-muted);')
                     try:
                         from web.services import get_service
                         page_data = await run.io_bound(
@@ -844,8 +939,21 @@ def create_result_card(search_state, refs, index, result):
                             _render_full_text(tc, page_data.text, hp)
                         else:
                             logger.warning("Lazy load: no page data for sys_id=%s p_num=%d", sid, p_num)
+                            _render_full_text(tc, '', hp)  # shows "Full text not available"
                     except Exception as e:
                         logger.error("Lazy load error for sys_id=%s: %s", sid, e, exc_info=True)
+                        # #11: per-op failure feedback + retry, scoped to this card.
+                        ls['loaded'] = False
+                        tc.clear()
+                        with tc:
+                            with ui.column().classes('gap-2'):
+                                ui.label(tr('Could not load full text. Try again later.')).classes('text-sm').style(
+                                    'color: var(--accent-red, #ef4444);'
+                                )
+                                ui.button(
+                                    tr('Retry'), icon='refresh',
+                                    on_click=lambda: asyncio.ensure_future(_lazy_load_text()),
+                                ).props('flat dense no-caps size=sm')
 
                 # Hook into toggle: load text on first expand
                 _orig_toggle_fn = lambda i, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, i)
@@ -1357,7 +1465,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                 ):
                     # Left: Shelfmark and page info
                     with ui.row().classes('items-center gap-3'):
-                        ui.label(display_shelfmark).classes('font-bold text-sm').style('color: var(--primary-700);')
+                        _isolated_label(display_shelfmark, classes='font-bold text-sm', style='color: var(--primary-700);')
                         if title:
                             # Resolve title by language
                             _bar_title = title
@@ -1367,8 +1475,8 @@ def open_advanced_dialog(search_state, refs, index, result):
                                     _bar_lang = get_language()
                                     _bar_title = (_bar_tt.get('english_title') or _bar_tt.get('hebrew_title') or title) if _bar_lang != 'he' else (_bar_tt.get('hebrew_title') or _bar_tt.get('english_title') or title)
                             _bar_dir = 'ltr' if get_language() != 'he' else 'rtl'
-                            ui.label(f"| {_bar_title[:50]}{'...' if len(_bar_title) > 50 else ''}").classes('text-xs').style(
-                                f'color: var(--text-muted); direction: {_bar_dir};'
+                            ui.label(f"| {_bar_title[:50]}{'...' if len(_bar_title) > 50 else ''}").classes('text-xs').props('dir="auto"').style(
+                                f'color: var(--text-muted); direction: {_bar_dir}; unicode-bidi: isolate;'
                             )
 
                     # Center: Page navigation
@@ -1485,9 +1593,9 @@ def open_advanced_dialog(search_state, refs, index, result):
                     with ui.row().classes('items-center justify-between w-full gap-2'):
                         # Left: Shelfmark (compact)
                         with ui.row().classes('items-center gap-2 min-w-0 flex-shrink'):
-                            ui.label(display_shelfmark).classes('text-sm font-bold truncate').style(
+                            _isolated_label(display_shelfmark, classes='text-sm font-bold truncate', style=(
                                 'color: var(--primary-700); max-width: 400px;'
-                            )
+                            ))
                             # Resolve translated title for info bar — always language-aware
                             _adv_title = title
                             if sys_id and search_state.title_translations:
@@ -1506,17 +1614,19 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 if _adv_orig and _adv_orig != _adv_t_short:
                                     _ib_st = {'showing_original': False}
                                     with ui.row().classes('items-center gap-0 min-w-0'):
-                                        _ib_lbl = ui.label(_adv_t_short).classes('text-xs truncate').style(
-                                            f'color: var(--text-muted); direction: {_adv_dir}; max-width: 350px;'
+                                        _ib_lbl = ui.label(_adv_t_short).classes('text-xs truncate').props('dir="auto"').style(
+                                            f'color: var(--text-muted); direction: {_adv_dir}; unicode-bidi: isolate; max-width: 350px;'
                                         )
                                         def _make_ib_toggle(lbl, orig, resolved, flag, resolved_dir):
                                             def handler():
                                                 flag['showing_original'] = not flag['showing_original']
                                                 _dir = 'rtl' if flag['showing_original'] else resolved_dir
                                                 lbl.text = orig if flag['showing_original'] else resolved
-                                                lbl.style(f'color: var(--text-muted); direction: {_dir}; max-width: 350px;')
+                                                lbl.style(f'color: var(--text-muted); direction: {_dir}; unicode-bidi: isolate; max-width: 350px;')
                                             return handler
-                                        ui.button(icon='swap_horiz').props('flat dense round size=xs').style(
+                                        ui.button(icon='swap_horiz').props(
+                                            f'flat dense round size=xs aria-label="{tr("Show original title")}"'
+                                        ).style(
                                             'min-width: 18px; min-height: 18px; padding: 0; opacity: 0.4;'
                                         ).tooltip(tr('Show original title')).on(
                                             'click.stop', _make_ib_toggle(_ib_lbl, _adv_orig, _adv_t_short, _ib_st, _adv_dir)
@@ -1524,7 +1634,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 else:
                                     ui.label(_adv_t_short).classes(
                                         'text-xs truncate'
-                                    ).style(f'color: var(--text-muted); direction: {_adv_dir}; max-width: 350px;')
+                                    ).props('dir="auto"').style(f'color: var(--text-muted); direction: {_adv_dir}; unicode-bidi: isolate; max-width: 350px;')
 
                         # Right: Action buttons
                         with ui.row().classes('items-center gap-1 shrink-0 flex-wrap'):
