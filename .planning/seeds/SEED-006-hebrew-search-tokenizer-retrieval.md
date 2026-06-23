@@ -1,8 +1,9 @@
 ---
 id: SEED-006
-status: implemented-rollout-pending
+status: complete
 planted: 2026-06-19
 code_merged: 2026-06-21 (master-main — shared/search_tokenizer.py; create_index + build_local_schema schema; _index_has_field compat gate)
+rolled_out: 2026-06-23 (v8.2.0 — web GENIZAH index rebuilt over Transcriptions.txt with content_search [1,161,479 docs] + redeployed @ e01bcf40; desktop ships the new schema + Settings → Build/Rebuild Index; LOCAL auto-rebuilds on the marker bump). STILL OPEN: M2 real-corpus ranking regression; L5 LAB side-index; one-time desktop no-freeze smoke test.
 planted_during: v8.2.0 / Phase 119 (Web Joins Lab)
 trigger_when: next search-quality, indexing, or My-Library milestone — anything touching Tantivy tokenization, LOCAL indexing, or Hebrew search recall
 scope: large

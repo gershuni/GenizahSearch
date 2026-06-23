@@ -1,5 +1,18 @@
 # Project Milestones: GenizahSearch
 
+## v8.2.0 Web Joins Lab, FGP Transcriptions & Hebrew Search (Shipped: 2026-06-23)
+
+**Phases completed:** 5 phases (117-121) — the desktop Joins Lab (Component A) ported to the web
+**Git range:** `v8.1.0` → `v8.2.0` (334 commits)
+**Scope:** 356 files changed, +64,570 / −1,041
+**App releases:** v8.2.0 (2026-06-23, both apps), tagged `v8.2.0` @ `e01bcf40` (GitHub Release with desktop installer — FGP DB bundled via `build_app.bat` `--add-data`); web deployed @ `e01bcf40` with the GENIZAH index rebuilt (SEED-006 `content_search` schema, 1,161,479 docs, zero-downtime mv-aside swap) + `fgp_transcriptions.db` uploaded.
+
+**Delivered:** The **Web Joins Lab** at `/joins-lab` — the desktop join-hunting workbench (v8.0.0 Component A) ported to the web at full parity on the shared `shared/joins_lab.py` core: anchor pane (image + numbered transcription), line-by-line query builders for both leaf sides, deduped candidate grid/table with sys_id-keyed triage, side-by-side Compare (per-pane zoom + synced verdicts), Visual Similarity toggle, and Add-as-Join / Add-to-Puzzle / Add-to-list. Bilingual EN/HE + RTL, no login wall, server-side per-session state via `safe_storage` (builder/triage/view survive refresh). Human-in-the-loop only — no automated finder. **Bundled and shipped together as v8.2.0 (beyond the milestone's web-only scope):** **FGP transcriptions go-live** (both apps — a distinct, selectable source in the version chooser, folio-label-aligned, rendered from visual XML; desktop DB bundled in the installer, web DB uploaded); the **SEED-006 Hebrew/Judeo-Arabic search rollout** (the `hebword` tokenizer + additive diacritic-folded `content_search`, made live by rebuilding the GENIZAH index — punctuation- and upper-dot-attached words now retrievable); **Responsa operators over My Library** (desktop `#`/`*`/`%`/`(א/ב)`); the fuzzy-mode Hebrew label `עמום`→`מקורב`; and bug fixes (My Library re-index schema-migration crash, Fragment Puzzle per-machine-install crash, telemetry focus/blur `Qt::ApplicationState` crash).
+
+**Known deferred at close:** `|` line-break operator over LOCAL; SEED-006 **M2** real-corpus ranking regression + **L5** LAB side-index punctuation + a one-time desktop no-freeze smoke test; Joins Lab **Component B** auto-finder (JSA-01/02/03 + JWB-05, deferred since v8.0.0).
+
+---
+
 ## v8.1.0 Desktop Telemetry (Shipped: 2026-06-16)
 
 **Phases completed:** 6 phases (111-116), 20 plans, 32 tasks
