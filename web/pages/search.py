@@ -1418,8 +1418,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     def _update_printed_filter_btn():
                         if search_state.printed_filter == 'all':
                             printed_filter_btn.text = tr('Filter Printed')
-                            printed_filter_btn.props(remove='color')
-                            printed_filter_btn.props('outline dense no-caps')
+                            # Keep the default primary color when cycled back to 'all' so it
+                            # stays blue like the sibling filter buttons (smoke 2026-06-23).
+                            printed_filter_btn.props('outline dense no-caps color=primary')
                         elif search_state.printed_filter == 'hide_printed':
                             printed_filter_btn.text = tr('Hiding printed')
                             printed_filter_btn.props(remove='color')
@@ -1459,8 +1460,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         # default state shows "Filter PGP" not "All" so the button is self-describing.
                         if search_state.pgp_filter == 'all':
                             pgp_filter_btn.text = tr('Filter PGP')
-                            pgp_filter_btn.props(remove='color')
-                            pgp_filter_btn.props('outline dense no-caps')
+                            # Match the other filter buttons (Filter by domains / Filter
+                            # Printed) — keep the default primary color in the 'all' state.
+                            # Removing the color prop here made the button render white/grey
+                            # while the siblings stayed blue (smoke 2026-06-23).
+                            pgp_filter_btn.props('outline dense no-caps color=primary')
                         elif search_state.pgp_filter == 'only_pgp':
                             pgp_filter_btn.text = tr('Has PGP')
                             pgp_filter_btn.props(remove='color')
@@ -1477,10 +1481,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         return
 
                     # Mirrors printed_filter_btn construction exactly (no icon per user, smoke-feedback 2026-05-19).
+                    # min-height matches the icon-bearing sibling buttons: a dense q-btn with an
+                    # icon renders at ~2.286em (icon 1.715em + 0.285em vertical padding ×2),
+                    # taller than the icon-less default 2em min-height (smoke 2026-06-23).
                     pgp_filter_btn = ui.button(
                         tr('Filter PGP'),
                         on_click=lambda: _toggle_pgp_filter()
-                    ).classes('text-sm').props('outline dense no-caps')
+                    ).classes('text-sm').props('outline dense no-caps').style('min-height: 2.286em;')
                     pgp_filter_btn.tooltip(tr('Filter by PGP coverage'))
                     _set_btn_visible(pgp_filter_btn, False)
                     # If session restored a non-'all' state, sync the button now (still hidden until enrichment).
@@ -4040,6 +4047,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         stop_btn.style('display: inline-flex;')
         progress_bar.classes(remove='opacity-0')
         search_within_btn.set_visibility(False)  # Hide during search
+        # Hide post-search filter buttons during the search — they reappear together
+        # via _apply_enrichment_to_ui() once enrichment completes. Without this, a stale
+        # PGP/domain/printed button left visible by the session-restore path
+        # (_deferred_transcription_restore) would persist through the new search
+        # (smoke 2026-06-23: "Filter PGP" showed while Searching...).
+        _set_btn_visible(domain_filter_btn, False)
+        _set_btn_visible(printed_filter_btn, False)
+        _set_btn_visible(pgp_filter_btn, False)
         progress_bar.value = 0
         # Collapse filter panel — chips summarize active filters
         adv_filters_panel.value = False

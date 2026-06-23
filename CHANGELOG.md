@@ -4,6 +4,18 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [Web Hotfix] - 2026-06-23 — Search "Filter PGP" button polish
+
+Web-only deploy on top of v8.2.0 (no version bump, no installer). Three display-only fixes to the post-search "Filter PGP" button on `/search`, all in `web/pages/search.py`.
+
+### Bug Fixes
+
+- **Web: "Filter PGP" no longer lingers during a search** — The session-restore path makes the PGP filter button visible on page load, but `execute_search` only hid the "Search within" button at search start, so a search run after a restore left a stale "Filter PGP" showing while *Searching…* (the sibling domain/printed buttons correctly stayed hidden). All three post-search filter buttons are now hidden at search start and reappear together when enrichment completes.
+- **Web: "Filter PGP" now matches the other filter buttons' color** — In its default state the button stripped its `color` prop and rendered white/grey while "Filter by domains" and "Filter Printed" stayed blue. It now keeps `color=primary` in the `all` state; the printed button's `all` branch got the same fix so it stays blue when cycled back.
+- **Web: "Filter PGP" now matches the other filter buttons' height** — The icon-less button sat at the dense `2em` min-height, shorter than its icon-bearing siblings (icon `1.715em` + padding ≈ `2.286em`). A matching `min-height` brings it level without adding an icon.
+
+---
+
 ## [8.2.0] - 2026-06-22 — Web Joins Lab, FGP Transcriptions & Hebrew Search
 
 This release brings the **Joins Lab to the web** at parity with the desktop
