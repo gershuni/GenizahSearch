@@ -44,6 +44,31 @@ from shared.synthetic_sys_id import is_synthetic_sys_id
 logger = logging.getLogger(__name__)
 
 
+def _warn_if_on_event_loop(func_name: str) -> None:
+    """Warn (never raise) if ``func_name`` is running on the asyncio event loop.
+
+    Audit #38: ``resolve_external_images`` does synchronous network I/O via
+    ``enrich_metadata`` and must run inside ``run.io_bound`` (an executor
+    thread), never directly on the NiceGUI/asyncio event loop where it would
+    block every other request. Detecting a *running* loop on the current thread
+    means we are NOT on an io_bound worker. This is a soft guard: it logs a
+    warning so the misuse is observable but does not change behaviour.
+    """
+    import asyncio
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No running loop on this thread → we are on a worker thread (or sync
+        # context). This is the correct place to call. Nothing to warn about.
+        return
+    logger.warning(
+        "%s called on the event-loop thread — it performs blocking network I/O "
+        "and must be invoked inside run.io_bound to avoid stalling the UI.",
+        func_name,
+        stack_info=True,
+    )
+
+
 def resolve_image_url(
     *,
     sys_id: str,
@@ -272,6 +297,14 @@ def resolve_external_images(
         On enrich_metadata failure (any Exception), returns the same shape with
         all-empty values — degrades gracefully, mirrors browse_enrichment.py:249-250.
     """
+    # Audit #38: the io_bound requirement (docstring above) was comment-only.
+    # Add a runtime guard that warns when this is mistakenly invoked on the
+    # asyncio event loop thread (i.e. NOT inside run.io_bound), where the
+    # synchronous enrich_metadata network call would block the whole UI. This
+    # only warns — it never raises — so existing callers that already wrap the
+    # call in run.io_bound (anchor_viewer.py, joins_lab.py) are unaffected.
+    _warn_if_on_event_loop("resolve_external_images")
+
     if meta_mgr is None:
         from web.state import state as _state
         meta_mgr = _state.meta_mgr
@@ -293,7 +326,12 @@ def resolve_external_images(
             meta_mgr.enrich_metadata(sys_id)
             cached = meta_mgr.nli_cache.get(sys_id, {})
         except Exception as e:
-            logger.warning("resolve_external_images enrich_metadata error for %s: %s", sys_id, e)
+            # Audit #37: include stack info so the failing call path is
+            # diagnosable (the bare warning lost the traceback).
+            logger.warning(
+                "resolve_external_images enrich_metadata error for %s: %s",
+                sys_id, e, exc_info=True,
+            )
             cached = {}
 
     return {

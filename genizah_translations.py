@@ -1769,6 +1769,7 @@ TRANSLATIONS = {
     "Zoom": "זום",
     "Zoom in": "הגדל",
     "Zoom out": "הקטן",
+    "Zoom level": "רמת זום",
     "Reset zoom": "אפס זום",
     "Fit to width": "התאם לרוחב",
     "Fit to height": "התאם לגובה",

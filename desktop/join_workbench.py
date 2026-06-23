@@ -495,7 +495,7 @@ try:
         QWidget, QLineEdit, QInputDialog, QMessageBox,
         QCheckBox, QMenu, QComboBox, QListWidget, QListWidgetItem,
     )
-    from PyQt6.QtCore import Qt, QThread, pyqtSignal
+    from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
     from PyQt6.QtGui import QPalette, QPixmap, QImage
     from desktop.image_loader import ImageLoaderThread
     from desktop.widgets.line_number_text_edit import apply_line_numbered_text
@@ -1775,6 +1775,18 @@ if _QT_AVAILABLE:
             self.img.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.img.setStyleSheet("background:#e2e8f0;color:#64748b;")
             lay.addWidget(self.img)
+            # Audit #43: web uses an animated skeleton while the candidate
+            # thumbnail loads. Minimal desktop parity — a lightweight animated
+            # "loading…" with cycling dots driven by a QTimer (no pixmap churn,
+            # no extra threads). The pump replaces the text with a pixmap or
+            # "(no image)" once done; the animator stops itself then.
+            self._loading_frame = 0
+            self._loading_timer = QTimer(self)
+            self._loading_timer.setInterval(350)
+            self._loading_timer.timeout.connect(self._tick_loading_anim)
+            # Initial thumbnail load is driven by ThumbResolver (see pane render);
+            # start animating immediately so the placeholder isn't static.
+            self._start_loading_anim()
 
             # 2. Shelfmark + provenance badge
             shelf_text = c.shelfmark
@@ -2076,7 +2088,7 @@ if _QT_AVAILABLE:
             """
             try:
                 self._folio_lbl.setText(f"p.{self._card_page}")
-                self.img.setText(tr("loading…"))
+                self._start_loading_anim()
             except RuntimeError:
                 return
             try:
@@ -2085,6 +2097,55 @@ if _QT_AVAILABLE:
                 )
             except Exception:
                 pass
+
+        def _start_loading_anim(self):
+            """Audit #43: begin the lightweight loading animation on self.img.
+
+            Sets the initial placeholder text and starts a QTimer that cycles
+            the trailing dots. The image pump (`_pump_images`) replaces the text
+            with a pixmap or "(no image)" when the fetch resolves; the tick then
+            detects the pixmap and stops itself.
+            """
+            self._loading_frame = 0
+            try:
+                self.img.setText(tr("loading…"))
+                if not self._loading_timer.isActive():
+                    self._loading_timer.start()
+            except RuntimeError:
+                pass
+
+        def _tick_loading_anim(self):
+            """Audit #43: cycle the loading dots; self-stop once the pump has
+            replaced the placeholder with a pixmap or a terminal text.
+
+            The animator only owns the text while it equals one of the frames it
+            itself produced (``loading…`` or ``loading``+dots). If the pump has
+            swapped in a pixmap, ``""`` (about to set a pixmap), or ``(no
+            image)``, the text no longer matches and the timer stops — it never
+            clobbers a real result.
+            """
+            try:
+                pm = self.img.pixmap()
+                if pm is not None and not pm.isNull():
+                    self._loading_timer.stop()
+                    return
+                cur = self.img.text()
+                # Reuse the existing tr("loading…") key (no new untranslated
+                # key) and animate by varying the count of trailing dots after
+                # the base label (the base already ends in an ellipsis glyph).
+                base = tr("loading…")
+                own_frames = {base + "." * n for n in range(4)}
+                if cur not in own_frames:
+                    # Pump set terminal text (e.g. "(no image)") or cleared it.
+                    self._loading_timer.stop()
+                    return
+                self._loading_frame = (self._loading_frame + 1) % 4
+                self.img.setText(base + "." * self._loading_frame)
+            except RuntimeError:
+                try:
+                    self._loading_timer.stop()
+                except RuntimeError:
+                    pass
 
         def _refresh_card_text(self):
             """Fetch the page text for the current _card_page on a background worker.
@@ -3867,7 +3928,16 @@ if _QT_AVAILABLE:
             btn_zoom_in.setFixedSize(26, 22)
             btn_zoom_in.setToolTip(tr("Zoom in"))
             btn_zoom_in.setAccessibleName(tr("Zoom in"))
+            # Audit #42: zoom-% label (parity with the web Compare panes, which
+            # show a live zoom percentage). Updated on every zoom change.
+            zoom_lbl = QLabel("100%")
+            zoom_lbl.setStyleSheet(f"font-size:10px;color:{_META_COLOR};")
+            zoom_lbl.setMinimumWidth(36)
+            zoom_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            zoom_lbl.setToolTip(tr("Zoom level"))
+            zoom_lbl.setAccessibleName(tr("Zoom level"))
             ctrl_row.addWidget(btn_zoom_out)
+            ctrl_row.addWidget(zoom_lbl)
             ctrl_row.addWidget(btn_zoom_in)
 
             img = QLabel(tr("…"))
@@ -3902,6 +3972,7 @@ if _QT_AVAILABLE:
                 "folio_prev": folio_prev,
                 "folio_lbl": folio_lbl,
                 "folio_next": folio_next,
+                "zoom_lbl": zoom_lbl,
                 "img": img,
                 "img_scroll": img_scroll,
                 "txt": txt,
@@ -3934,9 +4005,16 @@ if _QT_AVAILABLE:
             pannable scroll area can pan a zoomed image (mirrors window._apply_zoom)."""
             pix = pane.get("full_pix")
             lbl = pane.get("img")
+            z = pane.get("zoom", 1.0) or 1.0
+            # Audit #42: keep the zoom-% label in sync on every render/zoom.
+            zoom_lbl = pane.get("zoom_lbl")
+            if zoom_lbl is not None:
+                try:
+                    zoom_lbl.setText(f"{int(round(z * 100))}%")
+                except RuntimeError:
+                    pass
             if pix is None or lbl is None:
                 return
-            z = pane.get("zoom", 1.0) or 1.0
             try:
                 scaled = pix.scaled(
                     max(1, int(pix.width() * z)),

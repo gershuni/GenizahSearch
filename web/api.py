@@ -630,10 +630,22 @@ def init_api_routes(app_override=None):
 
     _register_runtime_cache_stats('nli_fl_ids', _nli_memory_cache_stats)
 
-    def _persist_positive_cache_snapshot() -> None:
-        with _nli_cache_lock:
-            cache_snapshot = dict(_nli_cache)
-            cache_time_snapshot = dict(_nli_cache_time)
+    def _persist_positive_cache_snapshot(snapshot: tuple | None = None) -> None:
+        """Persist the positive NLI cache to disk.
+
+        Audit #23: callers that have just mutated the cache under
+        ``_nli_cache_lock`` should pass a snapshot copied *inside* that same
+        critical section (``(dict(_nli_cache), dict(_nli_cache_time))``) so the
+        persisted view is consistent with the update and cannot interleave with
+        a concurrent mutation between the unlock and the re-lock. When no
+        snapshot is supplied this falls back to taking its own locked copy.
+        """
+        if snapshot is None:
+            with _nli_cache_lock:
+                cache_snapshot = dict(_nli_cache)
+                cache_time_snapshot = dict(_nli_cache_time)
+        else:
+            cache_snapshot, cache_time_snapshot = snapshot
         _save_nli_persistent_cache(cache_snapshot, cache_time_snapshot)
 
     def fetch_fl_ids_from_nli(system_id: str, suffix: int = 1) -> list:
@@ -738,11 +750,15 @@ def init_api_routes(app_override=None):
                                 fl_ids.append(fl_match.group(1))
 
                 if fl_ids:
+                    # Audit #23: copy the snapshot INSIDE the same critical
+                    # section as the update so the persisted view is consistent
+                    # (no interleaving mutation between unlock and re-lock).
                     with _nli_cache_lock:
                         _nli_cache[cache_key] = fl_ids
                         _nli_cache_time[cache_key] = _time.time()
                         _prune_nli_memory_cache_locked(_time.time())
-                    _persist_positive_cache_snapshot()
+                        _cache_snapshot = (dict(_nli_cache), dict(_nli_cache_time))
+                    _persist_positive_cache_snapshot(_cache_snapshot)
                     logger.info(f"Resolved {len(fl_ids)} FL IDs for {cache_key} from network IIIF manifest")
                     # Phase 98 D-06/D-08: real success — close the breaker.
                     _nli_record_success(path='fetch_fl_ids_from_nli')
@@ -787,11 +803,13 @@ def init_api_routes(app_override=None):
                             seen.add(fl_id)
                             unique_fl_ids.append(fl_id)
                     if unique_fl_ids:
+                        # Audit #23: snapshot copied inside the lock (see above).
                         with _nli_cache_lock:
                             _nli_cache[cache_key] = unique_fl_ids
                             _nli_cache_time[cache_key] = _time.time()
                             _prune_nli_memory_cache_locked(_time.time())
-                        _persist_positive_cache_snapshot()
+                            _cache_snapshot = (dict(_nli_cache), dict(_nli_cache_time))
+                        _persist_positive_cache_snapshot(_cache_snapshot)
                         logger.info(f"Cached {len(unique_fl_ids)} FL IDs from MARC for {system_id}")
                         # Phase 98 D-06/D-08: MARC fallback succeeded.
                         _nli_record_success(path='fetch_fl_ids_from_nli')
@@ -868,6 +886,14 @@ def init_api_routes(app_override=None):
                 _nli_record_failure(failure_type='429', path='nli_image')
             elif 500 <= resp.status_code < 600:
                 _nli_record_failure(failure_type='5xx', path='nli_image')
+            else:
+                # Audit #36: previously fell through silently. Low-noise debug
+                # log of the unexpected status (404 + any 3xx/other 4xx) so
+                # NLI-side behaviour changes are observable.
+                logger.debug(
+                    "NLI IIIF non-success status %s for FL%s (falling through to Rosetta)",
+                    resp.status_code, digits,
+                )
             # 404 / other → fall through to Rosetta
         except requests.exceptions.Timeout as e:
             logger.error(f"IIIF timeout for FL{digits}: {e}")
@@ -904,6 +930,12 @@ def init_api_routes(app_override=None):
                 _nli_record_failure(failure_type='429', path='nli_image')
             elif 500 <= resp.status_code < 600:
                 _nli_record_failure(failure_type='5xx', path='nli_image')
+            else:
+                # Audit #36: previously fell through silently to the final 404.
+                logger.debug(
+                    "NLI Rosetta non-success status %s for FL%s (returning 404)",
+                    resp.status_code, digits,
+                )
         except requests.exceptions.Timeout as e:
             logger.error(f"Rosetta timeout for FL{digits}: {e}")
             _nli_record_failure(failure_type='timeout', path='nli_image')
@@ -1008,6 +1040,11 @@ def init_api_routes(app_override=None):
     # FastAPI route). Production code never reads this dict.
     _api_test_seam['fetch_fl_ids_from_nli'] = fetch_fl_ids_from_nli
     _api_test_seam['_fetch_nli_image_bytes'] = _fetch_nli_image_bytes
+    # Audit SEED-021 #36/#23: expose the image route + the persist-snapshot
+    # helper so tests can assert the new non-200/non-429/non-5xx status logging
+    # and the lock-consistent cache snapshot without going through TestClient.
+    _api_test_seam['nli_image'] = nli_image
+    _api_test_seam['_persist_positive_cache_snapshot'] = _persist_positive_cache_snapshot
 
     @target_app.get('/api/nli_image_by_sysid/{sys_id}')
     def nli_image_by_sysid(sys_id: str, page: int = 0, width: int = 2000, suffix: int = 1):
