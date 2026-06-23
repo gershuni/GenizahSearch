@@ -9,7 +9,8 @@ Headless pytest cannot see *computed* bidi reordering or computed element height
 so a manual Hebrew-UI visual + keyboard pass is still required before merge. What
 these tests DO pin:
 
-  #14  aria-label present on icon-only buttons in the search toolbar/panel.
+  #14  aria-label present on icon-only buttons in the search toolbar/panel,
+        AND exhaustively on EVERY icon-only ui.button(...) in search_results.py.
   #15  shelfmark/title renders carry dir="auto" + unicode-bidi:isolate (or <bdi>).
   M3/#26 the result expand/collapse toggle exposes role=button / tabindex /
         aria-expanded / aria-controls and keyboard activation; a visible Collapse
@@ -23,6 +24,7 @@ these tests DO pin:
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import pathlib
 import re
@@ -90,6 +92,85 @@ class TestFinding14AriaLabels:
             assert "aria-label=" in window, (
                 f"icon-only button icon={icon!r} lacks aria-label within its props (#14)"
             )
+
+    def test_every_icon_only_button_in_results_has_accessible_name(self):
+        """REGRESSION GUARD (Codex REQUEST-CHANGES #14): EVERY icon-only
+        ``ui.button(...)`` in ``search_results.py`` must expose an accessible
+        name via ``aria-label=`` somewhere in its ``.props(...)`` chain.
+
+        An icon-only button is a ``ui.button(...)`` call with NO first positional
+        (text) argument — i.e. the label is conveyed only by ``icon=``. Buttons
+        with a positional text label (e.g. ``ui.button(tr('Collapse'), ...)``)
+        already have an accessible name from their visible text, so they are
+        exempt. A tooltip alone is NOT an accessible name (it is not announced as
+        the button's label by screen readers), so it does not satisfy this guard.
+
+        This is intentionally exhaustive (not a hand-picked subset) so a future
+        icon-only button that ships without aria-label is caught here.
+        """
+        src = _read(RESULTS_PY)
+        tree = ast.parse(src)
+
+        def _is_ui_button_call(node: ast.Call) -> bool:
+            f = node.func
+            return (
+                isinstance(f, ast.Attribute)
+                and f.attr == "button"
+                and isinstance(f.value, ast.Name)
+                and f.value.id == "ui"
+            )
+
+        def _is_icon_only(call: ast.Call) -> bool:
+            # Icon-only == no positional args (the label, if any, is positional).
+            # ``ui.button(icon=..., on_click=...)`` -> icon-only.
+            # ``ui.button(tr('Save'), icon='save')`` -> has a text label, exempt.
+            if call.args:
+                return False
+            return any(kw.arg == "icon" for kw in call.keywords)
+
+        def _props_chain_has_aria_label(button_call: ast.Call) -> bool:
+            """Return True iff a ``.props(...)`` call that decorates THIS button
+            instance carries ``aria-label=`` in its (string/f-string) argument.
+
+            A ``.props(...)`` decorates ``button_call`` when the button call's
+            source span is nested inside the props call's source span AND the
+            button's own source text appears within the props call's source text
+            (so sibling buttons on adjacent lines are not confused)."""
+            found = {"aria": False}
+            b_seg = ast.get_source_segment(src, button_call) or ""
+
+            class _OwnerVisitor(ast.NodeVisitor):
+                def visit_Call(self, node: ast.Call):
+                    func = node.func
+                    if (
+                        isinstance(func, ast.Attribute)
+                        and func.attr == "props"
+                        and node.args
+                        and button_call.lineno >= node.lineno
+                        and button_call.end_lineno <= (node.end_lineno or node.lineno)
+                    ):
+                        seg = ast.get_source_segment(src, node) or ""
+                        # Confirm this props() decorates *this* button instance
+                        # (its full segment contains the button's own segment).
+                        if b_seg and b_seg in seg and "aria-label=" in (
+                            ast.get_source_segment(src, node.args[0]) or ""
+                        ):
+                            found["aria"] = True
+                    self.generic_visit(node)
+
+            _OwnerVisitor().visit(tree)
+            return found["aria"]
+
+        offenders = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and _is_ui_button_call(node) and _is_icon_only(node):
+                if not _props_chain_has_aria_label(node):
+                    offenders.append(node.lineno)
+
+        assert not offenders, (
+            "icon-only ui.button(...) in search_results.py missing aria-label at "
+            f"line(s): {sorted(offenders)} (#14)"
+        )
 
 
 # ---------------------------------------------------------------------------

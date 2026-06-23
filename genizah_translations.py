@@ -4429,3 +4429,38 @@ TRANSLATIONS.update({
     "Visually similar":
         "דומה חזותית",
 })
+
+# --- SEED-014 a11y/RTL audit (PR #300): web search-results + filter-panel
+#     strings that were leaking English to Hebrew users (Codex REQUEST-CHANGES #3) ---
+TRANSLATIONS.update({
+    # web/components/visual_similarity_dialog.py — restriction-clear control
+    "Clear visual similarity restriction":
+        "נקה הגבלת דמיון חזותי",
+    # web/pages/search_results.py — joins-presence hint failure tooltip
+    "Could not check for joins — open the Joins Lab to search":
+        "לא ניתן לבדוק צירופים — פתחו את מעבדת הצירופים כדי לחפש",
+    # web/pages/search_results.py — lazy full-text load failure
+    "Could not load full text. Try again later.":
+        "לא ניתן לטעון את הטקסט המלא. נסו שוב מאוחר יותר.",
+    # web/components/filter_panel.py — filter-count recompute failure (#11)
+    "Could not update filter count":
+        "לא ניתן לעדכן את מניין הסינון",
+    # web/pages/search.py — search-history entry delete control
+    "Delete history entry":
+        "מחק רשומת היסטוריה",
+    # web/pages/search_results.py — expanded result region label
+    "Full text and image":
+        "טקסט מלא ותמונה",
+    # web/pages/search_results.py — lazy full-text loading spinner label
+    "Loading full text…":
+        "טוען טקסט מלא…",
+    # web/pages/search.py — refinement-chain component remove control
+    "Remove component":
+        "הסר רכיב",
+    # web/pages/search_results.py — expansion toggle accessible name
+    "Toggle full text and image":
+        "הצג/הסתר טקסט מלא ותמונה",
+    # web/components/filter_panel.py — filter-count recompute pending (#11)
+    "Updating filter count…":
+        "מעדכן את מניין הסינון…",
+})

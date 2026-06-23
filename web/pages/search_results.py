@@ -666,13 +666,13 @@ def create_result_card(search_state, refs, index, result):
                 if _card_ie_id:
                     _card_browse_url += f'&volume_ie={_card_ie_id}'
                 with ui.link(target=_card_browse_url).classes('no-underline'):
-                    ui.button(icon='menu_book').props('flat round dense size=sm color=green').tooltip(tr('Browse Full Manuscript'))
+                    ui.button(icon='menu_book').props(f'flat round dense size=sm color=green aria-label="{tr("Browse Full Manuscript")}"').tooltip(tr('Browse Full Manuscript'))
 
             # Quick View (was Advanced View)
             ui.button(
                 icon='open_in_full',
                 on_click=lambda idx=index, r=result, _ss=search_state, _r=refs: open_advanced_dialog(_ss, _r, idx, r)
-            ).props('flat round dense size=sm').tooltip(tr('Quick View'))
+            ).props(f'flat round dense size=sm aria-label="{tr("Quick View")}"').tooltip(tr('Quick View'))
 
             # Add to List
             def make_star_handler(r):
@@ -684,7 +684,7 @@ def create_result_card(search_state, refs, index, result):
             ui.button(
                 icon='star' if result_in_list else 'star_border',
                 on_click=make_star_handler(result)
-            ).props('flat round dense size=sm').style('color: var(--accent-amber);').tooltip(tr('In List') if result_in_list else tr('Add to List'))
+            ).props(f'flat round dense size=sm aria-label="{tr("In List") if result_in_list else tr("Add to List")}"').style('color: var(--accent-amber);').tooltip(tr('In List') if result_in_list else tr('Add to List'))
 
             # Catalog Records
             if sys_id:
@@ -693,7 +693,7 @@ def create_result_card(search_state, refs, index, result):
                 cat_btn = ui.button(
                     icon='description',
                     on_click=lambda s=sys_id, sm=shelfmark: show_catalog_dialog(s, sm),
-                ).props('flat round dense size=sm').tooltip(f'{tr("Catalog Records")} ({cat_count})')
+                ).props(f'flat round dense size=sm aria-label="{tr("Catalog Records")}"').tooltip(f'{tr("Catalog Records")} ({cat_count})')
                 if cat_count == 0:
                     cat_btn.disable()
 
@@ -921,7 +921,6 @@ def create_result_card(search_state, refs, index, result):
                     if ls['loaded']:
                         return
                     ls['loaded'] = True
-                    p_num = int(r.get('display', {}).get('img', '1'))
                     # #11: per-op pending feedback — show a spinner in this card's
                     # text column while the page fetch runs (does not block the page).
                     tc.clear()
@@ -930,6 +929,13 @@ def create_result_card(search_state, refs, index, result):
                             ui.spinner(size='sm').props('aria-hidden=true')
                             ui.label(tr('Loading full text…')).classes('text-sm').style('color: var(--text-muted);')
                     try:
+                        # Parse the page number INSIDE the guarded block: a missing
+                        # or non-numeric img must surface the error/Retry UI below
+                        # (and reset `loaded`), not raise after the spinner renders.
+                        try:
+                            p_num = int(r.get('display', {}).get('img', '1'))
+                        except (ValueError, TypeError):
+                            p_num = 1
                         from web.services import get_service
                         page_data = await run.io_bound(
                             lambda: get_service().get_browse_page(sid, p_num=p_num)
@@ -1009,7 +1015,7 @@ def open_advanced_dialog(search_state, refs, index, result):
             with adv_state.header_container:
                 # Left: Close and result counter
                 with ui.row().classes('items-center gap-2'):
-                    ui.button(icon='close', on_click=dialog.close).props('flat round color=white size=sm')
+                    ui.button(icon='close', on_click=dialog.close).props(f'flat round color=white size=sm aria-label="{tr("Close")}"').tooltip(tr('Close'))
                     if standalone:
                         _sm = display.get('shelfmark', 'Unknown')
                         adv_state.result_label = ui.label(_sm).classes('text-sm font-medium')
@@ -1026,12 +1032,12 @@ def open_advanced_dialog(search_state, refs, index, result):
                     adv_state.prev_btn = ui.button(
                         icon='chevron_right' if is_rtl() else 'chevron_left',
                         on_click=lambda: navigate_result(-1)
-                    ).props('flat round color=white size=sm').tooltip(tr('Previous'))
+                    ).props(f'flat round color=white size=sm aria-label="{tr("Previous")}"').tooltip(tr('Previous'))
 
                     adv_state.next_btn = ui.button(
                         icon='chevron_left' if is_rtl() else 'chevron_right',
                         on_click=lambda: navigate_result(1)
-                    ).props('flat round color=white size=sm').tooltip(tr('Next'))
+                    ).props(f'flat round color=white size=sm aria-label="{tr("Next")}"').tooltip(tr('Next'))
 
                     if standalone:
                         adv_state.prev_btn.set_enabled(False)
@@ -1046,7 +1052,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                     ui.button(
                         icon='fullscreen',
                         on_click=toggle_fullscreen
-                    ).props('flat round color=white size=sm').tooltip(tr('Fullscreen'))
+                    ).props(f'flat round color=white size=sm aria-label="{tr("Fullscreen")}"').tooltip(tr('Fullscreen'))
 
             # === Info Bar (shelfmark, buttons, chips — rendered in render_content) ===
             adv_state.info_bar_container = ui.element('div').classes('w-full shrink-0').style(
@@ -1485,7 +1491,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                             prev_pg_btn = ui.button(
                                 icon='chevron_right' if is_rtl() else 'chevron_left',
                                 on_click=lambda: load_page(direction=-1)
-                            ).props('flat round size=sm').tooltip(tr('Previous Page'))
+                            ).props(f'flat round size=sm aria-label="{tr("Previous Page")}"').tooltip(tr('Previous Page'))
                             prev_pg_btn.set_enabled(current_p_num > 1)
 
                             ui.label(f"{tr('Page')} {current_p_num}/{total_pages}").classes('text-sm font-medium')
@@ -1493,7 +1499,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                             next_pg_btn = ui.button(
                                 icon='chevron_left' if is_rtl() else 'chevron_right',
                                 on_click=lambda: load_page(direction=1)
-                            ).props('flat round size=sm').tooltip(tr('Next Page'))
+                            ).props(f'flat round size=sm aria-label="{tr("Next Page")}"').tooltip(tr('Next Page'))
                             next_pg_btn.set_enabled(current_p_num < total_pages)
                         else:
                             ui.label(f"{tr('Page')} 1").classes('text-sm')
@@ -1508,16 +1514,16 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 browse_url += f'&volume_ie={ie_id}'
                             # Use ui.link for full page reload to ensure browse page recreates with PGP data
                             with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse')):
-                                ui.button(icon='menu_book').props('flat round size=sm')
+                                ui.button(icon='menu_book').props(f'flat round size=sm aria-label="{tr("Browse")}"')
 
                         if display_text:
-                            ui.button(icon='content_copy', on_click=lambda t=display_text: copy_result_text(t)).props('flat round size=sm').tooltip(tr('Copy'))
+                            ui.button(icon='content_copy', on_click=lambda t=display_text: copy_result_text(t)).props(f'flat round size=sm aria-label="{tr("Copy")}"').tooltip(tr('Copy'))
 
                         # Exit fullscreen
                         def exit_fullscreen():
                             adv_state.is_fullscreen = False
                             render_content(result)
-                        ui.button(icon='fullscreen_exit', on_click=exit_fullscreen).props('flat round size=sm').tooltip(tr('Exit Fullscreen'))
+                        ui.button(icon='fullscreen_exit', on_click=exit_fullscreen).props(f'flat round size=sm aria-label="{tr("Exit Fullscreen")}"').tooltip(tr('Exit Fullscreen'))
 
                 # Two-panel layout for fullscreen
                 with ui.row().classes('w-full gap-4 flex-nowrap').style('height: calc(100vh - 120px);'):
@@ -1540,11 +1546,11 @@ def open_advanced_dialog(search_state, refs, index, result):
                             with ui.row().classes('w-full items-center justify-between p-2').style('background: #1a1a1a;'):
                                 ui.label(tr('Image')).classes('text-white text-sm')
                                 with ui.row().classes('gap-1'):
-                                    ui.button(icon='remove', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomOut()')).props('flat round size=xs text-color=white')
+                                    ui.button(icon='remove', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomOut()')).props(f'flat round size=xs text-color=white aria-label="{tr("Zoom out")}"').tooltip(tr('Zoom out'))
                                     ui.label('100%').classes('adv-zoom-label text-white text-xs px-1')
-                                    ui.button(icon='add', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomIn()')).props('flat round size=xs text-color=white')
-                                    ui.button(icon='rotate_right', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateRight()')).props('flat round size=xs text-color=white')
-                                    ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props('flat round size=xs text-color=white')
+                                    ui.button(icon='add', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomIn()')).props(f'flat round size=xs text-color=white aria-label="{tr("Zoom in")}"').tooltip(tr('Zoom in'))
+                                    ui.button(icon='rotate_right', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateRight()')).props(f'flat round size=xs text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
+                                    ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props(f'flat round size=xs text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
 
                             # Image
                             safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
@@ -1645,7 +1651,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 if ie_id:
                                     browse_url += f'&volume_ie={ie_id}'
                                 with ui.link(target=browse_url).classes('no-underline').tooltip(tr('Browse Full Manuscript')):
-                                    ui.button(icon='menu_book').props('flat round size=sm color=green')
+                                    ui.button(icon='menu_book').props(f'flat round size=sm color=green aria-label="{tr("Browse Full Manuscript")}"')
 
                             def make_add_handler(r):
                                 def handler():
@@ -1654,7 +1660,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                             adv_result_sys_id = result.get('display', {}).get('id')
                             adv_result_in_list = state.lists_mgr and adv_result_sys_id and state.lists_mgr.is_item_in_any_list(adv_result_sys_id)
                             ui.button(icon='star' if adv_result_in_list else 'star_border', on_click=make_add_handler(result)).props(
-                                'flat round size=sm'
+                                f'flat round size=sm aria-label="{tr("In List") if adv_result_in_list else tr("Add to List")}"'
                             ).style('color: var(--accent-amber);').tooltip(tr('In List') if adv_result_in_list else tr('Add to List'))
 
                             if WEB_PUZZLE_ENABLED:
@@ -1665,7 +1671,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                         ui.navigate.to(f'/puzzle?add={param}')
                                     return handler
                                 ui.button(icon='extension', on_click=_make_puzzle_handler()).props(
-                                    'flat round size=sm'
+                                    f'flat round size=sm aria-label="{tr("Add to Puzzle")}"'
                                 ).tooltip(tr('Add to Puzzle'))
 
                             if has_image:
@@ -1675,7 +1681,9 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 ui.button(
                                     icon='image' if adv_state.show_image_panel else 'hide_image',
                                     on_click=toggle_image
-                                ).props('flat round size=sm').tooltip(
+                                ).props(
+                                    f'flat round size=sm aria-label="{tr("Hide Image") if adv_state.show_image_panel else tr("Show Image")}"'
+                                ).tooltip(
                                     tr('Hide Image') if adv_state.show_image_panel else tr('Show Image')
                                 )
 
@@ -2073,7 +2081,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                             prev_page_btn = ui.button(
                                                 icon='chevron_right' if is_rtl() else 'chevron_left',
                                                 on_click=lambda: load_page(direction=-1)
-                                            ).props('flat round size=xs').tooltip(tr('Previous Page'))
+                                            ).props(f'flat round size=xs aria-label="{tr("Previous Page")}"').tooltip(tr('Previous Page'))
                                             prev_page_btn.set_enabled(current_p_num > 1)
 
                                             page_input = ui.number(value=current_p_num, min=1, max=total_pages).classes('w-20').props('dense outlined borderless')
@@ -2091,7 +2099,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                             next_page_btn = ui.button(
                                                 icon='chevron_left' if is_rtl() else 'chevron_right',
                                                 on_click=lambda: load_page(direction=1)
-                                            ).props('flat round size=xs').tooltip(tr('Next Page'))
+                                            ).props(f'flat round size=xs aria-label="{tr("Next Page")}"').tooltip(tr('Next Page'))
                                             next_page_btn.set_enabled(current_p_num < total_pages)
 
                                     with ui.row().classes('gap-1'):
@@ -2105,10 +2113,10 @@ def open_advanced_dialog(search_state, refs, index, result):
                                         ui.button(
                                             icon='format_list_numbered',
                                             on_click=_toggle_quick_view_line_numbers,
-                                        ).props('flat round size=sm').tooltip(tr('Toggle line numbers'))
-                                        ui.button(icon='content_copy', on_click=lambda t=display_text: copy_result_text(t)).props('flat round size=sm').tooltip(tr('Copy Text'))
+                                        ).props(f'flat round size=sm aria-label="{tr("Toggle line numbers")}"').tooltip(tr('Toggle line numbers'))
+                                        ui.button(icon='content_copy', on_click=lambda t=display_text: copy_result_text(t)).props(f'flat round size=sm aria-label="{tr("Copy Text")}"').tooltip(tr('Copy Text'))
                                         if sys_id and current_text:
-                                            ui.button(icon='edit', on_click=lambda: toggle_edit_mode(current_text)).props('flat round size=sm').tooltip(tr('Edit'))
+                                            ui.button(icon='edit', on_click=lambda: toggle_edit_mode(current_text)).props(f'flat round size=sm aria-label="{tr("Edit")}"').tooltip(tr('Edit'))
 
                                 # Text content - create container (same scope as outer text_content_container)
                                 text_content_container = ui.element('div').classes('w-full')
@@ -2191,14 +2199,14 @@ def open_advanced_dialog(search_state, refs, index, result):
                             ):
                                 ui.label(tr('Manuscript Image')).classes('text-white font-semibold')
                                 with ui.row().classes('gap-1'):
-                                    ui.button(icon='remove', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomOut()')).props('flat round size=sm text-color=white').tooltip(tr('Zoom out'))
+                                    ui.button(icon='remove', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomOut()')).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom out")}"').tooltip(tr('Zoom out'))
                                     ui.label('100%').classes('adv-zoom-label text-white text-sm px-2')
-                                    ui.button(icon='add', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomIn()')).props('flat round size=sm text-color=white').tooltip(tr('Zoom in'))
+                                    ui.button(icon='add', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.zoomIn()')).props(f'flat round size=sm text-color=white aria-label="{tr("Zoom in")}"').tooltip(tr('Zoom in'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
-                                    ui.button(icon='rotate_left', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateLeft()')).props('flat round size=sm text-color=white').tooltip(tr('Rotate Left'))
-                                    ui.button(icon='rotate_right', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateRight()')).props('flat round size=sm text-color=white').tooltip(tr('Rotate Right'))
+                                    ui.button(icon='rotate_left', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateLeft()')).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Left")}"').tooltip(tr('Rotate Left'))
+                                    ui.button(icon='rotate_right', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.rotateRight()')).props(f'flat round size=sm text-color=white aria-label="{tr("Rotate Right")}"').tooltip(tr('Rotate Right'))
                                     ui.separator().props('vertical').classes('mx-1 h-4 bg-gray-600')
-                                    ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props('flat round size=sm text-color=white').tooltip(tr('Reset View'))
+                                    ui.button(icon='restart_alt', on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.reset()')).props(f'flat round size=sm text-color=white aria-label="{tr("Reset View")}"').tooltip(tr('Reset View'))
 
                             # Image adjustment controls
                             with ui.row().classes('w-full items-center gap-2 px-3 py-1').style(
@@ -2222,7 +2230,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 ui.button(
                                     icon='exposure',
                                     on_click=lambda: ui.run_javascript('if(window.advViewer) window.advViewer.toggleInvert()')
-                                ).props('flat round size=sm text-color=white').tooltip(tr('Invert Colors'))
+                                ).props(f'flat round size=sm text-color=white aria-label="{tr("Invert Colors")}"').tooltip(tr('Invert Colors'))
                                 def _adv_reset_adj():
                                     if hasattr(adv_state, 'brightness_sl'): adv_state.brightness_sl.value = 0
                                     if hasattr(adv_state, 'contrast_sl'): adv_state.contrast_sl.value = 0
@@ -2231,7 +2239,7 @@ def open_advanced_dialog(search_state, refs, index, result):
                                 ui.button(
                                     icon='restart_alt',
                                     on_click=_adv_reset_adj
-                                ).props('flat round size=sm text-color=white').tooltip(tr('Reset Image'))
+                                ).props(f'flat round size=sm text-color=white aria-label="{tr("Reset Image")}"').tooltip(tr('Reset Image'))
 
                             # Image display
                             safe_img_url = img_url.replace("'", "\\'").replace('"', '\\"')
