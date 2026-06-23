@@ -25,6 +25,7 @@ python -m PyInstaller --noconfirm --noconsole --onedir --clean ^
  --add-data "bodleian_master_index.csv;." ^
  --add-data "pgp_tag_translations.py;." ^
  --add-data "shared_export_utils.py;." ^
+ --add-data "shared\export_utils.py;shared" ^
  --add-data "shared;shared" ^
  --add-data "libraries_translations.db;." ^
  --add-data "fist_data\fjms_enrichment.db;fist_data" ^

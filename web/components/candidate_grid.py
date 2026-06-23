@@ -52,6 +52,12 @@ from web.translations import tr, get_language, is_rtl
 _TITLE_TRUNCATE_AT = 80
 """Characters at which to truncate candidate titles before appending '...'."""
 
+# SEED-018 (#33): derive the table triage glyphs from the single source of truth
+# in shared.joins_lab.TRIAGE_ICONS instead of a hardcoded {"yes": "✓", ...} dict,
+# matching the _TRIAGE_COLORS derivation below. Keeps card icons and table glyphs
+# in sync with the shared join-triage vocabulary.
+_TRIAGE_GLYPHS = {k: v["glyph"] for k, v in TRIAGE_ICONS.items()}
+
 _MAX_RENDERED_CANDIDATES = 200
 """Defensive cap — kept as a safety net but no longer the PRIMARY render bound.
 
@@ -360,7 +366,7 @@ def _make_table_rows(
             dims = "—"
         material = m.get("material") or "—"
         verdict = _get_verdict(c.sys_id)
-        triage_glyph = {"yes": "✓", "maybe": "?", "no": "✗"}.get(verdict, "")
+        triage_glyph = _TRIAGE_GLYPHS.get(verdict, "")
         snippet = getattr(c, "snippet", None) or ""
         if len(snippet) > 80:
             snippet = snippet[:80] + "..."
