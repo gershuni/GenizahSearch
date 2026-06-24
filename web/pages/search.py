@@ -4962,7 +4962,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         ).tooltip(tr('Has PGP Transcription'))
                                         # SEED-022: manual-transcription indicator (icon + tooltip)
                                         if result.get('sys_id') in _tag_manual_ids:
-                                            ui.icon('menu_book').classes('text-sm shrink-0').props(
+                                            ui.icon('description').classes('text-sm shrink-0').props(
                                                 f'role=img aria-label="{tr("scholarly transcription/translation available")}"'
                                             ).style(
                                                 'color: var(--accent-amber, #b45309);'
