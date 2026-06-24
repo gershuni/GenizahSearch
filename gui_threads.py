@@ -791,21 +791,39 @@ class PGPSourceWorker(QThread):
 
 
 class PGPBadgeWorker(QThread):
-    """Batch check which sys_ids have PGP transcriptions for badge display."""
-    finished = pyqtSignal(set)
+    """Batch check badge sets for the results table (SEED-022).
+
+    Emits TWO sets:
+      * pgp_link_ids  -- sys_ids present in PGP (document_fragments link presence;
+        feeds the unchanged green "PGP" badge = "has PGP info", ~34K corpus-wide).
+      * manual_ids    -- sys_ids with readable manual transcription/translation
+        (PGP text presence ∪ FGP, translations included; feeds the new amber
+        "scholarly transcription" column, ~7.3K). FGP honors the shared
+        FGP_TRANSCRIPTIONS_ENABLED flag (no web-only override on desktop).
+    These are DIFFERENT predicates (link vs readable text), not a duplicate query.
+    """
+    finished = pyqtSignal(set, set)
 
     def __init__(self, sys_ids: list, parent=None):
         super().__init__(parent)
         self.sys_ids = sys_ids
 
     def run(self):
+        # Isolate the two queries (Codex #304 review): a failure in the new manual
+        # enrichment must NOT clear the unchanged green PGP badges (and vice versa).
+        pgp_link_ids: set = set()
+        manual_ids: set = set()
         try:
             from shared.document_service import get_sys_ids_with_transcriptions
-            result = get_sys_ids_with_transcriptions(self.sys_ids)
-            self.finished.emit(result)
+            pgp_link_ids = get_sys_ids_with_transcriptions(self.sys_ids)
         except Exception as e:
-            logger.error("PGPBadgeWorker error: %s", e)
-            self.finished.emit(set())
+            logger.error("PGPBadgeWorker PGP-link error: %s", e)
+        try:
+            from shared.transcription_service import get_sys_ids_with_manual_transcriptions
+            manual_ids = get_sys_ids_with_manual_transcriptions(self.sys_ids)
+        except Exception as e:
+            logger.error("PGPBadgeWorker manual-transcription error: %s", e)
+        self.finished.emit(pgp_link_ids, manual_ids)
 
 
 class PrintedBadgeWorker(QThread):
