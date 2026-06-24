@@ -134,6 +134,12 @@ def _count_automatic_transcriptions() -> int:
         return 0
 
 
+def _is_complete(stats: Dict[str, int]) -> bool:
+    """A result is cacheable only when every metric is populated (> 0). See
+    get_corpus_stats — guards against caching pre-startup / partially-failed runs."""
+    return all(stats.get(k, 0) > 0 for k in _KEYS)
+
+
 def _compute() -> Dict[str, int]:
     stats = {
         "manuscripts": _count_manuscripts(),
@@ -169,15 +175,21 @@ def get_corpus_stats(*, force_refresh: bool = False) -> Dict[str, int]:
             computed = _compute()
         except Exception:
             logger.warning("corpus-stats computation failed", exc_info=True)
-            computed = {k: 0 for k in _KEYS}
-            computed["computed_at"] = int(time.time())
-            _CACHE = computed
-            return _CACHE
-        # Do NOT memoize a result computed before the corpus finished loading:
-        # `manuscripts` (and `automatic_transcriptions`) come from runtime state, so
-        # `manuscripts == 0` in production means metadata isn't loaded yet. Return it
-        # uncached so a later call (after startup) recomputes the real numbers.
-        if computed.get("manuscripts", 0) > 0:
+            # Return an uncached all-zero dict so a later call retries — do NOT
+            # poison the cache with a transient total failure (Codex #306).
+            fallback = {k: 0 for k in _KEYS}
+            fallback["computed_at"] = int(time.time())
+            return fallback
+        # Memoize ONLY a complete result (every metric > 0). This avoids caching:
+        #  (a) a result computed before the corpus finished loading — manuscripts /
+        #      automatic_transcriptions come from runtime state that loads on a bg
+        #      thread, so they are 0 until ready; and
+        #  (b) a result where a sidecar metric transiently failed (caught -> 0).
+        # Incomplete results are returned uncached so a later call recomputes the
+        # real numbers (Codex #306 SHOULD-FIX). In a production deployment with all
+        # sidecars present every metric is > 0, so this memoizes on the first
+        # post-startup call.
+        if _is_complete(computed):
             _CACHE = computed
         return computed
 

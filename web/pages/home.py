@@ -179,11 +179,14 @@ def create_page():
                     ui.label(_label).classes('text-xs text-center').style('color: var(--text-muted);')
 
         async def _load_corpus_stats():
-            # Wait (bounded) for the corpus to finish loading so manuscripts /
-            # automatic_transcriptions reflect real counts (and the service memoizes
-            # a complete result), then fetch off the event loop.
-            for _ in range(120):
-                if state.is_ready():
+            # Wait (bounded) for the METADATA CACHE to finish loading before fetching.
+            # state.is_ready() only means searcher+meta_mgr exist; csv_bank (the
+            # manuscript count) loads later on a background thread (Codex #306), so
+            # poll csv_bank itself — and only call get_corpus_stats ONCE it is ready,
+            # so the service memoizes a complete result (not a premature manuscripts=0).
+            for _ in range(150):  # ~15s
+                _mm = getattr(state, 'meta_mgr', None)
+                if _mm is not None and getattr(_mm, 'csv_bank', None):
                     break
                 await asyncio.sleep(0.1)
             try:

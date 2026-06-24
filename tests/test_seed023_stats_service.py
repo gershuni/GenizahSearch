@@ -75,7 +75,7 @@ def test_force_refresh_recomputes(monkeypatch):
     ss.reset_cache()
 
 
-def test_compute_failure_returns_zero_dict_with_keys(monkeypatch):
+def test_compute_failure_returns_uncached_zero_dict(monkeypatch):
     ss.reset_cache()
     def boom():
         raise RuntimeError("boom")
@@ -84,6 +84,19 @@ def test_compute_failure_returns_zero_dict_with_keys(monkeypatch):
     for k in ss._KEYS:
         assert s[k] == 0
     assert "computed_at" in s
+    assert ss._CACHE is None  # total failure must NOT poison the cache (Codex #306)
+    ss.reset_cache()
+
+
+def test_partial_degraded_metric_not_cached(monkeypatch):
+    """manuscripts>0 but a sidecar metric transiently 0 -> incomplete -> not cached."""
+    ss.reset_cache()
+    vals = dict(_EXPECTED, catalog_entries=0)  # e.g. fjms transiently unavailable
+    _patch_all(monkeypatch, **vals)
+    s = ss.get_corpus_stats()
+    assert s["manuscripts"] == _EXPECTED["manuscripts"]
+    assert s["catalog_entries"] == 0
+    assert ss._CACHE is None  # incomplete -> recompute next call
     ss.reset_cache()
 
 
