@@ -46,7 +46,12 @@ from shared.exclusion_service import (
     resolve_shelfmarks, build_shelf_map, compute_excluded_ids,
     serialize_sources, deserialize_sources,
 )
-from web.document_service import get_sys_ids_with_transcriptions, get_fragments_by_tag, get_all_distinct_tags
+from web.document_service import (
+    get_sys_ids_with_transcriptions, get_sys_ids_with_pgp_text,
+    get_fragments_by_tag, get_all_distinct_tags,
+)
+from shared.fgp_service import get_sys_ids_with_fgp_sources
+from shared.transcription_service import union_manual_transcriptions
 from urllib.parse import quote
 import logging
 import html
@@ -2120,6 +2125,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.displayed_results = []
         search_state.selected_indices.clear()
         search_state.transcription_sys_ids = set()
+        search_state.manual_transcription_sys_ids = set()  # SEED-022
         search_state.total_count = 0
         search_state.current_page = 0
         search_state.result_domains = {}
@@ -4452,6 +4458,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Initialize enrichment fields to empty (will be populated progressively)
         search_state.transcription_sys_ids = set()
+        search_state.manual_transcription_sys_ids = set()  # SEED-022
         search_state.all_result_domains = {}
         search_state.result_domains = {}
         search_state.domain_name_map = {}
@@ -4703,11 +4710,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _t_stage1 = time.perf_counter()
         visible_ids = all_sys_ids[:PAGE_SIZE]
         if visible_ids and search_state.search_generation == this_generation:
-            fjms_tuple, transcription_ids, trans_data, vs_avail = await asyncio.gather(
+            # SEED-022: fetch the PGP-text set and FGP set alongside the existing
+            # PGP link-presence set (transcription_ids, which still feeds the PGP
+            # badge). pgp_text ∪ fgp = the new "has manual transcription" union.
+            fjms_tuple, transcription_ids, trans_data, vs_avail, pgp_text_ids, fgp_ids = await asyncio.gather(
                 run.io_bound(collect_fjms_enrichment, visible_ids),
                 run.io_bound(get_sys_ids_with_transcriptions, visible_ids),
                 run.io_bound(collect_translations, visible_ids, _show_trans_for_enrich),
                 run.io_bound(collect_vs_availability, visible_ids),
+                run.io_bound(get_sys_ids_with_pgp_text, visible_ids),
+                run.io_bound(get_sys_ids_with_fgp_sources, visible_ids),
             )
             # Check generation before applying (user may have started a new search)
             if search_state.search_generation == this_generation:
@@ -4715,6 +4727,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state._measurement_cache.update(meas_batch)  # Phase 54
                 _process_domain_data(raw_domains)
                 search_state.transcription_sys_ids = transcription_ids
+                search_state.manual_transcription_sys_ids = union_manual_transcriptions(pgp_text_ids, fgp_ids)
                 search_state.catalog_source_counts = catalog_counts
                 search_state.printed_ids = printed_ids
                 search_state.translation_data = trans_data
@@ -4758,11 +4771,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if search_state.search_generation != this_generation:
                     break  # New search started, abandon background enrichment
                 chunk_ids = remaining_ids[chunk_start:chunk_start + CHUNK_SIZE]
-                bg_fjms_tuple, bg_trans_ids, bg_trans_data, bg_vs = await asyncio.gather(
+                bg_fjms_tuple, bg_trans_ids, bg_trans_data, bg_vs, bg_pgp_text_ids, bg_fgp_ids = await asyncio.gather(
                     run.io_bound(collect_fjms_enrichment, chunk_ids),
                     run.io_bound(get_sys_ids_with_transcriptions, chunk_ids),
                     run.io_bound(collect_translations, chunk_ids, _show_trans_for_enrich),
                     run.io_bound(collect_vs_availability, chunk_ids),
+                    run.io_bound(get_sys_ids_with_pgp_text, chunk_ids),
+                    run.io_bound(get_sys_ids_with_fgp_sources, chunk_ids),
                 )
                 if search_state.search_generation != this_generation:
                     break
@@ -4770,6 +4785,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state._measurement_cache.update(bg_meas)  # Phase 54
                 _process_domain_data(bg_domains)
                 search_state.transcription_sys_ids |= bg_trans_ids
+                search_state.manual_transcription_sys_ids |= union_manual_transcriptions(bg_pgp_text_ids, bg_fgp_ids)
                 search_state.catalog_source_counts.update(bg_counts)
                 search_state.printed_ids |= bg_printed
                 search_state.translation_data.update(bg_trans_data)
@@ -4861,6 +4877,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 except Exception:
                     pass  # Translation lookup failed; continue without translation
 
+            # SEED-022: which tag-result sys_ids have readable manual text (PGP
+            # text ∪ FGP). The PGP badge below is unconditional (tag search is
+            # PGP-scoped); the new manual badge is conditional on actual text.
+            _tag_manual_ids: set = set()
+            try:
+                _tag_all_sids = [r.get('sys_id') for r in tag_results if r.get('sys_id')]
+                if _tag_all_sids:
+                    from shared.transcription_service import get_sys_ids_with_manual_transcriptions
+                    _tag_manual_ids = await run.io_bound(
+                        get_sys_ids_with_manual_transcriptions, _tag_all_sids
+                    )
+            except Exception:
+                pass  # Manual-transcription lookup failed; omit the badge
+
             results_container.clear()
             with results_container:
                 if not tag_results:
@@ -4895,6 +4925,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         ui.label('PGP').classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                             'background: var(--success-100); color: var(--success-700); font-weight: 600;'
                                         ).tooltip(tr('Has PGP Transcription'))
+                                        # SEED-022: manual-transcription indicator (icon + tooltip)
+                                        if result.get('sys_id') in _tag_manual_ids:
+                                            ui.icon('menu_book').classes('text-sm shrink-0').style(
+                                                'color: var(--accent-amber, #b45309);'
+                                            ).tooltip(tr('scholarly transcription/translation available'))
                                         ui.label(result.get('shelfmark', 'Unknown')).classes(
                                             'font-bold break-all'
                                         ).style('color: var(--primary-700);')
@@ -4969,6 +5004,15 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state.transcription_sys_ids = await run.io_bound(
                     get_sys_ids_with_transcriptions, sys_ids
                 )
+                # SEED-022: restore the manual-transcription union too, so the new
+                # badge reappears on a reloaded session (not just the PGP badge).
+                try:
+                    from shared.transcription_service import get_sys_ids_with_manual_transcriptions
+                    search_state.manual_transcription_sys_ids = await run.io_bound(
+                        get_sys_ids_with_manual_transcriptions, sys_ids
+                    )
+                except Exception:
+                    search_state.manual_transcription_sys_ids = set()
                 # Phase 999.2: PGP button + chip visibility now that transcription data is loaded.
                 _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
                 _update_pgp_filter_btn()

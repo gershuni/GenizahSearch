@@ -18,6 +18,7 @@ from shared.document_service import (
     get_editions_for_document as get_editions_for_document,
     get_translations_for_document as get_translations_for_document,
     get_sys_ids_with_transcriptions as get_sys_ids_with_transcriptions,
+    get_sys_ids_with_pgp_text as get_sys_ids_with_pgp_text,
     get_fragments_by_tag as get_fragments_by_tag,
     get_all_distinct_tags as get_all_distinct_tags,
     parse_html_sections as parse_html_sections,

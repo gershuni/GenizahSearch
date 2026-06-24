@@ -467,6 +467,47 @@ class PgpService:
             logger.error(f"Error batch checking transcriptions: {e}")
             return set()
 
+    def get_sys_ids_with_pgp_text(self, sys_ids: List[str]) -> Set[str]:
+        """Batch check which sys_ids have actual readable PGP transcription OR
+        translation TEXT (SEED-022).
+
+        DISTINCT from :meth:`get_sys_ids_with_transcriptions`, which only checks
+        whether a sys_id is *linked* to any PGP document (document_fragments
+        presence -- ~34K sys_ids, nearly the whole corpus). This method joins
+        through to ``documents`` and requires the precomputed availability flags
+        ``has_transcription`` / ``has_translation`` (~7.3K sys_ids), i.e. there is
+        genuine manual text to READ. Used by the new "has manual transcription"
+        indicator; the existing PGP badge keeps its link-presence helper untouched.
+
+        Args:
+            sys_ids: List of system IDs to check.
+
+        Returns:
+            Set of sys_ids linked to a PGP document with transcription/translation text.
+        """
+        sys_ids = list(sys_ids or [])
+        if not sys_ids or not self._conn:
+            return set()
+
+        try:
+            result_set: Set[str] = set()
+            batch_size = 500  # stay under the SQLite variable limit (999)
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    f"SELECT DISTINCT f.sys_id FROM document_fragments f "
+                    f"JOIN documents d ON d.pgpid = f.document_id "
+                    f"WHERE f.sys_id IN ({placeholders}) "
+                    f"AND (d.has_transcription = 1 OR d.has_translation = 1)",
+                    batch
+                )
+                result_set.update(row['sys_id'] for row in cursor)
+            return result_set
+        except Exception as e:
+            logger.error(f"Error batch checking PGP text presence: {e}")
+            return set()
+
     def get_fragments_by_tag(self, tag: str) -> List[Dict[str, Any]]:
         """
         Get all fragments linked to PGP documents with a specific tag.
@@ -1100,6 +1141,15 @@ def get_sys_ids_with_transcriptions(sys_ids: List[str]) -> Set[str]:
     """
     svc = get_pgp_service()
     return svc.get_sys_ids_with_transcriptions(sys_ids)
+
+
+def get_sys_ids_with_pgp_text(sys_ids: List[str]) -> Set[str]:
+    """Batch check which sys_ids have readable PGP transcription/translation TEXT
+    (SEED-022). See :meth:`PGPDocumentService.get_sys_ids_with_pgp_text` -- this is
+    the text-presence predicate (has_transcription/has_translation), NOT the
+    link-presence helper used by the existing PGP badge."""
+    svc = get_pgp_service()
+    return svc.get_sys_ids_with_pgp_text(sys_ids)
 
 
 def get_fragments_by_tag(tag: str) -> List[Dict[str, Any]]:

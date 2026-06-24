@@ -2087,6 +2087,8 @@ TRANSLATIONS = {
 
     # --- PGP Transcription ---
     "Has PGP Transcription": "יש תעתיק PGP",
+    # SEED-022: source-agnostic "has manual transcription" indicator tooltip.
+    "scholarly transcription/translation available": "תעתיק/תרגום מדעי זמין",
     "PGP Transcription": "תעתוק PGP",
     "PGP Transcriptions": "תעתוקי PGP",
     # --- FGP (Friedberg Genizah Project) Transcription ---
