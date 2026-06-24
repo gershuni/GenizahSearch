@@ -27,27 +27,34 @@ logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 50
 
-# ── SEED-023: corpus-wide PGP / scholarly-edition membership sets ───────────
+# ── SEED-023: corpus-wide PGP / scholarly-transcription membership sets ──────
 # Static per process (refresh on restart after a data update). Computed once,
 # lazily, under a lock, then shared read-only across all users / requests so the
 # catalog filters can intersect them against the full result set before
 # pagination. Heavy DB reads — NEVER recompute per request.
-_FILTER_SETS = {'pgp': None, 'edition': None}
+#
+# Both sets are published as ONE tuple sentinel (Codex #308 P2): a second worker
+# must never observe ``pgp`` set while ``edition`` is still ``None`` (that would
+# silently drop an active Editions filter). A single-slot publish has no partial
+# window.
+_FILTER_SETS = {'value': None}  # None or (pgp_link_sys_ids, edition_sys_ids)
 _FILTER_SETS_LOCK = threading.Lock()
 
 
 def _get_filter_sets():
-    """Return ``(pgp_link_sys_ids, edition_sys_ids)`` (both frozenset-like sets).
+    """Return ``(pgp_link_sys_ids, edition_sys_ids)`` (both sets).
 
     ``pgp_link_sys_ids`` = "has PGP info" link presence (same signal as the PGP
     badge). ``edition_sys_ids`` = PGP ``%Edition%`` ∪ FGP ``Digital Edition``
     (editions only; honors the ``WEB_FGP_ENABLED`` kill switch). Must be called
     from a worker thread (``run.io_bound``) — the first call runs DB queries.
     """
-    if _FILTER_SETS['pgp'] is not None:
-        return _FILTER_SETS['pgp'], _FILTER_SETS['edition']
+    cached = _FILTER_SETS['value']
+    if cached is not None:
+        return cached
     with _FILTER_SETS_LOCK:
-        if _FILTER_SETS['pgp'] is None:
+        cached = _FILTER_SETS['value']
+        if cached is None:
             from shared.document_service import (
                 get_all_pgp_link_sys_ids,
                 get_sys_ids_with_editions,
@@ -58,13 +65,13 @@ def _get_filter_sets():
             edition = set(get_sys_ids_with_editions())  # PGP %Edition%
             if web_fgp_enabled():
                 edition |= get_sys_ids_with_fgp_editions()  # FGP Digital Edition
-            _FILTER_SETS['pgp'] = pgp
-            _FILTER_SETS['edition'] = edition
+            cached = (pgp, edition)
+            _FILTER_SETS['value'] = cached  # single atomic publish
             logger.info(
                 "catalog_browse filter sets: pgp=%d edition=%d",
                 len(pgp), len(edition),
             )
-    return _FILTER_SETS['pgp'], _FILTER_SETS['edition']
+    return cached
 
 
 def create_catalog_browse_page(
@@ -719,7 +726,7 @@ def create_catalog_browse_page(
                         color='green' if current_pgp_filter['value'] == 'has_pgp' else 'red',
                     )
                 if current_editions_filter['value'] != 'all':
-                    ed_label = tr('Has edition') if current_editions_filter['value'] == 'has_edition' else tr('No edition')
+                    ed_label = tr('Has Scholarly Transcription') if current_editions_filter['value'] == 'has_edition' else tr('No Scholarly Transcription')
                     _make_chip(
                         ed_label,
                         lambda: clear_filter('editions'),
@@ -894,13 +901,13 @@ def create_catalog_browse_page(
         st = current_editions_filter['value']
         btn.props(remove='color')
         if st == 'has_edition':
-            btn.text = tr('Has edition')
+            btn.text = tr('Has Scholarly Transcription')
             btn.props('outline dense no-caps color=green')
         elif st == 'no_edition':
-            btn.text = tr('No edition')
+            btn.text = tr('No Scholarly Transcription')
             btn.props('outline dense no-caps color=red')
         else:
-            btn.text = tr('Filter Editions')
+            btn.text = tr('Filter Scholarly Transcriptions')
             btn.props('outline dense no-caps color=primary')
 
     async def _toggle_pgp_filter():
@@ -1257,13 +1264,16 @@ def create_catalog_browse_page(
                             tr('Filter PGP'),
                             on_click=lambda: _toggle_pgp_filter(),
                         ).props('outline dense no-caps color=primary').classes('text-sm')
-                        pgp_btn.tooltip(tr('Has PGP info'))
+                        pgp_btn.tooltip(tr('Filter by PGP information'))
                         pgp_filter_btn_ref['ref'] = pgp_btn
 
                         ed_btn = ui.button(
-                            tr('Filter Editions'),
+                            tr('Filter Scholarly Transcriptions'),
                             on_click=lambda: _toggle_editions_filter(),
                         ).props('outline dense no-caps color=primary').classes('text-sm')
+                        ed_btn.tooltip(
+                            tr('Filter by scholarly transcription (PGP or FGP edition)')
+                        )
                         editions_filter_btn_ref['ref'] = ed_btn
                     _update_pgp_filter_btn()
                     _update_editions_filter_btn()

@@ -2906,9 +2906,12 @@ TRANSLATIONS = {
     "Filter by PGP coverage": "סנן לפי כיסוי PGP",
     # Catalog browse availability filters (SEED-023)
     "Filter by availability": "סינון לפי זמינות",
-    "Filter Editions": "סנן מהדורות",
-    "Has edition": "עם מהדורה",
-    "No edition": "ללא מהדורה",
+    "Filter Scholarly Transcriptions": "סנן לפי תעתיק מדעי",
+    "Has Scholarly Transcription": "יש תעתיק מדעי",
+    "No Scholarly Transcription": "אין תעתיק מדעי",
+    "Filter by PGP information": "סנן כתבי יד לפי מידע PGP",
+    "Filter by scholarly transcription (PGP or FGP edition)":
+        "סנן לפי תעתיק מדעי (מהדורת PGP או FGP)",
     # Composition / parallels min-chunks
     "Min. chunk matches": "מינ' התאמות מקטע",
     "Minimum matching chunks per manuscript": "מספר מינימלי של מקטעים תואמים לכתב יד",
