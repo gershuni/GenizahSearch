@@ -157,13 +157,29 @@ TEAM_TOKENS = {t: _team_token(he) for t, (he, _en) in TEAM_CREDITS.items()}
 
 
 # ── FIST catalog (500) and book (600) credit maps ──
+def _table_columns(fi, table: str) -> set:
+    """Column names present in ``table`` (empty if the table is absent)."""
+    return {r[1] for r in fi.execute(f"PRAGMA table_info({table})")}
+
+
 def build_catalog_map(fi):
-    """{CatalogId -> '<CatAcronym> Catalog, <Publisher>, <Year>'} (fields optional)."""
+    """{CatalogId -> '<CatAcronym> Catalog, <Publisher>, <Year>'} (fields optional).
+
+    ``Publisher``/``YearOfPublishing`` exist in the full FIST.db but not in every
+    FIST schema variant (e.g. the synthetic test fixture). Select only the
+    columns that are present so a leaner schema yields the acronym-only credit
+    instead of raising ``OperationalError`` and aborting the whole credit fill.
+    """
+    cols = _table_columns(fi, "CODE_Catalog")
+    if not {"CatalogId", "CatAcronym"} <= cols:
+        return {}
+    has_pub = "Publisher" in cols
+    has_yr = "YearOfPublishing" in cols
+    select = "CatalogId, CatAcronym, " + (
+        "Publisher" if has_pub else "NULL"
+    ) + ", " + ("YearOfPublishing" if has_yr else "NULL")
     out = {}
-    for r in fi.execute(
-        "SELECT CatalogId, CatAcronym, Publisher, YearOfPublishing FROM CODE_Catalog"
-    ):
-        cid, acr, pub, yr = r
+    for cid, acr, pub, yr in fi.execute(f"SELECT {select} FROM CODE_Catalog"):
         if not acr:
             continue
         parts = [f"{acr} Catalog"]
@@ -176,22 +192,40 @@ def build_catalog_map(fi):
 
 
 def build_book_map(fi):
-    """{TitleId -> '<authors; >, <RunningTitleHeb>'} (title-only when no authors)."""
+    """{TitleId -> '<authors; >, <RunningTitleHeb>'} (title-only when no authors).
+
+    Defensive against FIST schema variants: requires ``CODE_Title`` with at least
+    one title column; ``CODE_TitleAuthor``/``CODE_Author`` are optional (no author
+    join when absent), and ``IsCanceledCode`` is filtered only when present.
+    """
+    title_cols = _table_columns(fi, "CODE_Title")
+    if "TitleId" not in title_cols:
+        return {}
+    avail_titles = [c for c in ("RunningTitleHeb", "FullTitleHeb", "AcronymHeb") if c in title_cols]
+    if not avail_titles:
+        return {}
+
     authors = {}
-    for tid, aid in fi.execute(
-        "SELECT TitleId, AuthorId FROM CODE_TitleAuthor WHERE IsCanceledCode=0 ORDER BY TitleId, rowid"
-    ):
-        authors.setdefault(tid, []).append(aid)
-    aname = {
-        r[0]: r[1]
-        for r in fi.execute("SELECT AuthorId, HebDesc FROM CODE_Author WHERE HebDesc IS NOT NULL")
-    }
+    ta_cols = _table_columns(fi, "CODE_TitleAuthor")
+    if {"TitleId", "AuthorId"} <= ta_cols:
+        where = "WHERE IsCanceledCode=0 " if "IsCanceledCode" in ta_cols else ""
+        for tid, aid in fi.execute(
+            f"SELECT TitleId, AuthorId FROM CODE_TitleAuthor {where}ORDER BY TitleId, rowid"
+        ):
+            authors.setdefault(tid, []).append(aid)
+    aname = {}
+    a_cols = _table_columns(fi, "CODE_Author")
+    if {"AuthorId", "HebDesc"} <= a_cols:
+        aname = {
+            r[0]: r[1]
+            for r in fi.execute("SELECT AuthorId, HebDesc FROM CODE_Author WHERE HebDesc IS NOT NULL")
+        }
+
+    select = "TitleId, " + ", ".join(avail_titles)
     out = {}
-    for r in fi.execute(
-        "SELECT TitleId, RunningTitleHeb, FullTitleHeb, AcronymHeb FROM CODE_Title"
-    ):
-        tid, rt, ft, acr = r
-        title = (rt or ft or acr or "").strip()
+    for row in fi.execute(f"SELECT {select} FROM CODE_Title"):
+        tid = row[0]
+        title = next((str(v).strip() for v in row[1:] if v and str(v).strip()), "")
         if not title:
             continue
         names = [aname[a] for a in authors.get(tid, []) if a in aname]
