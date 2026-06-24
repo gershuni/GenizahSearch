@@ -851,13 +851,11 @@ def create_result_card(search_state, refs, index, result):
         with expand_container:
             # #26: visible boundary + explicit Collapse control so the expanded
             # panel reads as a distinct region and is dismissable without hunting
-            # for the (also-clickable) header.
-            with ui.row().classes('w-full items-center justify-between mt-2 pt-2').style(
+            # for the (also-clickable) header. (The redundant visible title was
+            # dropped per UAT; the region still carries an aria-label for SR users.)
+            with ui.row().classes('w-full items-center justify-end mt-2 pt-2').style(
                 'border-top: 1px solid var(--border-light);'
             ):
-                ui.label(tr('Full text and image')).classes('text-xs font-medium').style(
-                    'color: var(--text-muted);'
-                )
                 ui.button(
                     tr('Collapse'), icon='expand_less',
                     on_click=lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx),
@@ -1782,7 +1780,7 @@ def open_advanced_dialog(search_state, refs, index, result):
             if pgp_metadata:
                 with ui.expansion(group='enrichment').classes('w-full pgp-expand').style(
                     'border-left: 3px solid #27ae60; border-radius: 8px; margin-bottom: 4px;'
-                ).props('dense header-class="text-xs font-bold" label="PGP Details"'):
+                ).props(f'dense header-class="text-xs font-bold" label="{tr("PGP Details")}"'):
                     with ui.row().classes('gap-6 flex-wrap'):
                         doc_type = pgp_metadata.get('document_type')
                         lang_primary = pgp_metadata.get('languages_primary')
@@ -1901,7 +1899,7 @@ def open_advanced_dialog(search_state, refs, index, result):
             if catalog_records:
                 with ui.expansion(group='enrichment').classes('w-full fjms-expand').style(
                     'border-left: 3px solid #9b59b6; border-radius: 8px; margin-bottom: 4px;'
-                ).props('dense header-class="text-xs font-bold" label="FJMS Details"'):
+                ).props(f'dense header-class="text-xs font-bold" label="{tr("FJMS Details")}"'):
                     merged = merge_catalog_records(catalog_records)
                     lang = get_language()
 
