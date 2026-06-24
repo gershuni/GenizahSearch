@@ -4,6 +4,34 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [8.2.2] - 2026-06-24 — FGP Credits, Homepage Stats, Catalog Filters & Audit Polish
+
+Roll-up release (both) of everything merged since v8.2.1: proper scholarly attribution for FGP transcriptions, a homepage corpus-statistics band, catalog availability filters, a "has manual transcription" indicator, an accessibility/RTL pass, and a product-quality audit batch (resilience, observability, cleanup).
+
+### New Features
+
+- **Bilingual, per-transcription FGP credits** *(both)* — every FGP transcription now shows its own scholarly credit in the language of the interface (Hebrew under the Hebrew UI, English under the English UI; catalogues and printed editions keep their single published citation). About **97%** of the 45,034 FGP transcriptions are credited at the responsible team-head level — e.g. *FGP Judeo-Arabic Halakhic Literature team (David Sklare, Head)* / *צוות FGP לספרות ההלכה בערבית-יהודית (דוד סקליר, ראש הצוות)* — preserving the individual transcriber's name where it is recorded (e.g. the Firkovitch team). The previous credit was single-language and derived from a manuscript's *aggregate* sources, so it could mix in unrelated catalogues; credits are now derived from each transcription's own source identity.
+- **Homepage corpus-statistics band** *(web)* — the homepage now shows live corpus counts (manuscripts, transcriptions, and more). *(SEED-023 Part A)*
+- **Catalog availability filters** *(web)* — the catalog "Browse by identification" view gains 3-state filters for PGP and scholarly editions ("Filter Scholarly Transcriptions" / "Has" / "No"), with tooltips. *(SEED-023 Part B)*
+- **"Has manual transcription" indicator** *(both)* — a source-agnostic indicator (PGP ∪ FGP) on web search results, and a matching scholarly-transcription column in the desktop results table. *(SEED-022)*
+
+### Improvements
+
+- **Accessibility & RTL/bidi pass** *(web)* — semantic expand/collapse on results, `aria-label` coverage, RTL isolation for shelfmarks and mixed-script rows, and Hebrew-UI i18n fixes for the Quick View expansion headers / Collapse. *(SEED-014)*
+- **Image-fetch observability + desktop viewer polish** *(both)* — clearer image-fetch logging/metrics and small desktop viewer refinements. *(SEED-021)*
+- **Resilience** *(web)* — `shared/`→`web/` layering cleanup, and a bounded executor for browse-enrichment fan-out so slow NLI no longer pins the shared thread pool. *(SEED-016)*
+
+### Bug Fixes
+
+- **Desktop: stylesheet warnings** — invalid `QScrollArea` stylesheets that logged "Could not parse stylesheet" are fixed.
+- Audit-batch Codex review fixes on the layering/accessibility PRs (executor-semaphore lifetime, aria/lazy-load).
+
+### Internal
+
+- Defensive guards, exception hygiene, and mechanical cleanup across the core; export utilities moved under `shared/`; candidate-grid triage glyphs de-duplicated. *(SEED-013 / SEED-018)*
+
+---
+
 ## [8.2.1] - 2026-06-23 — Recently Viewed fixes
 
 Patch release (both). Fixes to the **Recently Viewed** list on both platforms, plus the search "Filter PGP" button polish previously deployed to web.

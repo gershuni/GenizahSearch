@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 8.2.1
+# Dicta Genizah Search Pro 8.2.2
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,19 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 8.2.1?
+## What's New in Version 8.2.2?
+
+### v8.2.2: FGP Credits, Homepage Stats, Catalog Filters & Audit Polish
+
+Roll-up release (both). **FGP transcriptions now carry proper scholarly attribution**,
+shown in the language of the interface (Hebrew under the Hebrew UI, English under the
+English UI) — about 97% of the 45,034 FGP transcriptions are credited at the responsible
+team-head level, keeping the individual transcriber's name where it is recorded. The web
+homepage gains a **corpus-statistics band**, the catalog browse view gains **PGP /
+scholarly-edition availability filters**, and search results carry a **"has manual
+transcription" indicator** (web) / scholarly-transcription column (desktop). Also includes
+an **accessibility & RTL pass** and a product-quality audit batch (resilience,
+observability, code cleanup).
 
 ### v8.2.1: Recently Viewed fixes
 
@@ -442,7 +454,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V8.2.1_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V8.2.2_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
