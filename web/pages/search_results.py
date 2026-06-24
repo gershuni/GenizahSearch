@@ -468,7 +468,7 @@ def create_result_card(search_state, refs, index, result):
                     if sys_id and sys_id in search_state.transcription_sys_ids:
                         ui.label('PGP').classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                             'background: var(--success-100); color: var(--success-700); font-weight: 600;'
-                        ).tooltip(tr('Has PGP Transcription'))
+                        ).tooltip(tr('Has PGP info'))
                     # SEED-022: source-agnostic manual-transcription indicator (icon +
                     # tooltip). Additive; sits beside the PGP badge with a distinct
                     # (amber) hue. Shown when the mss has any readable manual

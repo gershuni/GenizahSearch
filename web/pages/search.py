@@ -4959,7 +4959,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         # PGP indicator
                                         ui.label('PGP').classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                             'background: var(--success-100); color: var(--success-700); font-weight: 600;'
-                                        ).tooltip(tr('Has PGP Transcription'))
+                                        ).tooltip(tr('Has PGP info'))
                                         # SEED-022: manual-transcription indicator (icon + tooltip)
                                         if result.get('sys_id') in _tag_manual_ids:
                                             ui.icon('description').classes('text-sm shrink-0').props(
