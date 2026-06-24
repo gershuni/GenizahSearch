@@ -46,7 +46,12 @@ from shared.exclusion_service import (
     resolve_shelfmarks, build_shelf_map, compute_excluded_ids,
     serialize_sources, deserialize_sources,
 )
-from web.document_service import get_sys_ids_with_transcriptions, get_fragments_by_tag, get_all_distinct_tags
+from web.document_service import (
+    get_sys_ids_with_transcriptions, get_sys_ids_with_pgp_text,
+    get_fragments_by_tag, get_all_distinct_tags,
+)
+from shared.fgp_service import get_sys_ids_with_fgp_sources
+from shared.transcription_service import union_manual_transcriptions
 from urllib.parse import quote
 import logging
 import html
@@ -54,6 +59,29 @@ import asyncio
 import time
 
 logger = logging.getLogger(__name__)
+
+
+def _web_fgp_sys_ids(sys_ids):
+    """FGP presence set, gated by the WEB-ONLY FGP kill switch (GitHub Codex #303).
+
+    The shared ``get_sys_ids_with_fgp_sources`` only honors the shared
+    ``FGP_TRANSCRIPTIONS_ENABLED`` flag; on web, FGP can be turned off independently
+    via ``WEB_FGP_ENABLED=0`` (mirrors the result-dialog/chooser gating). Without
+    this, a web deploy with FGP disabled but the sidecar present would still badge
+    FGP-only manuscripts the user cannot open. Returns set() when web FGP is off.
+    """
+    from web.feature_flags import web_fgp_enabled
+    if not web_fgp_enabled():
+        return set()
+    return get_sys_ids_with_fgp_sources(sys_ids)
+
+
+def _web_manual_transcription_ids(sys_ids):
+    """Web-aware manual-transcription union (PGP readable text ∪ web-gated FGP).
+
+    Used by the PGP-tag-browse and session-restore paths, which would otherwise call
+    the shared union helper that always includes FGP regardless of the web flag."""
+    return union_manual_transcriptions(get_sys_ids_with_pgp_text(sys_ids), _web_fgp_sys_ids(sys_ids))
 
 
 def create_search_page(initial_query: str = None, initial_tag: str = None,
@@ -2120,6 +2148,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.displayed_results = []
         search_state.selected_indices.clear()
         search_state.transcription_sys_ids = set()
+        search_state.manual_transcription_sys_ids = set()  # SEED-022
         search_state.total_count = 0
         search_state.current_page = 0
         search_state.result_domains = {}
@@ -4091,6 +4120,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.status = tr("Starting...")
         search_state.search_start_time = time.time()
         search_state.results = []
+        # SEED-022 (Codex #303 review): clear enrichment presence sets at new-search
+        # START, not only at the later common reset (~line 4460) which a cancelled/
+        # partial render path can skip — otherwise the prior search's PGP / manual-
+        # transcription / printed icons leak onto partial results of the new one.
+        search_state.transcription_sys_ids = set()
+        search_state.manual_transcription_sys_ids = set()
+        search_state.printed_ids = set()
         search_state.search_generation += 1  # Invalidate stale background enrichment
 
         # Immediate visual feedback — swap buttons before the 500ms timer tick
@@ -4452,6 +4488,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # Initialize enrichment fields to empty (will be populated progressively)
         search_state.transcription_sys_ids = set()
+        search_state.manual_transcription_sys_ids = set()  # SEED-022
         search_state.all_result_domains = {}
         search_state.result_domains = {}
         search_state.domain_name_map = {}
@@ -4703,11 +4740,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _t_stage1 = time.perf_counter()
         visible_ids = all_sys_ids[:PAGE_SIZE]
         if visible_ids and search_state.search_generation == this_generation:
-            fjms_tuple, transcription_ids, trans_data, vs_avail = await asyncio.gather(
+            # SEED-022: fetch the PGP-text set and FGP set alongside the existing
+            # PGP link-presence set (transcription_ids, which still feeds the PGP
+            # badge). pgp_text ∪ fgp = the new "has manual transcription" union.
+            fjms_tuple, transcription_ids, trans_data, vs_avail, pgp_text_ids, fgp_ids = await asyncio.gather(
                 run.io_bound(collect_fjms_enrichment, visible_ids),
                 run.io_bound(get_sys_ids_with_transcriptions, visible_ids),
                 run.io_bound(collect_translations, visible_ids, _show_trans_for_enrich),
                 run.io_bound(collect_vs_availability, visible_ids),
+                run.io_bound(get_sys_ids_with_pgp_text, visible_ids),
+                run.io_bound(_web_fgp_sys_ids, visible_ids),
             )
             # Check generation before applying (user may have started a new search)
             if search_state.search_generation == this_generation:
@@ -4715,6 +4757,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state._measurement_cache.update(meas_batch)  # Phase 54
                 _process_domain_data(raw_domains)
                 search_state.transcription_sys_ids = transcription_ids
+                search_state.manual_transcription_sys_ids = union_manual_transcriptions(pgp_text_ids, fgp_ids)
                 search_state.catalog_source_counts = catalog_counts
                 search_state.printed_ids = printed_ids
                 search_state.translation_data = trans_data
@@ -4725,6 +4768,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Smoke verification round 2 (2026-05-21) added the
                 # ``domain_name_map`` kwarg for the xlsx Hebrew domain
                 # substitution path; built by ``_process_domain_data`` above.
+                # SEED-022 (Codex #303 review): the new manual-transcription
+                # indicator is intentionally UI-ONLY for now — it is NOT plumbed
+                # into the export payload / JSON / xlsx (the seed deferred the
+                # API/export column; adding `has_transcription` would touch the
+                # public API contract + 12-col xlsx + parity tests). Revisit if a
+                # caller asks for it.
                 from web.export_state import update_search_export_enrichment
                 update_search_export_enrichment(
                     transcription_sys_ids=search_state.transcription_sys_ids,
@@ -4758,11 +4807,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if search_state.search_generation != this_generation:
                     break  # New search started, abandon background enrichment
                 chunk_ids = remaining_ids[chunk_start:chunk_start + CHUNK_SIZE]
-                bg_fjms_tuple, bg_trans_ids, bg_trans_data, bg_vs = await asyncio.gather(
+                bg_fjms_tuple, bg_trans_ids, bg_trans_data, bg_vs, bg_pgp_text_ids, bg_fgp_ids = await asyncio.gather(
                     run.io_bound(collect_fjms_enrichment, chunk_ids),
                     run.io_bound(get_sys_ids_with_transcriptions, chunk_ids),
                     run.io_bound(collect_translations, chunk_ids, _show_trans_for_enrich),
                     run.io_bound(collect_vs_availability, chunk_ids),
+                    run.io_bound(get_sys_ids_with_pgp_text, chunk_ids),
+                    run.io_bound(_web_fgp_sys_ids, chunk_ids),
                 )
                 if search_state.search_generation != this_generation:
                     break
@@ -4770,6 +4821,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state._measurement_cache.update(bg_meas)  # Phase 54
                 _process_domain_data(bg_domains)
                 search_state.transcription_sys_ids |= bg_trans_ids
+                search_state.manual_transcription_sys_ids |= union_manual_transcriptions(bg_pgp_text_ids, bg_fgp_ids)
                 search_state.catalog_source_counts.update(bg_counts)
                 search_state.printed_ids |= bg_printed
                 search_state.translation_data.update(bg_trans_data)
@@ -4861,6 +4913,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 except Exception:
                     pass  # Translation lookup failed; continue without translation
 
+            # SEED-022: which tag-result sys_ids have readable manual text (PGP
+            # text ∪ FGP). The PGP badge below is unconditional (tag search is
+            # PGP-scoped); the new manual badge is conditional on actual text.
+            _tag_manual_ids: set = set()
+            try:
+                _tag_all_sids = [r.get('sys_id') for r in tag_results if r.get('sys_id')]
+                if _tag_all_sids:
+                    _tag_manual_ids = await run.io_bound(
+                        _web_manual_transcription_ids, _tag_all_sids
+                    )
+            except Exception:
+                pass  # Manual-transcription lookup failed; omit the badge
+
             results_container.clear()
             with results_container:
                 if not tag_results:
@@ -4894,7 +4959,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         # PGP indicator
                                         ui.label('PGP').classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                                             'background: var(--success-100); color: var(--success-700); font-weight: 600;'
-                                        ).tooltip(tr('Has PGP Transcription'))
+                                        ).tooltip(tr('Has PGP info'))
+                                        # SEED-022: manual-transcription indicator (icon + tooltip)
+                                        if result.get('sys_id') in _tag_manual_ids:
+                                            ui.icon('description').classes('text-sm shrink-0').props(
+                                                f'role=img aria-label="{tr("scholarly transcription/translation available")}"'
+                                            ).style(
+                                                'color: var(--accent-amber, #b45309);'
+                                            ).tooltip(tr('scholarly transcription/translation available'))
                                         ui.label(result.get('shelfmark', 'Unknown')).classes(
                                             'font-bold break-all'
                                         ).style('color: var(--primary-700);')
@@ -4966,9 +5038,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if r.get('display', {}).get('id')
             ]
             if sys_ids:
-                search_state.transcription_sys_ids = await run.io_bound(
-                    get_sys_ids_with_transcriptions, sys_ids
-                )
+                # SEED-022: restore the PGP link set (PGP badge) AND the manual-
+                # transcription union (new badge) in parallel, so both reappear on a
+                # reloaded session.
+                try:
+                    link_ids, manual_ids = await asyncio.gather(
+                        run.io_bound(get_sys_ids_with_transcriptions, sys_ids),
+                        run.io_bound(_web_manual_transcription_ids, sys_ids),
+                    )
+                    search_state.transcription_sys_ids = link_ids
+                    search_state.manual_transcription_sys_ids = manual_ids
+                except Exception:
+                    search_state.transcription_sys_ids = await run.io_bound(
+                        get_sys_ids_with_transcriptions, sys_ids
+                    )
+                    search_state.manual_transcription_sys_ids = set()
                 # Phase 999.2: PGP button + chip visibility now that transcription data is loaded.
                 _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
                 _update_pgp_filter_btn()

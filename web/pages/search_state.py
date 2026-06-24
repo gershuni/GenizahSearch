@@ -40,7 +40,11 @@ class SearchUIState:
         self.is_panel_collapsed = False  # For collapsible search panel
         self.last_scroll_top = 0  # For scroll-based auto-collapse
         self.update_timer = None  # Track progress update asyncio Task to prevent duplicates
-        self.transcription_sys_ids: Set[str] = set()  # sys_ids with PGP transcriptions
+        self.transcription_sys_ids: Set[str] = set()  # sys_ids with PGP transcriptions (link-presence; PGP badge)
+        # SEED-022: sys_ids with ANY readable manual transcription/translation
+        # (PGP text ∪ FGP). Source-agnostic; rendered as a SEPARATE additive badge
+        # alongside the PGP one. Do NOT conflate with transcription_sys_ids above.
+        self.manual_transcription_sys_ids: Set[str] = set()
         self.displayed_results = []  # Currently rendered subset (may be filtered)
         self.builder_negated_words: list = []  # Words negated via Query Builder
         self.result_domains: dict = {}  # Domain classification map for result indicators

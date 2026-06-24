@@ -468,7 +468,17 @@ def create_result_card(search_state, refs, index, result):
                     if sys_id and sys_id in search_state.transcription_sys_ids:
                         ui.label('PGP').classes('text-xs px-2 py-0.5 rounded shrink-0').style(
                             'background: var(--success-100); color: var(--success-700); font-weight: 600;'
-                        ).tooltip(tr('Has PGP Transcription'))
+                        ).tooltip(tr('Has PGP info'))
+                    # SEED-022: source-agnostic manual-transcription indicator (icon +
+                    # tooltip). Additive; sits beside the PGP badge with a distinct
+                    # (amber) hue. Shown when the mss has any readable manual
+                    # transcription/translation (PGP text ∪ FGP).
+                    if sys_id and sys_id in getattr(search_state, 'manual_transcription_sys_ids', set()):
+                        ui.icon('description').classes('text-sm shrink-0').props(
+                            f'role=img aria-label="{tr("scholarly transcription/translation available")}"'
+                        ).style(
+                            'color: var(--accent-amber, #b45309);'
+                        ).tooltip(tr('scholarly transcription/translation available'))
                     # Domain indicator
                     if sys_id and search_state.result_domains:
                         domains_for_result = search_state.result_domains.get(sys_id, [])
