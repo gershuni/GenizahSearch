@@ -38,7 +38,7 @@ from nicegui import run, ui
 from shared.joins_lab import MARK_A, MARK_B
 from web.components.image_resolution import resolve_external_images, resolve_image_url
 from web.components.typography import render_line_numbered_html
-from web.translations import tr
+from web.translations import is_rtl, tr
 
 logger = logging.getLogger(__name__)
 
@@ -575,18 +575,22 @@ class AnchorViewer:
                 self._error_elem: Optional[Any] = None
 
             # Controls bar (below image, full width).
-            # Forced LTR so the media-control layout is stable regardless of the
-            # app's RTL direction: prev (<) on the left, next (>) on the right,
-            # zoom group on the far side. This matches the universal pager/player
-            # convention scholars expect (clicking > advances), and avoids the
-            # RTL flex-reversal that made the arrows read backwards (UAT round 2).
-            with ui.row().classes("anchor-controls-bar w-full justify-between").style(
-                "direction: ltr;"
-            ):
+            # #41: folio arrows follow the UI reading direction, mirroring the
+            # canonical browse-page pager (web/pages/browse.py): in an RTL UI
+            # "previous" points right (chevron_right) and "next" points left
+            # (chevron_left), and the row itself follows page direction so the
+            # arrows physically sit on the side a Hebrew reader expects. This
+            # replaces the earlier hard-coded direction:ltr override, which made
+            # the arrows read backwards under the RTL Hebrew interface.
+            _rtl = is_rtl()
+            with ui.row().classes("anchor-controls-bar w-full justify-between"):
                 # Folio navigation group
                 with ui.row().classes("gap-1 items-center"):
                     self._prev_btn = (
-                        ui.button(icon="chevron_left", on_click=self._on_prev_folio)
+                        ui.button(
+                            icon="chevron_right" if _rtl else "chevron_left",
+                            on_click=self._on_prev_folio,
+                        )
                         .props(f'flat round dense aria-label="{tr("Previous folio")}"')
                         .classes("text-white min-h-[44px] min-w-[44px]")
                     )
@@ -595,7 +599,10 @@ class AnchorViewer:
                     self._page_label = ui.label("…").classes("text-white text-sm px-2")
 
                     self._next_btn = (
-                        ui.button(icon="chevron_right", on_click=self._on_next_folio)
+                        ui.button(
+                            icon="chevron_left" if _rtl else "chevron_right",
+                            on_click=self._on_next_folio,
+                        )
                         .props(f'flat round dense aria-label="{tr("Next folio")}"')
                         .classes("text-white min-h-[44px] min-w-[44px]")
                     )

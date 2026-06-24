@@ -70,6 +70,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     search_state = SearchUIState()
 
+    # #22: Readiness flag for the filter chip bar. `_update_chip_bar` is defined far
+    # below (after chip_bar_container is created), but early render-time callbacks
+    # (e.g. save_text_position) may reference it. Gate those calls on this explicit
+    # flag instead of catching NameError — a broad NameError catch masks real bugs.
+    _chip_bar_ready = {'value': False}
+
     # Helper: deferred async callback without ui.timer (avoids parent_slot RuntimeError on navigation)
     # Capture NiceGUI client for deferred async tasks (slot context)
     _page_client = ui.context.client
@@ -342,7 +348,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                         ui.button(
                             icon='expand_more', on_click=expand_panel
-                        ).props('flat round dense size=sm').tooltip(tr('Expand search options'))
+                        ).props(f'flat round dense size=sm aria-label="{tr("Expand search options")}"').tooltip(tr('Expand search options'))
 
             # --- Expanded View (Full panel) ---
             expanded_panel = ui.card().classes(
@@ -369,7 +375,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                     ui.button(
                         icon='expand_less', on_click=collapse_panel
-                    ).props('flat round dense size=sm').tooltip(tr('Collapse search panel'))
+                    ).props(f'flat round dense size=sm aria-label="{tr("Collapse search panel")}"').tooltip(tr('Collapse search panel'))
 
                 # Main Search Row
                 with ui.row().classes('w-full items-end gap-4 flex-wrap'):
@@ -565,14 +571,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # New Search (reset) button
                     with ui.column().classes('items-center gap-0'):
                         ui.button(icon='restart_alt', on_click=lambda: _reset_search()).props(
-                            'flat dense round'
+                            f'flat dense round aria-label="{tr("New Search")}"'
                         ).tooltip(tr('New Search'))
 
                     # Search History Button + Menu
                     with ui.column().classes('items-center gap-0'):
                         history_btn = ui.button(icon='history', on_click=lambda: (
                             _refresh_history_menu(), history_menu.open()
-                        )).props('flat dense').tooltip(tr('Search History'))
+                        )).props(f'flat dense aria-label="{tr("Search History")}"').tooltip(tr('Search History'))
 
                         history_menu = ui.menu()
 
@@ -657,11 +663,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                                 def save_text_position():
                                     _safe_set('search_text_position', text_position_select.value)
-                                    try:
+                                    # #22: only call once the chip bar (and its updater) exist.
+                                    if _chip_bar_ready['value']:
                                         _update_chip_bar()
-                                    except NameError:
-                                        # Chip bar not yet constructed during initial render.
-                                        pass
                                 text_position_select.on('update:model-value', save_text_position)
 
 
@@ -878,7 +882,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             )
                             _filter_refs['text_input'] = text_filter_input
 
-                            ui.button(icon='add', on_click=lambda: _add_text_term()).props('flat dense round')
+                            ui.button(icon='add', on_click=lambda: _add_text_term()).props(
+                                f'flat dense round aria-label="{tr("Add term")}"'
+                            ).tooltip(tr('Add term'))
 
                     # Display current text filter chips
                     with ui.row().classes('w-full gap-1 flex-wrap') as text_chip_row:
@@ -1048,6 +1054,34 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); min-height: 0; margin-bottom: 16px; position: relative; z-index: 1;'
         )
         chip_bar_container.set_visibility(False)
+
+        # #11: per-op feedback for the (background) filter-count recompute. A tiny
+        # inline indicator inside the chip bar — spinner while pending, an error
+        # chip on failure — instead of leaving the count silently stale.
+        with chip_bar_container:
+            _filter_status_row = ui.row().classes('items-center gap-1')
+            _filter_status_row.set_visibility(False)
+            with _filter_status_row:
+                _filter_status_spinner = ui.spinner(size='sm').props('aria-hidden=true')
+                _filter_status_label = ui.label('').classes('text-xs').style('color: var(--text-muted);')
+
+        def _set_filter_recompute_state(status):
+            """Render pending/error feedback for the filter-count recompute (#11)."""
+            try:
+                if status == 'pending':
+                    _filter_status_spinner.set_visibility(True)
+                    _filter_status_label.text = tr('Updating filter count…')
+                    _filter_status_label.style('color: var(--text-muted);')
+                    _filter_status_row.set_visibility(True)
+                elif status == 'error':
+                    _filter_status_spinner.set_visibility(False)
+                    _filter_status_label.text = tr('Could not update filter count')
+                    _filter_status_label.style('color: var(--accent-red, #ef4444);')
+                    _filter_status_row.set_visibility(True)
+                else:  # 'done'
+                    _filter_status_row.set_visibility(False)
+            except Exception:
+                logger.debug("filter recompute status render failed", exc_info=True)
 
         def _get_display_name(key, opts_dict):
             """Extract display name from options dict (strip trailing count suffix only)."""
@@ -1284,7 +1318,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         async def _recompute_filter_count():
             """Recompute manuscript count for current filters (background)."""
-            await recompute_filter_count(search_state, _update_chip_bar)
+            await recompute_filter_count(
+                search_state, _update_chip_bar, on_state=_set_filter_recompute_state
+            )
             # D-16: Detect scope change during active refinement chain
             if search_state.refinement_chain:
                 new_sig = scope_signature(search_state.restrict_sys_ids)
@@ -1306,6 +1342,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         date_from_input.on('blur', _handlers['on_date_from_change'])
         date_to_input.on('blur', _handlers['on_date_to_change'])
         exclude_printed_cb.on('update:model-value', _handlers['on_exclude_printed_change'])
+
+        # #22: chip bar + updater now exist — mark ready so early callbacks may call it.
+        _chip_bar_ready['value'] = True
 
         # Initialize chip bar on page load
         _update_chip_bar()
@@ -1518,25 +1557,25 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     bulk_actions_row = ui.row().classes('gap-2').style('display: none;')
                     with bulk_actions_row:
                         ui.button(icon='playlist_add', on_click=lambda: bulk_add_to_list()).props(
-                            'flat round dense size=sm'
+                            f'flat round dense size=sm aria-label="{tr("Add Selected to List")}"'
                         ).tooltip(tr('Add Selected to List'))
                         ui.button(icon='content_copy', on_click=lambda: bulk_copy_text()).props(
-                            'flat round dense size=sm'
+                            f'flat round dense size=sm aria-label="{tr("Copy Selected Text")}"'
                         ).tooltip(tr('Copy Selected Text'))
 
                     # Filter toggle button
                     filter_btn = ui.button(icon='filter_list', on_click=lambda: toggle_filters()).props(
-                        'flat round dense size=sm'
+                        f'flat round dense size=sm aria-label="{tr("Toggle Filters")}"'
                     ).tooltip(tr('Toggle Filters'))
 
                     ui.button(icon='description', on_click=lambda: ui.download('/api/export/word')).props(
-                        'flat round dense size=sm'
+                        f'flat round dense size=sm aria-label="{tr("Export Word")}"'
                     ).tooltip(tr('Export Word'))
                     ui.button(icon='table_view', on_click=lambda: ui.download('/api/export/excel')).props(
-                        'flat round dense size=sm'
+                        f'flat round dense size=sm aria-label="{tr("Export Excel")}"'
                     ).tooltip(tr('Export Excel'))
                     ui.button(icon='data_object', on_click=lambda: ui.download('/api/export/json')).props(
-                        'flat round dense size=sm'
+                        f'flat round dense size=sm aria-label="{tr("Export JSON")}"'
                     ).tooltip(tr('Export JSON'))
 
             # Phase 55: Refinement breadcrumb strip (D-04) -- dedicated strip, NOT inside results header
@@ -1572,7 +1611,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         search_state.vs_restrict_mode = 'union'
                         search_state.vs_browse_mode = False
                         _update_vs_strip()
-                    ui.button(icon='close', on_click=_clear_vs).props('flat dense round size=xs').style('color: #ef6c00;')
+                    ui.button(icon='close', on_click=_clear_vs).props(
+                        f'flat dense round size=xs aria-label="{tr("Clear visual similarity restriction")}"'
+                    ).style('color: #ef6c00;').tooltip(tr('Clear visual similarity restriction'))
 
             _update_vs_strip()
 
@@ -2250,7 +2291,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         colors = ['#FFD700', '#4CAF50', '#2196F3', '#9C27B0', '#FF5722',
                                   '#00BCD4', '#E91E63', '#795548', '#607D8B', '#F44336']
                         for color in colors:
-                            btn = ui.button(icon='circle').props('flat round dense').style(
+                            btn = ui.button(icon='circle').props(
+                                f'flat round dense aria-label="{tr("Color")} {color}"'
+                            ).style(
                                 f'color: {color}; font-size: 1.5rem;'
                             )
                             btn.on('click', lambda c=color: selected_color.update({'value': c}))
@@ -2725,7 +2768,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Title
             with ui.row().classes('w-full items-center justify-between mb-2'):
                 ui.label(tr('Tabular Search')).classes('text-lg font-bold').style('color: var(--primary-600);')
-                ui.button(icon='close', on_click=builder_dialog.close).props('flat round dense')
+                ui.button(icon='close', on_click=builder_dialog.close).props(
+                    f'flat round dense aria-label="{tr("Close")}"'
+                ).tooltip(tr('Close'))
 
             # Scope Toggle
             scope_toggle = ui.toggle(
@@ -2770,8 +2815,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             ui.label(f"{tr('Component')} {ci+1}").classes('text-sm font-medium')
                             # Remove button (only for 3rd and 4th components)
                             rm_btn = ui.button(icon='close', on_click=lambda _, c=ci: remove_component(c)).props(
-                                'flat round dense size=xs color=red'
-                            )
+                                f'flat round dense size=xs color=red aria-label="{tr("Remove component")}"'
+                            ).tooltip(tr('Remove component'))
                             rm_btn.set_visibility(False)  # Hidden initially
                             remove_comp_btns.append(rm_btn)
 
@@ -3368,7 +3413,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 with ui.row().classes('items-center gap-2'):
                     ui.icon('person_remove').classes('text-xl').style('color: white !important;')
                     ui.label(tr('Exclude manuscripts')).classes('text-lg font-bold').style('color: white !important;')
-                ui.button(icon='close', on_click=dlg.close).props('flat round size=sm text-color=white')
+                ui.button(icon='close', on_click=dlg.close).props(
+                    f'flat round size=sm text-color=white aria-label="{tr("Close")}"'
+                ).tooltip(tr('Close'))
 
             # Show currently active exclusion sources with remove buttons
             if search_state.exclusion_sources:
@@ -3386,7 +3433,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     ui.notify(f"{tr('Removed')}: {s.label}", type='info')
                                 return _remove
                             ui.button(icon='delete', on_click=_make_dlg_remove()).props(
-                                'flat round dense size=sm color=red'
+                                f'flat round dense size=sm color=red aria-label="{tr("Remove")}"'
                             ).tooltip(tr('Remove'))
                     def _clear_all_exclusions():
                         search_state.exclusion_sources = []
@@ -3816,7 +3863,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # Delete button on each item
                     ui.button(icon='close', on_click=lambda e, idx=idx: (
                         delete_search_history_entry(idx), _refresh_history_menu()
-                    )).props('flat dense size=xs round').classes('ml-auto')
+                    )).props(f'flat dense size=xs round aria-label="{tr("Delete history entry")}"').classes('ml-auto').tooltip(tr('Delete history entry'))
 
             ui.separator()
             ui.menu_item(tr('Clear all'), on_click=lambda: (
