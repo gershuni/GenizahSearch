@@ -443,7 +443,7 @@ def _create_hebrew_content():
             <a href="/search" class="about-tool">
                 <div class="about-tool-icon">🔍</div>
                 <h3>חיפוש טקסט</h3>
-                <p>חפשו מילה או ביטוי בכל קטעי הגניזה. חיפוש וריאנטים מתמודד עם שגיאות הקריאה.</p>
+                <p>חפשו מילה או ביטוי בכל קטעי הגניזה. חיפוש וריאנטים ומקורב מתמודד עם שגיאות הקריאה; סננו את התוצאות לפי תעתיק מדעי או רשומת PGP.</p>
             </a>
             <a href="/parallels" class="about-tool">
                 <div class="about-tool-icon">📜</div>
@@ -453,7 +453,22 @@ def _create_hebrew_content():
             <a href="/browse" class="about-tool">
                 <div class="about-tool-icon">📖</div>
                 <h3>עיון בכתבי יד</h3>
-                <p>דפדפו בתמונות כתבי היד לצד התעתוק. תקנו, הוסיפו הערות, שתפו.</p>
+                <p>דפדפו בתמונות כתבי היד לצד התעתוק — כולל תעתיקים מדעיים מ-PGP ומפרויקט פרידברג (FGP). תקנו, הוסיפו הערות, שתפו.</p>
+            </a>
+            <a href="/catalog-browse" class="about-tool">
+                <div class="about-tool-icon">🗂️</div>
+                <h3>עיון לפי זיהוי</h3>
+                <p>עיינו בקטלוג לפי מחבר, חיבור, תחום או תאריך — וסננו רק לקטעים שיש להם תעתיק מדעי או רשומת PGP.</p>
+            </a>
+            <a href="/joins-lab" class="about-tool">
+                <div class="about-tool-icon">🧩</div>
+                <h3>מעבדת הצירופים</h3>
+                <p>שחזרו כתבי יד מפוזרים: עגנו קטע, חפשו את הקטע המצטרף, והשוו ביניהם זה לצד זה.</p>
+            </a>
+            <a href="/help#api" class="about-tool">
+                <div class="about-tool-icon">🤖</div>
+                <h3>ממשק API וכלי AI</h3>
+                <p>גשו לקורפוס באופן תכנותי, או חקרו את הגניזה בעזרת עוזר AI דרך הכלי cairo-genizah-research.</p>
             </a>
         </div>
         ''')
@@ -633,7 +648,7 @@ def _create_english_content():
             <a href="/search" class="about-tool">
                 <div class="about-tool-icon">🔍</div>
                 <h3>Text Search</h3>
-                <p>Search for a word or phrase across all Genizah fragments. Variant search handles reading errors.</p>
+                <p>Search for a word or phrase across all Genizah fragments. Variant and fuzzy search handle reading errors; filter results by scholarly transcription or PGP record.</p>
             </a>
             <a href="/parallels" class="about-tool">
                 <div class="about-tool-icon">📜</div>
@@ -643,7 +658,22 @@ def _create_english_content():
             <a href="/browse" class="about-tool">
                 <div class="about-tool-icon">📖</div>
                 <h3>Browse Manuscripts</h3>
-                <p>Browse manuscript images alongside the transcription. Correct, annotate, share.</p>
+                <p>Browse manuscript images alongside the transcription — including scholarly transcriptions from PGP and the Friedberg Genizah Project. Correct, annotate, share.</p>
+            </a>
+            <a href="/catalog-browse" class="about-tool">
+                <div class="about-tool-icon">🗂️</div>
+                <h3>Browse by Identification</h3>
+                <p>Explore the catalogue by author, work, domain, or date — and narrow to only fragments that have a scholarly transcription or a PGP record.</p>
+            </a>
+            <a href="/joins-lab" class="about-tool">
+                <div class="about-tool-icon">🧩</div>
+                <h3>Joins Lab</h3>
+                <p>Reconstruct dispersed manuscripts: pin an anchor fragment, search for the joining piece, and compare them side by side.</p>
+            </a>
+            <a href="/help#api" class="about-tool">
+                <div class="about-tool-icon">🤖</div>
+                <h3>Public API &amp; AI Tools</h3>
+                <p>Query the corpus programmatically, or research the Genizah with an AI assistant via the cairo-genizah-research skill.</p>
             </a>
         </div>
         ''')
