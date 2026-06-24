@@ -2063,6 +2063,8 @@ TRANSLATIONS = {
 
     # --- PGP Metadata ---
     "Princeton Geniza Project": "פרויקט הגניזה של פרינסטון",
+    "PGP Details": "פרטי PGP",
+    "FJMS Details": "פרטי FJMS",
     "Document Type": "סוג מסמך",
     "Tags": "תגיות",
     "Description": "תיאור",
@@ -4330,6 +4332,7 @@ TRANSLATIONS.update({
     "Export failed. Check your connection and try again.":
                                             "הייצוא נכשל. בדוק את החיבור לאינטרנט ונסה שוב.",
     "Retry":                                "נסה שוב",
+    "Collapse":                             "כווץ",
     "No candidates to export":              "אין מועמדים לייצוא",
     # --- Export column headers ---
     "Shelfmark":                            "מספר מדף",
