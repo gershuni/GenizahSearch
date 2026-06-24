@@ -1490,7 +1490,7 @@ TRANSLATIONS = {
     "Welcome to Dicta Genizah Search": "ברוכים הבאים לאתר הגניזה של דיקטה",
     "Dicta Genizah Search: Full-Text Manuscript Search": "אתר הגניזה של דיקטה: חיפוש בגניזה הקהירית",
     "Advanced research tools for Cairo Genizah manuscripts": "כלי מחקר מתקדמים לכתבי יד מגניזת קהיר",
-    "Search over 255,000 MiDRASH transcriptions: text, variants, parallels, joins, and images": "חיפוש בלמעלה מ-255,000 תעתוקי MiDRASH: טקסט, וריאנטים, מקבילות, צירופים ותמונות",
+    "Search MiDRASH transcriptions across 255,000+ manuscripts: text, variants, parallels, joins, and images": "חיפוש בתעתוקי MiDRASH של למעלה מ-255,000 כתבי יד: טקסט, וריאנטים, מקבילות, צירופים ותמונות",
     "What is the Cairo Genizah?": "מהי גניזת קהיר?",
     "Hundreds of thousands of medieval manuscripts from a Cairo synagogue attic, now searchable for the first time": "מאות אלפי כתבי יד מימי הביניים מעליית גג של בית כנסת בקהיר, זמינים לחיפוש לראשונה",
     "What can I do here?": "מה אפשר לעשות כאן?",
@@ -2093,7 +2093,7 @@ TRANSLATIONS = {
     "Edition": "מהדורה",
     # SEED-023: homepage corpus-stats band labels ("Manuscripts"/"Images" already exist).
     "Catalog entries": "רשומות קטלוג",
-    "Scholarly editions": "מהדורות מדעיות",
+    "Scholarly transcriptions": "תעתוקים מדעיים",
     "Automatic transcriptions": "תעתוקים אוטומטיים",
     "PGP Transcription": "תעתוק PGP",
     "PGP Transcriptions": "תעתוקי PGP",

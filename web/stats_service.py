@@ -1,55 +1,98 @@
-"""Cached corpus-scale statistics for the homepage (SEED-023 Part A).
+"""Homepage corpus statistics (SEED-023 Part A).
 
-Five headline numbers advertising the scale of the corpus:
+The five headline numbers are **hardcoded constants** by design (decision 2026-06-24):
+they change only on a data refresh + redeploy, and computing them live caused a
+partial-load race (``manuscripts`` was read mid ``csv_bank`` background load, yielding
+e.g. 17,852 instead of 255,723). Constants render instantly and CLS-free, with no
+readiness/caching machinery.
 
-    manuscripts                -- all loadable catalog records (libraries.csv rows)
-    catalog_entries            -- FJMS catalog rows
-    images                     -- NLI + Cambridge + Manchester + JTS image/manifest
-                                  records (raw provider-row SUM, not distinct images)
-    scholarly_editions         -- DISTINCT manuscripts with a scholarly edition
-                                  (PGP doc_relation %Edition% ∪ FGP 'Digital Edition')
-    automatic_transcriptions   -- DISTINCT manuscripts in the deduped GENIZAH
-                                  browse_map (MiDRASH automatic transcriptions)
+To refresh after a data update, regenerate from the live sidecars and paste the new
+values into ``CORPUS_STATS``::
 
-These are large tables, so each count is computed ONCE, lazily, on first access and
-cached process-wide -- NEVER queried per request. The cache is recomputed only on a
-process restart (so a data refresh + redeploy updates the numbers). Every metric
-degrades to 0 on any error so the homepage band never breaks. ``computed_at`` is a
-unix timestamp for diagnosability.
+    python -c "import web.stats_service as s; print(s.compute_live_stats())"
+
+(run from the repo root with the sidecars present). ``compute_live_stats()`` is the
+authoritative computation; it is NOT called at runtime.
 """
 
 from __future__ import annotations
 
-import threading
-import time
-from typing import Dict, Optional
+import os
+from typing import Dict
 
 from genizah_core import get_logger
 
 logger = get_logger(__name__)
 
-_LOCK = threading.Lock()
-_CACHE: Optional[Dict[str, int]] = None
+# --- Hardcoded headline numbers -------------------------------------------
+# Verified 2026-06-24 against the live sidecars via compute_live_stats():
+#   manuscripts              libraries.csv loadable rows (header + '#' markers excluded)
+#   catalog_entries          fjms_enrichment.db `catalog`
+#   images                   NLI + Cambridge + Manchester + JTS image/manifest records
+#   scholarly_transcriptions DISTINCT manuscripts: PGP %Edition% ∪ FGP 'Digital Edition'
+#   automatic_transcriptions DISTINCT manuscripts in the deduped GENIZAH browse_map
+CORPUS_STATS: Dict[str, int] = {
+    "manuscripts": 255_723,
+    "catalog_entries": 731_354,
+    "images": 1_019_886,
+    "scholarly_transcriptions": 27_424,
+    "automatic_transcriptions": 232_450,
+}
 
-_KEYS = (
-    "manuscripts",
-    "catalog_entries",
-    "images",
-    "scholarly_editions",
-    "automatic_transcriptions",
-)
+_KEYS = tuple(CORPUS_STATS.keys())
 
+
+def get_corpus_stats() -> Dict[str, int]:
+    """Return the (hardcoded) homepage corpus stats. Instant; safe on any thread."""
+    return dict(CORPUS_STATS)
+
+
+# ---------------------------------------------------------------------------
+# Live regeneration (NOT called at runtime) — run to refresh CORPUS_STATS after a
+# data refresh. Each metric degrades to 0 on error so a missing sidecar doesn't crash.
+# ---------------------------------------------------------------------------
 
 def _count_manuscripts() -> int:
-    """All loadable catalog records, via the already-loaded metadata (libraries.csv
-    rows minus header / ``#`` markers -- the loader's own count, not raw line count)."""
+    """All loadable catalog records (libraries.csv rows minus header / ``#`` markers).
+
+    Prefers the loaded runtime metadata, but falls back to counting libraries.csv
+    DIRECTLY so compute_live_stats() yields the real number from a plain shell
+    (where web.state is never initialized) -- otherwise the regeneration recipe
+    would emit 0 (Codex #307)."""
     try:
         from web.state import state
         mm = getattr(state, "meta_mgr", None)
         bank = getattr(mm, "csv_bank", None) if mm is not None else None
-        return len(bank) if bank else 0
+        if bank:
+            return len(bank)
     except Exception:
-        logger.debug("stats: manuscripts count failed", exc_info=True)
+        logger.debug("stats: manuscripts count (state) failed", exc_info=True)
+    return _count_manuscripts_from_csv()
+
+
+def _count_manuscripts_from_csv() -> int:
+    """Count distinct sys_ids in libraries.csv, replicating _load_csv_bank's filter
+    (skip header + ``#`` marker rows + rows with < 3 columns; key by digit-only sys_id)."""
+    try:
+        import csv as _csv
+        from genizah_core import Config
+        path = getattr(Config, "LIBRARIES_CSV", None)
+        if not path or not os.path.exists(path):
+            return 0
+        seen = set()
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            reader = _csv.reader(f, delimiter=",")
+            next(reader, None)  # header
+            for row in reader:
+                if not row or len(row) < 3:
+                    continue
+                raw = row[0]
+                if raw.startswith("#"):
+                    continue
+                seen.add("".join(ch for ch in str(raw) if ch.isdigit()))
+        return len(seen)
+    except Exception:
+        logger.debug("stats: manuscripts count (csv) failed", exc_info=True)
         return 0
 
 
@@ -84,11 +127,10 @@ def _count_image_records() -> int:
         return 0
 
 
-def _count_scholarly_editions() -> int:
-    """DISTINCT manuscripts with a scholarly edition: PGP %Edition% ∪ FGP Digital
-    Edition (editions only -- translations are NOT counted here)."""
+def _count_scholarly_transcriptions() -> int:
+    """DISTINCT manuscripts with a scholarly edition/transcription: PGP %Edition% ∪
+    FGP 'Digital Edition' (editions only -- translations are NOT counted here)."""
     sys_ids: set = set()
-    # PGP scholarly editions: document_fragments -> documents -> document_sources.
     try:
         from shared.document_service import get_pgp_service
         pgp = get_pgp_service(thread_safe=True)
@@ -102,7 +144,6 @@ def _count_scholarly_editions() -> int:
             sys_ids.update(row[0] for row in cur if row[0])
     except Exception:
         logger.debug("stats: PGP edition count failed", exc_info=True)
-    # FGP Digital Editions (flag-gated, edition-only).
     try:
         from shared.fgp_service import _fgp_enabled, _quote_ident, get_fgp_service
         if _fgp_enabled():
@@ -120,82 +161,47 @@ def _count_scholarly_editions() -> int:
 
 
 def _count_automatic_transcriptions() -> int:
-    """DISTINCT manuscripts in the deduped GENIZAH browse_map (held in memory at
-    runtime as SearchEngine._shared_browse_map -- no index-build artifact needed)."""
+    """DISTINCT manuscripts in the deduped GENIZAH browse_map (MiDRASH automatic
+    transcriptions). Prefers the in-memory SearchEngine._shared_browse_map; falls
+    back to reading the persisted browse_map.pkl so compute_live_stats() works from
+    a plain shell (Codex #307). NOTE: the pkl is deduped after the app's first load,
+    so the fallback is exact post-deploy."""
     try:
         from web.state import state
         searcher = getattr(state, "searcher", None)
-        if searcher is None:
+        if searcher is not None:
+            browse_map = searcher._load_browse_map()
+            if browse_map:
+                return len(browse_map)
+    except Exception:
+        logger.debug("stats: browse_map count (state) failed", exc_info=True)
+    return _count_browse_map_from_pkl()
+
+
+def _count_browse_map_from_pkl() -> int:
+    try:
+        import pickle
+        from genizah_core import Config
+        path = getattr(Config, "BROWSE_MAP", None)
+        if not path or not os.path.exists(path):
             return 0
-        browse_map = searcher._load_browse_map()
+        with open(path, "rb") as f:
+            browse_map = pickle.load(f)
         return len(browse_map) if browse_map else 0
     except Exception:
-        logger.debug("stats: browse_map count failed", exc_info=True)
+        logger.debug("stats: browse_map count (pkl) failed", exc_info=True)
         return 0
 
 
-def _is_complete(stats: Dict[str, int]) -> bool:
-    """A result is cacheable only when every metric is populated (> 0). See
-    get_corpus_stats — guards against caching pre-startup / partially-failed runs."""
-    return all(stats.get(k, 0) > 0 for k in _KEYS)
-
-
-def _compute() -> Dict[str, int]:
+def compute_live_stats() -> Dict[str, int]:
+    """Compute the stats live from the sidecars + loaded state. Use this to refresh
+    CORPUS_STATS after a data update; NOT used on the request path."""
     stats = {
         "manuscripts": _count_manuscripts(),
         "catalog_entries": _count_catalog_entries(),
         "images": _count_image_records(),
-        "scholarly_editions": _count_scholarly_editions(),
+        "scholarly_transcriptions": _count_scholarly_transcriptions(),
         "automatic_transcriptions": _count_automatic_transcriptions(),
-        "computed_at": int(time.time()),
     }
-    logger.info(
-        "corpus stats computed: manuscripts=%d catalog=%d images=%d editions=%d transcriptions=%d",
-        stats["manuscripts"], stats["catalog_entries"], stats["images"],
-        stats["scholarly_editions"], stats["automatic_transcriptions"],
-    )
+    logger.info("live corpus stats: %s", stats)
     return stats
-
-
-def get_corpus_stats(*, force_refresh: bool = False) -> Dict[str, int]:
-    """Return the cached corpus stats, computing them once (lazily) on first call.
-
-    Safe to call from a request path -- after the first call it is a dict return.
-    The first call performs a handful of indexed COUNT queries + an in-memory len();
-    callers on the event loop should still wrap it in ``run.io_bound`` for the
-    first-hit case (the homepage does).
-    """
-    global _CACHE
-    if _CACHE is not None and not force_refresh:
-        return _CACHE
-    with _LOCK:
-        if _CACHE is not None and not force_refresh:
-            return _CACHE
-        try:
-            computed = _compute()
-        except Exception:
-            logger.warning("corpus-stats computation failed", exc_info=True)
-            # Return an uncached all-zero dict so a later call retries — do NOT
-            # poison the cache with a transient total failure (Codex #306).
-            fallback = {k: 0 for k in _KEYS}
-            fallback["computed_at"] = int(time.time())
-            return fallback
-        # Memoize ONLY a complete result (every metric > 0). This avoids caching:
-        #  (a) a result computed before the corpus finished loading — manuscripts /
-        #      automatic_transcriptions come from runtime state that loads on a bg
-        #      thread, so they are 0 until ready; and
-        #  (b) a result where a sidecar metric transiently failed (caught -> 0).
-        # Incomplete results are returned uncached so a later call recomputes the
-        # real numbers (Codex #306 SHOULD-FIX). In a production deployment with all
-        # sidecars present every metric is > 0, so this memoizes on the first
-        # post-startup call.
-        if _is_complete(computed):
-            _CACHE = computed
-        return computed
-
-
-def reset_cache() -> None:
-    """Test hook: drop the memoized stats so the next call recomputes."""
-    global _CACHE
-    with _LOCK:
-        _CACHE = None

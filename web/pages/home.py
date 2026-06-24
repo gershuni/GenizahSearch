@@ -75,7 +75,7 @@ def create_page():
                     h1(tr('Dicta Genizah Search: Full-Text Manuscript Search'),
                        classes='text-lg font-bold',
                        style='color: var(--text-primary); margin: 0;')
-                    ui.label(tr('Search over 255,000 MiDRASH transcriptions: text, variants, parallels, joins, and images')).classes(
+                    ui.label(tr('Search MiDRASH transcriptions across 255,000+ manuscripts: text, variants, parallels, joins, and images')).classes(
                         'text-sm'
                     ).style('color: var(--text-secondary);')
 
@@ -154,17 +154,17 @@ def create_page():
                     ui.label(label).classes('text-xs').style('color: var(--text-secondary);')
 
         # === Corpus Stats Band (SEED-023) — advertises the scale of the corpus ===
-        # Five cached headline numbers. Values load asynchronously off the event loop
-        # AFTER the corpus is ready (web/stats_service memoizes once). Cards reserve a
-        # fixed min-height so filling the placeholder does not shift layout (CLS).
+        # Five HARDCODED headline numbers (web/stats_service.CORPUS_STATS). Rendered
+        # synchronously — no async/placeholder/readiness poll, so no layout shift.
+        from web.stats_service import get_corpus_stats as _get_corpus_stats
+        _stats = _get_corpus_stats()
         _stat_specs = [
             ('collections_bookmark', 'manuscripts', tr('Manuscripts')),
             ('inventory_2', 'catalog_entries', tr('Catalog entries')),
             ('photo_library', 'images', tr('Images')),
-            ('menu_book', 'scholarly_editions', tr('Scholarly editions')),
+            ('menu_book', 'scholarly_transcriptions', tr('Scholarly transcriptions')),
             ('subject', 'automatic_transcriptions', tr('Automatic transcriptions')),
         ]
-        _stat_value_labels = {}
         with ui.row().classes('w-full justify-center gap-3 flex-wrap mt-2 px-2'):
             for _icon_name, _key, _label in _stat_specs:
                 with ui.column().classes('items-center justify-center px-4 py-3').style(
@@ -173,31 +173,10 @@ def create_page():
                     'background: var(--bg-tertiary);'
                 ):
                     ui.icon(_icon_name).classes('text-2xl').style('color: var(--primary-600);')
-                    _stat_value_labels[_key] = ui.label('…').classes('text-xl font-bold').style(
+                    ui.label(f"{_stats.get(_key, 0):,}").classes('text-xl font-bold').style(
                         'color: var(--text-primary);'
                     )
                     ui.label(_label).classes('text-xs text-center').style('color: var(--text-muted);')
-
-        async def _load_corpus_stats():
-            # Wait (bounded) for the METADATA CACHE to finish loading before fetching.
-            # state.is_ready() only means searcher+meta_mgr exist; csv_bank (the
-            # manuscript count) loads later on a background thread (Codex #306), so
-            # poll csv_bank itself — and only call get_corpus_stats ONCE it is ready,
-            # so the service memoizes a complete result (not a premature manuscripts=0).
-            for _ in range(150):  # ~15s
-                _mm = getattr(state, 'meta_mgr', None)
-                if _mm is not None and getattr(_mm, 'csv_bank', None):
-                    break
-                await asyncio.sleep(0.1)
-            try:
-                from nicegui import run
-                from web.stats_service import get_corpus_stats
-                stats = await run.io_bound(get_corpus_stats)
-                for _k, _lbl in _stat_value_labels.items():
-                    _lbl.text = f"{stats.get(_k, 0):,}"
-            except Exception:
-                pass  # leave the placeholders; the band stays usable
-        asyncio.ensure_future(_load_corpus_stats())
 
         # === Info Carousel (auto-rotates + manual arrows) ===
         _card_style = 'background: var(--bg-tertiary); border: 1px solid var(--border-light);'
