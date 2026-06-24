@@ -433,7 +433,22 @@ async def _wrap_with_timeout(
     """
     loop = asyncio.get_event_loop()
     sem = _get_browse_semaphore()
-    await sem.acquire()
+
+    # SEED-016 #29 FIX-2 (GitHub Codex P1): bound the slot wait itself. Because the
+    # slot is held for the worker thread's TRUE lifetime (see below), a plain
+    # unbounded `sem.acquire()` here would block this task OUTSIDE any timeout once
+    # every slot is occupied by timed-out-but-still-running sidecar calls -- turning
+    # a sidecar hang into a stuck /api/browse (the exact saturation this guard is
+    # meant to prevent). Cap the wait at the per-source timeout; on expiry skip the
+    # source with an enrichment_timeout warning and WITHOUT submitting work, so no
+    # slot is consumed. asyncio.Semaphore.acquire releases correctly if cancelled
+    # after acquisition (CPython 3.10+). Worst case per source is ~2x timeout
+    # (slot wait + work wait) under full saturation -- bounded, degraded, not hung.
+    try:
+        await asyncio.wait_for(sem.acquire(), timeout=timeout)
+    except asyncio.TimeoutError:
+        warnings_list.append({'code': 'enrichment_timeout', 'source': source_name})
+        return None
 
     # Release the slot from the executor future's completion path so it is held
     # for the work's TRUE lifetime, even if the caller-facing wait_for below

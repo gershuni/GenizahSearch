@@ -402,20 +402,25 @@ def test_browse_slow_source_times_out_without_starving_others(monkeypatch):
     )
 
 
-def test_timed_out_source_holds_slot_until_blocking_call_returns(monkeypatch):
-    """SEED-016 #29 (Codex REQUEST-CHANGES): a source whose coroutine TIMES OUT
-    must keep its concurrency slot until the underlying blocking function ACTUALLY
-    returns -- not merely until asyncio.wait_for cancels the await.
+def test_timed_out_source_keeps_slot_and_does_not_hang_contenders(monkeypatch):
+    """SEED-016 #29 (in-session Codex REQUEST-CHANGES) + GitHub Codex PR #297 P1.
 
-    With BROWSE_SOURCE_CONCURRENCY = 1 we run two enrichment sources serialized by
-    the one slot. The first (slow) source blocks past its per-source timeout. We
-    prove the second source CANNOT begin executing its blocking body while the
-    first is still running (slot held despite the timeout), and that it DOES
-    proceed once the first blocking function returns.
+    Two properties that must coexist with BROWSE_SOURCE_CONCURRENCY = 1:
 
-    This is the gap the prior `..._without_starving_others` test missed: that one
-    only asserts the coroutine returned quickly, which the buggy
-    release-in-finally version also satisfied.
+      (A) Anti-early-re-admit: a source whose coroutine TIMES OUT keeps its slot
+          until the underlying blocking function ACTUALLY returns -- not merely
+          until asyncio.wait_for cancels the await. So a contender must NOT begin
+          executing its blocking body while the timed-out holder is still running.
+
+      (B) No-hang (PR #297 P1 FIX): a contender waiting for that held slot is
+          bounded -- once it cannot get a slot within the per-source timeout it is
+          SKIPPED with an enrichment_timeout warning, rather than blocking outside
+          any timeout until the hung thread returns. Browse stays responsive even
+          when every slot is occupied by a slow/hung sidecar call.
+
+    The slow holder blocks past its per-source timeout; the contender therefore
+    both (A) never runs its body while the slot is held AND (B) returns promptly
+    with an enrichment_timeout instead of waiting out the 5s hold.
     """
     # Cap concurrency to a single slot and rebuild the semaphore on this loop.
     monkeypatch.setattr(bs, 'BROWSE_SOURCE_CONCURRENCY', 1)
@@ -425,26 +430,17 @@ def test_timed_out_source_holds_slot_until_blocking_call_returns(monkeypatch):
 
     slow_started = threading.Event()
     slow_may_finish = threading.Event()
-    slow_returned = threading.Event()
     second_started = threading.Event()
-
-    # Records: did the second source begin its blocking body BEFORE the slow
-    # source's blocking body returned? If the slot was wrongly freed on timeout,
-    # the second source starts while slow_returned is still unset -> True (bug).
-    observed = {'second_started_before_slow_returned': None}
 
     def _slow_pgp(*a, **k):
         slow_started.set()
         # Block well past the 0.2s coroutine timeout; only finish on command.
         slow_may_finish.wait(timeout=5.0)
-        slow_returned.set()
         return {'page_section_text': 'late'}
 
     def _second_fjms(*a, **k):
+        # Should NEVER run: the contender times out waiting for the held slot.
         second_started.set()
-        # Observe whether the slow source had already returned (slot truly freed)
-        # at the instant we were admitted.
-        observed['second_started_before_slow_returned'] = not slow_returned.is_set()
         return {'source_names': ['CUL'], 'has_measurements': False,
                 'has_visual_suggestions': False}
 
@@ -468,36 +464,84 @@ def test_timed_out_source_holds_slot_until_blocking_call_returns(monkeypatch):
             await asyncio.sleep(0.01)
         assert slow_started.is_set(), 'slow source never started'
 
-        # Give the slow coroutine time to TIME OUT (0.2s) and then some. If the
-        # buggy finally-release were in place, the freed slot would let the
-        # second source begin its body here, while the slow body is still blocked.
-        await asyncio.sleep(0.6)
-        assert not second_started.is_set(), (
-            'second source acquired the slot while the timed-out source was '
-            'still running its blocking call -- the concurrency slot was freed '
-            'on coroutine timeout instead of on real completion (SEED-016 #29 '
-            'regression)'
-        )
+        # (B) The whole gather must resolve PROMPTLY (~per-source timeout), NOT
+        # wait out the slow holder's 5s block. If the contender's slot-acquire
+        # were unbounded (the PR #297 P1 bug) this await would hang until we set
+        # slow_may_finish below.
+        bundle, warnings = await asyncio.wait_for(task, timeout=2.0)
 
-        # Now let the slow blocking function return; the done-callback releases
-        # the slot and the second source must proceed.
-        slow_may_finish.set()
-        bundle, warnings = await asyncio.wait_for(task, timeout=5.0)
+        # (A) The contender never executed its blocking body -- the slot was held
+        # by the timed-out holder for the holder's true lifetime, never re-admitted
+        # early on coroutine timeout.
+        assert not second_started.is_set(), (
+            'contender ran its blocking body while the timed-out holder still held '
+            'the slot -- the slot was freed on coroutine timeout instead of on real '
+            'completion (SEED-016 #29 regression)'
+        )
         return bundle, warnings
+
+    try:
+        bundle, warnings = asyncio.run(_run())
+    finally:
+        # Release the still-blocked holder thread so it does not linger.
+        slow_may_finish.set()
+
+    # The slow holder timed out on its WORK; the contender timed out on its SLOT
+    # ACQUIRE -- both surface enrichment_timeout, neither hangs browse.
+    assert bundle.pgp is None and bundle.fjms is None
+    timed_out = {w.get('source') for w in warnings if w.get('code') == 'enrichment_timeout'}
+    assert {'pgp', 'fjms'} <= timed_out, (
+        f'expected enrichment_timeout for pgp (work) AND fjms (slot wait); got {warnings!r}'
+    )
+
+
+def test_slot_released_on_true_completion_lets_contender_proceed(monkeypatch):
+    """Companion to the no-hang test: when the holder finishes WITHIN the
+    contender's slot-acquire budget, the slot is released (on true completion) and
+    the contender proceeds -- and it only runs AFTER the holder's blocking call
+    actually returned (positive proof of release-on-completion, not on timeout)."""
+    monkeypatch.setattr(bs, 'BROWSE_SOURCE_CONCURRENCY', 1)
+    bs.reset_browse_executor_state()
+    # Generous per-source timeout so the slot wait (not the timeout) governs; the
+    # holder finishes quickly, well inside that budget.
+    monkeypatch.setenv('SEARCH_API_BROWSE_TIMEOUT', '2.0')
+
+    holder_returned = threading.Event()
+    observed = {'contender_started_before_holder_returned': None}
+
+    def _holder_pgp(*a, **k):
+        time.sleep(0.3)  # finishes well within the 2.0s contender budget
+        holder_returned.set()
+        return {'page_section_text': 'on-time'}
+
+    def _contender_fjms(*a, **k):
+        observed['contender_started_before_holder_returned'] = not holder_returned.is_set()
+        return {'source_names': ['CUL'], 'has_measurements': False,
+                'has_visual_suggestions': False}
+
+    def _noop_nli(*a, **k):
+        return {'physical_metadata': None, 'folio': None}
+
+    monkeypatch.setattr(bs, '_pgp_sync', _holder_pgp)
+    monkeypatch.setattr(bs, '_fjms_sync', _contender_fjms)
+    monkeypatch.setattr(bs, '_nli_sync', _noop_nli)
+
+    provider = _FakeProvider()
+
+    async def _run():
+        return await asyncio.wait_for(
+            bs.fetch_browse_bundle(service=provider, sys_id='99001', p_num=3),
+            timeout=5.0,
+        )
 
     bundle, warnings = asyncio.run(_run())
 
-    # The slow source timed out -> null + warning; the second source resolved.
-    assert bundle.pgp is None
-    assert any(
-        w.get('code') == 'enrichment_timeout' and w.get('source') == 'pgp'
-        for w in warnings
-    ), f'expected enrichment_timeout/pgp; got {warnings!r}'
+    # Both sources resolved (no timeout) and the contender ran only AFTER the
+    # holder's blocking call returned -- the slot was freed on true completion.
+    assert bundle.pgp is not None and bundle.pgp['page_section_text'] == 'on-time'
     assert bundle.fjms is not None and bundle.fjms['source_names'] == ['CUL']
-    # And when it finally ran, the slow body had already returned (slot freed only
-    # after real completion).
-    assert observed['second_started_before_slow_returned'] is False, (
-        'second source ran before the slow blocking call returned'
+    assert observed['contender_started_before_holder_returned'] is False, (
+        'contender ran before the holder blocking call returned'
     )
 
 
