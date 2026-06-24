@@ -7969,7 +7969,7 @@ class GenizahGUI(QMainWindow):
         edit_bar_layout.addWidget(self.btn_b_cancel_edit)
 
         edit_scroll = _make_scrollable_row(edit_bar_layout)
-        edit_scroll.setStyleSheet("background: transparent; QScrollBar:horizontal { height: 6px; }")
+        edit_scroll.setStyleSheet("QScrollArea { background: transparent; } QScrollBar:horizontal { height: 6px; }")
         edit_outer.addWidget(edit_scroll)
 
         self.browse_edit_bar.hide()
@@ -8070,7 +8070,7 @@ class GenizahGUI(QMainWindow):
         rd_toolbar_layout.addWidget(btn_rd_exit)
 
         rd_scroll = _make_scrollable_row(rd_toolbar_layout)
-        rd_scroll.setStyleSheet("background: transparent; QScrollBar:horizontal { height: 6px; }")
+        rd_scroll.setStyleSheet("QScrollArea { background: transparent; } QScrollBar:horizontal { height: 6px; }")
         rd_outer.addWidget(rd_scroll)
 
         self.browse_rd_toolbar.hide()
