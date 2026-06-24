@@ -957,6 +957,55 @@ class FgpService:
             logger.error("Error batch checking FGP sources: %s", e)
             return set()
 
+    def get_sys_ids_with_fgp_editions(self, sys_ids: Optional[List[str]] = None) -> Set[str]:
+        """Batch-check which sys_ids have an FGP scholarly EDITION (SEED-023).
+
+        EDITIONS-ONLY: ``doc_relation = 'Digital Edition'`` -- deliberately NOT
+        :meth:`get_sys_ids_with_fgp_sources` (which also counts 'Digital
+        Translation'). Pairs with
+        :meth:`shared.document_service.PGPDocumentService.get_sys_ids_with_editions`
+        (PGP ``%Edition%``) to form the full scholarly-editions union used by the
+        homepage stat and the catalog editions filter. Honors the FGP kill switch.
+
+        Args:
+            sys_ids: List of system IDs to check, or ``None`` for the FULL corpus
+                set. An empty list returns ``set()``.
+
+        Returns:
+            Set of sys_ids with an FGP Digital Edition. ``set()`` when the flag is
+            off, the DB is absent, or on error.
+        """
+        if not _fgp_enabled():
+            return set()
+        if not self.is_available() or "sys_id" not in self._columns:
+            return set()
+        if sys_ids is not None and not sys_ids:
+            return set()
+
+        base = (
+            f'SELECT DISTINCT sys_id FROM {_quote_ident(self._table)} '
+            "WHERE doc_relation = 'Digital Edition' AND sys_id IS NOT NULL"
+        )
+        try:
+            result_set: Set[str] = set()
+            if sys_ids is None:
+                cursor = self._conn.execute(base)
+                result_set.update(row["sys_id"] for row in cursor if row["sys_id"])
+                return result_set
+            batch_size = 500  # stay under SQLite's 999 variable limit
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ",".join("?" * len(batch))
+                cursor = self._conn.execute(
+                    f"{base} AND sys_id IN ({placeholders})",
+                    batch,
+                )
+                result_set.update(row["sys_id"] for row in cursor if row["sys_id"])
+            return result_set
+        except Exception as e:
+            logger.error("Error batch checking FGP editions: %s", e)
+            return set()
+
     def close(self):
         """Close the database connection if open."""
         if self._conn is not None:
@@ -1077,6 +1126,13 @@ def get_fgp_sources_for_fragment(sys_id: str) -> List[Dict[str, Any]]:
 def get_sys_ids_with_fgp_sources(sys_ids: List[str]) -> Set[str]:
     """Batch-check which sys_ids have FGP sources (chooser availability only)."""
     return get_fgp_service().get_sys_ids_with_fgp_sources(sys_ids)
+
+
+def get_sys_ids_with_fgp_editions(sys_ids: Optional[List[str]] = None) -> Set[str]:
+    """sys_ids with an FGP scholarly edition (SEED-023, 'Digital Edition' only).
+    ``None`` => full corpus. See
+    :meth:`FgpService.get_sys_ids_with_fgp_editions`."""
+    return get_fgp_service().get_sys_ids_with_fgp_editions(sys_ids)
 
 
 def get_version() -> Optional[str]:

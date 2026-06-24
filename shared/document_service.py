@@ -508,6 +508,77 @@ class PgpService:
             logger.error(f"Error batch checking PGP text presence: {e}")
             return set()
 
+    def get_all_pgp_link_sys_ids(self) -> Set[str]:
+        """Return the FULL corpus set of sys_ids that have a PGP link (SEED-023).
+
+        This is the same link-presence signal the green "PGP" badge uses
+        (``document_fragments`` row presence, ~34K sys_ids) -- "has PGP info" --
+        but corpus-wide with no input list, so the catalog "Browse by
+        identification" PGP filter can intersect it against the full result set
+        before pagination. Distinct from the text-presence helper
+        :meth:`get_sys_ids_with_pgp_text`.
+        """
+        if not self._conn:
+            return set()
+        try:
+            cursor = self._conn.execute(
+                "SELECT DISTINCT sys_id FROM document_fragments"
+            )
+            return {row['sys_id'] for row in cursor if row['sys_id']}
+        except Exception as e:
+            logger.error(f"Error fetching all PGP-link sys_ids: {e}")
+            return set()
+
+    def get_sys_ids_with_editions(self, sys_ids: Optional[List[str]] = None) -> Set[str]:
+        """Batch check which sys_ids have a PGP scholarly EDITION (SEED-023).
+
+        EDITIONS-ONLY: matches ``document_sources.doc_relation LIKE '%Edition%'``
+        (e.g. 'Edition', 'Digital Edition', 'Edition ; Translation'), so a
+        translation-only manuscript is NOT in the set. This is distinct from
+        SEED-022's :meth:`get_sys_ids_with_pgp_text` (which also counts
+        translations) and from :meth:`get_sys_ids_with_transcriptions` (link
+        presence). Pairs with :func:`shared.fgp_service.get_sys_ids_with_fgp_editions`
+        (FGP 'Digital Edition') to form the full scholarly-editions union.
+
+        Args:
+            sys_ids: List of system IDs to check, or ``None`` for the FULL corpus
+                set (used by the catalog editions filter). An empty list returns
+                ``set()``.
+
+        Returns:
+            Set of sys_ids linked to a PGP document with a scholarly edition.
+        """
+        if not self._conn:
+            return set()
+        if sys_ids is not None and not sys_ids:
+            return set()
+
+        base = (
+            "SELECT DISTINCT f.sys_id FROM document_fragments f "
+            "JOIN documents d ON d.pgpid = f.document_id "
+            "JOIN document_sources ds ON ds.pgpid = d.pgpid "
+            "WHERE ds.doc_relation LIKE '%Edition%'"
+        )
+        try:
+            result_set: Set[str] = set()
+            if sys_ids is None:
+                cursor = self._conn.execute(base)
+                result_set.update(row['sys_id'] for row in cursor if row['sys_id'])
+                return result_set
+            batch_size = 500  # stay under the SQLite variable limit (999)
+            for i in range(0, len(sys_ids), batch_size):
+                batch = sys_ids[i:i + batch_size]
+                placeholders = ','.join('?' * len(batch))
+                cursor = self._conn.execute(
+                    f"{base} AND f.sys_id IN ({placeholders})",
+                    batch,
+                )
+                result_set.update(row['sys_id'] for row in cursor if row['sys_id'])
+            return result_set
+        except Exception as e:
+            logger.error(f"Error batch checking PGP editions: {e}")
+            return set()
+
     def get_fragments_by_tag(self, tag: str) -> List[Dict[str, Any]]:
         """
         Get all fragments linked to PGP documents with a specific tag.
@@ -1150,6 +1221,21 @@ def get_sys_ids_with_pgp_text(sys_ids: List[str]) -> Set[str]:
     link-presence helper used by the existing PGP badge."""
     svc = get_pgp_service()
     return svc.get_sys_ids_with_pgp_text(sys_ids)
+
+
+def get_all_pgp_link_sys_ids() -> Set[str]:
+    """Full-corpus set of sys_ids with a PGP link (SEED-023). See
+    :meth:`PGPDocumentService.get_all_pgp_link_sys_ids` -- "has PGP info"
+    link-presence, corpus-wide, for the catalog browse PGP filter."""
+    svc = get_pgp_service()
+    return svc.get_all_pgp_link_sys_ids()
+
+
+def get_sys_ids_with_editions(sys_ids: Optional[List[str]] = None) -> Set[str]:
+    """sys_ids with a PGP scholarly edition (SEED-023, EDITIONS-ONLY). ``None``
+    => full corpus. See :meth:`PGPDocumentService.get_sys_ids_with_editions`."""
+    svc = get_pgp_service()
+    return svc.get_sys_ids_with_editions(sys_ids)
 
 
 def get_fragments_by_tag(tag: str) -> List[Dict[str, Any]]:
