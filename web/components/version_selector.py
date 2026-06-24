@@ -12,12 +12,12 @@ Allows users to switch between different versions of a transcription:
 import asyncio
 import logging
 from nicegui import ui
-from web.translations import tr
+from web.translations import tr, get_language
 from web.supabase_client import get_corrections
 from web.auth_state import GlobalAuthState
 from web.corrections_service import get_pending_corrections_for_page
 from web.supabase_client import get_user_client
-from shared.fgp_service import group_transcription_sources, source_relation_kind
+from shared.fgp_service import group_transcription_sources, source_relation_kind, pick_fgp_credit
 from typing import Optional, Callable, List, Dict, Any
 
 logger = logging.getLogger(__name__)
@@ -175,11 +175,18 @@ def create_version_selector(
                     first_fgp = fgp_sources[0]
                     version_label.text = 'FGP'
                     version_label.style(f'color: {_FGP_COLOR};')
+                    # Same bilingual credit + translation labelling as the menu
+                    # path, so the initial auto-loaded FGP source shows the same
+                    # metadata it would after the user reselects it (Codex #309 P2).
+                    _attr = first_fgp.get('attribution') or first_fgp.get('source_scholar', 'FGP')
+                    _credit = pick_fgp_credit(first_fgp, get_language()) or _attr
                     if on_version_change:
                         on_version_change(first_fgp.get('content', ''), {
                             'source': 'fgp',
-                            'attribution': first_fgp.get('attribution') or first_fgp.get('source_scholar', 'FGP'),
+                            'attribution': _attr,
+                            'source_credit': _credit,
                             'is_fgp': True,
+                            'is_translation': source_relation_kind(first_fgp) == 'translation',
                             'is_default': True,
                             'source_id': first_fgp.get('id'),
                             'uid': first_fgp.get('uid'),
@@ -393,8 +400,10 @@ def create_version_selector(
                         for fed in fgp_sources:
                             attribution = fed.get('attribution') or fed.get('source_scholar') or 'FGP'
                             # Specific FGP team credit (e.g. "יעקב זוסמן, ראש צוות
-                            # FGP…"); falls back to the generic attribution.
-                            credit = fed.get('source_credit') or attribution
+                            # FGP…"), in the UI language (HE/EN bilingual split,
+                            # falling back across languages then to the generic
+                            # attribution).
+                            credit = pick_fgp_credit(fed, get_language()) or attribution
                             # An FGP source can be a transcription OR a translation
                             # (e.g. a Hebrew translation of a Judeo-Arabic letter).
                             # Label it by its actual kind — never call a translation

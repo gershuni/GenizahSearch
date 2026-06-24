@@ -5006,12 +5006,16 @@ class GenizahGUI(QMainWindow):
 
         # === FGP Group (distinct from PGP; FGP-07) ===
         if fgp_sources:
+            from shared.fgp_service import pick_fgp_credit
+            # Live read (CURRENT_LANG flips at runtime on language switch — the
+            # module-level import binds a stale snapshot; see the lines-button site).
+            from genizah_core import CURRENT_LANG as _fgp_lang
             combo.addItem("─────────────", {"source": "header"})
             combo.model().item(combo.count() - 1).setEnabled(False)
             # Show the transcription credit in the FGP group header when the
             # manuscript has a single shared credit (the common case); the
             # per-item tooltip still carries each row's credit when they differ.
-            _fgp_credits = {s.get('source_credit') for s in fgp_sources if s.get('source_credit')}
+            _fgp_credits = {c for c in (pick_fgp_credit(s, _fgp_lang) for s in fgp_sources) if c}
             _fgp_hdr = (f"-- FGP · {next(iter(_fgp_credits))} --"
                         if len(_fgp_credits) == 1 else "-- FGP --")
             combo.addItem(_fgp_hdr, {"source": "header"})
@@ -5025,6 +5029,7 @@ class GenizahGUI(QMainWindow):
                     label = f"  FGP {lang_part}{tr('Translation')}"
                 else:
                     label = f"  {tr('FGP Transcription')}"
+                _credit = pick_fgp_credit(fsrc, _fgp_lang)
                 # No folio suffix: the combo is filtered to the displayed image's
                 # folio, so the folio only routes placement (it's not shown).
                 combo.addItem(label, {
@@ -5033,14 +5038,14 @@ class GenizahGUI(QMainWindow):
                     "scholar": fsrc.get('source_scholar', 'FGP'),
                     "language": language,
                     "attribution": fsrc.get('attribution'),
-                    "source_credit": fsrc.get('source_credit'),
+                    "source_credit": _credit,
                     "source_id": fsrc.get('id'),
                     "uid": fsrc.get('uid'),
                 })
                 # Surface the FGP team credit on hover (the label stays compact).
-                _credit = fsrc.get('source_credit') or fsrc.get('attribution')
-                if _credit:
-                    combo.setItemData(combo.count() - 1, _credit,
+                _tooltip = _credit or fsrc.get('attribution')
+                if _tooltip:
+                    combo.setItemData(combo.count() - 1, _tooltip,
                                       Qt.ItemDataRole.ToolTipRole)
 
         # === Visual divider before HTR ===

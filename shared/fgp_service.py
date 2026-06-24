@@ -795,8 +795,12 @@ def _row_to_fgp_source(row: sqlite3.Row) -> Dict[str, Any]:
         "attribution": FGP_ATTRIBUTION,
         # Per-source FGP credit (team leader, e.g. "יעקב זוסמן, ראש צוות FGP…").
         # None on an old DB lacking the column (graceful — display falls back to
-        # the generic attribution).
+        # the generic attribution). ``source_credit`` is the legacy single-language
+        # value; ``_he``/``_en`` are the bilingual split (2026-06-24) — the UI picks
+        # by language via :func:`pick_fgp_credit`, falling back across all three.
         "source_credit": d.get("source_credit"),
+        "source_credit_he": d.get("source_credit_he"),
+        "source_credit_en": d.get("source_credit_en"),
         "folio_num": d.get("folio_num"),
         "image_side": d.get("image_side"),
         "folio_label": _fgp_folio_label(d),
@@ -805,6 +809,22 @@ def _row_to_fgp_source(row: sqlite3.Row) -> Dict[str, Any]:
         "sequence_order": d.get("sequence_order") or 0,
     }
     return out
+
+
+def pick_fgp_credit(src: Dict[str, Any], lang: str = "en") -> Optional[str]:
+    """Pick the language-appropriate FGP credit from a chooser source dict.
+
+    Hebrew UI prefers ``source_credit_he``, English UI prefers
+    ``source_credit_en``; either falls back to the other, then to the legacy
+    single-language ``source_credit`` (so an old sidecar still shows something).
+    Returns ``None`` only when no credit exists at all.
+    """
+    he = src.get("source_credit_he")
+    en = src.get("source_credit_en")
+    legacy = src.get("source_credit")
+    if str(lang or "").lower().startswith("he"):
+        return he or en or legacy
+    return en or he or legacy
 
 
 class FgpService:
