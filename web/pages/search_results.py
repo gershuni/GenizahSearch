@@ -445,9 +445,13 @@ def create_result_card(search_state, refs, index, result):
             search_state.expansion_toggle_refs[index] = _content_col
             _content_col.on('click', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
             # Enter / Space activate, matching native button behavior. keydown.space.prevent
-            # stops the page from scrolling on Space.
-            _content_col.on('keydown.enter', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
-            _content_col.on('keydown.space.prevent', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
+            # stops the page from scrolling on Space. The `.self` modifier (GitHub Codex
+            # PR #300 P2) gates the handler on the wrapper being the event TARGET, so
+            # Enter/Space on a nested control (visual-similarity / title-swap button) does
+            # NOT bubble up and toggle the card -- click is already shielded via click.stop
+            # on those children, but keydown was not.
+            _content_col.on('keydown.enter.self', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
+            _content_col.on('keydown.space.self.prevent', lambda idx=index, _ss=search_state, _r=refs: toggle_expansion(_ss, _r, idx))
             with _content_col:
                 with ui.row().classes('items-center gap-2 flex-wrap'):
                     ui.label(f"#{index + 1}").classes('text-xs px-2 py-0.5 rounded shrink-0').style(

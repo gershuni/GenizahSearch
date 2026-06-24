@@ -1055,15 +1055,19 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         )
         chip_bar_container.set_visibility(False)
 
-        # #11: per-op feedback for the (background) filter-count recompute. A tiny
-        # inline indicator inside the chip bar — spinner while pending, an error
-        # chip on failure — instead of leaving the count silently stale.
-        with chip_bar_container:
-            _filter_status_row = ui.row().classes('items-center gap-1')
-            _filter_status_row.set_visibility(False)
-            with _filter_status_row:
-                _filter_status_spinner = ui.spinner(size='sm').props('aria-hidden=true')
-                _filter_status_label = ui.label('').classes('text-xs').style('color: var(--text-muted);')
+        # #11: per-op feedback for the (background) filter-count recompute — spinner
+        # while pending, an error chip on failure — instead of leaving the count
+        # silently stale.
+        # GitHub Codex PR #300 P2: this row must live OUTSIDE chip_bar_container.
+        # _update_chip_bar() calls chip_bar_container.clear() (including on the initial
+        # render), which previously destroyed these stored elements, so every later
+        # pending/error update mutated detached nodes and never became visible. Keep it
+        # in its own persistent, chip-bar-aligned container below the chips.
+        _filter_status_row = ui.row().classes('w-full px-4 items-center gap-1')
+        _filter_status_row.set_visibility(False)
+        with _filter_status_row:
+            _filter_status_spinner = ui.spinner(size='sm').props('aria-hidden=true')
+            _filter_status_label = ui.label('').classes('text-xs').style('color: var(--text-muted);')
 
         def _set_filter_recompute_state(status):
             """Render pending/error feedback for the filter-count recompute (#11)."""
