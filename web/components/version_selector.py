@@ -175,11 +175,18 @@ def create_version_selector(
                     first_fgp = fgp_sources[0]
                     version_label.text = 'FGP'
                     version_label.style(f'color: {_FGP_COLOR};')
+                    # Same bilingual credit + translation labelling as the menu
+                    # path, so the initial auto-loaded FGP source shows the same
+                    # metadata it would after the user reselects it (Codex #309 P2).
+                    _attr = first_fgp.get('attribution') or first_fgp.get('source_scholar', 'FGP')
+                    _credit = pick_fgp_credit(first_fgp, get_language()) or _attr
                     if on_version_change:
                         on_version_change(first_fgp.get('content', ''), {
                             'source': 'fgp',
-                            'attribution': first_fgp.get('attribution') or first_fgp.get('source_scholar', 'FGP'),
+                            'attribution': _attr,
+                            'source_credit': _credit,
                             'is_fgp': True,
+                            'is_translation': source_relation_kind(first_fgp) == 'translation',
                             'is_default': True,
                             'source_id': first_fgp.get('id'),
                             'uid': first_fgp.get('uid'),

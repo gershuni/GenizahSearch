@@ -102,17 +102,34 @@ def _kv(block: str, key: str, other: str):
     return m.group(1).strip() if m else None
 
 
+def _pair(eng, heb):
+    e = (str(eng).strip() if eng is not None else "") or None
+    h = (str(heb).strip() if heb is not None else "") or None
+    return (e, h) if (e or h) else None
+
+
 def _datasource_parts(ds):
-    """List of (en, he) per source block, alignment preserved (one per source)."""
+    """List of (en, he) per source block, alignment preserved (one per source).
+
+    Real data always stores ``DataSource`` as a ``{eng:.., heb:..}`` pseudo-dict
+    *string* (unquoted keys), so the regex branch is the live path. Genuine
+    dict/list values are handled directly (they would NOT match the unquoted-key
+    regex after ``json.dumps`` quotes the keys — Codex #309 P3)."""
     if not ds:
         return []
-    s = ds if isinstance(ds, str) else json.dumps(ds, ensure_ascii=False)
+    if isinstance(ds, dict):
+        p = _pair(ds.get("eng"), ds.get("heb"))
+        return [p] if p else []
+    if isinstance(ds, list):
+        out = []
+        for item in ds:
+            out.extend(_datasource_parts(item))
+        return out
     out = []
-    for block in re.findall(r"\{([^{}]*)\}", s):
-        e = _kv(block, "eng", "heb")
-        h = _kv(block, "heb", "eng")
-        if e or h:
-            out.append(((e or "").strip() or None, (h or "").strip() or None))
+    for block in re.findall(r"\{([^{}]*)\}", str(ds)):
+        p = _pair(_kv(block, "eng", "heb"), _kv(block, "heb", "eng"))
+        if p:
+            out.append(p)
     return out
 
 
@@ -154,6 +171,41 @@ def _team_token(he_credit: str) -> str:
 
 
 TEAM_TOKENS = {t: _team_token(he) for t, (he, _en) in TEAM_CREDITS.items()}
+
+
+def _token_matches(token: str, text: str) -> bool:
+    """True if ``token`` occurs in ``text`` as a COMPLETE team-name token, not
+    merely as the prefix of a longer one.
+
+    Plain substring matching cross-contaminated overlapping teams (Codex #309 P1):
+    token 132 = 'חומר תיעודי' is a prefix of token 131 = 'חומר תיעודי מאוחר', so a
+    132-prefix row on a manuscript that also carries team 131's DataSource part
+    would wrongly keep Avraham David's (131) credit. We reject an occurrence that
+    is immediately continued by more Hebrew (optionally across a single run of
+    spaces) — 'חומר תיעודי' followed by ' מאוחר' is rejected, while 'חומר תיעודי'
+    followed by ' (גויטין)' (132's own part) or end-of-string is accepted."""
+    if not token or not text:
+        return False
+    for m in re.finditer(re.escape(token), text):
+        if not re.match(r"\s*[א-ת]", text[m.end():]):
+            return True
+    return False
+
+
+def resolve_team_credit(prefix: int, parts):
+    """(he, en, category) for a scholarly-team transcription.
+
+    EN is always the clean verified English team credit (no English transcriber
+    names exist locally). HE is the verified team-head credit by default, but
+    keeps the manuscript DataSource part(s) belonging to THIS team when present
+    (boundary-matched via :func:`_token_matches`, so the richer individual
+    transcriber — e.g. אילה אליהו for Firkovitch — is preserved without pulling
+    in another team's part)."""
+    tok = TEAM_TOKENS[prefix]
+    matched_he = [he for (_en, he) in parts if he and _token_matches(tok, he)]
+    he = "; ".join(dict.fromkeys(matched_he)) if matched_he else TEAM_CREDITS[prefix][0]
+    en = TEAM_CREDITS[prefix][1]
+    return he, en, f"team:{prefix}:{'matched' if matched_he else 'fallback'}"
 
 
 # ── FIST catalog (500) and book (600) credit maps ──
@@ -284,11 +336,7 @@ def main() -> int:
             s = book_map.get(sub)
             return (s, s, "book") if s else (None, None, "book:unresolved")
         if prefix in TEAM_CREDITS:
-            tok = TEAM_TOKENS[prefix]
-            matched_he = [he for (_en, he) in parts if he and tok in he]
-            he = "; ".join(dict.fromkeys(matched_he)) if matched_he else TEAM_CREDITS[prefix][0]
-            en = TEAM_CREDITS[prefix][1]
-            return he, en, f"team:{prefix}:{'matched' if matched_he else 'fallback'}"
+            return resolve_team_credit(prefix, parts)
         if prefix in INFRA_CREDITS:
             he, en = INFRA_CREDITS[prefix]
             return he, en, f"infra:{prefix}"
