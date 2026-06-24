@@ -17,6 +17,7 @@ authoritative computation; it is NOT called at runtime.
 
 from __future__ import annotations
 
+import os
 from typing import Dict
 
 from genizah_core import get_logger
@@ -52,16 +53,46 @@ def get_corpus_stats() -> Dict[str, int]:
 # ---------------------------------------------------------------------------
 
 def _count_manuscripts() -> int:
-    """All loadable catalog records, via the loaded metadata (libraries.csv rows
-    minus header / ``#`` markers). NOTE: only reliable once csv_bank has finished
-    loading -- hence the runtime value is hardcoded, not read from here."""
+    """All loadable catalog records (libraries.csv rows minus header / ``#`` markers).
+
+    Prefers the loaded runtime metadata, but falls back to counting libraries.csv
+    DIRECTLY so compute_live_stats() yields the real number from a plain shell
+    (where web.state is never initialized) -- otherwise the regeneration recipe
+    would emit 0 (Codex #307)."""
     try:
         from web.state import state
         mm = getattr(state, "meta_mgr", None)
         bank = getattr(mm, "csv_bank", None) if mm is not None else None
-        return len(bank) if bank else 0
+        if bank:
+            return len(bank)
     except Exception:
-        logger.debug("stats: manuscripts count failed", exc_info=True)
+        logger.debug("stats: manuscripts count (state) failed", exc_info=True)
+    return _count_manuscripts_from_csv()
+
+
+def _count_manuscripts_from_csv() -> int:
+    """Count distinct sys_ids in libraries.csv, replicating _load_csv_bank's filter
+    (skip header + ``#`` marker rows + rows with < 3 columns; key by digit-only sys_id)."""
+    try:
+        import csv as _csv
+        from genizah_core import Config
+        path = getattr(Config, "LIBRARIES_CSV", None)
+        if not path or not os.path.exists(path):
+            return 0
+        seen = set()
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            reader = _csv.reader(f, delimiter=",")
+            next(reader, None)  # header
+            for row in reader:
+                if not row or len(row) < 3:
+                    continue
+                raw = row[0]
+                if raw.startswith("#"):
+                    continue
+                seen.add("".join(ch for ch in str(raw) if ch.isdigit()))
+        return len(seen)
+    except Exception:
+        logger.debug("stats: manuscripts count (csv) failed", exc_info=True)
         return 0
 
 
@@ -131,16 +162,34 @@ def _count_scholarly_transcriptions() -> int:
 
 def _count_automatic_transcriptions() -> int:
     """DISTINCT manuscripts in the deduped GENIZAH browse_map (MiDRASH automatic
-    transcriptions), held in memory at runtime as SearchEngine._shared_browse_map."""
+    transcriptions). Prefers the in-memory SearchEngine._shared_browse_map; falls
+    back to reading the persisted browse_map.pkl so compute_live_stats() works from
+    a plain shell (Codex #307). NOTE: the pkl is deduped after the app's first load,
+    so the fallback is exact post-deploy."""
     try:
         from web.state import state
         searcher = getattr(state, "searcher", None)
-        if searcher is None:
+        if searcher is not None:
+            browse_map = searcher._load_browse_map()
+            if browse_map:
+                return len(browse_map)
+    except Exception:
+        logger.debug("stats: browse_map count (state) failed", exc_info=True)
+    return _count_browse_map_from_pkl()
+
+
+def _count_browse_map_from_pkl() -> int:
+    try:
+        import pickle
+        from genizah_core import Config
+        path = getattr(Config, "BROWSE_MAP", None)
+        if not path or not os.path.exists(path):
             return 0
-        browse_map = searcher._load_browse_map()
+        with open(path, "rb") as f:
+            browse_map = pickle.load(f)
         return len(browse_map) if browse_map else 0
     except Exception:
-        logger.debug("stats: browse_map count failed", exc_info=True)
+        logger.debug("stats: browse_map count (pkl) failed", exc_info=True)
         return 0
 
 
