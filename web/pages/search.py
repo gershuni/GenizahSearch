@@ -61,6 +61,29 @@ import time
 logger = logging.getLogger(__name__)
 
 
+def _web_fgp_sys_ids(sys_ids):
+    """FGP presence set, gated by the WEB-ONLY FGP kill switch (GitHub Codex #303).
+
+    The shared ``get_sys_ids_with_fgp_sources`` only honors the shared
+    ``FGP_TRANSCRIPTIONS_ENABLED`` flag; on web, FGP can be turned off independently
+    via ``WEB_FGP_ENABLED=0`` (mirrors the result-dialog/chooser gating). Without
+    this, a web deploy with FGP disabled but the sidecar present would still badge
+    FGP-only manuscripts the user cannot open. Returns set() when web FGP is off.
+    """
+    from web.feature_flags import web_fgp_enabled
+    if not web_fgp_enabled():
+        return set()
+    return get_sys_ids_with_fgp_sources(sys_ids)
+
+
+def _web_manual_transcription_ids(sys_ids):
+    """Web-aware manual-transcription union (PGP readable text ∪ web-gated FGP).
+
+    Used by the PGP-tag-browse and session-restore paths, which would otherwise call
+    the shared union helper that always includes FGP regardless of the web flag."""
+    return union_manual_transcriptions(get_sys_ids_with_pgp_text(sys_ids), _web_fgp_sys_ids(sys_ids))
+
+
 def create_search_page(initial_query: str = None, initial_tag: str = None,
                        initial_mode: str = None, initial_variants: int = None,
                        initial_ja: int = None, initial_flex_spaces: int = None,
@@ -4726,7 +4749,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 run.io_bound(collect_translations, visible_ids, _show_trans_for_enrich),
                 run.io_bound(collect_vs_availability, visible_ids),
                 run.io_bound(get_sys_ids_with_pgp_text, visible_ids),
-                run.io_bound(get_sys_ids_with_fgp_sources, visible_ids),
+                run.io_bound(_web_fgp_sys_ids, visible_ids),
             )
             # Check generation before applying (user may have started a new search)
             if search_state.search_generation == this_generation:
@@ -4790,7 +4813,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     run.io_bound(collect_translations, chunk_ids, _show_trans_for_enrich),
                     run.io_bound(collect_vs_availability, chunk_ids),
                     run.io_bound(get_sys_ids_with_pgp_text, chunk_ids),
-                    run.io_bound(get_sys_ids_with_fgp_sources, chunk_ids),
+                    run.io_bound(_web_fgp_sys_ids, chunk_ids),
                 )
                 if search_state.search_generation != this_generation:
                     break
@@ -4897,9 +4920,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             try:
                 _tag_all_sids = [r.get('sys_id') for r in tag_results if r.get('sys_id')]
                 if _tag_all_sids:
-                    from shared.transcription_service import get_sys_ids_with_manual_transcriptions
                     _tag_manual_ids = await run.io_bound(
-                        get_sys_ids_with_manual_transcriptions, _tag_all_sids
+                        _web_manual_transcription_ids, _tag_all_sids
                     )
             except Exception:
                 pass  # Manual-transcription lookup failed; omit the badge
@@ -5020,10 +5042,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # transcription union (new badge) in parallel, so both reappear on a
                 # reloaded session.
                 try:
-                    from shared.transcription_service import get_sys_ids_with_manual_transcriptions
                     link_ids, manual_ids = await asyncio.gather(
                         run.io_bound(get_sys_ids_with_transcriptions, sys_ids),
-                        run.io_bound(get_sys_ids_with_manual_transcriptions, sys_ids),
+                        run.io_bound(_web_manual_transcription_ids, sys_ids),
                     )
                     search_state.transcription_sys_ids = link_ids
                     search_state.manual_transcription_sys_ids = manual_ids

@@ -70,6 +70,29 @@ def test_include_user_flag_is_accepted_noop(monkeypatch):
     assert ts.get_sys_ids_with_manual_transcriptions(['a'], include_user=False) == {'a'}
 
 
+# --- web FGP kill-switch gating (GitHub Codex #303 P2) ---------------------
+
+def test_web_manual_ids_respect_web_fgp_killswitch(monkeypatch):
+    """On web, the manual-transcription union must drop FGP when WEB_FGP_ENABLED=0,
+    even if the shared FGP flag/sidecar is present — otherwise FGP-only manuscripts
+    get badged but cannot be opened in the chooser."""
+    import web.feature_flags as ff
+    import web.pages.search as wsearch
+
+    monkeypatch.setattr(wsearch, 'get_sys_ids_with_pgp_text', lambda ids: {'pgp1'})
+    monkeypatch.setattr(wsearch, 'get_sys_ids_with_fgp_sources', lambda ids: {'fgp1'})
+
+    # FGP disabled on web -> FGP set dropped; union is PGP-text only.
+    monkeypatch.setattr(ff, 'web_fgp_enabled', lambda: False)
+    assert wsearch._web_fgp_sys_ids(['x']) == set()
+    assert wsearch._web_manual_transcription_ids(['x']) == {'pgp1'}
+
+    # FGP enabled on web -> FGP set included.
+    monkeypatch.setattr(ff, 'web_fgp_enabled', lambda: True)
+    assert wsearch._web_fgp_sys_ids(['x']) == {'fgp1'}
+    assert wsearch._web_manual_transcription_ids(['x']) == {'pgp1', 'fgp1'}
+
+
 # --- i18n ------------------------------------------------------------------
 
 def test_tooltip_key_present_en_he():
