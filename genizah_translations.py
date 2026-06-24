@@ -2091,6 +2091,10 @@ TRANSLATIONS = {
     "scholarly transcription/translation available": "תעתיק/תרגום מדעי זמין",
     # SEED-022: desktop results-table column header for the above (concise).
     "Edition": "מהדורה",
+    # SEED-023: homepage corpus-stats band labels ("Manuscripts"/"Images" already exist).
+    "Catalog entries": "רשומות קטלוג",
+    "Scholarly editions": "מהדורות מדעיות",
+    "Automatic transcriptions": "תעתוקים אוטומטיים",
     "PGP Transcription": "תעתוק PGP",
     "PGP Transcriptions": "תעתוקי PGP",
     # --- FGP (Friedberg Genizah Project) Transcription ---

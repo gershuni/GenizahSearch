@@ -153,6 +153,49 @@ def create_page():
                     ui.icon(icon_name).classes('text-sm').style('color: var(--primary-600);')
                     ui.label(label).classes('text-xs').style('color: var(--text-secondary);')
 
+        # === Corpus Stats Band (SEED-023) — advertises the scale of the corpus ===
+        # Five cached headline numbers. Values load asynchronously off the event loop
+        # AFTER the corpus is ready (web/stats_service memoizes once). Cards reserve a
+        # fixed min-height so filling the placeholder does not shift layout (CLS).
+        _stat_specs = [
+            ('collections_bookmark', 'manuscripts', tr('Manuscripts')),
+            ('inventory_2', 'catalog_entries', tr('Catalog entries')),
+            ('photo_library', 'images', tr('Images')),
+            ('menu_book', 'scholarly_editions', tr('Scholarly editions')),
+            ('subject', 'automatic_transcriptions', tr('Automatic transcriptions')),
+        ]
+        _stat_value_labels = {}
+        with ui.row().classes('w-full justify-center gap-3 flex-wrap mt-2 px-2'):
+            for _icon_name, _key, _label in _stat_specs:
+                with ui.column().classes('items-center justify-center px-4 py-3').style(
+                    'min-width: 150px; min-height: 96px; flex: 1 1 150px; max-width: 220px; '
+                    'border: 1px solid var(--border-light); border-radius: 10px; '
+                    'background: var(--bg-tertiary);'
+                ):
+                    ui.icon(_icon_name).classes('text-2xl').style('color: var(--primary-600);')
+                    _stat_value_labels[_key] = ui.label('…').classes('text-xl font-bold').style(
+                        'color: var(--text-primary);'
+                    )
+                    ui.label(_label).classes('text-xs text-center').style('color: var(--text-muted);')
+
+        async def _load_corpus_stats():
+            # Wait (bounded) for the corpus to finish loading so manuscripts /
+            # automatic_transcriptions reflect real counts (and the service memoizes
+            # a complete result), then fetch off the event loop.
+            for _ in range(120):
+                if state.is_ready():
+                    break
+                await asyncio.sleep(0.1)
+            try:
+                from nicegui import run
+                from web.stats_service import get_corpus_stats
+                stats = await run.io_bound(get_corpus_stats)
+                for _k, _lbl in _stat_value_labels.items():
+                    _lbl.text = f"{stats.get(_k, 0):,}"
+            except Exception:
+                pass  # leave the placeholders; the band stays usable
+        asyncio.ensure_future(_load_corpus_stats())
+
         # === Info Carousel (auto-rotates + manual arrows) ===
         _card_style = 'background: var(--bg-tertiary); border: 1px solid var(--border-light);'
         _card_classes = 'w-full p-0 overflow-hidden cursor-pointer hover:shadow-xl transition-all'
