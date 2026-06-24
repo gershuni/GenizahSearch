@@ -19526,6 +19526,17 @@ class GenizahGUI(QMainWindow):
 
         # Mark all as PGP
         self._pgp_transcription_sys_ids = {r['display']['id'] for r in formatted}
+        # SEED-022: this PGP-tag path bypasses the badge worker, so compute the
+        # scholarly-transcription set (PGP text ∪ FGP) for the new column here too —
+        # otherwise it would render stale/blank. Tag-result counts are bounded and
+        # this is two batched SQLite queries (lighter than the per-row meta loop above).
+        try:
+            from shared.transcription_service import get_sys_ids_with_manual_transcriptions
+            self._manual_transcription_sys_ids = get_sys_ids_with_manual_transcriptions(
+                [r['display']['id'] for r in formatted]
+            )
+        except Exception:
+            self._manual_transcription_sys_ids = set()
 
         self.chk_search_header.blockSignals(True)
         self.chk_search_header.setChecked(False)
