@@ -716,6 +716,10 @@ class FjmsService:
         # None = not yet computed. Empty set = computed but vocabulary is empty
         # (which validate_filter_values treats as fail-closed, NOT allow-all).
         self._materials_cache: Optional[set] = None
+        # SEED-023: per-thread registry of populated catalog-filter TEMP tables
+        # (name -> token). The PGP/edition membership sets are static per process,
+        # so each thread's TEMP table is built once and reused across requests.
+        self._filter_temp_local = threading.local()
 
         # Resolve db_path
         if db_path is None:
@@ -1981,6 +1985,43 @@ class FjmsService:
             for row in cursor
         ]
 
+    # SEED-023: catalog-filter TEMP table names (fixed allowlist — never interpolated
+    # from caller input). Each maps a static, corpus-wide sys_id set onto AlmaId.
+    _FILTER_TEMP_TABLES = ("_browse_filter_pgp", "_browse_filter_edition")
+
+    def _ensure_filter_temp(self, name: str, sys_ids, token: int) -> bool:
+        """Build (once per thread) a TEMP table of AlmaIds for a catalog filter.
+
+        The PGP/edition membership sets are static per process, so the table is
+        populated once per worker thread and reused across paginated requests
+        (``token`` = a stable signal, currently ``len``; a mismatch rebuilds).
+        Returns True if the table is ready to be referenced, False on failure
+        (caller then skips the filter rather than corrupting the result set).
+        """
+        if name not in self._FILTER_TEMP_TABLES or not self._conn:
+            return False
+        if not sys_ids:
+            return False
+        reg = getattr(self._filter_temp_local, "built", None)
+        if reg is None:
+            reg = {}
+            self._filter_temp_local.built = reg
+        if reg.get(name) == token:
+            return True
+        try:
+            self._conn.execute(f'DROP TABLE IF EXISTS "{name}"')
+            self._conn.execute(f'CREATE TEMP TABLE "{name}" (AlmaId TEXT PRIMARY KEY)')
+            self._conn.executemany(
+                f'INSERT OR IGNORE INTO "{name}" (AlmaId) VALUES (?)',
+                [(s,) for s in sys_ids if s],
+            )
+            reg[name] = token
+            return True
+        except Exception as e:
+            logger.error(f"FjmsService._ensure_filter_temp({name}) failed: {e}")
+            reg.pop(name, None)
+            return False
+
     def get_browse_results(
         self,
         domain: str = None,
@@ -1994,6 +2035,10 @@ class FjmsService:
         text_all: list[str] = None,
         text_any: list[str] = None,
         text_not: list[str] = None,
+        pgp_filter: str = None,
+        pgp_sys_ids=None,
+        editions_filter: str = None,
+        edition_sys_ids=None,
     ) -> dict:
         """
         Get paginated browse results matching all provided filters (intersection).
@@ -2011,6 +2056,17 @@ class FjmsService:
             text_all: Terms that must ALL appear (AND). Matched across all text fields.
             text_any: Terms where ANY must appear (OR). Matched across all text fields.
             text_not: Terms that must NOT appear. Excluded across all text fields.
+            pgp_filter: SEED-023 3-state PGP filter -- ``'has_pgp'`` / ``'no_pgp'``
+                (None or ``'all'`` = no-op). Applied BEFORE COUNT/pagination so
+                ``total`` reflects the filtered set.
+            pgp_sys_ids: Full corpus set of sys_ids with a PGP link
+                (``document_service.get_all_pgp_link_sys_ids()``); required when
+                ``pgp_filter`` is active. Intersected on ``c.AlmaId == sys_id``.
+            editions_filter: SEED-023 3-state editions filter --
+                ``'has_edition'`` / ``'no_edition'`` (None or ``'all'`` = no-op).
+            edition_sys_ids: Full corpus set of sys_ids with a scholarly edition
+                (PGP ``%Edition%`` ∪ FGP ``Digital Edition``); required when
+                ``editions_filter`` is active.
 
         Returns:
             Dict with keys:
@@ -2140,6 +2196,32 @@ class FjmsService:
                     conditions.append(_TEXT_NOT_MATCH)
                     like_pat = f"%{term}%"
                     params.extend([_fts_escape(term), like_pat, like_pat])
+
+            # SEED-023: PGP / editions membership filters. Each materializes a
+            # per-thread TEMP table of AlmaIds and adds an [NOT] EXISTS clause
+            # (no bound params) so it flows into BOTH the count and the paged
+            # results query via the shared WHERE. If the set is missing or the
+            # TEMP build fails, the filter is skipped (fail-open: never silently
+            # truncate to an empty/wrong set).
+            if pgp_filter in ("has_pgp", "no_pgp") and pgp_sys_ids:
+                if self._ensure_filter_temp(
+                    "_browse_filter_pgp", pgp_sys_ids, len(pgp_sys_ids)
+                ):
+                    op = "EXISTS" if pgp_filter == "has_pgp" else "NOT EXISTS"
+                    conditions.append(
+                        f'{op} (SELECT 1 FROM "_browse_filter_pgp" t '
+                        f"WHERE t.AlmaId = c.AlmaId)"
+                    )
+
+            if editions_filter in ("has_edition", "no_edition") and edition_sys_ids:
+                if self._ensure_filter_temp(
+                    "_browse_filter_edition", edition_sys_ids, len(edition_sys_ids)
+                ):
+                    op = "EXISTS" if editions_filter == "has_edition" else "NOT EXISTS"
+                    conditions.append(
+                        f'{op} (SELECT 1 FROM "_browse_filter_edition" t '
+                        f"WHERE t.AlmaId = c.AlmaId)"
+                    )
 
             where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 

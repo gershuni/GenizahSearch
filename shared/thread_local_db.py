@@ -111,6 +111,16 @@ class ThreadLocalConnection:
         """Execute SQL on the current thread's connection."""
         return self._get_conn().execute(sql, parameters)
 
+    def executemany(self, sql: str, seq_of_parameters) -> sqlite3.Cursor:
+        """Bulk-execute SQL on the current thread's connection.
+
+        Used to populate per-thread TEMP tables (e.g. catalog browse filter
+        sets) without 30k single INSERTs. TEMP writes are allowed even though the
+        main database is opened ``?mode=ro`` — temp tables live in a separate
+        connection-private schema.
+        """
+        return self._get_conn().executemany(sql, seq_of_parameters)
+
     @property
     def row_factory(self):
         return self._row_factory

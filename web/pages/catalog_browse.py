@@ -21,10 +21,50 @@ from shared.fjms_service import get_fjms_service
 
 import asyncio
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
 PAGE_SIZE = 50
+
+# ── SEED-023: corpus-wide PGP / scholarly-edition membership sets ───────────
+# Static per process (refresh on restart after a data update). Computed once,
+# lazily, under a lock, then shared read-only across all users / requests so the
+# catalog filters can intersect them against the full result set before
+# pagination. Heavy DB reads — NEVER recompute per request.
+_FILTER_SETS = {'pgp': None, 'edition': None}
+_FILTER_SETS_LOCK = threading.Lock()
+
+
+def _get_filter_sets():
+    """Return ``(pgp_link_sys_ids, edition_sys_ids)`` (both frozenset-like sets).
+
+    ``pgp_link_sys_ids`` = "has PGP info" link presence (same signal as the PGP
+    badge). ``edition_sys_ids`` = PGP ``%Edition%`` ∪ FGP ``Digital Edition``
+    (editions only; honors the ``WEB_FGP_ENABLED`` kill switch). Must be called
+    from a worker thread (``run.io_bound``) — the first call runs DB queries.
+    """
+    if _FILTER_SETS['pgp'] is not None:
+        return _FILTER_SETS['pgp'], _FILTER_SETS['edition']
+    with _FILTER_SETS_LOCK:
+        if _FILTER_SETS['pgp'] is None:
+            from shared.document_service import (
+                get_all_pgp_link_sys_ids,
+                get_sys_ids_with_editions,
+            )
+            from shared.fgp_service import get_sys_ids_with_fgp_editions
+            from web.feature_flags import web_fgp_enabled
+            pgp = get_all_pgp_link_sys_ids()
+            edition = set(get_sys_ids_with_editions())  # PGP %Edition%
+            if web_fgp_enabled():
+                edition |= get_sys_ids_with_fgp_editions()  # FGP Digital Edition
+            _FILTER_SETS['pgp'] = pgp
+            _FILTER_SETS['edition'] = edition
+            logger.info(
+                "catalog_browse filter sets: pgp=%d edition=%d",
+                len(pgp), len(edition),
+            )
+    return _FILTER_SETS['pgp'], _FILTER_SETS['edition']
 
 
 def create_catalog_browse_page(
@@ -56,6 +96,13 @@ def create_catalog_browse_page(
     current_text_not = {'value': _parse_csv(initial_text_not)}  # NOT terms
     current_page = {'value': (initial_page or 1)}
     sidebar_visible = {'value': True}
+    # SEED-023 availability filters — 3-state, persisted via safe_storage.
+    # Clamp persisted values to the known set so a stale/corrupted entry degrades
+    # to 'all' instead of crashing or filtering unexpectedly.
+    _pgp0 = safe_user_get('catalog_pgp_filter', 'all')
+    _ed0 = safe_user_get('catalog_editions_filter', 'all')
+    current_pgp_filter = {'value': _pgp0 if _pgp0 in ('all', 'has_pgp', 'no_pgp') else 'all'}
+    current_editions_filter = {'value': _ed0 if _ed0 in ('all', 'has_edition', 'no_edition') else 'all'}
 
     # Cached lists for cross-filtering
     authors_list = {'data': []}
@@ -75,6 +122,8 @@ def create_catalog_browse_page(
     sidebar_toggle_ref = {'ref': None}
     text_mode_ref = {'ref': None}
     text_input_ref = {'ref': None}
+    pgp_filter_btn_ref = {'ref': None}
+    editions_filter_btn_ref = {'ref': None}
 
     # ── Deep linking helper ────────────────────────────────────────
     def update_url():
@@ -189,22 +238,43 @@ def create_catalog_browse_page(
         sel.options = options
         sel.update()
 
+    def _fetch_results_blocking(
+        offset, domain, author, work, date_from, date_to, undated,
+        text_all, text_any, text_not, pgp_state, ed_state,
+    ):
+        """Blocking browse fetch (runs in io_bound). Resolves the corpus-wide
+        PGP/edition sets (cached) only when an availability filter is active and
+        threads them into the FJMS query so the count + pagination apply to the
+        FULL filtered set (SEED-023 B3)."""
+        pgp_ids = ed_ids = None
+        if pgp_state in ('has_pgp', 'no_pgp') or ed_state in ('has_edition', 'no_edition'):
+            pgp_ids, ed_ids = _get_filter_sets()
+        return fjms.get_browse_results(
+            domain, author, work, offset, PAGE_SIZE,
+            date_from, date_to, undated, text_all, text_any, text_not,
+            pgp_filter=(pgp_state if pgp_state in ('has_pgp', 'no_pgp') else None),
+            pgp_sys_ids=(pgp_ids if pgp_state in ('has_pgp', 'no_pgp') else None),
+            editions_filter=(ed_state if ed_state in ('has_edition', 'no_edition') else None),
+            edition_sys_ids=(ed_ids if ed_state in ('has_edition', 'no_edition') else None),
+        )
+
     async def fetch_results():
         """Fetch paginated browse results for current filters."""
         offset = (current_page['value'] - 1) * PAGE_SIZE
         data = await run.io_bound(
-            fjms.get_browse_results,
+            _fetch_results_blocking,
+            offset,
             current_domain['value'],
             current_author['value'],
             current_work['value'],
-            offset,
-            PAGE_SIZE,
             current_date_from['value'],
             current_date_to['value'],
             current_include_undated['value'],
             current_text_all['value'] or None,
             current_text_any['value'] or None,
             current_text_not['value'] or None,
+            current_pgp_filter['value'],
+            current_editions_filter['value'],
         )
         return data
 
@@ -613,6 +683,8 @@ def create_catalog_browse_page(
             current_text_all['value'],
             current_text_any['value'],
             current_text_not['value'],
+            current_pgp_filter['value'] != 'all',
+            current_editions_filter['value'] != 'all',
         ])
 
         if not has_filters:
@@ -637,6 +709,21 @@ def create_catalog_browse_page(
                     _make_chip(
                         f"{tr('Work / Title')}: {work_display}",
                         lambda: clear_filter('work'),
+                    )
+
+                if current_pgp_filter['value'] != 'all':
+                    pgp_label = tr('Has PGP') if current_pgp_filter['value'] == 'has_pgp' else tr('No PGP')
+                    _make_chip(
+                        pgp_label,
+                        lambda: clear_filter('pgp'),
+                        color='green' if current_pgp_filter['value'] == 'has_pgp' else 'red',
+                    )
+                if current_editions_filter['value'] != 'all':
+                    ed_label = tr('Has edition') if current_editions_filter['value'] == 'has_edition' else tr('No edition')
+                    _make_chip(
+                        ed_label,
+                        lambda: clear_filter('editions'),
+                        color='green' if current_editions_filter['value'] == 'has_edition' else 'red',
                     )
 
                 if current_date_from['value'] is not None or current_date_to['value'] is not None:
@@ -774,6 +861,63 @@ def create_catalog_browse_page(
             current_page['value'] = 1
             await refresh_results()
 
+    # ── Availability filters (PGP / Editions) — SEED-023 ───────────
+    _PGP_STATES = ('all', 'has_pgp', 'no_pgp')
+    _ED_STATES = ('all', 'has_edition', 'no_edition')
+
+    def _next_state(val, states):
+        """Cycle to the next 3-state value; a corrupted/unknown value normalizes
+        to the first state ('all') rather than raising (audit #12 lesson)."""
+        idx = states.index(val) if val in states else -1
+        return states[(idx + 1) % len(states)]
+
+    def _update_pgp_filter_btn():
+        btn = pgp_filter_btn_ref['ref']
+        if not btn:
+            return
+        st = current_pgp_filter['value']
+        btn.props(remove='color')
+        if st == 'has_pgp':
+            btn.text = tr('Has PGP')
+            btn.props('outline dense no-caps color=green')
+        elif st == 'no_pgp':
+            btn.text = tr('No PGP')
+            btn.props('outline dense no-caps color=red')
+        else:
+            btn.text = tr('Filter PGP')
+            btn.props('outline dense no-caps color=primary')
+
+    def _update_editions_filter_btn():
+        btn = editions_filter_btn_ref['ref']
+        if not btn:
+            return
+        st = current_editions_filter['value']
+        btn.props(remove='color')
+        if st == 'has_edition':
+            btn.text = tr('Has edition')
+            btn.props('outline dense no-caps color=green')
+        elif st == 'no_edition':
+            btn.text = tr('No edition')
+            btn.props('outline dense no-caps color=red')
+        else:
+            btn.text = tr('Filter Editions')
+            btn.props('outline dense no-caps color=primary')
+
+    async def _toggle_pgp_filter():
+        current_pgp_filter['value'] = _next_state(current_pgp_filter['value'], _PGP_STATES)
+        # safe_user_set absorbs the prune-race AssertionError (Phase 87 chokepoint).
+        safe_user_set('catalog_pgp_filter', current_pgp_filter['value'])
+        _update_pgp_filter_btn()
+        current_page['value'] = 1
+        await refresh_results()
+
+    async def _toggle_editions_filter():
+        current_editions_filter['value'] = _next_state(current_editions_filter['value'], _ED_STATES)
+        safe_user_set('catalog_editions_filter', current_editions_filter['value'])
+        _update_editions_filter_btn()
+        current_page['value'] = 1
+        await refresh_results()
+
     async def add_text_term():
         """Add a text term from the input with the current mode."""
         inp = text_input_ref['ref']
@@ -854,6 +998,14 @@ def create_catalog_browse_page(
             current_text_all['value'] = []
             current_text_any['value'] = []
             current_text_not['value'] = []
+        elif filter_name == 'pgp':
+            current_pgp_filter['value'] = 'all'
+            safe_user_set('catalog_pgp_filter', 'all')
+            _update_pgp_filter_btn()
+        elif filter_name == 'editions':
+            current_editions_filter['value'] = 'all'
+            safe_user_set('catalog_editions_filter', 'all')
+            _update_editions_filter_btn()
         current_page['value'] = 1
         await fetch_authors()
         await fetch_works()
@@ -871,6 +1023,12 @@ def create_catalog_browse_page(
         current_text_all['value'] = []
         current_text_any['value'] = []
         current_text_not['value'] = []
+        current_pgp_filter['value'] = 'all'
+        current_editions_filter['value'] = 'all'
+        safe_user_set('catalog_pgp_filter', 'all')
+        safe_user_set('catalog_editions_filter', 'all')
+        _update_pgp_filter_btn()
+        _update_editions_filter_btn()
         current_page['value'] = 1
         if author_select_ref['ref']:
             author_select_ref['ref'].value = None
@@ -1088,6 +1246,27 @@ def create_catalog_browse_page(
                             ui.label(
                                 f"{tr('Unclassified')} ({unclassified_count:,})"
                             ).classes('text-sm pl-2 py-1').style('color: var(--text-muted)')
+
+                # Availability Filter Card (PGP / Editions) — SEED-023
+                with ui.card().classes('w-full p-4 mt-2'):
+                    ui.label(tr('Filter by availability')).classes(
+                        'text-sm font-bold uppercase tracking-wide mb-2'
+                    ).style('color: var(--text-secondary)')
+                    with ui.row().classes('w-full flex-wrap gap-2'):
+                        pgp_btn = ui.button(
+                            tr('Filter PGP'),
+                            on_click=lambda: _toggle_pgp_filter(),
+                        ).props('outline dense no-caps color=primary').classes('text-sm')
+                        pgp_btn.tooltip(tr('Has PGP info'))
+                        pgp_filter_btn_ref['ref'] = pgp_btn
+
+                        ed_btn = ui.button(
+                            tr('Filter Editions'),
+                            on_click=lambda: _toggle_editions_filter(),
+                        ).props('outline dense no-caps color=primary').classes('text-sm')
+                        editions_filter_btn_ref['ref'] = ed_btn
+                    _update_pgp_filter_btn()
+                    _update_editions_filter_btn()
 
                 # Author Search Card
                 with ui.card().classes('w-full p-4 mt-2'):

@@ -238,6 +238,12 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### SEED-023 — Homepage corpus stats + catalog PGP/Editions filters (2026-06-24, web)
+
+**Part A — Homepage stats band (shipped):** five hardcoded headline numbers on the homepage — Manuscripts (255,723), Catalog entries (731,354), Images (1,019,886), Scholarly transcriptions (27,424), Automatic transcriptions (232,450). Constants live in `web/stats_service.py` (`CORPUS_STATS`); `compute_live_stats()` regenerates them from the sidecars after a data refresh (with `libraries.csv` / `browse_map.pkl` fallbacks so it works headless). Rendered synchronously (no per-request big-table COUNT, CLS-free) in `web/pages/home.py`.
+
+**Part B — Catalog "Browse by identification" availability filters:** two 3-state filter buttons (PGP: all / Has PGP / No PGP — link presence, "has PGP info"; Editions: all / Has edition / No edition — PGP `%Edition%` ∪ FGP `Digital Edition`, editions-only) in the catalog sidebar, with removable chips and persistence via the `safe_storage` chokepoint (Phase 87). Filters are pushed DOWN into `shared/fjms_service.py::get_browse_results` — each materializes a per-thread TEMP table of AlmaIds (built once, reused; works on the read-only connection) and adds an `[NOT] EXISTS` clause applied BEFORE `COUNT(DISTINCT AlmaId)` and pagination, so `total` + paging reflect the full filtered set (not the visible page). New helpers: `document_service.get_all_pgp_link_sys_ids()` / `get_sys_ids_with_editions(sys_ids=None)`, `fgp_service.get_sys_ids_with_fgp_editions(sys_ids=None)` (both dual-mode: list or full corpus). The corpus-wide membership sets are computed once per process, lock-protected, shared read-only. PGP badge, `/search` `pgp_filter`, and SEED-022 are untouched. Tests: `tests/test_seed023_catalog_filters.py` (10).
+
 ### Phase 97.3 — My Library UAT Stability (2026-05-26 — internal hotfix, no version bump)
 
 Closes the six post-Phase-97.2 UAT defects reported 2026-05-26 against the desktop My Library tab. Internal hotfix on the v7.14 chain (97.1 → 97.2 → 97.3); no public release, no GitHub tag.
