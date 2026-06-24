@@ -6993,7 +6993,7 @@ class GenizahGUI(QMainWindow):
         self.COL_TRANSCRIPTION = 12  # SEED-022: APPENDED (no index shift) — manual transcription/translation
 
         self.results_table = QTableWidget(); self.results_table.setColumnCount(13)
-        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src"), tr("PGP"), tr("Domain"), tr("Printed"), tr("Scholarly")])
+        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src"), tr("PGP"), tr("Domain"), tr("Printed"), tr("Edition")])
         # Tooltip for PGP column header
         self.results_table.horizontalHeaderItem(self.COL_PGP).setToolTip(tr("Scholarly transcriptions/data available from the Princeton Geniza Project"))
         self.results_table.horizontalHeaderItem(self.COL_PRINTED).setToolTip(tr("Printed material (not handwritten manuscript)"))
@@ -7029,6 +7029,14 @@ class GenizahGUI(QMainWindow):
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_PGP, QHeaderView.ResizeMode.Fixed)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_PRINTED, QHeaderView.ResizeMode.Fixed)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_TRANSCRIPTION, QHeaderView.ResizeMode.Fixed)
+        # SEED-022 (UAT): place PGP visually adjacent to the Edition column — move it
+        # to sit right after Printed. This is a VISUAL move only; logical indices
+        # (COL_*) are unchanged, and CheckBoxHeader is fully logical-index based
+        # (paintSection/logicalIndexAt/sectionViewportPosition), so filters, sorting,
+        # clicks and persistence are unaffected — only the display order changes.
+        # Final visual order: … Domain, Printed, PGP, Edition.
+        _res_hdr = self.results_table.horizontalHeader()
+        _res_hdr.moveSection(_res_hdr.visualIndex(self.COL_PGP), _res_hdr.visualIndex(self.COL_PRINTED))
         # Ensure column 0 is not sortable to avoid confusion with check action
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_CHECKBOX, QHeaderView.ResizeMode.Fixed)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_ACTIONS, QHeaderView.ResizeMode.Fixed)

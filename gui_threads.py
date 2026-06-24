@@ -809,15 +809,21 @@ class PGPBadgeWorker(QThread):
         self.sys_ids = sys_ids
 
     def run(self):
+        # Isolate the two queries (Codex #304 review): a failure in the new manual
+        # enrichment must NOT clear the unchanged green PGP badges (and vice versa).
+        pgp_link_ids: set = set()
+        manual_ids: set = set()
         try:
             from shared.document_service import get_sys_ids_with_transcriptions
-            from shared.transcription_service import get_sys_ids_with_manual_transcriptions
             pgp_link_ids = get_sys_ids_with_transcriptions(self.sys_ids)
-            manual_ids = get_sys_ids_with_manual_transcriptions(self.sys_ids)
-            self.finished.emit(pgp_link_ids, manual_ids)
         except Exception as e:
-            logger.error("PGPBadgeWorker error: %s", e)
-            self.finished.emit(set(), set())
+            logger.error("PGPBadgeWorker PGP-link error: %s", e)
+        try:
+            from shared.transcription_service import get_sys_ids_with_manual_transcriptions
+            manual_ids = get_sys_ids_with_manual_transcriptions(self.sys_ids)
+        except Exception as e:
+            logger.error("PGPBadgeWorker manual-transcription error: %s", e)
+        self.finished.emit(pgp_link_ids, manual_ids)
 
 
 class PrintedBadgeWorker(QThread):
