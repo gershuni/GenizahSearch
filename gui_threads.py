@@ -791,8 +791,18 @@ class PGPSourceWorker(QThread):
 
 
 class PGPBadgeWorker(QThread):
-    """Batch check which sys_ids have PGP transcriptions for badge display."""
-    finished = pyqtSignal(set)
+    """Batch check badge sets for the results table (SEED-022).
+
+    Emits TWO sets:
+      * pgp_link_ids  -- sys_ids present in PGP (document_fragments link presence;
+        feeds the unchanged green "PGP" badge = "has PGP info", ~34K corpus-wide).
+      * manual_ids    -- sys_ids with readable manual transcription/translation
+        (PGP text presence ∪ FGP, translations included; feeds the new amber
+        "scholarly transcription" column, ~7.3K). FGP honors the shared
+        FGP_TRANSCRIPTIONS_ENABLED flag (no web-only override on desktop).
+    These are DIFFERENT predicates (link vs readable text), not a duplicate query.
+    """
+    finished = pyqtSignal(set, set)
 
     def __init__(self, sys_ids: list, parent=None):
         super().__init__(parent)
@@ -801,11 +811,13 @@ class PGPBadgeWorker(QThread):
     def run(self):
         try:
             from shared.document_service import get_sys_ids_with_transcriptions
-            result = get_sys_ids_with_transcriptions(self.sys_ids)
-            self.finished.emit(result)
+            from shared.transcription_service import get_sys_ids_with_manual_transcriptions
+            pgp_link_ids = get_sys_ids_with_transcriptions(self.sys_ids)
+            manual_ids = get_sys_ids_with_manual_transcriptions(self.sys_ids)
+            self.finished.emit(pgp_link_ids, manual_ids)
         except Exception as e:
             logger.error("PGPBadgeWorker error: %s", e)
-            self.finished.emit(set())
+            self.finished.emit(set(), set())
 
 
 class PrintedBadgeWorker(QThread):

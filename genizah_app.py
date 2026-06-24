@@ -3380,6 +3380,7 @@ class GenizahGUI(QMainWindow):
         self.results_filters = {}
         self.list_filter_state = {'active': False, 'mode': 'in', 'lists': 'all'}
         self._pgp_transcription_sys_ids = set()
+        self._manual_transcription_sys_ids = set()  # SEED-022: PGP text ∪ FGP (scholarly transcription/translation)
         self._pgp_badge_worker = None
         self._printed_badge_worker = None
         self._printed_sys_ids = set()
@@ -6989,12 +6990,15 @@ class GenizahGUI(QMainWindow):
         self.COL_PGP = 9
         self.COL_DOMAIN = 10
         self.COL_PRINTED = 11
+        self.COL_TRANSCRIPTION = 12  # SEED-022: APPENDED (no index shift) — manual transcription/translation
 
-        self.results_table = QTableWidget(); self.results_table.setColumnCount(12)
-        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src"), tr("PGP"), tr("Domain"), tr("Printed")])
+        self.results_table = QTableWidget(); self.results_table.setColumnCount(13)
+        self.results_table.setHorizontalHeaderLabels(["", "", tr("System ID"), tr("Library"), tr("Shelfmark"), tr("Img"), tr("Title"), tr("Snippet"), tr("Src"), tr("PGP"), tr("Domain"), tr("Printed"), tr("Scholarly")])
         # Tooltip for PGP column header
         self.results_table.horizontalHeaderItem(self.COL_PGP).setToolTip(tr("Scholarly transcriptions/data available from the Princeton Geniza Project"))
         self.results_table.horizontalHeaderItem(self.COL_PRINTED).setToolTip(tr("Printed material (not handwritten manuscript)"))
+        # SEED-022: source-agnostic "has readable manual transcription/translation" column
+        self.results_table.horizontalHeaderItem(self.COL_TRANSCRIPTION).setToolTip(tr("scholarly transcription/translation available"))
 
         # Custom Header
         # Disable sort for Checkbox (0), Actions (1), and Image (5)
@@ -7005,7 +7009,7 @@ class GenizahGUI(QMainWindow):
             filter_callback=self._open_results_filter_dialog,
             star_columns=[self.COL_ACTIONS],
             star_callback=self.toggle_list_filter,
-            desc_first_cols=[self.COL_PGP, self.COL_PRINTED]
+            desc_first_cols=[self.COL_PGP, self.COL_PRINTED, self.COL_TRANSCRIPTION]
         )
         self.chk_search_header.toggled.connect(self.on_search_select_all_toggled)
         self.results_table.setHorizontalHeader(self.chk_search_header)
@@ -7019,10 +7023,12 @@ class GenizahGUI(QMainWindow):
         self.results_table.setColumnWidth(self.COL_PGP, 40)  # PGP badge column
         self.results_table.setColumnWidth(self.COL_DOMAIN, 130)  # Domain column
         self.results_table.setColumnWidth(self.COL_PRINTED, 50)  # Printed badge column
+        self.results_table.setColumnWidth(self.COL_TRANSCRIPTION, 70)  # SEED-022 scholarly-transcription badge
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_SNIPPET, QHeaderView.ResizeMode.Interactive)
         self.results_table.setColumnWidth(self.COL_SNIPPET, 600)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_PGP, QHeaderView.ResizeMode.Fixed)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_PRINTED, QHeaderView.ResizeMode.Fixed)
+        self.results_table.horizontalHeader().setSectionResizeMode(self.COL_TRANSCRIPTION, QHeaderView.ResizeMode.Fixed)
         # Ensure column 0 is not sortable to avoid confusion with check action
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_CHECKBOX, QHeaderView.ResizeMode.Fixed)
         self.results_table.horizontalHeader().setSectionResizeMode(self.COL_ACTIONS, QHeaderView.ResizeMode.Fixed)
@@ -18008,6 +18014,7 @@ class GenizahGUI(QMainWindow):
 
         # 7. Clear printed filter state
         self._printed_sys_ids = set()
+        self._manual_transcription_sys_ids = set()  # SEED-022
         self._printed_filter_state = 'all'
         if hasattr(self, 'chk_search_header'):
             self.chk_search_header.set_filter_active(self.COL_PRINTED, False)
@@ -18267,6 +18274,15 @@ class GenizahGUI(QMainWindow):
             else:
                 self.results_table.setItem(row_idx, self.COL_PRINTED, QTableWidgetItem(""))
 
+            # SEED-022: scholarly transcription/translation badge (amber check)
+            if sid and sid in self._manual_transcription_sys_ids:
+                tr_item = QTableWidgetItem("\u2713")
+                tr_item.setForeground(QColor("#b45309"))
+                tr_item.setToolTip(tr("scholarly transcription/translation available"))
+                self.results_table.setItem(row_idx, self.COL_TRANSCRIPTION, tr_item)
+            else:
+                self.results_table.setItem(row_idx, self.COL_TRANSCRIPTION, QTableWidgetItem(""))
+
             self._update_search_row_list_indicator(row_idx, res)
 
         self.results_loaded = end_idx
@@ -18357,6 +18373,7 @@ class GenizahGUI(QMainWindow):
             self._result_domain_counts = {}
             self._result_domain_map = {}
             self._printed_sys_ids = set()
+            self._manual_transcription_sys_ids = set()  # SEED-022
             # Phase 55: Zero-result refinement -- don't commit step (D-14a)
             if self._refine_mode:
                 self._zero_result_refine = True
@@ -19293,9 +19310,12 @@ class GenizahGUI(QMainWindow):
                 tr("Showing {} of {} results").format(visible_count, total)
             )
 
-    def _on_pgp_badges_loaded(self, pgp_sys_ids):
-        """Handle PGP badge worker results - update badge column for all rows."""
+    def _on_pgp_badges_loaded(self, pgp_sys_ids, manual_sys_ids):
+        """Handle PGP badge worker results - update the PGP + scholarly-transcription
+        columns for all rows (SEED-022). pgp_sys_ids = PGP link presence (green "PGP");
+        manual_sys_ids = readable transcription/translation, PGP text ∪ FGP (amber ✓)."""
         self._pgp_transcription_sys_ids = pgp_sys_ids
+        self._manual_transcription_sys_ids = manual_sys_ids
         for row in range(self.results_table.rowCount()):
             item = self.results_table.item(row, self.COL_SYS_ID)
             if item:
@@ -19306,6 +19326,13 @@ class GenizahGUI(QMainWindow):
                     self.results_table.setItem(row, self.COL_PGP, pgp_item)
                 else:
                     self.results_table.setItem(row, self.COL_PGP, QTableWidgetItem(""))
+                if sys_id in manual_sys_ids:
+                    tr_item = QTableWidgetItem("✓")
+                    tr_item.setForeground(QColor("#b45309"))
+                    tr_item.setToolTip(tr("scholarly transcription/translation available"))
+                    self.results_table.setItem(row, self.COL_TRANSCRIPTION, tr_item)
+                else:
+                    self.results_table.setItem(row, self.COL_TRANSCRIPTION, QTableWidgetItem(""))
         self._apply_results_table_filters()
 
     def _on_printed_badges_loaded(self, printed_sys_ids):
