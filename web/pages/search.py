@@ -4097,6 +4097,13 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.status = tr("Starting...")
         search_state.search_start_time = time.time()
         search_state.results = []
+        # SEED-022 (Codex #303 review): clear enrichment presence sets at new-search
+        # START, not only at the later common reset (~line 4460) which a cancelled/
+        # partial render path can skip — otherwise the prior search's PGP / manual-
+        # transcription / printed icons leak onto partial results of the new one.
+        search_state.transcription_sys_ids = set()
+        search_state.manual_transcription_sys_ids = set()
+        search_state.printed_ids = set()
         search_state.search_generation += 1  # Invalidate stale background enrichment
 
         # Immediate visual feedback — swap buttons before the 500ms timer tick
@@ -4738,6 +4745,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 # Smoke verification round 2 (2026-05-21) added the
                 # ``domain_name_map`` kwarg for the xlsx Hebrew domain
                 # substitution path; built by ``_process_domain_data`` above.
+                # SEED-022 (Codex #303 review): the new manual-transcription
+                # indicator is intentionally UI-ONLY for now — it is NOT plumbed
+                # into the export payload / JSON / xlsx (the seed deferred the
+                # API/export column; adding `has_transcription` would touch the
+                # public API contract + 12-col xlsx + parity tests). Revisit if a
+                # caller asks for it.
                 from web.export_state import update_search_export_enrichment
                 update_search_export_enrichment(
                     transcription_sys_ids=search_state.transcription_sys_ids,
@@ -4927,7 +4940,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         ).tooltip(tr('Has PGP Transcription'))
                                         # SEED-022: manual-transcription indicator (icon + tooltip)
                                         if result.get('sys_id') in _tag_manual_ids:
-                                            ui.icon('menu_book').classes('text-sm shrink-0').style(
+                                            ui.icon('menu_book').classes('text-sm shrink-0').props(
+                                                f'role=img aria-label="{tr("scholarly transcription/translation available")}"'
+                                            ).style(
                                                 'color: var(--accent-amber, #b45309);'
                                             ).tooltip(tr('scholarly transcription/translation available'))
                                         ui.label(result.get('shelfmark', 'Unknown')).classes(
@@ -5001,17 +5016,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 if r.get('display', {}).get('id')
             ]
             if sys_ids:
-                search_state.transcription_sys_ids = await run.io_bound(
-                    get_sys_ids_with_transcriptions, sys_ids
-                )
-                # SEED-022: restore the manual-transcription union too, so the new
-                # badge reappears on a reloaded session (not just the PGP badge).
+                # SEED-022: restore the PGP link set (PGP badge) AND the manual-
+                # transcription union (new badge) in parallel, so both reappear on a
+                # reloaded session.
                 try:
                     from shared.transcription_service import get_sys_ids_with_manual_transcriptions
-                    search_state.manual_transcription_sys_ids = await run.io_bound(
-                        get_sys_ids_with_manual_transcriptions, sys_ids
+                    link_ids, manual_ids = await asyncio.gather(
+                        run.io_bound(get_sys_ids_with_transcriptions, sys_ids),
+                        run.io_bound(get_sys_ids_with_manual_transcriptions, sys_ids),
                     )
+                    search_state.transcription_sys_ids = link_ids
+                    search_state.manual_transcription_sys_ids = manual_ids
                 except Exception:
+                    search_state.transcription_sys_ids = await run.io_bound(
+                        get_sys_ids_with_transcriptions, sys_ids
+                    )
                     search_state.manual_transcription_sys_ids = set()
                 # Phase 999.2: PGP button + chip visibility now that transcription data is loaded.
                 _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
