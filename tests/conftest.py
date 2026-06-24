@@ -92,6 +92,7 @@ if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
 _GUI_TEST_FILES = {
     "test_telemetry_consent_ux.py",
     "test_seed022_desktop_badge.py",
+    "test_catalog_availability_filter.py",
 }
 
 

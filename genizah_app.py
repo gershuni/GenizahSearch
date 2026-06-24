@@ -1409,6 +1409,47 @@ class HiddenScrollArea(QScrollArea):
         # Maintain highlight focus when column width changes
         QTimer.singleShot(10, self._center_on_match)
         
+# Corpus-wide sys_id sets for the catalog availability filters (SEED-023 desktop
+# parity). Computed once, lazily, off the UI thread (~0.3s); cached for the
+# session. Mirrors web/pages/catalog_browse.py::_get_filter_sets.
+_CATALOG_FILTER_SETS = {'value': None}  # None or (pgp_link_sys_ids, edition_sys_ids)
+_CATALOG_FILTER_SETS_LOCK = threading.Lock()
+
+
+def _get_catalog_filter_sets():
+    """Return ``(pgp_link_sys_ids, edition_sys_ids)`` (both sets).
+
+    ``pgp_link_sys_ids`` = manuscripts with PGP info (same signal as the PGP
+    badge). ``edition_sys_ids`` = PGP ``%Edition%`` ∪ FGP ``Digital Edition``
+    (``get_sys_ids_with_fgp_editions`` self-honors the ``FGP_TRANSCRIPTIONS_ENABLED``
+    kill switch). Call from a worker thread — the first call runs DB queries.
+    """
+    cached = _CATALOG_FILTER_SETS['value']
+    if cached is not None:
+        return cached
+    with _CATALOG_FILTER_SETS_LOCK:
+        cached = _CATALOG_FILTER_SETS['value']
+        if cached is None:
+            from shared.document_service import (
+                get_all_pgp_link_sys_ids,
+                get_sys_ids_with_editions,
+            )
+            from shared.fgp_service import get_sys_ids_with_fgp_editions
+            pgp = get_all_pgp_link_sys_ids()
+            edition = set(get_sys_ids_with_editions()) | get_sys_ids_with_fgp_editions()
+            cached = (pgp, edition)
+            _CATALOG_FILTER_SETS['value'] = cached  # single atomic publish
+    return cached
+
+
+def reset_catalog_filter_sets():
+    """Invalidate the cached catalog availability sets so the next filtered query
+    recomputes them. Called when sidecar DBs (PGP/FJMS) are replaced at runtime —
+    otherwise the filter would keep using pre-update sys_id sets until restart."""
+    with _CATALOG_FILTER_SETS_LOCK:
+        _CATALOG_FILTER_SETS['value'] = None
+
+
 class _CatalogRefreshWorker(QThread):
     """Background worker for catalog browse DB queries (authors/works/results).
 
@@ -1421,7 +1462,8 @@ class _CatalogRefreshWorker(QThread):
     def __init__(self, parent, domain, author, work, offset, limit,
                  date_from=None, date_to=None, include_undated=False,
                  text_all=None, text_any=None, text_not=None,
-                 refresh_authors=True, refresh_works=True):
+                 refresh_authors=True, refresh_works=True,
+                 pgp_filter='all', editions_filter='all'):
         super().__init__(parent)
         self._domain = domain
         self._author = author
@@ -1436,6 +1478,8 @@ class _CatalogRefreshWorker(QThread):
         self._text_not = text_not
         self._refresh_authors = refresh_authors
         self._refresh_works = refresh_works
+        self._pgp_filter = pgp_filter
+        self._editions_filter = editions_filter
 
     def run(self):
         try:
@@ -1448,6 +1492,14 @@ class _CatalogRefreshWorker(QThread):
                 result['works'] = fjms.get_browse_works(
                     domain=self._domain, author=self._author,
                 )
+            # Availability filters (SEED-023 desktop parity): resolve the
+            # corpus-wide sets (cached) only when a filter is active, so the
+            # count + pagination apply to the FULL filtered set.
+            pgp_active = self._pgp_filter in ('has_pgp', 'no_pgp')
+            ed_active = self._editions_filter in ('has_edition', 'no_edition')
+            pgp_ids = ed_ids = None
+            if pgp_active or ed_active:
+                pgp_ids, ed_ids = _get_catalog_filter_sets()
             result['data'] = fjms.get_browse_results(
                 domain=self._domain, author=self._author, work=self._work,
                 offset=self._offset, limit=self._limit,
@@ -1455,6 +1507,10 @@ class _CatalogRefreshWorker(QThread):
                 include_undated=self._include_undated,
                 text_all=self._text_all, text_any=self._text_any,
                 text_not=self._text_not,
+                pgp_filter=(self._pgp_filter if pgp_active else None),
+                pgp_sys_ids=(pgp_ids if pgp_active else None),
+                editions_filter=(self._editions_filter if ed_active else None),
+                edition_sys_ids=(ed_ids if ed_active else None),
             )
             self.done.emit(result)
         except Exception:
@@ -11730,6 +11786,9 @@ class GenizahGUI(QMainWindow):
         self._catalog_text_any = []   # OR terms
         self._catalog_text_not = []   # NOT terms
         self._catalog_current_page = 0
+        # SEED-023 desktop parity — 3-state availability filters (mirrors web).
+        self._catalog_pgp_filter = 'all'        # 'all' | 'has_pgp' | 'no_pgp'
+        self._catalog_editions_filter = 'all'   # 'all' | 'has_edition' | 'no_edition'
         self._catalog_authors_cache = []
         self._catalog_works_cache = []
         self._catalog_tree_loaded = False
@@ -11945,6 +12004,25 @@ class GenizahGUI(QMainWindow):
         self._catalog_text_chips_layout.setSpacing(4)
         self._catalog_text_chips_layout.addStretch()
         left_layout.addWidget(self._catalog_text_chips_widget)
+
+        # --- Availability filters (SEED-023 desktop parity): PGP + Scholarly
+        #     Transcriptions, 3-state, mirroring the web catalog browse. ---
+        avail_label = QLabel(tr("Transcriptions"))
+        avail_label.setStyleSheet("font-weight: bold; font-size: 13px; margin-top: 6px; margin-bottom: 2px;")
+        left_layout.addWidget(avail_label)
+
+        self._catalog_pgp_filter_btn = QPushButton()
+        self._catalog_pgp_filter_btn.setFixedHeight(26)
+        self._catalog_pgp_filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._catalog_pgp_filter_btn.clicked.connect(self._catalog_cycle_pgp_filter)
+        left_layout.addWidget(self._catalog_pgp_filter_btn)
+
+        self._catalog_editions_filter_btn = QPushButton()
+        self._catalog_editions_filter_btn.setFixedHeight(26)
+        self._catalog_editions_filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._catalog_editions_filter_btn.clicked.connect(self._catalog_cycle_editions_filter)
+        left_layout.addWidget(self._catalog_editions_filter_btn)
+        self._catalog_update_avail_filter_btns()
 
         left_panel.setMinimumWidth(260)
 
@@ -12271,6 +12349,8 @@ class GenizahGUI(QMainWindow):
             text_not=self._catalog_text_not or None,
             refresh_authors=refresh_authors,
             refresh_works=refresh_works,
+            pgp_filter=self._catalog_pgp_filter,
+            editions_filter=self._catalog_editions_filter,
         )
         self._catalog_refresh_worker.done.connect(self._catalog_on_async_refresh_done)
         self._catalog_refresh_worker.start()
@@ -12479,6 +12559,46 @@ class GenizahGUI(QMainWindow):
                 btn.clicked.connect(lambda _, m=mode, term=t: self._catalog_remove_text_term(m, term))
                 layout.insertWidget(layout.count() - 1, btn)  # Before stretch
 
+    def _catalog_update_avail_filter_btns(self):
+        """Set the PGP / scholarly-transcription filter button labels + colors
+        to reflect their 3-state value (blue=all, green=has, red=no)."""
+        pgp_map = {
+            'all': (tr('Filter PGP'), '#3498db'),
+            'has_pgp': (tr('Has PGP'), '#27ae60'),
+            'no_pgp': (tr('No PGP'), '#e74c3c'),
+        }
+        ed_map = {
+            'all': (tr('Filter Scholarly Transcriptions'), '#3498db'),
+            'has_edition': (tr('Has Scholarly Transcription'), '#27ae60'),
+            'no_edition': (tr('No Scholarly Transcription'), '#e74c3c'),
+        }
+        for btn, (label, color) in (
+            (self._catalog_pgp_filter_btn, pgp_map[self._catalog_pgp_filter]),
+            (self._catalog_editions_filter_btn, ed_map[self._catalog_editions_filter]),
+        ):
+            btn.setText(label)
+            btn.setStyleSheet(
+                f"QPushButton {{ background: {color}; color: white; border-radius: 3px; "
+                f"padding: 2px 8px; font-size: 11px; border: none; }} "
+                f"QPushButton:hover {{ opacity: 0.85; }}"
+            )
+
+    def _catalog_cycle_pgp_filter(self):
+        """Cycle the PGP availability filter: all -> has_pgp -> no_pgp -> all."""
+        states = ['all', 'has_pgp', 'no_pgp']
+        self._catalog_pgp_filter = states[(states.index(self._catalog_pgp_filter) + 1) % 3]
+        self._catalog_update_avail_filter_btns()
+        self._catalog_current_page = 0
+        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
+
+    def _catalog_cycle_editions_filter(self):
+        """Cycle the scholarly-transcription filter: all -> has_edition -> no_edition -> all."""
+        states = ['all', 'has_edition', 'no_edition']
+        self._catalog_editions_filter = states[(states.index(self._catalog_editions_filter) + 1) % 3]
+        self._catalog_update_avail_filter_btns()
+        self._catalog_current_page = 0
+        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
+
     def _catalog_remove_filter(self, filter_type):
         """Remove a specific filter (or all) and refresh."""
         refresh_authors = False
@@ -12496,8 +12616,17 @@ class GenizahGUI(QMainWindow):
             self._catalog_text_not.clear()
             self._catalog_text_input.clear()
             self._catalog_render_text_chips()
+            self._catalog_pgp_filter = 'all'
+            self._catalog_editions_filter = 'all'
+            self._catalog_update_avail_filter_btns()
             refresh_authors = True
             refresh_works = True
+        elif filter_type == "pgp":
+            self._catalog_pgp_filter = 'all'
+            self._catalog_update_avail_filter_btns()
+        elif filter_type == "editions":
+            self._catalog_editions_filter = 'all'
+            self._catalog_update_avail_filter_btns()
         elif filter_type == "domain":
             self._catalog_current_domain = None
             self._catalog_current_author = None
@@ -12628,6 +12757,27 @@ class GenizahGUI(QMainWindow):
                 btn.setFixedHeight(24)
                 btn.clicked.connect(lambda _, m=mode, term=t: self._catalog_remove_text_term(m, term))
                 self._catalog_chips_layout.addWidget(btn)
+
+        if getattr(self, '_catalog_pgp_filter', 'all') != 'all':
+            has_any = True
+            label = tr('Has PGP') if self._catalog_pgp_filter == 'has_pgp' else tr('No PGP')
+            btn = QPushButton(f"{label}  ×")
+            btn.setStyleSheet(chip_style)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(24)
+            btn.clicked.connect(lambda: self._catalog_remove_filter("pgp"))
+            self._catalog_chips_layout.addWidget(btn)
+
+        if getattr(self, '_catalog_editions_filter', 'all') != 'all':
+            has_any = True
+            label = (tr('Has Scholarly Transcription') if self._catalog_editions_filter == 'has_edition'
+                     else tr('No Scholarly Transcription'))
+            btn = QPushButton(f"{label}  ×")
+            btn.setStyleSheet(chip_style)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(24)
+            btn.clicked.connect(lambda: self._catalog_remove_filter("editions"))
+            self._catalog_chips_layout.addWidget(btn)
 
         self._catalog_clear_all_btn.setVisible(has_any)
         # Enable/disable browse-to-search buttons
@@ -26073,6 +26223,9 @@ class GenizahGUI(QMainWindow):
         reset_pgp_service()
         reset_fjms_service()
         reset_nli_crossref_service()
+        # The catalog availability filter caches corpus-wide PGP/edition sys_id
+        # sets; invalidate it so post-update filtering reflects the new data.
+        reset_catalog_filter_sets()
 
     def _download_next_sidecar(self):
         """Download the next sidecar in the queue."""
