@@ -208,3 +208,36 @@ class TestStalenessWiring:
     def test_report_method_present(self):
         src = _read(CORE_PY)
         assert "def index_staleness_report" in src
+
+
+class TestWarnIfLocalIndexStaleBehavior:
+    """Codex PR #314 follow-up: exercise the real logging branch (the source-string
+    guards above don't), incl. the 'missing/default attr must NOT warn' case that
+    the ``is False`` guard protects."""
+
+    @staticmethod
+    def _run(monkeypatch, **attrs):
+        from types import SimpleNamespace
+
+        import genizah_core as g
+
+        calls = []
+        monkeypatch.setattr(
+            g, "LOGGER", SimpleNamespace(warning=lambda *a, **k: calls.append(a))
+        )
+        g.SearchEngine._warn_if_local_index_stale(SimpleNamespace(**attrs))
+        return calls
+
+    def test_stale_local_warns(self, monkeypatch):
+        calls = self._run(monkeypatch, _local_has_content_search=False)
+        assert len(calls) == 1
+        # LOGGER.warning("Stale LOCAL index: %s", msg) -> msg is the LOCAL text.
+        assert "LOCAL" in calls[0][1]
+
+    def test_fresh_local_does_not_warn(self, monkeypatch):
+        assert self._run(monkeypatch, _local_has_content_search=True) == []
+
+    def test_missing_attr_does_not_warn(self, monkeypatch):
+        # No _local_has_content_search at all -> getattr default True -> no warn
+        # (a mocked SearchEngine / partial object must not spuriously warn).
+        assert self._run(monkeypatch) == []
