@@ -62,4 +62,26 @@ durable safety net is (a) derive imports from the actual copied bodies and (b) t
 every commit boundary (which exercises the methods a bare import-smoke can't). Both are now in the plan.
 
 ## Commits (Round 3)
-- Committed: see git log `docs(123): apply Codex round-3 convergence fixes`.
+- Committed: `7a43d2fa docs(123): apply Codex round-3 convergence fixes`.
+
+---
+
+# Round 4 (final convergence) — CONVERGED ✓
+
+**Verdict:** **APPROVE WITH NITS** — no BLOCKER/HIGH/MEDIUM. All R3 fixes confirmed against live code;
+Codex ran a full per-module import-closure audit (all 7 modules) — shim completeness, D-01 retarget scope,
+mutable-global handling, source-hash coverage, and leaf-first ordering all sound.
+
+3 LOW nits (stale text contradicting the corrected task sections) — all cleared:
+1. PLAN Task 6 (joins) had a stale parenthetical claiming lists_manager must NOT add module-level `time`
+   (round-3 superseded it) → deleted.
+2. RESEARCH responsa-module note still said "KEEP `List`" after responsa moves → corrected to "remove `List`,
+   keep `Optional`; ruff F401 is ground truth".
+3. RESEARCH Q7 dependency graph omitted `genizah_translations` for `shared/lists_manager.py` → added.
+
+**Outcome:** 4 Codex rounds. Trajectory: structural/correctness (R1) → import-completeness (R2) →
+my-edit regressions (R3) → clean APPROVE-with-nits (R4, nits cleared). The plan is execution-ready; the
+durable safety net (derive imports from actual code + ruff-F401 + full-suite-at-every-commit) is in place.
+
+## Commits (Round 4)
+- Committed: see git log `docs(123): clear Codex round-4 LOW nits — CONVERGED`.

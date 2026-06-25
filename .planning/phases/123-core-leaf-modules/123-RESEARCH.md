@@ -376,9 +376,11 @@ from dataclasses import dataclass, field         # field used: LineGroup.word_ga
 from shared.config import Config                 # for Config.MAX_EXPANDED_TERMS
 from genizah_translations import TRANSLATIONS    # for inline _tr() helper
 ```
-> **NOTE (Codex round-2 N4):** after these move, `from dataclasses import dataclass, field` becomes
-> dead in genizah_core.py (`ResponsaComponent` + `LineGroup` are its only two `@dataclass`, and the only
-> `field(...)` use is `LineGroup.word_gaps`) — remove it there; KEEP `List`/`Optional` (17/9 other uses).
+> **NOTE (Codex round-2 N4 + round-3 F2):** after these move, `from dataclasses import dataclass, field`
+> becomes dead in genizah_core.py (`ResponsaComponent` + `LineGroup` are its only two `@dataclass`, and the
+> only `field(...)` use is `LineGroup.word_gaps`) — remove it there. ALSO remove `List` (its only
+> non-docstring `List[...]` annotations were in the moved responsa cluster; the leftover hits are docstrings)
+> — KEEP `Optional` (real annotations remain). Let `ruff F401` on genizah_core.py be the ground truth.
 
 **Inline `_tr()` helper** (3-line private helper in `shared/responsa.py`):
 ```python
@@ -637,7 +639,7 @@ shared/variants.py            → shared.config, unified_variants (optional)
 shared/responsa.py            → shared.config, genizah_translations
 shared/codicological.py       → shared.config, shared.browse_map_utils
 shared/joins_manager.py       → shared.config, shared.browse_map_utils
-shared/lists_manager.py       → shared.config
+shared/lists_manager.py       → shared.config, genizah_translations
 ```
 
 The only intra-shared dependencies are:
