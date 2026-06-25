@@ -146,6 +146,20 @@ def test_join_query_builder_mode_and_single_text_round_trip():
     assert b2._single_widget.isVisibleTo(b2) is True
 
 
+def test_find_button_green_toggles_to_red_stop():
+    """SEED-024 follow-up: Find Candidates is green and toggles to a red Stop."""
+    from unittest.mock import MagicMock
+
+    from desktop.join_workbench import JoinCandidatePane
+
+    pane = JoinCandidatePane(wb=MagicMock(), executor=None)
+    assert "#27ae60" in pane.btn_find.styleSheet()    # green idle (main-search parity)
+    pane._set_find_button_searching(True)
+    assert "#c0392b" in pane.btn_find.styleSheet()     # red Stop while searching
+    pane._set_find_button_searching(False)
+    assert "#27ae60" in pane.btn_find.styleSheet()     # back to green
+
+
 def test_join_workbench_window_opens():
     """Regression: JoinWorkbenchWindow opens (full _init_ui) without AttributeError.
 
