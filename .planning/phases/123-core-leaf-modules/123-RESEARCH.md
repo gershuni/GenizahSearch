@@ -258,15 +258,18 @@ from shared.config import Config                            # safe; not a cycle
 LOGGER = logging.getLogger(__name__)                        # no genizah_core needed
 ```
 
-**`CURRENT_LANG` in `get_library_display`:** The function uses `CURRENT_LANG` as a fallback default
-when `lang` parameter is `None`. Since `CURRENT_LANG` is a module-level mutable global defined at
-`genizah_core.py:2774`, the new module cannot import it at module level (GUARD-01). **Solution:**
-lazy import inside the function body:
+**`CURRENT_LANG` in `get_library_display`:** The function uses `CURRENT_LANG` as a fallback when
+`lang` is FALSY. The live code is `effective_lang = lang if lang else CURRENT_LANG` — a FALSY check
+(handles both `None` AND `""`), **NOT** `is None`. Since `CURRENT_LANG` is a module-level mutable global
+defined at `genizah_core.py:2774`, the new module cannot import it at module level (GUARD-01).
+**Solution:** lazy import inside the function body, PRESERVING the exact falsy semantics — using
+`is None` would change `lang=""` from current-language to English (Codex F1, zero-behavior-change
+violation):
 ```python
 def get_library_display(code: str, short: bool = True, lang: str = None) -> str:
     ...
     effective_lang = lang
-    if effective_lang is None:
+    if not effective_lang:        # falsy: None OR "" — matches live `lang if lang else CURRENT_LANG`
         from genizah_core import CURRENT_LANG  # noqa: PLC0415 — intentional lazy; GUARD-01 safe
         effective_lang = CURRENT_LANG
     ...
