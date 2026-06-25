@@ -8,7 +8,21 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v8.2.0 Web Joins Lab
+## Current Milestone: v8.3.0 God-File Decomposition
+
+**Goal:** Split the two GenizahSearch god-files — `genizah_app.py` (~28k lines, desktop) and `genizah_core.py` (~12.5k lines, shared by both apps) — into cohesive modules using the proven v7.9 extract-behind-tests / one-atomic-commit-per-cluster recipe, with **zero behavior change**. Pure internal maintainability work: no user-facing change, no release (label-only version bump).
+
+**Target features (extraction phases):**
+- **Phase 0 — `shared/config.py`** (enabler): break the `Config` import-cycle pivot; `genizah_core.Config` stays a permanent re-export facade.
+- **Phase 1 — core leaf modules:** `shared/variants.py`, `shared/codicological.py`, `shared/responsa.py`, `shared/joins_manager.py`, `shared/lists_manager.py`, `shared/browse_map_utils.py`.
+- **Phase 2 — metadata/index:** `shared/metadata_manager.py`, `shared/indexer.py`.
+- **Phase 3 — engines:** SEED-011 composition-dedup first, then `shared/search_engine.py` + `shared/lab_engine.py` + `shared/lab_settings.py` (meta_mgr/var_mgr dependency injection).
+- **Phase 4 — desktop panels:** `desktop/settings_dialogs.py`, `desktop/ui_widgets.py`, `desktop/catalog_browse.py`, `desktop/search_results_panel.py`, `desktop/browse_panel.py` + `desktop/reading_desk_panel.py`, `desktop/lists_tab.py`.
+- **Phase 5 — desktop `desktop/update_ui.py`** (the one cleanly-extractable startup/UI sub-cluster).
+
+**Key context:** Full strategy, dependency analysis, risk map, and adjudicated decisions live in `.planning/seeds/SEED-020-decomposition-map.md` (§7 "Codex review corrections" is authoritative). **Hard constraints:** core extractions go to `shared/` and MUST keep web+desktop imports working via re-export shims; **no module-level back-edges** (`genizah_core` must not import a new shared module that imports it — `Config` is the cycle pivot, hence Phase 0 first); retarget all source-scanning/AST tests before deleting implementations; **never** run repo-wide `ruff --fix` (it strips the `# noqa: F401` shims); install permanent AST back-edge guards at the end. **OUT OF SCOPE:** desktop composition-tab + startup/session extraction (deferred — a separate `CompositionState` refactor seed is the prerequisite). Runs **LAST** among current work since it rewrites files everything else touches. Phase numbering continues from 121 → **122**. No GitHub Release (internal-only).
+
+## Shipped Milestone: v8.2.0 Web Joins Lab — ✅ SHIPPED 2026-06-23 (closed retroactively at v8.3.0 open)
 
 **Goal:** Bring the desktop Joins Lab (Component A) to the web at **full parity** — a human-in-the-loop join-hunting workbench where a scholar pins ONE anchor fragment (image + numbered transcription) and drives GenizahSearch's EXISTING search tools to find the fragments that physically join it. There is NO automated join-finder — the scholar is the ranker and confirmer. Rides the shared, web-reusable `shared/joins_lab.py` core (v8.0.0 Phase 106), which is complete; this milestone is UI composition + the web adapter, not search-engine work.
 
