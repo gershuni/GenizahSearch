@@ -32,6 +32,7 @@ EXTRACTED_MODULES = [
     "shared/browse_map_utils.py",
     "shared/text_normalize.py",
     "shared/variants.py",
+    "shared/responsa.py",
 ]
 
 # Compound statement types whose bodies run at import time
@@ -327,3 +328,51 @@ def test_variants_standalone_import():
     variants = vm.get_variants("test", "variants")
     assert isinstance(variants, list)
     assert "test" in variants
+
+
+# ---------------------------------------------------------------------------
+# Phase 123: responsa (CORE-01)
+# ---------------------------------------------------------------------------
+
+def test_responsa_identity():
+    """CORE-01: key responsa symbols are the same objects via genizah_core shim."""
+    import shared.responsa
+    import genizah_core
+
+    assert shared.responsa.ResponsaComponent is genizah_core.ResponsaComponent, (
+        "genizah_core.ResponsaComponent is not the same object as "
+        "shared.responsa.ResponsaComponent."
+    )
+    assert shared.responsa.parse_responsa_query is genizah_core.parse_responsa_query, (
+        "genizah_core.parse_responsa_query is not the same object as "
+        "shared.responsa.parse_responsa_query."
+    )
+    assert shared.responsa._apply_explosion_guard is genizah_core._apply_explosion_guard, (
+        "genizah_core._apply_explosion_guard is not the same object as "
+        "shared.responsa._apply_explosion_guard."
+    )
+    assert shared.responsa._count_expanded_terms is genizah_core._count_expanded_terms, (
+        "genizah_core._count_expanded_terms is not the same object as "
+        "shared.responsa._count_expanded_terms."
+    )
+    assert shared.responsa.GRAMMATICAL_PREFIXES is genizah_core.GRAMMATICAL_PREFIXES, (
+        "genizah_core.GRAMMATICAL_PREFIXES is not the same object as "
+        "shared.responsa.GRAMMATICAL_PREFIXES."
+    )
+
+
+def test_responsa_standalone_import():
+    """CORE-01 smoke: shared.responsa can be imported and parse_responsa_query works."""
+    import shared.responsa
+    assert hasattr(shared.responsa, 'ResponsaComponent')
+    assert hasattr(shared.responsa, 'parse_responsa_query')
+    assert hasattr(shared.responsa, '_apply_explosion_guard')
+    assert hasattr(shared.responsa, 'GRAMMATICAL_PREFIXES')
+    assert hasattr(shared.responsa, 'GRAMMATICAL_SUFFIXES')
+    assert hasattr(shared.responsa, '_SOFIT_TO_NORMAL')
+    assert hasattr(shared.responsa, 'LineGroup')
+    assert hasattr(shared.responsa, '_parse_line_break_query')
+    # Smoke: parse a simple query
+    result = shared.responsa.parse_responsa_query("word1 word2")
+    assert isinstance(result, list)
+    assert len(result) == 2
