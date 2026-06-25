@@ -10,14 +10,14 @@
 
 ### Invariants (GUARD) — cross-cutting, enforced at EVERY phase boundary (122–127)
 
-- [ ] **GUARD-01**: No module-level import back-edges — no `shared/` module extracted this milestone is imported at module level by a `genizah_core` symbol that it in turn imports (no cycle). A permanent AST/import guard test enforces this from Phase 0 onward.
-- [ ] **GUARD-02**: Zero behavior change — the full existing pytest suite (search / browse / responsa / joins / lists / composition parity, web + desktop import paths) passes at every phase boundary.
-- [ ] **GUARD-03**: Every source-scanning / AST test that reads `genizah_core.py` or `genizah_app.py` is retargeted to the new module location **before** the original implementation is deleted — explicitly including `test_desktop_folio_navigation.py`, `test_wr01_open_local_browse_page_ast.py`, `test_tabular_builder_rtl.py`, `test_view_all_cap.py`, and `test_shelfmark_bridge.py` (which hashes `normalize_shelfmark` source) — retargeted during the additive phase, flipped at deletion.
-- [ ] **GUARD-04**: `genizah_core.py` remains a permanent compatibility facade (re-export shims preserved); the `genizah_app.py` implementation shims are removed in a clean final deletion pass.
+- [x] **GUARD-01**: No module-level import back-edges — no `shared/` module extracted this milestone is imported at module level by a `genizah_core` symbol that it in turn imports (no cycle). A permanent AST/import guard test enforces this from Phase 0 onward.
+- [x] **GUARD-02**: Zero behavior change — the full existing pytest suite (search / browse / responsa / joins / lists / composition parity, web + desktop import paths) passes at every phase boundary.
+- [x] **GUARD-03**: Every source-scanning / AST test that reads `genizah_core.py` or `genizah_app.py` is retargeted to the new module location **before** the original implementation is deleted — explicitly including `test_desktop_folio_navigation.py`, `test_wr01_open_local_browse_page_ast.py`, `test_tabular_builder_rtl.py`, `test_view_all_cap.py`, and `test_shelfmark_bridge.py` (which hashes `normalize_shelfmark` source) — retargeted during the additive phase, flipped at deletion.
+- [x] **GUARD-04**: `genizah_core.py` remains a permanent compatibility facade (re-export shims preserved); the `genizah_app.py` implementation shims are removed in a clean final deletion pass.
 
 ### Config enabler (CONFIG) — Phase 122 (Phase 0)
 
-- [ ] **CONFIG-01**: `Config` is defined in `shared/config.py`; `genizah_core.Config` re-exports the same class object; all existing `from genizah_core import Config` callers (incl. `shared/session_persistence.py`) work unchanged.
+- [x] **CONFIG-01**: `Config` is defined in `shared/config.py`; `genizah_core.Config` re-exports the same class object; all existing `from genizah_core import Config` callers (incl. `shared/session_persistence.py`) work unchanged.
 
 ### Core extractions (CORE) — `genizah_core.py` → `shared/`
 
@@ -76,11 +76,11 @@ GSD phase numbering continues from v8.2.0 (ended Phase 121) → this milestone i
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| GUARD-01 | 122 (then enforced 122–127) | Pending |
-| GUARD-02 | 122–127 (every boundary) | Pending |
-| GUARD-03 | 122–127 (every boundary) | Pending |
-| GUARD-04 | 122–127 (every boundary) | Pending |
-| CONFIG-01 | 122 | Pending |
+| GUARD-01 | 122 (then enforced 122–127) | Complete |
+| GUARD-02 | 122–127 (every boundary) | Complete |
+| GUARD-03 | 122–127 (every boundary) | Complete |
+| GUARD-04 | 122–127 (every boundary) | Complete |
+| CONFIG-01 | 122 | Complete |
 | CORE-01 | 123 | Pending |
 | CORE-02 | 123 | Pending |
 | CORE-03 | 123 | Pending |
@@ -105,6 +105,7 @@ GSD phase numbering continues from v8.2.0 (ended Phase 121) → this milestone i
 | DESK-08 | 127 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 27 total (4 GUARD + 1 CONFIG + 13 CORE + 1 PREP + 8 DESK)
 - Mapped to phases: 27 (GUARD-02/03/04 are cross-cutting, verified at every phase boundary)
 - Unmapped: 0 ✓

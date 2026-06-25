@@ -75,7 +75,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 ## Summary Checklist
 
-- [ ] **Phase 122: Config Enabler** - Extract `Config` to `shared/config.py`; install back-edge AST guard (GUARD-01). Breaks the import-cycle pivot that blocks all subsequent core moves.
+- [x] **Phase 122: Config Enabler** - Extract `Config` to `shared/config.py`; install back-edge AST guard (GUARD-01). Breaks the import-cycle pivot that blocks all subsequent core moves. (completed 2026-06-25)
 - [ ] **Phase 123: Core Leaf Modules** - Extract seven low-risk, well-tested clusters: `shared/variants.py`, `shared/codicological.py`, `shared/responsa.py`, `shared/joins_manager.py`, `shared/lists_manager.py`, `shared/browse_map_utils.py`, `shared/text_normalize.py`. Proves the shim+guard pipeline on core before touching engines.
 - [ ] **Phase 124: Core Metadata & Index** - Extract `shared/metadata_manager.py` (+ `_BoundedLRUCache`) and `shared/indexer.py`; retarget the `shared/local_indexer.py` lazy back-edges into `genizah_core` helpers.
 - [ ] **Phase 125: Core Engines** - SEED-011 composition dedup first (125a), then extract `shared/search_engine.py` (DI + BrowseMap cache + SEED-006 gates + `_LAST_RESPONSA_DOWNGRADE` preserved), `shared/lab_settings.py`, `shared/lab_engine.py` (LOCAL-LAB mirror preserved), and model `_my_library_tab_ref` as an injected optional interface for both engines.
@@ -97,7 +97,8 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
   4. Per-file ruff review on the extraction commit shows zero unintended F401 removals; the `# noqa: F401` shim in `genizah_core.py` is present and ruff-clean.
 
 **Plans**: 1 plan
-- [ ] 122-01-PLAN.md — Extract Config to shared/config.py (same-object facade) + session_persistence retarget + GUARD-01 back-edge guard / CONFIG-01 identity test
+
+- [x] 122-01-PLAN.md — Extract Config to shared/config.py (same-object facade) + session_persistence retarget + GUARD-01 back-edge guard / CONFIG-01 identity test
 
 ### Phase 123: Core Leaf Modules
 
@@ -182,7 +183,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 | 119. Candidates, Compare & Visual Similarity | 11/11 | Complete | 2026-06-19 |
 | 120. Actions & Persistence | 7/8 | Complete | 2026-06-21 |
 | 121. i18n Polish | 3/3 | Complete | 2026-06-21 |
-| 122. Config Enabler | 0/1 | Not started | - |
+| 122. Config Enabler | 1/1 | Complete   | 2026-06-25 |
 | 123. Core Leaf Modules | 0/TBD | Not started | - |
 | 124. Core Metadata & Index | 0/TBD | Not started | - |
 | 125. Core Engines | 0/TBD | Not started | - |
