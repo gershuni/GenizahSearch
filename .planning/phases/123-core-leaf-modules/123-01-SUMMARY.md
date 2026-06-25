@@ -133,3 +133,40 @@ None. This plan moves existing code between modules without adding new network e
 - Commit 5bf8b335: FOUND
 - Commit 746176f4: FOUND
 - Commit 3fca9bd1: FOUND
+
+## Post-Execution Code Review — Codex Convergence (2026-06-26)
+
+Ran a cross-AI (Codex) read-only review loop against the full implementation diff
+(`08c43bea..HEAD`). Converged in **3 rounds** (findings 3 → 2 → 0):
+
+**Round 1** (commit `674d16b5`):
+- HIGH — 7 search-query helpers (`_add_bracket_variants`, `_query_has_brackets`,
+  `_strip_brackets`, `_index_has_field`, `content_search_staleness_messages`,
+  `MARK_TOLERANT_INSERTER`, `make_mark_tolerant_pattern`) had been spuriously copied
+  into `shared/responsa.py`. Per PLAN L391-393 these STAY in genizah_core until Phase 125.
+  Fix: deleted the spurious copies from `shared/responsa.py` (they already live in core).
+  (Codex suggested shimming them from shared → rejected as contrary to the plan.)
+- MEDIUM — `_make_flex_spacing_pattern`/`_build_wildcard_regex` defined twice (byte-identical)
+  in genizah_core.py. Fix: removed the duplicate block.
+- LOW — moved modules logged under `shared.*`, bypassing genizah's `propagate=False`
+  handler tree (routing regression). Fix: `logging.getLogger("genizah." + __name__)` in
+  browse_map_utils, codicological, joins_manager, lists_manager.
+
+**Round 2** (commit `0a095e89`):
+- HIGH — `UNIFIED_VARIANT_PAIRS` / `get_top_pairs` no longer importable from genizah_core.
+- MEDIUM — `LIBRARY_CODES_HE` dropped from the facade.
+  Fix: restored all three to the genizah_core compat facade (GUARD-04 permanent-facade
+  invariant). **NOTE — conscious supersession:** PLAN L340-341 deliberately removed the
+  `unified_variants` try/except as "grep-confirmed dead". GUARD-04 ("genizah_core remains a
+  PERMANENT compatibility facade, re-export shims preserved") governs and outranks that
+  dead-code-trim; restoring is zero-risk, breaks no test, and changes no behavior.
+  A systematic module-level name diff (base vs HEAD) confirmed the only OTHER dropped names
+  are stdlib/typing imports (List, Mapping, dataclass, field, itertools) and one private
+  lazy cache (`_LIBRARY_PREFIX_ALIASES`, now self-contained in browse_map_utils) — none
+  importable through genizah_core, so no further facade restore needed.
+
+**Round 3:** Findings: none. Verdict **APPROVE**.
+
+Post-fix verification: ruff clean on all 8 touched files; 186 targeted tests pass
+(back-edges / responsa / bracket / hebrew-tokenizer / search-normalization);
+all facade imports resolve.
