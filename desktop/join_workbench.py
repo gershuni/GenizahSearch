@@ -213,6 +213,24 @@ def _clamp_zoom(z):
     return max(0.25, min(4.0, z))
 
 
+def _rotated_pixmap(pix, degrees):
+    """Return ``pix`` rotated ``degrees`` clockwise via QTransform (SEED-017 #10 desktop).
+
+    Qt pixmap rotation is an instantaneous re-render (no CSS-style animation), so a
+    signed angle (-90) and its %360 equivalent (270) look identical — we pass the
+    signed value straight through. Returns ``pix`` unchanged when ``degrees`` is
+    0/falsy or ``pix`` is None. Lazy Qt imports keep the module import-safe headlessly.
+    """
+    if pix is None or not degrees:
+        return pix
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QTransform
+    return pix.transformed(
+        QTransform().rotate(degrees),
+        Qt.TransformationMode.SmoothTransformation,
+    )
+
+
 def _image_url_for_idx(images, idx, width=2000):
     """Return the IIIF full URL for images[idx], or '' if out of range.
 
@@ -3940,6 +3958,30 @@ if _QT_AVAILABLE:
             ctrl_row.addWidget(zoom_lbl)
             ctrl_row.addWidget(btn_zoom_in)
 
+            # SEED-017 (#10): rotate + reset + fullscreen — same controls as the
+            # ResultDialog viewer (↺ ↻ ↩ ⛶), NOT brightness/contrast/gamma. Wired
+            # below once pane_dict exists (captured by reference like the zoom buttons).
+            btn_rot_left = QPushButton("↺")
+            btn_rot_left.setFixedSize(26, 22)
+            btn_rot_left.setToolTip(tr("Rotate Left 90°"))
+            btn_rot_left.setAccessibleName(tr("Rotate Left 90°"))
+            btn_rot_right = QPushButton("↻")
+            btn_rot_right.setFixedSize(26, 22)
+            btn_rot_right.setToolTip(tr("Rotate Right 90°"))
+            btn_rot_right.setAccessibleName(tr("Rotate Right 90°"))
+            btn_view_reset = QPushButton("↩")
+            btn_view_reset.setFixedSize(26, 22)
+            btn_view_reset.setToolTip(tr("Reset View"))
+            btn_view_reset.setAccessibleName(tr("Reset View"))
+            btn_fullscreen = QPushButton("⛶")
+            btn_fullscreen.setFixedSize(26, 22)
+            btn_fullscreen.setToolTip(tr("Fullscreen"))
+            btn_fullscreen.setAccessibleName(tr("Fullscreen"))
+            ctrl_row.addWidget(btn_rot_left)
+            ctrl_row.addWidget(btn_rot_right)
+            ctrl_row.addWidget(btn_view_reset)
+            ctrl_row.addWidget(btn_fullscreen)
+
             img = QLabel(tr("…"))
             img.setAlignment(Qt.AlignmentFlag.AlignCenter)
             img.setStyleSheet("background:#e2e8f0;color:#64748b;")
@@ -3979,6 +4021,7 @@ if _QT_AVAILABLE:
                 "sys_id": "",
                 "page": 1,
                 "zoom": 1.0,
+                "rotation": 0,  # SEED-017 (#10): degrees CW; reset on each fresh load
                 "full_pix": None,
             }
             # Wire folio buttons — capture pane_dict by reference
@@ -3987,6 +4030,11 @@ if _QT_AVAILABLE:
             # Wire zoom — capture pane_dict by reference
             btn_zoom_out.clicked.connect(lambda _=False, pd=pane_dict: self._pane_zoom(pd, 1/1.25))
             btn_zoom_in.clicked.connect(lambda _=False, pd=pane_dict: self._pane_zoom(pd, 1.25))
+            # SEED-017 (#10): wire rotate / reset / fullscreen — capture pane_dict by reference
+            btn_rot_left.clicked.connect(lambda _=False, pd=pane_dict: self._pane_rotate(pd, -90))
+            btn_rot_right.clicked.connect(lambda _=False, pd=pane_dict: self._pane_rotate(pd, 90))
+            btn_view_reset.clicked.connect(lambda _=False, pd=pane_dict: self._pane_reset_view(pd))
+            btn_fullscreen.clicked.connect(lambda _=False, pd=pane_dict: self._open_pane_fullscreen(pd))
             return pane_dict
 
         def _pane_zoom(self, pane: dict, factor: float):
@@ -4016,9 +4064,11 @@ if _QT_AVAILABLE:
             if pix is None or lbl is None:
                 return
             try:
-                scaled = pix.scaled(
-                    max(1, int(pix.width() * z)),
-                    max(1, int(pix.height() * z)),
+                # SEED-017 (#10): rotate the cached pixmap first, then scale.
+                base = _rotated_pixmap(pix, pane.get("rotation", 0))
+                scaled = base.scaled(
+                    max(1, int(base.width() * z)),
+                    max(1, int(base.height() * z)),
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
@@ -4027,12 +4077,41 @@ if _QT_AVAILABLE:
             except RuntimeError:
                 pass
 
+        def _pane_rotate(self, pane: dict, delta: int):
+            """SEED-017 (#10): rotate a compare pane image by ±90° (signed accumulation)."""
+            pane["rotation"] = pane.get("rotation", 0) + delta
+            self._render_pane_image(pane)
+
+        def _pane_reset_view(self, pane: dict):
+            """SEED-017 (#10): reset a compare pane to rotation 0 + fit-to-view zoom."""
+            pix = pane.get("full_pix")
+            if pix is not None:
+                # _set_pane_pix re-fits zoom AND resets rotation to 0, then renders.
+                self._set_pane_pix(pane, pix)
+
+        def _open_pane_fullscreen(self, pane: dict):
+            """SEED-017 (#10): open this pane's image in the shared FullscreenImageWindow
+            (desktop.viewers — same as ResultDialog), with the current rotation baked in."""
+            pix = pane.get("full_pix")
+            if pix is None:
+                return
+            try:
+                from desktop.viewers import FullscreenImageWindow
+            except ImportError:
+                return
+            shown = _rotated_pixmap(pix, pane.get("rotation", 0))
+            # Keep a ref so it isn't GC'd before the user closes it (WA_DeleteOnClose
+            # tears it down). parent_viewer=None: standalone, no page-nav sync.
+            self._fs_window = FullscreenImageWindow(shown, parent_viewer=None)
+            self._fs_window.showFullScreen()
+
         def _set_pane_pix(self, pane: dict, pix):
             """Store a freshly-loaded full pixmap and fit it to the viewport on (re)load.
 
             Fit-to-view never upscales past native (min(ratio, 1.0)) — same rule as the main
             anchor image — so a fresh image fills the pane and the user zooms IN from there."""
             pane["full_pix"] = pix
+            pane["rotation"] = 0  # SEED-017 (#10): a fresh image starts unrotated
             vw = vh = 0
             try:
                 scroll = pane.get("img_scroll")
@@ -4354,6 +4433,7 @@ if _QT_AVAILABLE:
             self._anchor_images = []
             self._anchor_idx = 0
             self._zoom = 1.0
+            self._rotation = 0  # SEED-017 (#10): degrees CW; reset on fresh anchor
             self._anchor_full_pix = None
             # UAT follow-up: fit-the-whole-fragment-to-view on each fresh anchor image
             self._fit_pending = False
@@ -4458,6 +4538,37 @@ if _QT_AVAILABLE:
             btn_zoom_in.setAccessibleName(tr("Zoom in"))
             btn_zoom_in.clicked.connect(self._zoom_in)
             toolbar.addWidget(btn_zoom_in)
+
+            # SEED-017 (#10): rotate + reset + fullscreen — same controls as the
+            # ResultDialog viewer (glyphs ↺ ↻ ↩ ⛶), NOT the brightness/contrast/gamma
+            # sliders. Fullscreen reuses desktop.viewers.FullscreenImageWindow.
+            btn_rot_left = QPushButton("↺")
+            btn_rot_left.setFixedWidth(30)
+            btn_rot_left.setToolTip(tr("Rotate Left 90°"))
+            btn_rot_left.setAccessibleName(tr("Rotate Left 90°"))
+            btn_rot_left.clicked.connect(lambda: self._rotate_anchor(-90))
+            toolbar.addWidget(btn_rot_left)
+
+            btn_rot_right = QPushButton("↻")
+            btn_rot_right.setFixedWidth(30)
+            btn_rot_right.setToolTip(tr("Rotate Right 90°"))
+            btn_rot_right.setAccessibleName(tr("Rotate Right 90°"))
+            btn_rot_right.clicked.connect(lambda: self._rotate_anchor(90))
+            toolbar.addWidget(btn_rot_right)
+
+            btn_view_reset = QPushButton("↩")
+            btn_view_reset.setFixedWidth(30)
+            btn_view_reset.setToolTip(tr("Reset View"))
+            btn_view_reset.setAccessibleName(tr("Reset View"))
+            btn_view_reset.clicked.connect(self._reset_anchor_view)
+            toolbar.addWidget(btn_view_reset)
+
+            btn_fullscreen = QPushButton("⛶")
+            btn_fullscreen.setFixedWidth(30)
+            btn_fullscreen.setToolTip(tr("Fullscreen"))
+            btn_fullscreen.setAccessibleName(tr("Fullscreen"))
+            btn_fullscreen.clicked.connect(self._open_anchor_fullscreen)
+            toolbar.addWidget(btn_fullscreen)
 
             toolbar.addStretch()
 
@@ -4788,6 +4899,7 @@ if _QT_AVAILABLE:
 
             self._anchor_idx = max(0, page - 1)
             self._zoom = 1.0
+            self._rotation = 0  # SEED-017 (#10): reset rotation on fresh anchor
             self._fit_pending = True  # fit the whole fragment to view on first image
             self._anchor_full_pix = None
             self._anchor_images = []
@@ -4943,12 +5055,14 @@ if _QT_AVAILABLE:
                 pass
 
         def _apply_zoom(self):
-            """Rescale the cached full pixmap by the current zoom factor."""
+            """Rescale the cached full pixmap by the current zoom factor (and rotation)."""
             if not self._anchor_full_pix:
                 return
-            scaled = self._anchor_full_pix.scaled(
-                int(self._anchor_full_pix.width() * self._zoom),
-                int(self._anchor_full_pix.height() * self._zoom),
+            # SEED-017 (#10): rotate the cached pixmap first, then scale the result.
+            base = _rotated_pixmap(self._anchor_full_pix, getattr(self, "_rotation", 0))
+            scaled = base.scaled(
+                max(1, int(base.width() * self._zoom)),
+                max(1, int(base.height() * self._zoom)),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
@@ -4967,6 +5081,35 @@ if _QT_AVAILABLE:
         def _zoom_out(self):
             self._zoom = _clamp_zoom(self._zoom / 1.25)
             self._apply_zoom()
+
+        def _rotate_anchor(self, delta):
+            """SEED-017 (#10): rotate the anchor image by ±90° (signed accumulation)."""
+            self._rotation = getattr(self, "_rotation", 0) + delta
+            self._apply_zoom()
+
+        def _reset_anchor_view(self):
+            """SEED-017 (#10): reset rotation to 0 and fit the whole fragment to view."""
+            self._rotation = 0
+            self._fit_to_view()
+            self._apply_zoom()
+
+        def _open_anchor_fullscreen(self):
+            """SEED-017 (#10): open the current anchor image in the shared fullscreen
+            viewer (desktop.viewers.FullscreenImageWindow — same as ResultDialog),
+            with the current rotation already baked in. The window carries its own
+            zoom/rotate controls and Escape-to-close."""
+            if not self._anchor_full_pix:
+                return
+            try:
+                from desktop.viewers import FullscreenImageWindow
+            except ImportError:
+                return
+            pix = _rotated_pixmap(self._anchor_full_pix, getattr(self, "_rotation", 0))
+            # Keep a reference so the window is not GC'd before the user closes it
+            # (WA_DeleteOnClose handles teardown). parent_viewer=None: standalone,
+            # no page-nav sync (the fullscreen prev/next are inert here).
+            self._fs_window = FullscreenImageWindow(pix, parent_viewer=None)
+            self._fs_window.showFullScreen()
 
         def _folio_prev(self):
             """Navigate to the previous folio image (same anchor, D-07)."""

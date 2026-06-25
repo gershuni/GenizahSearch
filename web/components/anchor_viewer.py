@@ -159,6 +159,55 @@ _VIEWER_HEAD = '''
         border-radius: 0 0 8px 8px;
     }
 
+    /* SEED-017 (#10): the image + controls bar live inside .anchor-image-pane so
+       the native Fullscreen API can expand BOTH (the transcription stays out of
+       fullscreen — full-bleed image, like /browse). Native :fullscreen escapes the
+       Compare dialog's stacking/transform context; a position:fixed overlay would
+       be trapped inside the maximized ui.dialog. Specificity (.anchor-image-pane +
+       :fullscreen + .image-container = 3) beats the base
+       .anchor-viewer-container .image-container rule (2). */
+    .anchor-image-pane:-webkit-full-screen {
+        background: #000;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        width: 100vw;
+        height: 100vh;
+    }
+    .anchor-image-pane:fullscreen {
+        background: #000;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        width: 100vw;
+        height: 100vh;
+    }
+    /* !important is required: Compare sets an inline `max-height: {image_max_height}`
+       (e.g. 40vh) on .image-container, and an inline style beats a stylesheet rule.
+       Without !important the Compare panes would stay capped at 40vh in fullscreen. */
+    .anchor-image-pane:-webkit-full-screen .image-container {
+        max-height: calc(100vh - 56px) !important;
+        height: calc(100vh - 56px) !important;
+        min-height: 0;
+        flex: 1 1 auto;
+        border-radius: 0;
+    }
+    .anchor-image-pane:fullscreen .image-container {
+        max-height: calc(100vh - 56px) !important;
+        height: calc(100vh - 56px) !important;
+        min-height: 0;
+        flex: 1 1 auto;
+        border-radius: 0;
+    }
+    .anchor-image-pane:-webkit-full-screen .anchor-controls-bar {
+        border-radius: 0;
+        flex-shrink: 0;
+    }
+    .anchor-image-pane:fullscreen .anchor-controls-bar {
+        border-radius: 0;
+        flex-shrink: 0;
+    }
+
     /* Transcription panel — light cream background, so force DARK text.
        Without this the body inherited the dark-theme's light text colour
        and rendered white-on-cream (illegible). */
@@ -339,6 +388,10 @@ class AnchorViewer:
 
         # Per-instance zoom state (mirrors browse.py state.zoom_level)
         self._zoom: float = 1.0
+        # SEED-017 (#10): per-instance rotation in degrees (0/90/180/270), mirrors
+        # browse.py state.rotation. Pushed to the JS viewer via _apply_transform;
+        # reset to 0 on zoom-reset and on folio change.
+        self._rotation: int = 0
         # SEED-010: per-instance image source (persisted across folio nav so the
         # chosen provider sticks) + a unique container CLASS so this viewer's
         # zoom/pan is scoped to ITS OWN image, not the first .zoomable-image on
@@ -356,6 +409,7 @@ class AnchorViewer:
         self._nav_gen: int = 0
 
         # UI element references set during _build_ui()
+        self._image_pane: Optional[Any] = None  # SEED-017 (#10) fullscreen target
         self._image_container: Optional[Any] = None
         self._controls_row: Optional[Any] = None
         self._transcription_container: Optional[Any] = None
@@ -387,29 +441,109 @@ class AnchorViewer:
     def zoom_in(self) -> None:
         """Increase zoom by 0.25, clamped at 4.0."""
         self._zoom = min(self._zoom + 0.25, 4.0)
-        self._apply_zoom()
+        self._apply_transform()
 
     def zoom_out(self) -> None:
         """Decrease zoom by 0.25, clamped at 0.25."""
         self._zoom = max(self._zoom - 0.25, 0.25)
-        self._apply_zoom()
+        self._apply_transform()
 
     def zoom_reset(self) -> None:
         """Reset zoom to 1.0 and reset the viewer pan/rotation."""
         self._zoom = 1.0
+        # SEED-017 (#10): mv.reset() already zeroes the JS rotation; sync the
+        # Python state so the next rotate starts from 0 and the % label is right.
+        self._rotation = 0
         ui.run_javascript(
             f"(function(){{ var mv=(window.__msViewers||{{}})['{self._viewer_id}']; if(mv) mv.reset(); }})();"
         )
-        self._apply_zoom()
+        self._apply_transform()
 
-    def _apply_zoom(self) -> None:
-        """Push the current zoom level to the client.
+    # ──────────────────────────────────────────────────────────────────────────
+    # Rotation + fullscreen (SEED-017 / audit #10 — parity with /browse + desktop)
+    # ──────────────────────────────────────────────────────────────────────────
 
-        Mirrors browse.py's proven path: drive the shared ``manuscriptViewer``
-        via ``update(scale, rotation)`` (which sets the scale and re-applies the
-        transform). The % label is updated SERVER-SIDE here rather than relying
-        on the viewer's JS ``updateLabel()`` selector. A direct-transform
-        fallback keeps zoom working even if the viewer object never initialised.
+    def rotate_left(self) -> None:
+        """Rotate the image 90° counter-clockwise (parity /browse + desktop, #10).
+
+        Signed accumulation (NO ``% 360``): clicking left from 0 yields -90 so the CSS
+        ``transition: transform`` animates a 90° counter-clockwise turn — not a 270°
+        clockwise spin to the same visual position (UAT: "270 right seems odd"). CSS
+        handles arbitrary degree values; folio change re-renders a fresh <img> at 0.
+        """
+        self._rotation -= 90
+        self._apply_rotation()
+
+    def rotate_right(self) -> None:
+        """Rotate the image 90° clockwise (signed accumulation; see rotate_left)."""
+        self._rotation += 90
+        self._apply_rotation()
+
+    def _apply_rotation(self) -> None:
+        """Push ONLY rotation, preserving the LIVE client scale (P2 review fix).
+
+        Mouse-wheel zoom (manuscript_viewer.js ``onWheel``) updates ``mv.state.scale``
+        client-side only — ``self._zoom`` stays at its last server value (often 1.0).
+        If rotation went through ``_apply_transform`` (which forces ``scale=self._zoom``),
+        rotating after a wheel-zoom would snap the image back to 100%. So the rotation
+        path reads the live ``mv.state.scale`` and leaves the zoom label untouched (the
+        wheel handler keeps it in sync). The fallback (no ``mv``) uses ``self._zoom``.
+        """
+        ui.run_javascript(
+            "(function(){"
+            f"  var mv = (window.__msViewers || {{}})['{self._viewer_id}'];"
+            "  if (mv && typeof mv.update === 'function') {"
+            f"    mv.update((mv.state ? mv.state.scale : {self._zoom}), {self._rotation});"
+            "  } else {"
+            f"    var im = document.querySelector('.{self._viewer_id} .zoomable-image');"
+            f"    if (im) im.style.transform = 'translate(0px,0px) rotate({self._rotation}deg) scale({self._zoom})';"
+            "  }"
+            "})();"
+        )
+
+    def _fullscreen_js_handler(self) -> str:
+        """Return the CLIENT-SIDE click-handler JS that toggles native fullscreen.
+
+        Bound via ``button.on("click", js_handler=...)`` — NOT server-side
+        ``ui.run_javascript`` — because the Fullscreen API requires transient user
+        activation, which is lost when a click round-trips to the server (Codex HIGH).
+        A pure ``js_handler`` runs synchronously inside the browser click, preserving
+        activation (the same pattern compare_modal.py uses for window.open).
+
+        Targets the per-instance ``.anchor-image-pane`` wrapper (image + controls) so
+        BOTH expand together (transcription stays out — full-bleed image, like /browse).
+        Native fullscreen escapes the Compare dialog's stacking/transform context (a
+        ``position:fixed`` overlay would be trapped inside the maximized ``ui.dialog``)
+        and ESC exits natively. Scoped to this viewer's unique ``{viewer_id}`` class so
+        Compare's two panes fullscreen independently. ``webkit``-prefixed fallbacks
+        cover older Safari.
+
+        HIGH-2: only requestFullscreen/exitFullscreen on a DOM node — no
+        handleImageError / iiif.nli.org.il / fetchFlIdsFromManifest.
+        """
+        return (
+            "(e) => {"
+            f"  const pane = document.querySelector('.{self._viewer_id} .anchor-image-pane');"
+            "  if (!pane) return;"
+            "  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;"
+            "  if (!fsEl) {"
+            "    const rfs = pane.requestFullscreen || pane.webkitRequestFullscreen;"
+            "    if (rfs) rfs.call(pane);"
+            "  } else {"
+            "    const efs = document.exitFullscreen || document.webkitExitFullscreen;"
+            "    if (efs) efs.call(document);"
+            "  }"
+            "}"
+        )
+
+    def _apply_transform(self) -> None:
+        """Push the current zoom + rotation to the client.
+
+        Mirrors browse.py's proven path: drive the per-instance ``manuscriptViewer``
+        via ``update(scale, rotation)`` (which sets scale + rotation and re-applies
+        the transform). The % label is updated SERVER-SIDE here rather than relying
+        on the viewer's JS ``updateLabel()`` selector. A direct-transform fallback
+        keeps zoom + rotation working even if the viewer object never initialised.
         """
         if self._zoom_label is not None:
             self._zoom_label.set_text(f"{int(self._zoom * 100)}%")
@@ -417,10 +551,10 @@ class AnchorViewer:
             "(function(){"
             f"  var mv = (window.__msViewers || {{}})['{self._viewer_id}'];"
             "  if (mv && typeof mv.update === 'function') {"
-            f"    mv.update({self._zoom}, (mv.state ? mv.state.rotation : 0));"
+            f"    mv.update({self._zoom}, {self._rotation});"
             "  } else {"
             f"    var im = document.querySelector('.{self._viewer_id} .zoomable-image');"
-            f"    if (im) im.style.transform = 'translate(0px,0px) scale({self._zoom})';"
+            f"    if (im) im.style.transform = 'translate(0px,0px) rotate({self._rotation}deg) scale({self._zoom})';"
             "  }"
             "})();"
         )
@@ -510,7 +644,7 @@ class AnchorViewer:
         return (
             f'<img src="{img_url}" '
             f'class="zoomable-image" '
-            f'style="transform: translate(0px,0px) scale({self._zoom}); cursor: grab;" '
+            f'style="transform: translate(0px,0px) rotate({self._rotation}deg) scale({self._zoom}); cursor: grab;" '
             f'draggable="false" '
             f'onload="if(window.__msInitViewer) window.__msInitViewer(\'{self._viewer_id}\')" '
             f'/>'
@@ -548,92 +682,127 @@ class AnchorViewer:
             # When suppressed, _info_header/_shelfmark_label/_meta_label remain None
             # (set in __init__). update_content guards all three with `is not None`.
 
-            # Image container (shows skeleton initially).
-            # .mark("anchor-viewer-image-pane") enables Plan-08 render-smoke to
-            # assert that the skeleton is gone after update_content resolves (F-A3).
-            # R2-3: when image_max_height is set (Compare context), apply it as an
-            # inline style override so both image + transcription fit in the pane.
-            image_container_style = ""
-            if self._image_max_height:
-                # Compare context: cap the image to the given (viewport-relative)
-                # height and drop the 200px min-height floor so it can shrink on a
-                # short window. The transcription below gets its own bounded inner
-                # scroll (see _transcription_container) so the pane fits the window.
-                image_container_style = (
-                    f"max-height: {self._image_max_height}; min-height: 0;"
+            # SEED-017 (#10): wrap the image + controls bar in .anchor-image-pane so
+            # toggle_fullscreen's native Fullscreen API can expand BOTH together (the
+            # transcription stays out of fullscreen). The wrapper is a descendant of
+            # .anchor-viewer-container, so the existing .image-container /
+            # .anchor-controls-bar CSS (descendant/class selectors) is unaffected.
+            self._image_pane = ui.element("div").classes("anchor-image-pane w-full")
+            with self._image_pane:
+                # Image container (shows skeleton initially).
+                # .mark("anchor-viewer-image-pane") enables Plan-08 render-smoke to
+                # assert that the skeleton is gone after update_content resolves (F-A3).
+                # R2-3: when image_max_height is set (Compare context), apply it as an
+                # inline style override so both image + transcription fit in the pane.
+                image_container_style = ""
+                if self._image_max_height:
+                    # Compare context: cap the image to the given (viewport-relative)
+                    # height and drop the 200px min-height floor so it can shrink on a
+                    # short window. The transcription below gets its own bounded inner
+                    # scroll (see _transcription_container) so the pane fits the window.
+                    image_container_style = (
+                        f"max-height: {self._image_max_height}; min-height: 0;"
+                    )
+                self._image_container = (
+                    ui.element("div")
+                    .classes("image-container relative")
+                    .mark("anchor-viewer-image-pane")
                 )
-            self._image_container = (
-                ui.element("div")
-                .classes("image-container relative")
-                .mark("anchor-viewer-image-pane")
-            )
-            if image_container_style:
-                self._image_container.style(image_container_style)
-            with self._image_container:
-                self._skeleton = ui.element("div").classes("anchor-viewer-skeleton")
-                self._img_html_elem: Optional[Any] = None
-                self._error_elem: Optional[Any] = None
+                if image_container_style:
+                    self._image_container.style(image_container_style)
+                with self._image_container:
+                    self._skeleton = ui.element("div").classes("anchor-viewer-skeleton")
+                    self._img_html_elem: Optional[Any] = None
+                    self._error_elem: Optional[Any] = None
 
-            # Controls bar (below image, full width).
-            # #41: folio arrows follow the UI reading direction, mirroring the
-            # canonical browse-page pager (web/pages/browse.py): in an RTL UI
-            # "previous" points right (chevron_right) and "next" points left
-            # (chevron_left), and the row itself follows page direction so the
-            # arrows physically sit on the side a Hebrew reader expects. This
-            # replaces the earlier hard-coded direction:ltr override, which made
-            # the arrows read backwards under the RTL Hebrew interface.
-            _rtl = is_rtl()
-            with ui.row().classes("anchor-controls-bar w-full justify-between"):
-                # Folio navigation group
-                with ui.row().classes("gap-1 items-center"):
-                    self._prev_btn = (
-                        ui.button(
-                            icon="chevron_right" if _rtl else "chevron_left",
-                            on_click=self._on_prev_folio,
+                # Controls bar (below image, full width).
+                # #41: folio arrows follow the UI reading direction, mirroring the
+                # canonical browse-page pager (web/pages/browse.py): in an RTL UI
+                # "previous" points right (chevron_right) and "next" points left
+                # (chevron_left), and the row itself follows page direction so the
+                # arrows physically sit on the side a Hebrew reader expects. This
+                # replaces the earlier hard-coded direction:ltr override, which made
+                # the arrows read backwards under the RTL Hebrew interface.
+                _rtl = is_rtl()
+                with ui.row().classes("anchor-controls-bar w-full justify-between"):
+                    # Folio navigation group
+                    with ui.row().classes("gap-1 items-center"):
+                        self._prev_btn = (
+                            ui.button(
+                                icon="chevron_right" if _rtl else "chevron_left",
+                                on_click=self._on_prev_folio,
+                            )
+                            .props(f'flat round dense aria-label="{tr("Previous folio")}"')
+                            .classes("text-white min-h-[44px] min-w-[44px]")
                         )
-                        .props(f'flat round dense aria-label="{tr("Previous folio")}"')
-                        .classes("text-white min-h-[44px] min-w-[44px]")
-                    )
-                    ui.tooltip(tr("Previous folio")).bind_visibility_from(self._prev_btn)
+                        ui.tooltip(tr("Previous folio")).bind_visibility_from(self._prev_btn)
 
-                    self._page_label = ui.label("…").classes("text-white text-sm px-2")
+                        self._page_label = ui.label("…").classes("text-white text-sm px-2")
 
-                    self._next_btn = (
-                        ui.button(
-                            icon="chevron_left" if _rtl else "chevron_right",
-                            on_click=self._on_next_folio,
+                        self._next_btn = (
+                            ui.button(
+                                icon="chevron_left" if _rtl else "chevron_right",
+                                on_click=self._on_next_folio,
+                            )
+                            .props(f'flat round dense aria-label="{tr("Next folio")}"')
+                            .classes("text-white min-h-[44px] min-w-[44px]")
                         )
-                        .props(f'flat round dense aria-label="{tr("Next folio")}"')
-                        .classes("text-white min-h-[44px] min-w-[44px]")
-                    )
-                    ui.tooltip(tr("Next folio")).bind_visibility_from(self._next_btn)
+                        ui.tooltip(tr("Next folio")).bind_visibility_from(self._next_btn)
 
-                # Zoom controls group
-                with ui.row().classes("gap-1 items-center"):
-                    _zoom_out_btn = (
-                        ui.button(icon="remove", on_click=self.zoom_out)
-                        .props(f'flat round dense aria-label="{tr("Zoom out")}"')
-                        .classes("text-white min-h-[44px] min-w-[44px]")
-                    )
-                    ui.tooltip(tr("Zoom out")).bind_visibility_from(_zoom_out_btn)
+                    # Zoom + rotate + fullscreen group (SEED-017 #10: rotate/fullscreen
+                    # bring the Lab/Compare viewer to parity with /browse + desktop).
+                    with ui.row().classes("gap-1 items-center"):
+                        _zoom_out_btn = (
+                            ui.button(icon="remove", on_click=self.zoom_out)
+                            .props(f'flat round dense aria-label="{tr("Zoom out")}"')
+                            .classes("text-white min-h-[44px] min-w-[44px]")
+                        )
+                        ui.tooltip(tr("Zoom out")).bind_visibility_from(_zoom_out_btn)
 
-                    self._zoom_label = ui.label("100%").classes(
-                        "zoom-level-label text-white text-sm px-1"
-                    )
+                        self._zoom_label = ui.label("100%").classes(
+                            "zoom-level-label text-white text-sm px-1"
+                        )
 
-                    _zoom_in_btn = (
-                        ui.button(icon="add", on_click=self.zoom_in)
-                        .props(f'flat round dense aria-label="{tr("Zoom in")}"')
-                        .classes("text-white min-h-[44px] min-w-[44px]")
-                    )
-                    ui.tooltip(tr("Zoom in")).bind_visibility_from(_zoom_in_btn)
+                        _zoom_in_btn = (
+                            ui.button(icon="add", on_click=self.zoom_in)
+                            .props(f'flat round dense aria-label="{tr("Zoom in")}"')
+                            .classes("text-white min-h-[44px] min-w-[44px]")
+                        )
+                        ui.tooltip(tr("Zoom in")).bind_visibility_from(_zoom_in_btn)
 
-                    _zoom_reset_btn = (
-                        ui.button(icon="fit_screen", on_click=self.zoom_reset)
-                        .props(f'flat round dense aria-label="{tr("Reset zoom")}"')
-                        .classes("text-white min-h-[44px] min-w-[44px]")
-                    )
-                    ui.tooltip(tr("Reset zoom")).bind_visibility_from(_zoom_reset_btn)
+                        _rotate_left_btn = (
+                            ui.button(icon="rotate_left", on_click=self.rotate_left)
+                            .props(f'flat round dense aria-label="{tr("Rotate left")}"')
+                            .classes("text-white min-h-[44px] min-w-[44px]")
+                        )
+                        ui.tooltip(tr("Rotate left")).bind_visibility_from(_rotate_left_btn)
+
+                        _rotate_right_btn = (
+                            ui.button(icon="rotate_right", on_click=self.rotate_right)
+                            .props(f'flat round dense aria-label="{tr("Rotate right")}"')
+                            .classes("text-white min-h-[44px] min-w-[44px]")
+                        )
+                        ui.tooltip(tr("Rotate right")).bind_visibility_from(_rotate_right_btn)
+
+                        # Reset icon matches the /browse viewer (restart_alt "Reset View")
+                        # per UAT — resets zoom + rotation + pan.
+                        _zoom_reset_btn = (
+                            ui.button(icon="restart_alt", on_click=self.zoom_reset)
+                            .props(f'flat round dense aria-label="{tr("Reset View")}"')
+                            .classes("text-white min-h-[44px] min-w-[44px]")
+                        )
+                        ui.tooltip(tr("Reset View")).bind_visibility_from(_zoom_reset_btn)
+
+                        # Fullscreen is bound CLIENT-SIDE (js_handler, no on_click) so the
+                        # Fullscreen API call stays inside the browser's user-activation
+                        # window — a server round-trip would have it rejected (Codex HIGH).
+                        _fullscreen_btn = (
+                            ui.button(icon="fullscreen")
+                            .props(f'flat round dense aria-label="{tr("Fullscreen")}"')
+                            .classes("text-white min-h-[44px] min-w-[44px]")
+                        )
+                        _fullscreen_btn.on("click", js_handler=self._fullscreen_js_handler())
+                        ui.tooltip(tr("Fullscreen")).bind_visibility_from(_fullscreen_btn)
 
             # Transcription area.
             # .mark("anchor-viewer-transcription-pane") enables Plan-08 render-smoke
@@ -692,9 +861,12 @@ class AnchorViewer:
         # Show loading skeleton while resolving
         self._show_loading()
 
-        # Reset zoom on folio change (mirrors /browse behaviour)
+        # Reset zoom + rotation on folio change (mirrors /browse behaviour). The
+        # re-rendered <img> carries no rotation, and the fresh per-instance viewer
+        # inits at rotation 0, so clearing _rotation here keeps Python state in sync.
         if direction != 0:
             self._zoom = 1.0
+            self._rotation = 0
 
         # Capture resolution params for the worker closure.
         #
@@ -818,8 +990,26 @@ class AnchorViewer:
             # the <img> onload (covers a cached image whose onload already fired).
             img_html = self._build_img_html(img_url)
             ui.html(img_html, sanitize=False)
+            # SEED-010 init + SEED-017 (#10) state-sync: the per-instance viewer
+            # object is reused across folios, so after re-init we MUST push the
+            # current Python (rotation, zoom, pan) into mv.state — otherwise a
+            # rotation/zoom from the previous folio survives in mv.state and snaps
+            # back on the next wheel/drag/applyTransform (Codex MEDIUM). _build_img_html
+            # already renders the <img> with this transform; this keeps mv.state in sync.
             ui.run_javascript(
-                f"if(window.__msInitViewer) setTimeout(() => window.__msInitViewer('{self._viewer_id}'), 50);"
+                "(function(){"
+                f"  var vid='{self._viewer_id}';"
+                "  function sync(){"
+                "    if(window.__msInitViewer) window.__msInitViewer(vid);"
+                "    var mv=(window.__msViewers||{})[vid];"
+                "    if(mv && mv.state){"
+                "      mv.state.x=0; mv.state.y=0;"
+                f"      mv.state.rotation={self._rotation}; mv.state.scale={self._zoom};"
+                "      if(typeof mv.applyTransform==='function') mv.applyTransform();"
+                "    }"
+                "  }"
+                "  sync(); setTimeout(sync, 50);"
+                "})();"
             )
 
     def _show_image_error(self) -> None:
