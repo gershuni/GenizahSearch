@@ -1,6 +1,8 @@
 # Project Milestones: GenizahSearch
 
-## v8.2.0 Web Joins Lab, FGP Transcriptions & Hebrew Search (Shipped: 2026-06-23)
+## v8.2.0 Web Joins Lab, FGP Transcriptions & Hebrew Search (Shipped: 2026-06-23; closed 2026-06-25)
+
+> **Close note (2026-06-25):** formal milestone-close run retroactively when opening v8.3.0 (the `/release`-skips-close gap). Phases 117–121 archived to `.planning/milestones/v8.2.0-phases/`; REQUIREMENTS/ROADMAP archived 2026-06-23. Patch releases **v8.2.1** (Recently-Viewed fixes) + **v8.2.2** (FGP credits, homepage stats, catalog filters, audit polish) shipped afterward as `/release` patches (not separate GSD milestones — see `CHANGELOG.md`).
 
 **Phases completed:** 5 phases (117-121) — the desktop Joins Lab (Component A) ported to the web
 **Git range:** `v8.1.0` → `v8.2.0` (334 commits)
