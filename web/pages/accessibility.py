@@ -41,9 +41,9 @@ def create_accessibility_page():
             ui.markdown(f'''
             {tr('We have taken the following measures to ensure accessibility:')}
 
-            *   **{tr('Keyboard Navigation')}**: {tr('The site is fully navigable using a keyboard.')}
-            *   **{tr('Focus Visibility')}**: {tr('Focus indicators are clearly visible on all interactive elements.')}
-            *   **{tr('Text Alternatives')}**: {tr('Controls and images have appropriate alternative text or labels.')}
+            *   **{tr('Keyboard Navigation')}**: {tr('Most of the site can be navigated using a keyboard, and we continue to expand keyboard support.')}
+            *   **{tr('Focus Visibility')}**: {tr('Focus indicators are visible on interactive elements.')}
+            *   **{tr('Text Alternatives')}**: {tr('Controls and images are given alternative text or labels where applicable.')}
             *   **{tr('Contrast')}**: {tr('Colors have been chosen to meet contrast requirements.')}
             *   **{tr('Zoom Support')}**: {tr('The site supports standard browser zoom up to 200% without loss of functionality.')}
             *   **{tr('Semantic Structure')}**: {tr('We use semantic HTML headings and landmarks to aid screen reader navigation.')}
@@ -71,4 +71,4 @@ def create_accessibility_page():
             ''')
 
         # Footer Date
-        ui.label(f"{tr('Last Updated')}: {tr('February 2025') if tr('February 2025') != 'February 2025' else 'פברואר 2025' if is_rtl() else 'February 2025'}").classes('text-sm text-gray-500 mt-8')
+        ui.label(f"{tr('Last Updated')}: {'יוני 2026' if is_rtl() else 'June 2026'}").classes('text-sm text-gray-500 mt-8')

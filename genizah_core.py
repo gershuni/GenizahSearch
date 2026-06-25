@@ -6718,6 +6718,44 @@ def _index_has_field(index, field_name: str) -> bool:
         return True
 
 
+def content_search_staleness_messages(genizah_present: bool,
+                                      local_present):
+    """SEED-019 #28: human-readable staleness diagnostics for the SEED-006
+    ``content_search`` compat gate.
+
+    The compat gate (:func:`_index_has_field`) lets search keep working against an
+    index built before the ``content_search`` field existed — but it does so by
+    *silently* degrading Hebrew punctuation/diacritic retrieval to the old
+    whitespace-tokenized ``content`` field. This helper turns that silent state
+    into one actionable remediation string per degraded index so the condition is
+    visible (logged at open + queryable via
+    :meth:`SearchEngine.index_staleness_report`).
+
+    Args:
+        genizah_present: the main GENIZAH index defines ``content_search``.
+        local_present: the LOCAL side-index defines it, or ``None`` when no LOCAL
+            index is open (so it contributes no message).
+
+    Returns:
+        list[str]: one message per degraded index; empty when nothing is stale.
+    """
+    messages = []
+    if not genizah_present:
+        messages.append(
+            "GENIZAH index predates the content_search field (SEED-006): Hebrew "
+            "punctuation/diacritic retrieval is degraded to whitespace-tokenized "
+            "content-only. Rebuild the index via create_index (web: rebuild + "
+            "redeploy; desktop: Settings -> Build / Rebuild Index)."
+        )
+    if local_present is False:
+        messages.append(
+            "LOCAL (My Library) index predates the content_search field "
+            "(SEED-006): Hebrew punctuation/diacritic retrieval is degraded for "
+            "local documents. Re-index via My Library -> Re-index All."
+        )
+    return messages
+
+
 # Inserted between regex tokens to allow optional combining marks and apostrophe/quote variants.
 # SEED-006: U+0022 (ASCII double quote) is included so the second-phase regex filter stays
 # symmetric with strip_search_diacritics / COMBINING_DIACRITICALS_PATTERN (which fold U+0022).
@@ -7255,6 +7293,7 @@ class SearchEngine:
             self.local_index = local_index
             self.local_searcher = local_index.searcher()
             self._local_has_content_search = _index_has_field(local_index, "content_search")
+            self._warn_if_local_index_stale()
             LOGGER.info("LOCAL side-index opened: %s", Config.LOCAL_INDEX_DIR)
         except Exception as open_exc:
             LOGGER.warning(
@@ -7294,6 +7333,7 @@ class SearchEngine:
                 self.local_index = local_index2
                 self.local_searcher = local_index2.searcher()
                 self._local_has_content_search = _index_has_field(local_index2, "content_search")
+                self._warn_if_local_index_stale()
                 LOGGER.info(
                     "LOCAL side-index: atomic rebuild succeeded, reopened: %s",
                     Config.LOCAL_INDEX_DIR,
@@ -7795,21 +7835,62 @@ class SearchEngine:
                 register_search_tokenizers(self.index)
                 self._has_content_search = _index_has_field(self.index, "content_search")
                 if not self._has_content_search:
-                    # SEED-006 M3: the GENIZAH main index has no schema marker, so
-                    # nothing else detects that it predates this fix. Surface it
-                    # loudly — the punctuation/diacritic retrieval fix is INERT
-                    # (degrades to whitespace-tokenized content-only) until the
-                    # index is rebuilt via create_index and redeployed.
-                    LOGGER.warning(
-                        "SEED-006: main index predates the content_search field — "
-                        "Hebrew punctuation/diacritic retrieval fix is INERT until "
-                        "the index is rebuilt (create_index) and redeployed."
-                    )
+                    # SEED-006 M3 + SEED-019 #28: the GENIZAH main index has no schema
+                    # marker, so nothing else detects that it predates this fix.
+                    # Surface it loudly — the punctuation/diacritic retrieval fix is
+                    # INERT (degrades to whitespace-tokenized content-only) until the
+                    # index is rebuilt. Message centralized in
+                    # content_search_staleness_messages so this log and the queryable
+                    # index_staleness_report() never drift apart.
+                    for _msg in content_search_staleness_messages(False, None):
+                        LOGGER.warning("Stale index [%s]: %s", db_path, _msg)
                 self.searcher = self.index.searcher()
                 return True
             except Exception as e:
                 LOGGER.error("Failed to reload Tantivy index from %s: %s", db_path, e)
         return False
+
+    def index_staleness_report(self) -> dict:
+        """SEED-019 #28: queryable verdict on the SEED-006 ``content_search`` compat
+        gate, so a degraded (stale) index is visible beyond the one-shot WARNING
+        emitted at index open.
+
+        The gate keeps search working against an index that predates the
+        ``content_search`` field, but silently degrades Hebrew
+        punctuation/diacritic retrieval. This report exposes that state for ops /
+        health surfaces (and the desktop rebuild prompt) instead of leaving it to a
+        single startup log line.
+
+        Returns:
+            dict: ``{'genizah_content_search': bool,
+                     'local_content_search': bool | None,   # None = no LOCAL index
+                     'stale': bool,                          # any index degraded
+                     'messages': list[str]}``               # remediation per index
+        """
+        genizah_present = bool(getattr(self, "_has_content_search", False))
+        local_present = (
+            bool(getattr(self, "_local_has_content_search", False))
+            if getattr(self, "local_index", None) is not None
+            else None
+        )
+        messages = content_search_staleness_messages(genizah_present, local_present)
+        return {
+            "genizah_content_search": genizah_present,
+            "local_content_search": local_present,
+            "stale": bool(messages),
+            "messages": messages,
+        }
+
+    def _warn_if_local_index_stale(self) -> None:
+        """SEED-019 #28: log a remediation warning when a freshly-opened LOCAL
+        side-index predates the SEED-006 ``content_search`` field. LOCAL normally
+        self-heals via its schema marker (a mismatch triggers an atomic rebuild),
+        so this is a defensive catch for the rare case where it opened degraded —
+        parity with the GENIZAH warning in :meth:`reload_index`.
+        """
+        if getattr(self, "_local_has_content_search", True) is False:
+            for _msg in content_search_staleness_messages(True, False):
+                LOGGER.warning("Stale LOCAL index: %s", _msg)
 
     # Class-level browse_map shared across all instances (loaded once)
     _shared_browse_map = None
