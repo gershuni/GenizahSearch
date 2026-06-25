@@ -33,6 +33,7 @@ EXTRACTED_MODULES = [
     "shared/text_normalize.py",
     "shared/variants.py",
     "shared/responsa.py",
+    "shared/codicological.py",
 ]
 
 # Compound statement types whose bodies run at import time
@@ -376,3 +377,27 @@ def test_responsa_standalone_import():
     result = shared.responsa.parse_responsa_query("word1 word2")
     assert isinstance(result, list)
     assert len(result) == 2
+
+
+# ---------------------------------------------------------------------------
+# Phase 123: codicological (CORE-03)
+# ---------------------------------------------------------------------------
+
+def test_codicological_identity():
+    """CORE-03: genizah_core.CodicologicalManager is the same class as shared.codicological.CodicologicalManager."""
+    import shared.codicological
+    import genizah_core
+
+    assert shared.codicological.CodicologicalManager is genizah_core.CodicologicalManager, (
+        "genizah_core.CodicologicalManager is not the same object as "
+        "shared.codicological.CodicologicalManager."
+    )
+
+
+def test_codicological_standalone_import():
+    """CORE-03 smoke: shared.codicological can be imported and CodicologicalManager instantiates."""
+    import shared.codicological
+    assert hasattr(shared.codicological, 'CodicologicalManager')
+    # Smoke: instantiate with no arguments
+    mgr = shared.codicological.CodicologicalManager()
+    assert mgr is not None
