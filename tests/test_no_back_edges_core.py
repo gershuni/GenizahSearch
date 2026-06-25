@@ -34,6 +34,7 @@ EXTRACTED_MODULES = [
     "shared/variants.py",
     "shared/responsa.py",
     "shared/codicological.py",
+    "shared/joins_manager.py",
 ]
 
 # Compound statement types whose bodies run at import time
@@ -401,3 +402,27 @@ def test_codicological_standalone_import():
     # Smoke: instantiate with no arguments
     mgr = shared.codicological.CodicologicalManager()
     assert mgr is not None
+
+
+# ---------------------------------------------------------------------------
+# Phase 123: joins_manager (CORE-04)
+# ---------------------------------------------------------------------------
+
+def test_joins_manager_identity():
+    """CORE-04: genizah_core.JoinsManager is the same class as shared.joins_manager.JoinsManager."""
+    import shared.joins_manager
+    import genizah_core
+
+    assert shared.joins_manager.JoinsManager is genizah_core.JoinsManager, (
+        "genizah_core.JoinsManager is not the same object as "
+        "shared.joins_manager.JoinsManager."
+    )
+
+
+def test_joins_manager_standalone_import():
+    """CORE-04 smoke: shared.joins_manager can be imported and JoinsManager has JOINS_FILE."""
+    import shared.joins_manager
+    assert hasattr(shared.joins_manager, 'JoinsManager')
+    # Smoke: JOINS_FILE class attribute is set (Pitfall 3 guard — Config must be importable)
+    assert hasattr(shared.joins_manager.JoinsManager, 'JOINS_FILE')
+    assert 'joins_cache.pkl' in shared.joins_manager.JoinsManager.JOINS_FILE
