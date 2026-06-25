@@ -25,11 +25,15 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: 124 (core-metadata-index) — PLANNING IN PROGRESS
-Plan: not yet created
-Status: Discuss SKIPPED (no user gray areas; 124-CONTEXT.md committed). Researcher running.
-  Pipeline: research → pattern-map → planner(opus) → plan-checker loop → execute →
-  Codex 3-round review drill (base-vs-HEAD facade-name diff) → verify → auto-advance to 125.
+Phase: 124 (core-metadata-index) — PLANNED, EXECUTING
+Plan: 124-01-PLAN.md (committed 2980538e) — plan-checker VERIFICATION PASSED (1st pass, 0 issues)
+Status: Discuss SKIPPED. Research→pattern-map→plan→check all DONE. Now executing.
+  Plan shape: 1 plan / 1 wave / 2 sequential commits — (1) MetadataManager+_BoundedLRUCache
+  +pre-cluster → shared/metadata_manager.py + 6-name facade shim + GUARD-03 retarget of
+  test_desktop_folio_navigation.py; (2) Indexer → shared/indexer.py w/ inline _tr()+_strip_brackets
+  + 1-name shim. Full suite green at both commits.
+  Remaining pipeline: execute → Codex 3-round review drill (base-vs-HEAD facade-name diff)
+  → verify → auto-advance to 125.
   Standing directive: run phases 124-127 autonomously, skip-discuss-when-unneeded,
   Codex drill must hit APPROVE before advancing. (123 done+verified; Codex 3-round APPROVE.)
 Last activity: 2026-06-26
