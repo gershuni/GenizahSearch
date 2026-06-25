@@ -2858,8 +2858,12 @@ if _QT_AVAILABLE:
             except Exception:
                 pass
             if terminated:
-                # No results were emitted — reset button + status here (the graceful
-                # path is handled by the queued _on_results instead).
+                # Bump the generation so any results the killed thread queued in the
+                # tiny race window before terminate() are dropped by _on_results' guard
+                # (Codex nit) — they'd otherwise overwrite "Search stopped." untagged.
+                self._search_gen += 1
+                # No results will be delivered — reset button + status here (the
+                # graceful path is handled by the queued _on_results instead).
                 self._is_searching = False
                 self._search_cancelled = False
                 self._set_find_button_searching(False)
