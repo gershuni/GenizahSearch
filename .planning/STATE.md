@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: executing
-stopped_at: Phase 123 context gathered
-last_updated: "2026-06-25T17:33:59.134Z"
-last_activity: 2026-06-25 -- Phase 123 planning complete
+status: verifying
+stopped_at: Completed 123-01-PLAN.md
+last_updated: "2026-06-25T21:00:19.158Z"
+last_activity: 2026-06-25
 progress:
   total_phases: 6
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 2
-  completed_plans: 1
-  percent: 17
+  completed_plans: 2
+  percent: 33
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 122 — config-enabler
+**Current focus:** Phase 123 — core-leaf-modules
 
 ## Current Position
 
-Phase: 123
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-25 -- Phase 123 planning complete
+Phase: 123 (core-leaf-modules) — EXECUTING
+Plan: 1 of 1
+Status: Phase complete — ready for verification
+Last activity: 2026-06-25
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -75,9 +75,9 @@ Items carried forward from v8.2.0 and earlier:
 
 ## Session Continuity
 
-Last session: 2026-06-25T15:55:57.959Z
-Stopped at: Phase 123 context gathered
-Resume file: .planning/phases/123-core-leaf-modules/123-CONTEXT.md
+Last session: 2026-06-25T21:00:19.152Z
+Stopped at: Completed 123-01-PLAN.md
+Resume file: None
 Next step: `/gsd-discuss-phase 122`
 
 ## Performance Metrics
@@ -86,3 +86,9 @@ Next step: `/gsd-discuss-phase 122`
 |-------|-------|-------|----------|
 | (none yet — milestone just started) | - | - | - |
 | 122 | 1 | - | - |
+| Phase 123 P01 | 63 | 7 tasks | 13 files |
+
+## Decisions
+
+- [Phase ?]: Engine-side helpers stay in genizah_core.py — depend on Tantivy engine context
+- [Phase ?]: Inline _tr() helper for tr()-dependent modules — lazy CURRENT_LANG import satisfies GUARD-01

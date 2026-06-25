@@ -77,7 +77,8 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 - [x] **Phase 122: Config Enabler** - Extract `Config` to `shared/config.py`; install back-edge AST guard (GUARD-01). Breaks the import-cycle pivot that blocks all subsequent core moves.
  (completed 2026-06-25)
-- [ ] **Phase 123: Core Leaf Modules** - Extract seven low-risk, well-tested clusters: `shared/variants.py`, `shared/codicological.py`, `shared/responsa.py`, `shared/joins_manager.py`, `shared/lists_manager.py`, `shared/browse_map_utils.py`, `shared/text_normalize.py`. Proves the shim+guard pipeline on core before touching engines.
+
+- [x] **Phase 123: Core Leaf Modules** - Extract seven low-risk, well-tested clusters: `shared/variants.py`, `shared/codicological.py`, `shared/responsa.py`, `shared/joins_manager.py`, `shared/lists_manager.py`, `shared/browse_map_utils.py`, `shared/text_normalize.py`. Proves the shim+guard pipeline on core before touching engines. (completed 2026-06-25)
 - [ ] **Phase 124: Core Metadata & Index** - Extract `shared/metadata_manager.py` (+ `_BoundedLRUCache`) and `shared/indexer.py`; retarget the `shared/local_indexer.py` lazy back-edges into `genizah_core` helpers.
 - [ ] **Phase 125: Core Engines** - SEED-011 composition dedup first (125a), then extract `shared/search_engine.py` (DI + BrowseMap cache + SEED-006 gates + `_LAST_RESPONSA_DOWNGRADE` preserved), `shared/lab_settings.py`, `shared/lab_engine.py` (LOCAL-LAB mirror preserved), and model `_my_library_tab_ref` as an injected optional interface for both engines.
 - [ ] **Phase 126: Desktop Panels** - Extract seven desktop panel clusters to `desktop/`: `settings_dialogs.py`, `ui_widgets.py`, `catalog_browse.py`, `search_results_panel.py`, `browse_panel.py`, `reading_desk_panel.py`, `lists_tab.py`.
@@ -117,7 +118,8 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 **Plans**: 1 plan (7 sequential waves, one atomic commit per cluster — D-02 leaf-first ordering)
 
 Plans:
-- [ ] 123-01-PLAN.md — Extract 7 core leaf clusters (browse_map_utils -> text_normalize -> variants -> responsa -> codicological -> joins_manager -> lists_manager) behind permanent same-object re-export shims; D-01 back-edge retargets; GUARD-01 registry 1->8; D-03 identity/smoke tests; snapshot regen
+
+- [x] 123-01-PLAN.md — Extract 7 core leaf clusters (browse_map_utils -> text_normalize -> variants -> responsa -> codicological -> joins_manager -> lists_manager) behind permanent same-object re-export shims; D-01 back-edge retargets; GUARD-01 registry 1->8; D-03 identity/smoke tests; snapshot regen
 
 ### Phase 124: Core Metadata & Index
 
@@ -188,7 +190,7 @@ Plans:
 | 120. Actions & Persistence | 7/8 | Complete | 2026-06-21 |
 | 121. i18n Polish | 3/3 | Complete | 2026-06-21 |
 | 122. Config Enabler | 1/1 | Complete    | 2026-06-25 |
-| 123. Core Leaf Modules | 0/TBD | Not started | - |
+| 123. Core Leaf Modules | 1/1 | Complete   | 2026-06-25 |
 | 124. Core Metadata & Index | 0/TBD | Not started | - |
 | 125. Core Engines | 0/TBD | Not started | - |
 | 126. Desktop Panels | 0/TBD | Not started | - |

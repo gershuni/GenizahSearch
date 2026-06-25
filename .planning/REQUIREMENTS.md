@@ -21,13 +21,13 @@
 
 ### Core extractions (CORE) — `genizah_core.py` → `shared/`
 
-- [ ] **CORE-01**: Responsa parsing/expansion logic extracted to `shared/responsa.py`; the responsa test suites pass via the facade.
-- [ ] **CORE-02**: `VariantManager` extracted to `shared/variants.py`.
-- [ ] **CORE-03**: `CodicologicalManager` extracted to `shared/codicological.py`.
-- [ ] **CORE-04**: `JoinsManager` extracted to `shared/joins_manager.py`.
-- [ ] **CORE-05**: `ListsManager` extracted to `shared/lists_manager.py`.
-- [ ] **CORE-06**: Browse-map + shelfmark utilities (`normalize_shelfmark`, `natural_sort_key`, `dedupe_browse_map`, `get_library_display`, IE-volume helpers) extracted to `shared/browse_map_utils.py`.
-- [ ] **CORE-07**: Search/text normalization helpers (`strip_nikud`, `strip_search_diacritics`, and their normalization constants) extracted to `shared/text_normalize.py`; the lazy back-edge imports in `shared/local_indexer.py` (and any other shared importers of these core helpers) are retargeted to the new module so no module-level core back-edge remains. *(closes SEED-020 §7 C-3)*
+- [x] **CORE-01**: Responsa parsing/expansion logic extracted to `shared/responsa.py`; the responsa test suites pass via the facade.
+- [x] **CORE-02**: `VariantManager` extracted to `shared/variants.py`.
+- [x] **CORE-03**: `CodicologicalManager` extracted to `shared/codicological.py`.
+- [x] **CORE-04**: `JoinsManager` extracted to `shared/joins_manager.py`.
+- [x] **CORE-05**: `ListsManager` extracted to `shared/lists_manager.py`.
+- [x] **CORE-06**: Browse-map + shelfmark utilities (`normalize_shelfmark`, `natural_sort_key`, `dedupe_browse_map`, `get_library_display`, IE-volume helpers) extracted to `shared/browse_map_utils.py`.
+- [x] **CORE-07**: Search/text normalization helpers (`strip_nikud`, `strip_search_diacritics`, and their normalization constants) extracted to `shared/text_normalize.py`; the lazy back-edge imports in `shared/local_indexer.py` (and any other shared importers of these core helpers) are retargeted to the new module so no module-level core back-edge remains. *(closes SEED-020 §7 C-3)*
 - [ ] **CORE-08**: `MetadataManager` (+ `_BoundedLRUCache`) extracted to `shared/metadata_manager.py`.
 - [ ] **CORE-09**: `Indexer` extracted to `shared/indexer.py`.
 - [ ] **CORE-10**: `SearchEngine` extracted (intact) to `shared/search_engine.py` with `meta_mgr`/`var_mgr` passed by dependency injection; the BrowseMap class-level cache migration, the SEED-006 `content_search` compat gates, and the `_LAST_RESPONSA_DOWNGRADE` thread-local downgrade channel are explicitly preserved with behavior unchanged. *(SEED-020 §7 C-3 hazards)*
@@ -81,13 +81,13 @@ GSD phase numbering continues from v8.2.0 (ended Phase 121) → this milestone i
 | GUARD-03 | 122–127 (every boundary) | Complete |
 | GUARD-04 | 122–127 (every boundary) | Complete |
 | CONFIG-01 | 122 | Complete |
-| CORE-01 | 123 | Pending |
-| CORE-02 | 123 | Pending |
-| CORE-03 | 123 | Pending |
-| CORE-04 | 123 | Pending |
-| CORE-05 | 123 | Pending |
-| CORE-06 | 123 | Pending |
-| CORE-07 | 123 | Pending |
+| CORE-01 | 123 | Complete |
+| CORE-02 | 123 | Complete |
+| CORE-03 | 123 | Complete |
+| CORE-04 | 123 | Complete |
+| CORE-05 | 123 | Complete |
+| CORE-06 | 123 | Complete |
+| CORE-07 | 123 | Complete |
 | CORE-08 | 124 | Pending |
 | CORE-09 | 124 | Pending |
 | PREP-01 | 125 (125a — first) | Pending |
