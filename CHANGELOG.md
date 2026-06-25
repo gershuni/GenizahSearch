@@ -266,6 +266,10 @@ A major overhaul of how LOCAL Hebrew PDFs are read into the My Library index, dr
 
 ## [Unreleased]
 
+### Audit tail — a11y statement wording + stale-index diagnostics (2026-06-25, PR #314)
+
+Closes the last code items of the 2026-06-23 product-quality audit. **#27 (web /accessibility):** softened the over-claims to match reality after SEED-014 — "fully navigable using a keyboard" → "Most of the site can be navigated…", "clearly visible on all interactive elements" → "visible on interactive elements", "have appropriate alternative text" → "are given… where applicable"; bumped the stale "February 2025" date to June 2026 (EN + HE re-keyed in lockstep). **SEED-019 #28 (stale-index diagnostics, `genizah_core.py`):** extended SEED-006's one-shot reload warning into a reusable `content_search_staleness_messages()` helper + a queryable `SearchEngine.index_staleness_report()` (genizah/local/stale/messages) + LOCAL-side parity warning; ASCII-only messages (cp1255-console-safe). Standalone Codex APPROVE WITH NITS (nit fixed); 20 tests in `tests/test_audit_27_28_a11y_statement_and_stale_index.py`. Also (#31) `/_tmp/` added to `.gitignore` (scratch dir). **Planning:** SEED-020 god-file decomposition opened as GSD milestone **v8.3.0** (Phases 122–127, roadmap-only — execution deferred).
+
 ### SEED-023 — Homepage corpus stats + catalog PGP/Editions filters (2026-06-24, web)
 
 **Part A — Homepage stats band (shipped):** five hardcoded headline numbers on the homepage — Manuscripts (255,723), Catalog entries (731,354), Images (1,019,886), Scholarly transcriptions (27,424), Automatic transcriptions (232,450). Constants live in `web/stats_service.py` (`CORPUS_STATS`); `compute_live_stats()` regenerates them from the sidecars after a data refresh (with `libraries.csv` / `browse_map.pkl` fallbacks so it works headless). Rendered synchronously (no per-request big-table COUNT, CLS-free) in `web/pages/home.py`.

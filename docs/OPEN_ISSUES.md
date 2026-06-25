@@ -111,7 +111,7 @@ shown) to the shared 4-sheet xlsx (reuses `genizah_app._build_search_results_xls
 SEED-019 #5** (desktop candidate XLSX export). New pure + integration tests (`tests/test_joins_lab_modes_export.py`),
 construct/visibility tests, 9 HE i18n keys. Standalone Codex APPROVE; all 8 CI checks green; ruff + check_docs clean.
 ✅ **Desktop UAT PASSED 2026-06-25** — including the round-1 follow-up (Stop + partial-results rendering, green Find button, `פרויקט השו״ת` label, shelfmark-named xlsx; PR #313). **SEED-024 fully closed.**
-**Still OPEN:** SEED-020 (resume v7.9 decomposition — own milestone, runs last).
+**Audit fully dispositioned:** SEED-020 (resume v7.9 decomposition) is no longer a loose "open" item — it was mapped (14-agent workflow → `.planning/seeds/SEED-020-decomposition-map.md`, 2 Codex critiques) and **opened as GSD milestone v8.3.0 "God-File Decomposition" (Phases 122–127, 27 requirements; execution deferred — runs last)** on 2026-06-25. See `.planning/{PROJECT,REQUIREMENTS,ROADMAP}.md`. Every other 2026-06-23 audit seed (SEED-013…024) is shipped or planned.
 (SEED-022 shipped in v8.2.2; **#31 `_tmp/` repo policy**, **#27 a11y statement**, and **SEED-019 #28 stale-index diagnostics** all ✅ DONE 2026-06-25. SEED-019 fully closed — #5 via SEED-024, #28 here.)
 Full register + execution-mode + seed map: **`.planning/audit-2026-06-23-product-quality/MASTER.md`**.
 Codex evidence: `_tmp/codex-audit-output.md`, `_tmp/codex-pr-review-output.md`, `_tmp/seed017-codex-output*.md`.
