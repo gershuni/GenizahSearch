@@ -29,7 +29,7 @@ import tempfile
 from datetime import datetime
 from typing import Optional
 
-from genizah_core import Config
+from shared.config import Config
 
 logger = logging.getLogger(__name__)
 
