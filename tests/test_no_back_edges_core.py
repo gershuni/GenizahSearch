@@ -30,6 +30,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 EXTRACTED_MODULES = [
     "shared/config.py",
     "shared/browse_map_utils.py",
+    "shared/text_normalize.py",
 ]
 
 # Compound statement types whose bodies run at import time
@@ -264,3 +265,38 @@ def test_browse_map_utils_standalone_import():
     assert hasattr(shared.browse_map_utils, 'LIBRARY_CODES')
     assert hasattr(shared.browse_map_utils, 'get_library_display')
     assert hasattr(shared.browse_map_utils, 'dedupe_browse_map')
+
+
+# ---------------------------------------------------------------------------
+# Phase 123: text_normalize (CORE-07)
+# ---------------------------------------------------------------------------
+
+def test_text_normalize_identity():
+    """CORE-07: genizah_core.strip_nikud and strip_search_diacritics are the same objects."""
+    import shared.text_normalize
+    import genizah_core
+
+    assert shared.text_normalize.strip_nikud is genizah_core.strip_nikud, (
+        "genizah_core.strip_nikud is not the same object as shared.text_normalize.strip_nikud. "
+        "The re-export shim must be: from shared.text_normalize import strip_nikud  # noqa: F401"
+    )
+    assert shared.text_normalize.strip_search_diacritics is genizah_core.strip_search_diacritics, (
+        "genizah_core.strip_search_diacritics is not the same object as "
+        "shared.text_normalize.strip_search_diacritics."
+    )
+    assert shared.text_normalize.NIKUD_PATTERN is genizah_core.NIKUD_PATTERN, (
+        "genizah_core.NIKUD_PATTERN is not the same object as shared.text_normalize.NIKUD_PATTERN."
+    )
+    assert shared.text_normalize.COMBINING_DIACRITICALS_PATTERN is genizah_core.COMBINING_DIACRITICALS_PATTERN, (
+        "genizah_core.COMBINING_DIACRITICALS_PATTERN is not the same object as "
+        "shared.text_normalize.COMBINING_DIACRITICALS_PATTERN."
+    )
+
+
+def test_text_normalize_standalone_import():
+    """CORE-07 smoke: shared.text_normalize can be imported and has the key symbols."""
+    import shared.text_normalize
+    assert hasattr(shared.text_normalize, 'strip_nikud')
+    assert hasattr(shared.text_normalize, 'strip_search_diacritics')
+    assert hasattr(shared.text_normalize, 'NIKUD_PATTERN')
+    assert hasattr(shared.text_normalize, 'COMBINING_DIACRITICALS_PATTERN')

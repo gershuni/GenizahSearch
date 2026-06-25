@@ -3151,7 +3151,7 @@ class LocalIndexer:
         # (L1 — round-2 requirement). Plan 02 extract_pdf_pages now yields NIKUD-BEARING
         # text; the strip is here, applied uniformly to every format. content == cached_text
         # == stripped (no divergence). SEED-004 defers nikud display for non-PDF formats.
-        from genizah_core import strip_nikud, strip_search_diacritics  # noqa: PLC0415 — intentional lazy import (L1)
+        from shared.text_normalize import strip_nikud, strip_search_diacritics  # noqa: PLC0415 — intentional lazy import (L1)
         stripped = strip_nikud(text)
 
         # Build content_head / content_tail for snippet generation (derived from stripped)
@@ -3823,7 +3823,7 @@ class LocalIndexer:
         # SEED-006 Stage 2: fold diacritics for the content_search field. Lazy
         # import keeps shared/local_indexer.py free of a module-top
         # genizah_core import (mirrors the strip_nikud import at the live add site).
-        from genizah_core import strip_search_diacritics  # noqa: PLC0415
+        from shared.text_normalize import strip_search_diacritics  # noqa: PLC0415
         docs_written = 0
         try:
             for row in self._conn.execute("""

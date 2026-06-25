@@ -69,6 +69,9 @@ from shared.browse_map_utils import (  # noqa: F401
     _get_library_prefix_aliases, _strip_library_prefix,
     _load_ie_volume_map, _extract_ie_from_header, _repair_missing_ie_pages,
 )
+# Phase 123: text_normalize extracted — permanent compat facade (v8.3.0)
+from shared.text_normalize import NIKUD_PATTERN, strip_nikud  # noqa: F401
+from shared.text_normalize import COMBINING_DIACRITICALS_PATTERN, strip_search_diacritics  # noqa: F401
 
 # Import unified variant pairs (generated from V0.7 vs V0.8 HTR comparison)
 # Sorted by frequency - use top N pairs based on slider setting
@@ -164,8 +167,7 @@ STANDARD_HEBREW_DIST = {
     'צ': 0.8, 'ץ': 0.4, 'ף': 0.3, 'ך': 0.3, 'ם': 2.5, 'ן': 1.0
 }
 
-# Hebrew nikud (vowel marks) Unicode range: U+0591-U+05C7 (excluding letters U+05D0-U+05EA)
-NIKUD_PATTERN = re.compile(r'[\u0591-\u05CF]')
+# NIKUD_PATTERN, strip_nikud moved to shared/text_normalize.py (Phase 123). Re-exported above.
 
 # --- Responsa Search Constants ---
 # Hebrew grammatical prefixes for # expansion (~25 entries)
@@ -205,16 +207,6 @@ GRAMMATICAL_SUFFIXES = [
     'יהם',   # 3rd person masculine plural (on plurals)
     'יהן',   # 3rd person feminine plural (on plurals)
 ]
-
-
-def strip_nikud(text: str) -> str:
-    """Remove Hebrew vowel marks (nikud) and cantillation marks from text.
-
-    Keeps only Hebrew letters (א-ת) and other characters.
-    """
-    if not text:
-        return text
-    return NIKUD_PATTERN.sub('', text)
 
 
 # ── Mosseri CUDL label construction ─────────────────────────────
@@ -5998,38 +5990,8 @@ def expand_judeo_arabic(word: str) -> List[str]:
 # --------------------------------------------------------------------------
 # Search normalization: diacritics stripping and mark-tolerant patterns
 # --------------------------------------------------------------------------
-
-# Matches combining diacritical marks (U+0300-U+036F), apostrophe variants (ASCII and curly),
-# the ASCII double-quote (U+0022 — the common typed substitute for Hebrew gershayim in
-# abbreviations like רמב"ם), and Hebrew geresh/gershayim. Does NOT match Hebrew nikud (U+05B0-U+05C7).
-COMBINING_DIACRITICALS_PATTERN = re.compile(r'[\u0300-\u036F\u0022\u0027\u05F3\u05F4\u2018\u2019]')
-
-
-def strip_search_diacritics(text: str) -> str:
-    """Strip combining diacritical marks, apostrophe variants, and geresh/gershayim from search text.
-
-    Removes:
-    - Combining diacritical marks (U+0300-U+036F)
-    - ASCII double-quote (U+0022) — the gershayim substitute in abbreviations (רמב"ם -> רמבם)
-    - ASCII apostrophe (U+0027)
-    - Hebrew geresh (U+05F3)
-    - Hebrew gershayim (U+05F4)
-    - Curly single quotes (U+2018, U+2019)
-
-    Preserves:
-    - Hebrew base letters, nikud/vowel points, Latin chars, digits, punctuation
-
-    SEED-006 P2: folding U+0022 keeps the additive ``content_search`` field
-    (built from ``strip_search_diacritics(content)``) and the ``content_search:``
-    query clause symmetric for ASCII-quote abbreviations, so a clean ``רמבם``
-    query reaches a corpus ``רמב"ם``. The stored ``content`` field is unchanged
-    (the hebword tokenizer still keeps ``"`` inside the token), so display and
-    the gershayim form ``רמב״ם`` are unaffected.
-    """
-    if not text:
-        return text
-    return COMBINING_DIACRITICALS_PATTERN.sub('', text)
-
+# COMBINING_DIACRITICALS_PATTERN, strip_search_diacritics moved to shared/text_normalize.py
+# (Phase 123). Re-exported above via shim.
 
 # ---------------------------------------------------------------------------
 # Bracket-aware search helpers
