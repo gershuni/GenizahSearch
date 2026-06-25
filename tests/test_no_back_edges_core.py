@@ -31,6 +31,7 @@ EXTRACTED_MODULES = [
     "shared/config.py",
     "shared/browse_map_utils.py",
     "shared/text_normalize.py",
+    "shared/variants.py",
 ]
 
 # Compound statement types whose bodies run at import time
@@ -300,3 +301,29 @@ def test_text_normalize_standalone_import():
     assert hasattr(shared.text_normalize, 'strip_search_diacritics')
     assert hasattr(shared.text_normalize, 'NIKUD_PATTERN')
     assert hasattr(shared.text_normalize, 'COMBINING_DIACRITICALS_PATTERN')
+
+
+# ---------------------------------------------------------------------------
+# Phase 123: variants (CORE-08)
+# ---------------------------------------------------------------------------
+
+def test_variants_identity():
+    """CORE-08: genizah_core.VariantManager is the same class object as shared.variants.VariantManager."""
+    import shared.variants
+    import genizah_core
+
+    assert shared.variants.VariantManager is genizah_core.VariantManager, (
+        "genizah_core.VariantManager is not the same object as shared.variants.VariantManager. "
+        "The re-export shim must be: from shared.variants import VariantManager  # noqa: F401"
+    )
+
+
+def test_variants_standalone_import():
+    """CORE-08 smoke: shared.variants can be imported and VariantManager instantiates."""
+    import shared.variants
+    assert hasattr(shared.variants, 'VariantManager')
+    # Smoke: instantiate with no settings, call get_variants
+    vm = shared.variants.VariantManager(settings=None)
+    variants = vm.get_variants("test", "variants")
+    assert isinstance(variants, list)
+    assert "test" in variants
