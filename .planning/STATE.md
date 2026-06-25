@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: verifying
-stopped_at: Completed 123-01-PLAN.md
-last_updated: "2026-06-25T21:00:19.158Z"
+status: executing
+stopped_at: Phase 123 verified (10/10 PASS); Codex review 3-round APPROVE
+last_updated: "2026-06-25T22:08:04.830Z"
 last_activity: 2026-06-25
 progress:
   total_phases: 6
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 123 — core-leaf-modules
+**Current focus:** Phase 124 — core-metadata-index (next)
 
 ## Current Position
 
-Phase: 123 (core-leaf-modules) — EXECUTING
-Plan: 1 of 1
-Status: Phase complete — ready for verification
-Last activity: 2026-06-25
+Phase: 123 (core-leaf-modules) — COMPLETE & VERIFIED (10/10 PASS)
+Plan: 1 of 1 complete
+Status: Phase 123 done — Codex review 3-round APPROVE; next: `/gsd-discuss-phase 124`
+Last activity: 2026-06-26
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 33% (2 of 6 phases)
 
 ## Accumulated Context
 
