@@ -40,7 +40,10 @@ import json
 import html
 import weakref  # Phase 97 R-01: weakref for MyLibraryTab gate
 
-from genizah_translations import TRANSLATIONS
+# Phase 123: LIBRARY_CODES_HE retained on the compat facade (GUARD-04). It is now
+# consumed only inside shared/ (browse_map_utils), but was importable from
+# genizah_core at v8.2.x, so the re-export is preserved for zero behavior change.
+from genizah_translations import TRANSLATIONS, LIBRARY_CODES_HE  # noqa: F401
 
 # Phase 98 D-03 + D-22 + D-23: shared NLI circuit breaker (replaces the
 # class-attribute breaker that used to live on MetadataManager). Module-level
@@ -72,6 +75,15 @@ from shared.text_normalize import NIKUD_PATTERN, strip_nikud  # noqa: F401
 from shared.text_normalize import COMBINING_DIACRITICALS_PATTERN, strip_search_diacritics  # noqa: F401
 # Phase 123: variants extracted — permanent compat facade (v8.3.0)
 from shared.variants import VariantManager  # noqa: F401
+# Phase 123: unified_variants pairs retained on the compat facade (GUARD-04).
+# VariantManager moved to shared/variants.py (which imports UNIFIED_VARIANT_PAIRS
+# itself); these names were importable from genizah_core at v8.2.x, so the
+# try/except re-export is preserved verbatim for zero behavior change.
+try:
+    from unified_variants import UNIFIED_VARIANT_PAIRS, get_top_pairs  # noqa: F401
+except ImportError:
+    UNIFIED_VARIANT_PAIRS = []
+    def get_top_pairs(n): return []
 # Phase 123: responsa extracted — permanent compat facade (v8.3.0)
 from shared.responsa import (  # noqa: F401
     GRAMMATICAL_PREFIXES, GRAMMATICAL_SUFFIXES,
