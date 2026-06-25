@@ -85,8 +85,65 @@ def test_join_candidate_pane_constructs():
     assert hasattr(pane, "_selected_keys")
     # Bulk bar widget present
     assert hasattr(pane, "_bulk_bar_widget")
-    # Search options button present
-    assert hasattr(pane.builder, "_btn_search_opts")
+    # SEED-024: the "Search options ▾" dialog button was replaced by inline option
+    # checkboxes + a 5-mode selector on the anchor-side builder.
+    assert not hasattr(pane.builder, "_btn_search_opts")
+    assert hasattr(pane.builder, "chk_variants")
+    assert pane.builder.mode_combo is not None
+    # The other-side builder stays Responsa-style only (no mode selector).
+    assert pane.other_builder.mode_combo is None
+    # SEED-024: candidate xlsx export button present.
+    assert hasattr(pane, "btn_export")
+
+
+def test_join_query_builder_mode_switch_toggles_single_line():
+    """SEED-024: switching off Responsa-style reveals the single free-text line and
+    hides the structured builder + Responsa-only options (web parity)."""
+    from desktop.join_workbench import JOINS_LAB_MODE_KEYS, JoinQueryBuilder
+
+    b = JoinQueryBuilder(on_search=lambda: None, first_hint="hint",
+                         allow_page_position=True, allow_modes=True)
+    # Default = Responsa-style: structured rows visible, single line hidden.
+    assert b.get_mode() == "responsa"
+    assert b._rows_container.isVisibleTo(b) is True
+    assert b._addline_widget.isVisibleTo(b) is True
+    assert b._opts_widget.isVisibleTo(b) is True
+    assert b._single_widget.isVisibleTo(b) is False
+
+    # Switch to "Exact" → single line shown, structured builder + opts hidden.
+    b.mode_combo.setCurrentIndex(JOINS_LAB_MODE_KEYS.index("exact"))
+    assert b.get_mode() == "exact"
+    assert b._single_widget.isVisibleTo(b) is True
+    assert b._rows_container.isVisibleTo(b) is False
+    assert b._addline_widget.isVisibleTo(b) is False
+    assert b._opts_widget.isVisibleTo(b) is False
+    assert b._preview_widget.isVisibleTo(b) is False
+
+    # Back to Responsa-style restores the structured builder.
+    b.mode_combo.setCurrentIndex(0)
+    assert b.get_mode() == "responsa"
+    assert b._rows_container.isVisibleTo(b) is True
+    assert b._single_widget.isVisibleTo(b) is False
+
+
+def test_join_query_builder_mode_and_single_text_round_trip():
+    """SEED-024: to_state/from_state preserves the selected mode + single-line text."""
+    from desktop.join_workbench import JOINS_LAB_MODE_KEYS, JoinQueryBuilder
+
+    b1 = JoinQueryBuilder(on_search=lambda: None, first_hint="hint",
+                          allow_page_position=True, allow_modes=True)
+    b1.mode_combo.setCurrentIndex(JOINS_LAB_MODE_KEYS.index("fuzzy"))
+    b1._single_edit.setText("טופס")
+    state = b1.to_state()
+    assert state["mode_idx"] == JOINS_LAB_MODE_KEYS.index("fuzzy")
+    assert state["single_text"] == "טופס"
+
+    b2 = JoinQueryBuilder(on_search=lambda: None, first_hint="hint",
+                          allow_page_position=True, allow_modes=True)
+    b2.from_state(state)
+    assert b2.get_mode() == "fuzzy"
+    assert b2.single_line_text() == "טופס"
+    assert b2._single_widget.isVisibleTo(b2) is True
 
 
 def test_join_workbench_window_opens():
