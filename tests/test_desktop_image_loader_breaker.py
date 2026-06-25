@@ -132,6 +132,89 @@ class TestNliImageGet:
         ), "non-NLI hosts must keep TLS verification and not suppress warnings"
 
 
+class _RedirectResp:
+    """Stand-in for a requests redirect response (allow_redirects=False)."""
+
+    def __init__(self, location, status_code=302):
+        self.status_code = status_code
+        self.headers = {"location": location}
+        self.is_redirect = True
+        self.content = b""
+        self.closed = False
+        # requests sets resp.next to the PreparedRequest for the next hop.
+        self.next = type("_PR", (), {"url": location})()
+
+    def close(self):
+        self.closed = True
+
+
+class _OkResp:
+    """Stand-in for a terminal 200 requests response (allow_redirects=False)."""
+
+    def __init__(self, content=b"IMG"):
+        self.status_code = 200
+        self.headers = {}
+        self.is_redirect = False
+        self.next = None
+        self.content = content
+
+    def close(self):
+        pass
+
+
+class TestNliImageGetRedirects:
+    """The TLS allowlist must not be escapable via a redirect (Codex bot P2)."""
+
+    def _script_get(self, monkeypatch, script):
+        calls = []
+
+        def fake_get(url, **kw):
+            calls.append({"url": url, "verify": kw.get("verify"),
+                          "allow_redirects": kw.get("allow_redirects")})
+            return script[url]
+
+        monkeypatch.setattr(nli_fetch.requests, "get", fake_get)
+        return calls
+
+    def test_redirect_from_nli_to_external_reverifies_per_hop(self, monkeypatch):
+        ext = "https://evil.example.com/y"
+        calls = self._script_get(
+            monkeypatch, {NLI_URL: _RedirectResp(ext), ext: _OkResp(b"DATA")}
+        )
+        resp = nli_fetch.nli_image_get(NLI_URL, headers={}, timeout=(3, 5), stream=True)
+        assert resp.content == b"DATA"
+        # Manual following: each hop fetched with allow_redirects=False...
+        assert all(c["allow_redirects"] is False for c in calls)
+        # ...the NLI hop with verify=False, the external redirect target with
+        # verify=True (the allowlist is NOT escaped by the 30x).
+        assert calls[0]["url"] == NLI_URL and calls[0]["verify"] is False
+        assert calls[1]["url"] == ext and calls[1]["verify"] is True
+
+    def test_redirect_nli_to_nli_stays_verify_false(self, monkeypatch):
+        target = "https://rosetta.nli.org.il/delivery/img"
+        calls = self._script_get(
+            monkeypatch, {NLI_URL: _RedirectResp(target), target: _OkResp(b"X")}
+        )
+        nli_fetch.nli_image_get(NLI_URL, headers={}, timeout=(3, 5))
+        assert calls[0]["verify"] is False
+        assert calls[1]["verify"] is False
+
+    def test_allow_redirects_false_returns_the_30x(self, monkeypatch):
+        ext = "https://evil.example.com/y"
+        calls = self._script_get(monkeypatch, {NLI_URL: _RedirectResp(ext)})
+        resp = nli_fetch.nli_image_get(
+            NLI_URL, headers={}, timeout=(3, 5), allow_redirects=False
+        )
+        assert resp.status_code == 302
+        assert len(calls) == 1  # not followed
+
+    def test_redirect_cap_raises_too_many_redirects(self, monkeypatch):
+        # A self-referential redirect loop must terminate via TooManyRedirects.
+        self._script_get(monkeypatch, {NLI_URL: _RedirectResp(NLI_URL)})
+        with pytest.raises(requests.exceptions.TooManyRedirects):
+            nli_fetch.nli_image_get(NLI_URL, headers={}, timeout=(3, 5))
+
+
 # ---------------------------------------------------------------------------
 # desktop/image_loader.py::_download_bytes — breaker wiring + timeouts
 # ---------------------------------------------------------------------------

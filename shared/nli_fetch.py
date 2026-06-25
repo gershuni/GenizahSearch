@@ -79,33 +79,75 @@ def nli_verify_for(url: str) -> bool:
     return not is_nli_host(url)
 
 
-def nli_image_get(url, *, headers=None, timeout=None, stream=False, **kwargs):
-    """``requests.get`` with the NLI host TLS policy applied.
+# Cap manual redirect following at the same default `requests` uses.
+_MAX_REDIRECTS = 5
 
-    For NLI image hosts, TLS verification is disabled and the resulting
-    ``InsecureRequestWarning`` is suppressed *host-scoped* — the ignore filter
-    is installed inside a :func:`warnings.catch_warnings` block around this one
-    call and torn down afterwards, so it never leaks to the rest of the process.
-    For all other hosts, ``verify=True`` and no filter is touched.
 
-    Does NOT consult or feed the circuit breaker — the caller records
-    success/failure so it can attach a call-site ``path``.
+def _get_once(url, *, verify, headers, timeout, stream, **kwargs):
+    """Single ``requests.get`` (no auto-redirect) honouring ``verify``.
+
+    When ``verify`` is False the ``InsecureRequestWarning`` is suppressed
+    *host-scoped* — the ignore filter is installed inside a
+    :func:`warnings.catch_warnings` block around this one call and torn down
+    afterwards, so it never leaks to the rest of the process.
     """
-    verify = nli_verify_for(url)
     if verify:
         return requests.get(
-            url, headers=headers, timeout=timeout, stream=stream, verify=True, **kwargs
+            url, headers=headers, timeout=timeout, stream=stream,
+            verify=True, allow_redirects=False, **kwargs,
         )
-    # NLI host -> verify=False, but keep the InsecureRequestWarning suppression
-    # scoped to exactly this call (catch_warnings restores the prior filters).
     with warnings.catch_warnings():
         if InsecureRequestWarning is not None:
             warnings.simplefilter('ignore', InsecureRequestWarning)
         else:  # pragma: no cover - defensive packaging fallback
             warnings.simplefilter('ignore')
         return requests.get(
-            url, headers=headers, timeout=timeout, stream=stream, verify=False, **kwargs
+            url, headers=headers, timeout=timeout, stream=stream,
+            verify=False, allow_redirects=False, **kwargs,
         )
+
+
+def nli_image_get(url, *, headers=None, timeout=None, stream=False, **kwargs):
+    """``requests.get`` with the NLI host TLS policy applied per-hop.
+
+    For NLI image hosts, TLS verification is disabled (with host-scoped warning
+    suppression); for every other host, ``verify=True``.
+
+    Redirects are followed **manually** so the per-host policy is re-evaluated
+    at EACH hop: a 30x from an allowlisted NLI host to a non-allowlisted host is
+    fetched with ``verify=True``, so the TLS allowlist cannot be escaped via a
+    redirect (legitimate same-/cross-host NLI redirects, e.g. Rosetta delivery,
+    still work). Pass ``allow_redirects=False`` to disable following entirely.
+
+    Does NOT consult or feed the circuit breaker — the caller records
+    success/failure so it can attach a call-site ``path``.
+    """
+    allow_redirects = kwargs.pop('allow_redirects', True)
+    current_url = url
+    redirects_left = _MAX_REDIRECTS
+    while True:
+        verify = nli_verify_for(current_url)
+        resp = _get_once(
+            current_url, verify=verify, headers=headers, timeout=timeout,
+            stream=stream, **kwargs,
+        )
+        if not allow_redirects:
+            return resp
+        nxt = getattr(resp, 'next', None)
+        if nxt is None or not getattr(resp, 'is_redirect', False):
+            return resp
+        if redirects_left <= 0:
+            raise requests.exceptions.TooManyRedirects(
+                f'Exceeded {_MAX_REDIRECTS} redirects.', response=resp
+            )
+        # Release the redirect response (important with stream=True) before the
+        # next hop, then re-evaluate the TLS policy against the new host.
+        try:
+            resp.close()
+        except Exception:  # pragma: no cover - close is best-effort
+            pass
+        current_url = nxt.url
+        redirects_left -= 1
 
 
 __all__ = [
