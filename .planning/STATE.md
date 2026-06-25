@@ -25,12 +25,16 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: 123 (core-leaf-modules) — COMPLETE & VERIFIED (10/10 PASS)
-Plan: 1 of 1 complete
-Status: Phase 123 done — Codex review 3-round APPROVE; next: `/gsd-discuss-phase 124`
+Phase: 124 (core-metadata-index) — PLANNING IN PROGRESS
+Plan: not yet created
+Status: Discuss SKIPPED (no user gray areas; 124-CONTEXT.md committed). Researcher running.
+  Pipeline: research → pattern-map → planner(opus) → plan-checker loop → execute →
+  Codex 3-round review drill (base-vs-HEAD facade-name diff) → verify → auto-advance to 125.
+  Standing directive: run phases 124-127 autonomously, skip-discuss-when-unneeded,
+  Codex drill must hit APPROVE before advancing. (123 done+verified; Codex 3-round APPROVE.)
 Last activity: 2026-06-26
 
-Progress: [███░░░░░░░] 33% (2 of 6 phases)
+Progress: [███░░░░░░░] 33% (2 of 6 phases — 122, 123 complete)
 
 ## Accumulated Context
 
