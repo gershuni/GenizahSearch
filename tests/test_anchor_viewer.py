@@ -1154,18 +1154,21 @@ class TestRotation:
             v.rotate_right()
         assert v._rotation == 90
 
-    def test_rotate_left_wraps_to_270(self):
+    def test_rotate_left_is_minus_90(self):
+        """UAT: rotate-left from 0 yields -90 (signed) so it animates 90° left,
+        not a 270° spin to the right."""
         v = self._viewer()
         with patch("web.components.anchor_viewer.ui"):
             v.rotate_left()
-        assert v._rotation == 270
+        assert v._rotation == -90
 
-    def test_rotate_right_four_times_wraps_to_0(self):
+    def test_rotate_right_accumulates_signed(self):
+        """Signed accumulation: 4× right = 360 (no % 360 wrap)."""
         v = self._viewer()
         with patch("web.components.anchor_viewer.ui"):
             for _ in range(4):
                 v.rotate_right()
-        assert v._rotation == 0
+        assert v._rotation == 360
 
     def test_rotate_left_then_right_returns_to_0(self):
         v = self._viewer()
@@ -1195,6 +1198,28 @@ class TestRotation:
         assert "mv.update(1.5, 90)" in js, f"expected mv.update(1.5, 90) in JS, got: {js!r}"
         # Fallback transform must also carry rotation (was dropped before #10).
         assert "rotate(90deg)" in js
+
+    def test_apply_rotation_preserves_live_scale(self):
+        """P2 review: rotating must preserve the LIVE mv.state.scale (wheel zoom), not
+        force the stale server self._zoom — so rotate-after-wheel-zoom doesn't snap to 100%."""
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui") as mock_ui:
+            v._rotation = 90
+            v._apply_rotation()
+            js = mock_ui.run_javascript.call_args[0][0]
+        # Reads the live client scale rather than hardcoding self._zoom.
+        assert "mv.state.scale" in js, "rotation must read the live client scale"
+        assert "mv.update((mv.state ? mv.state.scale" in js
+        assert "90" in js  # the rotation angle is pushed
+
+    def test_rotate_buttons_use_apply_rotation_not_apply_transform(self):
+        """rotate_left/right go through _apply_rotation (scale-preserving), not _apply_transform."""
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        # Both rotate methods must call _apply_rotation.
+        assert source.count("self._apply_rotation()") >= 2, (
+            "rotate_left and rotate_right must call _apply_rotation (preserves wheel zoom)"
+        )
 
     def test_show_image_syncs_js_viewer_state(self):
         """Codex MEDIUM: rendering a folio syncs the REUSED JS viewer state to the

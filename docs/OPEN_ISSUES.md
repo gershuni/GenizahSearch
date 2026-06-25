@@ -75,16 +75,18 @@ move + glyph de-dup), #298 (SEED-013+018-core guards/cleanup), #297 (SEED-016 la
 executor), #299 (SEED-021 image observability + desktop polish), #300 (SEED-014 a11y/RTL). All Codex-reviewed
 (2 found real bugs, fixed before merge: #297 executor-semaphore lifetime, #300 aria/lazy-load). **#300 still
 needs a manual Hebrew-UI visual+keyboard pass** (1 open ARIA nit: result-card `role=button` contains nested
-buttons). **SEED-017 (#10) IMPLEMENTED 2026-06-25** on branch `audit/seed-017-viewer-rotate-fullscreen`
-(pending PR + Hebrew-UI UAT): added Rotate Left / Rotate Right / Fullscreen to the web `AnchorViewer`
-toolbar (so the Joins-Lab anchor pane **and** the Compare modal's two panes reach parity with the
-`/browse` viewer + desktop). Rotation uses the per-instance JS viewer (`mv.update(scale, rotation)`);
-Fullscreen uses the native Fullscreen API on a per-instance `.anchor-image-pane` wrapper, bound
-**client-side** via `js_handler` (a server round-trip loses the user-activation the Fullscreen API
-requires). Codex-reviewed → 2 findings fixed pre-PR (HIGH: server-side `requestFullscreen` rejected →
-client-side js_handler; MEDIUM: reused JS viewer kept stale `state.rotation` on folio nav → `_show_image`
-now syncs JS state). 13 new tests in `tests/test_anchor_viewer.py`. Desktop `CompareDialog` rotate/fullscreen
-left OUT (not part of #10; logged as a candidate follow-up). **Still OPEN (decision-gated):** SEED-015
+buttons). **SEED-017 (#10) IMPLEMENTED + UAT-PASSED 2026-06-25** on branch `audit/seed-017-viewer-rotate-fullscreen`
+(PR #310): Rotate Left / Rotate Right / Reset / Fullscreen on **both apps' Joins-Lab + Compare viewers**.
+**Web** (`AnchorViewer` → Joins-Lab anchor pane + Compare modal's two panes): rotation via the per-instance
+JS viewer (`mv.update(scale, rotation)`, signed accumulation so rotate-left animates 90° left, not a 270°
+spin); Fullscreen via the native Fullscreen API on a per-instance `.anchor-image-pane` wrapper bound
+**client-side** via `js_handler` (a server round-trip loses the user-activation the Fullscreen API requires);
+reset icon switched to `/browse`'s `restart_alt` "Reset View". **Desktop** (`join_workbench.py`): same controls
+(glyphs ↺ ↻ ↩ ⛶, NOT brightness/contrast/gamma) on the main workbench anchor pane **and** the CompareDialog
+panes — rotation via `_rotated_pixmap` (QTransform on the cached pixmap), Fullscreen reuses
+`desktop.viewers.FullscreenImageWindow` (the ResultDialog fullscreen). Codex-reviewed → 3 findings fixed pre-merge
+(HIGH client-side fullscreen; MED stale JS `state.rotation`; MED Compare inline-`40vh`-cap vs fullscreen via
+`!important`). +26 tests (`tests/test_anchor_viewer.py`, `tests/test_join_workbench_rotate.py`). **Still OPEN (decision-gated):** SEED-015
 (image-loading/NLI minimal: breaker-wire desktop + TLS host-restrict — full unification deferred), SEED-019
 (stale-index diagnostics + desktop XLSX export), SEED-020 (resume v7.9 decomposition), #27 (a11y statement),
 #31 (`_tmp/` policy). (SEED-022 shipped in v8.2.2.)

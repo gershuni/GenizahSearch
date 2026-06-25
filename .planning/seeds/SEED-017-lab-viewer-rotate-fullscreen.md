@@ -26,13 +26,19 @@ to its toolbar. This automatically reaches BOTH consumers:
 - the main Joins-Lab anchor pane (`web/pages/joins_lab.py`), and
 - the Compare modal's two panes (`web/components/compare_modal.py`, which builds `AnchorViewer`).
 
-**Out of scope (logged, not done — per the answered decision):**
-- The reset-icon taste choice `fit_screen` vs `restart_alt` (#6) — keep `fit_screen`.
-- The rotation **slider** that browse.py carries — buttons match the desktop viewer and are the
-  minimal "Rotate" parity; a slider adds toolbar width + re-render sync cost for little gain.
-- Desktop `CompareDialog` (`desktop/join_workbench.py`) rotate/fullscreen — its panes have zoom
-  only (the audit cited the desktop *ResultDialog* viewer, which already has rotate+fullscreen, as
-  the parity reference; the Lab CompareDialog was never flagged by #10). Candidate follow-up only.
+**Scope expanded after UAT (2026-06-25, user request):** desktop Joins Lab is now IN scope too.
+- **Web reset icon:** switched `fit_screen` → `/browse`'s `restart_alt` "Reset View" (#6 taste choice
+  the user explicitly asked for).
+- **Web rotate-left:** signed accumulation (-90), not `(x-90)%360`=270, so the CSS transition animates
+  90° left instead of a 270° clockwise spin (UAT: "270 right seems odd").
+- **Desktop** (`desktop/join_workbench.py`): added Rotate Left / Rotate Right / Reset / Fullscreen to
+  BOTH the main workbench anchor pane AND the CompareDialog panes, using the same controls as the
+  ResultDialog viewer (glyphs ↺ ↻ ↩ ⛶) — NOT the brightness/contrast/gamma sliders. Rotation via a new
+  `_rotated_pixmap` helper (QTransform on the cached pixmap); Fullscreen reuses
+  `desktop.viewers.FullscreenImageWindow` (the ResultDialog fullscreen window).
+
+**Still out of scope (logged):** the rotation **slider** browse.py carries — buttons match the desktop
+viewer and are the minimal "Rotate" parity; a slider adds toolbar width + re-render sync cost for little gain.
 
 ## Why the JS layer is already ready
 

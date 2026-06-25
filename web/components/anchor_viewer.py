@@ -464,14 +464,42 @@ class AnchorViewer:
     # ──────────────────────────────────────────────────────────────────────────
 
     def rotate_left(self) -> None:
-        """Rotate the image 90° counter-clockwise (parity /browse + desktop, #10)."""
-        self._rotation = (self._rotation - 90) % 360
-        self._apply_transform()
+        """Rotate the image 90° counter-clockwise (parity /browse + desktop, #10).
+
+        Signed accumulation (NO ``% 360``): clicking left from 0 yields -90 so the CSS
+        ``transition: transform`` animates a 90° counter-clockwise turn — not a 270°
+        clockwise spin to the same visual position (UAT: "270 right seems odd"). CSS
+        handles arbitrary degree values; folio change re-renders a fresh <img> at 0.
+        """
+        self._rotation -= 90
+        self._apply_rotation()
 
     def rotate_right(self) -> None:
-        """Rotate the image 90° clockwise (parity /browse + desktop, #10)."""
-        self._rotation = (self._rotation + 90) % 360
-        self._apply_transform()
+        """Rotate the image 90° clockwise (signed accumulation; see rotate_left)."""
+        self._rotation += 90
+        self._apply_rotation()
+
+    def _apply_rotation(self) -> None:
+        """Push ONLY rotation, preserving the LIVE client scale (P2 review fix).
+
+        Mouse-wheel zoom (manuscript_viewer.js ``onWheel``) updates ``mv.state.scale``
+        client-side only — ``self._zoom`` stays at its last server value (often 1.0).
+        If rotation went through ``_apply_transform`` (which forces ``scale=self._zoom``),
+        rotating after a wheel-zoom would snap the image back to 100%. So the rotation
+        path reads the live ``mv.state.scale`` and leaves the zoom label untouched (the
+        wheel handler keeps it in sync). The fallback (no ``mv``) uses ``self._zoom``.
+        """
+        ui.run_javascript(
+            "(function(){"
+            f"  var mv = (window.__msViewers || {{}})['{self._viewer_id}'];"
+            "  if (mv && typeof mv.update === 'function') {"
+            f"    mv.update((mv.state ? mv.state.scale : {self._zoom}), {self._rotation});"
+            "  } else {"
+            f"    var im = document.querySelector('.{self._viewer_id} .zoomable-image');"
+            f"    if (im) im.style.transform = 'translate(0px,0px) rotate({self._rotation}deg) scale({self._zoom})';"
+            "  }"
+            "})();"
+        )
 
     def _fullscreen_js_handler(self) -> str:
         """Return the CLIENT-SIDE click-handler JS that toggles native fullscreen.
@@ -756,12 +784,14 @@ class AnchorViewer:
                         )
                         ui.tooltip(tr("Rotate right")).bind_visibility_from(_rotate_right_btn)
 
+                        # Reset icon matches the /browse viewer (restart_alt "Reset View")
+                        # per UAT — resets zoom + rotation + pan.
                         _zoom_reset_btn = (
-                            ui.button(icon="fit_screen", on_click=self.zoom_reset)
-                            .props(f'flat round dense aria-label="{tr("Reset zoom")}"')
+                            ui.button(icon="restart_alt", on_click=self.zoom_reset)
+                            .props(f'flat round dense aria-label="{tr("Reset View")}"')
                             .classes("text-white min-h-[44px] min-w-[44px]")
                         )
-                        ui.tooltip(tr("Reset zoom")).bind_visibility_from(_zoom_reset_btn)
+                        ui.tooltip(tr("Reset View")).bind_visibility_from(_zoom_reset_btn)
 
                         # Fullscreen is bound CLIENT-SIDE (js_handler, no on_click) so the
                         # Fullscreen API call stays inside the browser's user-activation
