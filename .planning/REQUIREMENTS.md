@@ -1,158 +1,114 @@
-# Requirements: GenizahSearch — v8.2.0 Web Joins Lab
+# Requirements: GenizahSearch — v8.3.0 God-File Decomposition
 
-**Defined:** 2026-06-17
-**Core Value:** Researchers can find what they need in the Genizah corpus.
+**Defined:** 2026-06-25
+**Core Value:** Researchers can find what they need in the Genizah corpus. (This milestone protects that value by making the two god-files maintainable — **zero behavior change**.)
 
-> **Milestone scope:** Port the desktop Joins Lab (Component A) to the web at **full parity**, riding the complete, web-reusable `shared/joins_lab.py` core (v8.0.0 Phase 106). Human-in-the-loop only — the scholar is the ranker and confirmer; there is NO automated join-finder. Decisions (user 2026-06-17): full parity (not streamlined), **Component A only**, **Visual Similarity included**, **persistence device-local for everyone** (no Supabase, no login wall). Phase numbering continues from **117**. Web-only milestone.
->
-> **Pre-lock review:** refined per the Codex code-grounded critique (`.planning/v8.2.0-REQ-CODEX-CRITIQUE.md`, 2026-06-17) — all 4 blockers + 9 HIGH findings folded in.
+> Strategy / dependency analysis / risk map: `.planning/seeds/SEED-020-decomposition-map.md` (§7 "Codex review corrections" authoritative). Requirements refined per the Codex requirements pre-flight (2026-06-25, verdict READY WITH EDITS — all 9 edits folded in).
+> Each requirement is an **extraction outcome**, verified by: the new module exists, imports work in BOTH directions (web + desktop), the relevant test suite passes via the re-export facade, and no behavior changes.
 
-## v1 Requirements
+## v1 Requirements (milestone v8.3.0 scope)
 
-Requirements for this milestone. Each maps to a roadmap phase.
+### Invariants (GUARD) — cross-cutting, enforced at EVERY phase boundary (122–127)
 
-### Foundation & Entry (FND)
+- [ ] **GUARD-01**: No module-level import back-edges — no `shared/` module extracted this milestone is imported at module level by a `genizah_core` symbol that it in turn imports (no cycle). A permanent AST/import guard test enforces this from Phase 0 onward.
+- [ ] **GUARD-02**: Zero behavior change — the full existing pytest suite (search / browse / responsa / joins / lists / composition parity, web + desktop import paths) passes at every phase boundary.
+- [ ] **GUARD-03**: Every source-scanning / AST test that reads `genizah_core.py` or `genizah_app.py` is retargeted to the new module location **before** the original implementation is deleted — explicitly including `test_desktop_folio_navigation.py`, `test_wr01_open_local_browse_page_ast.py`, `test_tabular_builder_rtl.py`, `test_view_all_cap.py`, and `test_shelfmark_bridge.py` (which hashes `normalize_shelfmark` source) — retargeted during the additive phase, flipped at deletion.
+- [ ] **GUARD-04**: `genizah_core.py` remains a permanent compatibility facade (re-export shims preserved); the `genizah_app.py` implementation shims are removed in a clean final deletion pass.
 
-- [x] **FND-01**: A web `SearchExecutor` adapter implements the `shared/joins_lab.py` Protocol (`execute_search` / `get_browse_page` / `get_meta_for_id` / `get_library_for_id`) by wrapping the web search engine **directly** (`state.searcher.execute_search` — NOT `/api/search`, which omits `text_position`/`corpus_scope` and caps modes). Search runs **off the event loop** (`run.io_bound`-style, as `web/pages/search.py` does) with timeout, cancellation, and stale-generation (latest-wins) handling — the NiceGUI event loop is never blocked. No search logic re-implemented.
-- [x] **FND-02**: User can open the Joins Lab at a dedicated `/joins-lab` web route.
-- [x] **FND-03**: User can cold-start the Joins Lab by entering a shelfmark or sys_id (no prior search required).
-- [x] **FND-04**: User can launch the Joins Lab on a specific fragment via a "Find joins" action on `/search` result cards.
-- [x] **FND-05**: User can launch the Joins Lab on a specific fragment via a "Find joins" action on `/browse`.
-- [x] **FND-06**: The Joins Lab works without login (no auth wall); every per-user state access goes through `web/safe_storage.py` (zero raw `app.storage.user`, preserving the Phase 87 CI-guarded invariant — `tests/test_no_raw_storage_access.py`, allowlist `[]`).
-- [x] **FND-07**: The entire Joins Lab UI is bilingual (EN/HE) with correct RTL layout, consistent with the rest of the web app.
-- [x] **FND-08**: The entry/deep-link URL contract is explicit — anchor identified by `sys_id` (with shelfmark / `fl_id` / page / `volume_ie` where relevant) so `/search`, `/browse`, and cold-start all resolve the same anchor (incl. multi-IE volumes). The deep link carries the anchor (and optional initial VS mode) only; builder/candidate/triage state is device-local, NOT encoded in shareable URLs.
+### Config enabler (CONFIG) — Phase 122 (Phase 0)
 
-### Anchor Pane (ANC)
+- [ ] **CONFIG-01**: `Config` is defined in `shared/config.py`; `genizah_core.Config` re-exports the same class object; all existing `from genizah_core import Config` callers (incl. `shared/session_persistence.py`) work unchanged.
 
-- [x] **ANC-01**: The anchor pane shows the pinned fragment's image with zoom/pan and folio (page) navigation.
-- [x] **ANC-02**: Anchor (and Compare) images load through the **existing per-provider image-proxy resolution** used by `/browse` (NLI, Oxford, Cambridge, Manchester, JTS) — reusing those endpoints and the Phase-98 NLI circuit breaker — rather than inventing direct image URLs. No unguarded NLI/IIIF fetch.
-- [x] **ANC-03**: The anchor pane shows the fragment's transcription as right-aligned (RTL) numbered lines.
-- [x] **ANC-04**: The anchor pane shows known joins (PGP + FJMS + user + community) as a connected group with source attribution.
-- [x] **ANC-05**: Known-joins display is multitenant-safe — it surfaces only public/confirmed joins (or is user/status-aware cache-isolated), so the process-global join cache can never leak one user's unconfirmed (creator-only, RLS-scoped) joins to another user.
+### Core extractions (CORE) — `genizah_core.py` → `shared/`
 
-### Query Builders (BLD)
+- [ ] **CORE-01**: Responsa parsing/expansion logic extracted to `shared/responsa.py`; the responsa test suites pass via the facade.
+- [ ] **CORE-02**: `VariantManager` extracted to `shared/variants.py`.
+- [ ] **CORE-03**: `CodicologicalManager` extracted to `shared/codicological.py`.
+- [ ] **CORE-04**: `JoinsManager` extracted to `shared/joins_manager.py`.
+- [ ] **CORE-05**: `ListsManager` extracted to `shared/lists_manager.py`.
+- [ ] **CORE-06**: Browse-map + shelfmark utilities (`normalize_shelfmark`, `natural_sort_key`, `dedupe_browse_map`, `get_library_display`, IE-volume helpers) extracted to `shared/browse_map_utils.py`.
+- [ ] **CORE-07**: Search/text normalization helpers (`strip_nikud`, `strip_search_diacritics`, and their normalization constants) extracted to `shared/text_normalize.py`; the lazy back-edge imports in `shared/local_indexer.py` (and any other shared importers of these core helpers) are retargeted to the new module so no module-level core back-edge remains. *(closes SEED-020 §7 C-3)*
+- [ ] **CORE-08**: `MetadataManager` (+ `_BoundedLRUCache`) extracted to `shared/metadata_manager.py`.
+- [ ] **CORE-09**: `Indexer` extracted to `shared/indexer.py`.
+- [ ] **CORE-10**: `SearchEngine` extracted (intact) to `shared/search_engine.py` with `meta_mgr`/`var_mgr` passed by dependency injection; the BrowseMap class-level cache migration, the SEED-006 `content_search` compat gates, and the `_LAST_RESPONSA_DOWNGRADE` thread-local downgrade channel are explicitly preserved with behavior unchanged. *(SEED-020 §7 C-3 hazards)*
+- [ ] **CORE-11**: `LabSettings` extracted to `shared/lab_settings.py`.
+- [ ] **CORE-12**: `LabEngine` extracted to `shared/lab_engine.py`; the SearchEngine↔LabEngine LOCAL-LAB mirror (CR-01/CR-02, `_lab_weights_hash_override`) preserved.
+- [ ] **CORE-13**: `_my_library_tab_ref` modeled as an injected optional "local-search-gate" interface consumed by BOTH `SearchEngine.attach_my_library_tab()` and `LabEngine.lab_composition_search()`; no `shared/` → desktop import. *(closes SEED-020 §7 C-4)*
 
-- [x] **BLD-01**: User can build a line-by-line query for the anchor side — rows of OR-grouped word-boxes corresponding to manuscript lines.
-- [x] **BLD-02**: User can build a line-by-line query for the OTHER side of the leaf with cross-side narrow/widen (`apply_cross_side`), over a web-defined page contract: which page identifier feeds `resolve_other_side_pages` (`p_num` vs internal index), multi-IE (`volume_ie`) behavior, unknown total-page counts, and sparse / metadata-only pages.
-- [x] **BLD-03**: User can set per-line modifiers (line-start ⊢ / line-end ⊣, plene/defective, etc.) on any builder row.
-- [x] **BLD-04**: User can set global search toggles (variants, Judeo-Arabic, flexible spacing, bidirectional) and an inline gap; these are applied to BOTH sides via the `_merge_globals`-equivalent before/around `compose()` (which hardcodes JA/flex/bidirectional to false) — so a toggle is never silently dropped.
-- [x] **BLD-05**: Running a built query composes into the engine's syntax (`compose`) and executes against the web search engine via the FND-01 adapter, returning candidates.
+### Composition dedup prerequisite (PREP) — Phase 125, FIRST (125a), before the engine move
 
-### Candidate Surface (CND)
+- [ ] **PREP-01**: SEED-011 composition double-prep dedup lands **before** `SearchEngine`/`LabEngine` composition code is moved (so the dedup is not reworked post-move).
 
-- [x] **CND-01**: Candidates render deduped to one entry per image/fragment (`dedup_candidates`).
-- [x] **CND-02**: User can view candidates in a grid surface (thumbnail + key metadata + per-card actions).
-- [x] **CND-03**: User can view candidates in a table surface (sortable columns, multi-select).
-- [x] **CND-04**: User can triage each candidate Yes / Maybe / No; triage is keyed by `sys_id`, reflected consistently across grid, table, and Compare, and resets on re-anchor.
-- [x] **CND-05**: The Lab surfaces a self-match readout when the anchor appears in its own candidate results (`detect_self_match`).
-- [x] **CND-06**: User can filter candidates (material / dimensions / size-mismatch / triage state), matching the desktop candidate filters.
-- [x] **CND-07**: The candidate surface is bounded — pagination and/or a result cap so a large candidate set never renders unbounded (event-loop / payload safety).
-- [x] **CND-08**: Candidate metadata (shelfmark/title/library/material/dimensions/thumbnail) is enriched off the event loop, batched, and breaker-guarded for image/network lookups.
+### Desktop extractions (DESK) — `genizah_app.py` → `desktop/`
 
-### Compare (CMP)
+- [ ] **DESK-01**: Settings / Help / Tabular-builder dialogs extracted to `desktop/settings_dialogs.py`.
+- [ ] **DESK-02**: Table / header / scroll widget classes extracted to `desktop/ui_widgets.py`.
+- [ ] **DESK-03**: Catalog "Browse-by-Identification" tab extracted to `desktop/catalog_browse.py`.
+- [ ] **DESK-04**: Search-results lifecycle extracted to `desktop/search_results_panel.py`.
+- [ ] **DESK-05**: Browse panel extracted to `desktop/browse_panel.py`.
+- [ ] **DESK-06**: Reading desk extracted to `desktop/reading_desk_panel.py`.
+- [ ] **DESK-07**: Lists tab + cloud-sync coordination extracted to `desktop/lists_tab.py`.
+- [ ] **DESK-08**: Update-UI sub-cluster (notification / What's-New / progress dialogs + sidecar reset/download coordination) extracted to `desktop/update_ui.py`, with **new direct behavioral tests** for the sidecar reset/download coordination methods plus the existing sidecar tests. *(SEED-020 §7 C-6)*
 
-- [x] **CMP-01**: User can open a side-by-side Compare of the anchor and a chosen candidate (image + transcription).
-- [x] **CMP-02**: Compare supports per-pane zoom and folio navigation.
-- [x] **CMP-03**: User can record a Yes/Maybe/No verdict from Compare, synced with the `sys_id`-keyed candidate triage state.
+## v2 Requirements (deferred — NOT in this roadmap)
 
-### Visual Similarity (VSM)
+### Future decomposition (DEFER)
 
-- [x] **VSM-01**: A single Visual Similarity (👁) toggle merges FIST look-alike candidates into the candidate surface (text-only when OFF; VS-merged / intersection when ON) via a web VS-service adapter feeding `merge_candidates`. The toggle tracks the loaded anchor sid so look-alikes invalidate on re-anchor, and has explicit disabled / no-VS-data / empty-intersection states.
-- [x] **VSM-02**: Visually-similar candidates carry a consistent 👁 badge across grid, table, and Compare.
-
-### Actions (ACT)
-
-- [x] **ACT-01**: User can add a confirmed candidate as a join via the existing pairwise-join path (login-gated — community write).
-- [x] **ACT-02**: User can add the anchor + selected candidates to the Fragment Puzzle. Because `/puzzle?add=` currently accepts a single fragment, this milestone adds a **bulk staging handoff** (multi-fragment payload/API) so the anchor + the selected candidates open together in `/puzzle`.
-- [x] **ACT-03**: User can add candidates to a saved list and/or export the candidate set.
-
-### Persistence (PST)
-
-- [x] **PST-01**: The Joins Lab persists builder **inputs**, triage verdicts, filter, and view state — NOT candidate result blobs (no `full_text` / image data). On restore the search is **re-run** from the persisted inputs (mirrors desktop `join_workbench`; avoids the search-history payload-bloat class of bug). Survives a page refresh without login.
-- [x] **PST-02**: Persistence uses server-side **per-browser-session** state via `web/safe_storage.py` (`safe_user_*`, keyed by the NiceGUI session cookie — survives refresh for anonymous users; NOT the volatile `browser`/`client`/`tab` stores, NOT a new localStorage wrapper). Per-session/per-user isolated (multitenant-safe, no cross-user leakage); compact schema with caps and a schema-version invalidation field. No Supabase, no cross-device sync.
-- [x] **PST-03**: User can clear/reset the Joins Lab working state.
-
-## Future Requirements
-
-Deferred to a later milestone. Tracked, not in this roadmap.
-
-### Component B — Join Workbench search-support algorithms (both apps)
-
-- **JSA-01**: Seed parallels/composition search from the anchor passage.
-- **JSA-02**: Corpus-driven suggest-then-search completion of a torn line's first/last N words.
-- **JSA-03**: `[`/`]`-aware torn-word completion.
-- **JWB-05**: Conservative tear-side assist (start-`]` = LEFT / end-`[` = RIGHT; "both edges torn" first-class; silent when unclear).
-
-### Web persistence enhancements
-
-- **PST-F1**: Cloud cross-device sync of candidate lists / triage via a new Supabase table (web-only; no desktop interop today). Deferred — desktop keeps working state local-only, so there is nothing to sync with yet.
+- **DEFER-01**: `SearchEngine` internal sub-split — peel `LineBreakSearcher` (~238 ln) and `CompositionSearcher` (~509 ln) out of `shared/search_engine.py` (only after CORE-10 ships and its direct-module tests are green).
+- **DEFER-02**: `CompositionState` dataclass refactor of `genizah_app.py`'s scattered `comp_*` fields — the **prerequisite** for any desktop composition-tab extraction. Own seed.
+- **DEFER-03**: Desktop composition-tab extraction → `desktop/composition_tab.py` (blocked on DEFER-02).
+- **DEFER-04**: Desktop startup/session remainder extraction (~50 `self.*` tab couplings) — structurally infeasible until DESK-04/05/06/07 expose tab state behind setters.
 
 ## Out of Scope
 
-Explicitly excluded. Documented to prevent scope creep.
-
 | Feature | Reason |
 |---------|--------|
-| Automated / auto-ranked join finder | Human-in-the-loop by design — the scholar is the ranker (consistent with v8.0.0 JOINS-F4). Slow, low-recall, no parallels for ~40% of cases. |
-| New Supabase schema for Joins Lab working state | Persistence is device-local (per-browser-session, server-side via safe_storage) this milestone; desktop is local-only too. Cloud sync → PST-F1 (future). |
-| Component B (JSA-01/02/03, JWB-05) | User decision 2026-06-08, reaffirmed 2026-06-17 — v8.2.0 is the Component-A web port only. |
-| Web↔desktop capability divergence | Full parity is the goal; divergence would re-introduce dual-maintenance drift. |
-| Richer N-fragment "other side" / multi-leaf join model | Design deferral #1 from v8.0.0; keep the pairwise→group model (no new schema). |
+| Any user-facing behavior change | This is a pure refactor — zero behavior change is GUARD-02 |
+| New features / performance work | Out of a decomposition milestone (SEED-011 is the one exception, as a Phase-3 prerequisite, not a feature) |
+| Desktop composition-tab + startup/session extraction | Needs `CompositionState` refactor first (DEFER-02/03/04) |
+| `SearchEngine` internal sub-split | Deferred to DEFER-01 after the class moves intact (CORE-10) |
+| LAB side-index punctuation / SEED-006 compat-gate **redesign** | Pre-existing tech-debt; the gates are **preserved** (CORE-10), not redesigned |
+| GitHub Release | Internal-only milestone (no user-facing change) |
 
 ## Traceability
 
-Which phases cover which requirements. Populated during roadmap creation.
+GSD phase numbering continues from v8.2.0 (ended Phase 121) → this milestone is **Phases 122–127**. Finalized by the roadmapper.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| FND-01 | Phase 117 | Complete |
-| FND-02 | Phase 117 | Complete |
-| FND-03 | Phase 117 | Complete |
-| FND-04 | Phase 118 | Complete |
-| FND-05 | Phase 118 | Complete |
-| FND-06 | Phase 117 | Complete |
-| FND-07 | Phase 121 | Complete |
-| FND-08 | Phase 117 | Complete |
-| ANC-01 | Phase 117 | Complete |
-| ANC-02 | Phase 117 | Complete |
-| ANC-03 | Phase 117 | Complete |
-| ANC-04 | Phase 118 | Complete |
-| ANC-05 | Phase 118 | Complete |
-| BLD-01 | Phase 117 | Complete |
-| BLD-02 | Phase 118 | Complete |
-| BLD-03 | Phase 118 | Complete |
-| BLD-04 | Phase 118 | Complete |
-| BLD-05 | Phase 117 | Complete |
-| CND-01 | Phase 117 | Complete |
-| CND-02 | Phase 117 | Complete |
-| CND-03 | Phase 119 | Complete |
-| CND-04 | Phase 119 | Complete |
-| CND-05 | Phase 119 | Complete |
-| CND-06 | Phase 119 | Complete |
-| CND-07 | Phase 119 | Complete |
-| CND-08 | Phase 119 | Complete |
-| CMP-01 | Phase 119 | Complete |
-| CMP-02 | Phase 119 | Complete |
-| CMP-03 | Phase 119 | Complete |
-| VSM-01 | Phase 119 | Complete |
-| VSM-02 | Phase 119 | Complete |
-| ACT-01 | Phase 120 | Complete |
-| ACT-02 | Phase 120 | Complete |
-| ACT-03 | Phase 120 | Complete |
-| PST-01 | Phase 120 | Complete |
-| PST-02 | Phase 120 | Complete |
-| PST-03 | Phase 120 | Complete |
-| JSA-01 | — | Deferred (Component B, future milestone) |
-| JSA-02 | — | Deferred (Component B, future milestone) |
-| JSA-03 | — | Deferred (Component B, future milestone) |
-| JWB-05 | — | Deferred (Component B, future milestone) |
+| GUARD-01 | 122 (then enforced 122–127) | Pending |
+| GUARD-02 | 122–127 (every boundary) | Pending |
+| GUARD-03 | 122–127 (every boundary) | Pending |
+| GUARD-04 | 122–127 (every boundary) | Pending |
+| CONFIG-01 | 122 | Pending |
+| CORE-01 | 123 | Pending |
+| CORE-02 | 123 | Pending |
+| CORE-03 | 123 | Pending |
+| CORE-04 | 123 | Pending |
+| CORE-05 | 123 | Pending |
+| CORE-06 | 123 | Pending |
+| CORE-07 | 123 | Pending |
+| CORE-08 | 124 | Pending |
+| CORE-09 | 124 | Pending |
+| PREP-01 | 125 (125a — first) | Pending |
+| CORE-10 | 125 | Pending |
+| CORE-11 | 125 | Pending |
+| CORE-12 | 125 | Pending |
+| CORE-13 | 125 | Pending |
+| DESK-01 | 126 | Pending |
+| DESK-02 | 126 | Pending |
+| DESK-03 | 126 | Pending |
+| DESK-04 | 126 | Pending |
+| DESK-05 | 126 | Pending |
+| DESK-06 | 126 | Pending |
+| DESK-07 | 126 | Pending |
+| DESK-08 | 127 | Pending |
 
 **Coverage:**
-
-- v1 requirements: 37 total
-- Mapped to phases: 37 (complete)
-- Unmapped: 0
+- v1 requirements: 27 total (4 GUARD + 1 CONFIG + 13 CORE + 1 PREP + 8 DESK)
+- Mapped to phases: 27 (GUARD-02/03/04 are cross-cutting, verified at every phase boundary)
+- Unmapped: 0 ✓
 
 ---
-*Requirements defined: 2026-06-17*
-*Last updated: 2026-06-17 — traceability table filled at roadmap creation*
+*Requirements defined: 2026-06-25*
+*Last updated: 2026-06-25 after Codex requirements pre-flight (READY WITH EDITS, 9 edits applied)*
