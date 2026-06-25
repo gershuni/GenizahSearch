@@ -668,6 +668,25 @@ class TestFolioBoundary:
             for c in ctxs:
                 c.stop()
 
+    def test_rotation_reset_on_folio_change(self):
+        """SEED-017 (#10): rotation resets to 0 on folio navigation (mirrors zoom).
+
+        The reset happens BEFORE the off-loop resolve, so it holds regardless of
+        whether the resolver returns a page or a boundary (None).
+        """
+        import asyncio
+        page = _make_page(p_num=1, total_pages=4, library_code="CUL")
+        v, mock_ui, ctxs = self._viewer_with_async_run(lambda *a, **kw: page)
+        try:
+            v._rotation = 90
+            v._zoom = 2.0
+            asyncio.run(v.update_content(direction=+1))
+            assert v._rotation == 0, "folio change must reset rotation to 0"
+            assert v._zoom == pytest.approx(1.0), "folio change must reset zoom to 1.0"
+        finally:
+            for c in ctxs:
+                c.stop()
+
 
 # ─── Task 1 (Plan 119-06): highlight_pattern + _highlight_html_line_safe ────────
 
@@ -1106,3 +1125,187 @@ class TestSuppressShelfmarkHeader:
         assert "max-height" in source, (
             "R2-3: anchor_viewer.py must apply max-height inline style when image_max_height is set"
         )
+
+
+# ─── SEED-017 (audit #10): Rotate + Fullscreen parity ─────────────────────────
+
+class TestRotation:
+    """SEED-017 (#10): per-instance rotation state + arithmetic (parity /browse + desktop).
+
+    The viewer methods call ui.run_javascript, so each method-under-test runs
+    inside a patched-`ui` context (mirrors the JS-mocked construction pattern; the
+    existing zoom tests simulate the arithmetic inline because they don't patch ui
+    around the call).
+    """
+
+    def _viewer(self) -> "Any":
+        return _make_viewer(
+            browse_resolver=lambda *a, **kw: None,
+            external_resolver=_noop_external,
+        )
+
+    def test_initial_rotation_is_0(self):
+        v = self._viewer()
+        assert v._rotation == 0
+
+    def test_rotate_right_increments_90(self):
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui"):
+            v.rotate_right()
+        assert v._rotation == 90
+
+    def test_rotate_left_wraps_to_270(self):
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui"):
+            v.rotate_left()
+        assert v._rotation == 270
+
+    def test_rotate_right_four_times_wraps_to_0(self):
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui"):
+            for _ in range(4):
+                v.rotate_right()
+        assert v._rotation == 0
+
+    def test_rotate_left_then_right_returns_to_0(self):
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui"):
+            v.rotate_left()
+            v.rotate_right()
+        assert v._rotation == 0
+
+    def test_zoom_reset_clears_rotation(self):
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui"):
+            v.rotate_right()
+            assert v._rotation == 90
+            v.zoom_reset()
+        assert v._rotation == 0
+        assert v._zoom == pytest.approx(1.0)
+
+    def test_apply_transform_sends_zoom_and_rotation(self):
+        """_apply_transform pushes mv.update(zoom, rotation) — rotation is NOT dropped."""
+        v = self._viewer()
+        with patch("web.components.anchor_viewer.ui") as mock_ui:
+            v._zoom = 1.5
+            v._rotation = 90
+            v._apply_transform()
+            assert mock_ui.run_javascript.called
+            js = mock_ui.run_javascript.call_args[0][0]
+        assert "mv.update(1.5, 90)" in js, f"expected mv.update(1.5, 90) in JS, got: {js!r}"
+        # Fallback transform must also carry rotation (was dropped before #10).
+        assert "rotate(90deg)" in js
+
+    def test_show_image_syncs_js_viewer_state(self):
+        """Codex MEDIUM: rendering a folio syncs the REUSED JS viewer state to the
+        current (rotation, zoom) so a stale rotation can't snap back on wheel/drag."""
+        v = self._viewer()
+        v._rotation = 0
+        v._zoom = 1.0
+        with patch("web.components.anchor_viewer.ui") as mock_ui:
+            v._show_image("/api/nli_image_by_sysid/990025143260205171?page=0")
+            calls = [c.args[0] for c in mock_ui.run_javascript.call_args_list if c.args]
+        joined = "\n".join(calls)
+        assert "mv.state.rotation" in joined, "must reset the reused JS viewer's rotation"
+        assert "mv.state.scale" in joined
+        assert "applyTransform" in joined
+
+    def test_build_img_html_carries_rotation(self):
+        """The inline <img> transform carries rotation so it renders rotated before JS sync."""
+        v = self._viewer()
+        v._rotation = 90
+        v._zoom = 1.0
+        html = v._build_img_html("/api/nli_image_by_sysid/990025143260205171?page=0")
+        assert "rotate(90deg)" in html
+
+
+class TestFullscreenControls:
+    """SEED-017 (#10): fullscreen toggle + toolbar/markup/CSS presence."""
+
+    def _viewer(self) -> "Any":
+        return _make_viewer(
+            browse_resolver=lambda *a, **kw: None,
+            external_resolver=_noop_external,
+        )
+
+    def test_fullscreen_handler_targets_scoped_pane(self):
+        """The fullscreen js_handler targets THIS viewer's .anchor-image-pane via the native API."""
+        v = self._viewer()
+        js = v._fullscreen_js_handler()
+        assert "requestFullscreen" in js
+        assert "exitFullscreen" in js
+        assert "anchor-image-pane" in js
+        assert v._viewer_id in js, "fullscreen must be scoped to this viewer's container"
+        # It must be a client-side arrow handler, not a server call.
+        assert js.lstrip().startswith("(e) =>"), "fullscreen must be a client-side js_handler"
+
+    def test_fullscreen_handler_has_webkit_fallback(self):
+        """Older Safari needs the webkit-prefixed API (graceful fallback)."""
+        v = self._viewer()
+        js = v._fullscreen_js_handler()
+        assert "webkitRequestFullscreen" in js
+        assert "webkitExitFullscreen" in js
+
+    def test_fullscreen_handler_no_high2_violation(self):
+        """HIGH-2: the fullscreen path introduces no direct-NLI fallback."""
+        v = self._viewer()
+        js = v._fullscreen_js_handler()
+        assert "handleImageError" not in js
+        assert "iiif.nli.org.il" not in js
+        assert "fetchFlIdsFromManifest" not in js
+
+    def test_fullscreen_bound_client_side_not_server(self):
+        """Codex HIGH: the Fullscreen API must run in the click's user-activation
+        window — bound via js_handler, NOT a server-side on_click round-trip."""
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        assert "js_handler=self._fullscreen_js_handler()" in source, (
+            "fullscreen button must be bound client-side via js_handler"
+        )
+        assert "on_click=self.toggle_fullscreen" not in source, (
+            "fullscreen must NOT use a server-side on_click (Fullscreen API needs user activation)"
+        )
+
+    def test_source_has_rotate_and_fullscreen_buttons(self):
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        assert 'icon="rotate_left"' in source
+        assert 'icon="rotate_right"' in source
+        assert 'icon="fullscreen"' in source
+        assert "_fullscreen_js_handler" in source
+
+    def test_source_wraps_image_in_anchor_image_pane(self):
+        import pathlib
+        source = pathlib.Path("web/components/anchor_viewer.py").read_text(encoding="utf-8")
+        assert "anchor-image-pane" in source, (
+            "#10: image + controls must live in .anchor-image-pane (the fullscreen target)"
+        )
+
+    def test_viewer_head_has_fullscreen_css(self):
+        from web.components.anchor_viewer import _VIEWER_HEAD
+        assert ".anchor-image-pane:fullscreen" in _VIEWER_HEAD, (
+            "#10: _VIEWER_HEAD must style the .anchor-image-pane fullscreen state"
+        )
+
+    def test_fullscreen_image_override_uses_important(self):
+        """Codex MED: Compare sets an INLINE max-height (40vh) on .image-container, which
+        beats a plain stylesheet rule — the fullscreen height override must use !important
+        or Compare panes stay capped at 40vh in fullscreen."""
+        import re
+        from web.components.anchor_viewer import _VIEWER_HEAD
+        # Find the standard :fullscreen .image-container block and assert !important on heights.
+        m = re.search(
+            r"\.anchor-image-pane:fullscreen\s+\.image-container\s*\{([^}]*)\}",
+            _VIEWER_HEAD,
+        )
+        assert m, ":fullscreen .image-container rule must exist"
+        block = m.group(1)
+        assert "max-height" in block and "!important" in block, (
+            "fullscreen .image-container max-height must be !important to beat Compare's inline cap"
+        )
+
+    def test_rotate_buttons_use_translated_strings(self):
+        """Rotate/Fullscreen aria/tooltips use keys present in TRANSLATIONS (no HE leak)."""
+        from genizah_translations import TRANSLATIONS
+        for key in ("Rotate left", "Rotate right", "Fullscreen"):
+            assert key in TRANSLATIONS, f"{key!r} must be translated (Hebrew UI would leak English)"
