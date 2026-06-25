@@ -8,6 +8,16 @@ from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtGui import QImage
 
 from genizah_core import Config, MetadataManager, get_logger
+# SEED-015: wire desktop image fetches into the shared NLI circuit breaker and
+# the shared NLI host TLS policy (#1 + M2).
+from shared.nli_circuit_breaker import (
+    NLI_CONNECT_TIMEOUT,
+    NLI_IMAGE_READ_TIMEOUT,
+    is_open as _nli_circuit_is_open,
+    record_failure as _nli_record_failure,
+    record_success as _nli_record_success,
+)
+from shared.nli_fetch import is_nli_host, nli_image_get
 
 logger = get_logger(__name__)
 
@@ -121,14 +131,58 @@ class ImageLoaderThread(QThread):
             self.load_failed.emit()
 
     def _download_bytes(self, target_url, headers):
-        """Helper to download bytes safely."""
+        """Helper to download bytes safely.
+
+        SEED-015: NLI hosts are gated by the shared circuit breaker (fail fast
+        during an outage instead of waiting the full read timeout on every
+        image) and feed it on failure. Non-NLI libraries (Cambridge/Oxford/JTS)
+        are never counted toward the NLI breaker and keep full TLS verification.
+        """
+        nli = is_nli_host(target_url)
+        # If NLI has been failing consistently, short-circuit without a network
+        # call. A non-NLI failure must never trip the NLI breaker, so only NLI
+        # hosts consult it.
+        if nli and _nli_circuit_is_open():
+            return None
+
+        # Short CONNECT timeout so a dead host fails in ~NLI_CONNECT_TIMEOUT s
+        # (not the old blanket 10-30s). Rosetta streams full-res TIFFs (7-15MB),
+        # which legitimately need a generous READ timeout.
+        if 'rosetta.nli.org.il' in target_url:
+            timeout = (NLI_CONNECT_TIMEOUT, 30)
+        elif nli:
+            timeout = (NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT)
+        else:
+            timeout = (NLI_CONNECT_TIMEOUT, 10)
+
         try:
-            # Rosetta stream returns large TIFF files (7-15MB) — allow longer timeout
-            timeout = 30 if 'rosetta.nli.org.il' in target_url else 10
-            resp = requests.get(target_url, headers=headers, timeout=timeout, stream=True, verify=False)
-            if self._cancelled: return None
+            # nli_image_get applies the host TLS policy (verification disabled,
+            # warning suppressed host-scoped, only for NLI's legacy cert chain;
+            # full TLS verification for every other library host).
+            resp = nli_image_get(target_url, headers=headers, timeout=timeout, stream=True)
+            if self._cancelled:
+                return None
             if resp.status_code == 200:
+                if nli:
+                    _nli_record_success(path='desktop_image_loader')
                 return resp.content
+            # Non-200 (#36 observability): log, and feed the breaker for NLI 429/5xx.
+            logger.warning("Image download non-200 (%s) for %s", resp.status_code, target_url)
+            if nli:
+                if resp.status_code == 429:
+                    _nli_record_failure(failure_type='429', path='desktop_image_loader')
+                elif 500 <= resp.status_code < 600:
+                    _nli_record_failure(failure_type='5xx', path='desktop_image_loader')
+            return None
+        except requests.exceptions.Timeout as e:
+            logger.warning("Image download timeout for %s: %s", target_url, e)
+            if nli:
+                _nli_record_failure(failure_type='timeout', path='desktop_image_loader')
+            return None
+        except requests.exceptions.ConnectionError as e:
+            logger.warning("Image download connection error for %s: %s", target_url, e)
+            if nli:
+                _nli_record_failure(failure_type='connection_error', path='desktop_image_loader')
             return None
         except Exception as e:
             logger.warning("Image download failed for %s: %s", target_url, e)
