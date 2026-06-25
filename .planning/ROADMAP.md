@@ -183,7 +183,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 | 119. Candidates, Compare & Visual Similarity | 11/11 | Complete | 2026-06-19 |
 | 120. Actions & Persistence | 7/8 | Complete | 2026-06-21 |
 | 121. i18n Polish | 3/3 | Complete | 2026-06-21 |
-| 122. Config Enabler | 1/1 | Complete   | 2026-06-25 |
+| 122. Config Enabler | 1/1 | Complete    | 2026-06-25 |
 | 123. Core Leaf Modules | 0/TBD | Not started | - |
 | 124. Core Metadata & Index | 0/TBD | Not started | - |
 | 125. Core Engines | 0/TBD | Not started | - |
