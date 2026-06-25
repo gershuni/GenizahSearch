@@ -213,6 +213,17 @@ def test_find_button_green_with_red_stop():
     assert "#c0392b" in _SRC   # red Stop
 
 
+def test_cancel_renders_partial_results_and_guards_generation():
+    # The core returns PARTIAL results on cancel (catches InterruptedError), emitted
+    # normally — so _on_results must render `raw` (not discard it) and a generation
+    # guard drops stale results from a superseded search.
+    assert "def _on_results(self, raw: list, gen=None)" in _SRC
+    assert "self._search_gen" in _SRC
+    assert "_search_was_partial" in _SRC
+    # Enter routes through the Find/Stop toggle so it can't start an overlapping search.
+    assert "self._on_find_clicked," in _SRC
+
+
 def test_responsa_label_matches_main_search():
     # The Responsa combo item now uses tr("Responsa") (-> "פרויקט השו\"ת"),
     # matching the main search — NOT the prior tr("Responsa-style").

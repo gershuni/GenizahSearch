@@ -2501,6 +2501,8 @@ if _QT_AVAILABLE:
             # SEED-024 follow-up: Stop-search toggle state (parity with main search)
             self._is_searching = False
             self._search_cancelled = False
+            self._search_was_partial = False  # tags the result count as partial
+            self._search_gen = 0              # latest-wins guard for late thread results
             # Phase 109 VS source state (G-04 toggle model)
             self._vs_cands = None         # list[Candidate] from VS load, or None
             self._vs_on = False           # G-04: the single toggle's checked state (bool)
@@ -2518,7 +2520,7 @@ if _QT_AVAILABLE:
             # SEED-024: allow_modes=True surfaces the 5-mode selector (web parity);
             # the other-side builder below stays Responsa-style only.
             self.builder = JoinQueryBuilder(
-                self.do_search,
+                self._on_find_clicked,  # SEED-024 fu: Enter routes through the Find/Stop toggle
                 first_hint=tr("word(s) on this line…"),
                 allow_modes=True,
             )
@@ -2551,7 +2553,7 @@ if _QT_AVAILABLE:
             ob.setSpacing(2)
             # RR-5: allow_page_position=False on the other-side builder
             self.other_builder = JoinQueryBuilder(
-                self.do_search,
+                self._on_find_clicked,  # SEED-024 fu: Enter routes through the Find/Stop toggle
                 first_hint=tr("word(s) required on the OTHER side…"),
                 allow_page_position=False,
             )
@@ -2830,39 +2832,41 @@ if _QT_AVAILABLE:
         def _stop_search(self):
             """Cancel the running search (parity with the main-search Stop button).
 
-            Sets the SearchThread cancel flag (the core checks it via its progress
-            callback and raises InterruptedError, emitting [] to _on_results, which
-            keeps any already-shown candidates as partial results). Falls back to
-            terminate() if the thread does not stop within 5s.
+            Sets the SearchThread cancel flag; the core catches the cancel and RETURNS
+            the partial results it found so far, which the thread emits normally — so
+            _on_results renders them (flagging the count partial). Only the terminate()
+            fallback (thread unresponsive >5s) emits nothing, so a stopped status is set
+            here for that path. Returns early if the thread already finished, so a
+            completed (full) result payload still queued isn't mis-tagged as partial.
             """
             th = self._search_thread
+            if th is None or not th.isRunning():
+                return  # already finished — let the queued _on_results deliver results
             self._search_cancelled = True
             try:
                 self.status.setText(tr("Stopping…"))
             except RuntimeError:
                 pass
-            if th is not None and th.isRunning():
-                try:
-                    th.cancel_flag = True
-                    th.wait(5000)
-                    if th.isRunning():
-                        th.terminate()
-                        th.wait()
-                except Exception:
-                    pass
-            self._is_searching = False
-            self._set_find_button_searching(False)
-            # Final status (covers the terminate() path where _on_results may not
-            # fire; if it does fire it sets the same / partial-tagged text).
+            terminated = False
             try:
-                if self.results:
-                    self.status.setText(
-                        tr("Search stopped.") + " (" + tr("Partial results") + ")"
-                    )
-                else:
-                    self.status.setText(tr("Search stopped."))
-            except RuntimeError:
+                th.cancel_flag = True
+                th.wait(5000)
+                if th.isRunning():
+                    th.terminate()
+                    th.wait()
+                    terminated = True
+            except Exception:
                 pass
+            if terminated:
+                # No results were emitted — reset button + status here (the graceful
+                # path is handled by the queued _on_results instead).
+                self._is_searching = False
+                self._search_cancelled = False
+                self._set_find_button_searching(False)
+                try:
+                    self.status.setText(tr("Search stopped."))
+                except RuntimeError:
+                    pass
 
         def do_search(self):
             """Build and launch the main search (R-01 — ONE engine call per find).
@@ -2923,19 +2927,28 @@ if _QT_AVAILABLE:
             # a red Stop (cancellable), rather than just being disabled.
             self._is_searching = True
             self._search_cancelled = False
+            self._search_was_partial = False
             self._set_find_button_searching(True)
             try:
                 self.status.setText(tr("working…"))
             except RuntimeError:
                 pass
 
-            # Cancel any previous search thread
-            if self._search_thread is not None:
+            # Cancel any previous search thread COOPERATIVELY — quit() does not stop a
+            # SearchThread mid-execute_search. Bump the generation so any late results
+            # from the prior thread are dropped by _on_results' guard.
+            if self._search_thread is not None and self._search_thread.isRunning():
                 try:
-                    self._search_thread.quit()
+                    self._search_thread.cancel_flag = True
+                    self._search_thread.wait(3000)
+                    if self._search_thread.isRunning():
+                        self._search_thread.terminate()
+                        self._search_thread.wait()
                 except Exception:
                     pass
-                self._search_thread = None
+            self._search_thread = None
+            self._search_gen += 1
+            _gen = self._search_gen
 
             # R-01: page_position forwarded as text_position; genizah scope only.
             # SEED-024: core_mode is the mode-aware string (was hardcoded "exact").
@@ -2948,30 +2961,26 @@ if _QT_AVAILABLE:
                 text_position=page_pos,
                 corpus_scope="genizah",
             )
-            self._search_thread.results_signal.connect(self._on_results)
+            self._search_thread.results_signal.connect(
+                lambda raw, g=_gen: self._on_results(raw, g)
+            )
             self._search_thread.start()
 
-        def _on_results(self, raw: list):
+        def _on_results(self, raw: list, gen=None):
             """Handle raw engine results; dedup and optionally start cross-side worker."""
             from shared.joins_lab import compose, detect_self_match, dedup_candidates
-            # SEED-024 follow-up: leave the searching state (Stop → Find Candidates).
+            # SEED-024 follow-up: drop stale results from a superseded/cancelled search.
+            if gen is not None and gen != self._search_gen:
+                return
+            # Leave the searching state (Stop → Find Candidates).
             self._is_searching = False
             self._set_find_button_searching(False)
-
-            # If the user pressed Stop, the thread emits [] — keep whatever was already
-            # shown (partial results) rather than wiping the grid, and tag the status.
-            if self._search_cancelled:
-                self._search_cancelled = False
-                try:
-                    if self.results:
-                        self.status.setText(
-                            tr("Search stopped.") + " (" + tr("Partial results") + ")"
-                        )
-                    else:
-                        self.status.setText(tr("Search stopped."))
-                except RuntimeError:
-                    pass
-                return
+            # A user Stop makes the core RETURN partial results (execute_search catches
+            # InterruptedError and returns what it found so far, emitted normally) — so
+            # render `raw` as usual and just flag the count as partial (apply_filters
+            # appends the "(Partial results)" tag).
+            self._search_was_partial = bool(self._search_cancelled)
+            self._search_cancelled = False
 
             # Anchor is excluded by default (adapted_decision 11: hardcoded)
             include_self = False
@@ -3417,8 +3426,13 @@ if _QT_AVAILABLE:
                     )
                     self.vs_hint.setVisible(False)   # combined message already carries "turn off" advice
                 else:
+                    # SEED-024 fu: tag the count as partial after a user Stop.
+                    _partial = (
+                        " (" + tr("Partial results") + ")"
+                        if getattr(self, "_search_was_partial", False) else ""
+                    )
                     self.status.setText(
-                        f"{len(filtered)}/{len(self.results)} " + tr("shown")
+                        f"{len(filtered)}/{len(self.results)} " + tr("shown") + _partial
                     )
                     # G-13.2: hint whenever toggle is ON and results are shown (pure-VS OR intersection).
                     self.vs_hint.setVisible(bool(getattr(self, "_vs_on", False)) and bool(filtered))
