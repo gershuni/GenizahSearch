@@ -26,7 +26,7 @@ created: 2026-06-25
 | **Estimated runtime** | quick ~15s · full suite a few min |
 
 **Windows / local executor notes (from RQ-5):**
-- `PYTHONUTF8=1` required (cp1255 console chokes on emoji/Hebrew in output).
+- `PYTHONUTF8=1` required (cp1255 console chokes on emoji/Hebrew in output). **Shell syntax:** Git Bash → `PYTHONUTF8=1 pytest …`; PowerShell (primary) → `$env:PYTHONUTF8='1'; pytest …` (the inline `VAR=value cmd` prefix is a PowerShell parser error).
 - Do **NOT** set `GITHUB_ACTIONS=true` locally — it skips `test_my_library_tab_*.py` which exercise the `Config` monkeypatch (D-14) identity guarantee.
 - Do **NOT** use `-n auto` (Tantivy loads its index per worker → OOM); bare `pytest` or `-n 2` max.
 - `QT_QPA_PLATFORM=offscreen` only if running GUI-marked tests locally without a display (not needed for this phase's quick smoke — no Qt).
