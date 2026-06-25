@@ -737,27 +737,56 @@ if _QT_AVAILABLE:
         def run(self):
             import requests
             import genizah_core
+            # SEED-015: same breaker + host TLS policy as desktop/image_loader.py.
+            from shared.nli_circuit_breaker import (
+                NLI_CONNECT_TIMEOUT,
+                NLI_IMAGE_READ_TIMEOUT,
+                is_open as _nli_circuit_is_open,
+                record_failure as _nli_record_failure,
+                record_success as _nli_record_success,
+            )
+            from shared.nli_fetch import is_nli_host, nli_image_get
 
             for i, sid in enumerate(self.sids):
                 if self._cancel:
                     return
                 qimg = None
+                nli = False
                 try:
                     if sid:
                         url = self.wb.meta_mgr.get_thumbnail(sid, size=320)
                         if url:
-                            resp = requests.get(
+                            nli = is_nli_host(url)
+                            # NLI down -> fail fast, no network. Non-NLI hosts
+                            # never consult the NLI breaker.
+                            if nli and _nli_circuit_is_open():
+                                self.resolved.emit(self._gen, i, None)
+                                continue
+                            resp = nli_image_get(
                                 url,
                                 headers=genizah_core.Config.HTTP_HEADERS,
-                                timeout=5,
-                                verify=False,
+                                timeout=(NLI_CONNECT_TIMEOUT, NLI_IMAGE_READ_TIMEOUT),
                             )
                             if resp.status_code == 200:
+                                if nli:
+                                    _nli_record_success(path='join_workbench_thumb')
                                 # QImage on a worker thread is OK (must-fix #8: NOT QPixmap)
                                 candidate = QImage()
                                 candidate.loadFromData(resp.content)
                                 if not candidate.isNull():
                                     qimg = candidate
+                            elif nli and resp.status_code == 429:
+                                _nli_record_failure(failure_type='429', path='join_workbench_thumb')
+                            elif nli and 500 <= resp.status_code < 600:
+                                _nli_record_failure(failure_type='5xx', path='join_workbench_thumb')
+                except requests.exceptions.Timeout:
+                    if nli:
+                        _nli_record_failure(failure_type='timeout', path='join_workbench_thumb')
+                    qimg = None
+                except requests.exceptions.ConnectionError:
+                    if nli:
+                        _nli_record_failure(failure_type='connection_error', path='join_workbench_thumb')
+                    qimg = None
                 except Exception:
                     qimg = None
                 self.resolved.emit(self._gen, i, qimg)
