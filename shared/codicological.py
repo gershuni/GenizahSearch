@@ -14,7 +14,7 @@ import re
 from shared.browse_map_utils import natural_sort_key
 from shared.config import Config
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("genizah." + __name__)
 
 
 class CodicologicalManager:

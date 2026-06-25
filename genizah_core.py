@@ -1,4 +1,4 @@
-"""Core search, indexing, metadata, and AI helpers for the Genizah project."""
+﻿"""Core search, indexing, metadata, and AI helpers for the Genizah project."""
 
 # -*- coding: utf-8 -*-
 # genizah_core.py
@@ -4638,73 +4638,6 @@ def _build_wildcard_regex(component: dict) -> str:
         return ''
 
     return ''
-
-
-
-def _make_flex_spacing_pattern(term: str) -> str:
-    """Create a flex-spacing regex pattern for a term.
-
-    Inserts \\s* between each character of the term, allowing flexible
-    whitespace between characters (handles OCR/HTR word boundary errors).
-
-    Example: "abc" -> "a\\s*b\\s*c"
-    """
-    if not term:
-        return term
-    chars = [re.escape(ch) for ch in term]
-    return r'\s*'.join(chars)
-
-
-def _build_wildcard_regex(component: dict) -> str:
-    """Build a regex pattern for a component with wildcard type.
-
-    Returns the regex string (NOT compiled) for the wildcard pattern.
-    """
-    wildcard = component.get('wildcard')
-    wildcard_pattern = component.get('wildcard_pattern')
-
-    if wildcard == 'pattern' and wildcard_pattern:
-        # Character pattern: *a*b*c* -> \S*a\S*b\S*c\S*
-        # Split on '*', escape each part, join with \S*
-        parts = wildcard_pattern.split('*')
-        escaped_parts = [re.escape(p) for p in parts]
-        return r'\S*'.join(escaped_parts)
-
-    if wildcard == 'suffix':
-        # Suffix wildcard: term\S*
-        # For Hebrew suffix wildcards, the trailing letter may be a sofit (final-form)
-        # letter. When followed by \S*, the sofit form will never match text where
-        # the stem continues with more letters (Hebrew uses normal form mid-word).
-        # Replace trailing sofit with a character class matching BOTH forms.
-        # Example: שלום -> שלו[םמ]\S* (matches both standalone שלום and continuation שלומ-)
-        regex_terms = component.get('regex_terms', [])
-        if regex_terms:
-            # Sort by length descending, escape
-            sorted_terms = sorted(set(regex_terms), key=len, reverse=True)
-            escaped = []
-            for t in sorted_terms:
-                if t and t[-1] in _SOFIT_TO_NORMAL:
-                    # Replace trailing sofit with char class matching both forms
-                    normal = _SOFIT_TO_NORMAL[t[-1]]
-                    sofit = t[-1]
-                    base = re.escape(t[:-1])
-                    escaped.append(f'{base}[{sofit}{normal}]' + r'\S*')
-                else:
-                    escaped.append(re.escape(t) + r'\S*')
-            return f"({'|'.join(escaped)})"
-        return ''
-
-    if wildcard == 'prefix':
-        # Prefix wildcard: \S*term
-        regex_terms = component.get('regex_terms', [])
-        if regex_terms:
-            sorted_terms = sorted(set(regex_terms), key=len, reverse=True)
-            escaped = [r'\S*' + re.escape(t) for t in sorted_terms]
-            return f"({'|'.join(escaped)})"
-        return ''
-
-    return ''
-
 
 
 def _add_bracket_variants(term: str) -> list:

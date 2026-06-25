@@ -19,7 +19,7 @@ from genizah_translations import TRANSLATIONS
 
 from shared.config import Config
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("genizah." + __name__)
 
 
 def _tr(text: str) -> str:

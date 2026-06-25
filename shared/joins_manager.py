@@ -19,7 +19,7 @@ import time
 from shared.browse_map_utils import normalize_shelfmark
 from shared.config import Config
 
-LOGGER = logging.getLogger(__name__)
+LOGGER = logging.getLogger("genizah." + __name__)
 
 
 class JoinsManager:
