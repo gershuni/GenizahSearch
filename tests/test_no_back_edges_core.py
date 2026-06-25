@@ -35,6 +35,7 @@ EXTRACTED_MODULES = [
     "shared/responsa.py",
     "shared/codicological.py",
     "shared/joins_manager.py",
+    "shared/lists_manager.py",
 ]
 
 # Compound statement types whose bodies run at import time
@@ -426,3 +427,29 @@ def test_joins_manager_standalone_import():
     # Smoke: JOINS_FILE class attribute is set (Pitfall 3 guard — Config must be importable)
     assert hasattr(shared.joins_manager.JoinsManager, 'JOINS_FILE')
     assert 'joins_cache.pkl' in shared.joins_manager.JoinsManager.JOINS_FILE
+
+
+# ---------------------------------------------------------------------------
+# Phase 123: lists_manager (CORE-05)
+# ---------------------------------------------------------------------------
+
+def test_lists_manager_identity():
+    """CORE-05: genizah_core.ListsManager is the same class as shared.lists_manager.ListsManager."""
+    import shared.lists_manager
+    import genizah_core
+
+    assert shared.lists_manager.ListsManager is genizah_core.ListsManager, (
+        "genizah_core.ListsManager is not the same object as "
+        "shared.lists_manager.ListsManager."
+    )
+
+
+def test_lists_manager_standalone_import():
+    """CORE-05 smoke: shared.lists_manager can be imported and ListsManager instantiates."""
+    import shared.lists_manager
+    assert hasattr(shared.lists_manager, 'ListsManager')
+    # Smoke: _tr helper is present (replacing tr() calls in methods)
+    assert hasattr(shared.lists_manager, '_tr')
+    # Smoke: instantiate with no arguments
+    mgr = shared.lists_manager.ListsManager()
+    assert mgr is not None
