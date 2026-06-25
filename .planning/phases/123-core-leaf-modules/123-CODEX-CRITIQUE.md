@@ -41,4 +41,25 @@ Task-7 read_first/done still stale). Plus 5 new findings — all verified agains
 | N5 | MED | RESEARCH Q1 "engine-side (NOT moved)" table still listed `_has_line_break_syntax`/`LineGroup`/`_parse_line_break_query`, contradicting Q2 + plan (which MOVE them) | CONFIRMED | RESEARCH Q1 table corrected with a CORRECTION note pointing to Q2/plan as authoritative. |
 
 ## Commits (Round 2)
-- Committed: see git log `docs(123): apply Codex round-2 review fixes`.
+- Committed: `9106563c docs(123): apply Codex round-2 review fixes`.
+
+---
+
+# Round 3 (convergence check)
+
+**Verdict:** REQUEST CHANGES. R1 F1/F3/F5 + R2 N1/N2/N3 RESOLVED. 3 issues remained — including a
+**regression introduced by the round-2 edits** (good catch for the convergence round). All verified
+against live code and fixed.
+
+| # | Sev | Finding | Verified | Resolution |
+|---|-----|---------|----------|------------|
+| F1 | **BLOCKER** | My round-2 removal of module-level `time` from `lists_manager` was WRONG: `export_list` calls `time.time()` and `shelfmark_sort_key` calls `re.split()` with NO local import — they relied on genizah_core's module-level `time`/`re`. Also `re` was never added. | CONFIRMED — `time.time()` at many sites incl. export_list (no local import); `re.split()` at shelfmark_sort_key (zero local `import re`) | Plan Task 7 + RESEARCH Module 7: require BOTH module-level `import time` AND `import re`; noted a bare import-smoke won't catch it — the full suite (exercises those methods) is the gate. |
+| F2 | HIGH | My round-2 "KEEP `List` (17 uses)" was wrong — the only `List[` outside the moved clusters are DOCSTRINGS (~:5514-5516). `List` goes dead after Task 4. | CONFIRMED — 3 outside-cluster `List[` all in a docstring | Plan Tasks 3/4 + RESEARCH: cleanup is now ruff-F401-driven (ground truth); `List` removed after Task 4, `Optional` kept; `List` kept at Task 3 (responsa not yet moved). |
+| F3 | MED | RESEARCH Summary (lines ~67-72) still listed `_SOFIT_TO_NORMAL`/`_has_line_break_syntax`/`LineGroup`/`_parse_line_break_query` as engine-side, contradicting the plan + Q1 correction. | CONFIRMED | RESEARCH Summary corrected to match (those 4 MOVE). |
+
+**Lesson reinforced:** analytically-derived import lists are unreliable for a 12.5K-line god file; the
+durable safety net is (a) derive imports from the actual copied bodies and (b) the full-suite gate at
+every commit boundary (which exercises the methods a bare import-smoke can't). Both are now in the plan.
+
+## Commits (Round 3)
+- Committed: see git log `docs(123): apply Codex round-3 convergence fixes`.

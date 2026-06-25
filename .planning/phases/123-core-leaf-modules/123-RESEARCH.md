@@ -67,9 +67,11 @@ The single highest-risk open question — the exact boundary of `shared/responsa
 functions (lines 5865–7044) form the cluster, minus a narrow set of engine-coupled helpers
 (`_add_bracket_variants`, `_query_has_brackets`, `_strip_brackets`, `_index_has_field`,
 `content_search_staleness_messages`, `MARK_TOLERANT_INSERTER`, `make_mark_tolerant_pattern`,
-`_SOFIT_TO_NORMAL`, `_build_wildcard_regex`, `_make_flex_spacing_pattern`, `_has_line_break_syntax`,
-`LineGroup`, `_parse_line_break_query`) that are called from `SearchEngine.build_tantivy_query` /
-`build_regex_pattern` and stay in `genizah_core.py` until Phase 125.
+`_build_wildcard_regex`, `_make_flex_spacing_pattern`) that are called from
+`SearchEngine.build_tantivy_query` / `build_regex_pattern` and stay in `genizah_core.py` until Phase 125.
+**(Codex round-3 F3 correction:** `_SOFIT_TO_NORMAL`, `_has_line_break_syntax`, `LineGroup`, and
+`_parse_line_break_query` are NOT engine-side — they MOVE to `shared/responsa.py` and the engine reaches
+them via the genizah_core shim; see Q1 correction note + Q2 Module 5 + plan Task 4, which are authoritative.)
 
 Two non-trivial discoveries: (1) `_load_ie_volume_map` in CORE-06 uses `Config.INTERNAL_DIR` —
 it already resolves paths via `Config` (which lives in `shared.config`) rather than `__file__`, so
@@ -434,15 +436,20 @@ LOGGER = logging.getLogger(__name__)
 ```python
 import os
 import pickle
+import time                          # export_list() calls time.time() with NO local import (Codex round-3 — REQUIRED)
+import re                           # shelfmark_sort_key() calls re.split() with NO local import (Codex round-3 — REQUIRED)
 import logging
 from shared.config import Config    # for Config.INDEX_DIR
 from genizah_translations import TRANSLATIONS   # for inline _tr() helper
 
 LOGGER = logging.getLogger(__name__)
 ```
-> **CORRECTION (Codex F2):** do NOT add a module-level `import time` — `ListsManager` imports `time`
-> INSIDE its methods, so a module-level import is unused → F401. (Contrast `joins_manager`, which DOES
-> need module-level `time`.) Derive imports from the actual copied body.
+> **CORRECTION (Codex round-3 BLOCKER, supersedes the round-2 note):** `shared/lists_manager.py` DOES need
+> module-level `import time` AND `import re`. Although several methods do `import time` locally, `export_list`
+> uses `time.time()` and `shelfmark_sort_key` uses `re.split()` with NO local import — today they rely on
+> genizah_core's module-level `time`/`re`. Omitting them NameErrors when those methods run (a bare
+> `import shared.lists_manager` smoke test will NOT catch it — the full suite is the real gate). The
+> redundant local `import time` statements in other methods are harmless verbatim copies.
 
 **`tr()` in ListsManager:** Used in methods at :11728, :12243, :12354–12367. All are inside
 method bodies — can be lazy-imported inside those methods:
