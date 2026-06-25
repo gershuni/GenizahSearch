@@ -4493,7 +4493,7 @@ TRANSLATIONS.update({
     "Type a query for the joining fragment, then Find Candidates.":
         "הקלידו שאילתה עבור הקטע המצורף, ואז מִצאו מועמדים.",
     "Responsa-style: structured line-by-line builder. Exact / Variants / Fuzzy / Regex: a single free-text query (like the main search).":
-        "סגנון שו״ת: בונה שאילתה מובְנה שורה־אחר־שורה. מדויק / צורות / מקורב / Regex: שאילתת טקסט חופשי אחת (כמו החיפוש הראשי).",
+        "פרויקט השו״ת: בונה שאילתה מובְנה שורה־אחר־שורה. מדויק / צורות / מקורב / Regex: שאילתת טקסט חופשי אחת (כמו החיפוש הראשי).",
     "Export XLSX":
         "ייצוא XLSX",
     "Export candidates to an Excel workbook — checked rows, or all shown if none checked":
@@ -4506,4 +4506,9 @@ TRANSLATIONS.update({
         "נשמר:",
     "candidates":
         "מועמדים",
+    # SEED-024 follow-up — Stop-search (parity with the main desktop search).
+    "Stopping…":
+        "עוצר…",
+    "Search stopped.":
+        "החיפוש הופסק.",
 })

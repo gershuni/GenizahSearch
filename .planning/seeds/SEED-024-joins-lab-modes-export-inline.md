@@ -72,6 +72,32 @@ ruff clean on changed files. Codex diff review, then PR. **Human UAT:** desktop 
 mode (single-line appears for non-Responsa), run a Fuzzy/Variants/Regex find, toggle inline options,
 export candidates (selection vs all) to a 4-sheet xlsx.
 
+## Follow-up — UAT round 1 (2026-06-25, branch `audit/seed-024-followups`)
+
+Desktop UAT on the merged feature surfaced four items, all addressed:
+
+1. **Fuzzy "got stuck"** → added a **Stop** capability. The "Find Candidates" button is now a
+   toggle (`_on_find_clicked`): while a search runs it turns into a red **Stop** that sets the
+   `SearchThread.cancel_flag` (the core checks it via its progress callback → `InterruptedError`),
+   exactly like the main desktop search. A heavy whole-corpus fuzzy is now cancellable instead of
+   appearing frozen.
+2. **Stop + partial results parity** — on Stop the thread emits `[]`; `_on_results` detects the
+   cancel and **keeps the already-shown candidates** (partial) rather than wiping the grid, tagging
+   the status `Search stopped. (Partial results)`. (Single-pass searches can't yield mid-flight
+   content beyond what was already rendered — same as the main desktop regular search.)
+3. **Green button** — `btn_find` is now green (`#27ae60`) idle / red (`#c0392b`) while searching,
+   matching the main-search button.
+4. **Responsa label** — the combo item now uses `tr("Responsa")` (→ `פרויקט השו"ת`, matching the
+   main search) instead of `tr("Responsa-style")` (→ `בסגנון השו"ת`). Desktop-only — the shared
+   `"Responsa-style"` translation (used by the **web** joins lab + its render-smoke test) is untouched.
+5. **XLSX filename** includes the normalized anchor shelfmark:
+   `joins_candidates_<shelf>.xlsx` (e.g. `joins_candidates_T-S_NS_324.11.xlsx`) via
+   `normalize_shelfmark_for_filename()`.
+
+Tests: `normalize_shelfmark_for_filename` + Stop/colour/label source guards added to
+`tests/test_joins_lab_modes_export.py`; a button-toggle construct test added to
+`tests/test_join_workbench_construct.py`; 2 new HE i18n keys. Targeted suites green, ruff clean.
+
 ## Done-when
 
 Desktop Joins Lab offers the 5 web modes, edits options inline (no dialog), and exports candidates to

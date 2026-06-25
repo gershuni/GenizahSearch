@@ -37,6 +37,7 @@ __all__ = [
     "JOINS_LAB_MODE_KEYS",
     "core_mode_for_join_mode",
     "build_candidate_export_rows",
+    "normalize_shelfmark_for_filename",
     # Plan 02 window class
     "JoinWorkbenchWindow",
     # Plan 03 (108-02) query builder + executor adapter
@@ -561,6 +562,23 @@ def build_candidate_export_rows(cands):
     return rows
 
 
+def normalize_shelfmark_for_filename(shelf: str) -> str:
+    """Normalize a shelfmark for use in an export filename (SEED-024 follow-up).
+
+    Whitespace/slashes/colons → underscores; keeps letters (incl. Hebrew), digits,
+    dot and hyphen; collapses repeats and trims stray underscores. Returns '' for
+    a blank shelfmark. E.g. 'T-S NS 324.11' → 'T-S_NS_324.11'.
+    """
+    import re as _re
+    s = (shelf or "").strip()
+    if not s:
+        return ""
+    s = _re.sub(r"\s+", "_", s)
+    s = _re.sub(r"[^\w.\-]", "_", s, flags=_re.UNICODE)
+    s = _re.sub(r"_+", "_", s).strip("_")
+    return s
+
+
 # ---------------------------------------------------------------------------
 # Plan 02 — Qt imports and QThread workers.
 # These are placed BELOW the pure helpers so the module can still be imported
@@ -976,7 +994,7 @@ if _QT_AVAILABLE:
                 self.mode_combo = QComboBox()
                 # Index order MUST match JOINS_LAB_MODE_KEYS. Read via get_mode()
                 # (index-driven — NEVER currentText(), which is a translated label).
-                self.mode_combo.addItem(tr("Responsa-style"))  # 0 responsa
+                self.mode_combo.addItem(tr("Responsa"))         # 0 responsa (פרויקט השו"ת — parity w/ main search)
                 self.mode_combo.addItem(tr("Exact"))            # 1 exact
                 self.mode_combo.addItem(tr("Variants"))         # 2 variants
                 self.mode_combo.addItem(tr("Fuzzy"))            # 3 fuzzy
@@ -2480,6 +2498,11 @@ if _QT_AVAILABLE:
             self._enrich_worker = None
             self._retired_workers = []  # crash-safety: running _EnrichWorkers awaiting finished() (0xC0000409)
             self._search_thread = None
+            # SEED-024 follow-up: Stop-search toggle state (parity with main search)
+            self._is_searching = False
+            self._search_cancelled = False
+            self._search_was_partial = False  # tags the result count as partial
+            self._search_gen = 0              # latest-wins guard for late thread results
             # Phase 109 VS source state (G-04 toggle model)
             self._vs_cands = None         # list[Candidate] from VS load, or None
             self._vs_on = False           # G-04: the single toggle's checked state (bool)
@@ -2497,7 +2520,7 @@ if _QT_AVAILABLE:
             # SEED-024: allow_modes=True surfaces the 5-mode selector (web parity);
             # the other-side builder below stays Responsa-style only.
             self.builder = JoinQueryBuilder(
-                self.do_search,
+                self._on_find_clicked,  # SEED-024 fu: Enter routes through the Find/Stop toggle
                 first_hint=tr("word(s) on this line…"),
                 allow_modes=True,
             )
@@ -2530,7 +2553,7 @@ if _QT_AVAILABLE:
             ob.setSpacing(2)
             # RR-5: allow_page_position=False on the other-side builder
             self.other_builder = JoinQueryBuilder(
-                self.do_search,
+                self._on_find_clicked,  # SEED-024 fu: Enter routes through the Find/Stop toggle
                 first_hint=tr("word(s) required on the OTHER side…"),
                 allow_page_position=False,
             )
@@ -2566,7 +2589,12 @@ if _QT_AVAILABLE:
             # Find Candidates button (always visible; with toggle ON + term, user presses Find
             # to run the text search; toggle ON + empty box auto-assembles on toggle)
             self.btn_find = QPushButton(tr("Find Candidates"))
-            self.btn_find.clicked.connect(self.do_search)
+            # SEED-024 follow-up: green like the main-search button; toggles to a red
+            # "Stop" while a search is running (parity with the main desktop search).
+            self.btn_find.setStyleSheet(
+                "background-color: #27ae60; color: white; font-weight: bold;"
+            )
+            self.btn_find.clicked.connect(self._on_find_clicked)
             src_row.addWidget(self.btn_find)
 
             rv.addLayout(src_row)
@@ -2778,6 +2806,72 @@ if _QT_AVAILABLE:
 
         # --- Search flow ---
 
+        def _set_find_button_searching(self, searching: bool):
+            """Toggle the Find/Stop button label + colour (SEED-024 follow-up)."""
+            try:
+                if searching:
+                    self.btn_find.setText(tr("Stop"))
+                    self.btn_find.setStyleSheet(
+                        "background-color: #c0392b; color: white; font-weight: bold;"
+                    )
+                else:
+                    self.btn_find.setText(tr("Find Candidates"))
+                    self.btn_find.setStyleSheet(
+                        "background-color: #27ae60; color: white; font-weight: bold;"
+                    )
+            except RuntimeError:
+                pass
+
+        def _on_find_clicked(self):
+            """Find Candidates button: start a search, or stop the running one."""
+            if self._is_searching:
+                self._stop_search()
+            else:
+                self.do_search()
+
+        def _stop_search(self):
+            """Cancel the running search (parity with the main-search Stop button).
+
+            Sets the SearchThread cancel flag; the core catches the cancel and RETURNS
+            the partial results it found so far, which the thread emits normally — so
+            _on_results renders them (flagging the count partial). Only the terminate()
+            fallback (thread unresponsive >5s) emits nothing, so a stopped status is set
+            here for that path. Returns early if the thread already finished, so a
+            completed (full) result payload still queued isn't mis-tagged as partial.
+            """
+            th = self._search_thread
+            if th is None or not th.isRunning():
+                return  # already finished — let the queued _on_results deliver results
+            self._search_cancelled = True
+            try:
+                self.status.setText(tr("Stopping…"))
+            except RuntimeError:
+                pass
+            terminated = False
+            try:
+                th.cancel_flag = True
+                th.wait(5000)
+                if th.isRunning():
+                    th.terminate()
+                    th.wait()
+                    terminated = True
+            except Exception:
+                pass
+            if terminated:
+                # Bump the generation so any results the killed thread queued in the
+                # tiny race window before terminate() are dropped by _on_results' guard
+                # (Codex nit) — they'd otherwise overwrite "Search stopped." untagged.
+                self._search_gen += 1
+                # No results will be delivered — reset button + status here (the
+                # graceful path is handled by the queued _on_results instead).
+                self._is_searching = False
+                self._search_cancelled = False
+                self._set_find_button_searching(False)
+                try:
+                    self.status.setText(tr("Search stopped."))
+                except RuntimeError:
+                    pass
+
         def do_search(self):
             """Build and launch the main search (R-01 — ONE engine call per find).
 
@@ -2833,19 +2927,32 @@ if _QT_AVAILABLE:
             # Clear selection on new search (adapted_decision 6)
             self._selected_keys.clear()
             self._update_bulk_bar()
+            # SEED-024 follow-up: enter the searching state — the Find button becomes
+            # a red Stop (cancellable), rather than just being disabled.
+            self._is_searching = True
+            self._search_cancelled = False
+            self._search_was_partial = False
+            self._set_find_button_searching(True)
             try:
                 self.status.setText(tr("working…"))
-                self.btn_find.setEnabled(False)
             except RuntimeError:
                 pass
 
-            # Cancel any previous search thread
-            if self._search_thread is not None:
+            # Cancel any previous search thread COOPERATIVELY — quit() does not stop a
+            # SearchThread mid-execute_search. Bump the generation so any late results
+            # from the prior thread are dropped by _on_results' guard.
+            if self._search_thread is not None and self._search_thread.isRunning():
                 try:
-                    self._search_thread.quit()
+                    self._search_thread.cancel_flag = True
+                    self._search_thread.wait(3000)
+                    if self._search_thread.isRunning():
+                        self._search_thread.terminate()
+                        self._search_thread.wait()
                 except Exception:
                     pass
-                self._search_thread = None
+            self._search_thread = None
+            self._search_gen += 1
+            _gen = self._search_gen
 
             # R-01: page_position forwarded as text_position; genizah scope only.
             # SEED-024: core_mode is the mode-aware string (was hardcoded "exact").
@@ -2858,16 +2965,26 @@ if _QT_AVAILABLE:
                 text_position=page_pos,
                 corpus_scope="genizah",
             )
-            self._search_thread.results_signal.connect(self._on_results)
+            self._search_thread.results_signal.connect(
+                lambda raw, g=_gen: self._on_results(raw, g)
+            )
             self._search_thread.start()
 
-        def _on_results(self, raw: list):
+        def _on_results(self, raw: list, gen=None):
             """Handle raw engine results; dedup and optionally start cross-side worker."""
             from shared.joins_lab import compose, detect_self_match, dedup_candidates
-            try:
-                self.btn_find.setEnabled(True)
-            except RuntimeError:
-                pass
+            # SEED-024 follow-up: drop stale results from a superseded/cancelled search.
+            if gen is not None and gen != self._search_gen:
+                return
+            # Leave the searching state (Stop → Find Candidates).
+            self._is_searching = False
+            self._set_find_button_searching(False)
+            # A user Stop makes the core RETURN partial results (execute_search catches
+            # InterruptedError and returns what it found so far, emitted normally) — so
+            # render `raw` as usual and just flag the count as partial (apply_filters
+            # appends the "(Partial results)" tag).
+            self._search_was_partial = bool(self._search_cancelled)
+            self._search_cancelled = False
 
             # Anchor is excluded by default (adapted_decision 11: hardcoded)
             include_self = False
@@ -3313,8 +3430,13 @@ if _QT_AVAILABLE:
                     )
                     self.vs_hint.setVisible(False)   # combined message already carries "turn off" advice
                 else:
+                    # SEED-024 fu: tag the count as partial after a user Stop.
+                    _partial = (
+                        " (" + tr("Partial results") + ")"
+                        if getattr(self, "_search_was_partial", False) else ""
+                    )
                     self.status.setText(
-                        f"{len(filtered)}/{len(self.results)} " + tr("shown")
+                        f"{len(filtered)}/{len(self.results)} " + tr("shown") + _partial
                     )
                     # G-13.2: hint whenever toggle is ON and results are shown (pure-VS OR intersection).
                     self.vs_hint.setVisible(bool(getattr(self, "_vs_on", False)) and bool(filtered))
@@ -3978,7 +4100,7 @@ if _QT_AVAILABLE:
             # Search context for the Credits and Info sheet.
             mode_label = (
                 self.builder.mode_combo.currentText()
-                if self.builder.mode_combo is not None else tr("Responsa-style")
+                if self.builder.mode_combo is not None else tr("Responsa")
             )
             try:
                 if self.builder.get_mode() == "responsa":
@@ -3995,9 +4117,14 @@ if _QT_AVAILABLE:
             n = sum(1 for v in triage.values() if v == "no")
             mode_info = f"Joins Lab — {mode_label} (✓{y} ?{m} ✗{n})"
 
+            # SEED-024 follow-up: default filename includes the normalized anchor
+            # shelfmark, e.g. joins_candidates_T-S_NS_324.11.xlsx.
+            _anchor_shelf = r_shelf(self.wb._anchor_res) if getattr(self.wb, "_anchor_res", None) else ""
+            _norm = normalize_shelfmark_for_filename(_anchor_shelf)
+            _default_name = f"joins_candidates_{_norm}.xlsx" if _norm else "joins_candidates.xlsx"
             path, _ = QFileDialog.getSaveFileName(
                 self, tr("Export candidates to XLSX"),
-                "joins_lab_candidates.xlsx", "Excel (*.xlsx)",
+                _default_name, "Excel (*.xlsx)",
             )
             if not path:
                 return
