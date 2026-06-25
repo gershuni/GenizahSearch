@@ -47,6 +47,8 @@ created: 2026-06-25
 | Req ID | Behavior | Threat Ref | Test Type | Automated Command | File Exists | Status |
 |--------|----------|------------|-----------|-------------------|-------------|--------|
 | CONFIG-01 | `shared.config.Config is genizah_core.Config` (same object, identity) | — | unit | `pytest tests/test_no_back_edges_core.py::test_config_identity -x` | ❌ W0 | ⬜ pending |
+| CONFIG-01 (paths) | Non-frozen `Config.BASE_DIR`/`FILE_V8`/`LIBRARIES_CSV` resolve to repo root, not `…/shared` (Codex BLOCKER #1) | — | unit | `pytest tests/test_no_back_edges_core.py::test_config_paths_resolve_to_repo_root -x` | ❌ W0 | ⬜ pending |
+| GUARD-01 (scope) | Guard catches a top-level `try:`-guarded back-edge AND ignores a function-body lazy import (Codex HIGH #2) | — | unit | `pytest tests/test_no_back_edges_core.py::test_guard_catches_top_level_guarded_import tests/test_no_back_edges_core.py::test_guard_ignores_lazy_function_body_import -x` | ❌ W0 | ⬜ pending |
 | GUARD-01 | No extracted-this-milestone `shared/` module has a module-level `import genizah_core` (registry = {`shared/config.py`}); AST via `ast.iter_child_nodes` (module-level only) | — | AST static | `pytest tests/test_no_back_edges_core.py -x` | ❌ W0 | ⬜ pending |
 | GUARD-02 | Full existing suite green (zero behavior change) | — | integration | `PYTHONUTF8=1 pytest tests/ -m "not gui and not render_smoke" -x -q` | ✅ | ⬜ pending |
 | GUARD-03 | No source-scanning/AST test broken (none deleted this phase) | — | structural | covered by GUARD-02 full run | ✅ | ⬜ pending |

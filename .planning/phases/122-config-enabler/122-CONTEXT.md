@@ -64,6 +64,13 @@ those are Phases 123–125); the desktop split (126–127); any behavior change.
   dependencies (verified). **Preserve the load-time side effect** at `genizah_core.py:2372`
   (`os.makedirs(INDEX_DIR, exist_ok=True)` in the class body) — it must run identically on
   `import shared.config`; this is part of "zero behavior change."
+  **Refinement (Codex review, 2026-06-25 — see `122-CODEX-CRITIQUE.md` BLOCKER #1):** the copy is
+  verbatim EXCEPT the non-frozen `BASE_DIR = os.path.dirname(os.path.abspath(__file__))` line
+  (`genizah_core.py:2347`), which becomes `os.path.dirname(os.path.dirname(...))` in
+  `shared/config.py` because `__file__` is one dir deeper there — without this, `BASE_DIR` and the
+  derived `FILE_V8`/`FILE_V7`/`LIBRARIES_CSV`/`OXFORD_DB`/`HELP_FILE` would point at `…/shared`,
+  breaking real callers. This SERVES D-05's zero-behavior-change intent (the literal "verbatim" was
+  the trap). The frozen branch (`sys.executable`) is unaffected.
 - **D-06:** Verification gate = the **full existing pytest suite** green at the phase
   boundary (GUARD-02). Ruff is **per-file review only** on the extraction commit — never
   repo-wide `ruff --fix` (it would strip the `# noqa: F401` re-export shim) — ROADMAP SC#4.
