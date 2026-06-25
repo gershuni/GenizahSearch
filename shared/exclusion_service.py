@@ -14,7 +14,7 @@ import io
 import logging
 from dataclasses import dataclass, field
 
-from genizah_core import normalize_shelfmark
+from shared.browse_map_utils import normalize_shelfmark
 
 logger = logging.getLogger(__name__)
 

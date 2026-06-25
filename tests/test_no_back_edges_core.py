@@ -26,8 +26,10 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # Registry: add one entry per phase as modules are extracted (v8.3.0 decomposition).
 # Phase 122: Config only.
+# Phase 123: browse_map_utils, text_normalize, variants, responsa, codicological, joins_manager, lists_manager
 EXTRACTED_MODULES = [
     "shared/config.py",
+    "shared/browse_map_utils.py",
 ]
 
 # Compound statement types whose bodies run at import time
@@ -224,3 +226,41 @@ def test_guard_ignores_lazy_function_body_import():
         f"Guard incorrectly flagged a function-body lazy import: lines {violations}. "
         "FunctionDef bodies must be excluded from the import-time traversal."
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 123: browse_map_utils (CORE-06)
+# ---------------------------------------------------------------------------
+
+def test_browse_map_utils_identity():
+    """CORE-06: genizah_core.normalize_shelfmark is the same object as shared.browse_map_utils.normalize_shelfmark."""
+    import shared.browse_map_utils
+    import genizah_core
+
+    assert shared.browse_map_utils.normalize_shelfmark is genizah_core.normalize_shelfmark, (
+        "genizah_core.normalize_shelfmark is not the same object as "
+        "shared.browse_map_utils.normalize_shelfmark. "
+        "The re-export shim must be: from shared.browse_map_utils import normalize_shelfmark  # noqa: F401"
+    )
+    assert shared.browse_map_utils.natural_sort_key is genizah_core.natural_sort_key, (
+        "genizah_core.natural_sort_key is not the same object as shared.browse_map_utils.natural_sort_key."
+    )
+    assert shared.browse_map_utils.get_library_display is genizah_core.get_library_display, (
+        "genizah_core.get_library_display is not the same object as shared.browse_map_utils.get_library_display."
+    )
+    assert shared.browse_map_utils.LIBRARY_CODES is genizah_core.LIBRARY_CODES, (
+        "genizah_core.LIBRARY_CODES is not the same object as shared.browse_map_utils.LIBRARY_CODES."
+    )
+    assert shared.browse_map_utils.dedupe_browse_map is genizah_core.dedupe_browse_map, (
+        "genizah_core.dedupe_browse_map is not the same object as shared.browse_map_utils.dedupe_browse_map."
+    )
+
+
+def test_browse_map_utils_standalone_import():
+    """CORE-06 smoke: shared.browse_map_utils can be imported and has the key symbols."""
+    import shared.browse_map_utils
+    assert hasattr(shared.browse_map_utils, 'normalize_shelfmark')
+    assert hasattr(shared.browse_map_utils, 'natural_sort_key')
+    assert hasattr(shared.browse_map_utils, 'LIBRARY_CODES')
+    assert hasattr(shared.browse_map_utils, 'get_library_display')
+    assert hasattr(shared.browse_map_utils, 'dedupe_browse_map')

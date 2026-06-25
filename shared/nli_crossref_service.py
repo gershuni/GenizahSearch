@@ -362,7 +362,7 @@ class NliCrossrefService:
             return None
         global _BRIDGE_IMPORT_WARNED
         try:
-            from genizah_core import normalize_shelfmark
+            from shared.browse_map_utils import normalize_shelfmark
             from shared.shelfmark_bridge import cudl_normalize, shelfmark_to_cudl_label
         except ImportError as _e:
             # Round 3 Codex MEDIUM — degraded path must STILL normalize before lookup.
@@ -373,7 +373,7 @@ class NliCrossrefService:
                 logger.warning("shelfmark_bridge unavailable in nli_crossref (degrading): %s", _e)
                 _BRIDGE_IMPORT_WARNED = True
             try:
-                from genizah_core import normalize_shelfmark as _ns
+                from shared.browse_map_utils import normalize_shelfmark as _ns
                 return self.get_cambridge_manifest(_ns(shelfmark))
             except Exception:
                 # Last-resort: hand the raw shelfmark in. Worse than canonical but

@@ -245,7 +245,7 @@ def _safe_library_name(code: Optional[str]) -> str:
     if not code:
         return ''
     try:
-        from genizah_core import get_library_display
+        from shared.browse_map_utils import get_library_display
         return get_library_display(code, short=False, lang='en') or code
     except Exception:
         return code or ''
