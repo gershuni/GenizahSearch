@@ -78,7 +78,8 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 - [x] **Phase 122: Config Enabler** - Extract `Config` to `shared/config.py`; install back-edge AST guard (GUARD-01). Breaks the import-cycle pivot that blocks all subsequent core moves.
  (completed 2026-06-25)
 
-- [x] **Phase 123: Core Leaf Modules** - Extract seven low-risk, well-tested clusters: `shared/variants.py`, `shared/codicological.py`, `shared/responsa.py`, `shared/joins_manager.py`, `shared/lists_manager.py`, `shared/browse_map_utils.py`, `shared/text_normalize.py`. Proves the shim+guard pipeline on core before touching engines. (completed 2026-06-25)
+- [x] **Phase 123: Core Leaf Modules** - Extract seven low-risk, well-tested clusters: `shared/variants.py`, `shared/codicological.py`, `shared/responsa.py`, `shared/joins_manager.py`, `shared/lists_manager.py`, `shared/browse_map_utils.py`, `shared/text_normalize.py`. Proves the shim+guard pipeline on core before touching engines.
+ (completed 2026-06-25)
 - [ ] **Phase 124: Core Metadata & Index** - Extract `shared/metadata_manager.py` (+ `_BoundedLRUCache`) and `shared/indexer.py`; retarget the `shared/local_indexer.py` lazy back-edges into `genizah_core` helpers.
 - [ ] **Phase 125: Core Engines** - SEED-011 composition dedup first (125a), then extract `shared/search_engine.py` (DI + BrowseMap cache + SEED-006 gates + `_LAST_RESPONSA_DOWNGRADE` preserved), `shared/lab_settings.py`, `shared/lab_engine.py` (LOCAL-LAB mirror preserved), and model `_my_library_tab_ref` as an injected optional interface for both engines.
 - [ ] **Phase 126: Desktop Panels** - Extract seven desktop panel clusters to `desktop/`: `settings_dialogs.py`, `ui_widgets.py`, `catalog_browse.py`, `search_results_panel.py`, `browse_panel.py`, `reading_desk_panel.py`, `lists_tab.py`.
@@ -133,7 +134,11 @@ Plans:
   3. `build_index.py` continues to resolve `Indexer.create_index` (smoke-importable); any existing direct `Indexer` coverage tests pass.
   4. No new module-level back-edge from `shared/metadata_manager.py` or `shared/indexer.py` into `genizah_core`; the GUARD-01 CI test remains green; per-file ruff review shows shims intact.
 
-**Plans**: TBD
+**Plans**: 1 plan (2 sequential commits — metadata_manager first, then indexer; both touch genizah_core.py)
+
+Plans:
+
+- [ ] 124-01-PLAN.md — Extract MetadataManager (+ _BoundedLRUCache + 8-item pre-cluster) to shared/metadata_manager.py and Indexer to shared/indexer.py behind permanent same-object re-export shims; inline _tr()/_strip_brackets for indexer (GUARD-01); GUARD-03 enrich_metadata fixture retarget; GUARD-01 registry 8->10; identity/smoke tests
 
 ### Phase 125: Core Engines
 
