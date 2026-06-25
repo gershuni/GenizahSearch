@@ -11,7 +11,7 @@ dependency_graph:
     - tests/test_builder_modifier_hoist.py (BLD-03 RED + compose line_start/end/gap GREEN)
     - tests/test_known_joins_group.py (ANC-04 source attribution GREEN + community RED)
     - tests/test_joins_anc05_rls.py (ANC-05 confirmed-only RED stubs)
-    - _tmp/118-fragment-joins-schema-probe.md (schema confirmation + Plan 02 directive)
+    - .planning/phases/118-joins-entry-full-builders/118-fragment-joins-schema-probe.md (schema confirmation + Plan 02 directive)
   affects:
     - plans/118-02 (confirmed by schema probe; status='confirmed' is primary ANC-05 fix)
     - plans/118-03 (BLD-03 test stubs are RED until Plan 03 adds _apply_modifiers_to_term)
@@ -29,7 +29,7 @@ key_files:
     - tests/test_builder_modifier_hoist.py
     - tests/test_known_joins_group.py
     - tests/test_joins_anc05_rls.py
-    - _tmp/118-fragment-joins-schema-probe.md
+    - .planning/phases/118-joins-entry-full-builders/118-fragment-joins-schema-probe.md
   modified: []
 decisions:
   - "Wave-0 test pattern: import RED symbols inside test body (not at module top) so pytest collection never fails — errors are INSIDE test bodies (TypeError/ModuleNotFoundError), not collection errors"
@@ -92,7 +92,7 @@ Module docstring records the complete ANC-05 directive: `status='confirmed'` pri
 
 ### Task 3: Schema Probe Note (commit `9f8f6599`)
 
-**`_tmp/118-fragment-joins-schema-probe.md`**:
+**`.planning/phases/118-joins-entry-full-builders/118-fragment-joins-schema-probe.md`**:
 - Method: static fallback (no SUPABASE env vars present)
 - Confirmation: `fragment_joins.status` EXISTS — `supabase_setup.sql:162` defines `TEXT DEFAULT 'proposed' CHECK (status IN ('proposed','confirmed','rejected'))`; `web/supabase_client.py:1593-1594` already applies `.eq('status', status)` when truthy
 - Note on stale SUPABASE_GUIDE.md: status column omitted from guide's schema diagram; canonical SQL is authoritative
@@ -143,7 +143,7 @@ All created files verified to exist:
 - tests/test_builder_modifier_hoist.py — FOUND
 - tests/test_known_joins_group.py — FOUND
 - tests/test_joins_anc05_rls.py — FOUND
-- _tmp/118-fragment-joins-schema-probe.md — FOUND
+- .planning/phases/118-joins-entry-full-builders/118-fragment-joins-schema-probe.md — FOUND
 - .planning/phases/118-joins-entry-full-builders/118-01-SUMMARY.md — FOUND
 
 Commits verified:

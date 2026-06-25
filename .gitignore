@@ -147,3 +147,7 @@ TestLLMAPIsProgram.cs
 # Debug/smoke scripts (development scratch — not committed)
 /debug_smoke*.py
 /debug_*.py
+
+# Scratch / working directory — review briefs, CI watch logs, probes, diffs, patches.
+# Never committed; genuine artifacts are relocated into .planning/ instead (SEED-019 #31).
+/_tmp/
