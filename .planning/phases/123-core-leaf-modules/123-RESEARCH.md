@@ -179,8 +179,12 @@ the engine references it via the `genizah_core` facade shim (same object, zero b
 | `MARK_TOLERANT_INSERTER`, `make_mark_tolerant_pattern` | Called by `build_tantivy_query` (:8150, :8220, :8520); also by `enrich_metadata` (:1375) |
 | `_build_wildcard_regex` | Called by `build_tantivy_query` |
 | `_make_flex_spacing_pattern` | Called by `build_tantivy_query` (:7924, :9087); also tested directly by `test_responsa_edge_cases.py` which imports it from `genizah_core` — stays on facade |
-| `_has_line_break_syntax` | Called from SearchEngine path |
-| `LineGroup`, `_parse_line_break_query` | Called from SearchEngine line-break paths (:7851, :8964) |
+
+> **CORRECTION (Codex round-2 N5):** `_has_line_break_syntax`, `LineGroup`, and `_parse_line_break_query`
+> were initially listed here as engine-side, but Open Question 1 RESOLVED them as **MOVED to
+> `shared/responsa.py`** (they are pure query-string parsers with no engine coupling; the engine reaches
+> them via the genizah_core shim in Phase 123, then directly in Phase 125). See Q2 Module 5 + the plan
+> Task 4 move list — those are authoritative. They are NOT engine-side.
 
 **`strip_search_diacritics` boundary note:** This function is at line :6493, within the responsa-
 range block, but its purpose is text normalization (SEED-006, content_search field). It belongs in
@@ -251,12 +255,13 @@ import os
 import re
 import json
 import logging
-from typing import Optional
 from genizah_translations import LIBRARY_CODES_HE          # safe; not genizah_core
 from shared.config import Config                            # safe; not a cycle
 
 LOGGER = logging.getLogger(__name__)                        # no genizah_core needed
 ```
+> **CORRECTION (Codex F2):** do NOT add `from typing import Optional` — none of the moved browse
+> functions use it; it would trip ruff F401. Derive the import set from the actual copied bodies.
 
 **`CURRENT_LANG` in `get_library_display`:** The function uses `CURRENT_LANG` as a fallback when
 `lang` is FALSY. The live code is `effective_lang = lang if lang else CURRENT_LANG` — a FALSY check
@@ -297,16 +302,20 @@ from shared.browse_map_utils import LIBRARY_CODES  # noqa: F401
 
 **Dependencies for `shared/variants.py`:**
 ```python
-from collections import defaultdict
-from typing import List
-import itertools
-from shared.config import Config   # for Config.VARIANT_GEN_LIMIT
+from typing import Mapping       # generate_variants(mapping: Mapping[str, set[str]]) — RUNTIME annotation
+import itertools                 # used in generate_variants
+from shared.config import Config # for Config.VARIANT_GEN_LIMIT
 try:
-    from unified_variants import UNIFIED_VARIANT_PAIRS, get_top_pairs
+    from unified_variants import UNIFIED_VARIANT_PAIRS   # get_top_pairs NOT used by VariantManager
 except ImportError:
     UNIFIED_VARIANT_PAIRS = []
-    def get_top_pairs(n): return []
 ```
+> **CORRECTION (Codex round-2 N1 + F2):** `VariantManager.generate_variants` annotates `mapping: Mapping[...]`
+> at runtime (no `from __future__ import annotations`), so `Mapping` MUST be imported or the module
+> NameErrors on import. Do NOT import `from typing import List` (unused → F401) or `get_top_pairs`
+> (unused → F401). Add `from collections import defaultdict` only if the actual body uses it (grep).
+> After the move, also drop the now-dead `import itertools` and `Mapping` from genizah_core.py (both were
+> VariantManager-only); KEEP `List`/`Optional` there (17/9 other uses).
 
 No `LOGGER` in VariantManager (verified by grep — the class uses no logging). No `tr()`. Clean.
 
@@ -322,6 +331,7 @@ No `LOGGER` in VariantManager (verified by grep — the class uses no logging). 
 **Dependencies for `shared/codicological.py`:**
 ```python
 import os
+import re                                    # CodicologicalManager uses re.match/search/sub ~11x (Codex N2 — REQUIRED)
 import json
 import logging
 from shared.config import Config            # for Config.OXFORD_DB
@@ -360,10 +370,13 @@ No `tr()` in CodicologicalManager (verified — the class logs but does not tran
 ```python
 import re
 from typing import List, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, field         # field used: LineGroup.word_gaps = field(default_factory=list)
 from shared.config import Config                 # for Config.MAX_EXPANDED_TERMS
 from genizah_translations import TRANSLATIONS    # for inline _tr() helper
 ```
+> **NOTE (Codex round-2 N4):** after these move, `from dataclasses import dataclass, field` becomes
+> dead in genizah_core.py (`ResponsaComponent` + `LineGroup` are its only two `@dataclass`, and the only
+> `field(...)` use is `LineGroup.word_gaps`) — remove it there; KEEP `List`/`Optional` (17/9 other uses).
 
 **Inline `_tr()` helper** (3-line private helper in `shared/responsa.py`):
 ```python
@@ -398,6 +411,7 @@ All 6 responsa test files import from `genizah_core` and will continue working v
 import os
 import pickle
 import threading
+import time                                                   # JoinsManager calls time.time() ~3x, NO local import (Codex N3 — REQUIRED at module level)
 import logging
 from shared.config import Config                              # for Config.INDEX_DIR
 from shared.browse_map_utils import normalize_shelfmark       # for _normalize_shelfmark wrapper
@@ -420,12 +434,15 @@ LOGGER = logging.getLogger(__name__)
 ```python
 import os
 import pickle
-import time
 import logging
 from shared.config import Config    # for Config.INDEX_DIR
+from genizah_translations import TRANSLATIONS   # for inline _tr() helper
 
 LOGGER = logging.getLogger(__name__)
 ```
+> **CORRECTION (Codex F2):** do NOT add a module-level `import time` — `ListsManager` imports `time`
+> INSIDE its methods, so a module-level import is unused → F401. (Contrast `joins_manager`, which DOES
+> need module-level `time`.) Derive imports from the actual copied body.
 
 **`tr()` in ListsManager:** Used in methods at :11728, :12243, :12354–12367. All are inside
 method bodies — can be lazy-imported inside those methods:
@@ -950,7 +967,7 @@ New test additions for Phase 123 (to be created during Wave 0):
    - Recommendation: Move them to `shared/responsa.py`. They are query parsers, not engine code. The engine accesses them via the genizah_core shim in Phase 123 and then via the direct `shared.responsa` import in Phase 125.
 
 2. **`ListsManager.tr()` calls — inline `_tr()` vs. lazy per-call import**
-   - What we know: `tr()` is called in 4 places inside `ListsManager` method bodies; all are inside function bodies (GUARD-01 safe)
+   - What we know: `tr()` is called in ~11 places inside `ListsManager` method bodies (Codex round-2 F4 — NOT 4; grep ALL and replace every one); all are inside function bodies (GUARD-01 safe)
    - What's unclear: which pattern is preferred — inline `_tr()` at module level vs. lazy `from genizah_core import tr` per call
    - Recommendation: Inline `_tr()` pattern (same as in `shared/responsa.py`) — cleaner, reduces per-call overhead, consistent.
 
