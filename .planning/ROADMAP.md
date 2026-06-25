@@ -75,7 +75,8 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 ## Summary Checklist
 
-- [x] **Phase 122: Config Enabler** - Extract `Config` to `shared/config.py`; install back-edge AST guard (GUARD-01). Breaks the import-cycle pivot that blocks all subsequent core moves. (completed 2026-06-25)
+- [x] **Phase 122: Config Enabler** - Extract `Config` to `shared/config.py`; install back-edge AST guard (GUARD-01). Breaks the import-cycle pivot that blocks all subsequent core moves.
+ (completed 2026-06-25)
 - [ ] **Phase 123: Core Leaf Modules** - Extract seven low-risk, well-tested clusters: `shared/variants.py`, `shared/codicological.py`, `shared/responsa.py`, `shared/joins_manager.py`, `shared/lists_manager.py`, `shared/browse_map_utils.py`, `shared/text_normalize.py`. Proves the shim+guard pipeline on core before touching engines.
 - [ ] **Phase 124: Core Metadata & Index** - Extract `shared/metadata_manager.py` (+ `_BoundedLRUCache`) and `shared/indexer.py`; retarget the `shared/local_indexer.py` lazy back-edges into `genizah_core` helpers.
 - [ ] **Phase 125: Core Engines** - SEED-011 composition dedup first (125a), then extract `shared/search_engine.py` (DI + BrowseMap cache + SEED-006 gates + `_LAST_RESPONSA_DOWNGRADE` preserved), `shared/lab_settings.py`, `shared/lab_engine.py` (LOCAL-LAB mirror preserved), and model `_my_library_tab_ref` as an injected optional interface for both engines.
@@ -113,7 +114,10 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
   4. All five source-scanning / AST tests that read `genizah_core.py` or `genizah_app.py` (`test_desktop_folio_navigation.py`, `test_wr01_open_local_browse_page_ast.py`, `test_tabular_builder_rtl.py`, `test_view_all_cap.py`, `test_shelfmark_bridge.py`) are retargeted to both locations during the additive phase and remain green — no deletion of originals until Phase 127.
   5. Per-file ruff review on each extraction commit shows no unintended stripping of `# noqa: F401` re-export shims in `genizah_core.py`; the full existing pytest suite passes at every cluster commit boundary.
 
-**Plans**: TBD
+**Plans**: 1 plan (7 sequential waves, one atomic commit per cluster — D-02 leaf-first ordering)
+
+Plans:
+- [ ] 123-01-PLAN.md — Extract 7 core leaf clusters (browse_map_utils -> text_normalize -> variants -> responsa -> codicological -> joins_manager -> lists_manager) behind permanent same-object re-export shims; D-01 back-edge retargets; GUARD-01 registry 1->8; D-03 identity/smoke tests; snapshot regen
 
 ### Phase 124: Core Metadata & Index
 
