@@ -33,6 +33,10 @@ __all__ = [
     "_other_member_of",
     "build_known_join_rows",
     "puzzle_add_targets",
+    # SEED-024 mode parity + candidate export pure helpers
+    "JOINS_LAB_MODE_KEYS",
+    "core_mode_for_join_mode",
+    "build_candidate_export_rows",
     # Plan 02 window class
     "JoinWorkbenchWindow",
     # Plan 03 (108-02) query builder + executor adapter
@@ -500,6 +504,64 @@ def material_display(material: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# SEED-024 — search-mode parity + candidate xlsx export (pure helpers).
+# Defined at module level (no Qt) so the mode mapping and the export-row
+# assembly are unit-testable headlessly, independent of the Qt builder/pane.
+# ---------------------------------------------------------------------------
+
+# Joins-Lab search modes (web parity: Responsa-style + 4 single-line modes).
+# Index order matches the JoinQueryBuilder.mode_combo items below.
+JOINS_LAB_MODE_KEYS = ("responsa", "exact", "variants", "fuzzy", "regex")
+
+# Map a builder mode key -> the core execute_search() mode string. The strings
+# mirror the desktop MAIN search (genizah_app.start_search): 'literal' exact,
+# 'variants', 'fuzzy', 'Regex'. 'responsa' routes through the structured builder
+# with mode='exact' + responsa_options(responsa_mode=True), so it maps to 'exact'.
+_JOINS_MODE_TO_CORE = {
+    "responsa": "exact",
+    "exact": "literal",
+    "variants": "variants",
+    "fuzzy": "fuzzy",
+    "regex": "Regex",
+}
+
+
+def core_mode_for_join_mode(mode_key: str) -> str:
+    """Map a Joins-Lab builder mode key to the core execute_search() mode string."""
+    return _JOINS_MODE_TO_CORE.get(mode_key, "exact")
+
+
+def build_candidate_export_rows(cands):
+    """Assemble Joins-Lab candidates into shared-dossier result dicts.
+
+    Each row is shaped for :func:`genizah_app._build_search_results_xlsx_bytes`
+    / :mod:`shared.export_dossier`: a primitive ``display`` dict plus top-level
+    ``sys_id`` / ``raw_file_hl`` / ``full_text`` / ``uid``. ``cands`` is any
+    iterable of objects exposing ``sys_id`` / ``page`` / ``shelfmark`` /
+    ``title`` / ``snippet`` / ``full_text`` / ``uid`` (the Joins-Lab
+    ``Candidate`` dataclass, or a test stand-in).
+    """
+    rows = []
+    for c in cands:
+        sid = getattr(c, "sys_id", "") or ""
+        page = getattr(c, "page", None)
+        rows.append({
+            "display": {
+                "id": sid,
+                "shelfmark": getattr(c, "shelfmark", "") or sid,
+                "title": getattr(c, "title", "") or "",
+                "source": "Genizah",
+                "img": page if page is not None else "",
+            },
+            "sys_id": sid,
+            "raw_file_hl": getattr(c, "snippet", "") or "",
+            "full_text": getattr(c, "full_text", "") or "",
+            "uid": getattr(c, "uid", "") or "",
+        })
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Plan 02 — Qt imports and QThread workers.
 # These are placed BELOW the pure helpers so the module can still be imported
 # headlessly (the Qt imports themselves are safe, but worker subclasses require
@@ -855,8 +917,14 @@ if _QT_AVAILABLE:
 
         Modifiers are PER-ROW (one mods dict per row, hoisted outside the slash-group).
         Global search options (variants/ja/flex/bidir) live in self._global_opts dict
-        and are edited via the "Search options ▾" button dialog.
+        and are edited via INLINE checkboxes on the controls row (SEED-024 — replaced
+        the old "Search options ▾" dialog; mirrors the main-search responsa sub-row).
         build_side_query() composes a SideQuery → compose() 3-tuple.
+
+        SEED-024: when allow_modes=True (anchor/main builder), a mode selector offers
+        Responsa-style + Exact/Variants/Fuzzy/Regex (web parity). Responsa-style shows
+        the structured row builder + inline options; the other modes swap to a single
+        free-text line (self._single_edit) and hide the Responsa-only widgets.
 
         RR-5: allow_page_position=True (anchor side) / False (other side).
         RR-13: wildcard-prefix disabled on multi-box rows (enforced in ⚙ dialog).
@@ -864,14 +932,19 @@ if _QT_AVAILABLE:
         """
 
         def __init__(self, on_search, first_hint: str,
-                     allow_page_position: bool = True, parent=None):
+                     allow_page_position: bool = True, allow_modes: bool = False,
+                     parent=None):
             super().__init__(parent)
             self._on_search_cb = on_search
             self._first_hint = first_hint
             self._allow_page_position = allow_page_position
+            # SEED-024: anchor/main builder exposes the 5-mode selector (web parity);
+            # the other-side builder stays Responsa-style only (allow_modes=False).
+            self._allow_modes = allow_modes
+            self.mode_combo = None  # created in _init_ui when allow_modes
 
             # Global search options dict (persists even if dialog is never opened).
-            # _responsa_opts() reads from here; the "Search options ▾" dialog writes here.
+            # _responsa_opts() reads from here; the inline option checkboxes write here.
             self._global_opts = {
                 "variants": False,
                 "ja": False,
@@ -894,32 +967,85 @@ if _QT_AVAILABLE:
             outer.setSpacing(2)
             outer.setContentsMargins(0, 0, 0, 0)
 
-            # Row container — rows are inserted here by add_row()
-            self._rows_box = QVBoxLayout()
+            # SEED-024: mode selector row (anchor/main builder only — web parity).
+            # Always visible; _apply_mode_visibility() swaps the structured builder
+            # for a single free-text line in the non-Responsa modes.
+            if self._allow_modes:
+                mode_row = QHBoxLayout()
+                mode_row.addWidget(QLabel(tr("Mode:") + " "))
+                self.mode_combo = QComboBox()
+                # Index order MUST match JOINS_LAB_MODE_KEYS. Read via get_mode()
+                # (index-driven — NEVER currentText(), which is a translated label).
+                self.mode_combo.addItem(tr("Responsa-style"))  # 0 responsa
+                self.mode_combo.addItem(tr("Exact"))            # 1 exact
+                self.mode_combo.addItem(tr("Variants"))         # 2 variants
+                self.mode_combo.addItem(tr("Fuzzy"))            # 3 fuzzy
+                self.mode_combo.addItem(tr("Regex"))            # 4 regex
+                self.mode_combo.setToolTip(tr(
+                    "Responsa-style: structured line-by-line builder. "
+                    "Exact / Variants / Fuzzy / Regex: a single free-text query "
+                    "(like the main search)."
+                ))
+                mode_row.addWidget(self.mode_combo)
+                mode_row.addStretch()
+                outer.addLayout(mode_row)
+            else:
+                self.mode_combo = None
+
+            # SEED-024: single free-text query line — shown only in non-Responsa modes.
+            self._single_widget = QWidget()
+            single_row = QHBoxLayout(self._single_widget)
+            single_row.setContentsMargins(0, 0, 0, 0)
+            single_row.addWidget(QLabel(tr("Query:") + " "))
+            self._single_edit = QLineEdit()
+            self._single_edit.setLayoutDirection(Qt.LayoutDirection.RightToLeft)
+            self._single_edit.setPlaceholderText(
+                tr("Search terms for the joining fragment…")
+            )
+            self._single_edit.returnPressed.connect(self.on_enter)
+            single_row.addWidget(self._single_edit, 1)
+            outer.addWidget(self._single_widget)
+            self._single_widget.setVisible(False)
+
+            # Structured row container — rows are inserted here by add_row().
+            self._rows_container = QWidget()
+            self._rows_box = QVBoxLayout(self._rows_container)
             self._rows_box.setSpacing(2)
-            outer.addLayout(self._rows_box)
+            self._rows_box.setContentsMargins(0, 0, 0, 0)
+            outer.addWidget(self._rows_container)
 
             # NOTE: the first row is added at the END of this method (see below),
             # AFTER every widget add_row()/_update_preview() touches (page_pos and
             # especially self._preview_edit) has been constructed.
 
-            # Controls row: [+ Add Line] [stretch] [Search options ▾]
-            ctrl_row = QHBoxLayout()
+            # Controls row: [+ Add Line] (Responsa-style only)
+            self._addline_widget = QWidget()
+            ctrl_row = QHBoxLayout(self._addline_widget)
+            ctrl_row.setContentsMargins(0, 0, 0, 0)
             btn_add_line = QPushButton(tr("+ Add Line"))
             btn_add_line.setToolTip(tr("Add another manuscript line to the query"))
             btn_add_line.clicked.connect(self._on_add_line)
             ctrl_row.addWidget(btn_add_line)
             ctrl_row.addStretch()
+            outer.addWidget(self._addline_widget)
 
-            # "Search options ▾" button — opens dialog for variants/ja/flex/bidir
-            self._btn_search_opts = QPushButton(tr("Search options ▾"))
-            self._btn_search_opts.setToolTip(tr("Global search options (variants, Judeo-Arabic, flex spacing, bidirectional)"))
-            self._btn_search_opts.clicked.connect(self._open_search_options_dialog)
-            ctrl_row.addWidget(self._btn_search_opts)
+            # SEED-024: inline global search options (replaces the old "Search
+            # options ▾" dialog) — mirrors the main-search responsa sub-row.
+            self._opts_widget = QWidget()
+            opts_row = QHBoxLayout(self._opts_widget)
+            opts_row.setContentsMargins(0, 0, 0, 0)
+            opts_row.setSpacing(10)
+            self.chk_variants = QCheckBox(tr("Variants"))
+            self.chk_variants.setToolTip(tr("Expand spelling variants"))
+            self.chk_ja = QCheckBox(tr("Judeo-Arabic"))
+            self.chk_flex = QCheckBox(tr("Flex Spacing"))
+            self.chk_bidir = QCheckBox(tr("Bidirectional"))
+            for _chk in (self.chk_variants, self.chk_ja, self.chk_flex, self.chk_bidir):
+                opts_row.addWidget(_chk)
+            opts_row.addStretch()
+            outer.addWidget(self._opts_widget)
 
-            outer.addLayout(ctrl_row)
-
-            # Page-position control (anchor side only — RR-5)
+            # Page-position control (anchor side only — RR-5); applies to all modes.
             if self._allow_page_position:
                 pp_row = QHBoxLayout()
                 pp_row.addWidget(QLabel(tr("Position:") + " "))
@@ -938,8 +1064,10 @@ if _QT_AVAILABLE:
             else:
                 self.page_pos = None
 
-            # Read-only Preview row
-            preview_row = QHBoxLayout()
+            # Read-only Preview row (Responsa-style only)
+            self._preview_widget = QWidget()
+            preview_row = QHBoxLayout(self._preview_widget)
+            preview_row.setContentsMargins(0, 0, 0, 0)
             preview_row.addWidget(QLabel(tr("Preview:")))
             self._preview_edit = QLineEdit()
             self._preview_edit.setReadOnly(True)
@@ -953,12 +1081,25 @@ if _QT_AVAILABLE:
                 "border-radius: 4px; min-height: 22px; color: #94a3b8;"
             )
             preview_row.addWidget(self._preview_edit, 1)
-            outer.addLayout(preview_row)
+            outer.addWidget(self._preview_widget)
 
             # Add the first row LAST — now that _preview_edit and page_pos all exist,
             # add_row()'s trailing _update_preview() can run without an AttributeError.
-            # The row inserts into the top-positioned _rows_box.
             self.add_row(placeholder=self._first_hint)
+
+            # Initialise inline option checkboxes from _global_opts, THEN wire signals
+            # (so the initial setChecked cannot fire _on_opts_changed prematurely).
+            self.chk_variants.setChecked(self._global_opts["variants"])
+            self.chk_ja.setChecked(self._global_opts["ja"])
+            self.chk_flex.setChecked(self._global_opts["flex_spacing"])
+            self.chk_bidir.setChecked(self._global_opts["bidirectional"])
+            for _chk in (self.chk_variants, self.chk_ja, self.chk_flex, self.chk_bidir):
+                _chk.toggled.connect(self._on_opts_changed)
+
+            # Wire mode changes + apply the initial visibility (default = Responsa-style).
+            if self.mode_combo is not None:
+                self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+            self._apply_mode_visibility()
 
         def _on_add_line(self):
             self.add_row()
@@ -1140,45 +1281,48 @@ if _QT_AVAILABLE:
                 e["gap"].setVisible(i < len(self.rows) - 1)
 
         # ------------------------------------------------------------------
-        # "Search options ▾" dialog (global options: variants/ja/flex/bidir)
+        # SEED-024 — search mode + inline global options (replaced the dialog)
         # ------------------------------------------------------------------
 
-        def _open_search_options_dialog(self):
-            """Open a modal dialog to edit global search options (_global_opts dict)."""
-            dlg = QDialog(self)
-            dlg.setWindowTitle(tr("Search options"))
-            lay = QVBoxLayout(dlg)
-            lay.setSpacing(6)
+        def get_mode(self) -> str:
+            """Return the current search-mode key (index-driven; never currentText()).
 
-            chk_variants = QCheckBox(tr("Expand spelling variants"))
-            chk_variants.setChecked(self._global_opts["variants"])
-            chk_ja = QCheckBox(tr("Judeo-Arabic"))
-            chk_ja.setChecked(self._global_opts["ja"])
-            chk_flex = QCheckBox(tr("Flex Spacing"))
-            chk_flex.setChecked(self._global_opts["flex_spacing"])
-            chk_bidir = QCheckBox(tr("Bidirectional"))
-            chk_bidir.setChecked(self._global_opts["bidirectional"])
+            'responsa' when there is no mode selector (the other-side builder) or the
+            selector is on Responsa-style; otherwise 'exact'|'variants'|'fuzzy'|'regex'.
+            """
+            if self.mode_combo is None:
+                return "responsa"
+            idx = self.mode_combo.currentIndex()
+            if 0 <= idx < len(JOINS_LAB_MODE_KEYS):
+                return JOINS_LAB_MODE_KEYS[idx]
+            return "responsa"
 
-            for chk in (chk_variants, chk_ja, chk_flex, chk_bidir):
-                lay.addWidget(chk)
+        def single_line_text(self) -> str:
+            """Return the trimmed free-text query for the non-Responsa single-line modes."""
+            return self._single_edit.text().strip()
 
-            btn_row = QHBoxLayout()
-            btn_done = QPushButton(tr("Done"))
-            btn_done.setDefault(True)
-            btn_row.addStretch()
-            btn_row.addWidget(btn_done)
-            lay.addLayout(btn_row)
+        def _on_opts_changed(self, *_args):
+            """Inline option checkbox toggled — write through to _global_opts."""
+            self._global_opts["variants"] = self.chk_variants.isChecked()
+            self._global_opts["ja"] = self.chk_ja.isChecked()
+            self._global_opts["flex_spacing"] = self.chk_flex.isChecked()
+            self._global_opts["bidirectional"] = self.chk_bidir.isChecked()
+            self._update_preview()
 
-            def _on_done():
-                self._global_opts["variants"] = chk_variants.isChecked()
-                self._global_opts["ja"] = chk_ja.isChecked()
-                self._global_opts["flex_spacing"] = chk_flex.isChecked()
-                self._global_opts["bidirectional"] = chk_bidir.isChecked()
-                self._update_preview()
-                dlg.accept()
+        def _on_mode_changed(self, *_args):
+            self._apply_mode_visibility()
+            self._update_preview()
 
-            btn_done.clicked.connect(_on_done)
-            dlg.exec()
+        def _apply_mode_visibility(self):
+            """Show the structured builder + Responsa options only in Responsa mode;
+            show the single free-text line in the Exact/Variants/Fuzzy/Regex modes
+            (web parity). Page-position applies to every mode and stays visible."""
+            is_responsa = (self.get_mode() == "responsa")
+            self._rows_container.setVisible(is_responsa)
+            self._addline_widget.setVisible(is_responsa)
+            self._opts_widget.setVisible(is_responsa)
+            self._preview_widget.setVisible(is_responsa)
+            self._single_widget.setVisible(not is_responsa)
 
         # ------------------------------------------------------------------
         # Per-row ⚙ line options dialog
@@ -1396,6 +1540,10 @@ if _QT_AVAILABLE:
         def _update_preview(self):
             """Update the read-only Preview QLineEdit with the composed query string."""
             from shared.joins_lab import compose
+            # SEED-024: the preview is a Responsa-style artifact only; the single-line
+            # modes show their own free-text box (no composed-query preview).
+            if self.get_mode() != "responsa":
+                return
             if self.is_empty():
                 self._preview_edit.setText("")
                 return
@@ -1439,10 +1587,14 @@ if _QT_AVAILABLE:
             page_pos_idx = 0
             if self.page_pos is not None:
                 page_pos_idx = self.page_pos.currentIndex()
+            mode_idx = self.mode_combo.currentIndex() if self.mode_combo is not None else 0
             return {
                 "rows": rows_state,
                 "global_opts": dict(self._global_opts),
                 "page_pos_idx": page_pos_idx,
+                # SEED-024: persist the search mode + the single-line free-text query.
+                "mode_idx": mode_idx,
+                "single_text": self._single_edit.text(),
             }
 
         def from_state(self, state: dict):
@@ -1509,6 +1661,23 @@ if _QT_AVAILABLE:
                 idx = int(page_pos_idx)
                 if 0 <= idx < self.page_pos.count():
                     self.page_pos.setCurrentIndex(idx)
+
+            # SEED-024: sync the inline option checkboxes from the restored
+            # _global_opts (wired at construction — block signals so the sync does
+            # not re-fire _on_opts_changed), then restore the mode + single-line text.
+            for _chk, _k in (
+                (self.chk_variants, "variants"), (self.chk_ja, "ja"),
+                (self.chk_flex, "flex_spacing"), (self.chk_bidir, "bidirectional"),
+            ):
+                _chk.blockSignals(True)
+                _chk.setChecked(bool(self._global_opts.get(_k, False)))
+                _chk.blockSignals(False)
+            self._single_edit.setText(state.get("single_text", "") or "")
+            if self.mode_combo is not None:
+                m_idx = int(state.get("mode_idx", 0) or 0)
+                if 0 <= m_idx < self.mode_combo.count():
+                    self.mode_combo.setCurrentIndex(m_idx)
+            self._apply_mode_visibility()
 
             self._update_preview()
 
@@ -2325,9 +2494,12 @@ if _QT_AVAILABLE:
             rv.setSpacing(4)
 
             # --- Anchor (this-side) builder ---
+            # SEED-024: allow_modes=True surfaces the 5-mode selector (web parity);
+            # the other-side builder below stays Responsa-style only.
             self.builder = JoinQueryBuilder(
                 self.do_search,
                 first_hint=tr("word(s) on this line…"),
+                allow_modes=True,
             )
             rv.addWidget(self.builder)
 
@@ -2441,6 +2613,14 @@ if _QT_AVAILABLE:
             self.btn_browse_results.setToolTip(tr("Open Browse results compare window"))
             self.btn_browse_results.clicked.connect(self._browse_results)
             res_toolbar.addWidget(self.btn_browse_results)
+
+            # SEED-024: export candidate results to a 4-sheet xlsx (selection, else all)
+            self.btn_export = QPushButton("⬇ " + tr("Export XLSX"))
+            self.btn_export.setToolTip(
+                tr("Export candidates to an Excel workbook — checked rows, or all shown if none checked")
+            )
+            self.btn_export.clicked.connect(self._export_xlsx)
+            res_toolbar.addWidget(self.btn_export)
 
             # "Clear" button — resets lab + clears persisted join_lab session state (Feature 5)
             self.btn_clear_lab = QPushButton(tr("Clear"))
@@ -2599,32 +2779,55 @@ if _QT_AVAILABLE:
         # --- Search flow ---
 
         def do_search(self):
-            """Build and launch the main search (R-01 — ONE engine call per find)."""
+            """Build and launch the main search (R-01 — ONE engine call per find).
+
+            SEED-024: the builder's mode selector chooses between the structured
+            Responsa-style path (mode='exact' + responsa_options) and the single
+            free-text modes (Exact/Variants/Fuzzy/Regex → 'literal'/'variants'/
+            'fuzzy'/'Regex', no responsa_options). Web parity with the anchor-side
+            builder's mode selector.
+            """
             from shared.joins_lab import compose
-            if self.builder.is_empty():
-                try:
-                    self.status.setText(
-                        tr("Build a line-by-line query, then Find Candidates.")
-                    )
-                except RuntimeError:
-                    pass
-                return
+            mode_key = self.builder.get_mode()
 
-            side = self.builder.build_side_query()
-            if side is None:
-                return
-            try:
-                query_str, ro, page_pos = compose(side)
-            except ValueError as exc:
+            if mode_key == "responsa":
+                if self.builder.is_empty():
+                    try:
+                        self.status.setText(
+                            tr("Build a line-by-line query, then Find Candidates.")
+                        )
+                    except RuntimeError:
+                        pass
+                    return
+                side = self.builder.build_side_query()
+                if side is None:
+                    return
                 try:
-                    self.status.setText(str(exc))
-                except RuntimeError:
-                    pass
-                return
+                    query_str, ro, page_pos = compose(side)
+                except ValueError as exc:
+                    try:
+                        self.status.setText(str(exc))
+                    except RuntimeError:
+                        pass
+                    return
+                # RR-14: merge the builder's real ja/flex/bidir into the composed ro
+                # (compose hardcodes them False at :745-747 in joins_lab.py)
+                self._merge_globals(self.builder, ro)
+            else:
+                # Single free-text modes — no Responsa pipeline (ro stays None).
+                query_str = self.builder.single_line_text()
+                if not query_str:
+                    try:
+                        self.status.setText(
+                            tr("Type a query for the joining fragment, then Find Candidates.")
+                        )
+                    except RuntimeError:
+                        pass
+                    return
+                ro = None
+                page_pos = self.builder._page_position()
 
-            # RR-14: merge the builder's real ja/flex/bidir into the composed ro
-            # (compose hardcodes them False at :745-747 in joins_lab.py)
-            self._merge_globals(self.builder, ro)
+            core_mode = core_mode_for_join_mode(mode_key)
 
             self._text_cands = None
             # Clear selection on new search (adapted_decision 6)
@@ -2644,11 +2847,12 @@ if _QT_AVAILABLE:
                     pass
                 self._search_thread = None
 
-            # R-01: page_position forwarded as text_position; genizah scope only
+            # R-01: page_position forwarded as text_position; genizah scope only.
+            # SEED-024: core_mode is the mode-aware string (was hardcoded "exact").
             self._search_thread = SearchThread(
                 self.wb.searcher,
                 query_str,
-                "exact",
+                core_mode,
                 0,
                 responsa_options=ro,
                 text_position=page_pos,
@@ -3404,6 +3608,17 @@ if _QT_AVAILABLE:
                     "flex_spacing": False,
                     "bidirectional": False,
                 }
+                # SEED-024: sync the inline option checkboxes to the reset dict,
+                # clear the single-line query, and return to Responsa-style mode.
+                for _chk in (builder.chk_variants, builder.chk_ja,
+                             builder.chk_flex, builder.chk_bidir):
+                    _chk.blockSignals(True)
+                    _chk.setChecked(False)
+                    _chk.blockSignals(False)
+                builder._single_edit.clear()
+                if builder.mode_combo is not None:
+                    builder.mode_combo.setCurrentIndex(0)
+                builder._apply_mode_visibility()
                 builder.add_row(placeholder=builder._first_hint)
 
             # Reset other-side enable
@@ -3703,6 +3918,121 @@ if _QT_AVAILABLE:
         # ------------------------------------------------------------------
         # "Browse results ▶" + bulk actions + selection management
         # ------------------------------------------------------------------
+
+        def _export_xlsx(self):
+            """Export candidate results to a 4-sheet xlsx (SEED-024 / SEED-019 #5).
+
+            Scope: the checked candidates if any are selected, else all currently
+            shown (filtered) candidates. Reuses the main-search 4-sheet dossier
+            builder (``genizah_app._build_search_results_xlsx_bytes`` over
+            :mod:`shared.export_dossier`) so the workbook structure matches the main
+            Search export exactly. Per-row triage is reflected via the triage filter
+            (the fixed 12-column main sheet is unchanged); triage counts are noted on
+            the Credits and Info sheet.
+            """
+            from PyQt6.QtWidgets import QFileDialog, QMessageBox
+            from shared.joins_lab import compose
+
+            filtered = list(getattr(self.wb, "filtered", []) or [])
+            if not filtered:
+                try:
+                    self.status.setText(tr("No candidates to export."))
+                except RuntimeError:
+                    pass
+                return
+
+            selected = [c for c in filtered if self._candidate_key(c) in self._selected_keys]
+            cands = selected if selected else filtered
+            results = build_candidate_export_rows(cands)
+
+            import genizah_core
+            lang = getattr(genizah_core, "CURRENT_LANG", "en") or "en"
+            meta_mgr = getattr(self.wb, "meta_mgr", None)
+            searcher = getattr(self.wb, "searcher", None)
+
+            def _meta_resolver(sid):
+                if not sid or meta_mgr is None:
+                    return None
+                try:
+                    shelf, mtitle = meta_mgr.get_meta_for_id(sid)
+                except Exception:
+                    shelf, mtitle = None, None
+                shelf = shelf or f"ID: {sid}"
+                mtitle = mtitle or ""
+                try:
+                    lib_code = meta_mgr.get_library_for_id(sid) or ""
+                except Exception:
+                    lib_code = ""
+                try:
+                    lib_name = (
+                        genizah_core.get_library_display(lib_code, short=False, lang=lang)
+                        if lib_code else ""
+                    )
+                except Exception:
+                    lib_name = lib_code
+                return {
+                    "shelfmark": shelf, "title": mtitle,
+                    "library_code": lib_code, "library_name": lib_name,
+                }
+
+            # Search context for the Credits and Info sheet.
+            mode_label = (
+                self.builder.mode_combo.currentText()
+                if self.builder.mode_combo is not None else tr("Responsa-style")
+            )
+            try:
+                if self.builder.get_mode() == "responsa":
+                    side = self.builder.build_side_query()
+                    q_preview = compose(side)[0] if side is not None else ""
+                else:
+                    q_preview = self.builder.single_line_text()
+            except Exception:
+                q_preview = ""
+
+            triage = getattr(self.wb, "triage", {}) or {}
+            y = sum(1 for v in triage.values() if v == "yes")
+            m = sum(1 for v in triage.values() if v == "maybe")
+            n = sum(1 for v in triage.values() if v == "no")
+            mode_info = f"Joins Lab — {mode_label} (✓{y} ?{m} ✗{n})"
+
+            path, _ = QFileDialog.getSaveFileName(
+                self, tr("Export candidates to XLSX"),
+                "joins_lab_candidates.xlsx", "Excel (*.xlsx)",
+            )
+            if not path:
+                return
+            if not path.lower().endswith(".xlsx"):
+                path += ".xlsx"
+
+            try:
+                from genizah_app import _build_search_results_xlsx_bytes
+                from shared.export_dossier import main_header_row
+                try:
+                    from shared_export_utils import sanitize_text_for_excel as _sanitize
+                except Exception:
+                    _sanitize = None
+                content = _build_search_results_xlsx_bytes(
+                    results=results,
+                    headers_main=main_header_row(lang),
+                    meta_resolver=_meta_resolver,
+                    sanitize_fn=_sanitize,
+                    lang=lang,
+                    full_text_fetcher=(
+                        lambda uid: (searcher.get_full_text_by_id(uid) or "")
+                        if (uid and searcher is not None) else ""
+                    ),
+                    search_query=q_preview or "",
+                    search_mode=mode_info,
+                )
+                with open(path, "wb") as f:
+                    f.write(content)
+                QMessageBox.information(
+                    self, tr("Export"),
+                    tr("Saved:") + f"\n{path}\n\n{len(results)} " + tr("candidates"),
+                )
+            except Exception as exc:
+                logger.warning("Joins-Lab xlsx export failed: %r", exc)
+                QMessageBox.critical(self, tr("Error"), f"Failed to save XLSX:\n{exc}")
 
         def _candidate_key(self, c) -> str:
             """Return a stable string key for a Candidate (sys_id + page)."""

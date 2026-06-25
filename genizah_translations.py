@@ -4484,3 +4484,26 @@ TRANSLATIONS.update({
     "Updating filter count…":
         "מעדכן את מניין הסינון…",
 })
+
+
+# SEED-024 — desktop Joins-Lab search-mode parity + candidate xlsx export.
+TRANSLATIONS.update({
+    "Search terms for the joining fragment…":
+        "מילות חיפוש עבור הקטע המצורף…",
+    "Type a query for the joining fragment, then Find Candidates.":
+        "הקלידו שאילתה עבור הקטע המצורף, ואז מִצאו מועמדים.",
+    "Responsa-style: structured line-by-line builder. Exact / Variants / Fuzzy / Regex: a single free-text query (like the main search).":
+        "סגנון שו״ת: בונה שאילתה מובְנה שורה־אחר־שורה. מדויק / צורות / מקורב / Regex: שאילתת טקסט חופשי אחת (כמו החיפוש הראשי).",
+    "Export XLSX":
+        "ייצוא XLSX",
+    "Export candidates to an Excel workbook — checked rows, or all shown if none checked":
+        "ייצוא מועמדים לחוברת Excel — שורות מסומנות, או כל המוצגות אם אין סימון",
+    "Export candidates to XLSX":
+        "ייצוא מועמדים ל־XLSX",
+    "No candidates to export.":
+        "אין מועמדים לייצוא.",
+    "Saved:":
+        "נשמר:",
+    "candidates":
+        "מועמדים",
+})
