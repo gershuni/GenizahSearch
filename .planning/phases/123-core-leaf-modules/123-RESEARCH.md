@@ -936,7 +936,10 @@ New test additions for Phase 123 (to be created during Wave 0):
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> Both questions below carry an adopted `Recommendation:` verdict (folded into 123-01-PLAN.md).
+> No open decision remains for the planner or executor.
 
 1. **`_has_line_break_syntax`/`LineGroup`/`_parse_line_break_query` placement**
    - What we know: they are pure query-string parsers; they are called by `SearchEngine.build_tantivy_query` / `build_regex_pattern` and by `tests/test_joins_lab.py` / `tests/test_line_break_word_gaps.py` via genizah_core facade; they have no engine coupling themselves
