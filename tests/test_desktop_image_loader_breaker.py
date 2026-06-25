@@ -31,6 +31,18 @@ import requests
 import shared.nli_circuit_breaker as br
 from shared import nli_fetch
 
+# desktop.image_loader pulls PyQt6.QtGui (QImage). On a headless box where Qt is
+# installed but QtGui can't load libGL.so.1, that import fails — so only the
+# loader-dependent class below is guarded; the pure host-policy / redirect /
+# source-guard tests run regardless. (Mirrors the repo's QT_AVAILABLE pattern.)
+try:
+    from desktop.image_loader import ImageLoaderThread
+
+    IMAGE_LOADER_AVAILABLE = True
+except Exception:  # pragma: no cover - environment-dependent (headless QtGui)
+    ImageLoaderThread = None
+    IMAGE_LOADER_AVAILABLE = False
+
 NLI_URL = "https://iiif.nli.org.il/IIIFv21/FL12345/full/2000,/0/default.jpg"
 ROSETTA_URL = (
     "https://rosetta.nli.org.il/delivery/DeliveryManagerServlet"
@@ -218,10 +230,12 @@ class TestNliImageGetRedirects:
 # ---------------------------------------------------------------------------
 # desktop/image_loader.py::_download_bytes — breaker wiring + timeouts
 # ---------------------------------------------------------------------------
+@pytest.mark.skipif(
+    not IMAGE_LOADER_AVAILABLE,
+    reason="desktop.image_loader unavailable (PyQt6 QtGui could not load)",
+)
 class TestDownloadBytesBreaker:
     def _loader(self):
-        from desktop.image_loader import ImageLoaderThread
-
         # _download_bytes is a pure method (uses only self._cancelled); build
         # the instance without QThread.__init__ to avoid Qt teardown.
         loader = ImageLoaderThread.__new__(ImageLoaderThread)
