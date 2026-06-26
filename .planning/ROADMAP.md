@@ -202,7 +202,7 @@ Plans:
 **Plans**: 3 plans (3 sequential waves — each post-Wave-0 wave edits the genizah_app.py shim block, so they serialize)
 
 - [x] 127-01-PLAN.md (Wave 1) — Wave-0 scaffolds: NEW `tests/test_no_back_edges_desktop.py` (GUARD-04 AST guard, 19 desktop modules incl. pre-registered `update_ui.py`), NEW `tests/test_genizah_core_facade.py` (SC#3 permanent-facade identity, 20 names), NEW `tests/test_update_ui_coordination.py` (DESK-08 behavioral tests for the sidecar coordination methods IN PLACE on GenizahGUI)
-- [ ] 127-02-PLAN.md (Wave 2) — Extract `desktop/update_ui.py`: MOVE-and-shim the 4 update-UI classes (`UpdateNotificationBar`/`WhatsNewBar`/`WhatsNewDialog`/`UpdateProgressDialog`), delete originals from `genizah_app.py`, add a no-noqa re-export shim (classes are used); back-edge guard now enforces `update_ui.py`. Coordination methods stay on GenizahGUI (research crux verdict)
+- [x] 127-02-PLAN.md (Wave 2) — Extract `desktop/update_ui.py`: MOVE-and-shim the 4 update-UI classes (`UpdateNotificationBar`/`WhatsNewBar`/`WhatsNewDialog`/`UpdateProgressDialog`), delete originals from `genizah_app.py`, add a no-noqa re-export shim (classes are used); back-edge guard now enforces `update_ui.py`. Coordination methods stay on GenizahGUI (research crux verdict)
 - [ ] 127-03-PLAN.md (Wave 3) — Final cleanup + sign-off: retire the Phase-126 D1 noqa suffix (genizah_app.py:77-78, imports kept), retarget `test_telemetry_consent_ux.py` to `desktop.settings_dialogs`, hard-flip the EN disclosure test in `test_privacy_disclosure_strings.py`, confirm the PERMANENT genizah_core facade, full-suite (bulk 6-env baseline + gui green) milestone sign-off
 
 ## Progress
@@ -219,4 +219,4 @@ Plans:
 | 124. Core Metadata & Index | 1/1 | Complete   | 2026-06-26 |
 | 125. Core Engines | 4/4 | Complete   | 2026-06-26 |
 | 126. Desktop Panels | 1/1 | Complete   | 2026-06-26 |
-| 127. Update UI & Final Cleanup | 1/3 | In Progress|  |
+| 127. Update UI & Final Cleanup | 2/3 | In Progress|  |
