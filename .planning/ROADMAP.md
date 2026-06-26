@@ -84,7 +84,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 - [x] **Phase 124: Core Metadata & Index** - Extract `shared/metadata_manager.py` (+ `_BoundedLRUCache`) and `shared/indexer.py`; retarget the `shared/local_indexer.py` lazy back-edges into `genizah_core` helpers.
  (completed 2026-06-26)
 
-- [ ] **Phase 125: Core Engines** - SEED-011 composition dedup first (125a), then extract `shared/search_engine.py` (DI + BrowseMap cache + SEED-006 gates + `_LAST_RESPONSA_DOWNGRADE` preserved), `shared/lab_settings.py`, `shared/lab_engine.py` (LOCAL-LAB mirror preserved), and model `_my_library_tab_ref` as an injected optional interface for both engines.
+- [x] **Phase 125: Core Engines** - SEED-011 composition dedup first (125a), then extract `shared/search_engine.py` (DI + BrowseMap cache + SEED-006 gates + `_LAST_RESPONSA_DOWNGRADE` preserved), `shared/lab_settings.py`, `shared/lab_engine.py` (LOCAL-LAB mirror preserved), and model `_my_library_tab_ref` as an injected optional interface for both engines. (completed 2026-06-26)
 - [ ] **Phase 126: Desktop Panels** - Extract seven desktop panel clusters to `desktop/`: `settings_dialogs.py`, `ui_widgets.py`, `catalog_browse.py`, `search_results_panel.py`, `browse_panel.py`, `reading_desk_panel.py`, `lists_tab.py`.
 - [ ] **Phase 127: Update UI & Final Cleanup** - Extract `desktop/update_ui.py` + new direct behavioral tests for sidecar reset/download coordination; remove all desktop shims from `genizah_app.py`; confirm `genizah_core.py` permanent facade; full-suite-green sign-off.
 
@@ -163,7 +163,7 @@ Plans:
 - [x] 125-01-PLAN.md — SEED-011 composition double-prep dedup (PREP-01): _ChunkPlan (two-query: genizah + diacritic-folded LOCAL) + _LabChunkPlan (shared fingerprint, index-local source boost); behavior-preserving; new invocation-count guard test; GUARD-01 registry pre-grown 10→13 (skip-until-exists)
 - [x] 125-02-PLAN.md — Extract LabSettings → shared/lab_settings.py (CORE-11; stdlib-only, no tantivy) behind a permanent same-object re-export shim; identity tests
 - [x] 125-03-PLAN.md — Extract LabEngine → shared/lab_engine.py (CORE-12 + CORE-13 LabEngine side); preserve CR-01/CR-02 LOCAL-LAB mirror + _my_library_tab_ref getattr gate (no shared→desktop import); lazy text_to_fingerprint/_LabChunkPlan imports; GUARD-03 LabEngine source-scan retargets
-- [ ] 125-04-PLAN.md — Extract SearchEngine + pre-cluster → shared/search_engine.py (CORE-10 + CORE-13 SearchEngine side); preserve 3 hazards (BrowseMap class-cache, SEED-006 content_search gates, _LAST_RESPONSA_DOWNGRADE thread-local); full 20-name facade shim; duck-typed is_searchable gate; GUARD-03 SearchEngine retargets; GUARD-01 registry final at 13
+- [x] 125-04-PLAN.md — Extract SearchEngine + pre-cluster → shared/search_engine.py (CORE-10 + CORE-13 SearchEngine side); preserve 3 hazards (BrowseMap class-cache, SEED-006 content_search gates, _LAST_RESPONSA_DOWNGRADE thread-local); full 20-name facade shim; duck-typed is_searchable gate; GUARD-03 SearchEngine retargets; GUARD-01 registry final at 13
 
 ### Phase 126: Desktop Panels
 
@@ -207,6 +207,6 @@ Plans:
 | 122. Config Enabler | 1/1 | Complete    | 2026-06-25 |
 | 123. Core Leaf Modules | 1/1 | Complete   | 2026-06-25 |
 | 124. Core Metadata & Index | 1/1 | Complete   | 2026-06-26 |
-| 125. Core Engines | 3/4 | In Progress|  |
+| 125. Core Engines | 4/4 | Complete   | 2026-06-26 |
 | 126. Desktop Panels | 0/TBD | Not started | - |
 | 127. Update UI & Final Cleanup | 0/TBD | Not started | - |

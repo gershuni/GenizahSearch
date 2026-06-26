@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: Ready to execute
-stopped_at: Completed 125-02-PLAN.md
-last_updated: "2026-06-26T07:01:20.929Z"
+status: Phase complete — ready for verification
+stopped_at: Completed 125-04-PLAN.md
+last_updated: "2026-06-26T08:39:47.102Z"
 last_activity: 2026-06-26
 progress:
   total_phases: 6
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 7
-  completed_plans: 6
-  percent: 50
+  completed_plans: 7
+  percent: 67
 ---
 
 # Project State
@@ -113,8 +113,8 @@ Items carried forward from v8.2.0 and earlier:
 
 ## Session Continuity
 
-Last session: 2026-06-26T07:01:20.921Z
-Stopped at: Completed 125-02-PLAN.md
+Last session: 2026-06-26T08:39:47.092Z
+Stopped at: Completed 125-04-PLAN.md
 Resume file: None
 Next step: `/gsd-discuss-phase 122`
 
@@ -129,6 +129,7 @@ Next step: `/gsd-discuss-phase 122`
 | Phase 125-core-engines P01 | 45m | 3 tasks | 4 files |
 | Phase 125 P02 | 33m | 1 tasks | 3 files |
 | Phase 125-core-engines P03 | 120 | 1 tasks | 5 files |
+| Phase 125 P04 | 90m | 1 tasks | 14 files |
 
 ## Decisions
 
@@ -136,3 +137,4 @@ Next step: `/gsd-discuss-phase 122`
 - [Phase ?]: Inline _tr() helper for tr()-dependent modules — lazy CURRENT_LANG import satisfies GUARD-01
 - [Phase ?]: LabSettings extracted to shared/lab_settings.py; same-object facade shim in genizah_core
 - [Phase ?]: Phase 125-03
+- [Phase ?]: SearchEngine extracted to shared/search_engine.py with 20-name facade; 7 lazy imports break cycles to genizah_core
