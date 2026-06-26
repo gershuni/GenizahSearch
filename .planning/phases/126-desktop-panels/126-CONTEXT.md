@@ -1,5 +1,13 @@
 # Phase 126 — Desktop Panels: CONTEXT
 
+> **⚠ RE-SCOPED 2026-06-26 (user decision):** Phase 126 now ships **D1 ONLY** (the clean top-level
+> dialog + widget CLASS extractions → `desktop/settings_dialogs.py` + `desktop/ui_widgets.py`, via
+> MOVE-and-shim). The four METHOD-based panels below (D2 catalog tab, D3 search-results, D4
+> browse/reading-desk, D5 lists) are **DEFERRED to SEED-028** — the Codex PLAN pre-flight (2 rounds)
+> proved them too densely cross-called in GenizahGUI to move-and-shim safely without a prerequisite
+> widget-ownership refactor. The D1–D5 detail below is retained as the historical scope + SEED-028
+> starting point; **only D1 (126-01) is in-scope for execution.** See `126-PREFLIGHT-CODEX.md`.
+
 **Status:** Discuss-phase **SKIPPED** (no genuine user-facing gray areas). Recorded per the
 standing v8.3.0 autonomous directive ("skip discuss if no genuine user-facing gray areas — assess +
 justify + write a short CONTEXT recording the skip"). [[feedback_no_auto_discuss]] still holds: this

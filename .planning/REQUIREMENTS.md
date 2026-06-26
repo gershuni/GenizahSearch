@@ -43,11 +43,11 @@
 
 - [ ] **DESK-01**: Settings / Help / Tabular-builder dialogs extracted to `desktop/settings_dialogs.py`.
 - [ ] **DESK-02**: Table / header / scroll widget classes extracted to `desktop/ui_widgets.py`.
-- [ ] **DESK-03**: Catalog "Browse-by-Identification" tab extracted to `desktop/catalog_browse.py`.
-- [ ] **DESK-04**: Search-results lifecycle extracted to `desktop/search_results_panel.py`.
-- [ ] **DESK-05**: Browse panel extracted to `desktop/browse_panel.py`.
-- [ ] **DESK-06**: Reading desk extracted to `desktop/reading_desk_panel.py`.
-- [ ] **DESK-07**: Lists tab + cloud-sync coordination extracted to `desktop/lists_tab.py`.
+- [~] **DESK-03**: Catalog "Browse-by-Identification" tab extracted to `desktop/catalog_browse.py`. **DEFERRED → SEED-028** (method-based, densely cross-called; needs widget-ownership refactor first — Codex PLAN pre-flight, user decision 2026-06-26).
+- [~] **DESK-04**: Search-results lifecycle extracted to `desktop/search_results_panel.py`. **DEFERRED → SEED-028** (`on_search_finished` touches 109 `self.*`).
+- [~] **DESK-05**: Browse panel extracted to `desktop/browse_panel.py`. **DEFERRED → SEED-028**.
+- [~] **DESK-06**: Reading desk extracted to `desktop/reading_desk_panel.py`. **DEFERRED → SEED-028**.
+- [~] **DESK-07**: Lists tab + cloud-sync coordination extracted to `desktop/lists_tab.py`. **DEFERRED → SEED-028**.
 - [ ] **DESK-08**: Update-UI sub-cluster (notification / What's-New / progress dialogs + sidecar reset/download coordination) extracted to `desktop/update_ui.py`, with **new direct behavioral tests** for the sidecar reset/download coordination methods plus the existing sidecar tests. *(SEED-020 §7 C-6)*
 
 ## v2 Requirements (deferred — NOT in this roadmap)
@@ -58,6 +58,7 @@
 - **DEFER-02**: `CompositionState` dataclass refactor of `genizah_app.py`'s scattered `comp_*` fields — the **prerequisite** for any desktop composition-tab extraction. Own seed.
 - **DEFER-03**: Desktop composition-tab extraction → `desktop/composition_tab.py` (blocked on DEFER-02).
 - **DEFER-04**: Desktop startup/session remainder extraction (~50 `self.*` tab couplings) — structurally infeasible until DESK-04/05/06/07 expose tab state behind setters.
+- **DEFER-05** (SEED-028, added 2026-06-26): Method-based desktop panel extraction — DESK-03 (catalog tab), DESK-04 (search-results), DESK-05 (browse), DESK-06 (reading-desk), DESK-07 (lists). Deferred from Phase 126 after the Codex PLAN pre-flight proved them too densely cross-called to move-and-shim safely; needs a widget-ownership/state refactor first (pairs with DEFER-02/03/04).
 
 ## Out of Scope
 
@@ -97,11 +98,11 @@ GSD phase numbering continues from v8.2.0 (ended Phase 121) → this milestone i
 | CORE-13 | 125 | Complete |
 | DESK-01 | 126 | Pending |
 | DESK-02 | 126 | Pending |
-| DESK-03 | 126 | Pending |
-| DESK-04 | 126 | Pending |
-| DESK-05 | 126 | Pending |
-| DESK-06 | 126 | Pending |
-| DESK-07 | 126 | Pending |
+| DESK-03 | SEED-028 | Deferred |
+| DESK-04 | SEED-028 | Deferred |
+| DESK-05 | SEED-028 | Deferred |
+| DESK-06 | SEED-028 | Deferred |
+| DESK-07 | SEED-028 | Deferred |
 | DESK-08 | 127 | Pending |
 
 **Coverage:**

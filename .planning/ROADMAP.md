@@ -85,8 +85,8 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
  (completed 2026-06-26)
 
 - [x] **Phase 125: Core Engines** - SEED-011 composition dedup first (125a), then extract `shared/search_engine.py` (DI + BrowseMap cache + SEED-006 gates + `_LAST_RESPONSA_DOWNGRADE` preserved), `shared/lab_settings.py`, `shared/lab_engine.py` (LOCAL-LAB mirror preserved), and model `_my_library_tab_ref` as an injected optional interface for both engines. (completed 2026-06-26)
-- [ ] **Phase 126: Desktop Panels** - Extract seven desktop panel clusters to `desktop/`: `settings_dialogs.py`, `ui_widgets.py`, `catalog_browse.py`, `search_results_panel.py`, `browse_panel.py`, `reading_desk_panel.py`, `lists_tab.py`.
-- [ ] **Phase 127: Update UI & Final Cleanup** - Extract `desktop/update_ui.py` + new direct behavioral tests for sidecar reset/download coordination; remove all desktop shims from `genizah_app.py`; confirm `genizah_core.py` permanent facade; full-suite-green sign-off.
+- [ ] **Phase 126: Desktop Panels (RE-SCOPED 2026-06-26 → D1 only)** - Extract the clean top-level CLASS clusters to `desktop/`: `settings_dialogs.py` (dialogs) + `ui_widgets.py` (table/header/scroll widgets). The four METHOD-based panels (catalog tab, search-results, browse/reading-desk, lists) are DEFERRED to **SEED-028** — the Codex PLAN pre-flight proved them too entangled (dense `self.method()`/`self.widget` cross-refs; D3 `on_search_finished` alone touches 109 `self.*`) for a safe zero-behavior-change move-and-shim without a prerequisite widget-ownership refactor (like E2's CompositionState). User decision 2026-06-26.
+- [ ] **Phase 127: Update UI & Final Cleanup** - Extract `desktop/update_ui.py` + new direct behavioral tests for sidecar reset/download coordination; remove the Phase-126 (D1) desktop shims from `genizah_app.py`; install the `desktop/` back-edge guard; confirm `genizah_core.py` permanent facade; full-suite-green sign-off. (genizah_app.py shrinks only modestly this milestone — the bulk awaits SEED-028.)
 
 ## Phase Details
 
@@ -167,26 +167,22 @@ Plans:
 
 ### Phase 126: Desktop Panels
 
-**Goal**: Seven desktop panel clusters are extracted from `genizah_app.py` to `desktop/` modules: `desktop/settings_dialogs.py` (Settings/Help/Tabular-builder dialogs, D-07b telemetry snapshot stripping preserved), `desktop/ui_widgets.py` (table/header/scroll widget classes), `desktop/catalog_browse.py` (catalog Browse-by-Identification tab), `desktop/search_results_panel.py` (`SearchResultsPanel(QWidget)`), `desktop/browse_panel.py` (browse panel), `desktop/reading_desk_panel.py` (reading desk), and `desktop/lists_tab.py` (lists tab + cloud-sync coordination). The v7.9 proven recipe (copy-not-move; shim; delete+guard next phase) applies. `pyqtSignal` worker classes stay at module level. `D3` (search results) is sequenced before `D4` (browse) because `browse_text` is shared.
+**Goal** (RE-SCOPED 2026-06-26 → D1 only): Extract the two clean top-level CLASS clusters from `genizah_app.py` to `desktop/` modules: `desktop/settings_dialogs.py` (Settings/SearchSettings/LabScoring/Tabular-builder dialogs, D-07b telemetry snapshot stripping preserved) and `desktop/ui_widgets.py` (table/header/scroll widget classes). MOVE-and-shim recipe (mirror genizah_core 122–125): delete the original class from `genizah_app.py`, replace with a `# noqa: F401` re-export shim so `genizah_app.X is desktop.Y.X` holds. `LabPanel` deferred to E2. The four METHOD-based panels (D2 catalog tab, D3 search-results, D4 browse/reading-desk, D5 lists) are DEFERRED to **SEED-028** — the Codex PLAN pre-flight (2 rounds) proved they are densely cross-called methods on `GenizahGUI` (e.g. `on_search_finished` touches 109 `self.*`; `_catalog_*`/browse/lists methods called from many sites that stay in `GenizahGUI`), unsafe to move-and-shim under a zero-behavior-change mandate without a prerequisite widget-ownership/state refactor (like E2's CompositionState). User decision 2026-06-26.
 **Depends on**: Phase 125
-**Requirements**: DESK-01, DESK-02, DESK-03, DESK-04, DESK-05, DESK-06, DESK-07, GUARD-02, GUARD-03, GUARD-04
+**Requirements**: DESK-01, DESK-02, GUARD-02, GUARD-03, GUARD-04 (DESK-03..07 → deferred to SEED-028)
 **Success Criteria** (what must be TRUE):
 
-  1. Each of the seven `desktop/` modules exists and imports cleanly in isolation (no import of `genizah_app` at module level); `genizah_app.py` re-exports each panel class so all current `from genizah_app import ...` call sites (test files + `desktop/join_workbench.py` + 16+ other files) continue to work unchanged.
-  2. The existing desktop panel test suites pass via the re-export shims: `tests/test_telemetry_consent_ux.py`, `tests/test_tabular_builder_rtl.py`, `tests/test_seed023_catalog_filters.py`, `tests/test_catalog_availability_filter.py`, `tests/test_browse_state.py`, `tests/test_browse_synthetic.py`, `tests/test_local_browse_panel.py`, `tests/test_wr01_open_local_browse_page_ast.py`, `tests/test_add_to_list_dialog_ui_context.py`, `tests/test_user_lists_*.py`.
-  3. A new `tests/test_search_results_panel.py` (mock `SearchThread`) exercises `SearchResultsPanel` directly, imported from `desktop/search_results_panel.py` — the first panel to have a direct-module test.
-  4. `pyqtSignal`-bearing worker classes (e.g. `_CatalogRefreshWorker`) remain at module level in their new `desktop/` home; the desktop app starts and the affected tabs are fully functional (desktop smoke-import + headless PyQt6 construction test green).
-  5. The full existing pytest suite passes; per-file ruff review on each extraction commit shows no unintended shim stripping in `genizah_app.py`.
+  1. `desktop/settings_dialogs.py` and `desktop/ui_widgets.py` exist and import cleanly in isolation (no module-level `import genizah_app`); `genizah_app.py` re-exports the moved classes so all current `from genizah_app import ...` / `genizah_app.X` call sites continue to work unchanged, with `genizah_app.X is desktop.Y.X` identity (move-and-shim — original deleted, shim not shadowed).
+  2. The existing D1 test suites pass via the shims: `tests/test_telemetry_consent_ux.py` (D-07b consent snapshot strip identical after the move), `tests/test_tabular_builder_rtl.py` (additive GUARD-03 retarget).
+  3. The full existing pytest suite (bulk + gui slice) passes — 6-env `test_search_api_v2::…real_index[*]` baseline is the accepted GREEN baseline; per-file ruff review on each extraction commit shows no unintended shim stripping; base-vs-HEAD `dir(genizah_app)` NAME diff (not failure count) confirms no dropped names.
+  4. Headless PyQt6 construction/import smoke green; the dialogs/widgets work identically after the move.
 
-**Plans**: 5 plans (5 sequential waves — every cluster edits `genizah_app.py` shim block, so they serialize; D3 before D4 for shared `browse_text`)
+**Plans**: 1 plan (126-01, Wave 1, D1). The D2–D5 method-based plans were drafted (Codex-r1-corrected) and preserved at `deferred-method-panels/126-02..05-PLAN.md` as the starting point for SEED-028.
 
 Plans:
 
-- [ ] 126-01-PLAN.md (Wave 1, D1) — Extract Settings/Help/Tabular dialogs -> desktop/settings_dialogs.py + table/header/scroll widgets -> desktop/ui_widgets.py; D-07b telemetry snapshot strip verbatim; GenizahGUI apply/cancel_settings API; LabPanel DEFERRED to E2
-- [ ] 126-02-PLAN.md (Wave 2, D2) — Extract catalog Browse-by-Identification tab -> desktop/catalog_browse.py (CatalogBrowsePanel + module-level _CatalogRefreshWorker); _CATALOG_FILTER_SETS kept in place (aliasing hazard)
-- [ ] 126-03-PLAN.md (Wave 3, D3) — Extract search-results lifecycle -> desktop/search_results_panel.py (SearchResultsPanel; cross-tab signals; session/history delegated, E3-deferred); NEW tests/test_search_results_panel.py (mock SearchThread) + conftest _GUI_TEST_FILES
-- [ ] 126-04-PLAN.md (Wave 4, D4) — Extract browse -> desktop/browse_panel.py (BrowsePanel + moved browse_thumb_resolved signal) + reading desk -> desktop/reading_desk_panel.py (sub-widget); 8 browse source-scan tests additively retargeted (OR-location)
-- [ ] 126-05-PLAN.md (Wave 5, D5) — Extract Personal Lists tab -> desktop/lists_tab.py (ListsPanel + _ListsSyncCoordinator owning debounce state + authenticated cloud-sync gate verbatim); Community populators stay
+- [ ] 126-01-PLAN.md (Wave 1, D1) — Extract Settings/SearchSettings/LabScoring/Tabular dialogs -> desktop/settings_dialogs.py + table/header/scroll widgets -> desktop/ui_widgets.py (MOVE-and-shim, identity); D-07b telemetry snapshot strip verbatim; GenizahGUI apply/cancel_settings API; LabPanel DEFERRED to E2
+- [DEFERRED → SEED-028] D2 catalog tab, D3 search-results, D4 browse/reading-desk, D5 lists — method-based; need a widget-ownership refactor first. Draft plans preserved in `deferred-method-panels/`.
 
 ### Phase 127: Update UI & Final Cleanup
 
@@ -196,7 +192,7 @@ Plans:
 **Success Criteria** (what must be TRUE):
 
   1. `desktop/update_ui.py` exists and imports cleanly; `UpdateNotificationBar`, `WhatsNewBar`, `WhatsNewDialog`, and `UpdateProgressDialog` are importable from it; new direct behavioral tests covering the GUI sidecar reset/download coordination methods pass (SEED-020 §7 C-6 requirement).
-  2. All `genizah_app.py` implementation shims (the desktop panel cluster code that was copied but not yet deleted in Phase 126) are removed in one clean commit; `genizah_app.py` contains only thin re-export lines for each extracted cluster; the file shrinks by at least 70% from its pre-milestone 28,033 lines.
+  2. The Phase-126 (D1) desktop re-export shims are retired in one clean commit — callers retargeted from `genizah_app` to `desktop.settings_dialogs`/`desktop.ui_widgets`, the shim lines removed, plus the `update_ui` shim from this phase. (NOTE re-scope 2026-06-26: the original ≥70% `genizah_app.py` shrink is NO LONGER a v8.3.0 target — the bulk of the file is the four method-based panels deferred to SEED-028; this milestone delivers the D1 classes + update_ui only.)
   3. `genizah_core.py` permanent re-export facade is confirmed: `from genizah_core import Config`, `from genizah_core import SearchEngine`, and all other extracted names continue to resolve; `tests/test_genizah_core_facade.py` (new or updated) asserts the facade exports the same objects as the `shared/` modules.
   4. Both back-edge guards are green: `tests/test_no_back_edges_core.py` (GUARD-01, installed Phase 122) confirms no `shared/` module imports `genizah_core` at module level; `tests/test_no_back_edges_desktop.py` (new, this phase) confirms no `desktop/` module imports `genizah_app` at module level.
   5. The full existing pytest suite (all categories: search, browse, responsa, joins, lists, composition parity, web + desktop import paths) is green — the milestone's final zero-behavior-change sign-off.

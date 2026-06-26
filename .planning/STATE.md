@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: Phase 126 planned (5 plans, D1-D5 sequential waves) — ready to execute
-stopped_at: Phase 126 planned — 5 PLANs (126-01..05), one cluster per sequential wave; awaiting Codex PLAN pre-flight + execute
-last_updated: "2026-06-26T15:00:00.000Z"
+status: Phase 126 RE-SCOPED to D1 only (D2-D5 deferred → SEED-028); 126-01 pre-flight-clean — ready to execute
+stopped_at: Phase 126 re-scoped to D1 (126-01) after Codex PLAN pre-flight R2; D2-D5 method-based panels deferred to SEED-028; ready to execute 126-01
+last_updated: "2026-06-26T16:00:00.000Z"
 last_activity: 2026-06-26
 progress:
   total_phases: 6
@@ -25,17 +25,24 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: 126 (Desktop Panels) — PLANNED (5 plans, D1-D5, sequential waves 1-5). NEXT: Codex PLAN pre-flight, then execute.
-Plan: 0 of 5 executed.
+Phase: 126 (Desktop Panels) — RE-SCOPED 2026-06-26 to **D1 ONLY**. NEXT: execute 126-01 (already Codex-pre-flight-clean).
+Plan: 0 of 1 executed (only 126-01 remains in the phase; D2-D5 moved to deferred-method-panels/ → SEED-028).
 
-PHASE 126 PLAN (5 plans, ONE cluster per sequential wave — every cluster edits the genizah_app.py shim
-  block, so they serialize; USE_WORKTREES=false; D3 before D4 for shared browse_text):
-  W1 126-01 D1 settings_dialogs + ui_widgets (D-07b strip verbatim; GenizahGUI apply/cancel_settings; LabPanel DEFERRED to E2)
-  W2 126-02 D2 catalog_browse (CatalogBrowsePanel + module-level _CatalogRefreshWorker; _CATALOG_FILTER_SETS kept-in-place)
-  W3 126-03 D3 search_results_panel (hardest — 109 self.* in on_search_finished; session/history DELEGATED=E3-defer; NEW test_search_results_panel.py + conftest _GUI_TEST_FILES)
-  W4 126-04 D4 browse_panel + reading_desk_panel (browse_thumb_resolved signal moved onto BrowsePanel; reading desk = sub-widget; 8 browse source-scan tests additively retargeted OR-location)
-  W5 126-05 D5 lists_tab (ListsPanel + _ListsSyncCoordinator owning the _auto_sync_pending/_last debounce + authenticated supabase_client gate verbatim; Personal Lists tab only — Community populators stay)
-  GUARD-03 uses RESEARCH's CORRECTED list (4 CONTEXT-listed tests are web-side false positives; 8 browse + 1 tabular genuinely retarget, additively). copy-not-move; never repo-wide ruff --fix; base-vs-HEAD dir(genizah_app) NAME diff per commit (NOT count). Base = aa215b37.
+RE-SCOPE RATIONALE (user decision 2026-06-26): the Codex PLAN pre-flight ran TWICE. R1 caught a BLOCKER
+  (recipe must be MOVE-and-shim, not copy-keep-both — a kept original shadows the shim) + D3/D4 method
+  reassignment + GUARD-03 list fixes → all fixed (commit 4793ab05). R2 then exposed the FUNDAMENTAL issue:
+  the D2 catalog-tab + D3 search-results + D4 browse + D5 lists "panels" are densely cross-called
+  GenizahGUI METHODS — moving them breaks the many self.<method>() callers that stay in GenizahGUI
+  (export_results, filter dialogs, startup, session-restore, login/logout, _on_tab_changed,
+  open_result_in_browse, etc.). on_search_finished alone touches 109 self.*. This is the same dense-
+  coupling that got E2/E3 deferred. User chose: DEFER the entangled panels, keep only the clean class
+  extraction. So Phase 126 = **D1** (top-level dialog + widget CLASSES → desktop/settings_dialogs.py +
+  desktop/ui_widgets.py; pure move-and-shim, identity holds, NO method deletion / cross-caller breakage).
+  D2-D5 → **SEED-028** (needs a widget-ownership/state refactor first, like E2's CompositionState); their
+  Codex-r1-corrected draft plans preserved at .planning/phases/126-desktop-panels/deferred-method-panels/.
+  126-01 had ZERO Codex r2 findings → pre-flight-clean. Base = aa215b37.
+  EXECUTE: 126-01 only. MOVE-and-shim; never repo-wide ruff --fix; base-vs-HEAD dir(genizah_app) NAME diff
+  (NOT count); GUARD-03 additive retarget of test_tabular_builder_rtl.py; bulk + gui slices; 6-env baseline.
 
 PHASE 125 (engines) — COMPLETE 2026-06-26. genizah_core.py 6064→755 ln (permanent 20-name
   same-object facade). 4 waves: 125-01 SEED-011 dedup (_ChunkPlan/_LabChunkPlan), 125-02 LabSettings,
@@ -113,6 +120,7 @@ Items carried forward from v8.2.0 and earlier:
 | DEFER-02 | CompositionState dataclass refactor | Own seed | v8.3.0 |
 | DEFER-03 | Desktop composition-tab extraction | Blocked on DEFER-02 | v8.3.0 |
 | DEFER-04 | Desktop startup/session remainder extraction | Blocked on DESK-04/05/06/07 | v8.3.0 |
+| DEFER-05 | Method-based desktop panel extraction (DESK-03..07: catalog tab, search-results, browse, reading-desk, lists) → SEED-028 | Needs widget-ownership refactor first; draft plans in 126/deferred-method-panels/ | v8.3.0 (Phase 126 re-scope, 2026-06-26) |
 
 ## Session Continuity
 

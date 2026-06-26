@@ -9,6 +9,9 @@ created: 2026-06-26
 
 # Phase 126 — Validation Strategy
 
+> **⚠ RE-SCOPED 2026-06-26:** Phase 126 = **D1 only** (126-01). The D2–D5 rows in the per-task map
+> below are DEFERRED to SEED-028 and are NOT executed this phase — only the 126-01 (D1) rows apply.
+
 > Per-phase validation contract for feedback sampling during execution. Phase 126 is a
 > ZERO-BEHAVIOR-CHANGE refactor (MOVE panel clusters out of `genizah_app.py` into `desktop/`,
 > replace the originals with `# noqa: F401` re-export shims — the genizah_core 122–125 recipe).
