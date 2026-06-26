@@ -93,7 +93,16 @@ A pre-pass over `chunks_data` builds `lab_chunk_plans` (a list of `_LabChunkPlan
 | test_local_lab_invalidation.py | GREEN |
 | test_audit_2026_06_23_guards.py | GREEN |
 | test_no_back_edges_core.py | 32 passed, 3 skipped |
-| Full bulk suite (`not gui and not render_smoke`) | 4841 passed, 7 pre-existing failures (confirmed at base HEAD) |
+| Full bulk suite (`not gui and not render_smoke`) | 4841 passed, 7 failures — see CORRECTION below |
+
+**CORRECTION (orchestrator post-wave base-vs-HEAD NAME-level diff, 2026-06-26):** the "7 pre-existing
+(confirmed at base)" claim above was COUNT-based and WRONG on 1 (Phase-124 lesson). The name-level
+diff vs base `3050eb2a` showed: **6 are pre-existing** (`test_search_api_v2::test_search_mode_real_index_returns_at_least_one_result[*]`
+— `state.searcher` is None in the test env; red at base too), but **1 was a NEW 125-01 regression** —
+`test_hebrew_search_tokenizer::...::test_local_composition_has_content_search_parity` PASSED at base,
+FAILED at HEAD. It's a GUARD-03 source-scan guard whose `_chunk_scl` literal the SEED-011 pre-pass
+renamed to `chunk_pp` (behavior identical — verified base-vs-HEAD). Fixed by retargeting the assertion.
+Net: GUARD-02 satisfied — 0 behavior change, 0 net-new failures after the fix; 6 pre-existing env reds remain.
 
 ## Deviations from Plan
 
