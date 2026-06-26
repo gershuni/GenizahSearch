@@ -4,13 +4,13 @@ milestone: v8.3.0
 milestone_name: God-File Decomposition
 status: Ready to execute
 stopped_at: Completed 125-02-PLAN.md
-last_updated: "2026-06-26T05:32:58.248Z"
+last_updated: "2026-06-26T07:01:20.929Z"
 last_activity: 2026-06-26
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 50
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 125 (Core Engines) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 124 recap: post-exec review caught 3 defects the executor misreported as "pre-existing"
   (count-based check) — _parse_cudl_label facade drop (fc3ce883), path-string-registry
   GUARD-03 miss (e4abf248), tantivy import-order GUARD-02 change (741f7b24, Codex r1 HIGH).
@@ -113,7 +113,7 @@ Items carried forward from v8.2.0 and earlier:
 
 ## Session Continuity
 
-Last session: 2026-06-26T05:32:58.241Z
+Last session: 2026-06-26T07:01:20.921Z
 Stopped at: Completed 125-02-PLAN.md
 Resume file: None
 Next step: `/gsd-discuss-phase 122`
@@ -128,9 +128,11 @@ Next step: `/gsd-discuss-phase 122`
 | Phase 124-core-metadata-index P01 | 90 | 2 tasks | 8 files |
 | Phase 125-core-engines P01 | 45m | 3 tasks | 4 files |
 | Phase 125 P02 | 33m | 1 tasks | 3 files |
+| Phase 125-core-engines P03 | 120 | 1 tasks | 5 files |
 
 ## Decisions
 
 - [Phase ?]: Engine-side helpers stay in genizah_core.py — depend on Tantivy engine context
 - [Phase ?]: Inline _tr() helper for tr()-dependent modules — lazy CURRENT_LANG import satisfies GUARD-01
 - [Phase ?]: LabSettings extracted to shared/lab_settings.py; same-object facade shim in genizah_core
+- [Phase ?]: Phase 125-03

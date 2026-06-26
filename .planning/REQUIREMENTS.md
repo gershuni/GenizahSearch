@@ -32,8 +32,8 @@
 - [x] **CORE-09**: `Indexer` extracted to `shared/indexer.py`.
 - [ ] **CORE-10**: `SearchEngine` extracted (intact) to `shared/search_engine.py` with `meta_mgr`/`var_mgr` passed by dependency injection; the BrowseMap class-level cache migration, the SEED-006 `content_search` compat gates, and the `_LAST_RESPONSA_DOWNGRADE` thread-local downgrade channel are explicitly preserved with behavior unchanged. *(SEED-020 §7 C-3 hazards)*
 - [x] **CORE-11**: `LabSettings` extracted to `shared/lab_settings.py`.
-- [ ] **CORE-12**: `LabEngine` extracted to `shared/lab_engine.py`; the SearchEngine↔LabEngine LOCAL-LAB mirror (CR-01/CR-02, `_lab_weights_hash_override`) preserved.
-- [ ] **CORE-13**: `_my_library_tab_ref` modeled as an injected optional "local-search-gate" interface consumed by BOTH `SearchEngine.attach_my_library_tab()` and `LabEngine.lab_composition_search()`; no `shared/` → desktop import. *(closes SEED-020 §7 C-4)*
+- [x] **CORE-12**: `LabEngine` extracted to `shared/lab_engine.py`; the SearchEngine↔LabEngine LOCAL-LAB mirror (CR-01/CR-02, `_lab_weights_hash_override`) preserved.
+- [x] **CORE-13**: `_my_library_tab_ref` modeled as an injected optional "local-search-gate" interface consumed by BOTH `SearchEngine.attach_my_library_tab()` and `LabEngine.lab_composition_search()`; no `shared/` → desktop import. *(closes SEED-020 §7 C-4)*
 
 ### Composition dedup prerequisite (PREP) — Phase 125, FIRST (125a), before the engine move
 
@@ -93,8 +93,8 @@ GSD phase numbering continues from v8.2.0 (ended Phase 121) → this milestone i
 | PREP-01 | 125 (125a — first) | Complete |
 | CORE-10 | 125 | Pending |
 | CORE-11 | 125 | Complete |
-| CORE-12 | 125 | Pending |
-| CORE-13 | 125 | Pending |
+| CORE-12 | 125 | Complete |
+| CORE-13 | 125 | Complete |
 | DESK-01 | 126 | Pending |
 | DESK-02 | 126 | Pending |
 | DESK-03 | 126 | Pending |
