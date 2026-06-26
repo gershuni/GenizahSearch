@@ -189,8 +189,16 @@ render_smoke slice: 35 passed / 0 failed. **Zero new failures attributable to Ph
 - `test_phase_97_invariants.py::test_local_post_dedup_merge`
 - `test_nli_breaker_cross_module_invariants.py::TestNoResidualHardcodedNliTimeouts::test_no_bare_timeout_on_nli_calls_ast` (root cause: the test `ast.parse()`s genizah_core.py, which carries a UTF-8 BOM → `SyntaxError: U+FEFF`; the audit has been silently non-functional since the BOM was introduced — pre-existing, candidate for a future seed)
 
-The first 7 are forward-looking LabEngine/composition/dedup tests (Phase 125 / SEED-011
-territory) that are red until that work lands. None are caused by the MetadataManager/Indexer move.
+~~The first 7 are forward-looking LabEngine/composition/dedup tests (Phase 125 / SEED-011
+territory) that are red until that work lands.~~ None are caused by the MetadataManager/Indexer move.
+
+**CORRECTION (2026-06-26, from Phase-125 research):** all 8 of these were NOT forward-looking
+composition tests — they were a **Phase-123 regression**: commit `674d16b5` accidentally added a
+UTF-8 BOM to genizah_core.py, so every test that `ast.parse()`s the file failed with
+`SyntaxError: U+FEFF`. The asserted behaviors were correctly implemented all along. Fixed by a
+byte-level BOM strip (commit `29d51f4a`); all 8 now pass. The Phase-124 GUARD-02 *conclusion*
+(zero new failures from the MetadataManager/Indexer move) was still correct — only this prose
+attribution was wrong.
 
 **Cosmetic note:** commit `1f67dc3d`'s message and one identity-test docstring label Indexer
 as "CORE-10"; CORE-10 is actually the Phase 125 SearchEngine requirement. No tracking leak —

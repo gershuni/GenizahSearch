@@ -33,12 +33,20 @@ Plan: 124-01 done (6 commits b63411c1..741f7b24)
   Codex CODE review converged R1→R2 APPROVE. GUARD-02 confirmed zero new failures via
   base-vs-HEAD NAME-level diff (8 pre-existing reds confirmed at base; gui+render_smoke green).
 
-PHASE 125 (engines) — START HERE. Per ROADMAP: SEED-011 composition dedup FIRST as 125a,
-  then search_engine (PRESERVE BrowseMap class-cache migration / SEED-006 content_search gates
-  / _LAST_RESPONSA_DOWNGRADE thread-local), lab_settings, lab_engine; model _my_library_tab_ref
-  as injected cross-engine local-search gate (never import desktop into shared). CORE-10..13.
-  FIRST STEP = discuss-assessment: SEED-011 (composition double-prep dedup) may be a genuine
-  user gray area (is it behavior-preserving or an intended change?) — assess before skipping.
+PHASE 125 (engines) — IN PROGRESS. Discuss SKIPPED (125-CONTEXT.md). Research DONE
+  (125-RESEARCH.md, HIGH confidence). NEXT: pattern-map → plan(opus) → checker → Codex PLAN
+  pre-flight → execute → Codex CODE review → verify.
+  **KEY RESEARCH FINDING + FIX (done):** the 8 "pre-existing" red tests were NOT SEED-011
+  forward-spec — they were a **Phase-123 regression**: commit 674d16b5 added a UTF-8 BOM to
+  genizah_core.py → every AST/source-scan test hit `SyntaxError: U+FEFF`. Fixed by byte-level
+  BOM strip (commit 29d51f4a); all 8 now green; zero behavior change. Bulk suite now CLEAN.
+  (Phase-123 verify MISSED this; my 124 SUMMARY mis-attributed it — both corrected.)
+  Plan shape (researcher): 125a = SEED-011 dedup ONLY (BOM already fixed) — NOTE the
+  ChunkPlan needs TWO query strings (Genizah vs LOCAL diacritic-fold differ; SEED-006 M1);
+  then 125b LabSettings → 125c LabEngine → 125d SearchEngine (~3,490 ln, most importers;
+  preserve BrowseMap class-cache, SEED-006 content_search gates, _LAST_RESPONSA_DOWNGRADE
+  thread-locals; 6 downgrade names need facade shims). GUARD-03: 5 source-scan test files.
+  Tell the planner the BOM is ALREADY fixed (don't re-include in 125a).
 
   FULL DRILL for phases 125-127 (TWO Codex touchpoints — pre-flight + post-exec):
   discuss(skip-if-no-gray-areas) → research → pattern-map → plan(opus) → gsd-plan-checker loop
