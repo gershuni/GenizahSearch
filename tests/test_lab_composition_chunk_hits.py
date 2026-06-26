@@ -338,7 +338,7 @@ class TestSearchCompositionLogicStaticContract:
         """chunk_count must be derived from unique chunk_hits, not incremented
         inline. Inline increment would re-introduce the 2026-05-15 bug where
         repeated source phrases inflated `min chunks` filter results."""
-        with open("genizah_core.py", encoding="utf-8") as f:
+        with open("shared/search_engine.py", encoding="utf-8") as f:
             src = f.read()
         assert "rec['chunk_count'] += 1" not in src, (
             "Inline chunk_count increment was removed in the 2026-05-15 bugfix "
@@ -360,7 +360,7 @@ class TestSearchCompositionLogicStaticContract:
         """The list-of-tuples chunk_hits must be appended with the same shape
         Plan 02 uses (i, chunk_text, score, ms_snip).
         """
-        with open("genizah_core.py", encoding="utf-8") as f:
+        with open("shared/search_engine.py", encoding="utf-8") as f:
             src = f.read()
         # The defaultdict initializes chunk_hits as a list (not int)
         assert "'chunk_hits': []" in src, (
@@ -386,7 +386,7 @@ class TestSearchCompositionLogicStaticContract:
         """build_items at the end of search_composition_logic must surface
         chunk_hits onto the returned-item dict so the serializer can read it.
         """
-        with open("genizah_core.py", encoding="utf-8") as f:
+        with open("shared/search_engine.py", encoding="utf-8") as f:
             src = f.read()
         assert "'chunk_hits': data.get('chunk_hits', [])" in src, (
             "build_items output must surface data['chunk_hits'] (list) for "

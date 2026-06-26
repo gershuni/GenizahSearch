@@ -615,16 +615,19 @@ class TestLabCompositionSearchLocalLab:
         assert result is False
 
     def test_search_engine_has_required_attrs(self):
-        """SearchEngine must declare local_lab_searcher, local_lab_searcher_stale, _lab_local_meta."""
-        src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "genizah_core.py")
+        """SearchEngine must declare local_lab_searcher, local_lab_searcher_stale, _lab_local_meta.
+
+        GUARD-03 retarget (Phase 125-04): SearchEngine moved to shared/search_engine.py.
+        """
+        src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "shared", "search_engine.py")
         if not os.path.exists(src_path):
-            pytest.skip("genizah_core.py not found")
+            pytest.skip("shared/search_engine.py not found")
 
         with open(src_path, "r", encoding="utf-8") as f:
             source = f.read()
 
-        # Check attributes exist in genizah_core.py source
-        assert "local_lab_searcher" in source, "local_lab_searcher missing from genizah_core.py"
+        # Check attributes exist in shared/search_engine.py source
+        assert "local_lab_searcher" in source, "local_lab_searcher missing from shared/search_engine.py"
         assert "local_lab_searcher_stale" in source, "local_lab_searcher_stale missing"
         assert "_lab_local_meta" in source, "_lab_local_meta missing"
         assert "_check_local_lab_freshness" in source, "_check_local_lab_freshness method missing"
@@ -640,13 +643,13 @@ class TestLabCompositionSearchLocalLab:
         assert hasattr(SearchEngine, "rebuild_local_lab_index"), (
             "SearchEngine.rebuild_local_lab_index method required (W5 Option C wire-up)"
         )
-        src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "genizah_core.py")
+        src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "shared", "search_engine.py")
         if not os.path.exists(src_path):
-            pytest.skip("genizah_core.py not found")
+            pytest.skip("shared/search_engine.py not found")
         with open(src_path, "r", encoding="utf-8") as f:
             source = f.read()
         assert "fingerprint_dyn_fn=" in source, (
-            "Option C callback wire-up missing: fingerprint_dyn_fn= not found in genizah_core.py"
+            "Option C callback wire-up missing: fingerprint_dyn_fn= not found in shared/search_engine.py"
         )
 
     def test_search_composition_logic_extends_regular_local_query(self):
@@ -656,9 +659,9 @@ class TestLabCompositionSearchLocalLab:
         LAB side-index is Lab-Mode-only (see lab_composition_search). So the standard
         path must reference ``self.local_searcher`` and must NOT reference
         ``local_lab_searcher`` (that routing was the UAT bug the re-point fixed)."""
-        src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "genizah_core.py")
+        src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "shared", "search_engine.py")
         if not os.path.exists(src_path):
-            pytest.skip("genizah_core.py not found")
+            pytest.skip("shared/search_engine.py not found")
         with open(src_path, "r", encoding="utf-8") as f:
             source = f.read()
 
@@ -675,7 +678,7 @@ class TestLabCompositionSearchLocalLab:
                 uses_lab = "local_lab_searcher" in fn_source
                 break
 
-        assert found_fn, "search_composition_logic function not found in genizah_core.py"
+        assert found_fn, "search_composition_logic function not found in shared/search_engine.py"
         assert uses_regular, (
             "search_composition_logic does not reference self.local_searcher — Phase 110: "
             "standard composition must extend the REGULAR LOCAL index"

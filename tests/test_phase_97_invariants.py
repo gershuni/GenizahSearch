@@ -214,7 +214,7 @@ def test_local_post_dedup_merge():
     tests/test_local_post_dedup_merge.py — duplication is intentional for CI
     fast-fail visibility.
     """
-    src = (REPO_ROOT / "genizah_core.py").read_text(encoding="utf-8")
+    src = (REPO_ROOT / "shared" / "search_engine.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
 
     def _statement_contains_attr_call(stmt: ast.stmt, target_attr: str) -> bool:

@@ -144,14 +144,16 @@ class TestSearchCompositionSharedPrepOnce:
         source_text = "אחד שניים שלושה ארבעה"  # 4 Hebrew tokens → 3 chunks of size 2
 
         construction_calls = []
-        original_chunk_plan = genizah_core._ChunkPlan
+        import shared.search_engine as _se
+        original_chunk_plan = _se._ChunkPlan
 
         def counting_chunk_plan(*args, **kwargs):
             obj = original_chunk_plan(*args, **kwargs)
             construction_calls.append(1)
             return obj
 
-        with patch.object(genizah_core, "_ChunkPlan", side_effect=counting_chunk_plan):
+        # GUARD-03 retarget (Phase 125-04): _ChunkPlan moved to shared.search_engine
+        with patch.object(_se, "_ChunkPlan", side_effect=counting_chunk_plan):
             engine.search_composition_logic(
                 full_text=source_text,
                 chunk_size=2,
@@ -188,14 +190,16 @@ class TestSearchCompositionSharedPrepOnce:
         source_text = "אחד שניים שלושה ארבעה"
 
         built_plans = []
-        original_chunk_plan = genizah_core._ChunkPlan
+        import shared.search_engine as _se
+        original_chunk_plan = _se._ChunkPlan
 
         def capturing_chunk_plan(*args, **kwargs):
             obj = original_chunk_plan(*args, **kwargs)
             built_plans.append(obj)
             return obj
 
-        with patch.object(genizah_core, "_ChunkPlan", side_effect=capturing_chunk_plan):
+        # GUARD-03 retarget (Phase 125-04): _ChunkPlan moved to shared.search_engine
+        with patch.object(_se, "_ChunkPlan", side_effect=capturing_chunk_plan):
             engine.search_composition_logic(
                 full_text=source_text,
                 chunk_size=2,

@@ -56,9 +56,10 @@ def test_corrupt_local_index_falls_back_to_genizah_only(tmp_path, caplog):
     def _patched_warning(msg, *args, **kwargs):
         warnings_logged.append(msg % args if args else msg)
 
+    import shared.search_engine as _se
     with patch.object(genizah_core.Config, "LOCAL_INDEX_DIR", str(corrupt_dir)):
         with patch("genizah_core.SearchEngine.reload_index", return_value=False):
-            with patch.object(genizah_core.LOGGER, "warning", side_effect=_patched_warning):
+            with patch.object(_se.LOGGER, "warning", side_effect=_patched_warning):
                 meta = MagicMock()
                 meta.parse_full_id_components.return_value = {}
                 engine = genizah_core.SearchEngine(meta, MagicMock())

@@ -22,6 +22,8 @@ import pathlib
 REPO_ROOT = pathlib.Path(__file__).parent.parent
 A11Y_PY = REPO_ROOT / "web" / "pages" / "accessibility.py"
 CORE_PY = REPO_ROOT / "genizah_core.py"
+# GUARD-03 retarget (Phase 125-04): SearchEngine moved to shared/search_engine.py
+SEARCH_ENGINE_PY = REPO_ROOT / "shared" / "search_engine.py"
 
 
 def _read(p: pathlib.Path) -> str:
@@ -193,20 +195,20 @@ class TestIndexStalenessReport:
 
 class TestStalenessWiring:
     def test_reload_index_logs_via_shared_helper(self):
-        src = _read(CORE_PY)
+        src = _read(SEARCH_ENGINE_PY)
         # The inline M3 warning text was replaced by the centralized helper.
         assert "content_search_staleness_messages(False, None)" in src
         # The old bespoke wording is gone (kept the SEED-006 tag in a comment only).
         assert "retrieval fix is INERT until" not in src
 
     def test_local_open_sites_warn(self):
-        src = _read(CORE_PY)
+        src = _read(SEARCH_ENGINE_PY)
         # Both LOCAL open sites call the parity warning helper.
         assert src.count("self._warn_if_local_index_stale()") >= 2
         assert "def _warn_if_local_index_stale" in src
 
     def test_report_method_present(self):
-        src = _read(CORE_PY)
+        src = _read(SEARCH_ENGINE_PY)
         assert "def index_staleness_report" in src
 
 
@@ -220,10 +222,11 @@ class TestWarnIfLocalIndexStaleBehavior:
         from types import SimpleNamespace
 
         import genizah_core as g
+        import shared.search_engine as se
 
         calls = []
         monkeypatch.setattr(
-            g, "LOGGER", SimpleNamespace(warning=lambda *a, **k: calls.append(a))
+            se, "LOGGER", SimpleNamespace(warning=lambda *a, **k: calls.append(a))
         )
         g.SearchEngine._warn_if_local_index_stale(SimpleNamespace(**attrs))
         return calls

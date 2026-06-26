@@ -132,7 +132,7 @@ def test_local_merge_inserts_after_dedup_call_site():
     execute_search has the hook, even if _execute_line_break_search does not).
     Runs from a pytest file (not an illegal python -c one-liner per W6 fix).
     """
-    src = Path("genizah_core.py").read_text(encoding="utf-8")
+    src = Path("shared/search_engine.py").read_text(encoding="utf-8")
     tree = ast.parse(src)
     fns = _find_functions_containing_call(tree, "_deduplicate")
     assert fns, (

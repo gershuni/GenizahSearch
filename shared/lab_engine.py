@@ -666,7 +666,7 @@ class LabEngine:
         composition path (lab_composition_search).
         """
         from genizah_core import text_to_fingerprint, HEBREW_FREQ  # noqa: PLC0415 — lazy; GUARD-01 safe
-        from genizah_core import make_mark_tolerant_pattern  # noqa: PLC0415 — lazy; GUARD-01 safe
+        from shared.search_engine import make_mark_tolerant_pattern  # noqa: PLC0415 — lazy; GUARD-01 safe
         # Phase 110 C4: fail CLOSED — never expose LOCAL on a bad value.
         if corpus_scope not in ('genizah', 'local', 'all'):
             corpus_scope = 'genizah'
@@ -880,8 +880,8 @@ class LabEngine:
         from genizah_core import text_to_fingerprint, HEBREW_FREQ  # noqa: PLC0415 — lazy; GUARD-01 safe
         from genizah_core import get_boundary_stats, get_crossed_boundaries  # noqa: PLC0415 — lazy; GUARD-01 safe
         from genizah_core import calculate_boundary_quality, calculate_final_score_with_boost  # noqa: PLC0415 — lazy; GUARD-01 safe
-        from genizah_core import _count_unique_chunks  # noqa: PLC0415 — lazy; GUARD-01 safe
-        from genizah_core import _LabChunkPlan  # noqa: PLC0415 — lazy; GUARD-01 safe
+        from shared.search_engine import _count_unique_chunks  # noqa: PLC0415 — lazy; GUARD-01 safe
+        from shared.search_engine import _LabChunkPlan  # noqa: PLC0415 — lazy; GUARD-01 safe
         # Phase 110 C4: fail CLOSED — never expose LOCAL on a bad value.
         if corpus_scope not in ('genizah', 'local', 'all'):
             corpus_scope = 'genizah'

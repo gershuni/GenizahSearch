@@ -232,7 +232,8 @@ class TestHashSymbolConflict:
         mock_result.hits = []
         engine.searcher.search = MagicMock(return_value=mock_result)
 
-        with patch('genizah_core.parse_responsa_query') as mock_parse:
+        # GUARD-03 retarget (Phase 125-04): execute_search moved to shared.search_engine
+        with patch('shared.search_engine.parse_responsa_query') as mock_parse:
             mock_parse.return_value = [ResponsaComponent(words=["shalom"])]
 
             engine.execute_search(

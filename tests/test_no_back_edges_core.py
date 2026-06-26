@@ -615,3 +615,46 @@ def test_lab_engine_standalone_import():
     assert shared.lab_engine.LabEngine.LAB_FINGERPRINT_FIELD == "fingerprint", (
         "LabEngine.LAB_FINGERPRINT_FIELD must equal 'fingerprint'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 125: search_engine (CORE-10)
+# ---------------------------------------------------------------------------
+
+def test_search_engine_identity():
+    """CORE-10: genizah_core.SearchEngine is the same class object as shared.search_engine.SearchEngine."""
+    import shared.search_engine
+    import genizah_core
+
+    assert shared.search_engine.SearchEngine is genizah_core.SearchEngine, (
+        "genizah_core.SearchEngine is not the same object as shared.search_engine.SearchEngine. "
+        "The re-export shim must be: from shared.search_engine import SearchEngine  # noqa: F401"
+    )
+
+
+def test_search_engine_standalone_import():
+    """CORE-10 smoke: shared.search_engine can be imported without genizah_core at module level,
+    SearchEngine class is present, and key class-level attrs (Hazard A+C) are intact."""
+    import shared.search_engine
+    assert hasattr(shared.search_engine, 'SearchEngine'), (
+        "shared.search_engine must export SearchEngine"
+    )
+    # Hazard A: class-level BrowseMap cache attrs
+    assert hasattr(shared.search_engine.SearchEngine, '_shared_browse_map'), (
+        "Hazard A: SearchEngine must have class-level _shared_browse_map"
+    )
+    assert hasattr(shared.search_engine.SearchEngine, '_browse_map_lock'), (
+        "Hazard A: SearchEngine must have class-level _browse_map_lock"
+    )
+    # Hazard C: _LAST_RESPONSA_DOWNGRADE thread-local channel must be in module
+    assert hasattr(shared.search_engine, '_LAST_RESPONSA_DOWNGRADE'), (
+        "Hazard C: _LAST_RESPONSA_DOWNGRADE thread-local must be in shared.search_engine"
+    )
+    # Pre-cluster names present
+    assert hasattr(shared.search_engine, 'RRF_K'), "RRF_K must be in shared.search_engine"
+    assert shared.search_engine.RRF_K == 60, "RRF_K must equal 60"
+    assert hasattr(shared.search_engine, '_count_unique_chunks'), (
+        "_count_unique_chunks must be in shared.search_engine"
+    )
+    assert hasattr(shared.search_engine, '_ChunkPlan'), "_ChunkPlan must be in shared.search_engine"
+    assert hasattr(shared.search_engine, '_LabChunkPlan'), "_LabChunkPlan must be in shared.search_engine"

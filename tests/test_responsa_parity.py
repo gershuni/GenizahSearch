@@ -370,7 +370,7 @@ class TestCrossAppParity:
         })
 
         warning_text = "Variant mode downgraded to basic (30 pairs)"
-        with patch('genizah_core._apply_explosion_guard') as mock_guard:
+        with patch('shared.search_engine._apply_explosion_guard') as mock_guard:
             mock_guard.return_value = (
                 [ResponsaComponent(words=["word1"]), ResponsaComponent(words=["word2"])],
                 warning_text,

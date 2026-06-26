@@ -550,7 +550,7 @@ class TestExecuteSearchResponsa:
 
         # Use a query with many words that will trigger explosion guard warning
         # We'll patch _apply_explosion_guard to return a warning
-        with patch('genizah_core._apply_explosion_guard') as mock_guard:
+        with patch('shared.search_engine._apply_explosion_guard') as mock_guard:
             mock_guard.return_value = (
                 [ResponsaComponent(words=["word1"]), ResponsaComponent(words=["word2"])],
                 "Variant mode downgraded to basic (30 pairs)",
@@ -582,7 +582,7 @@ class TestExecuteSearchResponsa:
         mock_search_result.hits = []
         engine.searcher.search = MagicMock(return_value=mock_search_result)
 
-        with patch('genizah_core.parse_responsa_query') as mock_parse:
+        with patch('shared.search_engine.parse_responsa_query') as mock_parse:
             mock_parse.return_value = [ResponsaComponent(words=["test"])]
 
             engine.execute_search(
@@ -607,8 +607,8 @@ class TestExecuteSearchResponsa:
         mock_search_result.hits = []
         engine.searcher.search = MagicMock(return_value=mock_search_result)
 
-        with patch('genizah_core.parse_responsa_query') as mock_parse, \
-             patch('genizah_core.expand_grammatical_suffixes') as mock_suffix:
+        with patch('shared.search_engine.parse_responsa_query') as mock_parse, \
+             patch('shared.search_engine.expand_grammatical_suffixes') as mock_suffix:
             mock_parse.return_value = [
                 ResponsaComponent(words=["stem"], grammatical_suffixes=True)
             ]
@@ -637,8 +637,8 @@ class TestExecuteSearchResponsa:
         mock_search_result.hits = []
         engine.searcher.search = MagicMock(return_value=mock_search_result)
 
-        with patch('genizah_core.parse_responsa_query') as mock_parse, \
-             patch('genizah_core.expand_plene_defective') as mock_plene:
+        with patch('shared.search_engine.parse_responsa_query') as mock_parse, \
+             patch('shared.search_engine.expand_plene_defective') as mock_plene:
             mock_parse.return_value = [
                 ResponsaComponent(words=["shalom"], plene_defective=True)
             ]
@@ -669,11 +669,11 @@ class TestExecuteSearchResponsa:
 
         call_order = []
 
-        with patch('genizah_core.parse_responsa_query') as mock_parse, \
-             patch('genizah_core.expand_plene_defective') as mock_plene, \
-             patch('genizah_core.expand_grammatical_prefixes') as mock_prefix, \
-             patch('genizah_core.expand_grammatical_suffixes') as mock_suffix, \
-             patch('genizah_core._apply_explosion_guard') as mock_guard:
+        with patch('shared.search_engine.parse_responsa_query') as mock_parse, \
+             patch('shared.search_engine.expand_plene_defective') as mock_plene, \
+             patch('shared.search_engine.expand_grammatical_prefixes') as mock_prefix, \
+             patch('shared.search_engine.expand_grammatical_suffixes') as mock_suffix, \
+             patch('shared.search_engine._apply_explosion_guard') as mock_guard:
 
             comp = ResponsaComponent(
                 words=["word"],
