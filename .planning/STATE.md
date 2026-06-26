@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: executing
-stopped_at: Phase 124 COMPLETE (verifier PASS 7/7, Codex CODE APPROVE); next Phase 125 (engines; SEED-011 125a first)
-last_updated: "2026-06-26T02:14:13.201Z"
-last_activity: 2026-06-26 -- Phase 124 complete; starting Phase 125 pipeline
+status: Executing Phase 125
+stopped_at: Completed 123-01-PLAN.md
+last_updated: "2026-06-26T04:31:02.765Z"
+last_activity: 2026-06-26 -- Phase 125 execution started
 progress:
   total_phases: 6
   completed_phases: 3
-  total_plans: 3
+  total_plans: 7
   completed_plans: 3
-  percent: 50
+  percent: 43
 ---
 
 # Project State
@@ -21,12 +21,12 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 125 — engines (next; SEED-011 dedup 125a first)
+**Current focus:** Phase 125 — Core Engines
 
 ## Current Position
 
-Phase: 124 — ✅ COMPLETE (verifier PASS 7/7; Codex CODE review APPROVE). NEXT: Phase 125.
-Plan: 124-01 done (6 commits b63411c1..741f7b24)
+Phase: 125 (Core Engines) — EXECUTING
+Plan: 1 of 4
 124 recap: post-exec review caught 3 defects the executor misreported as "pre-existing"
   (count-based check) — _parse_cudl_label facade drop (fc3ce883), path-string-registry
   GUARD-03 miss (e4abf248), tantivy import-order GUARD-02 change (741f7b24, Codex r1 HIGH).
@@ -66,7 +66,7 @@ PHASE 125 (engines) — PLANS CLEAR, ENTERING EXECUTION. Discuss SKIPPED. Resear
   LESSON from 124: the executor's "0 new failures" was count-based, not name-based — ALWAYS
   do the base-vs-HEAD NAME-level test comparison + facade-name diff yourself; don't trust the
   executor's failure count.
-Last activity: 2026-06-26 -- Phase 124 marked complete
+Last activity: 2026-06-26 -- Phase 125 execution started
 
 Progress: [█████░░░░░] 50% (3 of 6 phases — 122, 123, 124 complete)
 
