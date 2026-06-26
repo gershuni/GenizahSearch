@@ -276,7 +276,6 @@ class TestLabCompositionSharedPrepOnce:
                     engine.lab_composition_search(
                         full_text=source_text,
                         chunk_size=3,
-                        max_freq=100,
                         corpus_scope="all",
                     )
 

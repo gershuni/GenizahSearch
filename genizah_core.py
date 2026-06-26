@@ -1583,6 +1583,39 @@ class LabEngine:
         was_interrupted = False
         chunks_processed = 0
 
+        # SEED-011 (125a): Build per-chunk lab plans ONCE before both LAB loops.
+        # fp_str / fp_list / needed_unique_fps / core_query are genuinely index-
+        # independent — identical for the Genizah-LAB and LOCAL-LAB passes.
+        # text_to_fingerprint is called ONCE per qualifying chunk (not 2x).
+        # Chunks that fail the weak-phrase test or the len<4 test become None
+        # sentinels that both loops skip.  final_query_str is NOT stored on the
+        # plan because the Genizah-LAB loop adds a source boost while the
+        # LOCAL-LAB loop uses core_query directly.
+        lab_chunk_plans = []
+        for (lcp_token_start, lcp_chunk_tokens, lcp_chunk_crossed) in chunks_data:
+            lcp_chunk_text = " ".join(lcp_chunk_tokens)
+            if self._is_phrase_statistically_weak(lcp_chunk_text):
+                lab_chunk_plans.append(None)
+                continue
+            lcp_fp_str = text_to_fingerprint(lcp_chunk_text, freq_map=target_map)
+            if not lcp_fp_str or len(lcp_chunk_tokens) < 4:
+                lab_chunk_plans.append(None)
+                continue
+            lcp_fp_list = lcp_fp_str.split()
+            lcp_needed_unique_fps = set(lcp_fp_list)
+            lcp_clauses = [f'{target_field}:{t}' for t in lcp_fp_str.split()]
+            lcp_core_query = " OR ".join(lcp_clauses)
+            lab_chunk_plans.append(_LabChunkPlan(
+                token_start_idx=lcp_token_start,
+                chunk_tokens=lcp_chunk_tokens,
+                chunk_text=lcp_chunk_text,
+                chunk_crossed_bounds=lcp_chunk_crossed,
+                fp_str=lcp_fp_str,
+                fp_list=lcp_fp_list,
+                needed_unique_fps=lcp_needed_unique_fps,
+                core_query=lcp_core_query,
+            ))
+
         # (Part 2: Scanning) - wrapped in try/except to support partial results on cancel
         try:
           # Phase 110: gate the Genizah lab loop — skipped on a LOCAL-only run.
@@ -1598,23 +1631,22 @@ class LabEngine:
                 "lab_composition_search: Genizah LAB index not built — skipping Genizah lab loop"
             )
           if corpus_scope != 'local' and self.lab_index is not None and self.lab_searcher is not None:
-            for i, (token_start_idx, chunk_tokens, chunk_crossed_bounds) in enumerate(chunks_data):
+            for i, plan in enumerate(lab_chunk_plans):
                 chunks_processed = i
                 if progress_callback: progress_callback(i, total_chunks)
-                chunk_text = " ".join(chunk_tokens)
+                if plan is None: continue  # statistically-weak or too short — pre-pass skipped it
 
-                if self._is_phrase_statistically_weak(chunk_text): continue
+                # Consume pre-built plan fields (SEED-011)
+                token_start_idx = plan.token_start_idx
+                chunk_tokens = plan.chunk_tokens
+                chunk_text = plan.chunk_text
+                chunk_crossed_bounds = plan.chunk_crossed_bounds
+                fp_str = plan.fp_str
+                fp_list = plan.fp_list
+                needed_unique_fps = plan.needed_unique_fps
+                core_query = plan.core_query
 
-                fp_str = text_to_fingerprint(chunk_text, freq_map=target_map)
-                if not fp_str or len(chunk_tokens) < 4: continue
-
-                fp_list = fp_str.split()
-                needed_unique_fps = set(fp_list)
-
-                # Query with Boost
-                query_tokens = fp_str.split()
-                clauses = [f'{target_field}:{t}' for t in query_tokens]
-                core_query = " OR ".join(clauses)
+                # Query with Boost (Genizah-LAB only — index-local source boost)
                 final_query_str = f'({core_query}) AND (source:"V0.8"^10 OR source:"V0.7")'
 
                 q_obj = None
@@ -1769,17 +1801,19 @@ class LabEngine:
                 local_lab_index = getattr(self, "_local_lab_index", None)
                 local_lab_searcher = self.local_lab_searcher
                 if local_lab_index is not None and local_lab_searcher is not None:
-                    for _i, (_token_start_idx, _chunk_tokens, _chunk_crossed_bounds) in enumerate(chunks_data):
-                        _chunk_text = " ".join(_chunk_tokens)
-                        if self._is_phrase_statistically_weak(_chunk_text):
-                            continue
-                        _fp_str = text_to_fingerprint(_chunk_text, freq_map=target_map)
-                        if not _fp_str or len(_chunk_tokens) < 4:
-                            continue
-                        _fp_list = _fp_str.split()
-                        _needed_unique_fps = set(_fp_list)
-                        _clauses = [f'{target_field}:{t}' for t in _fp_str.split()]
-                        _core_query = " OR ".join(_clauses)
+                    # SEED-011 (125a): consume pre-built lab_chunk_plans — fingerprint
+                    # prep is index-independent and was already computed above.
+                    for _i, _plan in enumerate(lab_chunk_plans):
+                        if _plan is None:
+                            continue  # pre-pass marked this chunk as weak/too-short
+                        _token_start_idx = _plan.token_start_idx
+                        _chunk_tokens = _plan.chunk_tokens
+                        _chunk_text = _plan.chunk_text
+                        _chunk_crossed_bounds = _plan.chunk_crossed_bounds
+                        _fp_str = _plan.fp_str
+                        _fp_list = _plan.fp_list
+                        _needed_unique_fps = _plan.needed_unique_fps
+                        _core_query = _plan.core_query
                         try:
                             _q_obj = local_lab_index.parse_query(_core_query)
                         except (ValueError, RuntimeError):

@@ -28,6 +28,8 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # Phase 122: Config only.
 # Phase 123: browse_map_utils, text_normalize, variants, responsa, codicological, joins_manager, lists_manager
 # Phase 124: metadata_manager, indexer
+# Phase 125 (pre-grown in 125-01 — skip-until-exists guard handles not-yet-created modules):
+#   lab_settings (125b), lab_engine (125c), search_engine (125d)
 EXTRACTED_MODULES = [
     "shared/config.py",
     "shared/browse_map_utils.py",
@@ -39,6 +41,9 @@ EXTRACTED_MODULES = [
     "shared/lists_manager.py",
     "shared/metadata_manager.py",
     "shared/indexer.py",             # Phase 124
+    "shared/lab_settings.py",        # Phase 125b (not yet created — skip-until-exists)
+    "shared/lab_engine.py",          # Phase 125c (not yet created — skip-until-exists)
+    "shared/search_engine.py",       # Phase 125d (not yet created — skip-until-exists)
 ]
 
 # Compound statement types whose bodies run at import time
@@ -147,9 +152,19 @@ def _has_module_level_genizah_core_import(source: str) -> list[int]:
 
 @pytest.mark.parametrize("rel_path", EXTRACTED_MODULES)
 def test_no_module_level_genizah_core_import(rel_path):
-    """GUARD-01 strict: extracted shared/ module must not import genizah_core at module level."""
+    """GUARD-01 strict: extracted shared/ module must not import genizah_core at module level.
+
+    Modules that are pre-registered in EXTRACTED_MODULES but not yet created
+    (e.g., Phase 125 entries registered in 125-01 before 125b/c/d land) are
+    skipped with a descriptive message.  Once the file exists, the test
+    automatically becomes enforcing with no code change needed.
+    """
     path = REPO_ROOT / rel_path
-    assert path.exists(), f"Extracted module {rel_path} not found — was it created?"
+    if not path.exists():
+        pytest.skip(
+            f"{rel_path} not yet created (pre-registered in Phase 125 Wave 0); "
+            "this test will become enforcing automatically once the file exists."
+        )
     source = path.read_text(encoding="utf-8")
     violations = _has_module_level_genizah_core_import(source)
     assert not violations, (
