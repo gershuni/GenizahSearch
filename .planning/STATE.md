@@ -25,18 +25,27 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: 124 (core-metadata-index) — EXECUTING
+Phase: 124 (core-metadata-index) — EXECUTED + Codex CODE review APPROVE; VERIFIER RUNNING
 Plan: 1 of 1
-Status: Phase complete — ready for verification
-  Plan shape: 1 plan / 1 wave / 2 sequential commits — (1) MetadataManager+_BoundedLRUCache
-  +pre-cluster → shared/metadata_manager.py + 6-name facade shim + GUARD-03 retarget of
-  test_desktop_folio_navigation.py; (2) Indexer → shared/indexer.py w/ inline _tr()+_strip_brackets
+Status: Executed (6 commits b63411c1..741f7b24). Post-exec review caught 3 defects the
+  executor misreported as "pre-existing" — _parse_cudl_label facade drop (fc3ce883),
+  path-string-registry GUARD-03 miss (e4abf248), tantivy import-order GUARD-02 change
+  (741f7b24, Codex r1 HIGH). Codex CODE review converged R1->R2 APPROVE (0 findings).
+  GUARD-02 confirmed zero new failures via base-vs-HEAD name-level diff (8 pre-existing
+  reds confirmed at base; gui+render_smoke green). gsd-verifier running.
+  Remaining for 124: verifier PASS → auto-advance to 125.
 
-  + 1-name shim. Full suite green at both commits.
-  Remaining pipeline: execute → Codex 3-round review drill (base-vs-HEAD facade-name diff)
-  → verify → auto-advance to 125.
-  Standing directive: run phases 124-127 autonomously, skip-discuss-when-unneeded,
-  Codex drill must hit APPROVE before advancing. (123 done+verified; Codex 3-round APPROVE.)
+  FULL DRILL for phases 125-127 (TWO Codex touchpoints — pre-flight + post-exec):
+  discuss(skip-if-no-gray-areas) → research → pattern-map → plan(opus) → gsd-plan-checker loop
+  → **Codex PLAN PRE-FLIGHT (review plan/research vs live codebase for plan↔code drift; must
+  clear before execute)** → execute → Codex CODE review 3-round convergence + base-vs-HEAD
+  facade-name diff + base-vs-HEAD name-level test comparison → gsd-verifier → auto-advance.
+  Standing directive: run 125-127 autonomously, skip-discuss-when-unneeded, BOTH Codex gates
+  must clear before proceeding. (User reminder 2026-06-26: do NOT skip the Codex plan
+  pre-flight — see [[feedback_codex_preflight_before_plan_complete]].)
+  LESSON from 124: the executor's "0 new failures" was count-based, not name-based — ALWAYS
+  do the base-vs-HEAD NAME-level test comparison + facade-name diff yourself; don't trust the
+  executor's failure count.
 Last activity: 2026-06-26
 
 Progress: [███░░░░░░░] 33% (2 of 6 phases — 122, 123 complete)
