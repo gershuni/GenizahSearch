@@ -27,7 +27,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # Registry: add one entry per phase as modules are extracted (v8.3.0 decomposition).
 # Phase 122: Config only.
 # Phase 123: browse_map_utils, text_normalize, variants, responsa, codicological, joins_manager, lists_manager
-# Phase 124: metadata_manager
+# Phase 124: metadata_manager, indexer
 EXTRACTED_MODULES = [
     "shared/config.py",
     "shared/browse_map_utils.py",
@@ -38,6 +38,7 @@ EXTRACTED_MODULES = [
     "shared/joins_manager.py",
     "shared/lists_manager.py",
     "shared/metadata_manager.py",
+    "shared/indexer.py",             # Phase 124
 ]
 
 # Compound statement types whose bodies run at import time
@@ -500,3 +501,30 @@ def test_metadata_manager_standalone_import():
     assert 'key1' in cache
     assert cache['key1'] == 'val1'
     assert len(cache) == 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 124: indexer (CORE-10)
+# ---------------------------------------------------------------------------
+
+def test_indexer_identity():
+    """CORE-10: genizah_core.Indexer is the same class as shared.indexer.Indexer."""
+    import shared.indexer
+    import genizah_core
+
+    assert shared.indexer.Indexer is genizah_core.Indexer, (
+        "genizah_core.Indexer is not the same object as shared.indexer.Indexer. "
+        "The re-export shim must be: from shared.indexer import Indexer  # noqa: F401"
+    )
+
+
+def test_indexer_standalone_import():
+    """CORE-10 smoke: shared.indexer imports and Indexer instantiates with a mock meta_mgr."""
+    import shared.indexer
+    assert hasattr(shared.indexer, 'Indexer')
+
+    class _FakeMM:
+        pass
+
+    idx = shared.indexer.Indexer(_FakeMM())
+    assert idx.meta_mgr is not None
