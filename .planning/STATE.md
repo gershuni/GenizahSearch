@@ -33,9 +33,16 @@ Plan: 124-01 done (6 commits b63411c1..741f7b24)
   Codex CODE review converged R1→R2 APPROVE. GUARD-02 confirmed zero new failures via
   base-vs-HEAD NAME-level diff (8 pre-existing reds confirmed at base; gui+render_smoke green).
 
-PHASE 125 (engines) — IN PROGRESS. Discuss SKIPPED (125-CONTEXT.md). Research DONE
-  (125-RESEARCH.md, HIGH confidence). NEXT: pattern-map → plan(opus) → checker → Codex PLAN
-  pre-flight → execute → Codex CODE review → verify.
+PHASE 125 (engines) — PLANS CLEAR, ENTERING EXECUTION. Discuss SKIPPED. Research+pattern-map+plan
+  DONE. 4 plans (e95b5053; revised a2dd3662 + a 125-04 nit commit). Internal checker PASS (12/12).
+  **Pre-125 Codex regression audit** (user "Ask Codex"): found+fixed a 2nd BOM (shared/responsa.py);
+  122-124 verified faithful (facade identity 12/12, AST method-completeness 7/7); adopted a
+  source-integrity gate (125-PREAUDIT-CODEX.md). **Codex PLAN pre-flight CONVERGED in 3 rounds**:
+  r1 = 2 BLOCKER + 4 HIGH + 2 MED (wrong LabEngine boundary, undefined-name deps, SearchEngine↔LabEngine
+  cycle, GUARD-03 gaps, SEED-011 test premise, LAB_LOGGER routing) → revised; r2 = 2 HIGH runtime
+  LOGGER-monkeypatch retargets + 2 LOW → fixed in 125-04; r3 = **PLANS CLEAR** (1 LOW doc nit fixed).
+  NEXT: execute wave-by-wave (125-01→04), source-integrity gate between waves, then Codex CODE
+  review + base-vs-HEAD name-level diff + facade-name diff → verify.
   **KEY RESEARCH FINDING + FIX (done):** the 8 "pre-existing" red tests were NOT SEED-011
   forward-spec — they were a **Phase-123 regression**: commit 674d16b5 added a UTF-8 BOM to
   genizah_core.py → every AST/source-scan test hit `SyntaxError: U+FEFF`. Fixed by byte-level
