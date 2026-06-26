@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: Phase 126 RE-SCOPED to D1 only (D2-D5 deferred → SEED-028); 126-01 pre-flight-clean — ready to execute
-stopped_at: Phase 126 re-scoped to D1 (126-01) after Codex PLAN pre-flight R2; D2-D5 method-based panels deferred to SEED-028; ready to execute 126-01
-last_updated: "2026-06-26T16:00:00.000Z"
+status: Phase 126 (D1) EXECUTED — 126-01 complete; D2-D5 deferred to SEED-028; awaiting Codex CODE review + gsd-verifier
+stopped_at: Completed 126-01-PLAN.md (D1 dialogs+widgets MOVE-and-shim; 9/9 identity, D-07b verbatim, GUARD-02/03/04 green)
+last_updated: "2026-06-26T12:31:26.413Z"
 last_activity: 2026-06-26
 progress:
   total_phases: 6
-  completed_phases: 4
-  total_plans: 7
-  completed_plans: 7
-  percent: 67
+  completed_phases: 5
+  total_plans: 8
+  completed_plans: 8
+  percent: 83
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 126 (Desktop Panels) — RE-SCOPED 2026-06-26 to **D1 ONLY**. NEXT: execute 126-01 (already Codex-pre-flight-clean).
-Plan: 0 of 1 executed (only 126-01 remains in the phase; D2-D5 moved to deferred-method-panels/ → SEED-028).
+Plan: 1 of 1 executed (only 126-01 remains in the phase; D2-D5 moved to deferred-method-panels/ → SEED-028).
 
 RE-SCOPE RATIONALE (user decision 2026-06-26): the Codex PLAN pre-flight ran TWICE. R1 caught a BLOCKER
   (recipe must be MOVE-and-shim, not copy-keep-both — a kept original shadows the shim) + D3/D4 method
@@ -124,7 +124,7 @@ Items carried forward from v8.2.0 and earlier:
 
 ## Session Continuity
 
-Last session: 2026-06-26T13:00:00.000Z
+Last session: 2026-06-26T12:29:54.282Z
 Stopped at: Phase 125 verified complete (Codex APPROVE 3-round; verifier PASS 5/5)
 Resume file: None
 Next step: `/gsd-discuss-phase 126` (or skip-discuss-if-empty per the standing autonomous directive)
@@ -141,6 +141,7 @@ Next step: `/gsd-discuss-phase 126` (or skip-discuss-if-empty per the standing a
 | Phase 125 P02 | 33m | 1 tasks | 3 files |
 | Phase 125-core-engines P03 | 120 | 1 tasks | 5 files |
 | Phase 125 P04 | 90m | 1 tasks | 14 files |
+| Phase 126-desktop-panels P01 | 55m | 3 tasks | 5 files |
 
 ## Decisions
 
@@ -149,3 +150,4 @@ Next step: `/gsd-discuss-phase 126` (or skip-discuss-if-empty per the standing a
 - [Phase ?]: LabSettings extracted to shared/lab_settings.py; same-object facade shim in genizah_core
 - [Phase ?]: Phase 125-03
 - [Phase ?]: SearchEngine extracted to shared/search_engine.py with 20-name facade; 7 lazy imports break cycles to genizah_core
+- [Phase ?]: Phase 126 D1: MOVE-and-shim 5 dialogs to desktop/settings_dialogs.py + 4 widgets to desktop/ui_widgets.py; originals deleted, identity holds 9/9; D-07b strip verbatim; GenizahGUI.apply/cancel_settings added; LabPanel deferred to E2

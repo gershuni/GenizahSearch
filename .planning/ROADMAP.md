@@ -85,7 +85,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
  (completed 2026-06-26)
 
 - [x] **Phase 125: Core Engines** - SEED-011 composition dedup first (125a), then extract `shared/search_engine.py` (DI + BrowseMap cache + SEED-006 gates + `_LAST_RESPONSA_DOWNGRADE` preserved), `shared/lab_settings.py`, `shared/lab_engine.py` (LOCAL-LAB mirror preserved), and model `_my_library_tab_ref` as an injected optional interface for both engines. (completed 2026-06-26)
-- [ ] **Phase 126: Desktop Panels (RE-SCOPED 2026-06-26 → D1 only)** - Extract the clean top-level CLASS clusters to `desktop/`: `settings_dialogs.py` (dialogs) + `ui_widgets.py` (table/header/scroll widgets). The four METHOD-based panels (catalog tab, search-results, browse/reading-desk, lists) are DEFERRED to **SEED-028** — the Codex PLAN pre-flight proved them too entangled (dense `self.method()`/`self.widget` cross-refs; D3 `on_search_finished` alone touches 109 `self.*`) for a safe zero-behavior-change move-and-shim without a prerequisite widget-ownership refactor (like E2's CompositionState). User decision 2026-06-26.
+- [x] **Phase 126: Desktop Panels (RE-SCOPED 2026-06-26 → D1 only)** - Extract the clean top-level CLASS clusters to `desktop/`: `settings_dialogs.py` (dialogs) + `ui_widgets.py` (table/header/scroll widgets). The four METHOD-based panels (catalog tab, search-results, browse/reading-desk, lists) are DEFERRED to **SEED-028** — the Codex PLAN pre-flight proved them too entangled (dense `self.method()`/`self.widget` cross-refs; D3 `on_search_finished` alone touches 109 `self.*`) for a safe zero-behavior-change move-and-shim without a prerequisite widget-ownership refactor (like E2's CompositionState). User decision 2026-06-26. (completed 2026-06-26)
 - [ ] **Phase 127: Update UI & Final Cleanup** - Extract `desktop/update_ui.py` + new direct behavioral tests for sidecar reset/download coordination; remove the Phase-126 (D1) desktop shims from `genizah_app.py`; install the `desktop/` back-edge guard; confirm `genizah_core.py` permanent facade; full-suite-green sign-off. (genizah_app.py shrinks only modestly this milestone — the bulk awaits SEED-028.)
 
 ## Phase Details
@@ -181,7 +181,7 @@ Plans:
 
 Plans:
 
-- [ ] 126-01-PLAN.md (Wave 1, D1) — Extract Settings/SearchSettings/LabScoring/Tabular dialogs -> desktop/settings_dialogs.py + table/header/scroll widgets -> desktop/ui_widgets.py (MOVE-and-shim, identity); D-07b telemetry snapshot strip verbatim; GenizahGUI apply/cancel_settings API; LabPanel DEFERRED to E2
+- [x] 126-01-PLAN.md (Wave 1, D1) — Extract Settings/SearchSettings/LabScoring/Tabular dialogs -> desktop/settings_dialogs.py + table/header/scroll widgets -> desktop/ui_widgets.py (MOVE-and-shim, identity); D-07b telemetry snapshot strip verbatim; GenizahGUI apply/cancel_settings API; LabPanel DEFERRED to E2
 - [DEFERRED → SEED-028] D2 catalog tab, D3 search-results, D4 browse/reading-desk, D5 lists — method-based; need a widget-ownership refactor first. Draft plans preserved in `deferred-method-panels/`.
 
 ### Phase 127: Update UI & Final Cleanup
@@ -212,5 +212,5 @@ Plans:
 | 123. Core Leaf Modules | 1/1 | Complete   | 2026-06-25 |
 | 124. Core Metadata & Index | 1/1 | Complete   | 2026-06-26 |
 | 125. Core Engines | 4/4 | Complete   | 2026-06-26 |
-| 126. Desktop Panels | 0/5 | Planned | - |
+| 126. Desktop Panels | 1/1 | Complete   | 2026-06-26 |
 | 127. Update UI & Final Cleanup | 0/TBD | Not started | - |

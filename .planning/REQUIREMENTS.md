@@ -41,8 +41,8 @@
 
 ### Desktop extractions (DESK) — `genizah_app.py` → `desktop/`
 
-- [ ] **DESK-01**: Settings / Help / Tabular-builder dialogs extracted to `desktop/settings_dialogs.py`.
-- [ ] **DESK-02**: Table / header / scroll widget classes extracted to `desktop/ui_widgets.py`.
+- [x] **DESK-01**: Settings / Help / Tabular-builder dialogs extracted to `desktop/settings_dialogs.py`.
+- [x] **DESK-02**: Table / header / scroll widget classes extracted to `desktop/ui_widgets.py`.
 - [~] **DESK-03**: Catalog "Browse-by-Identification" tab extracted to `desktop/catalog_browse.py`. **DEFERRED → SEED-028** (method-based, densely cross-called; needs widget-ownership refactor first — Codex PLAN pre-flight, user decision 2026-06-26).
 - [~] **DESK-04**: Search-results lifecycle extracted to `desktop/search_results_panel.py`. **DEFERRED → SEED-028** (`on_search_finished` touches 109 `self.*`).
 - [~] **DESK-05**: Browse panel extracted to `desktop/browse_panel.py`. **DEFERRED → SEED-028**.
@@ -96,8 +96,8 @@ GSD phase numbering continues from v8.2.0 (ended Phase 121) → this milestone i
 | CORE-11 | 125 | Complete |
 | CORE-12 | 125 | Complete |
 | CORE-13 | 125 | Complete |
-| DESK-01 | 126 | Pending |
-| DESK-02 | 126 | Pending |
+| DESK-01 | 126 | Complete |
+| DESK-02 | 126 | Complete |
 | DESK-03 | SEED-028 | Deferred |
 | DESK-04 | SEED-028 | Deferred |
 | DESK-05 | SEED-028 | Deferred |
