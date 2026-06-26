@@ -161,7 +161,7 @@ Plans:
 Plans:
 
 - [x] 125-01-PLAN.md — SEED-011 composition double-prep dedup (PREP-01): _ChunkPlan (two-query: genizah + diacritic-folded LOCAL) + _LabChunkPlan (shared fingerprint, index-local source boost); behavior-preserving; new invocation-count guard test; GUARD-01 registry pre-grown 10→13 (skip-until-exists)
-- [ ] 125-02-PLAN.md — Extract LabSettings → shared/lab_settings.py (CORE-11; stdlib-only, no tantivy) behind a permanent same-object re-export shim; identity tests
+- [x] 125-02-PLAN.md — Extract LabSettings → shared/lab_settings.py (CORE-11; stdlib-only, no tantivy) behind a permanent same-object re-export shim; identity tests
 - [ ] 125-03-PLAN.md — Extract LabEngine → shared/lab_engine.py (CORE-12 + CORE-13 LabEngine side); preserve CR-01/CR-02 LOCAL-LAB mirror + _my_library_tab_ref getattr gate (no shared→desktop import); lazy text_to_fingerprint/_LabChunkPlan imports; GUARD-03 LabEngine source-scan retargets
 - [ ] 125-04-PLAN.md — Extract SearchEngine + pre-cluster → shared/search_engine.py (CORE-10 + CORE-13 SearchEngine side); preserve 3 hazards (BrowseMap class-cache, SEED-006 content_search gates, _LAST_RESPONSA_DOWNGRADE thread-local); full 20-name facade shim; duck-typed is_searchable gate; GUARD-03 SearchEngine retargets; GUARD-01 registry final at 13
 
@@ -207,6 +207,6 @@ Plans:
 | 122. Config Enabler | 1/1 | Complete    | 2026-06-25 |
 | 123. Core Leaf Modules | 1/1 | Complete   | 2026-06-25 |
 | 124. Core Metadata & Index | 1/1 | Complete   | 2026-06-26 |
-| 125. Core Engines | 1/4 | In Progress|  |
+| 125. Core Engines | 2/4 | In Progress|  |
 | 126. Desktop Panels | 0/TBD | Not started | - |
 | 127. Update UI & Final Cleanup | 0/TBD | Not started | - |
