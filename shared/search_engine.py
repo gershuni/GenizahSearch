@@ -2853,23 +2853,49 @@ class SearchEngine:
         # Each _ChunkPlan carries both flavor query strings (Genizah raw +
         # LOCAL diacritic-folded) and both compiled regexes.  Both loops then
         # consume the pre-built plans rather than re-deriving them independently.
-        # build_tantivy_query / build_regex_pattern remain called once per
-        # (chunk x flavor) — the 2*N count is unchanged and correct (LOCAL folds
-        # diacritics for SEED-006 M1, producing a genuinely different query).
+        # build_tantivy_query / build_regex_pattern are called once per
+        # (chunk x flavor) — for corpus_scope='all' that is the same 2*N as base
+        # (the two flavors genuinely differ: LOCAL folds diacritics for SEED-006
+        # M1).  Codex Gate-2 fix: each flavor's build is GATED on the same
+        # predicate as its consuming loop, so a scoped run (incl. the default
+        # corpus_scope='genizah') no longer builds the unused opposite flavor —
+        # restoring base behavior, where each build lived inside its own loop.
         _cs_field = 'content_search' if getattr(self, '_has_content_search', False) else None
         _local_has_cs_prepass = getattr(self, "_local_has_content_search", False)
+        # Predicates mirror the Genizah loop gate (corpus_scope != 'local') and the
+        # LOCAL block gate (corpus_scope != 'genizah' + local index present +
+        # is_searchable) below.  (`not was_cancelled` is intentionally omitted: it
+        # can only flip mid-Genizah-loop, AFTER this pre-pass; in that rare cancel
+        # case the LOCAL loop is skipped anyway, so the pre-built LOCAL plans are
+        # simply unused — wasted work on an already-cancelled run, identical result.)
+        _do_genizah_pp = (corpus_scope != 'local')
+        _scl_tab_pp = self._my_library_tab_ref() if getattr(self, "_my_library_tab_ref", None) is not None else None
+        _scl_is_searchable_pp = getattr(_scl_tab_pp, "is_searchable", True) if _scl_tab_pp is not None else True
+        _do_local_pp = (corpus_scope != 'genizah'
+                        and getattr(self, 'local_searcher', None) is not None
+                        and getattr(self, 'local_index', None) is not None
+                        and _scl_is_searchable_pp)
         chunk_plans = []
         for (token_idx_pp, chunk_pp, chunk_crossed_pp) in chunks_data:
             # Genizah flavor: raw chunk, with content_search_field if available
-            _genizah_q_str = self.build_tantivy_query(chunk_pp, mode, content_search_field=_cs_field)
-            _genizah_regex = self.build_regex_pattern(chunk_pp, mode, 0)
+            if _do_genizah_pp:
+                _genizah_q_str = self.build_tantivy_query(chunk_pp, mode, content_search_field=_cs_field)
+                _genizah_regex = self.build_regex_pattern(chunk_pp, mode, 0)
+            else:
+                _genizah_q_str = None
+                _genizah_regex = None
             # LOCAL flavor: diacritic-folded chunk for SEED-006 M1 compat
-            if _local_has_cs_prepass and mode != 'Regex':
-                _local_chunk_q = [strip_search_diacritics(_w) for _w in chunk_pp]
+            if _do_local_pp:
+                if _local_has_cs_prepass and mode != 'Regex':
+                    _local_chunk_q = [strip_search_diacritics(_w) for _w in chunk_pp]
+                else:
+                    _local_chunk_q = chunk_pp
+                _local_q_str = self.build_tantivy_query(_local_chunk_q, mode)
+                _local_regex = self.build_regex_pattern(_local_chunk_q, mode, 0)
             else:
                 _local_chunk_q = chunk_pp
-            _local_q_str = self.build_tantivy_query(_local_chunk_q, mode)
-            _local_regex = self.build_regex_pattern(_local_chunk_q, mode, 0)
+                _local_q_str = None
+                _local_regex = None
             chunk_plans.append(_ChunkPlan(
                 token_idx=token_idx_pp,
                 chunk=chunk_pp,

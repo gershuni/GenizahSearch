@@ -954,30 +954,46 @@ class LabEngine:
         # sentinels that both loops skip.  final_query_str is NOT stored on the
         # plan because the Genizah-LAB loop adds a source boost while the
         # LOCAL-LAB loop uses core_query directly.
+        #
+        # Codex Gate-2 fix: gate the prep on whether EITHER lab loop will actually
+        # run.  In base, text_to_fingerprint / _is_phrase_statistically_weak ran
+        # INSIDE each loop, so an unbuilt or scoped-out LAB index never paid for
+        # the (costly) fingerprinting.  Without this guard a no-LAB-index run (the
+        # common case — Lab Mode is opt-in) would fingerprint every chunk for
+        # nothing.  (`is_searchable`/freshness are advisory and computed later, so
+        # they are intentionally not part of this gate — the dominant waste is the
+        # absent-index case, which the index-presence checks here fully cover.)
+        _do_genizah_lab_pp = (corpus_scope != 'local'
+                              and self.lab_index is not None
+                              and self.lab_searcher is not None)
+        _do_local_lab_pp = (corpus_scope != 'genizah'
+                            and getattr(self, 'local_lab_searcher', None) is not None
+                            and getattr(self, '_local_lab_index', None) is not None)
         lab_chunk_plans = []
-        for (lcp_token_start, lcp_chunk_tokens, lcp_chunk_crossed) in chunks_data:
-            lcp_chunk_text = " ".join(lcp_chunk_tokens)
-            if self._is_phrase_statistically_weak(lcp_chunk_text):
-                lab_chunk_plans.append(None)
-                continue
-            lcp_fp_str = text_to_fingerprint(lcp_chunk_text, freq_map=target_map)
-            if not lcp_fp_str or len(lcp_chunk_tokens) < 4:
-                lab_chunk_plans.append(None)
-                continue
-            lcp_fp_list = lcp_fp_str.split()
-            lcp_needed_unique_fps = set(lcp_fp_list)
-            lcp_clauses = [f'{target_field}:{t}' for t in lcp_fp_str.split()]
-            lcp_core_query = " OR ".join(lcp_clauses)
-            lab_chunk_plans.append(_LabChunkPlan(
-                token_start_idx=lcp_token_start,
-                chunk_tokens=lcp_chunk_tokens,
-                chunk_text=lcp_chunk_text,
-                chunk_crossed_bounds=lcp_chunk_crossed,
-                fp_str=lcp_fp_str,
-                fp_list=lcp_fp_list,
-                needed_unique_fps=lcp_needed_unique_fps,
-                core_query=lcp_core_query,
-            ))
+        if _do_genizah_lab_pp or _do_local_lab_pp:
+            for (lcp_token_start, lcp_chunk_tokens, lcp_chunk_crossed) in chunks_data:
+                lcp_chunk_text = " ".join(lcp_chunk_tokens)
+                if self._is_phrase_statistically_weak(lcp_chunk_text):
+                    lab_chunk_plans.append(None)
+                    continue
+                lcp_fp_str = text_to_fingerprint(lcp_chunk_text, freq_map=target_map)
+                if not lcp_fp_str or len(lcp_chunk_tokens) < 4:
+                    lab_chunk_plans.append(None)
+                    continue
+                lcp_fp_list = lcp_fp_str.split()
+                lcp_needed_unique_fps = set(lcp_fp_list)
+                lcp_clauses = [f'{target_field}:{t}' for t in lcp_fp_str.split()]
+                lcp_core_query = " OR ".join(lcp_clauses)
+                lab_chunk_plans.append(_LabChunkPlan(
+                    token_start_idx=lcp_token_start,
+                    chunk_tokens=lcp_chunk_tokens,
+                    chunk_text=lcp_chunk_text,
+                    chunk_crossed_bounds=lcp_chunk_crossed,
+                    fp_str=lcp_fp_str,
+                    fp_list=lcp_fp_list,
+                    needed_unique_fps=lcp_needed_unique_fps,
+                    core_query=lcp_core_query,
+                ))
 
         # (Part 2: Scanning) - wrapped in try/except to support partial results on cancel
         try:

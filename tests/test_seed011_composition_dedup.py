@@ -223,6 +223,55 @@ class TestSearchCompositionSharedPrepOnce:
                 "_ChunkPlan must have local_query_str field"
             )
 
+    @staticmethod
+    def _count_build_tantivy_calls(engine, source_text, corpus_scope):
+        """Run a composition and return how many times build_tantivy_query fired."""
+        original = engine.build_tantivy_query
+        calls = []
+
+        def counting(*args, **kwargs):
+            calls.append(1)
+            return original(*args, **kwargs)
+
+        with patch.object(engine, "build_tantivy_query", side_effect=counting):
+            engine.search_composition_logic(
+                full_text=source_text,
+                chunk_size=2,
+                max_freq=100,
+                mode="Composition",
+                corpus_scope=corpus_scope,
+            )
+        return len(calls)
+
+    def test_scoped_run_skips_opposite_flavor_build(self):
+        """Codex Gate-2 regression: a SCOPED composition run builds ONLY its own
+        flavor's query/regex, not both.
+
+        Base behavior: the Genizah-flavor build lived inside the
+        ``corpus_scope != 'local'`` loop and the LOCAL-flavor build inside the
+        ``corpus_scope != 'genizah'`` loop, so a scoped run (incl. the DEFAULT
+        ``corpus_scope='genizah'``) only ever built one flavor.  The SEED-011
+        pre-pass must preserve that: ``'all'`` builds 2*N (Genizah + LOCAL), while
+        ``'genizah'`` and ``'local'`` each build exactly N.  A regression that
+        builds both flavors unconditionally would make all three counts equal.
+        """
+        source_text = "אחד שניים שלושה ארבעה"  # 4 tokens, chunk_size=2 → 3 chunks
+        n_chunks = 3
+        all_calls = self._count_build_tantivy_calls(_make_search_engine(), source_text, "all")
+        genizah_calls = self._count_build_tantivy_calls(_make_search_engine(), source_text, "genizah")
+        local_calls = self._count_build_tantivy_calls(_make_search_engine(), source_text, "local")
+
+        assert all_calls - genizah_calls == n_chunks, (
+            f"corpus_scope='genizah' must skip the N LOCAL-flavor builds "
+            f"(all={all_calls}, genizah={genizah_calls}, expected diff {n_chunks}). "
+            f"Equal counts mean the pre-pass builds the unused LOCAL flavor on the "
+            f"default scoped path (the Codex Gate-2 regression)."
+        )
+        assert all_calls - local_calls == n_chunks, (
+            f"corpus_scope='local' must skip the N Genizah-flavor builds "
+            f"(all={all_calls}, local={local_calls}, expected diff {n_chunks})."
+        )
+
 
 # ---------------------------------------------------------------------------
 # Test 2 — lab_composition_search no-double-prep
@@ -290,4 +339,42 @@ class TestLabCompositionSharedPrepOnce:
             f"If the count is {2 * n_chunks} the _LabChunkPlan pre-pass is missing "
             f"and both LAB loops are still computing the fingerprint independently "
             f"(the pre-Task-3 double-prep state)."
+        )
+
+    def test_lab_prepass_skipped_when_no_index(self):
+        """Codex Gate-2 regression: with NO LAB index present (the common case —
+        Lab Mode is opt-in), the fingerprint pre-pass must be skipped entirely.
+
+        Base computed text_to_fingerprint INSIDE each LAB loop, both of which are
+        gated on their index being present, so an absent index never paid for the
+        (costly) fingerprinting.  A pre-pass that fingerprints every chunk
+        unconditionally would regress every no-LAB-index composition run.
+        """
+        import genizah_core
+
+        engine = _make_lab_engine()
+        # Remove BOTH lab indices so neither loop can run.
+        engine.lab_index = None
+        engine.lab_searcher = None
+        engine._local_lab_index = None
+        engine.local_lab_searcher = None
+
+        call_count = []
+        original_t2f = genizah_core.text_to_fingerprint
+
+        def counting_t2f(text, freq_map=None):
+            call_count.append(text)
+            return original_t2f(text, freq_map=freq_map)
+
+        with patch.object(genizah_core, "text_to_fingerprint", side_effect=counting_t2f):
+            engine.lab_composition_search(
+                full_text="אחד שניים שלושה ארבעה חמישה",
+                chunk_size=3,
+                corpus_scope="all",
+            )
+
+        assert call_count == [], (
+            f"With no LAB index, text_to_fingerprint must NOT be called "
+            f"(got {len(call_count)} calls) — the pre-pass must be gated on whether "
+            f"either LAB loop will actually run."
         )
