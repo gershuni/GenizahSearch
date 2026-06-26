@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: verifying
-stopped_at: Completed 123-01-PLAN.md
-last_updated: "2026-06-26T01:03:04.928Z"
-last_activity: 2026-06-26
+status: executing
+stopped_at: Phase 124 COMPLETE (verifier PASS 7/7, Codex CODE APPROVE); next Phase 125 (engines; SEED-011 125a first)
+last_updated: "2026-06-26T02:14:13.201Z"
+last_activity: 2026-06-26 -- Phase 124 complete; starting Phase 125 pipeline
 progress:
   total_phases: 6
   completed_phases: 3
@@ -21,19 +21,24 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 124 — core-metadata-index
+**Current focus:** Phase 125 — engines (next; SEED-011 dedup 125a first)
 
 ## Current Position
 
-Phase: 124 (core-metadata-index) — EXECUTED + Codex CODE review APPROVE; VERIFIER RUNNING
-Plan: 1 of 1
-Status: Executed (6 commits b63411c1..741f7b24). Post-exec review caught 3 defects the
-  executor misreported as "pre-existing" — _parse_cudl_label facade drop (fc3ce883),
-  path-string-registry GUARD-03 miss (e4abf248), tantivy import-order GUARD-02 change
-  (741f7b24, Codex r1 HIGH). Codex CODE review converged R1->R2 APPROVE (0 findings).
-  GUARD-02 confirmed zero new failures via base-vs-HEAD name-level diff (8 pre-existing
-  reds confirmed at base; gui+render_smoke green). gsd-verifier running.
-  Remaining for 124: verifier PASS → auto-advance to 125.
+Phase: 124 — ✅ COMPLETE (verifier PASS 7/7; Codex CODE review APPROVE). NEXT: Phase 125.
+Plan: 124-01 done (6 commits b63411c1..741f7b24)
+124 recap: post-exec review caught 3 defects the executor misreported as "pre-existing"
+  (count-based check) — _parse_cudl_label facade drop (fc3ce883), path-string-registry
+  GUARD-03 miss (e4abf248), tantivy import-order GUARD-02 change (741f7b24, Codex r1 HIGH).
+  Codex CODE review converged R1→R2 APPROVE. GUARD-02 confirmed zero new failures via
+  base-vs-HEAD NAME-level diff (8 pre-existing reds confirmed at base; gui+render_smoke green).
+
+PHASE 125 (engines) — START HERE. Per ROADMAP: SEED-011 composition dedup FIRST as 125a,
+  then search_engine (PRESERVE BrowseMap class-cache migration / SEED-006 content_search gates
+  / _LAST_RESPONSA_DOWNGRADE thread-local), lab_settings, lab_engine; model _my_library_tab_ref
+  as injected cross-engine local-search gate (never import desktop into shared). CORE-10..13.
+  FIRST STEP = discuss-assessment: SEED-011 (composition double-prep dedup) may be a genuine
+  user gray area (is it behavior-preserving or an intended change?) — assess before skipping.
 
   FULL DRILL for phases 125-127 (TWO Codex touchpoints — pre-flight + post-exec):
   discuss(skip-if-no-gray-areas) → research → pattern-map → plan(opus) → gsd-plan-checker loop
@@ -46,9 +51,9 @@ Status: Executed (6 commits b63411c1..741f7b24). Post-exec review caught 3 defec
   LESSON from 124: the executor's "0 new failures" was count-based, not name-based — ALWAYS
   do the base-vs-HEAD NAME-level test comparison + facade-name diff yourself; don't trust the
   executor's failure count.
-Last activity: 2026-06-26
+Last activity: 2026-06-26 -- Phase 124 marked complete
 
-Progress: [███░░░░░░░] 33% (2 of 6 phases — 122, 123 complete)
+Progress: [█████░░░░░] 50% (3 of 6 phases — 122, 123, 124 complete)
 
 ## Accumulated Context
 
