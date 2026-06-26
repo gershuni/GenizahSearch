@@ -304,10 +304,10 @@ class TestUiBranchCorrectness:
         # The synthetic-flag check is at the top of fetchFlIdsFromManifest;
         # the PNX_MANUSCRIPTS line is several lines after the cache check.
         ("web/static/manuscript_viewer.js", r"PNX_MANUSCRIPTS", 18),
-        # genizah_core.py — fetch_iiif_manifest has a long docstring + cache check
-        # before the URL builder line; widen window
-        ("genizah_core.py", r"PNX_MANUSCRIPTS\{system_id\}", 30),
-        ("genizah_core.py", r"NLI_IIIF_BASE\}/marc/bib/\{system_id\}", 30),
+        # shared/metadata_manager.py — fetch_iiif_manifest has a long docstring + cache check
+        # before the URL builder line; widen window (Phase 124: moved from genizah_core.py)
+        ("shared/metadata_manager.py", r"PNX_MANUSCRIPTS\{system_id\}", 30),
+        ("shared/metadata_manager.py", r"NLI_IIIF_BASE\}/marc/bib/\{system_id\}", 30),
         # desktop/dialogs_scholarly.py — REVIEWS-MODE NEW (Codex HIGH)
         ("desktop/dialogs_scholarly.py", r"PNX_MANUSCRIPTS\{sys_id\}", 8),
         # desktop/result_dialog.py — REVIEWS-MODE NEW (Codex HIGH)

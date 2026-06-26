@@ -131,7 +131,14 @@ class TestSharedBreakerWiring:
     """The migration wired all expected call sites + failure types."""
 
     def _read_source(self):
-        return pathlib.Path('genizah_core.py').read_text(encoding='utf-8')
+        # Phase 124: MetadataManager (and its NLI call sites) moved to
+        # shared/metadata_manager.py — read both files so wiring assertions
+        # pass regardless of which file contains the patterns.
+        src = pathlib.Path('genizah_core.py').read_text(encoding='utf-8')
+        mm_path = pathlib.Path('shared/metadata_manager.py')
+        if mm_path.exists():
+            src += '\n' + mm_path.read_text(encoding='utf-8')
+        return src
 
     def test_shared_breaker_import_present(self):
         src = self._read_source()

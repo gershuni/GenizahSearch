@@ -27,6 +27,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # Registry: add one entry per phase as modules are extracted (v8.3.0 decomposition).
 # Phase 122: Config only.
 # Phase 123: browse_map_utils, text_normalize, variants, responsa, codicological, joins_manager, lists_manager
+# Phase 124: metadata_manager
 EXTRACTED_MODULES = [
     "shared/config.py",
     "shared/browse_map_utils.py",
@@ -36,6 +37,7 @@ EXTRACTED_MODULES = [
     "shared/codicological.py",
     "shared/joins_manager.py",
     "shared/lists_manager.py",
+    "shared/metadata_manager.py",
 ]
 
 # Compound statement types whose bodies run at import time
@@ -453,3 +455,48 @@ def test_lists_manager_standalone_import():
     # Smoke: instantiate with no arguments
     mgr = shared.lists_manager.ListsManager()
     assert mgr is not None
+
+
+# ---------------------------------------------------------------------------
+# Phase 124: metadata_manager (CORE-09)
+# ---------------------------------------------------------------------------
+
+def test_metadata_manager_identity():
+    """CORE-09: genizah_core.MetadataManager is the same class as shared.metadata_manager.MetadataManager."""
+    import shared.metadata_manager
+    import genizah_core
+
+    assert shared.metadata_manager.MetadataManager is genizah_core.MetadataManager, (
+        "genizah_core.MetadataManager is not the same object as "
+        "shared.metadata_manager.MetadataManager. "
+        "The re-export shim must be: from shared.metadata_manager import MetadataManager  # noqa: F401"
+    )
+    assert shared.metadata_manager._BoundedLRUCache is genizah_core._BoundedLRUCache, (
+        "genizah_core._BoundedLRUCache is not the same object as "
+        "shared.metadata_manager._BoundedLRUCache."
+    )
+    assert shared.metadata_manager.MARC_FUTURE_TIMEOUT is genizah_core.MARC_FUTURE_TIMEOUT, (
+        "genizah_core.MARC_FUTURE_TIMEOUT is not the same object as "
+        "shared.metadata_manager.MARC_FUTURE_TIMEOUT."
+    )
+    assert shared.metadata_manager._NLI_CACHE_MAX_ENTRIES is genizah_core._NLI_CACHE_MAX_ENTRIES, (
+        "genizah_core._NLI_CACHE_MAX_ENTRIES is not the same object as "
+        "shared.metadata_manager._NLI_CACHE_MAX_ENTRIES."
+    )
+
+
+def test_metadata_manager_standalone_import():
+    """CORE-09 smoke: shared.metadata_manager can be imported and MetadataManager has expected API."""
+    import shared.metadata_manager
+    assert hasattr(shared.metadata_manager, 'MetadataManager')
+    assert hasattr(shared.metadata_manager, '_BoundedLRUCache')
+    assert hasattr(shared.metadata_manager, '_NLI_CACHE_MAX_ENTRIES')
+    assert hasattr(shared.metadata_manager, 'MARC_FUTURE_TIMEOUT')
+    assert hasattr(shared.metadata_manager, 'NLI_IIIF_FUTURE_TIMEOUT')
+    assert hasattr(shared.metadata_manager, 'EXTERNAL_IIIF_HTTP_TIMEOUT')
+    # Smoke: _BoundedLRUCache can be instantiated and basic dict-like ops work
+    cache = shared.metadata_manager._BoundedLRUCache(maxsize=5)
+    cache['key1'] = 'val1'
+    assert 'key1' in cache
+    assert cache['key1'] == 'val1'
+    assert len(cache) == 1

@@ -51,6 +51,14 @@ def genizah_core_source():
         return f.read()
 
 
+@pytest.fixture(scope="module")
+def metadata_manager_source():
+    """Return the full source code of shared/metadata_manager.py as a string."""
+    src_path = os.path.join(os.path.dirname(__file__), '..', 'shared', 'metadata_manager.py')
+    with open(src_path, 'r', encoding='utf-8') as f:
+        return f.read()
+
+
 def _extract_method(source, method_name):
     """Extract a method's source from the full file by finding its def and
     reading until the next def at the same or lower indentation level."""
@@ -166,9 +174,9 @@ def test_folio_label_in_browse_nav(genizah_app_source):
 # Test 5: image_source_info populated in enrich_metadata
 # ---------------------------------------------------------------------------
 
-def test_image_source_info_in_enrich_metadata(genizah_core_source):
+def test_image_source_info_in_enrich_metadata(metadata_manager_source):
     """Verify that enrich_metadata populates image_source_info."""
-    enrich_method = _extract_method(genizah_core_source, 'enrich_metadata')
+    enrich_method = _extract_method(metadata_manager_source, 'enrich_metadata')
     assert enrich_method, "enrich_metadata method not found"
 
     # Should populate image_source_info
