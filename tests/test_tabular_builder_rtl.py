@@ -10,9 +10,9 @@ RTL must remain.
 Phase 126 D1 (GUARD-03, additive): TabularQueryBuilderDialog was MOVED from
 genizah_app.py to desktop/settings_dialogs.py (re-exported via a # noqa: F401
 shim). This guard now AST-scans BOTH candidate locations and asserts against
-whichever module actually defines the class (OR-location). It is intentionally
-NOT flipped to new-only — that hard flip is Phase 127's job; keeping the OR
-keeps the guard resilient regardless of where the source lives.
+whichever module actually defines the class (OR-location). Phase 127 intentionally
+LEFT this guard OR-location (resilient regardless of where the source lives) — only
+the EN privacy-disclosure test was hard-flipped to new-only; this guard stays as-is.
 
 This guard runs without QApplication — pure AST analysis only.
 """

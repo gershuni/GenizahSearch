@@ -453,11 +453,11 @@ def resolve_volume_suffix(sys_id, ie_id):
 # ==============================================================================
 #  METADATA MANAGER (moved to shared/metadata_manager.py — Phase 124)
 # ==============================================================================
-# _CUDL_LABEL_RE, _parse_cudl_label, _BRIDGE_IMPORT_WARNED, _warn_bridge_import_failed,
-# _nli_crossref_svc, _get_crossref_service, _fjms_svc, _get_fjms_service,
-# _NLI_CACHE_MAX_ENTRIES, _BoundedLRUCache, MARC_FUTURE_TIMEOUT,
-# NLI_IIIF_FUTURE_TIMEOUT, EXTERNAL_IIIF_HTTP_TIMEOUT, MetadataManager
-# all re-exported from genizah_core via the Phase 124 compat shim above.
+# Re-exported from genizah_core via the Phase 124 compat shim (import block above):
+# _NLI_CACHE_MAX_ENTRIES, _BoundedLRUCache, MARC_FUTURE_TIMEOUT, NLI_IIIF_FUTURE_TIMEOUT,
+# EXTERNAL_IIIF_HTTP_TIMEOUT, MetadataManager, _get_crossref_service, _get_fjms_service,
+# _parse_cudl_label.  (_CUDL_LABEL_RE, the bridge-warning helpers, and the private service
+# singletons stayed internal to shared/metadata_manager.py — intentionally NOT re-exported.)
 
 # ==============================================================================
 #  LOGGING
@@ -493,17 +493,6 @@ def get_logger(name=None):
 
 
 LOGGER = get_logger(__name__)
-
-# Phase 84: WARNING-once flag for shelfmark_bridge import failures (Gemini LOW).
-_BRIDGE_IMPORT_WARNED = False
-
-
-def _warn_bridge_import_failed(exc):
-    """Log shelfmark_bridge import failure at WARNING once per process (Gemini LOW)."""
-    global _BRIDGE_IMPORT_WARNED
-    if not _BRIDGE_IMPORT_WARNED:
-        LOGGER.warning("shelfmark_bridge unavailable (degrading to v7.10 behavior): %s", exc)
-        _BRIDGE_IMPORT_WARNED = True
 
 
 def configure_lab_logger():

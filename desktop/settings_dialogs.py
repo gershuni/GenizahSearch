@@ -11,7 +11,9 @@ Provides five modal QDialog subclasses moved verbatim out of the
   - SettingsDialog(QDialog)           — General + About tabs (D-07b telemetry strip)
 
 ZERO behavior change vs. the originals. ``genizah_app.py`` re-exports these
-via a ``# noqa: F401`` shim (MOVE-and-shim, mirroring genizah_core 122-125).
+via a plain re-export import (MOVE-and-shim, mirroring genizah_core 122-125; the
+Phase-126 D1 ``# noqa: F401`` marker was retired in Phase 127 — the classes are
+used internally so the import is no longer a bare re-export).
 
 GUARD-01: NO module-level ``import genizah_app`` — shared symbols come from the
 ``genizah_core`` facade only.
