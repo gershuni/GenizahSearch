@@ -48,7 +48,7 @@ build/
 !/reports/cudl_orphans_all_post_phase86.csv
 !/reports/cudl_orphans_with_neighbor_post_phase86.csv
 !/reports/preflight_dryrun_phase86.txt
-Genizah_Index/genizah.log
+Genizah_Index/
 genizah.log
 backend.log
 web.log
