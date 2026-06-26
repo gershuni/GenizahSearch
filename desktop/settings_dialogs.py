@@ -1355,7 +1355,7 @@ class SettingsDialog(QDialog):
         for name, ver in sources:
             row = QHBoxLayout()
             row.setSpacing(6)
-            icon = QLabel("✓" if ver else "—")
+            icon = QLabel("\u2713" if ver else "\u2014")
             icon.setStyleSheet(("color: #27ae60; font-weight: bold;" if ver else f"color: {self._muted};") + " font-size: 13px;")
             icon.setFixedWidth(16)
             row.addWidget(icon)
@@ -1404,7 +1404,7 @@ class SettingsDialog(QDialog):
         self._vs_download_btn.setEnabled(True)
         self._vs_download_btn.setText(tr("Download complete"))
         self._vs_download_progress.setValue(100)
-        self._vs_download_status.setText(f"✓ {tr('Download complete')}")
+        self._vs_download_status.setText(f"\u2713 {tr('Download complete')}")
         self._vs_download_status.setStyleSheet("color: #27ae60; font-size: 11px;")
         # Reset service singleton to pick up new local DB
         from shared.visual_similarity_service import reset_vs_service
@@ -1414,7 +1414,7 @@ class SettingsDialog(QDialog):
         self._vs_download_btn.setEnabled(True)
         self._vs_download_btn.setText(tr("Download full visual similarity database"))
         self._vs_download_progress.setVisible(False)
-        self._vs_download_status.setText(f"✗ {tr('Download failed')}: {error_msg}")
+        self._vs_download_status.setText(f"\u2717 {tr('Download failed')}: {error_msg}")
         self._vs_download_status.setStyleSheet("color: #e74c3c; font-size: 11px;")
 
     # ── About Tab ────────────────────────────────────────────────

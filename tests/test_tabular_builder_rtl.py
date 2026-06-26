@@ -130,8 +130,9 @@ def test_target_file_exists():
     Both the genizah_app.py shim host and the desktop/settings_dialogs.py
     extraction target must exist (Phase 126 D1 OR-location).
     """
-    existing = [t for t in CANDIDATE_TARGETS if t.exists()]
-    assert existing, (
-        "No candidate source file found: "
-        + " | ".join(str(p) for p in CANDIDATE_TARGETS)
+    missing = [str(t) for t in CANDIDATE_TARGETS if not t.exists()]
+    assert not missing, (
+        "Phase 126 D1: BOTH the genizah_app.py shim host AND the "
+        "desktop/settings_dialogs.py extraction target must exist (move-and-shim). Missing: "
+        + " | ".join(missing)
     )
