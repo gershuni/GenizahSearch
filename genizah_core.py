@@ -1,4 +1,4 @@
-﻿"""Core search, indexing, metadata, and AI helpers for the Genizah project."""
+"""Core search, indexing, metadata, and AI helpers for the Genizah project."""
 
 # -*- coding: utf-8 -*-
 # genizah_core.py
