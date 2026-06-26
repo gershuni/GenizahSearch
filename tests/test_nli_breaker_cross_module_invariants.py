@@ -21,12 +21,18 @@ import pytest
 import shared.nli_circuit_breaker as br
 
 
-# The 4 files modified by Phase 98 Wave 3
+# The files Phase 98 Wave 3 wired the NLI breaker into. genizah_core.py's
+# MetadataManager NLI call sites (and their path= literals) relocated to
+# shared/metadata_manager.py in Phase 124 (god-file decomposition); the module
+# is added here so the call-site coverage and path-string audits still see them
+# (GUARD-03 source-scan retarget). genizah_core.py stays in the list — it keeps
+# the re-exported breaker import aliases the import-consistency tests assert.
 PHASE_98_MODIFIED_FILES = [
     'web/api.py',
     'shared/puzzle_image_service.py',
     'web/pages/puzzle.py',
     'genizah_core.py',
+    'shared/metadata_manager.py',
 ]
 
 # The expected path= literals across all call sites (per Plans 98-03/04/05)
@@ -38,10 +44,10 @@ EXPECTED_PATHS = {
     'puzzle_fetch_iiif_image',         # shared/puzzle_image_service.py — Plan 98-04
     'puzzle_fetch_direct_url',         # shared/puzzle_image_service.py — Plan 98-04
     'puzzle_resolve_folios',           # web/pages/puzzle.py — Plan 98-04
-    'fetch_iiif_manifest',             # genizah_core.py — Plan 98-05
-    'fetch_marc_data',                 # genizah_core.py — Plan 98-05
-    '_fetch_single_worker',            # genizah_core.py — Plan 98-05
-    '_fetch_fl_ids',                   # genizah_core.py — Plan 98-05
+    'fetch_iiif_manifest',             # shared/metadata_manager.py — Plan 98-05 (moved from genizah_core.py in Phase 124)
+    'fetch_marc_data',                 # shared/metadata_manager.py — Plan 98-05 (moved from genizah_core.py in Phase 124)
+    '_fetch_single_worker',            # shared/metadata_manager.py — Plan 98-05 (moved from genizah_core.py in Phase 124)
+    '_fetch_fl_ids',                   # shared/metadata_manager.py — Plan 98-05 (moved from genizah_core.py in Phase 124)
 }
 
 
@@ -58,7 +64,7 @@ def _combined_src():
 # -----------------------------------------------------------------------------
 class TestPhaseLevelCallSiteCoverage:
     def test_total_call_site_coverage(self):
-        """At least 10 _nli_circuit_is_open() check sites across all 4 files."""
+        """At least 10 _nli_circuit_is_open() check sites across all 5 files."""
         total = 0
         per_file = {}
         for p in PHASE_98_MODIFIED_FILES:
@@ -316,7 +322,7 @@ class TestLegacyBreakerFullyRemoved:
 # Test class 5 — all 4 files import from shared.nli_circuit_breaker with aliases
 # -----------------------------------------------------------------------------
 class TestBreakerImportConsistency:
-    """All 4 files use the documented import aliases."""
+    """All 5 files use the documented import aliases."""
 
     def test_all_4_files_import_shared_breaker(self):
         for p in PHASE_98_MODIFIED_FILES:
