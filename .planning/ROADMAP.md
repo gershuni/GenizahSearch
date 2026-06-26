@@ -178,7 +178,15 @@ Plans:
   4. `pyqtSignal`-bearing worker classes (e.g. `_CatalogRefreshWorker`) remain at module level in their new `desktop/` home; the desktop app starts and the affected tabs are fully functional (desktop smoke-import + headless PyQt6 construction test green).
   5. The full existing pytest suite passes; per-file ruff review on each extraction commit shows no unintended shim stripping in `genizah_app.py`.
 
-**Plans**: TBD
+**Plans**: 5 plans (5 sequential waves — every cluster edits `genizah_app.py` shim block, so they serialize; D3 before D4 for shared `browse_text`)
+
+Plans:
+
+- [ ] 126-01-PLAN.md (Wave 1, D1) — Extract Settings/Help/Tabular dialogs -> desktop/settings_dialogs.py + table/header/scroll widgets -> desktop/ui_widgets.py; D-07b telemetry snapshot strip verbatim; GenizahGUI apply/cancel_settings API; LabPanel DEFERRED to E2
+- [ ] 126-02-PLAN.md (Wave 2, D2) — Extract catalog Browse-by-Identification tab -> desktop/catalog_browse.py (CatalogBrowsePanel + module-level _CatalogRefreshWorker); _CATALOG_FILTER_SETS kept in place (aliasing hazard)
+- [ ] 126-03-PLAN.md (Wave 3, D3) — Extract search-results lifecycle -> desktop/search_results_panel.py (SearchResultsPanel; cross-tab signals; session/history delegated, E3-deferred); NEW tests/test_search_results_panel.py (mock SearchThread) + conftest _GUI_TEST_FILES
+- [ ] 126-04-PLAN.md (Wave 4, D4) — Extract browse -> desktop/browse_panel.py (BrowsePanel + moved browse_thumb_resolved signal) + reading desk -> desktop/reading_desk_panel.py (sub-widget); 8 browse source-scan tests additively retargeted (OR-location)
+- [ ] 126-05-PLAN.md (Wave 5, D5) — Extract Personal Lists tab -> desktop/lists_tab.py (ListsPanel + _ListsSyncCoordinator owning debounce state + authenticated cloud-sync gate verbatim); Community populators stay
 
 ### Phase 127: Update UI & Final Cleanup
 
@@ -208,5 +216,5 @@ Plans:
 | 123. Core Leaf Modules | 1/1 | Complete   | 2026-06-25 |
 | 124. Core Metadata & Index | 1/1 | Complete   | 2026-06-26 |
 | 125. Core Engines | 4/4 | Complete   | 2026-06-26 |
-| 126. Desktop Panels | 0/TBD | Not started | - |
+| 126. Desktop Panels | 0/5 | Planned | - |
 | 127. Update UI & Final Cleanup | 0/TBD | Not started | - |

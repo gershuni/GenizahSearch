@@ -1,9 +1,9 @@
 ---
 phase: 126
 slug: desktop-panels
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: planned
+nyquist_compliant: true
+wave_0_complete: false  # Wave 0 (new test_search_results_panel.py) is task 126-03-02
 created: 2026-06-26
 ---
 
@@ -54,7 +54,20 @@ SEPARATE marker slice — load-bearing for this phase (these ARE the GUI panels)
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | Status |
 |---------|------|------|-------------|-----------|-------------------|--------|
-| {126-Dx-yy} | Dx | n | DESK-0x / GUARD-02/03/04 | unit + import-smoke | `pytest <panel test> + bulk/gui slice` | ⬜ pending |
+| 126-01-01 | D1 | 1 | DESK-02 | import-smoke + ruff | `python -c import desktop.ui_widgets + genizah_app` ; `ruff check desktop/ui_widgets.py genizah_app.py` | ⬜ pending |
+| 126-01-02 | D1 | 1 | DESK-01 | gui (runtime) + ruff | `pytest test_telemetry_consent_ux.py` ; identity check `g.SettingsDialog is s.SettingsDialog` | ⬜ pending |
+| 126-01-03 | D1 | 1 | GUARD-03/02 | source-scan (additive) + slices | `pytest test_tabular_builder_rtl.py` ; bulk + gui slice | ⬜ pending |
+| 126-02-01 | D2 | 2 | DESK-03 | import-smoke + ruff | `python -c import desktop.catalog_browse + identity` ; `ruff check` | ⬜ pending |
+| 126-02-02 | D2 | 2 | GUARD-03/02 | runtime + web-side false-positive + slices | `pytest test_catalog_availability_filter.py test_seed023_catalog_filters.py` ; bulk + gui | ⬜ pending |
+| 126-03-01 | D3 | 3 | DESK-04 | import-smoke + ruff | `python -c import desktop.search_results_panel + identity` ; `ruff check` | ⬜ pending |
+| 126-03-02 | D3 | 3 | DESK-04 | gui (NEW direct test) | `pytest test_search_results_panel.py` (mock SearchThread) ; conftest registration check | ⬜ pending |
+| 126-03-03 | D3 | 3 | GUARD-02/04 | bulk + gui slices + name diff | bulk + gui slice ; `dir(genizah_app)` name diff | ⬜ pending |
+| 126-04-01 | D4 | 4 | DESK-06 | import-smoke + ruff | `python -c import desktop.reading_desk_panel + identity` ; `ruff check` | ⬜ pending |
+| 126-04-02 | D4 | 4 | DESK-05 | import-smoke + signal-attr + ruff | `python -c import desktop.browse_panel + browse_thumb_resolved attr` ; `ruff check` | ⬜ pending |
+| 126-04-03 | D4 | 4 | GUARD-03/02 | source-scan (8 additive) + slices | `pytest` 8 browse source-scan tests ; bulk + gui | ⬜ pending |
+| 126-05-01 | D5 | 5 | DESK-07 | import-smoke + ruff | `python -c import desktop.lists_tab _ListsSyncCoordinator + identity` ; `ruff check` | ⬜ pending |
+| 126-05-02 | D5 | 5 | DESK-07 | import-smoke + scope-guard + ruff | `python -c import ListsPanel + Community populators NOT moved` ; `ruff check` | ⬜ pending |
+| 126-05-03 | D5 | 5 | GUARD-03/02/04 | web-side false-positives + slices + phase-final name diff | `pytest` 4 web lists tests + runtime ; bulk + gui ; phase-final name diff | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -62,7 +75,7 @@ SEPARATE marker slice — load-bearing for this phase (these ARE the GUI panels)
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_search_results_panel.py` — NEW direct test of `SearchResultsPanel` imported from
+- [x] (planned) `tests/test_search_results_panel.py` — NEW direct test of `SearchResultsPanel` imported from
   `desktop/search_results_panel.py` (mock `SearchThread` from `gui_threads.py`); first panel with a
   direct-module test (D3 success criterion #3). Register it in `conftest.py` `_GUI_TEST_FILES`.
 - [ ] No framework install needed (pytest + PyQt6 already present).
@@ -81,11 +94,11 @@ SEPARATE marker slice — load-bearing for this phase (these ARE the GUI panels)
 
 ## Validation Sign-Off
 
-- [ ] All tasks verify via a retargeted source-scan test + bulk/gui slice (or Wave 0 dep for D3)
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers the new `test_search_results_panel.py`
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 300s (bulk)
-- [ ] `nyquist_compliant: true` set in frontmatter (planner/checker)
+- [x] All tasks verify via a retargeted source-scan test + bulk/gui slice (or Wave 0 dep for D3)
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers the new `test_search_results_panel.py` (task 126-03-02)
+- [x] No watch-mode flags
+- [x] Feedback latency < 300s (bulk)
+- [x] `nyquist_compliant: true` set in frontmatter (planner/checker)
 
-**Approval:** pending
+**Approval:** planner — per-task map populated, nyquist_compliant set

@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: Phase 125 complete — ready to plan Phase 126
-stopped_at: Phase 125 verified complete (Codex CODE review APPROVE 3-round; verifier PASS 5/5, 8/8 reqs)
-last_updated: "2026-06-26T13:00:00.000Z"
+status: Phase 126 planned (5 plans, D1-D5 sequential waves) — ready to execute
+stopped_at: Phase 126 planned — 5 PLANs (126-01..05), one cluster per sequential wave; awaiting Codex PLAN pre-flight + execute
+last_updated: "2026-06-26T15:00:00.000Z"
 last_activity: 2026-06-26
 progress:
   total_phases: 6
@@ -25,8 +25,17 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: 125 (Core Engines) — ✅ COMPLETE (verified). NEXT: Phase 126 (Desktop Panels).
-Plan: 4 of 4 done.
+Phase: 126 (Desktop Panels) — PLANNED (5 plans, D1-D5, sequential waves 1-5). NEXT: Codex PLAN pre-flight, then execute.
+Plan: 0 of 5 executed.
+
+PHASE 126 PLAN (5 plans, ONE cluster per sequential wave — every cluster edits the genizah_app.py shim
+  block, so they serialize; USE_WORKTREES=false; D3 before D4 for shared browse_text):
+  W1 126-01 D1 settings_dialogs + ui_widgets (D-07b strip verbatim; GenizahGUI apply/cancel_settings; LabPanel DEFERRED to E2)
+  W2 126-02 D2 catalog_browse (CatalogBrowsePanel + module-level _CatalogRefreshWorker; _CATALOG_FILTER_SETS kept-in-place)
+  W3 126-03 D3 search_results_panel (hardest — 109 self.* in on_search_finished; session/history DELEGATED=E3-defer; NEW test_search_results_panel.py + conftest _GUI_TEST_FILES)
+  W4 126-04 D4 browse_panel + reading_desk_panel (browse_thumb_resolved signal moved onto BrowsePanel; reading desk = sub-widget; 8 browse source-scan tests additively retargeted OR-location)
+  W5 126-05 D5 lists_tab (ListsPanel + _ListsSyncCoordinator owning the _auto_sync_pending/_last debounce + authenticated supabase_client gate verbatim; Personal Lists tab only — Community populators stay)
+  GUARD-03 uses RESEARCH's CORRECTED list (4 CONTEXT-listed tests are web-side false positives; 8 browse + 1 tabular genuinely retarget, additively). copy-not-move; never repo-wide ruff --fix; base-vs-HEAD dir(genizah_app) NAME diff per commit (NOT count). Base = aa215b37.
 
 PHASE 125 (engines) — COMPLETE 2026-06-26. genizah_core.py 6064→755 ln (permanent 20-name
   same-object facade). 4 waves: 125-01 SEED-011 dedup (_ChunkPlan/_LabChunkPlan), 125-02 LabSettings,
