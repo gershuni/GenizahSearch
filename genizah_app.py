@@ -74,9 +74,9 @@ from desktop.vs_cache import DesktopVSCache, VSFetchThread, VSDownloadThread  # 
 from desktop.my_library_tab import MyLibraryTab  # Phase 95 — 7th tab
 from desktop.pdf_page_renderer import PdfRenderWorker  # Phase 100 D-07
 from desktop.pdf_image_controller import PdfImageController  # Phase 100 D-07b
-from desktop.ui_widgets import ShelfmarkTableWidgetItem, CheckBoxHeader, HiddenScrollArea, ListsTreeWidget  # noqa: F401  Phase 126 D1
-from desktop.settings_dialogs import SettingsDialog, SearchSettingsDialog, HelpDialog, TabularQueryBuilderDialog, LabScoringDialog  # noqa: F401  Phase 126 D1
-from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog  # Phase 127 D1
+from desktop.ui_widgets import ShelfmarkTableWidgetItem, CheckBoxHeader, HiddenScrollArea, ListsTreeWidget
+from desktop.settings_dialogs import SettingsDialog, SearchSettingsDialog, HelpDialog, TabularQueryBuilderDialog, LabScoringDialog
+from desktop.update_ui import UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog  # Phase 127 update_ui
 from filter_text_dialog import FilterTextDialog
 from column_filter_dialog import ColumnFilterDialog
 from list_filter_dialog import ListFilterDialog
@@ -539,8 +539,9 @@ def _format_list_star(in_list=False):
 # ---------------------------------------------------------------------------
 # TabularQueryBuilderDialog + SettingsDialog (and LabScoringDialog,
 # SearchSettingsDialog, HelpDialog) were MOVED to desktop/settings_dialogs.py
-# in Phase 126 D1 and are re-exported via the # noqa: F401 shim near the top of
+# in Phase 126 D1 and are re-exported via the plain import shim near the top of
 # this module. Originals deleted so the shim is not shadowed (identity holds).
+# (Phase 127: noqa suffix retired — all 9 D1 classes are used directly.)
 # ---------------------------------------------------------------------------
 
 

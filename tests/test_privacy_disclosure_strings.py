@@ -66,22 +66,18 @@ def test_help_page_contains_local_cache_disclosure_he():
 def test_about_dialog_contains_local_cache_disclosure_en():
     """D-NEW-6: EN About dialog must mention zstd and 'never uploaded'.
 
-    Phase 126 D1 (GUARD-03, additive): SettingsDialog (which owns the About-tab
-    HTML) was MOVED from genizah_app.py to desktop/settings_dialogs.py and is
-    re-exported via a # noqa: F401 shim. Scan BOTH candidate sources (OR-location)
-    so the disclosure is accepted wherever the dialog body lives — NOT flipped to
-    new-only (that hard flip is Phase 127's job)."""
-    app_src = (REPO_ROOT / "genizah_app.py").read_text(encoding="utf-8")
+    Phase 127 final flip: SettingsDialog source is now definitively in
+    desktop/settings_dialogs.py (Phase 126 D1 shim retired; noqa suffix removed).
+    Scan new-only location — the OR-location guard is no longer needed."""
     dialogs_src = (REPO_ROOT / "desktop" / "settings_dialogs.py").read_text(encoding="utf-8")
-    combined = app_src + dialogs_src
-    assert "zstd" in combined, (
-        "About dialog (genizah_app.py or desktop/settings_dialogs.py) must mention "
+    assert "zstd" in dialogs_src, (
+        "About dialog (desktop/settings_dialogs.py) must mention "
         "'zstd' (Phase 97 D-NEW-6)"
     )
     assert (
-        "never uploaded" in combined.lower()
-        or "not uploaded" in combined.lower()
-        or "never upload" in combined.lower()
+        "never uploaded" in dialogs_src.lower()
+        or "not uploaded" in dialogs_src.lower()
+        or "never upload" in dialogs_src.lower()
     ), (
         "About dialog must clarify cache is 'never uploaded' (Phase 97 D-NEW-6)"
     )

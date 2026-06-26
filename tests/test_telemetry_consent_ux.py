@@ -519,7 +519,8 @@ def test_settings_toggle_initial_state(monkeypatch):
     import genizah_core
     monkeypatch.setattr(genizah_core, 'save_app_config', lambda d: fake_cfg.update(d))
 
-    sd = genizah_app.SettingsDialog.__new__(genizah_app.SettingsDialog)
+    import desktop.settings_dialogs
+    sd = desktop.settings_dialogs.SettingsDialog.__new__(desktop.settings_dialogs.SettingsDialog)
     # Minimal init attributes needed by SettingsDialog.__init__
     # We can't call super().__init__ without a display, so call directly.
     QDialog.__init__(sd)
@@ -586,7 +587,8 @@ def test_settings_toggle_applies_on_confirm(monkeypatch):
         def __getattr__(self, name):
             return lambda *a, **kw: None
 
-    sd = genizah_app.SettingsDialog.__new__(genizah_app.SettingsDialog)
+    import desktop.settings_dialogs
+    sd = desktop.settings_dialogs.SettingsDialog.__new__(desktop.settings_dialogs.SettingsDialog)
     QDialog.__init__(sd)
     sd.main_win = _FakeMainWin()
     pal = QApplication.palette()
@@ -650,7 +652,8 @@ def test_settings_toggle_reverts_on_cancel_confirm(monkeypatch):
         def __getattr__(self, name):
             return lambda *a, **kw: None
 
-    sd = genizah_app.SettingsDialog.__new__(genizah_app.SettingsDialog)
+    import desktop.settings_dialogs
+    sd = desktop.settings_dialogs.SettingsDialog.__new__(desktop.settings_dialogs.SettingsDialog)
     QDialog.__init__(sd)
     sd.main_win = _FakeMainWin()
     pal = QApplication.palette()
@@ -719,7 +722,8 @@ def test_settings_checkbox_refreshes_on_open(monkeypatch):
         def __getattr__(self, name):
             return lambda *a, **kw: None
 
-    sd = genizah_app.SettingsDialog.__new__(genizah_app.SettingsDialog)
+    import desktop.settings_dialogs
+    sd = desktop.settings_dialogs.SettingsDialog.__new__(desktop.settings_dialogs.SettingsDialog)
     QDialog.__init__(sd)
     sd.main_win = _FakeMainWin()
     pal = QApplication.palette()
