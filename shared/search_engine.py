@@ -1594,14 +1594,14 @@ class SearchEngine:
         s, e = m.span()
         start = max(0, s - 60)
         end = min(len(text), e + 60)
-        
+
         # Calculate indices relative to snippet
         rel_s = s - start
         rel_e = e - start
 
         # Grab raw snippet
         snippet = text[start:end]
-        
+
         # Sanitize snippet to prevent interference with markers (replace with space to keep indices)
         snippet_safe = snippet.replace('*', ' ')
 
@@ -3044,18 +3044,20 @@ class SearchEngine:
         #
         # CR-01 fallback semantics preserved: the outer try/except below guarantees
         # LOCAL never breaks standard Composition Search.
-        # Phase 97 R-01: skip LOCAL composition search if is_searchable gate closed.
-        _scl_tab = self._my_library_tab_ref() if getattr(self, "_my_library_tab_ref", None) is not None else None
-        _scl_is_searchable = getattr(_scl_tab, "is_searchable", True) if _scl_tab is not None else True
         # Phase 110 correction: the regular index has no staleness — the standard
         # path never reports stale. (Lab-Mode staleness is handled in
         # lab_composition_search only.) Keep the per-run key for the result payload.
         _local_lab_stale = False
-        # Phase 110: gate the LOCAL hook on corpus_scope (skipped on a Genizah-only run).
-        if (not was_cancelled and corpus_scope != 'genizah'
-                and getattr(self, 'local_searcher', None) is not None
-                and getattr(self, 'local_index', None) is not None
-                and _scl_is_searchable):
+        # Phase 97 R-01 + Codex Gate-2 (round 2): enter the LOCAL block IFF the
+        # pre-pass actually built the LOCAL-flavor query/regex (`_do_local_pp` —
+        # the SAME snapshot of corpus_scope != 'genizah' + local index present +
+        # is_searchable used above to decide the build), so build and consume can
+        # never disagree.  Re-reading mutable availability HERE (as before) could
+        # diverge from the pre-pass: if it flipped absent->present mid-search (a
+        # MyLibraryTab rebuild completing on another thread) this loop would enter
+        # and consume None plans, silently dropping every LOCAL hit.  (A
+        # present->absent flip is still handled by the inner None-guard below.)
+        if not was_cancelled and _do_local_pp:
             try:
                 _local_index_scl = self.local_index
                 _local_searcher_scl = self.local_searcher
@@ -3489,7 +3491,7 @@ class SearchEngine:
 
         # 3. New Grouping Algorithm (Dictionary Based - O(N))
         # Instead of double loop, map all items by signature
-        
+
         groups_map = defaultdict(list)
         wrapped_items = []
         total_items = len(items)
@@ -3498,7 +3500,7 @@ class SearchEngine:
             # Update GUI infrequently to prevent freezing
             if progress_callback and idx % 100 == 0:
                 progress_callback(idx, total_items)
-            
+
             if check_cancel and check_cancel(): return None, None, None
 
             # Extract title
@@ -3510,18 +3512,18 @@ class SearchEngine:
             meta = self.meta_mgr.nli_cache.get(sid, {})
             t = meta.get('title', '').strip()
             shelfmark = self.meta_mgr.get_shelfmark_from_header(item['raw_header']) or meta.get('shelfmark', 'Unknown')
-            
+
             sig = _get_signature(t)
-            
+
             w_item = {
-                'item': item, 
-                'title': t, 
+                'item': item,
+                'title': t,
                 'signature': sig,
                 'shelfmark': shelfmark,
                 'grouped': False
             }
             wrapped_items.append(w_item)
-            
+
             if sig:
                 groups_map[sig].append(w_item)
 
@@ -3539,10 +3541,10 @@ class SearchEngine:
 
         # 5. Create Main List (ungrouped)
         main_list = [w['item'] for w in wrapped_items if not w['grouped']]
-        
+
         # Sort by score descending
         main_list.sort(key=lambda x: x['score'], reverse=True)
-        
+
         # Final GUI update
         if progress_callback:
             progress_callback(total_items, total_items)
@@ -3562,7 +3564,7 @@ class SearchEngine:
         """Fetch ALL pages for a system ID, sorted by page number."""
         browse_map = self._load_browse_map()
         if not browse_map: return []
-        
+
         pages_meta = browse_map.get(sys_id, [])
         if not pages_meta: return []
 
@@ -3579,7 +3581,7 @@ class SearchEngine:
                     'fl_id': parsed.get('fl_id')
                 })
         return full_content
-        
+
     def _get_metadata_only_browse_page(self, sys_id, p_num=None, absolute_index=None, next_prev=0):
         """Build a minimal browse result from csv_bank for records with no Tantivy text.
 
@@ -3659,7 +3661,7 @@ class SearchEngine:
                             volume_ie, len(pages), len(all_pages), sys_id)
         else:
             pages = all_pages
-        
+
         target_idx = -1
 
         # PRIORITY 1: Use Absolute Index if provided (Fixes duplicate page loop)
@@ -3668,18 +3670,18 @@ class SearchEngine:
                 target_idx = absolute_index
             else:
                 # If index is invalid, fallback to p_num logic? No, just fail or reset.
-                pass 
-        
+                pass
+
         # PRIORITY 2: Search by p_num (Fallback / Initial Load)
         if target_idx == -1 and p_num is not None:
             # Robust casting
             try: p_val = int(p_num)
             except (ValueError, TypeError): p_val = -999
-            
+
             for i, p in enumerate(pages):
-                if p['p_num'] == p_val: 
+                if p['p_num'] == p_val:
                     target_idx = i; break
-            
+
             # Smart Fallback: Find closest insertion point
             if target_idx == -1:
                 for i, p in enumerate(pages):
@@ -3690,10 +3692,10 @@ class SearchEngine:
 
         # PRIORITY 3: Default to start
         if target_idx == -1: target_idx = 0
-        
+
         # Calculate New Index
         new_idx = target_idx + next_prev
-        
+
         # Handle crossing to adjacent manuscripts when requested
         if (new_idx < 0 or new_idx >= len(pages)) and allow_cross and next_prev != 0:
             direction = 1 if next_prev > 0 else -1
@@ -3709,10 +3711,10 @@ class SearchEngine:
                 return None
 
         if new_idx < 0 or new_idx >= len(pages): return None
-        
+
         target_page = pages[new_idx]
         text = self.get_full_text_by_id(target_page['uid'])
-        
+
         return {
             'uid': target_page['uid'],
             'p_num': target_page['p_num'],
@@ -3949,12 +3951,11 @@ class SearchEngine:
             # Find current index
             curr_idx = self._ordered_sys_ids.index(current_sys_id)
             new_idx = curr_idx + offset
-            
+
             # Check bounds
             if 0 <= new_idx < len(self._ordered_sys_ids):
                 return self._ordered_sys_ids[new_idx]
         except ValueError:
             pass # Current ID not found in list
-            
-        return None
 
+        return None

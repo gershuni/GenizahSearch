@@ -1009,7 +1009,15 @@ class LabEngine:
             LAB_LOGGER.info(
                 "lab_composition_search: Genizah LAB index not built — skipping Genizah lab loop"
             )
-          if corpus_scope != 'local' and self.lab_index is not None and self.lab_searcher is not None:
+          # Codex Gate-2 (round 2): also require the fingerprint pre-pass to have
+          # actually run (_do_genizah_lab_pp or _do_local_lab_pp) — i.e.
+          # lab_chunk_plans is populated.  Otherwise, if the LAB index were absent
+          # at pre-pass (so plans stayed empty) but reloaded onto self before this
+          # gate (a MyLibraryTab rebuild on another thread), this loop would iterate
+          # zero plans and silently drop hits.  The live presence re-read stays for
+          # crash-safety on a present->absent flip.
+          if (corpus_scope != 'local' and self.lab_index is not None and self.lab_searcher is not None
+                  and (_do_genizah_lab_pp or _do_local_lab_pp)):
             for i, plan in enumerate(lab_chunk_plans):
                 chunks_processed = i
                 if progress_callback: progress_callback(i, total_chunks)
@@ -1173,9 +1181,14 @@ class LabEngine:
         # rebuild_local_lab_index docstring), which silently suppressed ALL Lab+LOCAL results.
         # Freshness stays advisory (per-run `local_lab_stale` payload + the log above); the
         # inner None-guard below keeps it crash-safe.
+        # Codex Gate-2 (round 2): also require the fingerprint pre-pass to have run
+        # (lab_chunk_plans populated) — same absent-at-pre-pass / reloaded-before-
+        # gate race as the Genizah-LAB loop above.  The inner None-guard below keeps
+        # a present->absent flip crash-safe.
         if (not was_interrupted and corpus_scope != 'genizah' and _lab_is_searchable
                 and getattr(self, 'local_lab_searcher', None) is not None
-                and getattr(self, '_local_lab_index', None) is not None):
+                and getattr(self, '_local_lab_index', None) is not None
+                and (_do_genizah_lab_pp or _do_local_lab_pp)):
             try:
                 local_lab_index = getattr(self, "_local_lab_index", None)
                 local_lab_searcher = self.local_lab_searcher
