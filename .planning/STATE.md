@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: Phase complete — ready for verification
-stopped_at: Phase 125 verified complete (Codex APPROVE 3-round; verifier PASS 5/5)
-last_updated: "2026-06-26T15:23:45.055Z"
+status: ✅ MILESTONE COMPLETE — all 6 phases (122-127) done + verified; internal refactor, no release
+stopped_at: Phase 127 verified complete (Codex PLAN pre-flight 3-round + CODE review 2-round APPROVE; verifier PASS 5/5) — v8.3.0 CLOSED
+last_updated: "2026-06-26T20:00:00.000Z"
 last_activity: 2026-06-26
 progress:
   total_phases: 6
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 12
-  completed_plans: 11
-  percent: 83
+  completed_plans: 12
+  percent: 100
 ---
 
 # Project State
@@ -21,12 +21,29 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 127 — Update UI & Final Cleanup (final phase; Phase 126 D1 complete)
+**Current focus:** ✅ v8.3.0 God-File Decomposition COMPLETE (all 6 phases). No active milestone — next: `/gsd-new-milestone` when ready.
 
 ## Current Position
 
-Phase: 126 (Desktop Panels, D1-only) — ✅ COMPLETE + verified 2026-06-26. NEXT: Phase 127 (final).
-Plan: 1 of 1 executed (126-01). D2-D5 deferred → SEED-028 (drafts in deferred-method-panels/).
+✅ **v8.3.0 MILESTONE COMPLETE — 6/6 phases (122-127), 2026-06-26.** Pure internal refactor, zero behavior
+change, NO release (label-only). genizah_core.py 12.5K→755 ln behind a permanent 27-name same-object facade;
+the 4 update-UI classes + 9 D1 dialog/widget classes relocated to desktop/ (identity 13/13). Two back-edge
+guards installed (GUARD-01 core + GUARD-04 desktop). Final suite: bulk 4894/0, gui 60/0 (3× consecutive green).
+
+PHASE 127 (Update UI & Final Cleanup; FINAL) COMPLETE + verified 2026-06-26 (HEAD da6aaa1a-region):
+  desktop/update_ui.py (4 classes, MOVE-and-shim, byte-identical to base bodies — Codex-confirmed cmp=0);
+  D1 noqa markers retired (imports kept, 9 classes used internally), test_telemetry_consent_ux.py retargeted
+  to desktop.settings_dialogs, EN privacy disclosure test hard-flipped; NEW tests/test_no_back_edges_desktop.py
+  (GUARD-04, 19 modules) + tests/test_genizah_core_facade.py (27-name permanent facade). Sidecar coordination
+  methods STAYED on GenizahGUI (research crux verdict — entangled across 4 ownership domains; DESK-08 tests
+  target them in place). Codex PLAN pre-flight CLEARED (3-round: caught the APP_VERSION-not-in-core import drift
+  + the BATCH_SIZE delete-range overshoot before any code was written) + Codex CODE review CLEARED (APPROVE-
+  WITH-NITS → APPROVE; byte-faithfulness restore). gsd-verifier PASS 5/5 (127-VERIFICATION.md). One non-blocking
+  human item: interactive desktop launch (update-UI render + sidecar download flow).
+
+DEFERRED (logged): DESK-03..07 method-based panels → SEED-028; DEFER-01/02/03/04. The ≥70% genizah_app.py
+  shrink was dropped (its bulk is the deferred method-based panels). docs/CODE_INDEX.md refresh → SEED-027.
+  Phase-dir archival to .planning/milestones/v8.3.0-phases/ defers to the next milestone open (established cadence).
 
 PHASE 126 (D1) COMPLETE 2026-06-26 (HEAD 7a692319). 9 classes MOVE-and-shimmed → desktop/settings_dialogs.py
   (5 dialogs) + desktop/ui_widgets.py (4 widgets); genizah_app.py −1860 net; D-07b strip verbatim; apply/

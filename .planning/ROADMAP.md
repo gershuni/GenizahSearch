@@ -28,7 +28,7 @@
 - **v8.0.0 Dicta Rebrand & Joins Lab** -- BRAND (no-phase) + Phases 103, 105 (folded from v7.17; Phase 104 → EXP-F3) + Phases 106-110 Joins Lab (shipped 2026-06-09; closed 2026-06-11). Component B (JSA-01/02/03 + JWB-05) + web Joins Lab UI deferred post-v8.0.0. See `milestones/v8.0.0-ROADMAP.md`
 - **v8.1.0 Desktop Telemetry** -- Phases 111-116 (shipped 2026-06-16; closed 2026-06-16). See `milestones/v8.1.0-ROADMAP.md`
 - ✅ **v8.2.0 Web Joins Lab, FGP Transcriptions & Hebrew Search** -- Phases 117-121 (shipped 2026-06-23, both apps)
-- 🚧 **v8.3.0 God-File Decomposition** -- Phases 122-127 (in progress)
+- ✅ **v8.3.0 God-File Decomposition** -- Phases 122-127 (complete 2026-06-26; internal refactor, zero behavior change, no release — both apps)
 
 ## Phases
 

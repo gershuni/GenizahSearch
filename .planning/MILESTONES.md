@@ -1,5 +1,43 @@
 # Project Milestones: GenizahSearch
 
+## v8.3.0 God-File Decomposition (Complete: 2026-06-26 — internal refactor, no release)
+
+> **Label-only milestone — NO release, NO version bump, NO GitHub release.** A pure internal refactor:
+> zero behavior change at every phase boundary (GUARD-02). Both Codex gates (PLAN pre-flight + CODE
+> review) cleared on every phase; the full suite stayed green throughout.
+
+**Delivered:** Split the two god-files — `genizah_core.py` (12.5K→755 lines) and the UI-class clusters of
+`genizah_app.py` — into cohesive `shared/` and `desktop/` modules, behind a PERMANENT `genizah_core`
+re-export facade (same-object) and TEMPORARY `genizah_app` re-export shims (retired in Phase 127). Two new
+AST back-edge guards lock the layering in place.
+
+**Phases completed:** 6 phases (122-127):
+- **122** Config enabler (`shared/config.py` — the import-cycle pivot) + GUARD-01 back-edge guard
+- **123** core leaf modules (variants, codicological, responsa, joins_manager, lists_manager, browse_map_utils, text_normalize)
+- **124** metadata_manager + indexer → `shared/`
+- **125** core engines (SEED-011 composition dedup first, then SearchEngine/LabEngine/LabSettings) → `shared/`; 20-name same-object facade
+- **126** desktop panels — RE-SCOPED to **D1 only**: 9 top-level dialog/widget CLASSES → `desktop/settings_dialogs.py` + `desktop/ui_widgets.py` (move-and-shim). D2–D5 method-based panels deferred → **SEED-028** (need a widget-ownership refactor first)
+- **127** `desktop/update_ui.py` (4 update-UI classes) + retire the D1 shim markers + `tests/test_no_back_edges_desktop.py` + `tests/test_genizah_core_facade.py` + full-suite sign-off
+
+**Key accomplishments:**
+
+- `genizah_core.py`: 12,500 → 755 lines; permanent 27-name same-object facade (`genizah_core.X is shared.Y.X`)
+- 4 update-UI classes + 9 D1 dialog/widget classes relocated to `desktop/`; `genizah_app.X is desktop.Y.X` identity holds (13/13)
+- Two back-edge guards: `tests/test_no_back_edges_core.py` (GUARD-01, no `shared/`→`genizah_core` module-level import) + `tests/test_no_back_edges_desktop.py` (GUARD-04, no `desktop/`→`genizah_app` module-level import; 19 modules)
+- Process: TWO Codex gates per phase (PLAN pre-flight catching plan↔code drift + CODE 3-round convergence) + an orchestrator source-integrity gate per wave (facade identity + base-vs-HEAD NAME-level test diff, never count-based). Caught real BLOCKER-class issues in 124/125/126/127 the executors' count-based checks missed.
+
+**Scope deferred (logged):** DESK-03..07 method-based panels → **SEED-028**; DEFER-01 (SearchEngine internal sub-split), DEFER-02 (CompositionState), DEFER-03 (composition-tab), DEFER-04 (startup/session remainder). The original ≥70% `genizah_app.py` shrink was dropped (its bulk is the deferred method-based panels).
+
+**Stats:**
+
+- 6 phases (122-127), 12 plans
+- 2 days (Jun 25-26, 2026)
+- Final suite: bulk 4894 passed / 0 failed, gui 60 passed / 0 failed (3× consecutive green full runs)
+
+**Git tag:** none (label-only milestone — no release; web is continuous-deploy and the desktop binary is unaffected by the internal reorg)
+
+---
+
 ## v8.2.0 Web Joins Lab, FGP Transcriptions & Hebrew Search (Shipped: 2026-06-23; closed 2026-06-25)
 
 > **Close note (2026-06-25):** formal milestone-close run retroactively when opening v8.3.0 (the `/release`-skips-close gap). Phases 117–121 archived to `.planning/milestones/v8.2.0-phases/`; REQUIREMENTS/ROADMAP archived 2026-06-23. Patch releases **v8.2.1** (Recently-Viewed fixes) + **v8.2.2** (FGP credits, homepage stats, catalog filters, audit polish) shipped afterward as `/release` patches (not separate GSD milestones — see `CHANGELOG.md`).
