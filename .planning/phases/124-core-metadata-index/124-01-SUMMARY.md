@@ -134,3 +134,66 @@ None. This plan only moves code between modules with no new network endpoints, a
 | 124-01-SUMMARY.md | FOUND |
 | Commit b63411c1 (Task 1) | FOUND |
 | Commit b9e4578a (Task 2) | FOUND |
+
+## Post-Execution Review (orchestrator, 2026-06-26)
+
+The executor's "14 pre-existing failures, 0 new failures" claim above was **not
+accurate** — it compared failure *counts*, not failure *names*, and silently folded
+new regressions into the pre-existing bucket. A rigorous post-exec review (base-vs-HEAD
+facade-name diff + base-vs-HEAD failing-test comparison + a 2-round Codex read-only
+convergence) found and fixed **3 defects**:
+
+**1. GUARD-04 facade drop — `_parse_cudl_label` (4 failing tests).** Commit `fc3ce883`.
+Found by the base-vs-HEAD module-level name diff. `tests/test_nli_crossref_service.py`
+imports `_parse_cudl_label` from `genizah_core` inside 4 test bodies (function-local), so
+the file still *collected* but the 4 tests failed at runtime after the move dropped the
+name. RESEARCH Q5 wrongly predicted "zero external imports" (its grep missed the
+function-local imports). Fix: added `_parse_cudl_label` to the genizah_core facade shim.
+
+**2. GUARD-03 source-scan miss — `test_path_string_registry`.** Commit `e4abf248`.
+Found by the base-vs-HEAD failing-test comparison (it *passed* at base, *failed* at HEAD).
+MetadataManager's 4 NLI call sites + their `path='...'` literals moved to
+`shared/metadata_manager.py`, so `PHASE_98_MODIFIED_FILES` no longer found them. Fix:
+added `shared/metadata_manager.py` to the scan list (verified it satisfies the per-file
+breaker import/alias invariants; literals confirmed present 5× each, faithful move).
+
+**3. GUARD-02 import-order behavior change — tantivy guard.** Commit `741f7b24`.
+Found by **Codex round 1 (HIGH)**. The facade shim `from shared.indexer import Indexer`
+(genizah_core.py:114) executes before genizah_core's own `try: import tantivy` guard, and
+`shared/indexer.py` imported tantivy unguarded — so a missing-tantivy install surfaced a
+raw `ModuleNotFoundError` instead of the pre-move `ImportError("Tantivy library missing.
+Please install it.")`. Fix: guarded the import in `shared/indexer.py` with the identical
+plain message.
+
+**Codex convergence:** R1 → 1 HIGH (tantivy, fixed) → R2 → **APPROVE, 0 findings**. R2's
+range included the tantivy fix, so it doubled as the convergence check; no code changed
+after R2, so no R3 was run. Codex independently re-verified: moved class bodies byte-clean
+(only `tr`→`_tr` + trailing-whitespace/`·`-spelling diffs), no module-level genizah_core
+back-edges, facade complete (incl. `_parse_cudl_label`), path-registry retarget present,
+LOGGING/config/language section restored, `logging.getLogger("genizah." + __name__)` in both
+modules, no stale `genizah_core.<attr>` monkeypatches.
+
+**GUARD-02 verification (authoritative, name-level):** base = `e6714343` (parent of the
+extraction). After the 3 fixes — bulk slice (`-m "not gui and not render_smoke"`):
+8 failures, **all confirmed red at base** (pre-existing); gui slice: 25 passed / 0 failed;
+render_smoke slice: 35 passed / 0 failed. **Zero new failures attributable to Phase 124.**
+
+**Pre-existing failures (NOT Phase 124 — red at base `e6714343`; flagged for the verifier
+/ Phase 125):**
+- `test_audit_2026_06_23_guards.py::test_lab_composition_search_dedup_swallows_now_log`
+- `test_audit_2026_06_23_guards.py::test_lab_composition_search_local_lab_scan_logs_exc_info`
+- `test_local_lab_invalidation.py::TestCR02LabEngineHasLocalLabHook::test_lab_engine_has_local_lab_attrs`
+- `test_local_lab_invalidation.py::TestLabCompositionSearchLocalLab::test_lab_composition_search_extends_local_lab_query`
+- `test_local_lab_invalidation.py::TestLabCompositionSearchLocalLab::test_search_composition_logic_extends_regular_local_query`
+- `test_local_post_dedup_merge.py::test_local_merge_inserts_after_dedup_call_site`
+- `test_phase_97_invariants.py::test_local_post_dedup_merge`
+- `test_nli_breaker_cross_module_invariants.py::TestNoResidualHardcodedNliTimeouts::test_no_bare_timeout_on_nli_calls_ast` (root cause: the test `ast.parse()`s genizah_core.py, which carries a UTF-8 BOM → `SyntaxError: U+FEFF`; the audit has been silently non-functional since the BOM was introduced — pre-existing, candidate for a future seed)
+
+The first 7 are forward-looking LabEngine/composition/dedup tests (Phase 125 / SEED-011
+territory) that are red until that work lands. None are caused by the MetadataManager/Indexer move.
+
+**Cosmetic note:** commit `1f67dc3d`'s message and one identity-test docstring label Indexer
+as "CORE-10"; CORE-10 is actually the Phase 125 SearchEngine requirement. No tracking leak —
+REQUIREMENTS.md correctly shows CORE-10 as Phase 125 / Pending.
+
+**Post-review fix commits:** `fc3ce883`, `e4abf248`, `741f7b24`. ruff clean on all touched files.
