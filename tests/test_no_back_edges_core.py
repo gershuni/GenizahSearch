@@ -569,3 +569,49 @@ def test_lab_settings_standalone_import():
     assert hasattr(settings, 'candidate_limit'), (
         "LabSettings instance is missing 'candidate_limit' attribute"
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 125: lab_engine (CORE-12)
+# ---------------------------------------------------------------------------
+
+def test_lab_engine_identity():
+    """CORE-12: genizah_core.LabEngine is the same class object as shared.lab_engine.LabEngine."""
+    import shared.lab_engine
+    import genizah_core
+
+    assert shared.lab_engine.LabEngine is genizah_core.LabEngine, (
+        "genizah_core.LabEngine is not the same object as shared.lab_engine.LabEngine. "
+        "The re-export shim must be: from shared.lab_engine import LabEngine  # noqa: F401"
+    )
+
+
+def test_lab_engine_standalone_import():
+    """CORE-12 smoke: shared.lab_engine can be imported, LabEngine instantiates with mocked
+    meta_mgr/var_mgr, and CR-02 attrs (LOCAL-LAB mirror) are present."""
+    import shared.lab_engine
+    from unittest.mock import MagicMock, patch
+    assert hasattr(shared.lab_engine, 'LabEngine')
+
+    # Construct LabEngine with mocked dependencies (no real Tantivy index needed).
+    with patch.object(shared.lab_engine.LabEngine, '_reload_lab_index'), \
+         patch.object(shared.lab_engine.LabEngine, 'reload_local_lab_index'):
+        engine = shared.lab_engine.LabEngine(MagicMock(), MagicMock())
+
+    # CR-02 attrs must be present (LOCAL-LAB mirror)
+    assert hasattr(engine, 'local_lab_searcher'), (
+        "CR-02: LabEngine must have local_lab_searcher attr"
+    )
+    assert hasattr(engine, '_local_lab_index'), (
+        "CR-02: LabEngine must have _local_lab_index attr"
+    )
+    assert hasattr(engine, '_lab_local_meta'), (
+        "CR-02: LabEngine must have _lab_local_meta attr"
+    )
+    assert hasattr(engine, 'local_lab_searcher_stale'), (
+        "CR-02: LabEngine must have local_lab_searcher_stale attr"
+    )
+    # Class attribute sanity
+    assert shared.lab_engine.LabEngine.LAB_FINGERPRINT_FIELD == "fingerprint", (
+        "LabEngine.LAB_FINGERPRINT_FIELD must equal 'fingerprint'"
+    )

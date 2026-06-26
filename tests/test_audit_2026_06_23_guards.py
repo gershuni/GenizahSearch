@@ -149,11 +149,18 @@ def _handler_excepts_types(handler: ast.ExceptHandler, names: set[str]) -> bool:
 def test_lab_composition_search_dedup_swallows_now_log():
     """#7: the two (KeyError, IndexError, TypeError) chunk-hit dedup handlers in
     lab_composition_search must log (formerly bare `pass`). There are two — the
-    main composition path and the LOCAL-LAB branch sibling."""
-    src = (ROOT / "genizah_core.py").read_text(encoding="utf-8")
+    main composition path and the LOCAL-LAB branch sibling.
+
+    GUARD-03 retarget (Phase 125-03): lab_composition_search moved to
+    shared/lab_engine.py — scan that file instead of genizah_core.py.
+    """
+    lab_engine_path = ROOT / "shared" / "lab_engine.py"
+    if not lab_engine_path.exists():
+        pytest.skip("shared/lab_engine.py not yet created")
+    src = lab_engine_path.read_text(encoding="utf-8")
     tree = ast.parse(src)
     handlers = _handlers_in_func(tree, "lab_composition_search")
-    assert handlers, "lab_composition_search not found"
+    assert handlers, "lab_composition_search not found in shared/lab_engine.py"
     dedup = [h for h in handlers
              if _handler_excepts_types(h, {"KeyError", "IndexError", "TypeError"})]
     assert len(dedup) == 2, f"expected 2 dedup handlers, found {len(dedup)}"
@@ -164,13 +171,20 @@ def test_lab_composition_search_dedup_swallows_now_log():
 
 def test_lab_composition_search_local_lab_scan_logs_exc_info():
     """#7: the broad LOCAL-LAB scan handler logs WITH exc_info (logging-only;
-    return shape unchanged — no degraded flag added by decision)."""
-    src = (ROOT / "genizah_core.py").read_text(encoding="utf-8")
+    return shape unchanged — no degraded flag added by decision).
+
+    GUARD-03 retarget (Phase 125-03): lab_composition_search moved to
+    shared/lab_engine.py — scan that file instead of genizah_core.py.
+    """
+    lab_engine_path = ROOT / "shared" / "lab_engine.py"
+    if not lab_engine_path.exists():
+        pytest.skip("shared/lab_engine.py not yet created")
+    src = lab_engine_path.read_text(encoding="utf-8")
     tree = ast.parse(src)
     handlers = _handlers_in_func(tree, "lab_composition_search")
     # The LOCAL-LAB scan handler binds `_local_lab_exc`.
     scan = [h for h in handlers if h.name == "_local_lab_exc"]
-    assert len(scan) == 1, "LOCAL-LAB scan handler not found"
+    assert len(scan) == 1, "LOCAL-LAB scan handler not found in shared/lab_engine.py"
     h = scan[0]
     assert _handler_logs(h), "LOCAL-LAB scan handler must log"
     # exc_info=True present on the logging call.

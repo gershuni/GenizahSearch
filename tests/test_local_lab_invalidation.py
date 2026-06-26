@@ -11,6 +11,7 @@ import ast
 import inspect
 import json
 import os
+import pathlib
 import shutil
 from unittest.mock import MagicMock
 
@@ -685,12 +686,15 @@ class TestLabCompositionSearchLocalLab:
         )
 
     def test_lab_composition_search_extends_local_lab_query(self):
-        """D-09: lab_composition_search contains the LOCAL LAB extension hook."""
-        src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "genizah_core.py")
-        if not os.path.exists(src_path):
-            pytest.skip("genizah_core.py not found")
-        with open(src_path, "r", encoding="utf-8") as f:
-            source = f.read()
+        """D-09: lab_composition_search contains the LOCAL LAB extension hook.
+
+        GUARD-03 retarget (Phase 125-03): lab_composition_search moved to
+        shared/lab_engine.py — scan that file instead of genizah_core.py.
+        """
+        src_path = (pathlib.Path(__file__).parent.parent / "shared" / "lab_engine.py")
+        if not src_path.exists():
+            pytest.skip("shared/lab_engine.py not yet created")
+        source = src_path.read_text(encoding="utf-8")
 
         tree = ast.parse(source)
         found_fn = False
@@ -703,18 +707,21 @@ class TestLabCompositionSearchLocalLab:
                     found_local_lab = True
                 break
 
-        assert found_fn, "lab_composition_search function not found in genizah_core.py"
+        assert found_fn, "lab_composition_search function not found in shared/lab_engine.py"
         assert found_local_lab, (
             "lab_composition_search does not reference local_lab_searcher (D-09 extension missing)"
         )
 
     def test_no_rrf_in_lab_scoring(self):
-        """D-09: LAB scoring path must NOT use RRF (custom fingerprint scoring preserved)."""
-        src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "genizah_core.py")
-        if not os.path.exists(src_path):
-            pytest.skip("genizah_core.py not found")
-        with open(src_path, "r", encoding="utf-8") as f:
-            source = f.read()
+        """D-09: LAB scoring path must NOT use RRF (custom fingerprint scoring preserved).
+
+        GUARD-03 retarget (Phase 125-03): LabEngine moved to shared/lab_engine.py —
+        scan that file instead of genizah_core.py.
+        """
+        src_path = (pathlib.Path(__file__).parent.parent / "shared" / "lab_engine.py")
+        if not src_path.exists():
+            pytest.skip("shared/lab_engine.py not yet created")
+        source = src_path.read_text(encoding="utf-8")
 
         import re as _re
         # Ensure no rrf_merge call near "lab" context
@@ -808,16 +815,21 @@ class TestCR02LabEngineHasLocalLabHook:
 
     def test_lab_engine_has_local_lab_attrs(self):
         """LabEngine __init__ must set local_lab_searcher, _local_lab_index,
-        _lab_local_meta, local_lab_searcher_stale."""
+        _lab_local_meta, local_lab_searcher_stale.
+
+        GUARD-03 retarget (Phase 125-03): LabEngine moved to shared/lab_engine.py —
+        scan that file instead of genizah_core.py.
+        """
         try:
             from genizah_core import LabEngine  # noqa: F401  (imported to verify availability; used via AST inspection below)
         except ImportError:
             pytest.skip("genizah_core not importable")
 
-        # Read source — actual instantiation requires meta_mgr/var_mgr.
-        src_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "genizah_core.py")
-        with open(src_path, "r", encoding="utf-8") as f:
-            source = f.read()
+        # Read source from shared/lab_engine.py — actual instantiation requires meta_mgr/var_mgr.
+        src_path = pathlib.Path(__file__).parent.parent / "shared" / "lab_engine.py"
+        if not src_path.exists():
+            pytest.skip("shared/lab_engine.py not yet created")
+        source = src_path.read_text(encoding="utf-8")
 
         # AST check: LabEngine.__init__ must assign all four attributes.
         tree = ast.parse(source)
@@ -833,7 +845,7 @@ class TestCR02LabEngineHasLocalLabHook:
                                 if stmt.value.id == "self":
                                     attr_names.add(stmt.attr)
                 break
-        assert found_class, "LabEngine class not found"
+        assert found_class, "LabEngine class not found in shared/lab_engine.py"
         for required in (
             "local_lab_searcher",
             "_local_lab_index",
