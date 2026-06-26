@@ -10,9 +10,11 @@ created: 2026-06-26
 # Phase 126 — Validation Strategy
 
 > Per-phase validation contract for feedback sampling during execution. Phase 126 is a
-> ZERO-BEHAVIOR-CHANGE refactor (copy panel clusters out of `genizah_app.py` into `desktop/`,
-> leave re-export shims). Validation is therefore dominated by **behavior-parity** (existing suites
-> stay green) plus one **new direct panel test** (D3) and the **load-bearing gui slice**.
+> ZERO-BEHAVIOR-CHANGE refactor (MOVE panel clusters out of `genizah_app.py` into `desktop/`,
+> replace the originals with `# noqa: F401` re-export shims — the genizah_core 122–125 recipe).
+> Validation is therefore dominated by **behavior-parity** (existing suites stay green via the
+> re-export shims), **MOVE-and-shim identity** (`genizah_app.X is desktop.Y.X`), one **new direct
+> panel test** (D3), and the **load-bearing gui slice**.
 
 ---
 
@@ -48,25 +50,26 @@ SEPARATE marker slice — load-bearing for this phase (these ARE the GUI panels)
 ## Per-Task Verification Map
 
 > Populated by the planner per task. Each panel-extraction task verifies via its GUARD-03-retargeted
-> source-scan test(s) + the bulk/gui slice. Copy-not-move means every existing GUARD-03 test stays
-> green automatically in Phase 126 (retarget is ADDITIVE — scan both old + new location; the
-> delete+flip happens in Phase 127).
+> source-scan test(s) + the bulk/gui slice. MOVE-and-shim: the cluster code is DELETED from
+> `genizah_app.py` and re-exported via shim, so `genizah_app.X is desktop.Y.X` identity must HOLD;
+> GUARD-03 source-scan tests are additively retargeted (OR-location — accept the old genizah_app.py
+> path OR the new desktop module). The external-caller retarget + shim deletion happen in Phase 127.
 
 | Task ID | Plan | Wave | Requirement | Test Type | Automated Command | Status |
 |---------|------|------|-------------|-----------|-------------------|--------|
-| 126-01-01 | D1 | 1 | DESK-02 | import-smoke + ruff | `python -c import desktop.ui_widgets + genizah_app` ; `ruff check desktop/ui_widgets.py genizah_app.py` | ⬜ pending |
-| 126-01-02 | D1 | 1 | DESK-01 | gui (runtime) + ruff | `pytest test_telemetry_consent_ux.py` ; identity check `g.SettingsDialog is s.SettingsDialog` | ⬜ pending |
-| 126-01-03 | D1 | 1 | GUARD-03/02 | source-scan (additive) + slices | `pytest test_tabular_builder_rtl.py` ; bulk + gui slice | ⬜ pending |
-| 126-02-01 | D2 | 2 | DESK-03 | import-smoke + ruff | `python -c import desktop.catalog_browse + identity` ; `ruff check` | ⬜ pending |
+| 126-01-01 | D1 | 1 | DESK-02 | import-smoke (identity) + ruff | `python -c import desktop.ui_widgets + g.X is w.X` ; `ruff check desktop/ui_widgets.py genizah_app.py` | ⬜ pending |
+| 126-01-02 | D1 | 1 | DESK-01 | gui (runtime) + identity + ruff | `pytest test_telemetry_consent_ux.py` ; `g.SettingsDialog is s.SettingsDialog` | ⬜ pending |
+| 126-01-03 | D1 | 1 | GUARD-03/02 | source-scan (1 additive) + slices | `pytest test_tabular_builder_rtl.py` (OR-location) ; bulk + gui slice | ⬜ pending |
+| 126-02-01 | D2 | 2 | DESK-03 | import-smoke (identity) + ruff | `python -c import desktop.catalog_browse + g.X is c.X (panel + worker)` ; `ruff check` | ⬜ pending |
 | 126-02-02 | D2 | 2 | GUARD-03/02 | runtime + web-side false-positive + slices | `pytest test_catalog_availability_filter.py test_seed023_catalog_filters.py` ; bulk + gui | ⬜ pending |
-| 126-03-01 | D3 | 3 | DESK-04 | import-smoke + ruff | `python -c import desktop.search_results_panel + identity` ; `ruff check` | ⬜ pending |
+| 126-03-01 | D3 | 3 | DESK-04 | import-smoke (identity) + ruff | `python -c import desktop.search_results_panel + g.X is p.X` ; `ruff check` | ⬜ pending |
 | 126-03-02 | D3 | 3 | DESK-04 | gui (NEW direct test) | `pytest test_search_results_panel.py` (mock SearchThread) ; conftest registration check | ⬜ pending |
-| 126-03-03 | D3 | 3 | GUARD-02/04 | bulk + gui slices + name diff | bulk + gui slice ; `dir(genizah_app)` name diff | ⬜ pending |
-| 126-04-01 | D4 | 4 | DESK-06 | import-smoke + ruff | `python -c import desktop.reading_desk_panel + identity` ; `ruff check` | ⬜ pending |
-| 126-04-02 | D4 | 4 | DESK-05 | import-smoke + signal-attr + ruff | `python -c import desktop.browse_panel + browse_thumb_resolved attr` ; `ruff check` | ⬜ pending |
-| 126-04-03 | D4 | 4 | GUARD-03/02 | source-scan (8 additive) + slices | `pytest` 8 browse source-scan tests ; bulk + gui | ⬜ pending |
-| 126-05-01 | D5 | 5 | DESK-07 | import-smoke + ruff | `python -c import desktop.lists_tab _ListsSyncCoordinator + identity` ; `ruff check` | ⬜ pending |
-| 126-05-02 | D5 | 5 | DESK-07 | import-smoke + scope-guard + ruff | `python -c import ListsPanel + Community populators NOT moved` ; `ruff check` | ⬜ pending |
+| 126-03-03 | D3 | 3 | GUARD-03/02/04 | source-scan (1 additive) + slices + name diff | `pytest test_local_filter_cascade.py` (retargeted; HIGH-2) ; bulk + gui slice ; `dir(genizah_app)` name diff | ⬜ pending |
+| 126-04-01 | D4 | 4 | DESK-06 | import-smoke (identity) + ruff | `python -c import desktop.reading_desk_panel + g.X is r.X` ; `ruff check` | ⬜ pending |
+| 126-04-02 | D4 | 4 | DESK-05 | import-smoke + signal-attr (4 sites) + ruff | `python -c import desktop.browse_panel + g.X is b.X + browse_thumb_resolved/_on_browse_thumb_resolved attrs` ; `ruff check` | ⬜ pending |
+| 126-04-03 | D4 | 4 | GUARD-03/02 | source-scan (12 additive) + slices | `pytest` 12 browse source-scan tests (HIGH-3) ; bulk + gui | ⬜ pending |
+| 126-05-01 | D5 | 5 | DESK-07 | import-smoke (identity) + ruff | `python -c import desktop.lists_tab _ListsSyncCoordinator + g.X is l.X` ; `ruff check` | ⬜ pending |
+| 126-05-02 | D5 | 5 | DESK-07 | import-smoke + scope-guard + ruff | `python -c import ListsPanel + show_add_to_list_menu & Community populators NOT moved` ; `ruff check` | ⬜ pending |
 | 126-05-03 | D5 | 5 | GUARD-03/02/04 | web-side false-positives + slices + phase-final name diff | `pytest` 4 web lists tests + runtime ; bulk + gui ; phase-final name diff | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
@@ -81,6 +84,18 @@ SEPARATE marker slice — load-bearing for this phase (these ARE the GUI panels)
 - [ ] No framework install needed (pytest + PyQt6 already present).
 
 *Otherwise existing infrastructure covers all phase requirements (behavior-parity refactor).*
+
+---
+
+## GUARD-03 Source-Scan Test Retarget Map (by FILENAME — HIGH-3: no bare counts)
+
+| Plan | Retargeted (additive, OR-location) | Excluded (web-side false positive / not this cluster) |
+|------|-------------------------------------|-------------------------------------------------------|
+| D1 (126-01) | `test_tabular_builder_rtl.py` | — |
+| D2 (126-02) | (none — runtime cache kept in place) | `test_seed023_catalog_filters.py` (web.pages.catalog_browse) |
+| D3 (126-03) | `test_local_filter_cascade.py` (HIGH-2; scans `_apply_results_table_filters`/`_apply_local_filter`/`_apply_local_optout_filter`) | — |
+| D4 (126-04) | `test_browse_synthetic.py`, `test_local_browse_panel.py`, `test_wr01_open_local_browse_page_ast.py`, `test_desktop_folio_navigation.py`, `test_view_all_cap.py`, `test_view_all_incremental.py`, `test_desktop_pending_corrections.py`, `test_fgp_chooser_integration.py`, `test_local_nav_codex_fix7.py`, `test_local_nav_codex_fix8.py`, `test_my_library_tab.py`, `test_synthetic_round_trip.py` (12 total; + `test_join_workbench_vs.py` genizah_app.py-read OR-location for `btn_b_find_joins`) | `test_browse_state.py` (web.pages.browse_state); `test_local_filter_cascade.py` (→ D3) |
+| D5 (126-05) | (none — all web-side) | `test_add_to_list_dialog_ui_context.py`, `test_user_lists_cache_isolation.py`, `test_user_lists_data_threading.py`, `test_user_lists_refresh_data_returns.py` (all web.*) |
 
 ---
 
@@ -100,5 +115,7 @@ SEPARATE marker slice — load-bearing for this phase (these ARE the GUI panels)
 - [x] No watch-mode flags
 - [x] Feedback latency < 300s (bulk)
 - [x] `nyquist_compliant: true` set in frontmatter (planner/checker)
+- [x] MOVE-and-shim identity (`genizah_app.X is desktop.Y.X`) is an acceptance criterion in every extraction task (BLOCKER resolution)
+- [x] GUARD-03 retarget map enumerated by FILENAME (HIGH-3; D3=1, D4=12, no bare counts)
 
-**Approval:** planner — per-task map populated, nyquist_compliant set
+**Approval:** planner — per-task map populated + retarget map enumerated by filename; nyquist_compliant set; revised per 126-PREFLIGHT-CODEX.md
