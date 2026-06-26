@@ -561,4 +561,8 @@ class TestSchemaSourceGuards:
         # site — it must also fan across content_search (gated) and fold the chunk.
         src = inspect.getsource(SearchEngine.search_composition_logic)
         assert '_local_fields_scl.append("content_search")' in src
-        assert "strip_search_diacritics(_w) for _w in _chunk_scl" in src
+        # SEED-011 (125a) hoisted the LOCAL diacritic fold into the per-chunk pre-pass and
+        # renamed the iterated chunk var _chunk_scl -> chunk_pp. Behavior is identical: same
+        # `_local_has_content_search and mode != 'Regex'` gate (verified base-vs-HEAD), still
+        # building the LOCAL query from the diacritic-folded chunk.
+        assert "strip_search_diacritics(_w) for _w in chunk_pp" in src
