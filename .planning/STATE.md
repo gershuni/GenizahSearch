@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: Phase 126 (D1) EXECUTED — 126-01 complete; D2-D5 deferred to SEED-028; awaiting Codex CODE review + gsd-verifier
-stopped_at: Completed 126-01-PLAN.md (D1 dialogs+widgets MOVE-and-shim; 9/9 identity, D-07b verbatim, GUARD-02/03/04 green)
-last_updated: "2026-06-26T12:31:26.413Z"
+status: Phase 126 (D1) COMPLETE + verified — D2-D5 deferred to SEED-028; ready to plan Phase 127 (final)
+stopped_at: Phase 126 (D1) verified complete (Codex CODE review substance-APPROVE + 2 LOW fixed; gsd-verifier PASS 5/5)
+last_updated: "2026-06-26T17:00:00.000Z"
 last_activity: 2026-06-26
 progress:
   total_phases: 6
@@ -21,12 +21,28 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 126 — Desktop Panels (next; Phase 125 complete)
+**Current focus:** Phase 127 — Update UI & Final Cleanup (final phase; Phase 126 D1 complete)
 
 ## Current Position
 
-Phase: 126 (Desktop Panels) — RE-SCOPED 2026-06-26 to **D1 ONLY**. NEXT: execute 126-01 (already Codex-pre-flight-clean).
-Plan: 1 of 1 executed (only 126-01 remains in the phase; D2-D5 moved to deferred-method-panels/ → SEED-028).
+Phase: 126 (Desktop Panels, D1-only) — ✅ COMPLETE + verified 2026-06-26. NEXT: Phase 127 (final).
+Plan: 1 of 1 executed (126-01). D2-D5 deferred → SEED-028 (drafts in deferred-method-panels/).
+
+PHASE 126 (D1) COMPLETE 2026-06-26 (HEAD 7a692319). 9 classes MOVE-and-shimmed → desktop/settings_dialogs.py
+  (5 dialogs) + desktop/ui_widgets.py (4 widgets); genizah_app.py −1860 net; D-07b strip verbatim; apply/
+  cancel_settings API added; LabPanel+_CatalogRefreshWorker+D2-D5 methods correctly LEFT (deferred → SEED-028).
+  Source-integrity gate ALL PASS (identity 9/9, GUARD-01, no BOM, name-diff = 6 unused PyQt drops only).
+  Bulk 4853 passed/0 new fail; gui 60 passed. Codex CODE review substance-APPROVE + 2 LOW (unicode escapes,
+  loose test assertion) → fixed (7a692319). gsd-verifier PASS 5/5 (126-VERIFICATION.md): grep ^class of all 9
+  names in genizah_app.py = ZERO (true MOVE), deferral recorded in ROADMAP+REQUIREMENTS.
+
+NEXT — Phase 127 (Update UI & Final Cleanup; FINAL, closes v8.3.0): extract desktop/update_ui.py
+  (UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog + sidecar reset/download
+  coordination) with NEW direct behavioral tests (DESK-08); RETIRE the D1 shims (retarget genizah_app→desktop
+  callers, remove shim lines); install tests/test_no_back_edges_desktop.py AST guard; confirm genizah_core
+  facade; full-suite sign-off. NOTE (re-scope): the ≥70% genizah_app.py shrink is NO LONGER a target (bulk
+  deferred to SEED-028). Run under the FULL DRILL (discuss-skip → research → pattern-map → plan(opus) →
+  checker → Codex PLAN pre-flight → execute → source-integrity gate + Codex CODE review → verifier). Base = HEAD 7a692319.
 
 RE-SCOPE RATIONALE (user decision 2026-06-26): the Codex PLAN pre-flight ran TWICE. R1 caught a BLOCKER
   (recipe must be MOVE-and-shim, not copy-keep-both — a kept original shadows the shim) + D3/D4 method
