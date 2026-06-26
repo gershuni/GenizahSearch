@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Responsa query parsing and expansion for Hebrew manuscript search.
 
 Phase 123: Extracted from genizah_core.py (v8.3.0 God-File Decomposition).
