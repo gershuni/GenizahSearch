@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: Executing Phase 125
+status: Ready to execute
 stopped_at: Completed 123-01-PLAN.md
-last_updated: "2026-06-26T04:31:02.765Z"
-last_activity: 2026-06-26 -- Phase 125 execution started
+last_updated: "2026-06-26T04:47:04.524Z"
+last_activity: 2026-06-26
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 7
-  completed_plans: 3
-  percent: 43
+  completed_plans: 4
+  percent: 50
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 125 (Core Engines) — EXECUTING
-Plan: 1 of 4
+Plan: 2 of 4
 124 recap: post-exec review caught 3 defects the executor misreported as "pre-existing"
   (count-based check) — _parse_cudl_label facade drop (fc3ce883), path-string-registry
   GUARD-03 miss (e4abf248), tantivy import-order GUARD-02 change (741f7b24, Codex r1 HIGH).
@@ -66,7 +66,7 @@ PHASE 125 (engines) — PLANS CLEAR, ENTERING EXECUTION. Discuss SKIPPED. Resear
   LESSON from 124: the executor's "0 new failures" was count-based, not name-based — ALWAYS
   do the base-vs-HEAD NAME-level test comparison + facade-name diff yourself; don't trust the
   executor's failure count.
-Last activity: 2026-06-26 -- Phase 125 execution started
+Last activity: 2026-06-26
 
 Progress: [█████░░░░░] 50% (3 of 6 phases — 122, 123, 124 complete)
 
@@ -113,7 +113,7 @@ Items carried forward from v8.2.0 and earlier:
 
 ## Session Continuity
 
-Last session: 2026-06-26T01:03:04.921Z
+Last session: 2026-06-26T04:47:04.518Z
 Stopped at: Completed 123-01-PLAN.md
 Resume file: None
 Next step: `/gsd-discuss-phase 122`
@@ -126,6 +126,7 @@ Next step: `/gsd-discuss-phase 122`
 | 122 | 1 | - | - |
 | Phase 123 P01 | 63 | 7 tasks | 13 files |
 | Phase 124-core-metadata-index P01 | 90 | 2 tasks | 8 files |
+| Phase 125-core-engines P01 | 45m | 3 tasks | 4 files |
 
 ## Decisions
 

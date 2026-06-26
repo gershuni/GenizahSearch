@@ -37,7 +37,7 @@
 
 ### Composition dedup prerequisite (PREP) — Phase 125, FIRST (125a), before the engine move
 
-- [ ] **PREP-01**: SEED-011 composition double-prep dedup lands **before** `SearchEngine`/`LabEngine` composition code is moved (so the dedup is not reworked post-move).
+- [x] **PREP-01**: SEED-011 composition double-prep dedup lands **before** `SearchEngine`/`LabEngine` composition code is moved (so the dedup is not reworked post-move).
 
 ### Desktop extractions (DESK) — `genizah_app.py` → `desktop/`
 
@@ -90,7 +90,7 @@ GSD phase numbering continues from v8.2.0 (ended Phase 121) → this milestone i
 | CORE-07 | 123 | Complete |
 | CORE-08 | 124 | Complete |
 | CORE-09 | 124 | Complete |
-| PREP-01 | 125 (125a — first) | Pending |
+| PREP-01 | 125 (125a — first) | Complete |
 | CORE-10 | 125 | Pending |
 | CORE-11 | 125 | Pending |
 | CORE-12 | 125 | Pending |
