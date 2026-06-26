@@ -88,7 +88,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 - [x] **Phase 126: Desktop Panels (RE-SCOPED 2026-06-26 → D1 only)** - Extract the clean top-level CLASS clusters to `desktop/`: `settings_dialogs.py` (dialogs) + `ui_widgets.py` (table/header/scroll widgets). The four METHOD-based panels (catalog tab, search-results, browse/reading-desk, lists) are DEFERRED to **SEED-028** — the Codex PLAN pre-flight proved them too entangled (dense `self.method()`/`self.widget` cross-refs; D3 `on_search_finished` alone touches 109 `self.*`) for a safe zero-behavior-change move-and-shim without a prerequisite widget-ownership refactor (like E2's CompositionState). User decision 2026-06-26.
  (completed 2026-06-26)
 
-- [ ] **Phase 127: Update UI & Final Cleanup** - Extract `desktop/update_ui.py` + new direct behavioral tests for sidecar reset/download coordination; remove the Phase-126 (D1) desktop shims from `genizah_app.py`; install the `desktop/` back-edge guard; confirm `genizah_core.py` permanent facade; full-suite-green sign-off. (genizah_app.py shrinks only modestly this milestone — the bulk awaits SEED-028.)
+- [x] **Phase 127: Update UI & Final Cleanup** - Extract `desktop/update_ui.py` + new direct behavioral tests for sidecar reset/download coordination; remove the Phase-126 (D1) desktop shims from `genizah_app.py`; install the `desktop/` back-edge guard; confirm `genizah_core.py` permanent facade; full-suite-green sign-off. (genizah_app.py shrinks only modestly this milestone — the bulk awaits SEED-028.) (completed 2026-06-26)
 
 ## Phase Details
 
@@ -203,7 +203,7 @@ Plans:
 
 - [x] 127-01-PLAN.md (Wave 1) — Wave-0 scaffolds: NEW `tests/test_no_back_edges_desktop.py` (GUARD-04 AST guard, 19 desktop modules incl. pre-registered `update_ui.py`), NEW `tests/test_genizah_core_facade.py` (SC#3 permanent-facade identity, 20 names), NEW `tests/test_update_ui_coordination.py` (DESK-08 behavioral tests for the sidecar coordination methods IN PLACE on GenizahGUI)
 - [x] 127-02-PLAN.md (Wave 2) — Extract `desktop/update_ui.py`: MOVE-and-shim the 4 update-UI classes (`UpdateNotificationBar`/`WhatsNewBar`/`WhatsNewDialog`/`UpdateProgressDialog`), delete originals from `genizah_app.py`, add a no-noqa re-export shim (classes are used); back-edge guard now enforces `update_ui.py`. Coordination methods stay on GenizahGUI (research crux verdict)
-- [ ] 127-03-PLAN.md (Wave 3) — Final cleanup + sign-off: retire the Phase-126 D1 noqa suffix (genizah_app.py:77-78, imports kept), retarget `test_telemetry_consent_ux.py` to `desktop.settings_dialogs`, hard-flip the EN disclosure test in `test_privacy_disclosure_strings.py`, confirm the PERMANENT genizah_core facade, full-suite (bulk 6-env baseline + gui green) milestone sign-off
+- [x] 127-03-PLAN.md (Wave 3) — Final cleanup + sign-off: retire the Phase-126 D1 noqa suffix (genizah_app.py:77-78, imports kept), retarget `test_telemetry_consent_ux.py` to `desktop.settings_dialogs`, hard-flip the EN disclosure test in `test_privacy_disclosure_strings.py`, confirm the PERMANENT genizah_core facade, full-suite (bulk 6-env baseline + gui green) milestone sign-off
 
 ## Progress
 
@@ -219,4 +219,4 @@ Plans:
 | 124. Core Metadata & Index | 1/1 | Complete   | 2026-06-26 |
 | 125. Core Engines | 4/4 | Complete   | 2026-06-26 |
 | 126. Desktop Panels | 1/1 | Complete   | 2026-06-26 |
-| 127. Update UI & Final Cleanup | 2/3 | In Progress|  |
+| 127. Update UI & Final Cleanup | 3/3 | Complete   | 2026-06-26 |
