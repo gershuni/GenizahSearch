@@ -108,6 +108,7 @@ from shared.metadata_manager import (  # noqa: F401
     MetadataManager,
     _get_crossref_service,
     _get_fjms_service,
+    _parse_cudl_label,
 )
 # Phase 124: indexer extracted — permanent compat facade (v8.3.0)
 from shared.indexer import Indexer  # noqa: F401
