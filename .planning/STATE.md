@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: executing
-stopped_at: Phase 123 verified (10/10 PASS); Codex review 3-round APPROVE
-last_updated: "2026-06-25T22:08:04.830Z"
-last_activity: 2026-06-25
+status: verifying
+stopped_at: Completed 123-01-PLAN.md
+last_updated: "2026-06-26T01:03:04.928Z"
+last_activity: 2026-06-26
 progress:
   total_phases: 6
-  completed_phases: 2
-  total_plans: 2
-  completed_plans: 2
-  percent: 33
+  completed_phases: 3
+  total_plans: 3
+  completed_plans: 3
+  percent: 50
 ---
 
 # Project State
@@ -21,16 +21,17 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 124 — core-metadata-index (next)
+**Current focus:** Phase 124 — core-metadata-index
 
 ## Current Position
 
-Phase: 124 (core-metadata-index) — PLANNED, EXECUTING
-Plan: 124-01-PLAN.md (committed 2980538e) — plan-checker VERIFICATION PASSED (1st pass, 0 issues)
-Status: Discuss SKIPPED. Research→pattern-map→plan→check all DONE. Now executing.
+Phase: 124 (core-metadata-index) — EXECUTING
+Plan: 1 of 1
+Status: Phase complete — ready for verification
   Plan shape: 1 plan / 1 wave / 2 sequential commits — (1) MetadataManager+_BoundedLRUCache
   +pre-cluster → shared/metadata_manager.py + 6-name facade shim + GUARD-03 retarget of
   test_desktop_folio_navigation.py; (2) Indexer → shared/indexer.py w/ inline _tr()+_strip_brackets
+
   + 1-name shim. Full suite green at both commits.
   Remaining pipeline: execute → Codex 3-round review drill (base-vs-HEAD facade-name diff)
   → verify → auto-advance to 125.
@@ -83,7 +84,7 @@ Items carried forward from v8.2.0 and earlier:
 
 ## Session Continuity
 
-Last session: 2026-06-25T21:00:19.152Z
+Last session: 2026-06-26T01:03:04.921Z
 Stopped at: Completed 123-01-PLAN.md
 Resume file: None
 Next step: `/gsd-discuss-phase 122`
@@ -95,6 +96,7 @@ Next step: `/gsd-discuss-phase 122`
 | (none yet — milestone just started) | - | - | - |
 | 122 | 1 | - | - |
 | Phase 123 P01 | 63 | 7 tasks | 13 files |
+| Phase 124-core-metadata-index P01 | 90 | 2 tasks | 8 files |
 
 ## Decisions
 

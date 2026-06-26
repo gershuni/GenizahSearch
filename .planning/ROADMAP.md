@@ -80,7 +80,8 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 - [x] **Phase 123: Core Leaf Modules** - Extract seven low-risk, well-tested clusters: `shared/variants.py`, `shared/codicological.py`, `shared/responsa.py`, `shared/joins_manager.py`, `shared/lists_manager.py`, `shared/browse_map_utils.py`, `shared/text_normalize.py`. Proves the shim+guard pipeline on core before touching engines.
  (completed 2026-06-25)
-- [ ] **Phase 124: Core Metadata & Index** - Extract `shared/metadata_manager.py` (+ `_BoundedLRUCache`) and `shared/indexer.py`; retarget the `shared/local_indexer.py` lazy back-edges into `genizah_core` helpers.
+
+- [x] **Phase 124: Core Metadata & Index** - Extract `shared/metadata_manager.py` (+ `_BoundedLRUCache`) and `shared/indexer.py`; retarget the `shared/local_indexer.py` lazy back-edges into `genizah_core` helpers. (completed 2026-06-26)
 - [ ] **Phase 125: Core Engines** - SEED-011 composition dedup first (125a), then extract `shared/search_engine.py` (DI + BrowseMap cache + SEED-006 gates + `_LAST_RESPONSA_DOWNGRADE` preserved), `shared/lab_settings.py`, `shared/lab_engine.py` (LOCAL-LAB mirror preserved), and model `_my_library_tab_ref` as an injected optional interface for both engines.
 - [ ] **Phase 126: Desktop Panels** - Extract seven desktop panel clusters to `desktop/`: `settings_dialogs.py`, `ui_widgets.py`, `catalog_browse.py`, `search_results_panel.py`, `browse_panel.py`, `reading_desk_panel.py`, `lists_tab.py`.
 - [ ] **Phase 127: Update UI & Final Cleanup** - Extract `desktop/update_ui.py` + new direct behavioral tests for sidecar reset/download coordination; remove all desktop shims from `genizah_app.py`; confirm `genizah_core.py` permanent facade; full-suite-green sign-off.
@@ -138,7 +139,7 @@ Plans:
 
 Plans:
 
-- [ ] 124-01-PLAN.md — Extract MetadataManager (+ _BoundedLRUCache + 8-item pre-cluster) to shared/metadata_manager.py and Indexer to shared/indexer.py behind permanent same-object re-export shims; inline _tr()/_strip_brackets for indexer (GUARD-01); GUARD-03 enrich_metadata fixture retarget; GUARD-01 registry 8->10; identity/smoke tests
+- [x] 124-01-PLAN.md — Extract MetadataManager (+ _BoundedLRUCache + 8-item pre-cluster) to shared/metadata_manager.py and Indexer to shared/indexer.py behind permanent same-object re-export shims; inline _tr()/_strip_brackets for indexer (GUARD-01); GUARD-03 enrich_metadata fixture retarget; GUARD-01 registry 8->10; identity/smoke tests
 
 ### Phase 125: Core Engines
 
@@ -196,7 +197,7 @@ Plans:
 | 121. i18n Polish | 3/3 | Complete | 2026-06-21 |
 | 122. Config Enabler | 1/1 | Complete    | 2026-06-25 |
 | 123. Core Leaf Modules | 1/1 | Complete   | 2026-06-25 |
-| 124. Core Metadata & Index | 0/TBD | Not started | - |
+| 124. Core Metadata & Index | 1/1 | Complete   | 2026-06-26 |
 | 125. Core Engines | 0/TBD | Not started | - |
 | 126. Desktop Panels | 0/TBD | Not started | - |
 | 127. Update UI & Final Cleanup | 0/TBD | Not started | - |

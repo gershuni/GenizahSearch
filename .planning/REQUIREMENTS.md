@@ -28,8 +28,8 @@
 - [x] **CORE-05**: `ListsManager` extracted to `shared/lists_manager.py`.
 - [x] **CORE-06**: Browse-map + shelfmark utilities (`normalize_shelfmark`, `natural_sort_key`, `dedupe_browse_map`, `get_library_display`, IE-volume helpers) extracted to `shared/browse_map_utils.py`.
 - [x] **CORE-07**: Search/text normalization helpers (`strip_nikud`, `strip_search_diacritics`, and their normalization constants) extracted to `shared/text_normalize.py`; the lazy back-edge imports in `shared/local_indexer.py` (and any other shared importers of these core helpers) are retargeted to the new module so no module-level core back-edge remains. *(closes SEED-020 §7 C-3)*
-- [ ] **CORE-08**: `MetadataManager` (+ `_BoundedLRUCache`) extracted to `shared/metadata_manager.py`.
-- [ ] **CORE-09**: `Indexer` extracted to `shared/indexer.py`.
+- [x] **CORE-08**: `MetadataManager` (+ `_BoundedLRUCache`) extracted to `shared/metadata_manager.py`.
+- [x] **CORE-09**: `Indexer` extracted to `shared/indexer.py`.
 - [ ] **CORE-10**: `SearchEngine` extracted (intact) to `shared/search_engine.py` with `meta_mgr`/`var_mgr` passed by dependency injection; the BrowseMap class-level cache migration, the SEED-006 `content_search` compat gates, and the `_LAST_RESPONSA_DOWNGRADE` thread-local downgrade channel are explicitly preserved with behavior unchanged. *(SEED-020 §7 C-3 hazards)*
 - [ ] **CORE-11**: `LabSettings` extracted to `shared/lab_settings.py`.
 - [ ] **CORE-12**: `LabEngine` extracted to `shared/lab_engine.py`; the SearchEngine↔LabEngine LOCAL-LAB mirror (CR-01/CR-02, `_lab_weights_hash_override`) preserved.
@@ -88,8 +88,8 @@ GSD phase numbering continues from v8.2.0 (ended Phase 121) → this milestone i
 | CORE-05 | 123 | Complete |
 | CORE-06 | 123 | Complete |
 | CORE-07 | 123 | Complete |
-| CORE-08 | 124 | Pending |
-| CORE-09 | 124 | Pending |
+| CORE-08 | 124 | Complete |
+| CORE-09 | 124 | Complete |
 | PREP-01 | 125 (125a — first) | Pending |
 | CORE-10 | 125 | Pending |
 | CORE-11 | 125 | Pending |
