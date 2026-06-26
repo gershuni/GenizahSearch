@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition
-status: Phase complete — ready for verification
-stopped_at: Completed 125-04-PLAN.md
-last_updated: "2026-06-26T08:39:47.102Z"
+status: Phase 125 complete — ready to plan Phase 126
+stopped_at: Phase 125 verified complete (Codex CODE review APPROVE 3-round; verifier PASS 5/5, 8/8 reqs)
+last_updated: "2026-06-26T13:00:00.000Z"
 last_activity: 2026-06-26
 progress:
   total_phases: 6
@@ -21,41 +21,35 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 125 — Core Engines
+**Current focus:** Phase 126 — Desktop Panels (next; Phase 125 complete)
 
 ## Current Position
 
-Phase: 125 (Core Engines) — EXECUTING
-Plan: 4 of 4
-124 recap: post-exec review caught 3 defects the executor misreported as "pre-existing"
-  (count-based check) — _parse_cudl_label facade drop (fc3ce883), path-string-registry
-  GUARD-03 miss (e4abf248), tantivy import-order GUARD-02 change (741f7b24, Codex r1 HIGH).
-  Codex CODE review converged R1→R2 APPROVE. GUARD-02 confirmed zero new failures via
-  base-vs-HEAD NAME-level diff (8 pre-existing reds confirmed at base; gui+render_smoke green).
+Phase: 125 (Core Engines) — ✅ COMPLETE (verified). NEXT: Phase 126 (Desktop Panels).
+Plan: 4 of 4 done.
 
-PHASE 125 (engines) — PLANS CLEAR, ENTERING EXECUTION. Discuss SKIPPED. Research+pattern-map+plan
-  DONE. 4 plans (e95b5053; revised a2dd3662 + a 125-04 nit commit). Internal checker PASS (12/12).
-  **Pre-125 Codex regression audit** (user "Ask Codex"): found+fixed a 2nd BOM (shared/responsa.py);
-  122-124 verified faithful (facade identity 12/12, AST method-completeness 7/7); adopted a
-  source-integrity gate (125-PREAUDIT-CODEX.md). **Codex PLAN pre-flight CONVERGED in 3 rounds**:
-  r1 = 2 BLOCKER + 4 HIGH + 2 MED (wrong LabEngine boundary, undefined-name deps, SearchEngine↔LabEngine
-  cycle, GUARD-03 gaps, SEED-011 test premise, LAB_LOGGER routing) → revised; r2 = 2 HIGH runtime
-  LOGGER-monkeypatch retargets + 2 LOW → fixed in 125-04; r3 = **PLANS CLEAR** (1 LOW doc nit fixed).
-  NEXT: execute wave-by-wave (125-01→04), source-integrity gate between waves, then Codex CODE
-  review + base-vs-HEAD name-level diff + facade-name diff → verify.
-  **KEY RESEARCH FINDING + FIX (done):** the 8 "pre-existing" red tests were NOT SEED-011
-  forward-spec — they were a **Phase-123 regression**: commit 674d16b5 added a UTF-8 BOM to
-  genizah_core.py → every AST/source-scan test hit `SyntaxError: U+FEFF`. Fixed by byte-level
-  BOM strip (commit 29d51f4a); all 8 now green; zero behavior change. Bulk suite now CLEAN.
-  (Phase-123 verify MISSED this; my 124 SUMMARY mis-attributed it — both corrected.)
-  Plan shape (researcher): 125a = SEED-011 dedup ONLY (BOM already fixed) — NOTE the
-  ChunkPlan needs TWO query strings (Genizah vs LOCAL diacritic-fold differ; SEED-006 M1);
-  then 125b LabSettings → 125c LabEngine → 125d SearchEngine (~3,490 ln, most importers;
-  preserve BrowseMap class-cache, SEED-006 content_search gates, _LAST_RESPONSA_DOWNGRADE
-  thread-locals; 6 downgrade names need facade shims). GUARD-03: 5 source-scan test files.
-  Tell the planner the BOM is ALREADY fixed (don't re-include in 125a).
+PHASE 125 (engines) — COMPLETE 2026-06-26. genizah_core.py 6064→755 ln (permanent 20-name
+  same-object facade). 4 waves: 125-01 SEED-011 dedup (_ChunkPlan/_LabChunkPlan), 125-02 LabSettings,
+  125-03 LabEngine, 125-04 SearchEngine → shared/. Each wave source-integrity-gated (facade identity,
+  AST method-completeness, BOM, bulk name-level diff == 6-env baseline).
+  **Codex CODE review (Gate ②) converged APPROVE in 3 rounds:** R1 = 2 BLOCKERs (SEED-011 pre-pass
+  moved per-chunk prep OUTSIDE the corpus/index gates → scoped/no-index over-build) → fixed 658ada3c
+  +2 regression tests; R2 = B1/B2 confirmed fixed, found 2 HIGH (the r1 fix split build-vs-consume
+  gates → TOCTOU that could drop LOCAL/LAB hits on a mid-search rebuild) + 1 LOW (trailing ws) → fixed
+  eb802521 (build⟺consume share one snapshot; git diff --check clean); R3 = APPROVE, zero findings.
+  **gsd-verifier PASS 5/5 SC, 8/8 reqs** (125-VERIFICATION.md) — facade identity 20/20, SearchEngine
+  methods 52=52, GUARD-01 clean, CORE-10 hazards intact, GUARD-02 bulk == 6-env baseline (4853 passed),
+  gui+render_smoke 60 passed. HEAD = eb802521 (+ a closeout commit for 2 cosmetic test-text nits).
+  124 recap: post-exec review caught 3 defects the executor misreported as "pre-existing" (count-based)
+  — _parse_cudl_label facade drop (fc3ce883), path-string-registry GUARD-03 miss (e4abf248), tantivy
+  import-order (741f7b24). Codex R1→R2 APPROVE; verifier PASS 7/7.
 
-  FULL DRILL for phases 125-127 (TWO Codex touchpoints — pre-flight + post-exec):
+  NEXT — Phase 126 (Desktop Panels): split genizah_app.py UI panels (settings_dialogs, ui_widgets,
+  catalog_browse, search_results_panel, browse_panel, reading_desk_panel, lists_tab) into desktop/.
+  Base = eb802521. Run under the SAME FULL DRILL below. (gui-test split matters here — these ARE the
+  GUI panels; add new dialog tests to conftest _GUI_TEST_FILES; gui+render_smoke slice is load-bearing.)
+
+  FULL DRILL for phases 126-127 (TWO Codex touchpoints — pre-flight + post-exec):
   discuss(skip-if-no-gray-areas) → research → pattern-map → plan(opus) → gsd-plan-checker loop
   → **Codex PLAN PRE-FLIGHT (review plan/research vs live codebase for plan↔code drift; must
   clear before execute)** → execute → Codex CODE review 3-round convergence + base-vs-HEAD
@@ -68,7 +62,7 @@ PHASE 125 (engines) — PLANS CLEAR, ENTERING EXECUTION. Discuss SKIPPED. Resear
   executor's failure count.
 Last activity: 2026-06-26
 
-Progress: [█████░░░░░] 50% (3 of 6 phases — 122, 123, 124 complete)
+Progress: [███████░░░] 67% (4 of 6 phases — 122, 123, 124, 125 complete)
 
 ## Accumulated Context
 
@@ -113,10 +107,10 @@ Items carried forward from v8.2.0 and earlier:
 
 ## Session Continuity
 
-Last session: 2026-06-26T08:39:47.092Z
-Stopped at: Completed 125-04-PLAN.md
+Last session: 2026-06-26T13:00:00.000Z
+Stopped at: Phase 125 verified complete (Codex APPROVE 3-round; verifier PASS 5/5)
 Resume file: None
-Next step: `/gsd-discuss-phase 122`
+Next step: `/gsd-discuss-phase 126` (or skip-discuss-if-empty per the standing autonomous directive)
 
 ## Performance Metrics
 

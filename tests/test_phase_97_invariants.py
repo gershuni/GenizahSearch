@@ -239,7 +239,7 @@ def test_local_post_dedup_merge():
                         break
 
     assert dedup_fns, (
-        "Phase 97 D-NEW-7 (d): No function calling self._deduplicate() found in genizah_core.py"
+        "Phase 97 D-NEW-7 (d): No function calling self._deduplicate() found in shared/search_engine.py"
     )
 
     any_found = False
@@ -264,6 +264,6 @@ def test_local_post_dedup_merge():
     assert any_found, (
         "Phase 97 D-NEW-7 (d) + Phase 95 D-08 P0 invariant VIOLATED: "
         "LOCAL merge hook not found AFTER _deduplicate(results) call site in "
-        "any function in genizah_core.py. "
+        "any function in shared/search_engine.py. "
         "Expected _rrf_merge or _query_local_index after dedup in execute_search."
     )

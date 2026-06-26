@@ -41,9 +41,9 @@ EXTRACTED_MODULES = [
     "shared/lists_manager.py",
     "shared/metadata_manager.py",
     "shared/indexer.py",             # Phase 124
-    "shared/lab_settings.py",        # Phase 125b (not yet created — skip-until-exists)
-    "shared/lab_engine.py",          # Phase 125c (not yet created — skip-until-exists)
-    "shared/search_engine.py",       # Phase 125d (not yet created — skip-until-exists)
+    "shared/lab_settings.py",        # Phase 125b
+    "shared/lab_engine.py",          # Phase 125c
+    "shared/search_engine.py",       # Phase 125d
 ]
 
 # Compound statement types whose bodies run at import time
