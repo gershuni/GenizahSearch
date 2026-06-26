@@ -32,6 +32,7 @@ class SafeRotatingFileHandler(RotatingFileHandler):
             else:
                 raise
 from typing import Optional
+from dataclasses import dataclass
 from functools import lru_cache
 import json
 import html
@@ -629,7 +630,58 @@ class LabSettings:
             logging.getLogger(__name__).warning('Failed to save lab config to %s: %s', Config.LAB_CONFIG_FILE, e)
 
 # ==============================================================================
-#  LAB ENGINE 
+#  SEED-011 COMPOSITION CHUNK PLANS (125a dedup)
+# ==============================================================================
+
+@dataclass
+class _ChunkPlan:
+    """Per-chunk precomputed plan for search_composition_logic (SEED-011 dedup).
+
+    Computed ONCE in a pre-pass over chunks_data before the index loops begin,
+    then shared by both the Genizah loop and the LOCAL loop.
+
+    The two query strings genuinely differ: the LOCAL pass applies diacritic
+    folding (SEED-006 M1) so local_query_str / compiled_regex_local are built
+    from the folded chunk while genizah_query_str / compiled_regex_genizah are
+    built from the raw chunk.  build_tantivy_query / build_regex_pattern are
+    each still called once per (chunk x flavor) — the dedup does NOT reduce that
+    count; it prevents each loop from independently re-iterating chunks_data.
+    """
+    token_idx: int                      # start token index in the source
+    chunk: list                         # raw (unfolded) chunk token list
+    chunk_crossed_bounds: object        # boundary info (set or None)
+    genizah_query_str: str              # build_tantivy_query(chunk, mode, content_search_field=_cs_field)
+    compiled_regex_genizah: object      # build_regex_pattern(chunk, mode, 0) — re.Pattern or None
+    local_query_str: str                # build_tantivy_query(folded_chunk, mode) — diacritic-folded
+    compiled_regex_local: object        # build_regex_pattern(folded_chunk, mode, 0) — re.Pattern or None
+    local_chunk_q: list                 # the folded chunk (for LOCAL _query_has_brackets check)
+
+
+@dataclass
+class _LabChunkPlan:
+    """Per-chunk fingerprint plan for lab_composition_search (SEED-011 dedup).
+
+    Computed ONCE per qualifying chunk before the two LAB loops (Genizah-LAB and
+    LOCAL-LAB).  The fingerprint prep is genuinely index-independent: fp_str,
+    fp_list, needed_unique_fps, and core_query are identical for both passes.
+
+    final_query_str is NOT stored here because the Genizah-LAB loop adds a
+    source boost (``AND (source:"V0.8"^10 OR source:"V0.7")``) while the
+    LOCAL-LAB loop uses core_query directly.  Each loop builds final_query_str
+    from plan.core_query.
+    """
+    token_start_idx: int                # start token index in the source
+    chunk_tokens: list                  # raw chunk token list
+    chunk_text: str                     # " ".join(chunk_tokens)
+    chunk_crossed_bounds: object        # boundary info (set or None)
+    fp_str: str                         # text_to_fingerprint(chunk_text)
+    fp_list: list                       # fp_str.split()
+    needed_unique_fps: set              # set(fp_list)
+    core_query: str                     # " OR ".join([f'{target_field}:{t}' for t in fp_str.split()])
+
+
+# ==============================================================================
+#  LAB ENGINE
 # ==============================================================================
 class LabEngine:
     LAB_FINGERPRINT_FIELD = "fingerprint"
@@ -4897,20 +4949,53 @@ class SearchEngine:
                     f'full_header:"{sid}"' for sid in restrict_sys_ids
                 ) + ')'
 
+        # SEED-011 (125a): Build per-chunk plans ONCE before the index loops.
+        # Each _ChunkPlan carries both flavor query strings (Genizah raw +
+        # LOCAL diacritic-folded) and both compiled regexes.  Both loops then
+        # consume the pre-built plans rather than re-deriving them independently.
+        # build_tantivy_query / build_regex_pattern remain called once per
+        # (chunk x flavor) — the 2*N count is unchanged and correct (LOCAL folds
+        # diacritics for SEED-006 M1, producing a genuinely different query).
+        _cs_field = 'content_search' if getattr(self, '_has_content_search', False) else None
+        _local_has_cs_prepass = getattr(self, "_local_has_content_search", False)
+        chunk_plans = []
+        for (token_idx_pp, chunk_pp, chunk_crossed_pp) in chunks_data:
+            # Genizah flavor: raw chunk, with content_search_field if available
+            _genizah_q_str = self.build_tantivy_query(chunk_pp, mode, content_search_field=_cs_field)
+            _genizah_regex = self.build_regex_pattern(chunk_pp, mode, 0)
+            # LOCAL flavor: diacritic-folded chunk for SEED-006 M1 compat
+            if _local_has_cs_prepass and mode != 'Regex':
+                _local_chunk_q = [strip_search_diacritics(_w) for _w in chunk_pp]
+            else:
+                _local_chunk_q = chunk_pp
+            _local_q_str = self.build_tantivy_query(_local_chunk_q, mode)
+            _local_regex = self.build_regex_pattern(_local_chunk_q, mode, 0)
+            chunk_plans.append(_ChunkPlan(
+                token_idx=token_idx_pp,
+                chunk=chunk_pp,
+                chunk_crossed_bounds=chunk_crossed_pp,
+                genizah_query_str=_genizah_q_str,
+                compiled_regex_genizah=_genizah_regex,
+                local_query_str=_local_q_str,
+                compiled_regex_local=_local_regex,
+                local_chunk_q=_local_chunk_q,
+            ))
+
         # 2. Scan chunks (wrapped in try/except to support partial results on cancel)
         try:
           # Phase 110: gate the Genizah Tantivy loop — skipped on a LOCAL-only run.
           # doc_hits/was_cancelled/total_chunks are initialized ABOVE this branch (M1),
           # so a corpus_scope='local' run never NameErrors on a loop-local variable.
           if corpus_scope != 'local':
-            for i, (token_idx, chunk, chunk_crossed_bounds) in enumerate(chunks_data):
+            for i, plan in enumerate(chunk_plans):
+                token_idx = plan.token_idx
+                chunk = plan.chunk
+                chunk_crossed_bounds = plan.chunk_crossed_bounds
                 if progress_callback: progress_callback(i, total_chunks)
 
-                # Build query (SEED-006 Stage 2: composition is a plain
-                # content word-search → enable the diacritic-fold fallback).
-                _cs_field = 'content_search' if getattr(self, '_has_content_search', False) else None
-                t_query = self.build_tantivy_query(chunk, mode, content_search_field=_cs_field)
-                regex = self.build_regex_pattern(chunk, mode, 0)
+                # Consume pre-built Genizah-flavor query + regex (SEED-011)
+                t_query = plan.genizah_query_str
+                regex = plan.compiled_regex_genizah
                 if not regex: continue
 
                 # Augment chunk query with sys_id filter
@@ -5057,17 +5142,17 @@ class SearchEngine:
                 if _local_has_cs_scl:
                     _local_fields_scl.append("content_search")
                 if _local_index_scl is not None and _local_searcher_scl is not None:
-                    for _i_scl, (_token_idx_scl, _chunk_scl, _chunk_crossed_scl) in enumerate(chunks_data):
-                        # SEED-006 M1: fold diacritics off the chunk for BOTH the
-                        # Tantivy query AND the regex backstop (a fold-only hit
-                        # retrieved via content_search would otherwise be dropped
-                        # by the regex at the `_regex_scl.search` filter below).
-                        if _local_has_cs_scl and mode != 'Regex':
-                            _chunk_q_scl = [strip_search_diacritics(_w) for _w in _chunk_scl]
-                        else:
-                            _chunk_q_scl = _chunk_scl
-                        _t_query_scl = self.build_tantivy_query(_chunk_q_scl, mode)
-                        _regex_scl = self.build_regex_pattern(_chunk_q_scl, mode, 0)
+                    # SEED-011 (125a): consume pre-built LOCAL-flavor plans instead of
+                    # re-deriving query/regex per chunk.  The diacritic-folded
+                    # local_query_str / compiled_regex_local were computed in the
+                    # pre-pass above (SEED-006 M1 fold already applied).
+                    for _i_scl, _plan_scl in enumerate(chunk_plans):
+                        _token_idx_scl = _plan_scl.token_idx
+                        _chunk_scl = _plan_scl.chunk
+                        _chunk_crossed_scl = _plan_scl.chunk_crossed_bounds
+                        _chunk_q_scl = _plan_scl.local_chunk_q
+                        _t_query_scl = _plan_scl.local_query_str
+                        _regex_scl = _plan_scl.compiled_regex_local
                         if not _regex_scl:
                             continue
                         _is_freq_filtered_scl = False
