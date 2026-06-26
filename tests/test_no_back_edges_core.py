@@ -543,3 +543,29 @@ def test_indexer_standalone_import():
 
     idx = shared.indexer.Indexer(_FakeMM())
     assert idx.meta_mgr is not None
+
+
+# ---------------------------------------------------------------------------
+# Phase 125: lab_settings (CORE-11)
+# ---------------------------------------------------------------------------
+
+def test_lab_settings_identity():
+    """CORE-11: genizah_core.LabSettings is the same class object as shared.lab_settings.LabSettings."""
+    import shared.lab_settings
+    import genizah_core
+
+    assert shared.lab_settings.LabSettings is genizah_core.LabSettings, (
+        "genizah_core.LabSettings is not the same object as shared.lab_settings.LabSettings. "
+        "The re-export shim must be: from shared.lab_settings import LabSettings  # noqa: F401"
+    )
+
+
+def test_lab_settings_standalone_import():
+    """CORE-11 smoke: shared.lab_settings can be imported and LabSettings instantiates with candidate_limit."""
+    import shared.lab_settings
+    assert hasattr(shared.lab_settings, 'LabSettings')
+    # Smoke: instantiate (loads config or uses defaults)
+    settings = shared.lab_settings.LabSettings()
+    assert hasattr(settings, 'candidate_limit'), (
+        "LabSettings instance is missing 'candidate_limit' attribute"
+    )
