@@ -48,7 +48,7 @@
 - [~] **DESK-05**: Browse panel extracted to `desktop/browse_panel.py`. **DEFERRED → SEED-028**.
 - [~] **DESK-06**: Reading desk extracted to `desktop/reading_desk_panel.py`. **DEFERRED → SEED-028**.
 - [~] **DESK-07**: Lists tab + cloud-sync coordination extracted to `desktop/lists_tab.py`. **DEFERRED → SEED-028**.
-- [ ] **DESK-08**: Update-UI sub-cluster (notification / What's-New / progress dialogs + sidecar reset/download coordination) extracted to `desktop/update_ui.py`, with **new direct behavioral tests** for the sidecar reset/download coordination methods plus the existing sidecar tests. *(SEED-020 §7 C-6)*
+- [x] **DESK-08**: Update-UI sub-cluster (notification / What's-New / progress dialogs + sidecar reset/download coordination) extracted to `desktop/update_ui.py`, with **new direct behavioral tests** for the sidecar reset/download coordination methods plus the existing sidecar tests. *(SEED-020 §7 C-6)*
 
 ## v2 Requirements (deferred — NOT in this roadmap)
 
@@ -103,7 +103,7 @@ GSD phase numbering continues from v8.2.0 (ended Phase 121) → this milestone i
 | DESK-05 | SEED-028 | Deferred |
 | DESK-06 | SEED-028 | Deferred |
 | DESK-07 | SEED-028 | Deferred |
-| DESK-08 | 127 | Pending |
+| DESK-08 | 127 | Complete |
 
 **Coverage:**
 
