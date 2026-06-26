@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Update-notification and progress UI classes (extracted from genizah_app.py, Phase 127 D1).
+"""Update-notification and progress UI classes (extracted from genizah_app.py, Phase 127).
 
 Provides four PyQt6 widget / dialog subclasses moved verbatim out of the
 28K-line ``genizah_app.py`` god file:
@@ -117,7 +117,7 @@ class WhatsNewBar(QFrame):
         self.btn_learn_more.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_learn_more.clicked.connect(self.on_learn_more)
 
-        self.btn_dismiss = QPushButton("✕")
+        self.btn_dismiss = QPushButton("\u2715")
         self.btn_dismiss.setToolTip(tr("Dismiss"))
         self.btn_dismiss.setStyleSheet("""
             QPushButton { background: transparent; color: #065f46; font-weight: bold; border: none; font-size: 16px; }
@@ -173,11 +173,11 @@ class WhatsNewDialog(QDialog):
         is_heb = CURRENT_LANG == 'he'
         items = [
             tr("Friedberg Genizah Project (FGP) transcriptions are now available as a selectable source in the version chooser, shown on the matching manuscript image."),
-            tr("Search is improved: it now finds words attached to punctuation (searching \"בסגן\" also finds \"בסגן,\") and Judeo-Arabic letters written with an upper dot (without typing the dot). In My Library this works automatically — the index rebuilds itself."),
-            tr("Recommended: to enjoy the improved search on the Genizah corpus too — especially for Judeo-Arabic texts — rebuild your Genizah index from Settings, via \"Build / Rebuild Index\". It's a one-time action, and highly recommended."),
-            tr("Responsa search operators — # (prefixes/suffixes), * (wildcard), % (plene/defective) and (א/ב) alternation — now work when searching My Library."),
+            tr("Search is improved: it now finds words attached to punctuation (searching \"\u05d1\u05e1\u05d2\u05df\" also finds \"\u05d1\u05e1\u05d2\u05df,\") and Judeo-Arabic letters written with an upper dot (without typing the dot). In My Library this works automatically \u2014 the index rebuilds itself."),
+            tr("Recommended: to enjoy the improved search on the Genizah corpus too \u2014 especially for Judeo-Arabic texts \u2014 rebuild your Genizah index from Settings, via \"Build / Rebuild Index\". It's a one-time action, and highly recommended."),
+            tr("Responsa search operators \u2014 # (prefixes/suffixes), * (wildcard), % (plene/defective) and (\u05d0/\u05d1) alternation \u2014 now work when searching My Library."),
         ]
-        bullet = "‏• " if is_heb else "• "
+        bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)
 
         features_label = QLabel()
@@ -279,8 +279,8 @@ class UpdateProgressDialog(QDialog):
 
     def start_download(self):
         """Start the download process."""
-        import tempfile  # noqa: PLC0415
-        import os  # noqa: PLC0415
+        import tempfile
+        import os
 
         if not self.installer_url:
             QMessageBox.warning(
@@ -297,7 +297,7 @@ class UpdateProgressDialog(QDialog):
         target_path = os.path.join(temp_dir, f"GenizahSearchPro_{safe_version}_Setup.exe")
 
         # Import and start download thread
-        from gui_threads import UpdateDownloaderThread  # noqa: PLC0415
+        from gui_threads import UpdateDownloaderThread
         self.download_thread = UpdateDownloaderThread(self.installer_url, target_path)
         self.download_thread.progress_signal.connect(self.on_progress)
         self.download_thread.finished_signal.connect(self.on_download_finished)
@@ -351,8 +351,8 @@ class UpdateProgressDialog(QDialog):
 
     def execute_update(self):
         """Run the installer in silent mode (Windows only)."""
-        import subprocess  # noqa: PLC0415
-        import sys  # noqa: PLC0415
+        import subprocess
+        import sys
 
         # Check platform
         if sys.platform != 'win32':
@@ -382,9 +382,9 @@ class UpdateProgressDialog(QDialog):
         # overwrite the bundled .db files — otherwise Windows file locks
         # prevent the installer from replacing pgp.db / fjms_enrichment.db
         try:
-            from shared.document_service import reset_pgp_service  # noqa: PLC0415
-            from shared.fjms_service import reset_fjms_service  # noqa: PLC0415
-            from shared.nli_crossref_service import reset_nli_crossref_service  # noqa: PLC0415
+            from shared.document_service import reset_pgp_service
+            from shared.fjms_service import reset_fjms_service
+            from shared.nli_crossref_service import reset_nli_crossref_service
             reset_pgp_service()
             reset_fjms_service()
             reset_nli_crossref_service()

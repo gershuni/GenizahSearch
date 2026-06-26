@@ -4,7 +4,7 @@
 Tests verify that bilingual EN+HE privacy disclosure for the local_index.sqlite3
 zstd cache appears in:
 - web/pages/help.py (EN and HE)
-- genizah_app.py About dialog HTML (EN)
+- desktop/settings_dialogs.py About dialog HTML (EN)
 """
 from pathlib import Path
 

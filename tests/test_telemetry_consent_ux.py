@@ -483,7 +483,7 @@ def test_settings_toggle_initial_state(monkeypatch):
 
     # We need to build just enough of SettingsDialog to test chk_telemetry.
     # Import and check the attribute exists and reflects is_enabled().
-    # We do this by introspecting genizah_app.py's SettingsDialog class
+    # We do this by introspecting desktop/settings_dialogs.py's SettingsDialog class
     # without constructing the full main window — using a minimal QDialog parent.
     from PyQt6.QtWidgets import QDialog
     import genizah_app

@@ -12,6 +12,7 @@ Methods under test:
 
 SEED-020 §7 C-6: these methods had no direct test before Phase 127.
 """
+import os
 from unittest.mock import MagicMock, patch
 
 
@@ -79,8 +80,13 @@ def test_download_next_sidecar_pops_queue_and_starts_thread():
     assert gui._sidecar_download_queue == [], (
         "_download_next_sidecar must pop the queue item"
     )
-    # Thread must have been created and started
+    # Thread must have been created with (url, joined target path, name) and started
     mock_cls.assert_called_once()
+    expected_target = os.path.join("/fake/data", "data", "test.db")
+    assert mock_cls.call_args.args == ("https://example.com/db.zip", expected_target, "test.db"), (
+        f"SidecarDownloadThread must be constructed with (url, joined target path, name); "
+        f"got {mock_cls.call_args.args}"
+    )
     mock_thread.finished_signal.connect.assert_called_once_with(gui._on_sidecar_download_finished)
     mock_thread.start.assert_called_once()
     # The new thread must be stored on the coordinator
@@ -112,13 +118,14 @@ def test_download_next_sidecar_empty_queue_calls_reset_and_returns():
     gui = _make_gui_coordinator()
     gui._sidecar_download_queue = []  # already empty
 
-    # Patch QMessageBox.information so the bare __new__ object is not used as a real QWidget.
+    # Patch QMessageBox so the bare __new__ object is not used as a real QWidget.
     with patch("genizah_app.QMessageBox") as mock_qmb, \
          patch.object(gui, "_reset_sidecar_connections") as mock_reset:
-        mock_qmb.information = MagicMock()
         gui._download_next_sidecar()
 
     mock_reset.assert_called_once()
+    # The empty-queue branch shows the "Update Complete" info dialog.
+    mock_qmb.information.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
