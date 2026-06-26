@@ -14,7 +14,16 @@ import json
 import pickle
 from collections import defaultdict
 
-import tantivy
+try:
+    import tantivy
+except ImportError:
+    # GUARD-02 (zero behavior change): at base, genizah_core guarded its
+    # `import tantivy` and raised this friendly message. The Phase 124 facade
+    # shim `from shared.indexer import Indexer` now executes BEFORE genizah_core's
+    # own guard, so this module must raise the identical ImportError — otherwise a
+    # missing-tantivy install surfaces a raw ModuleNotFoundError. Plain (untranslated)
+    # to match the first guard that fired at base genizah_core.py.
+    raise ImportError("Tantivy library missing. Please install it.")
 
 from genizah_translations import TRANSLATIONS
 
