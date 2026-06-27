@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition + Search & Browse UX
 status: 🚧 IN PROGRESS — decomposition (122-127) DONE + verified; RE-SCOPED 2026-06-27 to ship publicly as 8.3.0 by adding SEED-025 (Phase 128) + SEED-026 (Phase 129) at full both-apps parity, then /release + close
-stopped_at: Backlog triaged (122→18 open artifacts, commit 6b928d3f); milestone re-scoped from internal-only to public both-apps 8.3.0; next = /gsd-discuss-phase 128 (SEED-025 Space-scroll)
-last_updated: "2026-06-27T00:00:00.000Z"
-last_activity: 2026-06-27
+stopped_at: Phase 128 context gathered
+last_updated: "2026-06-27T19:46:33.246Z"
+last_activity: 2026-06-26
 progress:
   total_phases: 8
-  completed_phases: 6
-  total_plans: 11
+  completed_phases: 5
+  total_plans: 12
   completed_plans: 11
-  percent: 75
+  percent: 63
 ---
 
 # Project State
@@ -49,6 +49,7 @@ PHASE 127 (Update UI & Final Cleanup; FINAL) COMPLETE + verified 2026-06-26 (HEA
   (GUARD-04, 19 modules) + tests/test_genizah_core_facade.py (27-name permanent facade). Sidecar coordination
   methods STAYED on GenizahGUI (research crux verdict — entangled across 4 ownership domains; DESK-08 tests
   target them in place). Codex PLAN pre-flight CLEARED (3-round: caught the APP_VERSION-not-in-core import drift
+
   + the BATCH_SIZE delete-range overshoot before any code was written) + Codex CODE review CLEARED (APPROVE-
   WITH-NITS → APPROVE; byte-faithfulness restore). gsd-verifier PASS 5/5 (127-VERIFICATION.md). One non-blocking
   human item: interactive desktop launch (update-UI render + sidecar download flow).
@@ -169,9 +170,9 @@ Items carried forward from v8.2.0 and earlier:
 
 ## Session Continuity
 
-Last session: 2026-06-26T15:23:45.047Z
-Stopped at: Phase 125 verified complete (Codex APPROVE 3-round; verifier PASS 5/5)
-Resume file: None
+Last session: 2026-06-27T19:46:33.240Z
+Stopped at: Phase 128 context gathered
+Resume file: .planning/phases/128-search-results-space-scroll-seed-025/128-CONTEXT.md
 Next step: `/gsd-discuss-phase 126` (or skip-discuss-if-empty per the standing autonomous directive)
 
 ## Performance Metrics
