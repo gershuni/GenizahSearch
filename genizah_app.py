@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QTreeWidget, QTreeWidgetItem, QListWidget, QPlainTextEdit, QStyle, QFormLayout,
                              QGridLayout, QToolTip, QProgressDialog, QStackedLayout,
                              QScrollArea, QFrame, QSlider, QSizePolicy, QInputDialog,
-                             QToolButton,
+                             QToolButton, QAbstractSlider,
                              QCompleter)
 from PyQt6.QtCore import (Qt, QTimer, QUrl, pyqtSignal, QThread, QEventLoop, QEvent, QPoint)
 from PyQt6.QtGui import (QFont, QIcon, QDesktopServices, QPixmap, QColor,
@@ -108,6 +108,26 @@ from corrections_ui import (
 )
 
 logger = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Phase 128 SCROLL-02: Desktop results-table Space-scroll decision helper
+# ---------------------------------------------------------------------------
+
+def space_scroll_action(current_column: int, checkbox_column: int, is_shift: bool) -> str | None:
+    """Pure decision for desktop results-table Space-scroll.
+
+    Returns 'page_up' | 'page_down' | None.
+    None means "let Qt handle it" (e.g. checkbox toggle on the checkbox column).
+    current_column == -1 (no current item) routes to scroll, not a no-op.
+
+    This function is pure (no Qt imports, no side effects) so it can be imported
+    and tested directly without constructing a QApplication.
+    """
+    if current_column == checkbox_column:
+        return None
+    return 'page_up' if is_shift else 'page_down'
+
 
 # ---------------------------------------------------------------------------
 # Phase 96 NEW-2 D-14: View-All separator helper (LOCAL Browse panel)
@@ -17918,6 +17938,22 @@ class GenizahGUI(QMainWindow):
                 if key == Qt.Key.Key_Delete:
                     self._delete_history_item(action._history_type, action._history_index, reopen=True)
                     return True
+        # Phase 128 SCROLL-02: Space / Shift+Space page-scrolls the results table
+        if (hasattr(self, 'results_table')
+                and source is self.results_table
+                and event.type() == QEvent.Type.KeyPress
+                and event.key() == Qt.Key.Key_Space):
+            col = self.results_table.currentColumn()
+            is_shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            action = space_scroll_action(col, self.COL_CHECKBOX, is_shift)
+            if action is not None:
+                bar = self.results_table.verticalScrollBar()
+                if action == 'page_up':
+                    bar.triggerAction(QAbstractSlider.SliderAction.SliderPageStepSub)
+                else:
+                    bar.triggerAction(QAbstractSlider.SliderAction.SliderPageStepAdd)
+                return True  # consumed — do NOT let Qt toggle the current item
+            # action is None (col == COL_CHECKBOX): fall through to super() for checkbox toggle
         # Smart tooltips for truncated cell text in results table
         if hasattr(self, 'results_table') and source == self.results_table.viewport() and event.type() == QEvent.Type.ToolTip:
             pos = event.pos()
