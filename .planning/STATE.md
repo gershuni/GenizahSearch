@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
 milestone: v8.3.0
-milestone_name: God-File Decomposition
-status: ✅ MILESTONE COMPLETE — all 6 phases (122-127) done + verified; internal refactor, no release
-stopped_at: Phase 127 verified complete (Codex PLAN pre-flight 3-round + CODE review 2-round APPROVE; verifier PASS 5/5) — v8.3.0 CLOSED
-last_updated: "2026-06-26T20:00:00.000Z"
-last_activity: 2026-06-26
+milestone_name: God-File Decomposition + Search & Browse UX
+status: 🚧 IN PROGRESS — decomposition (122-127) DONE + verified; RE-SCOPED 2026-06-27 to ship publicly as 8.3.0 by adding SEED-025 (Phase 128) + SEED-026 (Phase 129) at full both-apps parity, then /release + close
+stopped_at: Backlog triaged (122→18 open artifacts, commit 6b928d3f); milestone re-scoped from internal-only to public both-apps 8.3.0; next = /gsd-discuss-phase 128 (SEED-025 Space-scroll)
+last_updated: "2026-06-27T00:00:00.000Z"
+last_activity: 2026-06-27
 progress:
-  total_phases: 6
+  total_phases: 8
   completed_phases: 6
-  total_plans: 12
-  completed_plans: 12
-  percent: 100
+  total_plans: 11
+  completed_plans: 11
+  percent: 75
 ---
 
 # Project State
@@ -21,12 +21,24 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** ✅ v8.3.0 God-File Decomposition COMPLETE (all 6 phases). No active milestone — next: `/gsd-new-milestone` when ready.
+**Current focus:** 🚧 v8.3.0 RE-SCOPED (2026-06-27) to a public both-apps release. Decomposition (122-127) done; building SEED-025 Space-scroll (Phase 128) + SEED-026 Library filter (Phase 129) at full parity, then `/release` 8.3.0 + close. Next: `/gsd-discuss-phase 128`.
 
 ## Current Position
 
-✅ **v8.3.0 MILESTONE COMPLETE — 6/6 phases (122-127), 2026-06-26.** Pure internal refactor, zero behavior
-change, NO release (label-only). genizah_core.py 12.5K→755 ln behind a permanent 27-name same-object facade;
+🚧 **RE-SCOPE 2026-06-27 (user decision):** v8.3.0 is NO LONGER internal-only. It now ships **publicly to
+both apps** as 8.3.0 (8.2.2 → 8.3.0, no skipped number) by folding in two user-facing search/browse features
+at **full parity**, so desktop earns the version bump with visible features (not just the invisible refactor):
+**Phase 128 = SEED-025** (Space-key scroll of search results, web + desktop) and **Phase 129 = SEED-026**
+(library filter on web search + Browse-by-Identification + desktop catalog parity; Codex-review-before-code
+gate). Sequence: build 128 → build 129 → `/release` 8.3.0 (web deploy + desktop installer + GitHub Release +
+What's New) → `/gsd-complete-milestone`. The decomposition's zero-behavior-change invariant is unchanged; the
+milestone close was DEFERRED (not run) — the pre-close backlog triage already ran (122→18 open, commit
+6b928d3f). Next action: `/gsd-discuss-phase 128`. The decomposition record below is unchanged execution history.
+
+---
+
+✅ **v8.3.0 DECOMPOSITION STRAND COMPLETE — 6/6 phases (122-127), 2026-06-26.** Pure internal refactor, zero behavior
+change (rides along as invisible plumbing in the 8.3.0 build). genizah_core.py 12.5K→755 ln behind a permanent 27-name same-object facade;
 the 4 update-UI classes + 9 D1 dialog/widget classes relocated to desktop/ (identity 13/13). Two back-edge
 guards installed (GUARD-01 core + GUARD-04 desktop). Final suite: bulk 4894/0, gui 60/0 (3× consecutive green).
 

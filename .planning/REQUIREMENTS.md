@@ -1,7 +1,7 @@
-# Requirements: GenizahSearch — v8.3.0 God-File Decomposition
+# Requirements: GenizahSearch — v8.3.0 God-File Decomposition + Search & Browse UX
 
-**Defined:** 2026-06-25
-**Core Value:** Researchers can find what they need in the Genizah corpus. (This milestone protects that value by making the two god-files maintainable — **zero behavior change**.)
+**Defined:** 2026-06-25 (decomposition); extended 2026-06-27 (SEED-025 + SEED-026 features for the public 8.3.0 release)
+**Core Value:** Researchers can find what they need in the Genizah corpus. The decomposition strand protects that value by making the two god-files maintainable (**zero behavior change**); the feature strand advances it with two user-facing search/browse additions that give the public 8.3.0 release real substance on **both apps**.
 
 > Strategy / dependency analysis / risk map: `.planning/seeds/SEED-020-decomposition-map.md` (§7 "Codex review corrections" authoritative). Requirements refined per the Codex requirements pre-flight (2026-06-25, verdict READY WITH EDITS — all 9 edits folded in).
 > Each requirement is an **extraction outcome**, verified by: the new module exists, imports work in BOTH directions (web + desktop), the relevant test suite passes via the re-export facade, and no behavior changes.
@@ -50,6 +50,21 @@
 - [~] **DESK-07**: Lists tab + cloud-sync coordination extracted to `desktop/lists_tab.py`. **DEFERRED → SEED-028**.
 - [x] **DESK-08**: Update-UI sub-cluster (notification / What's-New / progress dialogs + sidecar reset/download coordination) extracted to `desktop/update_ui.py`, with **new direct behavioral tests** for the sidecar reset/download coordination methods plus the existing sidecar tests. *(SEED-020 §7 C-6)*
 
+### Search Results Space-Scroll (SCROLL) — Phase 128 (SEED-025)
+
+- [ ] **SCROLL-01** (web): On `/search`, Space page-scrolls the results container (Shift+Space scrolls up) when no actionable result control holds focus; when a result checkbox / expand / open-detail control (or an open dialog) holds focus, Space performs that action and is NOT stolen; no `preventDefault` on controls that legitimately consume Space (a11y intact). State of the actionable-suppression set is enumerated + tested.
+- [ ] **SCROLL-02** (desktop): In the results table, Space routes to page-down (Shift+Space page-up) of the results scroll area when no item is in a checkable/actionable focus state; otherwise Space toggles/activates the focused item as today.
+
+### Library Filter (LIBFILTER) — Phase 129 (SEED-026)
+
+- [ ] **LIBFILTER-01** (web search): A library **multi-select** on `/search` results filters by `library_code` over the FULL result set BEFORE the `[:200]` render cap (empty = all); persists via the `web/safe_storage.py` chokepoint (Phase 87 invariant, CI allowlist `[]`); removable chips; i18n EN/HE labels (`LIBRARY_CODES`/`LIBRARY_CODES_HE`, no English leak under Hebrew).
+- [ ] **LIBFILTER-02** (web Browse-by-Identification): A `library_codes` arg pushed into `shared/fjms_service.get_browse_results` applies BEFORE `COUNT(DISTINCT AlmaId)` + `LIMIT/OFFSET` so `total`/pagination are correct over the full filtered set; additive/backward-compatible (None/empty = no-op); composes with the SEED-023 PGP/Editions filters; persists via `safe_storage`.
+- [ ] **LIBFILTER-03** (desktop parity): The desktop catalog Browse-by-Identification view gains the same library filter; existing desktop search-results library/shelfmark filtering is untouched.
+
+### Release (REL) — both apps
+
+- [ ] **REL-01**: v8.3.0 ships to **both apps** — web deploy + desktop installer + GitHub Release (installer asset) + bilingual What's New highlighting the two visible features (Space-scroll, library filter). The decomposition is invisible plumbing in the build. App version bumps 8.2.2 → 8.3.0 via `scripts/bump_version.py`.
+
 ## v2 Requirements (deferred — NOT in this roadmap)
 
 ### Future decomposition (DEFER)
@@ -64,12 +79,14 @@
 
 | Feature | Reason |
 |---------|--------|
-| Any user-facing behavior change | This is a pure refactor — zero behavior change is GUARD-02 |
-| New features / performance work | Out of a decomposition milestone (SEED-011 is the one exception, as a Phase-3 prerequisite, not a feature) |
+| User-facing behavior change *in the decomposition strand (122-127)* | The refactor itself is zero-behavior-change (GUARD-02). New behavior is confined to the deliberately-added feature phases 128-129. |
+| Feature scope beyond SEED-025 + SEED-026 | Only these two SEEDs were chosen for 8.3.0; other dormant seeds (001/003/005/012/026-followups) stay deferred. |
 | Desktop composition-tab + startup/session extraction | Needs `CompositionState` refactor first (DEFER-02/03/04) |
 | `SearchEngine` internal sub-split | Deferred to DEFER-01 after the class moves intact (CORE-10) |
 | LAB side-index punctuation / SEED-006 compat-gate **redesign** | Pre-existing tech-debt; the gates are **preserved** (CORE-10), not redesigned |
-| GitHub Release | Internal-only milestone (no user-facing change) |
+| API library-filter param (`/api/search`, `/api/browse`) | Natural follow-up to SEED-026; out of scope here (note for a later add) |
+
+> **Note (re-scope 2026-06-27):** the original "no GitHub Release / internal-only" out-of-scope line is **REMOVED** — v8.3.0 now ships publicly to both apps (REL-01).
 
 ## Traceability
 
@@ -104,13 +121,19 @@ GSD phase numbering continues from v8.2.0 (ended Phase 121) → this milestone i
 | DESK-06 | SEED-028 | Deferred |
 | DESK-07 | SEED-028 | Deferred |
 | DESK-08 | 127 | Complete |
+| SCROLL-01 | 128 | Not started |
+| SCROLL-02 | 128 | Not started |
+| LIBFILTER-01 | 129 | Not started |
+| LIBFILTER-02 | 129 | Not started |
+| LIBFILTER-03 | 129 | Not started |
+| REL-01 | release | Not started |
 
 **Coverage:**
 
-- v1 requirements: 27 total (4 GUARD + 1 CONFIG + 13 CORE + 1 PREP + 8 DESK)
-- Mapped to phases: 27 (GUARD-02/03/04 are cross-cutting, verified at every phase boundary)
-- Unmapped: 0 ✓
+- Decomposition requirements: 27 (4 GUARD + 1 CONFIG + 13 CORE + 1 PREP + 8 DESK) — Phases 122-127, complete (22 done + 5 DESK deferred → SEED-028).
+- Feature requirements: 6 (2 SCROLL + 3 LIBFILTER + 1 REL) — Phases 128-129 + release, not started.
+- Total v8.3.0 requirements: 33; mapped to phases/release: 33; unmapped: 0 ✓
 
 ---
-*Requirements defined: 2026-06-25*
-*Last updated: 2026-06-25 after Codex requirements pre-flight (READY WITH EDITS, 9 edits applied)*
+*Requirements defined: 2026-06-25 (decomposition)*
+*Last updated: 2026-06-27 — extended with SEED-025 + SEED-026 features for the public both-apps 8.3.0 release*

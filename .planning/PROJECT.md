@@ -8,9 +8,11 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v8.3.0 God-File Decomposition
+## Current Milestone: v8.3.0 God-File Decomposition + Search & Browse UX
 
-**Goal:** Split the two GenizahSearch god-files — `genizah_app.py` (~28k lines, desktop) and `genizah_core.py` (~12.5k lines, shared by both apps) — into cohesive modules using the proven v7.9 extract-behind-tests / one-atomic-commit-per-cluster recipe, with **zero behavior change**. Pure internal maintainability work: no user-facing change, no release (label-only version bump).
+**Goal:** Split the two GenizahSearch god-files — `genizah_app.py` (~28k lines, desktop) and `genizah_core.py` (~12.5k lines, shared by both apps) — into cohesive modules using the proven v7.9 extract-behind-tests / one-atomic-commit-per-cluster recipe, with **zero behavior change**.
+
+**Re-scope (2026-06-27):** the decomposition (Phases 122-127, done) was originally internal-only / no-release. User decision: ship it publicly as **8.3.0** (8.2.2 → 8.3.0) by folding in two user-facing search/browse features at **full both-apps parity** — **SEED-025** (Space-key scroll of search results, Phase 128) and **SEED-026** (library filter on web search + Browse-by-Identification + desktop catalog parity, Phase 129). Desktop earns the version bump with visible features, not just the refactor. Release goes to both apps (web deploy + desktop installer + GitHub Release + What's New); the decomposition rides along as invisible plumbing.
 
 **Target features (extraction phases):**
 - **Phase 0 — `shared/config.py`** (enabler): break the `Config` import-cycle pivot; `genizah_core.Config` stays a permanent re-export facade.

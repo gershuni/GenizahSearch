@@ -28,7 +28,7 @@
 - **v8.0.0 Dicta Rebrand & Joins Lab** -- BRAND (no-phase) + Phases 103, 105 (folded from v7.17; Phase 104 → EXP-F3) + Phases 106-110 Joins Lab (shipped 2026-06-09; closed 2026-06-11). Component B (JSA-01/02/03 + JWB-05) + web Joins Lab UI deferred post-v8.0.0. See `milestones/v8.0.0-ROADMAP.md`
 - **v8.1.0 Desktop Telemetry** -- Phases 111-116 (shipped 2026-06-16; closed 2026-06-16). See `milestones/v8.1.0-ROADMAP.md`
 - ✅ **v8.2.0 Web Joins Lab, FGP Transcriptions & Hebrew Search** -- Phases 117-121 (shipped 2026-06-23, both apps)
-- ✅ **v8.3.0 God-File Decomposition** -- Phases 122-127 (complete 2026-06-26; internal refactor, zero behavior change, no release — both apps)
+- 🚧 **v8.3.0 God-File Decomposition + Search & Browse UX** -- Phases 122-129 (decomposition done 2026-06-26; + SEED-025 Space-scroll & SEED-026 Library filter → public both-apps 8.3.0 release — in progress)
 
 ## Phases
 
@@ -61,9 +61,11 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 ---
 
-### 🚧 v8.3.0 God-File Decomposition (Phases 122-127) — In Progress
+### 🚧 v8.3.0 God-File Decomposition + Search & Browse UX (Phases 122-129) — In Progress
 
-**Milestone goal:** Split the two god-files — `genizah_app.py` (~28k lines, desktop) and `genizah_core.py` (~12.5k lines, shared by both apps) — into cohesive modules using the proven v7.9 extract-behind-tests / one-atomic-commit-per-cluster recipe. Zero behavior change. Pure internal maintainability work — no user-facing change, no GitHub Release (label-only version bump). Strategy in `.planning/seeds/SEED-020-decomposition-map.md` (§7 "Codex review corrections" authoritative).
+**Milestone goal:** Two strands shipped together as a **public both-apps 8.3.0 release**. (1) **Decomposition (Phases 122-127, DONE):** split the two god-files — `genizah_app.py` (~28k lines, desktop) and `genizah_core.py` (~12.5k lines, shared by both apps) — into cohesive `shared/`+`desktop/` modules behind permanent re-export facades, **zero behavior change** (rides along as invisible plumbing). (2) **Search & Browse UX (Phases 128-129, NEW):** two user-facing additions that give the version real substance on BOTH apps — **SEED-025** Space-key page-scroll of search results, and **SEED-026** a library filter on web search + Browse-by-Identification (+ desktop parity). Decomposition strategy in `.planning/seeds/SEED-020-decomposition-map.md` (§7 authoritative); feature specs in `.planning/seeds/SEED-025-*.md` + `SEED-026-*.md`.
+
+**Re-scope note (2026-06-27):** v8.3.0 was originally scoped internal-only / no-release. User decision: ship it publicly as 8.3.0 (8.2.2 → 8.3.0, no skipped number) by folding in SEED-025 + SEED-026 at **full both-apps parity** — so desktop earns the version bump with visible features, not just the refactor. The decomposition's zero-behavior-change invariant (GUARD-02) is unchanged; the new feature phases are additive.
 
 **Hard constraints across all phases (GUARD invariants):**
 
@@ -89,6 +91,10 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
  (completed 2026-06-26)
 
 - [x] **Phase 127: Update UI & Final Cleanup** - Extract `desktop/update_ui.py` + new direct behavioral tests for sidecar reset/download coordination; remove the Phase-126 (D1) desktop shims from `genizah_app.py`; install the `desktop/` back-edge guard; confirm `genizah_core.py` permanent facade; full-suite-green sign-off. (genizah_app.py shrinks only modestly this milestone — the bulk awaits SEED-028.) (completed 2026-06-26)
+
+- [ ] **Phase 128: Search Results Space-Scroll (SEED-025)** - Space page-scrolls the search-results area when no result control holds an actionable focus (checkbox / expand / open detail); Shift+Space scrolls up; never steals the keystroke from a focused control. Web (NiceGUI keydown handler + focus guard on the results scroll container) + desktop (PyQt6 results table page-down/up routing). Small, self-contained.
+
+- [ ] **Phase 129: Library Filter — Search + Browse-by-Identification (SEED-026)** - Library multi-select filter on web `/search` results (applied over the FULL pre-`[:200]` set, persisted via `safe_storage`, i18n EN/HE) and a `library_codes` filter pushed DOWN into `shared/fjms_service.get_browse_results` for Browse-by-Identification (correct `total`/pagination, composes with the SEED-023 PGP/Editions filters). Desktop parity: catalog Browse-by-Identification library filter (desktop search-results already filters by library/shelfmark). Reuses the SEED-023 push-down template; **Codex-review-before-code gate** per the seed.
 
 ## Phase Details
 
@@ -205,6 +211,35 @@ Plans:
 - [x] 127-02-PLAN.md (Wave 2) — Extract `desktop/update_ui.py`: MOVE-and-shim the 4 update-UI classes (`UpdateNotificationBar`/`WhatsNewBar`/`WhatsNewDialog`/`UpdateProgressDialog`), delete originals from `genizah_app.py`, add a no-noqa re-export shim (classes are used); back-edge guard now enforces `update_ui.py`. Coordination methods stay on GenizahGUI (research crux verdict)
 - [x] 127-03-PLAN.md (Wave 3) — Final cleanup + sign-off: retire the Phase-126 D1 noqa suffix (genizah_app.py:77-78, imports kept), retarget `test_telemetry_consent_ux.py` to `desktop.settings_dialogs`, hard-flip the EN disclosure test in `test_privacy_disclosure_strings.py`, confirm the PERMANENT genizah_core facade, full-suite (bulk 6-env baseline + gui green) milestone sign-off
 
+### Phase 128: Search Results Space-Scroll (SEED-025)
+
+**Goal**: Pressing **Space** page-scrolls the search-results area (Shift+Space scrolls up) **only when no result control holds an actionable focus** — a focused checkbox, expand/collapse control, open-detail trigger, or open dialog keeps Space doing that action. When focus is on a non-actionable element, Space falls through to scroll the results container by ~one viewport instead of being swallowed or no-op. Web + desktop parity.
+**Depends on**: Phase 127 (decomposition complete; desktop results panel is post-126/127)
+**Requirements**: SCROLL-01, SCROLL-02, GUARD-02
+**Success Criteria** (what must be TRUE):
+
+  1. Web: with focus on a non-actionable element, Space scrolls the `/search` results container by one viewport and Shift+Space scrolls up; with focus on a result checkbox / expand control / open detail, Space performs that control's action (keystroke NOT stolen); never `preventDefault` on a control that legitimately wants Space (a11y intact).
+  2. Desktop: in the results table, when no item is in a checkable/actionable focus state, Space routes to page-down (Shift+Space page-up) of the results scroll area; otherwise Space toggles/activates the focused item as today.
+  3. The actionable-focus suppression set is explicitly enumerated (per SEED-025 open-question #2) and tested; everything outside it scrolls.
+  4. Behavioral tests cover both the scroll path and the don't-steal path on each app; the full existing suite stays green.
+
+**Plans**: TBD (set at plan-phase)
+
+### Phase 129: Library Filter — Search + Browse-by-Identification (SEED-026)
+
+**Goal**: Add a **library filter** keyed on `library_code` (canonical list `LIBRARY_CODES`; Hebrew labels `LIBRARY_CODES_HE`) to: (1) web `/search` results as a **multi-select** applied over the FULL result set BEFORE the `[:200]` render cap (empty = all), persisted via `safe_storage`, removable chips, i18n EN/HE; (2) **Browse-by-Identification** (catalog) as a `library_codes` arg pushed DOWN into `shared/fjms_service.get_browse_results` BEFORE the `COUNT(DISTINCT AlmaId)` + `LIMIT/OFFSET` so `total`/pagination stay correct and it composes with the SEED-023 PGP/Editions filters; (3) desktop parity — a library filter on the desktop catalog Browse-by-Identification view (desktop search-results already filters by library/shelfmark, so that side is parity-only).
+**Depends on**: Phase 127; reuses the SEED-023 push-down + chip + `safe_storage` template
+**Requirements**: LIBFILTER-01, LIBFILTER-02, LIBFILTER-03, GUARD-02
+**Success Criteria** (what must be TRUE):
+
+  1. Web search: selecting one/several libraries narrows results to those `library_code`s over the FULL pre-`[:200]` set (not just the visible 200); empty = all; selection persists via `safe_storage` (Phase 87 invariant, CI allowlist `[]`); no English leak under Hebrew if names are shown.
+  2. Browse-by-Identification: the new `library_codes` arg to `get_browse_results` changes `total` correctly over the full filtered set, paginates correctly, is additive/backward-compatible (None/empty = no-op), and composes with the SEED-023 PGP/Editions filters.
+  3. Desktop catalog Browse-by-Identification gains the same library filter at parity; existing desktop search-results library/shelfmark filtering is untouched.
+  4. **Codex-review-before-code gate** satisfied (project seed-review gate per SEED-026 + [[feedback_audit_to_cloud_pipeline]]); the design crux (how catalog rows map to `library_code` via `AlmaId==sys_id`) is resolved before implementation.
+  5. Tests green (search full-set narrowing + persistence; catalog total/pagination/compose; `get_browse_results` additive arg); ruff clean; existing PGP/printed + SEED-023 filters unbroken.
+
+**Plans**: TBD (set at plan-phase, after the Codex design review)
+
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
@@ -220,3 +255,5 @@ Plans:
 | 125. Core Engines | 4/4 | Complete   | 2026-06-26 |
 | 126. Desktop Panels | 1/1 | Complete   | 2026-06-26 |
 | 127. Update UI & Final Cleanup | 3/3 | Complete   | 2026-06-26 |
+| 128. Search Results Space-Scroll (SEED-025) | 0/? | Not started | - |
+| 129. Library Filter (SEED-026) | 0/? | Not started | - |
