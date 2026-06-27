@@ -19,6 +19,25 @@ _SEARCH_PY = (_REPO_ROOT / "web" / "pages" / "search.py").read_text(encoding="ut
 _SEARCH_RESULTS_PY = (_REPO_ROOT / "web" / "pages" / "search_results.py").read_text(encoding="utf-8")
 
 
+def _func_source(src: str, name: str) -> str:
+    """Return the source slice of a (possibly nested) `def {name}` — its def line plus all
+    more-indented body lines, stopping at the first line dedented to <= the def's indent.
+    Lets source guards assert against a FUNCTION BODY, not the whole file (avoids tautologies
+    where a comment elsewhere satisfies the substring)."""
+    lines = src.splitlines()
+    start = next(
+        (i for i, ln in enumerate(lines) if ln.lstrip().startswith(f"def {name}")), None
+    )
+    assert start is not None, f"def {name} not found in source"
+    indent = len(lines[start]) - len(lines[start].lstrip())
+    body = [lines[start]]
+    for ln in lines[start + 1:]:
+        if ln.strip() and (len(ln) - len(ln.lstrip())) <= indent:
+            break
+        body.append(ln)
+    return "\n".join(body)
+
+
 # ---------------------------------------------------------------------------
 # Web source / static guards (SCROLL-01, GUARD-02)
 # ---------------------------------------------------------------------------
@@ -81,11 +100,15 @@ def test_web_no_double_install_guard():
 
 
 def test_existing_shortcuts_preserved():
-    """GUARD-02: handle_keyboard_shortcut must still contain Escape and '/' branches."""
-    assert "Escape" in _SEARCH_PY, (
+    """GUARD-02: handle_keyboard_shortcut must still contain Escape and '/' branches.
+
+    Scoped to the function body (not the whole file) so a stray comment or unrelated
+    string elsewhere in search.py cannot satisfy the guard (Codex CODE review LOW)."""
+    body = _func_source(_SEARCH_PY, "handle_keyboard_shortcut")
+    assert "Escape" in body, (
         "Escape branch missing from handle_keyboard_shortcut — keyboard shortcut regression"
     )
-    assert "'/'  " in _SEARCH_PY or "e.key == '/'" in _SEARCH_PY or "== '/'" in _SEARCH_PY, (
+    assert "'/'" in body or '"/"' in body, (
         "'/' branch missing from handle_keyboard_shortcut — keyboard shortcut regression"
     )
 

@@ -11,9 +11,10 @@ Do NOT skip or stub this test.
 """
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QApplication
-
-_app = QApplication.instance() or QApplication([])
+# NOTE: QApplication is created INSIDE the test (not at module scope) so that the
+# bulk `-m "not gui"` slice — which still imports this file during collection before
+# marker deselection — does not initialize Qt at import time (Codex CODE review LOW;
+# matters given the project's PyQt6-headless-segfault sensitivity).
 
 
 def test_desktop_eventfilter_triggers_scroll():
@@ -34,7 +35,9 @@ def test_desktop_eventfilter_triggers_scroll():
 
     from PyQt6.QtCore import QEvent, Qt
     from PyQt6.QtGui import QKeyEvent
-    from PyQt6.QtWidgets import QAbstractSlider, QTableWidget
+    from PyQt6.QtWidgets import QAbstractSlider, QApplication, QTableWidget
+
+    _app = QApplication.instance() or QApplication([])  # noqa: F841 — Qt requires a live app for widgets
 
     # Import the real production eventFilter method and the decision helper.
     # Both land in 128-02; ImportError here is the expected RED state.
