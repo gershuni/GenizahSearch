@@ -32,7 +32,6 @@
 | SCROLL-01 | Web: Space page-scrolls the results container; Shift+Space scrolls up; no `preventDefault` when actionable control has focus; suppression set enumerated + tested | See §§ Web Implementation Mechanism, Actionable Focus Suppression Set |
 | SCROLL-02 | Desktop: Space routes to page-down/page-up when no checkable/actionable focus state; otherwise Space toggles/activates as today | See §§ Desktop Implementation Mechanism, Desktop Checkbox Behavior |
 | GUARD-02 | Zero regression to existing behavior (existing keyboard shortcuts, checkbox toggle, PageUp/PageDown) | See §§ Regression Surface, Existing Keyboard Shortcuts |
-</phase_requirements>
 
 ---
 
@@ -44,9 +43,9 @@ This phase adds a Space-to-page-scroll affordance on both apps. The implementati
 
 **Desktop (PyQt6):** The results table checkbox is a `QTableWidgetItem` with `Qt.ItemFlag.ItemIsUserCheckable` (NOT a cell widget), so Qt's default Space handling toggles the check state on the current item. D-04 is implemented cleanest via a `QTableWidget` subclass (or `keyPressEvent` override directly on the main app's `eventFilter`) that intercepts `Key_Space` before the default handler. When `currentColumn() != COL_CHECKBOX`, consume the event and trigger `verticalScrollBar().triggerAction(SliderPageStepAdd/Sub)`; otherwise pass through to `super()`.
 
-**Testing:** Both platforms use static AST source guards (already proven in this codebase) for the "don't hand-roll" path. The web keyboard path cannot be exercised in the NiceGUI `User` headless driver without a real browser; test via source-structure assertions + pure-logic unit tests. The desktop can be tested via a `QApplication` widget construction smoke test in the `gui` marker group.
+**Testing:** Both platforms use static AST source guards (already proven in this codebase) for the "don't hand-roll" path. The web keyboard path cannot be exercised in the NiceGUI `User` headless driver without a real browser; test via source-structure assertions + pure-logic unit tests. The desktop Space-scroll DECISION logic is extracted into a pure, importable module-level helper (`genizah_app.space_scroll_action`) tested directly with no QApplication; ONE `gui`-marked widget test wires a bare `QTableWidget` + a mocked `verticalScrollBar().triggerAction` to prove the `eventFilter` branch calls `triggerAction` (action wiring).
 
-**Primary recommendation:** Inject a single self-contained `(function(){...})()` block via `ui.run_javascript` in a new `async def setup_space_scroll()` function, deferred with `asyncio.ensure_future(_after_delay(1.0, setup_space_scroll))`, placed adjacent to the existing `setup_scroll_collapse` call. On the desktop, subclass `QTableWidget` or add a `Key_Space` branch to the existing `GenizahGUI.eventFilter`.
+**Primary recommendation:** Inject a single self-contained `(function(){...})()` block via `ui.run_javascript` in a new `async def setup_space_scroll()` function, deferred with `asyncio.ensure_future(_after_delay(1.0, setup_space_scroll))`, placed adjacent to the existing `setup_scroll_collapse` call. On the desktop, add a `Key_Space` branch to the existing `GenizahGUI.eventFilter` that delegates the decision to a pure `space_scroll_action(...)` helper.
 
 ---
 
@@ -57,6 +56,7 @@ This phase adds a Space-to-page-scroll affordance on both apps. The implementati
 | Space-scroll, web | Browser (client-side JS) | — | `preventDefault` must fire synchronously before browser default; no server round-trip possible |
 | Focus guard, web | Browser (client-side JS) | — | `document.activeElement` is only available client-side at event time |
 | Space-scroll, desktop | Desktop app (Qt event layer) | — | QTableWidget key routing is entirely in-process Qt |
+| Space-scroll decision, desktop | Desktop app (pure helper `space_scroll_action`) | — | Decision logic extracted to a pure function so it is testable without QApplication |
 | Checkbox toggle preservation | Desktop app (Qt event layer via super()) | — | Default `QAbstractItemView` behavior handles it when not intercepted |
 
 ---
@@ -71,9 +71,9 @@ This phase adds NO new libraries. All capabilities are built from existing platf
 | `ui.run_javascript(js_code)` | `web/pages/search.py` (already used at multiple sites) | Inject the keydown handler JS [VERIFIED: grep search.py] |
 | `asyncio.ensure_future(_after_delay(...))` | `web/pages/search.py:2064` | Defer JS setup until DOM is ready (Cat-2 pattern already used for `setup_scroll_collapse`) [VERIFIED: grep search.py] |
 | `document.addEventListener('keydown', ...)` | `web/pages/browse.py:4706` | Client-side keyboard handler, same pattern as browse page arrow-key nav [VERIFIED: grep browse.py] |
-| `q-scrollarea__container` | `web/pages/search.py:1996` | Actual scrollable element inside Quasar scroll-area; `.scrollBy(0, height)` target [VERIFIED: existing JS in setup_scroll_collapse] |
-| `QTableWidget.verticalScrollBar().triggerAction(...)` | — | Qt scroll-bar action trigger; standard PyQt6 pattern [ASSUMED] |
-| `QAbstractSlider.SliderAction.SliderPageStepAdd/Sub` | — | Page-step scroll actions [ASSUMED] |
+| `q-scrollarea__container` | `web/pages/search.py:1996` | Actual scrollable element inside Quasar scroll-area; `.scrollTop += height` target [VERIFIED: existing JS in setup_scroll_collapse] |
+| `QTableWidget.verticalScrollBar().triggerAction(...)` | — | Qt scroll-bar action trigger; standard PyQt6 pattern [VERIFIED on this machine's PyQt6] |
+| `QAbstractSlider.SliderAction.SliderPageStepAdd/Sub` | — | Page-step scroll actions [VERIFIED on this machine's PyQt6 — enum path confirmed correct] |
 | `GenizahGUI.eventFilter` | `genizah_app.py:17891` | Existing event filter on the main window; already intercepts keys for results_table [VERIFIED: grep genizah_app.py] |
 
 ### Package Legitimacy Audit
@@ -96,17 +96,17 @@ No new packages are installed in this phase.
        YES -> let event through (a11y)   |
         |                                |
         NO -> preventDefault()           |
-             scrollBy(±clientHeight)     |
+             scrollTop += ±clientHeight  |
              on q-scrollarea__container  |
                                          |
         +--[Desktop: Qt Key_Space]-------+
                 |
-        [currentColumn() == COL_CHECKBOX?]
+        [space_scroll_action(col, COL_CHECKBOX, is_shift)]
                 |
-               YES -> super().keyPressEvent() -> Qt toggles checkbox
+               'page_up'/'page_down' -> consume event
+                |                        verticalScrollBar().triggerAction(SliderPageStepAdd/Sub)
                 |
-                NO -> consume event
-                      verticalScrollBar().triggerAction(SliderPageStepAdd/Sub)
+               None (col == COL_CHECKBOX, or non-Space) -> super().eventFilter() -> Qt toggles checkbox / default
 ```
 
 ### Recommended File Changes
@@ -116,8 +116,9 @@ web/pages/search.py
       └── asyncio.ensure_future(...)         # deferred 1.0s setup
 
 genizah_app.py
+  └── new module-level def space_scroll_action(current_column, checkbox_column, is_shift) -> str | None
   └── eventFilter (near line 17891)          # new Key_Space branch for results_table
-      └── OR: subclass QTableWidget          # if eventFilter branch grows too long
+      └── calls space_scroll_action(...) then triggerAction on 'page_up'/'page_down'
 ```
 
 ---
@@ -155,11 +156,11 @@ Quasar's `ui.scroll_area()` renders the outer element with class `.results-scrol
 ```javascript
 const scrollAreaEl = document.querySelector('.results-scroll-area');
 const inner = scrollAreaEl.querySelector('.q-scrollarea__container');
-// inner.scrollTop / inner.scrollBy() — this is the actual scroll target
+// inner.scrollTop / inner.scrollTop += — this is the actual scroll target
 ```
 [VERIFIED: `web/pages/search.py` near lines 1993-1999]
 
-`scrollBy(0, inner.clientHeight)` is one viewport down; `scrollBy(0, -inner.clientHeight)` is one viewport up.
+`inner.scrollTop += inner.clientHeight` is one viewport down; `inner.scrollTop -= inner.clientHeight` is one viewport up (see Open Question 1, RESOLVED → `scrollTop +=` is universal/Safari < 15.4-safe).
 
 ### Finding W-4: The Actionable-Focus Suppression Set (Web, D-01)
 
@@ -170,9 +171,12 @@ Per the rendered HTML structure in `create_result_card` (`web/pages/search_resul
 | Checkbox (`ui.checkbox`) | `<input type="checkbox">` — tagName `INPUT` | `activeElement.tagName === 'INPUT'` |
 | Expand-toggle (`_content_col`) | `<div role="button" tabindex="0">` | `activeElement.getAttribute('role') === 'button'` |
 | Action buttons (Browse, QuickView, star, catalog, joins, VS toggle) | `<button>` | `activeElement.tagName === 'BUTTON'` |
+| Result/browse links (`ui.link`) | `<a href>` — tagName `A` | `activeElement.tagName === 'A'` OR `activeElement.closest('a[href]')` |
 | Open detail dialog | Quasar `q-dialog` overlay | `document.querySelector('.q-dialog') !== null` |
 
-The existing `keyboard.js` `ignore` array for `ui.keyboard` includes `'input'` (so `input[type=checkbox]` is already ignored for the server-side on_key handler). In the new client-side handler, the same tagName checks apply — but we add `role=button` and the dialog check.
+`ui.link` anchors are real `<a href>` elements at `web/pages/search_results.py:538, :682, :1527/:1528, :1665, :1774` (browse / PGP / full-manuscript links). A focused anchor is actionable — Space (or its activation) must NOT be stolen. Both the direct `tagName === 'A'` test and the ancestor `closest('a[href]')` test are included so a focused element nested inside a link is also treated as actionable.
+
+The existing `keyboard.js` `ignore` array for `ui.keyboard` includes `'input'` (so `input[type=checkbox]` is already ignored for the server-side on_key handler). In the new client-side handler, the same tagName checks apply — but we add `role=button`, the anchor check, and the dialog check.
 
 **Complete guard expression (JavaScript):**
 ```javascript
@@ -182,6 +186,8 @@ const isActionable = (
     ae.tagName === 'BUTTON' ||
     ae.tagName === 'TEXTAREA' ||
     ae.tagName === 'SELECT' ||
+    ae.tagName === 'A' ||
+    ae.closest('a[href]') !== null ||
     ae.getAttribute('role') === 'button' ||
     ae.isContentEditable ||
     document.querySelector('.q-dialog') !== null
@@ -227,7 +233,7 @@ self.results_table.setItem(row_idx, self.COL_CHECKBOX, item_chk)
 
 This is NOT a `cellWidget` — it is a `QTableWidgetItem`. Qt's `QAbstractItemView` default key handling toggles the check state of the current item when Space is pressed. When `currentColumn() == COL_CHECKBOX`, the toggled item IS the checkbox. When `currentColumn() != COL_CHECKBOX`, the toggled item is a non-checkable item (typically no-op, but still consumes the Space).
 
-### Finding D-2: The Existing `eventFilter` Is the Right Hook
+### Finding D-2: The Existing `eventFilter` Is the Right Hook — Decision Logic Extracted to a Pure Helper
 
 `GenizahGUI.eventFilter` (near line 17891) already handles:
 - Key_Down on `query_input` → history menu
@@ -237,22 +243,35 @@ This is NOT a `cellWidget` — it is a `QTableWidgetItem`. Qt's `QAbstractItemVi
 
 The filter already has `source == self.results_table` checks for the ToolTip case. Adding a `Key_Space` branch here is the least-invasive approach — no new subclass needed.
 
-The new branch:
+`GenizahGUI.eventFilter` is an instance method on a heavy `QMainWindow`; a hand-copied stub could pass while the production branch is wrong. To make the decision honestly testable WITHOUT constructing the full GUI, the Space/Shift detection stays in `eventFilter`, but the routing DECISION is delegated to a pure, importable module-level helper:
+
+```python
+def space_scroll_action(current_column: int, checkbox_column: int, is_shift: bool) -> str | None:
+    """Pure decision for desktop Space-scroll. Returns 'page_up' | 'page_down' | None.
+    None = let Qt handle it (checkbox toggle on the checkbox column, or non-applicable).
+    current_column == -1 (no current item) routes to scroll (Open Question 2, RESOLVED).
+    """
+    if current_column == checkbox_column:
+        return None
+    return 'page_up' if is_shift else 'page_down'
+```
+
+The new eventFilter branch:
 ```python
 if (hasattr(self, 'results_table') and source is self.results_table
         and event.type() == QEvent.Type.KeyPress
         and event.key() == Qt.Key.Key_Space):
     col = self.results_table.currentColumn()
-    if col != self.COL_CHECKBOX:
-        # Not on checkbox — route to page-scroll
-        mod = event.modifiers()
+    is_shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+    action = space_scroll_action(col, self.COL_CHECKBOX, is_shift)
+    if action is not None:
         bar = self.results_table.verticalScrollBar()
-        if mod & Qt.KeyboardModifier.ShiftModifier:
+        if action == 'page_up':
             bar.triggerAction(QAbstractSlider.SliderAction.SliderPageStepSub)
         else:
             bar.triggerAction(QAbstractSlider.SliderAction.SliderPageStepAdd)
         return True  # consume — do NOT let Qt toggle a non-checkbox item
-    # col == COL_CHECKBOX: fall through to super() for checkbox toggle
+    # action is None (col == COL_CHECKBOX): fall through to super() for checkbox toggle
 ```
 
 ### Finding D-3: `installEventFilter(self)` Already Wired on results_table
@@ -266,15 +285,13 @@ self.results_table.viewport().installEventFilter(self)
 
 The filter is already installed. Only a new `Key_Space` branch inside `eventFilter` is needed.
 
-### Finding D-4: `QAbstractSlider.SliderAction` Import Check
+### Finding D-4: `QAbstractSlider.SliderAction` Import + Enum Path
 
-`QAbstractSlider` is imported in PyQt6 from `PyQt6.QtWidgets`. Confirm the imports already available:
-```python
-from PyQt6.QtWidgets import (..., QAbstractSlider, ...)
-```
-Check the existing imports at the top of `genizah_app.py` — if `QAbstractSlider` is not imported, add it to the existing `from PyQt6.QtWidgets import (...)` block.
+`QAbstractSlider` is imported in PyQt6 from `PyQt6.QtWidgets`. It is NOT currently in the existing import list — add it to the existing `from PyQt6.QtWidgets import (...)` block at the top of `genizah_app.py`.
 
-[ASSUMED: `QAbstractSlider` may or may not be in the existing import list — grep before writing the plan task]
+`QAbstractSlider.SliderAction.SliderPageStepAdd` / `SliderPageStepSub` is VERIFIED correct on this machine's PyQt6 — use it directly (no runtime enum-path hedging needed).
+
+[VERIFIED: `QAbstractSlider` absent from imports today (Assumption A1 resolved → must be added); enum path confirmed (Assumption A2 resolved)]
 
 ### Finding D-5: COL_CHECKBOX = 0 Is Stable
 
@@ -287,8 +304,9 @@ Check the existing imports at the top of `genizah_app.py` — if `QAbstractSlide
 | Problem | Don't Build | Use Instead | Why |
 |---------|-------------|-------------|-----|
 | Client-side keydown + preventDefault | Custom NiceGUI element or server-side logic | `ui.run_javascript` injected IIFE (same as scroll-collapse) | Only way to `preventDefault` synchronously; proven pattern already in codebase |
-| Quasar scroll area programmatic scroll | Parsing DOM manually | `.q-scrollarea__container` `.scrollBy()` | Already used by existing scroll-collapse JS; Quasar's scroll-area wraps a real scrollable div |
+| Quasar scroll area programmatic scroll | Parsing DOM manually | `.q-scrollarea__container` `.scrollTop +=` | Already used by existing scroll-collapse JS; Quasar's scroll-area wraps a real scrollable div |
 | Desktop page-scroll calculation | Computing pixel offsets | `QAbstractSlider.SliderPageStepAdd/Sub` via `triggerAction()` | Platform-native page-step is what PageDown uses; single call, no pixel arithmetic |
+| Desktop decision testing | Hand-copied eventFilter stub | Pure `space_scroll_action()` helper imported from `genizah_app` | Tests exercise REAL production decision logic; honest RED-before / GREEN-after with no QApplication |
 
 ---
 
@@ -301,7 +319,7 @@ Check the existing imports at the top of `genizah_app.py` — if `QAbstractSlide
 **Warning signs:** Results don't scroll on Space, or the page body scrolls instead of `.results-scroll-area`.
 
 ### Pitfall 2: Scrolling `.results-scroll-area` Instead of `.q-scrollarea__container`
-**What goes wrong:** `.results-scroll-area` is the Quasar `q-scroll-area` outer wrapper; its `overflow` may not be `auto`/`scroll`. `.scrollBy()` on it has no effect. The actual scrollable div is `.q-scrollarea__container`.
+**What goes wrong:** `.results-scroll-area` is the Quasar `q-scroll-area` outer wrapper; its `overflow` may not be `auto`/`scroll`. Scrolling it has no effect. The actual scrollable div is `.q-scrollarea__container`.
 **Why it happens:** The obvious target class name is `.results-scroll-area`, but Quasar wraps the actual scrollable content in an inner div.
 **How to avoid:** Use the two-step find pattern from the existing JS: `querySelector('.results-scroll-area').querySelector('.q-scrollarea__container')`. The `setup_scroll_collapse` code already proves this works.
 **Warning signs:** Space press shows no scroll effect.
@@ -315,7 +333,7 @@ Check the existing imports at the top of `genizah_app.py` — if `QAbstractSlide
 ### Pitfall 4: Desktop — Not Consuming the Event When Routing to Page-Scroll
 **What goes wrong:** `eventFilter` triggers the scroll but also passes the event to `super().eventFilter()`, which then lets Qt toggle the current item's checkbox (or try to). Spurious checkbox state changes appear.
 **Why it happens:** Returning `False` (or not returning `True`) from `eventFilter` passes the event downstream to Qt's default handling.
-**How to avoid:** Return `True` from the eventFilter branch when routing Space to the scroll bar, so Qt does NOT see the Key_Space event further.
+**How to avoid:** Return `True` from the eventFilter branch when `space_scroll_action(...)` returns a non-None action, so Qt does NOT see the Key_Space event further.
 
 ### Pitfall 5: Desktop — Intercepting Space on Wrong Source
 **What goes wrong:** Typing Space in the search input bar (`query_input`) is suppressed or routed to scroll.
@@ -349,11 +367,12 @@ Based on the existing `setup_scroll_collapse` pattern [VERIFIED: `web/pages/sear
         // 1. Any open dialog
         if (document.querySelector('.q-dialog')) return;
 
-        // 2. Actionable active element
+        // 2. Actionable active element (incl. anchors)
         const ae = document.activeElement;
         if (!ae) return;
         const tag = ae.tagName;
-        if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'A') return;
+        if (ae.closest && ae.closest('a[href]')) return;
         if (ae.getAttribute('role') === 'button') return;
         if (ae.isContentEditable) return;
 
@@ -362,7 +381,7 @@ Based on the existing `setup_scroll_collapse` pattern [VERIFIED: `web/pages/sear
         if (!outer) return;
         const inner = outer.querySelector('.q-scrollarea__container') || outer;
         const delta = e.shiftKey ? -inner.clientHeight : inner.clientHeight;
-        inner.scrollBy({ top: delta, behavior: 'instant' });
+        inner.scrollTop += delta;   // universal / Safari < 15.4-safe (Open Question 1 RESOLVED)
         e.preventDefault();
     });
 })();
@@ -382,14 +401,15 @@ async def setup_space_scroll():
             const ae = document.activeElement;
             if (!ae) return;
             const tag = ae.tagName;
-            if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+            if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'A') return;
+            if (ae.closest && ae.closest('a[href]')) return;
             if (ae.getAttribute('role') === 'button') return;
             if (ae.isContentEditable) return;
             const outer = document.querySelector('.results-scroll-area');
             if (!outer) return;
             const inner = outer.querySelector('.q-scrollarea__container') || outer;
             const delta = e.shiftKey ? -inner.clientHeight : inner.clientHeight;
-            inner.scrollBy({{ top: delta, behavior: 'instant' }});
+            inner.scrollTop += delta;
             e.preventDefault();
         });
     })();
@@ -403,11 +423,21 @@ async def setup_space_scroll():
 asyncio.ensure_future(_after_delay(1.0, setup_space_scroll))
 ```
 
-### Desktop: `eventFilter` Space Branch
+### Desktop: Pure Helper + `eventFilter` Space Branch
 
 Based on the existing `eventFilter` structure [VERIFIED: `genizah_app.py` near line 17891]:
 
 ```python
+# Source: new module-level helper in genizah_app.py (pure, importable, no Qt needed)
+def space_scroll_action(current_column: int, checkbox_column: int, is_shift: bool) -> str | None:
+    """Decision for desktop results-table Space-scroll.
+    Returns 'page_up' | 'page_down' | None (None = let Qt handle it, e.g. checkbox toggle).
+    current_column == -1 (no current item) routes to scroll (Open Question 2 RESOLVED)."""
+    if current_column == checkbox_column:
+        return None
+    return 'page_up' if is_shift else 'page_down'
+
+
 # Source: extends existing GenizahGUI.eventFilter in genizah_app.py
 # Add this BEFORE the ToolTip/Leave branches (early return is cleaner)
 if (hasattr(self, 'results_table')
@@ -415,20 +445,21 @@ if (hasattr(self, 'results_table')
         and event.type() == QEvent.Type.KeyPress
         and event.key() == Qt.Key.Key_Space):
     col = self.results_table.currentColumn()
-    if col != self.COL_CHECKBOX:
-        # Space on non-checkbox column → page-scroll (D-04)
+    is_shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+    action = space_scroll_action(col, self.COL_CHECKBOX, is_shift)
+    if action is not None:
         bar = self.results_table.verticalScrollBar()
-        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+        if action == 'page_up':
             bar.triggerAction(QAbstractSlider.SliderAction.SliderPageStepSub)
         else:
             bar.triggerAction(QAbstractSlider.SliderAction.SliderPageStepAdd)
         return True  # consumed — do NOT let Qt toggle the current item
-    # col == COL_CHECKBOX: fall through to super() for default checkbox toggle
+    # action is None (col == COL_CHECKBOX): fall through to super() for default checkbox toggle
 
 return super().eventFilter(source, event)
 ```
 
-**Required import check:** Verify `QAbstractSlider` is in the existing `from PyQt6.QtWidgets import (...)` block at the top of `genizah_app.py`. If not, add it.
+**Required import:** Add `QAbstractSlider` to the existing `from PyQt6.QtWidgets import (...)` block at the top of `genizah_app.py` (NOT currently imported — Finding D-4).
 
 ---
 
@@ -441,6 +472,7 @@ return super().eventFilter(source, event)
 | `/` | `handle_keyboard_shortcut` → `query_input.run_method('focus')` | None — independent key check |
 | `Enter` on search input | `query_input.on('keydown.enter', ...)` | None — Input tag is in suppression set |
 | Space on expand-toggle | `_content_col.on('keydown.space.self.prevent', ...)` | None — `.prevent` fires before global listener; activeElement will have `role=button` |
+| Space on result links | `ui.link` → `<a href>` navigation | None — `tag === 'A'` / `closest('a[href]')` in suppression set |
 | Space on result action buttons | Standard button behavior (click) | None — `tag === 'BUTTON'` in suppression set |
 | Space on result checkbox | Quasar checkbox toggle | None — `tag === 'INPUT'` in suppression set |
 | PageUp/PageDown | Browser native scroll on `q-scrollarea__container` | None — the Space handler only intercepts `e.key === ' '` |
@@ -451,7 +483,7 @@ return super().eventFilter(source, event)
 | Down arrow on `query_input` | `eventFilter` → `_show_search_history_menu()` | None — different source/key |
 | Up/Down in history menu | `eventFilter` → `super().eventFilter` | None — different source/key |
 | Return/Delete in history menu | `eventFilter` | None — different source/key |
-| Space on COL_CHECKBOX cell | Qt default (checkbox toggle via `itemChanged` signal) | Preserved — new branch falls through to `super()` when `col == COL_CHECKBOX` |
+| Space on COL_CHECKBOX cell | Qt default (checkbox toggle via `itemChanged` signal) | Preserved — `space_scroll_action` returns None → branch falls through to `super()` when `col == COL_CHECKBOX` |
 | PageDown/PageUp on results_table | Qt default (scroll bar page step) | Preserved — only `Key_Space` is intercepted, not `Key_PageDown`/`Key_PageUp` |
 | Double-click → `show_full_text` | `doubleClicked` signal | None — mouse event, unaffected |
 | `check_scroll_load` on scroll | `verticalScrollBar().valueChanged.connect(...)` | Preserved — `triggerAction` fires the `valueChanged` signal normally |
@@ -460,11 +492,11 @@ return super().eventFilter(source, event)
 
 ## Assumptions Log
 
-| # | Claim | Section | Risk if Wrong |
-|---|-------|---------|---------------|
-| A1 | `QAbstractSlider` is or is not already in `genizah_app.py`'s imports | Desktop Code Example | Compile error if missing — low risk, easy fix: add to import list |
-| A2 | `QAbstractSlider.SliderAction.SliderPageStepAdd/Sub` is the correct enum path in PyQt6 | Desktop Code Example | Wrong enum path → AttributeError. Verify: `from PyQt6.QtWidgets import QAbstractSlider; QAbstractSlider.SliderAction.SliderPageStepAdd` |
-| A3 | `behavior: 'instant'` is supported in all browsers GenizahSearch targets | Web Code Example | Safari < 15.4 does not support `scrollBehavior` in `scrollBy` options — fallback: use `scrollTop +=` assignment instead |
+| # | Claim | Section | Status |
+|---|-------|---------|--------|
+| A1 | `QAbstractSlider` is or is not already in `genizah_app.py`'s imports | Desktop Code Example | RESOLVED — absent today; must be added to the `PyQt6.QtWidgets` import block |
+| A2 | `QAbstractSlider.SliderAction.SliderPageStepAdd/Sub` is the correct enum path in PyQt6 | Desktop Code Example | RESOLVED — VERIFIED correct on this machine's PyQt6; use directly |
+| A3 | Scroll mechanism for all browsers GenizahSearch targets | Web Code Example | RESOLVED — use `inner.scrollTop += delta` (universal, Safari < 15.4-safe); no `scrollBy({behavior:'instant'})` dependence |
 
 ---
 
@@ -483,24 +515,25 @@ return super().eventFilter(source, event)
 | Req ID | Behavior | Test Type | Automated Command | Notes |
 |--------|----------|-----------|-------------------|-------|
 | SCROLL-01 | Web: Space NOT stolen when `activeElement` is `INPUT` | unit (pure-logic JS string scan) | `pytest tests/test_space_scroll.py::test_web_space_scroll_js_installed -x` | AST/source guard verifying JS is present in search.py output |
-| SCROLL-01 | Web: Space NOT stolen when `activeElement.role === 'button'` | unit (pure-logic) | `pytest tests/test_space_scroll.py::test_web_suppression_set_complete -x` | Static check: JS contains all required suppression conditions |
+| SCROLL-01 | Web: Space NOT stolen when `activeElement.role === 'button'` and anchors | unit (pure-logic) | `pytest tests/test_space_scroll.py::test_web_suppression_set_complete -x` | Static check: JS contains all required suppression conditions incl. anchor (`'A'` / `closest('a[href]')`) |
 | SCROLL-01 | Web: Space NOT stolen when `.q-dialog` present | unit (pure-logic) | `pytest tests/test_space_scroll.py::test_web_dialog_guard -x` | Static check: JS contains `document.querySelector('.q-dialog')` |
-| SCROLL-01 | Web: expand-toggle still gets Space when focused | source guard | `pytest tests/test_space_scroll.py::test_expand_toggle_space_prevent_intact -x` | Confirms `keydown.space.self.prevent` still present in search_results.py |
-| SCROLL-02 | Desktop: Space on non-checkbox column triggers page-scroll | unit (widget stub) | `pytest tests/test_space_scroll.py -m gui -x` | Creates QTableWidget stub, verifies triggerAction called |
-| SCROLL-02 | Desktop: Space on COL_CHECKBOX falls through to super() | unit (widget stub) | `pytest tests/test_space_scroll.py::test_desktop_space_checkbox_passthrough -m gui` | Verifies `super().eventFilter()` called, not consumed |
-| GUARD-02 | Desktop: Shift+Space triggers page-up (SliderPageStepSub) | unit (widget stub) | `pytest tests/test_space_scroll.py::test_desktop_shift_space_page_up -m gui` | Direction check |
+| SCROLL-01 | Web: expand-toggle still gets Space when focused | source guard | `pytest tests/test_space_scroll.py::test_expand_toggle_space_prevent_intact -x` | Confirms `keydown.space.self.prevent` still present in `web/pages/search_results.py` |
+| SCROLL-02 | Desktop: non-checkbox column → page_down decision | unit (pure helper, no QApplication) | `pytest tests/test_space_scroll.py::test_desktop_space_scroll_action_decision -x` | Calls REAL `genizah_app.space_scroll_action`; covers col != COL_CHECKBOX, col == -1, shift |
+| SCROLL-02 | Desktop: Space on COL_CHECKBOX falls through (None) | unit (pure helper, no QApplication) | `pytest tests/test_space_scroll.py::test_desktop_space_scroll_action_decision -x` | Same pure test asserts `space_scroll_action(COL_CHECKBOX, ...) is None` |
+| SCROLL-02 | Desktop: eventFilter branch calls triggerAction (action wiring) | gui (widget) | `pytest tests/test_space_scroll.py::test_desktop_eventfilter_triggers_scroll -m gui` | Bare QTableWidget + mocked `verticalScrollBar().triggerAction` |
 | GUARD-02 | Web: `window._gsSpaceScrollInstalled` guard present (no double-install) | source guard | `pytest tests/test_space_scroll.py::test_web_no_double_install_guard -x` | Static check: JS contains the flag |
-| GUARD-02 | Existing Escape/slash keyboard shortcuts still work (no removed code) | source guard | `pytest tests/test_space_scroll.py::test_existing_shortcuts_preserved -x` | Confirms handle_keyboard_shortcut still has Escape and / cases |
+| GUARD-02 | Existing Escape/slash keyboard shortcuts still work (no removed code) | source guard | `pytest tests/test_space_scroll.py::test_existing_shortcuts_preserved -x` | Confirms `handle_keyboard_shortcut` still has Escape and / cases |
 
 ### Observable Behaviors (for manual smoke / Nyquist validation)
 1. **Web — basic scroll:** Load `/search`, run a query, press Space → results pane scrolls down ~1 viewport. Press Shift+Space → scrolls up.
 2. **Web — checkbox not stolen:** Tab to a result checkbox, press Space → checkbox toggles, results do NOT scroll.
 3. **Web — expand not stolen:** Tab to a result card body (role=button), press Space → card expands/collapses, results do NOT scroll.
-4. **Web — dialog not stolen:** Click Quick View to open the fullscreen dialog, press Space → results do NOT scroll (dialog stays in front, no background scroll).
-5. **Web — action button not stolen:** Tab to a Browse/QuickView button, press Space → button activates, results do NOT scroll.
-6. **Desktop — basic scroll:** Run a search, click anywhere in results to focus the table, press Space → page scrolls down. Shift+Space → page scrolls up.
-7. **Desktop — checkbox preserved:** Click on the checkbox column cell for a result, press Space → checkbox toggles (not a scroll).
-8. **Desktop — PageDown/PageUp unaffected:** Press PageDown in the results table → native page-scroll (not broken by this change).
+4. **Web — link not stolen:** Tab to a Browse/PGP link (`<a href>`), press Space → no scroll (anchor is actionable).
+5. **Web — dialog not stolen:** Click Quick View to open the fullscreen dialog, press Space → results do NOT scroll (dialog stays in front, no background scroll).
+6. **Web — action button not stolen:** Tab to a Browse/QuickView button, press Space → button activates, results do NOT scroll.
+7. **Desktop — basic scroll:** Run a search, click anywhere in results to focus the table, press Space → page scrolls down. Shift+Space → page scrolls up.
+8. **Desktop — checkbox preserved:** Click on the checkbox column cell for a result, press Space → checkbox toggles (not a scroll).
+9. **Desktop — PageDown/PageUp unaffected:** Press PageDown in the results table → native page-scroll (not broken by this change).
 
 ### Sampling Rate
 - **Per task commit:** `python -m pytest tests/test_space_scroll.py -x -q` (< 5s)
@@ -508,8 +541,8 @@ return super().eventFilter(source, event)
 - **Phase gate:** Full suite green (`bulk` + `gui` split) before `/gsd-verify-work`
 
 ### Wave 0 Gaps
-- [ ] `tests/test_space_scroll.py` — create this file with all test cases above. Mix of AST/static guards (no QApplication needed) and gui-marked widget tests (need `QApplication.instance() or QApplication([])`).
-- [ ] Add `"test_space_scroll.py"` to `_GUI_TEST_FILES` set in `tests/conftest.py` for the widget-level desktop tests (the ones that construct QTableWidget and dispatch key events).
+- [ ] `tests/test_space_scroll.py` — create this file with all test cases above. Mix of AST/static guards + a pure desktop decision test (no QApplication needed) and ONE gui-marked widget test (needs `QApplication.instance() or QApplication([])`).
+- [ ] Add `"test_space_scroll.py"` to `_GUI_TEST_FILES` set in `tests/conftest.py` for the gui-marked widget test.
 
 ---
 
@@ -536,21 +569,19 @@ SCROLL-01/SCROLL-02 add a keyboard scroll affordance. No authentication, no data
 | Old Approach | Current Approach | Impact |
 |--------------|------------------|--------|
 | `ui.keyboard on_key` for all shortcuts | Pure client-side `document.addEventListener` for shortcuts requiring `preventDefault` | Correct separation: server-side for logic, client-side for event suppression |
-| `scrollBy({behavior: 'smooth'})` | `scrollBy({behavior: 'instant'})` or `scrollTop +=` | Instant is more predictable for keyboard navigation; smooth feels sluggish |
+| `scrollBy({behavior: 'smooth'})` | `scrollTop += delta` | Instant + universal is more predictable for keyboard navigation; smooth feels sluggish, and `scrollTop +=` is Safari < 15.4-safe |
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **`behavior: 'instant'` vs `scrollTop +=` for scroll compatibility**
+1. **`behavior: 'instant'` vs `scrollTop +=` for scroll compatibility** — RESOLVED: use `inner.scrollTop += delta` (universal, Safari < 15.4-safe).
    - What we know: `behavior: 'instant'` is part of the CSSOM View spec but older Safari (< 15.4) may fall back to instant anyway or ignore the options object.
-   - What's unclear: Whether the target browsers include old Safari.
-   - Recommendation: Use `scrollTop += delta` assignment as the fallback: `inner.scrollTop += delta; e.preventDefault();` — this works universally and is already what old browsers do.
+   - Resolution: Use `inner.scrollTop += delta` assignment (then `e.preventDefault()`) — works universally including Safari < 15.4, and is the implemented approach. No `scrollBy({behavior:'instant'})` dependence.
 
-2. **`COL_CHECKBOX` visibility when no row is selected (desktop)**
-   - What we know: When the table has items but none is currently selected/focused, `currentColumn()` may return -1 or the last column. Qt's `currentColumn()` returns -1 when there is no current item.
-   - What's unclear: Whether `currentColumn() == -1` should route to scroll or fall through.
-   - Recommendation: Treat `currentColumn() != COL_CHECKBOX` (including -1) as "scroll." This is correct — if no item is focused on the checkbox column, Space should scroll.
+2. **`COL_CHECKBOX` visibility when no row is selected (desktop)** — RESOLVED: `currentColumn() == -1` routes to scroll.
+   - What we know: When the table has items but none is currently selected/focused, Qt's `currentColumn()` returns -1 when there is no current item.
+   - Resolution: Treat `currentColumn() != COL_CHECKBOX` (including -1) as "scroll." `space_scroll_action(-1, COL_CHECKBOX, ...)` returns `'page_down'`/`'page_up'`. This is the implemented behavior.
 
 ---
 
@@ -558,7 +589,7 @@ SCROLL-01/SCROLL-02 add a keyboard scroll affordance. No authentication, no data
 
 ### Primary (HIGH confidence)
 - `web/pages/search.py` — direct read: keyboard handler at ~line 1959, scroll area at ~1763, setup_scroll_collapse at ~1980, _after_delay at ~111
-- `web/pages/search_results.py` — direct read: create_result_card showing checkbox (ui.checkbox, line 428), expand-toggle with `keydown.space.self.prevent` (line 454), action buttons (lines 683-762)
+- `web/pages/search_results.py` — direct read: create_result_card showing checkbox (ui.checkbox, line 428), expand-toggle with `keydown.space.self.prevent` (line 454), `ui.link` anchors (lines 538, 682, 1527/1528, 1665, 1774), action buttons (lines 683-762)
 - `nicegui/elements/keyboard.js` — direct read: confirms round-trip `$emit`, no `preventDefault` possible from Python callback
 - `nicegui/elements/keyboard.py` — direct read: confirms `ignore` behavior, `KeyEventArguments` structure
 - `genizah_app.py` — direct read: `results_table` setup (~4828), `COL_CHECKBOX` (~4814), `eventFilter` (~17891), `installEventFilter` (~4879), checkbox item creation (~16111)
@@ -570,9 +601,9 @@ SCROLL-01/SCROLL-02 add a keyboard scroll affordance. No authentication, no data
 - `tests/test_no_server_side_stop_propagation.py` — AST guard pattern for client-side-only propagation control (confirms project convention)
 - `tests/test_join_workbench_rotate.py` — desktop widget test pattern without pytest-qt (confirms `QApplication.instance() or QApplication([])` pattern and gui marker)
 
-### Tertiary (LOW confidence / ASSUMED)
-- `QAbstractSlider.SliderAction.SliderPageStepAdd/Sub` API — [ASSUMED] standard PyQt6 enum path; verify import before writing plan task
-- `scrollBy({behavior: 'instant'})` browser compatibility — [ASSUMED] widely supported, but recommend `scrollTop +=` fallback for Safari < 15.4
+### Tertiary (RESOLVED)
+- `QAbstractSlider.SliderAction.SliderPageStepAdd/Sub` API — VERIFIED correct on this machine's PyQt6
+- Scroll mechanism — `scrollTop += delta` chosen (universal / Safari < 15.4-safe)
 
 ---
 
@@ -581,10 +612,10 @@ SCROLL-01/SCROLL-02 add a keyboard scroll affordance. No authentication, no data
 **Confidence breakdown:**
 - Web mechanism (preventDefault via client-side JS): HIGH — verified from keyboard.js source and existing browse.py pattern
 - Web scroll target (`q-scrollarea__container`): HIGH — verified from existing setup_scroll_collapse JS
-- Web suppression set membership: HIGH — verified by reading all result card controls in search_results.py
-- Desktop eventFilter hook: HIGH — verified from existing eventFilter structure
+- Web suppression set membership: HIGH — verified by reading all result card controls in search_results.py (incl. `ui.link` anchors)
+- Desktop eventFilter hook + pure helper: HIGH — verified from existing eventFilter structure
 - Desktop checkbox is ItemIsUserCheckable (not cell widget): HIGH — verified from result population code
-- Desktop QAbstractSlider API path: MEDIUM — standard PyQt6, not yet confirmed via import check
+- Desktop QAbstractSlider API path: HIGH — verified on this machine's PyQt6
 - Testing approach: HIGH — mirrors existing test patterns exactly
 
 **Research date:** 2026-06-27
