@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Quick Task 260319-mc4: Search UX Overhaul — Summary
 
 **Completed:** 2026-03-19

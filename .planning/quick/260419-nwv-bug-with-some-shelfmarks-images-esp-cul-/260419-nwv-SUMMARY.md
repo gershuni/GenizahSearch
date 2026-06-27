@@ -1,7 +1,7 @@
 ---
 id: 260419-nwv
 type: quick-fix
-status: partial-fix
+status: complete
 completed: 2026-04-19
 files_modified:
   - scripts/debug_ts_ns_158_112_image_alignment.py

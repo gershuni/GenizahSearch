@@ -1,6 +1,6 @@
 ---
 id: SEED-008
-status: dormant
+status: shipped
 planted: 2026-06-19
 planted_during: v8.2.0 / Phase 119 (Web Joins Lab) live UAT
 trigger_when: Phase 120 (Actions & Persistence) — fold this hardening fix into that phase alongside the other close-out items. Small, well-precedented bug fix; not a standalone phase.

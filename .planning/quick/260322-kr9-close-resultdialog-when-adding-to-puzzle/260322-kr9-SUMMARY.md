@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Quick Task 260322-kr9: Close ResultDialog when adding to puzzle — Summary
 
 ## Changes (3 commits)

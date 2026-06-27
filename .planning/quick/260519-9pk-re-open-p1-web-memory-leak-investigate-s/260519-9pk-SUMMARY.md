@@ -1,4 +1,5 @@
 ---
+status: complete
 quick_id: 260519-9pk
 title: "Re-open P1 web memory leak -- investigate secondary leak after export-cap fix"
 created: 2026-05-19

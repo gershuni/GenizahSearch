@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Quick Task 10 Summary
 
 ## Fix desktop community tab corrections SupabaseCorrectionsClient error

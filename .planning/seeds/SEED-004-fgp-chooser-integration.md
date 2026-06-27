@@ -1,6 +1,6 @@
 ---
 id: SEED-004
-status: dormant
+status: shipped
 planted: 2026-06-18
 planted_during: FGP-transcriptions groundwork (prepared while v8.2.0 "Web Joins Lab" runs in parallel)
 trigger_when: v8.2.0 ships AND a transcription-sources / scholarly-coverage milestone is next — surface this for `/gsd-new-milestone`

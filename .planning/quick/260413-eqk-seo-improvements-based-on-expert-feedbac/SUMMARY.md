@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Quick Task 260413-eqk: SEO Improvements Round 2 -- Summary
 
 ## One-liner

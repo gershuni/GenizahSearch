@@ -1,3 +1,7 @@
+---
+status: shipped
+---
+
 # SEED-015 — Desktop image loader: NLI circuit-breaker wiring + TLS host policy (MINIMAL)
 
 > Source: 2026-06-23 product-quality audit, findings **#1** (HIGH, CONFIRMED) and **M2** (MED, NEW).

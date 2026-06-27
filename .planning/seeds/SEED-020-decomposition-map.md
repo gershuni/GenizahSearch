@@ -1,3 +1,7 @@
+---
+status: shipped
+---
+
 # SEED-020 — Decomposition Strategy: Splitting the Two GenizahSearch God-Files
 
 > **Status:** strategy / map (planning seed). Run SEED-020 as its **own milestone, LAST**, because it rewrites files that nearly every other workstream touches.

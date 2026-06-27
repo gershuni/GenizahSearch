@@ -1,3 +1,7 @@
+---
+status: shipped
+---
+
 # SEED-017 — Joins-Lab / Compare viewer: Rotate + Fullscreen (audit #10)
 
 > Source: 2026-06-23 product-quality audit, finding **#10** (CONFIRMED, MEDIUM).

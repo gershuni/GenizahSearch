@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Quick Task 260325-hhn: Summary
 
 ## What was done

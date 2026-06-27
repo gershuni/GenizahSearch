@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Quick Task 007: Summary
 
 ## What changed

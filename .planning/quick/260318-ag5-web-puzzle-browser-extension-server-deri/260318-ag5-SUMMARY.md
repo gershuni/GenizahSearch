@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Quick Task 260318-ag5: Web Puzzle Browser Extension + Server Derivative Cache
 
 ## Status: COMPLETE

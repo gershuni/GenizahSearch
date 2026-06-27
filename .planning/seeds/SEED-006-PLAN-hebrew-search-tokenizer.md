@@ -1,3 +1,7 @@
+---
+status: shipped
+---
+
 # Fix Hebrew retrieval: punctuation- and diacritic-attached words are unfindable (LOCAL + Genizah)
 
 ## Context

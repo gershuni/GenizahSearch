@@ -1,3 +1,7 @@
+---
+status: shipped
+---
+
 # SEED-024 — Desktop Joins-Lab: search-mode parity + candidate XLSX export + inline options
 
 > Source: user request 2026-06-25 ("another parity"). Folds the audit backlog item

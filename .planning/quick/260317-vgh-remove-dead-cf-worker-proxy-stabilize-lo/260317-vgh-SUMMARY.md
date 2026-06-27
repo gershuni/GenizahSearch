@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Quick Task 260317-vgh: Remove Dead CF Worker Proxy, Stabilize Localhost Helper
 
 ## What Changed

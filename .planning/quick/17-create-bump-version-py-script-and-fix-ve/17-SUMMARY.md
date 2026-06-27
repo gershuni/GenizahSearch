@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Quick Task 17: Summary
 
 ## What changed

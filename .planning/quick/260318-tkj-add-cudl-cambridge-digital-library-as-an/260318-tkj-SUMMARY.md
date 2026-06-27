@@ -1,4 +1,5 @@
 ---
+status: complete
 phase: quick-260318-tkj
 plan: 01
 subsystem: image-resolution

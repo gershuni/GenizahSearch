@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Quick Task 260317-aru: Fix background removal for CUL blue conservation mat
 
 ## Problem

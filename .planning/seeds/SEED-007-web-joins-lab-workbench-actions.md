@@ -1,6 +1,6 @@
 ---
 id: SEED-007
-status: dormant
+status: shipped
 planted: 2026-06-19
 planted_during: v8.2.0 / Phase 119 (Web Joins Lab)
 trigger_when: Phase 120 (Actions & Persistence) discuss — pull these items in there. Phase 120 ALREADY scopes "Add-as-Join (login-gated)" + persistence; items #1,#2,#3,#5,#6 below are additive to that same phase, NOT a separate one.

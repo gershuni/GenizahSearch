@@ -1,3 +1,7 @@
+---
+status: shipped
+---
+
 # Codex review brief — Hebrew search retrieval fix (GenizahSearch)
 
 You are reviewing a PLAN (not yet implemented). Be critical and specific: flag correctness pitfalls,

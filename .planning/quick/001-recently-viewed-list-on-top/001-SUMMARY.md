@@ -1,4 +1,5 @@
 ---
+status: complete
 phase: quick-001
 plan: 01
 subsystem: web-ui

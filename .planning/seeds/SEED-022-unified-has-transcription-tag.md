@@ -1,6 +1,6 @@
 ---
 id: SEED-022
-status: dormant
+status: shipped
 planted: 2026-06-23
 planted_during: User feature request (relayed by Hillel) — "can users see which mss have a manual transcription?" Mapped via two Explore passes. NOT part of the 2026-06-23 audit; a new feature.
 trigger_when: After audit PRs #298 (genizah_app.py/gui_threads.py) and #300 (web/pages/search.py, search_results.py) MERGE — SEED-022 edits the same files and would conflict. Build on the merged base. Codex-review this seed before coding (per the project's seed-review gate).

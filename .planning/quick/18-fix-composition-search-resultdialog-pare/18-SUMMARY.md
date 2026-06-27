@@ -1,3 +1,7 @@
+---
+status: complete
+---
+
 # Quick Task 18: Summary
 
 ## What was fixed

@@ -1,6 +1,6 @@
 ---
 id: SEED-009
-status: dormant
+status: shipped
 planted: 2026-06-21
 planted_during: v8.2.0 / Phase 120 (Actions & Persistence) live UAT
 trigger_when: Standalone — app-wide (NOT Joins Lab). Triage on its own branch off origin, not inline during a phase. Investigate whether it shares the off-loop-auth root cause fixed in Phase 120 before scoping.
