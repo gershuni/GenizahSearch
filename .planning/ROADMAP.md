@@ -223,7 +223,11 @@ Plans:
   3. The actionable-focus suppression set is explicitly enumerated (per SEED-025 open-question #2) and tested; everything outside it scrolls.
   4. Behavioral tests cover both the scroll path and the don't-steal path on each app; the full existing suite stays green.
 
-**Plans**: TBD (set at plan-phase)
+**Plans**: 2 plans
+
+Plans:
+- [ ] 128-01-PLAN.md (Wave 1) — Web Space-scroll: client-side keydown handler injected via ui.run_javascript scrolls .results-scroll-area / .q-scrollarea__container on Space (Shift+Space up), suppressed for INPUT/BUTTON/TEXTAREA/SELECT/role=button/contentEditable/open .q-dialog; double-install guard; + full tests/test_space_scroll.py scaffold + conftest gui registration (SCROLL-01, GUARD-02)
+- [ ] 128-02-PLAN.md (Wave 2, depends 128-01) — Desktop Space-scroll: QAbstractSlider import + Key_Space branch in GenizahGUI.eventFilter routing non-checkbox-column Space to verticalScrollBar().triggerAction(SliderPageStepAdd/Sub), checkbox-column Space falls through to Qt toggle; turns the 3 desktop gui tests green (SCROLL-02, GUARD-02)
 
 ### Phase 129: Library Filter — Search + Browse-by-Identification (SEED-026)
 
