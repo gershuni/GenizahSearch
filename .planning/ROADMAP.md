@@ -226,7 +226,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 128-01-PLAN.md (Wave 1) — Web Space-scroll: client-side keydown handler injected via ui.run_javascript scrolls .results-scroll-area / .q-scrollarea__container on Space (Shift+Space up), suppressed for INPUT/BUTTON/TEXTAREA/SELECT/role=button/contentEditable/open .q-dialog; double-install guard; + full tests/test_space_scroll.py scaffold + conftest gui registration (SCROLL-01, GUARD-02)
+
+- [x] 128-01-PLAN.md (Wave 1) — Web Space-scroll: client-side keydown handler injected via ui.run_javascript scrolls .results-scroll-area / .q-scrollarea__container on Space (Shift+Space up), suppressed for INPUT/BUTTON/TEXTAREA/SELECT/role=button/contentEditable/open .q-dialog; double-install guard; + full tests/test_space_scroll.py scaffold + conftest gui registration (SCROLL-01, GUARD-02)
 - [ ] 128-02-PLAN.md (Wave 2, depends 128-01) — Desktop Space-scroll: QAbstractSlider import + Key_Space branch in GenizahGUI.eventFilter routing non-checkbox-column Space to verticalScrollBar().triggerAction(SliderPageStepAdd/Sub), checkbox-column Space falls through to Qt toggle; turns the 3 desktop gui tests green (SCROLL-02, GUARD-02)
 
 ### Phase 129: Library Filter — Search + Browse-by-Identification (SEED-026)
@@ -259,5 +260,5 @@ Plans:
 | 125. Core Engines | 4/4 | Complete   | 2026-06-26 |
 | 126. Desktop Panels | 1/1 | Complete   | 2026-06-26 |
 | 127. Update UI & Final Cleanup | 3/3 | Complete   | 2026-06-26 |
-| 128. Search Results Space-Scroll (SEED-025) | 0/? | Not started | - |
+| 128. Search Results Space-Scroll (SEED-025) | 1/2 | In Progress|  |
 | 129. Library Filter (SEED-026) | 0/? | Not started | - |

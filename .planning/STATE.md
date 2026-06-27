@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v8.3.0
 milestone_name: God-File Decomposition + Search & Browse UX
-status: 🚧 IN PROGRESS — decomposition (122-127) DONE + verified; RE-SCOPED 2026-06-27 to ship publicly as 8.3.0 by adding SEED-025 (Phase 128) + SEED-026 (Phase 129) at full both-apps parity, then /release + close
+status: Ready to execute
 stopped_at: Phase 128 context gathered
-last_updated: "2026-06-27T19:46:33.246Z"
-last_activity: 2026-06-26
+last_updated: "2026-06-27T20:54:56.745Z"
+last_activity: 2026-06-27
 progress:
   total_phases: 8
   completed_phases: 5
-  total_plans: 12
-  completed_plans: 11
+  total_plans: 15
+  completed_plans: 12
   percent: 63
 ---
 
@@ -21,10 +21,12 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** 🚧 v8.3.0 RE-SCOPED (2026-06-27) to a public both-apps release. Decomposition (122-127) done; building SEED-025 Space-scroll (Phase 128) + SEED-026 Library filter (Phase 129) at full parity, then `/release` 8.3.0 + close. Next: `/gsd-discuss-phase 128`.
+**Current focus:** Phase 128 — Search Results Space-Scroll (SEED-025)
 
 ## Current Position
 
+Phase: 128 (Search Results Space-Scroll (SEED-025)) — EXECUTING
+Plan: 2 of 2
 🚧 **RE-SCOPE 2026-06-27 (user decision):** v8.3.0 is NO LONGER internal-only. It now ships **publicly to
 both apps** as 8.3.0 (8.2.2 → 8.3.0, no skipped number) by folding in two user-facing search/browse features
 at **full parity**, so desktop earns the version bump with visible features (not just the invisible refactor):
@@ -122,7 +124,7 @@ PHASE 125 (engines) — COMPLETE 2026-06-26. genizah_core.py 6064→755 ln (perm
   LESSON from 124: the executor's "0 new failures" was count-based, not name-based — ALWAYS
   do the base-vs-HEAD NAME-level test comparison + facade-name diff yourself; don't trust the
   executor's failure count.
-Last activity: 2026-06-26
+Last activity: 2026-06-27
 
 Progress: [███████░░░] 67% (4 of 6 phases — 122, 123, 124, 125 complete)
 
@@ -170,9 +172,9 @@ Items carried forward from v8.2.0 and earlier:
 
 ## Session Continuity
 
-Last session: 2026-06-27T19:46:33.240Z
+Last session: 2026-06-27T20:54:56.738Z
 Stopped at: Phase 128 context gathered
-Resume file: .planning/phases/128-search-results-space-scroll-seed-025/128-CONTEXT.md
+Resume file: None
 Next step: `/gsd-discuss-phase 126` (or skip-discuss-if-empty per the standing autonomous directive)
 
 ## Performance Metrics
@@ -190,6 +192,7 @@ Next step: `/gsd-discuss-phase 126` (or skip-discuss-if-empty per the standing a
 | Phase 126-desktop-panels P01 | 55m | 3 tasks | 5 files |
 | Phase 127-update-ui-final-cleanup P02 | 25 | 2 tasks | 2 files |
 | Phase 127-update-ui-final-cleanup P03 | 30m | 2 tasks | 3 files |
+| Phase 128 P01 | 20min | 2 tasks | 4 files |
 
 ## Decisions
 
