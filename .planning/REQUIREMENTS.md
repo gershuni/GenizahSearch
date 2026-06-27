@@ -53,7 +53,7 @@
 ### Search Results Space-Scroll (SCROLL) — Phase 128 (SEED-025)
 
 - [x] **SCROLL-01** (web): On `/search`, Space page-scrolls the results container (Shift+Space scrolls up) when no actionable result control holds focus; when a result checkbox / expand / open-detail control (or an open dialog) holds focus, Space performs that action and is NOT stolen; no `preventDefault` on controls that legitimately consume Space (a11y intact). State of the actionable-suppression set is enumerated + tested.
-- [ ] **SCROLL-02** (desktop): In the results table, Space routes to page-down (Shift+Space page-up) of the results scroll area when no item is in a checkable/actionable focus state; otherwise Space toggles/activates the focused item as today.
+- [x] **SCROLL-02** (desktop): In the results table, Space routes to page-down (Shift+Space page-up) of the results scroll area when no item is in a checkable/actionable focus state; otherwise Space toggles/activates the focused item as today.
 
 ### Library Filter (LIBFILTER) — Phase 129 (SEED-026)
 

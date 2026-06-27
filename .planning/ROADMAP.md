@@ -92,7 +92,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 - [x] **Phase 127: Update UI & Final Cleanup** - Extract `desktop/update_ui.py` + new direct behavioral tests for sidecar reset/download coordination; remove the Phase-126 (D1) desktop shims from `genizah_app.py`; install the `desktop/` back-edge guard; confirm `genizah_core.py` permanent facade; full-suite-green sign-off. (genizah_app.py shrinks only modestly this milestone — the bulk awaits SEED-028.) (completed 2026-06-26)
 
-- [ ] **Phase 128: Search Results Space-Scroll (SEED-025)** - Space page-scrolls the search-results area when no result control holds an actionable focus (checkbox / expand / open detail); Shift+Space scrolls up; never steals the keystroke from a focused control. Web (NiceGUI keydown handler + focus guard on the results scroll container) + desktop (PyQt6 results table page-down/up routing). Small, self-contained.
+- [x] **Phase 128: Search Results Space-Scroll (SEED-025)** - Space page-scrolls the search-results area when no result control holds an actionable focus (checkbox / expand / open detail); Shift+Space scrolls up; never steals the keystroke from a focused control. Web (NiceGUI keydown handler + focus guard on the results scroll container) + desktop (PyQt6 results table page-down/up routing). Small, self-contained. (completed 2026-06-27)
 
 - [ ] **Phase 129: Library Filter — Search + Browse-by-Identification (SEED-026)** - Library multi-select filter on web `/search` results (applied over the FULL pre-`[:200]` set, persisted via `safe_storage`, i18n EN/HE) and a `library_codes` filter pushed DOWN into `shared/fjms_service.get_browse_results` for Browse-by-Identification (correct `total`/pagination, composes with the SEED-023 PGP/Editions filters). Desktop parity: catalog Browse-by-Identification library filter (desktop search-results already filters by library/shelfmark). Reuses the SEED-023 push-down template; **Codex-review-before-code gate** per the seed.
 
@@ -228,7 +228,7 @@ Plans:
 Plans:
 
 - [x] 128-01-PLAN.md (Wave 1) — Web Space-scroll: client-side keydown handler injected via ui.run_javascript scrolls .results-scroll-area / .q-scrollarea__container on Space (Shift+Space up), suppressed for INPUT/BUTTON/TEXTAREA/SELECT/role=button/contentEditable/open .q-dialog; double-install guard; + full tests/test_space_scroll.py scaffold + conftest gui registration (SCROLL-01, GUARD-02)
-- [ ] 128-02-PLAN.md (Wave 2, depends 128-01) — Desktop Space-scroll: QAbstractSlider import + Key_Space branch in GenizahGUI.eventFilter routing non-checkbox-column Space to verticalScrollBar().triggerAction(SliderPageStepAdd/Sub), checkbox-column Space falls through to Qt toggle; turns the 3 desktop gui tests green (SCROLL-02, GUARD-02)
+- [x] 128-02-PLAN.md (Wave 2, depends 128-01) — Desktop Space-scroll: QAbstractSlider import + Key_Space branch in GenizahGUI.eventFilter routing non-checkbox-column Space to verticalScrollBar().triggerAction(SliderPageStepAdd/Sub), checkbox-column Space falls through to Qt toggle; turns the 3 desktop gui tests green (SCROLL-02, GUARD-02)
 
 ### Phase 129: Library Filter — Search + Browse-by-Identification (SEED-026)
 
@@ -260,5 +260,5 @@ Plans:
 | 125. Core Engines | 4/4 | Complete   | 2026-06-26 |
 | 126. Desktop Panels | 1/1 | Complete   | 2026-06-26 |
 | 127. Update UI & Final Cleanup | 3/3 | Complete   | 2026-06-26 |
-| 128. Search Results Space-Scroll (SEED-025) | 1/2 | In Progress|  |
+| 128. Search Results Space-Scroll (SEED-025) | 2/2 | Complete   | 2026-06-27 |
 | 129. Library Filter (SEED-026) | 0/? | Not started | - |
