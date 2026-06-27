@@ -2058,10 +2058,57 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         except TimeoutError:
             pass  # JS still executes, timeout is just about awaiting response
 
+    async def setup_space_scroll():
+        """Install client-side Space key scroll handler for the results pane (SCROLL-01 / D-03).
+
+        Injects a single self-contained IIFE via ui.run_javascript that:
+        - Guards against double-install with window._gsSpaceScrollInstalled.
+        - Intercepts document keydown for the Space key only.
+        - Returns without action when an actionable control has focus (D-01 suppression set)
+          or a Quasar dialog is open — a11y intact.
+        - Scrolls .results-scroll-area > .q-scrollarea__container by ±clientHeight (D-02/D-03).
+        - Uses scrollTop += delta (universal / Safari < 15.4-safe, Open Question 1 RESOLVED).
+        """
+        js_code = '''
+        (function() {
+            if (window._gsSpaceScrollInstalled) return;
+            window._gsSpaceScrollInstalled = true;
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key !== ' ') return;
+
+                // Guard: any open Quasar dialog (Quick View etc.)
+                if (document.querySelector('.q-dialog')) return;
+
+                // Guard: actionable active element (D-01 suppression set)
+                var ae = document.activeElement;
+                if (!ae) return;
+                var tag = ae.tagName;
+                if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'A') return;
+                if (ae.closest && ae.closest('a[href]')) return;
+                if (ae.getAttribute('role') === 'button') return;
+                if (ae.isContentEditable) return;
+
+                // Scroll the results pane (D-03 / Finding W-3)
+                var outer = document.querySelector('.results-scroll-area');
+                if (!outer) return;
+                var inner = outer.querySelector('.q-scrollarea__container') || outer;
+                var delta = e.shiftKey ? -inner.clientHeight : inner.clientHeight;
+                inner.scrollTop += delta;
+                e.preventDefault();
+            });
+        })();
+        '''
+        try:
+            await ui.run_javascript(js_code, timeout=5.0)
+        except TimeoutError:
+            pass  # JS still executes; timeout is just about awaiting the response
+
     # Set up scroll handlers after a short delay
     # Cat-2: _after_delay pattern for JS DOM readiness - scroll handlers bind to
     # dynamically rendered elements that must exist before JS runs.
     asyncio.ensure_future(_after_delay(1.0, setup_scroll_collapse))
+    asyncio.ensure_future(_after_delay(1.0, setup_space_scroll))
 
     # === Helper Functions ===
 
