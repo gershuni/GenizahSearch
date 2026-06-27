@@ -21,12 +21,20 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 128 — Search Results Space-Scroll (SEED-025)
+**Current focus:** Phase 128 DONE (code + reviews + suite green; manual UAT pending). Next: `/gsd-discuss-phase 129` (SEED-026 library filter).
 
 ## Current Position
 
-Phase: 128 (Search Results Space-Scroll (SEED-025)) — EXECUTING
-Plan: 2 of 2
+✅ **Phase 128 (Search Results Space-Scroll, SEED-025) — CODE-COMPLETE 2026-06-28.** Both plans executed (128-01 web
+client-side keydown JS + two-file test scaffold; 128-02 desktop pure `space_scroll_action` helper + `eventFilter`
+Key_Space branch). Gates all cleared: Codex PLAN pre-flight APPROVE (4-round), Codex CODE review APPROVE (2-round,
+no findings), gsd-verifier 8/8 must-haves (`human_needed` only for the 6 live-browser/desktop manual smokes — the
+render-smoke gap), full bulk suite 4901 passed/0 failed (GUARD-02). SCROLL-01 + SCROLL-02 satisfied. Remaining:
+6 manual UAT smokes (do at release-time web/desktop smoke). NEXT: Phase 129 (SEED-026 library filter) — carries a
+Codex-review-BEFORE-code gate; then `/release` 8.3.0 (both apps) → `/gsd-complete-milestone`.
+
+Phase: 128 (Search Results Space-Scroll (SEED-025)) — DONE (manual UAT pending)
+Plan: 2 of 2 complete
 🚧 **RE-SCOPE 2026-06-27 (user decision):** v8.3.0 is NO LONGER internal-only. It now ships **publicly to
 both apps** as 8.3.0 (8.2.2 → 8.3.0, no skipped number) by folding in two user-facing search/browse features
 at **full parity**, so desktop earns the version bump with visible features (not just the invisible refactor):
