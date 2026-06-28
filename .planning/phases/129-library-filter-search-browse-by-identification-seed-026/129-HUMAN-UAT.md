@@ -1,38 +1,47 @@
 ---
-status: issues_found
+status: partial
 phase: 129-library-filter-search-browse-by-identification-seed-026
 source: [129-VERIFICATION.md]
 started: 2026-06-28T16:57:22Z
-updated: 2026-06-28T17:30:00Z
+updated: 2026-06-28T22:10:00Z
+round: 2 (re-smoke after gap-closure plans 129-05/06/07)
 ---
 
 ## Current Test
 
-[awaiting human testing]
+[awaiting human re-smoke of the redesigned checkbox-dialog UX]
+
+## History
+
+Round 1 (2026-06-28) found 8 UX gaps (GAP-A..GAP-H) — menu/dropdown control, misplaced chips,
+broken "search within results". Closed by gap-closure plans 129-05/06/07 (menu/dropdown → checkbox
+dialog mirroring "Filter by Domains"; post-search chips; search-within now threads the library
+selection). Both code-review gates (internal + Codex CODE, converged APPROVE) passed; 64 tests green.
 
 ## Tests
 
-### 1. Web search filter — visual / RTL smoke test
-expected: In the Hebrew UI, the "סינון לפי ספרייה" (Filter by library) control appears beside the PGP/Printed buttons. Selecting one or more libraries narrows the result list (over the full set, not just the visible page), the per-library facet counts render correctly with 0-match libraries hidden, the active selection shows as a removable Hebrew chip, the results count shows the "(מסנן ספרייה)" indicator, and clicking the chip × restores the full result set. No English leak under Hebrew.
-result: ISSUES — (GAP-A) the filter button does not render; (GAP-B) clicking "Filter by Domains" opens both menus; (GAP-C) wrong control type — must be a checkbox dialog like Filter by Domains so users can hide specific libraries; (GAP-D) chips appear in the pre-search "search only in…" bar instead of the post-search filter area.
+### 1. Web /search — checkbox dialog, chip placement, no menu collision
+expected: After a search returning multiple libraries, the "סינון לפי ספרייה" button is VISIBLE (GAP-A). Clicking it opens a CHECKBOX DIALOG (not a dropdown menu) like "Filter by Domains" (GAP-C). Apply is disabled when all boxes are unchecked; "Select all" re-enables it (all-unchecked guard). Selecting e.g. CUL + Apply narrows results over the full set; a removable chip appears in the POST-search filter row (not the pre-search "search only in…" bar) (GAP-D); chip × restores all. The "Filter by Domains" button opens ONLY the domain dialog (GAP-B). No English under Hebrew.
+result: [pending]
 
-### 2. Web Browse-by-Identification — push-down total correctness
-expected: On the catalog (Browse-by-Identification) page, selecting a library from the new dropdown-checklist changes the total count correctly (reflects the full filtered set, not just the current page), pagination stays correct, the filter composes with the SEED-023 PGP/Editions filters (combining them ANDs correctly), per-code chips are removable, and clearing restores the unfiltered total. Labels render in Hebrew under the Hebrew UI.
-result: ISSUES — (GAP-E) must use a checkbox dialog, not the dropdown; (GAP-F) "Search in these results" does not work when libraries are selected (selection dropped / button disabled). Push-down total/pagination not re-confirmed due to control issues.
+### 2. Web Browse-by-Identification — dialog, push-down, search-within, no parallels leak
+expected: The catalog library control is a CHECKBOX DIALOG (GAP-E). Selecting libraries changes the total correctly (push-down, composes with PGP/Editions). "Search in these results" is ENABLED and carries the library selection to /search (chip visible, results narrowed) (GAP-F); reloading /search persists it. Navigating catalog→parallels with a library selected does NOT silently leak the library filter into a later fresh /search (WR-01 fix). No English under Hebrew.
+result: [pending]
 
-### 3. Desktop catalog — visual smoke test
-expected: On the desktop catalog Browse-by-Identification view, the library-filter QPushButton opens a Hebrew-labeled QMenu of checkable libraries with NO "My Library" / LOCAL option. Selecting e.g. CUL narrows the catalog results (correct total/pagination), the active selection appears as a Hebrew chip with per-code remove + clear-all, and removing restores results. Existing desktop search-results library/shelfmark filtering is unaffected.
-result: ISSUES — (GAP-G) must use checkboxes in the tab, not a QMenu; (GAP-H) "search within these results" must compose with the library filter.
+### 3. Desktop catalog — dialog, search-within, recompute preserves library
+expected: The desktop catalog library control is a CHECKBOX DIALOG (not a QMenu), with NO "My Library"/LOCAL option (GAP-G); OK disabled at zero-checked. Selecting CUL narrows the catalog; a removable Hebrew chip appears; removing restores. "Search in these results" / "Parallels in these results" carry the library scope to the search tab, where it shows as a removable "Library: …" chip (GAP-H); removing a DIFFERENT (e.g. domain) chip afterward PRESERVES the library restriction (FilterCountWorker recompute). No English under Hebrew.
+result: [pending]
 
 ## Summary
 
 total: 3
 passed: 0
-issues: 3
-pending: 0
+issues: 0
+pending: 3
 skipped: 0
 blocked: 0
 
 ## Gaps
 
-All 8 gaps (GAP-A .. GAP-H) are documented with root cause + remediation map in `129-VERIFICATION.md` (Gaps section). They route to gap-closure planning (`/gsd:plan-phase 129 --gaps`).
+Round-1 gaps GAP-A..GAP-H are all CLOSED by code evidence (see 129-VERIFICATION.md re-verification).
+Awaiting human re-smoke confirmation of the 3 surfaces above.
