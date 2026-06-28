@@ -4008,7 +4008,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             total = len(search_state.results)
             showing = len(filtered)
             n_excl = len(excluded_items)
-            results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({n_excl} {tr('excluded')})"
+            count_parts = [f"{n_excl} {tr('excluded')}"]
+            if search_state.library_filter:  # SEED-026 (WR-04): show indicator when library filter active
+                count_parts.append(tr('Library filter'))
+            results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({', '.join(count_parts)})"
             render_results(filtered, page=0)
 
     def _apply_domain_exclusions(reset_expansion=True):
