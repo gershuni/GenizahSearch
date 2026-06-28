@@ -1117,7 +1117,12 @@ def create_catalog_browse_page(
                             # Apply inclusion mapping:
                             #   all-checked => [] (clear filter; '[]' = show all)
                             #   strict subset => that subset
-                            new_filter = _library_apply_selection(checked, _all)
+                            # WR-03 fix: re-add the LIBRARY_CODES validation that the old
+                            # ui.select path enforced — drop any code not in the canonical
+                            # set before persisting (the downstream resolver also drops
+                            # unknowns, but this prevents junk accumulating in storage).
+                            new_filter = [c for c in _library_apply_selection(checked, _all)
+                                          if c in LIBRARY_CODES]
                             current_library_filter['value'] = new_filter
                             safe_user_set('catalog_library_filter', new_filter)
                             _update_library_filter_btn()
