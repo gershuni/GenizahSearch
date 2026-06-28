@@ -260,7 +260,7 @@ Plans:
 **Gap Closure (UAT 2026-06-28 — control redesign + search-within wiring)** *(data layer is verified/unchanged; these close the 8 UX gaps GAP-A..GAP-H. All 3 plans have disjoint `files_modified` → parallel Wave 1.)*
 
 - [x] 129-05-PLAN.md (gap, Wave 1) — Web `/search` control redesign: fix button-visibility mechanism conflict (GAP-A), remove the menu so the domain button stops co-opening it (GAP-B), replace the `ui.menu` with a checkbox dialog mirroring "Filter by Domains" (GAP-C), relocate chips to the post-search area near `results_header` (GAP-D); owns `genizah_translations.py` additions (LIBFILTER-01, GUARD-02)
-- [ ] 129-06-PLAN.md (gap, Wave 1) — Web catalog: replace the `ui.select` with a checkbox dialog (GAP-E) + thread the library selection through browse→search "Search in these results" via `_build_incoming_filters`/`_has_active_filters` (catalog) + `consume_incoming_filters` (filter_panel) persisting the literal `search_library_filter` key (GAP-F) (LIBFILTER-02, GUARD-02)
+- [x] 129-06-PLAN.md (gap, Wave 1) — Web catalog: replace the `ui.select` with a checkbox dialog (GAP-E) + thread the library selection through browse→search "Search in these results" via `_build_incoming_filters`/`_has_active_filters` (catalog) + `consume_incoming_filters` (filter_panel) persisting the literal `search_library_filter` key (GAP-F) (LIBFILTER-02, GUARD-02)
 - [ ] 129-07-PLAN.md (gap, Wave 1) — Desktop catalog: replace QMenu with a `LibraryFilterDialog` checkbox dialog (GAP-G) + thread `_catalog_library_filter` into "search within"/"parallels within" by intersecting `resolve_library_sys_ids` into `pre_search_restrict_sys_ids` (GAP-H); gui-marked tests (LIBFILTER-03, GUARD-02)
 
 ## Progress
@@ -279,4 +279,4 @@ Plans:
 | 126. Desktop Panels | 1/1 | Complete   | 2026-06-26 |
 | 127. Update UI & Final Cleanup | 3/3 | Complete   | 2026-06-26 |
 | 128. Search Results Space-Scroll (SEED-025) | 2/2 | Complete   | 2026-06-27 |
-| 129. Library Filter (SEED-026) | 5/7 | In Progress|  |
+| 129. Library Filter (SEED-026) | 6/7 | In Progress|  |
