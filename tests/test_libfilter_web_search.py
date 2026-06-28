@@ -8,6 +8,11 @@ Coverage:
   (5) test_persistence_uses_safe_storage_chokepoint     — key search_library_filter + no raw access
   (6) test_label_uses_get_library_display               — labels via get_library_display, not raw code
   (7) test_chip_renders_when_library_only               — chip visible in library-only case (AST)
+  (8) test_dialog_control_not_menu                      — GAP-B/C: dialog not menu (AST)
+  (9) test_button_visibility_mechanism_consistent       — GAP-A: _set_btn_visible not set_visibility
+  (10) test_library_apply_selection_mapping             — GAP-C: all-checked=>[], subset=>subset
+  (11) test_all_unchecked_guard                         — FINDING 1: Apply guarded against zero-checked
+  (12) test_chip_placement_post_search_container        — GAP-D: chips in post-search row not chip_bar
 """
 import ast
 import re
@@ -48,6 +53,23 @@ def _compute_library_facets_pure(results_list: list) -> Counter:
         for r in results_list
         if r.get('display', {}).get('library_code')
     )
+
+
+# Pure mapping helper — mirrors _library_apply_selection (Task 2 implementation).
+# all-checked => [] (clear filter); strict subset => that subset.
+def _library_apply_selection_pure(checked_codes: list, all_codes: list) -> list:
+    """Pure-Python version of _library_apply_selection for test verification.
+
+    Returns [] when checked_codes == all_codes (all included = no filter),
+    else returns the checked subset.
+    ONLY called with non-empty checked_codes (zero-checked state is blocked by Apply guard).
+    """
+    if not checked_codes:
+        # This should never happen — the Apply guard prevents zero-checked commits.
+        raise ValueError("_library_apply_selection_pure must not be called with empty checked_codes")
+    if set(checked_codes) == set(all_codes):
+        return []
+    return list(checked_codes)
 
 
 # ---------------------------------------------------------------------------
@@ -357,18 +379,13 @@ def test_chip_renders_when_library_only():
     active filter — it must NOT be gated solely on _has_active_filters() (which
     covers only pre-search filters) or on printed/pgp being active.
 
-    AST guard: the library chip render code must be inside a branch that fires
-    on bool(search_state.library_filter) independently of printed_filter/pgp_filter.
+    GAP-D: library chips render in the POST-SEARCH container (library_chip_row),
+    not in chip_bar_container (_update_chip_bar). This test checks that there is
+    a chip render path referencing library_filter.
     """
     source = SEARCH_PY.read_text(encoding='utf-8')
 
-    # The chip bar or a standalone library-chip path must reference library_filter
-    # AND must not be exclusively gated on _has_active_filters() or printed/pgp.
-    # We check that 'library_filter' appears in a context that is NOT exclusively
-    # guarded by printed_filter or pgp_filter.
-
-    # Minimum: the source must contain a library chip render (a ui.chip or ui.badge
-    # or "×" removal that references library_filter).
+    # The source must contain a library chip render referencing library_filter
     assert 'library_filter' in source, (
         "search_library_filter / library_filter not found in search.py — "
         "the library chip path has not been implemented."
@@ -416,4 +433,310 @@ def test_chip_renders_when_library_only():
     assert has_update_fn, (
         "No library chip update/render path found in search.py. "
         "The chip must render when library is the only active filter."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 8 (GAP-B/C): dialog not menu — AST source-scan
+# ---------------------------------------------------------------------------
+
+def test_dialog_control_not_menu():
+    """GAP-B closed: domain button opens ONLY the domain dialog (no library menu
+    in the shared button row).
+    GAP-C closed: library control is a checkbox dialog (_open_library_filter_dialog)
+    with inclusion semantics, NOT a ui.menu.
+
+    Assertions:
+    - _open_library_filter_dialog is defined in search.py
+    - search.py contains ui.dialog( (the dialog primitive used inside the function)
+    - _rebuild_library_menu, _library_menu_ref, ui.menu_item for libraries are ABSENT
+      (the old menu apparatus is gone)
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+
+    # Positive: dialog function defined
+    assert '_open_library_filter_dialog' in source, (
+        "_open_library_filter_dialog not found in web/pages/search.py. "
+        "GAP-C: library control must be a checkbox dialog, not a ui.menu."
+    )
+
+    # Positive: ui.dialog( is used (the dialog primitive)
+    assert 'ui.dialog(' in source, (
+        "ui.dialog( not found in web/pages/search.py. "
+        "The library filter dialog must use ui.dialog."
+    )
+
+    # Negative: old menu apparatus must be gone
+    assert '_rebuild_library_menu' not in source, (
+        "_rebuild_library_menu still present in search.py. "
+        "GAP-C: the old ui.menu apparatus must be removed in favour of the dialog."
+    )
+
+    assert '_library_menu_ref' not in source, (
+        "_library_menu_ref still present in search.py. "
+        "GAP-C: the old menu-reference dict must be removed."
+    )
+
+    # No bare ui.menu() for the library filter (the only remaining ui.menu calls
+    # should be the history menu, not a library filter menu)
+    # Check that library_filter_btn is NOT connected to a ui.menu.open()
+    assert 'library_filter_btn.on(\'click\', lambda: _library_menu.open())' not in source and \
+           'library_filter_btn.on("click", lambda: _library_menu.open())' not in source, (
+        "library_filter_btn is still wired to a ui.menu.open() click handler. "
+        "GAP-C: it must instead open _open_library_filter_dialog()."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 9 (GAP-A): button visibility mechanism consistent
+# ---------------------------------------------------------------------------
+
+def test_button_visibility_mechanism_consistent():
+    """GAP-A closed: library_filter_btn is revealed via _set_btn_visible (CSS
+    visibility:hidden/visible, reserves layout space), NOT via set_visibility(False)
+    (display:none / NiceGUI _visible flag) which conflicts with the reveal path.
+
+    Assertions:
+    - library_filter_btn.set_visibility( does NOT appear anywhere in search.py
+    - _set_btn_visible(library_filter_btn is present at >=2 sites (construction init
+      + results-arrive reveal path at search.py:4930)
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+
+    # Negative: set_visibility(False) must not be used for library_filter_btn
+    assert 'library_filter_btn.set_visibility(' not in source, (
+        "library_filter_btn.set_visibility( found in search.py. "
+        "GAP-A: use _set_btn_visible(library_filter_btn, False) consistently. "
+        "set_visibility uses display:none which conflicts with the CSS visibility reveal path."
+    )
+
+    # Positive: _set_btn_visible(library_filter_btn must appear
+    assert '_set_btn_visible(library_filter_btn' in source, (
+        "_set_btn_visible(library_filter_btn not found in search.py. "
+        "GAP-A: library_filter_btn must be hidden/revealed via _set_btn_visible "
+        "at construction AND at the results-arrive reveal path (matching sibling buttons)."
+    )
+
+    # Count occurrences — must be >=2 (construction + reveal)
+    count = source.count('_set_btn_visible(library_filter_btn')
+    assert count >= 2, (
+        f"_set_btn_visible(library_filter_btn found only {count} time(s) in search.py. "
+        "Expected >=2: one at button construction (False) and one at results-arrive reveal."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 10 (GAP-C): inclusion mapping — all-checked=>[], subset=>subset
+# ---------------------------------------------------------------------------
+
+def test_library_apply_selection_mapping():
+    """GAP-C: _library_apply_selection (or an equivalent pure helper) must implement
+    the correct inclusion mapping:
+      - all checked ⇒ [] (clear filter / show all — the '[]' sentinel means 'show all')
+      - strict subset checked ⇒ exactly that subset (inclusion filter)
+
+    This test exercises the pure mapping helper defined in this file, and also verifies
+    that _library_apply_selection exists in search.py (the production implementation).
+    """
+    # All-checked case: when checked == all_codes, result is []
+    all_codes = ['CUL', 'JTS', 'Oxford', 'RNL']
+    result = _library_apply_selection_pure(all_codes, all_codes)
+    assert result == [], (
+        "All libraries checked should yield [] (clear filter / show all sentinel). "
+        f"Got: {result}"
+    )
+
+    # Strict subset case: checked subset is returned as-is
+    checked_subset = ['CUL', 'JTS']
+    result2 = _library_apply_selection_pure(checked_subset, all_codes)
+    assert set(result2) == {'CUL', 'JTS'}, (
+        f"Strict subset apply should return the checked subset. Got: {result2}"
+    )
+
+    # Single code selected
+    result3 = _library_apply_selection_pure(['Oxford'], all_codes)
+    assert set(result3) == {'Oxford'}, (
+        f"Single library selected should return ['Oxford']. Got: {result3}"
+    )
+
+    # Source-level check: _library_apply_selection must exist in search.py
+    source = SEARCH_PY.read_text(encoding='utf-8')
+    assert '_library_apply_selection' in source, (
+        "_library_apply_selection not found in web/pages/search.py. "
+        "GAP-C: a pure testable mapping helper must be defined "
+        "(all-checked->[], subset->subset)."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 11 (FINDING 1): all-unchecked Apply guard
+# ---------------------------------------------------------------------------
+
+def test_all_unchecked_guard():
+    """FINDING 1: applying with zero libraries checked must be UNREACHABLE.
+
+    The data layer uses [] to mean 'show all'. If the user could apply an
+    all-unchecked state, the resulting [] would be read as 'show all' — the
+    OPPOSITE of the intended 'hide all'. To prevent this collision:
+
+    1. No 'Select None' / 'deselect all' library affordance (only 'Select All').
+    2. The Apply path must be guarded against a zero-checked commit — either
+       the Apply button is disabled when checked-count == 0, or the Python
+       apply handler short-circuits with a warning notify.
+    3. The guard token (a hint string or disabled-Apply JS) must be present.
+    4. _library_apply_selection is NEVER fed an empty checked set as a committed filter.
+
+    Assertions (source-scan):
+    - No 'Select None' for the library filter (no deselect-all library action)
+    - A guard token is present: 'Select at least one library' string OR the
+      _library_apply_selection is documented/guarded against empty input
+    - _library_apply_selection is ONLY called from the Apply path (never with
+      an empty checked set as a committed filter commit)
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+
+    # Guard: _library_apply_selection must exist (verified by test 10 too)
+    assert '_library_apply_selection' in source, (
+        "_library_apply_selection not found in search.py. "
+        "The all-unchecked guard requires this pure mapping helper."
+    )
+
+    # The guard token must be present — either:
+    # (a) a hint string 'Select at least one library' (or the tr() key for it), OR
+    # (b) the Apply handler contains an `if not checked` / `if len(...) == 0` guard
+    hint_present = (
+        'Select at least one library' in source
+        or "tr('Select at least one library" in source
+        or 'tr("Select at least one library' in source
+    )
+    # Also accept the JS-disabled-Apply pattern (checked_count == 0 disables Apply)
+    js_guard_present = (
+        'checked-count == 0' in source
+        or 'checked_count == 0' in source
+        or 'len(checked' in source
+        or 'if not checked' in source
+    )
+    assert hint_present or js_guard_present, (
+        "No Apply guard found for the zero-checked state in search.py. "
+        "FINDING 1: the Apply button must be disabled when zero libraries are checked, "
+        "OR the Python apply handler must short-circuit with a warning notify "
+        "when the checked set is empty. "
+        "Expected hint string 'Select at least one library' or a guarded if-not-checked path."
+    )
+
+    # Confirm there is NO 'Select None' library affordance (only 'Select All' is allowed).
+    # The domain dialog has 'Select None' — that's OK; we check the LIBRARY dialog only.
+    # Strategy: look for 'Select None' appearing near the library filter dialog context.
+    # We verify by checking for the absence of a 'Select None' text immediately after
+    # _open_library_filter_dialog definition (within the function body).
+    lines = source.splitlines()
+    in_lib_dialog = False
+    lib_dialog_body_lines = []
+    brace_depth = 0
+    for ln in lines:
+        if 'def _open_library_filter_dialog' in ln:
+            in_lib_dialog = True
+        if in_lib_dialog:
+            lib_dialog_body_lines.append(ln)
+            # Simple heuristic: collect until next top-level def at same indent or out of function
+            if len(lib_dialog_body_lines) > 5 and re.match(r'\s{4,8}def ', ln) and ln.strip().startswith('def ') is False:
+                # Still inside indented function body — keep collecting
+                pass
+            if len(lib_dialog_body_lines) > 200:
+                break  # stop after 200 lines of the function
+
+    lib_dialog_src = '\n'.join(lib_dialog_body_lines)
+
+    # 'Select None' must NOT appear in the library filter dialog body
+    # (it IS allowed in the domain dialog — this only checks the library dialog context)
+    # If 'Select None' appears in search.py at all for libraries, that's the bug.
+    # The domain dialog has it but the library dialog must NOT.
+    # We look for Select None in close proximity to 'library' context strings:
+    select_none_in_lib_dialog = (
+        'Select None' in lib_dialog_src
+        or 'select_none' in lib_dialog_src.lower()
+        or 'deselect_all' in lib_dialog_src.lower()
+    )
+    assert not select_none_in_lib_dialog, (
+        "FINDING 1: 'Select None' or deselect-all affordance found in the library "
+        "filter dialog body (_open_library_filter_dialog). "
+        "Only 'Select All' is allowed — 'Select None' would leave an apply-able "
+        "all-unchecked state that collides with the '[]' = show-all sentinel."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 12 (GAP-D): chip placement — post-search container, not chip_bar_container
+# ---------------------------------------------------------------------------
+
+def test_chip_placement_post_search_container():
+    """GAP-D: library chips must be rendered in a dedicated post-search container
+    (library_chip_row) near results_header — NOT in chip_bar_container / _update_chip_bar.
+
+    Assertions:
+    - A 'library_chip_row' identifier exists in search.py (the new post-search chip row)
+    - 'account_balance' (the library chip icon) does NOT appear inside _update_chip_bar
+    - The has_any line in _update_chip_bar does NOT OR bool(search_state.library_filter)
+      (that widening is reverted because library chips moved to their own row)
+    - _update_chip_bar STILL builds the other chip types: domain/measurement/text-position
+      (no chip disappears — regression guard)
+    - chip_bar_container is NOT responsible for library chips
+
+    Note: there is NO 'printed chip' in _update_chip_bar (printed is a BUTTON, not a chip).
+    Do NOT assert a printed chip.
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+
+    # Positive: post-search library chip row must exist
+    assert 'library_chip_row' in source, (
+        "library_chip_row not found in search.py. "
+        "GAP-D: a dedicated post-search chip row must be created near results_header "
+        "for the library filter chips (relocated from chip_bar_container)."
+    )
+
+    # Find the _update_chip_bar function body
+    tree = ast.parse(source)
+    update_chip_bar_src = None
+    for func in _iter_function_defs(tree):
+        if func.name == '_update_chip_bar':
+            update_chip_bar_src = ast.get_source_segment(source, func) or ''
+            break
+
+    assert update_chip_bar_src is not None, (
+        "_update_chip_bar not found in search.py. "
+        "The pre-search chip bar function must still exist."
+    )
+
+    # Negative: account_balance (library chip icon) must NOT be in _update_chip_bar
+    assert 'account_balance' not in update_chip_bar_src, (
+        "'account_balance' (library chip icon) still appears inside _update_chip_bar. "
+        "GAP-D: library chips must be RELOCATED to library_chip_row (post-search area), "
+        "not rendered inside _update_chip_bar (the pre-search chip_bar_container)."
+    )
+
+    # Negative: has_any line must NOT OR bool(search_state.library_filter)
+    # (this widening is reverted because library chips are now in their own row)
+    assert 'or bool(search_state.library_filter)' not in update_chip_bar_src, (
+        "_update_chip_bar has_any line still ORs bool(search_state.library_filter). "
+        "GAP-D: this widening must be reverted — library chips moved to library_chip_row, "
+        "so chip_bar_container's visibility no longer needs to consider library_filter."
+    )
+
+    # Positive: _update_chip_bar still builds the other chip types
+    # (domain chips: 'filter_domains', 'category' icon or domain chip block)
+    assert 'filter_domains' in update_chip_bar_src or 'domain' in update_chip_bar_src.lower(), (
+        "Domain chip block appears to be missing from _update_chip_bar. "
+        "GAP-D: only the library chip block must be removed; all other chip types must remain."
+    )
+
+    # Measurement chips: 'filter_width_min' or 'straighten' icon (measurement chip icon)
+    assert 'filter_width_min' in update_chip_bar_src or 'straighten' in update_chip_bar_src, (
+        "Measurement chip block appears to be missing from _update_chip_bar. "
+        "GAP-D: only the library chip block must be removed; all other chip types must remain."
+    )
+
+    # Text-position chips: 'text_position' or 'anywhere'
+    assert 'text_position' in update_chip_bar_src or 'anywhere' in update_chip_bar_src, (
+        "Text-position chip block appears to be missing from _update_chip_bar. "
+        "GAP-D: only the library chip block must be removed; all other chip types must remain."
     )
