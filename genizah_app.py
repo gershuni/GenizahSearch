@@ -10712,10 +10712,19 @@ class GenizahGUI(QMainWindow):
                 date_from=filters.get('date_from'),
                 date_to=filters.get('date_to'),
             )
-        # GAP-H: intersect library filter into restrict scope
+        # GAP-H: intersect library filter into restrict scope.
+        # WR-02 fix: mirror the data-layer fail-open (fjms_service.get_browse_results:2274-2285)
+        # — if resolution is empty (meta_mgr unavailable, import failure, or genuinely empty
+        # library code list) do NOT intersect to zero; skip and log instead.
         if self._catalog_library_filter:
             lib_ids = resolve_library_sys_ids(self._catalog_library_filter, self.meta_mgr)
-            if self.pre_search_restrict_sys_ids is None:
+            if not lib_ids:
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    "library filter %s resolved to empty on search-in-results — skipping (fail-open)",
+                    self._catalog_library_filter,
+                )
+            elif self.pre_search_restrict_sys_ids is None:
                 self.pre_search_restrict_sys_ids = lib_ids
             else:
                 self.pre_search_restrict_sys_ids &= lib_ids
@@ -10739,10 +10748,17 @@ class GenizahGUI(QMainWindow):
                 date_from=filters.get('date_from'),
                 date_to=filters.get('date_to'),
             )
-        # GAP-H: intersect library filter into restrict scope
+        # GAP-H: intersect library filter into restrict scope.
+        # WR-02 fix: mirror the data-layer fail-open — skip when resolution is empty.
         if self._catalog_library_filter:
             lib_ids = resolve_library_sys_ids(self._catalog_library_filter, self.meta_mgr)
-            if self.pre_search_restrict_sys_ids is None:
+            if not lib_ids:
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    "library filter %s resolved to empty on parallels-in-results — skipping (fail-open)",
+                    self._catalog_library_filter,
+                )
+            elif self.pre_search_restrict_sys_ids is None:
                 self.pre_search_restrict_sys_ids = lib_ids
             else:
                 self.pre_search_restrict_sys_ids &= lib_ids

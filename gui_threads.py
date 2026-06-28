@@ -1288,10 +1288,19 @@ class FilterCountWorker(QThread):
             # FINDING 2 (129-07): intersect library restriction into the recomputed set.
             # Runs on this worker QThread (off the UI thread) — correct for an O(255K)
             # csv_bank scan. No-op when meta_mgr is None or no 'library' key present.
+            # WR-02 fix: skip the intersect when resolution is empty (fail-open), consistent
+            # with fjms_service.get_browse_results:2274-2285 and the two search-within sites.
             if self.filters.get('library') and self._meta_mgr is not None:
                 from shared.fjms_service import resolve_library_sys_ids
+                import logging as _log
                 lib_ids = resolve_library_sys_ids(self.filters['library'], self._meta_mgr)
-                result = lib_ids if result is None else (result & lib_ids)
+                if not lib_ids:
+                    _log.getLogger(__name__).warning(
+                        "FilterCountWorker: library filter %s resolved to empty — skipping (fail-open)",
+                        self.filters['library'],
+                    )
+                else:
+                    result = lib_ids if result is None else (result & lib_ids)
             self.finished.emit(result)
         except Exception:
             self.finished.emit(None)  # Operation failed; emit empty/None so caller handles gracefully
