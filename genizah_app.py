@@ -67,7 +67,7 @@ from desktop.title_helpers import (
 from desktop.image_loader import ImageLoaderThread
 from desktop.result_dialog import ResultDialog
 from desktop.dialogs_scholarly import FjmsBibliographyDialog, FjmsCatalogDialog, FjmsMeasurementsDialog, NliBibliographyDialog  # noqa: F401
-from desktop.dialogs_filter import ExcludeDialog, DomainFilterDialog, PreSearchFilterDialog  # noqa: F401
+from desktop.dialogs_filter import ExcludeDialog, DomainFilterDialog, PreSearchFilterDialog, LibraryFilterDialog, library_apply_selection  # noqa: F401
 from desktop.viewers import ZoomableScrollArea, FullscreenImageWindow, ManuscriptViewerWidget, _make_scrollable_row, _generate_oxford_dynamic_url  # noqa: F401
 from desktop.puzzle import PuzzleFragmentItem, PuzzleCanvasView, PuzzleExportThread, PuzzlePublishThread, PuzzleCanvasWindow  # noqa: F401
 from desktop.vs_cache import DesktopVSCache, VSFetchThread, VSDownloadThread  # noqa: F401
@@ -9834,10 +9834,9 @@ class GenizahGUI(QMainWindow):
         left_layout.addWidget(self._catalog_editions_filter_btn)
         self._catalog_update_avail_filter_btns()
 
-        # SEED-026 desktop parity — library filter (LIBFILTER-03, D-01/D-03).
-        # A QPushButton opens a QMenu of checkable QActions (one per library code).
-        # Labels via get_library_display(code, short=False) — auto-detects CURRENT_LANG,
-        # no English leak under Hebrew UI.
+        # SEED-026 desktop parity — library filter (LIBFILTER-03, GAP-G).
+        # A QPushButton opens a LibraryFilterDialog (checkbox QDialog mirroring
+        # DomainFilterDialog), NOT a QMenu of checkable QActions.
         lib_filter_label = QLabel(tr("Library"))
         lib_filter_label.setStyleSheet("font-weight: bold; font-size: 13px; margin-top: 6px; margin-bottom: 2px;")
         left_layout.addWidget(lib_filter_label)
@@ -9847,17 +9846,8 @@ class GenizahGUI(QMainWindow):
         self._catalog_library_filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._catalog_library_filter_btn.setStyleSheet(
             "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; }"
-            "QPushButton::menu-indicator { image: none; }"
         )
-        lib_menu = QMenu(self._catalog_library_filter_btn)
-        lib_menu.setStyleSheet("QMenu { font-size: 11px; } QMenu::item { padding: 3px 18px; }")
-        for _lib_code in (c for c in LIBRARY_CODES.keys() if c != 'LOCAL'):  # WR-02: LOCAL is not a Genizah library
-            action = lib_menu.addAction(get_library_display(_lib_code, short=False))
-            action.setCheckable(True)
-            action.setData(_lib_code)
-            action.toggled.connect(lambda checked, code=_lib_code: self._catalog_toggle_library(code, checked))
-        self._catalog_library_filter_btn.setMenu(lib_menu)
-        self._catalog_library_menu = lib_menu
+        self._catalog_library_filter_btn.clicked.connect(self._open_catalog_library_dialog)
         left_layout.addWidget(self._catalog_library_filter_btn)
 
         left_panel.setMinimumWidth(260)
@@ -10437,20 +10427,18 @@ class GenizahGUI(QMainWindow):
         self._catalog_current_page = 0
         self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
 
-    def _catalog_toggle_library(self, code: str, checked: bool):
-        """Toggle a library code in the multi-select filter and refresh (LIBFILTER-03).
-
-        Called by the checkable QAction in _catalog_library_menu.
-        Empty selection = all (no filter).
-        """
-        if checked:
-            if code not in self._catalog_library_filter:
-                self._catalog_library_filter.append(code)
-        else:
-            self._catalog_library_filter = [c for c in self._catalog_library_filter if c != code]
-        self._catalog_update_library_filter_btn()
-        self._catalog_current_page = 0
-        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
+    def _open_catalog_library_dialog(self):
+        """Open LibraryFilterDialog (GAP-G) and apply the selection."""
+        all_codes = [c for c in LIBRARY_CODES.keys() if c != 'LOCAL']
+        dlg = LibraryFilterDialog(self, selected_codes=list(self._catalog_library_filter))
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._catalog_library_filter = library_apply_selection(
+                dlg.get_checked_codes(), all_codes
+            )
+            self._catalog_update_library_filter_btn()
+            self._catalog_current_page = 0
+            self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
+            self._catalog_update_chips()
 
     def _catalog_update_library_filter_btn(self):
         """Update the library filter button label to reflect current selection."""
@@ -10464,16 +10452,11 @@ class GenizahGUI(QMainWindow):
                 self._catalog_library_filter_btn.setText(tr("All Libraries"))
 
     def _sync_library_menu_checks(self):
-        """Sync QAction checked states in the library menu with _catalog_library_filter."""
-        if not hasattr(self, '_catalog_library_menu'):
-            return
-        selected = set(self._catalog_library_filter)
-        for action in self._catalog_library_menu.actions():
-            code = action.data()
-            if code is not None:
-                action.blockSignals(True)
-                action.setChecked(code in selected)
-                action.blockSignals(False)
+        """No-op: formerly synced QAction checks in the library QMenu (GAP-G retired).
+
+        Kept as a safe no-op so any legacy caller in _catalog_remove_filter
+        does not raise AttributeError.
+        """
 
     def _catalog_remove_filter(self, filter_type, library_code=None):
         """Remove a specific filter (or all) and refresh.

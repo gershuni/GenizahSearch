@@ -5,7 +5,7 @@ import re
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFileDialog,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QPlainTextEdit, QPushButton, QSpinBox, QToolTip,
+    QListWidget, QListWidgetItem, QPlainTextEdit, QPushButton, QSpinBox, QToolTip,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 from PyQt6.QtCore import QEvent, Qt
@@ -1655,4 +1655,139 @@ class PreSearchFilterDialog(QDialog):
         """Return the computed restrict_sys_ids set (or None)."""
         return self._result_set
 
+
+# ── Library Filter (GAP-G / 129-07) ────────────────────────────────────────
+
+def library_apply_selection(checked: list, all_codes: list) -> list:
+    """Map the dialog's checked codes to the _catalog_library_filter sentinel value.
+
+    Inclusion model:
+      * all checked (== all_codes) -> [] (show-all sentinel; no filter active)
+      * strict subset             -> that subset list (ordered by checked position)
+
+    This function is ONLY called when the OK guard allows accept (i.e. checked is
+    non-empty), so the all-unchecked -> [] -> show-all collision is structurally
+    prevented by the dialog.
+    """
+    if set(checked) == set(all_codes):
+        return []
+    return list(checked)
+
+
+class LibraryFilterDialog(QDialog):
+    """Flat checkable library filter dialog mirroring DomainFilterDialog.
+
+    Inclusion model (GAP-G / FINDING 1):
+      * All libraries except LOCAL offered; all checked by default when
+        ``selected_codes`` is empty (= show all).
+      * Non-empty ``selected_codes`` -> only those codes checked on open.
+      * "Select all" button re-checks everything (= clear the filter).
+      * NO "Select None"/deselect-all affordance (FINDING 1: an all-unchecked
+        state would collide with the `[] = show-all` sentinel).
+      * OK button is DISABLED when zero items are checked, preventing the
+        all-unchecked state from being committed.
+      * ``get_checked_codes()`` returns the list of currently-checked codes
+        in stable (list order) sequence.
+    """
+
+    def __init__(self, parent=None, *, selected_codes: list | None = None):
+        super().__init__(parent)
+        from genizah_core import LIBRARY_CODES, get_library_display  # local import to avoid circular
+        self.setWindowTitle(tr("Filter by Library"))
+        self.setMinimumSize(360, 480)
+        self._all_codes = [c for c in LIBRARY_CODES.keys() if c != 'LOCAL']
+
+        layout = QVBoxLayout(self)
+
+        # List widget with per-item checkboxes (flat, one row per library code)
+        self.list_widget = QListWidget()
+        self.list_widget.setSpacing(2)
+        layout.addWidget(self.list_widget)
+
+        # Populate list
+        active_set = set(selected_codes) if selected_codes else set()
+        all_checked = len(active_set) == 0  # empty selected_codes = all included
+        for code in self._all_codes:
+            label = get_library_display(code, short=False)
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, code)
+            if all_checked or code in active_set:
+                item.setCheckState(Qt.CheckState.Checked)
+            else:
+                item.setCheckState(Qt.CheckState.Unchecked)
+            self.list_widget.addItem(item)
+
+        # Status hint label (shown when OK guard fires)
+        self._hint_label = QLabel("")
+        self._hint_label.setStyleSheet("color: #c0392b; font-size: 11px;")
+        self._hint_label.setVisible(False)
+        layout.addWidget(self._hint_label)
+
+        # Buttons row
+        btn_layout = QHBoxLayout()
+        select_all_btn = QPushButton(tr("Select All"))
+        select_all_btn.clicked.connect(self._select_all)
+        btn_layout.addWidget(select_all_btn)
+        btn_layout.addStretch()
+
+        self.ok_button = QPushButton(tr("OK"))
+        self.ok_button.setDefault(True)
+        self.ok_button.clicked.connect(self._on_accept)
+        cancel_btn = QPushButton(tr("Cancel"))
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(self.ok_button)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        # Connect guard
+        self.list_widget.itemChanged.connect(self._on_item_changed)
+        self._update_ok_button()
+
+    def _on_item_changed(self, item):
+        """Re-evaluate the OK guard whenever a checkbox changes."""
+        self._update_ok_button()
+
+    def _update_ok_button(self):
+        """Enable OK iff at least one library is checked."""
+        checked_count = sum(
+            1 for i in range(self.list_widget.count())
+            if self.list_widget.item(i).checkState() == Qt.CheckState.Checked
+        )
+        self.ok_button.setEnabled(checked_count > 0)
+        if checked_count == 0:
+            self._hint_label.setText(
+                tr("Select at least one library, or check all to clear the filter")
+            )
+            self._hint_label.setVisible(True)
+        else:
+            self._hint_label.setVisible(False)
+
+    def _select_all(self):
+        """Re-check all items (= clear the filter / show all)."""
+        self.list_widget.blockSignals(True)
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.CheckState.Checked)
+        self.list_widget.blockSignals(False)
+        self._update_ok_button()
+
+    def _on_accept(self):
+        """Guard: only accept if at least one library is checked."""
+        checked = self.get_checked_codes()
+        if not checked:
+            # All-unchecked state is unreachable as a committed filter
+            self._hint_label.setText(
+                tr("Select at least one library, or check all to clear the filter")
+            )
+            self._hint_label.setVisible(True)
+            return
+        self.accept()
+
+    def get_checked_codes(self) -> list:
+        """Return the ordered list of currently-checked library codes."""
+        codes = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                codes.append(item.data(Qt.ItemDataRole.UserRole))
+        return codes
 
