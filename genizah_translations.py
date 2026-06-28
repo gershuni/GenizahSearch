@@ -2904,6 +2904,9 @@ TRANSLATIONS = {
     "Library filter": "מסנן ספרייה",
     "All Libraries": "כל הספריות",
     "Libraries": "ספריות",
+    # SEED-026 GAP-C dialog (title-case dialog header + FINDING-1 hint)
+    "Filter by Library": "סינון לפי ספרייה",
+    "Select at least one library, or check all to clear the filter": "יש לבחור לפחות ספרייה אחת, או לסמן הכל כדי לבטל את הסינון",
     # PGP filter (Phase 93)
     "Filter PGP": "סנן PGP",
     "Has PGP": "PGP בלבד",

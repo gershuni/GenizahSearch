@@ -1132,16 +1132,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         def _update_chip_bar():
             """Rebuild chip bar from current filter state.
 
-            SEED-026 (LIBFILTER-01): also renders library filter chips when library is
-            the only active filter (not gated on _has_active_filters() which covers only
-            pre-search filters — library is a post-search filter).
+            SEED-026 (LIBFILTER-01 GAP-D): library chips moved to library_chip_row (post-search
+            area near results_header). chip_bar_container is the PRE-search 'search only in…' bar
+            and only shows domain/text-position/material/measurement chips. The has_any OR for
+            library_filter is reverted — library chips now have their own dedicated row.
             """
             chip_bar_container.clear()
             _pos = (text_position_select.value or 'anywhere')
             _pos_active = _pos != 'anywhere'
-            # SEED-026: include library filter in the "has any" check so chip bar
-            # shows when library is the only active filter.
-            has_any = _has_active_filters() or _pos_active or bool(search_state.library_filter)
+            # NOTE: library_filter is intentionally NOT included here — library chips
+            # were relocated to library_chip_row (post-search area). The pre-search
+            # chip_bar_container only shows filters that apply during search construction.
+            has_any = _has_active_filters() or _pos_active
             chip_bar_container.set_visibility(has_any)
             if not has_any:
                 return
@@ -1289,19 +1291,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         'background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-light);'
                     )
 
-                # SEED-026 (LIBFILTER-01): library filter chips — post-search filter.
-                # Rendered here so chips appear when library is the ONLY active filter
-                # (the has_any check above is widened to include library_filter).
-                if search_state.library_filter:
-                    lang = get_language()
-                    for _lib_code in list(search_state.library_filter):
-                        _lib_label = get_library_display(_lib_code, short=False, lang=lang)
-                        _chip_text = f"{tr('Library')}: {_lib_label}"
-                        _c = _lib_code  # capture for lambda
-                        ui.chip(
-                            _chip_text, icon='account_balance', removable=True,
-                            on_click=lambda: None, color='teal-2',
-                        ).on('remove', lambda c=_c: _remove_library_code(c))
+                # NOTE (SEED-026 GAP-D): library chips were RELOCATED to library_chip_row
+                # (a dedicated post-search row near results_header). They no longer render
+                # here in chip_bar_container (_update_chip_bar). See _update_library_chips().
 
         async def _remove_filter(filter_type, value=None):
             """Remove a specific filter and update state."""
@@ -1591,29 +1583,25 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     if search_state.pgp_filter != 'all':
                         _update_pgp_filter_btn()
 
-                    # SEED-026 (LIBFILTER-01): Library multi-select filter button + dropdown + chips.
-                    # Placed beside PGP filter; hidden until search results exist (same as printed/pgp buttons).
-                    # Uses ui.button that opens a ui.menu with checkable rows — compact dropdown-with-checklist (D-03).
-                    _library_menu_ref = {}  # {menu: ui.menu} forward-reference for the inner callback
+                    # SEED-026 GAP-A/B/C/D: Library multi-select filter — redesigned as a checkbox
+                    # dialog (mirroring _open_domain_filter_dialog) with inclusion semantics.
+                    # Button hidden via _set_btn_visible (CSS visibility, same as sibling buttons).
+                    # No ui.menu — dialog only. Chips are in a dedicated post-search library_chip_row.
 
-                    def _toggle_library_code(code):
-                        """Toggle a library code in/out of the selection and re-apply filters."""
-                        if code in search_state.library_filter:
-                            search_state.library_filter = [c for c in search_state.library_filter if c != code]
-                        else:
-                            search_state.library_filter = list(search_state.library_filter) + [code]
-                        persist_value('search_library_filter', search_state.library_filter)
-                        _update_library_btn()
-                        _update_library_chips()
-                        # Rebuild dropdown to update checkmarks + facet counts
-                        _rebuild_library_menu()
-                        # Re-apply filters and re-render — same cascade as printed/pgp toggles.
-                        if search_state.exclusion_sources:
-                            _apply_manuscript_exclusions()
-                        elif search_state.domain_exclusions and search_state.has_domain_data:
-                            _apply_domain_exclusions()
-                        elif search_state.results:
-                            _apply_printed_filter_and_render(search_state.results)
+                    def _library_apply_selection(checked_codes, all_codes):
+                        """Pure mapping helper: returns [] when all codes are checked (= clear filter /
+                        show all — the '[]' sentinel means 'show all' in the data layer), else returns
+                        the inclusion list (= the checked subset). MUST only be called with a non-empty
+                        checked_codes set — the Apply guard in _open_library_filter_dialog ensures this.
+
+                        Contract (FINDING 1):
+                        - all-checked ⇒ [] (clear filter; '[]' = show all)
+                        - strict subset ⇒ that subset (inclusion filter)
+                        - zero-checked ⇒ NEVER CALLED (blocked by Apply guard)
+                        """
+                        if set(checked_codes) == set(all_codes):
+                            return []
+                        return list(checked_codes)
 
                     def _update_library_btn():
                         """Sync library filter button label and color."""
@@ -1626,47 +1614,27 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             library_filter_btn.props(remove='color')
                             library_filter_btn.props('outline dense no-caps color=teal')
 
-                    def _rebuild_library_menu():
-                        """Repopulate the library dropdown with current facet counts and checkmarks."""
-                        menu = _library_menu_ref.get('menu')
-                        if menu is None:
-                            return
-                        menu.clear()
-                        if not search_state.results:
-                            return
-                        facets = _compute_library_facets(search_state.results)
-                        if not facets:
-                            return
-                        lang = get_language()
-                        # Sort by count desc, then by label
-                        sorted_codes = sorted(
-                            facets.keys(),
-                            key=lambda c: (-facets[c], get_library_display(c, short=False, lang=lang))
-                        )
-                        with menu:
-                            for code in sorted_codes:
-                                count = facets[code]
-                                label = get_library_display(code, short=False, lang=lang)
-                                is_selected = code in search_state.library_filter
-                                _code = code  # capture for lambda
-                                ui.menu_item(
-                                    f"{label} ({count})",
-                                    on_click=lambda c=_code: _toggle_library_code(c),
-                                ).props('dense').style(
-                                    'font-weight: bold;' if is_selected else ''
-                                ).classes('text-sm')
-
                     def _update_library_chips():
-                        """Refresh chip bar to include/remove library filter chips.
-
-                        Library chips are now rendered inside _update_chip_bar (which is
-                        widened to fire when library is the only active filter). This helper
-                        simply delegates to _update_chip_bar, guarded on _chip_bar_ready.
-                        Callers can use _update_library_chips() to ensure chips are up-to-date.
+                        """Rebuild the post-search library_chip_row with one removable chip per
+                        selected library code. Show/hide the row based on whether the filter is active.
+                        GAP-D: chips render in library_chip_row (near results_header), NOT in
+                        chip_bar_container (_update_chip_bar).
                         """
-                        if not _chip_bar_ready.get('value'):
+                        library_chip_row.clear()
+                        if not search_state.library_filter:
+                            library_chip_row.set_visibility(False)
                             return
-                        _update_chip_bar()
+                        library_chip_row.set_visibility(True)
+                        lang = get_language()
+                        with library_chip_row:
+                            for _lib_code in list(search_state.library_filter):
+                                _lib_label = get_library_display(_lib_code, short=False, lang=lang)
+                                _chip_text = f"{tr('Library')}: {_lib_label}"
+                                _c = _lib_code  # capture for lambda
+                                ui.chip(
+                                    _chip_text, icon='account_balance', removable=True,
+                                    on_click=lambda: None, color='teal-2',
+                                ).on('remove', lambda c=_c: _remove_library_code(c))
 
                     def _remove_library_code(code):
                         """Remove a single library code from the selection and re-render."""
@@ -1674,7 +1642,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         persist_value('search_library_filter', search_state.library_filter)
                         _update_library_btn()
                         _update_library_chips()
-                        _rebuild_library_menu()
                         if search_state.exclusion_sources:
                             _apply_manuscript_exclusions()
                         elif search_state.domain_exclusions and search_state.has_domain_data:
@@ -1682,16 +1649,172 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         elif search_state.results:
                             _apply_printed_filter_and_render(search_state.results)
 
+                    def _open_library_filter_dialog():
+                        """Open modal dialog with library filter checkboxes.
+
+                        GAP-C: mirroring _open_domain_filter_dialog — ui.dialog + HTML checkboxes
+                        with JS readback. Inclusion model (locked 2026-06-28): checked = INCLUDE.
+                        All in-result libraries start checked. Unchecking hides that library.
+
+                        FINDING 1 (all-unchecked guard):
+                        - Only a 'Select All' affordance is provided; there is intentionally
+                          NO 'deselect-all' or 'uncheck-all' action (that would yield an apply-able
+                          all-unchecked state that collides with the '[]' = show-all sentinel).
+                        - Apply is disabled client-side when checked-count == 0.
+                        - Python Apply handler defensively short-circuits if checked set is empty,
+                          so a tampered client cannot commit the all-unchecked '[]' collision.
+                        - '[]' ALWAYS means 'show all'; the zero-checked state is intentionally blocked
+                          so it can never collide with that sentinel. _library_apply_selection is only
+                          ever called with a non-empty checked set.
+                        """
+                        if not search_state.results:
+                            return
+                        facets = _compute_library_facets(search_state.results)
+                        if not facets:
+                            return
+
+                        lang = get_language()
+                        # Sort by count desc, then by label
+                        all_codes = sorted(
+                            facets.keys(),
+                            key=lambda c: (-facets[c], get_library_display(c, short=False, lang=lang))
+                        )
+
+                        # Build checkbox HTML — one per library code present in results.
+                        # All start checked (inclusion model); unchecking hides that library.
+                        import html as _html
+                        import uuid as _uuid
+                        container_id = f'lib-filter-{_uuid.uuid4().hex[:8]}'
+                        current_filter = set(search_state.library_filter)
+
+                        checkbox_html_parts = []
+                        for code in all_codes:
+                            count = facets[code]
+                            label = get_library_display(code, short=False, lang=lang)
+                            # Inclusion model: checked when included (not in exclusion set).
+                            # If library_filter is empty (= show all), all are checked.
+                            # If library_filter is a subset, only those codes are checked.
+                            is_checked = (not current_filter) or (code in current_filter)
+                            checked_attr = 'checked' if is_checked else ''
+                            code_attr = _html.escape(code, quote=True)
+                            label_html = _html.escape(f"{label} ({count})")
+                            checkbox_html_parts.append(
+                                f'<label style="display:flex;align-items:center;gap:8px;'
+                                f'padding:5px 0;cursor:pointer;font-size:0.9rem">'
+                                f'<input type="checkbox" class="lib-cb" data-code="{code_attr}" '
+                                f'{checked_attr} '
+                                f'style="width:16px;height:16px;accent-color:#1976d2;cursor:pointer" '
+                                f'onchange="libFilterUpdateApply(\'{container_id}\')">'
+                                f'<span>{label_html}</span></label>'
+                            )
+                        checkbox_html = '\n'.join(checkbox_html_parts)
+                        total_codes = len(all_codes)
+
+                        with ui.dialog() as dialog, ui.card().classes('w-[480px] max-h-[80vh]'):
+                            with ui.column().classes('w-full gap-2'):
+                                ui.label(tr('Filter by Library')).classes('text-lg font-bold')
+                                ui.label(
+                                    f"{tr('Showing')} {len(search_state.results)} {tr('results')}"
+                                ).classes('text-sm text-gray-500')
+
+                                with ui.scroll_area().classes('w-full').style('max-height: 50vh;'):
+                                    ui.html(
+                                        f'<div id="{container_id}">{checkbox_html}</div>'
+                                        f'<script>'
+                                        f'function libFilterUpdateApply(cid){{'
+                                        f'  var cont=document.getElementById(cid);'
+                                        f'  if(!cont)return;'
+                                        f'  var cbs=cont.querySelectorAll(".lib-cb");'
+                                        f'  var n=0;'
+                                        f'  cbs.forEach(function(cb){{if(cb.checked)n++;}});'
+                                        f'  var btn=document.getElementById("libApplyBtn_"+cid);'
+                                        f'  if(btn)btn.disabled=(n===0);'
+                                        f'}}'
+                                        f'function libFilterGetChecked(cid){{'
+                                        f'  var cont=document.getElementById(cid);'
+                                        f'  if(!cont)return [];'
+                                        f'  var result=[];'
+                                        f'  cont.querySelectorAll(".lib-cb:checked").forEach(function(cb){{result.push(cb.dataset.code);}});'
+                                        f'  return result;'
+                                        f'}}'
+                                        f'function libFilterSelectAll(cid,val){{'
+                                        f'  var cont=document.getElementById(cid);'
+                                        f'  if(!cont)return;'
+                                        f'  cont.querySelectorAll(".lib-cb").forEach(function(cb){{cb.checked=val;}});'
+                                        f'  libFilterUpdateApply(cid);'
+                                        f'}}'
+                                        f'</script>',
+                                        sanitize=False,
+                                    )
+
+                                # Buttons
+                                with ui.row().classes('w-full justify-between'):
+                                    _cid = container_id  # capture for closures
+                                    _all = all_codes      # capture for apply
+
+                                    # Select All — the ONLY bulk action provided.
+                                    # Re-checks everything = clear filter / show all.
+                                    # A deselect-all action is intentionally omitted — an all-unchecked
+                                    # apply would produce [] which collides with the 'show all' sentinel.
+                                    ui.button(
+                                        tr('Select All'),
+                                        on_click=lambda: ui.run_javascript(
+                                            f'libFilterSelectAll("{_cid}", true)')
+                                    ).props('flat dense no-caps')
+
+                                    with ui.row().classes('gap-2'):
+                                        async def apply_library_filter():
+                                            checked_list = await ui.run_javascript(
+                                                f'libFilterGetChecked("{_cid}")', timeout=5.0
+                                            )
+                                            checked = list(checked_list) if checked_list else []
+                                            # FINDING 1 — Python-side guard: if checked set is empty,
+                                            # do NOT commit (would produce [] = 'show all' collision).
+                                            # This defensive check fires only if the client-side
+                                            # disabled-Apply guard was bypassed.
+                                            if not checked:
+                                                ui.notify(
+                                                    tr('Select at least one library, or check all to clear the filter'),
+                                                    type='warning',
+                                                )
+                                                return
+                                            # Apply inclusion mapping:
+                                            # all-checked => [] (clear filter); subset => that subset.
+                                            new_filter = _library_apply_selection(checked, _all)
+                                            search_state.library_filter = new_filter
+                                            persist_value('search_library_filter', search_state.library_filter)
+                                            _update_library_btn()
+                                            _update_library_chips()
+                                            if search_state.exclusion_sources:
+                                                _apply_manuscript_exclusions()
+                                            elif search_state.domain_exclusions and search_state.has_domain_data:
+                                                _apply_domain_exclusions()
+                                            elif search_state.results:
+                                                _apply_printed_filter_and_render(search_state.results)
+                                            dialog.close()
+
+                                        # Apply button — disabled client-side when checked-count == 0
+                                        # (libFilterUpdateApply JS handler manages this).
+                                        # Element id used by the JS handler: libApplyBtn_{container_id}
+                                        apply_btn = ui.button(
+                                            tr('Apply'), on_click=apply_library_filter
+                                        ).props('dense no-caps color=primary')
+                                        # Set the DOM id so the JS can find and disable/enable it
+                                        apply_btn.props(f'id="libApplyBtn_{container_id}"')
+
+                                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat dense no-caps')
+
+                        dialog.open()
+
                     library_filter_btn = ui.button(
                         tr('Filter by library'),
                     ).classes('text-sm').props('outline dense no-caps').style('min-height: 2.286em;')
                     library_filter_btn.tooltip(tr('Filter results by library'))
-                    library_filter_btn.set_visibility(False)
-
-                    with ui.menu().classes('shadow-md') as _library_menu:
-                        pass  # Populated by _rebuild_library_menu() when results arrive
-                    _library_menu_ref['menu'] = _library_menu
-                    library_filter_btn.on('click', lambda: _library_menu.open())
+                    # GAP-A: use _set_btn_visible (CSS visibility) to match sibling buttons.
+                    # set_visibility(False) uses display:none which conflicts with the
+                    # results-arrive reveal path that uses _set_btn_visible.
+                    _set_btn_visible(library_filter_btn, False)
+                    library_filter_btn.on('click', lambda: _open_library_filter_dialog())
 
                     # If session restored a library filter, sync button state now (still hidden until search).
                     if search_state.library_filter:
@@ -1741,6 +1864,17 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ui.button(icon='data_object', on_click=lambda: ui.download('/api/export/json')).props(
                         f'flat round dense size=sm aria-label="{tr("Export JSON")}"'
                     ).tooltip(tr('Export JSON'))
+
+            # SEED-026 GAP-D: Post-search library filter chip row — near results_header.
+            # Library chips render HERE, NOT in chip_bar_container (_update_chip_bar).
+            # Hidden until a library filter is active (_update_library_chips manages visibility).
+            library_chip_row = ui.row().classes('w-full px-4 py-1 gap-2 items-center flex-wrap').style(
+                'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); min-height: 0;'
+            )
+            library_chip_row.set_visibility(bool(search_state.library_filter))
+            # If session restored a library filter, populate chips immediately.
+            if search_state.library_filter:
+                _update_library_chips()
 
             # Phase 55: Refinement breadcrumb strip (D-04) -- dedicated strip, NOT inside results header
             refinement_strip = ui.row().classes('w-full px-4 py-1 gap-1 items-center').style(
@@ -4929,7 +5063,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # SEED-026 (LIBFILTER-01): library filter button — visible whenever results exist.
             _set_btn_visible(library_filter_btn, bool(search_state.results))
             _update_library_btn()
-            _rebuild_library_menu()
             _update_library_chips()
 
         def _render_with_filters(reset_expansion=True):
