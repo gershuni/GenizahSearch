@@ -2897,6 +2897,13 @@ TRANSLATIONS = {
     "Showing all": "מציג הכל",
     "Hiding printed": "מסתיר דפוסים",
     "Only printed": "דפוסים בלבד",
+    # Library filter (SEED-026)
+    "Filter by library": "סינון לפי ספרייה",
+    "Filter results by library": "סינון התוצאות לפי ספרייה",
+    "Select libraries...": "בחר ספריות...",
+    "Library filter": "מסנן ספרייה",
+    "All Libraries": "כל הספריות",
+    "Libraries": "ספריות",
     # PGP filter (Phase 93)
     "Filter PGP": "סנן PGP",
     "Has PGP": "PGP בלבד",
