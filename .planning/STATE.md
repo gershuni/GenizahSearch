@@ -4,13 +4,13 @@ milestone: v8.3.0
 milestone_name: God-File Decomposition + Search & Browse UX
 status: Ready to execute
 stopped_at: Phase 129 context gathered
-last_updated: "2026-06-28T04:22:59.964Z"
-last_activity: 2026-06-28 -- Phase 129 planning complete
+last_updated: "2026-06-28T15:50:18.035Z"
+last_activity: 2026-06-28
 progress:
   total_phases: 8
   completed_phases: 5
   total_plans: 19
-  completed_plans: 13
+  completed_plans: 14
   percent: 63
 ---
 
@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 128 DONE (code + reviews + suite green; manual UAT pending). Next: `/gsd-discuss-phase 129` (SEED-026 library filter).
+**Current focus:** Phase 129 — library-filter-search-browse-by-identification-seed-026
 
 ## Current Position
 
@@ -33,8 +33,8 @@ render-smoke gap), full bulk suite 4901 passed/0 failed (GUARD-02). SCROLL-01 + 
 6 manual UAT smokes (do at release-time web/desktop smoke). NEXT: Phase 129 (SEED-026 library filter) — carries a
 Codex-review-BEFORE-code gate; then `/release` 8.3.0 (both apps) → `/gsd-complete-milestone`.
 
-Phase: 128 (Search Results Space-Scroll (SEED-025)) — DONE (manual UAT pending)
-Plan: 2 of 2 complete
+Phase: 129 (library-filter-search-browse-by-identification-seed-026) — EXECUTING
+Plan: 2 of 4
 🚧 **RE-SCOPE 2026-06-27 (user decision):** v8.3.0 is NO LONGER internal-only. It now ships **publicly to
 both apps** as 8.3.0 (8.2.2 → 8.3.0, no skipped number) by folding in two user-facing search/browse features
 at **full parity**, so desktop earns the version bump with visible features (not just the invisible refactor):
@@ -132,7 +132,7 @@ PHASE 125 (engines) — COMPLETE 2026-06-26. genizah_core.py 6064→755 ln (perm
   LESSON from 124: the executor's "0 new failures" was count-based, not name-based — ALWAYS
   do the base-vs-HEAD NAME-level test comparison + facade-name diff yourself; don't trust the
   executor's failure count.
-Last activity: 2026-06-28 -- Phase 129 planning complete
+Last activity: 2026-06-28
 
 Progress: [███████░░░] 67% (4 of 6 phases — 122, 123, 124, 125 complete)
 
@@ -180,9 +180,9 @@ Items carried forward from v8.2.0 and earlier:
 
 ## Session Continuity
 
-Last session: 2026-06-28T03:31:06.110Z
+Last session: 2026-06-28T15:50:18.029Z
 Stopped at: Phase 129 context gathered
-Resume file: .planning/phases/129-library-filter-search-browse-by-identification-seed-026/129-CONTEXT.md
+Resume file: None
 Next step: `/gsd-discuss-phase 126` (or skip-discuss-if-empty per the standing autonomous directive)
 
 ## Performance Metrics
