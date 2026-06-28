@@ -4000,7 +4000,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             total = len(search_state.results)
             showing = len(filtered)
             n_excl = len(excluded_items)
-            results_count.text = f"{showing} {tr('Results')} ({n_excl} {tr('excluded')})"
+            count_parts = [f"{n_excl} {tr('excluded')}"]
+            if search_state.library_filter:  # SEED-026 (WR-04 / Codex): indicator in the library-active branch
+                count_parts.append(tr('Library filter'))
+            results_count.text = f"{showing} {tr('Results')} ({', '.join(count_parts)})"
             render_results(filtered, page=0)
         else:
             filtered = _apply_library_filter(filtered)  # SEED-026 (LIBFILTER-01): library-only post-word-search
