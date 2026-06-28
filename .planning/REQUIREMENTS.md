@@ -57,7 +57,7 @@
 
 ### Library Filter (LIBFILTER) — Phase 129 (SEED-026)
 
-- [ ] **LIBFILTER-01** (web search): A library **multi-select** on `/search` results filters by `library_code` over the FULL result set BEFORE the `[:200]` render cap (empty = all); persists via the `web/safe_storage.py` chokepoint (Phase 87 invariant, CI allowlist `[]`); removable chips; i18n EN/HE labels (`LIBRARY_CODES`/`LIBRARY_CODES_HE`, no English leak under Hebrew).
+- [x] **LIBFILTER-01** (web search): A library **multi-select** on `/search` results filters by `library_code` over the FULL result set BEFORE the `[:200]` render cap (empty = all); persists via the `web/safe_storage.py` chokepoint (Phase 87 invariant, CI allowlist `[]`); removable chips; i18n EN/HE labels (`LIBRARY_CODES`/`LIBRARY_CODES_HE`, no English leak under Hebrew).
 - [x] **LIBFILTER-02** (web Browse-by-Identification): A `library_codes` arg pushed into `shared/fjms_service.get_browse_results` applies BEFORE `COUNT(DISTINCT AlmaId)` + `LIMIT/OFFSET` so `total`/pagination are correct over the full filtered set; additive/backward-compatible (None/empty = no-op); composes with the SEED-023 PGP/Editions filters; persists via `safe_storage`.
 - [ ] **LIBFILTER-03** (desktop parity): The desktop catalog Browse-by-Identification view gains the same library filter; existing desktop search-results library/shelfmark filtering is untouched.
 

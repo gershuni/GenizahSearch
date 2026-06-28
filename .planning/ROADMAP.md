@@ -250,7 +250,7 @@ Plans:
 **Wave 1**
 
 - [x] 129-01-PLAN.md (Wave 1) — Shared push-down core: extend `shared/fjms_service.get_browse_results` with additive `library_codes`/`library_sys_ids` + `_browse_filter_library` TEMP table (content-derived token, Codex Change 1) + shared `resolve_library_sys_ids` helper + selected-but-empty fail-open (Codex Change 2); LIBFILTER-02 service tests (LIBFILTER-02, GUARD-02)
-- [ ] 129-02-PLAN.md (Wave 1) — Web `/search` library multi-select: `_apply_library_filter` over the FULL pre-`[:200]` set + facet counts (hide 0-match) + removable chips + `search_library_filter` via safe_storage; EN/HE labels (LIBFILTER-01, GUARD-02)
+- [x] 129-02-PLAN.md (Wave 1) — Web `/search` library multi-select: `_apply_library_filter` over the FULL pre-`[:200]` set + facet counts (hide 0-match) + removable chips + `search_library_filter` via safe_storage; EN/HE labels (LIBFILTER-01, GUARD-02)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -273,4 +273,4 @@ Plans:
 | 126. Desktop Panels | 1/1 | Complete   | 2026-06-26 |
 | 127. Update UI & Final Cleanup | 3/3 | Complete   | 2026-06-26 |
 | 128. Search Results Space-Scroll (SEED-025) | 2/2 | Complete   | 2026-06-27 |
-| 129. Library Filter (SEED-026) | 1/4 | In Progress|  |
+| 129. Library Filter (SEED-026) | 2/4 | In Progress|  |
