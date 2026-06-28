@@ -243,7 +243,14 @@ Plans:
   4. **Codex-review-before-code gate** satisfied (project seed-review gate per SEED-026 + [[feedback_audit_to_cloud_pipeline]]); the design crux (how catalog rows map to `library_code` via `AlmaId==sys_id`) is resolved before implementation.
   5. Tests green (search full-set narrowing + persistence; catalog total/pagination/compose; `get_browse_results` additive arg); ruff clean; existing PGP/printed + SEED-023 filters unbroken.
 
-**Plans**: TBD (set at plan-phase, after the Codex design review)
+**Plans**: 4 plans (2 waves) — Codex design-crux review CLEARED (APPROVE WITH CHANGES; see 129-CODEX-CRUX-REVIEW.md) before planning, satisfying Success Criterion #4. Wave 1 = shared push-down core (01) + web search filter (02), disjoint files, parallel. Wave 2 = web catalog UI (03) + desktop parity (04), both depend on 01's get_browse_results signature, disjoint files, parallel.
+
+Plans:
+
+- [ ] 129-01-PLAN.md (Wave 1) — Shared push-down core: extend `shared/fjms_service.get_browse_results` with additive `library_codes`/`library_sys_ids` + `_browse_filter_library` TEMP table (content-derived token, Codex Change 1) + shared `resolve_library_sys_ids` helper + selected-but-empty fail-open (Codex Change 2); LIBFILTER-02 service tests (LIBFILTER-02, GUARD-02)
+- [ ] 129-02-PLAN.md (Wave 1) — Web `/search` library multi-select: `_apply_library_filter` over the FULL pre-`[:200]` set + facet counts (hide 0-match) + removable chips + `search_library_filter` via safe_storage; EN/HE labels (LIBFILTER-01, GUARD-02)
+- [ ] 129-03-PLAN.md (Wave 2, depends 129-01) — Web Browse-by-Identification: `catalog_library_filter` state + dropdown checklist + per-code chips; resolve sys_ids off the event loop in `_fetch_results_blocking` and push `library_codes`/`library_sys_ids` into get_browse_results (composes with SEED-023 PGP/Editions) (LIBFILTER-02, GUARD-02)
+- [ ] 129-04-PLAN.md (Wave 2, depends 129-01) — Desktop catalog parity: `_catalog_library_filter` state + checkable widget beside SEED-023 buttons + worker `library_filter` param resolved on the QThread + chips; gui-marked `test_libfilter_desktop.py`; OQ-1 reachability documented (LIBFILTER-03, GUARD-02)
 
 ## Progress
 
@@ -261,4 +268,4 @@ Plans:
 | 126. Desktop Panels | 1/1 | Complete   | 2026-06-26 |
 | 127. Update UI & Final Cleanup | 3/3 | Complete   | 2026-06-26 |
 | 128. Search Results Space-Scroll (SEED-025) | 2/2 | Complete   | 2026-06-27 |
-| 129. Library Filter (SEED-026) | 0/? | Not started | - |
+| 129. Library Filter (SEED-026) | 0/4 | Planned | - |
