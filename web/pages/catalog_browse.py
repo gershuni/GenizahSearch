@@ -300,8 +300,9 @@ def create_catalog_browse_page(
             current_text_not['value'] or None,
             current_pgp_filter['value'],
             current_editions_filter['value'],
-            # SEED-026: pass current library selection (empty list = no filter)
-            current_library_filter['value'] or None,
+            # SEED-026: pass a COPY of the current library selection (empty list = no filter).
+            # Snapshot so chip removal mutating the list cannot race the io_bound resolver.
+            list(current_library_filter['value']) or None,
         )
         return data
 
@@ -976,9 +977,10 @@ def create_catalog_browse_page(
 
     async def clear_library_code(code: str):
         """Remove a single library code from the filter and repaint via refresh_results()."""
-        lst = current_library_filter['value']
-        if code in lst:
-            lst.remove(code)
+        # Assign a NEW list rather than mutating in place — an in-flight io_bound
+        # resolver may hold a reference to the old list (Codex CODE-review MEDIUM).
+        lst = [c for c in current_library_filter['value'] if c != code]
+        current_library_filter['value'] = lst
         safe_user_set('catalog_library_filter', lst)
         _update_library_filter_ctrl()
         current_page['value'] = 1
