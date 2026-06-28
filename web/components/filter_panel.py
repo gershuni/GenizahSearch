@@ -335,16 +335,14 @@ def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bo
     # Persist key is the FLAT literal 'search_library_filter' (NOT {pfx}_filter_*) because
     # search.py loads it at :187-189 via _safe_get('search_library_filter', []).
     # setattr (live this render) + persist (durable for the next fresh render) are BOTH
-    # required for the persist→reload lifecycle.  Defensive getattr/setattr so a parallels
-    # state lacking .library_filter does not crash (parallels does not implement a library
-    # post-filter; threading it there is OUT OF SCOPE per the GAP-F spec).
-    if incoming.get('library_filter'):
-        _lib_codes = [str(c) for c in incoming['library_filter']]
-        try:
-            setattr(state, 'library_filter', _lib_codes)
-        except (AttributeError, TypeError):
-            pass  # parallels-like state without library_filter attribute — no crash
-        persist_value('search_library_filter', getattr(state, 'library_filter', _lib_codes))
+    # required for the persist→reload lifecycle.
+    # WR-01 fix: only persist when storage_prefix == 'search' — parallels does not
+    # implement a library post-filter, so writing 'search_library_filter' during a
+    # parallels handoff would silently infect a later fresh /search reload.
+    if incoming.get('library_filter') and storage_prefix == 'search':
+        _lib_codes = [str(c) for c in incoming['library_filter'] if c]
+        state.library_filter = _lib_codes
+        persist_value('search_library_filter', _lib_codes)
     # Clear incoming_filters from storage after consuming.
     # 2026-05-12 Codex 3rd-pass CRITICAL: safe_user_pop so prune races don't 500.
     from web.safe_storage import safe_user_pop
