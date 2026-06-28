@@ -10187,7 +10187,7 @@ class GenizahGUI(QMainWindow):
             refresh_works=refresh_works,
             pgp_filter=self._catalog_pgp_filter,
             editions_filter=self._catalog_editions_filter,
-            library_filter=self._catalog_library_filter,
+            library_filter=list(self._catalog_library_filter),
             meta_mgr=self.meta_mgr,
         )
         self._catalog_refresh_worker.done.connect(self._catalog_on_async_refresh_done)
