@@ -15395,6 +15395,13 @@ class GenizahGUI(QMainWindow):
                 work_display = filters.get('work_name') or str(filters['work'])
                 self._add_filter_chip(chip_layout, tr("Work") + ": " + work_display, ('works', filters['work']))
 
+            # Library chips (GAP-H: per-code removable chips so user can see/clear scope).
+            # Keyed as ('library', code) so _remove_filter's tuple branch handles removal
+            # by updating pre_search_filters['library'] and triggering FilterCountWorker.
+            for _lib_code in filters.get('library', []):
+                _lib_label = get_library_display(_lib_code, short=False)
+                self._add_filter_chip(chip_layout, tr("Library") + ": " + _lib_label, ('library', _lib_code))
+
             if filters.get('date_from') or filters.get('date_to'):
                 date_str = ""
                 if filters.get('date_from') and filters.get('date_to'):
