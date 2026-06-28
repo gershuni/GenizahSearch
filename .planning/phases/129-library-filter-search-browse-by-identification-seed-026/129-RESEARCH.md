@@ -67,6 +67,8 @@ The key non-trivial question (the design crux) is: how does a set of `library_co
 
 ## Design Crux Resolution
 
+> **⚠ CODEX GATE (2026-06-28) — APPROVE WITH CHANGES.** This crux was reviewed by the mandatory Codex-review-before-code gate (Success Criterion #4) against live source. Design APPROVED, with TWO required changes folded into the code blocks below and detailed in `129-CODEX-CRUX-REVIEW.md`: **(1) HIGH** — the `_ensure_filter_temp` token MUST be derived from the *selection content* (`hash(tuple(sorted(library_codes)))`), NOT `len(library_sys_ids)` — the library set is dynamic multi-select, so same-size different selections collide on a length token and reuse stale TEMP rows. **(2) MEDIUM** — handle "selected-but-resolves-to-empty" (normalize/validate persisted codes; `csv_bank` readiness policy) distinctly from "empty selection = all".
+
 ### The Push-Down Problem
 
 `get_browse_results` is server-side paginated. A library filter applied AFTER `LIMIT/OFFSET` would corrupt `total` (it would reflect the page subset, not the full filtered set). This is the SEED-023 B3 lesson. The same fix applies: push the filter condition into the `WHERE` clause that feeds BOTH the `COUNT(DISTINCT c.AlmaId)` query and the results query.
@@ -150,8 +152,11 @@ Appended after the editions block, before `where = ...`:
 # LIBFILTER-02: library membership filter. Same temp-table pattern as SEED-023.
 # Fail-open: if sys_id set is missing or TEMP build fails, skip the filter.
 if library_codes and library_sys_ids:
+    # CODEX GATE CHANGE 1 (HIGH): token derived from SELECTION CONTENT, not len() —
+    # dynamic multi-select means same-size different selections must NOT collide.
+    _lib_token = hash(tuple(sorted(library_codes)))
     if self._ensure_filter_temp(
-        "_browse_filter_library", library_sys_ids, len(library_sys_ids)
+        "_browse_filter_library", library_sys_ids, _lib_token
     ):
         conditions.append(
             'EXISTS (SELECT 1 FROM "_browse_filter_library" t '
@@ -409,8 +414,11 @@ Library filter (LIBFILTER-02) is structurally identical, using `EXISTS` always (
 ```python
 # New block, after editions block, before `where = ...`
 if library_codes and library_sys_ids:
+    # CODEX GATE CHANGE 1 (HIGH): token derived from SELECTION CONTENT, not len() —
+    # dynamic multi-select means same-size different selections must NOT collide.
+    _lib_token = hash(tuple(sorted(library_codes)))
     if self._ensure_filter_temp(
-        "_browse_filter_library", library_sys_ids, len(library_sys_ids)
+        "_browse_filter_library", library_sys_ids, _lib_token
     ):
         conditions.append(
             'EXISTS (SELECT 1 FROM "_browse_filter_library" t '
