@@ -9851,7 +9851,7 @@ class GenizahGUI(QMainWindow):
         )
         lib_menu = QMenu(self._catalog_library_filter_btn)
         lib_menu.setStyleSheet("QMenu { font-size: 11px; } QMenu::item { padding: 3px 18px; }")
-        for _lib_code in list(LIBRARY_CODES.keys()):
+        for _lib_code in (c for c in LIBRARY_CODES.keys() if c != 'LOCAL'):  # WR-02: LOCAL is not a Genizah library
             action = lib_menu.addAction(get_library_display(_lib_code, short=False))
             action.setCheckable(True)
             action.setData(_lib_code)
