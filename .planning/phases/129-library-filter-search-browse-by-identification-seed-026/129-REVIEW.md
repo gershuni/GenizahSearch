@@ -18,7 +18,8 @@ findings:
   warning: 4
   info: 3
   total: 8
-status: issues_found
+status: resolved
+resolution: All 1 Critical + 4 Warning findings fixed in atomic commits 0b5bb13d (CR-01), 6fd016a2 (WR-01), 2e9e0e61 (WR-02), 3dbaea71 (WR-03), aeaa095c (WR-04). 3 Info findings deferred (non-blocking). Targeted + integration tests green (26 passed); ruff clean.
 ---
 
 # Phase 129: Code Review Report
@@ -26,7 +27,16 @@ status: issues_found
 **Reviewed:** 2026-06-28
 **Depth:** standard
 **Files Reviewed:** 9
-**Status:** issues_found
+**Status:** resolved (Critical + Warning fixed 2026-06-28; Info deferred)
+
+> **Resolution (2026-06-28):** All 1 Critical + 4 Warning findings were fixed during execute-phase and committed atomically:
+> - **CR-01** → `0b5bb13d` — added 6 Hebrew translation keys for the library-filter UI strings.
+> - **WR-01** → `6fd016a2` — pass a `list(...)` copy of `_catalog_library_filter` to the worker.
+> - **WR-02** → `2e9e0e61` — exclude `LOCAL` from the desktop catalog library menu (web parity).
+> - **WR-03** → `3dbaea71` — replace `hash()` TEMP token with a stable sorted-tuple token.
+> - **WR-04** → `aeaa095c` — add the `(Library filter)` count indicator to the word-search path.
+>
+> The 3 Info findings (IN-01..IN-03) were intentionally deferred as non-blocking polish.
 
 ## Summary
 
