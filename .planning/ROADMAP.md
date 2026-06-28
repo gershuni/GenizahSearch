@@ -247,8 +247,13 @@ Plans:
 
 Plans:
 
+**Wave 1**
+
 - [ ] 129-01-PLAN.md (Wave 1) — Shared push-down core: extend `shared/fjms_service.get_browse_results` with additive `library_codes`/`library_sys_ids` + `_browse_filter_library` TEMP table (content-derived token, Codex Change 1) + shared `resolve_library_sys_ids` helper + selected-but-empty fail-open (Codex Change 2); LIBFILTER-02 service tests (LIBFILTER-02, GUARD-02)
 - [ ] 129-02-PLAN.md (Wave 1) — Web `/search` library multi-select: `_apply_library_filter` over the FULL pre-`[:200]` set + facet counts (hide 0-match) + removable chips + `search_library_filter` via safe_storage; EN/HE labels (LIBFILTER-01, GUARD-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 129-03-PLAN.md (Wave 2, depends 129-01) — Web Browse-by-Identification: `catalog_library_filter` state + dropdown checklist + per-code chips; resolve sys_ids off the event loop in `_fetch_results_blocking` and push `library_codes`/`library_sys_ids` into get_browse_results (composes with SEED-023 PGP/Editions) (LIBFILTER-02, GUARD-02)
 - [ ] 129-04-PLAN.md (Wave 2, depends 129-01) — Desktop catalog parity: `_catalog_library_filter` state + checkable widget beside SEED-023 buttons + worker `library_filter` param resolved on the QThread + chips; gui-marked `test_libfilter_desktop.py`; OQ-1 reachability documented (LIBFILTER-03, GUARD-02)
 
