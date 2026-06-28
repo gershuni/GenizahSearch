@@ -977,7 +977,7 @@ def create_catalog_browse_page(
 
     async def clear_library_code(code: str):
         """Remove a single library code from the filter and repaint via refresh_results()."""
-        # Assign a NEW list rather than mutating in place — an in-flight io_bound
+        # Assign a NEW list rather than mutating in place -- an in-flight io_bound
         # resolver may hold a reference to the old list (Codex CODE-review MEDIUM).
         lst = [c for c in current_library_filter['value'] if c != code]
         current_library_filter['value'] = lst

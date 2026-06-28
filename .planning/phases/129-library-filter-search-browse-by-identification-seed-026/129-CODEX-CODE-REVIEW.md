@@ -3,7 +3,7 @@ phase: 129-library-filter-search-browse-by-identification-seed-026
 gate: codex-code-review (CODE gate — second of two Codex gates)
 reviewer: codex (gpt-5.x via codex exec)
 reviewed: 2026-06-28
-verdict: APPROVE WITH CHANGES
+verdict: APPROVE (converged round 2; round 1 was APPROVE WITH CHANGES)
 findings: { blocker: 0, high: 0, medium: 1, low: 1 }
 status: resolved
 ---
@@ -48,3 +48,11 @@ indicator) in the `elif` (library-active) branch, which is the actually-reachabl
 - `pytest tests/test_libfilter_web_search.py tests/test_libfilter_catalog.py tests/test_no_raw_storage_access.py` → 19 passed.
 
 No new BLOCKER/HIGH. Both findings resolved → gate satisfied.
+
+## Convergence round 2 (confirmation)
+Re-ran Codex against the two fix diffs only. **VERDICT: APPROVE.** Codex confirmed
+(a) fix #1 eliminates the race (call-site snapshot + new-list-on-remove) and
+(b) fix #2 puts the indicator in the reachable library-active branch, with no new
+functional bug. Sole nit: an em-dash (U+2014) in a new comment rendered as mojibake
+under the Windows cp1255 console — replaced with an ASCII `--` (comment-only, no
+behavior change). Convergence achieved at round 2 (0 outstanding findings).
