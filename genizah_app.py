@@ -31,7 +31,7 @@ from functools import partial
 
 _CORE_IMPORT_ERROR = None
 try:
-    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, ListsManager, JoinsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config, get_library_display, normalize_shelfmark, generate_tabular_syntax  # noqa: F401 (VariantManager used at lines 880, 12908 -- ruff can't see through try/except)
+    from genizah_core import Config, MetadataManager, VariantManager, SearchEngine, LabEngine, ListsManager, JoinsManager, tr, save_language, CURRENT_LANG, get_logger, natural_sort_key, load_app_config, save_app_config, get_library_display, normalize_shelfmark, generate_tabular_syntax, LIBRARY_CODES  # noqa: F401 (VariantManager used at lines 880, 12908 -- ruff can't see through try/except)
     from shared.synthetic_sys_id import is_synthetic_sys_id
 except ImportError as import_error:
     _CORE_IMPORT_ERROR = import_error
@@ -498,7 +498,8 @@ class _CatalogRefreshWorker(QThread):
                  date_from=None, date_to=None, include_undated=False,
                  text_all=None, text_any=None, text_not=None,
                  refresh_authors=True, refresh_works=True,
-                 pgp_filter='all', editions_filter='all'):
+                 pgp_filter='all', editions_filter='all',
+                 library_filter=None, meta_mgr=None):
         super().__init__(parent)
         self._domain = domain
         self._author = author
@@ -515,6 +516,11 @@ class _CatalogRefreshWorker(QThread):
         self._refresh_works = refresh_works
         self._pgp_filter = pgp_filter
         self._editions_filter = editions_filter
+        # SEED-026 desktop parity — library filter (LIBFILTER-03).
+        # meta_mgr is passed explicitly (OQ-2: avoids self.parent().meta_mgr which
+        # is None in tests and brittle in Qt; parent is passed to QThread.__init__).
+        self._library_filter = library_filter or []
+        self._meta_mgr = meta_mgr
 
     def run(self):
         try:
@@ -535,6 +541,14 @@ class _CatalogRefreshWorker(QThread):
             pgp_ids = ed_ids = None
             if pgp_active or ed_active:
                 pgp_ids, ed_ids = _get_catalog_filter_sets()
+            # SEED-026 desktop parity — library filter (LIBFILTER-03, OQ-2).
+            # Resolution runs here (background thread) via the explicit self._meta_mgr
+            # ctor arg — never on the UI thread.  Empty list → None for both args
+            # (Pitfall 5: empty must pass None, never an empty set that returns 0 rows).
+            library_sys_ids = None
+            if self._library_filter:
+                from shared.fjms_service import resolve_library_sys_ids
+                library_sys_ids = resolve_library_sys_ids(self._library_filter, self._meta_mgr)
             result['data'] = fjms.get_browse_results(
                 domain=self._domain, author=self._author, work=self._work,
                 offset=self._offset, limit=self._limit,
@@ -546,6 +560,8 @@ class _CatalogRefreshWorker(QThread):
                 pgp_sys_ids=(pgp_ids if pgp_active else None),
                 editions_filter=(self._editions_filter if ed_active else None),
                 edition_sys_ids=(ed_ids if ed_active else None),
+                library_codes=(self._library_filter or None),
+                library_sys_ids=(library_sys_ids or None),
             )
             self.done.emit(result)
         except Exception:
@@ -9581,6 +9597,8 @@ class GenizahGUI(QMainWindow):
         # SEED-023 desktop parity — 3-state availability filters (mirrors web).
         self._catalog_pgp_filter = 'all'        # 'all' | 'has_pgp' | 'no_pgp'
         self._catalog_editions_filter = 'all'   # 'all' | 'has_edition' | 'no_edition'
+        # SEED-026 desktop parity — library filter (LIBFILTER-03).
+        self._catalog_library_filter = []       # [] = all; list of library codes when active
         self._catalog_authors_cache = []
         self._catalog_works_cache = []
         self._catalog_tree_loaded = False
@@ -9815,6 +9833,32 @@ class GenizahGUI(QMainWindow):
         self._catalog_editions_filter_btn.clicked.connect(self._catalog_cycle_editions_filter)
         left_layout.addWidget(self._catalog_editions_filter_btn)
         self._catalog_update_avail_filter_btns()
+
+        # SEED-026 desktop parity — library filter (LIBFILTER-03, D-01/D-03).
+        # A QPushButton opens a QMenu of checkable QActions (one per library code).
+        # Labels via get_library_display(code, short=False) — auto-detects CURRENT_LANG,
+        # no English leak under Hebrew UI.
+        lib_filter_label = QLabel(tr("Library"))
+        lib_filter_label.setStyleSheet("font-weight: bold; font-size: 13px; margin-top: 6px; margin-bottom: 2px;")
+        left_layout.addWidget(lib_filter_label)
+
+        self._catalog_library_filter_btn = QPushButton(tr("All Libraries"))
+        self._catalog_library_filter_btn.setFixedHeight(26)
+        self._catalog_library_filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._catalog_library_filter_btn.setStyleSheet(
+            "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; }"
+            "QPushButton::menu-indicator { image: none; }"
+        )
+        lib_menu = QMenu(self._catalog_library_filter_btn)
+        lib_menu.setStyleSheet("QMenu { font-size: 11px; } QMenu::item { padding: 3px 18px; }")
+        for _lib_code in list(LIBRARY_CODES.keys()):
+            action = lib_menu.addAction(get_library_display(_lib_code, short=False))
+            action.setCheckable(True)
+            action.setData(_lib_code)
+            action.toggled.connect(lambda checked, code=_lib_code: self._catalog_toggle_library(code, checked))
+        self._catalog_library_filter_btn.setMenu(lib_menu)
+        self._catalog_library_menu = lib_menu
+        left_layout.addWidget(self._catalog_library_filter_btn)
 
         left_panel.setMinimumWidth(260)
 
@@ -10143,6 +10187,8 @@ class GenizahGUI(QMainWindow):
             refresh_works=refresh_works,
             pgp_filter=self._catalog_pgp_filter,
             editions_filter=self._catalog_editions_filter,
+            library_filter=self._catalog_library_filter,
+            meta_mgr=self.meta_mgr,
         )
         self._catalog_refresh_worker.done.connect(self._catalog_on_async_refresh_done)
         self._catalog_refresh_worker.start()
@@ -10391,8 +10437,51 @@ class GenizahGUI(QMainWindow):
         self._catalog_current_page = 0
         self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
 
-    def _catalog_remove_filter(self, filter_type):
-        """Remove a specific filter (or all) and refresh."""
+    def _catalog_toggle_library(self, code: str, checked: bool):
+        """Toggle a library code in the multi-select filter and refresh (LIBFILTER-03).
+
+        Called by the checkable QAction in _catalog_library_menu.
+        Empty selection = all (no filter).
+        """
+        if checked:
+            if code not in self._catalog_library_filter:
+                self._catalog_library_filter.append(code)
+        else:
+            self._catalog_library_filter = [c for c in self._catalog_library_filter if c != code]
+        self._catalog_update_library_filter_btn()
+        self._catalog_current_page = 0
+        self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
+
+    def _catalog_update_library_filter_btn(self):
+        """Update the library filter button label to reflect current selection."""
+        if hasattr(self, '_catalog_library_filter_btn'):
+            if self._catalog_library_filter:
+                count = len(self._catalog_library_filter)
+                self._catalog_library_filter_btn.setText(
+                    tr("Libraries") + f" ({count})"
+                )
+            else:
+                self._catalog_library_filter_btn.setText(tr("All Libraries"))
+
+    def _sync_library_menu_checks(self):
+        """Sync QAction checked states in the library menu with _catalog_library_filter."""
+        if not hasattr(self, '_catalog_library_menu'):
+            return
+        selected = set(self._catalog_library_filter)
+        for action in self._catalog_library_menu.actions():
+            code = action.data()
+            if code is not None:
+                action.blockSignals(True)
+                action.setChecked(code in selected)
+                action.blockSignals(False)
+
+    def _catalog_remove_filter(self, filter_type, library_code=None):
+        """Remove a specific filter (or all) and refresh.
+
+        For library filter:
+          _catalog_remove_filter("library") — clear all selected library codes.
+          _catalog_remove_filter("library", library_code="CUL") — remove one code.
+        """
         refresh_authors = False
         refresh_works = False
         if filter_type == "all":
@@ -10411,6 +10500,10 @@ class GenizahGUI(QMainWindow):
             self._catalog_pgp_filter = 'all'
             self._catalog_editions_filter = 'all'
             self._catalog_update_avail_filter_btns()
+            # Clear library filter + uncheck all QActions.
+            self._catalog_library_filter = []
+            self._catalog_update_library_filter_btn()
+            self._sync_library_menu_checks()
             refresh_authors = True
             refresh_works = True
         elif filter_type == "pgp":
@@ -10419,6 +10512,14 @@ class GenizahGUI(QMainWindow):
         elif filter_type == "editions":
             self._catalog_editions_filter = 'all'
             self._catalog_update_avail_filter_btns()
+        elif filter_type == "library":
+            # Remove one specific code or all (clear-all chip path).
+            if library_code is not None:
+                self._catalog_library_filter = [c for c in self._catalog_library_filter if c != library_code]
+            else:
+                self._catalog_library_filter = []
+            self._catalog_update_library_filter_btn()
+            self._sync_library_menu_checks()
         elif filter_type == "domain":
             self._catalog_current_domain = None
             self._catalog_current_author = None
@@ -10569,6 +10670,21 @@ class GenizahGUI(QMainWindow):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setFixedHeight(24)
             btn.clicked.connect(lambda: self._catalog_remove_filter("editions"))
+            self._catalog_chips_layout.addWidget(btn)
+
+        # SEED-026 desktop parity — library filter chips (LIBFILTER-03, D-01/D-03).
+        # One removable chip per selected library code, labeled via get_library_display
+        # (auto-detects CURRENT_LANG — no English leak under Hebrew UI).
+        for _lib_code in list(getattr(self, '_catalog_library_filter', [])):
+            has_any = True
+            lib_label = get_library_display(_lib_code, short=False)
+            btn = QPushButton(f"{lib_label}  ×")
+            btn.setStyleSheet(chip_style)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(24)
+            btn.clicked.connect(
+                lambda _checked=False, code=_lib_code: self._catalog_remove_filter("library", library_code=code)
+            )
             self._catalog_chips_layout.addWidget(btn)
 
         self._catalog_clear_all_btn.setVisible(has_any)

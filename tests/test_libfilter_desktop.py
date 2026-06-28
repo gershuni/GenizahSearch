@@ -11,7 +11,7 @@ Pins the new desktop-side wiring for LIBFILTER-03:
 GUI-marked (constructs QApplication for the QThread worker); runs in gui-tests.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from PyQt6.QtWidgets import QApplication
 
