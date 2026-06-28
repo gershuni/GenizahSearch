@@ -168,7 +168,12 @@ The data layer is sound — all 5 must-have truths (push-down before COUNT/pagin
 | GAP-G | desktop catalog tab | Should use checkboxes, not a QPushButton+QMenu | `genizah_app.py:9837-9861` (+ `_catalog_toggle_library` 10440, `_catalog_update_library_filter_btn` 10455) → checkbox widget/dialog | `DomainFilterDialog` `desktop/dialogs_filter.py:533-590` (flat checkable QListWidget) | failed |
 | GAP-H | desktop catalog tab | "Search within these results" drops the library filter | `_catalog_build_browse_filters()` `genizah_app.py:10697-10710` omits `_catalog_library_filter`; also `_catalog_parallels_in_results()` `:10732+`; consume on the search-tab side | existing domain/author/date handling in same fn | failed |
 
-**Design decisions to lock before planning** (see DISCUSSION/CONTEXT update): (1) web filter = `ui.dialog` checkbox list mirroring Filter-by-Domains exclusion semantics (all shown by default, uncheck to hide), backed by the existing inclusion push-down (pass the still-shown set); (2) desktop widget form (inline checkbox panel vs button→checkbox-dialog); (3) post-search chip placement near the filter buttons; (4) "search within these results" must thread the library selection on BOTH web catalog and desktop.
+**Design decisions (locked 2026-06-28 with user):**
+1. **Execution:** gap-closure planning, Codex-gated (user choice).
+2. **Web search + web catalog filter control:** a `ui.dialog` checkbox list mirroring "Filter by Domains" (`_open_domain_filter_dialog`) — exclusion semantics (all libraries shown by default, uncheck to hide), backed by the EXISTING inclusion push-down/post-filter (pass the still-checked set as `library_codes`; all-checked ⇒ no filter / None). Replaces the `ui.menu` (search) and `ui.select` (catalog).
+3. **Desktop catalog widget:** DEFAULT = button on the catalog filter bar → checkbox `QDialog` (flat checkable `QListWidget`, mirroring `DomainFilterDialog`), consistent with web's dialog + the existing button-bar layout. (User did not select between this and an inline panel in the smoke-test question; confirm during gap-discuss — default stands if unaddressed.)
+4. **Web search chip placement:** post-search filter chip area near `results_header`, NOT the pre-search "search only in…" `chip_bar_container`.
+5. **"Search within these results":** MUST thread the library selection — web catalog (`_build_incoming_filters` + `_has_active_filters` + receiving `search.py` consume `incoming.get('library_filter')`) and desktop (`_catalog_build_browse_filters` + `_catalog_parallels_in_results`).
 
 ---
 
