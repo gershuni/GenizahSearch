@@ -484,13 +484,12 @@ def test_catalog_dialog_no_deselect_all_and_apply_guarded():
         "catalog_browse.py must provide a 'Select All' action in the library dialog"
     )
 
-    # There must be NO 'Select None' or deselect-all library action in the catalog dialog.
-    # 'Select None' is the forbidden key that would yield an all-unchecked apply-able state.
-    # (It IS present in the domain filter dialog in search.py, but must NOT appear in
-    # the catalog library dialog.)
-    # We check that 'Select None' does not appear in catalog_browse.py at all.
-    assert 'Select None' not in source, (
-        "catalog_browse.py must NOT contain 'Select None' for the library dialog "
+    # There must be NO callable 'Select None' button or deselect-all library action.
+    # We verify this by checking that tr('Select None') does NOT appear in catalog_browse.py
+    # (which would mean a NiceGUI button with that label was created).  Mere mentions in
+    # comments are acceptable; only a tr(key) call creates a user-visible button.
+    assert "tr('Select None')" not in source and 'tr("Select None")' not in source, (
+        "catalog_browse.py must NOT use tr('Select None') as a button label "
         "(a deselect-all action would let the user commit an all-unchecked state "
         "that collides with the '[]' = show all sentinel — FINDING 1)"
     )

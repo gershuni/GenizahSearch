@@ -138,7 +138,7 @@ def create_catalog_browse_page(
     text_input_ref = {'ref': None}
     pgp_filter_btn_ref = {'ref': None}
     editions_filter_btn_ref = {'ref': None}
-    library_filter_ctrl_ref = {'ref': None}
+    library_filter_btn_ref = {'ref': None}  # GAP-E: button opens _open_library_filter_dialog()
 
     # ── Deep linking helper ────────────────────────────────────────
     def update_url():
@@ -957,23 +957,186 @@ def create_catalog_browse_page(
         await refresh_results()
 
     # ── Library filter helpers — SEED-026 ─────────────────────────────────────
+    # GAP-E (2026-06-28): The ui.select(multiple=True) was replaced with a button +
+    # checkbox dialog (_open_library_filter_dialog), mirroring the web-search domain dialog.
+    # Inclusion model (locked): checked = include; all-checked ⇒ [] (show all);
+    # strict subset ⇒ that subset; zero-checked ⇒ Apply guarded (FINDING 1).
 
-    def _update_library_filter_ctrl():
-        """Update the library filter multi-select widget to reflect current state."""
-        ctrl = library_filter_ctrl_ref['ref']
-        if ctrl is None:
+    def _update_library_filter_btn():
+        """Sync the library filter button label to reflect current selection."""
+        btn = library_filter_btn_ref['ref']
+        if not btn:
             return
-        ctrl.value = current_library_filter['value']
-        ctrl.update()
+        if not current_library_filter['value']:
+            btn.text = tr('All Libraries')
+            btn.props('outline dense no-caps color=primary')
+        else:
+            n = len(current_library_filter['value'])
+            btn.text = f"{tr('Libraries')} ({n})"
+            btn.props(remove='color')
+            btn.props('outline dense no-caps color=teal')
 
-    async def _on_library_filter_change(e):
-        """Handle library multi-select change (adds/removes codes, repaints)."""
-        selected = e.value if isinstance(e.value, list) else []
-        # Validate against LIBRARY_CODES (drop unknown entries from browser state)
-        current_library_filter['value'] = [c for c in selected if c in LIBRARY_CODES]
-        safe_user_set('catalog_library_filter', current_library_filter['value'])
-        current_page['value'] = 1
-        await refresh_results()
+    def _library_apply_selection(checked_codes, all_codes):
+        """Pure mapping helper: maps the checked set to the filter value.
+
+        Contract (FINDING 1 apply mapping):
+          - all checked ⇒ [] (clear filter; '[]' = show all — the existing data-layer sentinel)
+          - strict non-empty subset ⇒ that subset (inclusion filter)
+          - zero checked ⇒ NEVER CALLED (blocked by Apply guard + defensive short-circuit)
+
+        All-checked is reached ONLY via 'Select All'; the all-unchecked state is
+        intentionally unreachable via Apply so it can never collide with the '[]'=show-all
+        sentinel.
+        """
+        if set(checked_codes) == set(all_codes):
+            return []
+        return list(checked_codes)
+
+    def _open_library_filter_dialog():
+        """Open modal dialog with library filter checkboxes.
+
+        GAP-E: replaces the ui.select(multiple=True) with a ui.dialog, mirroring
+        the web-search library dialog.  Inclusion model (locked 2026-06-28): checked
+        = INCLUDE.  All libraries start checked (= no filter / show all).  Unchecking
+        hides that library in results.
+
+        FINDING 1 (all-unchecked guard):
+        - Only a 'Select All' affordance is provided; there is intentionally
+          NO 'Select None'/deselect-all action (that would yield an apply-able
+          all-unchecked state that collides with the '[]' = show-all sentinel).
+        - Apply is disabled client-side when checked-count == 0.
+        - Python Apply handler defensively short-circuits if checked set is empty.
+        - '[]' ALWAYS means 'show all'; the zero-checked state is intentionally
+          blocked so it can never collide with that sentinel.
+        """
+        _lang = get_language()
+        # Build the full list of codes (PLAIN list, no counts — D-02); exclude LOCAL.
+        all_codes = [c for c in LIBRARY_CODES if c != 'LOCAL']
+        all_codes_sorted = sorted(
+            all_codes,
+            key=lambda c: get_library_display(c, short=False, lang=_lang),
+        )
+
+        # Build checkbox HTML — one per library code in LIBRARY_CODES (minus LOCAL).
+        # All start checked (inclusion model); unchecking hides that library.
+        import html as _html
+        import uuid as _uuid
+        container_id = f'cat-lib-filter-{_uuid.uuid4().hex[:8]}'
+        current_filter = set(current_library_filter['value'])
+
+        checkbox_html_parts = []
+        for code in all_codes_sorted:
+            label = get_library_display(code, short=False, lang=_lang)
+            # Inclusion model: checked when in the current filter, OR when filter is empty
+            # (= show all — all libraries are "included").
+            is_checked = (not current_filter) or (code in current_filter)
+            checked_attr = 'checked' if is_checked else ''
+            code_attr = _html.escape(code, quote=True)
+            label_html = _html.escape(label)
+            checkbox_html_parts.append(
+                f'<label style="display:flex;align-items:center;gap:8px;'
+                f'padding:5px 0;cursor:pointer;font-size:0.9rem">'
+                f'<input type="checkbox" class="cat-lib-cb" data-code="{code_attr}" '
+                f'{checked_attr} '
+                f'style="width:16px;height:16px;accent-color:#1976d2;cursor:pointer" '
+                f'onchange="catLibFilterUpdateApply(\'{container_id}\')">'
+                f'<span>{label_html}</span></label>'
+            )
+        checkbox_html = '\n'.join(checkbox_html_parts)
+
+        with ui.dialog() as dialog, ui.card().classes('w-[480px] max-h-[80vh]'):
+            with ui.column().classes('w-full gap-2'):
+                ui.label(tr('Filter by Library')).classes('text-lg font-bold')
+
+                with ui.scroll_area().classes('w-full').style('max-height: 55vh;'):
+                    ui.html(
+                        f'<div id="{container_id}">{checkbox_html}</div>'
+                        f'<script>'
+                        f'function catLibFilterUpdateApply(cid){{'
+                        f'  var cont=document.getElementById(cid);'
+                        f'  if(!cont)return;'
+                        f'  var cbs=cont.querySelectorAll(".cat-lib-cb");'
+                        f'  var n=0;'
+                        f'  cbs.forEach(function(cb){{if(cb.checked)n++;}});'
+                        f'  var btn=document.getElementById("catLibApplyBtn_"+cid);'
+                        f'  if(btn)btn.disabled=(n===0);'
+                        f'}}'
+                        f'function catLibFilterGetChecked(cid){{'
+                        f'  var cont=document.getElementById(cid);'
+                        f'  if(!cont)return [];'
+                        f'  var result=[];'
+                        f'  cont.querySelectorAll(".cat-lib-cb:checked").forEach('
+                        f'    function(cb){{result.push(cb.dataset.code);}}'
+                        f'  );'
+                        f'  return result;'
+                        f'}}'
+                        f'function catLibFilterSelectAll(cid,val){{'
+                        f'  var cont=document.getElementById(cid);'
+                        f'  if(!cont)return;'
+                        f'  cont.querySelectorAll(".cat-lib-cb").forEach('
+                        f'    function(cb){{cb.checked=val;}}'
+                        f'  );'
+                        f'  catLibFilterUpdateApply(cid);'
+                        f'}}'
+                        f'</script>',
+                        sanitize=False,
+                    )
+
+                # Buttons row
+                with ui.row().classes('w-full justify-between'):
+                    _cid = container_id  # capture for closures
+                    _all = all_codes_sorted  # capture for apply
+
+                    # Select All — the ONLY bulk action provided.
+                    # Re-checks everything = clear filter / show all.
+                    # A 'Select None'/deselect-all action is intentionally omitted —
+                    # an all-unchecked apply would produce [] which collides with
+                    # the '[]' = show all sentinel (FINDING 1).
+                    ui.button(
+                        tr('Select All'),
+                        on_click=lambda: ui.run_javascript(
+                            f'catLibFilterSelectAll("{_cid}", true)')
+                    ).props('flat dense no-caps')
+
+                    with ui.row().classes('gap-2'):
+                        async def apply_catalog_library_filter():
+                            checked_list = await ui.run_javascript(
+                                f'catLibFilterGetChecked("{_cid}")', timeout=5.0
+                            )
+                            checked = list(checked_list) if checked_list else []
+                            # FINDING 1 — Python-side guard: if checked set is empty,
+                            # do NOT commit (would produce [] = 'show all' collision).
+                            # This defensive check fires only if the client-side
+                            # disabled-Apply guard was bypassed.
+                            if not checked:
+                                ui.notify(
+                                    tr('Select at least one library, or check all to clear the filter'),
+                                    type='warning',
+                                )
+                                return
+                            # Apply inclusion mapping:
+                            #   all-checked => [] (clear filter; '[]' = show all)
+                            #   strict subset => that subset
+                            new_filter = _library_apply_selection(checked, _all)
+                            current_library_filter['value'] = new_filter
+                            safe_user_set('catalog_library_filter', new_filter)
+                            _update_library_filter_btn()
+                            current_page['value'] = 1
+                            await refresh_results()
+                            render_chips()
+                            _update_search_buttons()
+                            dialog.close()
+
+                        # Apply button — disabled client-side when checked-count == 0.
+                        # Element id used by the JS handler: catLibApplyBtn_{container_id}
+                        apply_btn = ui.button(
+                            tr('Apply'), on_click=apply_catalog_library_filter
+                        ).props('dense no-caps color=primary')
+                        apply_btn.props(f'id="catLibApplyBtn_{container_id}"')
+
+                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat dense no-caps')
+
+        dialog.open()
 
     async def clear_library_code(code: str):
         """Remove a single library code from the filter and repaint via refresh_results()."""
@@ -982,7 +1145,7 @@ def create_catalog_browse_page(
         lst = [c for c in current_library_filter['value'] if c != code]
         current_library_filter['value'] = lst
         safe_user_set('catalog_library_filter', lst)
-        _update_library_filter_ctrl()
+        _update_library_filter_btn()
         current_page['value'] = 1
         await refresh_results()
 
@@ -1078,7 +1241,7 @@ def create_catalog_browse_page(
             # SEED-026: clear all selected library codes at once
             current_library_filter['value'] = []
             safe_user_set('catalog_library_filter', [])
-            _update_library_filter_ctrl()
+            _update_library_filter_btn()
         current_page['value'] = 1
         await fetch_authors()
         await fetch_works()
@@ -1104,7 +1267,7 @@ def create_catalog_browse_page(
         safe_user_set('catalog_library_filter', [])
         _update_pgp_filter_btn()
         _update_editions_filter_btn()
-        _update_library_filter_ctrl()
+        _update_library_filter_btn()
         current_page['value'] = 1
         if author_select_ref['ref']:
             author_select_ref['ref'].value = None
@@ -1354,26 +1517,22 @@ def create_catalog_browse_page(
                     _update_pgp_filter_btn()
                     _update_editions_filter_btn()
 
-                # Library Filter Card — SEED-026
+                # Library Filter Card — SEED-026 (GAP-E: checkbox dialog replaces ui.select)
                 with ui.card().classes('w-full p-4 mt-2'):
                     ui.label(tr('Filter by library')).classes(
                         'text-sm font-bold uppercase tracking-wide mb-2'
                     ).style('color: var(--text-secondary)')
-                    # Build options: code → full display name (D-01, EN/HE via get_library_display)
-                    # D-02: plain list, no per-library counts
-                    _lib_options = {
-                        code: get_library_display(code, short=False, lang=lang)
-                        for code in LIBRARY_CODES
-                        if code != 'LOCAL'  # My Library is a local-only concept, not a Genizah library
-                    }
-                    lib_sel = ui.select(
-                        options=_lib_options,
-                        value=current_library_filter['value'],
-                        multiple=True,
-                        label=tr('Select libraries...'),
-                        on_change=_on_library_filter_change,
-                    ).props('dense outlined use-chips').classes('w-full')
-                    library_filter_ctrl_ref['ref'] = lib_sel
+                    # D-01: EN/HE display; D-02: plain list, no per-library counts.
+                    # GAP-E: button opens a checkbox dialog (_open_library_filter_dialog)
+                    # instead of the old ui.select(multiple=True).  The dialog uses the
+                    # same HTML+JS readback pattern as the web-search library dialog.
+                    lib_btn = ui.button(
+                        tr('All Libraries'),
+                        on_click=lambda: _open_library_filter_dialog(),
+                    ).props('outline dense no-caps color=primary').classes('w-full text-sm')
+                    lib_btn.tooltip(tr('Filter results by library'))
+                    library_filter_btn_ref['ref'] = lib_btn
+                    _update_library_filter_btn()
 
                 # Author Search Card
                 with ui.card().classes('w-full p-4 mt-2'):
