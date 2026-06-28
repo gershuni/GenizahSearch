@@ -17,7 +17,8 @@ from nicegui import ui, run
 from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr, is_rtl, get_language
 from web.components.typography import h1
-from shared.fjms_service import get_fjms_service
+from shared.fjms_service import get_fjms_service, resolve_library_sys_ids
+from shared.browse_map_utils import LIBRARY_CODES, get_library_display
 
 import asyncio
 import logging
@@ -110,6 +111,12 @@ def create_catalog_browse_page(
     _ed0 = safe_user_get('catalog_editions_filter', 'all')
     current_pgp_filter = {'value': _pgp0 if _pgp0 in ('all', 'has_pgp', 'no_pgp') else 'all'}
     current_editions_filter = {'value': _ed0 if _ed0 in ('all', 'has_edition', 'no_edition') else 'all'}
+    # SEED-026: library filter — persisted as a list of library codes.
+    # Normalized + validated against LIBRARY_CODES (drop unknown/corrupted codes).
+    _lib0 = safe_user_get('catalog_library_filter', [])
+    current_library_filter = {
+        'value': [c for c in _lib0 if c in LIBRARY_CODES] if isinstance(_lib0, list) else []
+    }
 
     # Cached lists for cross-filtering
     authors_list = {'data': []}
@@ -131,6 +138,7 @@ def create_catalog_browse_page(
     text_input_ref = {'ref': None}
     pgp_filter_btn_ref = {'ref': None}
     editions_filter_btn_ref = {'ref': None}
+    library_filter_ctrl_ref = {'ref': None}
 
     # ── Deep linking helper ────────────────────────────────────────
     def update_url():
@@ -247,15 +255,23 @@ def create_catalog_browse_page(
 
     def _fetch_results_blocking(
         offset, domain, author, work, date_from, date_to, undated,
-        text_all, text_any, text_not, pgp_state, ed_state,
+        text_all, text_any, text_not, pgp_state, ed_state, library_codes,
     ):
         """Blocking browse fetch (runs in io_bound). Resolves the corpus-wide
-        PGP/edition sets (cached) only when an availability filter is active and
-        threads them into the FJMS query so the count + pagination apply to the
-        FULL filtered set (SEED-023 B3)."""
+        PGP/edition sets (cached) and the selected-library sys_id set only when the
+        respective filter is active.  All resolution runs here — off the async event
+        loop — so the count + pagination apply to the FULL filtered set (SEED-023 B3,
+        SEED-026)."""
         pgp_ids = ed_ids = None
         if pgp_state in ('has_pgp', 'no_pgp') or ed_state in ('has_edition', 'no_edition'):
             pgp_ids, ed_ids = _get_filter_sets()
+        # SEED-026: resolve library codes → sys_id set inside io_bound (O(255K), Pitfall 2).
+        # Fail-open: empty selection passes None for both args (Pitfall 5 — never set()).
+        lib_sys_ids = None
+        if library_codes:
+            from web.state import state as _state
+            resolved = resolve_library_sys_ids(library_codes, _state.meta_mgr)
+            lib_sys_ids = resolved if resolved else None  # empty set → None (fail-open)
         return fjms.get_browse_results(
             domain, author, work, offset, PAGE_SIZE,
             date_from, date_to, undated, text_all, text_any, text_not,
@@ -263,6 +279,8 @@ def create_catalog_browse_page(
             pgp_sys_ids=(pgp_ids if pgp_state in ('has_pgp', 'no_pgp') else None),
             editions_filter=(ed_state if ed_state in ('has_edition', 'no_edition') else None),
             edition_sys_ids=(ed_ids if ed_state in ('has_edition', 'no_edition') else None),
+            library_codes=(library_codes or None),
+            library_sys_ids=lib_sys_ids,
         )
 
     async def fetch_results():
@@ -282,6 +300,8 @@ def create_catalog_browse_page(
             current_text_not['value'] or None,
             current_pgp_filter['value'],
             current_editions_filter['value'],
+            # SEED-026: pass current library selection (empty list = no filter)
+            current_library_filter['value'] or None,
         )
         return data
 
@@ -692,6 +712,7 @@ def create_catalog_browse_page(
             current_text_not['value'],
             current_pgp_filter['value'] != 'all',
             current_editions_filter['value'] != 'all',
+            bool(current_library_filter['value']),
         ])
 
         if not has_filters:
@@ -731,6 +752,15 @@ def create_catalog_browse_page(
                         ed_label,
                         lambda: clear_filter('editions'),
                         color='green' if current_editions_filter['value'] == 'has_edition' else 'red',
+                    )
+
+                # SEED-026: per-code library chips (removable, D-01 EN/HE labels)
+                for _code in list(current_library_filter['value']):
+                    _lib_label = get_library_display(_code, short=False, lang=lang)
+                    _make_chip(
+                        f"{tr('Library')}: {_lib_label}",
+                        lambda c=_code: clear_library_code(c),
+                        color='blue',
                     )
 
                 if current_date_from['value'] is not None or current_date_to['value'] is not None:
@@ -925,6 +955,35 @@ def create_catalog_browse_page(
         current_page['value'] = 1
         await refresh_results()
 
+    # ── Library filter helpers — SEED-026 ─────────────────────────────────────
+
+    def _update_library_filter_ctrl():
+        """Update the library filter multi-select widget to reflect current state."""
+        ctrl = library_filter_ctrl_ref['ref']
+        if ctrl is None:
+            return
+        ctrl.value = current_library_filter['value']
+        ctrl.update()
+
+    async def _on_library_filter_change(e):
+        """Handle library multi-select change (adds/removes codes, repaints)."""
+        selected = e.value if isinstance(e.value, list) else []
+        # Validate against LIBRARY_CODES (drop unknown entries from browser state)
+        current_library_filter['value'] = [c for c in selected if c in LIBRARY_CODES]
+        safe_user_set('catalog_library_filter', current_library_filter['value'])
+        current_page['value'] = 1
+        await refresh_results()
+
+    async def clear_library_code(code: str):
+        """Remove a single library code from the filter and repaint via refresh_results()."""
+        lst = current_library_filter['value']
+        if code in lst:
+            lst.remove(code)
+        safe_user_set('catalog_library_filter', lst)
+        _update_library_filter_ctrl()
+        current_page['value'] = 1
+        await refresh_results()
+
     async def add_text_term():
         """Add a text term from the input with the current mode."""
         inp = text_input_ref['ref']
@@ -1013,6 +1072,11 @@ def create_catalog_browse_page(
             current_editions_filter['value'] = 'all'
             safe_user_set('catalog_editions_filter', 'all')
             _update_editions_filter_btn()
+        elif filter_name == 'library':
+            # SEED-026: clear all selected library codes at once
+            current_library_filter['value'] = []
+            safe_user_set('catalog_library_filter', [])
+            _update_library_filter_ctrl()
         current_page['value'] = 1
         await fetch_authors()
         await fetch_works()
@@ -1032,10 +1096,13 @@ def create_catalog_browse_page(
         current_text_not['value'] = []
         current_pgp_filter['value'] = 'all'
         current_editions_filter['value'] = 'all'
+        current_library_filter['value'] = []
         safe_user_set('catalog_pgp_filter', 'all')
         safe_user_set('catalog_editions_filter', 'all')
+        safe_user_set('catalog_library_filter', [])
         _update_pgp_filter_btn()
         _update_editions_filter_btn()
+        _update_library_filter_ctrl()
         current_page['value'] = 1
         if author_select_ref['ref']:
             author_select_ref['ref'].value = None
@@ -1277,6 +1344,27 @@ def create_catalog_browse_page(
                         editions_filter_btn_ref['ref'] = ed_btn
                     _update_pgp_filter_btn()
                     _update_editions_filter_btn()
+
+                # Library Filter Card — SEED-026
+                with ui.card().classes('w-full p-4 mt-2'):
+                    ui.label(tr('Filter by library')).classes(
+                        'text-sm font-bold uppercase tracking-wide mb-2'
+                    ).style('color: var(--text-secondary)')
+                    # Build options: code → full display name (D-01, EN/HE via get_library_display)
+                    # D-02: plain list, no per-library counts
+                    _lib_options = {
+                        code: get_library_display(code, short=False, lang=lang)
+                        for code in LIBRARY_CODES
+                        if code != 'LOCAL'  # My Library is a local-only concept, not a Genizah library
+                    }
+                    lib_sel = ui.select(
+                        options=_lib_options,
+                        value=current_library_filter['value'],
+                        multiple=True,
+                        label=tr('Select libraries...'),
+                        on_change=_on_library_filter_change,
+                    ).props('dense outlined use-chips').classes('w-full')
+                    library_filter_ctrl_ref['ref'] = lib_sel
 
                 # Author Search Card
                 with ui.card().classes('w-full p-4 mt-2'):
