@@ -62,3 +62,13 @@ at lines **3418** and **3446**, with parallel paths in `_apply_domain_exclusions
 - Desktop OQ-1: live filter actions use `_catalog_start_async_refresh` (not `_catalog_refresh`). Plan 04 wires the right one.
 
 **VERDICT: BLOCK** on the Plan 02 cascade-integration BLOCKER; fold the HIGH + 2 MEDIUM + 2 LOW into the same revision before execution.
+
+---
+
+## Revision + Re-review + Residual Closure (2026-06-28)
+
+**Round 1 revision** (gsd-planner, opus) closed all 6 findings. A focused Codex **re-review** returned: findings 2,3,4,5,6 = **PASS**; finding 1 (BLOCKER) = **FAIL (residual)** — the printed-ONLY history-restore predicate at `web/pages/search.py:4066` routes to `_apply_printed_filter_and_render` but, being printed-only (no `pgp_filter` clause), would be missed by a "grep the printed+PGP predicate" instruction → a library-only history-restore would bypass the filter. `VERDICT: BLOCK` on that one residual.
+
+**Residual closure (orchestrator, code-verified):** read live `search.py` 4050-4079 and confirmed 4066 is `elif search_state.printed_filter != 'all' and search_state.printed_ids:` with a measurement-only `else` (4068-4071) that bypasses the filter. Then grepped ALL routing predicates that gate the three filtering helpers, yielding the COMPLETE set: **3418, 3446, 3823, 4066, 4775, 5114** (3418/3446/3823/4775 printed+PGP; 4066 printed-only; 5114 omits the `and printed_ids` guard). Confirmed the printed/pgp toggle dispatchers (~1482-1487 / ~1522-1527) route via an unconditional `elif search_state.results:` and need NO widening. Plan 02 step (5) + its acceptance criterion were edited to (a) name 4066 explicitly with the exact widened predicate, (b) generalize the grep to printed-ONLY forms, and (c) enumerate all six sites in the acceptance criterion, forbidding the count-match shortcut. The "domain analogue" wording drift was removed by switching to explicit line anchors.
+
+**Status: pre-flight gate SATISFIED** — all 6 findings closed; the BLOCKER residual closed via an exhaustive code-verified predicate enumeration (broader than the single site Codex flagged).
