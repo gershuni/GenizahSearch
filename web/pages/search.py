@@ -40,6 +40,7 @@ from web.pages.search_results import (
     show_add_to_list_dialog as show_add_to_list_dialog_local,
 )
 from genizah_core import generate_tabular_syntax
+from shared.browse_map_utils import get_library_display, LIBRARY_CODES
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature
 from shared.exclusion_service import (
     ExclusionSource, parse_shelfmark_file, parse_csv_shelfmarks,
@@ -182,6 +183,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.domain_exclusions = set(_de) if _de is not None else set()
         search_state.printed_filter = _safe_get('search_printed_filter', 'all')
         search_state.pgp_filter = _safe_get('search_pgp_filter', 'all')  # Phase 999.2 (PGP-FILTER-05, D-10)
+        # SEED-026 (LIBFILTER-01): library multi-select filter — persist as list, validate against known codes.
+        _lib0 = _safe_get('search_library_filter', [])
+        _lib0 = _lib0 if isinstance(_lib0, list) else []
+        search_state.library_filter = [c for c in _lib0 if c in LIBRARY_CODES]
 
     # Clear exclusions if initial_domain provided (from browse page navigation)
     if initial_domain:
@@ -1125,11 +1130,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             return key
 
         def _update_chip_bar():
-            """Rebuild chip bar from current filter state."""
+            """Rebuild chip bar from current filter state.
+
+            SEED-026 (LIBFILTER-01): also renders library filter chips when library is
+            the only active filter (not gated on _has_active_filters() which covers only
+            pre-search filters — library is a post-search filter).
+            """
             chip_bar_container.clear()
             _pos = (text_position_select.value or 'anywhere')
             _pos_active = _pos != 'anywhere'
-            has_any = _has_active_filters() or _pos_active
+            # SEED-026: include library filter in the "has any" check so chip bar
+            # shows when library is the only active filter.
+            has_any = _has_active_filters() or _pos_active or bool(search_state.library_filter)
             chip_bar_container.set_visibility(has_any)
             if not has_any:
                 return
@@ -1276,6 +1288,20 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     ).classes('text-xs px-2 py-0.5 rounded ml-2').style(
                         'background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-light);'
                     )
+
+                # SEED-026 (LIBFILTER-01): library filter chips — post-search filter.
+                # Rendered here so chips appear when library is the ONLY active filter
+                # (the has_any check above is widened to include library_filter).
+                if search_state.library_filter:
+                    lang = get_language()
+                    for _lib_code in list(search_state.library_filter):
+                        _lib_label = get_library_display(_lib_code, short=False, lang=lang)
+                        _chip_text = f"{tr('Library')}: {_lib_label}"
+                        _c = _lib_code  # capture for lambda
+                        ui.chip(
+                            _chip_text, icon='account_balance', removable=True,
+                            on_click=lambda: None, color='teal-2',
+                        ).on('remove', lambda c=_c: _remove_library_code(c))
 
         async def _remove_filter(filter_type, value=None):
             """Remove a specific filter and update state."""
@@ -1564,6 +1590,112 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # If session restored a non-'all' state, sync the button now (still hidden until enrichment).
                     if search_state.pgp_filter != 'all':
                         _update_pgp_filter_btn()
+
+                    # SEED-026 (LIBFILTER-01): Library multi-select filter button + dropdown + chips.
+                    # Placed beside PGP filter; hidden until search results exist (same as printed/pgp buttons).
+                    # Uses ui.button that opens a ui.menu with checkable rows — compact dropdown-with-checklist (D-03).
+                    _library_menu_ref = {}  # {menu: ui.menu} forward-reference for the inner callback
+
+                    def _toggle_library_code(code):
+                        """Toggle a library code in/out of the selection and re-apply filters."""
+                        if code in search_state.library_filter:
+                            search_state.library_filter = [c for c in search_state.library_filter if c != code]
+                        else:
+                            search_state.library_filter = list(search_state.library_filter) + [code]
+                        persist_value('search_library_filter', search_state.library_filter)
+                        _update_library_btn()
+                        _update_library_chips()
+                        # Rebuild dropdown to update checkmarks + facet counts
+                        _rebuild_library_menu()
+                        # Re-apply filters and re-render — same cascade as printed/pgp toggles.
+                        if search_state.exclusion_sources:
+                            _apply_manuscript_exclusions()
+                        elif search_state.domain_exclusions and search_state.has_domain_data:
+                            _apply_domain_exclusions()
+                        elif search_state.results:
+                            _apply_printed_filter_and_render(search_state.results)
+
+                    def _update_library_btn():
+                        """Sync library filter button label and color."""
+                        if not search_state.library_filter:
+                            library_filter_btn.text = tr('Filter by library')
+                            library_filter_btn.props('outline dense no-caps color=primary')
+                        else:
+                            n = len(search_state.library_filter)
+                            library_filter_btn.text = f"{tr('Library')} ({n})"
+                            library_filter_btn.props(remove='color')
+                            library_filter_btn.props('outline dense no-caps color=teal')
+
+                    def _rebuild_library_menu():
+                        """Repopulate the library dropdown with current facet counts and checkmarks."""
+                        menu = _library_menu_ref.get('menu')
+                        if menu is None:
+                            return
+                        menu.clear()
+                        if not search_state.results:
+                            return
+                        facets = _compute_library_facets(search_state.results)
+                        if not facets:
+                            return
+                        lang = get_language()
+                        # Sort by count desc, then by label
+                        sorted_codes = sorted(
+                            facets.keys(),
+                            key=lambda c: (-facets[c], get_library_display(c, short=False, lang=lang))
+                        )
+                        with menu:
+                            for code in sorted_codes:
+                                count = facets[code]
+                                label = get_library_display(code, short=False, lang=lang)
+                                is_selected = code in search_state.library_filter
+                                _code = code  # capture for lambda
+                                ui.menu_item(
+                                    f"{label} ({count})",
+                                    on_click=lambda c=_code: _toggle_library_code(c),
+                                ).props('dense').style(
+                                    'font-weight: bold;' if is_selected else ''
+                                ).classes('text-sm')
+
+                    def _update_library_chips():
+                        """Refresh chip bar to include/remove library filter chips.
+
+                        Library chips are now rendered inside _update_chip_bar (which is
+                        widened to fire when library is the only active filter). This helper
+                        simply delegates to _update_chip_bar, guarded on _chip_bar_ready.
+                        Callers can use _update_library_chips() to ensure chips are up-to-date.
+                        """
+                        if not _chip_bar_ready.get('value'):
+                            return
+                        _update_chip_bar()
+
+                    def _remove_library_code(code):
+                        """Remove a single library code from the selection and re-render."""
+                        search_state.library_filter = [c for c in search_state.library_filter if c != code]
+                        persist_value('search_library_filter', search_state.library_filter)
+                        _update_library_btn()
+                        _update_library_chips()
+                        _rebuild_library_menu()
+                        if search_state.exclusion_sources:
+                            _apply_manuscript_exclusions()
+                        elif search_state.domain_exclusions and search_state.has_domain_data:
+                            _apply_domain_exclusions()
+                        elif search_state.results:
+                            _apply_printed_filter_and_render(search_state.results)
+
+                    library_filter_btn = ui.button(
+                        tr('Filter by library'),
+                    ).classes('text-sm').props('outline dense no-caps').style('min-height: 2.286em;')
+                    library_filter_btn.tooltip(tr('Filter results by library'))
+                    library_filter_btn.set_visibility(False)
+
+                    with ui.menu().classes('shadow-md') as _library_menu:
+                        pass  # Populated by _rebuild_library_menu() when results arrive
+                    _library_menu_ref['menu'] = _library_menu
+                    library_filter_btn.on('click', lambda: _library_menu.open())
+
+                    # If session restored a library filter, sync button state now (still hidden until search).
+                    if search_state.library_filter:
+                        _update_library_btn()
 
                     # Phase 55: "Search within" button (D-01)
                     search_within_btn = ui.button(
@@ -2236,6 +2368,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.pgp_filter = 'all'
         _update_pgp_filter_btn()
         _update_pgp_filter_chip()
+        # SEED-026 (LIBFILTER-01): hide library button + reset in-memory state on New Search.
+        # The persisted 'search_library_filter' key is reset by clear_search_snapshot() (added to defaults).
+        _set_btn_visible(library_filter_btn, False)
+        search_state.library_filter = []
+        _update_library_btn()
+        _update_library_chips()
         # Phase 55: Clear refinement chain
         _clear_refinement_chain()
         search_within_btn.set_visibility(False)
@@ -3380,14 +3518,42 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             filtered.append(r)
         return filtered
 
+    def _apply_library_filter(results_list):
+        """SEED-026 (LIBFILTER-01): filter results by selected library codes.
+
+        Returns results_list unchanged when search_state.library_filter is empty.
+        Otherwise returns only results whose r['display']['library_code'] is in the
+        selected set. Iterates the FULL results list — never sliced first.
+        """
+        if not search_state.library_filter:
+            return results_list
+        selected = set(search_state.library_filter)
+        return [r for r in results_list if r.get('display', {}).get('library_code', '') in selected]
+
+    def _compute_library_facets(results_list):
+        """SEED-026 (LIBFILTER-01): compute per-library counts over the FULL pre-filter result set.
+
+        Returns a Counter of library_code -> count. Codes with 0 results are absent (not in the
+        Counter) so the dropdown can hide them (D-02). Always called with search_state.results
+        BEFORE applying _apply_library_filter.
+        """
+        from collections import Counter
+        return Counter(
+            r.get('display', {}).get('library_code', '')
+            for r in results_list
+            if r.get('display', {}).get('library_code')
+        )
+
     def _apply_printed_filter_and_render(results_list, reset_expansion=True):
         """Apply printed filter + PGP filter to results and re-render (used when no domain exclusions active).
 
         Phase 999.2 (PGP-FILTER-04, D-11): PGP filter stacks AFTER printed_filter and BEFORE
         measurement post-filters, per the canonical cascade ordering.
+        SEED-026 (LIBFILTER-01): library filter stacks AFTER pgp and BEFORE measurement.
         """
         filtered = _apply_printed_filter(results_list)
         filtered = _apply_pgp_filter(filtered)  # Phase 999.2 (D-11)
+        filtered = _apply_library_filter(filtered)  # SEED-026 (LIBFILTER-01)
         # Apply measurement post-filters (Phase 54, review concern #1)
         filtered = _apply_measurement_post_filters(filtered, search_state)
         total = len(search_state.results)
@@ -3397,6 +3563,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             count_parts.append(tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed'))
         if search_state.pgp_filter != 'all':  # Phase 999.2 (D-09)
             count_parts.append(tr('Only PGP') if search_state.pgp_filter == 'only_pgp' else tr('Hiding PGP'))
+        if search_state.library_filter:  # SEED-026 (LIBFILTER-01)
+            count_parts.append(tr('Library filter'))
         if count_parts:
             results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({', '.join(count_parts)})"
         else:
@@ -3415,8 +3583,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _apply_word_search_exclusions_and_render()
             elif search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions(reset_expansion=reset_expansion)
-            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all':
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
                 # Phase 999.2 (PGP-FILTER-04): route through unified printed+PGP filter when EITHER is active.
+                # SEED-026 (LIBFILTER-01): widened — also fires when library filter is the only active filter.
                 _apply_printed_filter_and_render(search_state.results, reset_expansion=reset_expansion)
             elif search_state.results:
                 filtered = _apply_measurement_post_filters(search_state.results, search_state)
@@ -3443,8 +3612,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _apply_word_search_exclusions_and_render()
             elif search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions(reset_expansion=reset_expansion)
-            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all':
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
                 # Phase 999.2 (PGP-FILTER-04): widened — routes through unified printed+PGP helper.
+                # SEED-026 (LIBFILTER-01): widened — also fires when library filter is the only active filter.
                 _apply_printed_filter_and_render(filtered, reset_expansion=reset_expansion)
             else:
                 filtered2 = _apply_measurement_post_filters(filtered, search_state)
@@ -3820,10 +3990,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             search_state.results = filtered
             _apply_domain_exclusions()
             search_state.results = original_results
-        elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all':
+        elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
             # Phase 999.2 (PGP-FILTER-04): widened — apply printed AND/OR PGP filter post-word-search.
+            # SEED-026 (LIBFILTER-01): widened — also fires when library filter is the only active filter.
             filtered = _apply_printed_filter(filtered)
             filtered = _apply_pgp_filter(filtered)  # Phase 999.2 (D-11)
+            filtered = _apply_library_filter(filtered)  # SEED-026 (LIBFILTER-01)
             filtered = _apply_measurement_post_filters(filtered, search_state)
             total = len(search_state.results)
             showing = len(filtered)
@@ -3831,6 +4003,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             results_count.text = f"{showing} {tr('Results')} ({n_excl} {tr('excluded')})"
             render_results(filtered, page=0)
         else:
+            filtered = _apply_library_filter(filtered)  # SEED-026 (LIBFILTER-01): library-only post-word-search
             filtered = _apply_measurement_post_filters(filtered, search_state)
             total = len(search_state.results)
             showing = len(filtered)
@@ -3881,6 +4054,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         filtered = _apply_printed_filter(filtered)
         # Apply PGP filter on top of printed-filtered results (Phase 999.2, D-11)
         filtered = _apply_pgp_filter(filtered)
+        # Apply library filter on top of PGP-filtered results (SEED-026, LIBFILTER-01)
+        filtered = _apply_library_filter(filtered)
         # Apply measurement post-filters (Phase 54, review concern #1)
         filtered = _apply_measurement_post_filters(filtered, search_state)
 
@@ -3894,6 +4069,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             count_parts.append(tr('Hiding printed') if search_state.printed_filter == 'hide_printed' else tr('Only printed'))
         if search_state.pgp_filter != 'all':  # Phase 999.2 (D-09)
             count_parts.append(tr('Only PGP') if search_state.pgp_filter == 'only_pgp' else tr('Hiding PGP'))
+        if search_state.library_filter:  # SEED-026 (LIBFILTER-01)
+            count_parts.append(tr('Library filter'))
         if count_parts:
             results_count.text = f"{showing} {tr('of')} {total} {tr('Results')} ({', '.join(count_parts)})"
         else:
@@ -4063,7 +4240,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 _apply_manuscript_exclusions()
             elif search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions()
-            elif search_state.printed_filter != 'all' and search_state.printed_ids:
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or bool(search_state.library_filter):
+                # SEED-026 (LIBFILTER-01): widened — library-only history-restore routes through filtering helper.
                 _apply_printed_filter_and_render(search_state.results)
             else:
                 # Apply measurement post-filters on history restore (Phase 54)
@@ -4742,6 +4920,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _update_domain_filter_btn()
             # Phase 56: refresh exclusion chips when results render
             _update_exclude_btn()
+            # SEED-026 (LIBFILTER-01): library filter button — visible whenever results exist.
+            _set_btn_visible(library_filter_btn, bool(search_state.results))
+            _update_library_btn()
+            _rebuild_library_menu()
+            _update_library_chips()
 
         def _render_with_filters(reset_expansion=True):
             """Re-render applying exclusions and filters.
@@ -4772,9 +4955,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
             if search_state.domain_exclusions and search_state.has_domain_data:
                 _apply_domain_exclusions(reset_expansion=reset_expansion)
-            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all':
+            elif (search_state.printed_filter != 'all' and search_state.printed_ids) or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
                 # Phase 999.2 (PGP-FILTER-04, HIGH-1): widened — printed OR PGP routes through
                 # the unified _apply_printed_filter_and_render (which applies BOTH per Task 3).
+                # SEED-026 (LIBFILTER-01): widened — library-only also routes through filtering helper.
                 search_state.domain_excluded_results = []
                 _apply_printed_filter_and_render(display_results, reset_expansion=reset_expansion)
             else:
@@ -5111,7 +5295,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     _apply_manuscript_exclusions(reset_expansion=False)
                 elif search_state.domain_exclusions and search_state.has_domain_data:
                     _apply_domain_exclusions(reset_expansion=False)
-                elif search_state.printed_filter != 'all' or search_state.pgp_filter != 'all':
+                elif search_state.printed_filter != 'all' or search_state.pgp_filter != 'all' or bool(search_state.library_filter):
+                    # SEED-026 (LIBFILTER-01): widened — library-only also routes through filtering helper on restore.
                     _apply_printed_filter_and_render(search_state.results, reset_expansion=False)
                 else:
                     # Original behavior: no filters active, raw render preserves pagination.
