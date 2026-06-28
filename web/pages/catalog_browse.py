@@ -1137,6 +1137,7 @@ def create_catalog_browse_page(
             current_text_all['value'],
             current_text_any['value'],
             current_text_not['value'],
+            current_library_filter['value'],  # GAP-F: library selection enables "Search in these results"
         ])
 
     def _build_incoming_filters() -> dict:
@@ -1162,6 +1163,12 @@ def create_catalog_browse_page(
             incoming['text_any'] = current_text_any['value']
         if current_text_not['value']:
             incoming['text_not'] = current_text_not['value']
+        # GAP-F: thread library selection to /search so "Search in these results" applies it.
+        # The receiving search page loads 'search_library_filter' at :187-189 (before consume),
+        # and consume (search.py:199) sets state.library_filter + persists the key so the
+        # next fresh render reloads it (persist→reload lifecycle).
+        if current_library_filter['value']:
+            incoming['library_filter'] = list(current_library_filter['value'])
         return incoming
 
     def _update_search_buttons():

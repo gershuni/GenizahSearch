@@ -228,7 +228,8 @@ def test_build_incoming_filters_includes_library_filter():
     source = pathlib.Path('web/pages/catalog_browse.py').read_text(encoding='utf-8')
     build_idx = source.find('def _build_incoming_filters()')
     assert build_idx != -1, "_build_incoming_filters() must exist in catalog_browse.py"
-    func_snippet = source[build_idx:build_idx + 1000]
+    # Use a larger snippet (2000 chars) to encompass the full function body
+    func_snippet = source[build_idx:build_idx + 2000]
     assert "incoming['library_filter']" in func_snippet or "incoming[\"library_filter\"]" in func_snippet, (
         "_build_incoming_filters() must set incoming['library_filter'] from "
         "current_library_filter['value'] (GAP-F)"
