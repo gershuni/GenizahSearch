@@ -1985,16 +1985,32 @@ class FjmsService:
             for row in cursor
         ]
 
-    # SEED-023: catalog-filter TEMP table names (fixed allowlist — never interpolated
-    # from caller input). Each maps a static, corpus-wide sys_id set onto AlmaId.
-    _FILTER_TEMP_TABLES = ("_browse_filter_pgp", "_browse_filter_edition")
+    # SEED-023/SEED-026: catalog-filter TEMP table names (fixed allowlist — never
+    # interpolated from caller input). Each maps a sys_id set onto AlmaId.
+    # PGP and Editions sets are static, corpus-wide (token = len is stable).
+    # The library filter (_browse_filter_library) is a DYNAMIC multi-select set;
+    # its token is content-derived (hash of sorted library_codes) so that two
+    # same-size but different selections correctly rebuild the TEMP table.
+    _FILTER_TEMP_TABLES = (
+        "_browse_filter_pgp",
+        "_browse_filter_edition",
+        "_browse_filter_library",
+    )
 
     def _ensure_filter_temp(self, name: str, sys_ids, token: int) -> bool:
         """Build (once per thread) a TEMP table of AlmaIds for a catalog filter.
 
-        The PGP/edition membership sets are static per process, so the table is
-        populated once per worker thread and reused across paginated requests
-        (``token`` = a stable signal, currently ``len``; a mismatch rebuilds).
+        The PGP/edition membership sets are static and corpus-wide, so they use
+        ``len(sys_ids)`` as the token (a given filter value always maps to the same
+        set — token match skips the rebuild safely).
+
+        The library filter (``_browse_filter_library``) is a DYNAMIC multi-select:
+        two different selections can resolve to the same set *size*, so its caller
+        passes a CONTENT-derived token (``hash(tuple(sorted(library_codes)))``)
+        to guarantee a rebuild when the selection changes — even at the same size.
+        This method is intentionally generic: it just compares ``reg.get(name) ==
+        token`` and rebuilds on mismatch, regardless of which filter is calling.
+
         Returns True if the table is ready to be referenced, False on failure
         (caller then skips the filter rather than corrupting the result set).
         """
@@ -2039,6 +2055,8 @@ class FjmsService:
         pgp_sys_ids=None,
         editions_filter: str = None,
         edition_sys_ids=None,
+        library_codes: list = None,
+        library_sys_ids=None,
     ) -> dict:
         """
         Get paginated browse results matching all provided filters (intersection).
@@ -2067,6 +2085,17 @@ class FjmsService:
             edition_sys_ids: Full corpus set of sys_ids with a scholarly edition
                 (PGP ``%Edition%`` ∪ FGP ``Digital Edition``); required when
                 ``editions_filter`` is active.
+            library_codes: SEED-026 list of selected library codes (e.g.
+                ``['CUL', 'JTS']``); used as the content token source (UI state) and
+                for chip rendering by callers. None or empty list = no-op (all results
+                returned). Must be accompanied by ``library_sys_ids``.
+            library_sys_ids: Precomputed set of sys_ids belonging to the selected
+                libraries (from ``resolve_library_sys_ids()``).  Applied BEFORE
+                COUNT/pagination so ``total`` reflects the full filtered set.
+                When ``library_codes`` is truthy but this is falsy/empty, the filter
+                is SKIPPED (fail-open) and a warning is logged — never silently returns
+                0 results.  Callers MUST run ``resolve_library_sys_ids`` off the event
+                loop (it is O(255K) over csv_bank).
 
         Returns:
             Dict with keys:
@@ -2222,6 +2251,34 @@ class FjmsService:
                         f'{op} (SELECT 1 FROM "_browse_filter_edition" t '
                         f"WHERE t.AlmaId = c.AlmaId)"
                     )
+
+            # SEED-026: library filter.  The token is CONTENT-derived from the
+            # selection (not len) so that two same-size-but-different library
+            # selections on the same thread correctly rebuild the TEMP table and
+            # return distinct result sets (Codex REQUIRED CHANGE 1).
+            if library_codes and library_sys_ids:
+                # Content-derived token (Codex REQUIRED CHANGE 1 / SEED-026):
+                # same-size but different selections get different tokens.
+                _lib_token = hash(tuple(sorted(library_codes)))
+                if self._ensure_filter_temp(
+                    "_browse_filter_library", library_sys_ids, _lib_token
+                ):
+                    conditions.append(
+                        'EXISTS (SELECT 1 FROM "_browse_filter_library" t '
+                        "WHERE t.AlmaId = c.AlmaId)"
+                    )
+            elif library_codes and not library_sys_ids:
+                # Selected-but-resolved-to-empty: fail open rather than returning 0
+                # results. This path is reached when all selected codes were invalid
+                # or the csv_bank was not yet loaded (Codex REQUIRED CHANGE 2).
+                logger.warning(
+                    "library filter selected (%d code(s): %s) but resolved to an "
+                    "empty sys_id set — skipping filter (fail-open). "
+                    "Check that library_codes are valid LIBRARY_CODES keys and that "
+                    "csv_bank is fully loaded before calling get_browse_results.",
+                    len(library_codes),
+                    library_codes,
+                )
 
             where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -3541,3 +3598,56 @@ def get_filter_sys_ids(**kwargs):
     intersections without spinning up the real FJMS sidecar.
     """
     return get_fjms_service(thread_safe=True).get_filter_sys_ids(**kwargs)
+
+
+def resolve_library_sys_ids(library_codes, meta_mgr) -> set:
+    """Reverse-lookup: convert a list of library codes to the matching sys_id set.
+
+    Shared helper importable by both web catalog (Plan C) and desktop catalog
+    (Plan D) so neither duplicates this logic.
+
+    Args:
+        library_codes: Iterable of library-code strings (e.g. ``['CUL', 'JTS']``).
+            Unknown codes are silently dropped (they are validated against
+            ``LIBRARY_CODES`` keys).  Empty list or None → returns ``set()``.
+        meta_mgr: A ``MetadataManager`` instance whose ``csv_bank`` attribute maps
+            ``sys_id → {library_code: str, ...}``.  ``None`` → returns ``set()``.
+
+    Returns:
+        ``set[str]`` of sys_ids whose ``library_code`` is in the validated code set.
+        Returns ``set()`` on any input that cannot be resolved (empty codes, None
+        meta_mgr, no valid codes after validation).
+
+    Threading / performance note:
+        This function iterates over the full csv_bank (~255K entries) in Python.
+        It MUST be called off the asyncio event loop — run via
+        ``asyncio.get_event_loop().run_in_executor(None, resolve_library_sys_ids, ...)``
+        or equivalent.  The result is a plain Python set that can be passed directly
+        to ``get_browse_results(library_sys_ids=...)``.
+    """
+    if not library_codes or meta_mgr is None:
+        return set()
+
+    # Lazy import to avoid a top-level cycle — browse_map_utils is a shared/
+    # module but importing LIBRARY_CODES at module load is safe; the lazy import
+    # here mirrors the pattern used by other helpers in this file.
+    try:
+        from shared.browse_map_utils import LIBRARY_CODES as _VALID_CODES
+    except ImportError:
+        logger.error("resolve_library_sys_ids: could not import LIBRARY_CODES")
+        return set()
+
+    valid_code_set = {c for c in library_codes if c in _VALID_CODES}
+    if not valid_code_set:
+        logger.debug(
+            "resolve_library_sys_ids: all supplied codes %r are unknown — "
+            "returning empty set (no filter applied)",
+            list(library_codes),
+        )
+        return set()
+
+    return {
+        sid
+        for sid, row in meta_mgr.csv_bank.items()
+        if row.get("library_code") in valid_code_set
+    }
