@@ -4,14 +4,14 @@ milestone: v8.3.0
 milestone_name: God-File Decomposition + Search & Browse UX
 status: Phase complete — ready for verification
 stopped_at: Phase 129 context gathered
-last_updated: "2026-06-28T20:12:31.465Z"
+last_updated: "2026-06-28T20:24:37.350Z"
 last_activity: 2026-06-28
 progress:
   total_phases: 8
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 22
-  completed_plans: 19
-  percent: 63
+  completed_plans: 20
+  percent: 75
 ---
 
 # Project State
@@ -180,7 +180,7 @@ Items carried forward from v8.2.0 and earlier:
 
 ## Session Continuity
 
-Last session: 2026-06-28T20:12:31.458Z
+Last session: 2026-06-28T20:23:43.457Z
 Stopped at: Phase 129 context gathered
 Resume file: None
 Next step: `/gsd-discuss-phase 126` (or skip-discuss-if-empty per the standing autonomous directive)
@@ -207,6 +207,7 @@ Next step: `/gsd-discuss-phase 126` (or skip-discuss-if-empty per the standing a
 | Phase 129 P04 | 16m | 2 tasks | 3 files |
 | Phase 129 P05 | 8min | 2 tasks | 3 files |
 | Phase 129 P06 | 7min | 3 tasks | 3 files |
+| Phase 129 P07 | 35 | 3 tasks | 4 files |
 
 ## Decisions
 
@@ -218,3 +219,5 @@ Next step: `/gsd-discuss-phase 126` (or skip-discuss-if-empty per the standing a
 - [Phase ?]: Phase 126 D1: MOVE-and-shim 5 dialogs to desktop/settings_dialogs.py + 4 widgets to desktop/ui_widgets.py; originals deleted, identity holds 9/9; D-07b strip verbatim; GenizahGUI.apply/cancel_settings added; LabPanel deferred to E2
 - [Phase ?]: GAP-E: catalog library filter uses checkbox dialog not ui.select; FINDING 1 all-unchecked guard
 - [Phase ?]: GAP-F: consume_incoming_filters persists search_library_filter key; persist->reload lifecycle via load-before-consume ordering in search.py
+- [Phase ?]: GAP-G closed
+- [Phase ?]: FINDING 2 closed
