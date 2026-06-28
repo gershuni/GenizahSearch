@@ -94,7 +94,7 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 - [x] **Phase 128: Search Results Space-Scroll (SEED-025)** - Space page-scrolls the search-results area when no result control holds an actionable focus (checkbox / expand / open detail); Shift+Space scrolls up; never steals the keystroke from a focused control. Web (NiceGUI keydown handler + focus guard on the results scroll container) + desktop (PyQt6 results table page-down/up routing). Small, self-contained. (completed 2026-06-27)
 
-- [ ] **Phase 129: Library Filter — Search + Browse-by-Identification (SEED-026)** - Library multi-select filter on web `/search` results (applied over the FULL pre-`[:200]` set, persisted via `safe_storage`, i18n EN/HE) and a `library_codes` filter pushed DOWN into `shared/fjms_service.get_browse_results` for Browse-by-Identification (correct `total`/pagination, composes with the SEED-023 PGP/Editions filters). Desktop parity: catalog Browse-by-Identification library filter (desktop search-results already filters by library/shelfmark). Reuses the SEED-023 push-down template; **Codex-review-before-code gate** per the seed.
+- [x] **Phase 129: Library Filter — Search + Browse-by-Identification (SEED-026)** - Library multi-select filter on web `/search` results (applied over the FULL pre-`[:200]` set, persisted via `safe_storage`, i18n EN/HE) and a `library_codes` filter pushed DOWN into `shared/fjms_service.get_browse_results` for Browse-by-Identification (correct `total`/pagination, composes with the SEED-023 PGP/Editions filters). Desktop parity: catalog Browse-by-Identification library filter (desktop search-results already filters by library/shelfmark). Reuses the SEED-023 push-down template; **Codex-review-before-code gate** per the seed. (completed 2026-06-28)
 
 ## Phase Details
 
@@ -255,7 +255,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 129-03-PLAN.md (Wave 2, depends 129-01) — Web Browse-by-Identification: `catalog_library_filter` state + dropdown checklist + per-code chips; resolve sys_ids off the event loop in `_fetch_results_blocking` and push `library_codes`/`library_sys_ids` into get_browse_results (composes with SEED-023 PGP/Editions) (LIBFILTER-02, GUARD-02)
-- [ ] 129-04-PLAN.md (Wave 2, depends 129-01) — Desktop catalog parity: `_catalog_library_filter` state + checkable widget beside SEED-023 buttons + worker `library_filter` param resolved on the QThread + chips; gui-marked `test_libfilter_desktop.py`; OQ-1 reachability documented (LIBFILTER-03, GUARD-02)
+- [x] 129-04-PLAN.md (Wave 2, depends 129-01) — Desktop catalog parity: `_catalog_library_filter` state + checkable widget beside SEED-023 buttons + worker `library_filter` param resolved on the QThread + chips; gui-marked `test_libfilter_desktop.py`; OQ-1 reachability documented (LIBFILTER-03, GUARD-02)
 
 ## Progress
 
@@ -273,4 +273,4 @@ Plans:
 | 126. Desktop Panels | 1/1 | Complete   | 2026-06-26 |
 | 127. Update UI & Final Cleanup | 3/3 | Complete   | 2026-06-26 |
 | 128. Search Results Space-Scroll (SEED-025) | 2/2 | Complete   | 2026-06-27 |
-| 129. Library Filter (SEED-026) | 3/4 | In Progress|  |
+| 129. Library Filter (SEED-026) | 4/4 | Complete   | 2026-06-28 |
