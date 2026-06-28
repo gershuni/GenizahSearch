@@ -10451,13 +10451,6 @@ class GenizahGUI(QMainWindow):
             else:
                 self._catalog_library_filter_btn.setText(tr("All Libraries"))
 
-    def _sync_library_menu_checks(self):
-        """No-op: formerly synced QAction checks in the library QMenu (GAP-G retired).
-
-        Kept as a safe no-op so any legacy caller in _catalog_remove_filter
-        does not raise AttributeError.
-        """
-
     def _catalog_remove_filter(self, filter_type, library_code=None):
         """Remove a specific filter (or all) and refresh.
 
@@ -10483,10 +10476,9 @@ class GenizahGUI(QMainWindow):
             self._catalog_pgp_filter = 'all'
             self._catalog_editions_filter = 'all'
             self._catalog_update_avail_filter_btns()
-            # Clear library filter + uncheck all QActions.
+            # Clear library filter.
             self._catalog_library_filter = []
             self._catalog_update_library_filter_btn()
-            self._sync_library_menu_checks()
             refresh_authors = True
             refresh_works = True
         elif filter_type == "pgp":
@@ -10502,7 +10494,6 @@ class GenizahGUI(QMainWindow):
             else:
                 self._catalog_library_filter = []
             self._catalog_update_library_filter_btn()
-            self._sync_library_menu_checks()
         elif filter_type == "domain":
             self._catalog_current_domain = None
             self._catalog_current_author = None
