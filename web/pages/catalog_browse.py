@@ -1132,8 +1132,13 @@ def create_catalog_browse_page(
                             _update_search_buttons()
                             dialog.close()
 
-                        # Apply button — disabled client-side when checked-count == 0.
-                        # Element id used by the JS handler: catLibApplyBtn_{container_id}
+                        # Apply button — disabled cosmetically by the JS handler
+                        # (catLibFilterUpdateApply sets btn.disabled on the raw DOM element).
+                        # NOTE: raw .disabled on a Quasar <q-btn> wrapper may not reliably
+                        # propagate to the Vue component's disable prop, so the JS guard is
+                        # best-effort / cosmetic UX only. The Python guard above
+                        # (if not checked: notify; return) is the AUTHORITATIVE, load-bearing
+                        # guard that prevents an all-unchecked Apply from committing [] = "show all".
                         apply_btn = ui.button(
                             tr('Apply'), on_click=apply_catalog_library_filter
                         ).props('dense no-caps color=primary')

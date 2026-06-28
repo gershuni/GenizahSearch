@@ -1793,13 +1793,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                 _apply_printed_filter_and_render(search_state.results)
                                             dialog.close()
 
-                                        # Apply button — disabled client-side when checked-count == 0
-                                        # (libFilterUpdateApply JS handler manages this).
-                                        # Element id used by the JS handler: libApplyBtn_{container_id}
+                                        # Apply button — disabled cosmetically by the JS handler
+                                        # (libFilterUpdateApply sets btn.disabled on the raw DOM
+                                        # element). NOTE: raw .disabled on a Quasar <q-btn> wrapper
+                                        # may not reliably propagate to the Vue component's disable
+                                        # prop, so the JS guard is best-effort / cosmetic UX only.
+                                        # The Python guard above (if not checked: notify; return)
+                                        # is the AUTHORITATIVE, load-bearing guard that prevents
+                                        # an all-unchecked Apply from committing [] = "show all".
                                         apply_btn = ui.button(
                                             tr('Apply'), on_click=apply_library_filter
                                         ).props('dense no-caps color=primary')
-                                        # Set the DOM id so the JS can find and disable/enable it
+                                        # Set the DOM id so the JS can find the button
                                         apply_btn.props(f'id="libApplyBtn_{container_id}"')
 
                                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat dense no-caps')
