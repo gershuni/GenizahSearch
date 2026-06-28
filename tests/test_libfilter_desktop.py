@@ -345,14 +345,15 @@ def test_filter_count_worker_intersects_library_with_meta_mgr(monkeypatch):
     fake_fjms_instance.is_available.return_value = True
     fake_fjms_instance.get_filter_sys_ids.side_effect = _fake_get_filter_sys_ids
 
+    # Patch at the source module so the local import inside run() picks it up
     monkeypatch.setattr(_fjms_mod, 'resolve_library_sys_ids', _fake_resolve)
 
     emitted = []
     filters = {'library': ['CUL'], 'domains': ['some_domain']}
     worker = FilterCountWorker(filters, meta_mgr=fake_meta)
 
-    # Replace the FjmsService constructor call inside run() with our fake
-    with patch('gui_threads.FjmsService', return_value=fake_fjms_instance):
+    # Patch FjmsService in shared.fjms_service (where it's imported from inside run())
+    with patch('shared.fjms_service.FjmsService', return_value=fake_fjms_instance):
         worker.finished.connect(emitted.append)
         worker.run()
 
@@ -385,7 +386,7 @@ def test_filter_count_worker_no_meta_mgr_is_safe_noop(monkeypatch):
     # meta_mgr defaults to None -> library intersection must be a no-op
     worker = FilterCountWorker(filters)
 
-    with patch('gui_threads.FjmsService', return_value=fake_fjms_instance):
+    with patch('shared.fjms_service.FjmsService', return_value=fake_fjms_instance):
         worker.finished.connect(emitted.append)
         worker.run()
 

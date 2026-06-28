@@ -10690,6 +10690,9 @@ class GenizahGUI(QMainWindow):
             filters['date_from'] = self._catalog_date_from
         if self._catalog_date_to is not None:
             filters['date_to'] = self._catalog_date_to
+        # GAP-H: thread library filter into search-within / parallels-within scope
+        if self._catalog_library_filter:
+            filters['library'] = list(self._catalog_library_filter)
         return filters
 
     def _catalog_search_in_results(self):
@@ -10699,7 +10702,7 @@ class GenizahGUI(QMainWindow):
             return
         self.pre_search_filters = filters
         # Recompute restrict_sys_ids for the filter set
-        from shared.fjms_service import get_fjms_service
+        from shared.fjms_service import get_fjms_service, resolve_library_sys_ids
         fjms = get_fjms_service()
         if fjms.is_available():
             self.pre_search_restrict_sys_ids = fjms.get_filter_sys_ids(
@@ -10709,6 +10712,13 @@ class GenizahGUI(QMainWindow):
                 date_from=filters.get('date_from'),
                 date_to=filters.get('date_to'),
             )
+        # GAP-H: intersect library filter into restrict scope
+        if self._catalog_library_filter:
+            lib_ids = resolve_library_sys_ids(self._catalog_library_filter, self.meta_mgr)
+            if self.pre_search_restrict_sys_ids is None:
+                self.pre_search_restrict_sys_ids = lib_ids
+            else:
+                self.pre_search_restrict_sys_ids &= lib_ids
         self._update_filter_chip_bar()
         self._set_active_tab(0)  # Switch to search tab
 
@@ -10719,7 +10729,7 @@ class GenizahGUI(QMainWindow):
             return
         self.pre_search_filters = filters
         # Recompute restrict_sys_ids for the filter set
-        from shared.fjms_service import get_fjms_service
+        from shared.fjms_service import get_fjms_service, resolve_library_sys_ids
         fjms = get_fjms_service()
         if fjms.is_available():
             self.pre_search_restrict_sys_ids = fjms.get_filter_sys_ids(
@@ -10729,6 +10739,13 @@ class GenizahGUI(QMainWindow):
                 date_from=filters.get('date_from'),
                 date_to=filters.get('date_to'),
             )
+        # GAP-H: intersect library filter into restrict scope
+        if self._catalog_library_filter:
+            lib_ids = resolve_library_sys_ids(self._catalog_library_filter, self.meta_mgr)
+            if self.pre_search_restrict_sys_ids is None:
+                self.pre_search_restrict_sys_ids = lib_ids
+            else:
+                self.pre_search_restrict_sys_ids &= lib_ids
         self._update_filter_chip_bar()
         self._set_active_tab(1)  # Switch to composition tab
 
@@ -15428,7 +15445,10 @@ class GenizahGUI(QMainWindow):
         # Check if any real filters remain (not just include_mode)
         has_real = any(k != 'include_mode' for k in self.pre_search_filters)
         if has_real:
-            worker = FilterCountWorker(self.pre_search_filters)
+            # FINDING 2 (129-07): pass meta_mgr so the worker can intersect
+            # filters['library'] into the recomputed set (preserves library
+            # restriction after non-library chip removal).
+            worker = FilterCountWorker(self.pre_search_filters, meta_mgr=self.meta_mgr)
             worker.finished.connect(self._on_filter_recompute_finished)
             self._filter_recompute_worker = worker
             worker.start()
@@ -24532,7 +24552,9 @@ class GenizahGUI(QMainWindow):
             psf = entry.get('pre_search_filters', {})
             self.pre_search_filters = psf
             if psf and any(k != 'include_mode' for k in psf):
-                worker = FilterCountWorker(psf)
+                # FINDING 2 (129-07): pass meta_mgr so library restriction is
+                # preserved across history/session restore.
+                worker = FilterCountWorker(psf, meta_mgr=self.meta_mgr)
                 worker.finished.connect(self._on_restore_filter_finished)
                 worker.start()
                 self._filter_restore_worker = worker
@@ -24598,7 +24620,9 @@ class GenizahGUI(QMainWindow):
             psf = entry.get('pre_search_filters', {})
             self.pre_search_filters = psf
             if psf and any(k != 'include_mode' for k in psf):
-                worker = FilterCountWorker(psf)
+                # FINDING 2 (129-07): pass meta_mgr so library restriction is
+                # preserved across composition history restore.
+                worker = FilterCountWorker(psf, meta_mgr=self.meta_mgr)
                 worker.finished.connect(self._on_restore_filter_finished)
                 worker.start()
                 self._filter_restore_worker = worker
@@ -25231,8 +25255,10 @@ class GenizahGUI(QMainWindow):
             self._post_measurement_filters = state.get('post_measurement_filters', {})
             self.word_excluded_sys_ids = set(state.get('word_excluded_sys_ids', []))
             if self.pre_search_filters:
-                # Recompute restrict_sys_ids from saved filters
-                worker = FilterCountWorker(self.pre_search_filters)
+                # Recompute restrict_sys_ids from saved filters.
+                # FINDING 2 (129-07): pass meta_mgr so library restriction is
+                # preserved across session restore.
+                worker = FilterCountWorker(self.pre_search_filters, meta_mgr=self.meta_mgr)
                 worker.finished.connect(self._on_restore_filter_finished)
                 self._restore_filter_worker = worker
                 worker.start()

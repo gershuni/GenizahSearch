@@ -1226,9 +1226,15 @@ class FilterCountWorker(QThread):
     """Background worker to compute manuscript count for pre-search filters."""
     finished = pyqtSignal(object)  # set or None
 
-    def __init__(self, filters: dict, parent=None):
+    def __init__(self, filters: dict, parent=None, *, meta_mgr=None):
         super().__init__(parent)
         self.filters = filters
+        # FINDING 2 (129-07): optional meta_mgr for library restriction recompute.
+        # When provided, the worker intersects filters['library'] into the result
+        # set so chip-removal does not silently drop the library restriction.
+        # Defaults to None (no-op) so the pre-existing dialogs_filter.py caller
+        # FilterCountWorker(filters, self) is unaffected.
+        self._meta_mgr = meta_mgr
 
     def run(self):
         try:
@@ -1279,6 +1285,13 @@ class FilterCountWorker(QThread):
                 kwargs['authors_exclude'] = _authors
                 kwargs['works_exclude'] = _works
             result = fjms.get_filter_sys_ids(**kwargs)
+            # FINDING 2 (129-07): intersect library restriction into the recomputed set.
+            # Runs on this worker QThread (off the UI thread) — correct for an O(255K)
+            # csv_bank scan. No-op when meta_mgr is None or no 'library' key present.
+            if self.filters.get('library') and self._meta_mgr is not None:
+                from shared.fjms_service import resolve_library_sys_ids
+                lib_ids = resolve_library_sys_ids(self.filters['library'], self._meta_mgr)
+                result = lib_ids if result is None else (result & lib_ids)
             self.finished.emit(result)
         except Exception:
             self.finished.emit(None)  # Operation failed; emit empty/None so caller handles gracefully
