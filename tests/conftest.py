@@ -91,6 +91,7 @@ if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
 # ---------------------------------------------------------------------------
 _GUI_TEST_FILES = {
     "test_catalog_availability_filter.py",
+    "test_libfilter_desktop.py",
     "test_seed022_desktop_badge.py",
     "test_space_scroll_gui.py",
     "test_telemetry_consent_ux.py",
