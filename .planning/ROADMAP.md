@@ -257,6 +257,12 @@ Plans:
 - [x] 129-03-PLAN.md (Wave 2, depends 129-01) — Web Browse-by-Identification: `catalog_library_filter` state + dropdown checklist + per-code chips; resolve sys_ids off the event loop in `_fetch_results_blocking` and push `library_codes`/`library_sys_ids` into get_browse_results (composes with SEED-023 PGP/Editions) (LIBFILTER-02, GUARD-02)
 - [x] 129-04-PLAN.md (Wave 2, depends 129-01) — Desktop catalog parity: `_catalog_library_filter` state + checkable widget beside SEED-023 buttons + worker `library_filter` param resolved on the QThread + chips; gui-marked `test_libfilter_desktop.py`; OQ-1 reachability documented (LIBFILTER-03, GUARD-02)
 
+**Gap Closure (UAT 2026-06-28 — control redesign + search-within wiring)** *(data layer is verified/unchanged; these close the 8 UX gaps GAP-A..GAP-H. All 3 plans have disjoint `files_modified` → parallel Wave 1.)*
+
+- [ ] 129-05-PLAN.md (gap, Wave 1) — Web `/search` control redesign: fix button-visibility mechanism conflict (GAP-A), remove the menu so the domain button stops co-opening it (GAP-B), replace the `ui.menu` with a checkbox dialog mirroring "Filter by Domains" (GAP-C), relocate chips to the post-search area near `results_header` (GAP-D); owns `genizah_translations.py` additions (LIBFILTER-01, GUARD-02)
+- [ ] 129-06-PLAN.md (gap, Wave 1) — Web catalog: replace the `ui.select` with a checkbox dialog (GAP-E) + thread the library selection through browse→search "Search in these results" via `_build_incoming_filters`/`_has_active_filters` (catalog) + `consume_incoming_filters` (filter_panel) persisting the literal `search_library_filter` key (GAP-F) (LIBFILTER-02, GUARD-02)
+- [ ] 129-07-PLAN.md (gap, Wave 1) — Desktop catalog: replace QMenu with a `LibraryFilterDialog` checkbox dialog (GAP-G) + thread `_catalog_library_filter` into "search within"/"parallels within" by intersecting `resolve_library_sys_ids` into `pre_search_restrict_sys_ids` (GAP-H); gui-marked tests (LIBFILTER-03, GUARD-02)
+
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
@@ -273,4 +279,4 @@ Plans:
 | 126. Desktop Panels | 1/1 | Complete   | 2026-06-26 |
 | 127. Update UI & Final Cleanup | 3/3 | Complete   | 2026-06-26 |
 | 128. Search Results Space-Scroll (SEED-025) | 2/2 | Complete   | 2026-06-27 |
-| 129. Library Filter (SEED-026) | 4/4 | Complete   | 2026-06-28 |
+| 129. Library Filter (SEED-026) | 4/7 | Gap closure (UX) | 2026-06-28 |
