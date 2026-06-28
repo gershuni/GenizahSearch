@@ -2,6 +2,8 @@
 phase: 129-library-filter-search-browse-by-identification-seed-026
 reviewed: 2026-06-28T00:00:00Z
 depth: standard
+status: resolved
+resolution: "All 4 Warnings + 3 Info fixed in commits 5d8c7e39 (WR-01), 8d3c6481 (WR-02), 10b25819 (WR-03), 165ad935 (WR-04), 8fa4a104 (IN-01/02), plus 120b756a (desktop library chip visibility, also Codex MEDIUM). 64 targeted+regression tests pass; ruff clean; Codex CODE gate converged APPROVE."
 files_reviewed: 7
 files_reviewed_list:
   - web/pages/search.py
