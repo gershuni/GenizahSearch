@@ -1997,7 +1997,7 @@ class FjmsService:
         "_browse_filter_library",
     )
 
-    def _ensure_filter_temp(self, name: str, sys_ids, token: int) -> bool:
+    def _ensure_filter_temp(self, name: str, sys_ids, token) -> bool:
         """Build (once per thread) a TEMP table of AlmaIds for a catalog filter.
 
         The PGP/edition membership sets are static and corpus-wide, so they use
@@ -2006,8 +2006,10 @@ class FjmsService:
 
         The library filter (``_browse_filter_library``) is a DYNAMIC multi-select:
         two different selections can resolve to the same set *size*, so its caller
-        passes a CONTENT-derived token (``hash(tuple(sorted(library_codes)))``)
+        passes a CONTENT-derived token (``tuple(sorted(library_codes))``)
         to guarantee a rebuild when the selection changes — even at the same size.
+        Using the sorted tuple directly (rather than ``hash()``) eliminates the
+        hash-collision class: two different selections always produce different tokens.
         This method is intentionally generic: it just compares ``reg.get(name) ==
         token`` and rebuilds on mismatch, regardless of which filter is calling.
 
@@ -2259,7 +2261,9 @@ class FjmsService:
             if library_codes and library_sys_ids:
                 # Content-derived token (Codex REQUIRED CHANGE 1 / SEED-026):
                 # same-size but different selections get different tokens.
-                _lib_token = hash(tuple(sorted(library_codes)))
+                # Use the sorted tuple directly (not hash()) to eliminate the
+                # hash-collision class entirely (WR-03).
+                _lib_token = tuple(sorted(library_codes))
                 if self._ensure_filter_temp(
                     "_browse_filter_library", library_sys_ids, _lib_token
                 ):
