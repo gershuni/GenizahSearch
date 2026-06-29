@@ -20,6 +20,14 @@ import sqlite3
 import pytest
 
 
+def _func_body(source: str, def_idx: int) -> str:
+    """Return the source of a nested function starting at def_idx, sliced up to the
+    next sibling `    def ` (4-space indent) so fixed-size windows can't bleed into
+    an adjacent function's body/docstring."""
+    nxt = source.find('\n    def ', def_idx + 1)
+    return source[def_idx:nxt] if nxt != -1 else source[def_idx:]
+
+
 # ── Minimal in-memory-ish FJMS catalog for the browse-filter wiring tests ───
 
 _CAT_COLS = (
@@ -226,13 +234,62 @@ def test_build_incoming_filters_includes_library_filter():
     """
     import pathlib
     source = pathlib.Path('web/pages/catalog_browse.py').read_text(encoding='utf-8')
-    build_idx = source.find('def _build_incoming_filters()')
-    assert build_idx != -1, "_build_incoming_filters() must exist in catalog_browse.py"
-    # Use a larger snippet (2000 chars) to encompass the full function body
-    func_snippet = source[build_idx:build_idx + 2000]
+    # Signature gained an include_library kwarg (Codex MEDIUM 2026-06-29) — match the
+    # def by prefix, not the old zero-arg form.
+    build_idx = source.find('def _build_incoming_filters(')
+    assert build_idx != -1, "_build_incoming_filters(...) must exist in catalog_browse.py"
+    func_snippet = _func_body(source, build_idx)
     assert "incoming['library_filter']" in func_snippet or "incoming[\"library_filter\"]" in func_snippet, (
         "_build_incoming_filters() must set incoming['library_filter'] from "
         "current_library_filter['value'] (GAP-F)"
+    )
+
+
+def test_parallels_handoff_excludes_library():
+    """Codex MEDIUM (2026-06-29): web Parallels ignores library_filter, so the
+    catalog→parallels handoff must NOT carry it (it would silently produce unscoped
+    parallels), and a library-ONLY selection must not enable the Parallels button.
+
+    Source-scan assertions:
+    - _has_active_filters_excluding_library() exists and does NOT reference library.
+    - _parallels_in_results calls _build_incoming_filters(include_library=False).
+    - _update_search_buttons gates the parallels button on the excluding-library check.
+    - Search handoff (_search_in_results) still carries library (include_library default).
+    """
+    import pathlib
+    source = pathlib.Path('web/pages/catalog_browse.py').read_text(encoding='utf-8')
+
+    # The library-excluding active-filter helper must exist.
+    excl_idx = source.find('def _has_active_filters_excluding_library(')
+    assert excl_idx != -1, "_has_active_filters_excluding_library() must exist"
+    excl_body = _func_body(source, excl_idx)
+    assert 'current_library_filter' not in excl_body, (
+        "_has_active_filters_excluding_library() must NOT count current_library_filter"
+    )
+
+    # Parallels handoff strips library.
+    par_idx = source.find('def _parallels_in_results(')
+    assert par_idx != -1, "_parallels_in_results() must exist"
+    par_body = _func_body(source, par_idx)
+    assert 'include_library=False' in par_body, (
+        "_parallels_in_results must build the handoff with include_library=False"
+    )
+
+    # Parallels button enablement uses the excluding-library check.
+    upd_idx = source.find('def _update_search_buttons(')
+    assert upd_idx != -1, "_update_search_buttons() must exist"
+    upd_body = _func_body(source, upd_idx)
+    assert '_has_active_filters_excluding_library()' in upd_body, (
+        "_update_search_buttons must gate the parallels button on "
+        "_has_active_filters_excluding_library()"
+    )
+
+    # Search handoff still carries library (default include_library=True).
+    search_idx = source.find('def _search_in_results(')
+    assert search_idx != -1, "_search_in_results() must exist"
+    search_body = _func_body(source, search_idx)
+    assert 'include_library=False' not in search_body, (
+        "_search_in_results must NOT strip library (search applies it)"
     )
 
 

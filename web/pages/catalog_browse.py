@@ -1296,8 +1296,31 @@ def create_catalog_browse_page(
             current_library_filter['value'],  # GAP-F: library selection enables "Search in these results"
         ])
 
-    def _build_incoming_filters() -> dict:
-        """Build incoming_filters dict from all active browse filters."""
+    def _has_active_filters_excluding_library() -> bool:
+        """Active filters that a TARGET page can actually apply, EXCLUDING library.
+
+        Codex MEDIUM (2026-06-29): web Parallels has no library scoping — it ignores
+        library_filter entirely. So a library-ONLY selection must NOT enable the
+        "Parallels in these results" button (it would silently produce unscoped
+        parallels). Library still enables the Search button via _has_active_filters().
+        """
+        return any([
+            current_domain['value'],
+            current_author['value'],
+            current_work['value'],
+            current_date_from['value'] is not None,
+            current_date_to['value'] is not None,
+            current_text_all['value'],
+            current_text_any['value'],
+            current_text_not['value'],
+        ])
+
+    def _build_incoming_filters(include_library: bool = True) -> dict:
+        """Build incoming_filters dict from all active browse filters.
+
+        include_library=False strips the library selection from the handoff — used for
+        the Parallels target, which cannot apply a library filter (Codex MEDIUM).
+        """
         incoming = {}
         if current_domain['value']:
             incoming['domain'] = current_domain['value']
@@ -1323,7 +1346,9 @@ def create_catalog_browse_page(
         # The receiving search page loads 'search_library_filter' at :187-189 (before consume),
         # and consume (search.py:199) sets state.library_filter + persists the key so the
         # next fresh render reloads it (persist→reload lifecycle).
-        if current_library_filter['value']:
+        # Codex MEDIUM (2026-06-29): only carry library to targets that apply it (search);
+        # Parallels passes include_library=False so the library scope isn't silently dropped.
+        if include_library and current_library_filter['value']:
             incoming['library_filter'] = list(current_library_filter['value'])
         return incoming
 
@@ -1335,8 +1360,11 @@ def create_catalog_browse_page(
                 search_btn_ref['ref'].props(remove='disable')
             else:
                 search_btn_ref['ref'].props('disable')
+        # Codex MEDIUM (2026-06-29): Parallels can't apply a library filter, so a
+        # library-ONLY selection must not enable it (would yield unscoped parallels).
+        parallels_active = _has_active_filters_excluding_library()
         if parallels_btn_ref['ref']:
-            if active:
+            if parallels_active:
                 parallels_btn_ref['ref'].props(remove='disable')
             else:
                 parallels_btn_ref['ref'].props('disable')
@@ -1351,10 +1379,17 @@ def create_catalog_browse_page(
         ui.navigate.to('/search?from_browse=1')
 
     def _parallels_in_results():
-        """Navigate to parallels page with all active browse filters pre-populated."""
-        incoming = _build_incoming_filters()
+        """Navigate to parallels page with all active browse filters pre-populated.
+
+        Codex MEDIUM (2026-06-29): Parallels cannot apply a library filter — strip it
+        from the handoff (include_library=False) so it is not silently dropped, and tell
+        the user if they had a library selection that won't carry over.
+        """
+        incoming = _build_incoming_filters(include_library=False)
         if not incoming:
             return
+        if current_library_filter['value']:
+            ui.notify(tr('Library filter is not applied to parallel search'), type='info')
         # Class N/A — bare write, no wrapper. safe_user_set absorbs prune-race.
         safe_user_set('incoming_filters', incoming)
         ui.navigate.to('/parallels')

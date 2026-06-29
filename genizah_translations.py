@@ -2902,6 +2902,8 @@ TRANSLATIONS = {
     # appends a "(shown/total)" count to this same phrasing rather than switching words.
     "Filter by library": "סינון לפי ספרייה",
     "Filter results by library": "סינון התוצאות לפי ספרייה",
+    # Codex MEDIUM (2026-06-29): catalog→parallels handoff drops library (parallels can't scope by it)
+    "Library filter is not applied to parallel search": "מסנן הספרייה אינו חל על חיפוש מקבילות",
     "Library filter": "מסנן ספרייה",
     "All Libraries": "כל הספריות",
     "Libraries": "ספריות",

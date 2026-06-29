@@ -1825,6 +1825,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat dense no-caps')
 
                         dialog.open()
+                        # Codex LOW (2026-06-29): initialize the Apply disabled-state from the
+                        # actual checked count. If a persisted library_filter matches NONE of the
+                        # current result set's libraries, the dialog opens all-unchecked; without
+                        # this, Apply would start enabled (Python guard still blocks the [] commit,
+                        # but the client invariant would be incomplete).
+                        ui.run_javascript(f'libFilterUpdateApply("{container_id}")')
 
                     library_filter_btn = ui.button(
                         tr('Filter by library'),
