@@ -184,9 +184,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.printed_filter = _safe_get('search_printed_filter', 'all')
         search_state.pgp_filter = _safe_get('search_pgp_filter', 'all')  # Phase 999.2 (PGP-FILTER-05, D-10)
         # SEED-026 (LIBFILTER-01): library multi-select filter — persist as list, validate against known codes.
+        # D-46/D-NEW-7: exclude 'LOCAL' — My Library is desktop-only and must never appear as a web filter.
         _lib0 = _safe_get('search_library_filter', [])
         _lib0 = _lib0 if isinstance(_lib0, list) else []
-        search_state.library_filter = [c for c in _lib0 if c in LIBRARY_CODES]
+        search_state.library_filter = [c for c in _lib0 if c in LIBRARY_CODES and c != 'LOCAL']
 
     # Clear exclusions if initial_domain provided (from browse page navigation)
     if initial_domain:

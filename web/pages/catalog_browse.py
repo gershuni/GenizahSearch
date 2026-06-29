@@ -1111,8 +1111,11 @@ def create_catalog_browse_page(
                             # ui.select path enforced — drop any code not in the canonical
                             # set before persisting (the downstream resolver also drops
                             # unknowns, but this prevents junk accumulating in storage).
+                            # D-46/D-NEW-7: exclude 'LOCAL' (My Library is desktop-only;
+                            # it must never enter a web library filter, even via a crafted
+                            # selection or stale storage).
                             new_filter = [c for c in _library_apply_selection(checked, _all)
-                                          if c in LIBRARY_CODES]
+                                          if c in LIBRARY_CODES and c != 'LOCAL']
                             current_library_filter['value'] = new_filter
                             safe_user_set('catalog_library_filter', new_filter)
                             _update_library_filter_btn()
