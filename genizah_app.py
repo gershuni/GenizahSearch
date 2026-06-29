@@ -9841,7 +9841,7 @@ class GenizahGUI(QMainWindow):
         lib_filter_label.setStyleSheet("font-weight: bold; font-size: 13px; margin-top: 6px; margin-bottom: 2px;")
         left_layout.addWidget(lib_filter_label)
 
-        self._catalog_library_filter_btn = QPushButton(tr("All Libraries"))
+        self._catalog_library_filter_btn = QPushButton(tr("Filter by library"))
         self._catalog_library_filter_btn.setFixedHeight(26)
         self._catalog_library_filter_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._catalog_library_filter_btn.setStyleSheet(
@@ -10453,16 +10453,18 @@ class GenizahGUI(QMainWindow):
             return
         btn = self._catalog_library_filter_btn
         if self._catalog_library_filter:
+            # Consistent base label (smoke 2026-06-29): same "Filter by library" phrasing
+            # in both states + count appended, matching the web buttons.
             total = len([c for c in LIBRARY_CODES.keys() if c != 'LOCAL'])
             shown = len(self._catalog_library_filter)
-            btn.setText(tr("Filter Libraries") + f" ({shown}/{total})")
+            btn.setText(tr("Filter by library") + f" ({shown}/{total})")
             btn.setStyleSheet(
                 "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; "
                 "background-color: #d32f2f; color: white; border: none; border-radius: 3px; }"
                 "QPushButton:hover { background-color: #b71c1c; }"
             )
         else:
-            btn.setText(tr("All Libraries"))
+            btn.setText(tr("Filter by library"))
             btn.setStyleSheet(
                 "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; }"
             )

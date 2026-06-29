@@ -419,9 +419,14 @@ def test_chip_renders_when_library_only():
         "_update_library_btn must read search_state.library_filter to decide "
         "whether the filter is active (independent of printed/pgp)."
     )
-    assert "tr('Filter Libraries')" in update_btn_src, (
-        "_update_library_btn must set the active-state label 'Filter Libraries' "
-        "(rendered as 'Filter Libraries (shown/total)')."
+    # Consistent base label (smoke 2026-06-29): both states use 'Filter by library';
+    # the active state appends a "(shown/total)" count rather than switching the word.
+    assert "tr('Filter by library')" in update_btn_src, (
+        "_update_library_btn must use the consistent 'Filter by library' base label in "
+        "both states (active appends '(shown/total)'), not a different word."
+    )
+    assert '({shown}/{total})' in update_btn_src or '(shown}/{total)' in update_btn_src or 'shown}/{total' in update_btn_src, (
+        "_update_library_btn must append a (shown/total) count to the active label."
     )
 
 

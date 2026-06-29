@@ -2898,9 +2898,9 @@ TRANSLATIONS = {
     "Hiding printed": "מסתיר דפוסים",
     "Only printed": "דפוסים בלבד",
     # Library filter (SEED-026)
+    # Single consistent base label in both states (smoke 2026-06-29): the active button
+    # appends a "(shown/total)" count to this same phrasing rather than switching words.
     "Filter by library": "סינון לפי ספרייה",
-    # SEED-026 smoke 2026-06-29: active-filter button label "Filter Libraries (shown/total)"
-    "Filter Libraries": "סינון ספריות",
     "Filter results by library": "סינון התוצאות לפי ספרייה",
     "Library filter": "מסנן ספרייה",
     "All Libraries": "כל הספריות",

@@ -1670,7 +1670,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             library_filter_btn.props(remove='color')
                             library_filter_btn.props('outline dense no-caps color=primary')
                         else:
-                            library_filter_btn.text = f"{tr('Filter Libraries')} ({shown}/{total})"
+                            # Consistent base label (smoke 2026-06-29): same "Filter by library"
+                            # phrasing as the inactive state, with the count appended — not a
+                            # different word ("Filter Libraries") that read as inconsistent.
+                            library_filter_btn.text = f"{tr('Filter by library')} ({shown}/{total})"
                             library_filter_btn.props(remove='color outline')
                             library_filter_btn.props('dense no-caps color=negative')
 
@@ -4425,6 +4428,46 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     def open_advanced_dialog(index, result):
         _open_advanced_dialog(search_state, refs, index, result)
 
+    # SEED-026 (smoke 2026-06-29): lifted to PAGE LEVEL (were nested in execute_search)
+    # so the session-restore path (_deferred_transcription_restore) can re-run the same
+    # cheap FJMS enrichment and re-reveal the domain/printed filter buttons after a
+    # language change rebuilds the page from the snapshot. Pure relative to execute_search
+    # (only close over search_state + module imports), so behaviour is identical there.
+    def collect_fjms_enrichment(sys_ids):
+        """Collect all FJMS enrichment in one sidecar pass for this batch."""
+        from shared.fjms_service import get_fjms_service
+        fjms = get_fjms_service(thread_safe=True)
+        if not fjms.is_available():
+            return {}, {}, set(), {}
+        return (
+            fjms.get_domains_for_sys_ids(sys_ids),
+            fjms.get_catalog_source_counts(sys_ids),
+            fjms.get_printed_sys_ids(sys_ids),
+            fjms.get_measurement_summaries_batch(sys_ids),  # Phase 54: measurement cache
+        )
+
+    def _process_domain_data(raw_domains):
+        """Process raw domain data into search_state fields."""
+        from shared.fjms_service import qualify_domain_name
+        for sys_id, doms in raw_domains.items():
+            child_names = {d['domain'] for d in doms}
+            filtered = [qualify_domain_name(d['domain'], d.get('parent_domain')) for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
+            # Smoke round 5 (2026-05-21): dedupe in first-seen order.
+            # A manuscript can have multiple FJMS rows for the same
+            # domain; without dedupe the Domains xlsx cell rendered the
+            # name n times (e.g. 'Arabic Tafsir|Arabic Tafsir|...').
+            # dict.fromkeys preserves insertion order on Python 3.7+.
+            filtered = list(dict.fromkeys(filtered))
+            if filtered:
+                search_state.all_result_domains[sys_id] = filtered
+            for d in doms:
+                qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
+                if qname != d['domain'] and d.get('domain_heb') and d.get('parent_domain_heb'):
+                    search_state.domain_name_map[qname] = f"{d['domain_heb']} ({d['parent_domain_heb']})"
+                if d.get('domain_heb') and d['domain'] not in search_state.domain_name_map:
+                    search_state.domain_name_map[d['domain']] = d['domain_heb']
+                if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in search_state.domain_name_map:
+                    search_state.domain_name_map[d['parent_domain']] = d['parent_domain_heb']
 
     async def execute_search():
         # Guard against double-submit (rage-clicking while search is running)
@@ -4994,19 +5037,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         logger.info("Search perf: first_render_ms=%.0f (results=%d)", (_t_render - _t_stage0) * 1000, len(results))
 
         # --- Enrichment helper functions (defined once, used for both stages) ---
-        def collect_fjms_enrichment(sys_ids):
-            """Collect all FJMS enrichment in one sidecar pass for this batch."""
-            from shared.fjms_service import get_fjms_service
-            fjms = get_fjms_service(thread_safe=True)
-            if not fjms.is_available():
-                return {}, {}, set(), {}
-            return (
-                fjms.get_domains_for_sys_ids(sys_ids),
-                fjms.get_catalog_source_counts(sys_ids),
-                fjms.get_printed_sys_ids(sys_ids),
-                fjms.get_measurement_summaries_batch(sys_ids),  # Phase 54: measurement cache
-            )
-
+        # NOTE (SEED-026 smoke 2026-06-29): collect_fjms_enrichment + _process_domain_data
+        # were lifted to PAGE LEVEL (see above execute_search) so the restore path can reuse
+        # them. They resolve via closure here — behaviour unchanged.
         _show_trans_for_enrich = _safe_get('show_translations', False)
 
         def collect_translations(sys_ids, show_trans=False):
@@ -5032,29 +5065,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             except Exception as e:
                 logger.warning("VS batch check failed: %s", e)
             return {}
-
-        def _process_domain_data(raw_domains):
-            """Process raw domain data into search_state fields."""
-            from shared.fjms_service import qualify_domain_name
-            for sys_id, doms in raw_domains.items():
-                child_names = {d['domain'] for d in doms}
-                filtered = [qualify_domain_name(d['domain'], d.get('parent_domain')) for d in doms if not (d.get('parent_domain') and d['parent_domain'] in child_names and d['parent_domain'] != d['domain'])]
-                # Smoke round 5 (2026-05-21): dedupe in first-seen order.
-                # A manuscript can have multiple FJMS rows for the same
-                # domain; without dedupe the Domains xlsx cell rendered the
-                # name n times (e.g. 'Arabic Tafsir|Arabic Tafsir|...').
-                # dict.fromkeys preserves insertion order on Python 3.7+.
-                filtered = list(dict.fromkeys(filtered))
-                if filtered:
-                    search_state.all_result_domains[sys_id] = filtered
-                for d in doms:
-                    qname = qualify_domain_name(d['domain'], d.get('parent_domain'))
-                    if qname != d['domain'] and d.get('domain_heb') and d.get('parent_domain_heb'):
-                        search_state.domain_name_map[qname] = f"{d['domain_heb']} ({d['parent_domain_heb']})"
-                    if d.get('domain_heb') and d['domain'] not in search_state.domain_name_map:
-                        search_state.domain_name_map[d['domain']] = d['domain_heb']
-                    if d.get('parent_domain_heb') and d.get('parent_domain') and d['parent_domain'] not in search_state.domain_name_map:
-                        search_state.domain_name_map[d['parent_domain']] = d['parent_domain_heb']
 
         def _apply_enrichment_to_ui():
             """Update UI elements after enrichment data changes."""
@@ -5382,6 +5392,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     elif search_state.results:
         results_count.text = f"{len(search_state.results)} {tr('Results')}"
         render_results(search_state.results, page=0)
+        # SEED-026 (smoke 2026-06-29): on session restore (e.g. after a UI-language
+        # change rebuilds the page from the snapshot), reveal the buttons whose data is
+        # already restored — library (needs only results) + exclude (exclusion_sources).
+        # PGP is revealed by _deferred_transcription_restore; domain/printed are revealed
+        # there too after the cheap FJMS re-fetch. Without this, all filter buttons stayed
+        # hidden on restore because the reveal lived only in the fresh-search enrichment path.
+        try:
+            _set_btn_visible(library_filter_btn, True)
+            _update_library_btn()
+            _update_exclude_btn()
+        except Exception:
+            logger.exception("SEED-026: filter button reveal on session restore failed (non-fatal)")
         ui.notify(tr('Session restored'), type='info', timeout=3000, position='top')
     elif initial_query:
         # Cat-2: deferred page-mount init - execute_search needs UI to render first.
@@ -5437,6 +5459,30 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         get_sys_ids_with_transcriptions, sys_ids
                     )
                     search_state.manual_transcription_sys_ids = set()
+                # SEED-026 (smoke 2026-06-29): re-run the cheap FJMS enrichment on restore
+                # (domains + printed + catalog counts + measurements) so the domain/printed
+                # filter buttons reappear after a UI-language change rebuilds the page from
+                # the snapshot. Mirrors fresh-search STAGE-1 enrichment but is all SQLite
+                # sidecar reads (no IIIF/NLI), so it is fast and cannot hit the image-fetch
+                # timeout path. Runs BEFORE the cascade below so has_domain_data is set in
+                # time for the domain-exclusions branch.
+                try:
+                    raw_domains, catalog_counts, printed_ids, meas_batch = await run.io_bound(
+                        collect_fjms_enrichment, sys_ids
+                    )
+                    _process_domain_data(raw_domains)
+                    search_state.has_domain_data = bool(search_state.all_result_domains)
+                    search_state.result_domains = dict(search_state.all_result_domains)
+                    search_state.printed_ids = printed_ids
+                    search_state.catalog_source_counts = catalog_counts
+                    search_state._measurement_cache.update(meas_batch)
+                    _set_btn_visible(printed_filter_btn, len(search_state.printed_ids) > 0)
+                    _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
+                    _update_domain_filter_btn()
+                    _set_btn_visible(library_filter_btn, bool(search_state.results))
+                    _update_library_btn()
+                except Exception:
+                    logger.exception("SEED-026: FJMS re-enrichment on restore failed (non-fatal)")
                 # Phase 999.2: PGP button + chip visibility now that transcription data is loaded.
                 _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
                 _update_pgp_filter_btn()

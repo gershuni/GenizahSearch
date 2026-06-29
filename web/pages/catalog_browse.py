@@ -975,13 +975,15 @@ def create_catalog_browse_page(
             return
         sel = current_library_filter['value']
         if not sel:
-            btn.text = tr('All Libraries')
+            btn.text = tr('Filter by library')
             btn.props(remove='color')
             btn.props('outline dense no-caps color=primary')
         else:
+            # Consistent base label (smoke 2026-06-29): same "Filter by library" phrasing
+            # in both states + count appended, matching the web-search button.
             total = len([c for c in LIBRARY_CODES if c != 'LOCAL'])
             shown = len(sel)
-            btn.text = f"{tr('Filter Libraries')} ({shown}/{total})"
+            btn.text = f"{tr('Filter by library')} ({shown}/{total})"
             btn.props(remove='color outline')
             btn.props('dense no-caps color=negative')
 
@@ -1545,7 +1547,7 @@ def create_catalog_browse_page(
                     # instead of the old ui.select(multiple=True).  The dialog uses the
                     # same HTML+JS readback pattern as the web-search library dialog.
                     lib_btn = ui.button(
-                        tr('All Libraries'),
+                        tr('Filter by library'),
                         on_click=lambda: _open_library_filter_dialog(),
                     ).props('outline dense no-caps color=primary').classes('w-full text-sm')
                     lib_btn.tooltip(tr('Filter results by library'))
