@@ -2899,6 +2899,8 @@ TRANSLATIONS = {
     "Only printed": "דפוסים בלבד",
     # Library filter (SEED-026)
     "Filter by library": "סינון לפי ספרייה",
+    # SEED-026 smoke 2026-06-29: active-filter button label "Filter Libraries (shown/total)"
+    "Filter Libraries": "סינון ספריות",
     "Filter results by library": "סינון התוצאות לפי ספרייה",
     "Library filter": "מסנן ספרייה",
     "All Libraries": "כל הספריות",

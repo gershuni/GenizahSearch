@@ -7,12 +7,12 @@ Coverage:
   (4) test_facets_from_prefilter_full_set               — _compute_library_facets uses full list
   (5) test_persistence_uses_safe_storage_chokepoint     — key search_library_filter + no raw access
   (6) test_label_uses_get_library_display               — labels via get_library_display, not raw code
-  (7) test_chip_renders_when_library_only               — chip visible in library-only case (AST)
+  (7) test_chip_renders_when_library_only               — button-state path reachable library-only (AST)
   (8) test_dialog_control_not_menu                      — GAP-B/C: dialog not menu (AST)
   (9) test_button_visibility_mechanism_consistent       — GAP-A: _set_btn_visible not set_visibility
   (10) test_library_apply_selection_mapping             — GAP-C: all-checked=>[], subset=>subset
   (11) test_all_unchecked_guard                         — FINDING 1: Apply guarded against zero-checked
-  (12) test_chip_placement_post_search_container        — GAP-D: chips in post-search row not chip_bar
+  (12) test_chip_placement_post_search_container        — SEED-026 redesign: NO chips; state on button
   (13) test_no_script_in_library_dialog_html            — BUG-B static guard: no <script> in ui.html
   (14) test_library_btn_revealed_before_update_chain   — BUG-A static guard: reveal before _update_*
 """
@@ -350,7 +350,7 @@ def test_persistence_uses_safe_storage_chokepoint():
 # ---------------------------------------------------------------------------
 
 def test_label_uses_get_library_display():
-    """Library names in the dropdown and chips must come from
+    """Library names in the filter dialog checkboxes must come from
     get_library_display(code, short=False, lang=...) — no raw code labels.
     """
     source = SEARCH_PY.read_text(encoding='utf-8')
@@ -377,64 +377,51 @@ def test_label_uses_get_library_display():
 # ---------------------------------------------------------------------------
 
 def test_chip_renders_when_library_only():
-    """The library chip render path must be reachable when library is the ONLY
-    active filter — it must NOT be gated solely on _has_active_filters() (which
-    covers only pre-search filters) or on printed/pgp being active.
+    """SEED-026 (smoke 2026-06-29 redesign): there are NO library chips. The
+    library filter STATE is carried on the button itself (red + a "shown/total"
+    count) via _update_library_btn, and this state path must be reachable when
+    library is the ONLY active filter — independent of printed/pgp.
 
-    GAP-D: library chips render in the POST-SEARCH container (library_chip_row),
-    not in chip_bar_container (_update_chip_bar). This test checks that there is
-    a chip render path referencing library_filter.
+    This test (kept under its original name for the suite manifest) now verifies
+    the button-state path rather than a chip render path.
     """
     source = SEARCH_PY.read_text(encoding='utf-8')
 
-    # The source must contain a library chip render referencing library_filter
     assert 'library_filter' in source, (
         "search_library_filter / library_filter not found in search.py — "
-        "the library chip path has not been implemented."
+        "the library filter path has not been implemented."
     )
 
-    # The library filter chips must be renderable independently of printed/pgp.
-    # Check that there is at least one render path that fires on `library_filter`
-    # without requiring `printed_filter != 'all'` or `pgp_filter != 'all'` as a
-    # NECESSARY condition.
-    #
-    # Heuristic: at least one line that writes/creates a chip AND references
-    # library_filter (or calls a function that does so with library_filter as arg).
-    lines = source.splitlines()
-    chip_lines = [
-        i + 1 for i, ln in enumerate(lines)
-        if 'library_filter' in ln and (
-            'chip' in ln.lower() or 'remove' in ln.lower() or 'Library' in ln
-        )
-    ]
-    assert chip_lines, (
-        "No chip-related lines referencing library_filter found in search.py. "
-        "Removable library chips must be implemented."
-    )
-
-    # The chip render must not require printed_filter to be active as a guard.
-    # Check that there is NO `if ... printed_filter ... library_filter` pattern
-    # where printed_filter is a REQUIRED (AND) condition for library_filter chips.
-    # This is a best-effort heuristic — the structural requirement is tested by
-    # test_library_only_routes_through_filtering_helper which checks the routing
-    # predicates are widened so library-only takes the filter path.
-    #
-    # Additionally verify that 'search_library_filter' appears in the persistence
-    # and the chip-render function:
+    # Persistence chokepoint key still present.
     assert 'search_library_filter' in source, (
         "Persistence key 'search_library_filter' not found in search.py"
     )
 
-    # The update function for library chips must exist (named _update_library_chips
-    # or similar, or inline chip creation that references library_filter).
-    has_update_fn = (
-        '_update_library_chip' in source
-        or '_render_library_chip' in source
-        or ('library_filter' in source and 'chip' in source.lower())
+    # The button-state update function must exist and drive the label/colour.
+    tree = ast.parse(source)
+    update_btn_src = None
+    for func in _iter_function_defs(tree):
+        if func.name == '_update_library_btn':
+            update_btn_src = ast.get_source_segment(source, func) or ''
+            break
+    assert update_btn_src is not None, (
+        "_update_library_btn not found in search.py — the button-state path "
+        "(label + colour) must exist to convey the active library filter."
     )
-    assert has_update_fn, (
-        "No library chip update/render path found in search.py. "
-        "The chip must render when library is the only active filter."
+
+    # It must compute its count from the in-result facets (shown/total) and
+    # reference library_filter — i.e. the state is reachable for library-only.
+    assert '_compute_library_facets' in update_btn_src, (
+        "_update_library_btn must derive its (shown/total) count from "
+        "_compute_library_facets(search_state.results)."
+    )
+    assert 'library_filter' in update_btn_src, (
+        "_update_library_btn must read search_state.library_filter to decide "
+        "whether the filter is active (independent of printed/pgp)."
+    )
+    assert "tr('Filter Libraries')" in update_btn_src, (
+        "_update_library_btn must set the active-state label 'Filter Libraries' "
+        "(rendered as 'Filter Libraries (shown/total)')."
     )
 
 
@@ -660,32 +647,39 @@ def test_all_unchecked_guard():
 
 
 # ---------------------------------------------------------------------------
-# Test 12 (GAP-D): chip placement — post-search container, not chip_bar_container
+# Test 12 (SEED-026 smoke 2026-06-29 redesign): NO library chips — state on button
 # ---------------------------------------------------------------------------
 
 def test_chip_placement_post_search_container():
-    """GAP-D: library chips must be rendered in a dedicated post-search container
-    (library_chip_row) near results_header — NOT in chip_bar_container / _update_chip_bar.
+    """SEED-026 (smoke 2026-06-29 redesign): there are NO library chips at all.
+    The per-library chip row proved noisy when many libraries were selected, so
+    the filter state now lives entirely on library_filter_btn (red +
+    "Filter Libraries (shown/total)"). This test (kept under its original name
+    for the suite manifest) now enforces the no-chip design.
 
     Assertions:
-    - A 'library_chip_row' identifier exists in search.py (the new post-search chip row)
-    - 'account_balance' (the library chip icon) does NOT appear inside _update_chip_bar
+    - NO 'library_chip_row' identifier and NO '_update_library_chips' function
+      remain in search.py (chip row + render fn fully removed)
+    - 'account_balance' (the old library chip icon) does NOT appear inside
+      _update_chip_bar
     - The has_any line in _update_chip_bar does NOT OR bool(search_state.library_filter)
-      (that widening is reverted because library chips moved to their own row)
     - _update_chip_bar STILL builds the other chip types: domain/measurement/text-position
       (no chip disappears — regression guard)
-    - chip_bar_container is NOT responsible for library chips
 
     Note: there is NO 'printed chip' in _update_chip_bar (printed is a BUTTON, not a chip).
     Do NOT assert a printed chip.
     """
     source = SEARCH_PY.read_text(encoding='utf-8')
 
-    # Positive: post-search library chip row must exist
-    assert 'library_chip_row' in source, (
-        "library_chip_row not found in search.py. "
-        "GAP-D: a dedicated post-search chip row must be created near results_header "
-        "for the library filter chips (relocated from chip_bar_container)."
+    # Negative: the chip row + its render function must be GONE.
+    assert 'library_chip_row' not in source, (
+        "library_chip_row still present in search.py. "
+        "SEED-026 redesign: the post-search library chip row was removed; "
+        "filter state now lives on library_filter_btn (_update_library_btn)."
+    )
+    assert '_update_library_chips' not in source, (
+        "_update_library_chips still present in search.py. "
+        "SEED-026 redesign: the chip render function was removed."
     )
 
     # Find the _update_chip_bar function body
@@ -701,19 +695,18 @@ def test_chip_placement_post_search_container():
         "The pre-search chip bar function must still exist."
     )
 
-    # Negative: account_balance (library chip icon) must NOT be in _update_chip_bar
+    # Negative: account_balance (old library chip icon) must NOT be in _update_chip_bar
     assert 'account_balance' not in update_chip_bar_src, (
         "'account_balance' (library chip icon) still appears inside _update_chip_bar. "
-        "GAP-D: library chips must be RELOCATED to library_chip_row (post-search area), "
-        "not rendered inside _update_chip_bar (the pre-search chip_bar_container)."
+        "SEED-026: there are no library chips; the pre-search chip_bar_container "
+        "must not render any library chip."
     )
 
     # Negative: has_any line must NOT OR bool(search_state.library_filter)
-    # (this widening is reverted because library chips are now in their own row)
     assert 'or bool(search_state.library_filter)' not in update_chip_bar_src, (
         "_update_chip_bar has_any line still ORs bool(search_state.library_filter). "
-        "GAP-D: this widening must be reverted — library chips moved to library_chip_row, "
-        "so chip_bar_container's visibility no longer needs to consider library_filter."
+        "SEED-026: the library filter has no chip, so chip_bar_container's visibility "
+        "must not consider library_filter."
     )
 
     # Positive: _update_chip_bar still builds the other chip types

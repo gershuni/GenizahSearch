@@ -10441,15 +10441,31 @@ class GenizahGUI(QMainWindow):
             self._catalog_update_chips()
 
     def _catalog_update_library_filter_btn(self):
-        """Update the library filter button label to reflect current selection."""
-        if hasattr(self, '_catalog_library_filter_btn'):
-            if self._catalog_library_filter:
-                count = len(self._catalog_library_filter)
-                self._catalog_library_filter_btn.setText(
-                    tr("Libraries") + f" ({count})"
-                )
-            else:
-                self._catalog_library_filter_btn.setText(tr("All Libraries"))
+        """Update the library filter button label + colour to reflect the selection.
+
+        SEED-026 (smoke 2026-06-29): the per-library chips were removed — the button
+        itself carries the state. When a strict subset is selected the button turns
+        RED and reads "Filter Libraries (shown/total)" (total = catalog libraries,
+        LIBRARY_CODES minus LOCAL; shown = selected count); otherwise it is the
+        neutral "All Libraries".
+        """
+        if not hasattr(self, '_catalog_library_filter_btn'):
+            return
+        btn = self._catalog_library_filter_btn
+        if self._catalog_library_filter:
+            total = len([c for c in LIBRARY_CODES.keys() if c != 'LOCAL'])
+            shown = len(self._catalog_library_filter)
+            btn.setText(tr("Filter Libraries") + f" ({shown}/{total})")
+            btn.setStyleSheet(
+                "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; "
+                "background-color: #d32f2f; color: white; border: none; border-radius: 3px; }"
+                "QPushButton:hover { background-color: #b71c1c; }"
+            )
+        else:
+            btn.setText(tr("All Libraries"))
+            btn.setStyleSheet(
+                "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; }"
+            )
 
     def _catalog_remove_filter(self, filter_type, library_code=None):
         """Remove a specific filter (or all) and refresh.
@@ -10646,20 +10662,13 @@ class GenizahGUI(QMainWindow):
             btn.clicked.connect(lambda: self._catalog_remove_filter("editions"))
             self._catalog_chips_layout.addWidget(btn)
 
-        # SEED-026 desktop parity — library filter chips (LIBFILTER-03, D-01/D-03).
-        # One removable chip per selected library code, labeled via get_library_display
-        # (auto-detects CURRENT_LANG — no English leak under Hebrew UI).
-        for _lib_code in list(getattr(self, '_catalog_library_filter', [])):
+        # SEED-026 (smoke 2026-06-29): NO per-library chips — the library filter
+        # state is shown on the catalog library button itself (red + "shown/total",
+        # see _catalog_update_library_filter_btn). An active library filter must still
+        # count toward has_any so "Clear all" + "Search/Parallels in these results"
+        # stay enabled.
+        if list(getattr(self, '_catalog_library_filter', [])):
             has_any = True
-            lib_label = get_library_display(_lib_code, short=False)
-            btn = QPushButton(f"{lib_label}  ×")
-            btn.setStyleSheet(chip_style)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFixedHeight(24)
-            btn.clicked.connect(
-                lambda _checked=False, code=_lib_code: self._catalog_remove_filter("library", library_code=code)
-            )
-            self._catalog_chips_layout.addWidget(btn)
 
         self._catalog_clear_all_btn.setVisible(has_any)
         # Enable/disable browse-to-search buttons
@@ -15386,12 +15395,17 @@ class GenizahGUI(QMainWindow):
                 work_display = filters.get('work_name') or str(filters['work'])
                 self._add_filter_chip(chip_layout, tr("Work") + ": " + work_display, ('works', filters['work']))
 
-            # Library chips (GAP-H: per-code removable chips so user can see/clear scope).
-            # Keyed as ('library', code) so _remove_filter's tuple branch handles removal
-            # by updating pre_search_filters['library'] and triggering FilterCountWorker.
-            for _lib_code in filters.get('library', []):
-                _lib_label = get_library_display(_lib_code, short=False)
-                self._add_filter_chip(chip_layout, tr("Library") + ": " + _lib_label, ('library', _lib_code))
+            # Library chip (SEED-026 smoke 2026-06-29): collapse the per-code chips into a
+            # SINGLE summary chip "Library (N)" — a catalog handoff can carry many libraries
+            # and one chip per code floods the bar. Keyed as the plain string 'library' so
+            # _remove_filter's else-branch pops the whole 'library' restriction (then
+            # FilterCountWorker recomputes the remaining filters). The scope stays visible
+            # and removable (GAP-H intent) without the clutter.
+            _lib_codes = filters.get('library', [])
+            if _lib_codes:
+                self._add_filter_chip(
+                    chip_layout, tr("Library") + f" ({len(_lib_codes)})", 'library'
+                )
 
             if filters.get('date_from') or filters.get('date_to'):
                 date_str = ""

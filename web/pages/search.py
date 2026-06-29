@@ -1157,16 +1157,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         def _update_chip_bar():
             """Rebuild chip bar from current filter state.
 
-            SEED-026 (LIBFILTER-01 GAP-D): library chips moved to library_chip_row (post-search
-            area near results_header). chip_bar_container is the PRE-search 'search only in…' bar
-            and only shows domain/text-position/material/measurement chips. The has_any OR for
-            library_filter is reverted — library chips now have their own dedicated row.
+            SEED-026 (smoke 2026-06-29): there are NO library chips. The library filter state
+            is shown on library_filter_btn itself (red + "Filter Libraries (shown/total)").
+            chip_bar_container is the PRE-search 'search only in…' bar and only shows
+            domain/text-position/material/measurement chips.
             """
             chip_bar_container.clear()
             _pos = (text_position_select.value or 'anywhere')
             _pos_active = _pos != 'anywhere'
-            # NOTE: library_filter is intentionally NOT included here — library chips
-            # were relocated to library_chip_row (post-search area). The pre-search
+            # NOTE: library_filter is intentionally NOT included here — its state lives on
+            # the library_filter_btn (see _update_library_btn). The pre-search
             # chip_bar_container only shows filters that apply during search construction.
             has_any = _has_active_filters() or _pos_active
             chip_bar_container.set_visibility(has_any)
@@ -1316,9 +1316,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         'background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border-light);'
                     )
 
-                # NOTE (SEED-026 GAP-D): library chips were RELOCATED to library_chip_row
-                # (a dedicated post-search row near results_header). They no longer render
-                # here in chip_bar_container (_update_chip_bar). See _update_library_chips().
+                # NOTE (SEED-026): there are no library chips. The library filter state is
+                # shown on library_filter_btn itself (red + "Filter Libraries (shown/total)"),
+                # not in chip_bar_container (_update_chip_bar). See _update_library_btn().
 
         async def _remove_filter(filter_type, value=None):
             """Remove a specific filter and update state."""
@@ -1611,7 +1611,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                     # SEED-026 GAP-A/B/C/D: Library multi-select filter — redesigned as a checkbox
                     # dialog (mirroring _open_domain_filter_dialog) with inclusion semantics.
                     # Button hidden via _set_btn_visible (CSS visibility, same as sibling buttons).
-                    # No ui.menu — dialog only. Chips are in a dedicated post-search library_chip_row.
+                    # No ui.menu — dialog only. Active-filter state shows on the button itself
+                    # (red + "Filter Libraries (shown/total)"); there are no chips.
 
                     def _library_apply_selection(checked_codes, all_codes):
                         """Pure mapping helper: returns [] when all codes are checked (= clear filter /
@@ -1629,50 +1630,34 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         return list(checked_codes)
 
                     def _update_library_btn():
-                        """Sync library filter button label and color."""
-                        if not search_state.library_filter:
+                        """Sync the library filter button: label, count, and color.
+
+                        SEED-026 (smoke 2026-06-29): the post-search chips were removed — the
+                        button itself now carries the filter state. When a strict subset of the
+                        in-result libraries is shown, the button turns RED (color=negative,
+                        filled) and reads "Filter Libraries (shown/total)", where:
+                          - total = distinct libraries present in the current result set
+                          - shown = how many of those pass the active filter
+                        When all in-result libraries are shown (no active restriction), the
+                        button reverts to the neutral outlined "Filter by library".
+                        """
+                        facets = _compute_library_facets(search_state.results) if search_state.results else {}
+                        total = len(facets)
+                        shown = total
+                        active = False
+                        if search_state.library_filter:
+                            sel = set(search_state.library_filter)
+                            shown = sum(1 for code in facets if code in sel)
+                            # Active only when the selection actually hides some in-result library.
+                            active = bool(total) and shown != total
+                        if not active:
                             library_filter_btn.text = tr('Filter by library')
+                            library_filter_btn.props(remove='color')
                             library_filter_btn.props('outline dense no-caps color=primary')
                         else:
-                            n = len(search_state.library_filter)
-                            library_filter_btn.text = f"{tr('Library')} ({n})"
-                            library_filter_btn.props(remove='color')
-                            library_filter_btn.props('outline dense no-caps color=teal')
-
-                    def _update_library_chips():
-                        """Rebuild the post-search library_chip_row with one removable chip per
-                        selected library code. Show/hide the row based on whether the filter is active.
-                        GAP-D: chips render in library_chip_row (near results_header), NOT in
-                        chip_bar_container (_update_chip_bar).
-                        """
-                        library_chip_row.clear()
-                        if not search_state.library_filter:
-                            library_chip_row.set_visibility(False)
-                            return
-                        library_chip_row.set_visibility(True)
-                        lang = get_language()
-                        with library_chip_row:
-                            for _lib_code in list(search_state.library_filter):
-                                _lib_label = get_library_display(_lib_code, short=False, lang=lang)
-                                _chip_text = f"{tr('Library')}: {_lib_label}"
-                                _c = _lib_code  # capture for lambda
-                                ui.chip(
-                                    _chip_text, icon='account_balance', removable=True,
-                                    on_click=lambda: None, color='teal-2',
-                                ).on('remove', lambda c=_c: _remove_library_code(c))
-
-                    def _remove_library_code(code):
-                        """Remove a single library code from the selection and re-render."""
-                        search_state.library_filter = [c for c in search_state.library_filter if c != code]
-                        persist_value('search_library_filter', search_state.library_filter)
-                        _update_library_btn()
-                        _update_library_chips()
-                        if search_state.exclusion_sources:
-                            _apply_manuscript_exclusions()
-                        elif search_state.domain_exclusions and search_state.has_domain_data:
-                            _apply_domain_exclusions()
-                        elif search_state.results:
-                            _apply_printed_filter_and_render(search_state.results)
+                            library_filter_btn.text = f"{tr('Filter Libraries')} ({shown}/{total})"
+                            library_filter_btn.props(remove='color outline')
+                            library_filter_btn.props('dense no-caps color=negative')
 
                     def _open_library_filter_dialog():
                         """Open modal dialog with library filter checkboxes.
@@ -1797,7 +1782,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                             search_state.library_filter = new_filter
                                             persist_value('search_library_filter', search_state.library_filter)
                                             _update_library_btn()
-                                            _update_library_chips()
                                             if search_state.exclusion_sources:
                                                 _apply_manuscript_exclusions()
                                             elif search_state.domain_exclusions and search_state.has_domain_data:
@@ -1883,16 +1867,12 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         f'flat round dense size=sm aria-label="{tr("Export JSON")}"'
                     ).tooltip(tr('Export JSON'))
 
-            # SEED-026 GAP-D: Post-search library filter chip row — near results_header.
-            # Library chips render HERE, NOT in chip_bar_container (_update_chip_bar).
-            # Hidden until a library filter is active (_update_library_chips manages visibility).
-            library_chip_row = ui.row().classes('w-full px-4 py-1 gap-2 items-center flex-wrap').style(
-                'background: var(--bg-tertiary); border-bottom: 1px solid var(--border-light); min-height: 0;'
-            )
-            library_chip_row.set_visibility(bool(search_state.library_filter))
-            # If session restored a library filter, populate chips immediately.
-            if search_state.library_filter:
-                _update_library_chips()
+            # SEED-026 (smoke 2026-06-29): the post-search library chip row was REMOVED.
+            # Per-library chips proved noisy when many libraries were selected; the filter
+            # state now lives entirely on the library_filter_btn itself, which turns red and
+            # reads "Filter Libraries (shown/total)" when a restriction is active (see
+            # _update_library_btn). The dialog (Select All / Select None / Apply) is the sole
+            # control surface.
 
             # Phase 55: Refinement breadcrumb strip (D-04) -- dedicated strip, NOT inside results header
             refinement_strip = ui.row().classes('w-full px-4 py-1 gap-1 items-center').style(
@@ -2525,7 +2505,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _set_btn_visible(library_filter_btn, False)
         search_state.library_filter = []
         _update_library_btn()
-        _update_library_chips()
         # Phase 55: Clear refinement chain
         _clear_refinement_chain()
         search_within_btn.set_visibility(False)
@@ -5000,15 +4979,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         # IMMEDIATE RENDER — user sees results with title translations only
         render_results(results, page=0)
         # SEED-026 (smoke round 3 — BUG A real root cause): reveal the library filter button
-        # + chips HERE, at render time, NOT only in _apply_enrichment_to_ui(). The library
-        # filter needs no enrichment data (only bool(search_state.results)); enrichment runs
-        # later in a background task that can time out (IIIF) or touch a torn-down slot
-        # ("parent element slot deleted"), which left the button permanently hidden. Render
-        # time is the active client context, so building chips in library_chip_row is safe.
+        # HERE, at render time, NOT only in _apply_enrichment_to_ui(). The library filter
+        # needs no enrichment data (only bool(search_state.results)); enrichment runs later
+        # in a background task that can time out (IIIF) or touch a torn-down slot ("parent
+        # element slot deleted"), which left the button permanently hidden. _update_library_btn
+        # computes its (shown/total) count from search_state.results, available now.
         try:
             _set_btn_visible(library_filter_btn, bool(search_state.results))
             _update_library_btn()
-            _update_library_chips()
         except Exception:
             logger.exception("SEED-026: library filter reveal at render time failed (non-fatal)")
         _t_render = time.perf_counter()
@@ -5099,7 +5077,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             # Phase 56: refresh exclusion chips when results render
             _update_exclude_btn()
             _update_library_btn()
-            _update_library_chips()
 
         def _render_with_filters(reset_expansion=True):
             """Re-render applying exclusions and filters.

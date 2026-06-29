@@ -713,7 +713,9 @@ def create_catalog_browse_page(
             current_text_not['value'],
             current_pgp_filter['value'] != 'all',
             current_editions_filter['value'] != 'all',
-            bool(current_library_filter['value']),
+            # SEED-026 (smoke 2026-06-29): library filter has NO chip — its state
+            # lives on the library filter button (red + "shown/total"), so it must
+            # NOT force the chip bar to appear.
         ])
 
         if not has_filters:
@@ -755,14 +757,9 @@ def create_catalog_browse_page(
                         color='green' if current_editions_filter['value'] == 'has_edition' else 'red',
                     )
 
-                # SEED-026: per-code library chips (removable, D-01 EN/HE labels)
-                for _code in list(current_library_filter['value']):
-                    _lib_label = get_library_display(_code, short=False, lang=lang)
-                    _make_chip(
-                        f"{tr('Library')}: {_lib_label}",
-                        lambda c=_code: clear_library_code(c),
-                        color='blue',
-                    )
+                # SEED-026 (smoke 2026-06-29): NO per-library chips — the library
+                # filter state is shown on the library filter button itself
+                # (red + "Filter Libraries (shown/total)"). See _update_library_filter_btn.
 
                 if current_date_from['value'] is not None or current_date_to['value'] is not None:
                     df = current_date_from['value']
@@ -963,18 +960,30 @@ def create_catalog_browse_page(
     # strict subset ⇒ that subset; zero-checked ⇒ Apply guarded (FINDING 1).
 
     def _update_library_filter_btn():
-        """Sync the library filter button label to reflect current selection."""
+        """Sync the library filter button: label, count, and colour.
+
+        SEED-026 (smoke 2026-06-29): the per-library chips were removed — the
+        button itself carries the filter state. When a strict subset of the
+        catalog's libraries is selected, the button turns RED (color=negative,
+        filled) and reads "Filter Libraries (shown/total)", where total is the
+        number of catalog libraries (LIBRARY_CODES minus LOCAL) and shown is the
+        selected count. When nothing is restricted, it reverts to the neutral
+        outlined "All Libraries".
+        """
         btn = library_filter_btn_ref['ref']
         if not btn:
             return
-        if not current_library_filter['value']:
+        sel = current_library_filter['value']
+        if not sel:
             btn.text = tr('All Libraries')
+            btn.props(remove='color')
             btn.props('outline dense no-caps color=primary')
         else:
-            n = len(current_library_filter['value'])
-            btn.text = f"{tr('Libraries')} ({n})"
-            btn.props(remove='color')
-            btn.props('outline dense no-caps color=teal')
+            total = len([c for c in LIBRARY_CODES if c != 'LOCAL'])
+            shown = len(sel)
+            btn.text = f"{tr('Filter Libraries')} ({shown}/{total})"
+            btn.props(remove='color outline')
+            btn.props('dense no-caps color=negative')
 
     def _library_apply_selection(checked_codes, all_codes):
         """Pure mapping helper: maps the checked set to the filter value.
@@ -1127,16 +1136,9 @@ def create_catalog_browse_page(
 
         dialog.open()
 
-    async def clear_library_code(code: str):
-        """Remove a single library code from the filter and repaint via refresh_results()."""
-        # Assign a NEW list rather than mutating in place -- an in-flight io_bound
-        # resolver may hold a reference to the old list (Codex CODE-review MEDIUM).
-        lst = [c for c in current_library_filter['value'] if c != code]
-        current_library_filter['value'] = lst
-        safe_user_set('catalog_library_filter', lst)
-        _update_library_filter_btn()
-        current_page['value'] = 1
-        await refresh_results()
+    # SEED-026 (smoke 2026-06-29): clear_library_code() was removed along with the
+    # per-library chips. The Apply dialog (Select All / Select None / Apply) is now
+    # the sole way to change the catalog library filter; the button shows the state.
 
     async def add_text_term():
         """Add a text term from the input with the current mode."""
