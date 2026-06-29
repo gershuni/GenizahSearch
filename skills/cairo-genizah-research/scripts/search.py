@@ -1,7 +1,8 @@
 """POST /api/search transport. Emits JSON envelope to stdout.
 
 Usage: python search.py --query "ויאמר" --search-mode exact [--limit N]
-                        [--gap N] [--filters-json '{"library":["CUL"]}']
+                        [--gap N] [--library CUL,JTS]
+                        [--filters-json '{"library":["CUL"],"domains":["Liturgy"]}']
                         [--responsa-options-json '{"variants":true}']
                         [--base-url URL]
 
@@ -148,7 +149,16 @@ def _main(argv: list[str] | None = None) -> int:
         "--filters-json",
         default=None,
         dest="filters_json",
-        help='JSON filters dict e.g. \'{"library":["CUL"]}\'',
+        help='JSON filters dict e.g. \'{"library":["CUL"],"domains":["Liturgy"]}\'',
+    )
+    p.add_argument(
+        "--library",
+        default=None,
+        help=(
+            "Comma-separated library codes to restrict to, e.g. CUL,JTS,Oxford "
+            "(convenience for filters.library; merged into --filters-json). "
+            "Applied server-side BEFORE the result cap."
+        ),
     )
     p.add_argument(
         "--responsa-options-json",
@@ -165,6 +175,13 @@ def _main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     filters = json.loads(args.filters_json) if args.filters_json else None
+    # --library is a convenience that merges into filters.library (explicit
+    # filters-json library wins if both are given).
+    if args.library:
+        _codes = [c.strip() for c in args.library.split(",") if c.strip()]
+        if _codes:
+            filters = dict(filters or {})
+            filters.setdefault("library", _codes)
     ropts = (
         json.loads(args.responsa_options_json) if args.responsa_options_json else None
     )

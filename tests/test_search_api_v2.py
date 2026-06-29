@@ -1206,3 +1206,94 @@ def test_fuzzy_default_limit_recall(client):
 def test_max_limit_unchanged():
     """MAX_LIMIT stays 100 for non-fuzzy modes."""
     assert MAX_LIMIT == 100
+
+
+# ---------------------------------------------------------------------------
+# Section 8 — Library filter (SEED-026, server-side)
+#   filters.library is an inclusion filter resolved to sys_ids and intersected
+#   into restrict_sys_ids BEFORE the result cap. Unknown codes -> 400.
+# ---------------------------------------------------------------------------
+
+import asyncio  # noqa: E402
+
+from web.search_api import _intersect_library_filter  # noqa: E402
+
+
+def test_library_filter_echo_passthrough(client, stub_searcher, monkeypatch):
+    """A valid filters.library round-trips into the request echo and the request
+    is accepted (validation + intersect wired)."""
+    from shared import fjms_service as fjms_module
+    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
+    monkeypatch.setattr(fjms_module, 'get_filter_sys_ids', lambda **kw: None)
+    monkeypatch.setattr(
+        fjms_module, 'resolve_library_sys_ids',
+        lambda codes, mgr: {'9912345678901234'},
+    )
+    r = _post_search(
+        client, query='x', search_mode='exact',
+        filters={'library': ['CUL']},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()['request']['filters'] == {'library': ['CUL']}
+
+
+def test_library_filter_unknown_code_400(client, stub_searcher):
+    """An unknown library code is rejected with 400 unresolvable_filter_value
+    (the REAL validate_filter_values runs — library codes check a static set,
+    no FJMS sidecar needed)."""
+    r = _post_search(
+        client, query='x', search_mode='exact',
+        filters={'library': ['NOT_A_REAL_LIBRARY']},
+    )
+    assert r.status_code == 400, r.text
+    assert r.json()['error']['code'] == 'unresolvable_filter_value'
+
+
+def test_library_filter_extra_field_allowed_in_model(client, stub_searcher, monkeypatch):
+    """filters.library is a recognized field (NOT rejected by extra='forbid').
+    Regression guard: before SEED-026 the contract doc advertised it but the
+    model would 400 it as an unknown field."""
+    from shared import fjms_service as fjms_module
+    monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
+    monkeypatch.setattr(fjms_module, 'get_filter_sys_ids', lambda **kw: None)
+    monkeypatch.setattr(
+        fjms_module, 'resolve_library_sys_ids', lambda codes, mgr: {'9912345678901234'})
+    r = _post_search(
+        client, query='x', search_mode='exact',
+        filters={'library': ['CUL']},
+    )
+    # If 'library' were an unknown field, Pydantic extra='forbid' -> 400 invalid_request.
+    assert r.status_code == 200, r.text
+
+
+def test_intersect_helper_no_library_is_noop(monkeypatch):
+    """No library key -> restrict returned unchanged (no resolution call)."""
+    from shared import fjms_service as fjms_module
+    called = {'n': 0}
+
+    def _boom(codes, mgr):
+        called['n'] += 1
+        return set()
+    monkeypatch.setattr(fjms_module, 'resolve_library_sys_ids', _boom)
+
+    out = asyncio.run(_intersect_library_filter({'a', 'b'}, {'domains': ['x']}, object()))
+    assert out == {'a', 'b'}
+    assert called['n'] == 0
+
+
+def test_intersect_helper_library_only(monkeypatch):
+    """library only (restrict None) -> resolved library set."""
+    from shared import fjms_service as fjms_module
+    monkeypatch.setattr(
+        fjms_module, 'resolve_library_sys_ids', lambda codes, mgr: {'s1', 's2'})
+    out = asyncio.run(_intersect_library_filter(None, {'library': ['CUL']}, object()))
+    assert out == {'s1', 's2'}
+
+
+def test_intersect_helper_intersects_with_existing_restrict(monkeypatch):
+    """library + other filters -> intersection of the two sys_id sets."""
+    from shared import fjms_service as fjms_module
+    monkeypatch.setattr(
+        fjms_module, 'resolve_library_sys_ids', lambda codes, mgr: {'b', 'c', 'd'})
+    out = asyncio.run(_intersect_library_filter({'a', 'b', 'c'}, {'library': ['CUL']}, object()))
+    assert out == {'b', 'c'}

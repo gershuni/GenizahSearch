@@ -118,6 +118,15 @@ class FiltersModel(BaseModel):
         default=None,
         description="FJMS genizah_titles work names. Unknown values -> 400 unresolvable_filter_value.",
     )
+    library: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Library codes (e.g. 'CUL', 'JTS', 'Oxford'). Inclusion filter — results "
+            "are restricted to manuscripts in these libraries, intersected with any "
+            "other filters BEFORE the result cap. Unknown codes -> 400 "
+            "unresolvable_filter_value. SEED-026."
+        ),
+    )
     materials: Optional[List[str]] = Field(
         default=None,
         description="Material type (e.g. 'paper', 'parchment'). Unknown values -> 400 unresolvable_filter_value.",
@@ -297,6 +306,35 @@ def _resolve_search_timeout(search_mode: str) -> tuple:
 def _resolve_parallels_timeout() -> float:
     """Return the parallels ceiling (re-read per request)."""
     return _read_timeout('SEARCH_API_PARALLELS_TIMEOUT', DEFAULT_PARALLELS_TIMEOUT)
+
+
+async def _intersect_library_filter(restrict_sys_ids, filters_dict, meta_mgr):
+    """SEED-026 (API library filter): if ``filters_dict`` carries a ``library`` list,
+    intersect the resolved library sys_id set into ``restrict_sys_ids``.
+
+    ``resolve_library_sys_ids`` iterates the full csv_bank (~255K rows), so it runs
+    off the event loop via ``run_in_executor``. Returns the updated restrict set:
+      - no library filter -> ``restrict_sys_ids`` unchanged (may be None);
+      - library only -> the resolved library sys_id set;
+      - library + other filters -> the intersection (which the caller short-circuits
+        to 0 results if empty).
+
+    Late-binds ``resolve_library_sys_ids`` through the module attribute so test
+    fixtures can monkeypatch ``shared.fjms_service.resolve_library_sys_ids``.
+    Library codes are validated upstream by ``validate_filter_values`` (unknown -> 400),
+    so by here every code is a known LIBRARY_CODES key.
+    """
+    libs = (filters_dict or {}).get('library')
+    if not libs:
+        return restrict_sys_ids
+    from shared import fjms_service as _fjms_module
+    loop = asyncio.get_running_loop()
+    lib_ids = await loop.run_in_executor(
+        None, _fjms_module.resolve_library_sys_ids, libs, meta_mgr
+    )
+    if restrict_sys_ids is None:
+        return lib_ids
+    return restrict_sys_ids & lib_ids
 
 
 def _resolve_fuzzy_max_limit() -> int:
@@ -991,6 +1029,10 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                     date_from=filters_dict.get('date_from'),
                     date_to=filters_dict.get('date_to'),
                 )
+                # SEED-026: intersect the library filter BEFORE the result cap.
+                restrict_sys_ids = await _intersect_library_filter(
+                    restrict_sys_ids, filters_dict, state.meta_mgr
+                )
                 if restrict_sys_ids is not None and len(restrict_sys_ids) == 0:
                     short_circuit_empty = True
 
@@ -1510,6 +1552,11 @@ def init_search_api(app_override: Optional[FastAPI] = None, path_prefix: str = '
                 material_include=filters_dict.get('materials'),
                 date_from=filters_dict.get('date_from'),
                 date_to=filters_dict.get('date_to'),
+            )
+            # SEED-026: intersect the library filter BEFORE the result cap (parity
+            # with /api/search; otherwise filters.library would be silently ignored).
+            restrict_sys_ids = await _intersect_library_filter(
+                restrict_sys_ids, filters_dict, state.meta_mgr
             )
             if restrict_sys_ids is not None and len(restrict_sys_ids) == 0:
                 short_circuit_empty = True

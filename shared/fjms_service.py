@@ -1493,6 +1493,20 @@ class FjmsService:
                         http_status=400,
                     )
 
+        # ---- Library (SEED-026): codes validated against the static LIBRARY_CODES
+        # set (no FJMS sidecar dependency, so no 503 path). Unknown code -> 400, so a
+        # typo never silently falls through to an unfiltered (fail-open) result.
+        library = filters.get('library')
+        if library:
+            from shared.browse_map_utils import LIBRARY_CODES
+            for v in library:
+                if v not in LIBRARY_CODES:
+                    raise APIError(
+                        'unresolvable_filter_value',
+                        f"filter library={v!r} is not a known library code",
+                        http_status=400,
+                    )
+
         # ---- Materials: R2-#3 — empty vocabulary MUST fail closed, NOT allow-all.
         materials = filters.get('materials')
         if materials:

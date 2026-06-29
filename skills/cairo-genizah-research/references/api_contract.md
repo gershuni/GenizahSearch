@@ -31,7 +31,7 @@ HTTP 429 carries `Retry-After: <seconds>` header.
   "query": "<1-1000 chars>",
   "gap": 0,
   "limit": 10,
-  "filters": {"library": ["CUL"], "domain": ["Liturgy"]},
+  "filters": {"library": ["CUL", "JTS"], "domains": ["Liturgy"]},
   "responsa_options": {"variants": false, "ja": false, "flex_spacing": false, "bidirectional": false}
 }
 ```
@@ -49,6 +49,14 @@ Notes:
   limit when recall is important (e.g. agent searching for a rare name). Fuzzy with no explicit
   limit widens to 250 automatically.
 - `regex_pattern_too_long` error code is NOT in v7.10 (deferred with regex mode).
+- `filters` keys (all optional; `extra='forbid'` rejects any other key with
+  `invalid_request`): `library` (list of library codes, e.g. `["CUL","JTS","Oxford"]`),
+  `domains`, `authors`, `works`, `materials` (all lists), `date_from`, `date_to` (ints).
+  Every categorical value is validated server-side — an unknown value (incl. an unknown
+  library code) returns 400 `unresolvable_filter_value`. **`library` is an inclusion
+  filter applied server-side and intersected with the other filters BEFORE the result
+  cap** (SEED-026), so it is more complete than filtering the returned page client-side.
+  The `search.py` script also accepts a convenience `--library CUL,JTS` flag.
 
 ## POST /api/search response
 

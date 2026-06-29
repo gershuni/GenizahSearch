@@ -147,6 +147,7 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
   "gap": 0,
   "limit": 50,
   "filters": {
+    "library": ["CUL", "JTS"],
     "domains": ["Halakha"],
     "date_from": 1100,
     "date_to": 1300
@@ -180,7 +181,7 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
 | `responsa_options` | object \| null | valid only when `search_mode="responsa"` | `null` | see sub-table below |
 | `gap` | integer | must be `0` when `search_mode in {title, shelfmark}` | `0` | proximity slop for keyword search |
 | `limit` | integer | `1..100` for non-fuzzy modes (`MAX_LIMIT=100`); `1..SEARCH_API_FUZZY_MAX_LIMIT` (default 500, max 2000) for `fuzzy` | `50` (fuzzy with no explicit limit widens to a recall-oriented default of 250) | P9X: fuzzy recall-over-precision — non-fuzzy boundary unchanged |
-| `filters` | object \| null | all sub-fields nullable; unknown filter keys → 400 `unknown_filter_key`; unknown values → 400 `unresolvable_filter_value` | `null` | `domains`, `authors`, `works`, `materials` (string lists); `date_from`, `date_to` (int years) |
+| `filters` | object \| null | all sub-fields nullable; unknown filter keys → 400 `unknown_filter_key`; unknown values → 400 `unresolvable_filter_value` | `null` | `library` (library codes, e.g. `["CUL","JTS","Oxford"]` — inclusion filter, intersected with the other filters BEFORE the result cap; SEED-026), `domains`, `authors`, `works`, `materials` (string lists); `date_from`, `date_to` (int years) |
 
 ### `responsa_options` sub-fields
 
