@@ -4525,6 +4525,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _set_btn_visible(domain_filter_btn, False)
         _set_btn_visible(printed_filter_btn, False)
         _set_btn_visible(pgp_filter_btn, False)
+        # SEED-026 (smoke round 3): hide the library button during the search too; it is
+        # re-revealed at RENDER time (not enrichment time) once results exist.
+        _set_btn_visible(library_filter_btn, False)
         progress_bar.value = 0
         # Collapse filter panel — chips summarize active filters
         adv_filters_panel.value = False
@@ -4996,6 +4999,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
         # IMMEDIATE RENDER — user sees results with title translations only
         render_results(results, page=0)
+        # SEED-026 (smoke round 3 — BUG A real root cause): reveal the library filter button
+        # + chips HERE, at render time, NOT only in _apply_enrichment_to_ui(). The library
+        # filter needs no enrichment data (only bool(search_state.results)); enrichment runs
+        # later in a background task that can time out (IIIF) or touch a torn-down slot
+        # ("parent element slot deleted"), which left the button permanently hidden. Render
+        # time is the active client context, so building chips in library_chip_row is safe.
+        try:
+            _set_btn_visible(library_filter_btn, bool(search_state.results))
+            _update_library_btn()
+            _update_library_chips()
+        except Exception:
+            logger.exception("SEED-026: library filter reveal at render time failed (non-fatal)")
         _t_render = time.perf_counter()
         logger.info("Search perf: first_render_ms=%.0f (results=%d)", (_t_render - _t_stage0) * 1000, len(results))
 
