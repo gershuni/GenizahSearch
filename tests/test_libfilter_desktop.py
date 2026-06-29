@@ -25,7 +25,7 @@ GUI-marked (constructs QApplication for the QThread worker); runs in gui-tests.
 import pytest
 from unittest.mock import MagicMock, patch
 
-from PyQt6.QtWidgets import QApplication, QDialogButtonBox
+from PyQt6.QtWidgets import QApplication
 
 import shared.fjms_service as _fjms_mod
 
@@ -214,23 +214,41 @@ def test_library_filter_dialog_get_checked_codes():
 
 
 @pytest.mark.gui
-def test_library_filter_dialog_no_select_none():
-    """FINDING 1: LibraryFilterDialog must NOT provide a 'Select None'/deselect-all button."""
+def test_library_filter_dialog_select_none_present_ok_still_guarded():
+    """BUG-C fix: LibraryFilterDialog now provides a 'Select None' clear-checkboxes
+    convenience button, BUT OK must remain DISABLED at zero checked (FINDING 1 guard).
+
+    'Select None' unchecks all items without applying. The _update_ok_button and
+    _on_accept guards ensure the all-unchecked state cannot be committed via OK.
+    """
     from desktop.dialogs_filter import LibraryFilterDialog
     from PyQt6.QtWidgets import QPushButton
 
     dlg = LibraryFilterDialog(selected_codes=[])
-    # Collect all button texts
-    btn_texts = [
-        b.text().lower()
-        for b in dlg.findChildren(QPushButton)
-    ]
-    # "select none" or "deselect all" or "none" must not appear
+
+    # 'Select None' button must be present (BUG-C fix)
+    btn_texts = [b.text() for b in dlg.findChildren(QPushButton)]
+    # The button label comes from tr("Select None") which may be translated; check the
+    # source text too (translations.py has "Select None": "בטל בחירה")
+    has_select_none = any(
+        'none' in t.lower() or 'בטל' in t
+        for t in btn_texts
+    )
+    assert has_select_none, (
+        f"BUG-C: 'Select None' button missing from LibraryFilterDialog. "
+        f"Button texts found: {btn_texts!r}"
+    )
+
+    # After clicking 'Select None', zero items are checked → OK must be disabled.
+    dlg._select_none()
+    assert not dlg.ok_button.isEnabled(), (
+        "OK must remain DISABLED after 'Select None' (zero checked — FINDING 1 guard)"
+    )
+
+    # 'deselect' (as in a 'Deselect All' variant) must NOT appear (guard against
+    # a differently-labelled button that also bypasses the guard).
     for text in btn_texts:
-        assert 'none' not in text, (
-            f"LibraryFilterDialog must NOT have a 'Select None' button; found: {text!r}"
-        )
-        assert 'deselect' not in text, (
+        assert 'deselect' not in text.lower(), (
             f"LibraryFilterDialog must NOT have a 'Deselect All' button; found: {text!r}"
         )
 

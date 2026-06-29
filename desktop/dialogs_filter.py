@@ -1704,6 +1704,13 @@ class LibraryFilterDialog(QDialog):
         self.list_widget.setSpacing(2)
         layout.addWidget(self.list_widget)
 
+        # BUG-D fix: sort by display name alphabetically for a clear, predictable order.
+        # get_library_display uses the current CURRENT_LANG so Hebrew UI gets Hebrew names.
+        self._all_codes = sorted(
+            self._all_codes,
+            key=lambda c: get_library_display(c, short=False),
+        )
+
         # Populate list
         active_set = set(selected_codes) if selected_codes else set()
         all_checked = len(active_set) == 0  # empty selected_codes = all included
@@ -1728,6 +1735,11 @@ class LibraryFilterDialog(QDialog):
         select_all_btn = QPushButton(tr("Select All"))
         select_all_btn.clicked.connect(self._select_all)
         btn_layout.addWidget(select_all_btn)
+        # BUG-C: "Select none" unchecks all checkboxes (convenience), but does NOT
+        # commit — OK remains disabled at zero checked (_update_ok_button guard).
+        select_none_btn = QPushButton(tr("Select None"))
+        select_none_btn.clicked.connect(self._select_none)
+        btn_layout.addWidget(select_none_btn)
         btn_layout.addStretch()
 
         self.ok_button = QPushButton(tr("OK"))
@@ -1767,6 +1779,20 @@ class LibraryFilterDialog(QDialog):
         self.list_widget.blockSignals(True)
         for i in range(self.list_widget.count()):
             self.list_widget.item(i).setCheckState(Qt.CheckState.Checked)
+        self.list_widget.blockSignals(False)
+        self._update_ok_button()
+
+    def _select_none(self):
+        """Uncheck all items (convenience only — does NOT apply).
+
+        BUG-C fix: unchecking all is a convenience action that does NOT commit.
+        OK stays disabled while zero are checked (_update_ok_button guard).
+        The all-unchecked state cannot be committed via OK because _on_accept
+        also checks get_checked_codes() before calling self.accept().
+        """
+        self.list_widget.blockSignals(True)
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
         self.list_widget.blockSignals(False)
         self._update_ok_button()
 
