@@ -882,3 +882,38 @@ def test_library_btn_revealed_before_update_chain():
                 f"_apply_enrichment_to_ui. The reveal must come FIRST so an exception "
                 f"in the update chain cannot suppress the button reveal."
             )
+
+
+# ---------------------------------------------------------------------------
+# Test 15 (regression 2026-06-29): _compute_library_facets defined BEFORE the
+# first _update_library_btn() call. STATIC GUARD for a 500 crash.
+#
+# Root cause caught: _update_library_btn() now derives a (shown/total) count via
+# _compute_library_facets(). It is called at session-restore time during page
+# setup. _compute_library_facets used to be defined ~2000 lines later, so a
+# restored session with non-empty results raised NameError -> HTTP 500. Headless
+# tests miss this (no live restore render). This source-order guard substitutes.
+# ---------------------------------------------------------------------------
+
+def test_compute_facets_defined_before_update_btn():
+    """_compute_library_facets must be defined textually BEFORE _update_library_btn
+    (which calls it). Because a nested function must be defined before it is called,
+    and _update_library_btn() is invoked during page setup (the session-restore
+    sync), this ordering guarantees _compute_library_facets is bound before any
+    _update_library_btn() call — preventing the NameError/500 regression.
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+
+    facets_def = source.find('def _compute_library_facets')
+    btn_def = source.find('def _update_library_btn')
+
+    assert facets_def != -1, "def _compute_library_facets not found in search.py"
+    assert btn_def != -1, "def _update_library_btn not found in search.py"
+
+    assert facets_def < btn_def, (
+        "_compute_library_facets is defined AFTER _update_library_btn. "
+        "_update_library_btn() is called during page setup (session-restore sync) "
+        "and calls _compute_library_facets — if the facets helper is defined later, "
+        "a restored session with results raises NameError -> HTTP 500. "
+        "Define _compute_library_facets before _update_library_btn."
+    )

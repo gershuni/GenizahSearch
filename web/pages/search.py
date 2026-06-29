@@ -1629,6 +1629,21 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             return []
                         return list(checked_codes)
 
+                    def _compute_library_facets(results_list):
+                        """SEED-026 (LIBFILTER-01): per-library counts over the FULL pre-filter set.
+
+                        Returns a Counter of library_code -> count. Codes with 0 results are absent
+                        (not in the Counter). Defined HERE (before _update_library_btn's first call
+                        at session-restore time) — it must exist before any _update_library_btn()
+                        invocation, including the early restore sync below.
+                        """
+                        from collections import Counter
+                        return Counter(
+                            r.get('display', {}).get('library_code', '')
+                            for r in results_list
+                            if r.get('display', {}).get('library_code')
+                        )
+
                     def _update_library_btn():
                         """Sync the library filter button: label, count, and color.
 
@@ -3660,20 +3675,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             return results_list
         selected = set(search_state.library_filter)
         return [r for r in results_list if r.get('display', {}).get('library_code', '') in selected]
-
-    def _compute_library_facets(results_list):
-        """SEED-026 (LIBFILTER-01): compute per-library counts over the FULL pre-filter result set.
-
-        Returns a Counter of library_code -> count. Codes with 0 results are absent (not in the
-        Counter) so the dropdown can hide them (D-02). Always called with search_state.results
-        BEFORE applying _apply_library_filter.
-        """
-        from collections import Counter
-        return Counter(
-            r.get('display', {}).get('library_code', '')
-            for r in results_list
-            if r.get('display', {}).get('library_code')
-        )
 
     def _apply_printed_filter_and_render(results_list, reset_expansion=True):
         """Apply printed filter + PGP filter to results and re-render (used when no domain exclusions active).
