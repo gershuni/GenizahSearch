@@ -1049,36 +1049,10 @@ def create_catalog_browse_page(
                 ui.label(tr('Filter by Library')).classes('text-lg font-bold')
 
                 with ui.scroll_area().classes('w-full').style('max-height: 55vh;'):
+                    # BUG-B fix: NO <script> here — JS functions are defined once
+                    # at page level via ui.add_head_html (see page setup above).
                     ui.html(
-                        f'<div id="{container_id}">{checkbox_html}</div>'
-                        f'<script>'
-                        f'function catLibFilterUpdateApply(cid){{'
-                        f'  var cont=document.getElementById(cid);'
-                        f'  if(!cont)return;'
-                        f'  var cbs=cont.querySelectorAll(".cat-lib-cb");'
-                        f'  var n=0;'
-                        f'  cbs.forEach(function(cb){{if(cb.checked)n++;}});'
-                        f'  var btn=document.getElementById("catLibApplyBtn_"+cid);'
-                        f'  if(btn)btn.disabled=(n===0);'
-                        f'}}'
-                        f'function catLibFilterGetChecked(cid){{'
-                        f'  var cont=document.getElementById(cid);'
-                        f'  if(!cont)return [];'
-                        f'  var result=[];'
-                        f'  cont.querySelectorAll(".cat-lib-cb:checked").forEach('
-                        f'    function(cb){{result.push(cb.dataset.code);}}'
-                        f'  );'
-                        f'  return result;'
-                        f'}}'
-                        f'function catLibFilterSelectAll(cid,val){{'
-                        f'  var cont=document.getElementById(cid);'
-                        f'  if(!cont)return;'
-                        f'  cont.querySelectorAll(".cat-lib-cb").forEach('
-                        f'    function(cb){{cb.checked=val;}}'
-                        f'  );'
-                        f'  catLibFilterUpdateApply(cid);'
-                        f'}}'
-                        f'</script>',
+                        f'<div id="{container_id}">{checkbox_html}</div>',
                         sanitize=False,
                     )
 
@@ -1087,16 +1061,21 @@ def create_catalog_browse_page(
                     _cid = container_id  # capture for closures
                     _all = all_codes_sorted  # capture for apply
 
-                    # Select All — the ONLY bulk action provided.
-                    # Re-checks everything = clear filter / show all.
-                    # A 'Select None'/deselect-all action is intentionally omitted —
-                    # an all-unchecked apply would produce [] which collides with
-                    # the '[]' = show all sentinel (FINDING 1).
-                    ui.button(
-                        tr('Select All'),
-                        on_click=lambda: ui.run_javascript(
-                            f'catLibFilterSelectAll("{_cid}", true)')
-                    ).props('flat dense no-caps')
+                    # Bulk-action buttons (left side)
+                    with ui.row().classes('gap-1'):
+                        # Select All: re-checks everything = clear filter / show all.
+                        ui.button(
+                            tr('Select All'),
+                            on_click=lambda: ui.run_javascript(
+                                f'catLibFilterSelectAll("{_cid}", true)')
+                        ).props('flat dense no-caps')
+                        # BUG-C: Select none — unchecks all (convenience), does NOT apply.
+                        # Apply/OK stays disabled while zero are checked (catLibFilterUpdateApply).
+                        ui.button(
+                            tr('Select None'),
+                            on_click=lambda: ui.run_javascript(
+                                f'catLibFilterSelectAll("{_cid}", false)')
+                        ).props('flat dense no-caps')
 
                     with ui.row().classes('gap-2'):
                         async def apply_catalog_library_filter():
@@ -1379,6 +1358,33 @@ def create_catalog_browse_page(
     # ══════════════════════════════════════════════════════════════
     # Page Layout (single-pass build)
     # ══════════════════════════════════════════════════════════════
+
+    # BUG-B fix: catalog library filter JS helpers at page level (NOT inside ui.html).
+    # ui.html() raises ValueError if a <script> tag is present; define once here instead.
+    ui.add_head_html('''<script>
+    function catLibFilterUpdateApply(cid) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        var cbs = cont.querySelectorAll('.cat-lib-cb');
+        var n = 0;
+        cbs.forEach(function(cb) { if (cb.checked) n++; });
+        var btn = document.getElementById('catLibApplyBtn_' + cid);
+        if (btn) btn.disabled = (n === 0);
+    }
+    function catLibFilterGetChecked(cid) {
+        var cont = document.getElementById(cid);
+        if (!cont) return [];
+        var result = [];
+        cont.querySelectorAll('.cat-lib-cb:checked').forEach(function(cb) { result.push(cb.dataset.code); });
+        return result;
+    }
+    function catLibFilterSelectAll(cid, val) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        cont.querySelectorAll('.cat-lib-cb').forEach(function(cb) { cb.checked = val; });
+        catLibFilterUpdateApply(cid);
+    }
+    </script>''')
 
     dir_attr = 'rtl' if rtl else 'ltr'
 

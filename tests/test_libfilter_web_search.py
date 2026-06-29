@@ -13,6 +13,8 @@ Coverage:
   (10) test_library_apply_selection_mapping             — GAP-C: all-checked=>[], subset=>subset
   (11) test_all_unchecked_guard                         — FINDING 1: Apply guarded against zero-checked
   (12) test_chip_placement_post_search_container        — GAP-D: chips in post-search row not chip_bar
+  (13) test_no_script_in_library_dialog_html            — BUG-B static guard: no <script> in ui.html
+  (14) test_library_btn_revealed_before_update_chain   — BUG-A static guard: reveal before _update_*
 """
 import ast
 import re
@@ -624,44 +626,36 @@ def test_all_unchecked_guard():
         "Expected hint string 'Select at least one library' or a guarded if-not-checked path."
     )
 
-    # Confirm there is NO 'Select None' library affordance (only 'Select All' is allowed).
-    # The domain dialog has 'Select None' — that's OK; we check the LIBRARY dialog only.
-    # Strategy: look for 'Select None' appearing near the library filter dialog context.
-    # We verify by checking for the absence of a 'Select None' text immediately after
-    # _open_library_filter_dialog definition (within the function body).
+    # BUG-C fix: 'Select None' IS now present in the library dialog as a CLEAR-CHECKBOXES
+    # convenience (unchecks all without applying). OK/Apply stay DISABLED at zero checked
+    # (libFilterUpdateApply JS guard + Python if-not-checked guard).
+    # The test must now verify that 'Select None' unchecks-only and is paired with the
+    # guarded Apply — NOT that it is absent.
+    # Verify: both 'Select None' and the guarded-Apply hint coexist in the dialog.
     lines = source.splitlines()
     in_lib_dialog = False
     lib_dialog_body_lines = []
-    brace_depth = 0
     for ln in lines:
         if 'def _open_library_filter_dialog' in ln:
             in_lib_dialog = True
         if in_lib_dialog:
             lib_dialog_body_lines.append(ln)
-            # Simple heuristic: collect until next top-level def at same indent or out of function
-            if len(lib_dialog_body_lines) > 5 and re.match(r'\s{4,8}def ', ln) and ln.strip().startswith('def ') is False:
-                # Still inside indented function body — keep collecting
-                pass
             if len(lib_dialog_body_lines) > 200:
                 break  # stop after 200 lines of the function
 
     lib_dialog_src = '\n'.join(lib_dialog_body_lines)
 
-    # 'Select None' must NOT appear in the library filter dialog body
-    # (it IS allowed in the domain dialog — this only checks the library dialog context)
-    # If 'Select None' appears in search.py at all for libraries, that's the bug.
-    # The domain dialog has it but the library dialog must NOT.
-    # We look for Select None in close proximity to 'library' context strings:
-    select_none_in_lib_dialog = (
-        'Select None' in lib_dialog_src
-        or 'select_none' in lib_dialog_src.lower()
-        or 'deselect_all' in lib_dialog_src.lower()
+    # 'Select None' must appear in the dialog (BUG-C fix)
+    assert 'Select None' in lib_dialog_src or "tr('Select None')" in lib_dialog_src, (
+        "BUG-C: 'Select None' affordance missing from _open_library_filter_dialog. "
+        "It should uncheck all without applying (OK stays disabled at zero checked)."
     )
-    assert not select_none_in_lib_dialog, (
-        "FINDING 1: 'Select None' or deselect-all affordance found in the library "
-        "filter dialog body (_open_library_filter_dialog). "
-        "Only 'Select All' is allowed — 'Select None' would leave an apply-able "
-        "all-unchecked state that collides with the '[]' = show-all sentinel."
+
+    # The all-unchecked Apply guard MUST also be present to keep '[] = show-all' safe.
+    # 'Select None' is only safe because OK/Apply is disabled while zero are checked.
+    assert hint_present or js_guard_present, (
+        "The Apply guard (Python if-not-checked short-circuit or JS disabled-Apply) "
+        "must remain alongside the new 'Select None' button (FINDING 1 invariant)."
     )
 
 
@@ -740,3 +734,158 @@ def test_chip_placement_post_search_container():
         "Text-position chip block appears to be missing from _update_chip_bar. "
         "GAP-D: only the library chip block must be removed; all other chip types must remain."
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 13 (BUG-B): no <script> inside ui.html in the library filter dialog
+# STATIC GUARD — would have caught BUG-B (ValueError from NiceGUI when dialog opened).
+# NiceGUI raises ValueError: "HTML elements must not contain <script> tags" when
+# ui.html() content contains '<script'. This guard prevents regression.
+# ---------------------------------------------------------------------------
+
+def test_no_script_in_library_dialog_html():
+    """BUG-B static guard: _open_library_filter_dialog must NOT pass a string
+    containing '<script' to ui.html().
+
+    This is a static (source-scan) test that substitutes for a live-render test.
+    It catches the exact class of bug that caused BUG-B: JS functions defined inside
+    ui.html() raise ValueError at dialog-open time in the live NiceGUI runtime.
+
+    The correct pattern (matching the domain filter) is:
+      - JS functions defined ONCE at page level via ui.add_head_html(<script>...</script>)
+      - The dialog's ui.html() contains ONLY checkbox markup (no <script> tag)
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+
+    # Find the _open_library_filter_dialog function body
+    lines = source.splitlines()
+    in_fn = False
+    fn_lines = []
+    fn_indent = None
+    for ln in lines:
+        if 'def _open_library_filter_dialog' in ln:
+            in_fn = True
+            fn_indent = len(ln) - len(ln.lstrip())
+        if in_fn:
+            fn_lines.append(ln)
+            if len(fn_lines) > 1:
+                stripped = ln.strip()
+                if stripped and not stripped.startswith('#'):
+                    cur_indent = len(ln) - len(ln.lstrip())
+                    if cur_indent <= fn_indent and stripped.startswith('def '):
+                        break
+            if len(fn_lines) > 250:
+                break
+
+    fn_src = '\n'.join(fn_lines)
+
+    # The function must NOT pass '<script' to ui.html() — find ui.html( calls
+    # and assert none of the strings passed contain '<script'.
+    #
+    # Strategy: check non-comment lines within the function body.  Comments may
+    # legitimately mention '<script>' as documentation.  Only code lines matter.
+    non_comment_fn_lines = [
+        ln for ln in fn_lines
+        if ln.strip() and not ln.strip().startswith('#')
+    ]
+    non_comment_fn_src = '\n'.join(non_comment_fn_lines)
+
+    if 'ui.html(' in non_comment_fn_src and '<script' in non_comment_fn_src:
+        raise AssertionError(
+            "BUG-B: _open_library_filter_dialog in search.py passes a string containing "
+            "'<script' to ui.html(). NiceGUI raises ValueError: 'HTML elements must not "
+            "contain <script> tags. Use ui.add_body_html() instead.' at dialog-open time. "
+            "Move the JS functions to ui.add_head_html() at page setup (like domain filter). "
+            "The dialog's ui.html() must contain ONLY the checkbox <div> markup."
+        )
+
+    # Positive: the page-level ui.add_head_html must define the libFilter JS functions.
+    assert 'libFilterGetChecked' in source, (
+        "BUG-B: libFilterGetChecked JS function not found in search.py. "
+        "It must be defined in ui.add_head_html() at page setup."
+    )
+    assert 'libFilterUpdateApply' in source, (
+        "BUG-B: libFilterUpdateApply JS function not found in search.py."
+    )
+    # These must appear in a ui.add_head_html block, not inside _open_library_filter_dialog.
+    # The simplest check: the function appears in source BEFORE _open_library_filter_dialog.
+    add_head_idx = source.find('libFilterGetChecked')
+    dialog_fn_idx = source.find('def _open_library_filter_dialog')
+    assert add_head_idx != -1, "libFilterGetChecked not found in search.py"
+    assert dialog_fn_idx != -1, "_open_library_filter_dialog not found in search.py"
+    assert add_head_idx < dialog_fn_idx, (
+        "BUG-B: libFilterGetChecked definition appears AFTER _open_library_filter_dialog. "
+        "It must be in a page-level ui.add_head_html block defined BEFORE the dialog function."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 14 (BUG-A): library button revealed BEFORE the _update_* call chain
+# STATIC GUARD — would have caught BUG-A (button never visible if _update_* aborts).
+# ---------------------------------------------------------------------------
+
+def test_library_btn_revealed_before_update_chain():
+    """BUG-A static guard: in _apply_enrichment_to_ui, the _set_btn_visible call
+    for library_filter_btn must appear BEFORE _update_pgp_filter_btn,
+    _update_domain_filter_btn, and _update_exclude_btn.
+
+    The risk: if any of those _update_* calls raises an exception, the library button
+    reveal at the END of the function would never execute, leaving the button permanently
+    hidden. Moving the reveal to BEFORE the update chain ensures the button appears
+    even if a later update call fails.
+
+    STATIC GUARD: uses whole-file line numbers so nested-function indent detection
+    is not needed (the _apply_enrichment_to_ui body spans a bounded line range and
+    all the relevant calls appear within ~20 lines of the def).
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+    lines = source.splitlines()
+
+    # Locate the def line for _apply_enrichment_to_ui
+    fn_start = None
+    for i, ln in enumerate(lines):
+        if 'def _apply_enrichment_to_ui' in ln and 'def ' in ln:
+            fn_start = i
+            break
+
+    assert fn_start is not None, (
+        "_apply_enrichment_to_ui not found in search.py"
+    )
+
+    # Scan the NEXT 40 lines (the function body is short — ~15 lines).
+    # We look for the first occurrence of each token within the function body.
+    fn_body_lines = lines[fn_start: fn_start + 40]
+
+    lib_reveal_line = None
+    pgp_update_line = None
+    domain_update_line = None
+    exclude_update_line = None
+
+    for i, ln in enumerate(fn_body_lines):
+        if '_set_btn_visible(library_filter_btn' in ln and lib_reveal_line is None:
+            lib_reveal_line = i
+        if '_update_pgp_filter_btn(' in ln and pgp_update_line is None:
+            pgp_update_line = i
+        if '_update_domain_filter_btn(' in ln and domain_update_line is None:
+            domain_update_line = i
+        if '_update_exclude_btn(' in ln and exclude_update_line is None:
+            exclude_update_line = i
+
+    assert lib_reveal_line is not None, (
+        "BUG-A: _set_btn_visible(library_filter_btn...) not found in the first 40 lines "
+        "of _apply_enrichment_to_ui. The library button must be revealed in this function."
+    )
+
+    # The library reveal must come BEFORE each _update_* call (safe early block)
+    for update_name, update_line in [
+        ('_update_pgp_filter_btn', pgp_update_line),
+        ('_update_domain_filter_btn', domain_update_line),
+        ('_update_exclude_btn', exclude_update_line),
+    ]:
+        if update_line is not None:
+            assert lib_reveal_line < update_line, (
+                f"BUG-A: _set_btn_visible(library_filter_btn) (body-line {lib_reveal_line}) "
+                f"appears AFTER {update_name} (body-line {update_line}) in "
+                f"_apply_enrichment_to_ui. The reveal must come FIRST so an exception "
+                f"in the update chain cannot suppress the button reveal."
+            )

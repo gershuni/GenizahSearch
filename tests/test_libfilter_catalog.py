@@ -198,7 +198,7 @@ def test_has_active_filters_true_when_library_selected():
     active filter.  After the fix, the any([...]) in _has_active_filters
     includes current_library_filter['value'].
     """
-    import ast, pathlib
+    import pathlib
     source = pathlib.Path('web/pages/catalog_browse.py').read_text(encoding='utf-8')
     # The _has_active_filters function must reference current_library_filter
     # We verify this by source-scanning the function body
@@ -484,14 +484,17 @@ def test_catalog_dialog_no_deselect_all_and_apply_guarded():
         "catalog_browse.py must provide a 'Select All' action in the library dialog"
     )
 
-    # There must be NO callable 'Select None' button or deselect-all library action.
-    # We verify this by checking that tr('Select None') does NOT appear in catalog_browse.py
-    # (which would mean a NiceGUI button with that label was created).  Mere mentions in
-    # comments are acceptable; only a tr(key) call creates a user-visible button.
-    assert "tr('Select None')" not in source and 'tr("Select None")' not in source, (
-        "catalog_browse.py must NOT use tr('Select None') as a button label "
-        "(a deselect-all action would let the user commit an all-unchecked state "
-        "that collides with the '[]' = show all sentinel — FINDING 1)"
+    # BUG-C fix: 'Select None' IS now present in catalog_browse.py as a convenience
+    # clear-checkboxes action. It does NOT commit — Apply is disabled when zero are
+    # checked (catLibFilterUpdateApply JS guard + Python if-not-checked guard).
+    # Verify that 'Select None' is paired with a guarded Apply (both must coexist):
+    assert "tr('Select All')" in source or 'tr("Select All")' in source, (
+        "catalog_browse.py must still provide a 'Select All' action alongside 'Select None'"
+    )
+    # The all-unchecked Apply guard must remain (FINDING 1 invariant — '[] = show-all' safe).
+    assert 'Select at least one library' in source, (
+        "The Python Apply guard 'Select at least one library' must still be present "
+        "alongside the new 'Select None' button (FINDING 1 invariant)"
     )
 
 
@@ -524,4 +527,89 @@ def test_catalog_apply_mapping_all_checked_clears_filter():
     assert all_checked_clears or 'return []' in source, (
         "catalog_browse.py must implement the all-checked => [] (clear filter) branch "
         "in the library dialog apply handler (FINDING 1 apply mapping)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# BUG-B static guard: no <script> inside ui.html in the catalog library dialog
+# ---------------------------------------------------------------------------
+
+def test_catalog_no_script_in_library_dialog_html():
+    """BUG-B static guard: _open_library_filter_dialog in catalog_browse.py must NOT
+    pass a string containing '<script' to ui.html().
+
+    NiceGUI raises ValueError: 'HTML elements must not contain <script> tags.' when
+    ui.html() content contains a <script> tag. This guard catches the class of bug
+    that was BUG-B: JS functions embedded inside the dialog's ui.html() call.
+
+    The correct pattern: JS defined once at page level in ui.add_head_html().
+    """
+    import pathlib
+    source = pathlib.Path('web/pages/catalog_browse.py').read_text(encoding='utf-8')
+
+    # Find _open_library_filter_dialog function body in catalog_browse.py
+    lines = source.splitlines()
+    in_fn = False
+    fn_lines = []
+    fn_indent = None
+    for ln in lines:
+        if 'def _open_library_filter_dialog' in ln:
+            in_fn = True
+            fn_indent = len(ln) - len(ln.lstrip())
+        if in_fn:
+            fn_lines.append(ln)
+            if len(fn_lines) > 1:
+                stripped = ln.strip()
+                if stripped and not stripped.startswith('#'):
+                    cur_indent = len(ln) - len(ln.lstrip())
+                    if cur_indent <= fn_indent and stripped.startswith('def '):
+                        break
+            if len(fn_lines) > 200:
+                break
+
+    fn_src = '\n'.join(fn_lines)
+
+    assert '_open_library_filter_dialog' in fn_src, (
+        "_open_library_filter_dialog not found in catalog_browse.py"
+    )
+
+    # If ui.html( and <script both appear on non-comment lines in the function,
+    # that is the BUG-B pattern. Comments may legitimately mention '<script>' as docs.
+    non_comment_fn_lines = [
+        ln for ln in fn_lines
+        if ln.strip() and not ln.strip().startswith('#')
+    ]
+    non_comment_fn_src = '\n'.join(non_comment_fn_lines)
+
+    if 'ui.html(' in non_comment_fn_src and '<script' in non_comment_fn_src:
+        raise AssertionError(
+            "BUG-B: _open_library_filter_dialog in catalog_browse.py passes a string "
+            "containing '<script' to ui.html(). NiceGUI raises ValueError at dialog-open "
+            "time. Move JS functions to ui.add_head_html() at page setup."
+        )
+
+    # Positive: the page-level ui.add_head_html must define the catLibFilter JS functions.
+    assert 'catLibFilterGetChecked' in source, (
+        "BUG-B: catLibFilterGetChecked JS function not found in catalog_browse.py. "
+        "It must be defined in ui.add_head_html() at page setup (not inside ui.html)."
+    )
+    # The JS must be defined in a ui.add_head_html() call, not inside a ui.html() call.
+    # Verify: 'catLibFilterGetChecked' must appear INSIDE a ui.add_head_html( block.
+    # Simple heuristic: find the line number of 'catLibFilterGetChecked' and check that
+    # 'ui.add_head_html' appears within 20 lines before it.
+    catalog_lines = source.splitlines()
+    js_fn_line = None
+    for i, ln in enumerate(catalog_lines):
+        if 'catLibFilterGetChecked' in ln and 'function catLibFilterGetChecked' in ln:
+            js_fn_line = i
+            break
+    assert js_fn_line is not None, (
+        "BUG-B: 'function catLibFilterGetChecked' definition not found in catalog_browse.py. "
+        "The JS function must be defined (not just called) in ui.add_head_html() setup."
+    )
+    # Check that ui.add_head_html appears within the preceding 20 lines
+    preceding_block = '\n'.join(catalog_lines[max(0, js_fn_line - 20): js_fn_line + 1])
+    assert 'ui.add_head_html' in preceding_block, (
+        "BUG-B: 'function catLibFilterGetChecked' is not inside a ui.add_head_html() block. "
+        "The catLibFilter JS functions must be registered via ui.add_head_html at page setup."
     )

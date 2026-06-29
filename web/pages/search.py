@@ -313,6 +313,31 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
     # Domain filter dialog JS helpers (must be at page level for inline onchange handlers)
     # Functions accept containerId parameter for unique dialog instances
+    # Library filter dialog JS helpers (BUG-B fix: must be at page level, NOT inside ui.html)
+    ui.add_head_html('''<script>
+    function libFilterUpdateApply(cid) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        var cbs = cont.querySelectorAll('.lib-cb');
+        var n = 0;
+        cbs.forEach(function(cb) { if (cb.checked) n++; });
+        var btn = document.getElementById('libApplyBtn_' + cid);
+        if (btn) btn.disabled = (n === 0);
+    }
+    function libFilterGetChecked(cid) {
+        var cont = document.getElementById(cid);
+        if (!cont) return [];
+        var result = [];
+        cont.querySelectorAll('.lib-cb:checked').forEach(function(cb) { result.push(cb.dataset.code); });
+        return result;
+    }
+    function libFilterSelectAll(cid, val) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        cont.querySelectorAll('.lib-cb').forEach(function(cb) { cb.checked = val; });
+        libFilterUpdateApply(cid);
+    }
+    </script>''')
     ui.add_head_html('''<script>
     function domainFilterParentChanged(parentCb) {
         try {
@@ -1674,10 +1699,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             return
 
                         lang = get_language()
-                        # Sort by count desc, then by label
+                        # BUG-D fix: sort alphabetically by display name for clear,
+                        # predictable order consistent with catalog and desktop dialogs.
                         all_codes = sorted(
                             facets.keys(),
-                            key=lambda c: (-facets[c], get_library_display(c, short=False, lang=lang))
+                            key=lambda c: get_library_display(c, short=False, lang=lang)
                         )
 
                         # Build checkbox HTML — one per library code present in results.
@@ -1718,32 +1744,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 ).classes('text-sm text-gray-500')
 
                                 with ui.scroll_area().classes('w-full').style('max-height: 50vh;'):
+                                    # BUG-B fix: NO <script> here — JS functions are defined once
+                                    # at page level via ui.add_head_html (see page setup above).
                                     ui.html(
-                                        f'<div id="{container_id}">{checkbox_html}</div>'
-                                        f'<script>'
-                                        f'function libFilterUpdateApply(cid){{'
-                                        f'  var cont=document.getElementById(cid);'
-                                        f'  if(!cont)return;'
-                                        f'  var cbs=cont.querySelectorAll(".lib-cb");'
-                                        f'  var n=0;'
-                                        f'  cbs.forEach(function(cb){{if(cb.checked)n++;}});'
-                                        f'  var btn=document.getElementById("libApplyBtn_"+cid);'
-                                        f'  if(btn)btn.disabled=(n===0);'
-                                        f'}}'
-                                        f'function libFilterGetChecked(cid){{'
-                                        f'  var cont=document.getElementById(cid);'
-                                        f'  if(!cont)return [];'
-                                        f'  var result=[];'
-                                        f'  cont.querySelectorAll(".lib-cb:checked").forEach(function(cb){{result.push(cb.dataset.code);}});'
-                                        f'  return result;'
-                                        f'}}'
-                                        f'function libFilterSelectAll(cid,val){{'
-                                        f'  var cont=document.getElementById(cid);'
-                                        f'  if(!cont)return;'
-                                        f'  cont.querySelectorAll(".lib-cb").forEach(function(cb){{cb.checked=val;}});'
-                                        f'  libFilterUpdateApply(cid);'
-                                        f'}}'
-                                        f'</script>',
+                                        f'<div id="{container_id}">{checkbox_html}</div>',
                                         sanitize=False,
                                     )
 
@@ -1752,15 +1756,24 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     _cid = container_id  # capture for closures
                                     _all = all_codes      # capture for apply
 
-                                    # Select All — the ONLY bulk action provided.
-                                    # Re-checks everything = clear filter / show all.
-                                    # A deselect-all action is intentionally omitted — an all-unchecked
-                                    # apply would produce [] which collides with the 'show all' sentinel.
-                                    ui.button(
-                                        tr('Select All'),
-                                        on_click=lambda: ui.run_javascript(
-                                            f'libFilterSelectAll("{_cid}", true)')
-                                    ).props('flat dense no-caps')
+                                    # Bulk-action buttons (left side)
+                                    with ui.row().classes('gap-1'):
+                                        # Select All: re-checks everything = clear filter / show all.
+                                        ui.button(
+                                            tr('Select All'),
+                                            on_click=lambda: ui.run_javascript(
+                                                f'libFilterSelectAll("{_cid}", true)')
+                                        ).props('flat dense no-caps')
+                                        # BUG-C: Select none — unchecks all checkboxes (convenience
+                                        # clear), but does NOT apply. OK stays disabled at zero checked
+                                        # (the libFilterUpdateApply JS guard handles this).
+                                        # Unchecking all is safe here because it does NOT commit;
+                                        # the Python Apply guard blocks commit of empty sets.
+                                        ui.button(
+                                            tr('Select None'),
+                                            on_click=lambda: ui.run_javascript(
+                                                f'libFilterSelectAll("{_cid}", false)')
+                                        ).props('flat dense no-caps')
 
                                     with ui.row().classes('gap-2'):
                                         async def apply_library_filter():
@@ -5057,6 +5070,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _set_btn_visible(domain_filter_btn, search_state.has_domain_data)
             # Phase 999.2 (PGP-FILTER-02, D-07): PGP button visible iff some result has PGP.
             _set_btn_visible(pgp_filter_btn, bool(search_state.transcription_sys_ids))
+            # BUG-A fix: reveal library button FIRST (before any _update_* calls that might
+            # raise). If an exception in _update_pgp_filter_btn/_update_domain_filter_btn/
+            # _update_exclude_btn aborts the chain, the button still appears.
+            # SEED-026 (LIBFILTER-01): library filter button — visible whenever results exist.
+            _set_btn_visible(library_filter_btn, bool(search_state.results))
             # Re-sync defensively — enrichment can fire multiple times per session
             # (stage1 + stage2 background passes both call this function), and the
             # button state must reflect the latest search context on every call.
@@ -5065,8 +5083,6 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
             _update_domain_filter_btn()
             # Phase 56: refresh exclusion chips when results render
             _update_exclude_btn()
-            # SEED-026 (LIBFILTER-01): library filter button — visible whenever results exist.
-            _set_btn_visible(library_filter_btn, bool(search_state.results))
             _update_library_btn()
             _update_library_chips()
 
