@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 8.2.2
+# Dicta Genizah Search Pro 8.3.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,24 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 8.2.2?
+## What's New in Version 8.3.0?
+
+### v8.3.0: Search & Browse — Library Filter + Space-Scroll
+
+Public release (both). Two new ways to work through results, at full web + desktop parity:
+
+- **Filter by library** — narrow your search results, or the "Browse by Identification"
+  catalog, to one or more holding libraries (Cambridge, JTS, Oxford, RNL, Manchester, BL,
+  and more). On the web it's a checkbox dialog with a removable chip; the desktop catalog
+  has the same at parity; and the public API gains a `filters.library` parameter.
+- **Press Space to scroll results** — on the search-results view, Space pages down through
+  results and Shift+Space pages up (unless a result control holds the focus).
+- **Joins Lab polish** — Rotate and Fullscreen in the anchor and Compare viewers (both
+  apps); on desktop the Joins Lab now has the web's full set of search modes, inline
+  options, candidate Excel export, and a Stop button.
+- **Behind the scenes** — a large internal refactor split the two oversized source files
+  into cohesive modules with zero behavior change, plus more resilient desktop image
+  loading during an NLI outage.
 
 ### v8.2.2: FGP Credits, Homepage Stats, Catalog Filters & Audit Polish
 
@@ -454,7 +471,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V8.2.2_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V8.3.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 

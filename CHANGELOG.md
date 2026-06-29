@@ -4,6 +4,57 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [8.3.0] - 2026-06-29 — Search & Browse: Library Filter + Space-Scroll
+
+Public release (both). Two new search/browse features at full web + desktop parity — a
+**library filter** and **keyboard page-scrolling** — plus Joins Lab viewer and parity
+improvements, more resilient desktop image loading, and a large *invisible* internal
+refactor (the two "god files" split into cohesive modules with zero behavior change).
+
+### New Features
+
+- **Filter by library** *(both + API)* — narrow search results and the "Browse by
+  Identification" catalog to one or more holding libraries (Cambridge/CUL, JTS, Oxford,
+  RNL, Manchester, BL, and the rest). On web `/search` it applies over the full result set
+  before paging and shows a removable chip; on Browse-by-Identification it pushes the
+  filter down into the query so totals and pagination stay correct; the desktop catalog
+  tab has the same checkbox dialog at parity. The public API gains a `filters.library`
+  parameter on `POST /api/search` and `POST /api/parallels`. *(SEED-026)*
+- **Press Space to scroll results** *(both)* — on the search-results view, **Space** pages
+  down through results and **Shift+Space** pages up — unless a result control holds the
+  focus (a checkbox, an expand/collapse toggle, a link, or an open dialog), in which case
+  Space performs that control's action as before. *(SEED-025)*
+- **Rotate & fullscreen in the Joins Lab** *(both)* — the Joins Lab anchor pane and the
+  side-by-side Compare viewers gain Rotate Left / Rotate Right / Reset and a Fullscreen
+  toggle, on both web and desktop. *(SEED-017)*
+- **Desktop Joins Lab: full search-mode parity + candidate export** *(desktop)* — the
+  desktop Joins Lab now offers the web's search modes (Responsa-style, Exact, Variants,
+  Fuzzy, Regex), edits the variant / Judeo-Arabic / flexible-spacing / bidi options inline,
+  and exports its candidate list (selection, else all shown) to the shared 4-sheet Excel
+  workbook. A **Stop** button cancels a running search and keeps the candidates already
+  found. *(SEED-024)*
+
+### Improvements
+
+- **Desktop: resilient image loading during an NLI outage** *(desktop)* — desktop image
+  fetches now share the app's NLI circuit breaker (host-gated to the NLI image servers),
+  fail fast on a dead host instead of hanging, and restrict the relaxed-TLS path to NLI
+  hosts only — so an NLI outage can no longer stall Cambridge/Oxford image loads. *(SEED-015)*
+
+### Internal
+
+- **God-File Decomposition** *(both, zero behavior change)* — the two oversized source
+  files, `genizah_app.py` (desktop, ~28k lines) and `genizah_core.py` (shared, ~12.5k
+  lines), were split over six phases (122–127) into cohesive `shared/` + `desktop/` modules
+  behind permanent re-export facades. No user-visible change; search, browse, Responsa,
+  joins, lists, and composition all behave exactly as before, with back-edge import guards
+  keeping the layering honest.
+- Audit tail: softened over-claims in the accessibility statement to match reality after
+  the a11y pass, extended stale-index diagnostics into a reusable helper, and moved local
+  scratch files under a gitignored `_tmp/`.
+
+---
+
 ## [8.2.2] - 2026-06-24 — FGP Credits, Homepage Stats, Catalog Filters & Audit Polish
 
 Roll-up release (both) of everything merged since v8.2.1: proper scholarly attribution for FGP transcriptions, a homepage corpus-statistics band, catalog availability filters, a "has manual transcription" indicator, an accessibility/RTL pass, and a product-quality audit batch (resilience, observability, cleanup).

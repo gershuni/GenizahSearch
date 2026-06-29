@@ -1078,10 +1078,11 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                # Link the banner to the Joins Lab — the v8.2.0 milestone CTA.
+                # Link the banner to Search — where the v8.3.0 library filter and
+                # Space-scroll both live.
                 ui.link(
-                    tr('New features: Friedberg (FGP) transcriptions are now available; search now finds Judeo-Arabic letters with an upper dot, without typing the dot; and the Joins Lab is now on the web too — give it a try!'),
-                    '/joins-lab',
+                    tr('New features: filter your search results and the catalog by holding library; press Space to page through results; and the Joins Lab viewers gained rotate and fullscreen. Give it a try!'),
+                    '/search',
                 ).classes('text-xs flex-1 truncate text-primary hover:underline')
                 def dismiss_whats_new():
                     # Explicit user dismiss (X button): persist the flag unconditionally.

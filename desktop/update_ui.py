@@ -135,7 +135,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New features: Friedberg (FGP) transcriptions are now available in the app; and search is improved — it now finds Judeo-Arabic letters with an upper dot (without typing it) and words attached to punctuation, including searches in My Library."))
+        self.lbl_msg.setText(tr("New features: filter the catalog by library, press Space to page through search results, and rotate / view images fullscreen in the Joins Lab."))
         self.show()
 
     def on_learn_more(self):
@@ -172,10 +172,10 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("Friedberg Genizah Project (FGP) transcriptions are now available as a selectable source in the version chooser, shown on the matching manuscript image."),
-            tr("Search is improved: it now finds words attached to punctuation (searching \"\u05d1\u05e1\u05d2\u05df\" also finds \"\u05d1\u05e1\u05d2\u05df,\") and Judeo-Arabic letters written with an upper dot (without typing the dot). In My Library this works automatically \u2014 the index rebuilds itself."),
-            tr("Recommended: to enjoy the improved search on the Genizah corpus too \u2014 especially for Judeo-Arabic texts \u2014 rebuild your Genizah index from Settings, via \"Build / Rebuild Index\". It's a one-time action, and highly recommended."),
-            tr("Responsa search operators \u2014 # (prefixes/suffixes), * (wildcard), % (plene/defective) and (\u05d0/\u05d1) alternation \u2014 now work when searching My Library."),
+            tr("Filter by library: the 'Browse by Identification' catalog now has a library filter \u2014 narrow results to Cambridge, JTS, Oxford, and other holding libraries."),
+            tr("Press Space to page down through search results (Shift+Space to page up), unless a result control is focused."),
+            tr("Joins Lab improvements: rotate and fullscreen in the anchor and Compare viewers, the web's full set of search modes (Exact, Variants, Fuzzy, Regex, Responsa), inline search options, a Stop button, and candidate export to Excel."),
+            tr("More resilient image loading: an outage of the National Library's image servers no longer stalls loading of images from other libraries."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)
