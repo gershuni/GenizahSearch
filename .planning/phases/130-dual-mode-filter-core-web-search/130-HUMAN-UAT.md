@@ -37,17 +37,22 @@ test: Navigate from Browse-by-Identification (catalog) to /search with 2 librari
 expected: filter_panel.consume_incoming_filters writes Show-only mode + dict shape; button reflects it without a separate search run.
 result: [pending]
 
-### 6. Hebrew UI label rendering
-test: In Hebrew UI, confirm button states read "סינון לפי ספרייה" (neutral), "מציג N מתוך total" (Show-only), "מסתיר N" (Hide); confirm dialog toggle labels read "הצג רק נבחרות" / "הסתר נבחרות".
-expected: All four new HE translation keys render correctly; no English fallback under Hebrew UI.
+### 6. Hebrew UI label rendering (with pluralized noun)
+test: In Hebrew UI, confirm button states read "סינון לפי ספרייה" (neutral), "מציג N/total ספריות" (Show-only; "מציג 1/1 ספרייה" when total=1), "מסתיר ספרייה 1" (hide 1) / "מסתיר N ספריות" (hide 2+); confirm dialog toggle labels read "הצג רק נבחרות" / "הסתר נבחרות". In EN confirm "Showing N/total libraries" / "Hiding N libraries" (singular "library" at count 1).
+expected: All new template translation keys render correctly with the right singular/plural noun; no English fallback under Hebrew UI; HE hide-singular reads noun-then-number ("מסתיר ספרייה 1").
+result: [pending]
+
+### 7. Zero-manuscript libraries hidden from the filter universe
+test: Open the library filter dialog and expand the "all libraries" A–Z section; confirm NO library with zero manuscripts in the system appears — only libraries that actually have manuscripts in the corpus are listed.
+expected: The expand-all list = canonical LIBRARY_CODES minus 'LOCAL' minus any library with 0 corpus manuscripts (`library_codes_with_manuscripts()`).
 result: [pending]
 
 ## Summary
 
-total: 6
+total: 7
 passed: 0
 issues: 0
-pending: 6
+pending: 7
 skipped: 0
 blocked: 0
 
