@@ -350,18 +350,26 @@ def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bo
         # incoming value (non-list scalar, dict items, etc.) cannot raise TypeError at
         # this entry point — same hardening as search.py's restore path.
         from shared.browse_map_utils import sanitize_library_codes
-        _lib_codes = sanitize_library_codes(incoming.get('library_filter'))
-        # WR-03: only stamp show_only when sanitized codes are non-empty.
-        # If all incoming codes were LOCAL/invalid, leave state as neutral (hide/[])
-        # rather than persisting an invalid show_only/[] state.
+        _lf_raw = incoming.get('library_filter')
+        # Task 1 (131-04): accept both the new dict {mode, codes} shape and the legacy
+        # bare-list shape for backward compatibility (Codex R1 HIGH #3 + MED #7).
+        if isinstance(_lf_raw, dict):
+            # New dict shape from catalog handoff: read mode + codes, validate mode.
+            _lib_mode = _lf_raw.get('mode', 'hide')
+            _lib_mode = _lib_mode if _lib_mode in ('show_only', 'hide') else 'hide'
+            _lib_codes = sanitize_library_codes(_lf_raw.get('codes'))
+        else:
+            # Legacy bare-list shape: always interpret as Show-only allowlist (backward compat).
+            _lib_codes = sanitize_library_codes(_lf_raw)
+            _lib_mode = 'show_only'
+        # WR-03: only apply when sanitized codes are non-empty (or hide-with-codes).
+        # If all incoming codes were LOCAL/invalid, leave state as neutral (hide/[]).
         if _lib_codes:
             state.library_filter = _lib_codes
-            # Browse->search handoff is always a Show-only intent: user selected specific
-            # libraries in the catalog and wants to search within them.
-            state.library_mode = 'show_only'
+            state.library_mode = _lib_mode
             # Persist as {'mode','codes'} dict shape (D-09) so the restore path reads
-            # it back correctly as Show-only (not a Hide-set).
-            persist_value('search_library_filter', {'mode': 'show_only', 'codes': _lib_codes})
+            # it back correctly with the correct mode (not just Show-only).
+            persist_value('search_library_filter', {'mode': _lib_mode, 'codes': _lib_codes})
         # else: all codes sanitized away — leave state as neutral (hide/[]); no persist needed.
     # Clear incoming_filters from storage after consuming.
     # 2026-05-12 Codex 3rd-pass CRITICAL: safe_user_pop so prune races don't 500.
