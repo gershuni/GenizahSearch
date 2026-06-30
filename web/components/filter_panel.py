@@ -332,17 +332,29 @@ def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bo
         state.filter_material_exclude = incoming['material_exclude']
         persist_value(f'{pfx}_filter_material_exclude', incoming['material_exclude'])
     # GAP-F (2026-06-28): thread library selection from catalog browse to /search.
+    # DMF (T-130-02-06 / HIGH-1): browse->search handoff stamps mode='show_only' and
+    # persists the new {'mode','codes'} dict shape (NOT a bare list).  Without the mode
+    # stamp, Plan 01's library_mode='hide' default would silently mis-interpret the
+    # Show-only intent as a Hide-set after the handoff.
     # Persist key is the FLAT literal 'search_library_filter' (NOT {pfx}_filter_*) because
-    # search.py loads it at :187-189 via _safe_get('search_library_filter', []).
+    # search.py loads it via _safe_get('search_library_filter', None).
     # setattr (live this render) + persist (durable for the next fresh render) are BOTH
     # required for the persist→reload lifecycle.
     # WR-01 fix: only persist when storage_prefix == 'search' — parallels does not
     # implement a library post-filter, so writing 'search_library_filter' during a
     # parallels handoff would silently infect a later fresh /search reload.
     if incoming.get('library_filter') and storage_prefix == 'search':
-        _lib_codes = [str(c) for c in incoming['library_filter'] if c]
+        # HIGH-1: sanitize incoming codes against the canonical set; exclude 'LOCAL'
+        # (desktop-only library code that must never appear as a web filter option).
+        from shared.browse_map_utils import LIBRARY_CODES as _LIBRARY_CODES
+        _lib_codes = [str(c) for c in incoming['library_filter'] if c and str(c) in _LIBRARY_CODES and str(c) != 'LOCAL']
         state.library_filter = _lib_codes
-        persist_value('search_library_filter', _lib_codes)
+        # Browse->search handoff is always a Show-only intent: user selected specific
+        # libraries in the catalog and wants to search within them.
+        state.library_mode = 'show_only'
+        # Persist as {'mode','codes'} dict shape (D-09) so the restore path reads
+        # it back correctly as Show-only (not a Hide-set).
+        persist_value('search_library_filter', {'mode': 'show_only', 'codes': _lib_codes})
     # Clear incoming_filters from storage after consuming.
     # 2026-05-12 Codex 3rd-pass CRITICAL: safe_user_pop so prune races don't 500.
     from web.safe_storage import safe_user_pop

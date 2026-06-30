@@ -183,11 +183,29 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.domain_exclusions = set(_de) if _de is not None else set()
         search_state.printed_filter = _safe_get('search_printed_filter', 'all')
         search_state.pgp_filter = _safe_get('search_pgp_filter', 'all')  # Phase 999.2 (PGP-FILTER-05, D-10)
-        # SEED-026 (LIBFILTER-01): library multi-select filter — persist as list, validate against known codes.
+        # SEED-026 / DMF (LIBFILTER-01): library dual-mode filter — mode-aware restore with D-06 legacy migration.
         # D-46/D-NEW-7: exclude 'LOCAL' — My Library is desktop-only and must never appear as a web filter.
-        _lib0 = _safe_get('search_library_filter', [])
-        _lib0 = _lib0 if isinstance(_lib0, list) else []
-        search_state.library_filter = [c for c in _lib0 if c in LIBRARY_CODES and c != 'LOCAL']
+        # New shape: {'mode':'show_only'|'hide', 'codes':[...]}; legacy shape: plain list (v8.3.0).
+        _lib_raw = _safe_get('search_library_filter', None)
+        if isinstance(_lib_raw, list):
+            # D-06 legacy migration: plain list → Show-only (v8.3.0 values were inclusion-only lists).
+            _lib_codes = [c for c in _lib_raw if c in LIBRARY_CODES and c != 'LOCAL']
+            if _lib_codes:
+                search_state.library_mode = 'show_only'
+                search_state.library_filter = _lib_codes
+            else:
+                search_state.library_mode = 'hide'
+                search_state.library_filter = []
+        elif isinstance(_lib_raw, dict):
+            # New dict shape: read mode + codes directly, sanitize codes against LIBRARY_CODES and 'LOCAL'.
+            _lib_mode = _lib_raw.get('mode', 'hide')
+            _lib_codes = [c for c in (_lib_raw.get('codes') or []) if c in LIBRARY_CODES and c != 'LOCAL']
+            search_state.library_mode = _lib_mode if _lib_mode in ('show_only', 'hide') else 'hide'
+            search_state.library_filter = _lib_codes
+        else:
+            # Fresh/absent/garbage: default Hide mode, empty set (D-05 — show all by default).
+            search_state.library_mode = 'hide'
+            search_state.library_filter = []
 
     # Clear exclusions if initial_domain provided (from browse page navigation)
     if initial_domain:
@@ -1785,10 +1803,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                 f'libFilterGetChecked("{_cid}")', timeout=5.0
                                             )
                                             checked = list(checked_list) if checked_list else []
+                                            # HIGH-3: sanitize JS-returned codes against canonical set before
+                                            # any mode/selection mapping — a crafted client must not inject
+                                            # 'LOCAL' or unknown codes into the persisted set (T-130-02-02).
+                                            checked = [c for c in checked if c in LIBRARY_CODES and c != 'LOCAL']
+                                            # The mode for this dialog is Show-only (pre-Task-2 dialog).
                                             # FINDING 1 — Python-side guard: if checked set is empty,
-                                            # do NOT commit (would produce [] = 'show all' collision).
-                                            # This defensive check fires only if the client-side
-                                            # disabled-Apply guard was bypassed.
+                                            # do NOT commit — blocked by client-side disabled-Apply guard;
+                                            # this fires only if that guard was bypassed.
                                             if not checked:
                                                 ui.notify(
                                                     tr('Select at least one library, or check all to clear the filter'),
@@ -1796,10 +1818,23 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                 )
                                                 return
                                             # Apply inclusion mapping:
-                                            # all-checked => [] (clear filter); subset => that subset.
+                                            # all-checked => [] (clear filter / show all); subset => that subset.
                                             new_filter = _library_apply_selection(checked, _all)
-                                            search_state.library_filter = new_filter
-                                            persist_value('search_library_filter', search_state.library_filter)
+                                            # SHOW-ALL NORMALIZATION (MEDIUM): Show-only resolving to empty codes
+                                            # (all-in-result-checked -> []) normalizes to neutral Hide/[].
+                                            # "show all" has exactly ONE persisted representation (D-05/DMF).
+                                            if not new_filter:
+                                                # All checked = "show all" -> persisted as neutral hide/[].
+                                                search_state.library_mode = 'hide'
+                                                search_state.library_filter = []
+                                            else:
+                                                search_state.library_mode = 'show_only'
+                                                search_state.library_filter = new_filter
+                                            # Persist dict shape (D-09): both mode and codes in one key.
+                                            persist_value('search_library_filter', {
+                                                'mode': search_state.library_mode,
+                                                'codes': search_state.library_filter,
+                                            })
                                             _update_library_btn()
                                             if search_state.exclusion_sources:
                                                 _apply_manuscript_exclusions()
@@ -2525,10 +2560,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         search_state.pgp_filter = 'all'
         _update_pgp_filter_btn()
         _update_pgp_filter_chip()
-        # SEED-026 (LIBFILTER-01): hide library button + reset in-memory state on New Search.
+        # SEED-026 / DMF (LIBFILTER-01): hide library button + reset in-memory state on New Search.
         # The persisted 'search_library_filter' key is reset by clear_search_snapshot() (added to defaults).
         _set_btn_visible(library_filter_btn, False)
         search_state.library_filter = []
+        search_state.library_mode = 'hide'  # DMF D-04: reset mode to fresh default on New Search
         _update_library_btn()
         # Phase 55: Clear refinement chain
         _clear_refinement_chain()
@@ -3675,16 +3711,29 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         return filtered
 
     def _apply_library_filter(results_list):
-        """SEED-026 (LIBFILTER-01): filter results by selected library codes.
+        """SEED-026 / DMF (LIBFILTER-01): dual-mode filter results by selected library codes.
 
-        Returns results_list unchanged when search_state.library_filter is empty.
-        Otherwise returns only results whose r['display']['library_code'] is in the
-        selected set. Iterates the FULL results list — never sliced first.
+        Mode branch (D-01/D-02):
+          - Show-only (library_mode=='show_only'): keep rows where library_code IN codes set.
+            Empty Show-only set = show all (D-08; no [] collision).
+          - Hide (library_mode=='hide'): keep rows where library_code NOT IN codes set.
+            Empty Hide set = show all (D-05 default).
+          - Fully-populated Hide set yields [] → clean 0-results render downstream (DMF-06).
+        Iterates the FULL results list — never sliced first.
         """
-        if not search_state.library_filter:
-            return results_list
-        selected = set(search_state.library_filter)
-        return [r for r in results_list if r.get('display', {}).get('library_code', '') in selected]
+        mode = getattr(search_state, 'library_mode', 'hide')  # 'show_only' | 'hide'
+        codes = set(search_state.library_filter)
+
+        if mode == 'show_only':
+            if not codes:
+                return results_list  # empty Show-only = show all (D-08)
+            return [r for r in results_list
+                    if r.get('display', {}).get('library_code', '') in codes]
+        else:  # hide
+            if not codes:
+                return results_list  # empty Hide = show all (D-05 default)
+            return [r for r in results_list
+                    if r.get('display', {}).get('library_code', '') not in codes]
 
     def _apply_printed_filter_and_render(results_list, reset_expansion=True):
         """Apply printed filter + PGP filter to results and re-render (used when no domain exclusions active).
