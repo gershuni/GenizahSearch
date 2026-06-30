@@ -795,3 +795,60 @@ def test_web_catalog_shortlist_label_builder_passes_with_code():
         "The expand A-Z sort key must call get_library_display(c, short=False, lang=_lang) "
         "WITHOUT with_code — bare name for sort stability"
     )
+
+
+# ---------------------------------------------------------------------------
+# 131-10: catLibFilterSearch uses display='flex' not '' on show path
+# SOURCE-CONTRACT GUARD — row collapse fix
+# ---------------------------------------------------------------------------
+
+def test_catlib_filter_search_show_uses_flex_not_empty():
+    """131-10 source-contract: catLibFilterSearch in catalog_browse.py must set
+    row.style.display = 'flex' (not '') on the show path.
+
+    Setting display='' (empty string) clears the inline style and lets the
+    <label class="cat-lib-cb-row"> fall back to its browser default display:inline,
+    collapsing all shown rows into one continuous run of text.  The correct
+    value is 'flex' — matching the inline style="display:flex;..." on each row.
+
+    Checked patterns:
+    - The no-query reset branch uses display='flex' (not '')
+    - The match branch: ? 'flex' : 'none'  (the show arm must be 'flex', not '')
+    - Negative: neither show arm must use display='' (empty string)
+    """
+    import pathlib
+    source = pathlib.Path('web/pages/catalog_browse.py').read_text(encoding='utf-8')
+
+    # Find the catLibFilterSearch function body (bounded scan)
+    lines = source.splitlines()
+    in_fn = False
+    fn_lines = []
+    for ln in lines:
+        if 'function catLibFilterSearch(' in ln:
+            in_fn = True
+        if in_fn:
+            fn_lines.append(ln)
+            if len(fn_lines) > 1 and ln.strip() == '}':
+                break
+
+    fn_src = '\n'.join(fn_lines)
+    assert fn_src, "catLibFilterSearch function not found in catalog_browse.py"
+
+    # Positive: 'flex' must be the show value in both branches
+    assert "'flex'" in fn_src or '"flex"' in fn_src, (
+        "131-10: catLibFilterSearch in catalog_browse.py must use display='flex' on the "
+        "show path (both no-query reset and match branch). "
+        "Using display='' reverts rows to display:inline, collapsing the flex layout."
+    )
+
+    # Negative: the show arm must NOT use the empty-string reset pattern
+    assert "display = ''" not in fn_src and 'display = ""' not in fn_src, (
+        "131-10: catLibFilterSearch still uses display='' (empty) on the show path. "
+        "This clears the inline flex style and collapses rows to display:inline. "
+        "Change both show arms to display='flex'."
+    )
+
+    # Positive: 'none' must still be the hide value (no regression)
+    assert "'none'" in fn_src or '"none"' in fn_src, (
+        "catLibFilterSearch must still set display='none' on the hide path (no regression)"
+    )

@@ -966,3 +966,115 @@ def test_compute_facets_defined_before_update_btn():
         "a restored session with results raises NameError -> HTTP 500. "
         "Define _compute_library_facets before _update_library_btn."
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 16 (131-10): libFilterSearch uses display='flex' not '' on show path
+# SOURCE-CONTRACT GUARD — row collapse fix (display:'' reverts to display:inline
+# which collapses inline-flex rows into a single text run).
+# ---------------------------------------------------------------------------
+
+def test_libfilter_search_show_uses_flex_not_empty():
+    """131-10 source-contract: libFilterSearch in search.py must set
+    row.style.display = 'flex' (not '') on the show path.
+
+    Setting display='' (empty string) clears the inline style and lets the
+    <label class="lib-cb-row"> fall back to its browser default display:inline,
+    collapsing all shown rows into one continuous run of text.  The correct
+    value is 'flex' — matching the inline style="display:flex;..." on each row.
+
+    Checked patterns:
+    - The no-query reset branch: 'display = \\'flex\\'' or "display = 'flex'"
+    - The match branch: ? 'flex' : 'none'  (the show arm must be 'flex', not '')
+    - Negative: neither show arm must use display = '' (empty string)
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+
+    # Find the libFilterSearch function body (bounded scan)
+    lines = source.splitlines()
+    in_fn = False
+    fn_lines = []
+    for ln in lines:
+        if 'function libFilterSearch(' in ln:
+            in_fn = True
+        if in_fn:
+            fn_lines.append(ln)
+            if len(fn_lines) > 1 and ln.strip() == '}':
+                break
+
+    fn_src = '\n'.join(fn_lines)
+    assert fn_src, "libFilterSearch function not found in search.py"
+
+    # Positive: 'flex' must be used as the show value in both branches
+    assert "'flex'" in fn_src or '"flex"' in fn_src, (
+        "131-10: libFilterSearch in search.py must use display='flex' on the "
+        "show path (both no-query reset and match branch). "
+        "Using display='' reverts rows to display:inline, collapsing the flex layout."
+    )
+
+    # Negative: the show arm must NOT use the empty-string reset pattern
+    # Pattern: display = '' (with optional whitespace) on the non-'none' arm
+    assert "display = ''" not in fn_src and 'display = ""' not in fn_src, (
+        "131-10: libFilterSearch still uses display='' (empty) on the show path. "
+        "This clears the inline flex style and collapses rows to display:inline. "
+        "Change both show arms to display='flex'."
+    )
+
+    # Positive: 'none' must still be the hide value (no regression)
+    assert "'none'" in fn_src or '"none"' in fn_src, (
+        "libFilterSearch must still set display='none' on the hide path (no regression)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 17 (131-10 Fix B): /search dialog row data-label includes the library code
+# ---------------------------------------------------------------------------
+
+def test_search_dialog_row_label_includes_code():
+    """131-10 Fix B: the /search library-filter dialog row labels (and data-labels)
+    must include the library code in both EN and HE UI.
+
+    Source-contract: get_library_display is called with with_code=True at BOTH
+    the shortlist-label and expand-label build sites.  The sort key must stay bare
+    (no with_code) so A-Z ordering is code-independent.
+
+    Assertions:
+    - 'with_code=True' appears in the section that builds the dialog rows
+    - The sort key line does NOT carry with_code (bare sort stays stable)
+    - Both the shortlist and expand call sites pass with_code=True
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+
+    # 'with_code=True' must appear in search.py (the two label builders)
+    assert 'with_code=True' in source, (
+        "131-10 Fix B: 'with_code=True' not found in web/pages/search.py. "
+        "Both the shortlist and expand label builders must pass with_code=True "
+        "to get_library_display so the row label/data-label includes the code."
+    )
+
+    # Count the with_code=True occurrences at the get_library_display call sites
+    # (shortlist: ~line 1829, expand: ~line 1843)
+    with_code_count = source.count('with_code=True')
+    assert with_code_count >= 2, (
+        f"131-10 Fix B: expected at least 2 occurrences of 'with_code=True' in search.py "
+        f"(shortlist label + expand label), found {with_code_count}."
+    )
+
+    # The sort key must stay bare — the lambda key for expand A-Z sort must NOT
+    # carry with_code so sort order is name-keyed, not code-appended.
+    # The sort key pattern: key=lambda c: get_library_display(c, short=False, lang=lang)
+    assert 'key=lambda c: get_library_display(c, short=False, lang=lang)' in source, (
+        "131-10 Fix B: the expand A-Z sort key must call "
+        "get_library_display(c, short=False, lang=lang) WITHOUT with_code. "
+        "Adding with_code to the sort key would sort by '...name (CODE)' strings "
+        "instead of bare names, changing A-Z ordering."
+    )
+
+    # Verify that the sort key does NOT carry with_code=True
+    sort_key_idx = source.find('key=lambda c: get_library_display(c, short=False, lang=lang)')
+    assert sort_key_idx != -1, "Sort key pattern not found"
+    sort_key_line = source[sort_key_idx: sort_key_idx + 80]
+    assert 'with_code' not in sort_key_line, (
+        "131-10 Fix B: the expand A-Z sort key lambda must NOT contain 'with_code'. "
+        f"Found: {sort_key_line!r}"
+    )
