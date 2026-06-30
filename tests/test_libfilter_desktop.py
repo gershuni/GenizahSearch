@@ -914,3 +914,242 @@ def test_facet_computation_off_ui_thread():
         "_open_catalog_library_dialog must NOT call get_browse_library_facets directly "
         "(DB facet call must be delegated to the worker thread, not the UI thread)"
     )
+
+
+# ── Phase 131 Plan 07: Search box + sort toggle (DMF-07 desktop parity) ──────
+# Six tests cover: search hides non-matching rows while preserving check state;
+# get_checked_codes returns hidden-but-checked codes; By-count orders by facets desc;
+# A-Z orders by display name asc; By-count falls back to A-Z when facets empty;
+# Select All ignores the active search filter.
+
+
+@pytest.mark.gui
+def test_search_hides_nonmatching_rows_and_preserves_checks():
+    """(1) Type-to-find: non-matching rows are hidden; matching rows visible;
+    check state is preserved across hide/show; CUL stays checked while hidden.
+
+    Web parity: catLibFilterSearch hides rows whose data-label does not contain the
+    query; checkbox state is unchanged.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from PyQt6.QtCore import Qt
+
+    dlg = LibraryFilterDialog(mode='show_only', selected_codes=['CUL'])
+
+    # Find the CUL item and read its display label for a robust query
+    cul_item = None
+    for i in range(dlg.list_widget.count()):
+        item = dlg.list_widget.item(i)
+        if item.data(Qt.ItemDataRole.UserRole) == 'CUL':
+            cul_item = item
+            break
+    assert cul_item is not None, "CUL must appear in the dialog universe"
+
+    cul_label = cul_item.text()
+
+    # Use a 4-char substring of the CUL label that is unlikely to match every row.
+    # Fall back to 'CUL' as a query if the label itself is short.
+    query = cul_label[:4].lower() if len(cul_label) >= 4 else 'CUL'
+
+    dlg.search_input.setText(query)  # fires textChanged -> _apply_search_filter
+
+    # CUL row must be visible (label contains query)
+    assert not cul_item.isHidden(), (
+        f"CUL row must be visible after typing {query!r} (its label is {cul_label!r})"
+    )
+
+    # At least one other row must be hidden (query is not universal)
+    hidden_count = sum(
+        1 for i in range(dlg.list_widget.count())
+        if dlg.list_widget.item(i).isHidden()
+    )
+    assert hidden_count > 0, (
+        f"At least one non-matching row must be hidden after typing {query!r}"
+    )
+
+    # CUL check state must still be Checked
+    assert cul_item.checkState() == Qt.CheckState.Checked, (
+        "CUL must remain Checked after the search filter is applied"
+    )
+
+    # Clear the search — all rows must be visible again
+    dlg.search_input.setText("")
+    for i in range(dlg.list_widget.count()):
+        assert not dlg.list_widget.item(i).isHidden(), (
+            f"Row {i} must be visible after clearing the search box"
+        )
+
+
+@pytest.mark.gui
+def test_get_checked_codes_returns_hidden_checked_codes():
+    """(2) Hidden-but-checked rows still appear in get_checked_codes() — web parity.
+
+    Construct in hide mode, programmatically check two codes, then type a query that
+    hides those rows; assert get_checked_codes() still returns them.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from PyQt6.QtCore import Qt
+
+    dlg = LibraryFilterDialog(mode='hide')
+
+    # Find CUL and BL items and check them
+    codes_to_check = {'CUL', 'BL'}
+    checked_items = {}
+    for i in range(dlg.list_widget.count()):
+        item = dlg.list_widget.item(i)
+        code = item.data(Qt.ItemDataRole.UserRole)
+        if code in codes_to_check:
+            item.setCheckState(Qt.CheckState.Checked)
+            checked_items[code] = item
+
+    assert len(checked_items) >= 2, (
+        f"CUL and BL must both be present in the dialog universe; found {list(checked_items)}"
+    )
+
+    # Apply a query that hides at least the checked rows.
+    # Use a 3-letter string that shouldn't match CUL or BL display labels.
+    # We'll use a query that we know the CUL/BL labels don't contain (e.g. 'zzzz').
+    dlg.search_input.setText("zzzz")
+
+    # Both CUL and BL rows should be hidden (their labels don't contain 'zzzz')
+    for code, item in checked_items.items():
+        assert item.isHidden(), (
+            f"{code} row must be hidden after query 'zzzz'"
+        )
+
+    # get_checked_codes must still return both hidden-but-checked codes
+    returned = set(dlg.get_checked_codes())
+    for code in checked_items:
+        assert code in returned, (
+            f"get_checked_codes() must return hidden-but-checked code {code!r}; "
+            f"got {returned!r}"
+        )
+
+
+@pytest.mark.gui
+def test_by_count_sort_orders_by_facets_descending():
+    """(3) By count sort orders rows by self._facets descending (CUL>BL>JTS order).
+
+    Web parity: catLibFilterSort(key='count') sorts rows by data-count DESCENDING.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+
+    facets = {'CUL': 5000, 'JTS': 100, 'BL': 900}
+    dlg = LibraryFilterDialog(mode='hide', facets=facets)
+
+    # Default is A-Z; switch to By count
+    dlg._rb_sort_count.setChecked(True)  # fires _on_sort_changed -> _repopulate
+
+    # Read the row order
+    order = [
+        dlg.list_widget.item(i).data(256)  # 256 == Qt.ItemDataRole.UserRole
+        for i in range(dlg.list_widget.count())
+    ]
+
+    # All three facet codes must be present
+    assert 'CUL' in order and 'BL' in order and 'JTS' in order, (
+        f"CUL, BL, JTS must all be in the row order; got {order!r}"
+    )
+
+    # By count descending: CUL (5000) before BL (900) before JTS (100)
+    assert order.index('CUL') < order.index('BL'), (
+        f"CUL (5000) must appear before BL (900) in By-count order; got {order!r}"
+    )
+    assert order.index('BL') < order.index('JTS'), (
+        f"BL (900) must appear before JTS (100) in By-count order; got {order!r}"
+    )
+
+
+@pytest.mark.gui
+def test_az_sort_orders_by_display_name():
+    """(4) A-Z sort orders rows by display name ascending (default order).
+
+    Web parity: catLibFilterSort(key='az') sorts rows by data-label ascending.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from genizah_core import get_library_display
+    from shared.browse_map_utils import library_codes_with_manuscripts
+
+    dlg = LibraryFilterDialog(mode='hide')
+
+    # A-Z is the default; confirm it's selected
+    assert dlg._rb_sort_az.isChecked(), "A-Z sort radio must be checked by default"
+
+    # Collect all codes in list order
+    order = [
+        dlg.list_widget.item(i).data(256)
+        for i in range(dlg.list_widget.count())
+    ]
+
+    # The expected A-Z order: sorted by get_library_display ascending
+    all_codes = [c for c in library_codes_with_manuscripts() if c != 'LOCAL']
+    expected = sorted(all_codes, key=lambda c: get_library_display(c, short=False))
+
+    assert order == expected, (
+        f"A-Z sort must produce get_library_display ascending order; "
+        f"first 5 got {order[:5]!r}, expected {expected[:5]!r}"
+    )
+
+
+@pytest.mark.gui
+def test_by_count_falls_back_to_az_when_facets_empty():
+    """(5) By-count with empty facets produces the same order as A-Z (fallback).
+
+    Web parity: By-count with all data-count=0 produces stable sort; desktop
+    explicitly falls back to A-Z when self._facets is empty.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+
+    # Create with no facets (empty)
+    dlg = LibraryFilterDialog(mode='hide')
+
+    # Capture A-Z order (default)
+    az_order = [
+        dlg.list_widget.item(i).data(256)
+        for i in range(dlg.list_widget.count())
+    ]
+
+    # Switch to By count with empty facets
+    dlg._rb_sort_count.setChecked(True)  # fires _on_sort_changed -> _repopulate
+
+    bycount_order = [
+        dlg.list_widget.item(i).data(256)
+        for i in range(dlg.list_widget.count())
+    ]
+
+    assert bycount_order == az_order, (
+        f"By-count with empty facets must fall back to A-Z order; "
+        f"first 5 A-Z {az_order[:5]!r}, first 5 By-count {bycount_order[:5]!r}"
+    )
+
+
+@pytest.mark.gui
+def test_select_all_ignores_active_search_filter():
+    """(6) Select All checks ALL rows regardless of the active search filter.
+
+    Web parity: catLibFilterSelectAll(val) sets every .cat-lib-cb regardless of
+    visible/hidden state — hidden rows are also checked.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from PyQt6.QtCore import Qt
+
+    dlg = LibraryFilterDialog(mode='hide')
+
+    # Type a query that hides most rows (use 'zzzz' which matches nothing)
+    dlg.search_input.setText("zzzz")
+    hidden_before = sum(
+        1 for i in range(dlg.list_widget.count())
+        if dlg.list_widget.item(i).isHidden()
+    )
+    assert hidden_before > 0, "At least some rows must be hidden by 'zzzz' query"
+
+    # Click Select All
+    dlg._select_all()
+
+    # ALL items (including hidden) must be Checked
+    for i in range(dlg.list_widget.count()):
+        item = dlg.list_widget.item(i)
+        assert item.checkState() == Qt.CheckState.Checked, (
+            f"Item {i} (code={item.data(256)!r}, hidden={item.isHidden()}) "
+            f"must be Checked after Select All"
+        )
