@@ -380,6 +380,27 @@ Opt-in, privacy-preserving telemetry for the desktop app, flowing to the shared 
 
 ---
 
+## Milestone: v8.3.0 — God-File Decomposition + Search & Browse UX
+
+**Shipped:** 2026-06-29 (both apps) | **Closed:** 2026-06-30
+**Phases:** 8 (122-129) | **Plans:** 20
+
+### What Was Built
+God-file decomposition (genizah_app.py + genizah_core.py → cohesive shared/+desktop/ modules behind permanent re-export facades, zero behavior change) + SEED-025 Space-key results scroll + SEED-026 library filter (web /search + Browse-by-Identification + desktop + filters.library API). Bundled: SEED-017 viewer rotate/fullscreen, SEED-024 desktop Joins-Lab parity + XLSX export, SEED-015 desktop image NLI breaker.
+
+### What Worked
+- Two Codex gates per decomposition phase (PLAN pre-flight + CODE convergence) + per-wave source-integrity gate caught BLOCKER-class drift before code.
+- Same-object re-export facade (genizah_core.X is shared.Y.X) + AST back-edge guards locked the layering with zero behavior change.
+
+### What Was Inefficient
+- origin/master-main was 91 commits behind when /release pushed, so CI had never run on the Phase 128/129 work — the release-commit CI went red on two AST guards (web library filter not excluding 'LOCAL'), needing a hotfix before deploy. Lesson: push/CI more frequently within a milestone, don't let a large body of work go un-CI'd until release.
+
+### Key Lessons
+- Gate deploy on CI even when local tests are green; a far-behind origin means the release push is the first real CI signal for accumulated work.
+- /release does not run the GSD milestone-close ritual — close must be run explicitly afterward.
+
+---
+
 ## Cross-Milestone Trends
 
 | Milestone | Phases | Plans | Days | Plans/Day | Key Theme |
@@ -403,6 +424,7 @@ Opt-in, privacy-preserving telemetry for the desktop app, flowing to the shared 
 | v7.16 | 1* | 5 | 4 | 1.3 | Hebrew PDF text quality + freeze fixes |
 | v8.0.0 | 7 | 31 | 9 | 3.4 | Dicta rebrand + Joins Lab + LOCAL composition |
 | v8.1.0 | 6 | 20 | 6 | 3.3 | Desktop telemetry (opt-in, privacy-preserving) |
+| v8.3.0 | 8 | 20 | 5 | 4.0 | God-file decomposition + Search/Browse UX (Space-scroll + library filter) |
 
 *v7.16: 1 formal phase (102); most of the milestone was no-phase edit+test quality work (de-space follow-ups, UAT fixes, three search/startup freeze fixes) not captured by plan count.
 

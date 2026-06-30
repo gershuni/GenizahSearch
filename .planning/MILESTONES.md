@@ -1,5 +1,35 @@
 # Project Milestones: GenizahSearch
 
+## v8.3.0 God-File Decomposition + Search & Browse UX (Shipped: 2026-06-30)
+
+**Phases completed:** 8 phases, 20 plans, 23 tasks
+
+**Key accomplishments:**
+
+- Config class extracted from genizah_core.py to stdlib-only shared/config.py with permanent re-export facade (noqa: F401 shim) and scope-aware GUARD-01 AST back-edge guard.
+- Extracted 7 cohesive clusters (4,304 lines) from genizah_core.py into permanent shared/ modules behind same-object re-export shims, reducing genizah_core.py from ~12,500 to ~8,453 lines with zero behavior change.
+- Per-chunk `_ChunkPlan` / `_LabChunkPlan` dataclasses eliminate the double structural iteration of `chunks_data` in `corpus_scope='all'` composition; fingerprint prep in `lab_composition_search` drops from 2*N to N `text_to_fingerprint` calls per run.
+- stdlib-only `LabSettings` (Lab Mode scoring weights, JSON persistence) extracted from genizah_core.py into shared/lab_settings.py behind a permanent same-object re-export shim.
+- LabEngine class (1448 lines) extracted verbatim from genizah_core.py into shared/lab_engine.py with same-object re-export facade and GUARD-03 source-scan retargets
+- Moved the five top-level modal dialogs to `desktop/settings_dialogs.py` and the four reusable widget subclasses to `desktop/ui_widgets.py` via MOVE-and-shim (originals DELETED, `# noqa: F401` re-exports preserve `genizah_app.X is desktop.Y.X` identity), with the D-07b telemetry-consent strip moved verbatim and a new GenizahGUI.apply_settings()/cancel_settings() boundary — ZERO behavior change.
+- Three Nyquist scaffold test files (GUARD-04 AST guard + SC#3 facade identity + DESK-08 behavioral tests) established as green oracles before extraction waves begin — 40 passed, 1 skipped (desktop/update_ui.py skip-until-exists)
+- 4 update-UI classes (UpdateNotificationBar, WhatsNewBar, WhatsNewDialog, UpdateProgressDialog) moved verbatim from genizah_app.py lines 184-594 to desktop/update_ui.py via MOVE-and-shim; GUARD-04 back-edge guard now enforces the new module.
+- Retired Phase-126 D1 noqa markers from genizah_app.py plain imports, retargeted the one external SettingsDialog caller, hard-flipped the EN disclosure test to desktop-only, and signed off the v8.3.0 zero-behavior-change milestone with a full-suite green.
+- Client-side Space-scroll IIFE injected in web/pages/search.py with full D-01 suppression set (INPUT/BUTTON/TEXTAREA/SELECT/A/closest('a[href]')/role=button/isContentEditable/.q-dialog); Wave-0 two-file test scaffold created with conftest registration
+- Pure `space_scroll_action` helper + `Key_Space` eventFilter branch in `genizah_app.py` routing desktop results-table Space/Shift+Space to `QAbstractSlider` page-step actions, preserving checkbox-column toggle via `super()` fallthrough
+- Additive `library_codes`/`library_sys_ids` args to `get_browse_results` with content-derived TEMP token + shared `resolve_library_sys_ids` reverse-lookup helper.
+- Web catalog Browse-by-Identification library filter with multi-select dropdown, removable chips, sys_id resolution off the event loop, and composition with SEED-023 PGP/Editions filters.
+- Desktop catalog Browse-by-Identification gains a library multi-select filter at parity with web via an explicit-meta_mgr _CatalogRefreshWorker extension + QPushButton/QMenu dropdown + removable chips.
+- Replaced broken library ui.menu with a checkbox dialog (mirroring Filter by Domains), fixed button visibility to use CSS visibility consistently, and relocated library chips to a dedicated post-search row.
+- Catalog library filter replaced from ui.select dropdown to checkbox dialog (GAP-E); browse→search handoff threads library selection via consume_incoming_filters persist→reload lifecycle (GAP-F); FINDING 1 all-unchecked guard implemented.
+- Replaced the `QPushButton+QMenu` of checkable `QAction`s at `genizah_app.py:9837-9861` with a button connected to `_open_catalog_library_dialog()`. That method opens a new `LibraryFilterDialog` (in `desktop/dialogs_filter.py`) — a flat checkable `QListWidget` of all `LIBRARY_CODES` except `LOCAL`, with labels via `get_library_display(code, short=False)` (auto-Hebrew via `CURRENT_LANG`). On accept, `library_apply_selection(checked, all_codes)` maps the result to the filter sentinel (`[] = show all`, strict subset = subset).
+
+**Shipped:** 2026-06-29 (both apps) — web deployed @ c01e8842; desktop installer GenizahSearchPro_V8.3.0_Setup.exe published to GitHub Release latest @ tag v8.3.0; CI green on the release commit. Closed 2026-06-30.
+
+**Known deferred items at close:** 21 (see STATE.md → Deferred Items). SEED-025/026/027 were delivered in this milestone, not deferred.
+
+---
+
 ## v8.3.0 God-File Decomposition (Complete: 2026-06-26 — internal refactor, no release)
 
 > **Label-only milestone — NO release, NO version bump, NO GitHub release.** A pure internal refactor:
@@ -12,6 +42,7 @@ re-export facade (same-object) and TEMPORARY `genizah_app` re-export shims (reti
 AST back-edge guards lock the layering in place.
 
 **Phases completed:** 6 phases (122-127):
+
 - **122** Config enabler (`shared/config.py` — the import-cycle pivot) + GUARD-01 back-edge guard
 - **123** core leaf modules (variants, codicological, responsa, joins_manager, lists_manager, browse_map_utils, text_normalize)
 - **124** metadata_manager + indexer → `shared/`
