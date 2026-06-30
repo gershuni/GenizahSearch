@@ -345,7 +345,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         cbs.forEach(function(cb) { if (cb.checked) n++; });
         var btn = document.getElementById('libApplyBtn_' + cid);
         if (!btn) return;
-        var mode = cont.getAttribute('data-libmode') || 'show_only';
+        var mode = cont.getAttribute('data-libmode') || 'hide';
         // Only disable when show_only AND zero checked; hide mode allows empty (= hide nothing).
         btn.disabled = (mode === 'show_only' && n === 0);
     }
@@ -1720,7 +1720,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         hide_active = (mode == 'hide' and bool(codes))
 
                         if show_only_active:
-                            shown = sum(1 for c in facets if c in codes)
+                            # WR-05: reuse `shown` computed above — no duplicate iteration.
                             library_filter_btn.text = f"{tr('Showing')} {shown}/{total}"
                             library_filter_btn.props(remove='color outline')
                             library_filter_btn.props('dense no-caps color=negative')
@@ -1791,7 +1791,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         def _make_cb_row(code, label_text, checked):
                             """Single checkbox row HTML (no <script>; BUG-B safe)."""
                             code_attr = _html.escape(code, quote=True)
-                            label_esc = _html.escape(label_text)
+                            label_esc = _html.escape(label_text, quote=True)  # IN-02: quote=True guards data-label attr
                             checked_attr = 'checked' if checked else ''
                             return (
                                 f'<label class="lib-cb-row" data-label="{label_esc.lower()}" '
@@ -1868,13 +1868,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                     # libFilterSetMode also sets data-libmode so mode-aware JS sees the new mode.
                                     ui.run_javascript(f'libFilterSetMode("{container_id}", "{new_mode}")')
 
-                                mode_toggle.on('update:modelValue', lambda e: _on_mode_change(e.args))
+                                # CR-01: use on_value_change so e.value is the dict key
+                                # ('show_only'/'hide'), not the raw integer index (0/1) that
+                                # the low-level update:modelValue event emits.
+                                mode_toggle.on_value_change(lambda e: _on_mode_change(e.value))
 
                                 # Text-search input — client-side row filter, no Python round-trip.
+                                # WR-04: json.dumps is the correct JS-safe serializer (not repr()).
+                                import json as _json_libfilter
                                 ui.input(
                                     placeholder=tr('Search libraries...'),
                                     on_change=lambda e: ui.run_javascript(
-                                        f'libFilterSearch("{container_id}", {repr(e.value)})'
+                                        f'libFilterSearch("{container_id}", {_json_libfilter.dumps(e.value or "")})'
                                     ),
                                 ).props('dense clearable').classes('w-full')
 
@@ -1886,6 +1891,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                 with ui.row().classes('w-full justify-between'):
                                     _cid = container_id  # capture for closures
                                     _all_shortlist = shortlist_codes  # for all-checked -> [] mapping
+                                    # WR-01: full selectable universe (shortlist + expand) for show-all
+                                    # normalization — "Select All + Apply" when expand codes are checked
+                                    # must also normalize to neutral (hide/[]).
+                                    _all_for_norm = shortlist_codes + expand_codes
 
                                     with ui.row().classes('gap-1'):
                                         ui.button(
@@ -1917,8 +1926,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                         type='warning',
                                                     )
                                                     return
-                                                # All-in-result-checked -> [] mapping (show-all for Show-only).
-                                                new_filter = _library_apply_selection(checked, _all_shortlist)
+                                                # WR-01: All-in-result-checked -> [] mapping (show-all for Show-only).
+                                                # Compare against full selectable universe (shortlist + expand)
+                                                # so "Select All" when expand codes are checked also normalizes.
+                                                new_filter = _library_apply_selection(checked, _all_for_norm)
                                                 # SHOW-ALL NORMALIZATION (MEDIUM): Show-only + empty codes = neutral Hide/[].
                                                 if not new_filter:
                                                     search_state.library_mode = 'hide'

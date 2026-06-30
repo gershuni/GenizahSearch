@@ -348,13 +348,18 @@ def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bo
         # (desktop-only library code that must never appear as a web filter option).
         from shared.browse_map_utils import LIBRARY_CODES as _LIBRARY_CODES
         _lib_codes = [str(c) for c in incoming['library_filter'] if c and str(c) in _LIBRARY_CODES and str(c) != 'LOCAL']
-        state.library_filter = _lib_codes
-        # Browse->search handoff is always a Show-only intent: user selected specific
-        # libraries in the catalog and wants to search within them.
-        state.library_mode = 'show_only'
-        # Persist as {'mode','codes'} dict shape (D-09) so the restore path reads
-        # it back correctly as Show-only (not a Hide-set).
-        persist_value('search_library_filter', {'mode': 'show_only', 'codes': _lib_codes})
+        # WR-03: only stamp show_only when sanitized codes are non-empty.
+        # If all incoming codes were LOCAL/invalid, leave state as neutral (hide/[])
+        # rather than persisting an invalid show_only/[] state.
+        if _lib_codes:
+            state.library_filter = _lib_codes
+            # Browse->search handoff is always a Show-only intent: user selected specific
+            # libraries in the catalog and wants to search within them.
+            state.library_mode = 'show_only'
+            # Persist as {'mode','codes'} dict shape (D-09) so the restore path reads
+            # it back correctly as Show-only (not a Hide-set).
+            persist_value('search_library_filter', {'mode': 'show_only', 'codes': _lib_codes})
+        # else: all codes sanitized away — leave state as neutral (hide/[]); no persist needed.
     # Clear incoming_filters from storage after consuming.
     # 2026-05-12 Codex 3rd-pass CRITICAL: safe_user_pop so prune races don't 500.
     from web.safe_storage import safe_user_pop

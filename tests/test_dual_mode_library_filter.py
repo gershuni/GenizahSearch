@@ -635,3 +635,63 @@ def test_ast_persistence_chokepoint():
                     f"{name} line {i + 1}: raw app.storage.user access found near "
                     "library_filter. Use persist_value/_safe_get (Phase 87 invariant)."
                 )
+
+
+# ---------------------------------------------------------------------------
+# (25) AST: CR-01 regression guard — mode toggle uses high-level value API
+# (26) AST: WR-02 regression guard — JS libFilterUpdateApply fallback is 'hide'
+# ---------------------------------------------------------------------------
+
+def test_ast_mode_toggle_uses_high_level_value_api():
+    """CR-01 regression guard: the mode toggle must be wired with on_value_change
+    (or on_change=) so the handler receives the mapped dict key ('show_only'/'hide'),
+    not the raw integer index (0/1) emitted by update:modelValue.
+
+    Also asserts that _on_mode_change is NOT called via e.args (the bug pattern).
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+
+    # The fix: on_value_change feeds e.value into _on_mode_change.
+    assert 'on_value_change' in source and 'e.value' in source, (
+        "CR-01: mode toggle must use on_value_change(...e.value...) "
+        "so the handler receives the string key, not an integer index"
+    )
+
+    # The bug pattern must be absent: passing e.args into _on_mode_change.
+    assert '_on_mode_change(e.args)' not in source, (
+        "CR-01: '_on_mode_change(e.args)' found in search.py — this passes the raw "
+        "integer index (0/1), not the dict key ('show_only'/'hide'). "
+        "Replace with on_value_change(lambda e: _on_mode_change(e.value))."
+    )
+
+
+def test_ast_js_libfilter_fallback_is_hide():
+    """WR-02 regression guard: the JS libFilterUpdateApply fallback for a missing
+    data-libmode attribute must be 'hide' (the system default, D-05), NOT 'show_only'.
+
+    A 'show_only' fallback would incorrectly disable the Apply button in Hide-mode
+    when data-libmode is absent or empty.
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+
+    # Correct pattern must be present.
+    assert "|| 'hide'" in source or '|| "hide"' in source, (
+        "WR-02: JS libFilterUpdateApply must use `|| 'hide'` as the fallback for "
+        "a missing data-libmode attribute (D-05 system default is 'hide')"
+    )
+
+    # Wrong pattern must be absent in the libFilterUpdateApply JS context.
+    # We look for the specific fallback pattern in the function body.
+    import re as _re
+    # Extract the libFilterUpdateApply function block from the inline JS
+    match = _re.search(
+        r'function libFilterUpdateApply\(.*?\}',
+        source,
+        _re.DOTALL,
+    )
+    if match:
+        fn_body = match.group(0)
+        assert "|| 'show_only'" not in fn_body and '|| "show_only"' not in fn_body, (
+            "WR-02: libFilterUpdateApply contains `|| 'show_only'` fallback — "
+            "must be `|| 'hide'` (D-05)"
+        )
