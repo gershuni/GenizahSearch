@@ -1154,7 +1154,7 @@ def create_catalog_browse_page(
         _all_for_norm = shortlist_codes + expand_codes
 
         def _make_cat_cb_row(code, label_text, checked, count=None):
-            """Single checkbox row HTML for the catalog dialog (BUG-B safe — no <script>)."""
+            """Single checkbox row HTML for the catalog dialog (BUG-B safe — JS is page-level)."""
             code_attr = _html.escape(code, quote=True)
             label_esc = _html.escape(label_text, quote=True)
             checked_attr = 'checked' if checked else ''
