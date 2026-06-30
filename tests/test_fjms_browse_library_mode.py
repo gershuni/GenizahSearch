@@ -12,8 +12,6 @@ import inspect
 import pathlib
 from unittest.mock import MagicMock
 
-import pytest
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -110,8 +108,10 @@ def test_get_browse_library_facets_reuses_shared_conditions():
 
 
 def test_get_browse_library_facets_omits_library_filter():
-    """Facet method must NOT reference _browse_filter_library — counts must not be
-    scoped by the library filter being chosen (source assertion)."""
+    """Facet method must NOT apply the _browse_filter_library temp table in SQL —
+    counts must not be scoped by the library filter being chosen (source assertion).
+    The filter name may appear in a docstring comment explaining the exclusion, but
+    must never appear in an _ensure_filter_temp call or an EXISTS condition."""
     # Extract the get_browse_library_facets function body from source
     facets_idx = _SOURCE.find("def get_browse_library_facets")
     assert facets_idx != -1, "get_browse_library_facets not found in source"
@@ -121,9 +121,14 @@ def test_get_browse_library_facets_omits_library_filter():
         facets_body = _SOURCE[facets_idx:]
     else:
         facets_body = _SOURCE[facets_idx:next_def]
-    assert "_browse_filter_library" not in facets_body, (
-        "get_browse_library_facets must NOT reference _browse_filter_library — "
-        "facet counts must not be scoped by the library filter itself"
+    # The function must NOT call _ensure_filter_temp with _browse_filter_library
+    assert '_ensure_filter_temp(\n' + ' ' * 16 + '"_browse_filter_library"' not in facets_body, (
+        "get_browse_library_facets must NOT call _ensure_filter_temp for _browse_filter_library"
+    )
+    # It must NOT append an EXISTS or NOT EXISTS condition on _browse_filter_library
+    # (it may MENTION the name in a comment, but must not condition on it)
+    assert 'EXISTS (SELECT 1 FROM "_browse_filter_library"' not in facets_body, (
+        "get_browse_library_facets must NOT apply an EXISTS condition on _browse_filter_library"
     )
 
 

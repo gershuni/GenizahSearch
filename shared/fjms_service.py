@@ -2054,6 +2054,179 @@ class FjmsService:
             reg.pop(name, None)
             return False
 
+    def _build_browse_conditions(
+        self,
+        domain=None,
+        author=None,
+        work=None,
+        date_from=None,
+        date_to=None,
+        include_undated=False,
+        text_all=None,
+        text_any=None,
+        text_not=None,
+        pgp_filter=None,
+        pgp_sys_ids=None,
+        editions_filter=None,
+        edition_sys_ids=None,
+    ):
+        """Build the shared WHERE conditions (domain/author/work/date/text/pgp/editions).
+
+        Used by both ``get_browse_results`` and ``get_browse_library_facets`` so that
+        the facet counts honour the same non-library filters as the browse query.
+
+        The *library* filter is intentionally **excluded** from this helper so that
+        ``get_browse_library_facets`` can count per-library WITHOUT scoping by the
+        chosen library filter.
+
+        Returns:
+            (conditions, params) — a list of SQL condition fragments and the
+            corresponding bound parameter list.
+        """
+        conditions = []
+        params = []
+
+        if domain is not None:
+            conditions.append(
+                "c.AlmaId IN ("
+                "SELECT AlmaId FROM domains WHERE Domain = ? "
+                "UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?)"
+            )
+            params.extend([domain, domain])
+
+        if author is not None:
+            if self._has_persons_titles and _is_int(author):
+                # v5+: author is person_id -- match via title FK or direct Author FK
+                person_id = int(author)
+                conditions.append(
+                    "(c.GenizahTitleId IN ("
+                    "  SELECT gt.GenizahTitleId FROM genizah_titles gt "
+                    "  WHERE gt.AuthorId = ?"
+                    ") OR c.Author = ?)"
+                )
+                params.extend([person_id, person_id])
+            else:
+                # Legacy: author is AuthorText string
+                conditions.append("c.AuthorText = ?")
+                params.append(author)
+
+        if work is not None:
+            if self._has_persons_titles and _is_int(work):
+                # v5+: work is GenizahTitleId
+                conditions.append("c.GenizahTitleId = ?")
+                params.append(int(work))
+            else:
+                # Legacy: work is Title string
+                conditions.append("c.Title = ?")
+                params.append(work)
+
+        # Date range filter
+        has_date_filter = date_from is not None or date_to is not None
+        if has_date_filter:
+            _no_date = "(c.CopyDate IS NULL OR c.CopyDate = '' OR c.CopyDate = '0' OR c.CopyDate = '-99')"
+            date_parts = []
+            if date_from is not None and date_to is not None:
+                date_parts.append("CAST(c.CopyDate AS INTEGER) BETWEEN ? AND ?")
+                params.extend([date_from, date_to])
+            elif date_from is not None:
+                date_parts.append("CAST(c.CopyDate AS INTEGER) >= ?")
+                params.append(date_from)
+            else:
+                date_parts.append("CAST(c.CopyDate AS INTEGER) <= ?")
+                params.append(date_to)
+            # Exclude sentinel values from the numeric range check
+            dated_cond = f"(NOT {_no_date} AND {date_parts[0]})"
+            if include_undated:
+                conditions.append(f"({dated_cond} OR {_no_date})")
+            else:
+                conditions.append(dated_cond)
+
+        # Free text filters: hybrid FTS5 (catalog fields) + domain name LIKE
+        # FTS5 covers Title, TitleHeb, TextualFrame*, RunningTitle, FreeDescription, FullText, DetailedFrames
+        # Domain LIKE covers Domain/DomainHeb names which are NOT in the FTS5 index
+        def _fts_escape(term: str) -> str:
+            """Escape FTS5 special characters and wrap for substring match."""
+            escaped = term.replace('"', '""')
+            return f'"{escaped}"'
+
+        _TEXT_MATCH = (
+            "c.rowid IN ("
+            "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+            "UNION "
+            "SELECT c2.rowid FROM catalog c2 "
+            "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+            "WHERE dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?"
+            ")"
+        )
+        _TEXT_NOT_MATCH = (
+            "c.rowid NOT IN ("
+            "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+            "UNION "
+            "SELECT c2.rowid FROM catalog c2 "
+            "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+            "WHERE dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?"
+            ")"
+        )
+
+        if text_all:
+            for term in text_all:
+                conditions.append(_TEXT_MATCH)
+                like_pat = f"%{term}%"
+                params.extend([_fts_escape(term), like_pat, like_pat])
+
+        if text_any:
+            fts_expr = " OR ".join(_fts_escape(t) for t in text_any)
+            like_parts = []
+            like_params = []
+            for t in text_any:
+                like_parts.append("dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?")
+                like_params.extend([f"%{t}%", f"%{t}%"])
+            conditions.append(
+                "c.rowid IN ("
+                "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
+                "UNION "
+                "SELECT c2.rowid FROM catalog c2 "
+                "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
+                f"WHERE {' OR '.join(like_parts)}"
+                ")"
+            )
+            params.append(fts_expr)
+            params.extend(like_params)
+
+        if text_not:
+            for term in text_not:
+                conditions.append(_TEXT_NOT_MATCH)
+                like_pat = f"%{term}%"
+                params.extend([_fts_escape(term), like_pat, like_pat])
+
+        # SEED-023: PGP / editions membership filters. Each materializes a
+        # per-thread TEMP table of AlmaIds and adds an [NOT] EXISTS clause
+        # (no bound params) so it flows into BOTH the count and the paged
+        # results query via the shared WHERE. If the set is missing or the
+        # TEMP build fails, the filter is skipped (fail-open: never silently
+        # truncate to an empty/wrong set).
+        if pgp_filter in ("has_pgp", "no_pgp") and pgp_sys_ids:
+            if self._ensure_filter_temp(
+                "_browse_filter_pgp", pgp_sys_ids, len(pgp_sys_ids)
+            ):
+                op = "EXISTS" if pgp_filter == "has_pgp" else "NOT EXISTS"
+                conditions.append(
+                    f'{op} (SELECT 1 FROM "_browse_filter_pgp" t '
+                    f"WHERE t.AlmaId = c.AlmaId)"
+                )
+
+        if editions_filter in ("has_edition", "no_edition") and edition_sys_ids:
+            if self._ensure_filter_temp(
+                "_browse_filter_edition", edition_sys_ids, len(edition_sys_ids)
+            ):
+                op = "EXISTS" if editions_filter == "has_edition" else "NOT EXISTS"
+                conditions.append(
+                    f'{op} (SELECT 1 FROM "_browse_filter_edition" t '
+                    f"WHERE t.AlmaId = c.AlmaId)"
+                )
+
+        return conditions, params
+
     def get_browse_results(
         self,
         domain: str = None,
@@ -2134,147 +2307,22 @@ class FjmsService:
             return empty
 
         try:
-            conditions = []
-            params = []
-
-            if domain is not None:
-                conditions.append(
-                    "c.AlmaId IN ("
-                    "SELECT AlmaId FROM domains WHERE Domain = ? "
-                    "UNION SELECT AlmaId FROM domains WHERE ParentDomain = ?)"
-                )
-                params.extend([domain, domain])
-
-            if author is not None:
-                if self._has_persons_titles and _is_int(author):
-                    # v5+: author is person_id -- match via title FK or direct Author FK
-                    person_id = int(author)
-                    conditions.append(
-                        "(c.GenizahTitleId IN ("
-                        "  SELECT gt.GenizahTitleId FROM genizah_titles gt "
-                        "  WHERE gt.AuthorId = ?"
-                        ") OR c.Author = ?)"
-                    )
-                    params.extend([person_id, person_id])
-                else:
-                    # Legacy: author is AuthorText string
-                    conditions.append("c.AuthorText = ?")
-                    params.append(author)
-
-            if work is not None:
-                if self._has_persons_titles and _is_int(work):
-                    # v5+: work is GenizahTitleId
-                    conditions.append("c.GenizahTitleId = ?")
-                    params.append(int(work))
-                else:
-                    # Legacy: work is Title string
-                    conditions.append("c.Title = ?")
-                    params.append(work)
-
-            # Date range filter
-            has_date_filter = date_from is not None or date_to is not None
-            if has_date_filter:
-                _no_date = "(c.CopyDate IS NULL OR c.CopyDate = '' OR c.CopyDate = '0' OR c.CopyDate = '-99')"
-                date_parts = []
-                if date_from is not None and date_to is not None:
-                    date_parts.append("CAST(c.CopyDate AS INTEGER) BETWEEN ? AND ?")
-                    params.extend([date_from, date_to])
-                elif date_from is not None:
-                    date_parts.append("CAST(c.CopyDate AS INTEGER) >= ?")
-                    params.append(date_from)
-                else:
-                    date_parts.append("CAST(c.CopyDate AS INTEGER) <= ?")
-                    params.append(date_to)
-                # Exclude sentinel values from the numeric range check
-                dated_cond = f"(NOT {_no_date} AND {date_parts[0]})"
-                if include_undated:
-                    conditions.append(f"({dated_cond} OR {_no_date})")
-                else:
-                    conditions.append(dated_cond)
-
-            # Free text filters: hybrid FTS5 (catalog fields) + domain name LIKE
-            # FTS5 covers Title, TitleHeb, TextualFrame*, RunningTitle, FreeDescription, FullText, DetailedFrames
-            # Domain LIKE covers Domain/DomainHeb names which are NOT in the FTS5 index
-            def _fts_escape(term: str) -> str:
-                """Escape FTS5 special characters and wrap for substring match."""
-                escaped = term.replace('"', '""')
-                return f'"{escaped}"'
-
-            _TEXT_MATCH = (
-                "c.rowid IN ("
-                "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
-                "UNION "
-                "SELECT c2.rowid FROM catalog c2 "
-                "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
-                "WHERE dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?"
-                ")"
+            # Build shared non-library conditions (domain/author/work/date/text/pgp/editions)
+            conditions, params = self._build_browse_conditions(
+                domain=domain,
+                author=author,
+                work=work,
+                date_from=date_from,
+                date_to=date_to,
+                include_undated=include_undated,
+                text_all=text_all,
+                text_any=text_any,
+                text_not=text_not,
+                pgp_filter=pgp_filter,
+                pgp_sys_ids=pgp_sys_ids,
+                editions_filter=editions_filter,
+                edition_sys_ids=edition_sys_ids,
             )
-            _TEXT_NOT_MATCH = (
-                "c.rowid NOT IN ("
-                "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
-                "UNION "
-                "SELECT c2.rowid FROM catalog c2 "
-                "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
-                "WHERE dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?"
-                ")"
-            )
-
-            if text_all:
-                for term in text_all:
-                    conditions.append(_TEXT_MATCH)
-                    like_pat = f"%{term}%"
-                    params.extend([_fts_escape(term), like_pat, like_pat])
-
-            if text_any:
-                fts_expr = " OR ".join(_fts_escape(t) for t in text_any)
-                like_parts = []
-                like_params = []
-                for t in text_any:
-                    like_parts.append("dtf.Domain LIKE ? OR dtf.DomainHeb LIKE ?")
-                    like_params.extend([f"%{t}%", f"%{t}%"])
-                conditions.append(
-                    "c.rowid IN ("
-                    "SELECT rowid FROM catalog_fts WHERE catalog_fts MATCH ? "
-                    "UNION "
-                    "SELECT c2.rowid FROM catalog c2 "
-                    "INNER JOIN domains dtf ON c2.AlmaId = dtf.AlmaId "
-                    f"WHERE {' OR '.join(like_parts)}"
-                    ")"
-                )
-                params.append(fts_expr)
-                params.extend(like_params)
-
-            if text_not:
-                for term in text_not:
-                    conditions.append(_TEXT_NOT_MATCH)
-                    like_pat = f"%{term}%"
-                    params.extend([_fts_escape(term), like_pat, like_pat])
-
-            # SEED-023: PGP / editions membership filters. Each materializes a
-            # per-thread TEMP table of AlmaIds and adds an [NOT] EXISTS clause
-            # (no bound params) so it flows into BOTH the count and the paged
-            # results query via the shared WHERE. If the set is missing or the
-            # TEMP build fails, the filter is skipped (fail-open: never silently
-            # truncate to an empty/wrong set).
-            if pgp_filter in ("has_pgp", "no_pgp") and pgp_sys_ids:
-                if self._ensure_filter_temp(
-                    "_browse_filter_pgp", pgp_sys_ids, len(pgp_sys_ids)
-                ):
-                    op = "EXISTS" if pgp_filter == "has_pgp" else "NOT EXISTS"
-                    conditions.append(
-                        f'{op} (SELECT 1 FROM "_browse_filter_pgp" t '
-                        f"WHERE t.AlmaId = c.AlmaId)"
-                    )
-
-            if editions_filter in ("has_edition", "no_edition") and edition_sys_ids:
-                if self._ensure_filter_temp(
-                    "_browse_filter_edition", edition_sys_ids, len(edition_sys_ids)
-                ):
-                    op = "EXISTS" if editions_filter == "has_edition" else "NOT EXISTS"
-                    conditions.append(
-                        f'{op} (SELECT 1 FROM "_browse_filter_edition" t '
-                        f"WHERE t.AlmaId = c.AlmaId)"
-                    )
 
             # SEED-026: library filter.  The token is CONTENT-derived from the
             # selection (not len) so that two same-size-but-different library
@@ -2365,6 +2413,98 @@ class FjmsService:
         except Exception as e:
             logger.error(f"FjmsService.get_browse_results error: {e}")
             return empty
+
+    def get_browse_library_facets(
+        self,
+        domain=None,
+        author=None,
+        work=None,
+        date_from=None,
+        date_to=None,
+        include_undated=False,
+        text_all=None,
+        text_any=None,
+        text_not=None,
+        pgp_filter=None,
+        pgp_sys_ids=None,
+        editions_filter=None,
+        edition_sys_ids=None,
+        sys_id_to_library=None,
+    ) -> dict:
+        """Return true full-set per-library manuscript counts honoring active non-library filters.
+
+        The library filter itself is intentionally excluded so the caller can show
+        counts for every library reachable under the current domain/author/work/pgp/
+        editions filters — regardless of which library is (or would be) selected.
+
+        The method mirrors the live ``COUNT(DISTINCT c.AlmaId)``/``GROUP BY c.AlmaId``
+        browse counting via a single ``SELECT DISTINCT c.AlmaId`` so a catalog table
+        row per AlmaId counts once (multiple rows for the same manuscript are collapsed
+        by DISTINCT before mapping).
+
+        Args:
+            domain, author, work, date_from, date_to, include_undated,
+            text_all, text_any, text_not, pgp_filter, pgp_sys_ids,
+            editions_filter, edition_sys_ids:
+                Same semantics as ``get_browse_results`` — the non-library subset.
+            sys_id_to_library: A CALLABLE (e.g. a bound
+                ``MetadataManager.get_library_for_id`` method, or a ``dict.get`` bound
+                method) invoked once per distinct AlmaId to resolve the library code.
+                The caller must supply a **full-corpus** resolver, NOT a page-local
+                one, so off-page libraries are counted correctly.
+                If ``None``, not callable, or the call returns a falsy/blank value,
+                that AlmaId is skipped.  ``'LOCAL'`` is always skipped.
+
+        Returns:
+            ``{library_code: count}`` dict.  Returns ``{}`` when ``_conn`` is None,
+            ``sys_id_to_library`` is None/not-callable, or on any error (fail-open).
+        """
+        if self._conn is None:
+            return {}
+        if sys_id_to_library is None or not callable(sys_id_to_library):
+            return {}
+
+        try:
+            # Reuse the shared condition-builders (domain/author/work/date/text/pgp/editions).
+            # The library filter (_browse_filter_library) is intentionally NOT included here.
+            conditions, params = self._build_browse_conditions(
+                domain=domain,
+                author=author,
+                work=work,
+                date_from=date_from,
+                date_to=date_to,
+                include_undated=include_undated,
+                text_all=text_all,
+                text_any=text_any,
+                text_not=text_not,
+                pgp_filter=pgp_filter,
+                pgp_sys_ids=pgp_sys_ids,
+                editions_filter=editions_filter,
+                edition_sys_ids=edition_sys_ids,
+            )
+            where = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+            # Single SQL-bounded DISTINCT query — mirrors COUNT(DISTINCT c.AlmaId)
+            # from get_browse_results so a manuscript with multiple catalog rows
+            # is counted once.  The DB does the DISTINCT work, not Python.
+            facet_sql = f"SELECT DISTINCT c.AlmaId FROM catalog c{where}"
+            rows = self._conn.execute(facet_sql, params).fetchall()
+
+            # Map each distinct AlmaId to a library_code via the caller-supplied
+            # CALLABLE (the surface passes the full-corpus get_library_for_id bound
+            # method — NOT page-local _resolve_all — so off-page libraries appear).
+            counts: dict[str, int] = {}
+            for row in rows:
+                alma_id = row["AlmaId"] if hasattr(row, "keys") else row[0]
+                lib = sys_id_to_library(alma_id)
+                if not lib or lib == "LOCAL":
+                    continue
+                counts[lib] = counts.get(lib, 0) + 1
+
+            return counts
+        except Exception as e:
+            logger.error(f"FjmsService.get_browse_library_facets error: {e}")
+            return {}
 
     def _batch_domains(self, sys_ids: list[str]) -> dict:
         """Fetch domains for a batch of sys_ids efficiently.
