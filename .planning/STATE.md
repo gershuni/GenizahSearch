@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v8.4.0
 milestone_name: Dual-Mode Library Filter
 status: executing
-stopped_at: Completed 130-01-PLAN.md
-last_updated: "2026-06-30T06:45:52.421Z"
+stopped_at: Completed 130-02-PLAN.md
+last_updated: "2026-06-30T06:59:13.942Z"
 last_activity: 2026-06-30
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 130 (dual-mode-filter-core-web-search) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-06-30
 
@@ -103,8 +103,8 @@ Items acknowledged and deferred at v8.3.0 milestone close on 2026-06-30:
 
 ## Session Continuity
 
-Last session: 2026-06-30T06:45:52.411Z
-Stopped at: Completed 130-01-PLAN.md
+Last session: 2026-06-30T06:59:13.934Z
+Stopped at: Completed 130-02-PLAN.md
 Resume file: None
 Next step: `/gsd-discuss-phase 130` (or skip-discuss-if-empty per the standing autonomous directive)
 
@@ -114,12 +114,15 @@ Next step: `/gsd-discuss-phase 130` (or skip-discuss-if-empty per the standing a
 |-------|-------|-------|----------|
 | (none yet — milestone just started) | - | - | - |
 | Phase 130 P01 | 5 | 2 tasks | 1 files |
+| Phase 130 P02 | 8 | 3 tasks | 3 files |
 
 ## Decisions
 
 - [Phase 130]: (lead) define the shared (mode + set) state shape on web `/search` — mode toggle + safe_storage persistence + legacy-allowlist migration + edge-state sentinels + button/label, all settled before parity surfaces extend it.
 - [Phase ?]: library_mode defaults to 'hide': D-05 fresh-user default, Hide mode with empty set = show all
 - [Phase ?]: clear_search_snapshot resets search_library_filter to {'mode':'hide','codes':[]}: D-09 dict shape settles (mode+set) persistence contract for Plan 02
+- [Phase ?]: show-all normalized to neutral hide/[] on Apply (D-05/DMF)
+- [Phase ?]: browse->search handoff stamps mode=show_only + persists dict shape (prevents misread as Hide-set)
 
 ## Operator Next Steps
 

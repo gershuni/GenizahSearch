@@ -113,7 +113,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 130-02-PLAN.md — `search.py` runtime: mode-aware restore + legacy migration, mode-branch filter, dict persist shape, redesigned dialog (mode toggle + count-shortlist + expand-all + text search), 3-state button
+- [x] 130-02-PLAN.md — `search.py` runtime: mode-aware restore + legacy migration, mode-branch filter, dict persist shape, redesigned dialog (mode toggle + count-shortlist + expand-all + text search), 3-state button
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -154,6 +154,6 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 130. Dual-Mode Filter Core — Web /search | 1/3 | In Progress|  |
+| 130. Dual-Mode Filter Core — Web /search | 2/3 | In Progress|  |
 | 131. Dual-Mode Parity — Desktop + Browse + Parallels | 0/? | Not started | - |
 | 132. Public API Dual-Mode | 0/? | Not started | - |

@@ -9,10 +9,10 @@
 
 ### Dual-Mode Filter — Web Search (lead)
 
-- [ ] **DMF-01**: On web `/search`, the user can choose between two filter modes in the library filter dialog — **"Show only selected"** (allowlist) and **"Hide selected"** (denylist).
-- [ ] **DMF-02**: In **Hide** mode, libraries that surface in a later search but are NOT in the hidden set are shown by default (the "hide RNL" intent persists across searches); in **Show-only** mode, only the selected libraries are shown.
+- [x] **DMF-01**: On web `/search`, the user can choose between two filter modes in the library filter dialog — **"Show only selected"** (allowlist) and **"Hide selected"** (denylist).
+- [x] **DMF-02**: In **Hide** mode, libraries that surface in a later search but are NOT in the hidden set are shown by default (the "hide RNL" intent persists across searches); in **Show-only** mode, only the selected libraries are shown.
 - [x] **DMF-03**: The chosen mode AND the selected set persist across searches and reloads via the `web/safe_storage.py` chokepoint (Phase 87 invariant), so neither intent has to be re-entered each search.
-- [ ] **DMF-04**: The `/search` library-filter button (and any chip/label) clearly communicates the active mode and count — e.g. "Hiding N" vs "Showing N/total" — and a neutral state when no filter is active.
+- [x] **DMF-04**: The `/search` library-filter button (and any chip/label) clearly communicates the active mode and count — e.g. "Hiding N" vs "Showing N/total" — and a neutral state when no filter is active.
 - [x] **DMF-05**: Existing v8.3.0 persisted allowlist values (`search_library_filter`) are migrated cleanly into the new (mode + set) model without error (default interpretation: Show-only with the existing set).
 - [x] **DMF-06**: Sensible edge-state handling — an empty selection in Show-only means "show all" (no collision with the all-unchecked sentinel), and a fully-populated Hide set (everything hidden) is handled predictably.
 
@@ -34,7 +34,7 @@
 
 ### Invariants (guard, not new capability)
 
-- [ ] **DMF-10**: `'LOCAL'` (My Library) never appears as a web library-filter option in ANY mode or surface — the D-46 / D-NEW-7 guard (`tests/test_web_library_options_no_local.py` + `tests/test_phase_97_invariants.py`) stays green.
+- [x] **DMF-10**: `'LOCAL'` (My Library) never appears as a web library-filter option in ANY mode or surface — the D-46 / D-NEW-7 guard (`tests/test_web_library_options_no_local.py` + `tests/test_phase_97_invariants.py`) stays green.
 
 ## Future Requirements (deferred)
 
@@ -49,14 +49,14 @@
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| DMF-01 | Phase 130 | Pending |
-| DMF-02 | Phase 130 | Pending |
+| DMF-01 | Phase 130 | Complete |
+| DMF-02 | Phase 130 | Complete |
 | DMF-03 | Phase 130 | Complete |
-| DMF-04 | Phase 130 | Pending |
+| DMF-04 | Phase 130 | Complete |
 | DMF-05 | Phase 130 | Complete |
 | DMF-06 | Phase 130 | Complete |
 | DMF-07 | Phase 131 | Pending |
 | DMF-08 | Phase 131 | Pending |
 | DMF-09 | Phase 131 | Pending |
-| DMF-10 | Phase 130, Phase 131 (cross-cutting guard) | Pending |
+| DMF-10 | Phase 130, Phase 131 (cross-cutting guard) | Complete |
 | DMF-11 | Phase 132 | Pending |
