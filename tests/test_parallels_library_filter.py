@@ -22,10 +22,9 @@ Coverage (mirrors the pure-mirror + AST-scan pattern of test_dual_mode_library_f
 """
 
 import ast
-import re
 from pathlib import Path
 
-from shared.browse_map_utils import LIBRARY_CODES, sanitize_library_codes
+from shared.browse_map_utils import LIBRARY_CODES
 
 PARALLELS_PY = Path(__file__).parent.parent / 'web' / 'pages' / 'parallels.py'
 

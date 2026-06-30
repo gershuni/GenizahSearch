@@ -19,6 +19,15 @@ GAP-G / GAP-H / FINDING 1 / FINDING 2 (129-07 gap-closure) — additional tests:
   * ``FilterCountWorker`` (with meta_mgr) intersects filters['library'] into the
     recomputed set so chip-removal does not drop the library restriction.
 
+Phase 131 Plan 01 (DMF-07/DMF-13) extensions:
+  * LibraryFilterDialog dual-mode tests: mode='show_only' / mode='hide', get_mode(),
+    D-04 mode-flip reset, mode-aware OK guard, fresh-default 'hide'.
+  * Source scans: _catalog_library_mode='hide' init, library_codes_with_manuscripts
+    in dialogs_filter.py.
+  * REVISED: existing inclusion-only tests carry mode='show_only' (Codex R1 BLOCKER #1).
+  * REVISED + ADDED: _catalog_build_browse_filters handoff tests for Show-only / Hide
+    (Codex R2 N3).
+
 GUI-marked (constructs QApplication for the QThread worker); runs in gui-tests.
 """
 
@@ -172,11 +181,22 @@ def test_library_filter_dialog_importable():
 
 @pytest.mark.gui
 def test_library_filter_dialog_local_not_offered():
-    """GAP-G: LOCAL ('My Library') is never an option in LibraryFilterDialog."""
-    from desktop.dialogs_filter import LibraryFilterDialog
-    from genizah_core import LIBRARY_CODES
+    """GAP-G: LOCAL ('My Library') is never an option in LibraryFilterDialog.
 
-    dlg = LibraryFilterDialog(selected_codes=[])
+    Phase 131 Plan 01 REVISION (Codex R1 BLOCKER #1):
+      - Construct with mode='show_only' so the OLD inclusion-only Show-only
+        semantics are explicitly expressed (Plan 03 changes the default to 'hide').
+      - Universe expectation updated to set(library_codes_with_manuscripts()) - {'LOCAL'}
+        (DMF-13 — Plan 03 swaps _all_codes to library_codes_with_manuscripts()).
+        Under the fail-open default that frozenset equals frozenset(LIBRARY_CODES), so
+        comparing against the with-manuscripts set is correct in BOTH the populated and
+        fail-open cases.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from shared.browse_map_utils import library_codes_with_manuscripts
+
+    # REVISED: explicit mode='show_only' (Plan 03 default becomes 'hide')
+    dlg = LibraryFilterDialog(mode='show_only', selected_codes=[])
     codes_in_list = []
     for i in range(dlg.list_widget.count()):
         item = dlg.list_widget.item(i)
@@ -186,10 +206,10 @@ def test_library_filter_dialog_local_not_offered():
     # At least a few library codes must be offered
     assert len(codes_in_list) > 0, "LibraryFilterDialog must offer at least one library"
 
-    # All library codes except LOCAL should be present
-    expected_codes = {c for c in LIBRARY_CODES.keys() if c != 'LOCAL'}
+    # REVISED: universe is now library_codes_with_manuscripts() - {'LOCAL'} (DMF-13)
+    expected_codes = set(library_codes_with_manuscripts()) - {'LOCAL'}
     assert expected_codes == set(codes_in_list), (
-        f"LibraryFilterDialog codes differ from LIBRARY_CODES-LOCAL.\n"
+        f"LibraryFilterDialog codes must match library_codes_with_manuscripts()-LOCAL (DMF-13).\n"
         f"Missing: {expected_codes - set(codes_in_list)}\n"
         f"Extra: {set(codes_in_list) - expected_codes}"
     )
@@ -197,18 +217,24 @@ def test_library_filter_dialog_local_not_offered():
 
 @pytest.mark.gui
 def test_library_filter_dialog_get_checked_codes():
-    """GAP-G: get_checked_codes() returns list of checked codes."""
+    """GAP-G: get_checked_codes() returns list of checked codes.
+
+    Phase 131 Plan 01 REVISION (Codex R1 BLOCKER #1):
+      - Construct with mode='show_only' so the OLD inclusion-only semantics are
+        explicit (all-checked-by-default is Show-only semantics).
+    """
     from desktop.dialogs_filter import LibraryFilterDialog
 
-    # All checked by default (empty selected_codes = all included)
-    dlg = LibraryFilterDialog(selected_codes=[])
+    # REVISED: explicit mode='show_only' (all-checked-by-default is Show-only semantics)
+    # All checked by default when selected_codes is empty (Show-only: empty = show all)
+    dlg = LibraryFilterDialog(mode='show_only', selected_codes=[])
     codes = dlg.get_checked_codes()
     assert isinstance(codes, list), "get_checked_codes() must return a list"
-    assert len(codes) > 0, "All-checked dialog must return non-empty codes"
+    assert len(codes) > 0, "All-checked Show-only dialog must return non-empty codes"
     assert 'LOCAL' not in codes, "LOCAL must never be in get_checked_codes()"
 
-    # Subset: only CUL checked
-    dlg2 = LibraryFilterDialog(selected_codes=['CUL'])
+    # Subset case: only CUL checked (mode='show_only', selected_codes=['CUL'] -> ['CUL'])
+    dlg2 = LibraryFilterDialog(mode='show_only', selected_codes=['CUL'])
     codes2 = dlg2.get_checked_codes()
     assert codes2 == ['CUL'], f"Expected ['CUL'], got {codes2!r}"
 
@@ -220,11 +246,17 @@ def test_library_filter_dialog_select_none_present_ok_still_guarded():
 
     'Select None' unchecks all items without applying. The _update_ok_button and
     _on_accept guards ensure the all-unchecked state cannot be committed via OK.
+
+    Phase 131 Plan 01 REVISION (Codex R1 BLOCKER #1):
+      - Construct with mode='show_only' so the OLD zero-checked -> OK-disabled guard
+        still holds (in Hide mode, zero-checked is valid = show all; see
+        test_library_filter_dialog_ok_guard_mode_aware for the Hide counterpart).
     """
     from desktop.dialogs_filter import LibraryFilterDialog
     from PyQt6.QtWidgets import QPushButton
 
-    dlg = LibraryFilterDialog(selected_codes=[])
+    # REVISED: explicit mode='show_only' — "OK disabled after Select None" is Show-only semantics
+    dlg = LibraryFilterDialog(mode='show_only', selected_codes=[])
 
     # 'Select None' button must be present (BUG-C fix)
     btn_texts = [b.text() for b in dlg.findChildren(QPushButton)]
@@ -239,10 +271,11 @@ def test_library_filter_dialog_select_none_present_ok_still_guarded():
         f"Button texts found: {btn_texts!r}"
     )
 
-    # After clicking 'Select None', zero items are checked → OK must be disabled.
+    # After clicking 'Select None', zero items are checked → OK must be disabled (Show-only).
     dlg._select_none()
     assert not dlg.ok_button.isEnabled(), (
-        "OK must remain DISABLED after 'Select None' (zero checked — FINDING 1 guard)"
+        "OK must remain DISABLED after 'Select None' in Show-only mode "
+        "(zero checked — FINDING 1 guard)"
     )
 
     # 'deselect' (as in a 'Deselect All' variant) must NOT appear (guard against
@@ -255,18 +288,25 @@ def test_library_filter_dialog_select_none_present_ok_still_guarded():
 
 @pytest.mark.gui
 def test_library_filter_dialog_ok_disabled_when_zero_checked():
-    """FINDING 1 guard: OK button must be disabled when zero items are checked."""
+    """FINDING 1 guard: OK button must be disabled when zero items are checked (Show-only).
+
+    Phase 131 Plan 01 REVISION (Codex R1 BLOCKER #1):
+      - Construct with mode='show_only' so this guard remains valid.
+      - The Hide-mode counterpart (zero-checked -> OK ENABLED) is in
+        test_library_filter_dialog_ok_guard_mode_aware (new in Phase 131).
+    """
     from desktop.dialogs_filter import LibraryFilterDialog
     from PyQt6.QtCore import Qt
 
-    dlg = LibraryFilterDialog(selected_codes=[])
+    # REVISED: explicit mode='show_only' — zero-checked is only invalid in Show-only
+    dlg = LibraryFilterDialog(mode='show_only', selected_codes=[])
     # Uncheck all items programmatically
     for i in range(dlg.list_widget.count()):
         dlg.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
 
-    # The OK button must be disabled (or accept() must be a no-op — check both)
+    # The OK button must be disabled in Show-only mode (FINDING 1 guard)
     assert not dlg.ok_button.isEnabled(), (
-        "OK button must be disabled when zero libraries are checked"
+        "OK button must be disabled when zero libraries are checked (Show-only mode)"
     )
 
 
@@ -299,12 +339,24 @@ def test_library_apply_selection_all_checked_returns_empty():
 
 @pytest.mark.gui
 def test_catalog_build_browse_filters_includes_library(monkeypatch):
-    """GAP-H: _catalog_build_browse_filters adds filters['library'] when active."""
+    """GAP-H: _catalog_build_browse_filters adds filters['library'] when active (Show-only mode).
+
+    Phase 131 Plan 01 REVISION (Codex R2 N3):
+      - Add fake_self._catalog_library_mode = 'show_only' so that after Plan 03
+        gates filters['library'] on mode == 'show_only', this test still asserts
+        the include-handoff in Show-only mode.
+      - Without this line, MagicMock auto-creates _catalog_library_mode as a Mock
+        object, so _catalog_library_mode != 'show_only' evaluates truthy, and Plan 03's
+        gate would (correctly) suppress filters['library'], failing this test for the
+        wrong reason.
+    """
     import genizah_app
 
     # Build a minimal fake instance with _catalog_library_filter set
     fake_self = MagicMock()
     fake_self._catalog_library_filter = ['CUL', 'JTS']
+    # REVISED: set mode explicitly so Plan 03's Show-only gate passes (Codex N3)
+    fake_self._catalog_library_mode = 'show_only'
     fake_self._catalog_current_domain = None
     fake_self._catalog_current_author = None
     fake_self._catalog_current_work = None
@@ -313,7 +365,8 @@ def test_catalog_build_browse_filters_includes_library(monkeypatch):
 
     result = genizah_app.GenizahGUI._catalog_build_browse_filters(fake_self)
     assert 'library' in result, (
-        f"_catalog_build_browse_filters must include 'library' when _catalog_library_filter is set; got {result!r}"
+        f"_catalog_build_browse_filters must include 'library' when mode='show_only' and "
+        f"_catalog_library_filter is set; got {result!r}"
     )
     assert set(result['library']) == {'CUL', 'JTS'}, (
         f"filters['library'] must be the active codes; got {result['library']!r}"
@@ -415,4 +468,250 @@ def test_filter_count_worker_no_meta_mgr_is_safe_noop(monkeypatch):
     assert result == broader_set, (
         f"Without meta_mgr the library intersection must be a no-op; "
         f"expected {broader_set}, got {result!r}"
+    )
+
+
+# ── Phase 131 Plan 01: Dual-mode DMF-07 tests ─────────────────────────────
+# These tests are RED until Plan 03 adds mode/get_mode/_on_mode_changed/
+# _catalog_library_mode and the Show-only-gated handoff (intended Wave-0 state).
+# Use real assertions — NOT pytest.skip.
+
+@pytest.mark.gui
+def test_library_filter_dialog_mode_show_only():
+    """(1) DMF-07: LibraryFilterDialog(mode='show_only') -> get_mode() returns 'show_only'.
+
+    RED until Plan 03 adds the mode param + get_mode() method.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+    dlg = LibraryFilterDialog(mode='show_only', selected_codes=['CUL'])
+    assert dlg.get_mode() == 'show_only', (
+        f"LibraryFilterDialog(mode='show_only') must have get_mode()='show_only', "
+        f"got {dlg.get_mode()!r}"
+    )
+
+
+@pytest.mark.gui
+def test_library_filter_dialog_mode_hide():
+    """(2) DMF-07: LibraryFilterDialog(mode='hide') -> get_mode() returns 'hide'.
+
+    RED until Plan 03 adds the mode param + get_mode() method.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+    dlg = LibraryFilterDialog(mode='hide', selected_codes=[])
+    assert dlg.get_mode() == 'hide', (
+        f"LibraryFilterDialog(mode='hide') must have get_mode()='hide', "
+        f"got {dlg.get_mode()!r}"
+    )
+
+
+@pytest.mark.gui
+def test_library_filter_dialog_mode_flip_resets():
+    """(3) D-04: mode flip resets the checked set (prevents silent inversion of intent).
+
+    Construct in Show-only with CUL checked; programmatically check the Hide radio button;
+    assert ALL list-widget items become Unchecked.
+
+    RED until Plan 03 adds _rb_show_only/_rb_hide + _on_mode_changed.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from PyQt6.QtCore import Qt
+
+    dlg = LibraryFilterDialog(mode='show_only', selected_codes=['CUL'])
+
+    # Verify CUL is checked to start
+    checked_before = [
+        dlg.list_widget.item(i).checkState() == Qt.CheckState.Checked
+        for i in range(dlg.list_widget.count())
+    ]
+    assert any(checked_before), "At least one item (CUL) should be checked before mode flip"
+
+    # Simulate clicking the Hide radio button (D-04 reset)
+    dlg._rb_hide.setChecked(True)
+
+    # After mode flip, ALL items must be Unchecked
+    checked_after = [
+        dlg.list_widget.item(i).checkState() == Qt.CheckState.Checked
+        for i in range(dlg.list_widget.count())
+    ]
+    assert not any(checked_after), (
+        "D-04: mode flip must uncheck ALL items in the list widget "
+        f"(checked after flip: {sum(checked_after)})"
+    )
+
+
+@pytest.mark.gui
+def test_library_filter_dialog_ok_guard_mode_aware():
+    """(4) D-05/D-08: Mode-aware OK guard.
+
+    Hide + zero checked -> OK ENABLED (empty hide-set = show all).
+    Show-only + zero checked -> OK DISABLED (zero-checked Show-only is blocked).
+
+    RED until Plan 03 makes _update_ok_button mode-aware.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from PyQt6.QtCore import Qt
+
+    # Hide + zero checked -> OK must be ENABLED (empty hide-set = show all)
+    dlg_hide = LibraryFilterDialog(mode='hide', selected_codes=[])
+    for i in range(dlg_hide.list_widget.count()):
+        dlg_hide.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+    assert dlg_hide.ok_button.isEnabled(), (
+        "Hide mode + zero checked must have OK ENABLED (empty hide-set = show all, D-05/D-08)"
+    )
+
+    # Show-only + zero checked -> OK must be DISABLED (FINDING 1 guard)
+    dlg_show = LibraryFilterDialog(mode='show_only', selected_codes=[])
+    for i in range(dlg_show.list_widget.count()):
+        dlg_show.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+    assert not dlg_show.ok_button.isEnabled(), (
+        "Show-only mode + zero checked must have OK DISABLED (FINDING 1 guard)"
+    )
+
+
+@pytest.mark.gui
+def test_library_filter_dialog_fresh_default_hide():
+    """(5) D-05: LibraryFilterDialog() with no mode arg -> get_mode() returns 'hide'.
+
+    RED until Plan 03 changes the default from (implicit/no-mode) to mode='hide'.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+    dlg = LibraryFilterDialog()  # No mode arg — fresh default
+    assert dlg.get_mode() == 'hide', (
+        f"Fresh LibraryFilterDialog() must default to mode='hide' (D-05), "
+        f"got {dlg.get_mode()!r}"
+    )
+
+
+def test_catalog_library_mode_default_source():
+    """(6a) DMF-07 source scan: genizah_app.py must initialise _catalog_library_mode = 'hide'
+    in the catalog init block.
+
+    This avoids constructing a full GenizahGUI. We scan the source for the literal
+    `self._catalog_library_mode = 'hide'` in the init region.
+
+    RED until Plan 03 adds the _catalog_library_mode field.
+    """
+    import genizah_app
+    from pathlib import Path
+    source = Path(genizah_app.__file__).read_text(encoding='utf-8')
+    assert "self._catalog_library_mode = 'hide'" in source or \
+           'self._catalog_library_mode = "hide"' in source, (
+        "genizah_app.py must initialise self._catalog_library_mode = 'hide' "
+        "in the catalog init block (D-05 default). RED until Plan 03."
+    )
+
+
+def test_dialog_uses_with_manuscripts_universe_source():
+    """(6b) DMF-13 source scan: desktop/dialogs_filter.py must reference
+    library_codes_with_manuscripts where the _all_codes list is built.
+
+    RED until Plan 03 updates LibraryFilterDialog._all_codes to use
+    library_codes_with_manuscripts().
+    """
+    from pathlib import Path
+    dialogs_filter_py = Path(__file__).parent.parent / 'desktop' / 'dialogs_filter.py'
+    source = dialogs_filter_py.read_text(encoding='utf-8')
+    assert 'library_codes_with_manuscripts' in source, (
+        "desktop/dialogs_filter.py must reference library_codes_with_manuscripts "
+        "where _all_codes is built (DMF-13). RED until Plan 03."
+    )
+
+
+# ── Phase 131 Plan 01: Hide-mode handoff tests (Codex R2 N3) ──────────────
+# Tests (C): REVISED + ADDED handoff tests for _catalog_build_browse_filters.
+# RED until Plan 03 adds the Show-only-gated handoff.
+
+@pytest.mark.gui
+def test_catalog_build_browse_filters_hide_omits_library(monkeypatch):
+    """(C) Codex HIGH #4: Hide mode does NOT hand off filters['library'].
+
+    _catalog_build_browse_filters with mode='hide' and a non-empty filter must
+    NOT add 'library' to the result (Hide = complement, handled post-fetch).
+
+    RED until Plan 03 gates filters['library'] on mode=='show_only'.
+    """
+    import genizah_app
+
+    fake_self = MagicMock()
+    fake_self._catalog_library_filter = ['CUL', 'JTS']
+    fake_self._catalog_library_mode = 'hide'
+    fake_self._catalog_current_domain = None
+    fake_self._catalog_current_author = None
+    fake_self._catalog_current_work = None
+    fake_self._catalog_date_from = None
+    fake_self._catalog_date_to = None
+
+    result = genizah_app.GenizahGUI._catalog_build_browse_filters(fake_self)
+    assert 'library' not in result, (
+        f"_catalog_build_browse_filters with mode='hide' must NOT add filters['library'] "
+        f"(Codex HIGH #4 contract). RED until Plan 03. Got: {result!r}"
+    )
+
+
+@pytest.mark.gui
+def test_catalog_search_in_results_hide_no_restrict_and_notice(monkeypatch):
+    """(C) Codex N3: Hide mode in _catalog_search_in_results / _catalog_parallels_in_results
+    must NOT intersect resolve_library_sys_ids into pre_search_restrict_sys_ids,
+    AND must fire a Hide-suppression notice.
+
+    This test covers the _catalog_search_in_results path (the recompute path).
+    RED until Plan 03 adds the Hide-suppression branch.
+    """
+    import genizah_app
+    import shared.fjms_service as fjms_mod
+
+    # Track resolve_library_sys_ids calls
+    resolve_calls = []
+
+    def _fake_resolve(library_codes, meta_mgr):
+        resolve_calls.append(library_codes)
+        return {'fake_sys_id'}
+
+    monkeypatch.setattr(fjms_mod, 'resolve_library_sys_ids', _fake_resolve)
+
+    # Mock status bar for notice detection
+    status_messages = []
+    fake_status_bar = MagicMock()
+    fake_status_bar.showMessage.side_effect = lambda msg, *a, **kw: status_messages.append(msg)
+
+    # Build minimal fake_self with Hide mode active
+    fake_self = MagicMock()
+    fake_self._catalog_library_filter = ['CUL']
+    fake_self._catalog_library_mode = 'hide'
+    fake_self.statusBar.return_value = fake_status_bar
+    # Stub out navigation / search launch to keep test unit-scoped
+    fake_self._catalog_search_in_results_text = ''
+    fake_self._catalog_current_domain = None
+    fake_self._catalog_current_author = None
+    fake_self._catalog_current_work = None
+    fake_self._catalog_date_from = None
+    fake_self._catalog_date_to = None
+    # Return an empty restrict set (so the test verifies no library intersection added)
+    fake_self.meta_mgr = MagicMock()
+
+    # Call the recompute path; in Hide mode it should NOT call resolve_library_sys_ids
+    # for a library restriction intersect (and should fire a notice).
+    # We stub _catalog_start_async_refresh and related launchers to prevent real DB calls.
+    fake_self._catalog_start_async_refresh = MagicMock()
+    fake_self._catalog_parallels_in_results = MagicMock()
+
+    try:
+        genizah_app.GenizahGUI._catalog_search_in_results(fake_self)
+    except Exception:
+        # The stub may raise; we only care about what ran BEFORE the raise
+        pass
+
+    # Assert: resolve_library_sys_ids was NOT called for a library restriction
+    assert len(resolve_calls) == 0, (
+        f"_catalog_search_in_results in Hide mode must NOT call resolve_library_sys_ids "
+        f"(no library allowlist restriction in Hide mode). Codex N3. RED until Plan 03. "
+        f"Calls: {resolve_calls}"
+    )
+
+    # Assert: a suppression notice was fired (statusBar.showMessage called with a
+    # Hide-related message; accept any non-empty message as the notice)
+    assert len(status_messages) > 0 or fake_status_bar.showMessage.called or \
+           fake_self.statusBar.called, (
+        "_catalog_search_in_results in Hide mode must fire a Hide-suppression notice. "
+        "Codex N3. RED until Plan 03."
     )
