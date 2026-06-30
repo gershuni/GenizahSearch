@@ -60,7 +60,7 @@ result: [pending]
 
 total: 11
 passed: 0
-issues: 2
+issues: 0
 pending: 11
 skipped: 0
 blocked: 0
@@ -141,7 +141,8 @@ blocked: 0
     - "Update en-lang tests to expect the code; keep he-lang + default-off-invariant tests."
   debug_session: ""
 - truth: "The web /search library-filter dialog rows show the English library code in parentheses (e.g. 'Cambridge University Library (CUL)') in both languages, and the dialog's type-to-find matches the code — parity with the catalog dialog (gaps 131-08/09). A-Z order unchanged."
-  status: failed
+  status: fix_implemented_pending_uat
+  resolution: "Closed by gap plan 131-10 (commit 3674e600 incl.): added with_code=True to the two /search dialog label builds (search.py ~1829/1843); sort key (~1806) kept bare so A-Z unchanged. data-label now carries the code so libFilterSearch matches it. Live render-smoke = UAT test #10 (pending). 42/42 web tests pass."
   reason: "User: 'This should be in search too.' The /search dialog (web/pages/search.py) was not covered by 131-08/09 (those touched only the catalog dialog + shared helper)."
   severity: minor
   test: 10
@@ -154,7 +155,8 @@ blocked: 0
   debug_session: ""
 
 - truth: "Typing in the 'Search libraries' type-to-find box keeps the library rows stacked line-by-line in BOTH web dialogs (/search and /catalog) — rows do NOT collapse into continuous inline text."
-  status: failed
+  status: fix_implemented_pending_uat
+  resolution: "Closed by gap plan 131-10 (commit 486a3023): libFilterSearch (search.py) + catLibFilterSearch (catalog_browse.py) show-branch changed from row.style.display='' to 'flex', so showing a row restores its inline flex layout instead of falling back to <label> inline default. Source-contract guard tests added (commit 3674e600). 42/42 web tests pass. Live render-smoke = UAT test #11 (pending)."
   reason: "User: 'When I start to type to search in the search boxes, they collapse from being line after line, to continuous text.' BUG in the type-to-find show/hide."
   severity: major
   test: 11
