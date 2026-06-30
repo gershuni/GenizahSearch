@@ -18,7 +18,7 @@ from web.safe_storage import safe_user_get, safe_user_set
 from web.translations import tr, is_rtl, get_language
 from web.components.typography import h1
 from shared.fjms_service import get_fjms_service, resolve_library_sys_ids
-from shared.browse_map_utils import LIBRARY_CODES, get_library_display
+from shared.browse_map_utils import LIBRARY_CODES, get_library_display, sanitize_library_codes, library_codes_with_manuscripts
 
 import asyncio
 import logging
@@ -111,12 +111,36 @@ def create_catalog_browse_page(
     _ed0 = safe_user_get('catalog_editions_filter', 'all')
     current_pgp_filter = {'value': _pgp0 if _pgp0 in ('all', 'has_pgp', 'no_pgp') else 'all'}
     current_editions_filter = {'value': _ed0 if _ed0 in ('all', 'has_edition', 'no_edition') else 'all'}
-    # SEED-026: library filter — persisted as a list of library codes.
-    # Normalized + validated against LIBRARY_CODES (drop unknown/corrupted codes).
-    _lib0 = safe_user_get('catalog_library_filter', [])
-    current_library_filter = {
-        'value': [c for c in _lib0 if c in LIBRARY_CODES] if isinstance(_lib0, list) else []
-    }
+    # SEED-026 / DMF-08 (131-04): library filter — dual-mode (Show-only / Hide).
+    # Persisted as {'mode','codes'} dict; legacy plain-list migrates to Show-only.
+    # Three-branch D-06 migration matching search.py restore path.
+    _lib_raw = safe_user_get('catalog_library_filter', [])
+    if isinstance(_lib_raw, list):
+        # D-06 legacy migration: plain list -> Show-only (v8.3.0 plain-list values).
+        _lib_codes0 = sanitize_library_codes(_lib_raw)
+        if _lib_codes0:
+            _cat_library_mode = 'show_only'
+        else:
+            _cat_library_mode = 'hide'
+            _lib_codes0 = []
+    elif isinstance(_lib_raw, dict):
+        # New dict shape: read mode + codes, validate mode.
+        _cat_library_mode = _lib_raw.get('mode', 'hide')
+        if _cat_library_mode not in ('show_only', 'hide'):
+            _cat_library_mode = 'hide'
+        _lib_codes0 = sanitize_library_codes(_lib_raw.get('codes'))
+        # Normalize show_only+empty to hide (Codex HIGH fix).
+        if _cat_library_mode == 'show_only' and not _lib_codes0:
+            _cat_library_mode = 'hide'
+    else:
+        # Fresh/absent/garbage: default Hide, empty set (show all).
+        _cat_library_mode = 'hide'
+        _lib_codes0 = []
+    current_library_filter = {'value': _lib_codes0}
+    current_library_mode = {'value': _cat_library_mode}
+    # True full-set facet counts (DMF-12): refreshed alongside fetch_results.
+    # Always from fjms.get_browse_library_facets(...) — NEVER page-local counts.
+    current_library_facets = {'value': {}}
 
     # Cached lists for cross-filtering
     authors_list = {'data': []}
@@ -255,7 +279,7 @@ def create_catalog_browse_page(
 
     def _fetch_results_blocking(
         offset, domain, author, work, date_from, date_to, undated,
-        text_all, text_any, text_not, pgp_state, ed_state, library_codes,
+        text_all, text_any, text_not, pgp_state, ed_state, library_codes, library_mode,
     ):
         """Blocking browse fetch (runs in io_bound). Resolves the corpus-wide
         PGP/edition sets (cached) and the selected-library sys_id set only when the
@@ -281,6 +305,7 @@ def create_catalog_browse_page(
             edition_sys_ids=(ed_ids if ed_state in ('has_edition', 'no_edition') else None),
             library_codes=(library_codes or None),
             library_sys_ids=lib_sys_ids,
+            library_mode=library_mode,
         )
 
     async def fetch_results():
@@ -303,8 +328,47 @@ def create_catalog_browse_page(
             # SEED-026: pass a COPY of the current library selection (empty list = no filter).
             # Snapshot so chip removal mutating the list cannot race the io_bound resolver.
             list(current_library_filter['value']) or None,
+            current_library_mode['value'],
         )
         return data
+
+    def _fetch_library_facets_blocking(
+        domain, author, work, date_from, date_to, undated,
+        text_all, text_any, text_not, pgp_state, ed_state,
+    ):
+        """Fetch TRUE full-set library facet counts (DMF-12). Runs in io_bound.
+
+        ALWAYS from fjms.get_browse_library_facets — NEVER page-local counts (Codex R3 F1).
+        The library filter is intentionally excluded so ALL library options show their
+        full-corpus counts (not the post-library-filter counts).
+        Falls back to {} on any error; the dialog renders without counts in that case.
+        """
+        pgp_ids = ed_ids = None
+        if pgp_state in ('has_pgp', 'no_pgp') or ed_state in ('has_edition', 'no_edition'):
+            pgp_ids, ed_ids = _get_filter_sets()
+        try:
+            from web.state import state as _state
+            return fjms.get_browse_library_facets(
+                domain=domain,
+                author=author,
+                work=work,
+                date_from=date_from,
+                date_to=date_to,
+                include_undated=undated,
+                text_all=text_all,
+                text_any=text_any,
+                text_not=text_not,
+                pgp_filter=(pgp_state if pgp_state in ('has_pgp', 'no_pgp') else None),
+                pgp_sys_ids=(pgp_ids if pgp_state in ('has_pgp', 'no_pgp') else None),
+                editions_filter=(ed_state if ed_state in ('has_edition', 'no_edition') else None),
+                edition_sys_ids=(ed_ids if ed_state in ('has_edition', 'no_edition') else None),
+                # Pass the FULL-CORPUS callable (a bound method) — NOT a page-local dict.
+                # This ensures off-page libraries are counted correctly (Codex R3 F3, N5).
+                sys_id_to_library=_state.meta_mgr.get_library_for_id,
+            )
+        except Exception as e:
+            logger.warning("catalog_browse: facet fetch failed: %s", e)
+            return {}
 
     # ── Resolve shelfmark / library / catalog count / snippet ────────
     def _resolve_all(result_list):
@@ -399,6 +463,29 @@ def create_catalog_browse_page(
 
         results = data.get('results', [])
         total = data.get('total', 0)
+
+        # DMF-12: Fetch TRUE full-set library facet counts alongside the results.
+        # ALWAYS via fjms.get_browse_library_facets (the page's fjms instance method),
+        # honoring the active non-library filters. Never a page-local fallback.
+        try:
+            new_facets = await run.io_bound(
+                _fetch_library_facets_blocking,
+                current_domain['value'],
+                current_author['value'],
+                current_work['value'],
+                current_date_from['value'],
+                current_date_to['value'],
+                current_include_undated['value'],
+                current_text_all['value'] or None,
+                current_text_any['value'] or None,
+                current_text_not['value'] or None,
+                current_pgp_filter['value'],
+                current_editions_filter['value'],
+            )
+            current_library_facets['value'] = new_facets
+        except Exception as e:
+            logger.warning("catalog_browse: facet refresh failed: %s", e)
+            current_library_facets['value'] = {}
 
         # Batch resolve shelfmarks via io_bound
         resolved_meta = await run.io_bound(_resolve_all, results)
@@ -960,32 +1047,43 @@ def create_catalog_browse_page(
     # strict subset ⇒ that subset; zero-checked ⇒ Apply guarded (FINDING 1).
 
     def _update_library_filter_btn():
-        """Sync the library filter button: label, count, and colour.
+        """Sync the library filter button: 3-state label, count, and colour (DMF-08/DMF-12).
 
-        SEED-026 (smoke 2026-06-29): the per-library chips were removed — the
-        button itself carries the filter state. When a strict subset of the
-        catalog's libraries is selected, the button turns RED (color=negative,
-        filled) and reads "Filter Libraries (shown/total)", where total is the
-        number of catalog libraries (LIBRARY_CODES minus LOCAL) and shown is the
-        selected count. When nothing is restricted, it reverts to the neutral
-        outlined "All Libraries".
+        Three states keyed on current_library_mode + active-ness:
+          Neutral:          tr('Filter by library') — outline primary.
+          Show-only active: 'Showing {shown}/{total} library/libraries' — filled negative/red.
+          Hide active:      'Hiding {n} library/libraries' — filled deep-orange.
+
+        Uses the REAL Phase-130 pluralized template keys (VERIFIED genizah_translations.py).
         """
         btn = library_filter_btn_ref['ref']
         if not btn:
             return
-        sel = current_library_filter['value']
-        if not sel:
+        codes = set(current_library_filter['value'])
+        mode = current_library_mode['value']
+
+        if mode == 'show_only' and codes:
+            # Show-only active: count how many facet libraries are in the selected set.
+            facets = current_library_facets['value']
+            total = len([c for c in LIBRARY_CODES if c != 'LOCAL'])
+            shown = len(codes)
+            _lib_btn_key = ('Showing {shown}/{total} library' if total == 1
+                            else 'Showing {shown}/{total} libraries')
+            btn.text = tr(_lib_btn_key).format(shown=shown, total=total)
+            btn.props(remove='color outline')
+            btn.props('dense no-caps color=negative')
+        elif mode == 'hide' and codes:
+            # Hide active: show count of hidden libraries.
+            _n = len(codes)
+            _lib_btn_key = ('Hiding {n} library' if _n == 1 else 'Hiding {n} libraries')
+            btn.text = tr(_lib_btn_key).format(n=_n)
+            btn.props(remove='color outline')
+            btn.props('dense no-caps color=deep-orange')
+        else:
+            # Neutral: no active filter (empty codes in either mode).
             btn.text = tr('Filter by library')
             btn.props(remove='color')
             btn.props('outline dense no-caps color=primary')
-        else:
-            # Consistent base label (smoke 2026-06-29): same "Filter by library" phrasing
-            # in both states + count appended, matching the web-search button.
-            total = len([c for c in LIBRARY_CODES if c != 'LOCAL'])
-            shown = len(sel)
-            btn.text = f"{tr('Filter by library')} ({shown}/{total})"
-            btn.props(remove='color outline')
-            btn.props('dense no-caps color=negative')
 
     def _library_apply_selection(checked_codes, all_codes):
         """Pure mapping helper: maps the checked set to the filter value.
@@ -1004,84 +1102,167 @@ def create_catalog_browse_page(
         return list(checked_codes)
 
     def _open_library_filter_dialog():
-        """Open modal dialog with library filter checkboxes.
+        """Open dual-mode library filter dialog (131-04 / DMF-08/DMF-12 redesign).
 
-        GAP-E: replaces the ui.select(multiple=True) with a ui.dialog, mirroring
-        the web-search library dialog.  Inclusion model (locked 2026-06-28): checked
-        = INCLUDE.  All libraries start checked (= no filter / show all).  Unchecking
-        hides that library in results.
+        Dialog layout (mirrors web/pages/search.py _open_library_filter_dialog):
+          1. Mode toggle (Show-only | Hide) — D-03.
+          2. Text-search input filtering rows client-side.
+          3. Count shortlist — ALWAYS true full-set facets from fjms.get_browse_library_facets
+             (NO page-local fallback; facet-query failure renders shortlist without counts — Codex R3 F1).
+          4. Sort affordance — count-desc / A-Z (DMF-12).
+          5. Expandable section — libraries with manuscripts not in shortlist, A-Z — DMF-13.
+          6. Select All / Select None / Apply / Cancel.
 
-        FINDING 1 (all-unchecked guard):
-        - Only a 'Select All' affordance is provided; there is intentionally
-          NO 'Select None'/deselect-all action (that would yield an apply-able
-          all-unchecked state that collides with the '[]' = show-all sentinel).
-        - Apply is disabled client-side when checked-count == 0.
-        - Python Apply handler defensively short-circuits if checked set is empty.
-        - '[]' ALWAYS means 'show all'; the zero-checked state is intentionally
-          blocked so it can never collide with that sentinel.
+        Mode semantics (D-01/D-02):
+          - Show-only: keep results whose library_code IN checked set.
+          - Hide: keep results whose library_code NOT IN checked set.
+          Empty Hide set = show all (applyable, D-08); empty Show-only = blocked.
+
+        Show-all normalization (MEDIUM / D-05):
+          Show-only + all-universe-checked -> _library_apply_selection -> [] ->
+          normalize to neutral Hide/[] before persisting.
         """
-        _lang = get_language()
-        # Build the full list of codes (PLAIN list, no counts — D-02); exclude LOCAL.
-        all_codes = [c for c in LIBRARY_CODES if c != 'LOCAL']
-        all_codes_sorted = sorted(
-            all_codes,
-            key=lambda c: get_library_display(c, short=False, lang=_lang),
-        )
-
-        # Build checkbox HTML — one per library code in LIBRARY_CODES (minus LOCAL).
-        # All start checked (inclusion model); unchecking hides that library.
         import html as _html
+        import json as _json
         import uuid as _uuid
+
+        _lang = get_language()
         container_id = f'cat-lib-filter-{_uuid.uuid4().hex[:8]}'
         current_filter = set(current_library_filter['value'])
+        current_mode = [current_library_mode['value']]  # mutable cell for toggle
 
-        checkbox_html_parts = []
-        for code in all_codes_sorted:
-            label = get_library_display(code, short=False, lang=_lang)
-            # Inclusion model: checked when in the current filter, OR when filter is empty
-            # (= show all — all libraries are "included").
-            is_checked = (not current_filter) or (code in current_filter)
-            checked_attr = 'checked' if is_checked else ''
+        # --- Build shortlist from TRUE full-set facets (DMF-12, Codex R3 F1) ---
+        # ALWAYS from current_library_facets (fetched via fjms.get_browse_library_facets).
+        # If the facet fetch failed the cell is {}: render shortlist without counts.
+        facets = current_library_facets['value']
+        shortlist_codes = sorted(
+            [c for c in facets if c in LIBRARY_CODES and c != 'LOCAL'],
+            key=lambda c: -facets[c],
+        )
+        shortlist_set = set(shortlist_codes)
+
+        # --- Build expand section: libraries with manuscripts, not in shortlist, LOCAL excluded (DMF-13) ---
+        _codes_with_mss = library_codes_with_manuscripts()
+        expand_codes = sorted(
+            [c for c in LIBRARY_CODES if c != 'LOCAL' and c not in shortlist_set
+             and c in _codes_with_mss],
+            key=lambda c: get_library_display(c, short=False, lang=_lang),
+        )
+        _all_for_norm = shortlist_codes + expand_codes
+
+        def _make_cat_cb_row(code, label_text, checked, count=None):
+            """Single checkbox row HTML for the catalog dialog (BUG-B safe — no <script>)."""
             code_attr = _html.escape(code, quote=True)
-            label_html = _html.escape(label)
-            checkbox_html_parts.append(
-                f'<label style="display:flex;align-items:center;gap:8px;'
-                f'padding:5px 0;cursor:pointer;font-size:0.9rem">'
+            label_esc = _html.escape(label_text, quote=True)
+            checked_attr = 'checked' if checked else ''
+            data_count = str(count) if count is not None else '0'
+            return (
+                f'<label class="cat-lib-cb-row" data-label="{label_esc.lower()}" '
+                f'data-count="{data_count}" '
+                f'style="display:flex;align-items:center;gap:8px;'
+                f'padding:4px 0;cursor:pointer;font-size:0.9rem">'
                 f'<input type="checkbox" class="cat-lib-cb" data-code="{code_attr}" '
                 f'{checked_attr} '
                 f'style="width:16px;height:16px;accent-color:#1976d2;cursor:pointer" '
                 f'onchange="catLibFilterUpdateApply(\'{container_id}\')">'
-                f'<span>{label_html}</span></label>'
+                f'<span>{_html.escape(label_text)}</span></label>'
             )
-        checkbox_html = '\n'.join(checkbox_html_parts)
 
-        with ui.dialog() as dialog, ui.card().classes('w-[480px] max-h-[80vh]'):
+        # Shortlist rows (with counts when available; without on facet-query failure)
+        shortlist_rows = []
+        for code in shortlist_codes:
+            count = facets.get(code)
+            label = get_library_display(code, short=False, lang=_lang)
+            label_with_count = f"{label} ({count})" if count is not None else label
+            if current_mode[0] == 'show_only':
+                is_checked = (not current_filter) or (code in current_filter)
+            else:
+                is_checked = code in current_filter
+            shortlist_rows.append(_make_cat_cb_row(code, label_with_count, is_checked, count))
+
+        # Expand section rows (no count)
+        expand_rows = []
+        for code in expand_codes:
+            label = get_library_display(code, short=False, lang=_lang)
+            if current_mode[0] == 'show_only':
+                is_checked = (not current_filter) or (code in current_filter)
+            else:
+                is_checked = code in current_filter
+            expand_rows.append(_make_cat_cb_row(code, label, is_checked))
+
+        # Wrap in data-libmode container so JS mode-awareness works.
+        init_mode = _html.escape(current_mode[0], quote=True)
+        shortlist_html = '\n'.join(shortlist_rows)
+        full_html = f'<div id="{container_id}" data-libmode="{init_mode}">{shortlist_html}'
+        if expand_rows:
+            expand_label = _html.escape(tr('All libraries'))
+            full_html += (
+                f'<details style="margin-top:8px">'
+                f'<summary style="cursor:pointer;font-size:0.85rem;color:#666;'
+                f'padding:4px 0">{expand_label}</summary>'
+                + '\n'.join(expand_rows) +
+                f'</details>'
+            )
+        full_html += '</div>'
+
+        with ui.dialog() as dialog, ui.card().classes('w-[520px] max-h-[80vh]'):
             with ui.column().classes('w-full gap-2'):
                 ui.label(tr('Filter by Library')).classes('text-lg font-bold')
 
-                with ui.scroll_area().classes('w-full').style('max-height: 55vh;'):
-                    # BUG-B fix: NO <script> here — JS functions are defined once
-                    # at page level via ui.add_head_html (see page setup above).
-                    ui.html(
-                        f'<div id="{container_id}">{checkbox_html}</div>',
-                        sanitize=False,
-                    )
+                # Mode toggle (D-03): Show-only | Hide, initialized from current mode.
+                mode_options = {
+                    'show_only': tr('Show only selected'),
+                    'hide': tr('Hide selected'),
+                }
+                mode_toggle = ui.toggle(
+                    options=mode_options,
+                    value=current_mode[0],
+                ).props('dense no-caps')
+
+                def _on_mode_change(new_mode):
+                    current_mode[0] = new_mode
+                    # D-04: flipping mode resets checked set + re-syncs Apply-enable.
+                    ui.run_javascript(f'catLibFilterSetMode("{container_id}", "{new_mode}")')
+
+                mode_toggle.on_value_change(lambda e: _on_mode_change(e.value))
+
+                # Text-search input — client-side filter (no Python round-trip).
+                ui.input(
+                    placeholder=tr('Search libraries...'),
+                    on_change=lambda e: ui.run_javascript(
+                        f'catLibFilterSearch("{container_id}", {_json.dumps(e.value or "")})'
+                    ),
+                ).props('dense clearable').classes('w-full')
+
+                # Sort affordance (DMF-12): count-desc / A-Z.
+                with ui.row().classes('gap-1 items-center'):
+                    ui.label(tr('Sort:')).classes('text-xs').style('color:#888')
+                    ui.button(
+                        tr('By count'),
+                        on_click=lambda: ui.run_javascript(
+                            f'catLibFilterSort("{container_id}", "count")')
+                    ).props('flat dense no-caps').classes('text-xs')
+                    ui.button(
+                        tr('A–Z'),
+                        on_click=lambda: ui.run_javascript(
+                            f'catLibFilterSort("{container_id}", "az")')
+                    ).props('flat dense no-caps').classes('text-xs')
+
+                with ui.scroll_area().classes('w-full').style('max-height: 45vh;'):
+                    # BUG-B: NO <script> inside ui.html — JS is at page level (add_head_html).
+                    ui.html(full_html, sanitize=False)
 
                 # Buttons row
                 with ui.row().classes('w-full justify-between'):
                     _cid = container_id  # capture for closures
-                    _all = all_codes_sorted  # capture for apply
+                    _all = _all_for_norm  # full universe for show-all normalization
 
-                    # Bulk-action buttons (left side)
                     with ui.row().classes('gap-1'):
-                        # Select All: re-checks everything = clear filter / show all.
                         ui.button(
                             tr('Select All'),
                             on_click=lambda: ui.run_javascript(
                                 f'catLibFilterSelectAll("{_cid}", true)')
                         ).props('flat dense no-caps')
-                        # BUG-C: Select none — unchecks all (convenience), does NOT apply.
-                        # Apply/OK stays disabled while zero are checked (catLibFilterUpdateApply).
                         ui.button(
                             tr('Select None'),
                             on_click=lambda: ui.run_javascript(
@@ -1094,30 +1275,39 @@ def create_catalog_browse_page(
                                 f'catLibFilterGetChecked("{_cid}")', timeout=5.0
                             )
                             checked = list(checked_list) if checked_list else []
-                            # FINDING 1 — Python-side guard: if checked set is empty,
-                            # do NOT commit (would produce [] = 'show all' collision).
-                            # This defensive check fires only if the client-side
-                            # disabled-Apply guard was bypassed.
-                            if not checked:
-                                ui.notify(
-                                    tr('Select at least one library, or check all to clear the filter'),
-                                    type='warning',
-                                )
-                                return
-                            # Apply inclusion mapping:
-                            #   all-checked => [] (clear filter; '[]' = show all)
-                            #   strict subset => that subset
-                            # WR-03 fix: re-add the LIBRARY_CODES validation that the old
-                            # ui.select path enforced — drop any code not in the canonical
-                            # set before persisting (the downstream resolver also drops
-                            # unknowns, but this prevents junk accumulating in storage).
-                            # D-46/D-NEW-7: exclude 'LOCAL' (My Library is desktop-only;
-                            # it must never enter a web library filter, even via a crafted
-                            # selection or stale storage).
-                            new_filter = [c for c in _library_apply_selection(checked, _all)
-                                          if c in LIBRARY_CODES and c != 'LOCAL']
-                            current_library_filter['value'] = new_filter
-                            safe_user_set('catalog_library_filter', new_filter)
+                            # Sanitize JS-returned codes (T-131-04-01): drops non-str,
+                            # unknown codes, and 'LOCAL' (DMF-10 inline guard).
+                            checked = sanitize_library_codes(checked)
+                            committed_mode = current_mode[0]
+
+                            if committed_mode == 'show_only':
+                                # Show-only guard: empty checked set blocked (can't show nothing).
+                                if not checked:
+                                    ui.notify(
+                                        tr('Select at least one library, or check all to clear the filter'),
+                                        type='warning',
+                                    )
+                                    return
+                                # All-universe-checked -> _library_apply_selection -> [] -> normalize.
+                                new_filter = [c for c in _library_apply_selection(checked, _all)
+                                              if c in LIBRARY_CODES and c != 'LOCAL']
+                                # Show-all normalization (D-05): show_only + empty = neutral hide/[].
+                                if not new_filter:
+                                    current_library_mode['value'] = 'hide'
+                                    current_library_filter['value'] = []
+                                else:
+                                    current_library_mode['value'] = 'show_only'
+                                    current_library_filter['value'] = new_filter
+                            else:
+                                # Hide mode: empty set allowed (= hide nothing = show all, D-08).
+                                current_library_mode['value'] = 'hide'
+                                current_library_filter['value'] = checked
+
+                            # Persist dict shape (D-09): NEVER a bare list (DMF-10).
+                            safe_user_set('catalog_library_filter', {
+                                'mode': current_library_mode['value'],
+                                'codes': current_library_filter['value'],
+                            })
                             _update_library_filter_btn()
                             current_page['value'] = 1
                             await refresh_results()
@@ -1125,25 +1315,19 @@ def create_catalog_browse_page(
                             _update_search_buttons()
                             dialog.close()
 
-                        # Apply button — disabled cosmetically by the JS handler
-                        # (catLibFilterUpdateApply sets btn.disabled on the raw DOM element).
-                        # NOTE: raw .disabled on a Quasar <q-btn> wrapper may not reliably
-                        # propagate to the Vue component's disable prop, so the JS guard is
-                        # best-effort / cosmetic UX only. The Python guard above
-                        # (if not checked: notify; return) is the AUTHORITATIVE, load-bearing
-                        # guard that prevents an all-unchecked Apply from committing [] = "show all".
                         apply_btn = ui.button(
                             tr('Apply'), on_click=apply_catalog_library_filter
                         ).props('dense no-caps color=primary')
                         apply_btn.props(f'id="catLibApplyBtn_{container_id}"')
-
                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat dense no-caps')
 
         dialog.open()
+        # Initialize Apply disabled-state from current checked count + mode.
+        ui.run_javascript(f'catLibFilterUpdateApply("{container_id}")')
 
     # SEED-026 (smoke 2026-06-29): clear_library_code() was removed along with the
-    # per-library chips. The Apply dialog (Select All / Select None / Apply) is now
-    # the sole way to change the catalog library filter; the button shows the state.
+    # per-library chips. The Apply dialog (Show-only/Hide toggle + Select All / Select None / Apply)
+    # is now the sole way to change the catalog library filter; the button shows the state.
 
     async def add_text_term():
         """Add a text term from the input with the current mode."""
@@ -1234,9 +1418,11 @@ def create_catalog_browse_page(
             safe_user_set('catalog_editions_filter', 'all')
             _update_editions_filter_btn()
         elif filter_name == 'library':
-            # SEED-026: clear all selected library codes at once
+            # SEED-026/DMF-08 (131-04): clear library filter — reset to neutral hide/[].
+            # Persist dict shape (NEVER a bare list — D-09/DMF-10).
             current_library_filter['value'] = []
-            safe_user_set('catalog_library_filter', [])
+            current_library_mode['value'] = 'hide'
+            safe_user_set('catalog_library_filter', {'mode': 'hide', 'codes': []})
             _update_library_filter_btn()
         current_page['value'] = 1
         await fetch_authors()
@@ -1258,9 +1444,11 @@ def create_catalog_browse_page(
         current_pgp_filter['value'] = 'all'
         current_editions_filter['value'] = 'all'
         current_library_filter['value'] = []
+        current_library_mode['value'] = 'hide'
         safe_user_set('catalog_pgp_filter', 'all')
         safe_user_set('catalog_editions_filter', 'all')
-        safe_user_set('catalog_library_filter', [])
+        # DMF-08 (131-04): persist dict shape — NEVER a bare list (D-09/DMF-10).
+        safe_user_set('catalog_library_filter', {'mode': 'hide', 'codes': []})
         _update_pgp_filter_btn()
         _update_editions_filter_btn()
         _update_library_filter_btn()
@@ -1345,14 +1533,15 @@ def create_catalog_browse_page(
             incoming['text_any'] = current_text_any['value']
         if current_text_not['value']:
             incoming['text_not'] = current_text_not['value']
-        # GAP-F: thread library selection to /search so "Search in these results" applies it.
-        # The receiving search page loads 'search_library_filter' at :187-189 (before consume),
-        # and consume (search.py:199) sets state.library_filter + persists the key so the
-        # next fresh render reloads it (persist→reload lifecycle).
-        # Codex MEDIUM (2026-06-29): only carry library to targets that apply it (search);
+        # GAP-F / DMF-08 (131-04): carry library filter to /search with FULL {mode,codes} dict
+        # so a catalog Hide selection arrives at /search as Hide (Codex R1 HIGH #3).
+        # consume_incoming_filters() (filter_panel.py Task 1) accepts the dict shape.
         # Parallels passes include_library=False so the library scope isn't silently dropped.
         if include_library and current_library_filter['value']:
-            incoming['library_filter'] = list(current_library_filter['value'])
+            incoming['library_filter'] = {
+                'mode': current_library_mode['value'],
+                'codes': list(current_library_filter['value']),
+            }
         return incoming
 
     def _update_search_buttons():
@@ -1403,7 +1592,12 @@ def create_catalog_browse_page(
 
     # BUG-B fix: catalog library filter JS helpers at page level (NOT inside ui.html).
     # ui.html() raises ValueError if a <script> tag is present; define once here instead.
+    # DMF-12 (131-04): extended with catLibFilterSetMode (D-04 reset), catLibFilterSearch
+    # (text filter), catLibFilterSort (count-desc / A-Z sort), and mode-aware Apply-enable.
     ui.add_head_html('''<script>
+    // DMF (131-04) — mode-aware Apply enable:
+    // Show-only: zero-checked DISABLES Apply (can\'t show nothing).
+    // Hide: zero-checked LEAVES Apply ENABLED (hide nothing = show all = valid).
     function catLibFilterUpdateApply(cid) {
         var cont = document.getElementById(cid);
         if (!cont) return;
@@ -1411,7 +1605,9 @@ def create_catalog_browse_page(
         var n = 0;
         cbs.forEach(function(cb) { if (cb.checked) n++; });
         var btn = document.getElementById('catLibApplyBtn_' + cid);
-        if (btn) btn.disabled = (n === 0);
+        if (!btn) return;
+        var mode = cont.getAttribute('data-libmode') || 'hide';
+        btn.disabled = (mode === 'show_only' && n === 0);
     }
     function catLibFilterGetChecked(cid) {
         var cont = document.getElementById(cid);
@@ -1425,6 +1621,42 @@ def create_catalog_browse_page(
         if (!cont) return;
         cont.querySelectorAll('.cat-lib-cb').forEach(function(cb) { cb.checked = val; });
         catLibFilterUpdateApply(cid);
+    }
+    // Set the mode attribute and reset checkboxes (D-04: flipping mode clears selection).
+    function catLibFilterSetMode(cid, mode) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        cont.setAttribute('data-libmode', mode);
+        cont.querySelectorAll('.cat-lib-cb').forEach(function(cb) { cb.checked = false; });
+        catLibFilterUpdateApply(cid);
+    }
+    // Text-search row filter: hide rows whose label does not contain the query string.
+    function catLibFilterSearch(cid, query) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        var q = query.toLowerCase().trim();
+        cont.querySelectorAll('.cat-lib-cb-row').forEach(function(row) {
+            if (!q) { row.style.display = ''; return; }
+            var label = (row.getAttribute('data-label') || '').toLowerCase();
+            row.style.display = (label.indexOf(q) >= 0) ? '' : 'none';
+        });
+    }
+    // Sort rows by count-desc or A-Z (DMF-12).
+    function catLibFilterSort(cid, key) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        var rows = Array.from(cont.querySelectorAll('.cat-lib-cb-row'));
+        rows.sort(function(a, b) {
+            if (key === 'count') {
+                return (parseInt(b.getAttribute('data-count') || '0') -
+                        parseInt(a.getAttribute('data-count') || '0'));
+            } else {
+                var la = (a.getAttribute('data-label') || '').toLowerCase();
+                var lb = (b.getAttribute('data-label') || '').toLowerCase();
+                return la < lb ? -1 : la > lb ? 1 : 0;
+            }
+        });
+        rows.forEach(function(r) { cont.appendChild(r); });
     }
     </script>''')
 
