@@ -1690,37 +1690,49 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         )
 
                     def _update_library_btn():
-                        """Sync the library filter button: label, count, and color.
+                        """Sync the library filter button: 3-state label, count, and color (DMF D-07).
 
-                        SEED-026 (smoke 2026-06-29): the post-search chips were removed — the
-                        button itself now carries the filter state. When a strict subset of the
-                        in-result libraries is shown, the button turns RED (color=negative,
-                        filled) and reads "Filter Libraries (shown/total)", where:
-                          - total = distinct libraries present in the current result set
-                          - shown = how many of those pass the active filter
-                        When all in-result libraries are shown (no active restriction), the
-                        button reverts to the neutral outlined "Filter by library".
+                        Three states keyed on mode + active-ness:
+                          Neutral:        tr('Filter by library') — outline primary.
+                          Show-only active: f"{tr('Showing')} {shown}/{total}" — filled negative/red.
+                          Hide active:    f"{tr('Hiding')} {N}" — filled deep-orange (distinct from Show-only).
+
+                        "Active" per mode:
+                          Show-only: non-empty codes AND doesn't include every in-result library.
+                          Hide: mode=='hide' AND non-empty hide-set.
+                        An EMPTY code set is neutral in BOTH modes — so the Task-1 show-all
+                        normalization (hide/[]) reads as the neutral button state (MEDIUM confirm).
                         """
                         facets = _compute_library_facets(search_state.results) if search_state.results else {}
                         total = len(facets)
-                        shown = total
-                        active = False
-                        if search_state.library_filter:
-                            sel = set(search_state.library_filter)
-                            shown = sum(1 for code in facets if code in sel)
-                            # Active only when the selection actually hides some in-result library.
+                        codes = set(search_state.library_filter)
+                        mode = getattr(search_state, 'library_mode', 'hide')
+
+                        # Determine active state per mode.
+                        if mode == 'show_only' and codes:
+                            # Show-only active: non-empty codes set.
+                            shown = sum(1 for c in facets if c in codes)
                             active = bool(total) and shown != total
-                        if not active:
+                            show_only_active = active
+                        else:
+                            show_only_active = False
+
+                        hide_active = (mode == 'hide' and bool(codes))
+
+                        if show_only_active:
+                            shown = sum(1 for c in facets if c in codes)
+                            library_filter_btn.text = f"{tr('Showing')} {shown}/{total}"
+                            library_filter_btn.props(remove='color outline')
+                            library_filter_btn.props('dense no-caps color=negative')
+                        elif hide_active:
+                            library_filter_btn.text = f"{tr('Hiding')} {len(codes)}"
+                            library_filter_btn.props(remove='color outline')
+                            library_filter_btn.props('dense no-caps color=deep-orange')
+                        else:
+                            # Neutral: no active filter (empty codes, or show-only with all in-result showing).
                             library_filter_btn.text = tr('Filter by library')
                             library_filter_btn.props(remove='color')
                             library_filter_btn.props('outline dense no-caps color=primary')
-                        else:
-                            # Consistent base label (smoke 2026-06-29): same "Filter by library"
-                            # phrasing as the inactive state, with the count appended — not a
-                            # different word ("Filter Libraries") that read as inconsistent.
-                            library_filter_btn.text = f"{tr('Filter by library')} ({shown}/{total})"
-                            library_filter_btn.props(remove='color outline')
-                            library_filter_btn.props('dense no-caps color=negative')
 
                     def _open_library_filter_dialog():
                         """Open dual-mode library filter dialog (Phase 130-02 / DMF redesign).

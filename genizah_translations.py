@@ -2904,11 +2904,16 @@ TRANSLATIONS = {
     "Showing all": "מציג הכל",
     "Hiding printed": "מסתיר דפוסים",
     "Only printed": "דפוסים בלבד",
-    # Library filter (SEED-026)
-    # Single consistent base label in both states (smoke 2026-06-29): the active button
-    # appends a "(shown/total)" count to this same phrasing rather than switching words.
+    # Library filter (SEED-026 / Phase 130-02 DMF dual-mode)
+    # Single consistent base label in neutral state; active states use Showing/Hiding.
     "Filter by library": "סינון לפי ספרייה",
     "Filter results by library": "סינון התוצאות לפי ספרייה",
+    # Phase 130-02 DMF: dual-mode dialog labels and button states.
+    # Added 2026-06-30 — EN key + HE value so Hebrew UI does not fall back to English.
+    "Hiding": "מסתיר",
+    "Show only selected": "הצג רק נבחרות",
+    "Hide selected": "הסתר נבחרות",
+    "Search libraries...": "חיפוש ספריות...",
     # Codex MEDIUM (2026-06-29): catalog→parallels handoff drops library (parallels can't scope by it)
     "Library filter is not applied to parallel search": "מסנן הספרייה אינו חל על חיפוש מקבילות",
     "Library filter": "מסנן ספרייה",
