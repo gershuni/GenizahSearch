@@ -634,8 +634,15 @@ def test_ast_filter_panel_show_only_stamp():
     assert "'show_only'" in fn_src or '"show_only"' in fn_src, (
         "consume_incoming_filters must stamp mode='show_only' for the browse->search handoff"
     )
-    assert "!= 'LOCAL'" in fn_src or '!= "LOCAL"' in fn_src, (
-        "consume_incoming_filters must carry the c != 'LOCAL' guard (HIGH-1/DMF-10)"
+    # The LOCAL exclusion may be inline OR delegated to sanitize_library_codes (the shared
+    # single-source-of-truth, which enforces `c != 'LOCAL'`). Codex R2 moved the handoff to
+    # the shared sanitizer, so accept either form.
+    assert (
+        "!= 'LOCAL'" in fn_src or '!= "LOCAL"' in fn_src
+        or 'sanitize_library_codes(' in fn_src
+    ), (
+        "consume_incoming_filters must exclude 'LOCAL' — inline guard or via "
+        "sanitize_library_codes (HIGH-1/DMF-10)"
     )
 
 
