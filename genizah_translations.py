@@ -2911,6 +2911,14 @@ TRANSLATIONS = {
     # Phase 130-02 DMF: dual-mode dialog labels and button states.
     # Added 2026-06-30 — EN key + HE value so Hebrew UI does not fall back to English.
     "Hiding": "מסתיר",
+    # Phase 130 UAT: pluralized library/libraries noun on filter button (EN+HE).
+    # Format templates — call .format(shown=N, total=M) or .format(n=N) after tr().
+    # Keys ARE the English template text (tr() in 'en' mode returns the key itself).
+    # HE word-order for hide: singular is noun-then-number (ספרייה {n}), plural is number-then-noun.
+    "Showing {shown}/{total} library": "מציג {shown}/{total} ספרייה",
+    "Showing {shown}/{total} libraries": "מציג {shown}/{total} ספריות",
+    "Hiding {n} library": "מסתיר ספרייה {n}",
+    "Hiding {n} libraries": "מסתיר {n} ספריות",
     "Show only selected": "הצג רק נבחרות",
     "Hide selected": "הסתר נבחרות",
     "Search libraries...": "חיפוש ספריות...",

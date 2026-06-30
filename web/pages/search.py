@@ -40,7 +40,7 @@ from web.pages.search_results import (
     show_add_to_list_dialog as show_add_to_list_dialog_local,
 )
 from genizah_core import generate_tabular_syntax
-from shared.browse_map_utils import get_library_display, LIBRARY_CODES
+from shared.browse_map_utils import get_library_display, LIBRARY_CODES, library_codes_with_manuscripts
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature
 from shared.exclusion_service import (
     ExclusionSource, parse_shelfmark_file, parse_csv_shelfmarks,
@@ -1721,11 +1721,18 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                         if show_only_active:
                             # WR-05: reuse `shown` computed above — no duplicate iteration.
-                            library_filter_btn.text = f"{tr('Showing')} {shown}/{total}"
+                            # Phase 130 UAT: pluralized noun (singular when total==1).
+                            _lib_btn_key = ('Showing {shown}/{total} library' if total == 1
+                                            else 'Showing {shown}/{total} libraries')
+                            library_filter_btn.text = tr(_lib_btn_key).format(shown=shown, total=total)
                             library_filter_btn.props(remove='color outline')
                             library_filter_btn.props('dense no-caps color=negative')
                         elif hide_active:
-                            library_filter_btn.text = f"{tr('Hiding')} {len(codes)}"
+                            # Phase 130 UAT: pluralized noun (singular when hiding exactly 1).
+                            _n = len(codes)
+                            _lib_btn_key = ('Hiding {n} library' if _n == 1
+                                            else 'Hiding {n} libraries')
+                            library_filter_btn.text = tr(_lib_btn_key).format(n=_n)
                             library_filter_btn.props(remove='color outline')
                             library_filter_btn.props('dense no-caps color=deep-orange')
                         else:
@@ -1783,8 +1790,11 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
 
                         # --- Build expand section (canonical library list minus shortlist, LOCAL excluded) ---
                         # Keep literal `c != 'LOCAL'` so the AST LOCAL guard passes (D-46/DMF-10).
+                        # Phase 130 UAT: also exclude codes with zero manuscripts in the corpus.
+                        _codes_with_mss = library_codes_with_manuscripts()
                         expand_codes = sorted(
-                            [c for c in LIBRARY_CODES if c != 'LOCAL' and c not in shortlist_set],
+                            [c for c in LIBRARY_CODES if c != 'LOCAL' and c not in shortlist_set
+                             and c in _codes_with_mss],
                             key=lambda c: get_library_display(c, short=False, lang=lang),
                         )
 

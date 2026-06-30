@@ -468,18 +468,28 @@ def test_ast_dialog_shortlist_excludes_local():
 # ---------------------------------------------------------------------------
 
 def test_ast_update_library_btn_three_states():
-    """_update_library_btn must reference tr('Showing'), tr('Hiding'),
+    """_update_library_btn must reference the 4 pluralized template keys,
     tr('Filter by library'), and library_mode (3-state button contract).
+
+    Phase 130 UAT: bare tr('Showing')/tr('Hiding') are replaced with the
+    four template-key variants (lib_btn_showing_one/many, lib_btn_hiding_one/many).
     """
     source = SEARCH_PY.read_text(encoding='utf-8')
-    fn_src = _extract_function_lines(source, '_update_library_btn', max_lines=100)
+    fn_src = _extract_function_lines(source, '_update_library_btn', max_lines=120)
     assert fn_src, "_update_library_btn not found in web/pages/search.py"
 
-    assert "tr('Showing')" in fn_src or 'tr("Showing")' in fn_src, (
-        "_update_library_btn must have tr('Showing') for the Show-only active label"
+    # Phase 130 UAT: pluralized template keys must be present in the function body.
+    assert "Showing {shown}/{total} library" in fn_src, (
+        "_update_library_btn must reference 'Showing {shown}/{total} library' template key"
     )
-    assert "tr('Hiding')" in fn_src or 'tr("Hiding")' in fn_src, (
-        "_update_library_btn must have tr('Hiding') for the Hide active label"
+    assert "Showing {shown}/{total} libraries" in fn_src, (
+        "_update_library_btn must reference 'Showing {shown}/{total} libraries' template key"
+    )
+    assert "Hiding {n} library" in fn_src, (
+        "_update_library_btn must reference 'Hiding {n} library' template key"
+    )
+    assert "Hiding {n} libraries" in fn_src, (
+        "_update_library_btn must reference 'Hiding {n} libraries' template key"
     )
     assert "tr('Filter by library')" in fn_src or 'tr("Filter by library")' in fn_src, (
         "_update_library_btn must have tr('Filter by library') for the neutral label"
@@ -695,3 +705,156 @@ def test_ast_js_libfilter_fallback_is_hide():
             "WR-02: libFilterUpdateApply contains `|| 'show_only'` fallback — "
             "must be `|| 'hide'` (D-05)"
         )
+
+
+# ---------------------------------------------------------------------------
+# (27) library_codes_with_manuscripts() — unit tests (Phase 130 UAT Change 2)
+# ---------------------------------------------------------------------------
+
+def test_library_codes_with_manuscripts_is_subset_of_library_codes():
+    """library_codes_with_manuscripts() must return a non-empty set that is a
+    subset of set(LIBRARY_CODES).  The real corpus must contain at least the
+    big four: CUL, JTS, RNL, Oxford.
+    """
+    from shared.browse_map_utils import library_codes_with_manuscripts
+    # Reset cache so monkeypatching in other tests doesn't bleed in.
+    library_codes_with_manuscripts._cache = None
+    result = library_codes_with_manuscripts()
+    assert isinstance(result, set), "Must return a set"
+    assert result, "Must be non-empty"
+    assert result <= set(LIBRARY_CODES), (
+        "All returned codes must be in LIBRARY_CODES (no stray values)"
+    )
+    # The CSV always has the big four for the Cairo Genizah corpus.
+    for expected in ('CUL', 'JTS', 'RNL', 'Oxford'):
+        assert expected in result, f"Expected {expected!r} to have manuscripts"
+
+
+def test_library_codes_with_manuscripts_excludes_zero_record_codes():
+    """Codes that appear in LIBRARY_CODES but have NO rows in libraries.csv must
+    not appear in the returned set.
+
+    We monkeypatch the CSV path to a tiny synthetic CSV that has CUL and JTS
+    only, then verify that e.g. 'Bisno' (a real but low-count code that may be
+    absent) is absent while CUL and JTS are present.
+    """
+    import csv
+    import tempfile
+    import os
+    from shared.browse_map_utils import library_codes_with_manuscripts
+    from shared import browse_map_utils as _bmu
+
+    # Build a minimal CSV with only CUL rows.
+    rows = [
+        ['system_number', 'oxford_part_id', 'call_numbers', 'library_code', '', '', '', 'title'],
+        ['990000000000001', '', 'T-S 1.1', 'CUL', '', '', '', 'test'],
+        ['990000000000002', '', 'T-S 1.2', 'CUL', '', '', '', 'test2'],
+    ]
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', encoding='utf-8',
+                                     delete=False, newline='') as tmp:
+        writer = csv.writer(tmp)
+        writer.writerows(rows)
+        tmp_path = tmp.name
+
+    try:
+        # Monkeypatch the cache + CSV path.
+        library_codes_with_manuscripts._cache = None
+        original_csv = _bmu.Config.LIBRARIES_CSV
+        _bmu.Config.LIBRARIES_CSV = tmp_path
+        try:
+            result = library_codes_with_manuscripts()
+        finally:
+            _bmu.Config.LIBRARIES_CSV = original_csv
+            library_codes_with_manuscripts._cache = None
+
+        assert 'CUL' in result, "CUL must be present (has rows)"
+        assert 'JTS' not in result, "JTS must be absent (no rows in synthetic CSV)"
+        assert 'Bisno' not in result, "Bisno must be absent (no rows in synthetic CSV)"
+    finally:
+        os.unlink(tmp_path)
+
+
+def test_library_codes_with_manuscripts_fail_open_when_csv_missing(tmp_path):
+    """When LIBRARIES_CSV is absent, fail-open and return the full LIBRARY_CODES set."""
+    from shared.browse_map_utils import library_codes_with_manuscripts
+    from shared import browse_map_utils as _bmu
+
+    library_codes_with_manuscripts._cache = None
+    original_csv = _bmu.Config.LIBRARIES_CSV
+    _bmu.Config.LIBRARIES_CSV = str(tmp_path / 'nonexistent.csv')
+    try:
+        result = library_codes_with_manuscripts()
+    finally:
+        _bmu.Config.LIBRARIES_CSV = original_csv
+        library_codes_with_manuscripts._cache = None
+
+    assert result == set(LIBRARY_CODES), (
+        "Fail-open must return the full LIBRARY_CODES set when CSV is missing"
+    )
+
+
+# ---------------------------------------------------------------------------
+# (28) AST guards — Phase 130 UAT Change 1 + Change 2 (button keys + dialog filter)
+# ---------------------------------------------------------------------------
+
+def test_ast_btn_template_keys_in_translations():
+    """The 4 new template keys must exist in TRANSLATIONS (HE table)."""
+    from genizah_translations import TRANSLATIONS
+    expected_keys = (
+        "Showing {shown}/{total} library",
+        "Showing {shown}/{total} libraries",
+        "Hiding {n} library",
+        "Hiding {n} libraries",
+    )
+    for key in expected_keys:
+        assert key in TRANSLATIONS, (
+            f"Translation key {key!r} missing from TRANSLATIONS dict"
+        )
+        # The value must be a non-empty string (the HE translation).
+        assert isinstance(TRANSLATIONS[key], str) and TRANSLATIONS[key], (
+            f"TRANSLATIONS[{key!r}] must be a non-empty HE string"
+        )
+
+
+def test_ast_btn_template_keys_format_correctly():
+    """Ensure the 4 EN keys format correctly with the expected kwargs."""
+    # In EN mode tr() just returns the key; apply .format() directly.
+    # Simulate EN mode by calling the template key directly.
+    assert '3' in "Showing {shown}/{total} library".format(shown=3, total=1)
+    assert '5' in "Showing {shown}/{total} libraries".format(shown=5, total=10)
+    assert '1' in "Hiding {n} library".format(n=1)
+    assert '3' in "Hiding {n} libraries".format(n=3)
+
+    # Verify the HE translations also format without KeyError.
+    from genizah_translations import TRANSLATIONS
+    he_showing_one = TRANSLATIONS["Showing {shown}/{total} library"]
+    he_showing_many = TRANSLATIONS["Showing {shown}/{total} libraries"]
+    he_hiding_one = TRANSLATIONS["Hiding {n} library"]
+    he_hiding_many = TRANSLATIONS["Hiding {n} libraries"]
+    assert '2' in he_showing_one.format(shown=2, total=1)
+    assert '7' in he_showing_many.format(shown=7, total=10)
+    assert '1' in he_hiding_one.format(n=1)
+    assert '4' in he_hiding_many.format(n=4)
+
+
+def test_ast_dialog_expand_intersects_library_codes_with_manuscripts():
+    """_open_library_filter_dialog must reference library_codes_with_manuscripts
+    for the expand section, AND still contain the literal `c != 'LOCAL'`.
+
+    Phase 130 UAT Change 2: zero-manuscript codes must not appear as filter options.
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+    fn_src = _extract_function_lines(source, '_open_library_filter_dialog', max_lines=350)
+    assert fn_src, "_open_library_filter_dialog not found in web/pages/search.py"
+
+    assert 'library_codes_with_manuscripts' in fn_src, (
+        "_open_library_filter_dialog must call library_codes_with_manuscripts() "
+        "to exclude codes with zero manuscripts (Phase 130 UAT Change 2)"
+    )
+    # LOCAL guard must still be present (D-46 / test_web_library_options_no_local).
+    local_guard_count = fn_src.count("!= 'LOCAL'") + fn_src.count('!= "LOCAL"')
+    assert local_guard_count >= 2, (
+        f"Dialog function must still carry 'c != LOCAL' at least twice "
+        f"(shortlist + expand section), found {local_guard_count}. "
+        "Do not remove the LOCAL guard when adding the manuscripts filter."
+    )
