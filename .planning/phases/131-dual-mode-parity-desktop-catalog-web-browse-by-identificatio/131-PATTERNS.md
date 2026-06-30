@@ -225,14 +225,19 @@ def _catalog_update_library_filter_btn(self):
     btn = self._catalog_library_filter_btn
     mode = getattr(self, '_catalog_library_mode', 'hide')
     flt = self._catalog_library_filter
-    total = len([c for c in LIBRARY_CODES.keys() if c != 'LOCAL'])
+    # Codex F2/N4: total comes from the SAME universe the dialog offers
+    # (library_codes_with_manuscripts), NOT LIBRARY_CODES.keys() — otherwise the
+    # count can exceed the selectable libraries.
+    total = len([c for c in library_codes_with_manuscripts() if c != 'LOCAL'])
     if not flt:
         # Neutral: no active restriction
         btn.setText(tr("Filter by library"))
         btn.setStyleSheet("QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; }")
     elif mode == 'show_only':
         shown = len(flt)
-        btn.setText(tr("Filter by library") + f" ({shown}/{total})")
+        # Codex F2: REAL Phase-130 pluralized keys (genizah_translations.py:2918-2921), not an invented label
+        btn.setText(tr('Showing {shown}/{total} library' if total == 1
+                       else 'Showing {shown}/{total} libraries').format(shown=shown, total=total))
         btn.setStyleSheet(
             "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; "
             "background-color: #d32f2f; color: white; border: none; border-radius: 3px; }"
@@ -240,7 +245,7 @@ def _catalog_update_library_filter_btn(self):
         )
     else:  # hide mode, non-empty set
         n = len(flt)
-        btn.setText(tr("Hiding") + f" {n}")
+        btn.setText(tr('Hiding {n} library' if n == 1 else 'Hiding {n} libraries').format(n=n))
         btn.setStyleSheet(
             "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; "
             "background-color: #e65100; color: white; border: none; border-radius: 3px; }"
@@ -395,23 +400,28 @@ def _update_library_filter_btn():
 Key differences from current catalog dialog:
 - Add `ui.toggle({'show_only': tr('Show only selected'), 'hide': tr('Hide selected')})` at top (D-03)
 - Add `ui.input(placeholder=tr('Search libraries...'), ...)` client-side text filter
-- Split checkboxes into shortlist (result-derived facets — see Pattern below) + expand section
+- Split checkboxes into shortlist (TRUE full-set facets via `fjms.get_browse_library_facets(...)` — see Pattern below; NO page-local/result-derived fallback, Codex R3 F1) + expand section
 - JS functions: reuse `libFilterSearch` / `libFilterSetMode` / `libFilterGetChecked` / `libFilterUpdateApply` / `libFilterSelectAll` (already defined at page level in `search.py`; must be added to `catalog_browse.py` page-level `ui.add_head_html` if not already present)
 - `container_id = f'cat-lib-filter-{_uuid.uuid4().hex[:8]}'` (unique per open)
 
-**Per-library facet count source for catalog (DMF-12):**
-Build facets from the current result rows — mirrors `_compute_library_facets` in `search.py`. The catalog `_fetch_results_blocking` returns a results list; iterate it to count by `library_code`:
+**Per-library facet count source for catalog (DMF-12) — TRUE full-set facets, ALWAYS (Codex R3 F1/F2):**
+Do NOT build facets from the current result rows. The catalog is ALWAYS paginated (PAGE_SIZE=50), so a current-page `Counter` misses off-page libraries even with no filters active. The shortlist counts ALWAYS come from Plan 02's `fjms.get_browse_library_facets(...)` (true full-set facets) — called as an INSTANCE METHOD on the page's `fjms` handle (`fjms = get_fjms_service(thread_safe=True)` at line 89, the SAME handle `fjms.get_browse_results(...)` uses — Codex N1), inside the io_bound path (it is a DB call). The `sys_id_to_library` argument is a CALLABLE: pass the bound full-corpus method `state.meta_mgr.get_library_for_id` directly (Codex R3 F3) — NOT a dict, NOT the page-local `_resolve_all`, NOT a current-page Counter.
 ```python
-# After fetching current results (available via current_results_cache or re-use on dialog open):
-from collections import Counter
-facets = Counter(
-    r.get('library_code', '') or r.get('display', {}).get('library_code', '')
-    for r in <current_results_list>
-    if (r.get('library_code', '') or r.get('display', {}).get('library_code', ''))
-       not in ('', 'LOCAL')
-)
+# Inside the io_bound fetch path (NOT on the event loop), refreshed alongside refresh_results:
+try:
+    facets = fjms.get_browse_library_facets(
+        domain=..., author=..., work=...,            # active non-library filters
+        date_from=..., date_to=..., include_undated=...,
+        text_all=..., text_any=..., text_not=...,
+        pgp_filter=..., pgp_sys_ids=...,
+        editions_filter=..., edition_sys_ids=...,
+        sys_id_to_library=state.meta_mgr.get_library_for_id,   # CALLABLE full-corpus mapper (Codex F3)
+    )                                                          # -> {library_code: count}, '' / 'LOCAL' skipped
+except Exception:
+    facets = {}   # ONLY fallback: render the shortlist WITHOUT counts on facet-query failure (Codex F1)
+current_library_facets['value'] = facets
 ```
-If no current results are cached at dialog open, fall back to showing the full A-Z list without counts (same as the expand section). The planner must decide how to expose the current result rows to `_open_library_filter_dialog` (options: shared closure dict like `results_container`, or a dedicated `current_results_cache = {'value': []}` cell).
+There is NO page-local/result-derived fallback (Codex R3 F1). When `current_library_facets['value']` is empty (facet-query failure), the dialog renders the shortlist codes WITHOUT counts — never a page-local count substitute. Expose the facet cell to `_open_library_filter_dialog` via a `current_library_facets = {'value': {}}` closure cell refreshed in the io_bound `refresh_results` path.
 
 **Apply handler** (mirrors `search.py:1930–1976`):
 ```python
@@ -608,9 +618,25 @@ def _apply_parallels_library_filter(results_list):
                 and r.get('display', {}).get('library_code', '') not in codes]
 ```
 
-Apply after results are stored: call `_apply_parallels_library_filter(p_state.results)` before rendering. The planner should identify the result-render site (where `p_state.filtered_results` is populated) and insert the filter call there.
+`_apply_parallels_library_filter` is used ONLY for **Hide** (Show-only is scoped pre-query — see below). Apply it to `main_results`/`filtered_results` BEFORE `set_parallels_export(...)` (line 2343) and the `safe_user_set('parallels_results', ...)` write (line 2353) so exports + stored payloads are scoped (Codex R1 MED #6), plus a defensive idempotent re-apply at the top of `render_results`.
 
-Note (Pitfall 4): This post-fetch pattern avoids the `restrict_sys_ids` subtraction problem for Hide mode when no other filters are active. The `restrict_sys_ids` path (lines 2177–2224) is NOT modified for the library filter — library filtering runs as a post-fetch step only.
+**HYBRID scoping — `restrict_sys_ids` IS modified for Show-only (Codex R3 F2/F4 — correcting the earlier "not modified" statement):**
+The earlier note that "`restrict_sys_ids` is NOT modified for the library filter" is WRONG and is corrected here. The parallels library filter is HYBRID:
+- **Show-only (pre-query):** resolve the selected-library sys_ids and INTERSECT them INTO `restrict_sys_ids`. This block MUST live OUTSIDE the `if _has_active_filters():` body (that gate is `False` when ONLY a library filter is set — gating the resolve inside it would make a library-only Show-only never scope; Codex R3 F4) and MUST run AFTER the advanced-filter restrict block (after the empty-match early-return ~2217) and BEFORE the per-manuscript exclusion subtraction at 2219, so library-only AND advanced+library both compose:
+  ```python
+  # After the `if _has_active_filters():` block (after the 2211-2217 early-return),
+  # BEFORE `if p_state.excluded_manuscript_ids and restrict_sys_ids is not None:` (2219):
+  if p_state.library_mode == 'show_only' and p_state.library_filter:   # UNGATED by _has_active_filters (Codex F4)
+      lib_ids = await run.io_bound(resolve_library_sys_ids, list(p_state.library_filter), state.meta_mgr)
+      if lib_ids:  # fail-open: skip if empty
+          restrict_sys_ids = lib_ids if restrict_sys_ids is None else (restrict_sys_ids & lib_ids)
+  # ...then the existing exclusion subtraction at 2219-2221 subtracts per-ms exclusions from the
+  #    now-concrete library set too (library-only case composes), and 2224 captures restrict_sys_ids.
+  ```
+  This folds the Show-only scope into the Tantivy query (`search_engine.py:2929`) so selected-library hits beyond the unscoped top-50/chunk are retained.
+- **Hide (post-fetch):** the full-corpus complement is NOT computable from `restrict_sys_ids` alone (Pitfall 4), so Hide stays a post-fetch filter over the result rows, applied BEFORE export/storage (above). Do NOT touch the `restrict_sys_ids` path for Hide.
+
+The advanced-filter `restrict_sys_ids` semantics + the empty-match early-return (2211-2217) are otherwise unchanged.
 
 #### Site 5: DMF-10 LOCAL guard in new parallels dialog function
 
