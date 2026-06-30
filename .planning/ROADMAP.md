@@ -135,7 +135,19 @@ Plans:
   5. The web Browse-by-Identification catalog library filter gains the `/search` dialog affordances: a client-side text-search input, a per-library fragment/result count on the shortlist, and sort-by-count / sort-A–Z. (DMF-12)
   6. On every surface (catalog / `/parallels` / desktop), libraries with zero corpus manuscripts are excluded from the filter universe, reusing the shared `library_codes_with_manuscripts()` built in Phase 130 (web `/search` already done). (DMF-13)
 
-**Plans**: TBD
+**Plans**: 5 plans
+Plans:
+**Wave 1**
+
+- [ ] 131-01-PLAN.md — Wave-0 test scaffolds: new catalog + parallels dual-mode test files + extend desktop libfilter tests (pure mirrors + AST source contracts)
+- [ ] 131-02-PLAN.md — Shared `get_browse_results` `library_mode` param (EXISTS/NOT EXISTS, backward-compatible) for the server-side catalog/desktop surfaces
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 131-03-PLAN.md — Desktop catalog `LibraryFilterDialog` dual-mode (toggle + D-04 reset + mode-aware OK + 3-state button + `_catalog_library_mode` threaded into the worker) (DMF-07/10/13)
+- [ ] 131-04-PLAN.md — Web Browse-by-Identification catalog dual-mode dialog (toggle + text-search + count-shortlist + expand-all + sort + dict persist + migration) (DMF-08/12/10/13)
+- [ ] 131-05-PLAN.md — Web `/parallels` NEW dual-mode library control (button + dialog + post-fetch filter + `parallels_library_filter` persistence) (DMF-09/10/13)
+
 **UI hint**: yes
 
 ### Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`)
@@ -157,5 +169,5 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 130. Dual-Mode Filter Core — Web /search | 3/3 | Complete    | 2026-06-30 |
-| 131. Dual-Mode Parity — Desktop + Browse + Parallels | 0/? | Not started | - |
+| 131. Dual-Mode Parity — Desktop + Browse + Parallels | 0/5 | Planned | - |
 | 132. Public API Dual-Mode | 0/? | Not started | - |
