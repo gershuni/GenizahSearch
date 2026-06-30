@@ -103,7 +103,11 @@ See: .planning/milestones/v8.3.0-ROADMAP.md
   4. An existing v8.3.0 persisted allowlist (`search_library_filter`) loads cleanly into the new (mode + set) model without error, interpreted as **Show-only with the existing set** — verified by a migration test feeding the legacy value shape. (DMF-05)
   5. Edge states behave predictably: an empty selection in Show-only means "show all" (no collision with the all-unchecked sentinel), and a fully-populated Hide set (everything hidden) is handled without crash or contradictory display. (DMF-06)
   6. `'LOCAL'` is absent from the library-filter options in BOTH modes; `tests/test_web_library_options_no_local.py` + `tests/test_phase_97_invariants.py` stay green. (DMF-10)
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 130-01-PLAN.md — Model layer: `library_mode` field on `SearchUIState` + mode-aware `clear_search_snapshot` reset default
+- [ ] 130-02-PLAN.md — `search.py` runtime: mode-aware restore + legacy migration, mode-branch filter, dict persist shape, redesigned dialog (mode toggle + count-shortlist + expand-all + text search), 3-state button
+- [ ] 130-03-PLAN.md — Tests: new dual-mode behavior/migration/edge-state/LOCAL-guard suite + revise stale inclusion-only assertions in the existing libfilter test
 **UI hint**: yes
 
 ### Phase 131: Dual-Mode Parity — Desktop Catalog + Web Browse-by-Identification + Web `/parallels`
@@ -135,6 +139,6 @@ See: .planning/milestones/v8.3.0-ROADMAP.md
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 130. Dual-Mode Filter Core — Web /search | 0/? | Not started | - |
+| 130. Dual-Mode Filter Core — Web /search | 0/3 | Planned | - |
 | 131. Dual-Mode Parity — Desktop + Browse + Parallels | 0/? | Not started | - |
 | 132. Public API Dual-Mode | 0/? | Not started | - |
