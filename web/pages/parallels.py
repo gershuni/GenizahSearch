@@ -260,7 +260,10 @@ def create_parallels_page(initial_text: str = None):
             return ''
 
         if mode == 'show_only':
-            return [r for r in results_list if _get_lib_code(r) in codes]
+            # DMF-10: LOCAL rows are not user-selectable; exclude them symmetrically so
+            # Show-only and Hide both treat LOCAL the same way (never in the filter set).
+            return [r for r in results_list
+                    if _get_lib_code(r) in codes and _get_lib_code(r) != 'LOCAL']
         else:  # hide
             return [r for r in results_list if _get_lib_code(r) not in codes]
 
