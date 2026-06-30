@@ -48,12 +48,20 @@ result: [pending]
 expected: Switch the app to Hebrew UI. Open the catalog library filter dialog (web /catalog AND desktop) -> each library row shows the English code in parentheses after the Hebrew name, e.g. "ספריית האוניברסיטה של קיימברידג' (CUL)". Type "CUL" (or "JTS", etc.) in the type-to-find box -> the matching library is found. A-Z sort order is unchanged (sorts by the Hebrew name, not the appended code). ALSO (gap 131-09): switch to English UI -> rows now show the code too, e.g. "Cambridge University Library (CUL)", searchable by typing "CUL".
 result: [pending]
 
+### 10. Web /search library dialog — rows show the code, searchable (gap 131-10)
+expected: On web /search, open the library filter dialog -> each row shows the English code in parentheses (e.g. "Cambridge University Library (CUL)"; Hebrew "ספריית... (CUL)"); typing "CUL" in the dialog's "Search libraries" box finds it. A-Z order unchanged (sort keyed on bare name).
+result: [pending]
+
+### 11. Type-to-find layout — rows stay line-by-line (gap 131-10 bug fix)
+expected: In BOTH web dialogs (/search AND /catalog Browse-by-Identification), start typing in the "Search libraries" box -> the matching library rows stay stacked line-by-line (each on its own row). They must NOT collapse into a single run of continuous text. (Root cause: showing a row reset its display to the <label> inline default instead of restoring flex.)
+result: [pending]
+
 ## Summary
 
-total: 9
+total: 11
 passed: 0
-issues: 0
-pending: 9
+issues: 2
+pending: 11
 skipped: 0
 blocked: 0
 
@@ -131,4 +139,32 @@ blocked: 0
   missing:
     - "Flip with_code gate to always-on at both call sites (desktop + web)."
     - "Update en-lang tests to expect the code; keep he-lang + default-off-invariant tests."
+  debug_session: ""
+- truth: "The web /search library-filter dialog rows show the English library code in parentheses (e.g. 'Cambridge University Library (CUL)') in both languages, and the dialog's type-to-find matches the code — parity with the catalog dialog (gaps 131-08/09). A-Z order unchanged."
+  status: failed
+  reason: "User: 'This should be in search too.' The /search dialog (web/pages/search.py) was not covered by 131-08/09 (those touched only the catalog dialog + shared helper)."
+  severity: minor
+  test: 10
+  root_cause: "web/pages/search.py builds /search library-dialog row labels via get_library_display(code, short=False, lang=lang) at ~lines 1829 (shortlist) and ~1843 (expand) WITHOUT with_code. The sort key at ~line 1806 is separate. The shared with_code param (131-08) is already available."
+  artifacts:
+    - path: "web/pages/search.py"
+      issue: "Pass with_code=True to the two /search dialog label builds (~1829 shortlist label, ~1843 expand label) so the visible label AND the _make_cb_row data-label (derived from label_text.lower()) include the code; libFilterSearch then matches the code. KEEP the sort key at ~line 1806 WITHOUT with_code so A-Z order is unaffected. Both languages (always-on, matching the catalog dialog after 131-09)."
+  missing:
+    - "Add with_code=True to the /search dialog label builds; keep sort key bare; test the data-label/label includes the code + sort order unchanged."
+  debug_session: ""
+
+- truth: "Typing in the 'Search libraries' type-to-find box keeps the library rows stacked line-by-line in BOTH web dialogs (/search and /catalog) — rows do NOT collapse into continuous inline text."
+  status: failed
+  reason: "User: 'When I start to type to search in the search boxes, they collapse from being line after line, to continuous text.' BUG in the type-to-find show/hide."
+  severity: major
+  test: 11
+  root_cause: "The rows are <label class='lib-cb-row'/'cat-lib-cb-row'> with an INLINE style='display:flex;...'. The show branch of libFilterSearch (web/pages/search.py ~line 388) and catLibFilterSearch (web/pages/catalog_browse.py ~line 1645) sets row.style.display = '' to reveal a row, which CLEARS the inline display:flex and lets the <label> fall back to its default display:inline -> rows run together as continuous text."
+  artifacts:
+    - path: "web/pages/search.py"
+      issue: "In libFilterSearch, change the show value from '' to 'flex': the no-query reset `if (!q) { row.style.display = 'flex'; return; }` and the match branch `row.style.display = (label.indexOf(q) >= 0) ? 'flex' : 'none';`. (The rows are display:flex inline; restoring 'flex' preserves the line-by-line layout.)"
+    - path: "web/pages/catalog_browse.py"
+      issue: "Same fix in catLibFilterSearch (~line 1645): show branch uses 'flex' not ''."
+  missing:
+    - "Fix libFilterSearch + catLibFilterSearch show branch to restore display:flex (not '')."
+    - "Add a source-contract test asserting neither search-filter JS function uses display = '' on the show path (and uses 'flex')."
   debug_session: ""
