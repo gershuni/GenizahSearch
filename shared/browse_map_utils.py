@@ -120,12 +120,15 @@ LIBRARY_CODES = {
 }
 
 
-def library_codes_with_manuscripts() -> set:
+def library_codes_with_manuscripts() -> frozenset:
     """Return the set of library_code values that have at least one manuscript record.
 
     Reads ``libraries.csv`` (column 3 per CLAUDE.md), caches the result at module level
     so repeated calls are free.  Fail-open: if the CSV is unavailable or unreadable,
-    returns the full ``set(LIBRARY_CODES)`` so the filter never silently empties.
+    returns the full ``frozenset(LIBRARY_CODES)`` so the filter never silently empties.
+
+    Returns a ``frozenset`` so callers cannot mutate the cached result (Codex LOW fix).
+    ``c in <frozenset>`` membership tests work identically to a regular set.
 
     Phase 131 note: reusable by catalog/parallels/desktop — keep import-safe (no web/
     or desktop/ imports here).
@@ -139,7 +142,7 @@ def library_codes_with_manuscripts() -> set:
             "library_codes_with_manuscripts: %s not found — fail-open (returning full set)",
             csv_path,
         )
-        library_codes_with_manuscripts._cache = set(LIBRARY_CODES)
+        library_codes_with_manuscripts._cache = frozenset(LIBRARY_CODES)
         return library_codes_with_manuscripts._cache
 
     import csv as _csv
@@ -160,7 +163,7 @@ def library_codes_with_manuscripts() -> set:
             "library_codes_with_manuscripts: failed to read %s (%s) — fail-open",
             csv_path, exc,
         )
-        library_codes_with_manuscripts._cache = set(LIBRARY_CODES)
+        library_codes_with_manuscripts._cache = frozenset(LIBRARY_CODES)
         return library_codes_with_manuscripts._cache
 
     # Intersect with known canonical codes so stale/typo values from the CSV don't leak.
@@ -170,12 +173,30 @@ def library_codes_with_manuscripts() -> set:
             "library_codes_with_manuscripts: intersection is empty — fail-open (returning full set)"
         )
         result = set(LIBRARY_CODES)
-    library_codes_with_manuscripts._cache = result
+    library_codes_with_manuscripts._cache = frozenset(result)
     LOGGER.debug("library_codes_with_manuscripts: %d codes with manuscripts", len(result))
     return library_codes_with_manuscripts._cache
 
 
 library_codes_with_manuscripts._cache = None  # type: ignore[attr-defined]
+
+
+def sanitize_library_codes(raw) -> list:
+    """Return a clean list of canonical library codes from an untrusted value.
+
+    Accepts any value; non-list input returns [].
+    Keeps only str items that are in LIBRARY_CODES and != 'LOCAL'.
+    Order-preserving; deduplication not required by the caller.
+
+    Used at every restore / Apply-handler entry point in web/pages/search.py
+    so malformed persisted values (int, dict-items, stray strings) never reach
+    the filter logic and cause a TypeError.  The ``c != 'LOCAL'`` guard is kept
+    literal here (not hidden behind a variable) so the AST guard in
+    tests/test_web_library_options_no_local.py can detect it.
+    """
+    if not isinstance(raw, list):
+        return []
+    return [c for c in raw if isinstance(c, str) and c in LIBRARY_CODES and c != 'LOCAL']
 
 
 def normalize_shelfmark(shelfmark: str) -> str:

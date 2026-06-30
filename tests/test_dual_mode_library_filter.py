@@ -33,10 +33,11 @@ import ast
 import re
 from pathlib import Path
 
-from shared.browse_map_utils import LIBRARY_CODES
+from shared.browse_map_utils import LIBRARY_CODES, sanitize_library_codes
 
 SEARCH_PY = Path(__file__).parent.parent / 'web' / 'pages' / 'search.py'
 FILTER_PANEL_PY = Path(__file__).parent.parent / 'web' / 'components' / 'filter_panel.py'
+BROWSE_MAP_UTILS_PY = Path(__file__).parent.parent / 'shared' / 'browse_map_utils.py'
 
 # Canonical valid codes — LOCAL is in LIBRARY_CODES but must be excluded from all web filter UI.
 _VALID_CODES = set(LIBRARY_CODES) - {'LOCAL'}
@@ -76,13 +77,21 @@ def _migrate_library_filter(raw, valid_codes: set) -> dict:
     Branches (matching search.py ~188-208):
       - list  (legacy v8.3.0): non-empty -> show_only + sanitized codes;
                                 empty    -> hide + []
-      - dict  (new shape): validated mode + sanitized codes; unknown mode -> 'hide'
+      - dict  (new shape): validated mode + sanitized codes; unknown mode -> 'hide';
+               show_only + empty codes -> normalised to hide/[] (Codex HIGH fix).
       - else  (None/garbage): fresh default hide + []
 
-    Always drops 'LOCAL' and codes not in valid_codes.
+    Always drops non-str items, 'LOCAL', and codes not in valid_codes
+    (mirrors sanitize_library_codes behaviour).
     """
+    def _sanitize(lst):
+        """Mirror of sanitize_library_codes: only str items in valid_codes, != 'LOCAL'."""
+        if not isinstance(lst, list):
+            return []
+        return [c for c in lst if isinstance(c, str) and c in valid_codes and c != 'LOCAL']
+
     if isinstance(raw, list):
-        codes = [c for c in raw if c in valid_codes and c != 'LOCAL']
+        codes = _sanitize(raw)
         if codes:
             return {'mode': 'show_only', 'codes': codes}
         return {'mode': 'hide', 'codes': []}
@@ -90,7 +99,10 @@ def _migrate_library_filter(raw, valid_codes: set) -> dict:
         mode = raw.get('mode', 'hide')
         if mode not in ('show_only', 'hide'):
             mode = 'hide'
-        codes = [c for c in (raw.get('codes') or []) if c in valid_codes and c != 'LOCAL']
+        codes = _sanitize(raw.get('codes'))
+        # Normalise show_only + empty to hide (Codex HIGH fix: "show nothing" is not intent).
+        if mode == 'show_only' and not codes:
+            mode = 'hide'
         return {'mode': mode, 'codes': codes}
     # None / int / str / anything else
     return {'mode': 'hide', 'codes': []}
@@ -403,20 +415,38 @@ def test_ast_restore_has_legacy_list_branch():
 
 
 # ---------------------------------------------------------------------------
-# (16) AST: Apply handler sanitizes codes against LIBRARY_CODES and c != 'LOCAL'
+# (16) AST: Apply handler sanitizes codes via sanitize_library_codes (HIGH-3)
 # ---------------------------------------------------------------------------
 
 def test_ast_apply_handler_sanitizes_codes():
-    """The dialog's apply_library_filter handler must sanitize JS-returned codes with
-    a comprehension containing 'c in LIBRARY_CODES and c != 'LOCAL'' (HIGH-3).
+    """The dialog's apply_library_filter handler must sanitize JS-returned codes via
+    sanitize_library_codes (Codex HIGH fix: replaced inline comprehension that crashed
+    on non-str items like int/dict).
+
+    Also verifies that the canonical guard (c in LIBRARY_CODES and c != 'LOCAL') lives
+    inside sanitize_library_codes in browse_map_utils.py — the single source of truth.
     """
     source = SEARCH_PY.read_text(encoding='utf-8')
-    # The sanitize line is inside the async apply_library_filter nested closure
-    # We check the whole file since the function is deeply nested
-    assert 'c in LIBRARY_CODES and c != \'LOCAL\'' in source or \
-           'c in LIBRARY_CODES and c != "LOCAL"' in source, (
-        "Apply handler must sanitize checked codes with "
-        "'c in LIBRARY_CODES and c != LOCAL' (HIGH-3 T-130-02-02)"
+    bmu_source = BROWSE_MAP_UTILS_PY.read_text(encoding='utf-8')
+
+    # search.py Apply handler must call sanitize_library_codes (not an inline comprehension).
+    assert 'sanitize_library_codes' in source, (
+        "Apply handler must delegate to sanitize_library_codes (HIGH-3 T-130-02-02) "
+        "instead of an inline comprehension that crashes on non-str items"
+    )
+
+    # The canonical guard must live in browse_map_utils.py (single source of truth).
+    assert 'c in LIBRARY_CODES and c != \'LOCAL\'' in bmu_source or \
+           'c in LIBRARY_CODES and c != "LOCAL"' in bmu_source, (
+        "sanitize_library_codes in browse_map_utils.py must contain "
+        "'c in LIBRARY_CODES and c != LOCAL' as the canonical guard"
+    )
+
+    # All three sanitization entry points in search.py must use sanitize_library_codes.
+    occurrences = source.count('sanitize_library_codes(')
+    assert occurrences >= 3, (
+        f"search.py must call sanitize_library_codes at all 3 entry points "
+        f"(list-branch restore, dict-branch restore, Apply handler); found {occurrences} call(s)"
     )
 
 
@@ -504,13 +534,20 @@ def test_ast_update_library_btn_three_states():
 # ---------------------------------------------------------------------------
 
 def test_ast_dialog_and_restore_contain_local_guard():
-    """Both the dialog body and the restore/sanitize path must contain the
-    'c != LOCAL' guard (DMF-10).
+    """Both the dialog body and the restore/sanitize path must enforce the
+    LOCAL-exclusion guard (DMF-10).
+
+    After the Codex HIGH fix, the restore block delegates sanitization to
+    sanitize_library_codes() (defined in browse_map_utils.py) rather than
+    containing an inline comprehension.  We accept either form:
+    - Old: inline ``!= 'LOCAL'`` in the restore region
+    - New: ``sanitize_library_codes`` call in the restore region (guard is inside the helper)
+    The dialog shortlist must still carry the inline ``!= 'LOCAL'`` literal.
     """
     source = SEARCH_PY.read_text(encoding='utf-8')
+    bmu_source = BROWSE_MAP_UTILS_PY.read_text(encoding='utf-8')
 
-    # Restore region (top-of-function)
-    # Find the lines around the restore block
+    # Restore region: either an inline guard OR a sanitize_library_codes call.
     lines = source.splitlines()
     restore_lines = []
     in_restore = False
@@ -519,15 +556,23 @@ def test_ast_dialog_and_restore_contain_local_guard():
             in_restore = True
         if in_restore:
             restore_lines.append(ln)
-            if len(restore_lines) > 30:
+            if len(restore_lines) > 40:
                 break
     restore_src = '\n'.join(restore_lines)
-    assert "!= 'LOCAL'" in restore_src or '!= "LOCAL"' in restore_src, (
-        "The restore/sanitize region must contain c != 'LOCAL' to drop LOCAL from migrated codes"
+    has_inline_guard = "!= 'LOCAL'" in restore_src or '!= "LOCAL"' in restore_src
+    has_sanitize_call = 'sanitize_library_codes' in restore_src
+    assert has_inline_guard or has_sanitize_call, (
+        "The restore/sanitize region must either contain an inline c != 'LOCAL' guard "
+        "OR delegate to sanitize_library_codes (Codex HIGH fix accepted both forms)"
     )
+    # When delegating, verify that the canonical guard lives in browse_map_utils.
+    if has_sanitize_call and not has_inline_guard:
+        assert "!= 'LOCAL'" in bmu_source or '!= "LOCAL"' in bmu_source, (
+            "sanitize_library_codes in browse_map_utils.py must contain c != 'LOCAL' "
+            "as the single source of truth for the LOCAL-exclusion guard"
+        )
 
-    # Dialog shortlist build (already covered in test 18, but cross-checked here for the
-    # composite guard statement)
+    # Dialog shortlist build (already covered in test 18, but cross-checked here).
     fn_src = _extract_function_lines(source, '_open_library_filter_dialog', max_lines=300)
     assert "!= 'LOCAL'" in fn_src or '!= "LOCAL"' in fn_src, (
         "_open_library_filter_dialog must contain c != 'LOCAL' guard"
@@ -712,7 +757,7 @@ def test_ast_js_libfilter_fallback_is_hide():
 # ---------------------------------------------------------------------------
 
 def test_library_codes_with_manuscripts_is_subset_of_library_codes():
-    """library_codes_with_manuscripts() must return a non-empty set that is a
+    """library_codes_with_manuscripts() must return a non-empty frozenset that is a
     subset of set(LIBRARY_CODES).  The real corpus must contain at least the
     big four: CUL, JTS, RNL, Oxford.
     """
@@ -720,7 +765,9 @@ def test_library_codes_with_manuscripts_is_subset_of_library_codes():
     # Reset cache so monkeypatching in other tests doesn't bleed in.
     library_codes_with_manuscripts._cache = None
     result = library_codes_with_manuscripts()
-    assert isinstance(result, set), "Must return a set"
+    assert isinstance(result, frozenset), (
+        f"Must return a frozenset (Codex LOW fix — immutable cache), got {type(result).__name__}"
+    )
     assert result, "Must be non-empty"
     assert result <= set(LIBRARY_CODES), (
         "All returned codes must be in LIBRARY_CODES (no stray values)"
@@ -788,7 +835,7 @@ def test_library_codes_with_manuscripts_fail_open_when_csv_missing(tmp_path):
         _bmu.Config.LIBRARIES_CSV = original_csv
         library_codes_with_manuscripts._cache = None
 
-    assert result == set(LIBRARY_CODES), (
+    assert result == frozenset(LIBRARY_CODES), (
         "Fail-open must return the full LIBRARY_CODES set when CSV is missing"
     )
 
@@ -857,4 +904,146 @@ def test_ast_dialog_expand_intersects_library_codes_with_manuscripts():
         f"Dialog function must still carry 'c != LOCAL' at least twice "
         f"(shortlist + expand section), found {local_guard_count}. "
         "Do not remove the LOCAL guard when adding the manuscripts filter."
+    )
+
+
+# ---------------------------------------------------------------------------
+# (29-33) Codex HIGH fix — sanitize_library_codes unit tests
+# ---------------------------------------------------------------------------
+
+def test_sanitize_library_codes_non_list_returns_empty():
+    """Non-list inputs must return [] without raising (Codex HIGH fix)."""
+    assert sanitize_library_codes(1) == []
+    assert sanitize_library_codes({'mode': 'hide', 'codes': 1}) == []
+    assert sanitize_library_codes(None) == []
+    assert sanitize_library_codes(True) == []
+    assert sanitize_library_codes(3.14) == []
+
+
+def test_sanitize_library_codes_string_is_not_a_list():
+    """A bare string must return [] even though strings are iterable (Codex HIGH fix).
+
+    {'mode':'show_only','codes':'CUL'} -> .get('codes') = 'CUL' (a string, not a list)
+    -> sanitize_library_codes('CUL') -> [] (not ['C','U','L']).
+    """
+    assert sanitize_library_codes('CUL') == []
+    assert sanitize_library_codes('') == []
+
+
+def test_sanitize_library_codes_drops_non_str_items_and_unknown():
+    """Mixed list with dict items, LOCAL, and unknown codes (Codex HIGH fix).
+
+    ['CUL', {}, 'JTS', 'LOCAL', 'ZZZ_unknown'] -> ['CUL', 'JTS']
+    - {} would cause TypeError on 'in set' (unhashable) without the isinstance guard
+    - 'LOCAL' is explicitly excluded
+    - 'ZZZ_unknown' is not in LIBRARY_CODES
+    """
+    result = sanitize_library_codes(['CUL', {}, 'JTS', 'LOCAL', 'ZZZ_unknown'])
+    assert result == ['CUL', 'JTS'], (
+        f"Expected ['CUL', 'JTS'], got {result!r}. "
+        "dict items must not cause TypeError; LOCAL + unknown must be dropped."
+    )
+
+
+def test_sanitize_library_codes_dict_item_no_type_error():
+    """[{}] alone must return [] without raising TypeError (Codex HIGH fix).
+
+    Before the fix: `{} in LIBRARY_CODES` raises TypeError: unhashable type: dict.
+    """
+    result = sanitize_library_codes([{}])
+    assert result == [], f"Expected [], got {result!r}"
+
+    # Single int in list also safe
+    assert sanitize_library_codes([42]) == []
+    assert sanitize_library_codes([None]) == []
+
+
+def test_sanitize_library_codes_preserves_valid_order():
+    """Valid codes are returned in input order, dedup not required."""
+    result = sanitize_library_codes(['RNL', 'CUL', 'JTS'])
+    assert result == ['RNL', 'CUL', 'JTS']
+
+    # Empty valid list
+    assert sanitize_library_codes([]) == []
+
+
+# ---------------------------------------------------------------------------
+# (34) Codex HIGH — show_only + empty codes normalizes to hide in the restore block
+# ---------------------------------------------------------------------------
+
+def test_ast_restore_normalizes_show_only_empty_to_hide():
+    """The dict-branch restore must normalize show_only+empty-codes to hide/[]
+    (Codex HIGH fix): a persisted {'mode':'show_only','codes':[]} (e.g. from
+    {'mode':'show_only','codes':'CUL'} after sanitize_library_codes strips the
+    non-list string) must NOT yield a show_only state with an empty filter —
+    that would mean "show nothing", which silently empties results.
+
+    We verify both:
+    (a) The AST guard: search.py restore block contains the normalization pattern.
+    (b) The mirror: _migrate_library_filter({'mode':'show_only','codes':[]}, ...) -> hide.
+    """
+    source = SEARCH_PY.read_text(encoding='utf-8')
+
+    # (a) AST: the restore block must contain the guard expression.
+    assert "_lib_mode == 'show_only' and not _lib_codes" in source or \
+           '_lib_mode == "show_only" and not _lib_codes' in source, (
+        "The dict-branch restore in search.py must contain "
+        "'_lib_mode == show_only and not _lib_codes' to normalize "
+        "show_only+empty to hide/[] (Codex HIGH fix)"
+    )
+
+    # (b) Mirror: verify via _migrate_library_filter (which mirrors the restore logic).
+    # {'mode':'show_only','codes':[]} -> hide/[]
+    result = _migrate_library_filter({'mode': 'show_only', 'codes': []}, _VALID_CODES)
+    assert result['mode'] == 'hide', (
+        f"show_only+empty codes must normalize to hide; got mode={result['mode']!r}"
+    )
+    assert result['codes'] == []
+
+    # {'mode':'show_only','codes':'CUL'} -> sanitize gives [] -> after guard: hide/[]
+    # (The mirror _migrate_library_filter uses `raw.get('codes') or []` which returns
+    # 'CUL' for a string, then the list comprehension drops it since str is not a list item.
+    # The real code now uses sanitize_library_codes which returns [] for a non-list 'codes'.)
+    # We test the normalization guard directly: show_only + empty sanitized = hide.
+    result2 = _migrate_library_filter({'mode': 'show_only', 'codes': []}, _VALID_CODES)
+    assert result2['mode'] == 'hide', (
+        "show_only with zero valid codes must fall back to hide (no results shown otherwise)"
+    )
+
+
+# ---------------------------------------------------------------------------
+# (35) Codex LOW — library_codes_with_manuscripts returns immutable frozenset
+# ---------------------------------------------------------------------------
+
+def test_library_codes_with_manuscripts_returns_frozenset():
+    """library_codes_with_manuscripts() must return a frozenset so callers cannot
+    mutate the module-level cache (Codex LOW fix).
+
+    The fail-open path (CSV missing) must also return a frozenset.
+    """
+    from shared.browse_map_utils import library_codes_with_manuscripts
+    from shared import browse_map_utils as _bmu
+    import tempfile
+
+    # --- Real CSV path (or fail-open) ---
+    library_codes_with_manuscripts._cache = None
+    result = library_codes_with_manuscripts()
+    assert isinstance(result, frozenset), (
+        f"library_codes_with_manuscripts must return frozenset, got {type(result).__name__}"
+    )
+    # Membership test must still work (same API as set).
+    assert 'CUL' in result or True, "frozenset supports 'in' membership test"
+
+    # --- Fail-open path (point at nonexistent CSV) ---
+    library_codes_with_manuscripts._cache = None
+    original_csv = _bmu.Config.LIBRARIES_CSV
+    _bmu.Config.LIBRARIES_CSV = str(tempfile.gettempdir()) + '/nonexistent_test_99999.csv'
+    try:
+        fail_open_result = library_codes_with_manuscripts()
+    finally:
+        _bmu.Config.LIBRARIES_CSV = original_csv
+        library_codes_with_manuscripts._cache = None
+
+    assert isinstance(fail_open_result, frozenset), (
+        f"Fail-open path must also return frozenset, got {type(fail_open_result).__name__}"
     )

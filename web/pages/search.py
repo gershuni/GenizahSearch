@@ -40,7 +40,7 @@ from web.pages.search_results import (
     show_add_to_list_dialog as show_add_to_list_dialog_local,
 )
 from genizah_core import generate_tabular_syntax
-from shared.browse_map_utils import get_library_display, LIBRARY_CODES, library_codes_with_manuscripts
+from shared.browse_map_utils import get_library_display, LIBRARY_CODES, library_codes_with_manuscripts, sanitize_library_codes
 from shared.refinement import RefinementStep, compute_effective_restrict, needs_mode_labels, truncate_chain, replay_chain, scope_signature
 from shared.exclusion_service import (
     ExclusionSource, parse_shelfmark_file, parse_csv_shelfmarks,
@@ -189,7 +189,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         _lib_raw = _safe_get('search_library_filter', None)
         if isinstance(_lib_raw, list):
             # D-06 legacy migration: plain list → Show-only (v8.3.0 values were inclusion-only lists).
-            _lib_codes = [c for c in _lib_raw if c in LIBRARY_CODES and c != 'LOCAL']
+            # sanitize_library_codes: drops non-str items, unknown codes, and 'LOCAL' (Codex HIGH fix).
+            _lib_codes = sanitize_library_codes(_lib_raw)
             if _lib_codes:
                 search_state.library_mode = 'show_only'
                 search_state.library_filter = _lib_codes
@@ -198,9 +199,16 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                 search_state.library_filter = []
         elif isinstance(_lib_raw, dict):
             # New dict shape: read mode + codes directly, sanitize codes against LIBRARY_CODES and 'LOCAL'.
+            # sanitize_library_codes: accepts only lists of canonical str codes (Codex HIGH fix).
             _lib_mode = _lib_raw.get('mode', 'hide')
-            _lib_codes = [c for c in (_lib_raw.get('codes') or []) if c in LIBRARY_CODES and c != 'LOCAL']
-            search_state.library_mode = _lib_mode if _lib_mode in ('show_only', 'hide') else 'hide'
+            _lib_codes = sanitize_library_codes(_lib_raw.get('codes'))
+            _lib_mode = _lib_mode if _lib_mode in ('show_only', 'hide') else 'hide'
+            # Normalize invalid show_only+empty to the canonical neutral (Codex HIGH fix):
+            # a persisted show_only with no valid codes means "show nothing" which is never
+            # the user's intent — treat as hide/[] (show all).
+            if _lib_mode == 'show_only' and not _lib_codes:
+                _lib_mode = 'hide'
+            search_state.library_mode = _lib_mode
             search_state.library_filter = _lib_codes
         else:
             # Fresh/absent/garbage: default Hide mode, empty set (D-05 — show all by default).
@@ -1925,7 +1933,8 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                             )
                                             checked = list(checked_list) if checked_list else []
                                             # HIGH-3: sanitize JS-returned codes (T-130-02-02).
-                                            checked = [c for c in checked if c in LIBRARY_CODES and c != 'LOCAL']
+                                            # sanitize_library_codes: drops non-str items, unknown codes, LOCAL (Codex HIGH fix).
+                                            checked = sanitize_library_codes(checked)
                                             committed_mode = current_mode[0]
 
                                             if committed_mode == 'show_only':
