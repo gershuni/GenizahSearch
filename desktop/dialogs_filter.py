@@ -1690,6 +1690,14 @@ class LibraryFilterDialog(QDialog):
       * ``facets`` is an optional ``{library_code: count}`` dict (dynamic full-set counts
         honoring the catalog's other active filters); rows render ``Name (count)`` when a
         count is present, name-only otherwise (DMF-07/DMF-12 desktop facet counts).
+      * Type-to-find search box (placeholder ``tr('Search libraries...')``) hides every row
+        whose display label does not contain the query (case-insensitive substring); checkbox
+        state is preserved across hide/show; hidden rows still count as checked in
+        ``get_checked_codes()`` and the OK guard — at parity with web /catalog
+        ``catLibFilterSearch``.
+      * A-Z / By-count sort toggle: By count orders by ``self._facets`` descending (0/missing
+        last), falls back to A-Z when facets empty; A-Z is the default (ascending by display
+        name) — at parity with web /catalog ``catLibFilterSort``.
     """
 
     def __init__(self, parent=None, *, mode: str = 'hide', selected_codes: list | None = None,
@@ -1698,9 +1706,10 @@ class LibraryFilterDialog(QDialog):
         from genizah_core import get_library_display  # local import to avoid circular
         from shared.browse_map_utils import library_codes_with_manuscripts
         self.setWindowTitle(tr("Filter by Library"))
-        self.setMinimumSize(360, 480)
+        self.setMinimumSize(360, 500)
         self._facets = facets if isinstance(facets, dict) else {}
         self._all_codes = [c for c in library_codes_with_manuscripts() if c != 'LOCAL']
+        self._get_library_display = get_library_display  # keep a reference for _repopulate
 
         layout = QVBoxLayout(self)
 
@@ -1722,17 +1731,40 @@ class LibraryFilterDialog(QDialog):
         mode_layout.addStretch()
         layout.addLayout(mode_layout)
 
-        # List widget with per-item checkboxes (flat, one row per library code)
-        self.list_widget = QListWidget()
-        self.list_widget.setSpacing(2)
-        layout.addWidget(self.list_widget)
-
         # BUG-D fix: sort by display name alphabetically for a clear, predictable order.
         # get_library_display uses the current CURRENT_LANG so Hebrew UI gets Hebrew names.
         self._all_codes = sorted(
             self._all_codes,
             key=lambda c: get_library_display(c, short=False),
         )
+
+        # Search box — type-to-find (catLibFilterSearch parity)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText(tr("Search libraries..."))
+        self.search_input.setClearButtonEnabled(True)
+        layout.addWidget(self.search_input)
+        self.search_input.textChanged.connect(self._apply_search_filter)
+
+        # Sort toggle — A-Z / By count (catLibFilterSort parity)
+        sort_layout = QHBoxLayout()
+        sort_label = QLabel(tr("Sort:"))
+        sort_label.setStyleSheet("color: #888; font-size: 11px;")
+        sort_layout.addWidget(sort_label)
+        self._sort_group = QButtonGroup(self)
+        self._rb_sort_az = QRadioButton(tr("A–Z"))      # EN-DASH U+2013 matches web tr('A–Z')
+        self._rb_sort_count = QRadioButton(tr("By count"))
+        self._rb_sort_az.setChecked(True)  # A-Z is the default
+        self._sort_group.addButton(self._rb_sort_az, 1)
+        self._sort_group.addButton(self._rb_sort_count, 2)
+        sort_layout.addWidget(self._rb_sort_az)
+        sort_layout.addWidget(self._rb_sort_count)
+        sort_layout.addStretch()
+        layout.addLayout(sort_layout)
+
+        # List widget with per-item checkboxes (flat, one row per library code)
+        self.list_widget = QListWidget()
+        self.list_widget.setSpacing(2)
+        layout.addWidget(self.list_widget)
 
         # Populate list — initial checked state is mode-aware (DMF-07)
         active_set = set(selected_codes) if selected_codes else set()
@@ -1741,20 +1773,11 @@ class LibraryFilterDialog(QDialog):
             all_checked = len(active_set) == 0
         else:  # hide
             all_checked = False
-        for code in self._all_codes:
-            base_label = get_library_display(code, short=False)
-            count = self._facets.get(code)
-            if isinstance(count, int) and count >= 0:
-                label = f"{base_label}  ({count:,})"
-            else:
-                label = base_label
-            item = QListWidgetItem(label)
-            item.setData(Qt.ItemDataRole.UserRole, code)
-            if all_checked or code in active_set:
-                item.setCheckState(Qt.CheckState.Checked)
-            else:
-                item.setCheckState(Qt.CheckState.Unchecked)
-            self.list_widget.addItem(item)
+        initial_checked = set(self._all_codes) if all_checked else active_set
+        self._populate_rows(self._all_codes, initial_checked)
+
+        # Connect sort toggle AFTER initial population so it doesn't fire during __init__
+        self._sort_group.buttonToggled.connect(self._on_sort_changed)
 
         # Status hint label (shown when OK guard fires)
         self._hint_label = QLabel("")
@@ -1785,6 +1808,89 @@ class LibraryFilterDialog(QDialog):
 
         # Connect guard
         self.list_widget.itemChanged.connect(self._on_item_changed)
+        self._update_ok_button()
+
+    def _populate_rows(self, codes, checked_set):
+        """Build list rows for the given code order with check state from ``checked_set``.
+
+        This helper is called both from ``__init__`` (initial population with mode-aware
+        ``checked_set``) and from ``_repopulate`` (re-sort preserving existing check state).
+        ``checked_set`` must be a ``set`` of library codes to render as Checked.
+        """
+        get_library_display = self._get_library_display
+        for code in codes:
+            base_label = get_library_display(code, short=False)
+            count = self._facets.get(code)
+            if isinstance(count, int) and count >= 0:
+                label = f"{base_label}  ({count:,})"
+            else:
+                label = base_label
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, code)
+            if code in checked_set:
+                item.setCheckState(Qt.CheckState.Checked)
+            else:
+                item.setCheckState(Qt.CheckState.Unchecked)
+            self.list_widget.addItem(item)
+
+    def _apply_search_filter(self, *args):
+        """Hide rows whose display label does not contain the active query string.
+
+        Case-insensitive substring match on ``item.text()`` (the display label including
+        the count suffix).  Empty query shows all rows.  Does NOT change check state —
+        hidden-but-checked rows still count in ``get_checked_codes()`` (web parity).
+        """
+        q = self.search_input.text().strip().lower()
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            item.setHidden(bool(q) and q not in item.text().lower())
+
+    def _on_sort_changed(self, *args):
+        """Re-sort the list when the sort radio changes.
+
+        ``QButtonGroup.buttonToggled`` emits ``(button, checked)`` — ignore the
+        deactivation signal (``checked=False``) of the previously-active button.
+        """
+        if len(args) >= 2 and not args[1]:
+            return  # deactivation of the old button — nothing to do
+        self._repopulate()
+
+    def _repopulate(self):
+        """Re-sort the list while preserving check state and the active search filter.
+
+        Sort order:
+          * By count (``self._rb_sort_count`` checked AND ``self._facets`` non-empty):
+            sort by ``self._facets.get(code, 0)`` DESCENDING, tie-break A-Z.
+            Codes with 0 / missing count cluster at the end (web parity).
+          * A-Z (default or By-count fallback when ``self._facets`` is empty):
+            sort by ``get_library_display`` ascending.
+        After sorting the rows, re-applies the active search filter so a re-sort
+        never loses the typed query.
+        """
+        # Capture current check state before clearing
+        checked_set = set(self.get_checked_codes())
+
+        get_library_display = self._get_library_display
+        if self._rb_sort_count.isChecked() and self._facets:
+            # By count descending, tie-break by display name ascending
+            ordered = sorted(
+                self._all_codes,
+                key=lambda c: (-self._facets.get(c, 0), get_library_display(c, short=False)),
+            )
+        else:
+            # A-Z (default) or By-count fallback when facets empty
+            ordered = sorted(
+                self._all_codes,
+                key=lambda c: get_library_display(c, short=False),
+            )
+
+        self.list_widget.blockSignals(True)
+        self.list_widget.clear()
+        self._populate_rows(ordered, checked_set)
+        self.list_widget.blockSignals(False)
+
+        # Re-apply the active search query so a re-sort does not lose the filter
+        self._apply_search_filter()
         self._update_ok_button()
 
     def get_mode(self) -> str:

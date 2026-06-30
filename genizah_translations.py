@@ -910,6 +910,9 @@ TRANSLATIONS = {
     # --- Sorting ---
     "Sort by:": "מיין לפי:",
     "Sort by": "מיין לפי",
+    "Sort:": "מיון:",
+    "By count": "לפי כמות",
+    "A–Z": "א–ת",  # A–Z (EN-DASH U+2013) → א–ת; shared key with web tr('A–Z')
     "Shelfmark": "מספר מדף",
     "Date Added": "תאריך הוספה",
     "Filter...": "סנן...",
