@@ -334,6 +334,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
     # Functions accept containerId parameter for unique dialog instances
     # Library filter dialog JS helpers (BUG-B fix: must be at page level, NOT inside ui.html)
     ui.add_head_html('''<script>
+    // DMF (Phase 130-02) — mode-aware Apply enable:
+    // In Show-only mode, zero-checked DISABLES Apply (can't show nothing).
+    // In Hide mode, zero-checked LEAVES Apply ENABLED (hide nothing = show all = valid).
     function libFilterUpdateApply(cid) {
         var cont = document.getElementById(cid);
         if (!cont) return;
@@ -341,7 +344,10 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         var n = 0;
         cbs.forEach(function(cb) { if (cb.checked) n++; });
         var btn = document.getElementById('libApplyBtn_' + cid);
-        if (btn) btn.disabled = (n === 0);
+        if (!btn) return;
+        var mode = cont.getAttribute('data-libmode') || 'show_only';
+        // Only disable when show_only AND zero checked; hide mode allows empty (= hide nothing).
+        btn.disabled = (mode === 'show_only' && n === 0);
     }
     function libFilterGetChecked(cid) {
         var cont = document.getElementById(cid);
@@ -355,6 +361,26 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if (!cont) return;
         cont.querySelectorAll('.lib-cb').forEach(function(cb) { cb.checked = val; });
         libFilterUpdateApply(cid);
+    }
+    // Set the mode attribute and re-run Apply-enable after a mode toggle flip.
+    function libFilterSetMode(cid, mode) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        cont.setAttribute('data-libmode', mode);
+        // Reset all checkboxes (D-04: flipping mode clears the selection).
+        cont.querySelectorAll('.lib-cb').forEach(function(cb) { cb.checked = false; });
+        libFilterUpdateApply(cid);
+    }
+    // Text-search row filter: hide rows whose label text does not contain the typed substring.
+    function libFilterSearch(cid, query) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        var q = query.toLowerCase().trim();
+        cont.querySelectorAll('.lib-cb-row').forEach(function(row) {
+            if (!q) { row.style.display = ''; return; }
+            var label = (row.getAttribute('data-label') || '').toLowerCase();
+            row.style.display = (label.indexOf(q) >= 0) ? '' : 'none';
+        });
     }
     </script>''')
     ui.add_head_html('''<script>
@@ -1697,22 +1723,28 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                             library_filter_btn.props('dense no-caps color=negative')
 
                     def _open_library_filter_dialog():
-                        """Open modal dialog with library filter checkboxes.
+                        """Open dual-mode library filter dialog (Phase 130-02 / DMF redesign).
 
-                        GAP-C: mirroring _open_domain_filter_dialog — ui.dialog + HTML checkboxes
-                        with JS readback. Inclusion model (locked 2026-06-28): checked = INCLUDE.
-                        All in-result libraries start checked. Unchecking hides that library.
+                        Dialog layout:
+                          1. Mode toggle (Show-only | Hide) at TOP — D-03.
+                          2. Text-search input filtering the combined list client-side.
+                          3. Count shortlist — libraries present in current results, sorted by
+                             count desc, labeled "Display Name (count)" — HIGH-2: LOCAL excluded.
+                          4. Expandable section — ALL canonical libraries not in shortlist,
+                             sorted A–Z by display name, no count — LOCAL excluded by construction.
+                          5. Select All / Select None / Apply / Cancel buttons.
 
-                        FINDING 1 (all-unchecked guard):
-                        - Only a 'Select All' affordance is provided; there is intentionally
-                          NO 'deselect-all' or 'uncheck-all' action (that would yield an apply-able
-                          all-unchecked state that collides with the '[]' = show-all sentinel).
-                        - Apply is disabled client-side when checked-count == 0.
-                        - Python Apply handler defensively short-circuits if checked set is empty,
-                          so a tampered client cannot commit the all-unchecked '[]' collision.
-                        - '[]' ALWAYS means 'show all'; the zero-checked state is intentionally blocked
-                          so it can never collide with that sentinel. _library_apply_selection is only
-                          ever called with a non-empty checked set.
+                        Mode semantics (D-01/D-02):
+                          - Show-only: keep results whose library_code IN checked set.
+                          - Hide: keep results whose library_code NOT IN checked set.
+                          Empty Hide set = show all (applyable, D-08); empty Show-only = blocked.
+
+                        Show-all normalization (MEDIUM / D-05):
+                          When Show-only Apply resolves to empty codes (all-in-result checked
+                          -> _library_apply_selection -> []), normalize to neutral Hide/[] before
+                          persisting — "show all" has exactly ONE persisted representation.
+
+                        BUG-B: NO <script> inside ui.html() — all JS at page level (add_head_html).
                         """
                         if not search_state.results:
                             return
@@ -1720,77 +1752,135 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         if not facets:
                             return
 
-                        lang = get_language()
-                        # BUG-D fix: sort alphabetically by display name for clear,
-                        # predictable order consistent with catalog and desktop dialogs.
-                        all_codes = sorted(
-                            facets.keys(),
-                            key=lambda c: get_library_display(c, short=False, lang=lang)
-                        )
-
-                        # Build checkbox HTML — one per library code present in results.
-                        # All start checked (inclusion model); unchecking hides that library.
                         import html as _html
                         import uuid as _uuid
+
+                        lang = get_language()
                         container_id = f'lib-filter-{_uuid.uuid4().hex[:8]}'
                         current_filter = set(search_state.library_filter)
+                        current_mode = [getattr(search_state, 'library_mode', 'hide')]  # mutable cell
 
-                        checkbox_html_parts = []
-                        for code in all_codes:
-                            count = facets[code]
-                            label = get_library_display(code, short=False, lang=lang)
-                            # Inclusion model: checked when included (not in exclusion set).
-                            # If library_filter is empty (= show all), all are checked.
-                            # If library_filter is a subset, only those codes are checked.
-                            is_checked = (not current_filter) or (code in current_filter)
-                            checked_attr = 'checked' if is_checked else ''
+                        # --- Build shortlist (present in results, LOCAL excluded) ---
+                        # HIGH-2: explicit `c != 'LOCAL'` guard so even a result row with
+                        # library_code=='LOCAL' is dropped by construction (T-130-02-02).
+                        shortlist_codes = sorted(
+                            [c for c in facets if c in LIBRARY_CODES and c != 'LOCAL'],
+                            key=lambda c: -facets[c],
+                        )
+                        shortlist_set = set(shortlist_codes)
+
+                        # --- Build expand section (canonical library list minus shortlist, LOCAL excluded) ---
+                        # Keep literal `c != 'LOCAL'` so the AST LOCAL guard passes (D-46/DMF-10).
+                        expand_codes = sorted(
+                            [c for c in LIBRARY_CODES if c != 'LOCAL' and c not in shortlist_set],
+                            key=lambda c: get_library_display(c, short=False, lang=lang),
+                        )
+
+                        def _make_cb_row(code, label_text, checked):
+                            """Single checkbox row HTML (no <script>; BUG-B safe)."""
                             code_attr = _html.escape(code, quote=True)
-                            label_html = _html.escape(f"{label} ({count})")
-                            checkbox_html_parts.append(
-                                f'<label style="display:flex;align-items:center;gap:8px;'
-                                f'padding:5px 0;cursor:pointer;font-size:0.9rem">'
+                            label_esc = _html.escape(label_text)
+                            checked_attr = 'checked' if checked else ''
+                            return (
+                                f'<label class="lib-cb-row" data-label="{label_esc.lower()}" '
+                                f'style="display:flex;align-items:center;gap:8px;'
+                                f'padding:4px 0;cursor:pointer;font-size:0.9rem">'
                                 f'<input type="checkbox" class="lib-cb" data-code="{code_attr}" '
                                 f'{checked_attr} '
                                 f'style="width:16px;height:16px;accent-color:#1976d2;cursor:pointer" '
                                 f'onchange="libFilterUpdateApply(\'{container_id}\')">'
-                                f'<span>{label_html}</span></label>'
+                                f'<span>{label_esc}</span></label>'
                             )
-                        checkbox_html = '\n'.join(checkbox_html_parts)
-                        total_codes = len(all_codes)
 
-                        with ui.dialog() as dialog, ui.card().classes('w-[480px] max-h-[80vh]'):
+                        # Shortlist rows (with count)
+                        shortlist_rows = []
+                        for code in shortlist_codes:
+                            count = facets[code]
+                            label = get_library_display(code, short=False, lang=lang)
+                            label_with_count = f"{label} ({count})"
+                            # Initial checked state per current mode:
+                            if current_mode[0] == 'show_only':
+                                # Show-only: checked if code is in the active allowlist (or filter empty = show all).
+                                is_checked = (not current_filter) or (code in current_filter)
+                            else:
+                                # Hide: checked if code is in the active hide-set.
+                                is_checked = code in current_filter
+                            shortlist_rows.append(_make_cb_row(code, label_with_count, is_checked))
+
+                        # Expand section rows (no count)
+                        expand_rows = []
+                        for code in expand_codes:
+                            label = get_library_display(code, short=False, lang=lang)
+                            if current_mode[0] == 'show_only':
+                                is_checked = (not current_filter) or (code in current_filter)
+                            else:
+                                is_checked = code in current_filter
+                            expand_rows.append(_make_cb_row(code, label, is_checked))
+
+                        shortlist_html = '\n'.join(shortlist_rows)
+                        expand_html = '\n'.join(expand_rows)
+                        # Wrap in data-libmode container so JS can read mode for Apply-enable.
+                        init_mode = _html.escape(current_mode[0], quote=True)
+                        full_html = (
+                            f'<div id="{container_id}" data-libmode="{init_mode}">'
+                            f'{shortlist_html}'
+                        )
+                        if expand_rows:
+                            expand_label = _html.escape(tr('All libraries'))
+                            full_html += (
+                                f'<details style="margin-top:8px">'
+                                f'<summary style="cursor:pointer;font-size:0.85rem;color:#666;'
+                                f'padding:4px 0">{expand_label}</summary>'
+                                f'{expand_html}'
+                                f'</details>'
+                            )
+                        full_html += '</div>'
+
+                        with ui.dialog() as dialog, ui.card().classes('w-[520px] max-h-[80vh]'):
                             with ui.column().classes('w-full gap-2'):
                                 ui.label(tr('Filter by Library')).classes('text-lg font-bold')
-                                ui.label(
-                                    f"{tr('Showing')} {len(search_state.results)} {tr('results')}"
-                                ).classes('text-sm text-gray-500')
 
-                                with ui.scroll_area().classes('w-full').style('max-height: 50vh;'):
-                                    # BUG-B fix: NO <script> here — JS functions are defined once
-                                    # at page level via ui.add_head_html (see page setup above).
-                                    ui.html(
-                                        f'<div id="{container_id}">{checkbox_html}</div>',
-                                        sanitize=False,
-                                    )
+                                # Mode toggle (D-03): Show-only | Hide, initialized from current mode.
+                                mode_options = {
+                                    'show_only': tr('Show only selected'),
+                                    'hide': tr('Hide selected'),
+                                }
+                                mode_toggle = ui.toggle(
+                                    options=mode_options,
+                                    value=current_mode[0],
+                                ).props('dense no-caps')
 
-                                # Buttons
+                                def _on_mode_change(new_mode):
+                                    current_mode[0] = new_mode
+                                    # D-04: flipping the mode resets the checked set + re-syncs Apply-enable.
+                                    # libFilterSetMode also sets data-libmode so mode-aware JS sees the new mode.
+                                    ui.run_javascript(f'libFilterSetMode("{container_id}", "{new_mode}")')
+
+                                mode_toggle.on('update:modelValue', lambda e: _on_mode_change(e.args))
+
+                                # Text-search input — client-side row filter, no Python round-trip.
+                                ui.input(
+                                    placeholder=tr('Search libraries...'),
+                                    on_change=lambda e: ui.run_javascript(
+                                        f'libFilterSearch("{container_id}", {repr(e.value)})'
+                                    ),
+                                ).props('dense clearable').classes('w-full')
+
+                                with ui.scroll_area().classes('w-full').style('max-height: 45vh;'):
+                                    # BUG-B: NO <script> inside ui.html — JS is at page level (add_head_html).
+                                    ui.html(full_html, sanitize=False)
+
+                                # Buttons row
                                 with ui.row().classes('w-full justify-between'):
                                     _cid = container_id  # capture for closures
-                                    _all = all_codes      # capture for apply
+                                    _all_shortlist = shortlist_codes  # for all-checked -> [] mapping
 
-                                    # Bulk-action buttons (left side)
                                     with ui.row().classes('gap-1'):
-                                        # Select All: re-checks everything = clear filter / show all.
                                         ui.button(
                                             tr('Select All'),
                                             on_click=lambda: ui.run_javascript(
                                                 f'libFilterSelectAll("{_cid}", true)')
                                         ).props('flat dense no-caps')
-                                        # BUG-C: Select none — unchecks all checkboxes (convenience
-                                        # clear), but does NOT apply. OK stays disabled at zero checked
-                                        # (the libFilterUpdateApply JS guard handles this).
-                                        # Unchecking all is safe here because it does NOT commit;
-                                        # the Python Apply guard blocks commit of empty sets.
                                         ui.button(
                                             tr('Select None'),
                                             on_click=lambda: ui.run_javascript(
@@ -1803,33 +1893,32 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                 f'libFilterGetChecked("{_cid}")', timeout=5.0
                                             )
                                             checked = list(checked_list) if checked_list else []
-                                            # HIGH-3: sanitize JS-returned codes against canonical set before
-                                            # any mode/selection mapping — a crafted client must not inject
-                                            # 'LOCAL' or unknown codes into the persisted set (T-130-02-02).
+                                            # HIGH-3: sanitize JS-returned codes (T-130-02-02).
                                             checked = [c for c in checked if c in LIBRARY_CODES and c != 'LOCAL']
-                                            # The mode for this dialog is Show-only (pre-Task-2 dialog).
-                                            # FINDING 1 — Python-side guard: if checked set is empty,
-                                            # do NOT commit — blocked by client-side disabled-Apply guard;
-                                            # this fires only if that guard was bypassed.
-                                            if not checked:
-                                                ui.notify(
-                                                    tr('Select at least one library, or check all to clear the filter'),
-                                                    type='warning',
-                                                )
-                                                return
-                                            # Apply inclusion mapping:
-                                            # all-checked => [] (clear filter / show all); subset => that subset.
-                                            new_filter = _library_apply_selection(checked, _all)
-                                            # SHOW-ALL NORMALIZATION (MEDIUM): Show-only resolving to empty codes
-                                            # (all-in-result-checked -> []) normalizes to neutral Hide/[].
-                                            # "show all" has exactly ONE persisted representation (D-05/DMF).
-                                            if not new_filter:
-                                                # All checked = "show all" -> persisted as neutral hide/[].
-                                                search_state.library_mode = 'hide'
-                                                search_state.library_filter = []
+                                            committed_mode = current_mode[0]
+
+                                            if committed_mode == 'show_only':
+                                                # Show-only guard: empty checked set blocked (can't show nothing).
+                                                if not checked:
+                                                    ui.notify(
+                                                        tr('Select at least one library, or check all to clear the filter'),
+                                                        type='warning',
+                                                    )
+                                                    return
+                                                # All-in-result-checked -> [] mapping (show-all for Show-only).
+                                                new_filter = _library_apply_selection(checked, _all_shortlist)
+                                                # SHOW-ALL NORMALIZATION (MEDIUM): Show-only + empty codes = neutral Hide/[].
+                                                if not new_filter:
+                                                    search_state.library_mode = 'hide'
+                                                    search_state.library_filter = []
+                                                else:
+                                                    search_state.library_mode = 'show_only'
+                                                    search_state.library_filter = new_filter
                                             else:
-                                                search_state.library_mode = 'show_only'
-                                                search_state.library_filter = new_filter
+                                                # Hide mode: empty set allowed (= hide nothing = show all, D-08).
+                                                search_state.library_mode = 'hide'
+                                                search_state.library_filter = checked
+
                                             # Persist dict shape (D-09): both mode and codes in one key.
                                             persist_value('search_library_filter', {
                                                 'mode': search_state.library_mode,
@@ -1844,28 +1933,14 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                                                 _apply_printed_filter_and_render(search_state.results)
                                             dialog.close()
 
-                                        # Apply button — disabled cosmetically by the JS handler
-                                        # (libFilterUpdateApply sets btn.disabled on the raw DOM
-                                        # element). NOTE: raw .disabled on a Quasar <q-btn> wrapper
-                                        # may not reliably propagate to the Vue component's disable
-                                        # prop, so the JS guard is best-effort / cosmetic UX only.
-                                        # The Python guard above (if not checked: notify; return)
-                                        # is the AUTHORITATIVE, load-bearing guard that prevents
-                                        # an all-unchecked Apply from committing [] = "show all".
                                         apply_btn = ui.button(
                                             tr('Apply'), on_click=apply_library_filter
                                         ).props('dense no-caps color=primary')
-                                        # Set the DOM id so the JS can find the button
                                         apply_btn.props(f'id="libApplyBtn_{container_id}"')
-
                                         ui.button(tr('Cancel'), on_click=dialog.close).props('flat dense no-caps')
 
                         dialog.open()
-                        # Codex LOW (2026-06-29): initialize the Apply disabled-state from the
-                        # actual checked count. If a persisted library_filter matches NONE of the
-                        # current result set's libraries, the dialog opens all-unchecked; without
-                        # this, Apply would start enabled (Python guard still blocks the [] commit,
-                        # but the client invariant would be incomplete).
+                        # Initialize Apply disabled-state from current checked count + mode.
                         ui.run_javascript(f'libFilterUpdateApply("{container_id}")')
 
                     library_filter_btn = ui.button(
