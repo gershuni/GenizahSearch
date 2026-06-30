@@ -92,6 +92,7 @@ See: .planning/milestones/v8.3.0-ROADMAP.md
 ## Phase Details
 
 ### Phase 130: Dual-Mode Filter Core — Web `/search`
+
 **Goal**: The web `/search` library filter can express BOTH "show only these libraries" (allowlist) and "hide these libraries" (denylist) — chosen via a mode toggle in the filter dialog, persisted (mode + set) across searches and reloads, with the existing allowlist migrated cleanly and edge states handled predictably. This phase defines the shared (mode + set) state shape and the dialog UX that Phase 131 mirrors on every other surface.
 **Depends on**: Phase 129 (v8.3.0 SEED-026 inclusion-only allowlist shipped — this evolves it)
 **Requirements**: DMF-01, DMF-02, DMF-03, DMF-04, DMF-05, DMF-06, DMF-10
@@ -103,14 +104,25 @@ See: .planning/milestones/v8.3.0-ROADMAP.md
   4. An existing v8.3.0 persisted allowlist (`search_library_filter`) loads cleanly into the new (mode + set) model without error, interpreted as **Show-only with the existing set** — verified by a migration test feeding the legacy value shape. (DMF-05)
   5. Edge states behave predictably: an empty selection in Show-only means "show all" (no collision with the all-unchecked sentinel), and a fully-populated Hide set (everything hidden) is handled without crash or contradictory display. (DMF-06)
   6. `'LOCAL'` is absent from the library-filter options in BOTH modes; `tests/test_web_library_options_no_local.py` + `tests/test_phase_97_invariants.py` stay green. (DMF-10)
+
 **Plans**: 3 plans
 Plans:
+**Wave 1**
+
 - [ ] 130-01-PLAN.md — Model layer: `library_mode` field on `SearchUIState` + mode-aware `clear_search_snapshot` reset default
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 130-02-PLAN.md — `search.py` runtime: mode-aware restore + legacy migration, mode-branch filter, dict persist shape, redesigned dialog (mode toggle + count-shortlist + expand-all + text search), 3-state button
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 130-03-PLAN.md — Tests: new dual-mode behavior/migration/edge-state/LOCAL-guard suite + revise stale inclusion-only assertions in the existing libfilter test
+
 **UI hint**: yes
 
 ### Phase 131: Dual-Mode Parity — Desktop Catalog + Web Browse-by-Identification + Web `/parallels`
+
 **Goal**: The (mode + set) model from Phase 130 reaches the three remaining filter surfaces at parity: the desktop catalog `LibraryFilterDialog` (Browse-by-Identification), the web Browse-by-Identification catalog filter, and a NEW library-filter control on the web `/parallels` page (which scopes results through the existing `restrict_sys_ids` path) — each persisted for its surface.
 **Depends on**: Phase 130 (shared (mode + set) model settled)
 **Requirements**: DMF-07, DMF-08, DMF-09, DMF-10
@@ -120,10 +132,12 @@ Plans:
   2. The web Browse-by-Identification catalog filter offers the same Show-only / Hide modes over the full canonical library list, persisted, composing with the existing SEED-023 PGP/Editions filters without regression. (DMF-08)
   3. The web `/parallels` page has a library-filter control using the same dual-mode model; selecting libraries (Show-only) or hiding them (Hide) scopes the parallels results via the existing `restrict_sys_ids` compute path, and the selection persists for the page — closing the v8.3.0 deferred gap logged in `docs/OPEN_ISSUES.md` (2026-06-29). (DMF-09)
   4. On every web surface, `'LOCAL'` is absent from the options in BOTH modes; `tests/test_web_library_options_no_local.py` + `tests/test_phase_97_invariants.py` stay green; all web per-surface persistence goes through `web/safe_storage.py` (allowlist `[]`). (DMF-10)
+
 **Plans**: TBD
 **UI hint**: yes
 
 ### Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`)
+
 **Goal**: Programmatic callers can express "hide these libraries" as well as "only these" — the public `POST /api/search` and `POST /api/parallels` accept an optional library-filter `mode` (include / exclude) alongside `filters.library`, backward-compatibly. `exclude` resolves to the complement (sys_ids whose `library_code` is not in the given set) intersected into `restrict_sys_ids`, mirroring the UI semantics.
 **Depends on**: Phase 130 (mode semantics + complement resolution defined)
 **Requirements**: DMF-11
@@ -133,6 +147,7 @@ Plans:
   2. With `mode=exclude` and a set of library codes, results are scoped to sys_ids whose `library_code` is NOT in the given set (the complement), intersected into the existing `restrict_sys_ids` path on both endpoints — verified by an API test that a `library` set returns disjoint result libraries under `include` vs `exclude`.
   3. An invalid `mode` value (anything other than `include`/`exclude`) is rejected with the standard 400 invalid-request envelope (fail-closed, consistent with the existing filter validation).
   4. The behavior is documented in `docs/SEARCH_API.md` and the skill `api_contract.md` (skills/cairo-genizah-research/), including the omitted-mode default and the exclude/complement semantics.
+
 **Plans**: TBD
 
 ## Progress
