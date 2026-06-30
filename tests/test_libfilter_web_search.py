@@ -419,14 +419,27 @@ def test_chip_renders_when_library_only():
         "_update_library_btn must read search_state.library_filter to decide "
         "whether the filter is active (independent of printed/pgp)."
     )
-    # Consistent base label (smoke 2026-06-29): both states use 'Filter by library';
-    # the active state appends a "(shown/total)" count rather than switching the word.
-    assert "tr('Filter by library')" in update_btn_src, (
-        "_update_library_btn must use the consistent 'Filter by library' base label in "
-        "both states (active appends '(shown/total)'), not a different word."
+    # Phase 130 (dual-mode): _update_library_btn now has THREE states, not one active label.
+    # The old inclusion-only label was: 'Filter by library (shown/total)'
+    # The dual-mode labels are:
+    #   Neutral    → tr('Filter by library')
+    #   Show-only  → tr('Showing') + " {shown}/{total}"
+    #   Hide       → tr('Hiding') + " {N}"
+    # Relax assertion: accept any of the 3-state label tokens.
+    neutral_label_ok = "tr('Filter by library')" in update_btn_src
+    showing_label_ok = "tr('Showing')" in update_btn_src
+    hiding_label_ok = "tr('Hiding')" in update_btn_src
+    assert neutral_label_ok and showing_label_ok and hiding_label_ok, (
+        "_update_library_btn must carry all three dual-mode labels: "
+        "tr('Filter by library') (neutral), tr('Showing') (Show-only active), "
+        "and tr('Hiding') (Hide active). "
+        f"Neutral={neutral_label_ok}, Showing={showing_label_ok}, Hiding={hiding_label_ok}. "
+        "Phase 130 (dual-mode): the old single active-label pattern is replaced by 3 states."
     )
-    assert '({shown}/{total})' in update_btn_src or '(shown}/{total)' in update_btn_src or 'shown}/{total' in update_btn_src, (
-        "_update_library_btn must append a (shown/total) count to the active label."
+    # The button must also read library_mode to select the active branch.
+    assert 'library_mode' in update_btn_src, (
+        "_update_library_btn must read library_mode for the 3-state branch. "
+        "Phase 130 (dual-mode)."
     )
 
 
@@ -567,25 +580,29 @@ def test_library_apply_selection_mapping():
 # ---------------------------------------------------------------------------
 
 def test_all_unchecked_guard():
-    """FINDING 1: applying with zero libraries checked must be UNREACHABLE.
+    """FINDING 1: applying with zero libraries checked in SHOW-ONLY mode must be blocked.
 
-    The data layer uses [] to mean 'show all'. If the user could apply an
-    all-unchecked state, the resulting [] would be read as 'show all' — the
-    OPPOSITE of the intended 'hide all'. To prevent this collision:
+    Phase 130 (dual-mode): the guard is now SCOPED to Show-only mode.
+      - Show-only + empty checked = would show NOTHING → blocked (Apply guard fires).
+      - Hide + empty checked = hide nothing = show all → VALID and applyable (D-08).
 
-    1. No 'Select None' / 'deselect all' library affordance (only 'Select All').
-    2. The Apply path must be guarded against a zero-checked commit — either
-       the Apply button is disabled when checked-count == 0, or the Python
-       apply handler short-circuits with a warning notify.
-    3. The guard token (a hint string or disabled-Apply JS) must be present.
-    4. _library_apply_selection is NEVER fed an empty checked set as a committed filter.
+    The data layer uses [] to mean 'show all'. In SHOW-ONLY mode, an all-unchecked commit
+    would produce [] which would be read as 'show all' — the OPPOSITE of the intended
+    'show nothing'. The Apply guard must block this specifically for Show-only.
+    In HIDE mode, empty checked is intentionally allowed (libFilterUpdateApply reads
+    data-libmode and only disables Apply when mode='show_only' AND n=0).
+
+    Phase 130 (dual-mode) scoping update:
+    1. 'Select None' IS present in the dialog (BUG-C fix) — unchecks without applying.
+    2. The Apply guard is MODE-AWARE: blocks zero-checked ONLY in Show-only mode.
+    3. The guard token (hint string or JS-disabled-Apply with mode check) must be present.
+    4. The data-libmode approach correctly allows empty Hide.
 
     Assertions (source-scan):
-    - No 'Select None' for the library filter (no deselect-all library action)
-    - A guard token is present: 'Select at least one library' string OR the
-      _library_apply_selection is documented/guarded against empty input
-    - _library_apply_selection is ONLY called from the Apply path (never with
-      an empty checked set as a committed filter commit)
+    - A guard token is present: 'Select at least one library' OR guarded if-not-checked path
+      (this guard is triggered ONLY for Show-only mode — see libFilterUpdateApply mode check)
+    - 'Select None' is present in the dialog (BUG-C fix)
+    - The Apply-enable JS reads data-libmode / library_mode for the mode-aware disable
     """
     source = SEARCH_PY.read_text(encoding='utf-8')
 
@@ -611,19 +628,30 @@ def test_all_unchecked_guard():
         or 'if not checked' in source
     )
     assert hint_present or js_guard_present, (
-        "No Apply guard found for the zero-checked state in search.py. "
-        "FINDING 1: the Apply button must be disabled when zero libraries are checked, "
-        "OR the Python apply handler must short-circuit with a warning notify "
-        "when the checked set is empty. "
-        "Expected hint string 'Select at least one library' or a guarded if-not-checked path."
+        "No Apply guard found for the SHOW-ONLY zero-checked state in search.py. "
+        "FINDING 1 (Phase 130 dual-mode scoping): the Apply guard must block zero-checked "
+        "commits in Show-only mode ([] would mean 'show all' — opposite of intent). "
+        "Hide mode with empty checked is VALID (D-08) and must NOT be blocked. "
+        "Expected hint string 'Select at least one library' or guarded if-not-checked path "
+        "in the Show-only branch."
+    )
+
+    # Phase 130 (dual-mode): verify the JS Apply-enable is MODE-AWARE (data-libmode).
+    # libFilterUpdateApply must read data-libmode and disable Apply ONLY for show_only+0.
+    # This is what makes empty Hide valid while empty Show-only is blocked.
+    mode_aware_js_present = (
+        'data-libmode' in source
+        or 'show_only' in source  # mode-aware branch in the JS
+    )
+    assert mode_aware_js_present, (
+        "Phase 130 (dual-mode): Apply-enable JS must be mode-aware "
+        "(data-libmode attribute). Empty Hide must NOT disable Apply."
     )
 
     # BUG-C fix: 'Select None' IS now present in the library dialog as a CLEAR-CHECKBOXES
-    # convenience (unchecks all without applying). OK/Apply stay DISABLED at zero checked
-    # (libFilterUpdateApply JS guard + Python if-not-checked guard).
-    # The test must now verify that 'Select None' unchecks-only and is paired with the
-    # guarded Apply — NOT that it is absent.
-    # Verify: both 'Select None' and the guarded-Apply hint coexist in the dialog.
+    # convenience (unchecks all without applying). OK/Apply stay DISABLED in Show-only at
+    # zero checked (mode-aware libFilterUpdateApply JS + Python if-not-checked guard).
+    # Phase 130 (dual-mode): empty Hide IS valid after 'Select None' + Apply in Hide mode.
     lines = source.splitlines()
     in_lib_dialog = False
     lib_dialog_body_lines = []
@@ -640,14 +668,16 @@ def test_all_unchecked_guard():
     # 'Select None' must appear in the dialog (BUG-C fix)
     assert 'Select None' in lib_dialog_src or "tr('Select None')" in lib_dialog_src, (
         "BUG-C: 'Select None' affordance missing from _open_library_filter_dialog. "
-        "It should uncheck all without applying (OK stays disabled at zero checked)."
+        "It should uncheck all without applying (Apply stays disabled in Show-only at 0 checked)."
     )
 
-    # The all-unchecked Apply guard MUST also be present to keep '[] = show-all' safe.
-    # 'Select None' is only safe because OK/Apply is disabled while zero are checked.
+    # The all-unchecked Show-only Apply guard MUST also be present to keep '[] = show-all' safe.
+    # 'Select None' is only safe because Apply is disabled in Show-only while zero are checked.
+    # Phase 130 (dual-mode): guard is now mode-scoped, not universal.
     assert hint_present or js_guard_present, (
-        "The Apply guard (Python if-not-checked short-circuit or JS disabled-Apply) "
-        "must remain alongside the new 'Select None' button (FINDING 1 invariant)."
+        "The Show-only Apply guard (Python if-not-checked short-circuit or JS disabled-Apply) "
+        "must remain alongside the 'Select None' button (FINDING 1 invariant, "
+        "Phase 130 dual-mode scoped to Show-only)."
     )
 
 
@@ -780,12 +810,29 @@ def test_no_script_in_library_dialog_html():
     # The function must NOT pass '<script' to ui.html() — find ui.html( calls
     # and assert none of the strings passed contain '<script'.
     #
-    # Strategy: check non-comment lines within the function body.  Comments may
-    # legitimately mention '<script>' as documentation.  Only code lines matter.
-    non_comment_fn_lines = [
-        ln for ln in fn_lines
-        if ln.strip() and not ln.strip().startswith('#')
-    ]
+    # Strategy: check non-comment, non-docstring lines within the function body.
+    # Comments (#) and docstrings (triple-quoted) may legitimately mention '<script>'
+    # as documentation (e.g. "BUG-B: NO <script> inside ui.html()"). Only code lines matter.
+    # Phase 130 (dual-mode): the redesigned dialog docstring documents the BUG-B requirement
+    # inline, so the docstring filter is now required to avoid false positives.
+    in_docstring = False
+    non_comment_fn_lines = []
+    for ln in fn_lines:
+        stripped = ln.strip()
+        if not stripped:
+            continue
+        # Toggle docstring mode at triple-quote boundaries
+        if stripped.startswith('"""') or stripped.startswith("'''"):
+            in_docstring = not in_docstring
+            if stripped.endswith(('"""', "'''")) and len(stripped) > 3:
+                # Single-line docstring: remains out of docstring after this line
+                in_docstring = False
+            continue  # skip the docstring delimiter line itself
+        if in_docstring:
+            continue  # skip docstring body lines
+        if stripped.startswith('#'):
+            continue  # skip comment lines
+        non_comment_fn_lines.append(ln)
     non_comment_fn_src = '\n'.join(non_comment_fn_lines)
 
     if 'ui.html(' in non_comment_fn_src and '<script' in non_comment_fn_src:
