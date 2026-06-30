@@ -44,7 +44,7 @@ result: [pending]
 
 total: 7
 passed: 0
-issues: 0
+issues: 1
 pending: 7
 skipped: 0
 blocked: 0
@@ -69,3 +69,17 @@ blocked: 0
     - "Tests: extend tests/test_libfilter_desktop.py — dialog renders counts when facets provided; counts honor an active PGP-only filter set (dynamic); name-only fallback when facets absent; LOCAL excluded; off-thread/no-UI-block contract."
   debug_session: ""
 
+- truth: "Desktop catalog LibraryFilterDialog offers (a) a sort toggle between A-Z and by-count (descending), and (b) a type-to-find search box that filters the visible library rows as the user types -- at parity with web /catalog (catLibFilterSort + catLibFilterSearch)."
+  status: failed
+  reason: "User feedback during UAT: 'We should add sort by count/a-z and type to find.' The desktop library dialog has neither; web /catalog already has both."
+  severity: minor
+  test: 7
+  root_cause: "desktop/dialogs_filter.py LibraryFilterDialog has a single alphabetical sort (sorted by get_library_display in __init__) and no search box. Web /catalog (web/pages/catalog_browse.py add_head_html) defines catLibFilterSearch (case-insensitive substring on the row label -> hide non-matching rows; checkbox state preserved; hidden rows still count as checked) and catLibFilterSort (key='count' -> data-count desc; key='az' -> label asc), plus a 'Search libraries...' input and two sort controls. Select-All operates on ALL rows regardless of the active search filter. The desktop dialog ALREADY has the facet counts (self._facets from gap 131-06) needed for by-count sort."
+  artifacts:
+    - path: "desktop/dialogs_filter.py"
+      issue: "LibraryFilterDialog: add (1) a QLineEdit search box (placeholder tr('Search libraries...')) whose textChanged hides non-matching QListWidgetItems via setHidden, case-insensitive substring match on the display label; checked state preserved across hide/show; get_checked_codes() still returns ALL checked codes incl. hidden (mirror web). (2) A sort control (two radio buttons or small combo: tr('A-Z') and tr('By count')) that reorders the list: by-count uses self._facets (count desc, missing/0 last), A-Z uses get_library_display asc (current default). Re-sorting must preserve each row's checked state and re-apply the active search filter. Select All / Select None operate on ALL rows regardless of filter (web parity). When self._facets is empty (no counts available), by-count falls back to A-Z. Keep dual-mode init, D-04 mode-reset, and _update_ok_button (counts checked across all items incl. hidden) intact."
+  missing:
+    - "Add type-to-find QLineEdit + setHidden row-filter to desktop LibraryFilterDialog (label substring, case-insensitive, check-state preserved)."
+    - "Add A-Z / by-count sort toggle reordering the list (by-count via self._facets desc; A-Z default), preserving check state + active search filter."
+    - "Tests: extend tests/test_libfilter_desktop.py -- search hides non-matching rows and preserves checks/get_checked_codes; by-count sort orders by self._facets desc; A-Z sort orders by display name; by-count falls back to A-Z when facets empty; Select All ignores the filter. Headless: GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen, this file only."
+  debug_session: ""
