@@ -499,7 +499,7 @@ class _CatalogRefreshWorker(QThread):
                  text_all=None, text_any=None, text_not=None,
                  refresh_authors=True, refresh_works=True,
                  pgp_filter='all', editions_filter='all',
-                 library_filter=None, meta_mgr=None):
+                 library_filter=None, library_mode='hide', meta_mgr=None):
         super().__init__(parent)
         self._domain = domain
         self._author = author
@@ -516,10 +516,11 @@ class _CatalogRefreshWorker(QThread):
         self._refresh_works = refresh_works
         self._pgp_filter = pgp_filter
         self._editions_filter = editions_filter
-        # SEED-026 desktop parity — library filter (LIBFILTER-03).
+        # SEED-026 / DMF-07 desktop parity — library filter (LIBFILTER-03).
         # meta_mgr is passed explicitly (OQ-2: avoids self.parent().meta_mgr which
         # is None in tests and brittle in Qt; parent is passed to QThread.__init__).
         self._library_filter = library_filter or []
+        self._library_mode = library_mode          # DMF-07: 'show_only' | 'hide'
         self._meta_mgr = meta_mgr
 
     def run(self):
@@ -562,6 +563,7 @@ class _CatalogRefreshWorker(QThread):
                 edition_sys_ids=(ed_ids if ed_active else None),
                 library_codes=(self._library_filter or None),
                 library_sys_ids=(library_sys_ids or None),
+                library_mode=self._library_mode,   # DMF-07: 'show_only' | 'hide'
             )
             self.done.emit(result)
         except Exception:
@@ -9599,6 +9601,7 @@ class GenizahGUI(QMainWindow):
         self._catalog_editions_filter = 'all'   # 'all' | 'has_edition' | 'no_edition'
         # SEED-026 desktop parity — library filter (LIBFILTER-03).
         self._catalog_library_filter = []       # [] = all; list of library codes when active
+        self._catalog_library_mode = 'hide'     # 'show_only' | 'hide' (DMF D-05 default; in-memory only)
         self._catalog_authors_cache = []
         self._catalog_works_cache = []
         self._catalog_tree_loaded = False
@@ -10178,6 +10181,7 @@ class GenizahGUI(QMainWindow):
             pgp_filter=self._catalog_pgp_filter,
             editions_filter=self._catalog_editions_filter,
             library_filter=list(self._catalog_library_filter),
+            library_mode=self._catalog_library_mode,    # DMF-07
             meta_mgr=self.meta_mgr,
         )
         self._catalog_refresh_worker.done.connect(self._catalog_on_async_refresh_done)
@@ -10428,13 +10432,23 @@ class GenizahGUI(QMainWindow):
         self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
 
     def _open_catalog_library_dialog(self):
-        """Open LibraryFilterDialog (GAP-G) and apply the selection."""
-        all_codes = [c for c in LIBRARY_CODES.keys() if c != 'LOCAL']
-        dlg = LibraryFilterDialog(self, selected_codes=list(self._catalog_library_filter))
+        """Open LibraryFilterDialog (GAP-G) and apply the selection (dual-mode, DMF-07)."""
+        from shared.browse_map_utils import library_codes_with_manuscripts
+        all_codes = [c for c in library_codes_with_manuscripts() if c != 'LOCAL']
+        dlg = LibraryFilterDialog(
+            self,
+            mode=self._catalog_library_mode,
+            selected_codes=list(self._catalog_library_filter),
+        )
         if dlg.exec() == QDialog.DialogCode.Accepted:
-            self._catalog_library_filter = library_apply_selection(
-                dlg.get_checked_codes(), all_codes
-            )
+            mode = dlg.get_mode()
+            checked = dlg.get_checked_codes()
+            if mode == 'show_only':
+                new_filter = library_apply_selection(checked, all_codes)  # all-checked -> []
+            else:  # hide
+                new_filter = list(checked)   # empty hide-set is valid (D-05/D-08)
+            self._catalog_library_mode = mode
+            self._catalog_library_filter = new_filter
             self._catalog_update_library_filter_btn()
             self._catalog_current_page = 0
             self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
@@ -10443,30 +10457,45 @@ class GenizahGUI(QMainWindow):
     def _catalog_update_library_filter_btn(self):
         """Update the library filter button label + colour to reflect the selection.
 
-        SEED-026 (smoke 2026-06-29): the per-library chips were removed — the button
-        itself carries the state. When a strict subset is selected the button turns
-        RED and reads "Filter Libraries (shown/total)" (total = catalog libraries,
-        LIBRARY_CODES minus LOCAL; shown = selected count); otherwise it is the
-        neutral "All Libraries".
+        3-state (D-07 — DMF-07 Phase 131):
+          * Neutral: no active restriction — grey "Filter by library"
+          * Show-only: red "Showing {shown}/{total} library/libraries"
+          * Hide: deep-orange "Hiding {n} library/libraries"
+
+        Codex N4: total comes from library_codes_with_manuscripts() (the SAME universe
+        as the dialog), NOT LIBRARY_CODES.keys() — prevents shown > selectable count.
+        Uses the REAL Phase-130 pluralized translation keys (genizah_translations.py:2918-2921).
         """
         if not hasattr(self, '_catalog_library_filter_btn'):
             return
         btn = self._catalog_library_filter_btn
-        if self._catalog_library_filter:
-            # Consistent base label (smoke 2026-06-29): same "Filter by library" phrasing
-            # in both states + count appended, matching the web buttons.
-            total = len([c for c in LIBRARY_CODES.keys() if c != 'LOCAL'])
-            shown = len(self._catalog_library_filter)
-            btn.setText(tr("Filter by library") + f" ({shown}/{total})")
+        mode = getattr(self, '_catalog_library_mode', 'hide')
+        flt = self._catalog_library_filter
+        # Codex N4: total from the SAME universe the dialog offers (library_codes_with_manuscripts),
+        # NOT LIBRARY_CODES.keys() — otherwise the count can exceed the selectable libraries.
+        from shared.browse_map_utils import library_codes_with_manuscripts
+        total = len([c for c in library_codes_with_manuscripts() if c != 'LOCAL'])
+        if not flt:
+            # Neutral: no active restriction
+            btn.setText(tr("Filter by library"))
+            btn.setStyleSheet("QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; }")
+        elif mode == 'show_only':
+            shown = len(flt)
+            # REAL Phase-130 pluralized keys (genizah_translations.py:2918-2921)
+            btn.setText(tr('Showing {shown}/{total} library' if total == 1
+                           else 'Showing {shown}/{total} libraries').format(shown=shown, total=total))
             btn.setStyleSheet(
                 "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; "
                 "background-color: #d32f2f; color: white; border: none; border-radius: 3px; }"
                 "QPushButton:hover { background-color: #b71c1c; }"
             )
-        else:
-            btn.setText(tr("Filter by library"))
+        else:  # hide mode, non-empty set
+            n = len(flt)
+            btn.setText(tr('Hiding {n} library' if n == 1 else 'Hiding {n} libraries').format(n=n))
             btn.setStyleSheet(
-                "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; }"
+                "QPushButton { text-align: left; padding: 2px 8px; font-size: 11px; "
+                "background-color: #e65100; color: white; border: none; border-radius: 3px; }"
+                "QPushButton:hover { background-color: #bf360c; }"
             )
 
     def _catalog_remove_filter(self, filter_type, library_code=None):
@@ -10494,8 +10523,9 @@ class GenizahGUI(QMainWindow):
             self._catalog_pgp_filter = 'all'
             self._catalog_editions_filter = 'all'
             self._catalog_update_avail_filter_btns()
-            # Clear library filter.
+            # Clear library filter (reset mode too — DMF-07).
             self._catalog_library_filter = []
+            self._catalog_library_mode = 'hide'
             self._catalog_update_library_filter_btn()
             refresh_authors = True
             refresh_works = True
@@ -10510,7 +10540,9 @@ class GenizahGUI(QMainWindow):
             if library_code is not None:
                 self._catalog_library_filter = [c for c in self._catalog_library_filter if c != library_code]
             else:
+                # Clear-all: also reset mode (DMF-07)
                 self._catalog_library_filter = []
+                self._catalog_library_mode = 'hide'
             self._catalog_update_library_filter_btn()
         elif filter_type == "domain":
             self._catalog_current_domain = None
@@ -10692,8 +10724,11 @@ class GenizahGUI(QMainWindow):
             filters['date_from'] = self._catalog_date_from
         if self._catalog_date_to is not None:
             filters['date_to'] = self._catalog_date_to
-        # GAP-H: thread library filter into search-within / parallels-within scope
-        if self._catalog_library_filter:
+        # GAP-H / DMF-07: thread library filter into search-within / parallels-within scope.
+        # ONLY in Show-only mode: carry the allowlist. In Hide mode do NOT add filters['library']
+        # (Hide = complement; silently inverting to an include-list would give wrong results —
+        # Codex HIGH #4: suppress the restriction in Hide mode with a user notice instead).
+        if self._catalog_library_filter and self._catalog_library_mode == 'show_only':
             filters['library'] = list(self._catalog_library_filter)
         return filters
 
@@ -10714,22 +10749,30 @@ class GenizahGUI(QMainWindow):
                 date_from=filters.get('date_from'),
                 date_to=filters.get('date_to'),
             )
-        # GAP-H: intersect library filter into restrict scope.
-        # WR-02 fix: mirror the data-layer fail-open (fjms_service.get_browse_results:2274-2285)
-        # — if resolution is empty (meta_mgr unavailable, import failure, or genuinely empty
-        # library code list) do NOT intersect to zero; skip and log instead.
+        # GAP-H / DMF-07: library filter handoff — Show-only carries the allowlist;
+        # Hide mode SUPPRESSES the restriction (Codex HIGH #4: do NOT invert a Hide-set
+        # into an include-list; the full-corpus complement is out of scope for restrict_sys_ids).
         if self._catalog_library_filter:
-            lib_ids = resolve_library_sys_ids(self._catalog_library_filter, self.meta_mgr)
-            if not lib_ids:
-                import logging as _log
-                _log.getLogger(__name__).warning(
-                    "library filter %s resolved to empty on search-in-results — skipping (fail-open)",
-                    self._catalog_library_filter,
-                )
-            elif self.pre_search_restrict_sys_ids is None:
-                self.pre_search_restrict_sys_ids = lib_ids
+            if self._catalog_library_mode == 'show_only':
+                # Show-only: intersect the selected-library sys_ids into the restrict scope.
+                # WR-02: fail-open if resolution is empty.
+                lib_ids = resolve_library_sys_ids(self._catalog_library_filter, self.meta_mgr)
+                if not lib_ids:
+                    import logging as _log
+                    _log.getLogger(__name__).warning(
+                        "library filter %s resolved to empty on search-in-results — skipping (fail-open)",
+                        self._catalog_library_filter,
+                    )
+                elif self.pre_search_restrict_sys_ids is None:
+                    self.pre_search_restrict_sys_ids = lib_ids
+                else:
+                    self.pre_search_restrict_sys_ids &= lib_ids
             else:
-                self.pre_search_restrict_sys_ids &= lib_ids
+                # Hide mode: suppress the library restriction with a brief notice.
+                # (Do NOT invert — the complement is not a valid restrict_sys_ids set.)
+                self.statusBar().showMessage(
+                    tr("Library Hide filter not applied to search/composition"), 5000
+                )
         self._update_filter_chip_bar()
         self._set_active_tab(0)  # Switch to search tab
 
@@ -10750,20 +10793,28 @@ class GenizahGUI(QMainWindow):
                 date_from=filters.get('date_from'),
                 date_to=filters.get('date_to'),
             )
-        # GAP-H: intersect library filter into restrict scope.
-        # WR-02 fix: mirror the data-layer fail-open — skip when resolution is empty.
+        # GAP-H / DMF-07: library filter handoff — Show-only carries the allowlist;
+        # Hide mode SUPPRESSES the restriction (Codex HIGH #4).
         if self._catalog_library_filter:
-            lib_ids = resolve_library_sys_ids(self._catalog_library_filter, self.meta_mgr)
-            if not lib_ids:
-                import logging as _log
-                _log.getLogger(__name__).warning(
-                    "library filter %s resolved to empty on parallels-in-results — skipping (fail-open)",
-                    self._catalog_library_filter,
-                )
-            elif self.pre_search_restrict_sys_ids is None:
-                self.pre_search_restrict_sys_ids = lib_ids
+            if self._catalog_library_mode == 'show_only':
+                # Show-only: intersect the selected-library sys_ids into the restrict scope.
+                # WR-02: fail-open if resolution is empty.
+                lib_ids = resolve_library_sys_ids(self._catalog_library_filter, self.meta_mgr)
+                if not lib_ids:
+                    import logging as _log
+                    _log.getLogger(__name__).warning(
+                        "library filter %s resolved to empty on parallels-in-results — skipping (fail-open)",
+                        self._catalog_library_filter,
+                    )
+                elif self.pre_search_restrict_sys_ids is None:
+                    self.pre_search_restrict_sys_ids = lib_ids
+                else:
+                    self.pre_search_restrict_sys_ids &= lib_ids
             else:
-                self.pre_search_restrict_sys_ids &= lib_ids
+                # Hide mode: suppress the library restriction with a brief notice.
+                self.statusBar().showMessage(
+                    tr("Library Hide filter not applied to search/composition"), 5000
+                )
         self._update_filter_chip_bar()
         self._set_active_tab(1)  # Switch to composition tab
 
