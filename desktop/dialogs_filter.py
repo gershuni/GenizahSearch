@@ -1705,17 +1705,14 @@ class LibraryFilterDialog(QDialog):
         super().__init__(parent)
         from genizah_core import get_library_display  # local import to avoid circular
         from shared.browse_map_utils import library_codes_with_manuscripts
-        import genizah_core as _gc  # noqa: PLC0415 — read LIVE CURRENT_LANG, not the stale line-14 snapshot
         self.setWindowTitle(tr("Filter by Library"))
         self.setMinimumSize(360, 500)
         self._facets = facets if isinstance(facets, dict) else {}
         self._all_codes = [c for c in library_codes_with_manuscripts() if c != 'LOCAL']
         self._get_library_display = get_library_display  # keep a reference for _repopulate
-        # GAP-131-08: in Hebrew UI append the English code in parens after each library name
-        # so users can type 'CUL' / 'JTS' in the type-to-find box.  Read the LIVE module
-        # attribute — the module-level `from genizah_core import CURRENT_LANG` at line 14
-        # is a stale snapshot bound at import time, not at dialog-open time.
-        self._with_code = (_gc.CURRENT_LANG == 'he')
+        # GAP-131-09: always append the code in parens (both EN and HE UI) so users can
+        # type 'CUL' / 'JTS' in the type-to-find box regardless of the active language.
+        self._with_code = True
 
         layout = QVBoxLayout(self)
 
