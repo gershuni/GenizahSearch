@@ -144,7 +144,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 131-03-PLAN.md — Desktop catalog `LibraryFilterDialog` dual-mode (toggle + D-04 reset + mode-aware OK + 3-state button + `_catalog_library_mode` threaded into the worker) (DMF-07/10/13)
+- [x] 131-03-PLAN.md — Desktop catalog `LibraryFilterDialog` dual-mode (toggle + D-04 reset + mode-aware OK + 3-state button + `_catalog_library_mode` threaded into the worker) (DMF-07/10/13)
 - [ ] 131-04-PLAN.md — Web Browse-by-Identification catalog dual-mode dialog (toggle + text-search + count-shortlist + expand-all + sort + dict persist + migration) (DMF-08/12/10/13)
 - [ ] 131-05-PLAN.md — Web `/parallels` NEW dual-mode library control (button + dialog + post-fetch filter + `parallels_library_filter` persistence) (DMF-09/10/13)
 
@@ -169,5 +169,5 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 130. Dual-Mode Filter Core — Web /search | 3/3 | Complete    | 2026-06-30 |
-| 131. Dual-Mode Parity — Desktop + Browse + Parallels | 2/5 | In Progress|  |
+| 131. Dual-Mode Parity — Desktop + Browse + Parallels | 3/5 | In Progress|  |
 | 132. Public API Dual-Mode | 0/? | Not started | - |
