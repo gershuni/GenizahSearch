@@ -135,7 +135,7 @@ Plans:
   5. The web Browse-by-Identification catalog library filter gains the `/search` dialog affordances: a client-side text-search input, a per-library fragment/result count on the shortlist, and sort-by-count / sort-A–Z. (DMF-12)
   6. On every surface (catalog / `/parallels` / desktop), libraries with zero corpus manuscripts are excluded from the filter universe, reusing the shared `library_codes_with_manuscripts()` built in Phase 130 (web `/search` already done). (DMF-13)
 
-**Plans**: 6 plans (5 base + 1 gap-closure)
+**Plans**: 7 plans (5 base + 2 gap-closure)
 Plans:
 **Wave 1**
 
@@ -151,6 +151,7 @@ Plans:
 **Gap closure** *(UAT 2026-06-30 — DMF-07/DMF-12 desktop facet parity)*
 
 - [x] 131-06-PLAN.md — Desktop catalog `LibraryFilterDialog` dynamic per-library COUNTS (`Name (count)`) via `fjms.get_browse_library_facets`, computed off the UI thread, honoring the active PGP/Editions/domain filters — at parity with web /catalog (DMF-07/DMF-12)
+- [ ] 131-07-PLAN.md — Desktop catalog `LibraryFilterDialog` type-to-find search box + A-Z / By-count sort toggle (mirroring web `catLibFilterSearch` + `catLibFilterSort`; By count via `self._facets` desc, A-Z fallback; check-state preserved, Select All ignores filter) — at parity with web /catalog (DMF-07)
 
 **UI hint**: yes
 
