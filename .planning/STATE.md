@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v8.4.0
 milestone_name: Dual-Mode Library Filter
 status: verifying
-stopped_at: Phase 131 executed (131-01..05 + gaps 131-06, 131-07, 131-08) — held for human UAT
-last_updated: "2026-06-30T16:50:00.000Z"
+stopped_at: Phase 131 executed (131-01..05 + gaps 131-06..09) — held for human UAT
+last_updated: "2026-06-30T17:10:00.000Z"
 last_activity: 2026-06-30
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 11
-  completed_plans: 11
+  total_plans: 12
+  completed_plans: 12
   percent: 33
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md
 ## Current Position
 
 Phase: 131 (dual-mode-parity-desktop-catalog-web-browse-by-identificatio) — AWAITING HUMAN UAT (held by user)
-Plan: 8 of 8 executed (131-01..05 + gaps 131-06 dynamic facet counts, 131-07 sort + type-to-find, 131-08 Hebrew-UI library code)
-Status: Code-complete + code-verified (6/6 must-haves); desktop/web parity gaps 131-06/07/08 executed (62/62 desktop+catalog tests). HELD for live render-smoke UAT (9 items in 131-HUMAN-UAT.md). NOT marked complete; do NOT advance to Phase 132 until UAT passes.
-Last activity: 2026-06-30 -- Phase 131 + gaps 131-06/07/08 executed & gated; held for human UAT
+Plan: 9 of 9 executed (131-01..05 + gaps 131-06 dynamic facet counts, 131-07 sort + type-to-find, 131-08 Hebrew-UI library code, 131-09 same code in English UI)
+Status: Code-complete + code-verified (6/6 must-haves); desktop/web parity gaps 131-06..09 executed (63/63 desktop+catalog tests). HELD for live render-smoke UAT (9 items in 131-HUMAN-UAT.md). NOT marked complete; do NOT advance to Phase 132 until UAT passes.
+Last activity: 2026-06-30 -- Phase 131 + gaps 131-06..09 executed & gated; held for human UAT
 Next step: Run the 9 items in 131-HUMAN-UAT.md against a live web/desktop instance, then re-run `/gsd-execute-phase 131` (verifier re-runs -> passed -> completes phase) or `/gsd-verify-work 131`. Report issues -> `/gsd-plan-phase 131 --gaps`.
 
 ## Accumulated Context
@@ -105,7 +105,7 @@ Items acknowledged and deferred at v8.3.0 milestone close on 2026-06-30:
 ## Session Continuity
 
 Last session: 2026-06-30T16:30:00.000Z
-Stopped at: Phase 131 executed (131-01..05 + gaps 131-06, 131-07, 131-08) — held for human UAT
+Stopped at: Phase 131 executed (131-01..05 + gaps 131-06..09) — held for human UAT
 Resume file: None
 Next step: Run the 9 items in 131-HUMAN-UAT.md against a live instance, then re-run `/gsd-execute-phase 131` (verifier re-runs) to complete the phase, or `/gsd-plan-phase 131 --gaps` if UAT surfaces issues.
 

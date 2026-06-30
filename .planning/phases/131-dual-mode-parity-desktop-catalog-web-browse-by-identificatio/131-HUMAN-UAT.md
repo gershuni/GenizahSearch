@@ -52,7 +52,7 @@ result: [pending]
 
 total: 9
 passed: 0
-issues: 1
+issues: 0
 pending: 9
 skipped: 0
 blocked: 0
@@ -113,7 +113,8 @@ blocked: 0
     - "Tests: desktop tests/test_libfilter_desktop.py (he-lang label contains '(CUL)'; search 'CUL' matches; en-lang label unchanged; A-Z order unchanged) + a web/shared test for the get_library_display with_code param + the he-lang data-label includes the code."
   debug_session: ""
 - truth: "The English library code in parentheses ALSO appears in the catalog library-filter dialog rows in ENGLISH UI (both apps) — e.g. 'Cambridge University Library (CUL)' — searchable by code. Extends gap 131-08 (Hebrew-only) to both languages."
-  status: failed
+  status: fix_implemented_pending_uat
+  resolution: "Closed by gap plan 131-09 (commits bf53c31d flip with_code gate to always-on at both call sites; 42570b0c en-lang tests flipped to expect the code + EN search test; 13479f4a SUMMARY). 63/63 desktop+catalog tests pass headless; shared get_library_display still default-OFF (verified: en bare call = 'Cambridge University Library', no code; other displays unaffected). Live render-smoke folded into UAT test #9 (pending)."
   reason: "User follow-up after 131-08 confirmed working: 'Works well, add library codes to the EN UI too.'"
   severity: minor
   test: 9
