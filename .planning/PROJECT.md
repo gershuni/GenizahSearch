@@ -8,6 +8,18 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
+## Current Milestone: v8.4.0 Dual-Mode Library Filter
+
+**Goal:** Library filtering can express BOTH "show only these libraries" and "hide these libraries" intents, persisted so each survives across searches, at full web + desktop parity — closing the v8.3.0 gap where the inclusion-only allowlist (over a result-derived universe) could not represent a sticky "exclude library X".
+
+**Target features:**
+- **Dual-mode (Show-only / Hide) library filter on web `/search`** *(lead)* — the filter dialog gains a mode toggle; persist (mode + set) via `safe_storage` so "hide RNL" stays hidden as new libraries surface on later searches, and "show only CUL/JTS" likewise persists. Inclusion = allowlist, Hide = denylist (consistent with existing `domain_exclusions` / printed-filter exclusion semantics).
+- **Desktop catalog dual-mode parity** — the desktop `LibraryFilterDialog` (catalog Browse-by-Identification) gains the same Show-only / Hide model.
+- **Web `/parallels` library-filter UI control** — close the v8.3.0 deferred gap: add a library-filter control to the `/parallels` page (the core already honors `restrict_sys_ids`; this is UI + persistence), adopting the same dual-mode model.
+- **Browse-by-Identification catalog dual-mode** — give the web catalog filter the same Show-only / Hide modes (its universe is the full canonical library list, so its allowlist is already stable — lower urgency, included for consistency).
+
+**Key context:** Hard invariant — the D-46 / D-NEW-7 `'LOCAL'` exclusion guard (My Library must never appear as a web library-filter option) must be preserved across all surfaces (enforced by `tests/test_web_library_options_no_local.py` + `tests/test_phase_97_invariants.py`). Evolution of the shipped SEED-026; no new domain research needed.
+
 ## Shipped Milestone: v8.3.0 God-File Decomposition + Search & Browse UX — ✅ SHIPPED 2026-06-29, CLOSED 2026-06-30
 
 **Shipped to both apps 2026-06-29** (web deployed @ `c01e8842`; desktop installer `GenizahSearchPro_V8.3.0_Setup.exe` on GitHub Release latest @ tag `v8.3.0`; CI green on the release commit). Closed 2026-06-30. Two strands shipped together: (1) **decomposition (Phases 122-127)** — split the two god-files (`genizah_app.py` ~28k lines, desktop; `genizah_core.py` ~12.5k lines, shared) into cohesive `shared/`+`desktop/` modules behind permanent re-export facades, **zero behavior change**; (2) **Search & Browse UX (Phases 128-129)** — **SEED-025** Space-key scroll of search results + **SEED-026** library filter (web `/search` + Browse-by-Identification + desktop catalog parity), both apps. The decomposition rode along as invisible plumbing; desktop earned the version bump with the two visible features. Archives: `.planning/milestones/v8.3.0-ROADMAP.md` + `v8.3.0-REQUIREMENTS.md`.

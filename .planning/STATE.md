@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v8.3.0
-milestone_name: God-File Decomposition + Search & Browse UX
-status: Awaiting next milestone
-stopped_at: Phase 129 context gathered
-last_updated: "2026-06-30T03:54:58.331Z"
-last_activity: 2026-06-30 — Milestone v8.3.0 completed and archived
+milestone: v8.4.0
+milestone_name: Dual-Mode Library Filter
+status: planning
+last_updated: "2026-06-30T04:13:13.253Z"
+last_activity: 2026-06-30
 progress:
-  total_phases: 8
-  completed_phases: 6
-  total_plans: 22
-  completed_plans: 20
-  percent: 75
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,10 +24,10 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: Milestone v8.3.0 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-06-30 — Milestone v8.3.0 completed and archived
+Status: Defining requirements
+Last activity: 2026-06-30 — Milestone v8.4.0 started
 
 ## Accumulated Context
 
