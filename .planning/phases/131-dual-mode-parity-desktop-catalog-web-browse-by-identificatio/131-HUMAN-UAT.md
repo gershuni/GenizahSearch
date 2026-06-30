@@ -44,12 +44,16 @@ result: [pending]
 expected: Open Catalog tab -> library filter button. (a) A "Search libraries..." box filters the list as you type (case-insensitive); typing hides non-matching rows but keeps their checks (a checked-then-hidden library stays selected on Apply). (b) A sort toggle "A-Z" / "By count" reorders the list: "By count" shows highest-count libraries first; "A-Z" is alphabetical. Switching sort keeps your checks. "Select All" selects every library even while a search filter is active. No UI freeze.
 result: [pending]
 
+### 9. Hebrew UI — library rows show the English code, searchable by it (gap 131-08)
+expected: Switch the app to Hebrew UI. Open the catalog library filter dialog (web /catalog AND desktop) -> each library row shows the English code in parentheses after the Hebrew name, e.g. "ספריית האוניברסיטה של קיימברידג' (CUL)". Type "CUL" (or "JTS", etc.) in the type-to-find box -> the matching library is found. A-Z sort order is unchanged (sorts by the Hebrew name, not the appended code). English UI unchanged unless we later opt in.
+result: [pending]
+
 ## Summary
 
-total: 8
+total: 9
 passed: 0
-issues: 0
-pending: 8
+issues: 1
+pending: 9
 skipped: 0
 blocked: 0
 
@@ -87,4 +91,23 @@ blocked: 0
     - "Add type-to-find QLineEdit + setHidden row-filter to desktop LibraryFilterDialog (label substring, case-insensitive, check-state preserved)."
     - "Add A-Z / by-count sort toggle reordering the list (by-count via self._facets desc; A-Z default), preserving check state + active search filter."
     - "Tests: extend tests/test_libfilter_desktop.py -- search hides non-matching rows and preserves checks/get_checked_codes; by-count sort orders by self._facets desc; A-Z sort orders by display name; by-count falls back to A-Z when facets empty; Select All ignores the filter. Headless: GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen, this file only."
+  debug_session: ""
+- truth: "In Hebrew UI, each library row in the catalog library-filter dialog (web /catalog AND desktop) shows the English library code in parentheses after the Hebrew name (e.g. 'ספריית האוניברסיטה של קיימברידג'' (CUL)'), and the type-to-find search matches that code (typing 'CUL' finds Cambridge). A-Z sort order is unaffected (keyed on the bare Hebrew name)."
+  status: failed
+  reason: "User feedback during UAT: 'in Heb UI add also the English acronym, like ספריית האוניברסיטה של קיימברידג'' (CUL), so it can be searched also.' In Hebrew UI the row label is the Hebrew name only, so a user cannot find a library by typing its well-known English code (CUL/JTS/etc.) in the new type-to-find box."
+  severity: minor
+  test: 9
+  root_cause: "Dialog row labels come from shared get_library_display(code, short=False, lang=...) (shared/browse_map_utils.py:259) which returns the name WITHOUT the code. The type-to-find search matches the label/data-label, so the code is neither shown nor searchable in Hebrew UI. Desktop: desktop/dialogs_filter.py LibraryFilterDialog (_populate_rows uses get_library_display(short=False)). Web: web/pages/catalog_browse.py dialog builds data-label + visible label via get_library_display(short=False, lang=_lang) (~lines 1163/1178/1189)."
+  artifacts:
+    - path: "shared/browse_map_utils.py"
+      issue: "Add an opt-in way to append the code to the full name, e.g. a `with_code: bool=False` param on get_library_display: when True (and short=False), return f'{name} ({code})'. Default False so NO existing caller (search results column, browse, etc.) changes. Language-agnostic (the code is the same in both langs)."
+    - path: "desktop/dialogs_filter.py"
+      issue: "LibraryFilterDialog: when CURRENT_LANG == 'he', render row labels with the code appended (get_library_display(code, short=False, with_code=True) or equivalent). Keep the gap-131-06 'Name (count)' rendering: final Hebrew row reads 'שם (CODE)  —  count' style consistent with existing count rendering. CRITICAL: keep the A-Z sort key and the by-count tie-break on the BARE name (get_library_display(short=False), no code) so ordering is unchanged; only the DISPLAYED label and the search-match text include the code. The type-to-find search already matches the label, so appending the code makes it searchable automatically."
+    - path: "web/pages/catalog_browse.py"
+      issue: "Catalog library dialog: when _lang == 'he', append the code to the visible label AND to data-label (lowercased) so catLibFilterSearch matches it. Keep the A-Z sort key (data-label vs a separate sort attr) consistent so the appended code does not reorder A-Z — if sort uses data-label, ensure the code is appended in a way that does not change alphabetical order (append at END), matching desktop."
+  missing:
+    - "Add opt-in with_code (or equivalent) to get_library_display in shared/browse_map_utils.py; default OFF (no other caller changes)."
+    - "Desktop LibraryFilterDialog: append (CODE) to Hebrew-UI row labels; preserve A-Z/by-count sort keys on the bare name; counts rendering intact; search now matches code."
+    - "Web catalog dialog: append (CODE) to Hebrew-UI label + data-label so catLibFilterSearch matches; preserve A-Z order."
+    - "Tests: desktop tests/test_libfilter_desktop.py (he-lang label contains '(CUL)'; search 'CUL' matches; en-lang label unchanged; A-Z order unchanged) + a web/shared test for the get_library_display with_code param + the he-lang data-label includes the code."
   debug_session: ""
