@@ -1063,9 +1063,9 @@ def create_catalog_browse_page(
         mode = current_library_mode['value']
 
         if mode == 'show_only' and codes:
-            # Show-only active: count how many facet libraries are in the selected set.
-            facets = current_library_facets['value']
-            total = len([c for c in LIBRARY_CODES if c != 'LOCAL'])
+            # Show-only active: total = selectable-universe (manuscripts present, no LOCAL).
+            # Matches parallels.py:1510 — must NOT use static LIBRARY_CODES (Codex R5).
+            total = len([c for c in library_codes_with_manuscripts() if c != 'LOCAL'])
             shown = len(codes)
             _lib_btn_key = ('Showing {shown}/{total} library' if total == 1
                             else 'Showing {shown}/{total} libraries')
