@@ -460,7 +460,7 @@ def clear_search_snapshot() -> None:
         'domain_exclusions': [],
         'search_printed_filter': 'all',
         'search_pgp_filter': 'all',  # Phase 999.2 (PGP-FILTER-05, D-10) — central New-Search reset path
-        'search_library_filter': [],  # SEED-026 (LIBFILTER-01) — central New-Search reset path
+        'search_library_filter': {'mode': 'hide', 'codes': []},  # DMF (LIBFILTER-01/DMF-06) — central New-Search reset path; D-09 dict shape; D-05 fresh default
         'word_search_excluded_ids': [],
         'search_exclusion_sources': [],
     }
