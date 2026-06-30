@@ -385,9 +385,9 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
         if (!cont) return;
         var q = query.toLowerCase().trim();
         cont.querySelectorAll('.lib-cb-row').forEach(function(row) {
-            if (!q) { row.style.display = ''; return; }
+            if (!q) { row.style.display = 'flex'; return; }
             var label = (row.getAttribute('data-label') || '').toLowerCase();
-            row.style.display = (label.indexOf(q) >= 0) ? '' : 'none';
+            row.style.display = (label.indexOf(q) >= 0) ? 'flex' : 'none';
         });
     }
     </script>''')
@@ -1826,7 +1826,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         shortlist_rows = []
                         for code in shortlist_codes:
                             count = facets[code]
-                            label = get_library_display(code, short=False, lang=lang)
+                            label = get_library_display(code, short=False, lang=lang, with_code=True)
                             label_with_count = f"{label} ({count})"
                             # Initial checked state per current mode:
                             if current_mode[0] == 'show_only':
@@ -1840,7 +1840,7 @@ def create_search_page(initial_query: str = None, initial_tag: str = None,
                         # Expand section rows (no count)
                         expand_rows = []
                         for code in expand_codes:
-                            label = get_library_display(code, short=False, lang=lang)
+                            label = get_library_display(code, short=False, lang=lang, with_code=True)
                             if current_mode[0] == 'show_only':
                                 is_checked = (not current_filter) or (code in current_filter)
                             else:

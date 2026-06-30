@@ -1642,9 +1642,9 @@ def create_catalog_browse_page(
         if (!cont) return;
         var q = query.toLowerCase().trim();
         cont.querySelectorAll('.cat-lib-cb-row').forEach(function(row) {
-            if (!q) { row.style.display = ''; return; }
+            if (!q) { row.style.display = 'flex'; return; }
             var label = (row.getAttribute('data-label') || '').toLowerCase();
-            row.style.display = (label.indexOf(q) >= 0) ? '' : 'none';
+            row.style.display = (label.indexOf(q) >= 0) ? 'flex' : 'none';
         });
     }
     // Sort rows by count-desc or A-Z (DMF-12).
