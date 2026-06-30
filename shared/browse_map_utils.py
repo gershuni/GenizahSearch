@@ -120,6 +120,64 @@ LIBRARY_CODES = {
 }
 
 
+def library_codes_with_manuscripts() -> set:
+    """Return the set of library_code values that have at least one manuscript record.
+
+    Reads ``libraries.csv`` (column 3 per CLAUDE.md), caches the result at module level
+    so repeated calls are free.  Fail-open: if the CSV is unavailable or unreadable,
+    returns the full ``set(LIBRARY_CODES)`` so the filter never silently empties.
+
+    Phase 131 note: reusable by catalog/parallels/desktop — keep import-safe (no web/
+    or desktop/ imports here).
+    """
+    if library_codes_with_manuscripts._cache is not None:
+        return library_codes_with_manuscripts._cache
+
+    csv_path = Config.LIBRARIES_CSV
+    if not os.path.exists(csv_path):
+        LOGGER.warning(
+            "library_codes_with_manuscripts: %s not found — fail-open (returning full set)",
+            csv_path,
+        )
+        library_codes_with_manuscripts._cache = set(LIBRARY_CODES)
+        return library_codes_with_manuscripts._cache
+
+    import csv as _csv
+    found: set = set()
+    try:
+        with open(csv_path, 'r', encoding='utf-8', errors='replace') as _f:
+            reader = _csv.reader(_f)
+            next(reader, None)  # skip header
+            for row in reader:
+                if not row or row[0].startswith('#'):
+                    continue
+                if len(row) > 3:
+                    code = row[3].strip()
+                    if code:
+                        found.add(code)
+    except Exception as exc:
+        LOGGER.warning(
+            "library_codes_with_manuscripts: failed to read %s (%s) — fail-open",
+            csv_path, exc,
+        )
+        library_codes_with_manuscripts._cache = set(LIBRARY_CODES)
+        return library_codes_with_manuscripts._cache
+
+    # Intersect with known canonical codes so stale/typo values from the CSV don't leak.
+    result = found & set(LIBRARY_CODES)
+    if not result:
+        LOGGER.warning(
+            "library_codes_with_manuscripts: intersection is empty — fail-open (returning full set)"
+        )
+        result = set(LIBRARY_CODES)
+    library_codes_with_manuscripts._cache = result
+    LOGGER.debug("library_codes_with_manuscripts: %d codes with manuscripts", len(result))
+    return library_codes_with_manuscripts._cache
+
+
+library_codes_with_manuscripts._cache = None  # type: ignore[attr-defined]
+
+
 def normalize_shelfmark(shelfmark: str) -> str:
     """
     Normalize shelfmarks for consistent matching across the codebase.
