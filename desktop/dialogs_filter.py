@@ -1677,27 +1677,45 @@ def library_apply_selection(checked: list, all_codes: list) -> list:
 class LibraryFilterDialog(QDialog):
     """Flat checkable library filter dialog mirroring DomainFilterDialog.
 
-    Inclusion model (GAP-G / FINDING 1):
-      * All libraries except LOCAL offered; all checked by default when
-        ``selected_codes`` is empty (= show all).
-      * Non-empty ``selected_codes`` -> only those codes checked on open.
-      * "Select all" button re-checks everything (= clear the filter).
-      * NO "Select None"/deselect-all affordance (FINDING 1: an all-unchecked
-        state would collide with the `[] = show-all` sentinel).
-      * OK button is DISABLED when zero items are checked, preventing the
-        all-unchecked state from being committed.
+    Dual-mode (DMF-07 — Phase 131 Plan 03):
+      * mode='show_only': Show only selected libraries (allowlist). All checked by
+        default when ``selected_codes`` is empty (= show all).
+      * mode='hide': Hide selected libraries (denylist). Empty hide-set = show all.
+        OK is enabled even with zero checked (D-05/D-08).
+      * D-04: toggling mode resets the checked set (prevents silent inversion of intent).
+      * ``get_mode()`` returns the active mode string.
+      * Universe is ``library_codes_with_manuscripts()`` minus ``'LOCAL'`` (DMF-13).
       * ``get_checked_codes()`` returns the list of currently-checked codes
         in stable (list order) sequence.
     """
 
-    def __init__(self, parent=None, *, selected_codes: list | None = None):
+    def __init__(self, parent=None, *, mode: str = 'hide', selected_codes: list | None = None):
         super().__init__(parent)
-        from genizah_core import LIBRARY_CODES, get_library_display  # local import to avoid circular
+        from genizah_core import get_library_display  # local import to avoid circular
+        from shared.browse_map_utils import library_codes_with_manuscripts
         self.setWindowTitle(tr("Filter by Library"))
         self.setMinimumSize(360, 480)
-        self._all_codes = [c for c in LIBRARY_CODES.keys() if c != 'LOCAL']
+        self._all_codes = [c for c in library_codes_with_manuscripts() if c != 'LOCAL']
 
         layout = QVBoxLayout(self)
+
+        # Mode toggle — Show only selected / Hide selected (D-03)
+        from PyQt6.QtWidgets import QRadioButton, QButtonGroup
+        mode_layout = QHBoxLayout()
+        self._mode_group = QButtonGroup(self)
+        self._rb_show_only = QRadioButton(tr("Show only selected"))
+        self._rb_hide = QRadioButton(tr("Hide selected"))
+        self._mode_group.addButton(self._rb_show_only, 1)
+        self._mode_group.addButton(self._rb_hide, 2)
+        if mode == 'show_only':
+            self._rb_show_only.setChecked(True)
+        else:
+            self._rb_hide.setChecked(True)
+        self._mode_group.buttonToggled.connect(self._on_mode_changed)
+        mode_layout.addWidget(self._rb_show_only)
+        mode_layout.addWidget(self._rb_hide)
+        mode_layout.addStretch()
+        layout.addLayout(mode_layout)
 
         # List widget with per-item checkboxes (flat, one row per library code)
         self.list_widget = QListWidget()
@@ -1711,9 +1729,13 @@ class LibraryFilterDialog(QDialog):
             key=lambda c: get_library_display(c, short=False),
         )
 
-        # Populate list
+        # Populate list — initial checked state is mode-aware (DMF-07)
         active_set = set(selected_codes) if selected_codes else set()
-        all_checked = len(active_set) == 0  # empty selected_codes = all included
+        # Show-only: empty selected_codes = show all (all-checked); Hide: start unchecked
+        if mode == 'show_only':
+            all_checked = len(active_set) == 0
+        else:  # hide
+            all_checked = False
         for code in self._all_codes:
             label = get_library_display(code, short=False)
             item = QListWidgetItem(label)
@@ -1755,24 +1777,49 @@ class LibraryFilterDialog(QDialog):
         self.list_widget.itemChanged.connect(self._on_item_changed)
         self._update_ok_button()
 
+    def get_mode(self) -> str:
+        """Return the active mode: 'show_only' or 'hide'."""
+        return 'show_only' if self._rb_show_only.isChecked() else 'hide'
+
+    def _on_mode_changed(self, *args):
+        """D-04: mode flip resets the checked set (prevents silent inversion of intent).
+
+        NOTE: QButtonGroup.buttonToggled emits (button, checked) — slot MUST accept *args
+        (mirror the live analog _on_filter_changed(self, *args) at dialogs_filter.py:1368).
+        """
+        self.list_widget.blockSignals(True)
+        for i in range(self.list_widget.count()):
+            self.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+        self.list_widget.blockSignals(False)
+        self._update_ok_button()
+
     def _on_item_changed(self, item):
         """Re-evaluate the OK guard whenever a checkbox changes."""
         self._update_ok_button()
 
     def _update_ok_button(self):
-        """Enable OK iff at least one library is checked."""
+        """Mode-aware OK guard (DMF-07).
+
+        Hide mode: enable OK unconditionally (empty hide-set = show all, D-05/D-08).
+        Show-only mode: enable OK only when at least one library is checked.
+        """
+        mode = self.get_mode()
         checked_count = sum(
             1 for i in range(self.list_widget.count())
             if self.list_widget.item(i).checkState() == Qt.CheckState.Checked
         )
-        self.ok_button.setEnabled(checked_count > 0)
-        if checked_count == 0:
-            self._hint_label.setText(
-                tr("Select at least one library, or check all to clear the filter")
-            )
-            self._hint_label.setVisible(True)
-        else:
+        if mode == 'hide':
+            self.ok_button.setEnabled(True)       # empty hide-set = show all (D-05/D-08)
             self._hint_label.setVisible(False)
+        else:  # show_only
+            self.ok_button.setEnabled(checked_count > 0)
+            if checked_count == 0:
+                self._hint_label.setText(
+                    tr("Select at least one library, or check all to clear the filter")
+                )
+                self._hint_label.setVisible(True)
+            else:
+                self._hint_label.setVisible(False)
 
     def _select_all(self):
         """Re-check all items (= clear the filter / show all)."""
@@ -1797,15 +1844,19 @@ class LibraryFilterDialog(QDialog):
         self._update_ok_button()
 
     def _on_accept(self):
-        """Guard: only accept if at least one library is checked."""
+        """Mode-aware guard: reject only when Show-only mode has zero checked.
+
+        Hide mode: empty checked is valid (= hide nothing = show all, D-05/D-08).
+        """
+        mode = self.get_mode()
         checked = self.get_checked_codes()
-        if not checked:
-            # All-unchecked state is unreachable as a committed filter
+        if mode == 'show_only' and not checked:
             self._hint_label.setText(
                 tr("Select at least one library, or check all to clear the filter")
             )
             self._hint_label.setVisible(True)
             return
+        # Hide mode: empty checked is valid (= hide nothing = show all)
         self.accept()
 
     def get_checked_codes(self) -> list:
