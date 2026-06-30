@@ -715,3 +715,202 @@ def test_catalog_search_in_results_hide_no_restrict_and_notice(monkeypatch):
         "_catalog_search_in_results in Hide mode must fire a Hide-suppression notice. "
         "Codex N3. RED until Plan 03."
     )
+
+
+# ── Phase 131 Plan 06: Facet counts (DMF-07/DMF-12 desktop) ──────────────
+# Five tests cover: count rendering, dynamic PGP-only counts, name-only fallback,
+# LOCAL exclusion, and the off-UI-thread contract.
+
+
+@pytest.mark.gui
+def test_dialog_renders_facet_counts():
+    """(1) DMF-07/DMF-12: LibraryFilterDialog renders 'Name (count)' when facets supplied.
+
+    - CUL row text must contain '(1,234)' (localized thousands separator).
+    - A code present in the universe but absent from facets renders name-only (no count).
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from PyQt6.QtCore import Qt
+
+    dlg = LibraryFilterDialog(mode='hide', facets={'CUL': 1234})
+    cul_item = None
+    other_no_count_item = None
+    for i in range(dlg.list_widget.count()):
+        item = dlg.list_widget.item(i)
+        code = item.data(Qt.ItemDataRole.UserRole)
+        if code == 'CUL':
+            cul_item = item
+        elif code not in ('CUL',):
+            # Any code absent from facets — pick the first one found
+            if other_no_count_item is None:
+                other_no_count_item = item
+
+    assert cul_item is not None, "CUL must appear in the dialog universe"
+    assert '(1,234)' in cul_item.text(), (
+        f"CUL row must contain '(1,234)' when facets={{'CUL': 1234}}; "
+        f"got {cul_item.text()!r}"
+    )
+    # UserRole still returns bare code, not the labelled string
+    assert cul_item.data(Qt.ItemDataRole.UserRole) == 'CUL', (
+        "UserRole must still be the bare code 'CUL', not the labelled text"
+    )
+
+    # A code absent from facets must render name-only (no parenthesised count)
+    if other_no_count_item is not None:
+        text = other_no_count_item.text()
+        # Must not end with '(N)' pattern from a count (could legitimately have parentheses
+        # in the library name, so we check for the specific ' (' format we add)
+        assert '  (' not in text, (
+            f"Row for code absent from facets must not have a count; got {text!r}"
+        )
+
+
+@pytest.mark.gui
+def test_dialog_facets_none_fallback():
+    """(2) DMF-07/DMF-12: LibraryFilterDialog with facets=None (or no kwarg) renders name-only.
+
+    - Both calling forms produce name-only rows.
+    - get_checked_codes() still returns bare codes after selecting with show_only + CUL.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+
+    for kwarg in ({}, {'facets': None}):
+        dlg = LibraryFilterDialog(mode='hide', **kwarg)
+        for i in range(dlg.list_widget.count()):
+            item = dlg.list_widget.item(i)
+            assert '  (' not in item.text(), (
+                f"Name-only fallback: row must not contain count suffix for kwarg={kwarg!r}; "
+                f"got {item.text()!r}"
+            )
+
+    # get_checked_codes() returns bare codes
+    dlg_codes = LibraryFilterDialog(mode='show_only', selected_codes=['CUL'])
+    codes = dlg_codes.get_checked_codes()
+    assert codes == ['CUL'], (
+        f"get_checked_codes() must return bare codes ['CUL'], got {codes!r}"
+    )
+
+
+def test_facet_worker_dynamic_pgp_filter(monkeypatch):
+    """(3) DYNAMIC: _CatalogFacetWorker.run() passes pgp_filter + pgp_sys_ids + resolver
+    when pgp_filter='has_pgp' is active.
+
+    Proves that counts honor an active PGP-only filter set (DMF-12 dynamic counts).
+    """
+    import genizah_app
+    import shared.fjms_service as fjms_mod
+
+    recorded_kwargs = {}
+    fake_fjms = MagicMock()
+    fake_fjms.get_browse_library_facets.side_effect = (
+        lambda **kw: recorded_kwargs.update(kw) or {}
+    )
+    monkeypatch.setattr(fjms_mod, 'get_fjms_service', lambda **_: fake_fjms)
+    monkeypatch.setattr(
+        genizah_app, '_get_catalog_filter_sets',
+        lambda: ({'990001'}, set()),
+    )
+
+    meta_mgr = _make_fake_meta_mgr()
+
+    w = genizah_app._CatalogFacetWorker(
+        None,
+        domain=None,
+        author=None,
+        work=None,
+        pgp_filter='has_pgp',
+        editions_filter='all',
+        meta_mgr=meta_mgr,
+    )
+    w.run()  # synchronous; no QThread.start()
+
+    assert recorded_kwargs.get('pgp_filter') == 'has_pgp', (
+        f"Worker must pass pgp_filter='has_pgp' into get_browse_library_facets; "
+        f"got {recorded_kwargs.get('pgp_filter')!r}"
+    )
+    assert recorded_kwargs.get('pgp_sys_ids') == {'990001'}, (
+        f"Worker must pass non-None pgp_sys_ids (from _get_catalog_filter_sets) when "
+        f"pgp_filter='has_pgp'; got {recorded_kwargs.get('pgp_sys_ids')!r}"
+    )
+    assert recorded_kwargs.get('sys_id_to_library') is meta_mgr.get_library_for_id, (
+        "Worker must pass meta_mgr.get_library_for_id as sys_id_to_library "
+        "(full-corpus resolver, WR-05)"
+    )
+
+
+@pytest.mark.gui
+def test_dialog_excludes_local_even_in_facets():
+    """(4) LOCAL never rendered: LibraryFilterDialog universe excludes 'LOCAL' even when
+    facets includes a 'LOCAL' key.
+
+    The dialog _all_codes is library_codes_with_manuscripts() minus 'LOCAL' (DMF-13),
+    so 'LOCAL' can never appear as a row regardless of what facets contains.
+    """
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from PyQt6.QtCore import Qt
+
+    dlg = LibraryFilterDialog(mode='hide', facets={'LOCAL': 99, 'CUL': 5})
+    for i in range(dlg.list_widget.count()):
+        item = dlg.list_widget.item(i)
+        code = item.data(Qt.ItemDataRole.UserRole)
+        assert code != 'LOCAL', (
+            f"'LOCAL' must never appear as a row in LibraryFilterDialog "
+            f"(DMF-13); found at index {i}"
+        )
+
+
+def test_facet_computation_off_ui_thread():
+    """(5) OFF-THREAD: _CatalogFacetWorker is a QThread subclass; the DB facet call
+    (get_browse_library_facets) lives inside run(), not inside _open_catalog_library_dialog.
+
+    This is an AST/source scan — proves the off-UI-thread invariant without running
+    the real DB or starting a thread.
+    """
+    import ast
+    import genizah_app
+    from pathlib import Path
+    from PyQt6.QtCore import QThread
+
+    # 1. _CatalogFacetWorker must be a QThread subclass
+    assert issubclass(genizah_app._CatalogFacetWorker, QThread), (
+        "_CatalogFacetWorker must be a QThread subclass"
+    )
+
+    source = Path(genizah_app.__file__).read_text(encoding='utf-8')
+    tree = ast.parse(source)
+
+    # 2. find _CatalogFacetWorker.run body
+    run_has_facet_call = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == '_CatalogFacetWorker':
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == 'run':
+                    # Walk the run() body for get_browse_library_facets calls
+                    for child in ast.walk(item):
+                        if isinstance(child, ast.Attribute):
+                            if child.attr == 'get_browse_library_facets':
+                                run_has_facet_call = True
+                        elif isinstance(child, ast.Name):
+                            if child.id == 'get_browse_library_facets':
+                                run_has_facet_call = True
+
+    assert run_has_facet_call, (
+        "_CatalogFacetWorker.run() must contain a call to get_browse_library_facets"
+    )
+
+    # 3. _open_catalog_library_dialog must NOT contain a direct get_browse_library_facets call
+    dialog_open_has_facet_call = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == '_open_catalog_library_dialog':
+            for child in ast.walk(node):
+                if isinstance(child, ast.Attribute):
+                    if child.attr == 'get_browse_library_facets':
+                        dialog_open_has_facet_call = True
+                elif isinstance(child, ast.Name):
+                    if child.id == 'get_browse_library_facets':
+                        dialog_open_has_facet_call = True
+
+    assert not dialog_open_has_facet_call, (
+        "_open_catalog_library_dialog must NOT call get_browse_library_facets directly "
+        "(DB facet call must be delegated to the worker thread, not the UI thread)"
+    )
