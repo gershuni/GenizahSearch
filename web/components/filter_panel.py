@@ -346,8 +346,11 @@ def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bo
     if incoming.get('library_filter') and storage_prefix == 'search':
         # HIGH-1: sanitize incoming codes against the canonical set; exclude 'LOCAL'
         # (desktop-only library code that must never appear as a web filter option).
-        from shared.browse_map_utils import LIBRARY_CODES as _LIBRARY_CODES
-        _lib_codes = [str(c) for c in incoming['library_filter'] if c and str(c) in _LIBRARY_CODES and str(c) != 'LOCAL']
+        # Codex code-review (R2): route through the shared sanitizer so a malformed
+        # incoming value (non-list scalar, dict items, etc.) cannot raise TypeError at
+        # this entry point — same hardening as search.py's restore path.
+        from shared.browse_map_utils import sanitize_library_codes
+        _lib_codes = sanitize_library_codes(incoming.get('library_filter'))
         # WR-03: only stamp show_only when sanitized codes are non-empty.
         # If all incoming codes were LOCAL/invalid, leave state as neutral (hide/[])
         # rather than persisting an invalid show_only/[] state.

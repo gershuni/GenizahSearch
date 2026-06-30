@@ -449,6 +449,19 @@ def test_ast_apply_handler_sanitizes_codes():
         f"(list-branch restore, dict-branch restore, Apply handler); found {occurrences} call(s)"
     )
 
+    # Codex code-review R2: the browse->search handoff (filter_panel.consume_incoming_filters)
+    # is ALSO an untrusted entry point and must route through the shared sanitizer — not an
+    # inline comprehension that crashes on a malformed scalar (e.g. {'library_filter': 1}).
+    fp_source = FILTER_PANEL_PY.read_text(encoding='utf-8')
+    assert 'sanitize_library_codes(' in fp_source, (
+        "filter_panel.consume_incoming_filters must delegate library-code sanitization to "
+        "shared.browse_map_utils.sanitize_library_codes (Codex R2 HIGH)"
+    )
+    assert "for c in incoming['library_filter']" not in fp_source, (
+        "filter_panel must NOT iterate incoming['library_filter'] inline — a non-list scalar "
+        "raises TypeError before the neutral/skip path; use sanitize_library_codes instead"
+    )
+
 
 # ---------------------------------------------------------------------------
 # (17) AST: Apply handler persists dict shape (D-09)
