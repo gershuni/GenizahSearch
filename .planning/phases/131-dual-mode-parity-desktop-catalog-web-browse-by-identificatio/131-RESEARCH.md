@@ -496,17 +496,19 @@ all_codes = [c for c in library_codes_with_manuscripts() if c != 'LOCAL']
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **DMF-12 count source for catalog browse dialog**
+1. **DMF-12 count source for catalog browse dialog** — **RESOLVED (Plan 131-04): result-derived facets.**
    - What we know: `get_browse_results` returns `{'results': [], 'total': N}` but total is the count for all active filters, not per-library. Current results data includes `library_code` per row.
    - What's unclear: Should counts be derived from current page results (partial), from a separate COUNT query, or from a cached full-result scan?
    - Recommendation: Use result-derived facets from the current result rows (same pattern as `/search`). This is consistent, no new DB calls, and the expand-section handles libraries not in current results with no count.
+   - **DECISION (A2):** Result-derived facets via a `current_results_cache` cell populated from the resolved per-row `library_code` values — mirrors `/search`'s `_compute_library_facets`, no new DB query. Locked in Plan 131-04.
 
-2. **Parallels library filter: post-fetch vs pre-query for Hide mode**
+2. **Parallels library filter: post-fetch vs pre-query for Hide mode** — **RESOLVED (Plan 131-05): post-fetch filter.**
    - What we know: `/search` uses a post-fetch result filter; `/parallels` uses `restrict_sys_ids` as a pre-query scope restrictor.
    - What's unclear: Should Hide mode on parallels be pre-query (requires complement resolution) or post-fetch (mirrors /search)?
    - Recommendation: Post-fetch filter for parallels library filter (both modes). This avoids full-corpus ID resolution for Hide mode and is consistent with the web `/search` pattern. The planner should confirm this.
+   - **DECISION (A3):** Post-fetch filter over `p_state.results`/`filtered_results` (mirrors `search.py:_apply_library_filter`); Hide-mode complement cannot be computed from `restrict_sys_ids` alone without full-corpus sys_id resolution (Pitfall 4). The existing `restrict_sys_ids` advanced-filter path is untouched. Locked in Plan 131-05.
 
 3. **New translation keys needed**
    - `"Show only selected"` — added in Phase 130 (VERIFIED in 130-02-SUMMARY.md)
