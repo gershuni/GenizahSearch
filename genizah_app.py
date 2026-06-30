@@ -570,6 +570,71 @@ class _CatalogRefreshWorker(QThread):
             self.done.emit({'data': {'results': [], 'total': 0}})  # Operation failed; emit empty/None so caller handles gracefully
 
 
+class _CatalogFacetWorker(QThread):
+    """Background worker that computes per-library facet counts for the catalog dialog.
+
+    Mirrors web/pages/catalog_browse.py::_fetch_library_facets_blocking (DMF-12 desktop).
+    Runs fjms.get_browse_library_facets + _get_catalog_filter_sets OFF the UI thread.
+
+    Must be module-level (not nested) so pyqtSignal works reliably in PyQt6.
+    Constructor takes all active filter values explicitly — never reads self.parent()
+    (brittle in Qt + None in tests), mirroring _CatalogRefreshWorker (OQ-2 pattern).
+    Emits {} on any error (fail-open: dialog opens with name-only rows).
+    """
+
+    done = pyqtSignal(object)  # {library_code: count} dict
+
+    def __init__(self, parent, domain, author, work,
+                 date_from=None, date_to=None, include_undated=False,
+                 text_all=None, text_any=None, text_not=None,
+                 pgp_filter='all', editions_filter='all',
+                 meta_mgr=None):
+        super().__init__(parent)
+        self._domain = domain
+        self._author = author
+        self._work = work
+        self._date_from = date_from
+        self._date_to = date_to
+        self._include_undated = include_undated
+        self._text_all = text_all
+        self._text_any = text_any
+        self._text_not = text_not
+        self._pgp_filter = pgp_filter
+        self._editions_filter = editions_filter
+        self._meta_mgr = meta_mgr
+
+    def run(self):
+        try:
+            from shared.fjms_service import get_fjms_service
+            fjms = get_fjms_service(thread_safe=True)
+            pgp_active = self._pgp_filter in ('has_pgp', 'no_pgp')
+            ed_active = self._editions_filter in ('has_edition', 'no_edition')
+            pgp_ids = ed_ids = None
+            if pgp_active or ed_active:
+                pgp_ids, ed_ids = _get_catalog_filter_sets()
+            result = fjms.get_browse_library_facets(
+                domain=self._domain,
+                author=self._author,
+                work=self._work,
+                date_from=self._date_from,
+                date_to=self._date_to,
+                include_undated=self._include_undated,
+                text_all=self._text_all,
+                text_any=self._text_any,
+                text_not=self._text_not,
+                pgp_filter=(self._pgp_filter if pgp_active else None),
+                pgp_sys_ids=(pgp_ids if pgp_active else None),
+                editions_filter=(self._editions_filter if ed_active else None),
+                edition_sys_ids=(ed_ids if ed_active else None),
+                # Full-corpus callable resolver (WR-05 None-guard for startup race).
+                sys_id_to_library=(self._meta_mgr.get_library_for_id
+                                   if self._meta_mgr else None),
+            )
+            self.done.emit(result)
+        except Exception:
+            self.done.emit({})  # Facet query failed; emit empty dict so dialog opens name-only
+
+
 def _format_list_star(in_list=False):
     return "⭐" if in_list else "☆"
 
@@ -10432,13 +10497,52 @@ class GenizahGUI(QMainWindow):
         self._catalog_start_async_refresh(refresh_authors=False, refresh_works=False)
 
     def _open_catalog_library_dialog(self):
-        """Open LibraryFilterDialog (GAP-G) and apply the selection (dual-mode, DMF-07)."""
+        """Open LibraryFilterDialog (GAP-G) and apply the selection (dual-mode, DMF-07).
+
+        Facet counts (DMF-12 desktop parity) are computed off the UI thread via
+        _CatalogFacetWorker before the dialog opens.  A QEventLoop blocks until the
+        worker finishes so the existing synchronous dlg.exec() flow is preserved.
+        """
         from shared.browse_map_utils import library_codes_with_manuscripts
         all_codes = [c for c in library_codes_with_manuscripts() if c != 'LOCAL']
+
+        # --- Compute per-library facet counts off the UI thread (DMF-12) ---
+        facets = {}
+        loop = QEventLoop()
+
+        def _on_facets_done(result):
+            nonlocal facets
+            facets = result if isinstance(result, dict) else {}
+            loop.quit()
+
+        self._catalog_facet_worker = _CatalogFacetWorker(
+            self,
+            domain=self._catalog_current_domain,
+            author=self._catalog_current_author,
+            work=self._catalog_current_work,
+            date_from=self._catalog_date_from,
+            date_to=self._catalog_date_to,
+            include_undated=self._catalog_include_undated,
+            text_all=self._catalog_text_all or None,
+            text_any=self._catalog_text_any or None,
+            text_not=self._catalog_text_not or None,
+            pgp_filter=self._catalog_pgp_filter,
+            editions_filter=self._catalog_editions_filter,
+            meta_mgr=self.meta_mgr,
+        )
+        self._catalog_facet_worker.done.connect(_on_facets_done)
+        try:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            self._catalog_facet_worker.start()
+            loop.exec()
+        finally:
+            QApplication.restoreOverrideCursor()
+
         dlg = LibraryFilterDialog(
             self,
             mode=self._catalog_library_mode,
             selected_codes=list(self._catalog_library_filter),
+            facets=facets,
         )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             mode = dlg.get_mode()
