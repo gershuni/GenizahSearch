@@ -1786,7 +1786,13 @@ class LibraryFilterDialog(QDialog):
 
         NOTE: QButtonGroup.buttonToggled emits (button, checked) — slot MUST accept *args
         (mirror the live analog _on_filter_changed(self, *args) at dialogs_filter.py:1368).
+        Only act on the activation signal (checked=True); ignore the deactivation signal
+        from the previously-active button so clicking the already-active radio does not
+        unexpectedly clear all checkboxes.
         """
+        # args[1] is the `checked` bool from buttonToggled(button, checked)
+        if len(args) >= 2 and not args[1]:
+            return  # deactivation of the old button — nothing to do
         self.list_widget.blockSignals(True)
         for i in range(self.list_widget.count()):
             self.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
