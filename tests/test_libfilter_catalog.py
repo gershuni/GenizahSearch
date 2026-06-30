@@ -300,8 +300,13 @@ def test_consume_sets_library_filter_and_persists(monkeypatch):
 
     Encodes GAP-F consume side: after the fix, consume_incoming_filters reads
     incoming.get('library_filter') and:
-      1. sets state.library_filter via setattr
-      2. calls persist_value('search_library_filter', ...)
+      1. sets state.library_filter via setattr (to the codes list)
+      2. calls persist_value('search_library_filter', ...) with the D-09 dict shape
+
+    The incoming value is a bare list ['CUL', 'JTS'] (legacy shape).  The backward-compat
+    branch in consume_incoming_filters interprets a bare-list as Show-only and persists
+    the D-09 dict shape: {'mode': 'show_only', 'codes': ['CUL', 'JTS']}.
+    state.library_filter is set to the codes list (the live-render value).
     Both are required: setattr for the live render, persist for the next fresh render.
     """
     persisted = {}
@@ -337,14 +342,19 @@ def test_consume_sets_library_filter_and_persists(monkeypatch):
 
     assert result is True, "consume_incoming_filters must return True when filters were consumed"
     assert state.library_filter == ['CUL', 'JTS'], (
-        "consume_incoming_filters must set state.library_filter from incoming['library_filter']"
+        "consume_incoming_filters must set state.library_filter to the codes list "
+        "from incoming['library_filter']"
     )
     assert 'search_library_filter' in persisted, (
         "consume_incoming_filters must persist 'search_library_filter' (the literal key "
         "that search.py loads at :187-189)"
     )
-    assert persisted['search_library_filter'] == ['CUL', 'JTS'], (
-        "Persisted value must equal the incoming codes"
+    # D-09 contract: persisted value is ALWAYS the dict shape {'mode','codes'}.
+    # A bare-list incoming is interpreted as Show-only (backward-compat branch).
+    assert persisted['search_library_filter'] == {'mode': 'show_only', 'codes': ['CUL', 'JTS']}, (
+        "Persisted value must be the D-09 dict shape {'mode': 'show_only', 'codes': [...]}. "
+        "A bare-list incoming is interpreted as Show-only; search.py's load path reads "
+        "this dict shape and still migrates legacy plain-lists (search.py:189+)."
     )
 
 
@@ -390,10 +400,15 @@ def test_consume_does_not_crash_without_library_filter_attr(monkeypatch):
 # ── GAP-F: LIFECYCLE (persist→reload) ────────────────────────────────────────
 
 def test_lifecycle_persist_then_reload(monkeypatch):
-    """Full persist→reload lifecycle: consume persists, subsequent _safe_get returns codes.
+    """Full persist→reload lifecycle: consume persists D-09 dict, subsequent read returns it.
 
-    (a) consume_incoming_filters with library_filter=['CUL'] → persists 'search_library_filter'=['CUL']
-    (b) A fresh state-init render reads _safe_get('search_library_filter', []) → returns ['CUL']
+    (a) consume_incoming_filters with library_filter=['CUL'] (bare list, legacy shape)
+        → persists 'search_library_filter' as {'mode': 'show_only', 'codes': ['CUL']} (D-09 dict shape)
+    (b) A fresh state-init render reads storage.get('search_library_filter') → returns that dict
+
+    The D-09 contract (locked in Phase 130): persist key is ALWAYS the dict shape so the
+    restore path (search.py:189+) reads back the correct mode.  search.py still migrates
+    legacy plain-list values for backward compat with pre-Phase-130 storage entries.
     Both halves are required for the selection to survive a /search reload (GAP-F lifecycle).
     """
     storage = {}
@@ -426,21 +441,23 @@ def test_lifecycle_persist_then_reload(monkeypatch):
     class FakeState:
         library_filter: list = []
 
-    # (a) Run consume — simulating the browse→search handoff
+    # (a) Run consume — simulating the browse→search handoff with a bare-list incoming value
     state = FakeState()
     fp.consume_incoming_filters(state, 'search', require_from_browse=False)
-    # Assert that 'search_library_filter' was written to storage by consume
-    assert storage.get('search_library_filter') == ['CUL'], (
-        "consume_incoming_filters must persist 'search_library_filter'=['CUL'] "
-        "so a subsequent fresh render can reload it"
+    # D-09 contract: consume persists the dict shape, NOT the bare list.
+    # A bare-list incoming ['CUL'] is interpreted as Show-only (backward-compat branch).
+    assert storage.get('search_library_filter') == {'mode': 'show_only', 'codes': ['CUL']}, (
+        "consume_incoming_filters must persist 'search_library_filter' as the D-09 dict shape "
+        "{'mode': 'show_only', 'codes': ['CUL']} so a subsequent fresh render can reload it "
+        "with the correct mode"
     )
 
-    # (b) Simulate a fresh state-init render calling _safe_get('search_library_filter', [])
-    # This is the load path at search.py:187-189
+    # (b) Simulate a fresh state-init render calling storage.get('search_library_filter')
+    # This is the load path at search.py:189+ — reads the dict shape and restores mode+codes.
     reloaded = storage.get('search_library_filter', [])
-    assert reloaded == ['CUL'], (
-        "_safe_get('search_library_filter', []) on a fresh render must return the "
-        "persisted codes ['CUL']; got %r" % reloaded
+    assert reloaded == {'mode': 'show_only', 'codes': ['CUL']}, (
+        "The persisted 'search_library_filter' value on a fresh render must be the D-09 dict "
+        "{'mode': 'show_only', 'codes': ['CUL']}; got %r" % (reloaded,)
     )
 
 
