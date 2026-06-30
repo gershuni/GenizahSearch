@@ -256,13 +256,18 @@ def natural_sort_key(text):
     return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', normalized)]
 
 
-def get_library_display(code: str, short: bool = True, lang: str = None) -> str:
+def get_library_display(code: str, short: bool = True, lang: str = None,
+                        with_code: bool = False) -> str:
     """Return library name for display.
 
     Args:
         code: Library code (e.g., 'CUL', 'JTS')
         short: If True, return code; if False, return full name
         lang: Language code ('he', 'en', or None for auto-detect from CURRENT_LANG)
+        with_code: If True and short=False, append ' ({code})' after the resolved name
+            (e.g. 'ספריית האוניברסיטה של קיימברידג' (CUL)').  Default False so ALL
+            existing callers are byte-identical — only catalog filter-dialog row builders
+            pass True. No-op when short=True (short returns the bare code already).
 
     Returns:
         Display string for the library
@@ -276,8 +281,12 @@ def get_library_display(code: str, short: bool = True, lang: str = None) -> str:
         from genizah_core import CURRENT_LANG  # noqa: PLC0415 — intentional lazy; GUARD-01 safe
         effective_lang = CURRENT_LANG
     if effective_lang == 'he':
-        return LIBRARY_CODES_HE.get(code, LIBRARY_CODES.get(code, code))
-    return LIBRARY_CODES.get(code, code)
+        name = LIBRARY_CODES_HE.get(code, LIBRARY_CODES.get(code, code))
+    else:
+        name = LIBRARY_CODES.get(code, code)
+    if with_code:
+        return f"{name} ({code})"
+    return name
 
 
 # ── Library prefix stripping for shelfmark lookup ────────────────────────────

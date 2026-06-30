@@ -687,3 +687,104 @@ def test_catalog_no_script_in_library_dialog_html():
         "BUG-B: 'function catLibFilterGetChecked' is not inside a ui.add_head_html() block. "
         "The catLibFilter JS functions must be registered via ui.add_head_html at page setup."
     )
+
+
+# ── GAP-131-08: with_code param on get_library_display ─────────────────────
+
+def test_get_library_display_with_code_he():
+    """with_code=True + lang='he' appends ' (CODE)' after the Hebrew name."""
+    from shared.browse_map_utils import get_library_display, LIBRARY_CODES_HE, LIBRARY_CODES
+
+    he_name = LIBRARY_CODES_HE.get('CUL', LIBRARY_CODES.get('CUL', 'CUL'))
+    result = get_library_display('CUL', short=False, lang='he', with_code=True)
+    assert result == f"{he_name} (CUL)", (
+        f"with_code=True + lang=he must produce '{{HE name}} (CUL)'; got {result!r}"
+    )
+
+
+def test_get_library_display_with_code_en():
+    """with_code=True + lang='en' appends ' (CODE)' after the English name."""
+    from shared.browse_map_utils import get_library_display, LIBRARY_CODES
+
+    en_name = LIBRARY_CODES.get('CUL', 'CUL')
+    result = get_library_display('CUL', short=False, lang='en', with_code=True)
+    assert result == f"{en_name} (CUL)", (
+        f"with_code=True + lang=en must produce '{{EN name}} (CUL)'; got {result!r}"
+    )
+
+
+def test_get_library_display_default_off_he():
+    """Default (no with_code) returns the bare Hebrew name — existing behavior unchanged."""
+    from shared.browse_map_utils import get_library_display, LIBRARY_CODES_HE, LIBRARY_CODES
+
+    he_name = LIBRARY_CODES_HE.get('CUL', LIBRARY_CODES.get('CUL', 'CUL'))
+    # Default — no with_code kwarg
+    assert get_library_display('CUL', short=False, lang='he') == he_name, (
+        "Default (no with_code) must return bare Hebrew name, no appended code"
+    )
+    # Explicit with_code=False
+    assert get_library_display('CUL', short=False, lang='he', with_code=False) == he_name, (
+        "with_code=False must return bare Hebrew name, no appended code"
+    )
+
+
+def test_get_library_display_default_off_en():
+    """Default-off invariant: existing-style calls never append '(CUL)' to the result."""
+    from shared.browse_map_utils import get_library_display, LIBRARY_CODES
+
+    en_name = LIBRARY_CODES.get('CUL', 'CUL')
+    # Explicit lang='en' — must return bare English name (no appended code)
+    assert get_library_display('CUL', short=False, lang='en') == en_name, (
+        "get_library_display('CUL', short=False, lang='en') must return bare EN name"
+    )
+    # Default call (no with_code) — must NOT append '(CUL)' regardless of active language
+    result_default = get_library_display('CUL', short=False)
+    assert not result_default.endswith(' (CUL)'), (
+        f"Default call (no with_code) must not append '(CUL)'; got {result_default!r}"
+    )
+
+
+def test_get_library_display_short_wins_over_with_code():
+    """short=True returns the bare code — with_code is a no-op (prevents 'CUL (CUL)' duplication)."""
+    from shared.browse_map_utils import get_library_display
+
+    result = get_library_display('CUL', short=True, with_code=True)
+    assert result == 'CUL', (
+        f"short=True must short-circuit and return 'CUL' (no duplication); got {result!r}"
+    )
+
+
+def test_get_library_display_empty_code_with_code():
+    """Empty code returns '' even with with_code=True."""
+    from shared.browse_map_utils import get_library_display
+
+    assert get_library_display('', with_code=True) == '', (
+        "Empty code must return '' regardless of with_code"
+    )
+
+
+# ── GAP-131-08: web data-label includes code in Hebrew UI ───────────────────
+
+def test_web_catalog_shortlist_label_builder_passes_with_code():
+    """Shortlist + expand label builders pass with_code=(_lang == 'he') to get_library_display.
+
+    AST/source scan: the two label builder call sites inside the catalog dialog function
+    must pass with_code=(_lang == 'he'), and the A-Z expand sort key must NOT.
+    """
+    import pathlib
+    source = pathlib.Path('web/pages/catalog_browse.py').read_text(encoding='utf-8')
+
+    # Both the shortlist and expand row builders must pass with_code=(_lang == 'he')
+    assert "with_code=(_lang == 'he')" in source, (
+        "Both shortlist + expand label builders must pass with_code=(_lang == 'he') "
+        "to get_library_display in web/pages/catalog_browse.py"
+    )
+
+    # The expand A-Z sort key must NOT carry with_code (so sort order stays on bare name).
+    # The sort key is the lambda passed to sorted() for expand_codes — it must NOT
+    # contain with_code on the same line as the lambda key.
+    expand_sort_idx = source.find('key=lambda c: get_library_display(c, short=False, lang=_lang)')
+    assert expand_sort_idx != -1, (
+        "The expand A-Z sort key must call get_library_display(c, short=False, lang=_lang) "
+        "WITHOUT with_code — bare name for sort stability"
+    )
