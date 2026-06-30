@@ -85,7 +85,7 @@ See: .planning/milestones/v8.3.0-ROADMAP.md
 
 - [x] **Phase 130: Dual-Mode Filter Core — Web `/search`** *(lead)* - Define the shared (mode + set) state shape, add the Show-only / Hide mode toggle to the `/search` library-filter dialog, persist (mode + set) via `safe_storage`, migrate the existing allowlist cleanly, handle edge states, and make the button/label communicate the active mode + count. Settles the model the other surfaces mirror. (completed 2026-06-30)
 
-- [ ] **Phase 131: Dual-Mode Parity — Desktop Catalog + Web Browse-by-Identification + Web `/parallels`** - Extend the Phase-130 (mode + set) model to the three remaining UI surfaces: the desktop catalog `LibraryFilterDialog` (Browse-by-Identification), the web Browse-by-Identification catalog filter, and a NEW web `/parallels` library-filter control (scoping via the existing `restrict_sys_ids` path) — each persisted, each at parity with the lead. (executed 2026-06-30 — code-verified 6/6; awaiting human UAT — see 131-HUMAN-UAT.md)
+- [x] **Phase 131: Dual-Mode Parity — Desktop Catalog + Web Browse-by-Identification + Web `/parallels`** - Extend the Phase-130 (mode + set) model to the three remaining UI surfaces: the desktop catalog `LibraryFilterDialog` (Browse-by-Identification), the web Browse-by-Identification catalog filter, and a NEW web `/parallels` library-filter control (scoping via the existing `restrict_sys_ids` path) — each persisted, each at parity with the lead. (executed 2026-06-30 — code-verified 6/6; awaiting human UAT — see 131-HUMAN-UAT.md) (completed 2026-06-30)
 
 - [ ] **Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`)** - Add an optional library-filter `mode` (include / exclude) alongside `filters.library` on both public endpoints; backward-compatible (omitted = include); `exclude` resolves to the complement (sys_ids whose `library_code` is not in the set) intersected into `restrict_sys_ids`. Documented in `docs/SEARCH_API.md` + the skill `api_contract.md`.
 
@@ -150,7 +150,7 @@ Plans:
 
 **Gap closure** *(UAT 2026-06-30 — DMF-07/DMF-12 desktop facet parity)*
 
-- [ ] 131-06-PLAN.md — Desktop catalog `LibraryFilterDialog` dynamic per-library COUNTS (`Name (count)`) via `fjms.get_browse_library_facets`, computed off the UI thread, honoring the active PGP/Editions/domain filters — at parity with web /catalog (DMF-07/DMF-12)
+- [x] 131-06-PLAN.md — Desktop catalog `LibraryFilterDialog` dynamic per-library COUNTS (`Name (count)`) via `fjms.get_browse_library_facets`, computed off the UI thread, honoring the active PGP/Editions/domain filters — at parity with web /catalog (DMF-07/DMF-12)
 
 **UI hint**: yes
 
@@ -173,5 +173,5 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 130. Dual-Mode Filter Core — Web /search | 3/3 | Complete    | 2026-06-30 |
-| 131. Dual-Mode Parity — Desktop + Browse + Parallels | 5/5 | Complete   | 2026-06-30 |
+| 131. Dual-Mode Parity — Desktop + Browse + Parallels | 6/6 | Complete   | 2026-06-30 |
 | 132. Public API Dual-Mode | 0/? | Not started | - |
