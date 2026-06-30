@@ -766,18 +766,25 @@ def test_get_library_display_empty_code_with_code():
 # ── GAP-131-08: web data-label includes code in Hebrew UI ───────────────────
 
 def test_web_catalog_shortlist_label_builder_passes_with_code():
-    """Shortlist + expand label builders pass with_code=(_lang == 'he') to get_library_display.
+    """GAP-131-09: Shortlist + expand label builders pass with_code=True to get_library_display.
 
     AST/source scan: the two label builder call sites inside the catalog dialog function
-    must pass with_code=(_lang == 'he'), and the A-Z expand sort key must NOT.
+    must pass with_code=True (always-on, both EN and HE UI), and the A-Z expand sort
+    key must NOT (sort order stays on bare name).
     """
     import pathlib
     source = pathlib.Path('web/pages/catalog_browse.py').read_text(encoding='utf-8')
 
-    # Both the shortlist and expand row builders must pass with_code=(_lang == 'he')
-    assert "with_code=(_lang == 'he')" in source, (
-        "Both shortlist + expand label builders must pass with_code=(_lang == 'he') "
-        "to get_library_display in web/pages/catalog_browse.py"
+    # Both the shortlist and expand row builders must pass with_code=True (GAP-131-09)
+    assert "with_code=True" in source, (
+        "GAP-131-09: Both shortlist + expand label builders must pass with_code=True "
+        "to get_library_display in web/pages/catalog_browse.py (always-on, both EN and HE UI)"
+    )
+
+    # The old language-gated pattern must be gone from the call sites
+    assert "with_code=(_lang == 'he')" not in source, (
+        "GAP-131-09: The language-gated with_code=(_lang == 'he') must be replaced by "
+        "with_code=True in web/pages/catalog_browse.py"
     )
 
     # The expand A-Z sort key must NOT carry with_code (so sort order stays on bare name).

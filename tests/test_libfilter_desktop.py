@@ -1205,11 +1205,14 @@ def test_he_label_contains_code_and_count(monkeypatch):
 
 
 @pytest.mark.gui
-def test_en_label_unchanged(monkeypatch):
-    """(c) English-UI CUL row does NOT have a separately-appended '(CUL)' beyond the EN name."""
+def test_en_label_contains_code(monkeypatch):
+    """(c) GAP-131-09: English-UI CUL row also contains '(CUL)' after the EN name.
+
+    131-08 only added the code to Hebrew UI; 131-09 extends it to English UI too
+    (with_code is now always-on regardless of language).
+    """
     import genizah_core
     from desktop.dialogs_filter import LibraryFilterDialog
-    from shared.browse_map_utils import get_library_display
 
     monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
     dlg = LibraryFilterDialog(mode='hide')
@@ -1218,11 +1221,39 @@ def test_en_label_unchanged(monkeypatch):
     assert item is not None, "CUL must appear in the dialog universe"
     text = item.text()
 
-    en_name = get_library_display('CUL', short=False, lang='en')
-    # The English name IS the Cambridge University Library, not "CUL" — so the label
-    # must equal the bare EN name (no appended extra code suffix).
-    assert text == en_name, (
-        f"English-UI CUL row must equal bare EN name {en_name!r}; got {text!r}"
+    # GAP-131-09: both EN and HE UI append '(CODE)' after the library name.
+    assert '(CUL)' in text, (
+        f"GAP-131-09: English-UI CUL row must contain '(CUL)'; got {text!r}"
+    )
+
+
+@pytest.mark.gui
+def test_en_search_matches_code(monkeypatch):
+    """(c2) GAP-131-09: English-UI: typing 'CUL' in search_input keeps the Cambridge row visible."""
+    import genizah_core
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from PyQt6.QtCore import Qt
+
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
+    dlg = LibraryFilterDialog(mode='hide')
+
+    dlg.search_input.setText('CUL')
+
+    # CUL row must be visible
+    cul_item = _find_cul_item(dlg)
+    assert cul_item is not None, "CUL must appear in the dialog universe"
+    assert not cul_item.isHidden(), (
+        "CUL row must be visible when 'CUL' is typed in search box (English UI)"
+    )
+
+    # At least one other row must be hidden (proves filter is active)
+    some_hidden = any(
+        dlg.list_widget.item(i).isHidden()
+        for i in range(dlg.list_widget.count())
+        if dlg.list_widget.item(i).data(Qt.ItemDataRole.UserRole) != 'CUL'
+    )
+    assert some_hidden, (
+        "At least one non-CUL row must be hidden when 'CUL' is the search query (English UI)"
     )
 
 
