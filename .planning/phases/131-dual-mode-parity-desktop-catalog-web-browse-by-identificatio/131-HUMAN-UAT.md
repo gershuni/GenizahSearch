@@ -40,12 +40,16 @@ result: [pending]
 expected: Open Catalog tab → library filter button → each library row shows a count, e.g. "CUL (1,234)" (localized thousands separator). Turn "PGP Only" on (or a Scholarly-Editions / domain filter) and reopen the dialog → each row's count DROPS to that library's PGP-only (resp. filtered) manuscript count — the counts are dynamic w.r.t. the active catalog filters, at parity with web /catalog. The dialog must open without freezing the UI (facets are computed on a background worker thread).
 result: [pending]
 
+### 8. Desktop catalog dialog — sort toggle + type-to-find (gap 131-07)
+expected: Open Catalog tab -> library filter button. (a) A "Search libraries..." box filters the list as you type (case-insensitive); typing hides non-matching rows but keeps their checks (a checked-then-hidden library stays selected on Apply). (b) A sort toggle "A-Z" / "By count" reorders the list: "By count" shows highest-count libraries first; "A-Z" is alphabetical. Switching sort keeps your checks. "Select All" selects every library even while a search filter is active. No UI freeze.
+result: [pending]
+
 ## Summary
 
-total: 7
+total: 8
 passed: 0
-issues: 1
-pending: 7
+issues: 0
+pending: 8
 skipped: 0
 blocked: 0
 
@@ -70,7 +74,8 @@ blocked: 0
   debug_session: ""
 
 - truth: "Desktop catalog LibraryFilterDialog offers (a) a sort toggle between A-Z and by-count (descending), and (b) a type-to-find search box that filters the visible library rows as the user types -- at parity with web /catalog (catLibFilterSort + catLibFilterSearch)."
-  status: failed
+  status: fix_implemented_pending_uat
+  resolution: "Closed by gap plan 131-07 (commits 57344637 search box + A-Z/By-count sort toggle in LibraryFilterDialog; 0104900b +6 tests; genizah_translations.py Hebrew keys מיון:/לפי כמות/א–ת). 33/33 test_libfilter_desktop.py pass headless. Live render-smoke is UAT test #8 (pending)."
   reason: "User feedback during UAT: 'We should add sort by count/a-z and type to find.' The desktop library dialog has neither; web /catalog already has both."
   severity: minor
   test: 7
