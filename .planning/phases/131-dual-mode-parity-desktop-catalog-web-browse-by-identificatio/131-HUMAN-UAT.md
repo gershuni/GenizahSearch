@@ -36,19 +36,24 @@ result: [pending]
 expected: With Hide mode active, export results (XLSX/JSON) → exported rows exclude rows from the hidden libraries (Show-only pre-query and Hide pre-export scoping both hold).
 result: [pending]
 
+### 7. Desktop catalog dialog — dynamic per-library counts (gap 131-06 fix)
+expected: Open Catalog tab → library filter button → each library row shows a count, e.g. "CUL (1,234)" (localized thousands separator). Turn "PGP Only" on (or a Scholarly-Editions / domain filter) and reopen the dialog → each row's count DROPS to that library's PGP-only (resp. filtered) manuscript count — the counts are dynamic w.r.t. the active catalog filters, at parity with web /catalog. The dialog must open without freezing the UI (facets are computed on a background worker thread).
+result: [pending]
+
 ## Summary
 
-total: 6
+total: 7
 passed: 0
-issues: 1
-pending: 6
+issues: 0
+pending: 7
 skipped: 0
 blocked: 0
 
 ## Gaps
 
 - truth: "Desktop catalog LibraryFilterDialog shows per-library manuscript COUNTS (e.g. 'CUL (1,234)'), and those counts are DYNAMIC — they honor the catalog's other active filters (PGP Only / Scholarly-Editions / domain), at parity with web /catalog Browse-by-Identification."
-  status: failed
+  status: fix_implemented_pending_uat
+  resolution: "Closed by gap plan 131-06 (commits 08812bce dialog facets param + Name(count) render; c3c12d1a _CatalogFacetWorker off-UI-thread facet computation wired into _open_catalog_library_dialog; 8f156334 +5 tests). 27/27 test_libfilter_desktop.py pass headless. Live render-smoke is UAT test #7 (pending)."
   reason: "User feedback during UAT: desktop library dialog must include the count like web does; and the count should be dynamic — e.g. with 'PGP Only' on, each library row should show the number of that library's manuscripts that are ALSO PGP-only. (both apps — web /catalog already satisfies this)"
   severity: major
   test: 1
