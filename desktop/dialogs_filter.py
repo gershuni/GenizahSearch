@@ -1687,14 +1687,19 @@ class LibraryFilterDialog(QDialog):
       * Universe is ``library_codes_with_manuscripts()`` minus ``'LOCAL'`` (DMF-13).
       * ``get_checked_codes()`` returns the list of currently-checked codes
         in stable (list order) sequence.
+      * ``facets`` is an optional ``{library_code: count}`` dict (dynamic full-set counts
+        honoring the catalog's other active filters); rows render ``Name (count)`` when a
+        count is present, name-only otherwise (DMF-07/DMF-12 desktop facet counts).
     """
 
-    def __init__(self, parent=None, *, mode: str = 'hide', selected_codes: list | None = None):
+    def __init__(self, parent=None, *, mode: str = 'hide', selected_codes: list | None = None,
+                 facets: dict | None = None):
         super().__init__(parent)
         from genizah_core import get_library_display  # local import to avoid circular
         from shared.browse_map_utils import library_codes_with_manuscripts
         self.setWindowTitle(tr("Filter by Library"))
         self.setMinimumSize(360, 480)
+        self._facets = facets if isinstance(facets, dict) else {}
         self._all_codes = [c for c in library_codes_with_manuscripts() if c != 'LOCAL']
 
         layout = QVBoxLayout(self)
@@ -1737,7 +1742,12 @@ class LibraryFilterDialog(QDialog):
         else:  # hide
             all_checked = False
         for code in self._all_codes:
-            label = get_library_display(code, short=False)
+            base_label = get_library_display(code, short=False)
+            count = self._facets.get(code)
+            if isinstance(count, int) and count >= 0:
+                label = f"{base_label}  ({count:,})"
+            else:
+                label = base_label
             item = QListWidgetItem(label)
             item.setData(Qt.ItemDataRole.UserRole, code)
             if all_checked or code in active_set:
