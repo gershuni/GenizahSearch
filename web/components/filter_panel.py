@@ -340,9 +340,10 @@ def consume_incoming_filters(state, storage_prefix: str, require_from_browse: bo
     # search.py loads it via _safe_get('search_library_filter', None).
     # setattr (live this render) + persist (durable for the next fresh render) are BOTH
     # required for the persist→reload lifecycle.
-    # WR-01 fix: only persist when storage_prefix == 'search' — parallels does not
-    # implement a library post-filter, so writing 'search_library_filter' during a
-    # parallels handoff would silently infect a later fresh /search reload.
+    # Only persist 'search_library_filter' when storage_prefix == 'search'.
+    # The parallels page has its own 'parallels_library_filter' key (Phase 131);
+    # writing 'search_library_filter' during a parallels handoff would silently
+    # infect a subsequent fresh /search render.
     if incoming.get('library_filter') and storage_prefix == 'search':
         # HIGH-1: sanitize incoming codes against the canonical set; exclude 'LOCAL'
         # (desktop-only library code that must never appear as a web filter option).
