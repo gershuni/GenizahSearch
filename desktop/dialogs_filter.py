@@ -1705,11 +1705,17 @@ class LibraryFilterDialog(QDialog):
         super().__init__(parent)
         from genizah_core import get_library_display  # local import to avoid circular
         from shared.browse_map_utils import library_codes_with_manuscripts
+        import genizah_core as _gc  # noqa: PLC0415 — read LIVE CURRENT_LANG, not the stale line-14 snapshot
         self.setWindowTitle(tr("Filter by Library"))
         self.setMinimumSize(360, 500)
         self._facets = facets if isinstance(facets, dict) else {}
         self._all_codes = [c for c in library_codes_with_manuscripts() if c != 'LOCAL']
         self._get_library_display = get_library_display  # keep a reference for _repopulate
+        # GAP-131-08: in Hebrew UI append the English code in parens after each library name
+        # so users can type 'CUL' / 'JTS' in the type-to-find box.  Read the LIVE module
+        # attribute — the module-level `from genizah_core import CURRENT_LANG` at line 14
+        # is a stale snapshot bound at import time, not at dialog-open time.
+        self._with_code = (_gc.CURRENT_LANG == 'he')
 
         layout = QVBoxLayout(self)
 
@@ -1819,7 +1825,11 @@ class LibraryFilterDialog(QDialog):
         """
         get_library_display = self._get_library_display
         for code in codes:
-            base_label = get_library_display(code, short=False)
+            # GAP-131-08: pass with_code in Hebrew UI so the code appears in the label
+            # and becomes searchable via _apply_search_filter (which matches item.text()).
+            # Sort sites (in __init__ and _repopulate) do NOT pass with_code so order
+            # is keyed on the bare name and remains unchanged.
+            base_label = get_library_display(code, short=False, with_code=self._with_code)
             count = self._facets.get(code)
             if isinstance(count, int) and count >= 0:
                 label = f"{base_label}  ({count:,})"

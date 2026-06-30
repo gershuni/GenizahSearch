@@ -1153,3 +1153,136 @@ def test_select_all_ignores_active_search_filter():
             f"Item {i} (code={item.data(256)!r}, hidden={item.isHidden()}) "
             f"must be Checked after Select All"
         )
+
+
+# ── GAP-131-08: Hebrew-UI code appended to library row labels ────────────────
+
+
+def _find_cul_item(dlg):
+    """Return the CUL QListWidgetItem from the dialog."""
+    from PyQt6.QtCore import Qt
+    for i in range(dlg.list_widget.count()):
+        item = dlg.list_widget.item(i)
+        if item.data(Qt.ItemDataRole.UserRole) == 'CUL':
+            return item
+    return None
+
+
+@pytest.mark.gui
+def test_he_label_contains_code(monkeypatch):
+    """(a) Hebrew-UI CUL row label includes '(CUL)' after the Hebrew name."""
+    import genizah_core
+    from desktop.dialogs_filter import LibraryFilterDialog
+
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'he')
+    dlg = LibraryFilterDialog(mode='hide')
+
+    item = _find_cul_item(dlg)
+    assert item is not None, "CUL must appear in the dialog universe"
+    assert '(CUL)' in item.text(), (
+        f"Hebrew-UI CUL row must contain '(CUL)'; got {item.text()!r}"
+    )
+
+
+@pytest.mark.gui
+def test_he_label_contains_code_and_count(monkeypatch):
+    """(b) Hebrew-UI CUL row with facets shows '(CUL)' AND '(1,234)'."""
+    import genizah_core
+    from desktop.dialogs_filter import LibraryFilterDialog
+
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'he')
+    dlg = LibraryFilterDialog(mode='hide', facets={'CUL': 1234})
+
+    item = _find_cul_item(dlg)
+    assert item is not None, "CUL must appear in the dialog universe"
+    text = item.text()
+    assert '(CUL)' in text, (
+        f"Hebrew-UI CUL row (with facets) must contain '(CUL)'; got {text!r}"
+    )
+    assert '(1,234)' in text, (
+        f"Hebrew-UI CUL row (with facets) must contain '(1,234)'; got {text!r}"
+    )
+
+
+@pytest.mark.gui
+def test_en_label_unchanged(monkeypatch):
+    """(c) English-UI CUL row does NOT have a separately-appended '(CUL)' beyond the EN name."""
+    import genizah_core
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from shared.browse_map_utils import get_library_display
+
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'en')
+    dlg = LibraryFilterDialog(mode='hide')
+
+    item = _find_cul_item(dlg)
+    assert item is not None, "CUL must appear in the dialog universe"
+    text = item.text()
+
+    en_name = get_library_display('CUL', short=False, lang='en')
+    # The English name IS the Cambridge University Library, not "CUL" — so the label
+    # must equal the bare EN name (no appended extra code suffix).
+    assert text == en_name, (
+        f"English-UI CUL row must equal bare EN name {en_name!r}; got {text!r}"
+    )
+
+
+@pytest.mark.gui
+def test_he_search_matches_code(monkeypatch):
+    """(d) Hebrew-UI: typing 'CUL' in search_input keeps the Cambridge row visible."""
+    import genizah_core
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from PyQt6.QtCore import Qt
+
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'he')
+    dlg = LibraryFilterDialog(mode='hide')
+
+    dlg.search_input.setText('CUL')
+
+    # CUL row must be visible
+    cul_item = _find_cul_item(dlg)
+    assert cul_item is not None, "CUL must appear in the dialog universe"
+    assert not cul_item.isHidden(), (
+        "CUL row must be visible when 'CUL' is typed in search box (Hebrew UI)"
+    )
+
+    # At least one other row must be hidden (proves filter is active)
+    some_hidden = any(
+        dlg.list_widget.item(i).isHidden()
+        for i in range(dlg.list_widget.count())
+        if dlg.list_widget.item(i).data(Qt.ItemDataRole.UserRole) != 'CUL'
+    )
+    assert some_hidden, (
+        "At least one non-CUL row must be hidden when 'CUL' is the search query"
+    )
+
+
+@pytest.mark.gui
+def test_az_order_stable_with_code_vs_without(monkeypatch):
+    """(e) A-Z row order in Hebrew UI is unchanged by appending the code.
+
+    The sort key is the BARE name (no with_code), so the code-appended display rows
+    appear in the same code sequence as they would without with_code=True.
+    We verify this by comparing the code sequence produced by the dialog (which uses
+    with_code=True for the display label but bare-name for the sort key) against the
+    expected order computed directly from get_library_display(bare name, lang='he').
+    """
+    import genizah_core
+    from desktop.dialogs_filter import LibraryFilterDialog
+    from shared.browse_map_utils import get_library_display, library_codes_with_manuscripts
+    from PyQt6.QtCore import Qt
+
+    monkeypatch.setattr(genizah_core, 'CURRENT_LANG', 'he')
+    dlg = LibraryFilterDialog(mode='hide')
+    dialog_order = [
+        dlg.list_widget.item(i).data(Qt.ItemDataRole.UserRole)
+        for i in range(dlg.list_widget.count())
+    ]
+
+    # Expected: sorted by bare Hebrew name (same key as the sort sites use)
+    all_codes = [c for c in library_codes_with_manuscripts() if c != 'LOCAL']
+    expected_order = sorted(all_codes, key=lambda c: get_library_display(c, short=False, lang='he'))
+
+    assert dialog_order == expected_order, (
+        f"Hebrew-UI A-Z order must equal bare-name sort; "
+        f"first 5 dialog {dialog_order[:5]!r}, first 5 expected {expected_order[:5]!r}"
+    )
