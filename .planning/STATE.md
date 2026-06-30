@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v8.4.0
 milestone_name: Dual-Mode Library Filter
 status: executing
-stopped_at: Phase 130 context gathered
-last_updated: "2026-06-30T05:32:06.121Z"
-last_activity: 2026-06-30 -- Phase 130 planning complete
+stopped_at: Completed 130-01-PLAN.md
+last_updated: "2026-06-30T06:45:52.421Z"
+last_activity: 2026-06-30
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 3
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 130 — Dual-Mode Filter Core (web `/search`)
+**Current focus:** Phase 130 — dual-mode-filter-core-web-search
 
 ## Current Position
 
-Phase: 130 — Dual-Mode Filter Core (web `/search`) [lead]
-Plan: —
+Phase: 130 (dual-mode-filter-core-web-search) — EXECUTING
+Plan: 2 of 3
 Status: Ready to execute
-Last activity: 2026-06-30 -- Phase 130 planning complete
+Last activity: 2026-06-30
 
 ## Accumulated Context
 
@@ -103,9 +103,9 @@ Items acknowledged and deferred at v8.3.0 milestone close on 2026-06-30:
 
 ## Session Continuity
 
-Last session: 2026-06-30T05:08:10.083Z
-Stopped at: Phase 130 context gathered
-Resume file: .planning/phases/130-dual-mode-filter-core-web-search/130-CONTEXT.md
+Last session: 2026-06-30T06:45:52.411Z
+Stopped at: Completed 130-01-PLAN.md
+Resume file: None
 Next step: `/gsd-discuss-phase 130` (or skip-discuss-if-empty per the standing autonomous directive)
 
 ## Performance Metrics
@@ -113,10 +113,13 @@ Next step: `/gsd-discuss-phase 130` (or skip-discuss-if-empty per the standing a
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | (none yet — milestone just started) | - | - | - |
+| Phase 130 P01 | 5 | 2 tasks | 1 files |
 
 ## Decisions
 
 - [Phase 130]: (lead) define the shared (mode + set) state shape on web `/search` — mode toggle + safe_storage persistence + legacy-allowlist migration + edge-state sentinels + button/label, all settled before parity surfaces extend it.
+- [Phase ?]: library_mode defaults to 'hide': D-05 fresh-user default, Hide mode with empty set = show all
+- [Phase ?]: clear_search_snapshot resets search_library_filter to {'mode':'hide','codes':[]}: D-09 dict shape settles (mode+set) persistence contract for Plan 02
 
 ## Operator Next Steps
 

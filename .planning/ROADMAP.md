@@ -109,7 +109,7 @@ See: .planning/milestones/v8.3.0-ROADMAP.md
 Plans:
 **Wave 1**
 
-- [ ] 130-01-PLAN.md — Model layer: `library_mode` field on `SearchUIState` + mode-aware `clear_search_snapshot` reset default
+- [x] 130-01-PLAN.md — Model layer: `library_mode` field on `SearchUIState` + mode-aware `clear_search_snapshot` reset default
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -154,6 +154,6 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 130. Dual-Mode Filter Core — Web /search | 0/3 | Planned | - |
+| 130. Dual-Mode Filter Core — Web /search | 1/3 | In Progress|  |
 | 131. Dual-Mode Parity — Desktop + Browse + Parallels | 0/? | Not started | - |
 | 132. Public API Dual-Mode | 0/? | Not started | - |
