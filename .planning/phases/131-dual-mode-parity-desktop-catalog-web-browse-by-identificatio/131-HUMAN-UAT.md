@@ -52,7 +52,7 @@ result: [pending]
 
 total: 9
 passed: 0
-issues: 1
+issues: 0
 pending: 9
 skipped: 0
 blocked: 0
@@ -93,7 +93,8 @@ blocked: 0
     - "Tests: extend tests/test_libfilter_desktop.py -- search hides non-matching rows and preserves checks/get_checked_codes; by-count sort orders by self._facets desc; A-Z sort orders by display name; by-count falls back to A-Z when facets empty; Select All ignores the filter. Headless: GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen, this file only."
   debug_session: ""
 - truth: "In Hebrew UI, each library row in the catalog library-filter dialog (web /catalog AND desktop) shows the English library code in parentheses after the Hebrew name (e.g. 'ספריית האוניברסיטה של קיימברידג'' (CUL)'), and the type-to-find search matches that code (typing 'CUL' finds Cambridge). A-Z sort order is unaffected (keyed on the bare Hebrew name)."
-  status: failed
+  status: fix_implemented_pending_uat
+  resolution: "Closed by gap plan 131-08 (commits a9d642bd shared get_library_display with_code default-OFF param; cfd15930 desktop appends code in Hebrew UI via live CURRENT_LANG, sort keys on bare name; 421d1c70 web label+data-label so catLibFilterSearch matches; ed8e47f0 SUMMARY). 62/62 desktop+catalog tests pass headless; default-off invariant verified (existing callers unchanged). Live render-smoke is UAT test #9 (pending)."
   reason: "User feedback during UAT: 'in Heb UI add also the English acronym, like ספריית האוניברסיטה של קיימברידג'' (CUL), so it can be searched also.' In Hebrew UI the row label is the Hebrew name only, so a user cannot find a library by typing its well-known English code (CUL/JTS/etc.) in the new type-to-find box."
   severity: minor
   test: 9
