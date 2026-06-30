@@ -38,6 +38,12 @@ from sefaria_utils import SEFARIA_SOURCES, clean_hebrew_text, get_cache_dir, get
 # Import shared sanitization utility
 from shared_export_utils import sanitize_cache_filename as _sanitize_cache_filename
 
+# DMF-09/DMF-10/DMF-13: library filter imports
+from shared.browse_map_utils import (
+    LIBRARY_CODES, get_library_display, sanitize_library_codes,
+    library_codes_with_manuscripts,
+)
+
 
 def get_source_display_name(ref: str) -> str:
     """Get a display name for a source reference."""
@@ -194,8 +200,70 @@ def create_parallels_page(initial_text: str = None):
             # Translation enrichment (Phase 46-07)
             self.title_translations: dict = {}  # sys_id -> {hebrew_title, english_title, ...}
             self.translation_data: dict = {}  # sys_id -> {description_he, document_type_he}
+            # DMF-09: library filter for parallels page (Phase 131-05)
+            self.library_filter: list = []   # active library codes (for filter)
+            self.library_mode: str = 'hide'  # 'show_only' | 'hide' (D-05 default)
 
     p_state = ParallelsState()
+
+    # DMF-09: LOCAL helper for Show-only all-selected -> [] normalization (Codex N2).
+    # Mirrors search.py's nested _library_apply_selection but defined here (NOT imported
+    # from search.py — that function is a nested closure and is NOT module-level importable;
+    # referencing it would NameError at runtime).
+    def _parallels_apply_selection(checked_codes, all_codes):
+        """Return [] when all codes checked (= show all / clear Show-only), else return the subset.
+
+        Mirrors web/pages/search.py::_library_apply_selection (1670-1683).
+        Codex N2 contract: defined locally in parallels.py, NOT imported from search.py.
+        """
+        if set(checked_codes) == set(all_codes):
+            return []
+        return list(checked_codes)
+
+    # DMF-09: dual-mode post-fetch filter for parallels results (Phase 131-05).
+    # Used for Hide mode (Show-only is scoped pre-query via restrict_sys_ids).
+    # Apply BEFORE the export+storage writes so exports + stored payloads are scoped (Codex MED #6).
+    def _apply_parallels_library_filter(results_list):
+        """Dual-mode filter parallels results by selected library codes.
+
+        Mirrors web/pages/search.py::_apply_library_filter (3830-3853).
+        Show-only: keep rows where library_code IN codes.
+        Hide: keep rows where library_code NOT IN codes.
+        Empty codes in either mode = show all (D-05/D-08).
+
+        Library code resolution: tries row['library_code'] first, then
+        row['display']['library_code'], then meta_mgr lookup via raw_header sys_id.
+        (Show-only is scoped pre-query so this is mainly used for Hide.)
+        """
+        mode = getattr(p_state, 'library_mode', 'hide')
+        codes = set(p_state.library_filter)
+        if not codes:
+            return results_list  # empty codes = show all in either mode (D-05/D-08)
+
+        def _get_lib_code(item):
+            # Try direct fields first (fast path)
+            lc = item.get('library_code', '')
+            if lc:
+                return lc
+            lc = item.get('display', {}).get('library_code', '')
+            if lc:
+                return lc
+            # Fallback: resolve via meta_mgr from raw_header sys_id
+            if state.meta_mgr:
+                try:
+                    raw_header = item.get('raw_header', '')
+                    sys_match = re.search(r'(99\d{8,})', raw_header)
+                    if sys_match:
+                        return state.meta_mgr.get_library_for_id(sys_match.group(1)) or ''
+                except Exception:
+                    pass
+            return ''
+
+        if mode == 'show_only':
+            return [r for r in results_list if _get_lib_code(r) in codes]
+        else:  # hide
+            return [r for r in results_list if _get_lib_code(r) not in codes]
+
     _PARALLELS_ACTIVE_TAB_KEY = 'parallels_active_snapshot'
     _PARALLELS_ACTIVE_TAB_VERSION = 1
     _PARALLELS_ACTIVE_USER_FALLBACK_LIMIT = 250
@@ -269,6 +337,31 @@ def create_parallels_page(initial_text: str = None):
     # Restore domain exclusions for parallels
     _pde = _safe_get('parallels_domain_exclusions')
     p_state.domain_exclusions = set(_pde) if _pde is not None else set()
+
+    # DMF-09: restore library filter mode + codes (key 'parallels_library_filter')
+    # Mirrors search.py:189-216 D-06 migration pattern.
+    _plib_raw = _safe_get('parallels_library_filter', None)
+    if isinstance(_plib_raw, list):
+        # D-06 legacy migration: plain list -> Show-only (v8.3.0 values were inclusion-only lists).
+        _plib_codes = sanitize_library_codes(_plib_raw)
+        if _plib_codes:
+            p_state.library_mode = 'show_only'
+            p_state.library_filter = _plib_codes
+        else:
+            p_state.library_mode = 'hide'
+            p_state.library_filter = []
+    elif isinstance(_plib_raw, dict):
+        _pm = _plib_raw.get('mode', 'hide')
+        _plib_codes = sanitize_library_codes(_plib_raw.get('codes'))
+        _pm = _pm if _pm in ('show_only', 'hide') else 'hide'
+        # Normalize invalid show_only+empty to neutral (Codex HIGH fix, mirrors search.py:206-210)
+        if _pm == 'show_only' and not _plib_codes:
+            _pm = 'hide'
+        p_state.library_mode = _pm
+        p_state.library_filter = _plib_codes
+    else:
+        p_state.library_mode = 'hide'
+        p_state.library_filter = []
 
     # Restore previous results
     _active_snapshot = _get_active_snapshot()
@@ -396,6 +489,55 @@ def create_parallels_page(initial_text: str = None):
         safe_user_set('composition_history', [])
 
     # === UI Layout ===
+
+    # Library filter dialog JS helpers (separate parLibFilter* namespace from domainFilter/libFilter)
+    ui.add_head_html('''<script>
+    // DMF (Phase 131-05) parallels library filter JS — parLibFilter* namespace.
+    // Mode-aware Apply enable: Show-only with zero checked -> disable; Hide allows empty.
+    function parLibFilterUpdateApply(cid) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        var cbs = cont.querySelectorAll('.par-lib-cb');
+        var n = 0;
+        cbs.forEach(function(cb) { if (cb.checked) n++; });
+        var btn = document.getElementById('parLibApplyBtn_' + cid);
+        if (!btn) return;
+        var mode = cont.getAttribute('data-libmode') || 'hide';
+        btn.disabled = (mode === 'show_only' && n === 0);
+    }
+    function parLibFilterGetChecked(cid) {
+        var cont = document.getElementById(cid);
+        if (!cont) return [];
+        var result = [];
+        cont.querySelectorAll('.par-lib-cb:checked').forEach(function(cb) { result.push(cb.dataset.code); });
+        return result;
+    }
+    function parLibFilterSelectAll(cid, val) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        cont.querySelectorAll('.par-lib-cb').forEach(function(cb) { cb.checked = val; });
+        parLibFilterUpdateApply(cid);
+    }
+    // Set mode attribute and reset checkboxes (D-04: mode flip clears selection).
+    function parLibFilterSetMode(cid, mode) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        cont.setAttribute('data-libmode', mode);
+        cont.querySelectorAll('.par-lib-cb').forEach(function(cb) { cb.checked = false; });
+        parLibFilterUpdateApply(cid);
+    }
+    // Text-search row filter: hide rows whose label text does not contain the typed substring.
+    function parLibFilterSearch(cid, query) {
+        var cont = document.getElementById(cid);
+        if (!cont) return;
+        var q = query.toLowerCase().trim();
+        cont.querySelectorAll('.par-lib-cb-row').forEach(function(row) {
+            if (!q) { row.style.display = ''; return; }
+            var label = (row.getAttribute('data-label') || '').toLowerCase();
+            row.style.display = (label.indexOf(q) >= 0) ? '' : 'none';
+        });
+    }
+    </script>''')
 
     # Domain filter dialog JS helpers (must be at page level for inline onchange handlers)
     # Functions accept containerId parameter for unique dialog instances
@@ -1308,6 +1450,16 @@ def create_parallels_page(initial_text: str = None):
                         p_domain_filter_btn.text = f"{tr('Filter by domains')} ({n_excl} {tr('excluded')})"
                         p_domain_filter_btn.props('outline dense no-caps color=red')
 
+                    # DMF-09: library filter button (Phase 131-05)
+                    # 3-state: neutral / Show-only (showing N/total) / Hide (hiding N)
+                    # Hidden until results exist (like domain filter), then shown on results arrival.
+                    parallels_library_filter_btn = ui.button(
+                        tr('Filter by library'),
+                    ).classes('text-sm').props('outline dense no-caps').style('min-height: 2.286em;')
+                    parallels_library_filter_btn.tooltip(tr('Filter results by library'))
+                    parallels_library_filter_btn.set_visibility(False)
+                    parallels_library_filter_btn.on('click', lambda: _open_parallels_library_filter_dialog())
+
                     # Sort options
                     sort_select = ui.select(
                         {
@@ -1331,6 +1483,283 @@ def create_parallels_page(initial_text: str = None):
             results_container = ui.column().classes('w-full gap-4').style('min-height: 300px;')
 
     # === Logic ===
+
+    # === DMF-09: Parallels Library Filter Button + Dialog (Phase 131-05) ===
+
+    def _update_parallels_library_filter_btn():
+        """Sync the parallels library filter button: 3-state label and color (DMF D-07).
+
+        Three states keyed on mode + active-ness:
+          Neutral:      tr('Filter by library') — outline primary.
+          Show-only:    tr('Showing {shown}/{total} library'/'libraries') — filled red/negative.
+          Hide active:  tr('Hiding {n} library'/'libraries') — filled deep-orange.
+
+        total = selectable-universe count (library_codes_with_manuscripts minus LOCAL),
+        NOT a result-facet count — Codex R5 mandate.
+        """
+        flt = p_state.library_filter
+        mode = getattr(p_state, 'library_mode', 'hide')
+        if not flt:
+            # Neutral: no active restriction
+            parallels_library_filter_btn.text = tr('Filter by library')
+            parallels_library_filter_btn.props(remove='color')
+            parallels_library_filter_btn.props('outline dense no-caps color=primary')
+        elif mode == 'show_only':
+            # Show-only active: N of total selected
+            # total is the selectable-universe (NOT a result facet — Codex R5)
+            total = len([c for c in library_codes_with_manuscripts() if c != 'LOCAL'])
+            shown = len(flt)
+            # REAL Phase-130 pluralized keys (genizah_translations.py:2918-2921)
+            _lib_btn_key = ('Showing {shown}/{total} library' if total == 1
+                            else 'Showing {shown}/{total} libraries')
+            parallels_library_filter_btn.text = tr(_lib_btn_key).format(shown=shown, total=total)
+            parallels_library_filter_btn.props(remove='color outline')
+            parallels_library_filter_btn.props('dense no-caps color=negative')
+        else:  # hide mode, non-empty set
+            _n = len(flt)
+            _lib_btn_key = ('Hiding {n} library' if _n == 1 else 'Hiding {n} libraries')
+            parallels_library_filter_btn.text = tr(_lib_btn_key).format(n=_n)
+            parallels_library_filter_btn.props(remove='color outline')
+            parallels_library_filter_btn.props('dense no-caps color=deep-orange')
+
+    def _open_parallels_library_filter_dialog():
+        """Open dual-mode library filter dialog for /parallels (Phase 131-05 / DMF-09).
+
+        Dialog layout:
+          1. Mode toggle (Show-only | Hide) at TOP — D-03.
+          2. Text-search input filtering the combined list client-side.
+          3. Count shortlist — libraries present in current results, sorted by count desc.
+          4. Expandable section — ALL canonical libraries not in shortlist, sorted A-Z. LOCAL excluded.
+          5. Select All / Select None / Apply / Cancel buttons.
+
+        Persistence: safe_user_set('parallels_library_filter', {'mode': ..., 'codes': [...]}).
+        Show-only normalizes all-selected -> [] via the LOCAL _parallels_apply_selection helper
+        (Codex N2: NOT search.py's nested _library_apply_selection).
+        JS namespace: parLibFilter* (separate from search page's libFilter*).
+        """
+        import html as _html
+        import uuid as _uuid
+        import json as _json_plibfilter
+        from collections import Counter
+
+        lang = get_language()
+        container_id = f'par-lib-filter-{_uuid.uuid4().hex[:8]}'
+        current_filter = set(p_state.library_filter)
+        current_mode = [getattr(p_state, 'library_mode', 'hide')]  # mutable cell
+
+        # Build shortlist: libraries present in current results, LOCAL excluded (DMF-10).
+        # Derive from p_state.results via get_library_for_id (or display.library_code).
+        def _get_result_lib(item):
+            lc = item.get('display', {}).get('library_code', '')
+            if lc:
+                return lc
+            if state.meta_mgr:
+                try:
+                    raw_header = item.get('raw_header', '')
+                    sys_match = re.search(r'(99\d{8,})', raw_header)
+                    if sys_match:
+                        return state.meta_mgr.get_library_for_id(sys_match.group(1)) or ''
+                except Exception:
+                    pass
+            return ''
+
+        facets = Counter(
+            _get_result_lib(r) for r in (p_state.results or [])
+            if _get_result_lib(r) and _get_result_lib(r) != 'LOCAL'
+        )
+
+        # Shortlist codes: libraries in results, LOCAL excluded (HIGH-2 / DMF-10)
+        shortlist_codes = sorted(
+            [c for c in facets if c in LIBRARY_CODES and c != 'LOCAL'],
+            key=lambda c: -facets[c],
+        )
+        shortlist_set = set(shortlist_codes)
+
+        # Expand section: all canonical libraries not in shortlist, LOCAL excluded (DMF-10/DMF-13)
+        # Keep literal `c != 'LOCAL'` so the AST LOCAL guard passes (DMF-10).
+        _codes_with_mss = library_codes_with_manuscripts()
+        expand_codes = sorted(
+            [c for c in LIBRARY_CODES if c != 'LOCAL' and c not in shortlist_set
+             and c in _codes_with_mss],
+            key=lambda c: get_library_display(c, short=False, lang=lang),
+        )
+
+        def _make_cb_row(code, label_text, checked):
+            """Single checkbox row HTML — parLibFilter* classes."""
+            code_attr = _html.escape(code, quote=True)
+            label_esc = _html.escape(label_text, quote=True)
+            checked_attr = 'checked' if checked else ''
+            return (
+                f'<label class="par-lib-cb-row" data-label="{label_esc.lower()}" '
+                f'style="display:flex;align-items:center;gap:8px;'
+                f'padding:4px 0;cursor:pointer;font-size:0.9rem">'
+                f'<input type="checkbox" class="par-lib-cb" data-code="{code_attr}" '
+                f'{checked_attr} '
+                f'style="width:16px;height:16px;accent-color:#1976d2;cursor:pointer" '
+                f'onchange="parLibFilterUpdateApply(\'{container_id}\')">'
+                f'<span>{label_esc}</span></label>'
+            )
+
+        def _is_checked_init(code):
+            if current_mode[0] == 'show_only':
+                return (not current_filter) or (code in current_filter)
+            else:
+                return code in current_filter
+
+        # Shortlist rows (with count)
+        shortlist_rows = []
+        for code in shortlist_codes:
+            count = facets[code]
+            label = get_library_display(code, short=False, lang=lang)
+            shortlist_rows.append(_make_cb_row(code, f"{label} ({count})", _is_checked_init(code)))
+
+        # Expand section rows (no count)
+        expand_rows = []
+        for code in expand_codes:
+            label = get_library_display(code, short=False, lang=lang)
+            expand_rows.append(_make_cb_row(code, label, _is_checked_init(code)))
+
+        init_mode = _html.escape(current_mode[0], quote=True)
+        full_html = f'<div id="{container_id}" data-libmode="{init_mode}">'
+        full_html += '\n'.join(shortlist_rows)
+        if expand_rows:
+            expand_label = _html.escape(tr('All libraries'))
+            full_html += (
+                f'<details style="margin-top:8px">'
+                f'<summary style="cursor:pointer;font-size:0.85rem;color:#666;'
+                f'padding:4px 0">{expand_label}</summary>'
+                + '\n'.join(expand_rows)
+                + '</details>'
+            )
+        full_html += '</div>'
+
+        with ui.dialog() as dialog, ui.card().classes('w-[520px] max-h-[80vh]'):
+            with ui.column().classes('w-full gap-2'):
+                ui.label(tr('Filter by Library')).classes('text-lg font-bold')
+
+                # Mode toggle (D-03): Show-only | Hide
+                mode_options = {
+                    'show_only': tr('Show only selected'),
+                    'hide': tr('Hide selected'),
+                }
+                mode_toggle = ui.toggle(
+                    options=mode_options,
+                    value=current_mode[0],
+                ).props('dense no-caps')
+
+                def _on_mode_change(new_mode):
+                    current_mode[0] = new_mode
+                    # D-04: flipping mode resets checked set + re-syncs Apply-enable.
+                    ui.run_javascript(f'parLibFilterSetMode("{container_id}", "{new_mode}")')
+
+                mode_toggle.on_value_change(lambda e: _on_mode_change(e.value))
+
+                # Text-search input — client-side row filter
+                ui.input(
+                    placeholder=tr('Search libraries...'),
+                    on_change=lambda e: ui.run_javascript(
+                        f'parLibFilterSearch("{container_id}", {_json_plibfilter.dumps(e.value or "")})'
+                    ),
+                ).props('dense clearable').classes('w-full')
+
+                with ui.scroll_area().classes('w-full').style('max-height: 45vh;'):
+                    ui.html(full_html, sanitize=False)
+
+                # Buttons row
+                with ui.row().classes('w-full justify-between'):
+                    _cid = container_id
+                    # WR-01: full selectable universe for show-all normalization
+                    _all_for_norm = shortlist_codes + expand_codes
+
+                    with ui.row().classes('gap-1'):
+                        ui.button(
+                            tr('Select All'),
+                            on_click=lambda: ui.run_javascript(
+                                f'parLibFilterSelectAll("{_cid}", true)')
+                        ).props('flat dense no-caps')
+                        ui.button(
+                            tr('Select None'),
+                            on_click=lambda: ui.run_javascript(
+                                f'parLibFilterSelectAll("{_cid}", false)')
+                        ).props('flat dense no-caps')
+
+                    with ui.row().classes('gap-2'):
+                        async def apply_parallels_library_filter():
+                            checked_list = await ui.run_javascript(
+                                f'parLibFilterGetChecked("{_cid}")', timeout=5.0
+                            )
+                            checked = list(checked_list) if checked_list else []
+                            # Sanitize JS-returned codes (drops non-str, unknown, LOCAL).
+                            checked = sanitize_library_codes(checked)
+                            committed_mode = current_mode[0]
+
+                            if committed_mode == 'show_only':
+                                if not checked:
+                                    ui.notify(
+                                        tr('Select at least one library, or check all to clear the filter'),
+                                        type='warning',
+                                    )
+                                    return
+                                # All-in-universe checked -> [] mapping (show-all for Show-only).
+                                # Uses LOCAL _parallels_apply_selection (Codex N2 — NOT search.py's nested fn).
+                                new_filter = _parallels_apply_selection(checked, _all_for_norm)
+                                # Show-all normalization: Show-only + empty codes = neutral Hide/[].
+                                if not new_filter:
+                                    p_state.library_mode = 'hide'
+                                    p_state.library_filter = []
+                                else:
+                                    p_state.library_mode = 'show_only'
+                                    p_state.library_filter = new_filter
+                            else:
+                                # Hide mode: empty set allowed (hide nothing = show all, D-08).
+                                p_state.library_mode = 'hide'
+                                p_state.library_filter = checked
+
+                            # Persist dict shape (never a bare list).
+                            safe_user_set('parallels_library_filter', {
+                                'mode': p_state.library_mode,
+                                'codes': p_state.library_filter,
+                            })
+                            _update_parallels_library_filter_btn()
+                            parallels_library_filter_btn.set_visibility(True)
+                            dialog.close()
+
+                            # Show-only re-runs the search pre-query scoped (restrict_sys_ids).
+                            # Hide re-renders with post-fetch filter applied.
+                            if p_state.library_mode == 'show_only' and p_state.library_filter:
+                                await execute_parallels()
+                            elif p_state.results:
+                                # Re-render applying hide filter
+                                _rerender_with_library_filter()
+
+                        apply_btn = ui.button(
+                            tr('Apply'), on_click=apply_parallels_library_filter
+                        ).props('dense no-caps color=primary')
+                        apply_btn.props(f'id="parLibApplyBtn_{container_id}"')
+                        ui.button(tr('Cancel'), on_click=dialog.close).props('flat dense no-caps')
+
+        dialog.open()
+        # Initialize Apply disabled-state from current checked count + mode.
+        ui.run_javascript(f'parLibFilterUpdateApply("{container_id}")')
+
+    def _rerender_with_library_filter():
+        """Re-render results applying all post-fetch filters including library filter."""
+        main_results = p_state.results
+        filtered_results = p_state.filtered_results
+        if p_state.domain_exclusions and p_state.has_domain_data:
+            main_results = _filter_parallels_by_domain(main_results)
+            filtered_results = _filter_parallels_by_domain(filtered_results) if filtered_results else filtered_results
+        # Apply library Hide filter (Show-only is pre-query so not needed here on re-render)
+        if p_state.library_mode == 'hide' and p_state.library_filter:
+            main_results = _apply_parallels_library_filter(main_results)
+            if filtered_results:
+                filtered_results = _apply_parallels_library_filter(filtered_results)
+        render_results(main_results, filtered_results)
+
+    # If session restored a library filter, sync button state now (after functions are defined)
+    if p_state.library_filter:
+        parallels_library_filter_btn.set_visibility(True)
+        _update_parallels_library_filter_btn()
 
     # === Sefaria Loading Functions ===
     def show_sefaria_selection_dialog(source_type: str):
@@ -2049,6 +2478,10 @@ def create_parallels_page(initial_text: str = None):
         results_header.text = tr('Results')
         # Reset summary label
         summary_label.text = ''
+        # Reset library filter state (DMF-09)
+        p_state.library_mode = 'hide'
+        p_state.library_filter = []
+        safe_user_set('parallels_library_filter', {'mode': 'hide', 'codes': []})
         # Reset persistent storage to clean defaults
         safe_user_set('parallels_results', [])
         safe_user_set('parallels_filtered', [])
@@ -2216,6 +2649,19 @@ def create_parallels_page(initial_text: str = None):
                 ui.run_javascript('if (window.__hideLoadingBar) window.__hideLoadingBar();')
                 return
 
+        # DMF-09 HYBRID Show-only library pre-query intersect (Phase 131-05 / Codex R3 F4).
+        # MUST be OUTSIDE / AFTER the `_has_active_filters()` block above — that gate is False
+        # when ONLY a library filter is set, so gating the resolve inside it would make a
+        # library-only Show-only never scope.  Must also run BEFORE the per-manuscript
+        # exclusion subtraction below so library-only AND advanced+library cases both compose.
+        if p_state.library_mode == 'show_only' and p_state.library_filter:
+            from shared.fjms_service import resolve_library_sys_ids as _resolve_lib_ids
+            lib_ids = await run.io_bound(
+                _resolve_lib_ids, list(p_state.library_filter), state.meta_mgr
+            )
+            if lib_ids:  # fail-open: skip intersect if resolution returned empty
+                restrict_sys_ids = lib_ids if restrict_sys_ids is None else (restrict_sys_ids & lib_ids)
+
         # Merge per-manuscript exclusions into restrict_sys_ids if both are present
         if p_state.excluded_manuscript_ids and restrict_sys_ids is not None:
             restrict_sys_ids = restrict_sys_ids - p_state.excluded_manuscript_ids
@@ -2336,6 +2782,14 @@ def create_parallels_page(initial_text: str = None):
                         'boundary_options': None,  # Phase 77: not yet exposed as user-settable; placeholder for parity with /api/parallels API-02
                         'warnings': [],  # Phase 78 will populate
                     }
+                    # DMF-09 HYBRID Hide post-fetch filter (Phase 131-05 / Codex MED #6).
+                    # Applied BEFORE set_parallels_export / safe_user_set so exports + stored
+                    # payloads are scoped.  Show-only is already scoped pre-query (restrict_sys_ids)
+                    # so no post-fetch pass needed for Show-only.
+                    if p_state.library_mode == 'hide' and p_state.library_filter:
+                        main_results = _apply_parallels_library_filter(main_results)
+                        if filtered_results:
+                            filtered_results = _apply_parallels_library_filter(filtered_results)
                     from web.export_state import (
                         compact_parallels_result_rows,
                         set_parallels_export,
@@ -2477,6 +2931,10 @@ def create_parallels_page(initial_text: str = None):
                 # Show/hide domain filter button
                 p_domain_filter_btn.set_visibility(p_state.has_domain_data)
                 _update_parallels_domain_filter_btn()
+
+                # DMF-09: show library filter button whenever there are results (Phase 131-05)
+                parallels_library_filter_btn.set_visibility(bool(main_results or filtered_results))
+                _update_parallels_library_filter_btn()
 
                 # Build filter summary suffix for status line
                 _filter_suffix = ''
