@@ -2073,6 +2073,7 @@ class FjmsService:
         edition_sys_ids=None,
         library_codes: list = None,
         library_sys_ids=None,
+        library_mode: str = 'show_only',
     ) -> dict:
         """
         Get paginated browse results matching all provided filters (intersection).
@@ -2112,6 +2113,13 @@ class FjmsService:
                 is SKIPPED (fail-open) and a warning is logged — never silently returns
                 0 results.  Callers MUST run ``resolve_library_sys_ids`` off the event
                 loop (it is O(255K) over csv_bank).
+            library_mode: Controls how the library filter is applied when both
+                ``library_codes`` and ``library_sys_ids`` are provided.
+                ``'show_only'`` (default): keeps rows whose AlmaId IS in the
+                resolved set (allowlist / EXISTS).  ``'hide'``: keeps rows whose
+                AlmaId is NOT in the resolved set (denylist / NOT EXISTS).
+                Omitted or unrecognised values fall back to ``'show_only'``
+                (fail-safe, today's behaviour).
 
         Returns:
             Dict with keys:
@@ -2281,8 +2289,12 @@ class FjmsService:
                 if self._ensure_filter_temp(
                     "_browse_filter_library", library_sys_ids, _lib_token
                 ):
+                    # Dual-mode (DMF-07/08): 'hide' flips to NOT EXISTS so the
+                    # total and pagination are over the denylist-excluded set.
+                    # Any unrecognised mode falls back to 'show_only' (fail-safe).
+                    _exists_kw = "NOT EXISTS" if library_mode == "hide" else "EXISTS"
                     conditions.append(
-                        'EXISTS (SELECT 1 FROM "_browse_filter_library" t '
+                        f'{_exists_kw} (SELECT 1 FROM "_browse_filter_library" t '
                         "WHERE t.AlmaId = c.AlmaId)"
                     )
             elif library_codes and not library_sys_ids:
