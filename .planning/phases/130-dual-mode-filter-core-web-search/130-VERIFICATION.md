@@ -1,9 +1,11 @@
 ---
 phase: 130-dual-mode-filter-core-web-search
 verified: 2026-06-30T12:00:00Z
-status: human_needed
+status: passed
 score: 6/6 must-haves verified
 overrides_applied: 0
+human_verified: 2026-06-30 (user UAT approval — all 7 live-smoke items passed)
+code_review: 2026-06-30 (internal gsd-code-reviewer + Codex 3-round cross-AI review → APPROVE; CR-01 BLOCKER + restore-hardening HIGH fixed)
 human_verification:
   - test: "Open web /search in a browser, apply Hide mode filtering (e.g. hide RNL), run a new search, confirm RNL results are still absent; navigate away and back, confirm the Hiding N button state persists."
     expected: "Button reads 'Hiding N' after reload; results exclude RNL across searches; mode toggle initialized to Hide on dialog reopen."

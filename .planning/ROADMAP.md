@@ -156,6 +156,6 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 130. Dual-Mode Filter Core — Web /search | 3/3 | Complete   | 2026-06-30 |
+| 130. Dual-Mode Filter Core — Web /search | 3/3 | Complete    | 2026-06-30 |
 | 131. Dual-Mode Parity — Desktop + Browse + Parallels | 0/? | Not started | - |
 | 132. Public API Dual-Mode | 0/? | Not started | - |
