@@ -1172,10 +1172,12 @@ def create_catalog_browse_page(
             )
 
         # Shortlist rows (with counts when available; without on facet-query failure)
+        # GAP-131-08: in Hebrew UI append the code in parens so users can search by 'CUL'.
+        # with_code=(_lang == 'he') — English UI unchanged.
         shortlist_rows = []
         for code in shortlist_codes:
             count = facets.get(code)
-            label = get_library_display(code, short=False, lang=_lang)
+            label = get_library_display(code, short=False, lang=_lang, with_code=(_lang == 'he'))
             label_with_count = f"{label} ({count})" if count is not None else label
             if current_mode[0] == 'show_only':
                 is_checked = (not current_filter) or (code in current_filter)
@@ -1184,9 +1186,10 @@ def create_catalog_browse_page(
             shortlist_rows.append(_make_cat_cb_row(code, label_with_count, is_checked, count))
 
         # Expand section rows (no count)
+        # GAP-131-08: same with_code gate for the expand section.
         expand_rows = []
         for code in expand_codes:
-            label = get_library_display(code, short=False, lang=_lang)
+            label = get_library_display(code, short=False, lang=_lang, with_code=(_lang == 'he'))
             if current_mode[0] == 'show_only':
                 is_checked = (not current_filter) or (code in current_filter)
             else:
