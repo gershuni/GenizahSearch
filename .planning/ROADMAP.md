@@ -124,14 +124,16 @@ Plans:
 ### Phase 131: Dual-Mode Parity — Desktop Catalog + Web Browse-by-Identification + Web `/parallels`
 
 **Goal**: The (mode + set) model from Phase 130 reaches the three remaining filter surfaces at parity: the desktop catalog `LibraryFilterDialog` (Browse-by-Identification), the web Browse-by-Identification catalog filter, and a NEW library-filter control on the web `/parallels` page (which scopes results through the existing `restrict_sys_ids` path) — each persisted for its surface.
-**Depends on**: Phase 130 (shared (mode + set) model settled)
-**Requirements**: DMF-07, DMF-08, DMF-09, DMF-10
+**Depends on**: Phase 130 (shared (mode + set) model settled; `library_codes_with_manuscripts()` utility built)
+**Requirements**: DMF-07, DMF-08, DMF-09, DMF-10, DMF-12, DMF-13
 **Success Criteria** (what must be TRUE):
 
   1. The desktop catalog `LibraryFilterDialog` (`desktop/dialogs_filter.py`, Browse-by-Identification) offers the same Show-only / Hide modes as web `/search`; the chosen mode + set persist and re-apply on reopen, at model parity with the web lead. (DMF-07)
   2. The web Browse-by-Identification catalog filter offers the same Show-only / Hide modes over the full canonical library list, persisted, composing with the existing SEED-023 PGP/Editions filters without regression. (DMF-08)
   3. The web `/parallels` page has a library-filter control using the same dual-mode model; selecting libraries (Show-only) or hiding them (Hide) scopes the parallels results via the existing `restrict_sys_ids` compute path, and the selection persists for the page — closing the v8.3.0 deferred gap logged in `docs/OPEN_ISSUES.md` (2026-06-29). (DMF-09)
   4. On every web surface, `'LOCAL'` is absent from the options in BOTH modes; `tests/test_web_library_options_no_local.py` + `tests/test_phase_97_invariants.py` stay green; all web per-surface persistence goes through `web/safe_storage.py` (allowlist `[]`). (DMF-10)
+  5. The web Browse-by-Identification catalog library filter gains the `/search` dialog affordances: a client-side text-search input, a per-library fragment/result count on the shortlist, and sort-by-count / sort-A–Z. (DMF-12)
+  6. On every surface (catalog / `/parallels` / desktop), libraries with zero corpus manuscripts are excluded from the filter universe, reusing the shared `library_codes_with_manuscripts()` built in Phase 130 (web `/search` already done). (DMF-13)
 
 **Plans**: TBD
 **UI hint**: yes

@@ -23,6 +23,7 @@
 ### Browse-by-Identification (web catalog)
 
 - [ ] **DMF-08**: The web Browse-by-Identification catalog filter offers the same Show-only / Hide modes (its universe is the full canonical library list, so the allowlist is already stable — included for cross-surface consistency).
+- [ ] **DMF-12**: The web Browse-by-Identification catalog library filter gains the `/search` dialog affordances — a client-side text-search input over the library list, a per-library fragment/result count on the shortlist, and the ability to sort the list by count or A–Z. (User feedback 2026-06-30; companion to DMF-08.)
 
 ### Parallels Library Control
 
@@ -35,6 +36,7 @@
 ### Invariants (guard, not new capability)
 
 - [x] **DMF-10**: `'LOCAL'` (My Library) never appears as a web library-filter option in ANY mode or surface — the D-46 / D-NEW-7 guard (`tests/test_web_library_options_no_local.py` + `tests/test_phase_97_invariants.py`) stays green.
+- [~] **DMF-13**: Libraries with ZERO manuscripts in the corpus never appear in the library-filter universe on ANY surface — the expand-all list is `LIBRARY_CODES` minus `'LOCAL'` minus zero-count codes, via the shared `library_codes_with_manuscripts()` (`shared/browse_map_utils.py`, fail-open). Done for web `/search` in Phase 130; mirrored on catalog / `/parallels` / desktop in Phase 131. (User feedback 2026-06-30; cross-cutting like DMF-10.)
 
 ## Future Requirements (deferred)
 
@@ -60,3 +62,5 @@
 | DMF-09 | Phase 131 | Pending |
 | DMF-10 | Phase 130, Phase 131 (cross-cutting guard) | Complete |
 | DMF-11 | Phase 132 | Pending |
+| DMF-12 | Phase 131 | Pending |
+| DMF-13 | Phase 130 (/search done), Phase 131 (catalog/parallels/desktop) | Partial |
