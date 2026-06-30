@@ -139,7 +139,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 131-01-PLAN.md — Wave-0 test scaffolds: new catalog + parallels dual-mode test files + extend desktop libfilter tests (pure mirrors + AST source contracts)
+- [x] 131-01-PLAN.md — Wave-0 test scaffolds: new catalog + parallels dual-mode test files + extend desktop libfilter tests (pure mirrors + AST source contracts)
 - [ ] 131-02-PLAN.md — Shared `get_browse_results` `library_mode` param (EXISTS/NOT EXISTS, backward-compatible) for the server-side catalog/desktop surfaces
 
 **Wave 2** *(blocked on Wave 1)*
@@ -169,5 +169,5 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 130. Dual-Mode Filter Core — Web /search | 3/3 | Complete    | 2026-06-30 |
-| 131. Dual-Mode Parity — Desktop + Browse + Parallels | 0/5 | Planned | - |
+| 131. Dual-Mode Parity — Desktop + Browse + Parallels | 1/5 | In Progress|  |
 | 132. Public API Dual-Mode | 0/? | Not started | - |

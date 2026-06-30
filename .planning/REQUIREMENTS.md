@@ -18,16 +18,16 @@
 
 ### Desktop Parity
 
-- [ ] **DMF-07**: The desktop catalog `LibraryFilterDialog` (Browse-by-Identification) offers the same Show-only / Hide modes, persisted, at parity with web.
+- [x] **DMF-07**: The desktop catalog `LibraryFilterDialog` (Browse-by-Identification) offers the same Show-only / Hide modes, persisted, at parity with web.
 
 ### Browse-by-Identification (web catalog)
 
-- [ ] **DMF-08**: The web Browse-by-Identification catalog filter offers the same Show-only / Hide modes (its universe is the full canonical library list, so the allowlist is already stable — included for cross-surface consistency).
-- [ ] **DMF-12**: The web Browse-by-Identification catalog library filter gains the `/search` dialog affordances — a client-side text-search input over the library list, a per-library fragment/result count on the shortlist, and the ability to sort the list by count or A–Z. (User feedback 2026-06-30; companion to DMF-08.)
+- [x] **DMF-08**: The web Browse-by-Identification catalog filter offers the same Show-only / Hide modes (its universe is the full canonical library list, so the allowlist is already stable — included for cross-surface consistency).
+- [x] **DMF-12**: The web Browse-by-Identification catalog library filter gains the `/search` dialog affordances — a client-side text-search input over the library list, a per-library fragment/result count on the shortlist, and the ability to sort the list by count or A–Z. (User feedback 2026-06-30; companion to DMF-08.)
 
 ### Parallels Library Control
 
-- [ ] **DMF-09**: The web `/parallels` page gains a library-filter control (same dual-mode model) that scopes results via the existing `restrict_sys_ids` path, persisted for the page — closing the v8.3.0 deferred gap.
+- [x] **DMF-09**: The web `/parallels` page gains a library-filter control (same dual-mode model) that scopes results via the existing `restrict_sys_ids` path, persisted for the page — closing the v8.3.0 deferred gap.
 
 ### Public API
 
@@ -57,10 +57,10 @@
 | DMF-04 | Phase 130 | Complete |
 | DMF-05 | Phase 130 | Complete |
 | DMF-06 | Phase 130 | Complete |
-| DMF-07 | Phase 131 | Pending |
-| DMF-08 | Phase 131 | Pending |
-| DMF-09 | Phase 131 | Pending |
+| DMF-07 | Phase 131 | Complete |
+| DMF-08 | Phase 131 | Complete |
+| DMF-09 | Phase 131 | Complete |
 | DMF-10 | Phase 130, Phase 131 (cross-cutting guard) | Complete |
 | DMF-11 | Phase 132 | Pending |
-| DMF-12 | Phase 131 | Pending |
+| DMF-12 | Phase 131 | Complete |
 | DMF-13 | Phase 130 (/search done), Phase 131 (catalog/parallels/desktop) | Partial |
