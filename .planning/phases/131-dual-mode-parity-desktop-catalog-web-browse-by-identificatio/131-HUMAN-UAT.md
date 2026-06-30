@@ -45,14 +45,14 @@ expected: Open Catalog tab -> library filter button. (a) A "Search libraries..."
 result: [pending]
 
 ### 9. Hebrew UI — library rows show the English code, searchable by it (gap 131-08)
-expected: Switch the app to Hebrew UI. Open the catalog library filter dialog (web /catalog AND desktop) -> each library row shows the English code in parentheses after the Hebrew name, e.g. "ספריית האוניברסיטה של קיימברידג' (CUL)". Type "CUL" (or "JTS", etc.) in the type-to-find box -> the matching library is found. A-Z sort order is unchanged (sorts by the Hebrew name, not the appended code). English UI unchanged unless we later opt in.
+expected: Switch the app to Hebrew UI. Open the catalog library filter dialog (web /catalog AND desktop) -> each library row shows the English code in parentheses after the Hebrew name, e.g. "ספריית האוניברסיטה של קיימברידג' (CUL)". Type "CUL" (or "JTS", etc.) in the type-to-find box -> the matching library is found. A-Z sort order is unchanged (sorts by the Hebrew name, not the appended code). ALSO (gap 131-09): switch to English UI -> rows now show the code too, e.g. "Cambridge University Library (CUL)", searchable by typing "CUL".
 result: [pending]
 
 ## Summary
 
 total: 9
 passed: 0
-issues: 0
+issues: 1
 pending: 9
 skipped: 0
 blocked: 0
@@ -111,4 +111,23 @@ blocked: 0
     - "Desktop LibraryFilterDialog: append (CODE) to Hebrew-UI row labels; preserve A-Z/by-count sort keys on the bare name; counts rendering intact; search now matches code."
     - "Web catalog dialog: append (CODE) to Hebrew-UI label + data-label so catLibFilterSearch matches; preserve A-Z order."
     - "Tests: desktop tests/test_libfilter_desktop.py (he-lang label contains '(CUL)'; search 'CUL' matches; en-lang label unchanged; A-Z order unchanged) + a web/shared test for the get_library_display with_code param + the he-lang data-label includes the code."
+  debug_session: ""
+- truth: "The English library code in parentheses ALSO appears in the catalog library-filter dialog rows in ENGLISH UI (both apps) — e.g. 'Cambridge University Library (CUL)' — searchable by code. Extends gap 131-08 (Hebrew-only) to both languages."
+  status: failed
+  reason: "User follow-up after 131-08 confirmed working: 'Works well, add library codes to the EN UI too.'"
+  severity: minor
+  test: 9
+  root_cause: "131-08 gated with_code on the active language at the two call sites: desktop dialogs_filter.py sets self._with_code = (_gc.CURRENT_LANG == 'he'); web catalog_browse.py passes with_code=(_lang == 'he'). Flip BOTH to always-on (with_code=True). The shared get_library_display already supports with_code with lang='en' (returns 'EN name (CODE)') — no shared-helper change. The 131-08 tests that assert the en-lang label has NO code must flip to assert it HAS the code."
+  artifacts:
+    - path: "desktop/dialogs_filter.py"
+      issue: "Set self._with_code = True unconditionally (drop the CURRENT_LANG=='he' gate). Sort keys stay on the bare name; counts/search/sort unaffected."
+    - path: "web/pages/catalog_browse.py"
+      issue: "Pass with_code=True at BOTH catalog row builders (drop the _lang=='he' gate). data-label still receives the code so catLibFilterSearch matches in English UI too. Expand-section sort key stays bare (no with_code)."
+    - path: "tests/test_libfilter_desktop.py"
+      issue: "Flip the en-lang assertions added by 131-08: the en-lang row label now CONTAINS '(CUL)' and is searchable by 'CUL'. Keep he-lang assertions. Keep the get_library_display default-OFF invariant test unchanged (other callers still unaffected)."
+    - path: "tests/test_libfilter_catalog.py"
+      issue: "Flip the web en-lang data-label assertion to expect the code present."
+  missing:
+    - "Flip with_code gate to always-on at both call sites (desktop + web)."
+    - "Update en-lang tests to expect the code; keep he-lang + default-off-invariant tests."
   debug_session: ""
