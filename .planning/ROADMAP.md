@@ -29,6 +29,7 @@
 - **v8.1.0 Desktop Telemetry** -- Phases 111-116 (shipped 2026-06-16; closed 2026-06-16). See `milestones/v8.1.0-ROADMAP.md`
 - ✅ **v8.2.0 Web Joins Lab, FGP Transcriptions & Hebrew Search** -- Phases 117-121 (shipped 2026-06-23, both apps)
 - ✅ **v8.3.0 God-File Decomposition + Search & Browse UX** -- Phases 122-129 (shipped 2026-06-29, both apps; closed 2026-06-30). Decomposition (122-127, zero behavior change) + SEED-025 Space-scroll + SEED-026 library filter. See `.planning/milestones/v8.3.0-ROADMAP.md`.
+- 🚧 **v8.4.0 Dual-Mode Library Filter** -- Phases 130-132 (in progress). Evolve the v8.3.0 inclusion-only allowlist into a dual-mode (Show-only / Hide) library filter persisted across searches, at full web + desktop parity, plus a `mode` (include/exclude) on the public API. Evolution of SEED-026.
 
 ## Phases
 
@@ -59,30 +60,81 @@ See: .planning/milestones/v8.0.0-ROADMAP.md
 
 </details>
 
----
-
 <details>
-<summary>✅ v8.3.0 God-File Decomposition + Search & Browse UX (Phases 122-129) — SHIPPED 2026-06-29, both apps</summary>
+<summary>✅ v8.3.0 God-File Decomposition + Search & Browse UX (Phases 122-129) — SHIPPED 2026-06-29, both apps; closed 2026-06-30</summary>
 
 See: .planning/milestones/v8.3.0-ROADMAP.md
 
 8 phases (122-129). Two strands shipped together as the public 8.2.2→8.3.0 release: (1) god-file decomposition (122-127) — split genizah_app.py + genizah_core.py into cohesive shared/+desktop/ modules behind permanent re-export facades, zero behavior change; (2) Search & Browse UX (128-129) — SEED-025 Space-key results scroll + SEED-026 library filter (web /search + Browse-by-Identification + desktop catalog + filters.library API), both apps. Also shipped: SEED-017 Joins-Lab viewer rotate/fullscreen, SEED-024 desktop Joins-Lab parity + XLSX export, SEED-015 desktop image NLI breaker.
 </details>
 
+---
+
+### 🚧 v8.4.0 Dual-Mode Library Filter (Phases 130-132) — In Progress
+
+**Milestone goal:** Library filtering can express BOTH "show only these libraries" and "hide these libraries" intents, persisted so each survives across searches, at full web + desktop parity — closing the v8.3.0 gap where the inclusion-only allowlist (over a result-derived universe) could not represent a sticky "exclude library X". Inclusion = allowlist; Hide = denylist (consistent with the existing `domain_exclusions` / printed-filter exclusion semantics). Evolution of the shipped SEED-026 — no new domain research needed. Spec lineage: `.planning/seeds/SEED-026-*.md` + the 2026-06-29 web-Parallels library-filter gap in `docs/OPEN_ISSUES.md`.
+
+**Hard constraints across all phases (carry into every phase's success criteria):**
+
+- **D-46 / D-NEW-7 `'LOCAL'` guard (DMF-10):** `'LOCAL'` (My Library) never appears as a web library-filter option in ANY mode or surface; `tests/test_web_library_options_no_local.py` + `tests/test_phase_97_invariants.py` stay green. (This tripped the release-commit CI in v8.3.0 — do not regress.)
+- **Phase 87 multitenant invariant:** all per-user web state goes through the `web/safe_storage.py` chokepoint; `tests/test_no_raw_storage_access.py` allowlist stays `[]`.
+- **Web + desktop parity:** the (mode + set) model defined by the lead phase (Phase 130) is the shared shape mirrored by the desktop catalog dialog and the web parity surfaces; both apps must stay in parity for the model.
+- **Backward compatibility:** existing v8.3.0 persisted allowlist values and the existing API `filters.library` allowlist behavior must keep working unchanged (omitted mode = include = today's behavior).
+
+## Summary Checklist
+
+- [ ] **Phase 130: Dual-Mode Filter Core — Web `/search`** *(lead)* - Define the shared (mode + set) state shape, add the Show-only / Hide mode toggle to the `/search` library-filter dialog, persist (mode + set) via `safe_storage`, migrate the existing allowlist cleanly, handle edge states, and make the button/label communicate the active mode + count. Settles the model the other surfaces mirror.
+
+- [ ] **Phase 131: Dual-Mode Parity — Desktop Catalog + Web Browse-by-Identification + Web `/parallels`** - Extend the Phase-130 (mode + set) model to the three remaining UI surfaces: the desktop catalog `LibraryFilterDialog` (Browse-by-Identification), the web Browse-by-Identification catalog filter, and a NEW web `/parallels` library-filter control (scoping via the existing `restrict_sys_ids` path) — each persisted, each at parity with the lead.
+
+- [ ] **Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`)** - Add an optional library-filter `mode` (include / exclude) alongside `filters.library` on both public endpoints; backward-compatible (omitted = include); `exclude` resolves to the complement (sys_ids whose `library_code` is not in the set) intersected into `restrict_sys_ids`. Documented in `docs/SEARCH_API.md` + the skill `api_contract.md`.
+
+## Phase Details
+
+### Phase 130: Dual-Mode Filter Core — Web `/search`
+**Goal**: The web `/search` library filter can express BOTH "show only these libraries" (allowlist) and "hide these libraries" (denylist) — chosen via a mode toggle in the filter dialog, persisted (mode + set) across searches and reloads, with the existing allowlist migrated cleanly and edge states handled predictably. This phase defines the shared (mode + set) state shape and the dialog UX that Phase 131 mirrors on every other surface.
+**Depends on**: Phase 129 (v8.3.0 SEED-026 inclusion-only allowlist shipped — this evolves it)
+**Requirements**: DMF-01, DMF-02, DMF-03, DMF-04, DMF-05, DMF-06, DMF-10
+**Success Criteria** (what must be TRUE):
+
+  1. In the `/search` library-filter dialog the user can choose between **"Show only selected"** and **"Hide selected"** (bilingual EN/HE). In Hide mode, a library that surfaces in a later result set but is NOT in the hidden set is shown by default (the "hide RNL" intent persists as new libraries appear); in Show-only mode, only the selected libraries are shown. (DMF-01, DMF-02)
+  2. The chosen mode AND the selected set survive across searches and a full page reload — persisted through the `web/safe_storage.py` chokepoint (no raw `app.storage.user`; `tests/test_no_raw_storage_access.py` allowlist stays `[]`). (DMF-03)
+  3. The `/search` library-filter button (and any chip/label) clearly communicates the active mode and count — e.g. "Hiding N" vs "Showing N/total" — and shows a neutral state when no filter is active. (DMF-04)
+  4. An existing v8.3.0 persisted allowlist (`search_library_filter`) loads cleanly into the new (mode + set) model without error, interpreted as **Show-only with the existing set** — verified by a migration test feeding the legacy value shape. (DMF-05)
+  5. Edge states behave predictably: an empty selection in Show-only means "show all" (no collision with the all-unchecked sentinel), and a fully-populated Hide set (everything hidden) is handled without crash or contradictory display. (DMF-06)
+  6. `'LOCAL'` is absent from the library-filter options in BOTH modes; `tests/test_web_library_options_no_local.py` + `tests/test_phase_97_invariants.py` stay green. (DMF-10)
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 131: Dual-Mode Parity — Desktop Catalog + Web Browse-by-Identification + Web `/parallels`
+**Goal**: The (mode + set) model from Phase 130 reaches the three remaining filter surfaces at parity: the desktop catalog `LibraryFilterDialog` (Browse-by-Identification), the web Browse-by-Identification catalog filter, and a NEW library-filter control on the web `/parallels` page (which scopes results through the existing `restrict_sys_ids` path) — each persisted for its surface.
+**Depends on**: Phase 130 (shared (mode + set) model settled)
+**Requirements**: DMF-07, DMF-08, DMF-09, DMF-10
+**Success Criteria** (what must be TRUE):
+
+  1. The desktop catalog `LibraryFilterDialog` (`desktop/dialogs_filter.py`, Browse-by-Identification) offers the same Show-only / Hide modes as web `/search`; the chosen mode + set persist and re-apply on reopen, at model parity with the web lead. (DMF-07)
+  2. The web Browse-by-Identification catalog filter offers the same Show-only / Hide modes over the full canonical library list, persisted, composing with the existing SEED-023 PGP/Editions filters without regression. (DMF-08)
+  3. The web `/parallels` page has a library-filter control using the same dual-mode model; selecting libraries (Show-only) or hiding them (Hide) scopes the parallels results via the existing `restrict_sys_ids` compute path, and the selection persists for the page — closing the v8.3.0 deferred gap logged in `docs/OPEN_ISSUES.md` (2026-06-29). (DMF-09)
+  4. On every web surface, `'LOCAL'` is absent from the options in BOTH modes; `tests/test_web_library_options_no_local.py` + `tests/test_phase_97_invariants.py` stay green; all web per-surface persistence goes through `web/safe_storage.py` (allowlist `[]`). (DMF-10)
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`)
+**Goal**: Programmatic callers can express "hide these libraries" as well as "only these" — the public `POST /api/search` and `POST /api/parallels` accept an optional library-filter `mode` (include / exclude) alongside `filters.library`, backward-compatibly. `exclude` resolves to the complement (sys_ids whose `library_code` is not in the given set) intersected into `restrict_sys_ids`, mirroring the UI semantics.
+**Depends on**: Phase 130 (mode semantics + complement resolution defined)
+**Requirements**: DMF-11
+**Success Criteria** (what must be TRUE):
+
+  1. `POST /api/search` and `POST /api/parallels` accept an optional library-filter `mode` of `include` or `exclude` alongside `filters.library`; an omitted mode defaults to `include` and returns byte-for-byte the same behavior as today (backward-compatible — existing callers unaffected).
+  2. With `mode=exclude` and a set of library codes, results are scoped to sys_ids whose `library_code` is NOT in the given set (the complement), intersected into the existing `restrict_sys_ids` path on both endpoints — verified by an API test that a `library` set returns disjoint result libraries under `include` vs `exclude`.
+  3. An invalid `mode` value (anything other than `include`/`exclude`) is rejected with the standard 400 invalid-request envelope (fail-closed, consistent with the existing filter validation).
+  4. The behavior is documented in `docs/SEARCH_API.md` and the skill `api_contract.md` (skills/cairo-genizah-research/), including the omitted-mode default and the exclude/complement semantics.
+**Plans**: TBD
+
 ## Progress
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 117. Vertical Spine | 6/6 | Complete | 2026-06-18 |
-| 118. Joins, Entry & Full Builders | 6/6 | Complete | 2026-06-19 |
-| 119. Candidates, Compare & Visual Similarity | 11/11 | Complete | 2026-06-19 |
-| 120. Actions & Persistence | 7/8 | Complete | 2026-06-21 |
-| 121. i18n Polish | 3/3 | Complete | 2026-06-21 |
-| 122. Config Enabler | 1/1 | Complete    | 2026-06-25 |
-| 123. Core Leaf Modules | 1/1 | Complete   | 2026-06-25 |
-| 124. Core Metadata & Index | 1/1 | Complete   | 2026-06-26 |
-| 125. Core Engines | 4/4 | Complete   | 2026-06-26 |
-| 126. Desktop Panels | 1/1 | Complete   | 2026-06-26 |
-| 127. Update UI & Final Cleanup | 3/3 | Complete   | 2026-06-26 |
-| 128. Search Results Space-Scroll (SEED-025) | 2/2 | Complete   | 2026-06-27 |
-| 129. Library Filter (SEED-026) | 7/7 | Complete   | 2026-06-28 |
+| 130. Dual-Mode Filter Core — Web /search | 0/? | Not started | - |
+| 131. Dual-Mode Parity — Desktop + Browse + Parallels | 0/? | Not started | - |
+| 132. Public API Dual-Mode | 0/? | Not started | - |

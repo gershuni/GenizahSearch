@@ -49,14 +49,14 @@
 
 | REQ-ID | Phase | Status |
 |--------|-------|--------|
-| DMF-01 | — | Pending |
-| DMF-02 | — | Pending |
-| DMF-03 | — | Pending |
-| DMF-04 | — | Pending |
-| DMF-05 | — | Pending |
-| DMF-06 | — | Pending |
-| DMF-07 | — | Pending |
-| DMF-08 | — | Pending |
-| DMF-09 | — | Pending |
-| DMF-10 | — | Pending |
-| DMF-11 | — | Pending |
+| DMF-01 | Phase 130 | Pending |
+| DMF-02 | Phase 130 | Pending |
+| DMF-03 | Phase 130 | Pending |
+| DMF-04 | Phase 130 | Pending |
+| DMF-05 | Phase 130 | Pending |
+| DMF-06 | Phase 130 | Pending |
+| DMF-07 | Phase 131 | Pending |
+| DMF-08 | Phase 131 | Pending |
+| DMF-09 | Phase 131 | Pending |
+| DMF-10 | Phase 130, Phase 131 (cross-cutting guard) | Pending |
+| DMF-11 | Phase 132 | Pending |

@@ -6,7 +6,7 @@ status: planning
 last_updated: "2026-06-30T04:13:13.253Z"
 last_activity: 2026-06-30
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,26 +20,26 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 129 — library-filter-search-browse-by-identification-seed-026
+**Current focus:** Phase 130 — Dual-Mode Filter Core (web `/search`)
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 130 — Dual-Mode Filter Core (web `/search`) [lead]
 Plan: —
-Status: Defining requirements
-Last activity: 2026-06-30 — Milestone v8.4.0 started
+Status: Roadmap created; ready to plan Phase 130
+Last activity: 2026-06-30 — Milestone v8.4.0 roadmap created (Phases 130-132)
 
 ## Accumulated Context
 
-### Key Decisions (v8.3.0)
+### Key Decisions (v8.4.0 roadmap)
 
-- **Phase 122 first (GUARD-01 + CONFIG-01):** Config cycle pivot must precede ALL other core moves (C-1 from SEED-020 §7 — VariantManager, CodicologicalManager, responsa explosion guard, JoinsManager, and ListsManager all reference Config at class-definition time).
-- **Three modules from responsa cluster (C-2):** `shared/variants.py` + `shared/codicological.py` + `shared/responsa.py` — not a single `shared/responsa.py`; CodicologicalManager.load() takes csv_bank from MetadataManager.
-- **SEED-011 before engine move (Phase 125a):** Composition double-prep dedup must land before SearchEngine/LabEngine code is relocated to avoid reworking moved code.
-- **`genizah_core.py` = permanent compat facade:** Never delete the re-export shims; `genizah_app.py` shims DO get deleted in Phase 127 final cleanup.
-- **Never repo-wide `ruff --fix`:** Strips `# noqa: F401` shims; per-file ruff review only on every extraction commit.
-- **GUARD-03 named files:** 5 source-scanning tests must be retargeted before deletion: `test_desktop_folio_navigation.py`, `test_wr01_open_local_browse_page_ast.py`, `test_tabular_builder_rtl.py`, `test_view_all_cap.py`, `test_shelfmark_bridge.py`.
-- **`_my_library_tab_ref` = injected optional interface (C-4):** Spans both SearchEngine AND LabEngine; never import desktop into shared.
+- **Three phases, theme-grouped (condensed roadmap):** Phase 130 (lead — web `/search` core model + persistence + migration + edge states + button/label), Phase 131 (the three parity surfaces: desktop catalog dialog + web Browse-by-Identification + web `/parallels`), Phase 132 (public API mode). One phase per requirement was explicitly rejected per the project's condensed-roadmap preference.
+- **Phase 130 settles the shared (mode + set) shape FIRST:** Phases 131/132 mirror it. The mode toggle + persistence + migration + edge-state semantics must be locked before any parity surface or the API extends the model.
+- **Show-only = allowlist, Hide = denylist:** consistent with the existing `domain_exclusions` / printed-filter exclusion semantics. The Hide intent must persist as NEW libraries surface on later searches (the core "hide RNL stays hidden" behavior).
+- **Migration interpretation (DMF-05):** existing v8.3.0 `search_library_filter` allowlist values load as **Show-only with the existing set** — no error, no re-entry required.
+- **Edge-state sentinels (DMF-06):** empty selection in Show-only = "show all" (must not collide with the all-unchecked sentinel); a fully-populated Hide set (everything hidden) handled predictably.
+- **DMF-10 is a cross-cutting invariant, not a phase:** the `'LOCAL'` guard is folded into every web phase's success criteria. It tripped the v8.3.0 release-commit CI — sanitize against `'LOCAL'` (not just `LIBRARY_CODES`) on every new web filter path.
+- **API exclude = complement (DMF-11):** `mode=exclude` resolves to sys_ids whose `library_code` is NOT in the given set, intersected into `restrict_sys_ids` (mirrors the UI). Omitted mode defaults to `include` (today's allowlist behavior) — backward-compatible.
 
 ### Blockers/Concerns
 
@@ -47,14 +47,15 @@ None at roadmap creation.
 
 ### Pending Todos
 
-None yet. Begin with `/gsd-discuss-phase 122`.
+- Begin with `/gsd-discuss-phase 130` (or skip-discuss-if-empty per the standing autonomous directive).
 
 ## Deferred Items
 
-Items carried forward from v8.2.0 and earlier:
+Items carried forward from v8.3.0 and earlier:
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
+| DMF-future | Cross-device sync of the library-filter preference (currently device-local via safe_storage) | Future | v8.4.0 |
 | CONSENT-F1 | "Reset telemetry id" affordance in Settings | Future | v8.1.0 |
 | ERR-01 | Handled/non-fatal error counting at high-value sites | Future | v8.1.0 |
 | CRASH-F1 | "Send logs" flow for local faulthandler log | Future | v8.1.0 |
@@ -97,52 +98,25 @@ Items acknowledged and deferred at v8.3.0 milestone close on 2026-06-30:
 | verification | Phase 128 128-VERIFICATION.md (live render smoke) | human_needed |
 | verification | Phase 129 129-VERIFICATION.md (live render smoke) | human_needed |
 
-**Note:** SEED-025 (Space-scroll), SEED-026 (library filter), and SEED-027 (refresh CODE_INDEX) were flagged as "dormant" by the audit but were in fact **DELIVERED in v8.3.0** — not deferred. Their seed state files are stale; treat them as complete.
+**Note:** SEED-025 (Space-scroll), SEED-026 (library filter), and SEED-027 (refresh CODE_INDEX) were flagged as "dormant" by the audit but were in fact **DELIVERED in v8.3.0** — not deferred. Their seed state files are stale; treat them as complete. v8.4.0 is the planned **evolution** of SEED-026 (dual-mode).
 
 ## Session Continuity
 
-Last session: 2026-06-28T20:23:43.457Z
-Stopped at: Phase 129 context gathered
+Last session: 2026-06-30 — v8.4.0 roadmap created
+Stopped at: Roadmap written (Phases 130-132); REQUIREMENTS traceability filled
 Resume file: None
-Next step: `/gsd-discuss-phase 126` (or skip-discuss-if-empty per the standing autonomous directive)
+Next step: `/gsd-discuss-phase 130` (or skip-discuss-if-empty per the standing autonomous directive)
 
 ## Performance Metrics
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | (none yet — milestone just started) | - | - | - |
-| 122 | 1 | - | - |
-| Phase 123 P01 | 63 | 7 tasks | 13 files |
-| Phase 124-core-metadata-index P01 | 90 | 2 tasks | 8 files |
-| Phase 125-core-engines P01 | 45m | 3 tasks | 4 files |
-| Phase 125 P02 | 33m | 1 tasks | 3 files |
-| Phase 125-core-engines P03 | 120 | 1 tasks | 5 files |
-| Phase 125 P04 | 90m | 1 tasks | 14 files |
-| Phase 126-desktop-panels P01 | 55m | 3 tasks | 5 files |
-| Phase 127-update-ui-final-cleanup P02 | 25 | 2 tasks | 2 files |
-| Phase 127-update-ui-final-cleanup P03 | 30m | 2 tasks | 3 files |
-| Phase 128 P01 | 20min | 2 tasks | 4 files |
-| Phase 128 P02 | 8min | 1 tasks | 1 files |
-| Phase 129 P02 | 9min | 2 tasks | 3 files |
-| Phase 129 P03 | 15 | 2 tasks | 1 files |
-| Phase 129 P04 | 16m | 2 tasks | 3 files |
-| Phase 129 P05 | 8min | 2 tasks | 3 files |
-| Phase 129 P06 | 7min | 3 tasks | 3 files |
-| Phase 129 P07 | 35 | 3 tasks | 4 files |
 
 ## Decisions
 
-- [Phase ?]: Engine-side helpers stay in genizah_core.py — depend on Tantivy engine context
-- [Phase ?]: Inline _tr() helper for tr()-dependent modules — lazy CURRENT_LANG import satisfies GUARD-01
-- [Phase ?]: LabSettings extracted to shared/lab_settings.py; same-object facade shim in genizah_core
-- [Phase ?]: Phase 125-03
-- [Phase ?]: SearchEngine extracted to shared/search_engine.py with 20-name facade; 7 lazy imports break cycles to genizah_core
-- [Phase ?]: Phase 126 D1: MOVE-and-shim 5 dialogs to desktop/settings_dialogs.py + 4 widgets to desktop/ui_widgets.py; originals deleted, identity holds 9/9; D-07b strip verbatim; GenizahGUI.apply/cancel_settings added; LabPanel deferred to E2
-- [Phase ?]: GAP-E: catalog library filter uses checkbox dialog not ui.select; FINDING 1 all-unchecked guard
-- [Phase ?]: GAP-F: consume_incoming_filters persists search_library_filter key; persist->reload lifecycle via load-before-consume ordering in search.py
-- [Phase ?]: GAP-G closed
-- [Phase ?]: FINDING 2 closed
+- [Phase 130]: (lead) define the shared (mode + set) state shape on web `/search` — mode toggle + safe_storage persistence + legacy-allowlist migration + edge-state sentinels + button/label, all settled before parity surfaces extend it.
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd:new-milestone
+- `/gsd-discuss-phase 130` then `/gsd-plan-phase 130`.
