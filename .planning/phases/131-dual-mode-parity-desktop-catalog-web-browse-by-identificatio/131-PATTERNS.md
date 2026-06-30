@@ -60,8 +60,10 @@ layout.addLayout(mode_layout)
 
 **D-04 reset on mode flip** — add new method:
 ```python
-def _on_mode_changed(self):
-    """D-04: mode flip resets the checked set (prevents silent inversion of intent)."""
+def _on_mode_changed(self, *args):
+    """D-04: mode flip resets the checked set (prevents silent inversion of intent).
+    NOTE: QButtonGroup.buttonToggled emits (button, checked) — slot MUST accept *args
+    (mirror the live analog _on_filter_changed(self, *args) at dialogs_filter.py:1368)."""
     self.list_widget.blockSignals(True)
     for i in range(self.list_widget.count()):
         self.list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
@@ -381,14 +383,19 @@ def _update_library_filter_btn():
         btn.props(remove='color')
         btn.props('outline dense no-caps color=primary')
     elif mode == 'show_only':
-        total = len([c for c in LIBRARY_CODES if c != 'LOCAL'])
+        # universe = selectable libraries only (DMF-13), NOT raw LIBRARY_CODES
+        total = len([c for c in library_codes_with_manuscripts() if c != 'LOCAL'])
         shown = len(sel)
-        btn.text = f"{tr('Filter by library')} ({shown}/{total})"
+        # REAL Phase-130 pluralized keys (see web/pages/search.py:1733-1743 + genizah_translations.py:2918-2921);
+        # do NOT invent 'Filter by library ({shown}/{total})'.
+        key = 'Showing {shown}/{total} library' if total == 1 else 'Showing {shown}/{total} libraries'
+        btn.text = tr(key).format(shown=shown, total=total)
         btn.props(remove='color outline')
         btn.props('dense no-caps color=negative')
     else:  # hide, non-empty
         n = len(sel)
-        btn.text = f"{tr('Hiding')} {n}"
+        key = 'Hiding {n} library' if n == 1 else 'Hiding {n} libraries'
+        btn.text = tr(key).format(n=n)
         btn.props(remove='color outline')
         btn.props('dense no-caps color=deep-orange')
 ```
@@ -737,12 +744,12 @@ Called inside a dialog-build function (not at module level) to defer the first-c
 **Source:** `web/pages/search.py:1700–1750` (`_update_library_btn`) and `genizah_app.py:10443–10470` (`_catalog_update_library_filter_btn`).
 **Apply to:** both `_update_library_filter_btn` in `catalog_browse.py` and new button updater in `parallels.py`.
 
-Three states (D-07):
+Three states (D-07) — use the REAL Phase-130 pluralized keys; do NOT invent `Filter by library ({shown}/{total})` or bare `tr('Hiding') {n}`:
 - `not flt` → neutral: `tr('Filter by library')`, outline primary
-- `mode == 'show_only' and flt` → `f"{tr('Filter by library')} ({shown}/{total})"`, filled negative/red
-- `mode == 'hide' and flt` → `f"{tr('Hiding')} {n}"`, filled deep-orange
+- `mode == 'show_only' and flt` → `tr('Showing {shown}/{total} library'|'…libraries').format(shown=shown, total=total)`, filled negative/red — where `total = len([c for c in library_codes_with_manuscripts() if c != 'LOCAL'])` (selectable universe, NOT raw `LIBRARY_CODES`)
+- `mode == 'hide' and flt` → `tr('Hiding {n} library'|'…libraries').format(n=n)`, filled deep-orange
 
-Translation keys `'Hiding N library'` / `'Hiding N libraries'` / `'Showing {shown}/{total} library'` / `'Showing {shown}/{total} libraries'` are already in `genizah_translations.py` (added in Phase 130).
+Translation keys `'Hiding {n} library'` / `'Hiding {n} libraries'` / `'Showing {shown}/{total} library'` / `'Showing {shown}/{total} libraries'` are already in `genizah_translations.py:2918-2921` (added in Phase 130); the canonical pluralization logic is `web/pages/search.py:1733-1743` — read it as the source of truth.
 
 ### `_apply_library_filter` dual-mode logic
 **Source:** `web/pages/search.py:3830–3853` — the canonical shipped implementation.

@@ -259,14 +259,15 @@ current_library_filter = {'value': _cat_library_codes}
 - **Show-only mode (pre-query):** resolve the selected-library sys_ids and INTERSECT them into the existing `restrict_sys_ids` path BEFORE `captured_restrict_sys_ids = restrict_sys_ids` (line 2224), so the scope folds into the Tantivy query (`search_engine.py:2929`) and selected-library hits beyond the unscoped top-50/chunk are NOT lost.
 - **Hide mode (post-fetch):** the full-corpus complement is NOT computable from `restrict_sys_ids` alone (Pitfall 4), so Hide is a POST-FETCH filter over the result rows (mirroring web `/search`'s `_apply_library_filter`). It is applied to `main_results`/`filtered_results` BEFORE `set_parallels_export()` (line 2343) and the `safe_user_set('parallels_results', ...)` write (line 2353) so exports/stored payloads are scoped (Codex MED #6), with a defensive idempotent re-apply at the top of `render_results`.
 
-Concrete integration — Show-only intersect at the pre-query restrict path:
+Concrete integration — Show-only intersect at the pre-query restrict path. **Placement is critical:** do it OUTSIDE the `if _has_active_filters():` block (that gate is False when ONLY a library filter is set, ~2178), AFTER the advanced-filter restrict is computed, and BEFORE the per-manuscript exclusion subtraction (`restrict_sys_ids - excluded_manuscript_ids`, parallels.py:2219-2221) — which is itself before `captured_restrict_sys_ids = restrict_sys_ids` (2224). This guarantees both library-only and advanced+library selections compose:
 
 ```python
-# After the advanced-filter restrict is computed and BEFORE captured_restrict_sys_ids = restrict_sys_ids (2224):
+# OUTSIDE `if _has_active_filters():`; AFTER the advanced block; BEFORE the exclusion subtraction (2219-2221):
 if p_state.library_mode == 'show_only' and p_state.library_filter:
     lib_ids = await run.io_bound(resolve_library_sys_ids, list(p_state.library_filter), state.meta_mgr)
     if lib_ids:  # fail-open: skip if empty
         restrict_sys_ids = lib_ids if restrict_sys_ids is None else (restrict_sys_ids & lib_ids)
+# ... then the existing exclusion subtraction runs: restrict_sys_ids -= excluded_manuscript_ids (2219-2221)
 # Hide is NOT applied here — see the post-fetch block below.
 ```
 
