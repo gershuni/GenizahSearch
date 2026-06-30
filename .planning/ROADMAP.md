@@ -83,7 +83,7 @@ See: .planning/milestones/v8.3.0-ROADMAP.md
 
 ## Summary Checklist
 
-- [ ] **Phase 130: Dual-Mode Filter Core — Web `/search`** *(lead)* - Define the shared (mode + set) state shape, add the Show-only / Hide mode toggle to the `/search` library-filter dialog, persist (mode + set) via `safe_storage`, migrate the existing allowlist cleanly, handle edge states, and make the button/label communicate the active mode + count. Settles the model the other surfaces mirror.
+- [x] **Phase 130: Dual-Mode Filter Core — Web `/search`** *(lead)* - Define the shared (mode + set) state shape, add the Show-only / Hide mode toggle to the `/search` library-filter dialog, persist (mode + set) via `safe_storage`, migrate the existing allowlist cleanly, handle edge states, and make the button/label communicate the active mode + count. Settles the model the other surfaces mirror. (completed 2026-06-30)
 
 - [ ] **Phase 131: Dual-Mode Parity — Desktop Catalog + Web Browse-by-Identification + Web `/parallels`** - Extend the Phase-130 (mode + set) model to the three remaining UI surfaces: the desktop catalog `LibraryFilterDialog` (Browse-by-Identification), the web Browse-by-Identification catalog filter, and a NEW web `/parallels` library-filter control (scoping via the existing `restrict_sys_ids` path) — each persisted, each at parity with the lead.
 
@@ -117,7 +117,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 130-03-PLAN.md — Tests: new dual-mode behavior/migration/edge-state/LOCAL-guard suite + revise stale inclusion-only assertions in the existing libfilter test
+- [x] 130-03-PLAN.md — Tests: new dual-mode behavior/migration/edge-state/LOCAL-guard suite + revise stale inclusion-only assertions in the existing libfilter test
 
 **UI hint**: yes
 
@@ -154,6 +154,6 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 130. Dual-Mode Filter Core — Web /search | 2/3 | In Progress|  |
+| 130. Dual-Mode Filter Core — Web /search | 3/3 | Complete   | 2026-06-30 |
 | 131. Dual-Mode Parity — Desktop + Browse + Parallels | 0/? | Not started | - |
 | 132. Public API Dual-Mode | 0/? | Not started | - |
