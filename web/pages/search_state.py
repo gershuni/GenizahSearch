@@ -58,7 +58,8 @@ class SearchUIState:
         self.printed_ids: set = set()  # sys_ids with FragmentMaterial=Printed
         self.printed_filter: str = 'all'  # 'all', 'hide_printed', 'only_printed'
         self.pgp_filter: str = 'all'  # Phase 999.2: 'all', 'only_pgp', 'hide_pgp' — post-search PGP-presence filter
-        self.library_filter: list = []  # SEED-026 (LIBFILTER-01): selected library codes; empty = all
+        self.library_filter: list = []  # SEED-026 (LIBFILTER-01): active code set for the current mode (hide-set in Hide mode, allowlist in Show-only mode); empty = all
+        self.library_mode: str = 'hide'  # 'show_only' | 'hide' (D-05 default: Hide mode with empty set = show all)
         self.domain_excluded_results: list = []  # Results hidden by domain exclusion (with reasons)
         # Pre-search filter state (Search only in... panel)
         self.filter_domains: list = []      # Selected domain filters (multi-select)
