@@ -364,7 +364,10 @@ def create_catalog_browse_page(
                 edition_sys_ids=(ed_ids if ed_state in ('has_edition', 'no_edition') else None),
                 # Pass the FULL-CORPUS callable (a bound method) — NOT a page-local dict.
                 # This ensures off-page libraries are counted correctly (Codex R3 F3, N5).
-                sys_id_to_library=_state.meta_mgr.get_library_for_id,
+                # Guard: if meta_mgr is None (startup race before MetadataManager is ready),
+                # pass None so get_browse_library_facets returns {} gracefully (WR-05).
+                sys_id_to_library=(_state.meta_mgr.get_library_for_id
+                                   if _state.meta_mgr else None),
             )
         except Exception as e:
             logger.warning("catalog_browse: facet fetch failed: %s", e)
