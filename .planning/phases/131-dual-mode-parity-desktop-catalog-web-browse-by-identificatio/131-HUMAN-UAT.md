@@ -40,9 +40,27 @@ result: [pending]
 
 total: 6
 passed: 0
-issues: 0
+issues: 1
 pending: 6
 skipped: 0
 blocked: 0
 
 ## Gaps
+
+- truth: "Desktop catalog LibraryFilterDialog shows per-library manuscript COUNTS (e.g. 'CUL (1,234)'), and those counts are DYNAMIC — they honor the catalog's other active filters (PGP Only / Scholarly-Editions / domain), at parity with web /catalog Browse-by-Identification."
+  status: failed
+  reason: "User feedback during UAT: desktop library dialog must include the count like web does; and the count should be dynamic — e.g. with 'PGP Only' on, each library row should show the number of that library's manuscripts that are ALSO PGP-only. (both apps — web /catalog already satisfies this)"
+  severity: major
+  test: 1
+  root_cause: "Desktop LibraryFilterDialog (desktop/dialogs_filter.py:1677) renders each row as get_library_display(code) ONLY — no count; its __init__ takes only (mode, selected_codes), no facets param. The desktop catalog path (genizah_app.py) never calls the shared FjmsService.get_browse_library_facets. Web /catalog already does this dynamically: catalog_browse.py:335 _fetch_library_facets_blocking calls fjms.get_browse_library_facets(...) passing the active pgp_filter/editions_filter/pgp_sys_ids/edition_sys_ids (+ domain/author/work/date/text), and the shared method (shared/fjms_service.py:get_browse_library_facets) reuses _build_browse_conditions to count DISTINCT AlmaId under those conditions while intentionally excluding the library filter itself. So the shared engine ALREADY supports dynamic facets; only the desktop surface is unwired. DMF-12 was satisfied on web but never mirrored to desktop (DMF-07 'at parity with the web lead' parity gap)."
+  artifacts:
+    - path: "desktop/dialogs_filter.py"
+      issue: "LibraryFilterDialog.__init__ (~1692) builds rows as get_library_display(code) with no count. Add an optional facets: dict[str,int] | None param; render 'Name (count)' (localized thousands sep) when a code's count is present; keep name-only fallback when facets is None/missing. Sort-by-count is optional polish; alpha sort stays the default."
+    - path: "genizah_app.py"
+      issue: "The catalog library-dialog open path (~10436-10450) constructs LibraryFilterDialog without facets. Compute facets via the shared fjms.get_browse_library_facets(...) — passing the SAME active PGP/Editions/domain/date/text filter values the _CatalogRefreshWorker already threads into get_browse_results (PGP/Editions sets via _get_catalog_filter_sets, added v8.2.2) — OFF the UI thread (reuse/extend the existing worker; never block the UI thread), then pass the {code:count} dict into the dialog. sys_id_to_library must be the full-corpus callable (MetadataManager.get_library_for_id bound method), NOT a page/result-local map, so off-page libraries count correctly (mirror catalog_browse.py:351 + WR-05 None-guard)."
+  missing:
+    - "Add facets param + 'Name (count)' row rendering to desktop LibraryFilterDialog (name-only fallback preserved)."
+    - "Wire genizah_app catalog dialog-open to compute facets via shared get_browse_library_facets with the active PGP/Editions/domain filters, off-thread, full-corpus library resolver."
+    - "Tests: extend tests/test_libfilter_desktop.py — dialog renders counts when facets provided; counts honor an active PGP-only filter set (dynamic); name-only fallback when facets absent; LOCAL excluded; off-thread/no-UI-block contract."
+  debug_session: ""
+
