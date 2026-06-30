@@ -420,21 +420,18 @@ def test_chip_renders_when_library_only():
         "whether the filter is active (independent of printed/pgp)."
     )
     # Phase 130 (dual-mode): _update_library_btn now has THREE states, not one active label.
-    # The old inclusion-only label was: 'Filter by library (shown/total)'
-    # The dual-mode labels are:
-    #   Neutral    → tr('Filter by library')
-    #   Show-only  → tr('Showing') + " {shown}/{total}"
-    #   Hide       → tr('Hiding') + " {N}"
-    # Relax assertion: accept any of the 3-state label tokens.
+    # UAT 2026-06-30: active labels use PLURALIZED format-template keys (singular/plural noun),
+    # not the bare tr('Showing')/tr('Hiding'). Assert the real template keys (Codex code-review
+    # R3 LOW: the old bare-key scan passed only because those strings linger in the docstring).
     neutral_label_ok = "tr('Filter by library')" in update_btn_src
-    showing_label_ok = "tr('Showing')" in update_btn_src
-    hiding_label_ok = "tr('Hiding')" in update_btn_src
+    showing_label_ok = "Showing {shown}/{total} librar" in update_btn_src
+    hiding_label_ok = "Hiding {n} librar" in update_btn_src
     assert neutral_label_ok and showing_label_ok and hiding_label_ok, (
         "_update_library_btn must carry all three dual-mode labels: "
-        "tr('Filter by library') (neutral), tr('Showing') (Show-only active), "
-        "and tr('Hiding') (Hide active). "
+        "tr('Filter by library') (neutral), the 'Showing {shown}/{total} library/libraries' "
+        "template (Show-only active), and the 'Hiding {n} library/libraries' template (Hide active). "
         f"Neutral={neutral_label_ok}, Showing={showing_label_ok}, Hiding={hiding_label_ok}. "
-        "Phase 130 (dual-mode): the old single active-label pattern is replaced by 3 states."
+        "Phase 130 (dual-mode + pluralized noun)."
     )
     # The button must also read library_mode to select the active branch.
     assert 'library_mode' in update_btn_src, (
