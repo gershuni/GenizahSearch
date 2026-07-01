@@ -4,6 +4,41 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [8.4.1] - 2026-07-01 — Public API Dual-Mode (web)
+
+Web point-release. The public **Search API** counterpart to the v8.4.0 dual-mode library
+filter: programmatic callers can now express "**hide** these libraries" as well as "**only**
+these". Deployed on top of the 8.4.0 build (web only — the desktop app does not consume the
+public API and stays at 8.4.0).
+
+### New Features
+
+- **`library_filter_mode` on `POST /api/search` and `POST /api/parallels`** — an optional
+  filter field alongside `filters.library`, taking `"include"` (allowlist, the default) or
+  `"exclude"` (denylist). `exclude` scopes results to the complement — manuscripts whose
+  `library_code` is **not** in the given set — intersected into the same `restrict_sys_ids`
+  path the UI uses. Mirrors the v8.4.0 Show-only / Hide semantics for automation and the
+  `cairo-genizah-research` AI skill.
+- **Skill `--library` / `--library-mode` flags** — the `cairo-genizah-research` skill's
+  `search.py` and `parallels.py` clients gained first-class `--library CUL,JTS` and
+  `--library-mode {include,exclude}` flags (merged into `filters`; explicit `--filters-json`
+  still wins).
+
+### Compatibility
+
+- **Fully backward-compatible.** An omitted `library_filter_mode` behaves byte-for-byte like
+  today (include / allowlist) — the field is absent from requests that don't set it, so
+  existing callers and request echoes are unchanged.
+- An invalid `mode` value is rejected with the standard **400** `invalid_request` envelope
+  (fail-closed), consistent with existing filter validation.
+
+### Documentation
+
+- `docs/SEARCH_API.md` and the skill `references/api_contract.md` document the include/exclude
+  mode, the omitted-mode default, and the exclude/complement semantics.
+
+---
+
 ## [8.4.0] - 2026-07-01 — Dual-Mode Library Filter (Show-only / Hide)
 
 Public release (both apps). Evolves the v8.3.0 inclusion-only library filter into a

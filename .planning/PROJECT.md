@@ -8,9 +8,20 @@ A research platform for the Cairo Genizah that combines manuscript image browsin
 
 **Researchers can find what they need in the Genizah corpus.** The platform brings together manuscript images, scholarly transcriptions, PGP metadata, FJMS domain classifications, scientific joins, catalog records, and powerful search tools -- from simple keyword search to Responsa-Project style syntax with grammatical prefix expansion, Judeo-Arabic forms, and flexible spacing.
 
-## Current Milestone: v8.4.0 Dual-Mode Library Filter
+## Shipped Milestone: v8.4.0 Dual-Mode Library Filter + v8.4.1 Public API Dual-Mode — ✅ SHIPPED & CLOSED 2026-07-01
 
-**Goal:** Library filtering can express BOTH "show only these libraries" and "hide these libraries" intents, persisted so each survives across searches, at full web + desktop parity — closing the v8.3.0 gap where the inclusion-only allowlist (over a result-derived universe) could not represent a sticky "exclude library X".
+> **CLOSED.** Two related releases shipped 2026-07-01 and closed the same day.
+> **v8.4.0** (both apps, Phases 130-131) — the UI dual-mode Show-only / Hide library filter
+> at full web + desktop parity; web deployed + desktop installer `GenizahSearchPro_V8.4.0_Setup.exe`
+> published to GitHub Release `v8.4.0` @ `16fcf7a1` (latest). **v8.4.1** (web, Phase 132) — the
+> public-API half (DMF-11): `library_filter_mode` (include/exclude) on `POST /api/search` +
+> `/api/parallels`, backward-compatible, live-verified on the 255K corpus; skill clients gained
+> `--library-mode`. v8.4.1 is a web point-release on the 8.4.0 tree (no `version.py` bump / git
+> tag; the desktop stays 8.4.0). 13 requirements Complete (DMF-01..12) + DMF-13 Partial
+> (behaviorally safe). Archives: `.planning/milestones/v8.4.0-ROADMAP.md` + `v8.4.0-REQUIREMENTS.md`
+> and `v8.4.1-ROADMAP.md` + `v8.4.1-REQUIREMENTS.md`. NEXT: `/gsd-new-milestone`.
+
+**Goal (delivered):** Library filtering can express BOTH "show only these libraries" and "hide these libraries" intents, persisted so each survives across searches, at full web + desktop parity plus the public Search API — closing the v8.3.0 gap where the inclusion-only allowlist (over a result-derived universe) could not represent a sticky "exclude library X".
 
 **Target features:**
 - **Dual-mode (Show-only / Hide) library filter on web `/search`** *(lead)* — the filter dialog gains a mode toggle; persist (mode + set) via `safe_storage` so "hide RNL" stays hidden as new libraries surface on later searches, and "show only CUL/JTS" likewise persists. Inclusion = allowlist, Hide = denylist (consistent with existing `domain_exclusions` / printed-filter exclusion semantics).
@@ -496,9 +507,15 @@ The per-phase Current State notes below are retained as the milestone's executio
 - ✓ LIBFILTER-03 — desktop catalog Browse-by-Identification library filter parity -- v8.3.0
 - ✓ REL-01 — public both-apps 8.3.0 release (web deploy + desktop installer + GitHub Release + bilingual What's New; 8.2.2 → 8.3.0) -- v8.3.0
 
+- ✓ DMF-01..06 — web `/search` dual-mode Show-only / Hide library filter: mode toggle, `{'mode','codes'}` `safe_storage` persistence, legacy-allowlist migration (loads as Show-only), edge-state sentinels (empty Show-only = show all), 3-state mode/count button -- v8.4.0 (Phase 130)
+- ✓ DMF-07/08/09/12 — dual-mode parity on the desktop catalog `LibraryFilterDialog`, web Browse-by-Identification (+ per-library counts, sort, type-to-find), and a NEW web `/parallels` control (scoping via `restrict_sys_ids`) -- v8.4.0 (Phase 131)
+- ✓ DMF-10 — `'LOCAL'` never a web library-filter option in any mode/surface (cross-cutting guard; `test_web_library_options_no_local`) -- v8.4.0 (Phases 130-131)
+- ✓ DMF-11 — public API dual-mode: `filters.library_filter_mode` (include/exclude) on `POST /api/search` + `/api/parallels`, backward-compatible (omitted = include), `exclude` = complement into `restrict_sys_ids`; skill clients gained `--library-mode`; docs updated -- v8.4.1 (Phase 132, web)
+- ~ DMF-13 — zero-count libraries excluded from the filter universe via shared `library_codes_with_manuscripts()` (fail-open); fully wired on web `/search`, reused on catalog/`/parallels`/desktop but not independently verified per-surface (behaviorally safe) -- v8.4.0 (Partial; carried forward)
+
 ### Active
 
-**(No active milestone — v8.3.0 closed 2026-06-30; planning next milestone.)** Run `/gsd-new-milestone` to open the next cycle (first phase candidate: dual-mode Show-only/Hide library filter, a SEED-026 follow-up).
+**(No active milestone — v8.4.0 + v8.4.1 closed 2026-07-01; planning next milestone.)** Run `/gsd-new-milestone` to open the next cycle. Leading carried-forward candidates: DMF-13 zero-count exclusion per-surface verification (behaviorally safe today), cross-device sync of the library-filter preference, and D-F12 (regular Search ~8s wall-clock, profile-first).
 
 **Still deferred — Component B Join Workbench search-support algorithms (both apps; user decision 2026-06-08, reaffirmed 2026-06-17 — NOT in v8.2.0):**
 - **JSA-01** (seed parallels/composition from the anchor passage), **JSA-02** (corpus-driven suggest-then-search completion of a torn line's first/last N words), **JSA-03** (`[`/`]`-aware torn-word completion), and **JWB-05** (conservative tear-side assist; corrected rule start-`]` = LEFT / end-`[` = RIGHT; "both edges torn" first-class; silent when unclear). These ride the completed Component A and are cross-app (mostly shared-core work). v8.2.0 is the Component-A web port only.
@@ -619,6 +636,9 @@ Responsa adds a **parsing layer** before both phases -- `parse_responsa_query()`
 | v8.1.0: ONE shared web PostHog project (id 134161), identity-aligned with web (logged-in → Supabase `user.id`/`_uuid`) | PostHog separates by environment not platform; web already `identify()`s by Supabase id, so one project enables cross-surface web↔desktop journeys; reverses the initial separate-project/anonymous-only call | ✓ Good — split by `platform=desktop`/`platform=web`; LOAD-BEARING: send `_uuid` not `.id` (the latter is a compat hash that merges with nothing) |
 | v8.1.0: opt-in telemetry default OFF, never search/My-Library content | Privacy posture for a scholarly search app; consent is a one-time bilingual dialog + Settings toggle | ✓ Good — structurally enforced; frozen-exe `SSL_OK` confirms TLS delivery |
 | v8.1.0: advertise the API + AI skill to desktop via Help + What's New (skill-first), bundled in the release | Bundling ships the Help content in the same exe and avoids What's-New version churn; scholars benefit more from the AI-agent framing than raw HTTP | ✓ Good — bilingual Help section ("בינה מלאכותית" wording per Hillel); web brand/help unchanged |
+| v8.4.0: dual-mode = Show-only (allowlist) / Hide (denylist), Phase 130 settles the `{'mode','codes'}` shape FIRST | The other surfaces (desktop catalog, Browse, `/parallels`, API) mirror the lead; Hide intent must persist as new libraries surface ("hide RNL stays hidden"), consistent with `domain_exclusions` semantics | ✓ Good — legacy allowlist migrates as Show-only; empty Show-only = show all; `'LOCAL'` guard (DMF-10) held on every surface |
+| v8.4.1: public-API `library_filter_mode` default=None, NOT `'include'` | `model_dump(exclude_none=True)` drops the field for omitted callers → byte-for-byte backward-compat; Codex plan-review R1 caught that `default='include'` would inject it into every caller's request echo and break exact-echo tests | ✓ Good — `_intersect_library_filter` normalizes `None→'include'`; invalid mode → 400 via Pydantic `Literal` + `extra='forbid'`; live-verified on prod |
+| v8.4.1: ship the public-API half as a web point-release on the 8.4.0 tree (no version.py bump / tag), desktop stays 8.4.0 | The desktop app does not consume the public API; bumping the shared `version.py` would misrepresent the desktop EXE version; matches the project's web-only release convention (v7.10, v7.11.1) | ✓ Good — CHANGELOG `[8.4.1]` records it; deferred out of v8.4.0 during the installer-upload block then shipped same day |
 
 ## Evolution
 
@@ -638,7 +658,9 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-30 — **v8.3.0 God-File Decomposition + Search & Browse UX milestone CLOSED.** Shipped both apps 2026-06-29 (web @ c01e8842; desktop installer on GitHub latest @ v8.3.0; CI green). Decomposition (122-127, zero behavior change) + SEED-025 Space-scroll + SEED-026 library filter validated. NEXT: /gsd-new-milestone (next cycle — first phase: dual-mode Show-only/Hide library filter).*
+*Last updated: 2026-07-01 — **v8.4.0 Dual-Mode Library Filter + v8.4.1 Public API Dual-Mode milestones CLOSED.** v8.4.0 shipped both apps 2026-07-01 (web deployed; desktop installer `GenizahSearchPro_V8.4.0_Setup.exe` published to GitHub Release `v8.4.0` @ 16fcf7a1, latest); v8.4.1 shipped web the same day (public-API `library_filter_mode`, DMF-11, Phase 132; live-verified on the 255K corpus; web point-release on the 8.4.0 tree). Full evolution review done: DMF-01..12 moved to Validated (DMF-13 Partial), Active cleared, v8.4.0/v8.4.1 Key Decisions logged, roadmap collapsed + archived (`v8.4.0-*` + `v8.4.1-*`), `.planning/REQUIREMENTS.md` removed (fresh for next). NEXT: /gsd-new-milestone.*
+
+*Prior: 2026-06-30 — **v8.3.0 God-File Decomposition + Search & Browse UX milestone CLOSED.** Shipped both apps 2026-06-29 (web @ c01e8842; desktop installer on GitHub latest @ v8.3.0; CI green). Decomposition (122-127, zero behavior change) + SEED-025 Space-scroll + SEED-026 library filter validated.*
 
 *Prior: 2026-06-25 — v8.3.0 God-File Decomposition: Phase 122 (Config Enabler) complete. First phase of the milestone (Phases 122-127). The "Phase 0" import-cycle pivot: `Config` extracted from `genizah_core.py` to `shared/config.py` behind a same-object re-export facade, one back-edge retargeted, and the permanent GUARD-01 AST back-edge guard installed. Verified 6/6 must-haves; code review clean. Pure refactor, zero behavior change, no Release. NEXT: Phase 123 (Core Leaf Modules).*
 

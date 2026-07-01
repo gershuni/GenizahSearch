@@ -1,5 +1,42 @@
 # Project Milestones: GenizahSearch
 
+## v8.4.1 Public API Dual-Mode (`/api/search` + `/api/parallels`) (Shipped: 2026-07-01, web)
+
+**Phases completed:** 1 phase (132), 3 plans
+
+**Key accomplishments:**
+
+- The public-API half of the dual-mode library filter (DMF-11) — the API counterpart to the v8.4.0 UI work. `POST /api/search` + `POST /api/parallels` accept an optional library-filter `mode` (`include` / `exclude`) alongside `filters.library`.
+- One shared `FiltersModel.library_filter_mode` field (`Optional[Literal['include','exclude']]`, default=None) on both endpoints; `exclude` resolves to the complement (single-pass `resolve_library_complement_sys_ids` in `shared/fjms_service.py`) via `run_in_executor`, intersected into the existing `restrict_sys_ids` path.
+- **Byte-for-byte backward-compat:** `default=None` + `model_dump(exclude_none=True)` drops the field for omitted callers (Codex plan-review R1 caught that `default='include'` would have injected it into every caller's request echo and broken exact-echo tests). `_intersect_library_filter` normalizes `None → 'include'` internally. Invalid mode → 400 `invalid_request` automatically via Pydantic `Literal` + `extra='forbid'`.
+- **Skill parity:** the `cairo-genizah-research` clients (`search.py` / `parallels.py`) gained first-class `--library` / `--library-mode {include,exclude}` flags; omitting `--library-mode` is byte-for-byte the current include behavior. Documented in `docs/SEARCH_API.md` + skill `api_contract.md`.
+- Review gates: plan-Codex R1 (backward-compat HIGH caught pre-code), plan-checker PASS, verify 4/4 + live prod smoke, code-review 0 blockers (`132-REVIEW.md`), secure SECURED 5/5 (`132-SECURITY.md`), Codex code-diff APPROVE.
+
+**Shipped:** 2026-07-01 (web) — deployed to `genizahsearch.com` (`deploy.sh master-main`) on the v8.4.0 tree; live smoke on the real 255K corpus PASSED (exclude CUL → 0 CUL / 28,007 total; include CUL → all CUL / 8,554; bad mode → 400). 18 commits, 16 files, +1,306 / −49. Web-only (desktop stays 8.4.0); no `version.py` bump / git tag (web point-release convention). Closed 2026-07-01.
+
+**Note:** Deferred out of v8.4.0 (2026-07-01) while the v8.4.0 desktop installer upload was blocked, then built + deployed the same day as this v8.4.1 web point-release.
+
+---
+
+## v8.4.0 Dual-Mode Library Filter (Show-only / Hide) (Shipped: 2026-07-01, both apps)
+
+**Phases completed:** 2 phases (130-131), 13 plans
+
+**Key accomplishments:**
+
+- Evolved the v8.3.0 inclusion-only library allowlist (SEED-026) into a **dual-mode** UI filter — **Show-only** (allowlist) *or* **Hide** (denylist) — persisted via `safe_storage` so each intent survives across searches, at full web + desktop parity.
+- **Phase 130 (lead, web `/search`):** shared `{'mode','codes'}` state shape on `SearchUIState` + `safe_storage` persistence + clean legacy-allowlist migration (loads as Show-only) + edge-state sentinels (empty Show-only = show all) + a 3-state mode/count button, and a redesigned filter dialog (mode toggle + LOCAL-excluded count-shortlist + expand-all + text search). `library_codes_with_manuscripts()` drops zero-count libraries (fail-open).
+- **Phase 131 (parity surfaces + UAT gaps):** the desktop catalog `LibraryFilterDialog` (`desktop/dialogs_filter.py`), web Browse-by-Identification (`web/pages/catalog_browse.py`), and a NEW web `/parallels` control (`web/pages/parallels.py`, scoping via `restrict_sys_ids`); plus UAT-driven dynamic per-library counts (`shared/fjms_service.get_browse_library_facets`, off the UI thread), sort (count/A-Z) + type-to-find, and searchable English codes in both languages via `get_library_display(..., with_code=True)`.
+- **Invariants held:** `'LOCAL'` never a web filter option (DMF-10, `test_web_library_options_no_local`); all per-user web state through `web/safe_storage.py` (allowlist `[]`). Security: 131 SECURED 24/24 (`131-SECURITY.md`). No index-schema change (no rebuild).
+
+**Shipped:** 2026-07-01 (both apps) — web deployed to production (`deploy.sh master-main`); desktop installer `GenizahSearchPro_V8.4.0_Setup.exe` (531,242,765 bytes) published to GitHub Release latest @ tag `v8.4.0` (@ `16fcf7a1`). 102 commits, 70 files, +14,313 / −655; 2026-06-30 → 2026-07-01. Closed 2026-07-01.
+
+**Note:** The public-API dual-mode piece (DMF-11, Phase 132) shipped separately as the **v8.4.1** web release (above).
+
+**Known deferred items at close:** DMF-13 (zero-count library exclusion) Partial on non-`/search` surfaces — behaviorally safe (fail-open); cross-device sync of the filter preference deferred (device-local via `safe_storage`).
+
+---
+
 ## v8.3.0 God-File Decomposition + Search & Browse UX (Shipped: 2026-06-30)
 
 **Phases completed:** 8 phases, 20 plans, 23 tasks

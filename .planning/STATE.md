@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v8.4.1
-milestone_name: Public API Dual-Mode
-status: in_progress
-stopped_at: "v8.4.1 Phase 132 COMPLETE — deployed to genizahsearch.com (c624aa83) + live smoke PASSED (exclude/include/400); VERIFICATION passed. Remaining: v8.4.1 milestone-close ritual + v8.4.0 desktop-installer publish (see Resume Checklist)."
-last_updated: "2026-07-01T14:52:45.117Z"
+milestone: none
+milestone_name: "(none — v8.4.0 + v8.4.1 CLOSED 2026-07-01; awaiting /gsd-new-milestone)"
+status: no_active_milestone
+stopped_at: "v8.4.0 + v8.4.1 SHIPPED & CLOSED 2026-07-01. v8.4.0 (Phases 130-131, both apps): web deployed + desktop installer published to GitHub Release v8.4.0 @ 16fcf7a1 (latest, verified state:uploaded). v8.4.1 (Phase 132, web): public-API library_filter_mode deployed + live-verified. Both milestones archived (v8.4.0-* + v8.4.1-*); phase dirs moved to milestones/; REQUIREMENTS.md removed (fresh next milestone). No active milestone — run /gsd-new-milestone."
+last_updated: "2026-07-01T21:00:00.000Z"
 last_activity: 2026-07-01
 progress:
-  total_phases: 1
-  completed_phases: 1
-  total_plans: 3
-  completed_plans: 3
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -21,47 +21,27 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v8.4.1 API dual-mode is LIVE + verified. Remaining: (1) optional v8.4.1 milestone-close ritual (bookkeeping); (2) v8.4.0 desktop-installer publish (the real outstanding go-live — see Resume Checklist).
+**Current focus:** None — v8.4.0 + v8.4.1 shipped & closed 2026-07-01. Awaiting `/gsd-new-milestone`.
 
 ## Current Position
 
-Milestone: v8.4.1 Public API Dual-Mode — Phase 132 COMPLETE, DEPLOYED, LIVE-VERIFIED.
-Phase 132: 3 plans (01 RED scaffold → 02 impl GREEN → 03 docs); 175 tests pass, 0 regressions; ruff clean. ALL review gates clear: plan-Codex R1 (caught+fixed the default='include' HIGH), plan-checker PASS, verify 4/4, code-review 0-blockers (132-REVIEW.md), secure 5/5 (132-SECURITY.md), Codex code-diff APPROVE (132 doc nit fixed a098ca58). VERIFICATION: passed.
-Live: deployed to genizahsearch.com at c624aa83 (deploy.sh master-main, service active); live smoke on the real 255K corpus PASSED — exclude CUL→0 CUL (28007 total), include CUL→all CUL (8554), bad mode→400 invalid_request. DMF-11 satisfied end-to-end. `phase.complete 132` ran (roadmap/requirements updated; is_last_phase).
-Remaining:
-  - v8.4.1 milestone-close ritual (archive phase 130/131/132 dirs → milestones/, ✅ in ROADMAP, REQUIREMENTS archival) — optional bookkeeping; entangled with the still-open v8.4.0 track, so not auto-run.
-  - v8.4.0 desktop-installer publish (3 gh commands) — see Resume Checklist below. This is the one genuine outstanding go-live.
-All phase-132 commits PUSHED to origin.
-Last activity: 2026-07-01 -- v8.4.1 deployed + live smoke passed; phase 132 complete.
+**No active milestone.** v8.4.0 (Dual-Mode Library Filter, Phases 130-131) and v8.4.1 (Public
+API Dual-Mode, Phase 132) both SHIPPED & CLOSED 2026-07-01.
 
-## Resume Checklist — v8.4.0 go-live (needs good connectivity)
+- **v8.4.0 (both apps):** web deployed to production (`deploy.sh master-main`); desktop
+  installer `GenizahSearchPro_V8.4.0_Setup.exe` (531,242,765 bytes) uploaded + published to
+  GitHub Release `v8.4.0` @ `16fcf7a1` (marked latest; verified `state:uploaded`,
+  `isDraft:false`).
+- **v8.4.1 (web):** public-API `library_filter_mode` (DMF-11) deployed to genizahsearch.com
+  on the 8.4.0 tree + live-verified on the 255K corpus (exclude CUL→0 CUL; include CUL→all
+  CUL; bad mode→400). Web point-release — no `version.py` bump / git tag (desktop stays 8.4.0).
+- **Milestone close DONE:** both archived (`v8.4.0-ROADMAP.md`/`-REQUIREMENTS.md` +
+  `v8.4.1-ROADMAP.md`/`-REQUIREMENTS.md`); phase dirs moved to `milestones/v8.4.0-phases/`
+  (130,131) + `milestones/v8.4.1-phases/` (132); ROADMAP collapsed; MILESTONES.md + PROJECT.md
+  evolved; `.planning/REQUIREMENTS.md` removed (fresh next milestone). DMF-01..12 Validated;
+  DMF-13 Partial (behaviorally safe, carried forward).
 
-DONE (offline-safe, already applied):
-
-- [x] Phase 131 secured (`131-SECURITY.md`, 24/24 SECURED)
-- [x] Phase 132 deferred to v8.4.1 (ROADMAP + REQUIREMENTS DMF-11)
-- [x] Version bumped 8.3.0 → 8.4.0 (version.py / version_info.txt / .iss / README / _TARGET_VERSION)
-- [x] Docs: CHANGELOG [8.4.0], CLAUDE.md, README What's New, What's-New banners (web tr() EN+HE, desktop bar+dialog EN+HE)
-- [x] Gates: ruff clean, check_docs passed, 146 tests green
-- [x] 100 commits pushed to origin/master-main (HEAD 16fcf7a1)
-- [x] Tag `v8.4.0` created + pushed (annotated → 16fcf7a1)
-- [x] Desktop installer BUILT: `dist/GenizahSearchPro_V8.4.0_Setup.exe` (531,242,765 bytes / 507 MB, built 2026-07-01 09:56)
-- [x] GitHub release created as DRAFT (tag v8.4.0, notes set, NO asset — desktop users NOT pinged)
-
-- [x] WEB DEPLOYED to production 2026-07-01 (deploy.sh master-main → server reset to 16fcf7a1, genizah-web.service active; genizahsearch.com/ + /search → HTTP 200). v8.4.0 web half is LIVE.
-
-REMAINING (desktop half — needs solid connectivity; the installer upload failed on the plane's DNS):
-
-1. Upload asset to the draft:
-   `gh release upload v8.4.0 dist/GenizahSearchPro_V8.4.0_Setup.exe`
-
-2. VERIFY asset uploaded (state:uploaded, size == 531242765):
-   `gh release view v8.4.0 --json assets`
-
-3. Publish the release (this is what prompts desktop updaters):
-   `gh release edit v8.4.0 --draft=false --latest`
-
-4. Milestone-close ritual for v8.4.0 (archive phase dirs → milestones/, mark ✅ in ROADMAP, REQUIREMENTS archival, reset STATE for next milestone). HELD until the desktop release publishes so docs don't claim fully-shipped before the installer is downloadable.
+All commits PUSHED to origin/master-main. **Next: `/gsd-new-milestone`.**
 
 ## Accumulated Context
 
@@ -137,10 +117,10 @@ Items acknowledged and deferred at v8.3.0 milestone close on 2026-06-30:
 
 ## Session Continuity
 
-Last session: 2026-07-01T13:18:00.000Z
-Stopped at: Phase 132 Plan 03 COMPLETE — Wave 3 docs committed (4af733de, 031e9f8d); DMF-11 fully satisfied; Phase 132 all 3 plans done
+Last session: 2026-07-01
+Stopped at: v8.4.0 + v8.4.1 milestone close COMPLETE — both archived (ROADMAP collapsed, MILESTONES.md + PROJECT.md evolved, REQUIREMENTS.md removed); v8.4.0 desktop installer published + verified; v8.4.1 web live-verified.
 Resume file: None
-Next step: v8.4.1 milestone close ritual (archive phase 132 dirs → milestones/, mark done in ROADMAP, REQUIREMENTS archival); then resume v8.4.0 desktop release checklist.
+Next step: `/gsd-new-milestone` to open the next cycle. No active milestone.
 
 ## Performance Metrics
 
@@ -174,4 +154,4 @@ Next step: v8.4.1 milestone close ritual (archive phase 132 dirs → milestones/
 
 ## Operator Next Steps
 
-- v8.4.1 milestone close (archive phase 132 → milestones/, ROADMAP + REQUIREMENTS archival), then resume v8.4.0 desktop release checklist.
+- v8.4.0 + v8.4.1 CLOSED (2026-07-01). No active milestone — run `/gsd-new-milestone` to open the next cycle.
