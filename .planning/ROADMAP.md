@@ -29,7 +29,7 @@
 - **v8.1.0 Desktop Telemetry** -- Phases 111-116 (shipped 2026-06-16; closed 2026-06-16). See `milestones/v8.1.0-ROADMAP.md`
 - ✅ **v8.2.0 Web Joins Lab, FGP Transcriptions & Hebrew Search** -- Phases 117-121 (shipped 2026-06-23, both apps)
 - ✅ **v8.3.0 God-File Decomposition + Search & Browse UX** -- Phases 122-129 (shipped 2026-06-29, both apps; closed 2026-06-30). Decomposition (122-127, zero behavior change) + SEED-025 Space-scroll + SEED-026 library filter. See `.planning/milestones/v8.3.0-ROADMAP.md`.
-- 🚧 **v8.4.0 Dual-Mode Library Filter** -- Phases 130-132 (in progress). Evolve the v8.3.0 inclusion-only allowlist into a dual-mode (Show-only / Hide) library filter persisted across searches, at full web + desktop parity, plus a `mode` (include/exclude) on the public API. Evolution of SEED-026.
+- 🚧 **v8.4.0 Dual-Mode Library Filter** -- Phases 130-131 (in progress; **Phase 132 public-API dual-mode deferred to v8.4.1** on 2026-07-01). Evolve the v8.3.0 inclusion-only allowlist into a dual-mode (Show-only / Hide) library filter persisted across searches, at full web + desktop parity. Evolution of SEED-026.
 
 ## Phases
 
@@ -70,7 +70,7 @@ See: .planning/milestones/v8.3.0-ROADMAP.md
 
 ---
 
-### 🚧 v8.4.0 Dual-Mode Library Filter (Phases 130-132) — In Progress
+### 🚧 v8.4.0 Dual-Mode Library Filter (Phases 130-131; Phase 132 deferred to v8.4.1) — In Progress
 
 **Milestone goal:** Library filtering can express BOTH "show only these libraries" and "hide these libraries" intents, persisted so each survives across searches, at full web + desktop parity — closing the v8.3.0 gap where the inclusion-only allowlist (over a result-derived universe) could not represent a sticky "exclude library X". Inclusion = allowlist; Hide = denylist (consistent with the existing `domain_exclusions` / printed-filter exclusion semantics). Evolution of the shipped SEED-026 — no new domain research needed. Spec lineage: `.planning/seeds/SEED-026-*.md` + the 2026-06-29 web-Parallels library-filter gap in `docs/OPEN_ISSUES.md`.
 
@@ -87,7 +87,7 @@ See: .planning/milestones/v8.3.0-ROADMAP.md
 
 - [x] **Phase 131: Dual-Mode Parity — Desktop Catalog + Web Browse-by-Identification + Web `/parallels`** - Extend the Phase-130 (mode + set) model to the three remaining UI surfaces: the desktop catalog `LibraryFilterDialog` (Browse-by-Identification), the web Browse-by-Identification catalog filter, and a NEW web `/parallels` library-filter control (scoping via the existing `restrict_sys_ids` path) — each persisted, each at parity with the lead. (executed 2026-06-30 — code-verified 6/6; awaiting human UAT — see 131-HUMAN-UAT.md) (completed 2026-07-01)
 
-- [ ] **Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`)** - Add an optional library-filter `mode` (include / exclude) alongside `filters.library` on both public endpoints; backward-compatible (omitted = include); `exclude` resolves to the complement (sys_ids whose `library_code` is not in the set) intersected into `restrict_sys_ids`. Documented in `docs/SEARCH_API.md` + the skill `api_contract.md`.
+- [ ] **Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`)** — **DEFERRED → v8.4.1 (2026-07-01).** Add an optional library-filter `mode` (include / exclude) alongside `filters.library` on both public endpoints; backward-compatible (omitted = include); `exclude` resolves to the complement (sys_ids whose `library_code` is not in the set) intersected into `restrict_sys_ids`. Documented in `docs/SEARCH_API.md` + the skill `api_contract.md`.
 
 ## Phase Details
 
@@ -155,7 +155,9 @@ Plans:
 
 **UI hint**: yes
 
-### Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`)
+### Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`) — DEFERRED → v8.4.1 (2026-07-01)
+
+> Deferred out of v8.4.0 on 2026-07-01 (user decision). v8.4.0 ships the UI dual-mode filter at full web+desktop parity (Phases 130-131); the public-API `mode` knob moves to v8.4.1. Requirement DMF-11 carries forward.
 
 **Goal**: Programmatic callers can express "hide these libraries" as well as "only these" — the public `POST /api/search` and `POST /api/parallels` accept an optional library-filter `mode` (include / exclude) alongside `filters.library`, backward-compatibly. `exclude` resolves to the complement (sys_ids whose `library_code` is not in the given set) intersected into `restrict_sys_ids`, mirroring the UI semantics.
 **Depends on**: Phase 130 (mode semantics + complement resolution defined)
@@ -175,4 +177,4 @@ Plans:
 |-------|----------------|--------|-----------|
 | 130. Dual-Mode Filter Core — Web /search | 3/3 | Complete    | 2026-06-30 |
 | 131. Dual-Mode Parity — Desktop + Browse + Parallels | 10/8 | Complete    | 2026-07-01 |
-| 132. Public API Dual-Mode | 0/? | Not started | - |
+| 132. Public API Dual-Mode | 0/? | Deferred → v8.4.1 | - |

@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v8.4.0
 milestone_name: Dual-Mode Library Filter
 status: ready
-stopped_at: Phase 131 complete (user-approved 2026-07-01)
+stopped_at: v8.4.0 phases complete (130-131, user-approved 2026-07-01); Phase 132 deferred to v8.4.1 — ready to secure/release/close
 last_updated: "2026-07-01T04:26:41.044Z"
 last_activity: 2026-07-01
 progress:
-  total_phases: 3
+  total_phases: 2
   completed_phases: 2
   total_plans: 13
   completed_plans: 13
-  percent: 67
+  percent: 100
 ---
 
 # Project State
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 132 — public-api-dual-mode (v8.4.0)
+**Current focus:** v8.4.0 close-out — secure Phase 131 → release → milestone close (Phase 132 deferred to v8.4.1)
 
 ## Current Position
 
-Phase: 132 (public-api-dual-mode) — Not started
-Plan: Not started
-Status: Phase 131 COMPLETE (user-approved UAT 11/11 on 2026-07-01). Dual-mode library filter now at full desktop + web parity (catalog + /search + /parallels), incl. dynamic counts, sort, type-to-find, and searchable English codes. Phase 132 (public API dual-mode) not yet started.
-Last activity: 2026-07-01 -- Phase 131 completed (10 plans: 131-01..05 + gaps 131-06..10)
-Next step: /gsd-discuss-phase 132 (recommended) or /gsd-plan-phase 132. Optional: /gsd-secure-phase 131 (security_enforcement is on; no 131-SECURITY.md yet).
+Milestone: v8.4.0 Dual-Mode Library Filter — all in-scope phases COMPLETE (130-131)
+Phase 132 (public-api-dual-mode): DEFERRED → v8.4.1 (user decision 2026-07-01); requirement DMF-11 carries forward
+Status: v8.4.0 re-scoped to 2 phases (130-131), both complete + user-approved (UAT 11/11 on 2026-07-01). Dual-mode library filter at full desktop + web parity (catalog + /search + /parallels), incl. dynamic counts, sort, type-to-find, and searchable English codes.
+Last activity: 2026-07-01 -- Phase 132 deferred to v8.4.1; beginning v8.4.0 close-out (secure 131 → release → close)
+Next step: /gsd-secure-phase 131 → /release (v8.4.0) → milestone close ritual.
 
 ## Accumulated Context
 
@@ -57,6 +57,7 @@ Items carried forward from v8.3.0 and earlier:
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
+| DMF-11 (Phase 132) | Public API dual-mode: `mode` (include/exclude) on `POST /api/search` + `/api/parallels` — complement resolution into `restrict_sys_ids`, docs + skill `api_contract.md`. Roadmap detail + 3-plan-shaped success criteria already written in ROADMAP.md Phase 132. | Deferred → v8.4.1 | v8.4.0 (2026-07-01) |
 | DMF-future | Cross-device sync of the library-filter preference (currently device-local via safe_storage) | Future | v8.4.0 |
 | CONSENT-F1 | "Reset telemetry id" affordance in Settings | Future | v8.1.0 |
 | ERR-01 | Handled/non-fatal error counting at high-value sites | Future | v8.1.0 |
@@ -105,9 +106,9 @@ Items acknowledged and deferred at v8.3.0 milestone close on 2026-06-30:
 ## Session Continuity
 
 Last session: 2026-07-01T00:00:00.000Z
-Stopped at: Phase 131 complete (user-approved UAT 11/11, 2026-07-01)
+Stopped at: v8.4.0 re-scoped to Phases 130-131 (both complete, user-approved UAT 11/11); Phase 132 deferred to v8.4.1
 Resume file: None
-Next step: /gsd-discuss-phase 132 (or /gsd-plan-phase 132) to start the public-API dual-mode phase (last phase of v8.4.0).
+Next step: v8.4.0 close-out — /gsd-secure-phase 131 → /release → milestone close ritual.
 
 ## Performance Metrics
 
