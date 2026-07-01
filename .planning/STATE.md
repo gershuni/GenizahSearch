@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
 milestone: v8.4.1
-milestone_name: Public API Dual-Mode Library Filter
-status: complete
-stopped_at: "Phase 132 Plan 03 complete (Wave 3 docs — library_filter_mode documented on SEARCH_API.md + skill api_contract.md; DMF-11 fully satisfied)"
+milestone_name: Public API Dual-Mode
+status: in_progress
+stopped_at: "v8.4.1 Phase 132 executed + code-verified 4/4 (VERIFICATION human_needed — live smoke needs deploy); Codex code-diff review + v8.4.1 web deploy PENDING (connectivity). v8.4.0 desktop publish ALSO pending — see Resume Checklist."
 last_updated: "2026-07-01T13:18:00.000Z"
 last_activity: 2026-07-01
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 16
-  completed_plans: 16
-  percent: 100
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 3
+  completed_plans: 3
+  percent: 90
 ---
 
 # Project State
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** v8.4.0 close-out — secure Phase 131 → release → milestone close (Phase 132 deferred to v8.4.1)
+**Current focus:** Two tracks, both parked on plane connectivity — (1) v8.4.0 desktop-installer publish (draft release ready, see Resume Checklist); (2) v8.4.1 Phase 132 executed + code-verified, needs Codex code-diff review + web deploy + live smoke.
 
 ## Current Position
 
-Milestone: v8.4.1 Public API Dual-Mode Library Filter — Phase 132 COMPLETE
-Phase: 132-public-api-dual-mode-api-search-api-parallels — ALL 3 PLANS COMPLETE
-Plan: 03 COMPLETE (Wave 3 docs — library_filter_mode documented on SEARCH_API.md + skill api_contract.md; DMF-11 criterion 4 satisfied)
-Next: v8.4.1 milestone close, then resume v8.4.0 desktop release checklist
-Last activity: 2026-07-01 -- Phase 132 Plan 03 complete; docs committed (4af733de, 031e9f8d).
+Milestone: v8.4.1 Public API Dual-Mode — Phase 132 EXECUTED + code-verified (NOT yet complete)
+Phase 132: all 3 plans executed (01 RED scaffold → 02 impl GREEN → 03 docs); 175 tests pass, 0 regressions; ruff clean. VERIFICATION status: human_needed — SC1-4 all code-verified; only a live prod smoke against the real 255K corpus remains (needs the v8.4.1 web deploy).
+Pending for v8.4.1 (need connectivity): (a) Codex code-DIFF review — the authoritative cross-AI pass, deferred from the plane (Codex R1 already caught+fixed the default='include' backward-compat HIGH at plan stage); (b) web deploy via `deploy.sh master-main`; (c) live prod smoke (`mode=exclude` drops the named library); then v8.4.1 milestone close.
+ALSO still pending: v8.4.0 desktop-installer publish — see the Resume Checklist section below.
+Last activity: 2026-07-01 -- Phase 132 executed + verified (human_needed).
 
 ## Resume Checklist — v8.4.0 go-live (needs good connectivity)
 
