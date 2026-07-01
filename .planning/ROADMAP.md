@@ -178,7 +178,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1)*
 
-- [ ] 132-02-PLAN.md — Implementation: one shared `FiltersModel.library_filter_mode` field (both endpoints) + `resolve_library_complement_sys_ids` single-pass helper + `_intersect_library_filter` exclude branch (DMF-11)
+- [x] 132-02-PLAN.md — Implementation: one shared `FiltersModel.library_filter_mode` field (both endpoints) + `resolve_library_complement_sys_ids` single-pass helper + `_intersect_library_filter` exclude branch (DMF-11)
 
 **Wave 3** *(blocked on Wave 2)*
 
@@ -190,4 +190,4 @@ Plans:
 |-------|----------------|--------|-----------|
 | 130. Dual-Mode Filter Core — Web /search | 3/3 | Complete    | 2026-06-30 |
 | 131. Dual-Mode Parity — Desktop + Browse + Parallels | 10/8 | Complete    | 2026-07-01 |
-| 132. Public API Dual-Mode | 0/3 | Planned (v8.4.1) | - |
+| 132. Public API Dual-Mode | 2/3 | In Progress|  |

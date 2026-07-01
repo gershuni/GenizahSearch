@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v8.4.1
 milestone_name: Public API Dual-Mode Library Filter
 status: executing
-stopped_at: "Phase 132 Plan 01 complete (Wave 0 RED scaffold); Plan 02 next"
-last_updated: "2026-07-01T12:45:00.000Z"
+stopped_at: "Phase 132 Plan 02 complete (Wave 2 implementation — library_filter_mode + complement helper + exclude branch); Plan 03 next"
+last_updated: "2026-07-01T13:08:00.000Z"
 last_activity: 2026-07-01
 progress:
   total_phases: 3
   completed_phases: 2
   total_plans: 16
-  completed_plans: 14
-  percent: 88
+  completed_plans: 15
+  percent: 94
 ---
 
 # Project State
@@ -27,9 +27,9 @@ See: .planning/PROJECT.md
 
 Milestone: v8.4.1 Public API Dual-Mode Library Filter — Phase 132 in progress
 Phase: 132-public-api-dual-mode-api-search-api-parallels
-Plan: 01 COMPLETE (Wave 0 RED scaffold — tests/test_search_api_library_mode.py, 9 tests, 7 RED, 2 green)
-Next: Plan 02 — implementation (FiltersModel.library_filter_mode field + resolve_library_complement_sys_ids + _intersect_library_filter exclude branch)
-Last activity: 2026-07-01 -- Phase 132 Plan 01 complete; Wave 0 RED scaffold committed (0da02e11).
+Plan: 02 COMPLETE (Wave 2 implementation — library_filter_mode field + resolve_library_complement_sys_ids + _intersect_library_filter exclude branch; 9/9 GREEN)
+Next: Plan 03 — docs + skill api_contract update (docs/SEARCH_API.md + skills/cairo-genizah-research/references/api_contract.md)
+Last activity: 2026-07-01 -- Phase 132 Plan 02 complete; implementation committed (ae232d49, dc0c5033).
 
 ## Resume Checklist — v8.4.0 go-live (needs good connectivity)
 
@@ -129,10 +129,10 @@ Items acknowledged and deferred at v8.3.0 milestone close on 2026-06-30:
 
 ## Session Continuity
 
-Last session: 2026-07-01T12:45:00.000Z
-Stopped at: Phase 132 Plan 01 COMPLETE — Wave 0 RED scaffold committed (0da02e11); Plan 02 is next
+Last session: 2026-07-01T13:08:00.000Z
+Stopped at: Phase 132 Plan 02 COMPLETE — Wave 2 implementation committed (ae232d49, dc0c5033); Plan 03 is next
 Resume file: None
-Next step: Execute Plan 02 (132-02) — implementation of FiltersModel.library_filter_mode + complement helper + exclude branch.
+Next step: Execute Plan 03 (132-03) — docs/SEARCH_API.md + skills/cairo-genizah-research/references/api_contract.md update.
 
 ## Performance Metrics
 
@@ -157,6 +157,8 @@ Next step: Execute Plan 02 (132-02) — implementation of FiltersModel.library_f
 - [Phase ?]: show-all normalized to neutral hide/[] on Apply (D-05/DMF)
 - [Phase ?]: browse->search handoff stamps mode=show_only + persists dict shape (prevents misread as Hide-set)
 - [Phase 132 Plan 01]: library_filter_mode default=None (not 'include') — model_dump(exclude_none=True) drops it → omitted callers' echo stays byte-for-byte unchanged (Codex R1 HIGH); _intersect_library_filter normalises None→'include' internally
+
+- [Phase 132 Plan 02]: resolve_library_complement_sys_ids is a separate module-level function in shared/fjms_service.py (not inlined) — mirrors naming convention, independently testable; mode read AFTER `if not libs` short-circuit so exclude+empty is a clean no-op
 
 ## Operator Next Steps
 

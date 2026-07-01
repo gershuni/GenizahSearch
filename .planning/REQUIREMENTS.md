@@ -31,7 +31,7 @@
 
 ### Public API
 
-- [ ] **DMF-11**: The public API `POST /api/search` and `POST /api/parallels` accept an optional library-filter **mode** (include / exclude) alongside `filters.library`, so programmatic callers can express "hide these libraries" as well as "only these". Backward-compatible: an omitted mode defaults to **include** (the current allowlist behavior); **exclude** resolves to the complement (sys_ids whose `library_code` is not in the given set) intersected into `restrict_sys_ids`. Documented in `docs/SEARCH_API.md` + the skill `api_contract.md`.
+- [x] **DMF-11**: The public API `POST /api/search` and `POST /api/parallels` accept an optional library-filter **mode** (include / exclude) alongside `filters.library`, so programmatic callers can express "hide these libraries" as well as "only these". Backward-compatible: an omitted mode defaults to **include** (the current allowlist behavior); **exclude** resolves to the complement (sys_ids whose `library_code` is not in the given set) intersected into `restrict_sys_ids`. Documented in `docs/SEARCH_API.md` + the skill `api_contract.md`.
 
 ### Invariants (guard, not new capability)
 
@@ -61,6 +61,6 @@
 | DMF-08 | Phase 131 | Complete |
 | DMF-09 | Phase 131 | Complete |
 | DMF-10 | Phase 130, Phase 131 (cross-cutting guard) | Complete |
-| DMF-11 | Phase 132 | Pending |
+| DMF-11 | Phase 132 | Complete |
 | DMF-12 | Phase 131 | Complete |
 | DMF-13 | Phase 130 (/search done), Phase 131 (catalog/parallels/desktop) | Partial |
