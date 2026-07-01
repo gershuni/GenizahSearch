@@ -1078,10 +1078,10 @@ def create_layout():
             ) as whats_new_banner:
                 ui.icon('new_releases').classes('text-base').style('color: #10b981;')
                 ui.label(tr("New Features!")).classes('text-xs font-bold').style('color: var(--text-primary);')
-                # Link the banner to Search — where the v8.3.0 library filter and
-                # Space-scroll both live.
+                # Link the banner to Search — where the v8.4.0 dual-mode library
+                # filter lives.
                 ui.link(
-                    tr('New features: filter your search results and the catalog by holding library; press Space to page through results; and the Joins Lab viewers gained rotate and fullscreen. Give it a try!'),
+                    tr("New: choose Show only or Hide for the library filter — on Search, Browse, and now Parallels — with live per-library counts, sorting, and type-to-find. Give it a try!"),
                     '/search',
                 ).classes('text-xs flex-1 truncate text-primary hover:underline')
                 def dismiss_whats_new():

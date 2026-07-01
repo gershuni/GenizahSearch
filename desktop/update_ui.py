@@ -135,7 +135,7 @@ class WhatsNewBar(QFrame):
         self.hide()
 
     def show_whats_new(self, version: str):
-        self.lbl_msg.setText(tr("New features: filter the catalog by library, press Space to page through search results, and rotate / view images fullscreen in the Joins Lab."))
+        self.lbl_msg.setText(tr("New: the library filter now has two modes — Show only or Hide — with live per-library counts, sort, and type-to-find in Browse by Identification."))
         self.show()
 
     def on_learn_more(self):
@@ -172,10 +172,9 @@ class WhatsNewDialog(QDialog):
 
         is_heb = CURRENT_LANG == 'he'
         items = [
-            tr("Filter by library: the 'Browse by Identification' catalog now has a library filter \u2014 narrow results to Cambridge, JTS, Oxford, and other holding libraries."),
-            tr("Press Space to page down through search results (Shift+Space to page up), unless a result control is focused."),
-            tr("Joins Lab improvements: rotate and fullscreen in the anchor and Compare viewers, the web's full set of search modes (Exact, Variants, Fuzzy, Regex, Responsa), inline search options, a Stop button, and candidate export to Excel."),
-            tr("More resilient image loading: an outage of the National Library's image servers no longer stalls loading of images from other libraries."),
+            tr("Show only or Hide: the 'Browse by Identification' library filter now has two modes \u2014 show only the libraries you pick, or hide them. In Hide mode a newly-appearing library stays visible unless you've hidden it, and your choice is remembered."),
+            tr("Per-library counts: each library shows how many manuscripts it holds, updating live as you toggle the PGP and scholarly-edition filters."),
+            tr("Sort and type-to-find: sort the library list by count or A\u2013Z, and type to filter it. Each row shows its English code (e.g. CUL) in both the Hebrew and English interface."),
         ]
         bullet = "\u200f\u2022 " if is_heb else "\u2022 "
         features_text = "\n\n".join(f"{bullet}{item}" for item in items)

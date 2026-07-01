@@ -4,6 +4,53 @@ All notable changes to Dicta Genizah Search Pro will be documented in this file.
 
 ---
 
+## [8.4.0] - 2026-07-01 — Dual-Mode Library Filter (Show-only / Hide)
+
+Public release (both apps). Evolves the v8.3.0 inclusion-only library filter into a
+**dual-mode** filter — "**Show only** these libraries" *or* "**Hide** these libraries" —
+persisted across searches, at full web + desktop parity, with several usability upgrades
+driven by testing feedback.
+
+### New Features
+
+- **Show-only / Hide library modes** *(both)* — the library filter now expresses two
+  intents: show only the libraries you pick (allowlist), or hide the ones you pick
+  (denylist). In Hide mode a newly-appearing library stays visible unless you've hidden
+  it, so a "hide RNL" choice sticks as new results come in. The chosen mode and set
+  persist across searches and reloads. Available on web `/search`, "Browse by
+  Identification" (web + desktop), and — new this release — the web `/parallels` page.
+- **`/parallels` library filter** *(web)* — the parallels page gains its own dual-mode
+  library filter, scoping results the same way search does (closes a v8.3.0 deferred gap).
+- **Per-library counts, sorting & type-to-find** *(both)* — the library dialog shows how
+  many manuscripts each library holds, updating live as you toggle other filters
+  (PGP-only, editions, domain). Sort by count or A–Z and type to filter the list. The
+  desktop catalog dialog now matches the web at parity.
+- **Searchable library codes** *(both)* — each library row shows its English code (e.g.
+  *ספריית האוניברסיטה של קיימברידג' (CUL)*), in both the Hebrew and English interface, so
+  you can type "CUL" to find Cambridge.
+
+### Improvements / Fixes
+
+- Libraries with zero manuscripts in the corpus no longer appear in the filter list on any
+  surface.
+- Existing (v8.3.0) saved library selections migrate automatically to Show-only mode —
+  nothing to re-enter.
+- Fixed: typing in the library search box no longer collapses the rows from line-by-line
+  onto one continuous line.
+
+### Security
+
+- `/gsd-secure-phase` STRIDE audit of the parity surfaces: 24/24 threats verified closed
+  (fixed `EXISTS`/`NOT EXISTS` SQL keyword — no interpolation; `sanitize_library_codes` +
+  inline `'LOCAL'` guards on every filter path; `safe_storage` chokepoint; pre-export Hide
+  filtering). `.planning/phases/131-*/131-SECURITY.md`.
+
+### Notes
+
+- The matching public-API `mode` (include/exclude) parameter is deferred to **v8.4.1**.
+
+---
+
 ## [8.3.0] - 2026-06-29 — Search & Browse: Library Filter + Space-Scroll
 
 Public release (both). Two new search/browse features at full web + desktop parity — a

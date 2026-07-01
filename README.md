@@ -1,4 +1,4 @@
-# Dicta Genizah Search Pro 8.3.0
+# Dicta Genizah Search Pro 8.4.0
 
 **Collaborative Research Platform for the Cairo Genizah**
 
@@ -8,7 +8,22 @@ A comprehensive research environment for the Cairo Genizah, featuring a **Web Pl
 
 ---
 
-## What's New in Version 8.3.0?
+## What's New in Version 8.4.0?
+
+### v8.4.0: Dual-Mode Library Filter (Show-only / Hide)
+
+Public release (both apps). The library filter you got in v8.3.0 grows a second mode:
+
+- **Show only, or Hide** — filter the library list to *show only* the libraries you pick,
+  or to *hide* the ones you pick. In Hide mode a newly-appearing library stays visible
+  unless you've hidden it, so a "hide RNL" choice keeps working as new results come in.
+  Your choice of mode and libraries is remembered across searches.
+- **Now on Parallels too** — the web `/parallels` page gains its own dual-mode library
+  filter, on top of `/search` and "Browse by Identification" (web + desktop).
+- **Counts, sorting, and type-to-find** — the dialog shows how many manuscripts each
+  library holds (updating live as you toggle PGP / edition / domain filters), sorts by
+  count or A–Z, and filters as you type. Each row shows its English code (e.g.
+  *…קיימברידג' (CUL)*) in both the Hebrew and English interface, so "CUL" finds Cambridge.
 
 ### v8.3.0: Search & Browse — Library Filter + Space-Scroll
 
@@ -471,7 +486,7 @@ Visit [genizahsearch.com](https://genizahsearch.com) to start using Dicta Geniza
 
 ### Desktop Installation
 
-1. **Download:** Get `GenizahSearchPro_V8.3.0_Setup.exe` from the **Assets** section
+1. **Download:** Get `GenizahSearchPro_V8.4.0_Setup.exe` from the **Assets** section
 2. **Install:** Run the installer and follow instructions
 3. **Data Setup:** The software requires the **MiDRASH** dataset (`Transcriptions.txt`)
 
