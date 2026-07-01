@@ -3,7 +3,8 @@
 Usage:
     python parallels.py --text "ויאמר אליו" [--chunk-size 5] [--mode exact]
                         [--max-freq N] [--boundary-mode full]
-                        [--filters-json '{"library":["CUL"]}']
+                        [--library CUL,JTS] [--library-mode include|exclude]
+                        [--filters-json '{"library":["CUL"],"library_filter_mode":"exclude"}']
                         [--base-url URL]
 
 Or read text from a file:
@@ -156,6 +157,28 @@ def _main(argv: list[str] | None = None) -> int:
         help='JSON filters dict e.g. \'{"library":["CUL"]}\'',
     )
     p.add_argument(
+        "--library",
+        default=None,
+        help=(
+            "Comma-separated library codes, e.g. CUL,JTS,Oxford (convenience for "
+            "filters.library; merged into --filters-json). Scopes parallels results "
+            "server-side via restrict_sys_ids."
+        ),
+    )
+    p.add_argument(
+        "--library-mode",
+        default=None,
+        choices=["include", "exclude"],
+        dest="library_mode",
+        help=(
+            "How --library / filters.library is applied: 'include' (the effective "
+            "default when omitted) restricts to those libraries; 'exclude' restricts "
+            "to the complement (manuscripts whose library_code is NOT in the set). "
+            "Merged into filters.library_filter_mode. Omitting it is byte-for-byte "
+            "the current include behavior."
+        ),
+    )
+    p.add_argument(
         "--base-url",
         default=None,
         dest="base_url",
@@ -173,6 +196,16 @@ def _main(argv: list[str] | None = None) -> int:
             text = fh.read()
 
     filters = json.loads(args.filters_json) if args.filters_json else None
+    # --library / --library-mode convenience (explicit filters-json values win).
+    # Omitting --library-mode keeps the request byte-for-byte the current include behavior.
+    if args.library:
+        _codes = [c.strip() for c in args.library.split(",") if c.strip()]
+        if _codes:
+            filters = dict(filters or {})
+            filters.setdefault("library", _codes)
+    if args.library_mode:
+        filters = dict(filters or {})
+        filters.setdefault("library_filter_mode", args.library_mode)
 
     result = call_parallels(
         text=text,

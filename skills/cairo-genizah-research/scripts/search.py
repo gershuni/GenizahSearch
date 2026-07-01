@@ -1,8 +1,8 @@
 """POST /api/search transport. Emits JSON envelope to stdout.
 
 Usage: python search.py --query "ויאמר" --search-mode exact [--limit N]
-                        [--gap N] [--library CUL,JTS]
-                        [--filters-json '{"library":["CUL"],"domains":["Liturgy"]}']
+                        [--gap N] [--library CUL,JTS] [--library-mode include|exclude]
+                        [--filters-json '{"library":["CUL"],"library_filter_mode":"exclude"}']
                         [--responsa-options-json '{"variants":true}']
                         [--base-url URL]
 
@@ -161,6 +161,19 @@ def _main(argv: list[str] | None = None) -> int:
         ),
     )
     p.add_argument(
+        "--library-mode",
+        default=None,
+        choices=["include", "exclude"],
+        dest="library_mode",
+        help=(
+            "How --library / filters.library is applied: 'include' (the effective "
+            "default when omitted) restricts to those libraries; 'exclude' restricts "
+            "to the complement (manuscripts whose library_code is NOT in the set). "
+            "Merged into filters.library_filter_mode. Omitting it is byte-for-byte "
+            "the current include behavior."
+        ),
+    )
+    p.add_argument(
         "--responsa-options-json",
         default=None,
         dest="responsa_options_json",
@@ -182,6 +195,12 @@ def _main(argv: list[str] | None = None) -> int:
         if _codes:
             filters = dict(filters or {})
             filters.setdefault("library", _codes)
+    # --library-mode merges into filters.library_filter_mode (explicit filters-json
+    # value wins). Only set when provided, so an omitted flag stays byte-for-byte
+    # the current include behavior (the field is absent from the request).
+    if args.library_mode:
+        filters = dict(filters or {})
+        filters.setdefault("library_filter_mode", args.library_mode)
     ropts = (
         json.loads(args.responsa_options_json) if args.responsa_options_json else None
     )

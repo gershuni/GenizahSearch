@@ -184,6 +184,13 @@ cat composition.txt | python ${CLAUDE_SKILL_DIR}/scripts/parallels.py \
 # Shelfmark resolution (Tier 2)
 python ${CLAUDE_SKILL_DIR}/scripts/search.py \
   --query "T-S 12.123" --search-mode shelfmark --limit 5
+
+# Library filter — restrict to, or exclude, holding libraries
+python ${CLAUDE_SKILL_DIR}/scripts/search.py \
+  --query "ויאמר" --library CUL,JTS                       # only these libraries
+python ${CLAUDE_SKILL_DIR}/scripts/search.py \
+  --query "ויאמר" --library CUL --library-mode exclude    # everything EXCEPT CUL
+# (--library / --library-mode also work on parallels.py; omitting --library-mode = include, unchanged)
 ```
 
 Note: `${CLAUDE_SKILL_DIR}` is a Claude-Code-only string substitution. On other
