@@ -27,7 +27,8 @@ See: .planning/PROJECT.md
 
 Milestone: v8.4.1 Public API Dual-Mode — Phase 132 EXECUTED + code-verified (NOT yet complete)
 Phase 132: all 3 plans executed (01 RED scaffold → 02 impl GREEN → 03 docs); 175 tests pass, 0 regressions; ruff clean. VERIFICATION status: human_needed — SC1-4 all code-verified; only a live prod smoke against the real 255K corpus remains (needs the v8.4.1 web deploy).
-Pending for v8.4.1 (need connectivity): (a) Codex code-DIFF review — the authoritative cross-AI pass, deferred from the plane (Codex R1 already caught+fixed the default='include' backward-compat HIGH at plan stage); (b) web deploy via `deploy.sh master-main`; (c) live prod smoke (`mode=exclude` drops the named library); then v8.4.1 milestone close.
+Local gates DONE (offline): code-review (132-REVIEW.md — 0 blockers; WR-01 tautological test fixed + WR-03 docstring + info cleanup, commits 7904ce45/704f2ab4; WR-02 intentionally skipped) + secure-phase (132-SECURITY.md — SECURED 5/5, threats_open 0).
+Pending for v8.4.1 (need connectivity): (a) Codex code-DIFF review — the authoritative cross-AI pass, deferred from the plane (Codex R1 already caught+fixed the default='include' backward-compat HIGH at plan stage); (b) web deploy via `deploy.sh master-main`; (c) live prod smoke (`mode=exclude` drops the named library); then v8.4.1 milestone close. NOTE: many phase-132 commits are unpushed on master-main.
 ALSO still pending: v8.4.0 desktop-installer publish — see the Resume Checklist section below.
 Last activity: 2026-07-01 -- Phase 132 executed + verified (human_needed).
 
