@@ -163,7 +163,7 @@ Common codes the skill encounters:
 - `invalid_request` (HTTP 400; e.g. unknown field, including legacy `mode`)
 - `invalid_combination` (HTTP 400; e.g. responsa_options with non-responsa)
 - `limit_too_high` (HTTP 400; non-fuzzy `limit` > 100, or fuzzy `limit` > SEARCH_API_FUZZY_MAX_LIMIT. Note: a non-fuzzy limit in 101..2000 now returns this code — it was `invalid_request` previously; both are HTTP 400 rejections)
-- `invalid_filter_value` (HTTP 400; unknown filter token)
+- `unresolvable_filter_value` (HTTP 400; unknown filter token)
 - `filter_vocabulary_unavailable` (HTTP 503; FJMS sidecar misloaded)
 - `query_required`, `query_too_long`
 - `composition_required`, `composition_too_long`
