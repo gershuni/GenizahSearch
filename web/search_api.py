@@ -121,10 +121,23 @@ class FiltersModel(BaseModel):
     library: Optional[List[str]] = Field(
         default=None,
         description=(
-            "Library codes (e.g. 'CUL', 'JTS', 'Oxford'). Inclusion filter — results "
-            "are restricted to manuscripts in these libraries, intersected with any "
-            "other filters BEFORE the result cap. Unknown codes -> 400 "
-            "unresolvable_filter_value. SEED-026."
+            "Library codes (e.g. 'CUL', 'JTS', 'Oxford'). Applied as an inclusion or "
+            "exclusion filter depending on library_filter_mode (default: inclusion). "
+            "Results are restricted to manuscripts in (or NOT in) these libraries, "
+            "intersected with any other filters BEFORE the result cap. Unknown codes "
+            "-> 400 unresolvable_filter_value. SEED-026."
+        ),
+    )
+    library_filter_mode: Optional[Literal['include', 'exclude']] = Field(
+        default=None,
+        description=(
+            "How the library list is applied. "
+            "'include' (the effective default when omitted): restrict results to "
+            "manuscripts in the given libraries — today's behavior. "
+            "'exclude': restrict results to manuscripts NOT in the given libraries "
+            "(complement, intersected into restrict_sys_ids pre-search). "
+            "Omitting this field is equivalent to 'include'. "
+            "Invalid values -> 400 invalid_request."
         ),
     )
     materials: Optional[List[str]] = Field(
@@ -312,26 +325,40 @@ async def _intersect_library_filter(restrict_sys_ids, filters_dict, meta_mgr):
     """SEED-026 (API library filter): if ``filters_dict`` carries a ``library`` list,
     intersect the resolved library sys_id set into ``restrict_sys_ids``.
 
-    ``resolve_library_sys_ids`` iterates the full csv_bank (~255K rows), so it runs
-    off the event loop via ``run_in_executor``. Returns the updated restrict set:
+    Applies an inclusion OR exclusion filter depending on ``library_filter_mode``:
+      - ``'include'`` (or omitted/None): restrict to manuscripts IN the given
+        libraries — today's behavior (``resolve_library_sys_ids``).
+      - ``'exclude'``: restrict to manuscripts NOT in the given libraries
+        (``resolve_library_complement_sys_ids`` — single-pass complement).
+
+    Both paths run off the event loop via ``run_in_executor`` (csv_bank ~255K rows).
+    Returns the updated restrict set:
       - no library filter -> ``restrict_sys_ids`` unchanged (may be None);
+        also covers exclude+empty-library short-circuit (no filter applied);
       - library only -> the resolved library sys_id set;
       - library + other filters -> the intersection (which the caller short-circuits
         to 0 results if empty).
 
-    Late-binds ``resolve_library_sys_ids`` through the module attribute so test
-    fixtures can monkeypatch ``shared.fjms_service.resolve_library_sys_ids``.
+    Late-binds resolve helpers through the module attribute so test fixtures can
+    monkeypatch ``shared.fjms_service.resolve_library_sys_ids`` and
+    ``shared.fjms_service.resolve_library_complement_sys_ids``.
     Library codes are validated upstream by ``validate_filter_values`` (unknown -> 400),
     so by here every code is a known LIBRARY_CODES key.
     """
     libs = (filters_dict or {}).get('library')
     if not libs:
         return restrict_sys_ids
+    mode = (filters_dict or {}).get('library_filter_mode') or 'include'
     from shared import fjms_service as _fjms_module
     loop = asyncio.get_running_loop()
-    lib_ids = await loop.run_in_executor(
-        None, _fjms_module.resolve_library_sys_ids, libs, meta_mgr
-    )
+    if mode == 'exclude':
+        lib_ids = await loop.run_in_executor(
+            None, _fjms_module.resolve_library_complement_sys_ids, libs, meta_mgr
+        )
+    else:
+        lib_ids = await loop.run_in_executor(
+            None, _fjms_module.resolve_library_sys_ids, libs, meta_mgr
+        )
     if restrict_sys_ids is None:
         return lib_ids
     return restrict_sys_ids & lib_ids
