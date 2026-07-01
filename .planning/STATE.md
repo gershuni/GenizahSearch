@@ -28,7 +28,8 @@ See: .planning/PROJECT.md
 Milestone: v8.4.1 Public API Dual-Mode — Phase 132 EXECUTED + code-verified (NOT yet complete)
 Phase 132: all 3 plans executed (01 RED scaffold → 02 impl GREEN → 03 docs); 175 tests pass, 0 regressions; ruff clean. VERIFICATION status: human_needed — SC1-4 all code-verified; only a live prod smoke against the real 255K corpus remains (needs the v8.4.1 web deploy).
 Local gates DONE (offline): code-review (132-REVIEW.md — 0 blockers; WR-01 tautological test fixed + WR-03 docstring + info cleanup, commits 7904ce45/704f2ab4; WR-02 intentionally skipped) + secure-phase (132-SECURITY.md — SECURED 5/5, threats_open 0).
-Pending for v8.4.1 (need connectivity): (a) Codex code-DIFF review — the authoritative cross-AI pass, deferred from the plane (Codex R1 already caught+fixed the default='include' backward-compat HIGH at plan stage); (b) web deploy via `deploy.sh master-main`; (c) live prod smoke (`mode=exclude` drops the named library); then v8.4.1 milestone close. NOTE: many phase-132 commits are unpushed on master-main.
+Codex code-diff review (16fcf7a1..HEAD): DONE — implementation APPROVED in substance (backward-compat, complement branch, 400 path, WR-01 test all confirmed correct); sole finding a pre-existing skill-contract error-code doc nit (invalid_filter_value → unresolvable_filter_value), fixed in a098ca58. All Phase 132 review gates now clear (plan-Codex R1, checker, verify 4/4, code-review 0-blockers, secure 5/5, code-diff Codex).
+Pending for v8.4.1 (need connectivity): (a) web deploy via `deploy.sh master-main`; (b) live prod smoke (`mode=exclude` drops the named library) → flip 132-VERIFICATION to passed; (c) v8.4.1 milestone close. All phase-132 commits are PUSHED to origin (HEAD a098ca58).
 ALSO still pending: v8.4.0 desktop-installer publish — see the Resume Checklist section below.
 Last activity: 2026-07-01 -- Phase 132 executed + verified (human_needed).
 
