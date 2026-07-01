@@ -2,8 +2,8 @@
 gsd_state_version: 1.0
 milestone: v8.4.0
 milestone_name: Dual-Mode Library Filter
-status: ready
-stopped_at: v8.4.0 phases complete (130-131, user-approved 2026-07-01); Phase 132 deferred to v8.4.1 — ready to secure/release/close
+status: release_in_progress
+stopped_at: v8.4.0 built + tagged + secured; GitHub asset-upload + publish + web deploy PENDING (in-flight connectivity 2026-07-01) — see Resume Checklist
 last_updated: "2026-07-01T04:26:41.044Z"
 last_activity: 2026-07-01
 progress:
@@ -28,8 +28,33 @@ See: .planning/PROJECT.md
 Milestone: v8.4.0 Dual-Mode Library Filter — all in-scope phases COMPLETE (130-131)
 Phase 132 (public-api-dual-mode): DEFERRED → v8.4.1 (user decision 2026-07-01); requirement DMF-11 carries forward
 Status: v8.4.0 re-scoped to 2 phases (130-131), both complete + user-approved (UAT 11/11 on 2026-07-01). Dual-mode library filter at full desktop + web parity (catalog + /search + /parallels), incl. dynamic counts, sort, type-to-find, and searchable English codes.
-Last activity: 2026-07-01 -- Phase 132 deferred to v8.4.1; beginning v8.4.0 close-out (secure 131 → release → close)
-Next step: /gsd-secure-phase 131 → /release (v8.4.0) → milestone close ritual.
+Last activity: 2026-07-01 -- v8.4.0 release started; DESKTOP INSTALLER BUILT + tag pushed + draft release created; asset upload FAILED on in-flight DNS (no partial asset), deferred by user ("don't upload if the upload failed").
+Next step: finish the release when off the plane — see Resume Checklist below.
+
+## Resume Checklist — v8.4.0 go-live (needs good connectivity)
+
+DONE (offline-safe, already applied):
+- [x] Phase 131 secured (`131-SECURITY.md`, 24/24 SECURED)
+- [x] Phase 132 deferred to v8.4.1 (ROADMAP + REQUIREMENTS DMF-11)
+- [x] Version bumped 8.3.0 → 8.4.0 (version.py / version_info.txt / .iss / README / _TARGET_VERSION)
+- [x] Docs: CHANGELOG [8.4.0], CLAUDE.md, README What's New, What's-New banners (web tr() EN+HE, desktop bar+dialog EN+HE)
+- [x] Gates: ruff clean, check_docs passed, 146 tests green
+- [x] 100 commits pushed to origin/master-main (HEAD 16fcf7a1)
+- [x] Tag `v8.4.0` created + pushed (annotated → 16fcf7a1)
+- [x] Desktop installer BUILT: `dist/GenizahSearchPro_V8.4.0_Setup.exe` (531,242,765 bytes / 507 MB, built 2026-07-01 09:56)
+- [x] GitHub release created as DRAFT (tag v8.4.0, notes set, NO asset — desktop users NOT pinged)
+
+REMAINING (run when connectivity is solid):
+1. Upload asset to the draft:
+   `gh release upload v8.4.0 dist/GenizahSearchPro_V8.4.0_Setup.exe`
+2. VERIFY asset uploaded (state:uploaded, size == 531242765):
+   `gh release view v8.4.0 --json assets`
+3. Publish the release (this is what prompts desktop updaters):
+   `gh release edit v8.4.0 --draft=false --latest`
+4. Web deploy (no index rebuild needed — UI-only feature):
+   `ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com 'cd /home/ubuntu/GenizahSearch && ./deploy.sh master-main'`
+   then curl-smoke genizahsearch.com (port 8081).
+5. Milestone-close ritual for v8.4.0 (archive phase dirs → milestones/, mark ✅ in ROADMAP, REQUIREMENTS archival, reset STATE for next milestone). HELD until go-live so docs don't claim "shipped" before it's live.
 
 ## Accumulated Context
 
@@ -106,9 +131,9 @@ Items acknowledged and deferred at v8.3.0 milestone close on 2026-06-30:
 ## Session Continuity
 
 Last session: 2026-07-01T00:00:00.000Z
-Stopped at: v8.4.0 re-scoped to Phases 130-131 (both complete, user-approved UAT 11/11); Phase 132 deferred to v8.4.1
-Resume file: None
-Next step: v8.4.0 close-out — /gsd-secure-phase 131 → /release → milestone close ritual.
+Stopped at: v8.4.0 release paused mid-go-live (in-flight connectivity) — built + tagged + draft release, asset upload + publish + web deploy pending
+Resume file: See "Resume Checklist — v8.4.0 go-live" in Current Position above
+Next step: when off the plane — gh release upload → verify → publish → deploy.sh → milestone-close ritual.
 
 ## Performance Metrics
 
