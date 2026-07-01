@@ -1,74 +1,74 @@
 ---
-status: partial
+status: resolved
 phase: 131-dual-mode-parity-desktop-catalog-web-browse-by-identificatio
 source: [131-VERIFICATION.md]
 started: 2026-06-30T14:30:00Z
-updated: 2026-06-30T14:30:00Z
+updated: 2026-07-01T00:00:00Z
 ---
 
 ## Current Test
 
-[awaiting human testing]
+User-approved 2026-07-01 — all 11 items passed.
 
 ## Tests
 
 ### 1. Desktop catalog dialog — mode toggle + in-session persistence + button label
 expected: Open Catalog tab → library filter button → toggle Hide vs Show-only, select a subset, Apply, reopen the dialog within the same session. Dialog reopens with the previously selected mode and codes; toggling mode clears all checkboxes (D-04 reset); button shows "Showing N/M libraries" (Show-only) or "Hiding N libraries" (Hide) with the real Phase-130 pluralized keys; total M matches the selectable universe (library_codes_with_manuscripts minus LOCAL, not the broader LIBRARY_CODES count).
-result: [pending]
+result: passed (user-approved 2026-07-01)
 
 ### 2. Desktop — Hide-mode suppression on "Search/Composition in these results"
 expected: With a Hide library selection active, click "Search in these results" and "Composition in these results". The library restriction is SUPPRESSED (not silently inverted); status bar shows "Library Hide filter not applied to search/composition" (~5 s); the search/composition scope is NOT narrowed by the Hide selection.
-result: [pending]
+result: passed (user-approved 2026-07-01)
 
 ### 3. Web /catalog Browse-by-Identification — true-facet shortlist, toggles, reload persistence
 expected: Open the library filter dialog with NO other filters active → the count-shortlist shows TRUE full-set per-library counts from get_browse_library_facets (off-page libraries appear, not just current PAGE_SIZE=50 page); toggle Show-only/Hide, type in text-search, click sort-by-count vs A-Z, Apply, reload the page → mode+set survive (dict-shape persist); SEED-023 PGP/Editions filters still work alongside the library filter.
-result: [pending]
+result: passed (user-approved 2026-07-01)
 
 ### 4. Web /catalog — Hide-mode handoff to /search preserves mode
 expected: With a Hide library selection active, click "Search in these results" → the /search page opens with the filter in Hide mode (button shows "Hiding N libraries", not "Showing N/M"). The {mode,codes} handoff preserves the mode round-trip (not converted to Show-only).
-result: [pending]
+result: passed (user-approved 2026-07-01)
 
 ### 5. Web /parallels — library-only Show-only scope (ungated) + reload persistence
 expected: Run a composition search → open the new library-filter button → select a subset in Show-only mode with NO advanced filters active → Apply. Results rescope to the chosen libraries (NOT a no-op — library-only Show-only scope works ungated by _has_active_filters); results outside the selected libraries disappear. Reload the page → mode+set survive (parallels_library_filter key persists).
-result: [pending]
+result: passed (user-approved 2026-07-01)
 
 ### 6. Web /parallels — Hide-mode export scoping
 expected: With Hide mode active, export results (XLSX/JSON) → exported rows exclude rows from the hidden libraries (Show-only pre-query and Hide pre-export scoping both hold).
-result: [pending]
+result: passed (user-approved 2026-07-01)
 
 ### 7. Desktop catalog dialog — dynamic per-library counts (gap 131-06 fix)
 expected: Open Catalog tab → library filter button → each library row shows a count, e.g. "CUL (1,234)" (localized thousands separator). Turn "PGP Only" on (or a Scholarly-Editions / domain filter) and reopen the dialog → each row's count DROPS to that library's PGP-only (resp. filtered) manuscript count — the counts are dynamic w.r.t. the active catalog filters, at parity with web /catalog. The dialog must open without freezing the UI (facets are computed on a background worker thread).
-result: [pending]
+result: passed (user-approved 2026-07-01)
 
 ### 8. Desktop catalog dialog — sort toggle + type-to-find (gap 131-07)
 expected: Open Catalog tab -> library filter button. (a) A "Search libraries..." box filters the list as you type (case-insensitive); typing hides non-matching rows but keeps their checks (a checked-then-hidden library stays selected on Apply). (b) A sort toggle "A-Z" / "By count" reorders the list: "By count" shows highest-count libraries first; "A-Z" is alphabetical. Switching sort keeps your checks. "Select All" selects every library even while a search filter is active. No UI freeze.
-result: [pending]
+result: passed (user-approved 2026-07-01)
 
 ### 9. Hebrew UI — library rows show the English code, searchable by it (gap 131-08)
 expected: Switch the app to Hebrew UI. Open the catalog library filter dialog (web /catalog AND desktop) -> each library row shows the English code in parentheses after the Hebrew name, e.g. "ספריית האוניברסיטה של קיימברידג' (CUL)". Type "CUL" (or "JTS", etc.) in the type-to-find box -> the matching library is found. A-Z sort order is unchanged (sorts by the Hebrew name, not the appended code). ALSO (gap 131-09): switch to English UI -> rows now show the code too, e.g. "Cambridge University Library (CUL)", searchable by typing "CUL".
-result: [pending]
+result: passed (user-approved 2026-07-01)
 
 ### 10. Web /search library dialog — rows show the code, searchable (gap 131-10)
 expected: On web /search, open the library filter dialog -> each row shows the English code in parentheses (e.g. "Cambridge University Library (CUL)"; Hebrew "ספריית... (CUL)"); typing "CUL" in the dialog's "Search libraries" box finds it. A-Z order unchanged (sort keyed on bare name).
-result: [pending]
+result: passed (user-approved 2026-07-01)
 
 ### 11. Type-to-find layout — rows stay line-by-line (gap 131-10 bug fix)
 expected: In BOTH web dialogs (/search AND /catalog Browse-by-Identification), start typing in the "Search libraries" box -> the matching library rows stay stacked line-by-line (each on its own row). They must NOT collapse into a single run of continuous text. (Root cause: showing a row reset its display to the <label> inline default instead of restoring flex.)
-result: [pending]
+result: passed (user-approved 2026-07-01)
 
 ## Summary
 
 total: 11
-passed: 0
+passed: 11
 issues: 0
-pending: 11
+pending: 0
 skipped: 0
 blocked: 0
 
 ## Gaps
 
 - truth: "Desktop catalog LibraryFilterDialog shows per-library manuscript COUNTS (e.g. 'CUL (1,234)'), and those counts are DYNAMIC — they honor the catalog's other active filters (PGP Only / Scholarly-Editions / domain), at parity with web /catalog Browse-by-Identification."
-  status: fix_implemented_pending_uat
+  status: resolved
   resolution: "Closed by gap plan 131-06 (commits 08812bce dialog facets param + Name(count) render; c3c12d1a _CatalogFacetWorker off-UI-thread facet computation wired into _open_catalog_library_dialog; 8f156334 +5 tests). 27/27 test_libfilter_desktop.py pass headless. Live render-smoke is UAT test #7 (pending)."
   reason: "User feedback during UAT: desktop library dialog must include the count like web does; and the count should be dynamic — e.g. with 'PGP Only' on, each library row should show the number of that library's manuscripts that are ALSO PGP-only. (both apps — web /catalog already satisfies this)"
   severity: major
@@ -86,7 +86,7 @@ blocked: 0
   debug_session: ""
 
 - truth: "Desktop catalog LibraryFilterDialog offers (a) a sort toggle between A-Z and by-count (descending), and (b) a type-to-find search box that filters the visible library rows as the user types -- at parity with web /catalog (catLibFilterSort + catLibFilterSearch)."
-  status: fix_implemented_pending_uat
+  status: resolved
   resolution: "Closed by gap plan 131-07 (commits 57344637 search box + A-Z/By-count sort toggle in LibraryFilterDialog; 0104900b +6 tests; genizah_translations.py Hebrew keys מיון:/לפי כמות/א–ת). 33/33 test_libfilter_desktop.py pass headless. Live render-smoke is UAT test #8 (pending)."
   reason: "User feedback during UAT: 'We should add sort by count/a-z and type to find.' The desktop library dialog has neither; web /catalog already has both."
   severity: minor
@@ -101,7 +101,7 @@ blocked: 0
     - "Tests: extend tests/test_libfilter_desktop.py -- search hides non-matching rows and preserves checks/get_checked_codes; by-count sort orders by self._facets desc; A-Z sort orders by display name; by-count falls back to A-Z when facets empty; Select All ignores the filter. Headless: GITHUB_ACTIONS=true QT_QPA_PLATFORM=offscreen, this file only."
   debug_session: ""
 - truth: "In Hebrew UI, each library row in the catalog library-filter dialog (web /catalog AND desktop) shows the English library code in parentheses after the Hebrew name (e.g. 'ספריית האוניברסיטה של קיימברידג'' (CUL)'), and the type-to-find search matches that code (typing 'CUL' finds Cambridge). A-Z sort order is unaffected (keyed on the bare Hebrew name)."
-  status: fix_implemented_pending_uat
+  status: resolved
   resolution: "Closed by gap plan 131-08 (commits a9d642bd shared get_library_display with_code default-OFF param; cfd15930 desktop appends code in Hebrew UI via live CURRENT_LANG, sort keys on bare name; 421d1c70 web label+data-label so catLibFilterSearch matches; ed8e47f0 SUMMARY). 62/62 desktop+catalog tests pass headless; default-off invariant verified (existing callers unchanged). Live render-smoke is UAT test #9 (pending)."
   reason: "User feedback during UAT: 'in Heb UI add also the English acronym, like ספריית האוניברסיטה של קיימברידג'' (CUL), so it can be searched also.' In Hebrew UI the row label is the Hebrew name only, so a user cannot find a library by typing its well-known English code (CUL/JTS/etc.) in the new type-to-find box."
   severity: minor
@@ -121,7 +121,7 @@ blocked: 0
     - "Tests: desktop tests/test_libfilter_desktop.py (he-lang label contains '(CUL)'; search 'CUL' matches; en-lang label unchanged; A-Z order unchanged) + a web/shared test for the get_library_display with_code param + the he-lang data-label includes the code."
   debug_session: ""
 - truth: "The English library code in parentheses ALSO appears in the catalog library-filter dialog rows in ENGLISH UI (both apps) — e.g. 'Cambridge University Library (CUL)' — searchable by code. Extends gap 131-08 (Hebrew-only) to both languages."
-  status: fix_implemented_pending_uat
+  status: resolved
   resolution: "Closed by gap plan 131-09 (commits bf53c31d flip with_code gate to always-on at both call sites; 42570b0c en-lang tests flipped to expect the code + EN search test; 13479f4a SUMMARY). 63/63 desktop+catalog tests pass headless; shared get_library_display still default-OFF (verified: en bare call = 'Cambridge University Library', no code; other displays unaffected). Live render-smoke folded into UAT test #9 (pending)."
   reason: "User follow-up after 131-08 confirmed working: 'Works well, add library codes to the EN UI too.'"
   severity: minor
@@ -141,7 +141,7 @@ blocked: 0
     - "Update en-lang tests to expect the code; keep he-lang + default-off-invariant tests."
   debug_session: ""
 - truth: "The web /search library-filter dialog rows show the English library code in parentheses (e.g. 'Cambridge University Library (CUL)') in both languages, and the dialog's type-to-find matches the code — parity with the catalog dialog (gaps 131-08/09). A-Z order unchanged."
-  status: fix_implemented_pending_uat
+  status: resolved
   resolution: "Closed by gap plan 131-10 (commit 3674e600 incl.): added with_code=True to the two /search dialog label builds (search.py ~1829/1843); sort key (~1806) kept bare so A-Z unchanged. data-label now carries the code so libFilterSearch matches it. Live render-smoke = UAT test #10 (pending). 42/42 web tests pass."
   reason: "User: 'This should be in search too.' The /search dialog (web/pages/search.py) was not covered by 131-08/09 (those touched only the catalog dialog + shared helper)."
   severity: minor
@@ -155,7 +155,7 @@ blocked: 0
   debug_session: ""
 
 - truth: "Typing in the 'Search libraries' type-to-find box keeps the library rows stacked line-by-line in BOTH web dialogs (/search and /catalog) — rows do NOT collapse into continuous inline text."
-  status: fix_implemented_pending_uat
+  status: resolved
   resolution: "Closed by gap plan 131-10 (commit 486a3023): libFilterSearch (search.py) + catLibFilterSearch (catalog_browse.py) show-branch changed from row.style.display='' to 'flex', so showing a row restores its inline flex layout instead of falling back to <label> inline default. Source-contract guard tests added (commit 3674e600). 42/42 web tests pass. Live render-smoke = UAT test #11 (pending)."
   reason: "User: 'When I start to type to search in the search boxes, they collapse from being line after line, to continuous text.' BUG in the type-to-find show/hide."
   severity: major
