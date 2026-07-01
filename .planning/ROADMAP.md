@@ -190,4 +190,4 @@ Plans:
 |-------|----------------|--------|-----------|
 | 130. Dual-Mode Filter Core — Web /search | 3/3 | Complete    | 2026-06-30 |
 | 131. Dual-Mode Parity — Desktop + Browse + Parallels | 10/8 | Complete    | 2026-07-01 |
-| 132. Public API Dual-Mode | 3/3 | Complete   | 2026-07-01 |
+| 132. Public API Dual-Mode | 3/3 | Complete    | 2026-07-01 |

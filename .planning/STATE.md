@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v8.4.1
 milestone_name: Public API Dual-Mode
 status: in_progress
-stopped_at: "v8.4.1 Phase 132 executed + code-verified 4/4 (VERIFICATION human_needed — live smoke needs deploy); Codex code-diff review + v8.4.1 web deploy PENDING (connectivity). v8.4.0 desktop publish ALSO pending — see Resume Checklist."
-last_updated: "2026-07-01T13:18:00.000Z"
+stopped_at: "v8.4.1 Phase 132 COMPLETE — deployed to genizahsearch.com (c624aa83) + live smoke PASSED (exclude/include/400); VERIFICATION passed. Remaining: v8.4.1 milestone-close ritual + v8.4.0 desktop-installer publish (see Resume Checklist)."
+last_updated: "2026-07-01T14:52:45.117Z"
 last_activity: 2026-07-01
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
   completed_plans: 3
-  percent: 90
+  percent: 100
 ---
 
 # Project State
@@ -21,17 +21,18 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Two tracks, both parked on plane connectivity — (1) v8.4.0 desktop-installer publish (draft release ready, see Resume Checklist); (2) v8.4.1 Phase 132 executed + code-verified, needs Codex code-diff review + web deploy + live smoke.
+**Current focus:** v8.4.1 API dual-mode is LIVE + verified. Remaining: (1) optional v8.4.1 milestone-close ritual (bookkeeping); (2) v8.4.0 desktop-installer publish (the real outstanding go-live — see Resume Checklist).
 
 ## Current Position
 
-Milestone: v8.4.1 Public API Dual-Mode — Phase 132 EXECUTED + code-verified (NOT yet complete)
-Phase 132: all 3 plans executed (01 RED scaffold → 02 impl GREEN → 03 docs); 175 tests pass, 0 regressions; ruff clean. VERIFICATION status: human_needed — SC1-4 all code-verified; only a live prod smoke against the real 255K corpus remains (needs the v8.4.1 web deploy).
-Local gates DONE (offline): code-review (132-REVIEW.md — 0 blockers; WR-01 tautological test fixed + WR-03 docstring + info cleanup, commits 7904ce45/704f2ab4; WR-02 intentionally skipped) + secure-phase (132-SECURITY.md — SECURED 5/5, threats_open 0).
-Codex code-diff review (16fcf7a1..HEAD): DONE — implementation APPROVED in substance (backward-compat, complement branch, 400 path, WR-01 test all confirmed correct); sole finding a pre-existing skill-contract error-code doc nit (invalid_filter_value → unresolvable_filter_value), fixed in a098ca58. All Phase 132 review gates now clear (plan-Codex R1, checker, verify 4/4, code-review 0-blockers, secure 5/5, code-diff Codex).
-Pending for v8.4.1 (need connectivity): (a) web deploy via `deploy.sh master-main`; (b) live prod smoke (`mode=exclude` drops the named library) → flip 132-VERIFICATION to passed; (c) v8.4.1 milestone close. All phase-132 commits are PUSHED to origin (HEAD a098ca58).
-ALSO still pending: v8.4.0 desktop-installer publish — see the Resume Checklist section below.
-Last activity: 2026-07-01 -- Phase 132 executed + verified (human_needed).
+Milestone: v8.4.1 Public API Dual-Mode — Phase 132 COMPLETE, DEPLOYED, LIVE-VERIFIED.
+Phase 132: 3 plans (01 RED scaffold → 02 impl GREEN → 03 docs); 175 tests pass, 0 regressions; ruff clean. ALL review gates clear: plan-Codex R1 (caught+fixed the default='include' HIGH), plan-checker PASS, verify 4/4, code-review 0-blockers (132-REVIEW.md), secure 5/5 (132-SECURITY.md), Codex code-diff APPROVE (132 doc nit fixed a098ca58). VERIFICATION: passed.
+Live: deployed to genizahsearch.com at c624aa83 (deploy.sh master-main, service active); live smoke on the real 255K corpus PASSED — exclude CUL→0 CUL (28007 total), include CUL→all CUL (8554), bad mode→400 invalid_request. DMF-11 satisfied end-to-end. `phase.complete 132` ran (roadmap/requirements updated; is_last_phase).
+Remaining:
+  - v8.4.1 milestone-close ritual (archive phase 130/131/132 dirs → milestones/, ✅ in ROADMAP, REQUIREMENTS archival) — optional bookkeeping; entangled with the still-open v8.4.0 track, so not auto-run.
+  - v8.4.0 desktop-installer publish (3 gh commands) — see Resume Checklist below. This is the one genuine outstanding go-live.
+All phase-132 commits PUSHED to origin.
+Last activity: 2026-07-01 -- v8.4.1 deployed + live smoke passed; phase 132 complete.
 
 ## Resume Checklist — v8.4.0 go-live (needs good connectivity)
 
@@ -156,6 +157,7 @@ Next step: v8.4.1 milestone close ritual (archive phase 132 dirs → milestones/
 | Phase 131 P07 | 20 | 3 tasks | 3 files |
 | 131 | 10 | - | - |
 | Phase 132 P03 | 8 | 2 tasks | 2 files |
+| 132 | 3 | - | - |
 
 ## Decisions
 
