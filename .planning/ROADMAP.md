@@ -85,7 +85,8 @@ See: .planning/milestones/v8.3.0-ROADMAP.md
 
 - [x] **Phase 130: Dual-Mode Filter Core — Web `/search`** *(lead)* - Define the shared (mode + set) state shape, add the Show-only / Hide mode toggle to the `/search` library-filter dialog, persist (mode + set) via `safe_storage`, migrate the existing allowlist cleanly, handle edge states, and make the button/label communicate the active mode + count. Settles the model the other surfaces mirror. (completed 2026-06-30)
 
-- [x] **Phase 131: Dual-Mode Parity — Desktop Catalog + Web Browse-by-Identification + Web `/parallels`** - Extend the Phase-130 (mode + set) model to the three remaining UI surfaces: the desktop catalog `LibraryFilterDialog` (Browse-by-Identification), the web Browse-by-Identification catalog filter, and a NEW web `/parallels` library-filter control (scoping via the existing `restrict_sys_ids` path) — each persisted, each at parity with the lead. (executed 2026-06-30 — code-verified 6/6; awaiting human UAT — see 131-HUMAN-UAT.md) (completed 2026-07-01)
+- [x] **Phase 131: Dual-Mode Parity — Desktop Catalog + Web Browse-by-Identification + Web `/parallels`** - Extend the Phase-130 (mode + set) model to the three remaining UI surfaces: the desktop catalog `LibraryFilterDialog` (Browse-by-Identification), the web Browse-by-Identification catalog filter, and a NEW web `/parallels` library-filter control (scoping via the existing `restrict_sys_ids` path) — each persisted, each at parity with the lead. (executed 2026-06-30 — code-verified 6/6; awaiting human UAT — see 131-HUMAN-UAT.md)
+ (completed 2026-07-01)
 
 - [ ] **Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`)** — **DEFERRED → v8.4.1 (2026-07-01).** Add an optional library-filter `mode` (include / exclude) alongside `filters.library` on both public endpoints; backward-compatible (omitted = include); `exclude` resolves to the complement (sys_ids whose `library_code` is not in the set) intersected into `restrict_sys_ids`. Documented in `docs/SEARCH_API.md` + the skill `api_contract.md`.
 
@@ -155,9 +156,9 @@ Plans:
 
 **UI hint**: yes
 
-### Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`) — DEFERRED → v8.4.1 (2026-07-01)
+### Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`)
 
-> Deferred out of v8.4.0 on 2026-07-01 (user decision). v8.4.0 ships the UI dual-mode filter at full web+desktop parity (Phases 130-131); the public-API `mode` knob moves to v8.4.1. Requirement DMF-11 carries forward.
+> **v8.4.1 lead phase.** Deferred out of v8.4.0 on 2026-07-01 (user decision — v8.4.0 shipped the UI dual-mode filter at full web+desktop parity, Phases 130-131). Being planned/built as the lead of v8.4.1 (web-only). Requirement DMF-11.
 
 **Goal**: Programmatic callers can express "hide these libraries" as well as "only these" — the public `POST /api/search` and `POST /api/parallels` accept an optional library-filter `mode` (include / exclude) alongside `filters.library`, backward-compatibly. `exclude` resolves to the complement (sys_ids whose `library_code` is not in the given set) intersected into `restrict_sys_ids`, mirroring the UI semantics.
 **Depends on**: Phase 130 (mode semantics + complement resolution defined)
@@ -169,7 +170,19 @@ Plans:
   3. An invalid `mode` value (anything other than `include`/`exclude`) is rejected with the standard 400 invalid-request envelope (fail-closed, consistent with the existing filter validation).
   4. The behavior is documented in `docs/SEARCH_API.md` and the skill `api_contract.md` (skills/cairo-genizah-research/), including the omitted-mode default and the exclude/complement semantics.
 
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+**Wave 1**
+
+- [ ] 132-01-PLAN.md — Wave-0 test scaffold: new `tests/test_search_api_library_mode.py` (~8 tests) pinning DMF-11 on both `/api/search` and `/api/parallels` + the complement-helper contract (RED until Plan 02)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [ ] 132-02-PLAN.md — Implementation: one shared `FiltersModel.library_filter_mode` field (both endpoints) + `resolve_library_complement_sys_ids` single-pass helper + `_intersect_library_filter` exclude branch (DMF-11)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [ ] 132-03-PLAN.md — Docs: `docs/SEARCH_API.md` + skill `api_contract.md` document the include/exclude mode, omitted-default, and complement semantics (DMF-11 criterion 4)
 
 ## Progress
 
@@ -177,4 +190,4 @@ Plans:
 |-------|----------------|--------|-----------|
 | 130. Dual-Mode Filter Core — Web /search | 3/3 | Complete    | 2026-06-30 |
 | 131. Dual-Mode Parity — Desktop + Browse + Parallels | 10/8 | Complete    | 2026-07-01 |
-| 132. Public API Dual-Mode | 0/? | Deferred → v8.4.1 | - |
+| 132. Public API Dual-Mode | 0/3 | Planned (v8.4.1) | - |
