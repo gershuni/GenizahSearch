@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v8.4.0
 milestone_name: Dual-Mode Library Filter
-status: verifying
-stopped_at: Phase 131 executed (131-01..05 + gaps 131-06..10) — held for human UAT
-last_updated: "2026-06-30T17:10:00.000Z"
-last_activity: 2026-06-30
+status: ready
+stopped_at: Phase 131 complete (user-approved 2026-07-01)
+last_updated: "2026-07-01T04:26:41.044Z"
+last_activity: 2026-07-01
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 13
   completed_plans: 13
-  percent: 33
+  percent: 67
 ---
 
 # Project State
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md
 
 **Core value:** Researchers can find what they need in the Genizah corpus
-**Current focus:** Phase 131 — dual-mode-parity-desktop-catalog-web-browse-by-identificatio
+**Current focus:** Phase 132 — public-api-dual-mode (v8.4.0)
 
 ## Current Position
 
-Phase: 131 (dual-mode-parity-desktop-catalog-web-browse-by-identificatio) — AWAITING HUMAN UAT (held by user)
-Plan: 10 of 10 executed (131-01..05 + gaps 131-06 dynamic facet counts, 131-07 sort + type-to-find, 131-08 Hebrew-UI library code, 131-09 same code in English UI, 131-10 code in /search dialog + type-to-find collapse fix)
-Status: Code-complete + code-verified (6/6 must-haves); desktop/web parity gaps 131-06..10 executed (63 desktop+catalog + 42 web tests). HELD for live render-smoke UAT (11 items in 131-HUMAN-UAT.md). NOT marked complete; do NOT advance to Phase 132 until UAT passes.
-Last activity: 2026-06-30 -- Phase 131 + gaps 131-06..10 executed & gated; held for human UAT
-Next step: Run the 11 items in 131-HUMAN-UAT.md against a live web/desktop instance, then re-run `/gsd-execute-phase 131` (verifier re-runs -> passed -> completes phase) or `/gsd-verify-work 131`. Report issues -> `/gsd-plan-phase 131 --gaps`.
+Phase: 132 (public-api-dual-mode) — Not started
+Plan: Not started
+Status: Phase 131 COMPLETE (user-approved UAT 11/11 on 2026-07-01). Dual-mode library filter now at full desktop + web parity (catalog + /search + /parallels), incl. dynamic counts, sort, type-to-find, and searchable English codes. Phase 132 (public API dual-mode) not yet started.
+Last activity: 2026-07-01 -- Phase 131 completed (10 plans: 131-01..05 + gaps 131-06..10)
+Next step: /gsd-discuss-phase 132 (recommended) or /gsd-plan-phase 132. Optional: /gsd-secure-phase 131 (security_enforcement is on; no 131-SECURITY.md yet).
 
 ## Accumulated Context
 
@@ -122,6 +122,7 @@ Next step: Run the 11 items in 131-HUMAN-UAT.md against a live instance, then re
 | Phase 131 P03 | 15 | 2 tasks | 2 files |
 | Phase 131 P05 | 60 | 2 tasks | 1 files |
 | Phase 131 P07 | 20 | 3 tasks | 3 files |
+| 131 | 10 | - | - |
 
 ## Decisions
 
