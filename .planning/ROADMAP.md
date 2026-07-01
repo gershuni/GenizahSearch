@@ -88,7 +88,7 @@ See: .planning/milestones/v8.3.0-ROADMAP.md
 - [x] **Phase 131: Dual-Mode Parity — Desktop Catalog + Web Browse-by-Identification + Web `/parallels`** - Extend the Phase-130 (mode + set) model to the three remaining UI surfaces: the desktop catalog `LibraryFilterDialog` (Browse-by-Identification), the web Browse-by-Identification catalog filter, and a NEW web `/parallels` library-filter control (scoping via the existing `restrict_sys_ids` path) — each persisted, each at parity with the lead. (executed 2026-06-30 — code-verified 6/6; awaiting human UAT — see 131-HUMAN-UAT.md)
  (completed 2026-07-01)
 
-- [ ] **Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`)** — **DEFERRED → v8.4.1 (2026-07-01).** Add an optional library-filter `mode` (include / exclude) alongside `filters.library` on both public endpoints; backward-compatible (omitted = include); `exclude` resolves to the complement (sys_ids whose `library_code` is not in the set) intersected into `restrict_sys_ids`. Documented in `docs/SEARCH_API.md` + the skill `api_contract.md`.
+- [x] **Phase 132: Public API Dual-Mode (`/api/search` + `/api/parallels`)** — **DEFERRED → v8.4.1 (2026-07-01).** Add an optional library-filter `mode` (include / exclude) alongside `filters.library` on both public endpoints; backward-compatible (omitted = include); `exclude` resolves to the complement (sys_ids whose `library_code` is not in the set) intersected into `restrict_sys_ids`. Documented in `docs/SEARCH_API.md` + the skill `api_contract.md`. (completed 2026-07-01)
 
 ## Phase Details
 
@@ -182,7 +182,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2)*
 
-- [ ] 132-03-PLAN.md — Docs: `docs/SEARCH_API.md` + skill `api_contract.md` document the include/exclude mode, omitted-default, and complement semantics (DMF-11 criterion 4)
+- [x] 132-03-PLAN.md — Docs: `docs/SEARCH_API.md` + skill `api_contract.md` document the include/exclude mode, omitted-default, and complement semantics (DMF-11 criterion 4)
 
 ## Progress
 
@@ -190,4 +190,4 @@ Plans:
 |-------|----------------|--------|-----------|
 | 130. Dual-Mode Filter Core — Web /search | 3/3 | Complete    | 2026-06-30 |
 | 131. Dual-Mode Parity — Desktop + Browse + Parallels | 10/8 | Complete    | 2026-07-01 |
-| 132. Public API Dual-Mode | 2/3 | In Progress|  |
+| 132. Public API Dual-Mode | 3/3 | Complete   | 2026-07-01 |
