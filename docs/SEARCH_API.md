@@ -181,7 +181,7 @@ when the offending key is the legacy `mode` field (renamed to `search_mode` in P
 | `responsa_options` | object \| null | valid only when `search_mode="responsa"` | `null` | see sub-table below |
 | `gap` | integer | must be `0` when `search_mode in {title, shelfmark}` | `0` | proximity slop for keyword search |
 | `limit` | integer | `1..100` for non-fuzzy modes (`MAX_LIMIT=100`); `1..SEARCH_API_FUZZY_MAX_LIMIT` (default 500, max 2000) for `fuzzy` | `50` (fuzzy with no explicit limit widens to a recall-oriented default of 250) | P9X: fuzzy recall-over-precision — non-fuzzy boundary unchanged |
-| `filters` | object \| null | all sub-fields nullable; unknown filter keys → 400 `unknown_filter_key`; unknown values → 400 `unresolvable_filter_value` | `null` | `library` (library codes, e.g. `["CUL","JTS","Oxford"]` — inclusion filter, intersected with the other filters BEFORE the result cap; SEED-026), `domains`, `authors`, `works`, `materials` (string lists); `date_from`, `date_to` (int years) |
+| `filters` | object \| null | all sub-fields nullable; unknown filter keys → 400 `invalid_request` (Pydantic `extra='forbid'`); unknown values → 400 `unresolvable_filter_value` | `null` | `library` (library codes, e.g. `["CUL","JTS","Oxford"]` — inclusion or exclusion filter depending on `library_filter_mode`; intersected with the other filters BEFORE the result cap; SEED-026); `library_filter_mode` (`"include"` default, omitted≡include — restrict to the given set; `"exclude"` — restrict to the complement, i.e. manuscripts whose `library_code` is NOT in the set; invalid value → 400 `invalid_request`; applies to both `POST /api/search` and `POST /api/parallels`; Phase 132 DMF-11); `domains`, `authors`, `works`, `materials` (string lists); `date_from`, `date_to` (int years) |
 
 ### `responsa_options` sub-fields
 
@@ -642,7 +642,7 @@ public API surface — renaming any is a breaking change).
 | `query_required` | 400 | post-strip empty `query` |
 | `query_too_long` | 400 | `len(query) > 1000` |
 | `limit_too_high` | 400 | `req.limit > MAX_LIMIT` (100) for non-fuzzy modes, or `req.limit > SEARCH_API_FUZZY_MAX_LIMIT` for fuzzy. Pydantic still rejects `limit > 2000` (FUZZY_HARD_MAX) with `invalid_request`. **Contract change (heavy-tier release):** a non-fuzzy `limit` in `101..2000` now returns `limit_too_high` (was `invalid_request` when the Pydantic bound was `le=100`). The request is still rejected with HTTP 400; only the error `code` changed (now the more specific `limit_too_high`). Clients that branch on `invalid_request` for over-limit values should also accept `limit_too_high`. |
-| `unknown_filter_key` | 400 | filter key not in known set |
+| `unknown_filter_key` | 400 | reserved in `ERROR_CODES` for future use; in practice, an unknown `filters` key is caught first by Pydantic `extra='forbid'` and returns `invalid_request` (not this code) |
 | `unresolvable_filter_value` | 400 | filter value not in vocabulary |
 | `filter_vocabulary_unavailable` | 503 | vocabulary loader failed (Phase 78 R2-#3 fail-closed) |
 | `rate_limited` | 429 + `Retry-After` | per-IP sliding window exhausted on the endpoint's own bucket |
