@@ -51,11 +51,16 @@ Notes:
 - `regex_pattern_too_long` error code is NOT in v7.10 (deferred with regex mode).
 - `filters` keys (all optional; `extra='forbid'` rejects any other key with
   `invalid_request`): `library` (list of library codes, e.g. `["CUL","JTS","Oxford"]`),
+  `library_filter_mode` (optional enum; `"include"` default, omitted≡include — restrict to
+  the given set; `"exclude"` — restrict to the complement, i.e. manuscripts whose
+  `library_code` is NOT in the set; invalid value → 400 `invalid_request`; applies to
+  **both `POST /api/search` and `POST /api/parallels`**; Phase 132 DMF-11),
   `domains`, `authors`, `works`, `materials` (all lists), `date_from`, `date_to` (ints).
   Every categorical value is validated server-side — an unknown value (incl. an unknown
-  library code) returns 400 `unresolvable_filter_value`. **`library` is an inclusion
-  filter applied server-side and intersected with the other filters BEFORE the result
-  cap** (SEED-026), so it is more complete than filtering the returned page client-side.
+  library code) returns 400 `unresolvable_filter_value`. **`library` is an inclusion or
+  exclusion filter applied server-side (controlled by `library_filter_mode`) and intersected
+  with the other filters BEFORE the result cap** (SEED-026), so it is more complete than
+  filtering the returned page client-side.
   The `search.py` script also accepts a convenience `--library CUL,JTS` flag.
 
 ## POST /api/search response
