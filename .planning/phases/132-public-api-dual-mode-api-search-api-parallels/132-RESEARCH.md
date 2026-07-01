@@ -146,7 +146,7 @@ class FiltersModel(BaseModel):
         description="Library codes (e.g. 'CUL', 'JTS'). ...",
     )
     library_filter_mode: Optional[Literal['include', 'exclude']] = Field(
-        default='include',
+        default=None,  # Codex R1 HIGH: None (not 'include') → omitted callers' echo stays byte-for-byte; normalise None→'include' in _intersect_library_filter
         description=(
             "How the library list is applied. 'include' (default): restrict results to "
             "manuscripts in the given libraries (today's behavior). "
@@ -238,7 +238,7 @@ The `filters_dict` is built by `req.filters.model_dump(exclude_none=True)` at:
 
 `model_dump(exclude_none=True)` will include `library_filter_mode` in the dumped dict whenever it is not `None`. Since the default is `'include'` (not `None`), a client that omits the field entirely gets `library_filter_mode='include'` in the echo — accurate and informative.
 
-If the preference is to omit `library_filter_mode` from the echo when not supplied, use `Optional[Literal['include','exclude']] = None` with normalisation to `'include'` internally, and `exclude_defaults=True` in the dump. Either approach is valid; **recommended**: keep `default='include'` so the echo always shows the effective mode. [ASSUMED — design preference; either approach satisfies DMF-11]
+The code dumps via `model_dump(exclude_none=True)`, so use `Optional[Literal['include','exclude']] = Field(default=None)` and normalise `None → 'include'` in `_intersect_library_filter`. An omitted field is None → dropped from the dump → the request echo stays byte-for-byte identical (existing exact-echo tests unaffected). **DECISION (Codex R1 HIGH, 2026-07-01): `default=None`** — NOT `'include'`, which would inject the key into every caller's echo and break `tests/test_search_api_v2.py:662`/`:1237`.
 
 ### Anti-Patterns to Avoid
 
@@ -272,7 +272,7 @@ If the preference is to omit `library_filter_mode` from the echo when not suppli
 ### Pitfall 2: `model_dump(exclude_none=True)` behavior with default `'include'`
 **What goes wrong:** If `library_filter_mode` uses `Optional[...] = None` as default and the handler passes `filters_dict` to `_intersect_library_filter`, a client that omits the field gets `None` in `filters_dict` — then `(filters_dict or {}).get('library_filter_mode')` returns `None`, which must be treated as `'include'`. [ASSUMED — design detail to confirm]
 **Why it happens:** `exclude_none=True` strips `None` values; `Optional[...] = 'include'` includes the field only when the value is non-`None`.
-**How to avoid:** Prefer `default='include'` (non-None) so the field always appears in the dump. If `None`-as-default is used, normalise `None → 'include'` explicitly in `_intersect_library_filter`.
+**How to avoid:** Use `default=None` (Codex R1 HIGH) and normalise `None → 'include'` explicitly in `_intersect_library_filter`, so an omitted field is dropped by `exclude_none=True` and the echo stays byte-for-byte unchanged. (A non-None `'include'` default would inject the key into every caller's echo and break the exact-echo tests — rejected.)
 **Warning signs:** Mode echo in response shows wrong value; include/exclude behaves identically.
 
 ### Pitfall 3: DMF-10 — `'LOCAL'` must not be passable as an exclude code
@@ -316,7 +316,7 @@ class FiltersModel(BaseModel):
     )
     # ADD AFTER library:
     # library_filter_mode: Optional[Literal['include', 'exclude']] = Field(
-    #     default='include',
+    #     default=None,  # Codex R1 HIGH: None, not 'include'
     #     description="...",
     # )
     materials: Optional[List[str]] = Field(default=None, ...)
@@ -417,7 +417,7 @@ def test_library_include_exclude_disjoint(client, populated_state, clean_env, mo
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
 | A1 | `library_filter_mode` belongs in `FiltersModel` rather than as a top-level field on `SearchRequest`/`ParallelsRequest` | Architecture, Code Examples | If it's at the top level, the planner must add it to both request models instead of one. Behavior is identical. |
-| A2 | `default='include'` (non-None) is preferred over `default=None` with internal normalisation | Code Examples | If `None` default is chosen, `_intersect_library_filter` must treat `None → 'include'` explicitly. No behavior difference for callers. |
+| A2 | REVERSED (Codex R1 HIGH, 2026-07-01): `default=None` + internal `None→'include'` normalisation is REQUIRED (NOT `default='include'`), so omitting callers' request echo stays byte-for-byte | Code Examples | `_intersect_library_filter` treats `None → 'include'`; a non-None default would break exact-echo tests (test_search_api_v2.py:662/:1237) |
 | A3 | Adding a `LOCAL` guard to `validate_filter_values` library check is OPTIONAL (the current behavior is a no-op, not a security gap) | Pitfall 3 | If `LOCAL` should explicitly 400, the planner needs an extra task to add the guard to `validate_filter_values`. Currently `LOCAL` passes validation but resolves to empty set (web csv_bank has no LOCAL rows). |
 | A4 | `resolve_library_complement_sys_ids` is added to `shared/fjms_service.py` (module-level function, alongside `resolve_library_sys_ids`) | Code Examples | Could also be inlined in `_intersect_library_filter`. Separate function is more testable and mirrors the existing naming convention. |
 
