@@ -174,7 +174,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 132-01-PLAN.md — Wave-0 test scaffold: new `tests/test_search_api_library_mode.py` (~8 tests) pinning DMF-11 on both `/api/search` and `/api/parallels` + the complement-helper contract (RED until Plan 02)
+- [x] 132-01-PLAN.md — Wave-0 test scaffold: new `tests/test_search_api_library_mode.py` (9 tests, 7 RED / 2 green) pinning DMF-11 on both `/api/search` and `/api/parallels` + the complement-helper contract (RED until Plan 02) — COMPLETE 2026-07-01
 
 **Wave 2** *(blocked on Wave 1)*
 

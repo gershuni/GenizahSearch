@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
-milestone: v8.4.0
-milestone_name: Dual-Mode Library Filter
-status: release_in_progress
-stopped_at: v8.4.0 built + tagged + secured; GitHub asset-upload + publish + web deploy PENDING (in-flight connectivity 2026-07-01) — see Resume Checklist
-last_updated: "2026-07-01T04:26:41.044Z"
+milestone: v8.4.1
+milestone_name: Public API Dual-Mode Library Filter
+status: executing
+stopped_at: "Phase 132 Plan 01 complete (Wave 0 RED scaffold); Plan 02 next"
+last_updated: "2026-07-01T12:45:00.000Z"
 last_activity: 2026-07-01
 progress:
-  total_phases: 2
+  total_phases: 3
   completed_phases: 2
-  total_plans: 13
-  completed_plans: 13
-  percent: 100
+  total_plans: 16
+  completed_plans: 14
+  percent: 88
 ---
 
 # Project State
@@ -25,11 +25,11 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Milestone: v8.4.0 Dual-Mode Library Filter — all in-scope phases COMPLETE (130-131)
-Phase 132 (public-api-dual-mode): DEFERRED → v8.4.1 (user decision 2026-07-01); requirement DMF-11 carries forward
-Status: v8.4.0 re-scoped to 2 phases (130-131), both complete + user-approved (UAT 11/11 on 2026-07-01). Dual-mode library filter at full desktop + web parity (catalog + /search + /parallels), incl. dynamic counts, sort, type-to-find, and searchable English codes.
-Last activity: 2026-07-01 -- v8.4.0 release started; DESKTOP INSTALLER BUILT + tag pushed + draft release created; asset upload FAILED on in-flight DNS (no partial asset), deferred by user ("don't upload if the upload failed").
-Next step: finish the release when off the plane — see Resume Checklist below.
+Milestone: v8.4.1 Public API Dual-Mode Library Filter — Phase 132 in progress
+Phase: 132-public-api-dual-mode-api-search-api-parallels
+Plan: 01 COMPLETE (Wave 0 RED scaffold — tests/test_search_api_library_mode.py, 9 tests, 7 RED, 2 green)
+Next: Plan 02 — implementation (FiltersModel.library_filter_mode field + resolve_library_complement_sys_ids + _intersect_library_filter exclude branch)
+Last activity: 2026-07-01 -- Phase 132 Plan 01 complete; Wave 0 RED scaffold committed (0da02e11).
 
 ## Resume Checklist — v8.4.0 go-live (needs good connectivity)
 
@@ -129,10 +129,10 @@ Items acknowledged and deferred at v8.3.0 milestone close on 2026-06-30:
 
 ## Session Continuity
 
-Last session: 2026-07-01T00:00:00.000Z
-Stopped at: v8.4.0 release paused mid-go-live (in-flight connectivity) — built + tagged + draft release, asset upload + publish + web deploy pending
-Resume file: See "Resume Checklist — v8.4.0 go-live" in Current Position above
-Next step: when off the plane — gh release upload → verify → publish → deploy.sh → milestone-close ritual.
+Last session: 2026-07-01T12:45:00.000Z
+Stopped at: Phase 132 Plan 01 COMPLETE — Wave 0 RED scaffold committed (0da02e11); Plan 02 is next
+Resume file: None
+Next step: Execute Plan 02 (132-02) — implementation of FiltersModel.library_filter_mode + complement helper + exclude branch.
 
 ## Performance Metrics
 
@@ -156,6 +156,7 @@ Next step: when off the plane — gh release upload → verify → publish → d
 - [Phase ?]: clear_search_snapshot resets search_library_filter to {'mode':'hide','codes':[]}: D-09 dict shape settles (mode+set) persistence contract for Plan 02
 - [Phase ?]: show-all normalized to neutral hide/[] on Apply (D-05/DMF)
 - [Phase ?]: browse->search handoff stamps mode=show_only + persists dict shape (prevents misread as Hide-set)
+- [Phase 132 Plan 01]: library_filter_mode default=None (not 'include') — model_dump(exclude_none=True) drops it → omitted callers' echo stays byte-for-byte unchanged (Codex R1 HIGH); _intersect_library_filter normalises None→'include' internally
 
 ## Operator Next Steps
 
