@@ -1389,8 +1389,12 @@ class FjmsService:
 
         Args:
             filters: dict with optional keys 'domains', 'authors', 'works',
-                     'materials', 'date_from', 'date_to' (D-15 shape, post-
-                     Pydantic validation).
+                     'library', 'library_filter_mode', 'materials', 'date_from',
+                     'date_to' (D-15 shape, post-Pydantic validation).
+                     'library' is validated against LIBRARY_CODES (Phase 129).
+                     'library_filter_mode' is intentionally not validated here —
+                     it is a Pydantic Literal field with no server-side vocabulary
+                     table; it is consumed by _intersect_library_filter.
         """
         if not filters:
             return
