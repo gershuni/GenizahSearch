@@ -104,10 +104,10 @@ Items acknowledged and deferred at v8.3.0 milestone close on 2026-06-30:
 
 ## Session Continuity
 
-Last session: 2026-06-30T16:30:00.000Z
-Stopped at: Phase 131 executed (131-01..05 + gaps 131-06..10) — held for human UAT
+Last session: 2026-07-01T00:00:00.000Z
+Stopped at: Phase 131 complete (user-approved UAT 11/11, 2026-07-01)
 Resume file: None
-Next step: Run the 11 items in 131-HUMAN-UAT.md against a live instance, then re-run `/gsd-execute-phase 131` (verifier re-runs) to complete the phase, or `/gsd-plan-phase 131 --gaps` if UAT surfaces issues.
+Next step: /gsd-discuss-phase 132 (or /gsd-plan-phase 132) to start the public-API dual-mode phase (last phase of v8.4.0).
 
 ## Performance Metrics
 
