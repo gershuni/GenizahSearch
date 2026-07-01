@@ -3821,3 +3821,59 @@ def resolve_library_sys_ids(library_codes, meta_mgr) -> set:
         for sid, row in meta_mgr.csv_bank.items()
         if row.get("library_code") in valid_code_set
     }
+
+
+def resolve_library_complement_sys_ids(library_codes, meta_mgr) -> set:
+    """Reverse-lookup: sys_ids whose ``library_code`` is NOT in ``library_codes``.
+
+    Complement of :func:`resolve_library_sys_ids`.  Used for the public API
+    ``library_filter_mode='exclude'`` path — results are scoped to manuscripts
+    that do NOT belong to any of the given libraries.
+
+    Args:
+        library_codes: Iterable of library-code strings (e.g. ``['CUL', 'JTS']``).
+            Unknown codes are treated as "excluding nothing" (see below).
+            Empty list or None → returns ``set()`` (caller short-circuits; no-op).
+        meta_mgr: A ``MetadataManager`` instance whose ``csv_bank`` attribute maps
+            ``sys_id → {library_code: str, ...}``.  ``None`` → returns ``set()``.
+
+    Returns:
+        ``set[str]`` of sys_ids whose ``library_code`` is NOT in the validated
+        exclusion set.  Special cases:
+
+        * Empty / None ``library_codes`` → ``set()`` (caller's short-circuit handles
+          the "no filter" semantic before reaching here).
+        * All supplied codes are unknown/invalid → full corpus
+          (``set(meta_mgr.csv_bank.keys())``); excluding nothing means show all.
+        * ``ImportError`` on LIBRARY_CODES → fail-open to full corpus + log error.
+
+    Threading / performance note:
+        Iterates the full csv_bank (~255K entries) in a single O(N) pass.
+        MUST be called off the asyncio event loop — use
+        ``asyncio.get_event_loop().run_in_executor(None, resolve_library_complement_sys_ids, ...)``
+        (same pattern as :func:`resolve_library_sys_ids`).
+    """
+    if not library_codes or meta_mgr is None:
+        return set()
+
+    try:
+        from shared.browse_map_utils import LIBRARY_CODES as _VALID_CODES
+    except ImportError:
+        logger.error("resolve_library_complement_sys_ids: could not import LIBRARY_CODES — fail-open to full corpus")
+        return set(meta_mgr.csv_bank.keys())
+
+    excl_set = {c for c in library_codes if c in _VALID_CODES}
+    if not excl_set:
+        # All codes unknown — excluding nothing = return full corpus
+        logger.debug(
+            "resolve_library_complement_sys_ids: all supplied codes %r are unknown — "
+            "returning full corpus (exclude-nothing)",
+            list(library_codes),
+        )
+        return set(meta_mgr.csv_bank.keys())
+
+    return {
+        sid
+        for sid, row in meta_mgr.csv_bank.items()
+        if row.get("library_code") not in excl_set
+    }
