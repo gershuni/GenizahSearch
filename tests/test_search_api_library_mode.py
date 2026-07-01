@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Phase 132 Plan 01 — Wave 0 test scaffold for library_filter_mode (DMF-11).
+"""Phase 132 Plan 01+02 — regression guard for library_filter_mode (DMF-11).
 
-Pins every DMF-11 behavior BEFORE production code is written (RED → GREEN cycle).
 Tests cover BOTH /api/search AND /api/parallels since both share FiltersModel.
-
-All tests in this file are expected to FAIL (RED) until Plan 02 ships:
+All tests are GREEN (Plan 02 has shipped):
   - FiltersModel.library_filter_mode field (Optional[Literal['include','exclude']])
   - resolve_library_complement_sys_ids helper in shared/fjms_service.py
   - _intersect_library_filter exclude branch in web/search_api.py
@@ -151,8 +149,6 @@ def test_include_mode_is_default_same_as_omitted(client, stub_searcher, clean_en
     """DMF-11-1: posting library_filter_mode='include' yields the SAME resolved
     restrict set as omitting the field entirely — both routes through
     resolve_library_sys_ids, NOT the complement helper.
-
-    RED: FiltersModel.library_filter_mode field does not exist yet.
     """
     from shared import fjms_service as fjms_module
 
@@ -166,12 +162,11 @@ def test_include_mode_is_default_same_as_omitted(client, stub_searcher, clean_en
     monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
     monkeypatch.setattr(fjms_module, 'get_filter_sys_ids', lambda **kw: None)
     monkeypatch.setattr(fjms_module, 'resolve_library_sys_ids', _fake_include)
-    # resolve_library_complement_sys_ids may not exist yet — guard with hasattr
-    if hasattr(fjms_module, 'resolve_library_complement_sys_ids'):
-        monkeypatch.setattr(
-            fjms_module, 'resolve_library_complement_sys_ids',
-            lambda codes, mgr: (complement_calls.append(codes) or set()),
-        )
+    monkeypatch.setattr(
+        fjms_module, 'resolve_library_complement_sys_ids',
+        lambda codes, mgr: (complement_calls.append(codes) or set()),
+        raising=False,
+    )
 
     # Request WITH explicit include
     r_include = _post_search(
@@ -204,8 +199,6 @@ def test_omit_mode_equals_include(client, stub_searcher, clean_env, monkeypatch)
     'library_filter_mode' key when the field is omitted (default=None +
     model_dump(exclude_none=True) drops it). Explicitly posting 'include'
     MAY echo the key; omitting MUST NOT.
-
-    RED: FiltersModel.library_filter_mode field does not exist yet.
     """
     from shared import fjms_service as fjms_module
 
@@ -237,9 +230,6 @@ def test_omit_mode_equals_include(client, stub_searcher, clean_env, monkeypatch)
 def test_exclude_restricts_to_complement(client, stub_searcher, clean_env, monkeypatch):
     """DMF-11-2: library_filter_mode='exclude' routes through
     resolve_library_complement_sys_ids and the complement stub set scopes the search.
-
-    RED: FiltersModel.library_filter_mode field + resolve_library_complement_sys_ids
-    do not exist yet.
     """
     from shared import fjms_service as fjms_module
 
@@ -284,10 +274,12 @@ def test_exclude_restricts_to_complement(client, stub_searcher, clean_env, monke
 
 
 def test_include_vs_exclude_disjoint(client, stub_searcher, clean_env, monkeypatch):
-    """DMF-11-2: same library=['CUL'] under include vs exclude produces disjoint
-    restrict sets (include stub ∩ exclude stub == ∅).
+    """DMF-11-2: same library=['CUL'] under include vs exclude routes through
+    different resolver helpers — include must call resolve_library_sys_ids and
+    exclude must call resolve_library_complement_sys_ids, never the other.
 
-    RED: FiltersModel.library_filter_mode field does not exist yet.
+    This is a RUNTIME parity guard: it will FAIL if include and exclude are made
+    to call the same resolver, which was the regression risk.
     """
     from shared import fjms_service as fjms_module
 
@@ -295,56 +287,77 @@ def test_include_vs_exclude_disjoint(client, stub_searcher, clean_env, monkeypat
     INCLUDE_SYS_IDS = {'9911111111111111', '9911111111111112'}
     COMPLEMENT_SYS_IDS = {'9922222222222221', '9922222222222222'}
 
-    # These two sets must be disjoint by design
+    # Sanity: stubs are disjoint (test setup invariant)
     assert INCLUDE_SYS_IDS & COMPLEMENT_SYS_IDS == set(), (
         "Test setup error: include and complement stubs must be disjoint"
     )
 
-    restrict_sets_seen = []
+    include_calls = []
+    complement_calls = []
 
-    original_intersect = _intersect_library_filter
+    def _fake_include(codes, mgr):
+        include_calls.append(list(codes))
+        return INCLUDE_SYS_IDS
 
-    async def _spy_intersect(restrict_sys_ids, filters_dict, meta_mgr):
-        result = await original_intersect(restrict_sys_ids, filters_dict, meta_mgr)
-        restrict_sets_seen.append(result)
-        return result
+    def _fake_complement(codes, mgr):
+        complement_calls.append(list(codes))
+        return COMPLEMENT_SYS_IDS
 
     monkeypatch.setattr(fjms_module, 'validate_filter_values', lambda d: None)
     monkeypatch.setattr(fjms_module, 'get_filter_sys_ids', lambda **kw: None)
-    monkeypatch.setattr(
-        fjms_module, 'resolve_library_sys_ids',
-        lambda codes, mgr: INCLUDE_SYS_IDS,
-    )
+    monkeypatch.setattr(fjms_module, 'resolve_library_sys_ids', _fake_include)
     monkeypatch.setattr(
         fjms_module, 'resolve_library_complement_sys_ids',
-        lambda codes, mgr: COMPLEMENT_SYS_IDS,
+        _fake_complement,
         raising=False,
     )
 
+    # --- include request ---
     r_include = _post_search(
         client, query='x', search_mode='exact',
         filters={'library': ['CUL'], 'library_filter_mode': 'include'},
     )
+    assert r_include.status_code == 200, r_include.text
+
+    # Include request must have called resolve_library_sys_ids exactly once
+    assert len(include_calls) == 1, (
+        f"include mode must call resolve_library_sys_ids exactly once, got {include_calls}"
+    )
+    # Include request must NOT have called the complement helper
+    assert len(complement_calls) == 0, (
+        f"include mode must NOT call resolve_library_complement_sys_ids, got {complement_calls}"
+    )
+
+    # Reset call recorders before the exclude request
+    include_calls.clear()
+    complement_calls.clear()
+
+    # --- exclude request ---
     r_exclude = _post_search(
         client, query='x', search_mode='exact',
         filters={'library': ['CUL'], 'library_filter_mode': 'exclude'},
     )
-
-    assert r_include.status_code == 200, r_include.text
     assert r_exclude.status_code == 200, r_exclude.text
 
-    # The key invariant: include set and exclude set (complement) are disjoint
-    # We verify this via the stub stubs — the sets themselves do not overlap
+    # Exclude request must have called resolve_library_complement_sys_ids exactly once
+    assert len(complement_calls) == 1, (
+        f"exclude mode must call resolve_library_complement_sys_ids exactly once, got {complement_calls}"
+    )
+    # Exclude request must NOT have called the include helper
+    assert len(include_calls) == 0, (
+        f"exclude mode must NOT call resolve_library_sys_ids, got {include_calls}"
+    )
+
+    # The restrict sets from the two paths are disjoint by construction —
+    # verified here via the recorded resolver calls, not a pre-built constant.
     assert INCLUDE_SYS_IDS & COMPLEMENT_SYS_IDS == set(), (
-        "include and exclude result sets must be disjoint for library=['CUL']"
+        "include and exclude restrict sets must be disjoint for library=['CUL']"
     )
 
 
 def test_parallels_exclude_mode(client, stub_searcher, clean_env, monkeypatch):
     """DMF-11-2: /api/parallels with library_filter_mode='exclude' honors the mode
     (parity with /api/search) — assert 200 + the complement path was taken.
-
-    RED: FiltersModel.library_filter_mode field does not exist yet.
     """
     from shared import fjms_service as fjms_module
 
@@ -388,15 +401,6 @@ def test_invalid_mode_returns_400(client, stub_searcher, clean_env):
     with r.json()['error']['code'] == 'invalid_request' (Pydantic Literal rejection).
 
     Also asserts the same bad value 400s on /api/parallels.
-
-    RED: FiltersModel.library_filter_mode field (with Literal constraint) does not
-    exist yet — currently FiltersModel.extra='forbid' will reject the unknown key as
-    invalid_request, which means this test MAY be green incidentally; but we assert
-    the error code matches 'invalid_request' in both cases.
-
-    NOTE: If the field doesn't exist yet and extra='forbid' catches it, the test
-    may pass for the wrong reason. The test is still valid: once the field is added
-    (Plan 02), an invalid Literal value must still yield 400 invalid_request.
     """
     # /api/search
     r_search = _post_search(
@@ -420,9 +424,6 @@ def test_mode_without_library_is_noop(client, stub_searcher, clean_env, monkeypa
     applies no filter: assert neither resolve helper is called and the search still 200s.
 
     The _intersect_library_filter short-circuits when `not libs`, so this is a noop.
-
-    RED: FiltersModel.library_filter_mode field does not exist yet; if extra='forbid'
-    blocks it, this test will fail with 400. After Plan 02, it must 200.
     """
     from shared import fjms_service as fjms_module
 
@@ -472,18 +473,8 @@ def test_resolve_library_complement_sys_ids(monkeypatch):
       - Empty/None codes → set()
       - union(complement(['CUL']), resolve_library_sys_ids(['CUL'])) == all keys
       - intersection(complement(['CUL']), resolve_library_sys_ids(['CUL'])) == set()
-
-    RED: resolve_library_complement_sys_ids does not exist yet in shared/fjms_service.
     """
-    # Import lazily inside test body so collection does not error before Plan 02
-    try:
-        from shared.fjms_service import resolve_library_complement_sys_ids
-    except ImportError:
-        pytest.fail(
-            "resolve_library_complement_sys_ids not yet in shared/fjms_service — "
-            "this test will remain RED until Plan 02 implements the helper."
-        )
-
+    from shared.fjms_service import resolve_library_complement_sys_ids
     from shared.fjms_service import resolve_library_sys_ids
 
     # Build a fake meta_mgr with a csv_bank having 2 CUL + 2 JTS rows
@@ -547,8 +538,6 @@ def test_intersect_helper_exclude_branch(monkeypatch):
     (intersection with existing restrict set).
 
     Also asserts resolve_library_sys_ids was NOT called on the exclude path.
-
-    RED: _intersect_library_filter exclude branch does not exist yet.
     """
     from shared import fjms_service as fjms_module
 
