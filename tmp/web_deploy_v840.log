@@ -1,0 +1,18 @@
+=== Genizah Search Deployment ===
+Branch: master-main
+
+[1/3] Pulling latest code...
+From https://github.com/gershuni/GenizahSearch
+   c01e8842..16fcf7a1  master-main -> origin/master-main
+ * [new tag]           v8.4.0      -> v8.4.0
+HEAD is now at 16fcf7a1 chore(release): v8.4.0 — Dual-Mode Library Filter (Show-only / Hide)
+[2/3] Activating virtual environment...
+[3/3] Installing any new dependencies...
+
+[notice] A new release of pip is available: 25.3 -> 26.1.2
+[notice] To update, run: pip install --upgrade pip
+[4/4] Restarting services...
+
+=== Deployment complete ===
+● genizah-web.service - Genizah Web Interface
+     Active: active (running) since Wed 2026-07-01 11:45:29 UTC; 17ms ago

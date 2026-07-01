@@ -44,17 +44,16 @@ DONE (offline-safe, already applied):
 - [x] Desktop installer BUILT: `dist/GenizahSearchPro_V8.4.0_Setup.exe` (531,242,765 bytes / 507 MB, built 2026-07-01 09:56)
 - [x] GitHub release created as DRAFT (tag v8.4.0, notes set, NO asset — desktop users NOT pinged)
 
-REMAINING (run when connectivity is solid):
+- [x] WEB DEPLOYED to production 2026-07-01 (deploy.sh master-main → server reset to 16fcf7a1, genizah-web.service active; genizahsearch.com/ + /search → HTTP 200). v8.4.0 web half is LIVE.
+
+REMAINING (desktop half — needs solid connectivity; the installer upload failed on the plane's DNS):
 1. Upload asset to the draft:
    `gh release upload v8.4.0 dist/GenizahSearchPro_V8.4.0_Setup.exe`
 2. VERIFY asset uploaded (state:uploaded, size == 531242765):
    `gh release view v8.4.0 --json assets`
 3. Publish the release (this is what prompts desktop updaters):
    `gh release edit v8.4.0 --draft=false --latest`
-4. Web deploy (no index rebuild needed — UI-only feature):
-   `ssh ubuntu@ec2-44-247-206-248.us-west-2.compute.amazonaws.com 'cd /home/ubuntu/GenizahSearch && ./deploy.sh master-main'`
-   then curl-smoke genizahsearch.com (port 8081).
-5. Milestone-close ritual for v8.4.0 (archive phase dirs → milestones/, mark ✅ in ROADMAP, REQUIREMENTS archival, reset STATE for next milestone). HELD until go-live so docs don't claim "shipped" before it's live.
+4. Milestone-close ritual for v8.4.0 (archive phase dirs → milestones/, mark ✅ in ROADMAP, REQUIREMENTS archival, reset STATE for next milestone). HELD until the desktop release publishes so docs don't claim fully-shipped before the installer is downloadable.
 
 ## Accumulated Context
 
