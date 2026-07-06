@@ -98,42 +98,8 @@ from web.pages.browse_enrichment import (
 
 VIEWER_STYLES = '''
 <script src="/static/manuscript_viewer.js"></script>
-<script>
-// Progressive image loading: show spinner → thumbnail (400px) → full (2000px)
-function progressiveLoad(img) {
-    var container = img.closest('.img-loading-container');
-    var fullSrc = img.getAttribute('data-full-src');
-    // Mark loaded on first successful paint
-    img.addEventListener('load', function onThumbLoad() {
-        if (container) container.classList.add('img-loaded');
-        img.removeEventListener('load', onThumbLoad);
-        // Upgrade to full resolution if available
-        if (fullSrc && img.src !== fullSrc) {
-            var full = new Image();
-            full.onload = function() {
-                img.src = fullSrc;
-            };
-            full.src = fullSrc;
-        }
-    });
-    // Also mark loaded on error (hide spinner)
-    img.addEventListener('error', function onErr() {
-        if (container) container.classList.add('img-loaded');
-        img.removeEventListener('error', onErr);
-    });
-}
-// Auto-init all progressive images on page
-function initProgressiveImages() {
-    document.querySelectorAll('img[data-full-src]').forEach(function(img) {
-        if (!img.dataset.progressiveInit) {
-            img.dataset.progressiveInit = 'true';
-            progressiveLoad(img);
-        }
-    });
-}
-
-// fetchFlIdsFromManifest, handleImageError, NLI_IIIF_BASE are in /static/manuscript_viewer.js
-</script>
+<!-- progressiveLoad, initProgressiveImages, fetchFlIdsFromManifest, handleImageError,
+     NLI_IIIF_BASE are all in /static/manuscript_viewer.js (shared with /search) -->
 <style>
     /* Image viewer container */
     .image-viewer-container {

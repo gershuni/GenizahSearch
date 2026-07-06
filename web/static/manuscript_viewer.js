@@ -4,6 +4,8 @@
  * Provides:
  * - fetchFlIdsFromManifest(sysId) -- IIIF manifest FL ID resolution
  * - handleImageError(img, sysId, pageIdx, isOxford, viewerName) -- fallback chain
+ * - progressiveLoad(img) -- thumbnail-to-full-resolution upgrade for one image
+ * - initProgressiveImages() -- auto-init all [data-full-src] images on the page
  * - createManuscriptViewer(options) -- viewer factory (zoom/pan/rotate/adjustments)
  *
  * Usage:
@@ -163,6 +165,49 @@ async function handleImageError(img, sysId, pageIdx, isOxford, viewerName) {
     if (parent) {
         parent.innerHTML = '<div style="text-align: center; color: #888;"><i class="material-icons" style="font-size: 4rem;">image_not_supported</i><p>Image not available</p></div>';
     }
+}
+
+/**
+ * Progressive image loading: show spinner → thumbnail (400px) → full (2000px).
+ * Marks the surrounding .img-loading-container as loaded on first paint (or
+ * error), then upgrades the <img> to its data-full-src resolution once the
+ * full image has preloaded.
+ *
+ * @param {HTMLImageElement} img - Image element with an optional data-full-src
+ */
+function progressiveLoad(img) {
+    var container = img.closest('.img-loading-container');
+    var fullSrc = img.getAttribute('data-full-src');
+    // Mark loaded on first successful paint
+    img.addEventListener('load', function onThumbLoad() {
+        if (container) container.classList.add('img-loaded');
+        img.removeEventListener('load', onThumbLoad);
+        // Upgrade to full resolution if available
+        if (fullSrc && img.src !== fullSrc) {
+            var full = new Image();
+            full.onload = function() {
+                img.src = fullSrc;
+            };
+            full.src = fullSrc;
+        }
+    });
+    // Also mark loaded on error (hide spinner)
+    img.addEventListener('error', function onErr() {
+        if (container) container.classList.add('img-loaded');
+        img.removeEventListener('error', onErr);
+    });
+}
+
+/**
+ * Auto-init all progressive images on the page (idempotent per image).
+ */
+function initProgressiveImages() {
+    document.querySelectorAll('img[data-full-src]').forEach(function(img) {
+        if (!img.dataset.progressiveInit) {
+            img.dataset.progressiveInit = 'true';
+            progressiveLoad(img);
+        }
+    });
 }
 
 /**
