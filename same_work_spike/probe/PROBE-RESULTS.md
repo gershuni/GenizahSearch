@@ -1,5 +1,8 @@
 # SEED-029 Separability Probe — RESULTS (2026-07-06)
 
+> Internal lab log. For the standalone technical method report (written for external
+> collaborators — full pipeline, parameters, calibration, evaluation), see **`METHOD.md`**.
+
 One-day feasibility probe for shared-passage detection over MiDRASH HTR
 (SEED-029 revised architecture: normalize → DF-banded char-5-gram seeds →
 diagonal two-hit → alignment verify). Run entirely on the dev box
