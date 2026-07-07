@@ -1,0 +1,32 @@
+{
+ "n_pages": 102568,
+ "n_positions": 86583715,
+ "grams_total": 3098736,
+ "grams_singleton": 704717,
+ "grams_dropped_df": 160700,
+ "grams_kept": 2233319,
+ "pair_hits_total": 653611484,
+ "same_sys_dropped": 1762690,
+ "acc_entries": 590944966,
+ "candidate_pairs": 40549024,
+ "t_total_s": 358.7,
+ "candidate_unique_pairs": 38232433,
+ "verify_s": 127.3,
+ "rej_short": 0,
+ "rej_density": 40185453,
+ "span_clipped": 104,
+ "accepted_pairs": 337069,
+ "post_s": 257.1,
+ "tier1_titles_in_db": 1864,
+ "tier1_titles_recall": 0.993,
+ "bh_sys_present": 512,
+ "bh_sys_connected": 326,
+ "flank_classes": {
+  "edge": 98393,
+  "island": 235804,
+  "continuation": 2872
+ },
+ "dup_flagged": 672,
+ "clean_pairs": 336397,
+ "total_s": 837.1
+}

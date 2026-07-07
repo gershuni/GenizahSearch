@@ -104,13 +104,18 @@ def main():
         tt = ' · '.join(f"{html.escape(t)} ({c})"
                         for t, c in titles.most_common(3))
         mem_rows = []
-        for s in sorted(members):
+        MEMBER_CAP = 60
+        for s in sorted(members)[:MEMBER_CAP]:
             sm, lib, ti = meta.get(s, (s, '?', ''))
             mem_rows.append(
                 f"<tr><td><a href='https://genizahsearch.com/browse?"
                 f"sys_id={s}' target='_blank'>{html.escape(sm)}</a></td>"
                 f"<td>{html.escape(lib)}</td>"
                 f"<td>{html.escape(ti) or '—'}</td></tr>")
+        if len(members) > MEMBER_CAP:
+            mem_rows.append(
+                f"<tr><td colspan='3'>… +{len(members) - MEMBER_CAP:,} more "
+                f"manuscripts (full list in the clusters CSV)</td></tr>")
         # sample passages: best pairs inside this cluster
         mset = set(members)
         samples = []

@@ -188,6 +188,17 @@ most of it. NEW required verifier feature — **flank-contrast classifier** (Hil
 align ~150-letter flanks of every accepted span; flanks-align → same-work; flanks-dissimilar →
 ISLAND → quotation/formula; island∧non-canon = citation of a non-canonical work (indirect
 witness — the highest-value class). Review tool: `same_work_spike/probe/review/review.html`.
+Final grades (n=164): 1/164 spurious, post-stage-0 precision 99.1% — precision solved.
+**100K scale rehearsal (2026-07-07): ✅ RUN — see `same_work_spike/probe/REHEARSAL-RESULTS.md`.**
+Stage-0 over the full corpus (effective ≈667K pages of 948K; 40K dup-photo FLs); numpy
+sort-merge engine (`engine_np.py`) = dict-engine parity, 14 min for 102,568 pages; recall
+ROSE at scale (tier-1 titles 0.993); volume law measured (654M hits at DF≤100; full corpus
+≈4–5B → disk-partitioned merge, mechanical). First text-reuse map: 337K accepted page pairs
+→ 244K MS pairs; **giant liturgical component (15,969 MSS, 89%) survives flank-contrast ⇒
+Track-1 canon masking is empirically THE gate before the works-census map**; beyond the blob
+the census is real (51-MS grammar-treatise cluster across 5 libraries, JA classics
+self-assembling, Karaite ketubbah formula clusters). Atlas: `review/rehearsal_100k_atlas.html`.
+Method report for external collaborators: `same_work_spike/probe/METHOD.md`.
 Next steps (ordered, handoff-ready) in PROBE-RESULTS.md §Next steps.
 
 ## The 10 decisions that matter (start values + cheap validation)

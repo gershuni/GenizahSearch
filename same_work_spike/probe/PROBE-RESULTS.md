@@ -254,15 +254,21 @@ calibration itself is now human-grounded.
 
 ## Next steps (handoff-ready, ordered — R1/R2 DONE above)
 
-3. **Stage-0 module**: FL-id dedup, 997-collapse, target-sheet filter,
-   language ID. Rerun pilot clean.
-4. **Precision sampling**: 200 stratified cross-class pairs, graded labels
-   (verbatim/near/paraphrase/formula/topical/unrelated), stratified on the
-   overlap region (100–300 letters × 0.35–0.45) — human (Hillel) or assisted;
-   this converts `cross` yield into real precision and finalizes the boundary.
-5. **Scale rehearsal**: 100K-page slice with the numpy (pair,bucket)
-   sort-merge representation; measure candidates/page and memory/time vs
-   corpus size (the DF-cap selectivity improves with scale — measure, don't
-   extrapolate from the enriched pilot).
-6. Then: Track 1 (canon identification vs Maagarim/Sefaria) and the
-   full-corpus run per SEED-029.
+3. ✅ **Stage-0 module** (2026-07-07): FL-id dedup, shelfmark dedup,
+   line-agreement dedup, target-sheet filter — `scripts/stage0.py`; run over
+   the FULL corpus: 231,679 short + 40,452 dup-FL + 9,007 target sheets
+   dropped → effective corpus ≈667K pages. (Language ID still open.)
+4. ✅ **Precision sampling** (Round 3 above): 164 human grades; boundary
+   human-grounded.
+5. ✅ **Scale rehearsal** (2026-07-07): 102,568 pages end-to-end in ~14 min
+   via the numpy sort-merge engine (`scripts/engine_np.py`); recall ROSE at
+   scale (tier-1 titles 0.993, BH 64%); volume law measured (654M raw hits;
+   DF cap self-tightens — full corpus ≈4–5B hits → disk-partitioned merge);
+   first text-reuse map built (337K accepted pairs → 244K MS pairs; giant
+   liturgical component 15,969 MSS ⇒ **Track-1 canon masking is the gate**).
+   Full writeup: **`REHEARSAL-RESULTS.md`**; map `results/rehearsal_100k_map.md`;
+   atlas `review/rehearsal_100k_atlas.html`.
+6. Then: **Track 1** (canon identification vs Maagarim/Sefaria + masking —
+   now empirically the prerequisite for a legible works census) and the
+   full-corpus run per SEED-029 (disk-partitioned engine + page-chain
+   extension of edge-class spans).

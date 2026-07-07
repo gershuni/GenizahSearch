@@ -345,6 +345,15 @@ Ordered execution plan: stage-0 module → **100K-page rehearsal** with the nump
 representation (measure candidates/page, RAM, wall-clock vs corpus size) → Track 1 canon
 labeling → full-corpus run. All compute on the dev box; never on the production web server.
 
+**Rehearsal outcome (2026-07-07, `REHEARSAL-RESULTS.md`):** 102,568 pages end-to-end in
+~14 min single-threaded; recall rose at scale (Tier-1 titles 0.993); raw-hit volume grows
+~linearly, not quadratically (DF-cap self-tightening confirmed: 146M → 654M hits for 5.7×
+pages; full corpus ≈4–5B → disk-partitioned merge). Stage-0 over the full corpus cut it to
+≈667K effective pages (24% short/empty, 40,452 duplicate photographs, 9,007 target sheets).
+First map: 337K accepted page pairs → 244K manuscript pairs; a giant liturgical component
+(15,969 MSS) survives flank-contrast — **empirical confirmation that Track-1 canonical
+masking is the prerequisite for a legible works census** (§8.2).
+
 ---
 
 ## 10. Evaluation
