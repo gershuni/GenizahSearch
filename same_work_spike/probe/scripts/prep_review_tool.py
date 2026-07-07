@@ -272,8 +272,7 @@ TEMPLATE = r"""<!DOCTYPE html>
 <script>
 const DATA = __DATA__;
 const GRADES = [
- ["verbatim","1 · Verbatim / זהה"],
- ["near_verbatim","2 · Near-verbatim / כמעט זהה"],
+ ["same_text","1 · Same text / אותו טקסט — כולל שינויי סופרים רגילים"],
  ["paraphrase","3 · Paraphrase / ניסוח שונה"],
  ["shared_formula","4 · Shared formula / נוסחה משותפת (כתובות, שטרות)"],
  ["topical","5 · Topical only / דמיון נושאי"],
@@ -283,6 +282,11 @@ const GRADES = [
  ["duplicate_photo","9 · Duplicate photo / אותו דף שצולם פעמיים"]];
 const LS_KEY = "seed029_review_grades_v1";
 let grades = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
+// legacy migration: verbatim / near_verbatim -> same_text (scale merged
+// 2026-07-07: in a scribal corpus "identical wording" does not exist)
+for(const k in grades){
+ if(grades[k]==="verbatim" || grades[k]==="near_verbatim") grades[k]="same_text";
+}
 let idx = 0, filt = "all";
 
 function items(){ return filt==="all" ? DATA : DATA.filter(d=>d.stratum===filt); }
@@ -325,9 +329,11 @@ function render(){
    </div>
    <div class="hint">Keys: 1–8 grade &amp; advance · ←/→ navigate ·
      the highlighted span is the machine-matched passage; context in gray.
-     Rule: grade the RELATIONSHIP of the shared span — 1–3 = same-work /
-     citation evidence · 4 = documentary/liturgical boilerplate · 8 =
-     scripture/canon quotation · 5–7 = the match is spurious.</div>
+     Rule: grade the RELATIONSHIP of the shared span — 1 = same text
+     (same work / direct citation; normal scribal variance included) ·
+     3 = paraphrase · 4 = documentary/liturgical boilerplate ·
+     8 = scripture/canon quotation · 9 = same page photographed twice ·
+     5–7 = the match is spurious.</div>
   </div>`;
 }
 function grade(k){ const d=items()[idx]; grades[d.id]=k; save(); move(1); }
@@ -349,7 +355,13 @@ function exportGrades(){
  a.download = "seed029_grades.json"; a.click();
 }
 document.addEventListener("keydown", e=>{
- if(e.key>="1" && e.key<="9"){ grade(GRADES[+e.key-1][0]); }
+ if(e.key>="1" && e.key<="9"){
+   // keys match the NUMBER shown on each button (2 aliases to 1)
+   const byNum = {1:"same_text",2:"same_text",3:"paraphrase",
+     4:"shared_formula",5:"topical",6:"unrelated",7:"junk",
+     8:"canonical",9:"duplicate_photo"};
+   grade(byNum[+e.key]);
+ }
  else if(e.key==="ArrowLeft"){ move(1); }   /* RTL-friendly: left = forward */
  else if(e.key==="ArrowRight"){ move(-1); }
 });
