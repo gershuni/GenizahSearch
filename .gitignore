@@ -14,6 +14,8 @@ Transcriptions.txt
 AllGenizah_OLD.txt
 # SEED-029 probe: pilot corpus DB is 49MB and regenerable in 63s (extract_pilot.py)
 same_work_spike/probe/data/probe.db
+# SEED-029 rehearsal: 100K-page corpus DB, regenerable (extract_rehearsal.py)
+same_work_spike/probe/data/rehearsal.db
 Results/
 # Re-include probe results (the `Results/` pattern above matches
 # `results/` case-insensitively on Windows and would swallow them;
