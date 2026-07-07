@@ -204,6 +204,18 @@ accepting a span, align the ~150-letter flanks on both sides.
   — the project's most valuable category). Cost: 2 extra Levenshtein calls
   per accepted pair. → REQUIRED in the full pipeline's verifier.
 
+**Line-break-agreement duplicate detector (Hillel's second heuristic,
+mechanized):** line breaks are PHYSICAL-page properties — genuine parallel
+witnesses never agree on them; a re-photographed page (book-spread shot vs
+single-page shot, different FL ids) must. Detector: ≥60% of HTR lines
+(≥10 letters, ≥4 lines — short-page accident guard) matching in order at
+≤0.30 normalized distance ⇒ flag. Validation on the review sample: fires on
+**25/36 join anomalies** (confirming they are duplicate photography, not
+textual joins) and **6/40 top "discoveries"** (incl. the two Hillel caught
+by eye); zero fires in overlap/BH strata. → stage-0 dedup tier (c), after
+(a) same-FL-id and (b) same-shelfmark-via-libraries.csv. Bonus: same-page-
+HTRed-twice pairs = a free HTR-vs-HTR variance measurement.
+
 **Analysis caveat:** the review tool recomputes spans (uncapped) — its
 exported densities differ from engine densities; join grades to
 `verified_pairs_d50_cap1.json` by pair id for calibration analysis.

@@ -29,14 +29,22 @@ OUT_DIR = ROOT + r"\same_work_spike\probe\review"
 random.seed(7)
 
 # ---------- shelfmark lookup ----------
+def _norm_shelf(s):
+    t = re.sub(r'(\d)\.(\d)', r'\1DOT\2', s.replace('/', '.'))
+    t = re.sub(r'\W+', '', t).casefold().replace('dot', '.')
+    return t[2:] if t.startswith('ms') else t
+
+
 shelf = {}
+shelf_variants = {}  # sys_id -> set of normalized call-number variants
 with open(ROOT + r"\libraries.csv", encoding='utf-8-sig', newline='') as f:
     r = csv.reader(f)
     next(r, None)
     for row in r:
         if len(row) >= 4 and row[0]:
-            first = row[2].split('|')[0].strip() if row[2] else ''
-            shelf[row[0]] = first or row[0]
+            variants = [v.strip() for v in (row[2] or '').split('|') if v.strip()]
+            shelf[row[0]] = variants[0] if variants else row[0]
+            shelf_variants[row[0]] = {_norm_shelf(v) for v in variants if v}
 
 # ---------- BH witness map ----------
 bh = json.load(open(BH, encoding='utf-8'))
@@ -140,6 +148,28 @@ def pair_extents(sa, sb, k=5, band=20):
     return best
 
 
+def line_agreement(ma, mb):
+    """Same-page-photographed-twice detector: fraction of HTR LINES that
+    match near-identically IN ORDER between the two matched spans.
+    Line breaks are physical-page properties — genuine parallel witnesses
+    never agree on them; a re-photographed page must."""
+    la = [norm_stream(x)[0] for x in ma.split('\n')]
+    lb = [norm_stream(x)[0] for x in mb.split('\n')]
+    la = [x for x in la if len(x) >= 10]
+    lb = [x for x in lb if len(x) >= 10]
+    if min(len(la), len(lb)) < 4:   # short pages: accidental agreement risk
+        return 0.0, 0
+    j = matched = 0
+    for a in la:
+        for jj in range(j, min(j + 3, len(lb))):
+            b = lb[jj]
+            if Levenshtein.normalized_distance(a, b) <= 0.30:
+                matched += 1
+                j = jj + 1
+                break
+    return round(matched / max(len(la), len(lb)), 3), matched
+
+
 def seg3(text, offs, s0, s1, pad=110):
     """Return (before, match, after) original-text segments for stream span."""
     if not len(offs):
@@ -169,16 +199,23 @@ for name, p in final:
         mm = re.search(r'_P(\d+)_', pid)
         return int(mm.group(1)) if mm else 1
 
+    seg_a = seg3(ta, oa, a0, a1)
+    seg_b = seg3(tb, ob, b0, b1)
+    agree, n_lines = line_agreement(seg_a[1], seg_b[1])
+    same_shelf = bool(shelf_variants.get(sysa, set()) &
+                      shelf_variants.get(sysb, set()))
     items.append({
         'id': f"{p['a']}|{p['b']}",
         'stratum': name,
         'cls': p['cls'],
         'len': max(a1 - a0, b1 - b0),
         'density': dens,
+        'dup_lines': agree, 'dup_nlines': n_lines,
+        'dup_shelf': int(same_shelf),
         'a': {'pid': p['a'], 'sys': sysa, 'shelf': shelf.get(sysa, sysa),
-              'page': pnum(p['a']), 'seg': seg3(ta, oa, a0, a1)},
+              'page': pnum(p['a']), 'seg': seg_a},
         'b': {'pid': p['b'], 'sys': sysb, 'shelf': shelf.get(sysb, sysb),
-              'page': pnum(p['b']), 'seg': seg3(tb, ob, b0, b1)},
+              'page': pnum(p['b']), 'seg': seg_b},
     })
 
 import os
@@ -242,7 +279,8 @@ const GRADES = [
  ["topical","5 · Topical only / דמיון נושאי"],
  ["unrelated","6 · Unrelated / לא קשור"],
  ["junk","7 · Junk page / דף פסול"],
- ["canonical","8 · Canonical quote / ציטוט מקרא-חז\"ל-תפילה"]];
+ ["canonical","8 · Canonical quote / ציטוט מקרא-חז\"ל-תפילה"],
+ ["duplicate_photo","9 · Duplicate photo / אותו דף שצולם פעמיים"]];
 const LS_KEY = "seed029_review_grades_v1";
 let grades = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
 let idx = 0, filt = "all";
@@ -276,6 +314,8 @@ function render(){
     <span class="badge">${d.cls}</span>
     <span><b>${d.len}</b> letters</span>
     <span>density <b>${d.density}</b></span>
+    ${d.dup_lines>=0.6 ? `<span class="badge" style="background:#c62828;color:#fff">⚠ same page? line-match ${Math.round(d.dup_lines*100)}% (${d.dup_nlines} lines)</span>` : ``}
+    ${d.dup_shelf ? `<span class="badge" style="background:#e65100;color:#fff">⚠ same shelfmark</span>` : ``}
    </div>
    <div class="cols">${pane(d.a,"A")}${pane(d.b,"B")}</div>
    <div class="grades">${btns}</div>
@@ -309,7 +349,7 @@ function exportGrades(){
  a.download = "seed029_grades.json"; a.click();
 }
 document.addEventListener("keydown", e=>{
- if(e.key>="1" && e.key<="8"){ grade(GRADES[+e.key-1][0]); }
+ if(e.key>="1" && e.key<="9"){ grade(GRADES[+e.key-1][0]); }
  else if(e.key==="ArrowLeft"){ move(1); }   /* RTL-friendly: left = forward */
  else if(e.key==="ArrowRight"){ move(-1); }
 });
