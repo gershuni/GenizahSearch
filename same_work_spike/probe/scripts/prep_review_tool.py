@@ -238,10 +238,11 @@ const GRADES = [
  ["verbatim","1 · Verbatim / זהה"],
  ["near_verbatim","2 · Near-verbatim / כמעט זהה"],
  ["paraphrase","3 · Paraphrase / ניסוח שונה"],
- ["shared_formula","4 · Shared formula / נוסחה משותפת"],
+ ["shared_formula","4 · Shared formula / נוסחה משותפת (כתובות, שטרות)"],
  ["topical","5 · Topical only / דמיון נושאי"],
  ["unrelated","6 · Unrelated / לא קשור"],
- ["junk","7 · Junk page / דף פסול"]];
+ ["junk","7 · Junk page / דף פסול"],
+ ["canonical","8 · Canonical quote / ציטוט מקרא-חז\"ל-תפילה"]];
 const LS_KEY = "seed029_review_grades_v1";
 let grades = JSON.parse(localStorage.getItem(LS_KEY) || "{}");
 let idx = 0, filt = "all";
@@ -282,8 +283,11 @@ function render(){
     <button onclick="move(-1)">← Prev</button>
     <button onclick="move(1)">Next →</button>
    </div>
-   <div class="hint">Keys: 1–7 grade &amp; advance · ←/→ navigate ·
-     the highlighted span is the machine-matched passage; context in gray.</div>
+   <div class="hint">Keys: 1–8 grade &amp; advance · ←/→ navigate ·
+     the highlighted span is the machine-matched passage; context in gray.
+     Rule: grade the RELATIONSHIP of the shared span — 1–3 = same-work /
+     citation evidence · 4 = documentary/liturgical boilerplate · 8 =
+     scripture/canon quotation · 5–7 = the match is spurious.</div>
   </div>`;
 }
 function grade(k){ const d=items()[idx]; grades[d.id]=k; save(); move(1); }
@@ -305,7 +309,7 @@ function exportGrades(){
  a.download = "seed029_grades.json"; a.click();
 }
 document.addEventListener("keydown", e=>{
- if(e.key>="1" && e.key<="7"){ grade(GRADES[+e.key-1][0]); }
+ if(e.key>="1" && e.key<="8"){ grade(GRADES[+e.key-1][0]); }
  else if(e.key==="ArrowLeft"){ move(1); }   /* RTL-friendly: left = forward */
  else if(e.key==="ArrowRight"){ move(-1); }
 });
