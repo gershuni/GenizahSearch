@@ -1,0 +1,8 @@
+records streamed: 948549 in 63s
+target pages: 8133
+background pool (>=80 heb chars): 709758, sampled: 10000
+  bh: 1393 pages, 556 sys_ids
+  fgp: 740 pages, 192 sys_ids
+  joins: 1088 pages, 350 sys_ids
+  titles: 4963 pages, 203 sys_ids
+target sys_ids with NO pages in corpus: 107 (by bucket: {'joins': 41, 'titles': 17, 'fgp': 8, 'bh': 41})

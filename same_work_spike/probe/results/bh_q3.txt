@@ -1,0 +1,2 @@
+BH pages with a partner (full pilot, density<=0.30): 232/1393
+top partner is another known BH witness: 151 (65%)

@@ -1,0 +1,165 @@
+# SEED-029 Separability Probe — RESULTS (2026-07-06)
+
+One-day feasibility probe for shared-passage detection over MiDRASH HTR
+(SEED-029 revised architecture: normalize → DF-banded char-5-gram seeds →
+diagonal two-hit → alignment verify). Run entirely on the dev box
+(12C/24T, 63 GB). All code under `same_work_spike/probe/scripts/`,
+all outputs under `data/` + `results/`.
+
+## VERDICT: GO — with one engineering frontier and one calibration task
+
+The candidate stage lost **zero** ground-truth pairs (100% recall on all three
+families, inside a 17,228-page corpus with 10K random background pages). The
+verifier finds real parallels with correct span boundaries (manually confirmed
+in Hebrew/Judeo-Arabic). The two open items are **candidate-volume engineering**
+(31.7M candidate pairs at pilot scale — needs diagonal-keyed counting before
+full corpus) and **acceptance-threshold calibration** (density 0.30 clips
+liturgical/high-noise true pairs; the right boundary is a sloped
+length×density rule).
+
+## The pilot
+
+| Component | Value |
+|---|---|
+| Corpus | 17,228 pages: 1,393 BH witnesses + 1,088 joins + 4,963 title-groups + 740 FGP-overlap + 10,000 random background (reservoir, seed 43) |
+| Source | `Transcriptions.txt` (948,549 page records; streamed in 63 s) |
+| Normalization | NFC, strip nikud/marks (incl. U+0307), final-letter fold, **space-stripped letter stream** + offset map (`normalize.py`) |
+| Engine | `engine.py` — inverted char-k-gram index, DF-band, diagonal two-hit, span + Levenshtein verify (rapidfuzz); per-pair anchor cap 64 (memory guard) |
+| Candidate mode | k=5, df_drop=100 pages, min_anchors=2, band=±20, min_span=25, max_density=0.30 |
+| Ground-truth mode | k=4, no DF drop (posting cap 800), min_anchors=2 |
+| Runtime | full pilot end-to-end ≈ 10 min single-threaded Python (candidates 334 s, verify 270 s) |
+
+## Headline numbers
+
+| Measurement | Result |
+|---|---|
+| **Candidate recall vs Tier-1** (joins / titles / BH) | **1.00 / 1.00 / 1.00** |
+| Verified recall at density 0.30 | 0.94 / 0.90 / **0.50 (BH — threshold-clipped)** |
+| Empirical letter-CER (HTR vs 209 FGP human transcriptions) | **micro 20.1%, median 16.6%** (p25 8.9%, p90 42%) — upper bound |
+| Top confusions | י↔ו (620), ד↔ר (597), ב↔כ (485), ח↔ה, ה↔ת/ק — the classic set, now with weights (`results/confusion_matrix.json`) |
+| Join groups sharing ANY wording | **1 of 114 (1%)** — physical joins are textually invisible; corpus fact |
+| Title groups textually connected | 9 of 14 (64%); heterogeneous (ספר מצוות 29/33 MSS, 1,506 pairs; שו"ת ראב"ם ומגילת תענית 0) |
+| BH witnesses connected, density sweep | 0.30→101, 0.35→163, 0.40→220, **0.45→294 of 428 (69%)** |
+| BH identification (top partner is a known BH witness) | 65% of 232 connected pages (at strict 0.30) |
+| Candidate volume (the frontier) | 31.7M pairs = 21% of all pilot pairs; verify prunes to 4,417 |
+| Unplanned discovery | 2 background MSS carrying the same halakhic text on אונאה (density 0.15, 1,658 letters) — found among 10K random pages |
+
+## Findings
+
+**F1 — Seeds survive the noise; the architecture is right.** At measured CER
+16–20%, char-5-gram seeds + two-hit still captured every Tier-1 pair. The
+LSH design killed in the seed revision would have been blind here (predicted
+Jaccard 0.17–0.27 → 2–15% capture); the probe retroactively validates the
+pivot to seed-and-extend.
+
+**F2 — The verifier, not the seeds, is the only loss point — and it's a
+threshold, not a design flaw.** Density ≤0.30 sits at the two-sided noise
+floor (two CER-15% copies of identical text differ by ~26–30%). True-pair
+densities cluster 0.13–0.30 for literary works, 0.24–0.45 for liturgy
+(nusach variance on top of noise). Fix: sloped boundary — accept long spans
+at higher density (e.g. len≥200 & density≤0.45 / len≥60 & density≤0.30),
+ROC-tune on the scatter (`results/separability.png`). The exact-duplicate
+line at density 0.000 and the short+dense gray cloud are the FP frontier.
+
+**F3 — DF-banding HELPS liturgical recall (assumption inverted).** Under a
+per-pair anchor budget, common grams dilute anchors across many diagonals;
+DF-banding spends the budget on distinctive grams that cluster on the true
+diagonal. df=50/30 found 415/699 BH pairs vs 135 at df=None. The "whitelist
+for formulaic classes" worry is largely dissolved — DF-banding is the
+mechanism that makes liturgy WORK.
+
+**F4 — Physical joins ≠ textual parallels: 1%.** Empirically settled. Joins
+are useless as recall positives (SEED-029 eval design confirmed); the one
+"connected" join group was two catalog records of the same Talmud leaf.
+
+**F5 — Catalog-level same-work ≠ passage overlap.** 64% of title groups
+connect; the zeros (שו"ת ראב"ם, מגילת תענית, נואדר אלפלאספה) are
+different-parts-of-work or tiny/noisy pages. Tier-1 filtering (verifier over
+known pairs) is the correct recall denominator, as designed.
+
+**F6 — Stage-0 dedup is mandatory and easy.** The corpus contains exact
+duplicates under different sys_ids — `997…` NLI catalog variants sharing the
+SAME IE/P/FL image ids (22 of top-25 cross pairs; density exactly 0.0).
+Dedup key: FL image id (trivial), plus near-dup pass for re-photographed
+leaves (the join-group case).
+
+**F7 — NEW false-parallel class: microfilm target sheets / catalog cards.**
+Pages that are HTR gibberish of scale bars + the FGP card template
+(סימן/תוכן/מחבר/שנה/הערות) match each other across unrelated manuscripts.
+Stage-0 filter: template-keyword + low-Hebrew-entropy heuristic.
+
+**F8 — Candidate volume is the scale frontier.** Two-hit without diagonal
+consistency at candidate stage → 21% of all pairs become candidates. At 948K
+pages this explodes. Mitigations (in order): (1) key the accumulator on
+(pair, diagonal-bucket) so the two-hit test IS diagonal-consistent — cheap,
+kills most background pairs; (2) min_anchors=3; (3) per-page candidate caps
+with logging; (4) numpy/Rust posting-list representation (Python dicts hit
+15 GB at 17K pages — fine on this box, won't scale 55×).
+
+**F9 — CER heterogeneity demands per-genre thresholds.** p25=8.9% vs
+p90=42% — one global acceptance threshold cannot serve both square-script
+Bible hands and cursive documentary hands. The confusion matrix
+(`results/confusion_matrix.json`) enables confusion-weighted alignment costs
+(ד/ר, י/ו, ב/כ substitutions should cost less than random substitutions).
+
+**F10 — BH experiment: the witness index is the better oracle.** Candidate
+mode at df=30 found 738 witness pairs vs the GT run's 117 — the "oracle"
+suffered the same threshold clipping. For liturgy, recall should be measured
+against the human witness index (any cross-witness hit is presumptively true
+after dedup/target-sheet filtering), not against a same-pipeline GT run.
+
+## BH experiment detail (מפתח כתבי היד, ספר ברכת המזון)
+
+- Index: 484 sigla parsed from the docx (542 table rows + 54 tzerufim lines);
+  **471 resolved (97.3%) → 597 sys_ids → 1,393 HTR pages (556 sys_ids, 93%)**.
+  Unresolved: 8 RNL Evr. III B (absent from libraries.csv), Budapest Gen,
+  Sassoon/Letchworth (not in corpus). Resolver handles ranges, parentheticals,
+  Or.1080→CUL, NLI =4 markers, codex→leaves prefix fallback.
+- Witness connectivity vs density: 24% → 38% → 51% → **69%** (0.30→0.45).
+  Remaining 31% at 0.45: tiny fragments, extreme noise, or BH sections with
+  no counterpart preserved (the index includes witnesses of *any* part of BH).
+- Identification framing: of BH pages with any partner at 0.30, 65% point to
+  another known BH witness; the rest share OTHER liturgy (Hallel/psalms) with
+  non-BH siddur pages — correct behavior, wrong label, reinforcing the
+  canonical-channel design (Track 1).
+
+## What the full pipeline should change (vs SEED-029 revised)
+
+1. Acceptance: sloped length×density boundary; per-genre calibration;
+   confusion-weighted costs. (F2, F9)
+2. Candidate stage: diagonal-keyed two-hit. (F8)
+3. Stage-0 adds: FL-id dedup; 997-variant collapse; target-sheet filter. (F6, F7)
+4. DF-banding stays — and is a recall FEATURE on formulaic text. (F3)
+5. Liturgy eval: witness-index-as-oracle pattern (BH generalizes to any
+   indexed composition). (F10)
+6. Track 1 (canon) unchanged — probe reinforced it (Hallel cross-matches).
+
+## Artifacts
+
+| Path | What |
+|---|---|
+| `scripts/normalize.py` | union-view normalizer + offset back-projection |
+| `scripts/engine.py` | seed-and-extend engine (both modes) |
+| `scripts/resolve_bh_witnesses.py` → `data/bh_witnesses.json` | BH index resolution (reusable pattern for any witness index docx) |
+| `scripts/{extract_pilot,define_buckets}.py` → `data/probe.db` | pilot corpus (17,228 pages) |
+| `scripts/confusion_matrix.py` → `results/confusion_matrix.json` | empirical CER + confusions |
+| `scripts/ground_truth.py` → `results/tier1.json` | Tier-1 verified pairs |
+| `scripts/separability.py` → `results/separability.{json,png}`, `verified_pairs.json`, `discoveries.txt` | the probe itself |
+| `scripts/bh_experiment.py` → `results/bh_{report.txt,experiment.json}` | BH sweeps |
+| `results/tier1_samples.txt` | manually-QA'd Hebrew span samples |
+
+## Next steps (handoff-ready, ordered)
+
+1. **Diagonal-keyed candidate accumulator** in `engine.py` (~30 lines) —
+   rerun pilot, confirm recall holds while candidates drop >10×.
+2. **Sloped acceptance boundary** + ROC on the existing scatter data
+   (`verified_pairs.json` + a density-0.50 rerun for the curve's tail).
+3. **Stage-0 module**: FL-id dedup, 997-collapse, target-sheet filter,
+   language ID. Rerun pilot clean.
+4. **Precision sampling**: 200 stratified cross-class pairs, graded labels
+   (verbatim/near/paraphrase/formula/topical/unrelated) — human (Hillel) or
+   assisted; this yields the production threshold.
+5. **Scale rehearsal**: 100K-page slice with the numpy posting representation;
+   measure memory/time curve before committing to 948K.
+6. Then: Track 1 (canon identification vs Maagarim/Sefaria) and the full-corpus
+   run per SEED-029.

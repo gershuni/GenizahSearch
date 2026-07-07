@@ -1,0 +1,24 @@
+joins: 14907 groups, 14517 with >=2 members
+joins bucket: 150 groups, 391 sys_ids
+genizah_titles columns: ['GenizahTitleId', 'OrgTitle', 'EngTitle', 'DomainId', 'AuthorId', 'LanguageCode']
+title groups with 5-40 MSS: 271
+title bucket: 14 groups, 220 sys_ids
+  title 7762 (24 MSS): שולחן ערוך
+  title 7332 (14 MSS): ארחות חיים
+  title 7287 (20 MSS): כתאב אלאמלאך
+  title 7644 (15 MSS): אלרסאלה אלמנתכ'בה
+  title 7640 (7 MSS): כתאב אצול אלדין [אליהו בן אהרן אבן עבד אלולי]
+  title 7558 (25 MSS): מנורת המאור [ר"י אבוהב]
+  title 7593 (5 MSS): אלקואעד אלגליה פי שרח אלרסאלה אלשמסיה
+  title 7748 (9 MSS): שו"ת ר' אברהם בן הרמב"ם
+  title 7475 (20 MSS): כתאב אצול אלשער אלעבראני
+  title 7436 (9 MSS): פירוש על מלכים א'
+  title 7602 (20 MSS): כתאב אלנתף
+  title 7588 (12 MSS): נואדר אלפלאספה
+  title 7652 (34 MSS): ספר מצוות [לוי בן יפת]
+  title 7561 (6 MSS): מגילת תענית
+fgp tables: ['fgp_transcriptions', 'fgp_meta', 'fgp_shelfmark_meta', 'fgp_cnumber_info']
+fgp_transcriptions columns: ['id', 'collection', 'shelfmark', 'c_number', 'image_id', 'source_scholar', 'doc_relation', 'language', 'content', 'content_length', 'n_pages', 'sections', 'heb_ratio', 'size_bytes', 'rel_path', 'filename', 'sys_id', 'mms_id', 'inventory_id', 'full_shelfmark', 'sysid_method', 'author_en', 'author_he', 'title_en', 'title_he', 'language_meta', 'script', 'domain', 'creation_type', 'image_side', 'page_info', 'folio_num', 'source_credit', 'text_source', 'source_credit_he', 'source_credit_en']
+fgp text column: content
+fgp rows with text>400 chars: 30214
+fgp bucket: 200 sys_ids

@@ -12,7 +12,14 @@ docs/outreach/
 # Local Data (Don't upload these huge files!)
 Transcriptions.txt
 AllGenizah_OLD.txt
+# SEED-029 probe: pilot corpus DB is 49MB and regenerable in 63s (extract_pilot.py)
+same_work_spike/probe/data/probe.db
 Results/
+# Re-include probe results (the `Results/` pattern above matches
+# `results/` case-insensitively on Windows and would swallow them;
+# negations must come AFTER the excluding pattern — last match wins):
+!same_work_spike/probe/results/
+!same_work_spike/probe/results/**
 Genizah_Tantivy_Index/
 *.pkl
 config.pkl

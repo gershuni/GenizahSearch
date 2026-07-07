@@ -1,0 +1,11 @@
+Tier-1 oracle: 118 page pairs, 117 witness pairs, 82 witnesses connected
+df_drop=None: {'verified_page_pairs': 135, 'page_recall_vs_tier1': 0.6441, 'witness_pairs': 135, 'witness_recall_vs_tier1': 0.7009, 'witnesses_connected': 93, 'grams_dropped_df': 0, 'time_s': 12}
+df_drop=200: {'verified_page_pairs': 127, 'page_recall_vs_tier1': 0.5508, 'witness_pairs': 134, 'witness_recall_vs_tier1': 0.6154, 'witnesses_connected': 85, 'grams_dropped_df': 25, 'time_s': 8}
+df_drop=100: {'verified_page_pairs': 163, 'page_recall_vs_tier1': 0.5508, 'witness_pairs': 172, 'witness_recall_vs_tier1': 0.6068, 'witnesses_connected': 101, 'grams_dropped_df': 117, 'time_s': 6}
+df_drop=50: {'verified_page_pairs': 415, 'page_recall_vs_tier1': 0.5678, 'witness_pairs': 439, 'witness_recall_vs_tier1': 0.6154, 'witnesses_connected': 153, 'grams_dropped_df': 597, 'time_s': 4}
+df_drop=30: {'verified_page_pairs': 699, 'page_recall_vs_tier1': 0.5593, 'witness_pairs': 738, 'witness_recall_vs_tier1': 0.5897, 'witnesses_connected': 204, 'grams_dropped_df': 1204, 'time_s': 3}
+max_density=0.3: {'verified_page_pairs': 163, 'witness_pairs': 172, 'witnesses_connected': '101/428', 'time_s': 6}
+max_density=0.35: {'verified_page_pairs': 510, 'witness_pairs': 503, 'witnesses_connected': '163/428', 'time_s': 6}
+max_density=0.4: {'verified_page_pairs': 1241, 'witness_pairs': 1188, 'witnesses_connected': '220/428', 'time_s': 6}
+max_density=0.45: {'verified_page_pairs': 3012, 'witness_pairs': 2795, 'witnesses_connected': '294/428', 'time_s': 6}
+identification: verified_pairs.json missing (run separability.py first)

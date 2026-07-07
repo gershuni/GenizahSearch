@@ -1,0 +1,61 @@
+{
+ "corpus_pages": 17228,
+ "engine_params": {
+  "k": 5,
+  "df_drop": 100,
+  "posting_cap": 2000,
+  "min_anchors": 2,
+  "band": 20,
+  "margin": 30,
+  "min_span": 25,
+  "max_density": 0.3
+ },
+ "engine_stats": {
+  "grams_total": 1774147,
+  "grams_dropped_df": 16861,
+  "grams_dropped_cap": 0,
+  "grams_dropped_singleton": 635443,
+  "candidate_pairs": 31744866
+ },
+ "timing_s": {
+  "candidates": 334,
+  "verify": 270
+ },
+ "recall_vs_tier1": {
+  "joins": {
+   "gt_pairs": 36,
+   "candidate_recall": 1.0,
+   "verified_recall": 0.9444,
+   "candidate_recall_len60": 1.0,
+   "verified_recall_len60": 0.9444
+  },
+  "titles": {
+   "gt_pairs": 1866,
+   "candidate_recall": 1.0,
+   "verified_recall": 0.8987,
+   "candidate_recall_len60": 1.0,
+   "verified_recall_len60": 0.8987
+  },
+  "bh": {
+   "gt_pairs": 118,
+   "candidate_recall": 1.0,
+   "verified_recall": 0.5,
+   "candidate_recall_len60": 1.0,
+   "verified_recall_len60": 0.5
+  }
+ },
+ "volume": {
+  "pages_with_candidates": 17228,
+  "median_cand_per_page": 3449,
+  "p90_cand_per_page": 7243,
+  "max_cand_per_page": 14526,
+  "total_candidates": 31744866,
+  "total_verified": 4417,
+  "verified_with_background": 1983
+ },
+ "verified_classes": {
+  "tier1": 1770,
+  "cross": 2028,
+  "related_new": 619
+ }
+}
