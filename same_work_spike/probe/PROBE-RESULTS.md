@@ -269,7 +269,14 @@ calibration itself is now human-grounded.
    ⇒ **Track-1 canon masking is the gate**).
    Full writeup: **`REHEARSAL-RESULTS.md`**; map `results/rehearsal_100k_map.md`;
    atlas `review/rehearsal_100k_atlas.html`.
-6. Then: **Track 1** (canon identification vs Maagarim/Sefaria + masking —
-   now empirically the prerequisite for a legible works census) and the
-   full-corpus run per SEED-029 (disk-partitioned engine + page-chain
-   extension of edge-class spans).
+6. ✅ **Track 1** (2026-07-07, same day): Maagarim (5,274 works incl. full
+   Tanakh/Mishnah/Bavli/Yerushalmi) + Friedberg JA (89 works) reference;
+   asymmetric matcher `scripts/track1_match.py`. **26.4% of the random
+   100K sample identified** (Bible-domain recall 66.3%, Documents floor
+   3.7%); 4,096 JA identifications; mesirah channel (editions of Genizah
+   fragments) live. Masked Track-2 rerun: accepted pairs 337K→72.7K
+   (−78%), giant component 15,969→7,561; the residue = Karaite liturgy +
+   piyyut NOT covered by Maagarim/JA — itself a discovery product
+   (high-witness unidentified units). See REHEARSAL-RESULTS.md §Track 1.
+7. Then: the full-corpus run per SEED-029 (disk-partitioned engine +
+   page-chain extension of edge-class spans + Track-1 full-corpus pass).

@@ -38,6 +38,7 @@ ROOT = r"C:\Genizahsearch"
 DB = sys.argv[1] if len(sys.argv) > 1 else \
     ROOT + r"\same_work_spike\probe\data\rehearsal.db"
 TAG = sys.argv[2] if len(sys.argv) > 2 else "100k"
+TABLE = sys.argv[3] if len(sys.argv) > 3 else "accepted_pairs"
 OUT = ROOT + rf"\same_work_spike\probe\review\rehearsal_{TAG}_graph.html"
 
 MEMBER_CAP = 300      # drill-in node sample (top-degree)
@@ -159,9 +160,9 @@ def main():
     print(f"domain records for {len(domains):,} sys_ids "
           f"({time.time() - t0:.0f}s)", flush=True)
     con = sqlite3.connect(DB)
-    rows = con.execute("""
+    rows = con.execute(f"""
         SELECT sys_a, sys_b, aligned_len, density, flank_class
-        FROM accepted_pairs WHERE dup_shelf = 0 AND dup_lines < 0.6
+        FROM {TABLE} WHERE dup_shelf = 0 AND dup_lines < 0.6
     """).fetchall()
     con.close()
 

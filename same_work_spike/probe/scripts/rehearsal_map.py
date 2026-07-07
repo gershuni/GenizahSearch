@@ -22,6 +22,7 @@ ROOT = r"C:\Genizahsearch"
 DB = sys.argv[1] if len(sys.argv) > 1 else \
     ROOT + r"\same_work_spike\probe\data\rehearsal.db"
 TAG = sys.argv[2] if len(sys.argv) > 2 else "100k"
+TABLE = sys.argv[3] if len(sys.argv) > 3 else "accepted_pairs"
 OUT = ROOT + rf"\same_work_spike\probe\results\rehearsal_{TAG}_map.md"
 CSV_OUT = ROOT + rf"\same_work_spike\probe\results\rehearsal_{TAG}_clusters.csv"
 
@@ -52,10 +53,10 @@ def components(ms_index, edges):
 
 def main():
     con = sqlite3.connect(DB)
-    rows = con.execute("""
+    rows = con.execute(f"""
         SELECT sys_a, sys_b, bucket_a, bucket_b, aligned_len, density,
                dup_shelf, dup_lines, flank_dist
-        FROM accepted_pairs""").fetchall()
+        FROM {TABLE}""").fetchall()
     con.close()
     meta = load_lib_meta()
 

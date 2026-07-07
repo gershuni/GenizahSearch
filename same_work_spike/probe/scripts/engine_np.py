@@ -52,8 +52,13 @@ def _reduceat_minmax(vals, starts):
 
 
 def build_candidates(streams, sys_codes, df_drop=100, band=20, min_anchors=2,
-                     chunk_pairs=80_000_000, log=print):
-    """Returns (pa, pb, count, min_a, max_a, min_b, max_b) arrays + stats."""
+                     chunk_pairs=80_000_000, log=print, masks=None):
+    """Returns (pa, pb, count, min_a, max_a, min_b, max_b) arrays + stats.
+
+    masks: optional dict page_idx -> list of (start, end) stream intervals
+    (e.g. Track-1 canonical spans); grams whose k-window overlaps a masked
+    interval are not indexed — 'Track 2 never sees canonical characters'.
+    """
     t0 = time.time()
     n_pages = len(streams)
     assert n_pages < (1 << _P_BITS)
@@ -62,14 +67,26 @@ def build_candidates(streams, sys_codes, df_drop=100, band=20, min_anchors=2,
     # ---- position table: packed (G << 40 | P << 22 | POS), one np.sort ----
     parts = []
     max_len = 0
+    n_masked_grams = 0
     for pi, s in enumerate(streams):
         g = _gram_codes(s)
         if not len(g):
             continue
-        max_len = max(max_len, len(g))
+        max_len = max(max_len, len(g))   # position budget: ORIGINAL indices
+        pos = np.arange(len(g), dtype=np.uint64)
+        if masks:
+            iv = masks.get(pi)
+            if iv:
+                keep = np.ones(len(g), dtype=bool)
+                for m0, m1 in iv:
+                    keep[max(0, m0 - K + 1):m1] = False
+                n_masked_grams += int(len(g) - keep.sum())
+                g, pos = g[keep], pos[keep]
+                if not len(g):
+                    continue
         key = ((g << np.uint64(_POS_BITS + _P_BITS))
                | (np.uint64(pi) << np.uint64(_POS_BITS))
-               | np.arange(len(g), dtype=np.uint64))
+               | pos)
         parts.append(key)
     assert max_len < (1 << _POS_BITS) and max_len < 655_360
     keys = np.concatenate(parts)
@@ -97,6 +114,7 @@ def build_candidates(streams, sys_codes, df_drop=100, band=20, min_anchors=2,
     sizes = np.diff(np.r_[starts, len(G)])
     stats = {
         'n_pages': n_pages, 'n_positions': n_positions,
+        'grams_masked': n_masked_grams,
         'grams_total': len(starts),
         'grams_singleton': int((sizes < 2).sum()),
         'grams_dropped_df': int((sizes > df_drop).sum()),

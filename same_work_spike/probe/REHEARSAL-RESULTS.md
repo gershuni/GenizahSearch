@@ -131,15 +131,65 @@ CUL↔RNL alone are 64K manuscript pairs.
 5. Instrument peak RSS next run (not captured this run; design estimate ~35–40 GB at the
    final merge — the 63 GB box held comfortably).
 
+## Track 1 (2026-07-07, same session): Maagarim/JA identification + canonical masking
+
+Reference corpus (user-provided): **5,274 Maagarim works** (74.1M letters — full
+Tanakh/Mishnah/Tosefta/Bavli/Yerushalmi + 5,182 edited works incl. piyyut, geonica,
+letters) + **89 Friedberg JA works** (12.7M letters). Asymmetric matcher
+(`track1_match.py`): reference gram index (DF cap 128 entries/code — drops 143K
+formulaic codes carrying 60% of posting mass) → page-gram searchsorted → diagonal
+two-hit per (page, 3.8K-letter segment) → one-sided verify (density ≤ 0.28 under
+100 letters / 0.35 above; one-sided noise ⇒ tighter than Track 2's 0.42).
+
+**Identification results (102,568 pages, 24 min):**
+
+| Measurement | Result |
+|---|---|
+| pages identified (≥1 work) | **27,033 (26.4%)**; ≥100 matched letters: 25.9% |
+| (page, work) rows | 42,679 (Bible 17,214 · Maagarim-other 17,585 · JA 4,096 · Bavli 2,357 · Mishnah 750 · Yerushalmi 480 · Tosefta 197) |
+| Bible-domain pages matched (recall proxy) | **66.3%** |
+| Liturgy-domain pages | 51.0% |
+| Documents / Sciences pages (precision floor) | 3.7% / 1.1% |
+| mesirah channel (matches to editions-of-Genizah-fragments) | 1,490 strong rows w/ source shelfmarks (`##המסירה##`) |
+
+Top identifications read like a Genizah syllabus: Mishneh Torah (Sefer Ahavah 1,257
+pages), Saadia (tafsir, פירוש דניאל, siddur, בקשה), רשב"ח Torah commentary, ibn Janah's
+ספר הרקמה in BOTH the JA original AND ibn Tibbon's Hebrew, הלכות פסוקות, שאילתות,
+Nethanel al-Fayyumi, Abraham Maimonides, ברכת המזון (118 pages).
+
+**Masked Track-2 rerun** (`rehearsal_run.py … mask`: Track-1 spans dropped from the
+gram index — "Track 2 never sees identified text"; 15.5M grams masked = 18%):
+
+| | unmasked | masked |
+|---|---|---|
+| accepted page pairs | 337,069 | **72,741 (−78%)** |
+| clean MS pairs / MSS | 244,020 / 17,994 | 48,570 / 9,588 |
+| giant component (all / continuation) | 15,969 / 11,920 | **7,561 / 4,389** |
+| tier-1 titles recall | 0.993 | 0.986 (non-canonical works unharmed) |
+| library matrix head | RNL–RNL 114.0K, CUL–RNL 63.9K | RNL–RNL 39.2K (81% of map), CUL–RNL 2.9K |
+
+Reading: masking absorbed the **Rabbanite canonical core** (Bible/Talmud/liturgy —
+CUL–RNL cross-links collapse 63.9K→2.9K). The residual giant (4,389 MSS, 70% RNL,
+top titles אלמקדמאת / piyyut / סדור מנהג קראים) is the **Karaite-liturgy + piyyut
+continent — text shared across many MSS that is NOT in Maagarim/JA**: part missing
+reference coverage (Genizah piyyut, Karaite siddur/exegesis), part genuinely
+unedited. That residue is itself a discovery product: high-witness-count unidentified
+units. Masked top clusters are markedly cleaner (Rif, ibn Shuaib's דרשות, Saadia's
+siddur ×3, Targum Onkelos, shtarot/ketubbah formulas).
+
 ## Artifacts
 
 | Path | What |
 |---|---|
 | `scripts/stage0.py` | stage-0 filters + dedup tiers (a)–(d) |
 | `scripts/extract_rehearsal.py` → `data/rehearsal.db` | corpus (gitignored, regenerable) |
-| `scripts/engine_np.py` | numpy sort-merge candidate generator |
+| `scripts/engine_np.py` | numpy sort-merge candidate generator (+ `masks=` support) |
 | `scripts/probe_volume.py` | DF-sensitivity pre-flight |
-| `scripts/rehearsal_run.py` → `results/rehearsal_100k_stats.json` | the run |
+| `scripts/rehearsal_run.py` → `results/rehearsal_100k_stats.json` | the run (3rd arg `mask` = masked rerun) |
 | `scripts/fix_flanks.py` | equal-length flank recompute |
-| `scripts/rehearsal_map.py` → `results/rehearsal_100k_map.md`, `_clusters.csv` | the map |
+| `scripts/rehearsal_map.py` → `results/rehearsal_100k_map.md`, `_clusters.csv` | the map (3rd arg = pairs table) |
 | `scripts/build_rehearsal_atlas.py` → `review/rehearsal_100k_atlas.html` | the atlas |
+| `scripts/build_reuse_graph.py` → `review/rehearsal_100k{,_masked}_graph.html` | interactive graph |
+| `scripts/track1_build_ref.py` → `data/ref_corpus.pkl` | Maagarim+JA reference (gitignored) |
+| `scripts/track1_match.py` → `track1_matches`, `results/track1_100k_report.md` | Track-1 identification |
+| `results/rehearsal_100k_masked_map.md` | the masked map |

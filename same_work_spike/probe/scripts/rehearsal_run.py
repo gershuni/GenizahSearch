@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 """100K scale rehearsal: rehearsal.db -> candidates -> verified pairs -> map data.
 
-Usage: python rehearsal_run.py [db_path] [tag]
-Writes: <db>::accepted_pairs table, results/rehearsal_<tag>_stats.json
+Usage: python rehearsal_run.py [db_path] [tag] [mask]
+- 3rd arg 'mask': load Track-1 spans from <db>::track1_matches and mask them
+  out of the gram index (Track 2 never sees identified known-work text);
+  results go to accepted_pairs_masked instead of accepted_pairs.
+Writes: <db>::accepted_pairs[_masked] table, results/rehearsal_<tag>_stats.json
 """
 import json
 import sqlite3
@@ -20,6 +23,8 @@ ROOT = r"C:\Genizahsearch"
 DB = sys.argv[1] if len(sys.argv) > 1 else \
     ROOT + r"\same_work_spike\probe\data\rehearsal.db"
 TAG = sys.argv[2] if len(sys.argv) > 2 else "100k"
+USE_MASKS = len(sys.argv) > 3 and sys.argv[3] == 'mask'
+PAIRS_TABLE = 'accepted_pairs_masked' if USE_MASKS else 'accepted_pairs'
 STATS_OUT = ROOT + rf"\same_work_spike\probe\results\rehearsal_{TAG}_stats.json"
 
 K, BAND, DF_DROP, MIN_ANCHORS = 5, 20, 100, 2
@@ -32,15 +37,20 @@ def accept_density(length):
 
 
 def flank_dist(sa, sb, a0, a1, b0, b1):
-    """Best (lowest) flank normalized distance; None if no usable flank."""
+    """Best (lowest) EQUAL-LENGTH flank normalized distance; None if none.
+
+    Equal-length clipping is load-bearing: normalized_distance floors at
+    the length ratio, so unequal flanks inflate the island class
+    (fix_flanks.py post-mortem)."""
     best = None
-    for fa, fb in (((max(0, a0 - FLANK), a0), (max(0, b0 - FLANK), b0)),
-                   ((a1, min(len(sa), a1 + FLANK)),
-                    (b1, min(len(sb), b1 + FLANK)))):
-        xa, xb = sa[fa[0]:fa[1]], sb[fb[0]:fb[1]]
-        if min(len(xa), len(xb)) >= 60:
-            d = Levenshtein.normalized_distance(xa, xb)
-            best = d if best is None else min(best, d)
+    L = min(FLANK, a0, b0)
+    if L >= 60:
+        d = Levenshtein.normalized_distance(sa[a0 - L:a0], sb[b0 - L:b0])
+        best = d
+    L = min(FLANK, len(sa) - a1, len(sb) - b1)
+    if L >= 60:
+        d = Levenshtein.normalized_distance(sa[a1:a1 + L], sb[b1:b1 + L])
+        best = d if best is None else min(best, d)
     return best
 
 
@@ -62,9 +72,24 @@ def main():
     print(f"streams normalized in {time.time() - t0:.0f}s; "
           f"letters={sum(map(len, streams)):,}")
 
+    masks = None
+    if USE_MASKS:
+        id_to_idx = {p: i for i, p in enumerate(ids)}
+        masks = {}
+        for pid, spans_json in con.execute(
+                "SELECT page_id, spans_json FROM track1_matches"):
+            pi = id_to_idx.get(pid)
+            if pi is None:
+                continue
+            iv = masks.setdefault(pi, [])
+            iv.extend((int(s[0]), int(s[1]))
+                      for s in json.loads(spans_json))
+        n_iv = sum(len(v) for v in masks.values())
+        print(f"masks: {len(masks):,} pages, {n_iv:,} Track-1 intervals")
+
     pa, pb, cnt, mina, maxa, minb, maxb, stats = engine_np.build_candidates(
         streams, sys_codes, df_drop=DF_DROP, band=BAND,
-        min_anchors=MIN_ANCHORS)
+        min_anchors=MIN_ANCHORS, masks=masks)
     stats['candidate_unique_pairs'] = int(len(
         np.unique((pa.astype(np.uint64) << np.uint64(18)) | pb)))
 
@@ -122,8 +147,10 @@ def main():
         fd = flank_dist(sa, sb, r['a0'], r['a1'], r['b0'], r['b1'])
         if fd is None:
             fclass = 'edge'
+        elif fd <= 0.52:
+            fclass = 'continuation'
         else:
-            fclass = 'continuation' if fd <= 0.45 else 'island'
+            fclass = 'ambig' if fd <= 0.58 else 'island'
         out_rows.append((
             ids[ia], ids[ib], sys_ids[ia], sys_ids[ib],
             buckets[ia], buckets[ib],
@@ -132,9 +159,9 @@ def main():
             -1.0 if fd is None else round(fd, 4), fclass))
     stats['post_s'] = round(time.time() - t2, 1)
 
-    con.execute("DROP TABLE IF EXISTS accepted_pairs")
-    con.execute("""
-        CREATE TABLE accepted_pairs (
+    con.execute(f"DROP TABLE IF EXISTS {PAIRS_TABLE}")
+    con.execute(f"""
+        CREATE TABLE {PAIRS_TABLE} (
             page_a TEXT, page_b TEXT, sys_a TEXT, sys_b TEXT,
             bucket_a TEXT, bucket_b TEXT,
             a0 INT, a1 INT, b0 INT, b1 INT, n_anchors INT,
@@ -142,9 +169,10 @@ def main():
             dup_shelf INT, dup_lines REAL, flank_dist REAL, flank_class TEXT
         )""")
     con.executemany(
-        "INSERT INTO accepted_pairs VALUES "
+        f"INSERT INTO {PAIRS_TABLE} VALUES "
         "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", out_rows)
-    con.execute("CREATE INDEX idx_ap_sys ON accepted_pairs(sys_a, sys_b)")
+    con.execute(f"CREATE INDEX idx_{PAIRS_TABLE}_sys "
+                f"ON {PAIRS_TABLE}(sys_a, sys_b)")
     con.commit()
 
     # ---- tracer recall ----
