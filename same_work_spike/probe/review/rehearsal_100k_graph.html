@@ -160,7 +160,7 @@ function drawDrill(){
   if(i===hover){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();}});
  info.textContent=`cluster of ${comp.n.toLocaleString()} MSS`+
   (comp.sampled?` — showing top-${comp.nodes.length} by connectivity`:'')+
-  (comp.giant?' · part of the liturgical continent (pre Track-1 masking)':'')+
+  (comp.giant?' · Louvain subdivision of the giant connected component (pre Track-1 masking)':'')+
   ` · ${comp.edges.length.toLocaleString()} edges · click node → browse`;
 }
 function legend(){
@@ -208,7 +208,7 @@ cv.addEventListener('mousemove',e=>{
   if(mode==='over'){
    const t=p.titles.map(x=>`${x[0]} (${x[1]})`).join(' · ')||'ללא כותרת קטלוגית';
    const d=p.doms.map(x=>`${x[0]} (${x[1]})`).join(' · ');
-   tip.innerHTML=`<b>${p.n} כתבי יד · ${GROUPS[p.dgrp][1]}</b>${p.giant?' <span style="color:#f90">· היבשת הליטורגית</span>':''}<br>${t}${d?`<br><span style='color:#8fd3ff'>${d}</span>`:''}<div class='en'>libraries: ${JSON.stringify(p.libs)}</div>`;
+   tip.innerHTML=`<b>${p.n} כתבי יד · ${GROUPS[p.dgrp][1]}</b>${p.giant?' <span style="color:#f90">· תת-קבוצה מהרכיב הקשיר הגדול</span>':''}<br>${t}${d?`<br><span style='color:#8fd3ff'>${d}</span>`:''}<div class='en'>libraries: ${JSON.stringify(p.libs)}</div>`;
   }else{
    const nd=sim.comp.nodes[p];
    tip.innerHTML=`<b>${nd[1]}</b> · ${GROUPS[nd[5]][1]}<br>${nd[3]||'ללא כותרת'}<div class='en'>${nd[2]} · ${nd[4]} page-pair links · click to open</div>`;

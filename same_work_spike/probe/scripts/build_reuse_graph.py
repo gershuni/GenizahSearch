@@ -6,8 +6,12 @@ Output: review/rehearsal_<tag>_graph.html
 
 v2 (feedback: "giant blob + disconnected confetti, click on blob froze"):
 - Oversized continuation components (> SPLIT_AT members) are decomposed with
-  LOUVAIN community detection (recursively, max 3 levels) — the liturgical
-  continent becomes dozens of explorable circles instead of one dead blob.
+  LOUVAIN community detection (recursively, max 3 levels) — the giant
+  connected component (Bible + liturgy + piyyut + exegesis, bridged) becomes
+  dozens of explorable circles instead of one dead blob. Its communities
+  differentiate by FJMS domain (Bible/Liturgy/Piyyut/Exegesis/Halakha…), so
+  labeling it "liturgical" would be factually wrong — it is simply the
+  giant component, pre Track-1 canonical masking.
 - The overview is a real NETWORK: inter-cluster links are drawn (green =
   same-work bridges e.g. between communities of the former giant; orange =
   quotation/island links between different works). Circle layout is
@@ -513,7 +517,7 @@ function drawDrill(){
   if(i===hover){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();}});
  info.textContent=`cluster of ${comp.n.toLocaleString()} MSS`+
   (comp.sampled?` — showing top-${comp.nodes.length} by connectivity`:'')+
-  (comp.giant?' · part of the liturgical continent (pre Track-1 masking)':'')+
+  (comp.giant?' · Louvain subdivision of the giant connected component (pre Track-1 masking)':'')+
   ` · ${comp.edges.length.toLocaleString()} edges · click node → browse`;
 }
 function legend(){
@@ -561,7 +565,7 @@ cv.addEventListener('mousemove',e=>{
   if(mode==='over'){
    const t=p.titles.map(x=>`${x[0]} (${x[1]})`).join(' · ')||'ללא כותרת קטלוגית';
    const d=p.doms.map(x=>`${x[0]} (${x[1]})`).join(' · ');
-   tip.innerHTML=`<b>${p.n} כתבי יד · ${GROUPS[p.dgrp][1]}</b>${p.giant?' <span style="color:#f90">· היבשת הליטורגית</span>':''}<br>${t}${d?`<br><span style='color:#8fd3ff'>${d}</span>`:''}<div class='en'>libraries: ${JSON.stringify(p.libs)}</div>`;
+   tip.innerHTML=`<b>${p.n} כתבי יד · ${GROUPS[p.dgrp][1]}</b>${p.giant?' <span style="color:#f90">· תת-קבוצה מהרכיב הקשיר הגדול</span>':''}<br>${t}${d?`<br><span style='color:#8fd3ff'>${d}</span>`:''}<div class='en'>libraries: ${JSON.stringify(p.libs)}</div>`;
   }else{
    const nd=sim.comp.nodes[p];
    tip.innerHTML=`<b>${nd[1]}</b> · ${GROUPS[nd[5]][1]}<br>${nd[3]||'ללא כותרת'}<div class='en'>${nd[2]} · ${nd[4]} page-pair links · click to open</div>`;

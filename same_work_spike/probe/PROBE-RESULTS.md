@@ -265,7 +265,8 @@ calibration itself is now human-grounded.
    scale (tier-1 titles 0.993, BH 64%); volume law measured (654M raw hits;
    DF cap self-tightens — full corpus ≈4–5B hits → disk-partitioned merge);
    first text-reuse map built (337K accepted pairs → 244K MS pairs; giant
-   liturgical component 15,969 MSS ⇒ **Track-1 canon masking is the gate**).
+   canonical component 15,969 MSS — Bible+liturgy+piyyut+exegesis bridged
+   ⇒ **Track-1 canon masking is the gate**).
    Full writeup: **`REHEARSAL-RESULTS.md`**; map `results/rehearsal_100k_map.md`;
    atlas `review/rehearsal_100k_atlas.html`.
 6. Then: **Track 1** (canon identification vs Maagarim/Sefaria + masking —

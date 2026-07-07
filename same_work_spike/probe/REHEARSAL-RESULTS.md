@@ -76,7 +76,10 @@ pairs over 17,994 manuscripts** (`results/rehearsal_100k_map.md`).
 | island (quotation/formula) | 166,470 | 504 | **12,914** then 31, 8, 7… |
 
 One component holds 89% of connected manuscripts; its top titles are פיוט / אלמקדמאת /
-מקרא — the canonical-liturgical continent. Flank-contrast reduces but does not break it
+מקרא — the canonical continent (Bible + liturgy + piyyut + exegesis, bridged; its
+Louvain communities differentiate by domain: 41 Bible / 27 Liturgy / 19 Piyyut /
+15 Exegesis / 10 Halakha — so "liturgical" alone would mislabel it). Flank-contrast
+reduces but does not break it
 (shared liturgical *sequences* legitimately continue across flanks). **Consequence: Track 1
 (canon identification vs clean reference corpora + character-level masking before Track-2
 indexing) is the prerequisite for the works census** — not Leiden tuning, not thresholds.

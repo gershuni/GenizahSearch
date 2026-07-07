@@ -350,9 +350,10 @@ labeling → full-corpus run. All compute on the dev box; never on the productio
 ~linearly, not quadratically (DF-cap self-tightening confirmed: 146M → 654M hits for 5.7×
 pages; full corpus ≈4–5B → disk-partitioned merge). Stage-0 over the full corpus cut it to
 ≈667K effective pages (24% short/empty, 40,452 duplicate photographs, 9,007 target sheets).
-First map: 337K accepted page pairs → 244K manuscript pairs; a giant liturgical component
-(15,969 MSS) survives flank-contrast — **empirical confirmation that Track-1 canonical
-masking is the prerequisite for a legible works census** (§8.2).
+First map: 337K accepted page pairs → 244K manuscript pairs; a giant canonical component
+(15,969 MSS — Bible, liturgy, piyyut, and exegesis bridged into one; its communities
+differentiate by catalog domain) survives flank-contrast — **empirical confirmation that
+Track-1 canonical masking is the prerequisite for a legible works census** (§8.2).
 
 ---
 
