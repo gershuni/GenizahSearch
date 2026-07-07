@@ -1,26 +1,31 @@
 # -*- coding: utf-8 -*-
-"""Interactive text-reuse graph (self-contained HTML, canvas, no deps).
+"""Interactive text-reuse graph v2 (self-contained HTML, canvas, no CDN deps).
 
 Usage: python build_reuse_graph.py [db_path] [tag]
 Output: review/rehearsal_<tag>_graph.html
 
-Two levels:
-- OVERVIEW: every connected component (>=2 MSS) as a packed circle,
-  radius ~ sqrt(#MSS), color = dominant library. Hover = titles summary,
-  click = drill in. Search box filters by catalog title.
-- DRILL-IN: live force-directed MS graph of the cluster. Node size ~ number
-  of accepted page pairs touching the MS; edge width ~ page-pair count;
-  edge color: continuation (green) / island (orange) / mixed. Click a node
-  -> genizahsearch.com browse. Giant components are sampled to the
-  top-degree MEMBER_CAP subgraph (noted in the header).
+v2 (feedback: "giant blob + disconnected confetti, click on blob froze"):
+- Oversized continuation components (> SPLIT_AT members) are decomposed with
+  LOUVAIN community detection (recursively, max 3 levels) — the liturgical
+  continent becomes dozens of explorable circles instead of one dead blob.
+- The overview is a real NETWORK: inter-cluster links are drawn (green =
+  same-work bridges e.g. between communities of the former giant; orange =
+  quotation/island links between different works). Circle layout is
+  force-directed in Python over the link structure, so connected clusters
+  sit near each other.
+- Drill-in edges are capped to the strongest 4,000 and the biggest clusters
+  sampled to their top-300 most-connected members — no more freeze.
 """
 import csv
 import json
 import math
 import sqlite3
 import sys
+import time
 from collections import Counter, defaultdict
 
+import community as community_louvain
+import networkx as nx
 import numpy as np
 from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import connected_components
@@ -30,7 +35,12 @@ DB = sys.argv[1] if len(sys.argv) > 1 else \
     ROOT + r"\same_work_spike\probe\data\rehearsal.db"
 TAG = sys.argv[2] if len(sys.argv) > 2 else "100k"
 OUT = ROOT + rf"\same_work_spike\probe\review\rehearsal_{TAG}_graph.html"
-MEMBER_CAP = 300
+
+MEMBER_CAP = 300      # drill-in node sample (top-degree)
+EDGE_CAP = 4000       # drill-in edges (strongest)
+LINK_CAP = 4000       # overview inter-cluster links (strongest)
+SPLIT_AT = 800        # Louvain-decompose components bigger than this
+MIN_CLUSTER = 2
 
 
 def load_lib_meta():
@@ -48,7 +58,31 @@ def load_lib_meta():
     return meta
 
 
+def split_recursive(members, cont_adj, depth=0):
+    """Louvain-split an oversized member set; returns list of member lists."""
+    if len(members) <= SPLIT_AT or depth >= 3:
+        return [members]
+    g = nx.Graph()
+    mset = set(members)
+    g.add_nodes_from(members)
+    for a in members:
+        for b, w in cont_adj[a]:
+            if b in mset and a < b:
+                g.add_edge(a, b, weight=w)
+    part = community_louvain.best_partition(g, random_state=42)
+    groups = defaultdict(list)
+    for s, c in part.items():
+        groups[c].append(s)
+    if len(groups) <= 1:
+        return [members]
+    out = []
+    for grp in groups.values():
+        out.extend(split_recursive(grp, cont_adj, depth + 1))
+    return out
+
+
 def main():
+    t0 = time.time()
     meta = load_lib_meta()
     con = sqlite3.connect(DB)
     rows = con.execute("""
@@ -68,10 +102,7 @@ def main():
         elif fc == 'island':
             r[3] += 1
 
-    # cluster on the CONTINUATION (same-unit) layer only — island edges are
-    # quotation relationships and would bridge unrelated works into one blob
-    # (the all-layer giant swallows e.g. the 51-MS grammar cluster).
-    # Drill-in still displays island edges WITHIN a cluster (orange).
+    # ---- continuation components ----
     cont_keys = [k for k, r in ms_pairs.items() if r[2] >= max(1, r[3])]
     ms_ids = sorted({s for k in cont_keys for s in k})
     idx = {s: i for i, s in enumerate(ms_ids)}
@@ -80,67 +111,147 @@ def main():
     m = coo_matrix((np.ones(len(ea)), (ea, eb)),
                    shape=(len(ms_ids), len(ms_ids)))
     _, labels = connected_components(m, directed=False)
-
     comp_members = defaultdict(list)
     for s in ms_ids:
         comp_members[int(labels[idx[s]])].append(s)
-    comps = sorted((c for c in comp_members.values() if len(c) >= 2),
-                   key=len, reverse=True)
+
+    cont_adj = defaultdict(list)
+    for (a, b) in cont_keys:
+        w = ms_pairs[(a, b)][0]
+        cont_adj[a].append((b, w))
+        cont_adj[b].append((a, w))
+
+    # ---- decompose oversized components (Louvain) ----
+    clusters = []   # list of (members, from_giant)
+    for members in comp_members.values():
+        if len(members) < MIN_CLUSTER:
+            continue
+        if len(members) > SPLIT_AT:
+            for grp in split_recursive(members, cont_adj):
+                if len(grp) >= MIN_CLUSTER:
+                    clusters.append((grp, True))
+        else:
+            clusters.append((members, False))
+    clusters.sort(key=lambda c: -len(c[0]))
+    print(f"clusters after Louvain split: {len(clusters)} "
+          f"({time.time() - t0:.0f}s)", flush=True)
 
     deg = Counter()
     for (a, b), r in ms_pairs.items():
         deg[a] += r[0]
         deg[b] += r[0]
 
+    # ---- cluster records + membership map (single pass for edges) ----
+    cluster_of = {}
+    sampled_of = {}
     comp_records = []
-    for ci, members in enumerate(comps):
+    for ci, (members, from_giant) in enumerate(clusters):
         libs = Counter(meta.get(s, ('', '?', ''))[1] for s in members)
         titles = Counter(t for s in members
                          for t in [meta.get(s, ('', '?', ''))[2]] if t)
         full_n = len(members)
         sampled = full_n > MEMBER_CAP
-        if sampled:
-            members = sorted(members, key=lambda s: -deg[s])[:MEMBER_CAP]
-        mset = set(members)
-        loc = {s: i for i, s in enumerate(members)}
-        nodes = []
+        keep = (sorted(members, key=lambda s: -deg[s])[:MEMBER_CAP]
+                if sampled else members)
+        loc = {s: i for i, s in enumerate(keep)}
         for s in members:
-            sm, lib, ti = meta.get(s, (s, '?', ''))
-            nodes.append([s, sm, lib, ti, deg[s]])
-        edges = []
-        for (a, b), r in ms_pairs.items():
-            if a in mset and b in mset:
-                edges.append([loc[a], loc[b], r[0], r[1], r[2], r[3]])
+            cluster_of[s] = ci
+        sampled_of[ci] = loc
+        nodes = [[s] + list(meta.get(s, (s, '?', ''))) + [deg[s]]
+                 for s in keep]
         comp_records.append({
-            'id': ci, 'n': full_n, 'sampled': sampled,
+            'id': ci, 'n': full_n, 'sampled': sampled, 'giant': from_giant,
             'libs': dict(libs.most_common(5)),
             'titles': [[t, c] for t, c in titles.most_common(4)],
-            'nodes': nodes, 'edges': edges,
+            'nodes': nodes, 'edges': [],
         })
 
-    # ---- circle packing on a spiral (deterministic, no deps) ----
-    placed = []  # (x, y, r)
-    for rec in comp_records:
-        r = 6 + 3.2 * math.sqrt(rec['n'])
-        r = min(r, 320)
-        if not placed:
-            rec['x'], rec['y'], rec['r'] = 0.0, 0.0, r
-            placed.append((0.0, 0.0, r))
+    links_agg = defaultdict(lambda: [0, 0])  # (ci,cj) -> [cont_w, isl_w]
+    for (a, b), r in ms_pairs.items():
+        ca, cb = cluster_of.get(a), cluster_of.get(b)
+        if ca is None or cb is None:
             continue
-        ang, rad = 0.0, placed[0][2] + r + 8
+        if ca == cb:
+            loc = sampled_of[ca]
+            if a in loc and b in loc:
+                comp_records[ca]['edges'].append(
+                    [loc[a], loc[b], r[0], r[1], r[2], r[3]])
+        else:
+            key = (ca, cb) if ca < cb else (cb, ca)
+            links_agg[key][0] += r[2]
+            links_agg[key][1] += r[3]
+    for rec in comp_records:
+        rec['edges'].sort(key=lambda e: -e[2])
+        del rec['edges'][EDGE_CAP:]
+    links = sorted(([ci, cj, w[0], w[1]]
+                    for (ci, cj), w in links_agg.items()),
+                   key=lambda x: -(x[2] + x[3]))[:LINK_CAP]
+    print(f"links: {len(links_agg)} kept {len(links)} "
+          f"({time.time() - t0:.0f}s)", flush=True)
+
+    # ---- overview layout: force-directed over cluster circles ----
+    n = len(comp_records)
+    R = np.array([min(6 + 3.0 * math.sqrt(c['n']), 200)
+                  for c in comp_records])
+    rng = np.random.default_rng(42)
+    order = np.argsort(-R)
+    P = np.zeros((n, 2))
+    # spiral init, big first
+    placed = []
+    for oi in order:
+        r = R[oi]
+        if not placed:
+            placed.append((0.0, 0.0, r))
+            P[oi] = (0, 0)
+            continue
+        ang, rad = float(rng.uniform(0, 6.28)), placed[0][2] + r + 8
         while True:
-            x = rad * math.cos(ang)
-            y = rad * math.sin(ang)
-            if all((x - px) ** 2 + (y - py) ** 2 >= (r + pr + 6) ** 2
+            x, y = rad * math.cos(ang), rad * math.sin(ang)
+            if all((x - px) ** 2 + (y - py) ** 2 >= (r + pr + 4) ** 2
                    for px, py, pr in placed):
-                rec['x'], rec['y'], rec['r'] = round(x, 1), round(y, 1), r
                 placed.append((x, y, r))
+                P[oi] = (x, y)
                 break
-            ang += 0.35
-            rad += 1.1
+            ang += 0.37
+            rad += 1.0
+    la = np.array([l[0] for l in links], dtype=int)
+    lb = np.array([l[1] for l in links], dtype=int)
+    lw = np.log2(1 + np.array([l[2] + l[3] for l in links], float))
+    for it in range(240):
+        d = P[:, None, :] - P[None, :, :]
+        dist = np.sqrt((d ** 2).sum(-1)) + 1e-6
+        # circle-aware repulsion (stronger inside touching distance)
+        touch = R[:, None] + R[None, :] + 10
+        f = np.where(dist < touch * 2.2, (touch * 2.2 - dist) * 0.05, 0.0)
+        np.fill_diagonal(f, 0)
+        F = (d / dist[..., None] * f[..., None]).sum(1)
+        # link attraction
+        if len(la):
+            dv = P[lb] - P[la]
+            dd = np.sqrt((dv ** 2).sum(-1)) + 1e-6
+            want = (R[la] + R[lb]) * 1.4 + 40
+            pull = ((dd - want) * 0.004 * (0.5 + lw / 6))[:, None] * dv / \
+                dd[:, None]
+            np.add.at(F, la, pull)
+            np.add.at(F, lb, -pull)
+        # weak centering
+        F -= P * 0.001
+        P += np.clip(F, -18, 18)
+    # final overlap resolution
+    for it in range(60):
+        d = P[:, None, :] - P[None, :, :]
+        dist = np.sqrt((d ** 2).sum(-1)) + 1e-6
+        touch = R[:, None] + R[None, :] + 6
+        over = np.where(dist < touch, (touch - dist) * 0.5, 0.0)
+        np.fill_diagonal(over, 0)
+        P += (d / dist[..., None] * over[..., None]).sum(1) * 0.5
+    for rec, (x, y), r in zip(comp_records, P, R):
+        rec['x'], rec['y'], rec['r'] = round(float(x), 1), \
+            round(float(y), 1), round(float(r), 1)
+    print(f"layout done ({time.time() - t0:.0f}s)", flush=True)
 
     n_ms = sum(rec['n'] for rec in comp_records)
-    data = json.dumps({'comps': comp_records, 'tag': TAG,
+    data = json.dumps({'comps': comp_records, 'links': links, 'tag': TAG,
                        'n_ms': n_ms, 'n_edges': len(ms_pairs)},
                       ensure_ascii=False, separators=(',', ':'))
 
@@ -158,6 +269,7 @@ def main():
  canvas{display:block}
  #legend{position:fixed;bottom:10px;left:12px;font-size:12px;color:#99a;z-index:5;background:#1b2030cc;padding:6px 10px;border-radius:8px}
  .sw{display:inline-block;width:10px;height:10px;border-radius:5px;margin:0 3px -1px 8px}
+ .lw{display:inline-block;width:16px;height:3px;border-radius:2px;margin:0 3px 2px 8px}
 </style></head><body>
 <div id='bar'>
  <b>Text-reuse graph</b>
@@ -183,39 +295,34 @@ addEventListener('resize',resize);
 function libColor(l){return LIBCOL[l]||OTHER}
 function domLib(libs){let b=null,bc=-1;for(const k in libs)if(libs[k]>bc){bc=libs[k];b=k}return b}
 
-// ---------- view state ----------
-let mode='over';           // 'over' | 'drill'
-let cam={x:0,y:0,k:1};     // world->screen: s=(w-cam)*k + center
-let cur=null;              // drilled comp
-let sim=null;              // force sim state
-let hover=null;
-let filterQ='';
+let mode='over';
+let cam={x:0,y:0,k:1};
+let sim=null,hover=null,filterQ='';
 
 function toScreen(x,y){return[(x-cam.x)*cam.k+W/2,(y-cam.y)*cam.k+H/2]}
 function toWorld(sx,sy){return[(sx-W/2)/cam.k+cam.x,(sy-H/2)/cam.k+cam.y]}
-
 function fitOverview(){
  let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
  for(const c of DATA.comps){minx=Math.min(minx,c.x-c.r);maxx=Math.max(maxx,c.x+c.r);
   miny=Math.min(miny,c.y-c.r);maxy=Math.max(maxy,c.y+c.r);}
  cam.x=(minx+maxx)/2;cam.y=(miny+maxy)/2;
- cam.k=Math.min(W/(maxx-minx+80),(H-60)/(maxy-miny+80));
+ cam.k=Math.min(W/(maxx-minx+100),(H-70)/(maxy-miny+100));
 }
 
 // ---------- force sim (drill) ----------
 function startSim(comp){
  const n=comp.nodes.length;
  const pos=new Float32Array(2*n),vel=new Float32Array(2*n);
- for(let i=0;i<n;i++){const a=i*2.399963;const r=14*Math.sqrt(i);
+ for(let i=0;i<n;i++){const a=i*2.399963;const r=16*Math.sqrt(i);
   pos[2*i]=r*Math.cos(a);pos[2*i+1]=r*Math.sin(a);}
  sim={comp,pos,vel,tick:0,running:true};
- cam={x:0,y:0,k:Math.min(W,H)/(60*Math.sqrt(n)+240)*2.2};
+ cam={x:0,y:0,k:Math.min(W,H)/(34*Math.sqrt(n)+260)};
  requestAnimationFrame(step);
 }
 function step(){
  if(!sim||!sim.running)return;
  const {comp,pos,vel}=sim;const n=comp.nodes.length;
- const REP=1800,SPR=0.06,DAMP=0.85,LEN=60;
+ const REP=2200,SPR=0.06,DAMP=0.85,LEN=64;
  for(let it=0;it<3;it++){
   for(let i=0;i<n;i++){
    let fx=0,fy=0;
@@ -235,7 +342,7 @@ function step(){
   for(let i=0;i<2*n;i++)pos[i]+=vel[i];
   sim.tick++;}
  draw();
- if(sim.tick<400)requestAnimationFrame(step);else sim.running=false;
+ if(sim.tick<380)requestAnimationFrame(step);else sim.running=false;
 }
 
 // ---------- drawing ----------
@@ -244,22 +351,37 @@ function draw(){
  ctx.clearRect(0,0,W,H);
  if(mode==='over')drawOver();else drawDrill();
 }
+function linkColor(cont,isl){return cont>=isl?'#39d98a':'#ff9d4d'}
 function drawOver(){
  const q=filterQ.trim();
+ // links first (the web)
+ for(const L of DATA.links){
+  const a=DATA.comps[L[0]],b=DATA.comps[L[1]];
+  const[x1,y1]=toScreen(a.x,a.y),[x2,y2]=toScreen(b.x,b.y);
+  if(Math.max(x1,x2)<0||Math.min(x1,x2)>W||Math.max(y1,y2)<0||Math.min(y1,y2)>H)continue;
+  const w=L[2]+L[3];
+  ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);
+  ctx.strokeStyle=linkColor(L[2],L[3])+'40';
+  ctx.lineWidth=Math.min(4,0.4+Math.log2(1+w)*0.45);
+  ctx.stroke();}
  for(const c of DATA.comps){
-  const[sx,sy]=toScreen(c.x,c.y);const r=c.r*cam.k;
+  const[sx,sy]=toScreen(c.x,c.y);const r=Math.max(c.r*cam.k,1.4);
   if(sx<-r||sy<-r||sx>W+r||sy>H+r)continue;
   let match=true;
   if(q)match=c.titles.some(t=>t[0].includes(q));
-  ctx.beginPath();ctx.arc(sx,sy,Math.max(r,1.2),0,7);
-  ctx.fillStyle=libColor(domLib(c.libs))+(match?'cc':'22');
+  ctx.beginPath();ctx.arc(sx,sy,r,0,7);
+  ctx.fillStyle=libColor(domLib(c.libs))+(match?'cc':'1e');
   ctx.fill();
+  if(c.giant&&match){ctx.strokeStyle='#ffffff55';ctx.lineWidth=1;ctx.stroke();}
   if(c===hover){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();}
-  if(r>26){ctx.fillStyle=match?'#fff':'#667';ctx.font='12px Segoe UI';
-   ctx.textAlign='center';
-   ctx.fillText(c.n+' MSS',sx,sy+4);}
+  if(r>30&&match){
+   ctx.fillStyle='#fff';ctx.font='bold 12px Segoe UI';ctx.textAlign='center';
+   const t=(c.titles[0]&&c.titles[0][0])?c.titles[0][0].replace(/[.;].*$/,'').slice(0,22):'';
+   ctx.fillText(t||c.n+' MSS',sx,sy-2);
+   ctx.fillStyle='#ffffffaa';ctx.font='10.5px Segoe UI';
+   ctx.fillText(c.n+' MSS',sx,sy+13);}
  }
- info.textContent=`${DATA.comps.length} same-unit clusters (continuation layer) · ${DATA.n_ms.toLocaleString()} manuscripts · ${DATA.n_edges.toLocaleString()} MS-pair edges total · click a circle to open it`;
+ info.textContent=`${DATA.comps.length} same-unit clusters · ${DATA.n_ms.toLocaleString()} manuscripts · lines = shared-text links between clusters (green=same-work bridge, orange=quotation) · click a circle`;
 }
 function edgeColor(e){
  const cont=e[4],isl=e[5];
@@ -269,28 +391,33 @@ function edgeColor(e){
 }
 function drawDrill(){
  const {comp,pos}=sim;
- for(const e of comp.edges){
+ const maxDraw=Math.min(comp.edges.length,4000);
+ for(let k=0;k<maxDraw;k++){
+  const e=comp.edges[k];
   const[x1,y1]=toScreen(pos[2*e[0]],pos[2*e[0]+1]);
   const[x2,y2]=toScreen(pos[2*e[1]],pos[2*e[1]+1]);
   ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);
-  ctx.strokeStyle=edgeColor(e)+'99';
-  ctx.lineWidth=Math.min(7,0.7+Math.log2(1+e[2]));
+  ctx.strokeStyle=edgeColor(e)+'88';
+  ctx.lineWidth=Math.min(6,0.6+Math.log2(1+e[2]));
   ctx.stroke();}
  comp.nodes.forEach((nd,i)=>{
   const[sx,sy]=toScreen(pos[2*i],pos[2*i+1]);
-  const r=4+2.4*Math.sqrt(Math.min(nd[4],120));
-  ctx.beginPath();ctx.arc(sx,sy,r*Math.min(cam.k,1.4),0,7);
+  const r=(4+2.4*Math.sqrt(Math.min(nd[4],120)))*Math.min(cam.k,1.4);
+  ctx.beginPath();ctx.arc(sx,sy,Math.max(r,2),0,7);
   ctx.fillStyle=libColor(nd[2]);ctx.fill();
   if(i===hover){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();}});
  info.textContent=`cluster of ${comp.n.toLocaleString()} MSS`+
   (comp.sampled?` — showing top-${comp.nodes.length} by connectivity`:'')+
-  ` · ${comp.edges.length.toLocaleString()} edges · green=continuation orange=island · click node → browse`;
+  (comp.giant?' · part of the liturgical continent (pre Track-1 masking)':'')+
+  ` · ${comp.edges.length.toLocaleString()} edges · click node → browse`;
 }
 function legend(){
- let h='node = manuscript circle ~ evidence; ';
+ let h='';
  for(const k of['CUL','RNL','JTS','Oxford','BL'])
   h+=`<span class='sw' style='background:${LIBCOL[k]}'></span>${k}`;
  h+=`<span class='sw' style='background:${OTHER}'></span>other`;
+ h+=`<span class='lw' style='background:#39d98a'></span>same-work`;
+ h+=`<span class='lw' style='background:#ff9d4d'></span>quotation`;
  document.getElementById('legend').innerHTML=h;
 }
 
@@ -304,7 +431,7 @@ function pick(mx,my){
  const {comp,pos}=sim;
  for(let i=comp.nodes.length-1;i>=0;i--){
   const[sx,sy]=toScreen(pos[2*i],pos[2*i+1]);
-  const r=(4+2.4*Math.sqrt(Math.min(comp.nodes[i][4],120)))*Math.min(cam.k,1.4)+2;
+  const r=Math.max((4+2.4*Math.sqrt(Math.min(comp.nodes[i][4],120)))*Math.min(cam.k,1.4),2)+2;
   if((mx-sx)**2+(my-sy)**2<=r*r)return i;}
  return null;
 }
@@ -323,7 +450,7 @@ cv.addEventListener('mousemove',e=>{
   tip.style.top=(e.clientY+16)+'px';
   if(mode==='over'){
    const t=p.titles.map(x=>`${x[0]} (${x[1]})`).join(' · ')||'ללא כותרת קטלוגית';
-   tip.innerHTML=`<b>${p.n} כתבי יד</b><br>${t}<div class='en'>libraries: ${JSON.stringify(p.libs)}</div>`;
+   tip.innerHTML=`<b>${p.n} כתבי יד</b>${p.giant?' <span style="color:#f90">· היבשת הליטורגית</span>':''}<br>${t}<div class='en'>libraries: ${JSON.stringify(p.libs)}</div>`;
   }else{
    const nd=sim.comp.nodes[p];
    tip.innerHTML=`<b>${nd[1]}</b><br>${nd[3]||'ללא כותרת'}<div class='en'>${nd[2]} · ${nd[4]} page-pair links · click to open</div>`;
@@ -338,12 +465,12 @@ cv.addEventListener('click',e=>{
  if(moved)return;
  const p=pick(e.clientX,e.clientY);
  if(p==null)return;
- if(mode==='over'){mode='drill';cur=p;backBtn.style.display='inline-block';
+ if(mode==='over'){mode='drill';backBtn.style.display='inline-block';
   hover=null;startSim(p);}
  else{const nd=sim.comp.nodes[p];
   window.open('https://genizahsearch.com/browse?sys_id='+nd[0],'_blank');}
 });
-backBtn.onclick=()=>{mode='over';cur=null;sim=null;hover=null;
+backBtn.onclick=()=>{mode='over';sim=null;hover=null;
  backBtn.style.display='none';fitOverview();draw();};
 search.addEventListener('input',()=>{filterQ=search.value;if(mode==='over')draw();});
 
@@ -353,7 +480,7 @@ resize();fitOverview();legend();draw();
     open(OUT, 'w', encoding='utf-8').write(html_doc)
     kb = len(html_doc.encode('utf-8')) // 1024
     print(f"wrote {OUT} ({kb} KB, {len(comp_records)} clusters, "
-          f"{n_ms:,} MSS)")
+          f"{n_ms:,} MSS, {len(links)} links)")
 
 
 if __name__ == '__main__':
