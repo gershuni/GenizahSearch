@@ -148,18 +148,55 @@ after dedup/target-sheet filtering), not against a same-pipeline GT run.
 | `scripts/bh_experiment.py` → `results/bh_{report.txt,experiment.json}` | BH sweeps |
 | `results/tier1_samples.txt` | manually-QA'd Hebrew span samples |
 
-## Next steps (handoff-ready, ordered)
+## Round 2 (same day): diagonal-keyed candidates + boundary calibration ✅
 
-1. **Diagonal-keyed candidate accumulator** in `engine.py` (~30 lines) —
-   rerun pilot, confirm recall holds while candidates drop >10×.
-2. **Sloped acceptance boundary** + ROC on the existing scatter data
-   (`verified_pairs.json` + a density-0.50 rerun for the curve's tail).
+**Next-steps #1 and #2 were executed in the same session.** Artifacts:
+`scripts/separability2.py`, `scripts/roc_boundary.py`,
+`results/separability2_report{,_cap1}.{txt,json}`,
+`results/verified_pairs_d50{,_cap1}.json`, `results/roc_boundary.{md,png,json}`.
+
+**R1 — Diagonal-keyed two-hit (`engine.build_diag_pairs` + `verify_span`):**
+accumulates per (pair, diagonal-bucket) a fixed-size count+extent record (no
+position lists); candidate = ≥ min_anchors within a bucket±1 cluster;
+`per_gram_pair_cap=1` makes the two hits DISTINCT grams. Results (pilot,
+17,228 pages): **candidate recall stays 1.00 on all three families**;
+candidates 31.7M → **11.4M** (2.8×); verify 11 µs/pair (125 s); accumulation
+memory ↓ (~3.3 vs 15 GB at peak-comparable stage). NOT the >10× volume drop
+hoped for — random Hebrew page pairs do share 2 distinct same-diagonal
+5-grams under DF=100 at pilot density. HOWEVER: the absolute DF cap becomes
+RELATIVELY stricter as the corpus grows (at 948K pages most grams exceed 100
+pages → auto-dropped), so pilot volume does NOT extrapolate linearly — the
+100K rehearsal (step R5 below) is the honest instrument. The
+counting-representation (numpy sort-merge over (pair,bucket) keys) remains
+required for full scale (122M accumulator entries in Python dicts ≈ 12 GB
+at pilot size).
+
+**R2 — Sloped acceptance boundary (fitted per length band, keep-95% of
+Tier-1 per family; `results/roc_boundary.md`):** all profiles converge on
+one shape — **density ≤ 0.30 for spans < 100 letters; ≈ 0.39–0.42 for
+spans ≥ 100**. Short evidence must be clean; long evidence tolerates
+liturgical noise. Recommended production profile = `liturgy_q95`
+([25–100): 0.30, [100–200): 0.386, [200+): 0.418):
+- Tier-1 recall: joins **1.00**, titles **0.984**, BH **0.974**
+- **BH witnesses connected: 241/428 (56%)** vs 82 (19%) at flat 0.30
+- Verified-recall ladder (diag candidates, k=5): titles 86%@0.30 → 98%@0.40;
+  BH 46%@0.30 → 96%@0.40 → 98%@0.45
+- Cost: ~4.9K accepted `cross` pairs in the (deliberately enriched) pilot —
+  a mixture of canonical shares, undedup'd duplicates, target sheets, and
+  genuine discoveries; **the 100–300-letter × 0.35–0.45 region is where true
+  and cross overlap** — concentrate the graded precision sampling there.
+
+## Next steps (handoff-ready, ordered — R1/R2 DONE above)
+
 3. **Stage-0 module**: FL-id dedup, 997-collapse, target-sheet filter,
    language ID. Rerun pilot clean.
 4. **Precision sampling**: 200 stratified cross-class pairs, graded labels
-   (verbatim/near/paraphrase/formula/topical/unrelated) — human (Hillel) or
-   assisted; this yields the production threshold.
-5. **Scale rehearsal**: 100K-page slice with the numpy posting representation;
-   measure memory/time curve before committing to 948K.
-6. Then: Track 1 (canon identification vs Maagarim/Sefaria) and the full-corpus
-   run per SEED-029.
+   (verbatim/near/paraphrase/formula/topical/unrelated), stratified on the
+   overlap region (100–300 letters × 0.35–0.45) — human (Hillel) or assisted;
+   this converts `cross` yield into real precision and finalizes the boundary.
+5. **Scale rehearsal**: 100K-page slice with the numpy (pair,bucket)
+   sort-merge representation; measure candidates/page and memory/time vs
+   corpus size (the DF-cap selectivity improves with scale — measure, don't
+   extrapolate from the enriched pilot).
+6. Then: Track 1 (canon identification vs Maagarim/Sefaria) and the
+   full-corpus run per SEED-029.

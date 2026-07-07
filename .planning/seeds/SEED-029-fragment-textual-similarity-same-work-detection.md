@@ -176,6 +176,12 @@ sigla resolved — + joins + title-groups + FGP-overlap + 10K random background)
 - **Unplanned discovery**: two background MSS of the same halakhic work (אונאה text) auto-linked.
 - **Scale frontier**: candidate volume (31.7M pairs at pilot; two-hit needs diagonal-keyed
   accumulation before the 948K-page run; Python dicts → numpy/Rust postings).
+**Round 2 (same day):** diagonal-keyed distinct-gram two-hit candidates (recall stays 1.00;
+volume 31.7M→11.4M; `engine.build_diag_pairs`/`verify_span`) + fitted acceptance boundary —
+**density ≤0.30 under 100 letters, ≈0.39–0.42 above** (`results/roc_boundary.md`); production
+profile recall = joins 1.00 / titles 0.984 / BH 0.974; **BH witnesses connected 241/428 (56%)**
+vs 82 at flat 0.30. Remaining: stage-0 module → 200-pair graded precision sampling (focus the
+100–300-letter × 0.35–0.45 overlap region) → 100K numpy scale rehearsal → Track 1 + full corpus.
 Next steps (ordered, handoff-ready) in PROBE-RESULTS.md §Next steps.
 
 ## The 10 decisions that matter (start values + cheap validation)

@@ -126,6 +126,125 @@ def verify_pair(sa, sb, anchors, k=5, band=20, margin=30,
     }
 
 
+def build_diag_pairs(streams, k=5, df_drop=None, posting_cap=None,
+                     exclude_same_key=None, min_anchors=2, band=20,
+                     per_gram_pair_cap=8):
+    """Diagonal-keyed candidate generation (PROBE-RESULTS next-step #1).
+
+    Accumulates per (page_a, page_b, diagonal_bucket) a FIXED-SIZE record
+    [count, min_a, max_a, min_b, max_b] — no position lists. The two-hit
+    rule becomes diagonal-consistent: a pair is a candidate only if some
+    bucket cluster (bucket +/- 1) accumulates >= min_anchors hits.
+
+    Returns: dict[(pa, pb)] -> (cluster_count, a0, a1, b0, b1), stats
+    """
+    posting_cap = posting_cap or 3000
+    index = defaultdict(list)
+    for pi, s in enumerate(streams):
+        if not s:
+            continue
+        for pos in range(len(s) - k + 1):
+            index[s[pos:pos + k]].append((pi, pos))
+
+    stats = {
+        'grams_total': len(index),
+        'grams_dropped_df': 0,
+        'grams_dropped_cap': 0,
+        'grams_dropped_singleton': 0,
+    }
+
+    acc = {}  # (pa, pb, bucket) -> [count, min_a, max_a, min_b, max_b]
+    for gram, postings in index.items():
+        pages_here = {pi for pi, _ in postings}
+        if len(pages_here) < 2:
+            stats['grams_dropped_singleton'] += 1
+            continue
+        if df_drop is not None and len(pages_here) > df_drop:
+            stats['grams_dropped_df'] += 1
+            continue
+        if len(postings) > posting_cap:
+            stats['grams_dropped_cap'] += 1
+            continue
+        by_page = defaultdict(list)
+        for pi, pos in postings:
+            by_page[pi].append(pos)
+        pages = sorted(by_page)
+        for a_i in range(len(pages)):
+            for b_i in range(a_i + 1, len(pages)):
+                pa, pb = pages[a_i], pages[b_i]
+                if exclude_same_key is not None and \
+                        exclude_same_key[pa] == exclude_same_key[pb]:
+                    continue
+                n_combo = 0
+                for pos_a in by_page[pa][:per_gram_pair_cap]:
+                    for pos_b in by_page[pb][:per_gram_pair_cap]:
+                        bucket = (pos_a - pos_b) // band
+                        rec = acc.get((pa, pb, bucket))
+                        if rec is None:
+                            acc[(pa, pb, bucket)] = [1, pos_a, pos_a,
+                                                     pos_b, pos_b]
+                        else:
+                            rec[0] += 1
+                            if pos_a < rec[1]:
+                                rec[1] = pos_a
+                            elif pos_a > rec[2]:
+                                rec[2] = pos_a
+                            if pos_b < rec[3]:
+                                rec[3] = pos_b
+                            elif pos_b > rec[4]:
+                                rec[4] = pos_b
+                        n_combo += 1
+                        if n_combo >= per_gram_pair_cap:
+                            break
+                    if n_combo >= per_gram_pair_cap:
+                        break
+    stats['acc_entries'] = len(acc)
+
+    # group buckets per pair, take best +/-1 cluster
+    by_pair = defaultdict(dict)  # (pa,pb) -> {bucket: rec}
+    for (pa, pb, bucket), rec in acc.items():
+        by_pair[(pa, pb)][bucket] = rec
+    candidates = {}
+    for pair, buckets in by_pair.items():
+        best_count, best_ext = 0, None
+        for b in buckets:
+            cluster = [buckets[x] for x in (b - 1, b, b + 1) if x in buckets]
+            count = sum(r[0] for r in cluster)
+            if count > best_count:
+                best_count = count
+                best_ext = (
+                    min(r[1] for r in cluster), max(r[2] for r in cluster),
+                    min(r[3] for r in cluster), max(r[4] for r in cluster))
+        if best_count >= min_anchors:
+            candidates[pair] = (best_count,) + best_ext
+    stats['candidate_pairs'] = len(candidates)
+    return candidates, stats
+
+
+def verify_span(sa, sb, ext, k=5, margin=30, min_span=25, max_density=0.30):
+    """Verify a diagonal-cluster extent directly (no re-binning).
+
+    ext = (n_anchors, min_a, max_a, min_b, max_b) from build_diag_pairs."""
+    n_anchors, ia0, ia1, jb0, jb1 = ext
+    a0, a1 = max(0, ia0 - margin), min(len(sa), ia1 + k + margin)
+    b0, b1 = max(0, jb0 - margin), min(len(sb), jb1 + k + margin)
+    span_a, span_b = sa[a0:a1], sb[b0:b1]
+    if min(len(span_a), len(span_b)) < min_span:
+        return None
+    dist = Levenshtein.distance(span_a, span_b)
+    density = dist / max(len(span_a), len(span_b))
+    if density > max_density:
+        return None
+    return {
+        'a0': a0, 'a1': a1, 'b0': b0, 'b1': b1,
+        'n_anchors': n_anchors,
+        'aligned_len': max(len(span_a), len(span_b)),
+        'density': round(density, 4),
+        'coverage_shorter': round(
+            min(len(span_a), len(span_b)) / max(1, min(len(sa), len(sb))), 4),
+    }
+
+
 def run(streams, ids, k=5, df_drop=None, posting_cap=None, min_anchors=2,
         band=20, margin=30, min_span=25, max_density=0.30,
         exclude_same_key=None):

@@ -1,0 +1,68 @@
+{
+ "corpus_pages": 17228,
+ "cand_params": {
+  "k": 5,
+  "df_drop": 100,
+  "posting_cap": 2000,
+  "min_anchors": 2,
+  "band": 20
+ },
+ "verify_params": {
+  "k": 5,
+  "margin": 30,
+  "min_span": 25,
+  "max_density": 0.5
+ },
+ "engine_stats": {
+  "grams_total": 1774147,
+  "grams_dropped_df": 16861,
+  "grams_dropped_cap": 0,
+  "grams_dropped_singleton": 635443,
+  "acc_entries": 140370565,
+  "candidate_pairs": 13310834
+ },
+ "timing_s": {
+  "candidates": 794,
+  "verify": 148
+ },
+ "candidate_pairs": 13310834,
+ "candidate_pairs_v1_was": 31744866,
+ "recall_vs_tier1": {
+  "joins": {
+   "gt_pairs": 36,
+   "candidate_recall": 1.0,
+   "verified_recall@0.3": 0.7778,
+   "verified_recall@0.35": 0.8333,
+   "verified_recall@0.4": 1.0,
+   "verified_recall@0.45": 1.0,
+   "verified_recall@0.5": 1.0
+  },
+  "titles": {
+   "gt_pairs": 1866,
+   "candidate_recall": 1.0,
+   "verified_recall@0.3": 0.8414,
+   "verified_recall@0.35": 0.9341,
+   "verified_recall@0.4": 0.9705,
+   "verified_recall@0.45": 0.985,
+   "verified_recall@0.5": 0.9909
+  },
+  "bh": {
+   "gt_pairs": 118,
+   "candidate_recall": 1.0,
+   "verified_recall@0.3": 0.4322,
+   "verified_recall@0.35": 0.8475,
+   "verified_recall@0.4": 0.9492,
+   "verified_recall@0.45": 0.9831,
+   "verified_recall@0.5": 0.9915
+  }
+ },
+ "verified_at_050": 31686,
+ "classes": {
+  "tier1_titles": 1849,
+  "cross": 18033,
+  "duplicate": 197,
+  "related_new": 11454,
+  "tier1_joins": 36,
+  "tier1_bh": 117
+ }
+}
