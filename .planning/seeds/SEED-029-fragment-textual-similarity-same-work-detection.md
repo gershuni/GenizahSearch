@@ -182,6 +182,12 @@ volume 31.7M→11.4M; `engine.build_diag_pairs`/`verify_span`) + fitted acceptan
 profile recall = joins 1.00 / titles 0.984 / BH 0.974; **BH witnesses connected 241/428 (56%)**
 vs 82 at flat 0.30. Remaining: stage-0 module → 200-pair graded precision sampling (focus the
 100–300-letter × 0.35–0.45 overlap region) → 100K numpy scale rehearsal → Track 1 + full corpus.
+**Round 3 (2026-07-07):** first 19 human grades on the FP-frontier stratum: **68% canonical /
+16% formula / ~11% spurious** — routing, not precision, is the issue; Track-1 masking absorbs
+most of it. NEW required verifier feature — **flank-contrast classifier** (Hillel's heuristic):
+align ~150-letter flanks of every accepted span; flanks-align → same-work; flanks-dissimilar →
+ISLAND → quotation/formula; island∧non-canon = citation of a non-canonical work (indirect
+witness — the highest-value class). Review tool: `same_work_spike/probe/review/review.html`.
 Next steps (ordered, handoff-ready) in PROBE-RESULTS.md §Next steps.
 
 ## The 10 decisions that matter (start values + cheap validation)

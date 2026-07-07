@@ -186,6 +186,28 @@ liturgical noise. Recommended production profile = `liturgy_q95`
   genuine discoveries; **the 100–300-letter × 0.35–0.45 region is where true
   and cross overlap** — concentrate the graded precision sampling there.
 
+## Round 3 (2026-07-07): first human grades + the flank-contrast classifier
+
+**Early grading signal (Hillel, n=19, overlap_cross stratum — the FP
+frontier):** canonical 13 (68%) / shared_formula 3 / near_verbatim 1
+(possible genuine discovery) / unrelated+junk 2 (11%). I.e. **~89% of the
+apparent false-positive mass is correctly-detected shared text of the wrong
+KIND** — routing, not precision, is the issue: Track-1 canonical masking
+alone would absorb ~⅔ of the frontier. (Small n; continue grading.)
+
+**Flank-contrast classifier (Hillel's heuristic, mechanized):** after
+accepting a span, align the ~150-letter flanks on both sides.
+- flanks align → match CONTINUES → same-work evidence;
+- flanks dissimilar (density ≈ random floor ~0.6) → the span is an ISLAND →
+  quotation/formula; island ∧ canon-index hit → canonical quote; island ∧
+  NOT canon → **citation of a non-canonical work** (indirect textual witness
+  — the project's most valuable category). Cost: 2 extra Levenshtein calls
+  per accepted pair. → REQUIRED in the full pipeline's verifier.
+
+**Analysis caveat:** the review tool recomputes spans (uncapped) — its
+exported densities differ from engine densities; join grades to
+`verified_pairs_d50_cap1.json` by pair id for calibration analysis.
+
 ## Next steps (handoff-ready, ordered — R1/R2 DONE above)
 
 3. **Stage-0 module**: FL-id dedup, 997-collapse, target-sheet filter,
