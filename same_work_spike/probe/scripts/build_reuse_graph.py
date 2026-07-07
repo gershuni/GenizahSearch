@@ -58,6 +58,73 @@ def load_lib_meta():
     return meta
 
 
+# ---- FJMS domain layer -> ~13 coarse color groups ----
+# (index, EN, HE, color) — embedded in the JS as GROUPS
+DOMAIN_GROUPS = [
+    ('Bible', 'מקרא', '#4ea3ff'),
+    ('Exegesis & Tafsir', 'פרשנות ותפסיר', '#2ec8e6'),
+    ('Piyyut', 'פיוט', '#a06bff'),
+    ('Liturgy', 'תפילה וברכות', '#ffd35e'),
+    ('Poetry', 'שירה', '#ff5ed0'),
+    ('Talmud & Midrash', 'תלמוד ומדרש', '#c98a4b'),
+    ('Halakha', 'הלכה', '#8fe65e'),
+    ('Documents & Letters', 'תעודות ומכתבים', '#e8e8e8'),
+    ('Thought & Kabbalah', 'הגות וקבלה', '#ff7d5e'),
+    ('Sciences & Medicine', 'מדעים ורפואה', '#5effd0'),
+    ('Philology', 'בלשנות ומילונאות', '#9aa7ff'),
+    ('Belles Lettres', 'סיפורת', '#d4ff5e'),
+    ('Other / Unidentified', 'אחר', '#77808f'),
+]
+_G = {name: i for i, (name, _, _) in enumerate(DOMAIN_GROUPS)}
+_KEYWORD_GROUPS = [
+    ('tafsir', 'Exegesis & Tafsir'), ('exegesis', 'Exegesis & Tafsir'),
+    ('piyyut', 'Piyyut'), ('piyut', 'Piyyut'),
+    ('secular poetry', 'Poetry'),
+    ('liturgy', 'Liturgy'), ('prayer', 'Liturgy'),
+    ('bible', 'Bible'), ('masorah', 'Bible'), ('massorah', 'Bible'),
+    ('halakh', 'Halakha'), ('responsa', 'Halakha'),
+    ('talmud', 'Talmud & Midrash'), ('mishnah', 'Talmud & Midrash'),
+    ('rabbinic', 'Talmud & Midrash'), ('midrash', 'Talmud & Midrash'),
+    ('derashot', 'Talmud & Midrash'),
+    ('letters', 'Documents & Letters'), ('document', 'Documents & Letters'),
+    ('lists', 'Documents & Letters'),
+    ('philosoph', 'Thought & Kabbalah'), ('theolog', 'Thought & Kabbalah'),
+    ('kabbalah', 'Thought & Kabbalah'), ('kalam', 'Thought & Kabbalah'),
+    ('ethical', 'Thought & Kabbalah'), ('polemic', 'Thought & Kabbalah'),
+    ('science', 'Sciences & Medicine'), ('medicine', 'Sciences & Medicine'),
+    ('astronomy', 'Sciences & Medicine'), ('occult', 'Sciences & Medicine'),
+    ('predicting', 'Sciences & Medicine'),
+    ('philolog', 'Philology'), ('glossar', 'Philology'),
+    ('stories', 'Belles Lettres'), ('belles', 'Belles Lettres'),
+]
+
+
+def _group_of(domain, parent):
+    txt = f"{domain or ''} {parent or ''}".casefold()
+    for kw, grp in _KEYWORD_GROUPS:
+        if kw in txt:
+            return _G[grp]
+    return _G['Other / Unidentified']
+
+
+def load_domains():
+    """sys_id -> (Counter[group_idx], Counter[hebrew domain label])."""
+    con = sqlite3.connect(ROOT + r"\fist_data\fjms_enrichment.db")
+    out = {}
+    for alma, dom, dom_he, par, par_he in con.execute(
+            "SELECT AlmaId, Domain, DomainHeb, ParentDomain, ParentDomainHeb "
+            "FROM domains"):
+        rec = out.get(alma)
+        if rec is None:
+            rec = out[alma] = (Counter(), Counter())
+        rec[0][_group_of(dom, par)] += 1
+        label = dom_he or dom
+        if label and label not in ('לא מזוהה', 'Unidentified'):
+            rec[1][label] += 1
+    con.close()
+    return out
+
+
 def split_recursive(members, cont_adj, depth=0):
     """Louvain-split an oversized member set; returns list of member lists."""
     if len(members) <= SPLIT_AT or depth >= 3:
@@ -84,6 +151,9 @@ def split_recursive(members, cont_adj, depth=0):
 def main():
     t0 = time.time()
     meta = load_lib_meta()
+    domains = load_domains()
+    print(f"domain records for {len(domains):,} sys_ids "
+          f"({time.time() - t0:.0f}s)", flush=True)
     con = sqlite3.connect(DB)
     rows = con.execute("""
         SELECT sys_a, sys_b, aligned_len, density, flank_class
@@ -145,10 +215,28 @@ def main():
     cluster_of = {}
     sampled_of = {}
     comp_records = []
+    other_grp = _G['Other / Unidentified']
+
+    def ms_group(s):
+        rec = domains.get(s)
+        if not rec or not rec[0]:
+            return other_grp
+        # prefer a specific group over Other when both present
+        top = rec[0].most_common(2)
+        if top[0][0] == other_grp and len(top) > 1:
+            return top[1][0]
+        return top[0][0]
+
     for ci, (members, from_giant) in enumerate(clusters):
         libs = Counter(meta.get(s, ('', '?', ''))[1] for s in members)
         titles = Counter(t for s in members
                          for t in [meta.get(s, ('', '?', ''))[2]] if t)
+        grp_cnt = Counter(ms_group(s) for s in members)
+        dom_labels = Counter()
+        for s in members:
+            rec = domains.get(s)
+            if rec:
+                dom_labels.update(rec[1])
         full_n = len(members)
         sampled = full_n > MEMBER_CAP
         keep = (sorted(members, key=lambda s: -deg[s])[:MEMBER_CAP]
@@ -157,12 +245,19 @@ def main():
         for s in members:
             cluster_of[s] = ci
         sampled_of[ci] = loc
-        nodes = [[s] + list(meta.get(s, (s, '?', ''))) + [deg[s]]
+        nodes = [[s] + list(meta.get(s, (s, '?', ''))) + [deg[s], ms_group(s)]
                  for s in keep]
+        dgrp = grp_cnt.most_common(1)[0][0]
+        if dgrp == other_grp and len(grp_cnt) > 1:
+            nd = [g for g, _ in grp_cnt.most_common(2) if g != other_grp]
+            if nd and grp_cnt[nd[0]] >= max(2, 0.25 * full_n):
+                dgrp = nd[0]
         comp_records.append({
             'id': ci, 'n': full_n, 'sampled': sampled, 'giant': from_giant,
             'libs': dict(libs.most_common(5)),
             'titles': [[t, c] for t, c in titles.most_common(4)],
+            'doms': [[t, c] for t, c in dom_labels.most_common(4)],
+            'dgrp': dgrp,
             'nodes': nodes, 'edges': [],
         })
 
@@ -252,7 +347,8 @@ def main():
 
     n_ms = sum(rec['n'] for rec in comp_records)
     data = json.dumps({'comps': comp_records, 'links': links, 'tag': TAG,
-                       'n_ms': n_ms, 'n_edges': len(ms_pairs)},
+                       'n_ms': n_ms, 'n_edges': len(ms_pairs),
+                       'groups': DOMAIN_GROUPS},
                       ensure_ascii=False, separators=(',', ':'))
 
     html_doc = """<!DOCTYPE html><html lang='he'><head><meta charset='utf-8'>
@@ -274,7 +370,8 @@ def main():
 <div id='bar'>
  <b>Text-reuse graph</b>
  <button id='back'>&#8592; overview</button>
- <input id='search' placeholder='filter clusters by title (e.g. רמבם, פיוט)'>
+ <button id='colormode' style='background:#3d3f6b;border:none;color:#fff;border-radius:6px;padding:4px 14px;cursor:pointer'>color: domain</button>
+ <input id='search' placeholder='filter clusters by title or domain (e.g. רמבם, פיוט)'>
  <span id='info'></span>
 </div>
 <div id='tip'></div>
@@ -294,6 +391,10 @@ function resize(){DPR=devicePixelRatio||1;W=innerWidth;H=innerHeight;
 addEventListener('resize',resize);
 function libColor(l){return LIBCOL[l]||OTHER}
 function domLib(libs){let b=null,bc=-1;for(const k in libs)if(libs[k]>bc){bc=libs[k];b=k}return b}
+const GROUPS=DATA.groups; // [en, he, color]
+let colorBy='domain';     // 'domain' | 'library'
+function compColor(c){return colorBy==='domain'?GROUPS[c.dgrp][2]:libColor(domLib(c.libs))}
+function nodeColor(nd){return colorBy==='domain'?GROUPS[nd[5]][2]:libColor(nd[2])}
 
 let mode='over';
 let cam={x:0,y:0,k:1};
@@ -368,15 +469,19 @@ function drawOver(){
   const[sx,sy]=toScreen(c.x,c.y);const r=Math.max(c.r*cam.k,1.4);
   if(sx<-r||sy<-r||sx>W+r||sy>H+r)continue;
   let match=true;
-  if(q)match=c.titles.some(t=>t[0].includes(q));
+  if(q)match=c.titles.some(t=>t[0].includes(q))
+        ||c.doms.some(t=>t[0].includes(q))
+        ||GROUPS[c.dgrp][0].toLowerCase().includes(q.toLowerCase())
+        ||GROUPS[c.dgrp][1].includes(q);
   ctx.beginPath();ctx.arc(sx,sy,r,0,7);
-  ctx.fillStyle=libColor(domLib(c.libs))+(match?'cc':'1e');
+  ctx.fillStyle=compColor(c)+(match?'cc':'1e');
   ctx.fill();
   if(c.giant&&match){ctx.strokeStyle='#ffffff55';ctx.lineWidth=1;ctx.stroke();}
   if(c===hover){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();}
   if(r>30&&match){
    ctx.fillStyle='#fff';ctx.font='bold 12px Segoe UI';ctx.textAlign='center';
-   const t=(c.titles[0]&&c.titles[0][0])?c.titles[0][0].replace(/[.;].*$/,'').slice(0,22):'';
+   let t=(c.titles[0]&&c.titles[0][0])?c.titles[0][0].replace(/[.;].*$/,'').slice(0,22):'';
+   if(!t)t=(c.doms[0]&&c.doms[0][0])?c.doms[0][0].slice(0,22):GROUPS[c.dgrp][1];
    ctx.fillText(t||c.n+' MSS',sx,sy-2);
    ctx.fillStyle='#ffffffaa';ctx.font='10.5px Segoe UI';
    ctx.fillText(c.n+' MSS',sx,sy+13);}
@@ -404,7 +509,7 @@ function drawDrill(){
   const[sx,sy]=toScreen(pos[2*i],pos[2*i+1]);
   const r=(4+2.4*Math.sqrt(Math.min(nd[4],120)))*Math.min(cam.k,1.4);
   ctx.beginPath();ctx.arc(sx,sy,Math.max(r,2),0,7);
-  ctx.fillStyle=libColor(nd[2]);ctx.fill();
+  ctx.fillStyle=nodeColor(nd);ctx.fill();
   if(i===hover){ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();}});
  info.textContent=`cluster of ${comp.n.toLocaleString()} MSS`+
   (comp.sampled?` — showing top-${comp.nodes.length} by connectivity`:'')+
@@ -413,9 +518,14 @@ function drawDrill(){
 }
 function legend(){
  let h='';
- for(const k of['CUL','RNL','JTS','Oxford','BL'])
-  h+=`<span class='sw' style='background:${LIBCOL[k]}'></span>${k}`;
- h+=`<span class='sw' style='background:${OTHER}'></span>other`;
+ if(colorBy==='domain'){
+  for(const g of GROUPS)
+   h+=`<span class='sw' style='background:${g[2]}'></span>${g[1]}`;
+ }else{
+  for(const k of['CUL','RNL','JTS','Oxford','BL'])
+   h+=`<span class='sw' style='background:${LIBCOL[k]}'></span>${k}`;
+  h+=`<span class='sw' style='background:${OTHER}'></span>other`;
+ }
  h+=`<span class='lw' style='background:#39d98a'></span>same-work`;
  h+=`<span class='lw' style='background:#ff9d4d'></span>quotation`;
  document.getElementById('legend').innerHTML=h;
@@ -450,10 +560,11 @@ cv.addEventListener('mousemove',e=>{
   tip.style.top=(e.clientY+16)+'px';
   if(mode==='over'){
    const t=p.titles.map(x=>`${x[0]} (${x[1]})`).join(' · ')||'ללא כותרת קטלוגית';
-   tip.innerHTML=`<b>${p.n} כתבי יד</b>${p.giant?' <span style="color:#f90">· היבשת הליטורגית</span>':''}<br>${t}<div class='en'>libraries: ${JSON.stringify(p.libs)}</div>`;
+   const d=p.doms.map(x=>`${x[0]} (${x[1]})`).join(' · ');
+   tip.innerHTML=`<b>${p.n} כתבי יד · ${GROUPS[p.dgrp][1]}</b>${p.giant?' <span style="color:#f90">· היבשת הליטורגית</span>':''}<br>${t}${d?`<br><span style='color:#8fd3ff'>${d}</span>`:''}<div class='en'>libraries: ${JSON.stringify(p.libs)}</div>`;
   }else{
    const nd=sim.comp.nodes[p];
-   tip.innerHTML=`<b>${nd[1]}</b><br>${nd[3]||'ללא כותרת'}<div class='en'>${nd[2]} · ${nd[4]} page-pair links · click to open</div>`;
+   tip.innerHTML=`<b>${nd[1]}</b> · ${GROUPS[nd[5]][1]}<br>${nd[3]||'ללא כותרת'}<div class='en'>${nd[2]} · ${nd[4]} page-pair links · click to open</div>`;
   }
  }else tip.style.display='none';
 });
@@ -473,6 +584,9 @@ cv.addEventListener('click',e=>{
 backBtn.onclick=()=>{mode='over';sim=null;hover=null;
  backBtn.style.display='none';fitOverview();draw();};
 search.addEventListener('input',()=>{filterQ=search.value;if(mode==='over')draw();});
+document.getElementById('colormode').onclick=function(){
+ colorBy=colorBy==='domain'?'library':'domain';
+ this.textContent='color: '+colorBy;legend();draw();};
 
 resize();fitOverview();legend();draw();
 </script></body></html>"""
