@@ -157,25 +157,40 @@ pages), Saadia (tafsir, פירוש דניאל, siddur, בקשה), רשב"ח Tora
 ספר הרקמה in BOTH the JA original AND ibn Tibbon's Hebrew, הלכות פסוקות, שאילתות,
 Nethanel al-Fayyumi, Abraham Maimonides, ברכת המזון (118 pages).
 
-**Masked Track-2 rerun** (`rehearsal_run.py … mask`: Track-1 spans dropped from the
-gram index — "Track 2 never sees identified text"; 15.5M grams masked = 18%):
+**Testimony vs citation split** (Hillel's correction — two products, opposite
+handling; `track1_testimonies.py`). Discriminator = **page coverage**
+(matched letters / page letters): ≥0.45 → *testimony* (the page IS a copy of the
+work — first-rate witnesses, for canonical works too); 0.15–0.45 → partial;
+<0.15 → *citation* (noise for discovery, masked). Distributions validate it —
+Bavli is bimodal (citation mass at coverage 0.1–0.2 from halakhic works quoting
+it; testimony tail to 1.0). Results (28,965 MS×work rows): 12,389 testimony /
+8,734 partial / 7,842 citation; **canonical witnesses: 6,483 MSS (Bible 5,799,
+Bavli 421, Mishnah 199, Yerushalmi 47, Tosefta 17)**; edited-work testimonies
+5,906, of which **642 tier=new?** (the Maagarim edition's source manuscript is a
+DIFFERENT manuscript — candidate new witnesses). Report:
+`review/track1_100k_testimonies.html` + CSV.
 
-| | unmasked | masked |
-|---|---|---|
-| accepted page pairs | 337,069 | **72,741 (−78%)** |
-| clean MS pairs / MSS | 244,020 / 17,994 | 48,570 / 9,588 |
-| giant component (all / continuation) | 15,969 / 11,920 | **7,561 / 4,389** |
-| tier-1 titles recall | 0.993 | 0.986 (non-canonical works unharmed) |
-| library matrix head | RNL–RNL 114.0K, CUL–RNL 63.9K | RNL–RNL 39.2K (81% of map), CUL–RNL 2.9K |
+**Masked Track-2 reruns — three regimes** (`rehearsal_run.py … mask|maskcanon`;
+`maskcanon` masks ONLY Bible/Mishnah/Tosefta/Bavli/Yerushalmi spans, keeping
+edited-work matches in the map as labeled witness clusters):
 
-Reading: masking absorbed the **Rabbanite canonical core** (Bible/Talmud/liturgy —
-CUL–RNL cross-links collapse 63.9K→2.9K). The residual giant (4,389 MSS, 70% RNL,
-top titles אלמקדמאת / piyyut / סדור מנהג קראים) is the **Karaite-liturgy + piyyut
-continent — text shared across many MSS that is NOT in Maagarim/JA**: part missing
-reference coverage (Genizah piyyut, Karaite siddur/exegesis), part genuinely
-unedited. That residue is itself a discovery product: high-witness-count unidentified
-units. Masked top clusters are markedly cleaner (Rif, ibn Shuaib's דרשות, Saadia's
-siddur ×3, Targum Onkelos, shtarot/ketubbah formulas).
+| | unmasked | **canon-mask (the discovery map)** | all-mask |
+|---|---|---|---|
+| accepted page pairs | 337,069 | **91,579** | 72,741 |
+| clean MS pairs / MSS | 244,020 / 17,994 | 64,703 / 11,991 | 48,570 / 9,588 |
+| giant component (all / continuation) | 15,969 / 11,920 | **9,662 / 5,761** | 7,561 / 4,389 |
+| tier-1 titles recall | 0.993 | 0.991 | 0.986 |
+| BH witnesses connected | 326 | **314** (liturgy links kept) | 233 |
+| CUL–RNL cross links | 63,861 | 4,894 | 2,935 |
+
+Reading: canon-masking absorbed the **Rabbanite canonical citation core** (CUL–RNL
+collapses 63.9K→4.9K) while preserving liturgy/edited-work witness structure (BH
+connectivity nearly unmasked; Rif's Hilkhot, Mishneh Torah, ibn Shuaib clusters
+intact and Track-1-labelable). The residual giant (5,761 MSS continuation, ~55%
+RNL; top titles piyyut / אלמקדמאת / סדור מנהג קראים) is the **piyyut + Karaite
+continent — high-witness-count text NOT in Maagarim/JA**: part missing reference
+coverage, part genuinely unedited — itself a discovery product. The all-mask
+variant remains useful as the "unexplained sharing only" view.
 
 ## Artifacts
 
