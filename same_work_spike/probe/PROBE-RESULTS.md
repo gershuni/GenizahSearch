@@ -220,6 +220,35 @@ HTRed-twice pairs = a free HTR-vs-HTR variance measurement.
 exported densities differ from engine densities; join grades to
 `verified_pairs_d50_cap1.json` by pair id for calibration analysis.
 
+### Round 3 FINAL: 164 human grades — precision is effectively solved
+
+Full analysis: `results/grades_analysis.md`; raw grades:
+`review/grades_hillel_2026-07-07.json` (label semantics recorded there —
+canonical = quotation in a DIFFERENT work, Bible↔Bible = same_text;
+same_text judged at the UNIT level: siddur-BH ↔ Haggadah-BH = same_text
+⇒ **same-work clustering must cluster textual UNITS, not manuscripts**).
+
+| Measurement | Result |
+|---|---|
+| Actually spurious | **1/164 (0.6%)** |
+| Real shared text after stage-0 removes dup+junk | **110/111 (99.1%)** |
+| Real-rate per engine-density band 0.30→0.45 | **100 / 100 / 100 / 97%** |
+| Discovery stratum | **34/40 genuine same-composition discoveries** (6 dup-photos) |
+| join_anomaly stratum | **36/36 duplicate photography** — ZERO textual joins; the "1% of joins share text" is fully closed |
+| bh_boundary stratum (the loosened threshold) | 29/31 same_text — raised boundary vindicated |
+| short_span stratum | 6/8 junk (title sheets) — short spans need stage-0 BEFORE they're useful |
+| Line-agreement detector vs human | precision **100%** (31/31), recall 74% — add same-shelfmark tier + threshold tuning for the rest |
+
+Consequences: (1) the acceptance boundary can safely sit at ~0.42–0.45 for
+spans ≥100 letters — even the 0.40–0.45 band is 97% real; (2) the engine's
+error mass is ROUTING (canonical/formula/duplicate), all mechanically
+classifiable (Track 1 + flank-contrast + stage-0); (3) with 1,335
+discovery-class pairs in the enriched pilot and ~85% raw precision, the
+full-corpus run should yield thousands of genuine new same-composition
+links. Caveat: pilot is enriched with related material — corpus-wide
+precision still needs the pooling eval at scale, but the boundary
+calibration itself is now human-grounded.
+
 ## Next steps (handoff-ready, ordered — R1/R2 DONE above)
 
 3. **Stage-0 module**: FL-id dedup, 997-collapse, target-sheet filter,
