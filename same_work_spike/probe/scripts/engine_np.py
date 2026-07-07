@@ -191,19 +191,24 @@ def build_candidates(streams, sys_codes, df_drop=100, band=20, min_anchors=2,
     del order
     s3 = np.flatnonzero(np.r_[True, pkey[1:] != pkey[:-1]])
     pkey2 = pkey[s3]
-    cnt2 = np.add.reduceat(cnt.astype(np.int64), s3)
+    cnt2 = np.add.reduceat(cnt.astype(np.int32), s3)
     mina2, _ = _reduceat_minmax(mina, s3)
     _, maxa2 = _reduceat_minmax(maxa, s3)
     minb2, _ = _reduceat_minmax(minb, s3)
     _, maxb2 = _reduceat_minmax(maxb, s3)
     stats['acc_entries'] = len(pkey2)
+    # free the pre-merge arrays (~17 GB at 600M entries) BEFORE chain-merge —
+    # keeping them alive OOM'd the 63 GB box (maskcanon run, 2026-07-07)
+    del pkey, cnt, mina, maxa, minb, maxb, s3
 
     # ---- chain-merge adjacent buckets, two-hit ----
     pair = pkey2 >> np.uint64(_B_BITS)
-    bucket = (pkey2 & np.uint64((1 << _B_BITS) - 1)).astype(np.int64)
+    bucket = (pkey2 & np.uint64((1 << _B_BITS) - 1)).astype(np.int32)
+    del pkey2
     new_seg = np.r_[True, (pair[1:] != pair[:-1])
                     | (bucket[1:] - bucket[:-1] > 1)]
     s4 = np.flatnonzero(new_seg)
+    del bucket
     seg_cnt = np.add.reduceat(cnt2, s4)
     seg_pair = pair[s4]
     seg_mina, _ = _reduceat_minmax(mina2, s4)

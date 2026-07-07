@@ -1,0 +1,223 @@
+# -*- coding: utf-8 -*-
+"""Track-1 testimony vs citation classification + new-testimonies report.
+
+Two different products the plain match table conflates (Hillel, 2026-07-07):
+1. CITATION: a small fraction of the page matches a work (a quote inside a
+   different work) -> mask-only material for the discovery map.
+2. TESTIMONY: most of the page agrees with the work -> the page IS a copy —
+   a textual witness. Important for canonical works TOO (Genizah Talmud/Bible
+   leaves are first-rate witnesses), not just for edited Maagarim/JA works.
+
+Discriminator: page coverage = matched_letters / page_stream_letters.
+Thresholds are placed after inspecting the empirical distribution (printed
+as a histogram into the report; defaults below marked where the valley sat).
+
+Usage: python track1_testimonies.py [db_path] [tag]
+Out: results/track1_<tag>_testimonies.{md,csv}, review/track1_<tag>_testimonies.html
+"""
+import csv
+import html
+import json
+import re
+import sqlite3
+import sys
+from collections import Counter, defaultdict
+
+from normalize import norm_stream
+
+ROOT = r"C:\Genizahsearch"
+DB = sys.argv[1] if len(sys.argv) > 1 else \
+    ROOT + r"\same_work_spike\probe\data\rehearsal.db"
+TAG = sys.argv[2] if len(sys.argv) > 2 else "100k"
+MD = ROOT + rf"\same_work_spike\probe\results\track1_{TAG}_testimonies.md"
+CSV_OUT = ROOT + rf"\same_work_spike\probe\results\track1_{TAG}_testimonies.csv"
+HTML_OUT = ROOT + rf"\same_work_spike\probe\review\track1_{TAG}_testimonies.html"
+
+CANON_CATS = {'Bible', 'Mishnah', 'Tosefta', 'Bavli', 'Yerushalmi'}
+T_TESTIMONY = 0.45      # coverage >= : page IS a copy of the work
+T_PARTIAL = 0.15        # in between: partial / damaged / long extract
+
+CITY_LIB = [
+    ('Cambridge', 'CUL'), ('Oxford', 'Oxford'), ('Petersburg', 'RNL'),
+    ('London', 'BL'), ('New York', 'JTS'), ('Paris', 'AIU'),
+    ('Manchester', 'Manchester'), ('Strasbourg', 'Strasbourg'),
+    ('Philadelphia', 'Katz'), ('Jerusalem', 'NLI'), ('Budapest', 'Kaufmann'),
+    ('Vienna', 'Vienna'), ('Genève', 'Geneva'), ('Geneva', 'Geneva'),
+]
+
+
+def load_meta():
+    meta = {}
+    with open(ROOT + r"\libraries.csv", encoding='utf-8-sig', newline='') as f:
+        r = csv.reader(f)
+        next(r, None)
+        for row in r:
+            if len(row) >= 4 and row[0]:
+                variants = [v.strip() for v in (row[2] or '').split('|')
+                            if v.strip()]
+                title = row[7].strip() if len(row) >= 8 else ''
+                meta[row[0]] = (variants[0] if variants else row[0],
+                                row[3].strip() or '?', title)
+    return meta
+
+
+def mesirah_tier(mesirah, shelfmark, lib):
+    """'self?' if the edition's source manuscript looks like THIS ms."""
+    if not mesirah:
+        return ''
+    m_lib = next((code for city, code in CITY_LIB if city in mesirah), None)
+    if m_lib and m_lib != lib:
+        return 'new?'
+    md = set(re.findall(r'\d+', mesirah))
+    sd = set(re.findall(r'\d+', shelfmark))
+    if md and sd and (sd <= md or md <= sd):
+        return 'self?'
+    return 'new?'
+
+
+def main():
+    meta = load_meta()
+    con = sqlite3.connect(DB)
+    plen = {pid: len(norm_stream(tx)[0]) for pid, tx in
+            con.execute("SELECT page_id, text FROM pages")}
+    rows = con.execute("""
+        SELECT page_id, sys_id, work_id, cat, genre, author, title,
+               mesirah, matched_letters, best_density, n_spans
+        FROM track1_matches""").fetchall()
+    print(f"match rows: {len(rows):,}")
+
+    # ---- per-row coverage + class ----
+    hist = defaultdict(Counter)   # cat-group -> coverage bin
+    classed = []
+    for r in rows:
+        cov = r[8] / max(1, plen.get(r[0], 1))
+        cls = ('testimony' if cov >= T_TESTIMONY else
+               'partial' if cov >= T_PARTIAL else 'citation')
+        grp = r[3] if r[3] in CANON_CATS else 'edited'
+        hist[grp][round(min(cov, 1.0) * 10) / 10] += 1
+        classed.append(r + (round(cov, 3), cls))
+
+    # ---- aggregate to (manuscript, work) ----
+    ms_work = defaultdict(lambda: {'pages': 0, 'test': 0, 'part': 0,
+                                   'cit': 0, 'letters': 0, 'best_d': 1.0,
+                                   'best_cov': 0.0})
+    info = {}
+    for r in classed:
+        key = (r[1], r[2])
+        a = ms_work[key]
+        a['pages'] += 1
+        a['letters'] += r[8]
+        a['best_d'] = min(a['best_d'], r[9])
+        a['best_cov'] = max(a['best_cov'], r[11])
+        a['test' if r[12] == 'testimony' else
+          'part' if r[12] == 'partial' else 'cit'] += 1
+        info[key] = r
+    ms_rows = []
+    for (sid, wid), a in ms_work.items():
+        r = info[(sid, wid)]
+        sm, lib, cat_title = meta.get(sid, (sid, '?', ''))
+        cls = ('testimony' if a['test'] >= 1 and a['best_cov'] >= T_TESTIMONY
+               else 'partial' if a['part'] + a['test'] >= 1 else 'citation')
+        tier = mesirah_tier(r[7], sm, lib) if cls != 'citation' else ''
+        ms_rows.append({
+            'sys_id': sid, 'shelfmark': sm, 'lib': lib,
+            'catalog_title': cat_title,
+            'work_id': wid, 'cat': r[3], 'genre': r[4],
+            'author': r[5], 'work': r[6], 'mesirah': r[7],
+            'pages': a['pages'], 'p_test': a['test'], 'p_part': a['part'],
+            'p_cit': a['cit'], 'letters': a['letters'],
+            'best_cov': a['best_cov'], 'best_density': a['best_d'],
+            'cls': cls, 'tier': tier,
+        })
+
+    canon_test = [m for m in ms_rows
+                  if m['cat'] in CANON_CATS and m['cls'] == 'testimony']
+    edited_test = [m for m in ms_rows
+                   if m['cat'] not in CANON_CATS and m['cls'] == 'testimony']
+    lines = [f"# Track-1 testimonies vs citations — '{TAG}'", ""]
+    cls_c = Counter(m['cls'] for m in ms_rows)
+    lines += [
+        f"- (manuscript, work) rows: {len(ms_rows):,} — {dict(cls_c)}",
+        f"- **canonical testimonies** (MS is a Bible/Mishnah/Tosefta/Bavli/"
+        f"Yerushalmi copy): **{len(canon_test):,} MSS** "
+        f"({Counter(m['cat'] for m in canon_test).most_common()})",
+        f"- **edited-work testimonies** (Maagarim/JA works): "
+        f"**{len(edited_test):,}** (tier: "
+        f"{Counter(m['tier'] for m in edited_test).most_common()})", "",
+        "## Page-coverage distribution (validates the thresholds)",
+    ]
+    for grp in sorted(hist):
+        lines.append(f"- {grp}: " + " ".join(
+            f"{b:.1f}:{hist[grp][b]}" for b in sorted(hist[grp])))
+    lines += ["", f"(class thresholds: testimony >= {T_TESTIMONY}, "
+              f"partial >= {T_PARTIAL}, else citation)", ""]
+    lines.append("## Top edited works by testimony MSS")
+    wc = Counter()
+    for m in edited_test:
+        wc[f"[{m['cat']}] {m['author']} — {m['work']}"[:90]] += 1
+    for w, c in wc.most_common(30):
+        lines.append(f"- {w}: {c} MSS")
+
+    with open(CSV_OUT, 'w', encoding='utf-8-sig', newline='') as f:
+        w = csv.DictWriter(f, fieldnames=list(ms_rows[0].keys()))
+        w.writeheader()
+        for m in sorted(ms_rows, key=lambda m: (m['cls'] != 'testimony',
+                                                -m['letters'])):
+            w.writerow(m)
+
+    # ---- HTML: testimonies grouped by work ----
+    by_work = defaultdict(list)
+    for m in ms_rows:
+        if m['cls'] in ('testimony', 'partial'):
+            by_work[(m['cat'], m['author'], m['work'], m['mesirah'])].append(m)
+    cards = []
+    for (cat, author, work, mes), members in sorted(
+            by_work.items(), key=lambda kv: -len(kv[1])):
+        trs = []
+        for m in sorted(members, key=lambda m: -m['letters']):
+            trs.append(
+                f"<tr class='{m['cls']}'>"
+                f"<td><a href='https://genizahsearch.com/browse?sys_id="
+                f"{m['sys_id']}' target='_blank'>"
+                f"{html.escape(m['shelfmark'])}</a></td>"
+                f"<td>{m['lib']}</td>"
+                f"<td>{html.escape(m['catalog_title'][:60]) or '—'}</td>"
+                f"<td>{m['pages']}</td><td>{m['letters']:,}</td>"
+                f"<td>{m['best_cov']:.2f}</td><td>{m['cls']}"
+                f"{(' · ' + m['tier']) if m['tier'] else ''}</td></tr>")
+        head = f"[{cat}] {author + ' — ' if author else ''}{work}"
+        cards.append(
+            f"<details {'open' if len(members) > 5 else ''}><summary>"
+            f"<b>{html.escape(head)}</b> — {len(members)} MSS"
+            f"{(' · מסירה: ' + html.escape(mes[:70])) if mes else ''}"
+            f"</summary><table><tr><th>shelfmark</th><th>lib</th>"
+            f"<th>catalog title</th><th>pages</th><th>letters</th>"
+            f"<th>cov</th><th>class</th></tr>{''.join(trs)}</table>"
+            f"</details>")
+    doc = f"""<!DOCTYPE html><html lang='he'><head><meta charset='utf-8'>
+<title>Track-1 testimonies — {TAG}</title><style>
+ body{{font-family:Segoe UI,Arial;max-width:1150px;margin:20px auto;
+ padding:0 12px;background:#fafaf7;color:#222}}
+ details{{background:#fff;border:1px solid #ddd;border-radius:8px;
+ margin:8px 0;padding:6px 12px}}
+ summary{{cursor:pointer}}
+ table{{border-collapse:collapse;font-size:13px;margin:6px 0}}
+ td,th{{border:1px solid #ddd;padding:3px 8px}}
+ tr.testimony td{{background:#eaf7ea}} tr.partial td{{background:#fdf6e3}}
+</style></head><body>
+<h1>Track-1 testimonies — manuscripts carrying known works</h1>
+<p>{len(by_work)} works · green rows = testimony (page coverage ≥
+{T_TESTIMONY}), yellow = partial (≥ {T_PARTIAL}). Citations excluded
+(kept in the CSV). tier 'new?' = the edition's source manuscript appears
+to be a DIFFERENT manuscript; 'self?' = likely the edition's own source.
+Machine output — not human-reviewed.</p>
+{''.join(cards)}</body></html>"""
+    open(HTML_OUT, 'w', encoding='utf-8').write(doc)
+    open(MD, 'w', encoding='utf-8').write('\n'.join(lines))
+    print('\n'.join(lines[:30]))
+    print(f"\nwrote {MD}\n      {CSV_OUT}\n      {HTML_OUT}")
+    con.close()
+
+
+if __name__ == '__main__':
+    main()

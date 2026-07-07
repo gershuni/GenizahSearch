@@ -23,8 +23,15 @@ ROOT = r"C:\Genizahsearch"
 DB = sys.argv[1] if len(sys.argv) > 1 else \
     ROOT + r"\same_work_spike\probe\data\rehearsal.db"
 TAG = sys.argv[2] if len(sys.argv) > 2 else "100k"
-USE_MASKS = len(sys.argv) > 3 and sys.argv[3] == 'mask'
-PAIRS_TABLE = 'accepted_pairs_masked' if USE_MASKS else 'accepted_pairs'
+# mask modes: 'mask' = mask ALL Track-1 spans; 'maskcanon' = canonical
+# corpora only (Bible/Mishnah/Tosefta/Bavli/Yerushalmi) — edited-work
+# matches stay in the map as labeled witness clusters
+MASK_MODE = sys.argv[3] if len(sys.argv) > 3 else ''
+USE_MASKS = MASK_MODE in ('mask', 'maskcanon')
+PAIRS_TABLE = {'mask': 'accepted_pairs_masked',
+               'maskcanon': 'accepted_pairs_canonmask'}.get(
+    MASK_MODE, 'accepted_pairs')
+CANON_CATS = ('Bible', 'Mishnah', 'Tosefta', 'Bavli', 'Yerushalmi')
 STATS_OUT = ROOT + rf"\same_work_spike\probe\results\rehearsal_{TAG}_stats.json"
 
 K, BAND, DF_DROP, MIN_ANCHORS = 5, 20, 100, 2
@@ -76,8 +83,11 @@ def main():
     if USE_MASKS:
         id_to_idx = {p: i for i, p in enumerate(ids)}
         masks = {}
-        for pid, spans_json in con.execute(
-                "SELECT page_id, spans_json FROM track1_matches"):
+        q = "SELECT page_id, spans_json FROM track1_matches"
+        if MASK_MODE == 'maskcanon':
+            q += (" WHERE cat IN ("
+                  + ",".join(f"'{c}'" for c in CANON_CATS) + ")")
+        for pid, spans_json in con.execute(q):
             pi = id_to_idx.get(pid)
             if pi is None:
                 continue
@@ -85,7 +95,8 @@ def main():
             iv.extend((int(s[0]), int(s[1]))
                       for s in json.loads(spans_json))
         n_iv = sum(len(v) for v in masks.values())
-        print(f"masks: {len(masks):,} pages, {n_iv:,} Track-1 intervals")
+        print(f"masks[{MASK_MODE}]: {len(masks):,} pages, "
+              f"{n_iv:,} Track-1 intervals")
 
     pa, pb, cnt, mina, maxa, minb, maxb, stats = engine_np.build_candidates(
         streams, sys_codes, df_drop=DF_DROP, band=BAND,
