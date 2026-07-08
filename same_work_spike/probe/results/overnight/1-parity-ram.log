@@ -1,0 +1,13 @@
+[engine_np] positions=86,583,715 sorted in 3s
+[engine_np] grams kept=2,233,319 (singleton=704,717, df-dropped=160,700); raw pair-hits=653,611,484
+[engine_np] chunk 1/9: partial keys=78,417,806 (13s)
+[engine_np] chunk 2/9: partial keys=78,075,962 (25s)
+[engine_np] chunk 3/9: partial keys=78,154,737 (38s)
+[engine_np] chunk 4/9: partial keys=78,030,226 (51s)
+[engine_np] chunk 5/9: partial keys=78,003,308 (64s)
+[engine_np] chunk 6/9: partial keys=78,127,747 (76s)
+[engine_np] chunk 7/9: partial keys=77,182,979 (90s)
+[engine_np] chunk 8/9: partial keys=77,663,520 (103s)
+[engine_np] chunk 9/9: partial keys=13,444,833 (105s)
+[engine_np] acc entries=590,944,966 -> candidates=40,549,024 in 183.8s
+[ram] candidates=40,549,024 acc_entries=590,944,966 saturated=0 (330s)

@@ -1,0 +1,19 @@
+{
+ "pages": 667411,
+ "pages_matched": 176444,
+ "pages_strong": 173647,
+ "rows": 276296,
+ "hits": 11560429551,
+ "candidates": 920731230,
+ "rej_density": 920339934,
+ "cat_rows": {
+  "Maagarim": 110957,
+  "Mishnah": 5100,
+  "Yerushalmi": 3056,
+  "Bavli": 15796,
+  "JA": 27122,
+  "Tosefta": 1282,
+  "Bible": 112983
+ },
+ "total_s": 9972.9
+}
