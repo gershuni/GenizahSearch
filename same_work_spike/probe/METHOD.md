@@ -397,6 +397,50 @@ documentary regions. Identification rows feed (a) the testimony/citation census 
 FJMS-bibliography demotion of already-published witnesses, and (b) canonical-only
 masking (`maskcanon`) for the discovery map.
 
+### 9.2 Full-corpus findings (2026-07-08): the DF cap, not the mask, is the frontier
+
+**Masking exonerated by a three-regime comparison** (raw / edge-classified /
+char-masked, `mask_investigation_full.md`): BH witness connectivity and tier-1 recall
+are regime-independent. At 667K pages the DF≤100 cap already suppresses high-witness
+canonical text (raw-hit volume is identical masked vs unmasked, 1.475B vs 1.482B);
+masking still matters for the **low-DF canonical tail** — passages with <100 witnesses
+are the citation web (accepted pairs 3.44M→1.34M; CUL–RNL citation links 361K→5.1K).
+Edge-classification is not a substitute (Track-1 recall bounds it) but yields a labeled
+1.78M-edge citation layer as a by-product.
+
+**Who the cap hurts** (`df_damage_full.md`, within-work pairing rate with Track-1 pages
+as ground truth): NOT high-witness works as a class — pairing *rises* with witness
+count, because scribal variants create low-DF grams that survive. The victims are
+**short high-witness texts** (<2K letters: identical text in every witness, 0–30%
+pairing at 25–101 MSS, inverse gradient) — in the Genizah, that class is liturgy,
+piyyut, and formulae. Long works' low pairing is fragment dispersion (witnesses carry
+different sections), benign. Side-catch: implausible witness counts expose
+**reference-side false identifications** (a Qumran scroll with 176 "witnesses" — its
+embedded Deuteronomy paraphrase matches genuine Bible pages), fixed by reference-side
+canonical masking (`mask_ref_canon.py` → `build_ref_index(canon_masks=)`): canonical
+spans inside reference works are not indexed, so a work is identifiable only through
+its own formulations.
+
+**Remedies, measured:** (1) *reference edges* — Track-1 same-work witness webs merged
+into the census reconnect reference-covered works outright (BH 198→210 components
+metric); (2) *per-domain second pass* — rerunning candidates over the 139,694
+liturgy-domain pages, where the same absolute cap is proportionally ~4.5× looser,
+raised direct BH witness connectivity **166 → 291** of 506 present, at 12 minutes of
+compute; (3) *motif-as-query completion* — decomposed motifs re-queried against the
+full corpus with per-query DF economics (immune to the global cap).
+
+**Sequence-aware decomposition (motifs).** Flat transitive closure over aligned spans
+chains liturgy into one continuum (18,676 MSS) because pages share overlapping prayer
+*sequences*. Decomposing like synteny blocks — breakpoint segmentation of pages at
+aligned-span endpoints, monotone mapping of segments across each pair, components over
+segment links — dissolves it into 43,278 motifs at brakhah-level granularity.
+Validation against a human witness index (Birkat Hamazon, 597 sigla): 119 of the 179
+witnesses reachable in the pair data recovered, and 71 candidate witnesses NOT in the
+index surfaced (own-segment phrase-anchored). Measured caveat: link strictness trades
+recall for granularity (loose: BH 119, max motif 691; strict: BH 101, max motif 202),
+and on *denser* pair data loose links re-chain a mega-motif — community detection on
+the segment graph is the designed v2.
+
 ---
 
 ## 10. Evaluation

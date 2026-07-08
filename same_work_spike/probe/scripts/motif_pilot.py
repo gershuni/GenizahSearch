@@ -19,9 +19,10 @@ BH-anchored motifs should recover the known witnesses at high recall,
 and their NON-index members are candidate UNKNOWN BH witnesses
 (deliverable: review/bh_new_witnesses.html).
 
-Usage: python motif_pilot.py [db] [pairs_table]
-Out: results/motifs_pilot.md, review/bh_new_witnesses.html,
-     <db>::motifs_pilot / motif_members_pilot
+Usage: python motif_pilot.py [db] [pairs_table] [tag]
+Out: results/motifs_<tag>.md, review/bh_new_witnesses_<tag>.html
+     (tag 'pilot' keeps the original names), <db>::motifs_pilot /
+     motif_members_pilot
 """
 import html
 import json
@@ -37,14 +38,25 @@ ROOT = r"C:\Genizahsearch"
 DB = sys.argv[1] if len(sys.argv) > 1 else \
     ROOT + r"\same_work_spike\probe\data\fullcorpus.db"
 TABLE = sys.argv[2] if len(sys.argv) > 2 else "accepted_pairs_canonmask"
+TAG = sys.argv[3] if len(sys.argv) > 3 else "pilot"
 BH = ROOT + r"\same_work_spike\probe\data\bh_witnesses.json"
-MD_OUT = ROOT + r"\same_work_spike\probe\results\motifs_pilot.md"
-HTML_OUT = ROOT + r"\same_work_spike\probe\review\bh_new_witnesses.html"
+MD_OUT = ROOT + rf"\same_work_spike\probe\results\motifs_{TAG}.md"
+HTML_OUT = (ROOT + r"\same_work_spike\probe\review\bh_new_witnesses.html"
+            if TAG == 'pilot' else
+            ROOT + rf"\same_work_spike\probe\review\bh_new_witnesses_{TAG}.html")
 
 BP_GAP = 25          # endpoint cluster gap (HTR jitter absorption)
 MIN_SEG = 40         # elementary segments shorter than this are ignored
-MIN_LINK_COVER = 0.5  # mapped midpoint must land in a segment covering
-LEN_RATIO_MAX = 2.5  # linked segments must be length-comparable
+# Link strictness (argv[4], default 'loose'): measured trade-off
+# (2026-07-08): loose maximizes witness recall on SPARSE pair data
+# (canonmask: BH 119, candidates 71, max motif 691); strict prevents
+# mega-motif re-chaining on DENSE data (liturgy pass: loose max motif
+# 7,572 swallowing BH; strict 5,913/BH 109; on canonmask strict gives
+# max 202 but BH 101). Proper fix for dense data = community detection
+# on the segment graph (motif v2).
+STRICT = len(sys.argv) > 4 and sys.argv[4] == 'strict'
+MIN_LINK_COVER = 0.75 if STRICT else 0.5
+LEN_RATIO_MAX = 1.6 if STRICT else 2.5
 MOTIF_MIN_SYS = 2
 
 # BH text anchors — passed through norm_stream at startup (the stream
