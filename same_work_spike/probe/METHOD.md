@@ -383,11 +383,11 @@ over the box's RAM *and*, spilled naively, over its free disk. Instead:
   AND bucket ≤ bucket_hi), and accumulates per-segment min/max positions — only
   O(candidates) memory.
 
-**Parity:** on the 100K rehearsal corpus the spill path reproduces the in-RAM path's
-candidate count exactly (40,549,024 segments), with 5.9 GB spill and zero count
-saturations; a byte-level compare of keys, counts, and all four position extremes
-(`parity_spill.py`) is part of the full-run pre-flight (results in
-`results/overnight/2-parity-compare.log`).
+**Parity (verified 2026-07-08):** on the 100K rehearsal corpus the spill path
+reproduces the in-RAM path byte-for-byte — all 40,549,024 candidate segments with
+identical keys, anchor counts, and all four position extremes (`parity_spill.py`;
+38,232,433 unique pairs, matching the recorded rehearsal run), with 5.9 GB spill
+and zero count saturations.
 
 **Track-1 at full scale:** the identification pass streams all 667K pages against the
 same reference index. One operational note: the full corpus is catalog-ordered (not
