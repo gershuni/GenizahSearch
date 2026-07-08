@@ -71,8 +71,12 @@ def _reduceat_minmax(vals, starts):
 
 def build_candidates(streams, sys_codes, df_drop=100, band=20, min_anchors=2,
                      chunk_pairs=80_000_000, log=print, masks=None,
-                     spill_dir=None, spill_min_hits=1_500_000_000,
+                     spill_dir=None, spill_min_hits=800_000_000,
                      n_partitions=64):
+    # spill_min_hits history: 1.5B OOM'd the 63 GB box on the maskcanon FULL
+    # run (2026-07-08: canonical masking cut raw hits to ~1.48B — just under
+    # the gate — and the in-RAM final merge needs ~28 B/entry). 0.8B leaves
+    # the in-RAM path only for runs the box demonstrably handles (~650M).
     """Returns (pa, pb, count, min_a, max_a, min_b, max_b) arrays + stats.
 
     masks: optional dict page_idx -> list of (start, end) stream intervals
