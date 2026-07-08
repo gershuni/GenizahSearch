@@ -17,6 +17,7 @@ Out: results/track1_<tag>_testimonies.{md,csv}, review/track1_<tag>_testimonies.
 """
 import csv
 import html
+import json
 import re
 import sqlite3
 import sys
@@ -75,6 +76,35 @@ def mesirah_tier(mesirah, shelfmark, lib):
     return 'new?'
 
 
+P_RE = re.compile(r'_P(\d+)_')
+
+
+def pnum(pid):
+    m = P_RE.search(pid)
+    return int(m.group(1)) if m else 1
+
+
+def evidence_html(con, page_id, spans_json, pad=90):
+    """Highlighted best-span snippet from the page's original HTR text."""
+    row = con.execute("SELECT text FROM pages WHERE page_id=?",
+                      (page_id,)).fetchone()
+    if not row:
+        return ''
+    text = row[0]
+    stream, offs = norm_stream(text)
+    spans = json.loads(spans_json)
+    p0, p1, _ = max(spans, key=lambda s: s[1] - s[0])
+    p1 = min(int(p1), len(offs))
+    if not len(offs) or p1 <= 0:
+        return ''
+    a = offs[max(0, min(int(p0), len(offs) - 1))]
+    z = offs[p1 - 1] + 1
+    return (f"<div class='ev'><span class='ctx'>"
+            f"{html.escape(text[max(0, a - pad):a])}</span>"
+            f"<mark>{html.escape(text[a:z][:700])}</mark>"
+            f"<span class='ctx'>{html.escape(text[z:z + pad])}</span></div>")
+
+
 def main():
     meta = load_meta()
     con = sqlite3.connect(DB)
@@ -82,7 +112,7 @@ def main():
             con.execute("SELECT page_id, text FROM pages")}
     rows = con.execute("""
         SELECT page_id, sys_id, work_id, cat, genre, author, title,
-               mesirah, matched_letters, best_density, n_spans
+               mesirah, matched_letters, best_density, n_spans, spans_json
         FROM track1_matches""").fetchall()
     print(f"match rows: {len(rows):,}")
 
@@ -97,10 +127,10 @@ def main():
         hist[grp][round(min(cov, 1.0) * 10) / 10] += 1
         classed.append(r + (round(cov, 3), cls))
 
-    # ---- aggregate to (manuscript, work) ----
+    # ---- aggregate to (manuscript, work); keep the BEST-evidence page ----
     ms_work = defaultdict(lambda: {'pages': 0, 'test': 0, 'part': 0,
                                    'cit': 0, 'letters': 0, 'best_d': 1.0,
-                                   'best_cov': 0.0})
+                                   'best_cov': 0.0, 'best_letters': -1})
     info = {}
     for r in classed:
         key = (r[1], r[2])
@@ -108,10 +138,12 @@ def main():
         a['pages'] += 1
         a['letters'] += r[8]
         a['best_d'] = min(a['best_d'], r[9])
-        a['best_cov'] = max(a['best_cov'], r[11])
-        a['test' if r[12] == 'testimony' else
-          'part' if r[12] == 'partial' else 'cit'] += 1
-        info[key] = r
+        a['best_cov'] = max(a['best_cov'], r[12])
+        a['test' if r[13] == 'testimony' else
+          'part' if r[13] == 'partial' else 'cit'] += 1
+        if r[8] > a['best_letters']:
+            a['best_letters'] = r[8]
+            info[key] = r
     ms_rows = []
     for (sid, wid), a in ms_work.items():
         r = info[(sid, wid)]
@@ -128,6 +160,8 @@ def main():
             'p_cit': a['cit'], 'letters': a['letters'],
             'best_cov': a['best_cov'], 'best_density': a['best_d'],
             'cls': cls, 'tier': tier,
+            'best_page': r[0], 'best_pnum': pnum(r[0]),
+            'best_spans': r[11],
         })
 
     # ---- bib demotion: tier 'new?' already discussed/edited in research
@@ -181,8 +215,9 @@ def main():
     for w, c in wc.most_common(30):
         lines.append(f"- {w}: {c} MSS")
 
+    csv_fields = [k for k in ms_rows[0].keys() if k != 'best_spans']
     with open(CSV_OUT, 'w', encoding='utf-8-sig', newline='') as f:
-        w = csv.DictWriter(f, fieldnames=list(ms_rows[0].keys()))
+        w = csv.DictWriter(f, fieldnames=csv_fields, extrasaction='ignore')
         w.writeheader()
         for m in sorted(ms_rows, key=lambda m: (m['cls'] != 'testimony',
                                                 -m['letters'])):
@@ -193,30 +228,42 @@ def main():
     for m in ms_rows:
         if m['cls'] in ('testimony', 'partial'):
             by_work[(m['cat'], m['author'], m['work'], m['mesirah'])].append(m)
+    n_ev = 0
     cards = []
     for (cat, author, work, mes), members in sorted(
             by_work.items(), key=lambda kv: -len(kv[1])):
         trs = []
         for m in sorted(members, key=lambda m: -m['letters']):
+            url = (f"https://genizahsearch.com/browse?sys_id={m['sys_id']}"
+                   f"&page={m['best_pnum']}")
+            ev = ''
+            if m['tier']:   # evidence inline for the judgment-needed rows
+                snippet = evidence_html(con, m['best_page'], m['best_spans'])
+                if snippet:
+                    n_ev += 1
+                    ev = (f"<details class='evd'><summary>עדות (עמ' "
+                          f"{m['best_pnum']})</summary>{snippet}</details>")
             trs.append(
                 f"<tr class='{m['cls']}'>"
-                f"<td><a href='https://genizahsearch.com/browse?sys_id="
-                f"{m['sys_id']}' target='_blank'>"
+                f"<td><a href='{url}' target='_blank'>"
                 f"{html.escape(m['shelfmark'])}</a></td>"
                 f"<td>{m['lib']}</td>"
                 f"<td>{html.escape(m['catalog_title'][:60]) or '—'}</td>"
+                f"<td><a href='{url}' target='_blank'>עמ' "
+                f"{m['best_pnum']}</a></td>"
                 f"<td>{m['pages']}</td><td>{m['letters']:,}</td>"
                 f"<td>{m['best_cov']:.2f}</td><td>{m['cls']}"
-                f"{(' · ' + m['tier']) if m['tier'] else ''}</td></tr>")
+                f"{(' · ' + m['tier']) if m['tier'] else ''}{ev}</td></tr>")
         head = f"[{cat}] {author + ' — ' if author else ''}{work}"
         cards.append(
             f"<details {'open' if len(members) > 5 else ''}><summary>"
             f"<b>{html.escape(head)}</b> — {len(members)} MSS"
             f"{(' · מסירה: ' + html.escape(mes[:70])) if mes else ''}"
             f"</summary><table><tr><th>shelfmark</th><th>lib</th>"
-            f"<th>catalog title</th><th>pages</th><th>letters</th>"
-            f"<th>cov</th><th>class</th></tr>{''.join(trs)}</table>"
-            f"</details>")
+            f"<th>catalog title</th><th>best page</th><th>pages</th>"
+            f"<th>letters</th><th>cov</th><th>class</th></tr>"
+            f"{''.join(trs)}</table></details>")
+    print(f"inline evidence snippets: {n_ev:,}")
     doc = f"""<!DOCTYPE html><html lang='he'><head><meta charset='utf-8'>
 <title>Track-1 testimonies — {TAG}</title><style>
  body{{font-family:Segoe UI,Arial;max-width:1150px;margin:20px auto;
@@ -227,6 +274,13 @@ def main():
  table{{border-collapse:collapse;font-size:13px;margin:6px 0}}
  td,th{{border:1px solid #ddd;padding:3px 8px}}
  tr.testimony td{{background:#eaf7ea}} tr.partial td{{background:#fdf6e3}}
+ details.evd{{margin-top:3px;font-size:12px}}
+ details.evd summary{{color:#1a5da6;cursor:pointer}}
+ .ev{{direction:rtl;text-align:right;font-size:14px;line-height:1.6;
+ max-width:640px;white-space:pre-wrap;background:#fff;border:1px solid #ddd;
+ border-radius:6px;padding:6px 8px;margin-top:3px}}
+ .ev mark{{background:#ffe58a}}
+ .ev .ctx{{color:#999}}
 </style></head><body>
 <h1>Track-1 testimonies — manuscripts carrying known works</h1>
 <p>{len(by_work)} works · green rows = testimony (page coverage ≥
