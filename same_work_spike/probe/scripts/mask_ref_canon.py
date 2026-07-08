@@ -10,11 +10,12 @@ edited works as clean 'queries', tight clean-vs-clean boundary) and mask
 them when building the Track-1 reference index — a work can then only be
 identified through its OWN formulations.
 
-Usage: python mask_ref_canon.py
+Usage: python mask_ref_canon.py [test:<title-substring>]
 Out: data/ref_canon_masks.json (work_id -> [[m0, m1], ...], stream coords)
 """
 import json
 import pickle
+import sys
 import time
 from collections import defaultdict
 
@@ -34,11 +35,15 @@ K = 5
 CHUNK, OVERLAP = 5000, 200
 BAND, MIN_ANCHORS, B_OFF = 20, 2, 512
 MARGIN, MIN_SPAN, GAP = 20, 25, 30
+# v1 (0.15/0.20, cutoff 0.25) caught only 104 spans in 5,271 works:
+# canonical text inside reference works carries orthographic + light
+# paraphrase divergence (11QT's Deuteronomy tracks Deut 17 at ~0.15-0.28
+# clean-vs-clean). Loosened after evidence probe 2026-07-08.
+CUT = 0.45
 
 
 def accept_density(length):
-    # clean edition vs clean edition: tight
-    return 0.15 if length < 100 else 0.20
+    return 0.28 if length < 100 else 0.32
 
 
 def main():
@@ -46,6 +51,12 @@ def main():
     works = pickle.load(open(REF, 'rb'))
     canon = [w for w in works if w['cat'] in CANON_CATS]
     edited = [w for w in works if w['cat'] not in CANON_CATS]
+    test_filter = None
+    if len(sys.argv) > 1 and sys.argv[1].startswith('test:'):
+        test_filter = sys.argv[1][5:]
+        edited = [w for w in edited if test_filter in w['title']]
+        print(f"TEST MODE: {len(edited)} works matching "
+              f"'{test_filter}'", flush=True)
     print(f"canonical index: {len(canon)} works "
           f"({sum(len(w['stream']) for w in canon):,} letters); "
           f"edited queries: {len(edited)} works "
@@ -117,6 +128,30 @@ def main():
         c_minr = np.minimum.reduceat(minr, s3)[hit]
         c_maxr = np.maximum.reduceat(maxr, s3)[hit]
         stats['cand'] += len(c_seg)
+        def verify_split(w0, w1, r0, r1, sr, depth=0):
+            """Recursive hull refinement: diagonal drift (plene
+            insertions) + interleaved non-canonical passages inflate a
+            long hull's density even when it contains tight sub-spans
+            (the 11QT/Deut-17 case) — reject big hulls by bisecting."""
+            if min(w1 - w0, r1 - r0) < MIN_SPAN:
+                return
+            alen = max(w1 - w0, r1 - r0)
+            cutoff = int(CUT * alen) + 1
+            dist = Levenshtein.distance(s[w0:w1], sr[r0:r1],
+                                        score_cutoff=cutoff)
+            if dist / alen <= accept_density(alen):
+                spans.append((w0, w1))
+                stats['accepted'] += 1
+                return
+            if alen <= 300 or depth >= 4:
+                return
+            wm = (w0 + w1) // 2
+            rm = (r0 + r1) // 2
+            pad_w = min(50, (w1 - w0) // 4)
+            pad_r = min(50, (r1 - r0) // 4)
+            verify_split(w0, wm + pad_w, r0, rm + pad_r, sr, depth + 1)
+            verify_split(wm - pad_w, w1, rm - pad_r, r1, sr, depth + 1)
+
         spans = []
         for i in range(len(c_seg)):
             si = int(c_seg[i])
@@ -125,16 +160,7 @@ def main():
             w1 = min(len(s), int(c_maxw[i]) + K + MARGIN)
             r0 = max(0, int(c_minr[i]) - MARGIN)
             r1 = min(len(sr), int(c_maxr[i]) + K + MARGIN)
-            if min(w1 - w0, r1 - r0) < MIN_SPAN:
-                continue
-            alen = max(w1 - w0, r1 - r0)
-            cutoff = int(0.25 * alen) + 1
-            dist = Levenshtein.distance(s[w0:w1], sr[r0:r1],
-                                        score_cutoff=cutoff)
-            if dist / alen > accept_density(alen):
-                continue
-            spans.append((w0, w1))
-            stats['accepted'] += 1
+            verify_split(w0, w1, r0, r1, sr)
         if spans:
             spans.sort()
             merged = []
@@ -148,7 +174,9 @@ def main():
             print(f"  {wi + 1}/{len(edited)} works, masked "
                   f"{len(masks):,} ({time.time() - t0:.0f}s)", flush=True)
 
-    json.dump(masks, open(OUT, 'w', encoding='utf-8'))
+    out_path = OUT + '.test' if test_filter else OUT
+    rep_path = REPORT + '.test' if test_filter else REPORT
+    json.dump(masks, open(out_path, 'w', encoding='utf-8'))
 
     # report: most-masked works
     rows = []
@@ -170,9 +198,9 @@ def main():
     for frac, m, wid in rows[:35]:
         lines.append(f"- {100 * frac:.0f}% ({m:,} let of {wlen[wid]:,}) "
                      f"— {wname[wid][:70]}")
-    open(REPORT, 'w', encoding='utf-8').write('\n'.join(lines))
+    open(rep_path, 'w', encoding='utf-8').write('\n'.join(lines))
     print('\n'.join(lines[:14]))
-    print(f"wrote {OUT} ({time.time() - t0:.0f}s)")
+    print(f"wrote {out_path} ({time.time() - t0:.0f}s)")
 
 
 if __name__ == '__main__':

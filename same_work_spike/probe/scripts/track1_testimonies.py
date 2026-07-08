@@ -110,11 +110,14 @@ def main():
     con = sqlite3.connect(DB)
     plen = {pid: len(norm_stream(tx)[0]) for pid, tx in
             con.execute("SELECT page_id, text FROM pages")}
-    rows = con.execute("""
+    cols = [r[1] for r in con.execute("PRAGMA table_info(track1_matches)")]
+    live = ("WHERE shadowed_by IS NULL" if 'shadowed_by' in cols else "")
+    rows = con.execute(f"""
         SELECT page_id, sys_id, work_id, cat, genre, author, title,
                mesirah, matched_letters, best_density, n_spans, spans_json
-        FROM track1_matches""").fetchall()
-    print(f"match rows: {len(rows):,}")
+        FROM track1_matches {live}""").fetchall()
+    print(f"match rows: {len(rows):,} "
+          f"({'shadow-filtered' if live else 'no shadow column'})")
 
     # ---- per-row coverage + class ----
     hist = defaultdict(Counter)   # cat-group -> coverage bin

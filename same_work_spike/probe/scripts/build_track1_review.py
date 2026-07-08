@@ -174,10 +174,12 @@ def main():
                                 row[3].strip() or '?', title)
 
     con = sqlite3.connect(DB)
-    rows = con.execute("""
+    cols = [r[1] for r in con.execute("PRAGMA table_info(track1_matches)")]
+    live = ("WHERE shadowed_by IS NULL" if 'shadowed_by' in cols else "")
+    rows = con.execute(f"""
         SELECT page_id, sys_id, work_id, cat, genre, author, title,
                mesirah, matched_letters, best_density, n_spans, spans_json
-        FROM track1_matches""").fetchall()
+        FROM track1_matches {live}""").fetchall()
     plen = {}
     for pid, tx in con.execute(
             "SELECT p.page_id, p.text FROM pages p JOIN (SELECT DISTINCT "
