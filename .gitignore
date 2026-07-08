@@ -16,6 +16,10 @@ AllGenizah_OLD.txt
 same_work_spike/probe/data/probe.db
 # SEED-029 rehearsal: 100K-page corpus DB, regenerable (extract_rehearsal.py)
 same_work_spike/probe/data/rehearsal.db
+# SEED-029 full corpus: ~667K-page DB, regenerable (extract_full.py)
+same_work_spike/probe/data/fullcorpus.db
+# SEED-029 engine spill scratch (two-pass disk-partitioned merge)
+same_work_spike/probe/data/spill/
 # SEED-029 Track 1: Maagarim+JA reference pickle, regenerable (track1_build_ref.py)
 same_work_spike/probe/data/ref_corpus.pkl
 same_work_spike/probe/data/canon/

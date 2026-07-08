@@ -100,9 +100,10 @@ def main():
 
     pa, pb, cnt, mina, maxa, minb, maxb, stats = engine_np.build_candidates(
         streams, sys_codes, df_drop=DF_DROP, band=BAND,
-        min_anchors=MIN_ANCHORS, masks=masks)
-    stats['candidate_unique_pairs'] = int(len(
-        np.unique((pa.astype(np.uint64) << np.uint64(18)) | pb)))
+        min_anchors=MIN_ANCHORS, masks=masks,
+        spill_dir=ROOT + r"\same_work_spike\probe\data\spill")
+    stats['candidate_unique_pairs'] = int(len(np.unique(
+        (pa.astype(np.uint64) << np.uint64(engine_np._P_BITS)) | pb)))
 
     # ---- verification (sloped boundary; best segment per pair) ----
     t1 = time.time()
