@@ -192,6 +192,30 @@ continent — high-witness-count text NOT in Maagarim/JA**: part missing referen
 coverage, part genuinely unedited — itself a discovery product. The all-mask
 variant remains useful as the "unexplained sharing only" view.
 
+## Human grading of Track-1 identifications (2026-07-07 night)
+
+Hillel graded 61 cards of the evidence-review tool
+(`build_track1_review.py`, strata: new-witness claims / title mismatches /
+generic titles / controls): **58 correct, 3 boundary-coverage citations,
+0 wrong / formulaic / junk — identification precision ≈100%** even where
+the catalog title disagrees. Two triage corrections implemented
+(`track1_bib.py`): title "mismatch" was usually translation (JA↔Hebrew
+titles, author acronyms — fixed via FJMS catalog titles + acronym
+equivalences + classic-title pairs), and tier-`new?` claims already
+edited/discussed in scholarship are demoted via the FJMS `bibliography`
+table (`new?known`). Details: `results/track1_id_grades_round1.md`.
+
+## Page-chain extension (implemented 2026-07-08 night)
+
+`chain_pages.py` joins accepted pairs on consecutive P-numbers of BOTH
+manuscripts where spans reach the shared page boundary — multi-page
+continuous parallels, the strongest same-work evidence class. On the 100K
+canonmask table: 54 chains (random sampling rarely keeps both sides'
+consecutive pages; the full corpus is the real harvest). All top chains
+catalog-plausible (Levi b. Yefet ספר המצוות witness web); one immediate
+find: a generic "קובץ בהלכה קראית" identified as ספר המצוות ללוי בן יפת
+by a 2-page chain.
+
 ## Artifacts
 
 | Path | What |

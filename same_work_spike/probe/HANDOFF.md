@@ -14,7 +14,11 @@ morning entry point. Definitive method doc: `METHOD.md`; rehearsal numbers:
    file, then chaining (sequentially, logs in `results/overnight/<step>.log`,
    progress in `results/OVERNIGHT-RUN-LOG.md`):
    parity ram → parity compare → testimonies full → review page full →
-   **Track-2 canonmask full run** (hours) → map → atlas → graph.
+   **Track-2 canonmask full run** (hours) → map → atlas → graph →
+   page-chains (`chain_pages.py` — multi-page continuous parallels,
+   `results/chains_full.md`; validated on 100K: 54 chains, all
+   catalog-plausible, incl. a generic "קובץ בהלכה קראית" identified as
+   ספר המצוות ללוי בן יפת by a 2-page chain).
 
 ## Morning checklist
 
@@ -56,8 +60,11 @@ morning entry point. Definitive method doc: `METHOD.md`; rehearsal numbers:
   in RAM (~10 GB) — fine alone, do NOT run other heavy jobs concurrently.
 - **Graph/atlas at full scale** are `critical=False` in the orchestrator; if
   they failed, the map data (step 6) is still complete — rebuild interactively.
-- **Page-chain extension** of `edge`-class spans (join spans crossing page
-  boundaries of the same MS) is designed but NOT implemented — next feature.
+- **Page-chain extension** IS implemented as post-processing
+  (`chain_pages.py`, orchestrator step 9) — chains consecutive-P-number
+  accepted pairs whose spans reach the shared page boundary. Not yet
+  integrated into the map layers (a chain could upgrade its MS pair to
+  continuation-class regardless of flank noise) — candidate refinement.
 - **Disk**: spill peaks ~45 GB in `data/spill/` (auto-deleted); box had 82 GB
   free at launch. `fullcorpus.db` ~1.5 GB, gitignored, regenerable in ~2 min
   (`extract_full.py`).

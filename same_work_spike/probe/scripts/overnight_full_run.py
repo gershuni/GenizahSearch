@@ -117,6 +117,8 @@ def main():
                          'accepted_pairs_canonmask'], critical=False)
     run_step('8-graph', ['build_reuse_graph.py', DB, 'full',
                          'accepted_pairs_canonmask'], critical=False)
+    run_step('9-chains', ['chain_pages.py', DB, 'full',
+                          'accepted_pairs_canonmask'], critical=False)
     log("CHAIN COMPLETE — all artifacts under results/ + review/ "
         "(tags *_full*)")
 
