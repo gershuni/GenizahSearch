@@ -17,7 +17,6 @@ Out: results/track1_<tag>_testimonies.{md,csv}, review/track1_<tag>_testimonies.
 """
 import csv
 import html
-import json
 import re
 import sqlite3
 import sys
