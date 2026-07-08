@@ -168,9 +168,11 @@ def main():
     print(f"units (>=2 MSS): {len(units):,} ({time.time() - t0:.0f}s)",
           flush=True)
 
-    # ---- page stream lengths (members only) ----
+    # ---- page stream lengths (members only) + library-stamp junk pages ----
+    from stage0 import STAMP_RE
     need = {p for pm in units.values() for p in pm}
     plen = {}
+    stamp_pages = set()
     ids = list(need)
     for i in range(0, len(ids), 500):
         batch = ids[i:i + 500]
@@ -178,9 +180,23 @@ def main():
         for pid, tx in con.execute(
                 f"SELECT page_id, text FROM pages WHERE page_id IN ({ph})",
                 batch):
-            plen[pid] = len(norm_stream(tx)[0])
-    print(f"page lengths: {len(plen):,} ({time.time() - t0:.0f}s)",
-          flush=True)
+            slen = len(norm_stream(tx)[0])
+            plen[pid] = slen
+            if slen < 400 and STAMP_RE.search(tx):
+                stamp_pages.add(pid)
+    # drop NLI-ownership-stamp pages (junk class found BY this view,
+    # 2026-07-08: 2,618 RNL 'MSS' sharing the stamp text)
+    if stamp_pages:
+        for root in list(units):
+            pm = units[root]
+            for pid in list(pm):
+                if pid in stamp_pages:
+                    del pm[pid]
+            if len({page_sys[p] for p in pm}) < 2:
+                del units[root]
+    print(f"page lengths: {len(plen):,}; stamp-junk pages dropped: "
+          f"{len(stamp_pages):,}; units after: {len(units):,} "
+          f"({time.time() - t0:.0f}s)", flush=True)
 
     # ---- Track-1 spans per member page (label propagation) ----
     t1 = defaultdict(list)       # page -> [(p0, p1, label, cat)]
@@ -235,12 +251,21 @@ def main():
             t1_label, t1_n = labels.most_common(1)[0]
         elif canon_labels:
             t1_label, t1_n = canon_labels.most_common(1)[0]
+        # label CONFIDENCE gate: continuum-scale units chain MANY texts,
+        # so one work's label cannot cover them (the 18,676-MS liturgy
+        # continuum got 'Sefer Ahavah' from 1.2% direct evidence). For
+        # single-passage units >=2 agreeing direct labels is strong
+        # (Track-1 graded precision ~100%).
+        n_pg = len(pagemap)
+        conf = ''
+        if t1_label:
+            conf = 'high' if len(mss) <= 2000 and t1_n >= 2 else 'low'
         unit_rows.append({
-            'unit': root, 'n_pages': len(pagemap), 'n_ms': len(mss),
+            'unit': root, 'n_pages': n_pg, 'n_ms': len(mss),
             'med_len': lens[len(lens) // 2],
             'roles': dict(roles), 'libs': dict(libs.most_common(4)),
-            't1_label': t1_label, 't1_n': t1_n,
-            'labeled': bool(labels or canon_labels),
+            't1_label': t1_label, 't1_n': t1_n, 'conf': conf,
+            'labeled': conf == 'high',
         })
         member_rows.extend((root,) + m for m in members)
     unit_rows.sort(key=lambda u: -u['n_ms'])
@@ -249,13 +274,14 @@ def main():
     con.execute(f"DROP TABLE IF EXISTS passage_units_{TABLE}")
     con.execute(f"""CREATE TABLE passage_units_{TABLE} (
         unit INT, n_pages INT, n_ms INT, med_len INT,
-        roles TEXT, libs TEXT, t1_label TEXT, t1_n INT, labeled INT)""")
+        roles TEXT, libs TEXT, t1_label TEXT, t1_n INT, conf TEXT,
+        labeled INT)""")
     con.executemany(
-        f"INSERT INTO passage_units_{TABLE} VALUES (?,?,?,?,?,?,?,?,?)",
+        f"INSERT INTO passage_units_{TABLE} VALUES (?,?,?,?,?,?,?,?,?,?)",
         [(u['unit'], u['n_pages'], u['n_ms'], u['med_len'],
           json.dumps(u['roles'], ensure_ascii=False),
           json.dumps(u['libs'], ensure_ascii=False),
-          u['t1_label'], u['t1_n'], int(u['labeled']))
+          u['t1_label'], u['t1_n'], u['conf'], int(u['labeled']))
          for u in unit_rows])
     con.execute(f"DROP TABLE IF EXISTS passage_unit_members_{TABLE}")
     con.execute(f"""CREATE TABLE passage_unit_members_{TABLE} (
@@ -268,29 +294,43 @@ def main():
     print(f"persisted ({time.time() - t0:.0f}s)", flush=True)
 
     # ---- report ----
+    CONTINUUM_MS = 2000
     sizes = Counter(u['n_ms'] for u in unit_rows)
-    lab = [u for u in unit_rows if u['labeled']]
-    unlab = [u for u in unit_rows if not u['labeled']]
+    contin = [u for u in unit_rows if u['n_ms'] > CONTINUUM_MS]
+    lab = [u for u in unit_rows
+           if u['labeled'] and u['n_ms'] <= CONTINUUM_MS]
+    unlab = [u for u in unit_rows
+             if not u['labeled'] and u['n_ms'] <= CONTINUUM_MS]
     lines = [
         f"# Shared-passage units — '{TAG}' ({TABLE})", "",
         f"- units (passage attested in >=2 MSS): **{len(unit_rows):,}**",
         f"- MS-size distribution: " + " ".join(
             f"{k}:{sizes[k]}" for k in sorted(sizes)[:12]) +
         f" … max {max(sizes) if sizes else 0}",
-        f"- Track-1-labeled units: {len(lab):,} · unlabeled: "
-        f"**{len(unlab):,}** (the discovery/residue census)",
-        f"- label propagation: " + str(sum(
+        f"- confidently labeled: {len(lab):,} · unlabeled/low-conf: "
+        f"**{len(unlab):,}** (the discovery/residue census) · "
+        f"continuum-scale (> {CONTINUUM_MS} MSS): {len(contin)}",
+        f"- label propagation (high-conf units): " + str(sum(
             max(0, u['n_pages'] - u['t1_n']) for u in lab)) +
         " member pages inherit a label their page never matched directly",
         "",
-        "## Top UNLABELED units by witness count (frequent but unedited)",
+        "## Continuum-scale units (chained sequences, NOT single passages)",
     ]
+    for u in contin:
+        lines.append(
+            f"- unit {u['unit']}: **{u['n_ms']:,} MSS** "
+            f"({u['n_pages']:,} pages) — top label candidate "
+            f"'{u['t1_label']}' ({u['t1_n']} direct = "
+            f"{100 * u['t1_n'] / max(1, u['n_pages']):.1f}% — "
+            f"{u['conf']} confidence); needs sequence-aware decomposition")
+    lines += ["", "## Top UNLABELED units by witness count "
+              "(frequent but unedited)"]
     for u in unlab[:30]:
-        if u['labeled']:
-            continue
         lines.append(f"- unit {u['unit']}: **{u['n_ms']} MSS** "
                      f"({u['n_pages']} pages, med {u['med_len']} letters) "
-                     f"roles {u['roles']} libs {u['libs']}")
+                     f"roles {u['roles']} libs {u['libs']}"
+                     + (f" · label? {u['t1_label']} ({u['conf']})"
+                        if u['t1_label'] else ''))
     lines += ["", "## Top LABELED units (known works, member counts)"]
     for u in lab[:30]:
         lines.append(f"- {u['t1_label'] or '?'} — {u['n_ms']} MSS "
@@ -298,7 +338,7 @@ def main():
                      f"direct Track-1 {u['t1_n']}, inherited "
                      f"{u['n_pages'] - u['t1_n']}")
     open(MD_OUT, 'w', encoding='utf-8').write('\n'.join(lines))
-    print('\n'.join(lines[:20]))
+    print('\n'.join(lines[:24]))
 
     # ---- HTML browser (top units, evidence snippet per unit) ----
     cards = []
@@ -336,9 +376,17 @@ def main():
                 f"<td>{e - s}</td><td>{cov:.2f}</td><td>{role}</td></tr>")
         head = (f"unit {u['unit']} — {u['n_ms']} MSS · med "
                 f"{u['med_len']} letters")
-        label = (f" · <b style='color:#2c7d32'>"
-                 f"{html.escape(u['t1_label'])}</b>" if u['t1_label']
-                 else " · <b style='color:#c62828'>לא מזוהה</b>")
+        if u['n_ms'] > 2000:
+            label = (" · <b style='color:#ef6c00'>רצף־ענק (continuum) — "
+                     f"מועמד: {html.escape(u['t1_label'])}?</b>")
+        elif u['labeled']:
+            label = (f" · <b style='color:#2c7d32'>"
+                     f"{html.escape(u['t1_label'])}</b>")
+        elif u['t1_label']:
+            label = (f" · <b style='color:#ef6c00'>"
+                     f"{html.escape(u['t1_label'])}?</b>")
+        else:
+            label = " · <b style='color:#c62828'>לא מזוהה</b>"
         cards.append(
             f"<details><summary>{head}{label} · roles {u['roles']}"
             f"</summary>"

@@ -26,6 +26,12 @@ HEB_RE = re.compile(r'[א-ת]')
 # FGP microfilm card template words (probe finding F7; graded junk class)
 TARGET_SHEET_WORDS = ('סימן', 'תוכן', 'מחבר', 'שנה', 'הערות')
 
+# NLI ownership stamp / ruler-card pages photographed with RNL (Firkovich)
+# manuscripts — discovered 2026-07-08 by the passage-units view (unit of
+# 2,618 "MSS" sharing the stamp text). HTR mangles the stamp variously:
+# 'בית הספרים הלאומי והאוני ברסיטא' etc.
+STAMP_RE = re.compile(r'בית הספרים|אוניברסיט|האוני\s?ברסיט|הספרים הלאומ')
+
 MIN_STREAM_LETTERS = 80
 
 
@@ -49,6 +55,8 @@ def page_filter(text: str) -> str | None:
     hits = sum(1 for w in TARGET_SHEET_WORDS if w in text)
     if hits >= 4 or (hits >= 3 and n_heb < 400):
         return 'target_sheet'
+    if n_heb < 400 and STAMP_RE.search(text):
+        return 'library_stamp'
     return None
 
 
