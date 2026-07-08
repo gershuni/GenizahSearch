@@ -355,6 +355,46 @@ First map: 337K accepted page pairs → 244K manuscript pairs; a giant canonical
 differentiate by catalog domain) survives flank-contrast — **empirical confirmation that
 Track-1 canonical masking is the prerequisite for a legible works census** (§8.2).
 
+### 9.1 Full-corpus engineering (2026-07-07/08 run)
+
+The 667,411-page run required two representation changes, both validated against the
+rehearsal before use:
+
+**Bit-budget repack.** The packed position key moved from `G(24) | P(18) | POS(22)` to
+`G(24) | P(20) | POS(20)` — the 18-bit page index capped at 262K pages; the new layout
+fills the uint64 exactly (27⁵ < 2²⁴ gram codes; ≤1M pages; ≤1M positions per page, with
+the extant 655,360 ceiling from the 16-bit diagonal-bucket budget unchanged). Pair keys
+became `pa(20) | pb(20) | bucket(16)` = 56 bits.
+
+**Two-pass disk-partitioned merge** (`engine_np._spill_path`). The full corpus emits
+~4–5B raw pair-hits; in-RAM accumulation needs ~28 B/entry (key + count + 4 positions) —
+over the box's RAM *and*, spilled naively, over its free disk. Instead:
+
+- *Pass 1 — candidates from counts only.* Each gram-chunk is reduced to
+  `(pair-key, count)` records (10 B each, counts saturating at 2¹⁶−1, saturation counted
+  and reported: it can only affect anchor counts, never candidacy at `min_anchors=2`),
+  spilled to `pair % 64` hash partitions on disk. Each partition is then sorted, reduced,
+  and chain-merged independently (partitions are pair-disjoint, so per-partition
+  chain-merge ≡ global chain-merge), yielding candidate segments
+  `(pair, bucket_lo, bucket_hi, count)`.
+- *Pass 2 — positions for survivors only.* The gram-chunk emission is deterministic
+  (same tables, same chunk bounds), so a second sweep re-emits every hit, maps it to its
+  candidate segment via `searchsorted` on `(pair, bucket_lo)` keys (validity: same pair
+  AND bucket ≤ bucket_hi), and accumulates per-segment min/max positions — only
+  O(candidates) memory.
+
+**Parity:** on the 100K rehearsal corpus the spill path reproduces the in-RAM path's
+40,549,024 candidate segments exactly (byte-level compare of keys, counts, and all four
+position extremes via `parity_spill.py`), with 5.9 GB spill and zero count saturations.
+
+**Track-1 at full scale:** the identification pass streams all 667K pages against the
+same reference index. One operational note: the full corpus is catalog-ordered (not
+shuffled like the rehearsal sample), so per-batch cost varies ~3× — Bible-dense
+collection runs (e.g. Firkovich codices) produce ~10× the candidate density of
+documentary regions. Identification rows feed (a) the testimony/citation census with
+FJMS-bibliography demotion of already-published witnesses, and (b) canonical-only
+masking (`maskcanon`) for the discovery map.
+
 ---
 
 ## 10. Evaluation
@@ -469,17 +509,31 @@ All under `same_work_spike/probe/`:
 | `scripts/prep_review_tool.py` | grading tool → `review/review.html` (contains the line-agreement detector) |
 | `scripts/analyze_grades.py` | grades → `results/grades_analysis.md` |
 | `scripts/build_discoveries_report.py` | manuscript-pair aggregation → `review/discoveries_report.html` + `results/discoveries_report.csv` |
+| `scripts/stage0.py` | importable stage-0 filters/dedup tiers (§7) |
+| `scripts/extract_rehearsal.py`, `extract_full.py` | 100K rehearsal sample / full 667K corpus → `data/{rehearsal,fullcorpus}.db` |
+| `scripts/engine_np.py` | numpy sort-merge candidate generator; in-RAM + two-pass disk-spill paths (§9.1), `masks=` support |
+| `scripts/parity_spill.py` | byte-level in-RAM ↔ spill parity harness |
+| `scripts/rehearsal_run.py` | Track-2 driver: candidates → verify → flank/dup classify → `accepted_pairs[_canonmask,_masked]` |
+| `scripts/rehearsal_map.py`, `build_rehearsal_atlas.py`, `build_reuse_graph.py` | map stats / cluster atlas / interactive Louvain graph |
+| `scripts/track1_build_ref.py`, `track1_match.py` | Maagarim+JA reference build; asymmetric identification matcher |
+| `scripts/track1_bib.py` | FJMS bibliography cross-ref + translation/acronym-aware title matching |
+| `scripts/track1_testimonies.py` | testimony/citation census (coverage split) + bib demotion of known witnesses |
+| `scripts/build_track1_review.py` | identification review tool (evidence side-by-side, title triage, grading UI) |
+| `scripts/overnight_full_run.py` | unattended full-corpus chain driver |
 
 Dependencies: Python 3.10+, `rapidfuzz` (Levenshtein), `python-docx` (witness index parsing),
-numpy/matplotlib for analysis. No GPU. Full pilot (17,228 pages) runs end-to-end in ~10 min
-single-threaded on a desktop.
+numpy/matplotlib for analysis, networkx + python-louvain (graph decomposition). No GPU.
+Full pilot (17,228 pages) runs end-to-end in ~10 min single-threaded on a desktop.
 
 ---
 
 ## 13. Known limitations & open items
 
-1. **Track 1 canon masking is designed, not yet run** — the dominant residual routing class
-   in the graded sample is canonical shares; masking + labeling is the next structural gain.
+1. **Track 1 ran at rehearsal scale and validated** (26.4% of a random 100K sample
+   identified; graded identification precision ≈100%, 58/61 + 3 boundary citations);
+   the canonical-only mask (`maskcanon`) is the adopted discovery-map regime. Remaining:
+   reference-corpus coverage — the masked residue (piyyut + Karaite continent) is
+   high-witness-count text absent from Maagarim/JA.
 2. **Confusion-weighted alignment costs** not yet implemented (matrix is measured and ready).
 3. **Matres-light union view** designed, pending validation on plene/defective pairs.
 4. **Corpus-wide precision** requires the pooled evaluation at scale; the pilot is enriched.

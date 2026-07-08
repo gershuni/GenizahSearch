@@ -22,6 +22,7 @@ DB = sys.argv[1] if len(sys.argv) > 1 else \
     ROOT + r"\same_work_spike\probe\data\rehearsal.db"
 TAG = sys.argv[2] if len(sys.argv) > 2 else "100k"
 TOP_N = int(sys.argv[3]) if len(sys.argv) > 3 else 120
+TABLE = sys.argv[4] if len(sys.argv) > 4 else "accepted_pairs"
 OUT = ROOT + rf"\same_work_spike\probe\review\rehearsal_{TAG}_atlas.html"
 CLUSTERS_CSV = ROOT + rf"\same_work_spike\probe\results\rehearsal_{TAG}_clusters.csv"
 
@@ -74,10 +75,10 @@ def main():
     top = sorted(clusters.items(), key=lambda kv: -len(kv[1]))[:TOP_N]
 
     # accepted pairs per ms-pair, best-first
-    pair_rows = con.execute("""
+    pair_rows = con.execute(f"""
         SELECT page_a, page_b, sys_a, sys_b, a0, a1, b0, b1,
                aligned_len, density, flank_class
-        FROM accepted_pairs
+        FROM {TABLE}
         WHERE dup_shelf = 0 AND dup_lines < 0.6
         ORDER BY aligned_len DESC""").fetchall()
     by_ms = defaultdict(list)
