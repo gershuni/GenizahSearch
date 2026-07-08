@@ -171,8 +171,8 @@ def main():
         "## Citation-core collapse (CUL–RNL cross links)",
         f"- raw unmasked: {culrnl(all_edges):,}",
         f"- canonical-excluded: {culrnl(kept_edges):,}",
-        f"- (char-masked canonmask reference: 4,894 at 100K-scale ratio; "
-        f"see rehearsal_full_map.md for full)",
+        f"- (char-masked full canonmask reference: 5,134 — "
+        f"rehearsal_full_map.md)",
         "",
         "## BH witness connectivity (direct bh-page pairs)",
         f"- raw unmasked: {len(bh_ms_all)} sys connected",
