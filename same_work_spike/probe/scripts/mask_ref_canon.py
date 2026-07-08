@@ -14,6 +14,7 @@ Usage: python mask_ref_canon.py [test:<title-substring>]
 Out: data/ref_canon_masks.json (work_id -> [[m0, m1], ...], stream coords)
 """
 import json
+import os
 import pickle
 import sys
 import time
@@ -69,7 +70,20 @@ def main():
 
     masks = defaultdict(list)
     stats = {'hits': 0, 'cand': 0, 'accepted': 0}
+    # resume from checkpoint (2026-07-08 PC hard-crash lost a run in
+    # progress — persist every 500 works, atomic tmp+replace)
+    ck_path = OUT + '.ckpt'
+    start_wi = 0
+    if test_filter is None and os.path.exists(ck_path):
+        ck = json.load(open(ck_path, encoding='utf-8'))
+        start_wi = ck['done']
+        masks.update(ck['masks'])
+        stats.update(ck['stats'])
+        print(f"resume: {start_wi}/{len(edited)} works done, "
+              f"{len(masks):,} masked", flush=True)
     for wi, w in enumerate(edited):
+        if wi < start_wi:
+            continue
         s = w['stream']
         step = CHUNK - OVERLAP
         chunk_offs = list(range(0, max(1, len(s) - OVERLAP), step))
@@ -173,10 +187,18 @@ def main():
         if (wi + 1) % 500 == 0:
             print(f"  {wi + 1}/{len(edited)} works, masked "
                   f"{len(masks):,} ({time.time() - t0:.0f}s)", flush=True)
+            if test_filter is None:
+                tmp = ck_path + '.tmp'
+                with open(tmp, 'w', encoding='utf-8') as f:
+                    json.dump({'done': wi + 1, 'stats': stats,
+                               'masks': masks}, f)
+                os.replace(tmp, ck_path)
 
     out_path = OUT + '.test' if test_filter else OUT
     rep_path = REPORT + '.test' if test_filter else REPORT
     json.dump(masks, open(out_path, 'w', encoding='utf-8'))
+    if test_filter is None and os.path.exists(ck_path):
+        os.remove(ck_path)
 
     # report: most-masked works
     rows = []

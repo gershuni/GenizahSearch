@@ -104,9 +104,26 @@ def main():
     print(f"pages: {len(ids):,} ({time.time() - t0:.0f}s)", flush=True)
 
     hits = defaultdict(list)   # (page_idx, motif) accepted spans
+    # resume from checkpoint (2026-07-08 PC hard-crash at batch 65/84
+    # lost 2h of RAM-only hits — persist progress every 8 batches)
+    start_b0 = 0
+    if con.execute("SELECT name FROM sqlite_master WHERE "
+                   "name='motif_query_ckpt'").fetchone():
+        row = con.execute(
+            "SELECT next_b0, hits_json FROM motif_query_ckpt").fetchone()
+        if row:
+            pi_of = {p: i for i, p in enumerate(ids)}
+            wi_of = {w['id']: i for i, w in enumerate(works)}
+            for pid, m, spans in json.loads(row[1]):
+                if pid in pi_of and m in wi_of:
+                    hits[(pi_of[pid], wi_of[m])] = \
+                        [tuple(s) for s in spans]
+            start_b0 = row[0]
+            print(f"resume: batch {start_b0 // PAGE_BATCH + 1}, "
+                  f"{len(hits):,} hits restored", flush=True)
     t1 = time.time()
     n_cand = 0
-    for b0 in range(0, len(ids), PAGE_BATCH):
+    for b0 in range(start_b0, len(ids), PAGE_BATCH):
         bpages = range(b0, min(b0 + PAGE_BATCH, len(ids)))
         parts_c, parts_p, parts_pos = [], [], []
         for pi in bpages:
@@ -189,6 +206,15 @@ def main():
                   f"{(len(ids) - 1) // PAGE_BATCH + 1}: cand={n_cand:,} "
                   f"hits={len(hits):,} ({time.time() - t1:.0f}s)",
                   flush=True)
+            con.execute("CREATE TABLE IF NOT EXISTS motif_query_ckpt "
+                        "(next_b0 INT, hits_json TEXT)")
+            con.execute("DELETE FROM motif_query_ckpt")
+            con.execute(
+                "INSERT INTO motif_query_ckpt VALUES (?,?)",
+                (b0 + PAGE_BATCH, json.dumps(
+                    [[ids[pi], works[wi]['id'], sp]
+                     for (pi, wi), sp in hits.items()])))
+            con.commit()
 
     # ---- persist + growth report ----
     out_rows = []
@@ -209,6 +235,7 @@ def main():
     con.executemany("INSERT INTO motif_query_hits VALUES (?,?,?,?,?,?)",
                     out_rows)
     con.execute("CREATE INDEX idx_mqh ON motif_query_hits(motif)")
+    con.execute("DROP TABLE IF EXISTS motif_query_ckpt")
     con.commit()
 
     growth = sorted(((len(new), m) for m, new in motif_new.items()),
