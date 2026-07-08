@@ -10,9 +10,13 @@ morning entry point. Definitive method doc: `METHOD.md`; rehearsal numbers:
    (667,411 pages vs Maagarim+JA). Started ~21:15, ~4–5h expected. Writes
    `fullcorpus.db::track1_matches` + `results/track1_full_report.md` +
    `results/track1_full_stats.json` (the completion marker).
-2. **Overnight orchestrator** — `overnight_full_run.py`, polling for that stats
-   file, then chaining (sequentially, logs in `results/overnight/<step>.log`,
-   progress in `results/OVERNIGHT-RUN-LOG.md`):
+2. **Overnight orchestrator** — `overnight_full_run.py`, relaunched ~23:30 as a
+   DETACHED OS process (`Start-Process`, PID 46964; the first harness-managed
+   background task got killed mid-step-1 by the harness, killing its parity
+   child — check liveness with
+   `Get-CimInstance Win32_Process -Filter "Name like 'python%'"`). Chains
+   sequentially, logs in `results/overnight/<step>.log` (+
+   `orchestrator.{out,err}.log`), progress in `results/OVERNIGHT-RUN-LOG.md`:
    parity ram → parity compare → testimonies full → review page full →
    **Track-2 canonmask full run** (hours) → map → atlas → graph →
    page-chains (`chain_pages.py` — multi-page continuous parallels,
