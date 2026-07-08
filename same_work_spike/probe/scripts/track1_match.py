@@ -10,6 +10,7 @@ Usage: python track1_match.py [db_path] [tag]
 Writes: <db>::track1_matches, results/track1_<tag>_report.md + stats json
 """
 import json
+import os
 import pickle
 import sqlite3
 import sys
@@ -43,7 +44,12 @@ def accept_density(length):
     return 0.28 if length < 100 else 0.35
 
 
-def build_ref_index(works):
+def build_ref_index(works, canon_masks=None):
+    """canon_masks: work_id -> [[m0, m1], ...] (stream coords) — grams
+    whose k-window overlaps a masked interval are not indexed, so a work
+    is only identifiable through its OWN formulations (ref-side canonical
+    masking; fixes the Temple-Scroll / verse-quilt false-ID class).
+    Gram POSITIONS stay original, so span coordinates are unaffected."""
     seg_streams, seg_work, seg_off = [], [], []
     for wi, w in enumerate(works):
         s = w['stream']
@@ -55,12 +61,30 @@ def build_ref_index(works):
                 seg_work.append(wi)
                 seg_off.append(off)
     assert len(seg_streams) < (1 << 16), len(seg_streams)
+    n_masked = 0
     parts = []
     for si, seg in enumerate(seg_streams):
         g = _gram_codes(seg)
+        pos = np.arange(len(g), dtype=np.uint64)
+        if canon_masks:
+            iv = canon_masks.get(works[seg_work[si]]['id'])
+            if iv:
+                off = seg_off[si]
+                keep = np.ones(len(g), dtype=bool)
+                for m0, m1 in iv:
+                    l0, l1 = m0 - off, m1 - off
+                    if l1 <= 0 or l0 >= len(g):
+                        continue
+                    keep[max(0, int(l0) - K + 1):max(0, int(l1))] = False
+                n_masked += int(len(g) - keep.sum())
+                g, pos = g[keep], pos[keep]
+                if not len(g):
+                    continue
         key = ((g << np.uint64(28)) | (np.uint64(si) << np.uint64(12))
-               | np.arange(len(g), dtype=np.uint64))
+               | pos)
         parts.append(key)
+    if n_masked:
+        print(f"ref index: {n_masked:,} grams canonical-masked", flush=True)
     keys = np.concatenate(parts)
     del parts
     keys.sort()
@@ -83,8 +107,14 @@ def build_ref_index(works):
 def main():
     t0 = time.time()
     works = pickle.load(open(REF, 'rb'))
+    masks_path = ROOT + r"\same_work_spike\probe\data\ref_canon_masks.json"
+    canon_masks = None
+    if os.path.exists(masks_path):
+        canon_masks = json.load(open(masks_path, encoding='utf-8'))
+        print(f"ref-side canonical masks: {len(canon_masks):,} works",
+              flush=True)
     (seg_streams, seg_work, seg_off, codes_f, seg_f, pos_f,
-     df_dropped) = build_ref_index(works)
+     df_dropped) = build_ref_index(works, canon_masks)
     print(f"ref: {len(works)} works, {len(seg_streams):,} segments, "
           f"{len(codes_f):,} postings (df-dropped {df_dropped:,} codes) "
           f"({time.time() - t0:.0f}s)", flush=True)
