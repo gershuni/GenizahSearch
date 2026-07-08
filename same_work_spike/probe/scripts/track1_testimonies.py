@@ -24,6 +24,7 @@ import sys
 from collections import Counter, defaultdict
 
 from normalize import norm_stream
+from track1_bib import FjmsInfo, load_acronym_equiv
 
 ROOT = r"C:\Genizahsearch"
 DB = sys.argv[1] if len(sys.argv) > 1 else \
@@ -129,6 +130,29 @@ def main():
             'best_cov': a['best_cov'], 'best_density': a['best_d'],
             'cls': cls, 'tier': tier,
         })
+
+    # ---- bib demotion: tier 'new?' already discussed/edited in research
+    # (FJMS bibliography per AlmaId; Hillel 2026-07-07) -> 'new?known' ----
+    for m in ms_rows:
+        m['bib_n'] = 0
+        m['bib_signal'] = ''
+        m['bib_entry'] = ''
+    new_rows = [m for m in ms_rows if m['tier'] == 'new?']
+    if new_rows:
+        fj = FjmsInfo({m['sys_id'] for m in new_rows})
+        equiv = load_acronym_equiv()
+        for m in new_rows:
+            sig, entry = fj.bib_signal(m['sys_id'], m['author'], m['work'],
+                                       equiv)
+            m['bib_n'] = len(fj.bib.get(m['sys_id'], []))
+            m['bib_signal'] = sig
+            m['bib_entry'] = entry
+            if sig:
+                m['tier'] = 'new?known'
+        fj.close()
+        print(f"bib demotion: {sum(1 for m in new_rows if m['bib_signal'])}"
+              f"/{len(new_rows)} tier-new? rows already in research",
+              flush=True)
 
     canon_test = [m for m in ms_rows
                   if m['cat'] in CANON_CATS and m['cls'] == 'testimony']

@@ -43,6 +43,7 @@ from rapidfuzz.distance import Levenshtein
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from engine_np import _gram_codes, K  # noqa: E402
 from normalize import norm_stream  # noqa: E402
+from track1_bib import FjmsInfo, load_acronym_equiv, title_bucket2  # noqa: E402
 
 ROOT = r"C:\Genizahsearch"
 DB = sys.argv[1] if len(sys.argv) > 1 else \
@@ -63,55 +64,10 @@ CITY_LIB = [
     ('Philadelphia', 'Katz'), ('Jerusalem', 'NLI'), ('Budapest', 'Kaufmann'),
     ('Vienna', 'Vienna'), ('Genève', 'Geneva'), ('Geneva', 'Geneva'),
 ]
-CAPS = {'new_witness': 120, 'title_mismatch': 100, 'generic_title': 60,
-        'partial_mismatch': 40, 'match_control': 30, 'canonical_control': 20}
+CAPS = {'new_witness': 120, 'new_discussed': 30, 'title_mismatch': 100,
+        'generic_title': 60, 'partial_mismatch': 40, 'match_control': 30,
+        'canonical_control': 20}
 random.seed(11)
-
-# ---------------- title triage ----------------
-NIQQUD = re.compile(r'[֑-ׇ]')
-GENERIC_TOKENS = {
-    'פיוט', 'פיוטים', 'פיוטי', 'תפילה', 'תפלה', 'תפילות', 'תפלות',
-    'ברכות', 'ברכה', 'קטע', 'קטעים', 'קטעי', 'גניזה', 'שונות', 'סליחות',
-    'סליחה', 'פזמון', 'פזמונים', 'שיר', 'שירים', 'שירה', 'תחינות',
-    'זמירות', 'דף', 'דפים', 'תעודות', 'תעודה', 'מסמכים', 'רשימות',
-    'רשימה', 'כתבי', 'שרידים', 'שריד', 'עלים', 'עלה', 'לקוטים',
-    'ליקוטים', 'לקט', 'ערבית', 'יהודית', 'עברית', 'חבור', 'חיבור',
-    'ספרות', 'יפה', 'קבע',
-}
-STOP = {'קטע', 'קטעים', 'קטעי', 'גניזה', 'חלק', 'ספר', 'כתב', 'דפים',
-        'עם', 'מנהג', 'סדר'}
-
-
-def heb_tokens(s):
-    s = NIQQUD.sub('', s or '')
-    s = re.sub(r'["\'׳״]', '', s)   # geresh/gershayim: הרי"ף->הריף
-    return [t for t in re.findall(r'[א-ת]+', s) if len(t) >= 3]
-
-
-def _tok_eq(a, b):
-    if a == b:
-        return True
-    for x in (a, a[1:] if a[:1] in 'והבלכמש' and len(a) > 3 else a):
-        for y in (b, b[1:] if b[:1] in 'והבלכמש' and len(b) > 3 else b):
-            if x == y:
-                return True
-    if min(len(a), len(b)) >= 4 and \
-            Levenshtein.normalized_distance(a, b) <= 0.25:
-        return True
-    return False
-
-
-def title_bucket(catalog_title, work_author, work_title):
-    ct = [t for t in heb_tokens(catalog_title) if t not in STOP]
-    if not ct:
-        return 'generic'
-    wt = [t for t in heb_tokens(f"{work_author} {work_title}")
-          if t not in STOP]
-    if any(_tok_eq(a, b) for a in ct for b in wt):
-        return 'match'
-    if all(t in GENERIC_TOKENS for t in ct):
-        return 'generic'
-    return 'mismatch'
 
 
 def mesirah_tier(mesirah, shelfmark, lib):
@@ -230,6 +186,14 @@ def main():
     print(f"match rows: {len(rows):,}; matched pages: {len(plen):,} "
           f"({time.time() - t0:.0f}s)", flush=True)
 
+    # ---- FJMS enrichment: catalog titles + bibliography (AlmaId==sys_id) --
+    all_sys = {r[1] for r in rows}
+    fjms = FjmsInfo(all_sys)
+    equiv = load_acronym_equiv()
+    print(f"fjms: titles for {len(fjms.titles):,} MSS, bib for "
+          f"{len(fjms.bib):,} MSS; {len(equiv):,} acronym-equiv tokens "
+          f"({time.time() - t0:.0f}s)", flush=True)
+
     # ---- aggregate to (manuscript, work); keep the best evidence page ----
     ms_work = {}
     for r in rows:
@@ -255,13 +219,17 @@ def main():
         cls = ('testimony' if a['best_cov'] >= T_TESTIMONY
                else 'partial' if a['best_cov'] >= T_PARTIAL else 'citation')
         tier = mesirah_tier(r[7], sm, lib) if cls != 'citation' else ''
-        tb = title_bucket(cat_title, r[5], r[6])
+        cat_titles = [cat_title] + fjms.titles.get(sid, [])
+        tb = title_bucket2(cat_titles, r[5], r[6], equiv)
         is_canon = r[3] in CANON_CATS
         triage[(cls, 'canon' if is_canon else 'edited', tb)] += 1
+        bib_sig, bib_entry = ('', '')
+        if tier == 'new?':
+            bib_sig, bib_entry = fjms.bib_signal(sid, r[5], r[6], equiv)
         stratum = None
-        if not is_canon and tier == 'new?' and tb in ('generic', 'mismatch') \
-                and cls in ('testimony', 'partial'):
-            stratum = 'new_witness'
+        if not is_canon and tier == 'new?' and cls in ('testimony',
+                                                       'partial'):
+            stratum = 'new_discussed' if bib_sig else 'new_witness'
         elif not is_canon and cls == 'testimony' and tb == 'mismatch':
             stratum = 'title_mismatch'
         elif not is_canon and cls == 'testimony' and tb == 'generic':
@@ -278,6 +246,7 @@ def main():
                 'lib': lib, 'cat_title': cat_title, 'cls': cls, 'tier': tier,
                 'tbucket': tb, 'pages': a['pages'], 'letters': a['letters'],
                 'cov': round(a['best_cov'], 3), 'row': r,
+                'bib_sig': bib_sig, 'bib_entry': bib_entry,
             })
 
     by_str = defaultdict(list)
@@ -286,7 +255,7 @@ def main():
     sample = []
     for s, cap in CAPS.items():
         pool = by_str.get(s, [])
-        if s in ('new_witness', 'title_mismatch'):
+        if s in ('new_witness', 'title_mismatch', 'new_discussed'):
             pool = sorted(pool, key=lambda c: -c['letters'])[:cap]
         else:
             pool = random.sample(pool, min(cap, len(pool)))
@@ -345,10 +314,24 @@ def main():
                                 '')
                 else:
                     n_noref += 1
+            bibs = fjms.bib.get(c['sys'], [])
+            bib_list = []
+            for pub, art, auth, mtype, ttype, page in bibs[:6]:
+                lbl = pub or art
+                if art and pub:
+                    lbl += f" — {art}"
+                if auth:
+                    lbl += f" ({auth})"
+                tag = ttype if ttype in ('Full', 'Partial') else mtype
+                bib_list.append(
+                    f"{lbl} [{tag}{', p. ' + page if page else ''}]")
             items.append({
                 'id': f"{c['sys']}|{wid}",
                 'stratum': c['stratum'], 'tbucket': c['tbucket'],
                 'cls': c['cls'], 'tier': c['tier'],
+                'bib_sig': c['bib_sig'], 'bib_entry': c['bib_entry'][:110],
+                'bib_n': len(bibs), 'bib_list': bib_list,
+                'fjms_titles': fjms.titles.get(c['sys'], [])[:3],
                 'cov': c['cov'], 'pages': c['pages'],
                 'letters': c['letters'], 'span_dens': dens, 'ref_dens': rdens,
                 'a': {'pid': r[0], 'sys': c['sys'], 'shelf': c['shelf'],
@@ -361,6 +344,7 @@ def main():
             print(f"  works {wi + 1}/{len(by_work_rows)} "
                   f"items={len(items)} ({time.time() - t0:.0f}s)", flush=True)
     con.close()
+    fjms.close()
 
     order = {s: i for i, s in enumerate(CAPS)}
     items.sort(key=lambda d: (order[d['stratum']], -d['letters']))
@@ -425,6 +409,12 @@ TEMPLATE = r"""<!DOCTYPE html>
       cursor:pointer;background:#2e3138;color:#ddd}
  a{color:#6fb3e8}
  .hint{font-size:12px;color:#8a8a8a;margin-top:6px}
+ details.bib{margin-top:10px;font-size:13px;color:#b8b8b8;direction:rtl;
+      text-align:right;background:#1d1f25;border:1px solid #3a3d46;
+      border-radius:8px;padding:6px 10px}
+ details.bib summary{cursor:pointer;color:#9ec7e8}
+ details.bib ul{margin:6px 18px 2px 0;padding:0}
+ .fjt{font-size:12px;color:#9aa4ac;direction:rtl;text-align:right;margin-top:8px}
 </style>
 </head>
 <body>
@@ -489,6 +479,9 @@ function render(){
     <span class="badge">${d.stratum}</span>
     <span class="badge">${d.cls}</span>
     ${d.tier ? `<span class="badge new">tier ${d.tier}</span>` : ``}
+    ${d.bib_sig==="transcribed" ? `<span class="badge mis">כבר נדפס</span>` :
+      d.bib_sig==="discussed" ? `<span class="badge gen">נדון במחקר</span>` : ``}
+    ${d.bib_n ? `<span class="badge">bib ${d.bib_n}</span>` : ``}
     ${d.tbucket!=="match" ? `<span class="${tb||'badge'}">title ${d.tbucket}</span>` : ``}
     <span>coverage <b>${d.cov}</b></span>
     <span><b>${d.pages}</b> pages</span>
@@ -497,6 +490,8 @@ function render(){
     ${d.ref_dens!==null ? `<span>window dens <b>${d.ref_dens}</b></span>` : ``}
    </div>
    <div class="cols">${paneA(d.a)}${paneB(d.b)}</div>
+   ${d.fjms_titles.length ? `<div class="fjt">כותרות FJMS: ${d.fjms_titles.map(esc).join(" · ")}</div>` : ``}
+   ${d.bib_list.length ? `<details class="bib"><summary>ביבליוגרפיה (${d.bib_n})${d.bib_entry ? " — " + esc(d.bib_entry) : ""}</summary><ul>${d.bib_list.map(x=>`<li>${esc(x)}</li>`).join("")}</ul></details>` : ``}
    <div class="grades">${btns}</div>
    <div class="nav">
     <button onclick="move(-1)">← Prev</button>
