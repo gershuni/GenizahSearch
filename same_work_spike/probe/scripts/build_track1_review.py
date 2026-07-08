@@ -389,37 +389,42 @@ TEMPLATE = r"""<!DOCTYPE html>
 <meta charset="utf-8">
 <title>Track-1 ID review — __TAG__</title>
 <style>
- body{font-family:Segoe UI,Arial,sans-serif;margin:0;background:#f4f2ec;color:#222}
- header{position:sticky;top:0;background:#37474f;color:#fff;padding:8px 16px;
-        display:flex;gap:14px;align-items:center;flex-wrap:wrap;z-index:5}
+ body{font-family:Segoe UI,Arial,sans-serif;margin:0;background:#17181c;color:#d6d6d6}
+ header{position:sticky;top:0;background:#20262b;color:#eee;padding:8px 16px;
+        display:flex;gap:14px;align-items:center;flex-wrap:wrap;z-index:5;
+        border-bottom:1px solid #33393f}
  header .prog{font-weight:600}
- header select,header button{padding:4px 8px;border-radius:6px;border:none}
- .tri{font-size:11px;color:#cfd8dc;width:100%}
- .card{max-width:1250px;margin:14px auto;background:#fff;border-radius:10px;
-       box-shadow:0 1px 4px rgba(0,0,0,.15);padding:14px 18px}
- .meta{display:flex;gap:12px;flex-wrap:wrap;font-size:14px;color:#444;
+ header select,header button{padding:4px 8px;border-radius:6px;border:1px solid #444;
+        background:#2e3138;color:#ddd}
+ .tri{font-size:11px;color:#8fa3ad;width:100%}
+ .card{max-width:1250px;margin:14px auto;background:#23252c;border-radius:10px;
+       box-shadow:0 1px 6px rgba(0,0,0,.5);padding:14px 18px}
+ .meta{display:flex;gap:12px;flex-wrap:wrap;font-size:14px;color:#aaa;
        margin-bottom:8px;align-items:center}
- .meta b{color:#000}
- .badge{background:#eee;border-radius:10px;padding:1px 9px;font-size:12px}
+ .meta b{color:#fff}
+ .badge{background:#3a3d46;color:#ddd;border-radius:10px;padding:1px 9px;font-size:12px}
  .badge.new{background:#1565c0;color:#fff}
  .badge.mis{background:#c62828;color:#fff}
  .badge.gen{background:#ef6c00;color:#fff}
  .cols{display:flex;gap:14px;flex-wrap:wrap}
- .pane{flex:1 1 460px;border:1px solid #ddd;border-radius:8px;padding:10px}
- .pane h4{margin:0 0 6px;font-size:13px;color:#555;direction:rtl;text-align:right}
+ .pane{flex:1 1 460px;border:1px solid #3a3d46;border-radius:8px;padding:10px;
+       background:#1d1f25}
+ .pane h4{margin:0 0 6px;font-size:13px;color:#9aa4ac;direction:rtl;text-align:right}
+ .pane h4 b{color:#e8e6df}
  .txt{direction:rtl;text-align:right;font-size:17px;line-height:1.75;
-      white-space:pre-wrap;word-break:break-word;max-height:340px;overflow-y:auto}
- .txt mark{background:#ffe58a;padding:0 1px}
- .ctx{color:#999}
+      white-space:pre-wrap;word-break:break-word;max-height:340px;overflow-y:auto;
+      color:#e8e6df}
+ .txt mark{background:#6b5407;color:#ffe082;padding:0 1px}
+ .ctx{color:#6d6d6d}
  .grades{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
- .grades button{padding:8px 12px;border-radius:8px;border:1px solid #bbb;
-      background:#fafafa;cursor:pointer;font-size:14px}
+ .grades button{padding:8px 12px;border-radius:8px;border:1px solid #4a4d55;
+      background:#2e3138;color:#ddd;cursor:pointer;font-size:14px}
  .grades button.sel{background:#2c7d32;color:#fff;border-color:#2c7d32}
  .nav{display:flex;gap:10px;margin-top:10px}
- .nav button{padding:6px 14px;border-radius:8px;border:1px solid #888;
-      cursor:pointer;background:#fff}
- a{color:#1a5da6}
- .hint{font-size:12px;color:#777;margin-top:6px}
+ .nav button{padding:6px 14px;border-radius:8px;border:1px solid #555;
+      cursor:pointer;background:#2e3138;color:#ddd}
+ a{color:#6fb3e8}
+ .hint{font-size:12px;color:#8a8a8a;margin-top:6px}
 </style>
 </head>
 <body>
