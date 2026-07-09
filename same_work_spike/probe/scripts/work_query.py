@@ -234,6 +234,7 @@ def resolve_cohort():
     pairing rate <60%), (b) >=20-MSS edited works with pairing rate <30%.
     Returns a list of dicts sorted worst-rate-first."""
     con = sqlite3.connect(FULLCORPUS)
+    con.execute("PRAGMA busy_timeout=120000")  # wait out concurrent readers
     page_works = defaultdict(set)
     work_pages = defaultdict(set)
     work_ms = defaultdict(set)
@@ -446,6 +447,12 @@ def main():
         return
 
     con = sqlite3.connect(DB)
+    # busy_timeout: wait out concurrent readers/writers on the shared DB
+    # instead of failing instantly with 'database is locked' (SQLite's default
+    # is a 0s timeout). The A2 full run died mid-scan when FRAG-1 held a read
+    # on fullcorpus.db during a checkpoint write; 120s rides out any discrete
+    # reader transaction. (Still: don't run two FULL-page-pass jobs at once.)
+    con.execute("PRAGMA busy_timeout=120000")
     work_ids = [w['id'] for w in works]
     works_sig = hashlib.sha1(
         '|'.join(sorted(work_ids)).encode()).hexdigest()[:16]
