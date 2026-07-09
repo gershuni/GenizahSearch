@@ -148,9 +148,11 @@ cross-representation alignment). Apophenia guard on: every A-card carries a
 product — the convergences are.**
 
 ## The premise, vindicated
-The single most useful find is a **computational-biology paper** (TIGER,
-enzyme↔reaction retrieval), and the fill for our biggest capability gap came
-from an **LLM-data-provenance paper** and a **social-bot-detection paper**.
+The single most useful find comes from a field with no connection to
+manuscripts, philology, or history at all (TIGER — bidirectional retrieval
+between two very different representations of the same underlying object), and
+the fill for our biggest capability gap came from an **LLM-data-provenance
+paper** and a **social-bot-detection paper**.
 None would ever surface under a "text reuse / Genizah / Hebrew" search. When
 the same reformulation arrives independently from tracks that don't cite each
 other, that convergence is the signal to trust.
@@ -257,8 +259,9 @@ confidence (EASE, Sentiment); embedding-space DP alignment as a noise-robust
 reframing of seed-and-extend (SEA sign-language, Multimodality).
 
 ## A-tier singletons worth their own line (beyond the convergences)
-- **TIGER** (comp-bio, ML-for-NLP) — asymmetric two-space retrieval via a
-  generated *text pivot*; template for JA↔Hebrew / dirty-ms↔clean-edition (L).
+- **TIGER** (ML-for-NLP track; a domain far outside text scholarship) —
+  asymmetric two-space retrieval via a generated *text pivot*; template for
+  JA↔Hebrew / dirty-ms↔clean-edition (L).
 - **GenDis** (ML-for-NLP) — generalized category discovery = our **"new?" queue
   (1,168 items)** as a dual-view (surface + Track-3) co-training task (J/G).
 - **LSCD benchmark** (*SEM) — pairwise → graph → sense-induction clustering "IS
