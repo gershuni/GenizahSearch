@@ -180,7 +180,10 @@ def main():
           f"({time.time() - t0:.0f}s)", flush=True)
 
     # ---- report ----
-    slug = re.sub(r'[^a-z0-9]+', '-', (args.shelf or phrase[:12]).lower()).strip('-')
+    import hashlib
+    ph = hashlib.sha1(phrase.encode()).hexdigest()[:6]
+    slug = re.sub(r'[^a-z0-9]+', '-',
+                  (args.shelf or phrase[:12]).lower()).strip('-') + '-' + ph
     out = PROBE + rf"\results\idiom_{slug}.md"
     lines = [f"# Idiom search — `{args.phrase}`", "",
              f"normalized: `{phrase}` (len {len(phrase)}); max_edits={max_edits}; "
