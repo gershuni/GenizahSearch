@@ -38,7 +38,7 @@ that follow from it. Companion docs: `PROBE-RESULTS.md` (pilot), `REHEARSAL-RESU
 | Clean MS pairs / MSS in map | **437,989 / 62,414** |
 | Track-1 identified pages | **176,444 / 667,411 (26.4%)** — Bible-domain 66.2%, Documents 3.6% |
 | Census rows post-shadowing | **85,872** (MS, work) — testimony/partial/citation split |
-| Canonical witnesses | **21,797 MSS** (Bible 18,630, Bavli 1,969, Mishnah 840, Yerushalmi 243, Tosefta 115) |
+| Canonical witnesses | **21,215 MSS** post-shadowing (21,797 pre-shadow; Bible/Bavli/Mishnah/Yerushalmi/Tosefta — current subtotals in `results/track1_full_testimonies.md`) |
 | Edited-work testimonies | 25,801 |
 | **new? discovery queue** | **1,168** (post-shadowing; edition source ≠ this MS) + 1,495 new?known |
 | Passage units | **81,365** many-to-many units with member roles |
