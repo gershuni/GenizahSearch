@@ -159,6 +159,14 @@ SEARCH_API_BROWSE_TEXT_CAP=4000       # default char cap for transcription text;
 GENIZAH_API_BASE=https://genizahsearch.com    # overrides --base-url CLI flag (env wins)
 GENIZAH_SKILL_REQ_PER_MIN=96                  # skill self-throttle, leaves 24 rpm headroom under server's 120 rpm
 
+# Web memory remediation (2026-07-08 allocator-ratchet attribution; web-only)
+GENIZAH_MALLOC_TRIM_SECONDS=300       # periodic glibc malloc_trim(0) loop interval (0 disables; Linux-only, web/malloc_trim.py)
+GENIZAH_MALLOC_TRIM_MIN_GROWTH_MB=64  # adaptive: trim only when RssAnon grew this much since the last trim (0 = every tick)
+GENIZAH_STORAGE_RETENTION_DAYS=90     # delete .nicegui storage-user files untouched for N days at startup (0 disables;
+                                       # a browser absent longer is logged out on return — auth_session lives in the file)
+NLI_CACHE_MAX_ENTRIES=20000           # metadata nli_cache LRU bound (code default 75000; prod set 20000 on 2026-07-08)
+IIIF_MANIFEST_CACHE_MAX_ENTRIES=1500  # IIIF manifest cache bound (code default 5000; prod set 1500 on 2026-07-08)
+
 # Phase 98 NLI Resilience env knobs (added 2026-05-25)
 NLI_CIRCUIT_THRESHOLD=3               # Consecutive failures to trip the shared circuit breaker
 NLI_CIRCUIT_WINDOW=60                 # Seconds the breaker stays open before auto-recovery probes

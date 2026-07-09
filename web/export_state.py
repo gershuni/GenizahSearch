@@ -29,6 +29,7 @@ Read functions adopt (Phase 88 D-11 extension, Refinement 4 -- Codex review):
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple, Callable
 
@@ -427,23 +428,57 @@ def compact_user_storage_export_payloads(storage_payload: Any) -> bool:
     return changed
 
 
-def compact_nicegui_export_storage(storage: Any) -> Dict[str, Any]:
+# Age-based retention for on-disk NiceGUI storage-user files (2026-07-08).
+# NiceGUI prunes in-memory storage but never deletes on-disk files, so
+# one-visit anonymous/bot sessions accumulate forever (53K files / 260 MB on
+# prod when this shipped). mtime is refreshed on every session LOAD
+# (FilePersistentDict.initialize() re-writes via its change handler), so
+# mtime == "last visit" and old files belong to browsers absent for the whole
+# retention window. NOTE: deleting a file clears that browser's auth_session
+# too — a user absent longer than the retention window is logged out on
+# return (server-side lists/corrections live in Supabase and are unaffected).
+_STORAGE_RETENTION_DEFAULT_DAYS = 90
+
+
+def storage_retention_days_from_env() -> int:
+    """Read GENIZAH_STORAGE_RETENTION_DAYS (default 90; 0 disables)."""
+    raw = os.environ.get('GENIZAH_STORAGE_RETENTION_DAYS', '')
+    try:
+        value = int(raw) if raw.strip() else _STORAGE_RETENTION_DEFAULT_DAYS
+    except ValueError:
+        value = _STORAGE_RETENTION_DEFAULT_DAYS
+    return max(0, value)
+
+
+def compact_nicegui_export_storage(
+    storage: Any,
+    retention_days: Optional[int] = None,
+) -> Dict[str, Any]:
     """Compact loaded and on-disk NiceGUI export payloads.
 
     The function deliberately touches NiceGUI's storage internals rather than
     ``app.storage.user`` because it runs outside any single UI session.
+
+    When ``retention_days`` is a positive integer, on-disk
+    ``storage-user-*.json`` files whose mtime is older than the window are
+    deleted instead of compacted (skipping sessions currently loaded in
+    memory). Intended to run at startup, before clients connect.
     """
     summary = {
         'loaded_users_checked': 0,
         'loaded_users_compacted': 0,
         'files_checked': 0,
         'files_compacted': 0,
+        'files_deleted': 0,
         'bytes_before': 0,
         'bytes_after': 0,
+        'bytes_deleted': 0,
         'errors': 0,
     }
 
+    loaded_session_ids = set()
     for _session_id, payload in list((getattr(storage, '_users', {}) or {}).items()):
+        loaded_session_ids.add(str(_session_id))
         summary['loaded_users_checked'] += 1
         try:
             if compact_user_storage_export_payloads(payload):
@@ -455,11 +490,25 @@ def compact_nicegui_export_storage(storage: Any) -> Dict[str, Any]:
     if not storage_path.exists():
         return summary
 
+    cutoff = None
+    if retention_days and retention_days > 0:
+        cutoff = time.time() - retention_days * 86400
+
     for filepath in storage_path.glob('storage-user-*.json'):
         summary['files_checked'] += 1
         try:
-            before = filepath.stat().st_size
+            stat = filepath.stat()
+            before = stat.st_size
             summary['bytes_before'] += before
+            if cutoff is not None and stat.st_mtime < cutoff:
+                # storage-user-<session_id>.json — never delete a session
+                # that is currently loaded in memory.
+                session_id = filepath.stem[len('storage-user-'):]
+                if session_id not in loaded_session_ids:
+                    filepath.unlink()
+                    summary['files_deleted'] += 1
+                    summary['bytes_deleted'] += before
+                    continue
             with filepath.open('r', encoding='utf-8') as handle:
                 payload = json.load(handle)
             if not compact_user_storage_export_payloads(payload):

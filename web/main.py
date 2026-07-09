@@ -25,7 +25,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from nicegui import ui, app, run
 from web.framework_patches import apply_all_patches
-from web.crawler_visibility import should_block_archive_request, should_mark_noindex
+from web.crawler_visibility import (
+    should_block_archive_request,
+    should_block_seo_tool_request,
+    should_mark_noindex,
+)
 from web.safe_storage import ensure_session_uuid, safe_user_get, safe_user_set, safe_user_pop
 from web.auth_state import GlobalAuthState
 apply_all_patches()
@@ -205,6 +209,16 @@ async def _inject_font_display_swap(request, call_next):
 async def _mark_non_document_paths_noindex(request, call_next):
     """Keep implementation-detail URLs out of search and archive indexes."""
     path = str(request.url.path)
+    # Defense-in-depth behind the nginx UA block (2026-07-08): SEO-tool
+    # crawlers get a cheap 403 before any page render; robots.txt stays
+    # reachable so they can read their Disallow group (a 4xx robots.txt
+    # means "allow all" per RFC 9309 and they would keep probing forever).
+    if should_block_seo_tool_request(path, request.headers.get('user-agent')):
+        return _StarletteResponse(
+            content='Forbidden',
+            status_code=403,
+            media_type='text/plain',
+        )
     if should_block_archive_request(path, request.headers.get('user-agent')):
         return _StarletteResponse(
             content='Not Found',
@@ -2286,17 +2300,43 @@ async def auth_callback_route(code: str = None, error: str = None, error_descrip
 # ============================================================================
 
 async def compact_export_storage_on_startup():
-    """Shrink legacy oversized export payloads before users reconnect."""
+    """Shrink legacy oversized export payloads before users reconnect.
+
+    Also deletes storage-user files whose mtime is older than
+    GENIZAH_STORAGE_RETENTION_DAYS (default 90; 0 disables) — one-visit
+    anonymous/bot session files otherwise accumulate forever (53K files on
+    prod as of 2026-07-08). Runs at startup, before clients connect.
+    """
     def _compact_sync():
-        from web.export_state import compact_nicegui_export_storage
-        return compact_nicegui_export_storage(app.storage)
+        from web.export_state import (
+            compact_nicegui_export_storage,
+            storage_retention_days_from_env,
+        )
+        return compact_nicegui_export_storage(
+            app.storage,
+            retention_days=storage_retention_days_from_env(),
+        )
 
     try:
         summary = await run.io_bound(_compact_sync)
-        if summary.get('loaded_users_compacted') or summary.get('files_compacted') or summary.get('errors'):
+        if (
+            summary.get('loaded_users_compacted')
+            or summary.get('files_compacted')
+            or summary.get('files_deleted')
+            or summary.get('errors')
+        ):
             print(f"[init] Export storage compaction: {summary}", flush=True)
     except Exception as e:
         print(f"[init] Export storage compaction failed (non-fatal): {e}", flush=True)
+
+
+async def start_malloc_trim_on_startup():
+    """Start the periodic glibc malloc_trim(0) loop (see web/malloc_trim.py)."""
+    try:
+        from web.malloc_trim import start_malloc_trim_from_env
+        start_malloc_trim_from_env()
+    except Exception as e:
+        print(f"[init] malloc_trim startup failed (non-fatal): {e}", flush=True)
 
 
 async def initialize_engine():
@@ -2356,6 +2396,7 @@ async def initialize_engine():
         asyncio.create_task(_prewarm_fjms_background())
 
 app.on_startup(compact_export_storage_on_startup)
+app.on_startup(start_malloc_trim_on_startup)
 app.on_startup(initialize_engine)
 
 def _find_free_port(start_port: int, max_attempts: int = 10) -> int:

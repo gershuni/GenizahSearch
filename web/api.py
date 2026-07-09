@@ -17,7 +17,11 @@ from collections import OrderedDict
 from genizah_core import Config
 from shared.synthetic_sys_id import is_synthetic_sys_id
 from urllib.parse import urlparse
-from web.crawler_visibility import ARCHIVE_DISALLOWED_PATHS, ARCHIVE_USER_AGENT_TOKENS
+from web.crawler_visibility import (
+    ARCHIVE_DISALLOWED_PATHS,
+    ARCHIVE_USER_AGENT_TOKENS,
+    SEO_TOOL_ROBOTS_AGENTS,
+)
 
 # Phase 98 Plan 03: shared NLI circuit breaker + env-driven timeouts.
 # Replaces the class-attribute breaker that was in genizah_core.py:3940-3961
@@ -172,6 +176,12 @@ _RUNTIME_CACHE_STAT_PROVIDERS = {}
 
 def _register_runtime_cache_stats(name: str, provider) -> None:
     _RUNTIME_CACHE_STAT_PROVIDERS[name] = provider
+
+
+# Public alias for out-of-module providers (e.g. web/malloc_trim.py) so they
+# don't have to import a private name. Same registry, surfaces in
+# /_internal/memstat via get_runtime_cache_stats().
+register_runtime_cache_stats = _register_runtime_cache_stats
 
 
 def get_runtime_cache_stats() -> dict:
@@ -407,6 +417,10 @@ def init_api_routes(app_override=None):
             f"Disallow: {path}\n"
             for path in ARCHIVE_DISALLOWED_PATHS
         )
+        seo_tool_agents = ''.join(
+            f"User-agent: {agent}\n"
+            for agent in SEO_TOOL_ROBOTS_AGENTS
+        )
         content = (
             "User-agent: *\n"
             "Allow: /\n"
@@ -424,6 +438,11 @@ def init_api_routes(app_override=None):
             f"{archive_user_agents}"
             "Allow: /\n"
             f"{archive_disallows}"
+            "\n"
+            "# SEO-tool crawlers: no search-engine value, constant heavy load on\n"
+            "# /browse (2026-07-08: SemrushBot crawled ~7K pages/day, 24/7).\n"
+            f"{seo_tool_agents}"
+            "Disallow: /\n"
             "\n"
             "Sitemap: https://genizahsearch.com/sitemap.xml\n"
         )
